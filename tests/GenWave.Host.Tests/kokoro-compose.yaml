@@ -1,0 +1,16 @@
+# Disposable Kokoro TTS container for the Host integration tests (run on-demand; not the SDK-only CI).
+# The KokoroFixture brings this up (--wait) and tears it down (down -v).
+# Port 18880 is test-only; loopback-only binding so it never collides with a running production stack.
+name: genwave-kokorotest
+
+services:
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.2.1
+    ports:
+      - "127.0.0.1:18880:8880"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8880/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 36
+      start_period: 30s

@@ -1,0 +1,151 @@
+namespace GenWave.Tts;
+
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
+using GenWave.Core.Events;
+
+public sealed class TtsSegmentSource(
+    ISegmentCopyWriter copyWriter,
+    ITtsSynthesizer synthesizer,
+    ILoudnessAnalyzer analyzer,
+    ICueAnalyzer cueAnalyzer,
+    IOptionsMonitor<TtsOptions> options,
+    ILogger<TtsSegmentSource> logger,
+    IStationEventSink? events = null) : ITtsSegmentSource
+{
+    // SegmentGenerated publish seam (gitea-#246); no-op unless the host binds a real sink.
+    readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
+    // Fresh-per-airing (LLM-authored) blurb audio lands here instead of the station's forever-cache
+    // root, so it can be swept without touching templated kinds' stable (text,voice) cache (F34.6).
+    const string BlurbsDirName = "blurbs";
+
+    readonly ConcurrentDictionary<string, CuePoints?> cueCache = new();
+
+    public async Task<MediaItem?> RenderAsync(SegmentRequest request, CancellationToken ct)
+    {
+        try
+        {
+            // Read fresh per render — not a boot-frozen field — so Tts:BlurbRetentionHours
+            // (SPEC F44.2, closes gitea-#197) is live for SweepBlurbs below. CacheRoot/Format are not
+            // operator-editable (deployment topology, F44.4), so reading them from CurrentValue
+            // instead of a frozen snapshot changes nothing observable for them.
+            var cfg = options.CurrentValue;
+            var copy = await copyWriter.WriteAsync(request, ct);
+            var hash = ComputeHash(copy.Text, request.Voice, request.StationId);
+            var stationDir = Path.Combine(cfg.CacheRoot, request.StationId);
+            var targetDir = copy.FreshPerAiring ? Path.Combine(stationDir, BlurbsDirName) : stationDir;
+            var path = Path.Combine(targetDir, $"{hash}.{cfg.Format}");
+
+            var fileExists = File.Exists(path);
+            if (!fileExists)
+            {
+                Directory.CreateDirectory(targetDir);
+                var synthPath = await synthesizer.SynthesizeAsync(copy.Text, request.Voice, ct);
+                File.Move(synthPath, path, overwrite: true);
+            }
+
+            var loudness = await analyzer.AnalyzeAsync(path, ct);
+
+            CuePoints? cuePoints;
+            if (fileExists && cueCache.TryGetValue(hash, out var cached))
+            {
+                cuePoints = cached;
+            }
+            else
+            {
+                cuePoints = await MeasureCueAsync(path, hash, ct);
+            }
+
+            // Opportunistic GC (F34.6): only after a successful fresh-copy render, and only inside
+            // blurbs/ — templated kinds' forever-cache is never touched. Best-effort; a sweep failure
+            // must never fail a render that already succeeded.
+            if (copy.FreshPerAiring)
+                SweepBlurbs(targetDir, request.StationId);
+
+            // Display title is the station name, NOT the spoken text (issue gitea-#154) — players would
+            // otherwise show the whole patter script as the now-playing title. Artist credits the
+            // active persona reading the patter when one is active, else the station name (SPEC
+            // F39.2, gitea-#212): while a persona is on air it is that persona's voice reading every kind
+            // (StationId, TimeDate, LeadIn, BackAnnounce) alike, so the credit follows it. No active
+            // persona falls back to the gitea-#192/gitea-#172 brand rule unchanged (artist = <Station Name>) —
+            // without it every station ID / lead-in / back-announce rendered "Unknown artist" in
+            // the admin UI's now-playing and play-history surfaces. This is per-airing state, not
+            // cached content: the cache key below never includes PersonaName, so a cache-hit render
+            // still carries whichever persona is CURRENTLY active (F39.3).
+            // Render succeeded (cache hit or fresh synthesis) — publish before returning (gitea-#246).
+            events.Publish(new SegmentGenerated($"tts:{hash}", request.Kind.ToString(), request.Voice));
+
+            return new MediaItem(
+                $"tts:{hash}", path, request.StationName, loudness,
+                Artist: request.PersonaName ?? request.StationName, Cue: cuePoints);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "TTS render failed for {Kind}/{Voice}", request.Kind, request.Voice);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Deletes <paramref name="blurbsDir"/> entries whose last-write time is older than
+    /// <see cref="TtsOptions.BlurbRetentionHours"/>. Never reaches outside <paramref name="blurbsDir"/>.
+    /// Stops at the first delete failure (locked file, permission denied, lost race with a concurrent
+    /// delete) and logs once — the next blurb render retries whatever is left (F34.6, AC4).
+    /// </summary>
+    void SweepBlurbs(string blurbsDir, string stationId)
+    {
+        try
+        {
+            if (!Directory.Exists(blurbsDir))
+                return;
+
+            // Read fresh at sweep time (SPEC F44.2) — never a boot-frozen field — so a live edit to
+            // Tts:BlurbRetentionHours changes the retention horizon on the very next blurb render.
+            var cutoff = DateTime.UtcNow - TimeSpan.FromHours(options.CurrentValue.BlurbRetentionHours);
+            foreach (var entry in Directory.EnumerateFileSystemEntries(blurbsDir))
+            {
+                if (File.GetLastWriteTimeUtc(entry) < cutoff)
+                    File.Delete(entry);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Deliberately broad: this GC step is opportunistic (SPEC F34.6) — a render that already
+            // succeeded must return regardless of WHY the sweep couldn't finish (locked file, denied
+            // permission, a race with a concurrent delete). The next blurb render retries.
+            logger.LogWarning(ex, "Blurb retention sweep failed for station {StationId}; retrying on next blurb render", stationId);
+        }
+    }
+
+    async Task<CuePoints?> MeasureCueAsync(string path, string hash, CancellationToken ct)
+    {
+        try
+        {
+            var result = await cueAnalyzer.AnalyzeAsync(path, ct);
+            cueCache[hash] = result;
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Cue analysis failed for TTS clip {Hash}", hash);
+            cueCache[hash] = null;
+            return null;
+        }
+    }
+
+    static string ComputeHash(string text, string voice, string stationId) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text + "|" + voice + "|" + stationId)));
+}

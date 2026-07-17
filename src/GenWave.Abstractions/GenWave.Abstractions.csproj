@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- The SDK contract package (gitea-#251, ADR-0001 D3): the migration is the freeze trigger, so
+         this project ships to nuget.org as GenWave.Abstractions. Zero dependencies — SDK-clean
+         seams only; leaky contracts (ILiquidsoapControl, xmin write contracts, filesystem-typed
+         analyzers) stay in Core. Semver discipline applies from the first publish. -->
+    <PackageId>GenWave.Abstractions</PackageId>
+    <Description>Contract surface for GenWave modules: selection, catalog read, rating, TTS/persona, live-config providers, and the station event sink.</Description>
+  </PropertyGroup>
+
+</Project>

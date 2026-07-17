@@ -1,0 +1,84 @@
+name: Publish GenWave.Abstractions
+
+# Tag-triggered pack + publish to nuget.org (runbook §4): tag `vX.Y.Z` → package version X.Y.Z.
+# SourceLink is built into the .NET SDK (repo/commit metadata lands in the package automatically
+# on CI builds); symbols ship as a .snupkg. A CycloneDX SBOM is attached as a run artifact and a
+# license-blocker gate fails the publish on forbidden licenses (policy source: the license audit —
+# the blocklist below is the enforceable subset).
+#
+# Publishing uses nuget.org TRUSTED PUBLISHING (OIDC) — no long-lived API key. Setup:
+#   nuget.org → username menu → Trusted Publishing → new policy:
+#     Repository Owner: GenWave-Org · Repository: genwave · Workflow File: publish-nuget.yml
+#   Repo secret NUGET_USER = the nuget.org profile username (NOT an email).
+# Note: on a PRIVATE repo the policy starts "temporarily active" for 7 days and deactivates if
+# no publish happens in that window — re-activate it on nuget.org before the first tagged publish.
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  pack-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # GitHub OIDC token issuance for NuGet trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Derive version from tag
+        run: echo "PKG_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Build + test first — never publish from a red tree
+        run: |
+          dotnet build GenWave.sln --configuration Release
+          dotnet test GenWave.sln --no-build --configuration Release --filter "Category!=Integration"
+
+      - name: SBOM (CycloneDX)
+        run: |
+          dotnet tool install --global CycloneDX
+          dotnet-CycloneDX GenWave.sln -o sbom --json
+
+      - name: License-blocker gate
+        run: |
+          # Fail on licenses the dual-license model cannot ship against. AGPL-3.0 is OUR license,
+          # fine in our own tree; the gate watches third-party components pulled via NuGet.
+          BLOCKLIST='SSPL|BUSL|GPL-2\.0-only|GPL-3\.0-only|Commons-Clause'
+          if jq -r '.components[]?.licenses[]?.license?.id // empty' sbom/bom.json | grep -E "$BLOCKLIST"; then
+            echo "::error::Blocked license detected in dependency SBOM — see license audit policy"
+            exit 1
+          fi
+          echo "License gate clean."
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ env.PKG_VERSION }}
+          path: sbom/bom.json
+
+      - name: Pack
+        run: |
+          dotnet pack src/GenWave.Abstractions/GenWave.Abstractions.csproj \
+            --configuration Release \
+            --output packages \
+            -p:Version=${PKG_VERSION} \
+            -p:ContinuousIntegrationBuild=true \
+            -p:IncludeSymbols=true \
+            -p:SymbolPackageFormat=snupkg
+
+      # Requested LAST — the temp key lives ~1 hour, so it must not sit through the build.
+      - name: NuGet login (OIDC → temp API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Publish to nuget.org
+        run: |
+          dotnet nuget push "packages/GenWave.Abstractions.${PKG_VERSION}.nupkg" \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
