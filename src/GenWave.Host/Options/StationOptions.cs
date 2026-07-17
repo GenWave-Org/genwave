@@ -1,0 +1,47 @@
+namespace GenWave.Host.Options;
+
+using System.ComponentModel.DataAnnotations;
+
+/// <summary>
+/// Flat options class for the "Station" configuration section. Validated at startup;
+/// a missing or invalid station config prevents the host from starting.
+/// </summary>
+public sealed class StationOptions
+{
+    public const string Section = "Station";
+
+    [Required]
+    public string Id { get; set; } = string.Empty;
+
+    [Required]
+    public string Name { get; set; } = string.Empty;
+
+    [Required, MinLength(1)]
+    public string Voice { get; set; } = string.Empty;
+
+    /// <summary>The set of library ids this station is permitted to draw from. Must be non-empty.</summary>
+    public StationScopeOptions Scope { get; set; } = new();
+
+    /// <summary>
+    /// The set of library ids used for safe-rotation fallback. Must be non-empty and contain
+    /// only positive ids. The deployment default is library 1, provided via
+    /// <c>appsettings.json</c> so that IConfiguration binding starts from an empty list and
+    /// overrides replace rather than append. Bound to <c>Station:SafeScope:LibraryIds</c>.
+    /// </summary>
+    public StationScopeOptions SafeScope { get; set; } = new();
+
+    /// <summary>Controls how often voice segments are woven into the broadcast.</summary>
+    public StationCadenceOptions Cadence { get; set; } = new();
+
+    /// <summary>
+    /// Safe-loop authoring config (SPEC F27) — generation-time inputs, not live-editable
+    /// (F27.10). Bound to <c>Station:Safe</c>.
+    /// </summary>
+    public StationSafeOptions Safe { get; set; } = new();
+
+    /// <summary>Active DJ persona pointer (SPEC F35.2, F36.2). Bound to <c>Station:Persona</c>.</summary>
+    public StationPersonaOptions Persona { get; set; } = new();
+
+    /// <summary>Rotation anti-repeat/artist-separation knobs (SPEC F41.6). Bound to <c>Station:Rotation</c>.</summary>
+    public StationRotationOptions Rotation { get; set; } = new();
+}

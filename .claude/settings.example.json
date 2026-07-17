@@ -1,0 +1,72 @@
+{
+  "$comment": "Rename to settings.json (project-shared) or settings.local.json (personal, gitignored). Hooks below are examples — uncomment to enable. See https://docs.claude.com/claude-code/hooks for the full schema.",
+
+  "permissions": {
+    "$comment": "Pre-approve common safe commands so you stop seeing prompts.",
+    "allow": [
+      "Bash(dotnet build*)",
+      "Bash(dotnet test*)",
+      "Bash(dotnet run*)",
+      "Bash(dotnet format*)",
+      "Bash(dotnet restore*)",
+      "Bash(docker compose ps*)",
+      "Bash(docker compose logs*)",
+      "Bash(bun install)",
+      "Bash(bun test*)",
+      "Bash(bun run*)",
+      "Bash(npm install)",
+      "Bash(npm test*)",
+      "Bash(npm run*)",
+      "Bash(git status)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(ls *)",
+      "Bash(find . *)",
+      "Bash(grep -r *)"
+    ],
+    "deny": [
+      "Bash(rm -rf /*)",
+      "Bash(git push --force*)",
+      "Bash(curl * | sh)",
+      "Bash(curl * | bash)"
+    ]
+  },
+
+  "env": {
+    "$comment": "Project-wide env hints for the AI. Real secrets go in .env (gitignored)."
+  },
+
+  "hooks": {
+    "$comment_PostToolUse": "Run after each Edit/Write — uncomment to auto-format on save (dotnet format for .cs, prettier for TS/JS).",
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "case \"$CLAUDE_FILE_PATHS\" in *.cs) dotnet format --include \"$CLAUDE_FILE_PATHS\" 2>/dev/null || true ;; *.ts|*.tsx|*.js|*.jsx) test -f package.json && bunx prettier --write \"$CLAUDE_FILE_PATHS\" 2>/dev/null || true ;; esac"
+          }
+        ]
+      }
+    ],
+
+    "$comment_PreToolUse": "Block edits to sensitive files. Uncomment to enable.",
+    "PreToolUse": [
+      {
+        "$comment": "Example: refuse to edit .env files.",
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"$CLAUDE_FILE_PATHS\" | grep -qE '\\.env(\\..*)?$' && { echo 'refuse: do not edit .env files'; exit 2; } || exit 0"
+          }
+        ]
+      }
+    ],
+
+    "$comment_Stop": "Run on session end — uncomment to print a summary or trigger CI.",
+    "Stop": []
+  }
+}

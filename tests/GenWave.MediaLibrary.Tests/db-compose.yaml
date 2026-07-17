@@ -1,0 +1,24 @@
+# Disposable Postgres for the media library integration tests (run on-demand; not the SDK-only CI).
+# Initialised with the SAME db/01-library.sh as production, so the tests exercise the real schema +
+# the library_svc role. The DatabaseFixture brings this up (--wait) and tears it down (down -v).
+name: genwave-libtest
+
+services:
+  testdb:
+    image: postgres:16.4
+    environment:
+      POSTGRES_DB: genwave
+      POSTGRES_USER: genwave
+      POSTGRES_PASSWORD: test
+      LIBRARY_DB_PASSWORD: libtest
+      STATION_DB_PASSWORD: stationtest
+    ports:
+      - "55433:5432"
+    volumes:
+      - ../../db/01-library.sh:/docker-entrypoint-initdb.d/01-library.sh:ro
+      - ../../db/06-station-settings-migration.sh:/docker-entrypoint-initdb.d/06-station-settings-migration.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U genwave -d genwave"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

@@ -1,0 +1,198 @@
+@import "tailwindcss";
+
+/* shadcn/ui shared component infrastructure: data-state custom variants
+   (data-open, data-closed, data-checked, ...) and animation keyframes used
+   by primitives added via `npx shadcn add` (Q4). Carries no color tokens of
+   its own — verified: no --primary/--accent/--background definitions here. */
+@import "shadcn/tailwind.css";
+
+/* Tailwind's `dark:` variant tracks the app's theme-selection contract
+   (`data-theme="dark"` stamped on <html>), not prefers-color-scheme or a
+   `.dark` class. The stamping mechanism itself (cookie + toggle) is Q3;
+   this is the selector contract Q3 targets. */
+@custom-variant dark (&:is([data-theme="dark"] *));
+
+/* ---------------------------------------------------------------------------
+ * Wireless design tokens (SPEC F28.1/F28.2, .claude/skills/design-aesthetic).
+ * Semantic custom properties only — components consume these, never raw hex
+ * or Tailwind stock palette classes. A theme is a token set selected by
+ * `data-theme` on <html>; light "cream enamel" is the default, dark
+ * "walnut & brass" ships alongside it. Adding a theme later is one token
+ * block here, not a component rewrite.
+ * ------------------------------------------------------------------------ */
+
+:root {
+  /* light — "cream enamel" (default) */
+  --bg: #f6efe3; /* page ground */
+  --surface: #fdf8ee; /* cards, panels, table bodies */
+  --surface-2: #efe5d2; /* sidebar, inset wells */
+  --line: #ddd0b8; /* borders, dividers */
+  --ink: #2b2320; /* body text */
+  --mute: #77685c; /* secondary text */
+  --accent: #b94f29; /* rust — primary action, active nav, ON AIR */
+  --accent-ink: #fdf8ee; /* text/icons on --accent: cream reaches AA on the rust */
+  /* brass — labels, table headers, quiet emphasis. Darkened from #8a7b3f
+     (Q11 review): the original was below AA (4.5:1) as small text against
+     every light-theme ground (bg 3.69, surface 3.98, surface-2 3.37) — this
+     value clears all three (bg 5.25, surface 5.67, surface-2 4.80). */
+  --accent-2: #6f632f;
+  --danger: #a63325; /* deeper rust-red, distinct from accent */
+  --danger-ink: #fdf8ee; /* text/icons on --danger */
+  --success: #5c7a3f; /* olive green */
+}
+
+:root[data-theme="dark"] {
+  /* dark — "walnut & brass" (a tuned token set, not a naive inversion) */
+  --bg: #1e1713;
+  --surface: #2a211b;
+  --surface-2: #241c16;
+  --line: #3f342a;
+  --ink: #f0e7d8;
+  --mute: #a89a88;
+  --accent: #d96a3d; /* rust lifted for AA on dark */
+  /* cream on the lifted dark --accent only reaches ~2.8:1, so dark theme
+     deliberately inverts the on-accent ink to deep walnut (≈4.99:1 AA). */
+  --accent-ink: #1e1713;
+  --accent-2: #b3a25e; /* brass lifted */
+  --danger: #e06a55;
+  --danger-ink: #2a211b; /* text/icons on --danger */
+  --success: #8fae6a;
+}
+
+/* System default: nobody has made an explicit choice (no genwave-theme cookie,
+   so no data-theme attribute at all) and the OS prefers dark. Mirrors
+   :root[data-theme="dark"] exactly — CSS custom properties have no block-reuse
+   mechanism, so the values are duplicated rather than shared (SPEC F28.4). An
+   explicit data-theme (either value) always wins over this fallback because
+   the attribute selectors above are more specific than :root:not([data-theme]). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg: #1e1713;
+    --surface: #2a211b;
+    --surface-2: #241c16;
+    --line: #3f342a;
+    --ink: #f0e7d8;
+    --mute: #a89a88;
+    --accent: #d96a3d;
+    --accent-ink: #1e1713;
+    --accent-2: #b3a25e;
+    --danger: #e06a55;
+    --danger-ink: #2a211b;
+    --success: #8fae6a;
+  }
+}
+
+/* Map the semantic tokens (and vendored font variables) into Tailwind
+   utilities: bg-surface, text-ink, border-line, text-accent, font-display,
+   etc. `inline` because these reference runtime CSS custom properties
+   (theme selection, next/font scoping), not static build-time values. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-mute: var(--mute);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-2: var(--accent-2);
+  --color-danger: var(--danger);
+  --color-danger-ink: var(--danger-ink);
+  --color-success: var(--success);
+
+  --font-display: var(--font-display);
+  --font-sans: var(--font-sans);
+}
+
+@layer base {
+  body {
+    background-color: var(--bg);
+    color: var(--ink);
+  }
+
+  /* ---------------------------------------------------------------------
+   * Baseline visible keyboard focus (SPEC F28.14) for every native
+   * interactive element. Components with a bespoke focus treatment
+   * (Button, Sidebar/MobileNav links, ThemeToggle) already set the
+   * identical focus-visible utility classes inline — those simply repeat
+   * this rule at a higher specificity, so there's no conflict. This rule
+   * exists so a raw <input>/<select>/<textarea>/<button>/<a> is never
+   * left with no visible focus state by omission (e.g. filter fields,
+   * checkboxes, tab strips) without hand-adding the same three utility
+   * classes to every one of them.
+   * --------------------------------------------------------------------- */
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* ---------------------------------------------------------------------
+   * Touch targets ≥40px (SPEC F28.13, AC5). `min-height` — not `height` —
+   * so it only ever grows an element that would otherwise render smaller
+   * (an explicit Tailwind `h-*` utility of 40px or more is left alone).
+   * Checkboxes/radios are excluded: enlarging their own visual box would
+   * distort the control itself rather than pad its hit area — those get a
+   * `min-h-10` wrapper at each call site instead (the box stays native
+   * size, the clickable row around it doesn't).
+   * --------------------------------------------------------------------- */
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea,
+  button {
+    min-height: 2.5rem;
+  }
+
+  /* ---------------------------------------------------------------------
+   * prefers-reduced-motion (SPEC F28.14): the standard universal reset —
+   * collapses every CSS transition/animation duration to effectively zero
+   * for users who asked for it, in one place, rather than requiring every
+   * new `transition-*`/`animate-*` utility to separately remember a
+   * `motion-reduce:` variant. The onair-dot's own dedicated
+   * `animation: none` override further down this file still applies
+   * (redundant with this, not in conflict with it) and stays for its
+   * 1:1 spec coverage.
+   * --------------------------------------------------------------------- */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * ON AIR indicator lamp (SPEC F28.7, .claude/skills/design-aesthetic): the
+ * now-playing card's pulse dot is the ONLY ambient animation permitted
+ * anywhere in the UI — a 1.6s opacity loop, gated behind
+ * prefers-reduced-motion (SPEC F28.14). Tailwind's stock `animate-pulse`
+ * runs a 2s cadence with no way to override the duration via a utility
+ * class, so this is a small dedicated keyframe instead of an arbitrary
+ * animate-[...] value.
+ * ------------------------------------------------------------------------ */
+@keyframes onair-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.onair-dot {
+  animation: onair-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onair-dot {
+    animation: none;
+  }
+}

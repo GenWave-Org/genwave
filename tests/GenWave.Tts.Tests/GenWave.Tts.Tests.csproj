@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- STORY-119's MockCompletionsServer is a Kestrel-backed stub (same shape as
+         GenWave.Host.Tests/KokoroStubServer) — this brings WebApplication in at compile time
+         without switching the SDK to Microsoft.NET.Sdk.Web. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\..\src\GenWave.Core\GenWave.Core.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Tts\GenWave.Tts.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Loudness\GenWave.Loudness.csproj" />
+  </ItemGroup>
+
+</Project>

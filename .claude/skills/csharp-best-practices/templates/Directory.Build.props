@@ -1,0 +1,22 @@
+<!--
+  Drop this at the solution root. Every .csproj beneath it inherits these
+  settings, so individual projects stay clean. House rules: nullable on,
+  zero warnings (enforced as errors), latest language version.
+-->
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Zero-warning policy: a warning is a build failure. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+
+    <!-- Deterministic builds; embed sources for debugging containers. -->
+    <Deterministic>true</Deterministic>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+</Project>
