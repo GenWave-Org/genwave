@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GenWave.Core\GenWave.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="TagLibSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- AubioBpmAnalyzer's argument-construction and parse logic are `internal` so the aubio-fixture
+         specs (Story142_AubioBpmAnalyzer.cs) can exercise them directly without invoking the real
+         binary (SPEC F46.5 — CI runners don't carry aubio). -->
+    <InternalsVisibleTo Include="GenWave.MediaLibrary.Tests" />
+  </ItemGroup>
+
+</Project>

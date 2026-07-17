@@ -1,0 +1,42 @@
+# Multi-stage .NET 9 Dockerfile template.
+# Adapt: project paths, the ffmpeg block (only if the service shells out
+# to it), and the assembly name in ENTRYPOINT.
+
+# ---- Build stage ----
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+WORKDIR /src
+
+# Restore first, on its own layer, so source edits don't re-restore.
+COPY *.sln .
+COPY Directory.Build.props .
+COPY API/GenWave.Example.Manager/*.csproj API/GenWave.Example.Manager/
+# (repeat per project, or COPY **/*.csproj with a script that recreates the tree)
+RUN dotnet restore
+
+COPY . .
+RUN dotnet publish API/GenWave.Example.Manager/GenWave.Example.Manager.csproj \
+    -c Release -o /app/publish --no-restore
+
+# ---- Runtime stage ----
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
+WORKDIR /app
+
+# Native dependencies for the audio pipeline — final stage only,
+# no recommends, cache cleaned in the same layer.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /app/publish .
+
+# Non-root user shipped with .NET images; listens on 8080 by default.
+USER app
+EXPOSE 8080
+
+# Container-aware healthcheck endpoint is provided by the app (/health).
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD curl -fsS http://localhost:8080/health || exit 1
+
+# Exec form is mandatory: shell form swallows SIGTERM and breaks
+# graceful shutdown.
+ENTRYPOINT ["dotnet", "GenWave.Example.Manager.dll"]

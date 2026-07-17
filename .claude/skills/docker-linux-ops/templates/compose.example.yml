@@ -1,0 +1,62 @@
+# Compose template: API service + Postgres + NFS media volume.
+# Encodes the house defaults: healthcheck-gated startup, named volumes,
+# non-published DB, .env-driven settings, aligned shutdown timing.
+# Real values come from .env (gitignored); .env.example documents keys.
+
+services:
+  manager:
+    image: mrd-example-manager:latest
+    restart: unless-stopped
+    stop_grace_period: 30s          # >= host ShutdownTimeout
+    ports:
+      - "${MANAGER_PORT:-8080}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      # Service-name host, never localhost. Secrets only via env/secret
+      # files — never baked into the image or committed compose.
+      ConnectionStrings__Default: "Host=postgres;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Streaming__MountPoint: ${STREAM_MOUNT:-/main}
+    volumes:
+      - media-library:/media:ro     # streaming path only reads the library
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    # NOTE: POSTGRES_* env is applied ONLY on first boot of an empty
+    # volume. Changing .env later does not change an existing database —
+    # see docker-linux-ops SKILL.md §6 before "fixing" auth failures.
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # No published port: services reach it via the compose network.
+    # Publish temporarily for local inspection only.
+
+volumes:
+  pgdata:
+
+  # NFS-backed media library. Remember: no inotify over NFS (scan
+  # periodically), ignore .nfs* placeholder files, mount :ro where
+  # the consumer only reads.
+  media-library:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=${NFS_HOST},ro,nfsvers=4"
+      device: ":${NFS_EXPORT:-/exports/media}"

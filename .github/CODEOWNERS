@@ -1,0 +1,5 @@
+# Every path is owned by the maintainer. With branch protection's "Require review from
+# Code Owners" enabled, no write collaborator can merge their own PR — the separation-of-
+# duties backstop for if/when anyone besides the maintainer ever holds write access.
+# (External fork contributors can never merge regardless — they hold no write bit.)
+* @genwave-radio

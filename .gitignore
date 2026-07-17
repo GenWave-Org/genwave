@@ -1,0 +1,20 @@
+# Secrets — never commit the real environment file
+.env
+
+# .NET build output
+bin/
+obj/
+*.user
+
+# Smoke-test artifacts
+smoke-candidates.json
+*.wav
+
+# Playwright MCP session artifacts
+.playwright-mcp/
+
+# IDE + OS noise
+.idea/
+.vs/
+TestResults/
+.DS_Store

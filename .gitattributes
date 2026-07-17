@@ -1,0 +1,11 @@
+# Normalize line endings in the repo; shell scripts must stay LF (they run in Linux containers).
+* text=auto
+*.sh text eol=lf
+*.liq text eol=lf
+
+# Binary assets — never diff, never normalize.
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
+*.mp3 binary

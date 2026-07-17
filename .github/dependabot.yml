@@ -1,0 +1,29 @@
+# Dependabot version updates (security *alerts* are a separate, always-on feature).
+# Weekly cadence; nuget updates land in Directory.Packages.props (central package management).
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies]
+  - package-ecosystem: npm
+    directory: /admin-ui
+    schedule:
+      interval: weekly
+    labels: [dependencies]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies]
+  - package-ecosystem: docker
+    directory: /src/GenWave.Host
+    schedule:
+      interval: weekly
+    labels: [dependencies]
+  - package-ecosystem: docker
+    directory: /icecast
+    schedule:
+      interval: weekly
+    labels: [dependencies]

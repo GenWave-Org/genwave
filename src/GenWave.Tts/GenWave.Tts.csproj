@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The project owns its own composition (AddGenWaveTts, gitea-#243): options binding + validation
+         and typed HttpClients use the shared framework without pinning versions — the same shape
+         as MediaLibrary's own FrameworkReference. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\GenWave.Core\GenWave.Core.csproj" />
+    <ProjectReference Include="..\GenWave.Loudness\GenWave.Loudness.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- EndpointUri is internal (a small URI-join helper, not a public seam); the test project
+         needs direct access to unit-test its subpath-preservation behavior (STORY-124). -->
+    <InternalsVisibleTo Include="GenWave.Tts.Tests" />
+  </ItemGroup>
+</Project>
