@@ -21,5 +21,5 @@ GenWave Home is developed on `main`; security fixes land there and in the latest
 GenWave is designed for deployment on a private network or behind your own reverse proxy:
 
 - The Liquidsoap control port (1234) is unauthenticated by design and is **never published** by the shipped compose file — do not expose it.
-- Icecast's `/admin` shares the public listener port (8000), password-protected but reachable — put a TLS reverse proxy in front before exposing it to the internet.
-- Secrets live in `.env` (gitignored). An empty `ADMIN_PASSWORD` disables the admin auth gate entirely — local-development convenience only, never for a reachable deployment.
+- Icecast's `/admin` shares the public listener port (8000), password-protected but reachable — put a TLS reverse proxy in front before exposing it to the internet. One note here though: Given the nature of what GenWave is/does, this is not a recommended or approved use, as it's essentially public broadcasting, and as such is likely infringing on whatever rights you may have on your local media. So don't do this. But if you do anyway, put a reverse proxy in front of it.
+- Secrets live in `.env` (gitignored). An empty `ADMIN_PASSWORD` disables the admin auth gate entirely — local-development convenience only, never for a reachable deployment. And again, your deployment should never be publicly available anyway, right?
