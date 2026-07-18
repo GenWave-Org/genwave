@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Auth;
@@ -34,6 +35,7 @@ public sealed class AuthController(
     /// <summary>Verifies the admin password, sets the auth cookie, returns 204.</summary>
     [HttpPost("auth/login")]
     [AllowAnonymous]
+    [EnableRateLimiting(RateLimiterPolicies.Login)]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
         var configured = adminOptions.Value.Password;

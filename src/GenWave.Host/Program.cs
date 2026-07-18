@@ -71,6 +71,11 @@ app.UseRouting();
 // UseAuthentication (a disabled surface 404s instead of 401ing) — see SurfaceGateMiddleware.
 app.UseMiddleware<SurfaceGateMiddleware>();
 
+// SPEC F61.5: rate limiting runs after the surface gate (a killed admin plane 404s before the
+// limiter is ever consulted, STORY-166) and before authentication (an unauthenticated brute-force
+// burst is throttled before it reaches identity checks).
+app.UseRateLimiter();
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
