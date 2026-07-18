@@ -6,6 +6,9 @@ bin/
 obj/
 *.user
 
+# Claude session artifacts
+docs/
+
 # Smoke-test artifacts
 smoke-candidates.json
 *.wav
