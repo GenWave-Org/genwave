@@ -1,6 +1,8 @@
 using System.Reflection;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -24,13 +26,20 @@ namespace GenWave.Host.Api;
 /// Routes live under <c>/spectator/api/*</c>, deliberately outside <c>/api/*</c>: this keeps
 /// <see cref="NoCacheApiMiddleware"/> (which only stamps <c>/api/*</c>) from fighting the public
 /// <c>Cache-Control: public, max-age=N</c> headers this surface needs for CDN/reverse-proxy
-/// absorption (SPEC F62.3, added in a later task alongside <c>OutputCache</c>/rate limiting).
+/// absorption (SPEC F62.3/F62.10/F62.11, STORY-171/T13 — see
+/// <see cref="SpectatorOutputCachePolicies"/> and <see cref="SpectatorCacheControlAttribute"/>).
+/// </para>
+/// <para>
+/// <see cref="RateLimiterPolicies.Spectator"/> (SPEC F62.11) is applied class-wide: 120
+/// requests/minute per source IP, upstream of <c>OutputCache</c> in the pipeline (Program.cs) so
+/// a cached hit still counts against a caller's budget.
 /// </para>
 /// </summary>
 [ApiController]
 [Route("spectator/api")]
 [SpectatorSurface]
 [Authorize(Policy = AuthorizationPolicies.Spectator)]
+[EnableRateLimiting(RateLimiterPolicies.Spectator)]
 public sealed class SpectatorController(
     NowPlayingService nowPlayingService,
     PlayHistoryService playHistoryService,
@@ -73,6 +82,8 @@ public sealed class SpectatorController(
     /// </para>
     /// </summary>
     [HttpGet("now-playing")]
+    [OutputCache(PolicyName = SpectatorOutputCachePolicies.NowPlaying)]
+    [SpectatorCacheControl(5)]
     public IActionResult GetNowPlaying()
     {
         var snapshot = nowPlayingService.GetSnapshot(SingleStation.IdString);
@@ -97,6 +108,8 @@ public sealed class SpectatorController(
     /// construction, not by filtering.
     /// </summary>
     [HttpGet("play-history")]
+    [OutputCache(PolicyName = SpectatorOutputCachePolicies.PlayHistory)]
+    [SpectatorCacheControl(30)]
     public IActionResult GetPlayHistory()
     {
         var entries = playHistoryService.GetEntries(SingleStation.IdString)
@@ -122,6 +135,8 @@ public sealed class SpectatorController(
     /// </para>
     /// </summary>
     [HttpGet("stats")]
+    [OutputCache(PolicyName = SpectatorOutputCachePolicies.Stats)]
+    [SpectatorCacheControl(30)]
     public async Task<IActionResult> GetStats(CancellationToken ct)
     {
         var safeScope = new LibraryScope(stationMonitor.CurrentValue.SafeScope.LibraryIds.ToArray());
@@ -136,6 +151,8 @@ public sealed class SpectatorController(
     /// version, license, and canonical project URL, which cannot change at runtime.
     /// </summary>
     [HttpGet("about")]
+    [OutputCache(PolicyName = SpectatorOutputCachePolicies.About)]
+    [SpectatorCacheControl(300)]
     public IActionResult GetAbout()
     {
         var options = stationMonitor.CurrentValue;

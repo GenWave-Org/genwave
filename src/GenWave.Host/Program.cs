@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.HttpOverrides;
 using GenWave.Host.Api;
 using GenWave.Host.Configuration;
 using GenWave.Host.Options;
@@ -48,12 +49,28 @@ builder.Services
     // Boot seed: branded safe-loop backstop (F27.6), one-shot + idempotent.
     .AddGenWaveSafeLoopSeed(cfg)
     // Admin surface: admin options, Data Protection, cookie auth, deny-by-default policy.
-    .AddGenWaveAdminApi(cfg);
+    .AddGenWaveAdminApi(cfg)
+    // Named OutputCache policies for the public spectator surface (SPEC F62.10, STORY-171/T13).
+    .AddGenWaveSpectatorOutputCaching();
 
 builder.Services.AddControllers();
 
 // Liveness endpoint for the compose healthcheck. No checks registered = 200 Healthy when up.
 builder.Services.AddHealthChecks();
+
+// Trust X-Forwarded-For only from an operator-declared proxy network (Proxy:TrustedNetworks,
+// env/compose-only — deferred finding from T04's review, STORY-171/T13). Empty by default: the
+// middleware's own loopback-only KnownNetworks/KnownProxies defaults leave it inert behind a
+// compose-network proxy (e.g. Caddy, PLAN T19's reference topology) until an operator opts in —
+// never trust the header from an unlisted source (a spoofed IP would dodge the per-IP spectator
+// limiter, RateLimiterPolicies.Spectator).
+var proxyOptions = cfg.GetSection(ProxyOptions.SectionName).Get<ProxyOptions>() ?? new ProxyOptions();
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor;
+    foreach (var cidr in proxyOptions.TrustedNetworks)
+        options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(cidr));
+});
 
 var app = builder.Build();
 
@@ -61,6 +78,11 @@ var app = builder.Build();
 app.WarnIfAdminPasswordMissing();
 
 // ── Middleware pipeline ──────────────────────────────────────────────────────
+// Forwarded-headers processing runs first — anything downstream that reads Connection.RemoteIpAddress
+// (the spectator/login rate limiters) must see the real client IP, not a fronting proxy's. Inert by
+// default (see the ForwardedHeadersOptions configuration above).
+app.UseForwardedHeaders();
+
 // Stamp Cache-Control: no-store on all /api/* responses before auth/routing so
 // even error responses (401, 403, 500) carry the header. See NoCacheApiMiddleware.
 app.UseMiddleware<NoCacheApiMiddleware>();
@@ -78,6 +100,16 @@ app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+// OutputCache runs last in the pipeline, immediately before endpoint execution (the recommended
+// placement — after routing/auth so a cached response is only ever served for a request that
+// would otherwise have been allowed through). A cache hit still passed through the rate limiter
+// above, so it still counts against a caller's budget (SPEC F62.3/F62.11) — simpler than teaching
+// the limiter about cache hits, and correct: a caller flooding a cached route is still worth
+// throttling. Only SpectatorController actions carry an [OutputCache] policy today — every other
+// endpoint is unaffected.
+app.UseOutputCache();
+
 app.MapControllers();
 
 // Liveness probe — anonymous so the (conditional) deny-by-default policy never 401s it.
