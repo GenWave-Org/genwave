@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -39,6 +40,23 @@ public sealed class SpectatorController(
     /// <summary>Hard cap on <c>GET /spectator/api/play-history</c> entries (SPEC F62.6), independent
     /// of the operator-configurable <c>Admin:PlayHistoryCapacity</c> ring size.</summary>
     const int MaxHistoryEntries = 20;
+
+    /// <summary>SPDX identifier for the project's license (SPEC F62.8). The project is GPL-family,
+    /// not operator-configurable — a literal, not a setting.</summary>
+    const string License = "AGPL-3.0-or-later";
+
+    /// <summary>Canonical public repository URL (SPEC F62.8), matching the one
+    /// <see cref="GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup"/> sends as its User-Agent contact.</summary>
+    const string ProjectUrl = "https://github.com/GenWave-Org/genwave";
+
+    /// <summary>
+    /// The build-stamped <see cref="AssemblyInformationalVersionAttribute"/> on the Host assembly
+    /// (SPEC F65.1, STORY-175). Read once at class load — it is fixed for the process's lifetime,
+    /// so re-reading it per request would only waste reflection.
+    /// </summary>
+    static readonly string HostVersion =
+        typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? "unknown";
 
     /// <summary>
     /// GET /spectator/api/now-playing — the public-shaped now-playing projection (SPEC F62.4/
@@ -110,6 +128,18 @@ public sealed class SpectatorController(
         var counts = await catalog.GetStatusCountsAsync(safeScope, ct);
 
         return Ok(new SpectatorStats(counts.Ready, counts.Enriching, counts.Failed));
+    }
+
+    /// <summary>
+    /// GET /spectator/api/about — the public identity panel (SPEC F62.8, F65.3): station name and
+    /// public stream URL read live from <see cref="StationOptions"/>, alongside the build-stamped
+    /// version, license, and canonical project URL, which cannot change at runtime.
+    /// </summary>
+    [HttpGet("about")]
+    public IActionResult GetAbout()
+    {
+        var options = stationMonitor.CurrentValue;
+        return Ok(new SpectatorAbout(options.Name, HostVersion, License, ProjectUrl, options.PublicStreamUrl));
     }
 
     static object ToPublicEntry(PlayHistoryEntry entry) =>
