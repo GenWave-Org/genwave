@@ -8,6 +8,17 @@ public sealed class AdminOptions
     public const string SectionName = "Admin";
 
     /// <summary>
+    /// Kill switch for the entire admin control plane (SPEC F61.1). Env/compose-only — deliberately
+    /// absent from <see cref="GenWave.Host.Configuration.StationSettingsAllowlist"/> (F61.3), so no
+    /// API can ever read or write it; flipping it requires a container recreate. Read live, per
+    /// request, via <c>IOptionsMonitor&lt;AdminOptions&gt;</c> by <see cref="SurfaceGateMiddleware"/>:
+    /// when false, every endpoint marked <see cref="AdminSurfaceAttribute"/> (every admin controller,
+    /// including <see cref="AuthController"/>) returns a bare 404 — the plane does not exist rather
+    /// than merely refusing authentication. Default true (today's behavior unchanged).
+    /// </summary>
+    public bool Enabled { get; init; } = true;
+
+    /// <summary>
     /// How many entries the play history ring retains. Oldest entries are evicted
     /// once the ring is full. Default 50.
     /// </summary>

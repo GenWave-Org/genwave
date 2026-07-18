@@ -28,7 +28,16 @@ sealed class FrameworkDiagnosticEndpointAuthorizationHandler : IAuthorizationMid
         AuthorizationPolicy policy,
         PolicyAuthorizationResult authorizeResult)
     {
-        if (!authorizeResult.Succeeded && context.GetEndpoint() is Endpoint and not RouteEndpoint)
+        // Two pass-through cases when authorization fails:
+        //   null endpoint      — no route matched; nothing would run. The deny-ALL fallback still
+        //                        evaluates for endpoint-less requests (AuthorizationMiddleware
+        //                        combines the fallback over empty metadata), and masking the
+        //                        terminal 404 as a 401 would violate the "surface does not exist"
+        //                        semantics (SPEC F61.2/F62.2).
+        //   non-RouteEndpoint  — the framework's synthesized 405/415 diagnostics described above.
+        // Every real application endpoint is a RouteEndpoint and stays fully governed by the
+        // deny-ALL fallback.
+        if (!authorizeResult.Succeeded && context.GetEndpoint() is not RouteEndpoint)
             return next(context);
 
         return Default.HandleAsync(next, context, policy, authorizeResult);

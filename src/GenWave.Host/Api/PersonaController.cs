@@ -25,6 +25,7 @@ namespace GenWave.Host.Api;
 /// </summary>
 [ApiController]
 [Route("api/personas")]
+[AdminSurface]
 [Authorize(Policy = AuthorizationPolicies.AdminOnly)]
 public sealed class PersonaController(
     IPersonaStore personaStore,

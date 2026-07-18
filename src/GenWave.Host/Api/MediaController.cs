@@ -16,6 +16,7 @@ namespace GenWave.Host.Api;
 /// </summary>
 [ApiController]
 [Route("api")]
+[AdminSurface]
 [Authorize(Policy = AuthorizationPolicies.AdminOnly)]
 public sealed class MediaController(
     IAdminMediaQuery adminQuery,

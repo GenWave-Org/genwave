@@ -65,6 +65,12 @@ app.WarnIfAdminPasswordMissing();
 // even error responses (401, 403, 500) carry the header. See NoCacheApiMiddleware.
 app.UseMiddleware<NoCacheApiMiddleware>();
 app.UseRouting();
+
+// Surface gate (SPEC F61, F62.2): decides whether a route EXISTS before identity is ever
+// consulted. Must run after UseRouting (needs the matched endpoint's metadata) and before
+// UseAuthentication (a disabled surface 404s instead of 401ing) — see SurfaceGateMiddleware.
+app.UseMiddleware<SurfaceGateMiddleware>();
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

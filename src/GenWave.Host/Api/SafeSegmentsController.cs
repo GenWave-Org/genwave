@@ -32,6 +32,7 @@ namespace GenWave.Host.Api;
 /// </summary>
 [ApiController]
 [Route("api/safe-segments")]
+[AdminSurface]
 [Authorize(Policy = AuthorizationPolicies.AdminOnly)]
 public sealed class SafeSegmentsController(
     ISafeSegmentAuthor author,

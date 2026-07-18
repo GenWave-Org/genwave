@@ -19,6 +19,16 @@ public sealed class StationOptions
     [Required, MinLength(1)]
     public string Voice { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Enables the public spectator surface (SPEC F62, F61's operating-mode table). Not required —
+    /// defaults false (today's behavior unchanged: no public read-only surface). Read live, per
+    /// request, via <c>IOptionsMonitor&lt;StationOptions&gt;</c> by
+    /// <see cref="GenWave.Host.Api.SurfaceGateMiddleware"/>: when false, every endpoint marked
+    /// <see cref="GenWave.Host.Api.SpectatorSurfaceAttribute"/> returns a bare 404 — the surface
+    /// does not exist for a deployment that has not opted in.
+    /// </summary>
+    public bool SpectatorMode { get; set; }
+
     /// <summary>The set of library ids this station is permitted to draw from. Must be non-empty.</summary>
     public StationScopeOptions Scope { get; set; } = new();
 

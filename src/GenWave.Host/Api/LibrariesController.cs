@@ -23,6 +23,7 @@ namespace GenWave.Host.Api;
 /// </summary>
 [ApiController]
 [Route("api/libraries")]
+[AdminSurface]
 [Authorize(Policy = AuthorizationPolicies.AdminOnly)]
 public sealed class LibrariesController(
     ILibraryRepository libraryRepository,
