@@ -36,6 +36,13 @@ file sealed class CountingCatalog(MediaReference? byId, bool throwOnRead = false
         return Task.FromResult(byId is not null && byId.MediaId == mediaId ? byId : null);
     }
 
+    public Task<MediaReference?> GetByIdUnscopedAsync(string mediaId, CancellationToken ct)
+    {
+        Interlocked.Increment(ref byIdCalls);
+        if (throwOnRead) throw new InvalidOperationException("catalog unavailable");
+        return Task.FromResult(byId is not null && byId.MediaId == mediaId ? byId : null);
+    }
+
     public Task<MediaReference?> GetRandomReadyAsync(LibraryScope scope, IReadOnlyList<string> excludeIds, CancellationToken ct)
         => Task.FromResult<MediaReference?>(null);
 

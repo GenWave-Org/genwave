@@ -66,6 +66,12 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
             return Task.FromResult(found);
         }
 
+        public Task<MediaReference?> GetByIdUnscopedAsync(string mediaId, CancellationToken ct)
+        {
+            var found = tracks.FirstOrDefault(t => t.MediaId == mediaId);
+            return Task.FromResult(found);
+        }
+
         public Task<MediaReference?> GetRandomReadyAsync(
             LibraryScope scope, IReadOnlyList<string> excludeIds, CancellationToken ct)
         {

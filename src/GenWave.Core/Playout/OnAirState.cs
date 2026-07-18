@@ -11,8 +11,10 @@ namespace GenWave.Core.Playout;
 /// <param name="GainDb">Applied loudness-normalisation gain (0.0 when drain/cold).</param>
 /// <param name="StartedAt">UTC instant the current on-air item was first detected.</param>
 /// <param name="DurationMs">
-/// Track duration from pushed metadata, if known (SPEC F50.2); null for engine-initiated plays and
-/// <c>tts:*</c> patter (F50.6) — never fabricated.
+/// Track duration from pushed metadata, if known (SPEC F50.2). <c>tts:*</c> patter carries its
+/// measured cue-derived duration here (SPEC F66.1); an engine-initiated play is always null at this
+/// layer — the Host rehydrates it from the catalog after publish (SPEC F66.2), since
+/// <see cref="PlayoutFeeder"/> stays DB-free (F16.6). Never fabricated.
 /// </param>
 /// <param name="IsReal">True when the on-air item carries our stamped media id (not a drain token).</param>
 /// <param name="IsReady">False until the feeder has completed at least one tick.</param>

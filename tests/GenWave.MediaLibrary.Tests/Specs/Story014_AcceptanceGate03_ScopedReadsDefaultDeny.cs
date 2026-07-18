@@ -89,15 +89,19 @@ public sealed class ScenarioStationScopeReturnsReadyTracks(DatabaseFixture fixtu
 // ---------------------------------------------------------------------
 
 /// <summary>
-/// AC4 — Every public method on IMediaCatalog has a LibraryScope parameter (compile-time / reflection).
-/// Proves no unscoped read overload can be added without failing this test.
+/// AC4 — Every public method on IMediaCatalog has a LibraryScope parameter (compile-time / reflection),
+/// with exactly one sanctioned exception: <see cref="IMediaCatalog.GetByIdUnscopedAsync"/> (SPEC
+/// F66.2) is deliberately unscoped — an aired-fact lookup, not a selection, so the default-deny
+/// scope discipline this gate otherwise proves doesn't apply to it. Proves no OTHER unscoped read
+/// overload can be added without failing this test.
 /// </summary>
 public sealed class ScenarioIMediaCatalogHasNoUnscopedReadMethod
 {
     [Fact]
     public void EveryPublicMethodOnIMediaCatalogHasALibraryScopeParameter()
     {
-        var methods = typeof(IMediaCatalog).GetMethods();
+        var methods = typeof(IMediaCatalog).GetMethods()
+            .Where(m => m.Name != nameof(IMediaCatalog.GetByIdUnscopedAsync));
         Assert.All(methods, m =>
             Assert.Contains(m.GetParameters(), p => p.ParameterType == typeof(LibraryScope)));
     }

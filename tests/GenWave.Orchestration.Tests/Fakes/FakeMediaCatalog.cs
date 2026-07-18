@@ -35,6 +35,9 @@ sealed class FakeMediaCatalog(MediaReference? ready) : IMediaCatalog
     public Task<MediaReference?> GetByIdAsync(LibraryScope scope, string mediaId, CancellationToken ct)
         => Task.FromResult(ready is not null && ready.MediaId == mediaId ? ready : null);
 
+    public Task<MediaReference?> GetByIdUnscopedAsync(string mediaId, CancellationToken ct)
+        => Task.FromResult(ready is not null && ready.MediaId == mediaId ? ready : null);
+
     public Task<MediaReference?> GetRandomReadyAsync(LibraryScope scope, IReadOnlyList<string> excludeIds, CancellationToken ct)
     {
         RandomCallExcludeLists.Add(excludeIds);

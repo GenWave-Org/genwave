@@ -17,6 +17,11 @@ static class PlayoutServiceCollectionExtensions
     public static IServiceCollection AddGenWavePlayout(this IServiceCollection services) =>
         services
             .AddSingleton<PlayHistoryService>()
+            // Duration rehydration (SPEC F66.2-F66.4): NowPlayingService's optional ctor dependency,
+            // resolved here so every Update() call can trigger it. Depends only on IMediaCatalog
+            // (bound by AddMediaLibrary) and PlayHistoryService — no dependency back on
+            // NowPlayingService itself, so there is no DI cycle.
+            .AddSingleton<DurationRehydrator>()
             .AddSingleton<NowPlayingService>()
             // The host's event-sink binding (gitea-#246): TrackAired → play history; everything else
             // no-op. Deliberately a plain Add (not TryAdd) so it wins over the no-op defaults the

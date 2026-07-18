@@ -40,6 +40,9 @@ file sealed class FakeMediaCatalog : IMediaCatalog
     public Task<MediaReference?> GetByIdAsync(LibraryScope scope, string mediaId, CancellationToken ct)
         => throw new NotSupportedException("Not exercised by STORY-148.");
 
+    public Task<MediaReference?> GetByIdUnscopedAsync(string mediaId, CancellationToken ct)
+        => throw new NotSupportedException("Not exercised by STORY-148.");
+
     public Task<MediaReference?> GetRandomReadyAsync(LibraryScope scope, IReadOnlyList<string> excludeIds, CancellationToken ct)
         => throw new NotSupportedException("Not exercised by STORY-148.");
 

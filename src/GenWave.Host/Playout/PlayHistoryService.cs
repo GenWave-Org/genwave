@@ -65,6 +65,27 @@ public sealed class PlayHistoryService
         }
     }
 
+    /// <summary>
+    /// SPEC F66.2 — patches <c>durationMs</c> onto the ring entry matching <paramref name="mediaId"/>
+    /// + <paramref name="startedAt"/> for <paramref name="stationId"/>, in place: position and every
+    /// other field are untouched. A silent no-op when no such entry exists — the entry may already
+    /// have been evicted by the time <see cref="DurationRehydrator"/>'s async lookup resolves; that
+    /// races harmlessly with <see cref="Push"/> under the same station lock, and a miss here never
+    /// throws (F66.4).
+    /// </summary>
+    public void TryPatchDuration(string stationId, string mediaId, DateTimeOffset startedAt, int durationMs)
+    {
+        lock (LockFor(stationId))
+        {
+            for (var node = RingFor(stationId).First; node is not null; node = node.Next)
+            {
+                if (node.Value.MediaId != mediaId || node.Value.StartedAt != startedAt) continue;
+                node.Value = node.Value with { DurationMs = durationMs };
+                return;
+            }
+        }
+    }
+
     LinkedList<PlayHistoryEntry> RingFor(string stationId)
         => rings.GetOrAdd(stationId, _ => new LinkedList<PlayHistoryEntry>());
 

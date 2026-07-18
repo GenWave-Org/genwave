@@ -199,7 +199,9 @@ public sealed class PlayoutFeeder(
                 var gainDb = Gain.NormGainDb(item.Loudness, targetLufs, ceilingDbtp);
                 await ls.PushAsync(item, gainDb, ct);
                 // Stamped from the MediaItem we already hold — zero DB reads per poll (SPEC F50.2,
-                // F16.6 stands). item.DurationMs is null for tts:* patter (F50.6).
+                // F16.6 stands). item.DurationMs carries the tts:* segment's measured cue-derived
+                // duration (F66.1) or the catalog's stored value for music; only an engine-initiated
+                // advance (elsewhere in this method) is null, rehydrated later at the Host layer (F66.2).
                 pushedMeta[item.MediaId] = (item.Title, item.Artist, gainDb, item.DurationMs);
                 feederOwnedIds.Add(item.MediaId);
                 chainIds.Add(item.MediaId);
