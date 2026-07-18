@@ -1,5 +1,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
+using GenWave.Host.Options;
 using GenWave.Host.Playout;
 
 namespace GenWave.Host.Api;
@@ -26,8 +30,16 @@ namespace GenWave.Host.Api;
 [Route("spectator/api")]
 [SpectatorSurface]
 [Authorize(Policy = AuthorizationPolicies.Spectator)]
-public sealed class SpectatorController(NowPlayingService nowPlayingService) : ControllerBase
+public sealed class SpectatorController(
+    NowPlayingService nowPlayingService,
+    PlayHistoryService playHistoryService,
+    IMediaCatalog catalog,
+    IOptionsMonitor<StationOptions> stationMonitor) : ControllerBase
 {
+    /// <summary>Hard cap on <c>GET /spectator/api/play-history</c> entries (SPEC F62.6), independent
+    /// of the operator-configurable <c>Admin:PlayHistoryCapacity</c> ring size.</summary>
+    const int MaxHistoryEntries = 20;
+
     /// <summary>
     /// GET /spectator/api/now-playing — the public-shaped now-playing projection (SPEC F62.4/
     /// F62.5). A dedicated projection built from the same in-memory <see cref="NowPlayingService"/>
@@ -55,4 +67,53 @@ public sealed class SpectatorController(NowPlayingService nowPlayingService) : C
 
         return Ok(new SpectatorTrackNowPlaying(snapshot.Title, snapshot.Artist, snapshot.StartedAt, snapshot.DurationMs));
     }
+
+    /// <summary>
+    /// GET /spectator/api/play-history — the public-shaped recent play history (SPEC F62.6), newest
+    /// first, capped at <see cref="MaxHistoryEntries"/> regardless of the operator's configured ring
+    /// size. Reads the same <see cref="PlayHistoryService"/> ring the admin surface uses — no DB
+    /// round-trip — but projects each entry into one of two dedicated, unrelated shapes: a <c>tts:*</c>
+    /// media id becomes <see cref="SpectatorPlayHistoryPatterEntry"/> (kind + airedAt only, anonymized
+    /// per F62.9); anything else becomes <see cref="SpectatorPlayHistoryTrackEntry"/> (kind, title,
+    /// artist, airedAt). No media id, gain/loudness, or duration ever appears — excluded by
+    /// construction, not by filtering.
+    /// </summary>
+    [HttpGet("play-history")]
+    public IActionResult GetPlayHistory()
+    {
+        var entries = playHistoryService.GetEntries(SingleStation.IdString)
+            .Take(MaxHistoryEntries)
+            .Select(ToPublicEntry)
+            .ToList();
+
+        return Ok(new SpectatorPlayHistoryResponse(entries));
+    }
+
+    /// <summary>
+    /// GET /spectator/api/stats — exactly <c>{ready, enriching, failed}</c> (SPEC F62.7). Reads
+    /// <see cref="IMediaCatalog.GetStatusCountsAsync"/> with the same <c>Station:SafeScope:LibraryIds</c>
+    /// scope <see cref="StatusController.Get"/> passes, so the public number always agrees with the
+    /// admin dashboard's <c>catalog</c> block. Deliberately omits <c>unavailable</c>/<c>playable</c> —
+    /// both would disclose SafeScope sizing to the public — by returning a DTO that simply has no
+    /// properties for them (F62.9 disclosure-by-construction).
+    /// <para>
+    /// No try/catch here: a catalog failure (DB down) bubbles as a bare 500 with no exception
+    /// details middleware on this surface. A public page polling this every 30s is expected to just
+    /// ignore a failed poll and retry on the next tick — better than fabricating zero counts, which
+    /// would misreport an outage as an empty catalog.
+    /// </para>
+    /// </summary>
+    [HttpGet("stats")]
+    public async Task<IActionResult> GetStats(CancellationToken ct)
+    {
+        var safeScope = new LibraryScope(stationMonitor.CurrentValue.SafeScope.LibraryIds.ToArray());
+        var counts = await catalog.GetStatusCountsAsync(safeScope, ct);
+
+        return Ok(new SpectatorStats(counts.Ready, counts.Enriching, counts.Failed));
+    }
+
+    static object ToPublicEntry(PlayHistoryEntry entry) =>
+        entry.MediaId.StartsWith("tts:", StringComparison.Ordinal)
+            ? new SpectatorPlayHistoryPatterEntry(entry.StartedAt)
+            : new SpectatorPlayHistoryTrackEntry(entry.Title, entry.Artist, entry.StartedAt);
 }
