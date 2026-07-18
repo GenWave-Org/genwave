@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using GenWave.Host.Playout;
 
@@ -9,6 +10,7 @@ namespace GenWave.Host.Api;
 /// </summary>
 [ApiController]
 [Route("api")]
+[Authorize(Policy = AuthorizationPolicies.AdminOnly)]
 public sealed class LiveController(
     NowPlayingService nowPlayingService,
     PlayHistoryService historyService) : ControllerBase

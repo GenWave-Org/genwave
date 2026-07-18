@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using GenWave.Core.Abstractions;
 
@@ -15,6 +16,7 @@ namespace GenWave.Host.Api;
 /// </summary>
 [ApiController]
 [Route("api")]
+[Authorize(Policy = AuthorizationPolicies.AdminOnly)]
 public sealed class VoicesController(
     ITtsVoiceLister voiceLister,
     ILogger<VoicesController> logger) : ControllerBase

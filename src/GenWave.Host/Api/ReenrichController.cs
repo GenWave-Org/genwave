@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -21,6 +22,7 @@ namespace GenWave.Host.Api;
 /// </summary>
 [ApiController]
 [Route("api")]
+[Authorize(Policy = AuthorizationPolicies.AdminOnly)]
 public sealed class ReenrichController(
     IAdminMediaReenrichment adminReenrichment,
     IStationScopeProvider scopeProvider,

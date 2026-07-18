@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
@@ -24,6 +25,7 @@ namespace GenWave.Host.Api;
 /// </summary>
 [ApiController]
 [Route("api/personas")]
+[Authorize(Policy = AuthorizationPolicies.AdminOnly)]
 public sealed class PersonaController(
     IPersonaStore personaStore,
     IStationSettingsStore settingsStore,

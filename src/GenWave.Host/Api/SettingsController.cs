@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using GenWave.Host.Configuration;
@@ -20,6 +21,7 @@ namespace GenWave.Host.Api;
 /// </summary>
 [ApiController]
 [Route("api")]
+[Authorize(Policy = AuthorizationPolicies.AdminOnly)]
 public sealed class SettingsController(
     IConfiguration configuration,
     IStationSettingsStore store,

@@ -21,6 +21,7 @@ namespace GenWave.Host.Api;
 /// </summary>
 [ApiController]
 [Route("api")]
+[Authorize(Policy = AuthorizationPolicies.AdminOnly)]
 public sealed class AuthController(
     IOptions<AdminOptions> adminOptions,
     IStationIdentityProvider identityProvider,
