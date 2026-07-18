@@ -101,14 +101,17 @@ public static class FeatureSeededDefaults
     }
 
     /// <summary>
-    /// The two allowlisted keys whose C# default IS empty (<see cref="LlmOptions.Endpoint"/>/
-    /// <see cref="LlmOptions.Model"/>) — empty is their honest disabled state (F34.2), not a bug
-    /// the F55.1 seeding contract covers. Every other allowlisted key's C# default is non-empty.
+    /// Allowlisted keys whose C# default IS empty (<see cref="LlmOptions.Endpoint"/>/
+    /// <see cref="LlmOptions.Model"/>, <see cref="StationOptions.PublicStreamUrl"/>) — empty is
+    /// their honest disabled state (F34.2 for the LLM pair; F62.8 for PublicStreamUrl, where empty
+    /// means the spectator "about" panel hides the player), not a bug the F55.1 seeding contract
+    /// covers. Every other allowlisted key's C# default is non-empty.
     /// </summary>
     static readonly IReadOnlySet<string> HonestlyBlankKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "Llm:Endpoint",
         "Llm:Model",
+        "Station:PublicStreamUrl",
     };
 
     /// <summary>

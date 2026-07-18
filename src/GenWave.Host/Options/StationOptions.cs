@@ -29,6 +29,13 @@ public sealed class StationOptions
     /// </summary>
     public bool SpectatorMode { get; set; }
 
+    /// <summary>
+    /// The public Icecast stream URL surfaced to spectators (SPEC F62.8). Not required — defaults
+    /// to empty, which the spectator "about" panel treats as "no player": an absolute http/https
+    /// URL or a root-relative path (e.g. <c>/stream</c>) is legal once the operator sets it.
+    /// </summary>
+    public string PublicStreamUrl { get; set; } = string.Empty;
+
     /// <summary>The set of library ids this station is permitted to draw from. Must be non-empty.</summary>
     public StationScopeOptions Scope { get; set; } = new();
 

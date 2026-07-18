@@ -1,6 +1,7 @@
 using System.Text.Json;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Events;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 
 namespace GenWave.Host.Configuration;
@@ -17,15 +18,18 @@ public sealed class StationSettingsStore : IStationSettingsStore
     readonly string connectionString;
     readonly StationSettingsConfigurationSource source;
     readonly IStationEventSink events;
+    readonly ILogger<StationSettingsStore> logger;
 
     public StationSettingsStore(
         string connectionString,
         StationSettingsConfigurationSource source,
-        IStationEventSink? events = null)
+        IStationEventSink? events = null,
+        ILogger<StationSettingsStore>? logger = null)
     {
         this.connectionString = connectionString;
         this.source = source;
         this.events = events ?? NoOpStationEventSink.Instance;
+        this.logger = logger ?? NullLogger<StationSettingsStore>.Instance;
     }
 
     /// <inheritdoc/>
@@ -60,24 +64,49 @@ public sealed class StationSettingsStore : IStationSettingsStore
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Degrades to an empty result (every key reads as <c>source="default"</c> in
+    /// <c>GET /api/settings</c>) rather than throwing when the station DB is unreachable or
+    /// unconfigured — the settings page must still render with defaults while Postgres is briefly
+    /// down, mirroring <see cref="StationSettingsConfigurationProvider.Load"/>'s identical
+    /// degrade-to-empty-overlay behavior at boot. An empty <see cref="connectionString"/> throws
+    /// <see cref="InvalidOperationException"/> before a <see cref="NpgsqlException"/> is even
+    /// reachable (same guard the provider's <c>Load()</c> documents), so both cases are covered.
+    /// </remarks>
     public async Task<IReadOnlyDictionary<string, string>> ReadAllAsync(CancellationToken cancellationToken = default)
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        await using var conn = new NpgsqlConnection(connectionString);
-        await conn.OpenAsync(cancellationToken);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT key, value FROM station.settings";
-
-        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        if (string.IsNullOrWhiteSpace(connectionString))
         {
-            var key = reader.GetString(0);
-            if (!StationSettingsAllowlist.ByKey.ContainsKey(key))
-                continue;   // never surface a key that slipped through write-path guards
+            logger.LogWarning("No Station connection string; overlay reads as empty");
+            return result;
+        }
 
-            result[key] = reader.GetString(1);
+        try
+        {
+            await using var conn = new NpgsqlConnection(connectionString);
+            await conn.OpenAsync(cancellationToken);
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT key, value FROM station.settings";
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var key = reader.GetString(0);
+                if (!StationSettingsAllowlist.ByKey.ContainsKey(key))
+                    continue;   // never surface a key that slipped through write-path guards
+
+                result[key] = reader.GetString(1);
+            }
+        }
+        catch (NpgsqlException ex)
+        {
+            // DB down, wrong password, no station schema yet — none of these should turn
+            // GET /api/settings into a 500; the overlay is empty until the DB is reachable again.
+            logger.LogWarning(ex, "Overlay read failed; treating as empty");
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
         return result;

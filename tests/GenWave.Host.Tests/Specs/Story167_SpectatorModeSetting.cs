@@ -98,7 +98,8 @@ public static class FeatureSpectatorModeSetting
 
             var entry = await FindSettingAsync(factory, "Station:SpectatorMode");
 
-            Assert.Equal("Live", entry!.Value.GetProperty("applyMode").GetString());
+            // Wire convention is lowercase (F18.1 camelCase contract; matches Story043/058/100/120/124/139).
+            Assert.Equal("live", entry!.Value.GetProperty("applyMode").GetString());
         }
 
         [Fact(Skip = OperatorGated)]
