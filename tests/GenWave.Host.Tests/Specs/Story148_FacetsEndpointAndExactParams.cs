@@ -165,25 +165,25 @@ file sealed class FakeAdminMediaReenrichment : IAdminMediaReenrichment
 /// replacing every admin-media seam with a scriptable fake (or a sensible empty default) — mirrors
 /// Story137's <c>ScopeNeverBlocksWebFactory</c>. Callers pass only the fakes their fact scripts;
 /// everything else defaults to an inert double.
+///
+/// Admin:Password is always configured (STORY-164/T02: the admin plane fail-closes without one) —
+/// every fact that expects success logs in first via <see cref="FeatureFacetsEndpointAndExactParams.LoggedInClientAsync"/>.
 /// </summary>
 file sealed class FacetsAndExactParamsWebFactory(
     IMediaCatalog? catalog = null,
     IAdminMediaQuery? adminQuery = null,
     IAdminMediaWrite? adminWrite = null,
     IAdminMediaReenrichment? adminReenrichment = null,
-    LibraryScope? stationScope = null,
-    bool withAdminPassword = false) : WebApplicationFactory<Program>
+    LibraryScope? stationScope = null) : WebApplicationFactory<Program>
 {
     const string LibraryConnVar = "ConnectionStrings__Library";
+    internal const string Password = "test-password-x7z";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // Development config provides Station:Id/Name/Voice/Scope/SafeScope and Tts:Endpoint
         // so ValidateOnStart() is satisfied without injecting them manually.
         builder.UseEnvironment("Development");
-
-        if (withAdminPassword)
-            builder.UseSetting("Admin:Password", "test-password-x7z");
 
         builder.ConfigureTestServices(services =>
         {
@@ -215,15 +215,18 @@ file sealed class FacetsAndExactParamsWebFactory(
         // AddMediaLibrary reads Library connection string early in Program.cs (before
         // ConfigureTestServices runs), so it is injected via the environment. A non-reachable
         // host is fine: every seam that would touch it is replaced with a fake above.
-        var prev = Environment.GetEnvironmentVariable(LibraryConnVar);
+        var prevLib = Environment.GetEnvironmentVariable(LibraryConnVar);
+        var prevAdmin = Environment.GetEnvironmentVariable("Admin__Password");
         Environment.SetEnvironmentVariable(LibraryConnVar, "Host=nowhere;Database=test");
+        Environment.SetEnvironmentVariable("Admin__Password", Password);
         try
         {
             return base.CreateHost(builder);
         }
         finally
         {
-            Environment.SetEnvironmentVariable(LibraryConnVar, prev);
+            Environment.SetEnvironmentVariable(LibraryConnVar, prevLib);
+            Environment.SetEnvironmentVariable("Admin__Password", prevAdmin);
         }
     }
 }
@@ -232,6 +235,15 @@ file sealed class FacetsAndExactParamsWebFactory(
 
 public static class FeatureFacetsEndpointAndExactParams
 {
+    /// <summary>Logs in with the factory's fixed test password and returns the now-authenticated client.</summary>
+    static async Task<HttpClient> LoggedInClientAsync(WebApplicationFactory<Program> factory)
+    {
+        var client = factory.CreateClient();
+        var login = await client.PostAsJsonAsync("/api/auth/login", new { password = FacetsAndExactParamsWebFactory.Password });
+        Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
+        return client;
+    }
+
     static AdminMediaDto Row(string mediaId, string? artist = null, string? album = null, string? genre = null, bool eligible = true) => new(
         MediaId: mediaId,
         Locator: $"/media/{mediaId}.flac",
@@ -267,7 +279,7 @@ public static class FeatureFacetsEndpointAndExactParams
         {
             var catalog = new FakeMediaCatalog { FacetsResult = [new FacetValue("Queen", 3), new FacetValue("Rush", 1)] };
             await using var factory = new FacetsAndExactParamsWebFactory(catalog: catalog);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.GetAsync("/api/media/facets?field=artist");
 
@@ -284,7 +296,7 @@ public static class FeatureFacetsEndpointAndExactParams
         {
             var catalog = new FakeMediaCatalog { FacetsResult = [new FacetValue("A Night at the Opera", 1)] };
             await using var factory = new FacetsAndExactParamsWebFactory(catalog: catalog);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.GetAsync($"/api/media/facets?field={field}");
 
@@ -301,7 +313,7 @@ public static class FeatureFacetsEndpointAndExactParams
             var catalog = new FakeMediaCatalog { FacetsResult = [] };
             await using var factory = new FacetsAndExactParamsWebFactory(
                 catalog: catalog, stationScope: new LibraryScope([1L]));
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.GetAsync("/api/media/facets?field=artist&library-id=2");
 
@@ -312,7 +324,7 @@ public static class FeatureFacetsEndpointAndExactParams
         [Fact]
         public async Task TheEndpointRequiresTheAuthCookie()
         {
-            await using var factory = new FacetsAndExactParamsWebFactory(withAdminPassword: true);
+            await using var factory = new FacetsAndExactParamsWebFactory();
             var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
             var response = await client.GetAsync("/api/media/facets?field=artist");
@@ -332,7 +344,7 @@ public static class FeatureFacetsEndpointAndExactParams
             var rows = new[] { Row("1", artist: "Queen"), Row("2", artist: "Queensrÿche") };
             var query = new FakeExactAwareAdminQuery { Rows = rows };
             await using var factory = new FacetsAndExactParamsWebFactory(adminQuery: query);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.GetAsync("/api/media?artist-exact=Queen");
 
@@ -353,7 +365,7 @@ public static class FeatureFacetsEndpointAndExactParams
             var rows = new[] { Row("1", artist: "Queen") };
             var query = new FakeExactAwareAdminQuery { Rows = rows };
             await using var factory = new FacetsAndExactParamsWebFactory(adminQuery: query);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.GetAsync("/api/media?artist=&artist-exact=Queen");
 
@@ -368,7 +380,7 @@ public static class FeatureFacetsEndpointAndExactParams
             var rows = new[] { Row("1", genre: "Rock"), Row("2", genre: "Metal"), Row("3", genre: "Jazz") };
             var query = new FakeExactAwareAdminQuery { Rows = rows };
             await using var factory = new FacetsAndExactParamsWebFactory(adminQuery: query);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.GetAsync("/api/media?genre-exact=Rock&genre-exact=Metal");
 
@@ -389,7 +401,7 @@ public static class FeatureFacetsEndpointAndExactParams
             };
             var query = new FakeExactAwareAdminQuery { Rows = rows };
             await using var factory = new FacetsAndExactParamsWebFactory(adminQuery: query);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.GetAsync("/api/media?artist-exact=Queen&eligible=true&page=1&limit=10");
 
@@ -408,7 +420,7 @@ public static class FeatureFacetsEndpointAndExactParams
         {
             var write = new FakeAdminMediaWrite();
             await using var factory = new FacetsAndExactParamsWebFactory(adminWrite: write);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.PostAsJsonAsync("/api/media/eligibility", new
             {
@@ -426,7 +438,7 @@ public static class FeatureFacetsEndpointAndExactParams
             var write = new FakeAdminMediaWrite();
             var reenrichment = new FakeAdminMediaReenrichment();
             await using var factory = new FacetsAndExactParamsWebFactory(adminWrite: write, adminReenrichment: reenrichment);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var reassignResponse = await client.PostAsJsonAsync("/api/media/bulk/reassign", new
             {
@@ -454,7 +466,7 @@ public static class FeatureFacetsEndpointAndExactParams
         public async Task AMissingFacetFieldReturns400()
         {
             await using var factory = new FacetsAndExactParamsWebFactory();
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.GetAsync("/api/media/facets");
 
@@ -465,7 +477,7 @@ public static class FeatureFacetsEndpointAndExactParams
         public async Task AnUnknownFacetFieldReturns400()
         {
             await using var factory = new FacetsAndExactParamsWebFactory();
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.GetAsync("/api/media/facets?field=year");
 
@@ -477,7 +489,7 @@ public static class FeatureFacetsEndpointAndExactParams
         {
             var query = new FakeExactAwareAdminQuery { Rows = [] };
             await using var factory = new FacetsAndExactParamsWebFactory(adminQuery: query);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.GetAsync("/api/media?artist=que&artist-exact=Queen");
 
@@ -490,7 +502,7 @@ public static class FeatureFacetsEndpointAndExactParams
         {
             var query = new FakeExactAwareAdminQuery { Rows = [] };
             await using var factory = new FacetsAndExactParamsWebFactory(adminQuery: query);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.GetAsync("/api/media?genre=roc&genre-exact=Rock");
 

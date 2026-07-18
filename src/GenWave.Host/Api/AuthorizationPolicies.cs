@@ -9,11 +9,11 @@ namespace GenWave.Host.Api;
 /// policy here, not by scattering <c>[Authorize]</c> shapes across controllers.
 ///
 /// <list type="bullet">
-///   <item><see cref="AdminOnly"/> gates the entire admin control plane. Its current behavior when
-///   no <c>Admin:Password</c> is configured (open, via <see cref="AdminOnlyRequirement"/> /
-///   <see cref="AdminOnlyAuthorizationHandler"/>) is a deliberate T01 carry-over of the historical
-///   local-dev convenience; STORY-164/T02 flips that branch to deny without touching this
-///   registration.</item>
+///   <item><see cref="AdminOnly"/> gates the entire admin control plane. STORY-164/T02 made it
+///   fail-closed (SPEC F60.4): <see cref="AdminOnlyAuthorizationHandler"/> only succeeds for an
+///   authenticated cookie session, and no session can ever exist when <c>Admin:Password</c> is
+///   empty because <see cref="AuthController.Login"/> always fails in that case — the historical
+///   local-dev open mode is retired.</item>
 ///   <item><see cref="Spectator"/> is reserved for the public read-only surface (STORY-167+) —
 ///   registered now, demands nothing yet, and nothing references it yet.</item>
 ///   <item>The fallback policy is unconditional deny-ALL: any endpoint that is missing its explicit

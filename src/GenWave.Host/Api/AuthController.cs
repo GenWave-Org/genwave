@@ -14,7 +14,8 @@ namespace GenWave.Host.Api;
 /// <summary>
 /// Authentication + station info for the single-station Admin UI.
 /// Login checks the submitted password against the single configured <c>Admin:Password</c>
-/// (no user table). When no password is configured the API is open and login always succeeds.
+/// (no user table). When no password is configured (SPEC F60.4/T02, STORY-164) login always
+/// fails and no cookie is ever issued — the admin plane is fail-closed, not open.
 ///
 /// Library listing has moved to <see cref="LibrariesController"/> (STORY-047, Epic J):
 /// GET /api/libraries now returns every library row (not scope-filtered) with a media count.
@@ -36,8 +37,9 @@ public sealed class AuthController(
     {
         var configured = adminOptions.Value.Password;
 
-        // When a password is configured, require a constant-time match. Empty password = open mode.
-        if (!string.IsNullOrEmpty(configured) && !FixedTimeEquals(request.Password, configured))
+        // No configured password = fail-closed (SPEC F60.4): login can never succeed, so no
+        // cookie is ever issued. Otherwise require a constant-time match.
+        if (string.IsNullOrEmpty(configured) || !FixedTimeEquals(request.Password, configured))
         {
             logger.LogWarning("Login failed: wrong admin password");
             return Unauthorized(new { message = InvalidCredentialsMessage });

@@ -57,6 +57,9 @@ builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
+// Fail-closed admin gate (SPEC F60.4/STORY-164): loudly warn if the admin plane is locked down.
+app.WarnIfAdminPasswordMissing();
+
 // ── Middleware pipeline ──────────────────────────────────────────────────────
 // Stamp Cache-Control: no-store on all /api/* responses before auth/routing so
 // even error responses (401, 403, 500) carry the header. See NoCacheApiMiddleware.

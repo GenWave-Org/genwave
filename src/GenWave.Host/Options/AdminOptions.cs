@@ -15,7 +15,8 @@ public sealed class AdminOptions
 
     /// <summary>
     /// Single admin password for the Admin UI login (single-station deployment — no user table).
-    /// When empty, the auth gate is disabled and the API is open (local-dev convenience).
+    /// When empty, the admin plane is fail-closed (SPEC F60.4/STORY-164): login always fails and no
+    /// admin endpoint is reachable. Set via the <c>ADMIN_PASSWORD</c> environment variable.
     /// </summary>
     public string Password { get; init; } = "";
 
