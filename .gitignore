@@ -7,7 +7,11 @@ obj/
 *.user
 
 # Claude session artifacts
-docs/
+# (docs/* not docs/ — a bare `docs/` match excludes the directory itself, and git can never
+# re-include a file whose parent directory is excluded, only a directory's *contents*.)
+docs/*
+# ...except DEPLOYMENT.md — the one public deliverable out of the private planning docs (T19)
+!docs/DEPLOYMENT.md
 
 # Smoke-test artifacts
 smoke-candidates.json
