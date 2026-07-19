@@ -170,8 +170,13 @@ services:
     restart: unless-stopped
 
   kokoro:
-    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.2.1   # PIN — do not use latest
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.6.0   # PIN — do not use latest
     networks: [core]                                    # internal only; control port 8880 NEVER published
+    # kokoro-fastapi leaks RSS under load (upstream #453 — root cause fixed after v0.2.x; #262
+    # still open). Fresh baseline is ~1.2GiB; this cap is the fail-closed backstop: leak past it
+    # and the kernel OOM-kills the container, `restart: unless-stopped` brings it back clean in
+    # seconds. Blast radius is one failed TTS render — the broadcast keeps playing music.
+    mem_limit: 3g
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/8880'"]
       interval: 5s

@@ -5,7 +5,7 @@ name: genwave-kokorotest
 
 services:
   kokoro:
-    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.2.1
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.6.0
     ports:
       - "127.0.0.1:18880:8880"
     healthcheck:

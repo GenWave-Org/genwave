@@ -24,6 +24,6 @@ public sealed class KokoroVoiceLister(HttpClient http, IOptionsMonitor<TtsOption
         response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx
 
         var payload = await response.Content.ReadFromJsonAsync<KokoroVoicesResponse>(ct);
-        return payload?.Voices ?? [];
+        return payload?.VoiceIds() ?? [];
     }
 }
