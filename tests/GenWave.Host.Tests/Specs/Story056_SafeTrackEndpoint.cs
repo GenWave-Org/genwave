@@ -60,6 +60,9 @@ file sealed class FakeScopeCaptureCatalog(MediaReference? readyTrack) : IMediaCa
     public Task<MediaReference?> GetByIdAsync(LibraryScope scope, string mediaId, CancellationToken ct)
         => Task.FromResult<MediaReference?>(null);
 
+    public Task<MediaReference?> GetByIdUnscopedAsync(string mediaId, CancellationToken ct)
+        => Task.FromResult<MediaReference?>(null);
+
     public Task<MediaReference?> GetRandomReadyAsync(LibraryScope scope, IReadOnlyList<string> excludeIds, CancellationToken ct)
     {
         capturedScopes.Add(scope);

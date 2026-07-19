@@ -14,7 +14,11 @@ cd "$(dirname "$0")"
 SLN="GenWave.sln"
 CONFIG="${CONFIG:-Release}"
 
-echo "==> GenWave build (config: ${CONFIG})"
+# Tag-derived version stamp (SPEC F65.1, STORY-175): never committed to source, no csproj
+# <Version> — derived once here from git and threaded into the api image's InformationalVersion.
+GW_VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)"
+
+echo "==> GenWave build (config: ${CONFIG}, version: ${GW_VERSION})"
 
 # --- 1. .NET solution: libraries + apps, then tests -------------------------------------
 if [ -f "$SLN" ]; then
@@ -33,8 +37,14 @@ fi
 
 # --- 2. Docker images -------------------------------------------------------------------
 if [ -f src/GenWave.Host/Dockerfile ]; then
-  echo "==> docker compose build (all services)"
-  docker compose build
+  echo "==> docker compose build (icecast, engine, admin_ui)"
+  docker compose build icecast engine admin_ui
+
+  # api takes GW_VERSION via --build-arg (compose.yaml stays untouched — no build.args: entry;
+  # the Dockerfile's ARG GW_VERSION=0.0.0-dev default means a plain `docker compose build` still
+  # works without this flag).
+  echo "==> docker compose build api (GW_VERSION=${GW_VERSION})"
+  docker compose build --build-arg GW_VERSION="${GW_VERSION}" api
 else
   echo "==> docker compose build icecast (api image arrives in Phase 6)"
   docker compose build icecast

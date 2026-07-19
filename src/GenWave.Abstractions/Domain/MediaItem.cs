@@ -17,7 +17,8 @@ namespace GenWave.Core.Domain;
 /// <param name="Genre">Display genre (DJ blurb tags, F34.7); null until enriched or for non-music segments.</param>
 /// <param name="Year">Release year (DJ blurb tags, F34.7); null until enriched or for non-music segments.</param>
 /// <param name="DurationMs">
-/// Track duration in milliseconds (on-air duration, SPEC F50.1); null for engine-initiated plays and
-/// <c>tts:*</c> patter segments (F50.2, F50.6) — never fabricated.
+/// Track duration in milliseconds (on-air duration, SPEC F50.1); null for engine-initiated plays.
+/// <c>tts:*</c> patter segments carry the cue analyzer's measured CueOutSec, rounded to the nearest
+/// millisecond, when cue analysis succeeded (SPEC F66.1) — null when it failed. Never fabricated.
 /// </param>
 public sealed record MediaItem(string MediaId, string Locator, string Title, Loudness Loudness, string? Artist = null, CuePoints? Cue = null, double? IntroEnergy = null, double? OutroEnergy = null, string? Album = null, string? Genre = null, int? Year = null, int? DurationMs = null);

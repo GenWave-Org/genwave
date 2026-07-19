@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using GenWave.Host.Options;
 
@@ -7,7 +6,8 @@ namespace GenWave.Host.Api;
 
 /// <summary>
 /// The admin surface's cross-cutting wiring: admin options, Data Protection key persistence,
-/// cookie authentication, and the conditional deny-by-default authorization policy.
+/// cookie authentication, and the named authorization policies (SPEC F60,
+/// see <see cref="AuthorizationPolicies"/> for the policy definitions themselves).
 /// </summary>
 static class AdminApiServiceCollectionExtensions
 {
@@ -54,17 +54,13 @@ static class AdminApiServiceCollectionExtensions
                 };
             });
 
-        // Deny-by-default ONLY when an admin password is configured. With no password, the API is
-        // open — a deliberate local-dev convenience for a private single-station box.
-        services.AddAuthorization(o =>
-        {
-            if (!string.IsNullOrEmpty(adminOpts.Password))
-            {
-                o.FallbackPolicy = new AuthorizationPolicyBuilder()
-                    .RequireAuthenticatedUser()
-                    .Build();
-            }
-        });
+        // Named policies (AdminOnly, Spectator) + the unconditional deny-ALL fallback — see
+        // AuthorizationPolicies for the single registration point (SPEC F60).
+        services.AddGenWaveAuthorizationPolicies();
+
+        // Named rate-limiter policies (Login today; the spectator limiter joins here in T13) —
+        // see RateLimiterPolicies for the single registration point (SPEC F61.5).
+        services.AddGenWaveRateLimiting();
 
         return services;
     }

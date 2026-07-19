@@ -108,6 +108,10 @@ services:
     networks: [core, data]                      # core -> engine, data -> db
     ports:
       - "8080:8080"                             # control-plane API, direct on localhost
+      - "8081:8081"                             # public spectator listener (SPEC F64.1/F64.2, STORY-172) —
+                                                 # Standard mode wants LAN reachability, same as 8080; the
+                                                 # demo/appliance topology (PLAN T19) instead reaches it only
+                                                 # via Caddy on the core network.
     depends_on:
       db:
         condition: service_healthy              # schema must exist before first query
@@ -122,6 +126,13 @@ services:
       ConnectionStrings__Station: "Host=db;Database=genwave;Username=station_svc;Password=${STATION_DB_PASSWORD:?};Search Path=station"
       # Single admin password for the Admin UI login. Empty = open API (local-dev convenience).
       Admin__Password: "${ADMIN_PASSWORD:-}"
+      # Public listener (SPEC F64.1/F64.2, STORY-172): the app never force-binds a port — Kestrel
+      # binds whatever ASPNETCORE_URLS lists, so :8081 is added alongside the existing :8080.
+      # Spectator__PublicPort tells SurfaceGateMiddleware which local port is public-only: on it,
+      # only the spectator surface + /health respond — admin, /media/*, /internal/* 404 regardless
+      # of any other flag. Env/compose-only, deliberately not in the settings allowlist.
+      ASPNETCORE_URLS: "http://+:8080;http://+:8081"
+      Spectator__PublicPort: "8081"
       Liquidsoap__Host: engine
       Liquidsoap__Port: "1234"
       Liquidsoap__QueueId: "q"
@@ -140,6 +151,11 @@ services:
       Tts__Format: "wav"
       Tts__RenderBudgetSeconds: "30"
       Tts__CacheRoot: "/tts"
+      # Icecast admin-stats listener count (SPEC F62.12 addendum, STORY-179, gitea-#10). Env/compose-
+      # only, deliberately absent from StationSettingsAllowlist — Icecast__AdminPassword is a secret
+      # (F19.3), never readable or writable through the settings API.
+      Icecast__StatsUrl: http://icecast:8000
+      Icecast__AdminPassword: ${ICECAST_ADMIN_PASSWORD:?}
     volumes:
       - ${MEDIA_DIR:?}:/media:ro                # READ-ONLY: the library scans + analyses, never writes
       - tts:/tts                                # READ-WRITE: api writes TTS clips here for engine to play
@@ -166,6 +182,9 @@ services:
   admin_ui:
     build:
       context: ./admin-ui
+    profiles: ["admin"]                           # F61.4/STORY-166: Appliance/Headless boxes clear
+                                                   # COMPOSE_PROFILES in .env so no Node runtime runs;
+                                                   # Operator/Standard's default .env keeps it enabled.
     networks: [core]                             # reaches the api over the core network
     ports:
       - "3000:3000"                              # Admin UI, direct on localhost

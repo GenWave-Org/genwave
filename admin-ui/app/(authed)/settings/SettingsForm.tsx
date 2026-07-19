@@ -126,6 +126,14 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "RecentWindow has no additional effect, and RecentWindow=0 disables artist separation too. " +
     "Accepted range: 0–100.",
 
+  // ── Spectator surface (SPEC F62.1, F62.8, STORY-167/170) ─────────────────────────────────────
+  "Station:SpectatorMode":
+    "Public read-only spectator page and API. Off by default; when on, /spectator serves " +
+    "without login.",
+  "Station:PublicStreamUrl":
+    "Public stream URL for the spectator page player (e.g. /stream behind the reference proxy). " +
+    "Empty hides the player.",
+
   // ── TTS / LLM endpoints (SPEC F36.1–F36.4) ─────────────────────────────────────────────────
   "Tts:Endpoint":
     "The Kokoro TTS service base URL used to render all spoken patter — must be a non-empty " +

@@ -122,6 +122,19 @@ public static class FeatureComposeEnvDriftGuard
         // TTS render format/cache mount — infra, not operator-editable.
         "Tts__Format",
         "Tts__CacheRoot",
+        // Public listener (SPEC F64.1/F64.2, STORY-172, PLAN T15). ASPNETCORE_URLS is Kestrel/host
+        // wiring, not a GenWave config key at all. Spectator__PublicPort is env/compose-only —
+        // SpectatorOptions's doc comment names the same StationSettingsAllowlist exclusion as
+        // Admin__Password/ProxyOptions: flipping it requires a container recreate, never a live PUT.
+        "ASPNETCORE_URLS",
+        "Spectator__PublicPort",
+        // Icecast admin-stats listener count (SPEC F62.12 addendum, STORY-179, PLAN T21,
+        // gitea-#10). Icecast__StatsUrl is infra wiring (a container-network address), not an
+        // operator-editable setting — same shape as Spectator__PublicPort above. Icecast__AdminPassword
+        // is a secret and MUST NEVER become allowlist-readable (SPEC F19.3) — the same exclusion as
+        // Admin__Password/ConnectionStrings:* above.
+        "Icecast__StatsUrl",
+        "Icecast__AdminPassword",
     };
 
     /// <summary>

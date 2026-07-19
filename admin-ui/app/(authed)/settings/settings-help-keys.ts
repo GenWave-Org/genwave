@@ -28,6 +28,8 @@ export const SETTINGS_HELP_KEYS = [
   "Station:Persona:ActiveId",
   "Station:Rotation:RecentWindow",
   "Station:Rotation:ArtistSeparation",
+  "Station:SpectatorMode",
+  "Station:PublicStreamUrl",
   "Tts:Endpoint",
   "Llm:Endpoint",
   "Llm:Model",

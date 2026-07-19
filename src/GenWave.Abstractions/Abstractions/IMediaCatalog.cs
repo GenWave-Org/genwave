@@ -91,6 +91,15 @@ public interface IMediaCatalog
     Task<MediaReference?> GetByIdAsync(LibraryScope scope, string mediaId, CancellationToken ct);
 
     /// <summary>
+    /// The catalog entry for an id, or null if absent — deliberately NOT scope-filtered (SPEC F66.2).
+    /// An aired-fact lookup: the caller (the Host's duration rehydrator) uses this to recover a fact
+    /// about a track that has already aired, not to select one — scope is a selection-time concern
+    /// that does not apply here. Unlike <see cref="GetByIdAsync"/>, a row is returned regardless of
+    /// which library it belongs to.
+    /// </summary>
+    Task<MediaReference?> GetByIdUnscopedAsync(string mediaId, CancellationToken ct);
+
+    /// <summary>
     /// One random track that is ready to play (enriched and measurable), excluding the given ids so
     /// "random" can avoid recent repeats. Null when nothing is currently ready (cold/empty library) or
     /// the scope is empty.

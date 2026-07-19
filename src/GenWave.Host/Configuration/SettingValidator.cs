@@ -135,6 +135,16 @@ public sealed class SettingValidator(IConfiguration configuration)
             ["Station:Rotation:RecentWindow"] = v => IsIntInRange(v, 0, RotationRecentWindowMax),
             ["Station:Rotation:ArtistSeparation"] = v => IsIntInRange(v, 0, RotationArtistSeparationMax),
 
+            // Spectator surface (SPEC F62.1, F62.8, STORY-167/170). SpectatorMode is a plain bool
+            // kill switch, same shape as the Cadence/YearLookup:Enabled bools above. PublicStreamUrl
+            // is legally empty (the about panel hides the player); any non-empty value must either
+            // be an absolute http/https URL (mirrors Tts:Endpoint/Llm:Endpoint) or a genuine
+            // same-origin root-relative path such as "/stream" (an Icecast mount fronted by the
+            // same origin as the api) — see IsSafePublicStreamUrl for the injection/SSRF guards
+            // (rejects "//evil.com" protocol-relative, markup/control characters, whitespace).
+            ["Station:SpectatorMode"] = IsBool,
+            ["Station:PublicStreamUrl"] = IsSafePublicStreamUrl,
+
             // TTS endpoint (F36.1–F36.2) — there is no "disabled TTS" state, so an absolute
             // http/https URL is required; empty is rejected (mirrors TtsOptions' [Required, Url]).
             ["Tts:Endpoint"] = v => !string.IsNullOrEmpty(v) && IsAbsoluteHttpUri(v),
@@ -299,6 +309,40 @@ public sealed class SettingValidator(IConfiguration configuration)
         Uri.TryCreate(v, UriKind.Absolute, out var uri)
         && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 
+    /// <summary>
+    /// Guards <c>Station:PublicStreamUrl</c> (F62.1, F62.8) against both the SSRF/open-redirect
+    /// class of bug and markup injection into the future public <c>&lt;audio src&gt;</c>/about
+    /// panel:
+    ///   • empty is legal (hides the player),
+    ///   • '"', '&lt;', '&gt;', '\', control characters, and whitespace are rejected outright —
+    ///     <see cref="Uri.TryCreate(string, UriKind, out Uri)"/> happily accepts all of these
+    ///     unescaped in both absolute and relative URIs, so it cannot be relied on alone,
+    ///   • otherwise the value must either be an absolute http/https URL, or a genuine same-origin
+    ///     root-relative path — see <see cref="IsSameOriginRootRelativePath"/> (this is what keeps
+    ///     out protocol-relative "//evil.com", which resolves to an EXTERNAL origin, not the api's
+    ///     own).
+    /// </summary>
+    static bool IsSafePublicStreamUrl(string v)
+    {
+        if (string.IsNullOrEmpty(v)) return true;
+        if (HasDisallowedMarkupOrControlCharacters(v)) return false;
+        return IsAbsoluteHttpUri(v) || IsSameOriginRootRelativePath(v);
+    }
+
+    // '"'/'<'/'>' block markup injection into a future public page; '\' blocks backslash-based
+    // browser URL-parsing quirks; control characters and whitespace (incl. plain spaces) have no
+    // legitimate place in a URL an operator would type here.
+    static bool HasDisallowedMarkupOrControlCharacters(string v) =>
+        v.Any(c => c is '"' or '<' or '>' or '\\' || char.IsControl(c) || char.IsWhiteSpace(c));
+
+    // A single leading '/' (never "//" — that's protocol-relative and resolves to whatever host
+    // follows, i.e. an EXTERNAL origin, not this api's own) that also parses as a well-formed
+    // relative URI. Caller (IsSafePublicStreamUrl) has already screened out unsafe characters.
+    static bool IsSameOriginRootRelativePath(string v) =>
+        v.StartsWith('/')
+        && !v.StartsWith("//", StringComparison.Ordinal)
+        && Uri.TryCreate(v, UriKind.Relative, out _);
+
     // Persona ids are `long` (the C# projection of station.persona's serial id, cast on the way
     // out — mirrors PersonaRepository's own id::bigint cast), so this parses as long, not int.
     static bool IsNonNegativeLong(string v) =>
@@ -420,6 +464,9 @@ public sealed class SettingValidator(IConfiguration configuration)
             => $"Value '{value}' is not valid for '{key}'. Must be greater than {MinSilenceDurationSecMin} and at most {MinSilenceDurationSecMax}.",
         var k when k.Equals("Library:Energy:WindowSeconds", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be greater than {EnergyWindowSecondsMin} and at most {EnergyWindowSecondsMax}.",
+        var k when k.Equals("Station:PublicStreamUrl", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be empty, an absolute http/https URL, " +
+               "or a same-origin root-relative path starting with a single '/' (not '//'); no '\"', '<', '>', '\\', control characters, or whitespace.",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }

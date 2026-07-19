@@ -61,6 +61,15 @@ public sealed class TtsSegmentSource(
                 cuePoints = await MeasureCueAsync(path, hash, ct);
             }
 
+            // Duration is measured, never fabricated (SPEC F66.1): stamped from the cue analyzer's
+            // CueOutSec — same derivation SafeSegmentAuthor.BuildInsert uses for authored segments —
+            // and stays null when cue analysis failed (already logged in MeasureCueAsync above).
+            // cuePoints covers BOTH the fresh-render and cache-hit paths above, so a cached segment's
+            // cached cue points stamp the duration here too.
+            var durationMs = cuePoints is not null
+                ? (int?)Math.Round(cuePoints.CueOutSec * 1000.0, MidpointRounding.AwayFromZero)
+                : null;
+
             // Opportunistic GC (F34.6): only after a successful fresh-copy render, and only inside
             // blurbs/ — templated kinds' forever-cache is never touched. Best-effort; a sweep failure
             // must never fail a render that already succeeded.
@@ -82,7 +91,7 @@ public sealed class TtsSegmentSource(
 
             return new MediaItem(
                 $"tts:{hash}", path, request.StationName, loudness,
-                Artist: request.PersonaName ?? request.StationName, Cue: cuePoints);
+                Artist: request.PersonaName ?? request.StationName, Cue: cuePoints, DurationMs: durationMs);
         }
         catch (OperationCanceledException)
         {

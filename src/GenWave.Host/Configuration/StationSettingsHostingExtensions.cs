@@ -29,7 +29,11 @@ static class StationSettingsHostingExtensions
         // store picks up whatever IStationEventSink binding wins once ALL extensions have run —
         // this extension executes first, before the sink is bound (gitea-#246).
         builder.Services.AddSingleton<IStationSettingsStore>(sp =>
-            new StationSettingsStore(stationConnStr, stationSettingsSource, sp.GetRequiredService<IStationEventSink>()));
+            new StationSettingsStore(
+                stationConnStr,
+                stationSettingsSource,
+                sp.GetRequiredService<IStationEventSink>(),
+                sp.GetRequiredService<ILogger<StationSettingsStore>>()));
 
         // Settings validator — stateless, singleton.  Used by SettingsController.
         builder.Services.AddSingleton<SettingValidator>();

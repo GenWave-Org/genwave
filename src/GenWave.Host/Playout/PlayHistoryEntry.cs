@@ -6,8 +6,9 @@ namespace GenWave.Host.Playout;
 /// <see cref="StartedAt"/> of the next entry when the ring advances.
 /// </summary>
 /// <param name="DurationMs">
-/// Track duration, if known (SPEC F50.3); null for engine-initiated plays and <c>tts:*</c> patter
-/// (F50.6) — never fabricated.
+/// Track duration, if known (SPEC F50.3). <c>tts:*</c> patter carries its measured duration (SPEC
+/// F66.1); an engine-initiated play starts null and is patched in place once the Host's
+/// <see cref="DurationRehydrator"/> recovers it from the catalog (SPEC F66.2) — never fabricated.
 /// </param>
 public sealed record PlayHistoryEntry(
     string StationId,

@@ -54,8 +54,23 @@ public static class FeatureAcceptanceGateCurationSettings
         // Pinned 2026-07-15 — identical hashes to Story141's and Story147's own pins (V10/X10 ran
         // the same values): F52–F56 touch neither file, so the byte content is unchanged since
         // Epic V shipped.
+        //
+        // ComposeYamlSha256 re-pinned 2026-07-18 (PLAN T15, SPEC F64.1/F64.2, STORY-172): the
+        // api service gained the public-listener port mapping (8081) plus ASPNETCORE_URLS/
+        // Spectator__PublicPort env vars — a real, intentional edit from a LATER epic, not a
+        // regression of F52–F56 touching neither file (still true). EngineScriptSha256 is
+        // untouched — T15 does not touch engine/genwave.liq.
+        //
+        // ComposeYamlSha256 re-pinned AGAIN 2026-07-18 (PLAN T17, SPEC F61.4, STORY-166): admin_ui
+        // gained `profiles: ["admin"]` — another intentional edit from a LATER epic, not a
+        // regression of F52–F56 touching neither file. EngineScriptSha256 unchanged.
+        //
+        // ComposeYamlSha256 re-pinned YET AGAIN 2026-07-18 (PLAN T21, SPEC F62.12 addendum,
+        // STORY-179): the api service gained Icecast__StatsUrl/Icecast__AdminPassword env vars for
+        // the spectator listener-count poll — another intentional edit from a LATER epic, not a
+        // regression of F52–F56 touching neither file. EngineScriptSha256 unchanged.
         const string EngineScriptSha256 = "a256fd3f2797ed9b52e3f8507e8ca610aa02218e2fedc5c231369f0ccaab9bd6";
-        const string ComposeYamlSha256  = "20b3dc53f3ce9a2ace0f131e64edee0900afea101511979fb2f1baaf5ebb45b9";
+        const string ComposeYamlSha256  = "23490e050a79e87b6763e64e3b89ae507a1fa682b40f7e9029601221188f5446";
 
         [Fact]
         public void EngineScriptByteMatchesMain()

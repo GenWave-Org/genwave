@@ -1,0 +1,90 @@
+name: Release
+
+# Tag-triggered release (SPEC F65.2, STORY-176): push a `v*` tag -> build+test, publish images
+# stamped with the tag as GW_VERSION, then create the GitHub Release. Mirrors ci.yml's `images`
+# job (same registry, same `home-*` tag prefix -- the Business edition gets its own prefix
+# elsewhere) but stamps the pushed tag instead of the commit sha, and only the api + icecast
+# images are published here since that is the only established GHCR publish convention today
+# (admin_ui/engine are built locally by build.sh/compose, not pushed to a registry).
+#
+# Pushing the tag is the ONLY manual act: this workflow never commits or pushes back to the repo.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore GenWave.sln
+      - name: Build (warnings are errors)
+        run: dotnet build GenWave.sln --no-restore --configuration Release
+      # Same policy as ci.yml: integration tests need fixture-managed side containers and run
+      # on a dev box, not here.
+      - name: Test
+        run: dotnet test GenWave.sln --no-build --configuration Release --filter "Category!=Integration"
+
+  release:
+    needs: build-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # gh release create
+      packages: write   # ghcr.io push
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # GW_TAG is bound once via env and referenced as "$GW_TAG" (quoted) below -- never expanded
+      # directly into script text -- so a malicious tag (e.g. `v1;curl...|sh`) can't inject
+      # commands into this packages:write runner. See GitHub's script-injection mitigation.
+      - name: Build + push API image (GW_VERSION=${{ github.ref_name }})
+        env:
+          GW_TAG: ${{ github.ref_name }}
+        run: |
+          docker build -f src/GenWave.Host/Dockerfile \
+            --build-arg "GW_VERSION=$GW_TAG" \
+            --label org.opencontainers.image.source=https://github.com/GenWave-Org/genwave \
+            --label org.opencontainers.image.description="GenWave Home control-plane API" \
+            --label org.opencontainers.image.licenses=AGPL-3.0-only \
+            --label "org.opencontainers.image.version=$GW_TAG" \
+            -t "ghcr.io/genwave-org/genwave:home-$GW_TAG" \
+            -t ghcr.io/genwave-org/genwave:home-latest \
+            .
+          docker push "ghcr.io/genwave-org/genwave:home-$GW_TAG"
+          docker push ghcr.io/genwave-org/genwave:home-latest
+
+      - name: Build + push Icecast image
+        env:
+          GW_TAG: ${{ github.ref_name }}
+        run: |
+          docker build \
+            --label org.opencontainers.image.source=https://github.com/GenWave-Org/genwave \
+            --label org.opencontainers.image.description="GenWave Home Icecast fan-out" \
+            --label org.opencontainers.image.licenses=AGPL-3.0-only \
+            --label "org.opencontainers.image.version=$GW_TAG" \
+            -t "ghcr.io/genwave-org/genwave-icecast:home-$GW_TAG" \
+            -t ghcr.io/genwave-org/genwave-icecast:home-latest \
+            ./icecast
+          docker push "ghcr.io/genwave-org/genwave-icecast:home-$GW_TAG"
+          docker push ghcr.io/genwave-org/genwave-icecast:home-latest
+
+      # gh CLI over a third-party action -- it's preinstalled on the runner and needs only the
+      # default token. No repo write beyond the Release object itself (not a commit, not a push).
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GW_TAG: ${{ github.ref_name }}
+        run: gh release create "$GW_TAG" --generate-notes --title "$GW_TAG"

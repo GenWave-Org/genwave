@@ -85,6 +85,9 @@ file sealed class RecordingScopeCatalog(MediaReference? ready) : IMediaCatalog
     public Task<MediaReference?> GetByIdAsync(LibraryScope scope, string mediaId, CancellationToken ct)
         => Task.FromResult<MediaReference?>(null);
 
+    public Task<MediaReference?> GetByIdUnscopedAsync(string mediaId, CancellationToken ct)
+        => Task.FromResult<MediaReference?>(null);
+
     public Task<MediaReference?> GetRandomReadyAsync(LibraryScope scope, IReadOnlyList<string> excludeIds, CancellationToken ct)
         => throw new NotSupportedException("Not exercised by STORY-102's scenarios — Orchestrator selection now calls GetRotationCandidateAsync (SPEC F41.1).");
 

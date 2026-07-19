@@ -1,0 +1,329 @@
+/* GenWave spectator page — "Wireless" design tokens (.claude/skills/design-aesthetic).
+   Hand-written, no build step: vendored woff2 fonts (never a font CDN), semantic
+   custom-property tokens (never raw hex in rules below the :root block), warm
+   neutrals only. Mirrors admin-ui/app/globals.css's token values 1:1 so the two
+   surfaces read as one system. No theme toggle here (no interactive chrome for
+   one) — dark ships via prefers-color-scheme only. */
+
+@font-face {
+  font-family: "Fraunces";
+  src: url("/spectator/fonts/Fraunces-Variable-latin.woff2") format("woff2");
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  /* Regular weight only — matches admin-ui's italic usage (wordmark, track titles never
+     combine italic with the 600 weight, so no face requests weight 600 italic and the
+     browser never falls back to faux-bold synthesis). */
+  font-family: "Fraunces";
+  src: url("/spectator/fonts/Fraunces-Italic-Variable-latin.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Source Sans 3";
+  src: url("/spectator/fonts/SourceSans3-Variable-latin.woff2") format("woff2");
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* light — "cream enamel" (default) */
+  --bg: #f6efe3;
+  --surface: #fdf8ee;
+  --surface-2: #efe5d2;
+  --line: #ddd0b8;
+  --ink: #2b2320;
+  --mute: #77685c;
+  --accent: #b94f29;
+  --accent-ink: #fdf8ee;
+  --accent-2: #6f632f;
+  --danger: #a63325;
+  --danger-ink: #fdf8ee;
+  --success: #5c7a3f;
+
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "Source Sans 3", system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* dark — "walnut & brass" (a tuned token set, not a naive inversion) */
+    --bg: #1e1713;
+    --surface: #2a211b;
+    --surface-2: #241c16;
+    --line: #3f342a;
+    --ink: #f0e7d8;
+    --mute: #a89a88;
+    --accent: #d96a3d;
+    --accent-ink: #1e1713;
+    --accent-2: #b3a25e;
+    --danger: #e06a55;
+    --danger-ink: #2a211b;
+    --success: #8fae6a;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+a {
+  color: var(--accent);
+}
+
+a:focus-visible,
+audio:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.shell {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.masthead {
+  padding: 0.5rem 0 0.25rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.wordmark {
+  margin: 0;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 1.9rem;
+}
+
+.card {
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1.1rem 1.25rem;
+}
+
+.section-title {
+  margin: 0 0 0.75rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+/* ── Now-playing (hero card) ─────────────────────────────────────────────── */
+
+.now-playing {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+  /* Faceplate trim — the one permitted shadow, hero card only. */
+  box-shadow:
+    0 0 0 4px var(--bg),
+    0 0 0 5px var(--line);
+}
+
+.now-playing__dot {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-top: 0.35rem;
+  border-radius: 50%;
+  background-color: var(--line);
+}
+
+.now-playing__dot--live {
+  background-color: var(--accent);
+  animation: onair-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes onair-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .now-playing__dot--live {
+    animation: none;
+  }
+}
+
+.now-playing__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.now-playing__kicker {
+  margin: 0 0 0.2rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.now-playing__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 1.6rem;
+  overflow-wrap: break-word;
+}
+
+.now-playing__artist {
+  margin: 0.15rem 0 0;
+  color: var(--mute);
+}
+
+.now-playing__meta {
+  margin-top: 0.75rem;
+}
+
+.progress {
+  height: 6px;
+  border-radius: 3px;
+  background-color: var(--surface-2);
+  overflow: hidden;
+}
+
+.progress__fill {
+  height: 100%;
+  width: 0%;
+  background-color: var(--accent);
+}
+
+.now-playing__clock {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-2);
+}
+
+/* ── Player ───────────────────────────────────────────────────────────────── */
+
+.player {
+  width: 100%;
+}
+
+.hint {
+  margin: 0;
+  color: var(--mute);
+}
+
+/* ── History ──────────────────────────────────────────────────────────────── */
+
+.history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.history__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.history__row:last-child {
+  border-bottom: none;
+}
+
+.history__label {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.history__artist {
+  color: var(--mute);
+}
+
+.history__time {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--mute);
+  font-size: 0.85rem;
+}
+
+.history__empty {
+  margin: 0;
+  color: var(--mute);
+}
+
+/* ── Stats / About ────────────────────────────────────────────────────────── */
+
+.stats,
+.about {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.35rem 1rem;
+}
+
+.stats dt,
+.about dt {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.stats dd,
+.about dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.footer {
+  text-align: center;
+  color: var(--mute);
+  font-size: 0.82rem;
+}
+
+.footer p {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

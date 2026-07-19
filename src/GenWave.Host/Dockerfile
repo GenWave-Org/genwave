@@ -4,6 +4,11 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
+# Tag-derived version (SPEC F65.1, STORY-175): build.sh computes this via `git describe` and
+# passes it as a build-arg. Never committed to source — no csproj <Version>. Defaults to
+# 0.0.0-dev so a plain `docker build`/`docker compose build` (no --build-arg) still works.
+ARG GW_VERSION=0.0.0-dev
+
 # Restore against just the project files first for better layer caching. Restoring Host pulls the
 # whole reference graph, so every referenced csproj must be present here — plus the central
 # package versions (Directory.Packages.props) and the single-source pin (nuget.config), without
@@ -18,9 +23,11 @@ COPY src/GenWave.Orchestration/GenWave.Orchestration.csproj src/GenWave.Orchestr
 COPY src/GenWave.Host/GenWave.Host.csproj src/GenWave.Host/
 RUN dotnet restore src/GenWave.Host/GenWave.Host.csproj
 
-# Copy the sources and publish.
+# Copy the sources and publish. Only AssemblyInformationalVersion is stamped from GW_VERSION —
+# AssemblyVersion stays the SDK default so binding redirects/strong-naming are unaffected.
 COPY src/ src/
-RUN dotnet publish src/GenWave.Host/GenWave.Host.csproj -c Release -o /app /p:UseAppHost=false
+RUN dotnet publish src/GenWave.Host/GenWave.Host.csproj -c Release -o /app /p:UseAppHost=false \
+    "/p:InformationalVersion=${GW_VERSION}"
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 # ffmpeg (the Debian package bundles libswresample, so ebur128 peak=true works) is required by the

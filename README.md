@@ -6,6 +6,7 @@ No hand-built audio engine. A C# / .NET 10 control plane orchestrates [Liquidsoa
 
 This is **GenWave Home**, the AGPL edition — see [License](#license).
 
+
 ## Quickstart
 
 You need Docker (with Compose) and a music library of `.mp3`/`.flac` files.
@@ -17,7 +18,8 @@ cp .env.example .env
 #            MEDIA_DIR (absolute path to your library),
 #            and ADMIN_PASSWORD (admin UI login; leave blank for open API in local dev)
 
-docker compose up -d --build
+./build.sh
+./launch.sh
 ```
 
 Six services start: `db`, `icecast`, `engine`, `api`, `kokoro` (TTS synthesizer), and `admin_ui` (operator console).
@@ -84,6 +86,21 @@ npx tsc --noEmit && npm test && npm run build
 
 Five test projects: `Core.Tests`, `Host.Tests`, `MediaLibrary.Tests`, `Orchestration.Tests`, `Tts.Tests`. The full suite plus the on-air gate are required before anything merges to `main`.
 
+### Versions
+
+GenWave releases follow a semantic versioning as follows:
+
+```
+<major_version>.<minor_version>.<bugfix_version>
+```
+
+Where:
+
+- `major_version` is bumped when there are major changes, i.e. major implementation change etc. Versions with different major versions **are** incompatible
+- `minor_version` is bumped when there are minor changes, i.e. new features, renaming, new modules etc. Versions with different minor versions **may be** incompatible
+- `bugfix_version` is bumped when a new bugfix version is published. Versions with only bugfix version changes **should be** compatible
+
+
 ## Optional — prove the audio spine with the smoke test
 
 Validates the riskiest third-party behavior (annotation format, Icecast password, crossfade overlap) with none of your own configuration in the way. Needs `ffmpeg`/`ffprobe`, `jq`, and the .NET 10 SDK on the host.
@@ -130,7 +147,7 @@ GenWave's epic-by-epic history — v1 broadcast playout through Ranking & robust
 
 ## Built with AI assistance
 
-GenWave is developed openly with AI as a force multiplier for the people building it — not a replacement for them. Design decisions, reviews, and sign-offs are human; the `.claude/` toolkit in this repository is part of how the project is built and you're welcome to use it. The same deal applies to contributions — see [CONTRIBUTING.md](CONTRIBUTING.md).
+GenWave is developed openly with AI as a force multiplier for the people (me) building it — not a replacement for them. Design decisions, reviews, and sign-offs are human; the `.claude/` toolkit in this repository is part of how the project is built and you're welcome to use it. The same deal applies to contributions — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Contributing
 

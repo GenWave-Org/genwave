@@ -57,6 +57,15 @@ public static class StationSettingsAllowlist
         new("Station:Rotation:RecentWindow",                  SettingApplyMode.Live,          SettingKind.Number,     "tracks"),
         new("Station:Rotation:ArtistSeparation",              SettingApplyMode.Live,          SettingKind.Number,     "tracks"),
 
+        // Spectator surface (SPEC F62.1, F62.8, STORY-167/170) — both read live via
+        // IOptionsMonitor<StationOptions> by SurfaceGateMiddleware (SpectatorMode) and the
+        // spectator "about" endpoint (PublicStreamUrl), so a PUT here reaches the very next
+        // request with no api restart. SpectatorMode is the F62.1 kill switch (false = every
+        // SpectatorSurfaceAttribute route 404s, the surface does not exist); PublicStreamUrl is
+        // legally empty (the about panel hides the player until the operator sets it).
+        new("Station:SpectatorMode",                          SettingApplyMode.Live,          SettingKind.Boolean,    ""),
+        new("Station:PublicStreamUrl",                        SettingApplyMode.Live,          SettingKind.String,     ""),
+
         // TTS/LLM endpoint liveness (SPEC F36.1–F36.4, T8): KokoroTtsSynthesizer/KokoroVoiceLister
         // and LlmCopyWriter read these via IOptionsMonitor per call (no boot-frozen BaseAddress), so
         // a PUT here reroutes the very next render/voices call — no api restart. Llm:Endpoint is

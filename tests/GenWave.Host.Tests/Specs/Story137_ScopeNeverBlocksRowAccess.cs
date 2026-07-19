@@ -90,26 +90,23 @@ file sealed class FakeAdminMediaReenrichment : IAdminMediaReenrichment
 /// auth, model binding, [Consumes] negotiation) while removing hosted services and replacing the
 /// admin-media seams with scriptable fakes — mirrors Story056's <c>SafeTrackWebFactory</c>.
 ///
-/// <paramref name="withAdminPassword"/> controls whether the deny-by-default fallback authorization
-/// policy is active (the 401 fact needs it; every other fact leaves the API open).
+/// Admin:Password is always configured (STORY-164/T02: the admin plane fail-closes without one) —
+/// every fact that expects success logs in first via <see cref="FeatureScopeNeverBlocksRowAccess.LoggedInClientAsync"/>.
 /// </summary>
 file sealed class ScopeNeverBlocksWebFactory(
     IAdminMediaLookup lookup,
     IAdminMediaWrite write,
     IAdminMediaReenrichment reenrichment,
-    LibraryScope stationScope,
-    bool withAdminPassword = false) : WebApplicationFactory<Program>
+    LibraryScope stationScope) : WebApplicationFactory<Program>
 {
     const string LibraryConnVar = "ConnectionStrings__Library";
+    internal const string Password = "test-password-x7z";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // Development config provides Station:Id/Name/Voice/Scope/SafeScope and Tts:Endpoint
         // so ValidateOnStart() is satisfied without injecting them manually.
         builder.UseEnvironment("Development");
-
-        if (withAdminPassword)
-            builder.UseSetting("Admin:Password", "test-password-x7z");
 
         builder.ConfigureTestServices(services =>
         {
@@ -140,15 +137,18 @@ file sealed class ScopeNeverBlocksWebFactory(
         // AddMediaLibrary reads Library connection string early in Program.cs (before
         // ConfigureTestServices runs), so it is injected via the environment. A non-reachable
         // host is fine: every seam that would touch it is replaced with a fake above.
-        var prev = Environment.GetEnvironmentVariable(LibraryConnVar);
+        var prevLib = Environment.GetEnvironmentVariable(LibraryConnVar);
+        var prevAdmin = Environment.GetEnvironmentVariable("Admin__Password");
         Environment.SetEnvironmentVariable(LibraryConnVar, "Host=nowhere;Database=test");
+        Environment.SetEnvironmentVariable("Admin__Password", Password);
         try
         {
             return base.CreateHost(builder);
         }
         finally
         {
-            Environment.SetEnvironmentVariable(LibraryConnVar, prev);
+            Environment.SetEnvironmentVariable(LibraryConnVar, prevLib);
+            Environment.SetEnvironmentVariable("Admin__Password", prevAdmin);
         }
     }
 }
@@ -157,6 +157,15 @@ file sealed class ScopeNeverBlocksWebFactory(
 
 public static class FeatureScopeNeverBlocksRowAccess
 {
+    /// <summary>Logs in with the factory's fixed test password and returns the now-authenticated client.</summary>
+    static async Task<HttpClient> LoggedInClientAsync(WebApplicationFactory<Program> factory)
+    {
+        var client = factory.CreateClient();
+        var login = await client.PostAsJsonAsync("/api/auth/login", new { password = ScopeNeverBlocksWebFactory.Password });
+        Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
+        return client;
+    }
+
     /// <summary>Builds an <see cref="AdminMediaDto"/> row usable by any GET/PATCH fact below.</summary>
     static AdminMediaDto BuildRow(string mediaId, string version) => new(
         MediaId: mediaId,
@@ -192,7 +201,7 @@ public static class FeatureScopeNeverBlocksRowAccess
             var lookup = new FakeAdminMediaLookup { Result = (BuildRow("99", "42"), LibraryId: 2L) };
             await using var factory = new ScopeNeverBlocksWebFactory(
                 lookup, new FakeAdminMediaWrite(), new FakeAdminMediaReenrichment(), StationScope);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.GetAsync("/api/media/99");
 
@@ -205,7 +214,7 @@ public static class FeatureScopeNeverBlocksRowAccess
             var lookup = new FakeAdminMediaLookup { Result = (BuildRow("99", "42"), LibraryId: 2L) };
             await using var factory = new ScopeNeverBlocksWebFactory(
                 lookup, new FakeAdminMediaWrite(), new FakeAdminMediaReenrichment(), StationScope);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.GetAsync("/api/media/99");
 
@@ -219,7 +228,7 @@ public static class FeatureScopeNeverBlocksRowAccess
             var lookup = new FakeAdminMediaLookup { Result = (BuildRow("99", "42"), LibraryId: 2L) };
             await using var factory = new ScopeNeverBlocksWebFactory(
                 lookup, new FakeAdminMediaWrite(), new FakeAdminMediaReenrichment(), StationScope);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.GetAsync("/api/media/99");
 
@@ -237,7 +246,7 @@ public static class FeatureScopeNeverBlocksRowAccess
             };
             await using var factory = new ScopeNeverBlocksWebFactory(
                 new FakeAdminMediaLookup(), write, new FakeAdminMediaReenrichment(), StationScope);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             using var request = new HttpRequestMessage(HttpMethod.Patch, "/api/media/99")
             {
@@ -256,7 +265,7 @@ public static class FeatureScopeNeverBlocksRowAccess
             var reenrichment = new FakeAdminMediaReenrichment { ScheduleResult = ReenrichResult.Scheduled };
             await using var factory = new ScopeNeverBlocksWebFactory(
                 new FakeAdminMediaLookup(), new FakeAdminMediaWrite(), reenrichment, StationScope);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.PostAsync("/api/media/99/reenrich", content: null);
 
@@ -269,7 +278,7 @@ public static class FeatureScopeNeverBlocksRowAccess
             var lookup = new FakeAdminMediaLookup { Result = (BuildRow("1", "1"), LibraryId: 1L) };
             await using var factory = new ScopeNeverBlocksWebFactory(
                 lookup, new FakeAdminMediaWrite(), new FakeAdminMediaReenrichment(), StationScope);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.GetAsync("/api/media/1");
 
@@ -287,7 +296,7 @@ public static class FeatureScopeNeverBlocksRowAccess
             };
             await using var factory = new ScopeNeverBlocksWebFactory(
                 new FakeAdminMediaLookup(), write, new FakeAdminMediaReenrichment(), StationScope);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             using var request = new HttpRequestMessage(HttpMethod.Patch, "/api/media/99")
             {
@@ -318,7 +327,7 @@ public static class FeatureScopeNeverBlocksRowAccess
             var lookup = new FakeAdminMediaLookup { Result = null };
             await using var factory = new ScopeNeverBlocksWebFactory(
                 lookup, new FakeAdminMediaWrite(), new FakeAdminMediaReenrichment(), StationScope);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.GetAsync("/api/media/999999");
 
@@ -330,8 +339,7 @@ public static class FeatureScopeNeverBlocksRowAccess
         {
             var lookup = new FakeAdminMediaLookup { Result = (BuildRow("99", "42"), LibraryId: 2L) };
             await using var factory = new ScopeNeverBlocksWebFactory(
-                lookup, new FakeAdminMediaWrite(), new FakeAdminMediaReenrichment(), StationScope,
-                withAdminPassword: true);
+                lookup, new FakeAdminMediaWrite(), new FakeAdminMediaReenrichment(), StationScope);
             var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
             var response = await client.GetAsync("/api/media/99");
@@ -347,7 +355,7 @@ public static class FeatureScopeNeverBlocksRowAccess
             var write = new FakeAdminMediaWrite { BulkReassignResult = 0 };
             await using var factory = new ScopeNeverBlocksWebFactory(
                 new FakeAdminMediaLookup(), write, new FakeAdminMediaReenrichment(), StationScope);
-            var client = factory.CreateClient();
+            var client = await LoggedInClientAsync(factory);
 
             var response = await client.PostAsJsonAsync("/api/media/bulk/reassign", new { toLibraryId = 9 });
 

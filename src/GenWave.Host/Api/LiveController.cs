@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using GenWave.Host.Playout;
 
@@ -9,6 +10,8 @@ namespace GenWave.Host.Api;
 /// </summary>
 [ApiController]
 [Route("api")]
+[AdminSurface]
+[Authorize(Policy = AuthorizationPolicies.AdminOnly)]
 public sealed class LiveController(
     NowPlayingService nowPlayingService,
     PlayHistoryService historyService) : ControllerBase
@@ -18,7 +21,8 @@ public sealed class LiveController(
     ///   503 ProblemDetails — feeder has not completed its first tick yet (cold-start)
     ///   200 { stationId, drain: true } — safe-rotation / drain token is on-air
     ///   200 { stationId, mediaId, title, artist, gainDb, startedAt, durationMs? } — real track on-air
-    /// durationMs is null for engine-initiated plays and tts:* patter (SPEC F50.2, F50.6).
+    /// durationMs carries tts:* patter's measured duration (SPEC F66.1); an engine-initiated play
+    /// starts null and fills in once the Host's duration rehydrator recovers it (SPEC F66.2).
     /// </summary>
     [HttpGet("now-playing")]
     public IActionResult GetNowPlaying()
@@ -51,8 +55,9 @@ public sealed class LiveController(
 
     /// <summary>
     /// GET /api/play-history — play history, newest first; empty array when nothing has aired.
-    /// Each entry: { mediaId, title, artist, gainDb, startedAt, endedAt, durationMs? }. durationMs is
-    /// null for engine-initiated plays and tts:* patter (SPEC F50.2, F50.6).
+    /// Each entry: { mediaId, title, artist, gainDb, startedAt, endedAt, durationMs? }. durationMs
+    /// carries tts:* patter's measured duration (SPEC F66.1); an engine-initiated play starts null
+    /// and is patched in place once the Host's duration rehydrator recovers it (SPEC F66.2).
     /// </summary>
     [HttpGet("play-history")]
     public IActionResult GetPlayHistory()

@@ -60,6 +60,24 @@ sealed class MediaRepository(
         return row?.ToReference(logger);
     }
 
+    /// <summary>
+    /// SPEC F66.2 — the unscoped counterpart to <see cref="GetByIdAsync"/>: no <c>library_id</c>
+    /// predicate, since the caller is recovering a fact about a track that already aired, not
+    /// selecting one. Every other selection path keeps the default-deny scope discipline; this is
+    /// deliberately the one read that bypasses it.
+    /// </summary>
+    public async Task<MediaReference?> GetByIdUnscopedAsync(string mediaId, CancellationToken ct)
+    {
+        if (!long.TryParse(mediaId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
+            return null;
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<MediaRow>(new CommandDefinition(
+            $"{SelectColumns} where id = @id",
+            new { id }, cancellationToken: ct));
+        return row?.ToReference(logger);
+    }
+
     public async Task<MediaReference?> GetRandomReadyAsync(LibraryScope scope, IReadOnlyList<string> excludeIds, CancellationToken ct)
     {
         // Default-deny: no scope means no access, no SQL issued.

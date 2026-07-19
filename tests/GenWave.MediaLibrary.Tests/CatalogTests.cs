@@ -97,4 +97,47 @@ public class CatalogTests(DatabaseFixture fixture)
         var reference = await ((IMediaCatalog)Harness.Repo(fixture)).GetByIdAsync(new LibraryScope([1L]), "999999", CancellationToken.None);
         Assert.Null(reference);
     }
+
+    [Fact]
+    public async Task Catalog_GetByIdUnscoped_RoundTrips()
+    {
+        await fixture.ResetAsync();
+        var repo = Harness.Repo(fixture);
+
+        var id = await repo.InsertDiscoveredAsync("/media/y.flac", "flac", 123, Harness.Mtime, CancellationToken.None);
+        await repo.WriteEnrichmentAsync(id, Harness.ReadyResult(measurable: true), CancellationToken.None);
+
+        var reference = await ((IMediaCatalog)repo).GetByIdUnscopedAsync(id.ToString(), CancellationToken.None);
+
+        Assert.NotNull(reference);
+        Assert.Equal("/media/y.flac", reference!.Locator);
+    }
+
+    [Fact]
+    public async Task Catalog_GetByIdUnscoped_IgnoresScope()
+    {
+        await fixture.ResetAsync();
+        var repo = Harness.Repo(fixture);
+
+        // Rows land in library_id 1 by default (db/01-library.sh). A scope that excludes it still
+        // must not matter: this is an aired-fact lookup (SPEC F66.2), not a selection, so scope
+        // filtering doesn't apply — unlike GetByIdAsync, which stays scoped.
+        var id = await repo.InsertDiscoveredAsync("/media/z.flac", "flac", 123, Harness.Mtime, CancellationToken.None);
+        await repo.WriteEnrichmentAsync(id, Harness.ReadyResult(measurable: true), CancellationToken.None);
+
+        var catalog = (IMediaCatalog)repo;
+        var scoped = await catalog.GetByIdAsync(new LibraryScope([999L]), id.ToString(), CancellationToken.None);
+        var unscoped = await catalog.GetByIdUnscopedAsync(id.ToString(), CancellationToken.None);
+
+        Assert.Null(scoped);
+        Assert.NotNull(unscoped);
+    }
+
+    [Fact]
+    public async Task Catalog_GetByIdUnscoped_Unknown_ReturnsNull()
+    {
+        await fixture.ResetAsync();
+        var reference = await ((IMediaCatalog)Harness.Repo(fixture)).GetByIdUnscopedAsync("999999", CancellationToken.None);
+        Assert.Null(reference);
+    }
 }

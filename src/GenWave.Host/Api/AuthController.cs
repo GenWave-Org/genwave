@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Auth;
@@ -14,13 +15,16 @@ namespace GenWave.Host.Api;
 /// <summary>
 /// Authentication + station info for the single-station Admin UI.
 /// Login checks the submitted password against the single configured <c>Admin:Password</c>
-/// (no user table). When no password is configured the API is open and login always succeeds.
+/// (no user table). When no password is configured (SPEC F60.4/T02, STORY-164) login always
+/// fails and no cookie is ever issued — the admin plane is fail-closed, not open.
 ///
 /// Library listing has moved to <see cref="LibrariesController"/> (STORY-047, Epic J):
 /// GET /api/libraries now returns every library row (not scope-filtered) with a media count.
 /// </summary>
 [ApiController]
 [Route("api")]
+[AdminSurface]
+[Authorize(Policy = AuthorizationPolicies.AdminOnly)]
 public sealed class AuthController(
     IOptions<AdminOptions> adminOptions,
     IStationIdentityProvider identityProvider,
@@ -31,12 +35,14 @@ public sealed class AuthController(
     /// <summary>Verifies the admin password, sets the auth cookie, returns 204.</summary>
     [HttpPost("auth/login")]
     [AllowAnonymous]
+    [EnableRateLimiting(RateLimiterPolicies.Login)]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
         var configured = adminOptions.Value.Password;
 
-        // When a password is configured, require a constant-time match. Empty password = open mode.
-        if (!string.IsNullOrEmpty(configured) && !FixedTimeEquals(request.Password, configured))
+        // No configured password = fail-closed (SPEC F60.4): login can never succeed, so no
+        // cookie is ever issued. Otherwise require a constant-time match.
+        if (string.IsNullOrEmpty(configured) || !FixedTimeEquals(request.Password, configured))
         {
             logger.LogWarning("Login failed: wrong admin password");
             return Unauthorized(new { message = InvalidCredentialsMessage });
