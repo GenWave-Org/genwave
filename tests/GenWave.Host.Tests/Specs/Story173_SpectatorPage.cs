@@ -65,11 +65,18 @@ public static class FeatureSpectatorPage
         var html = await client.GetStringAsync("/spectator");
         var bundle = new List<(string, string)> { ("/spectator", html) };
 
+        // Resolve each reference against the REAL document URL (RFC 3986), exactly as a browser
+        // would: base = /spectator with NO trailing slash, so a bare relative reference like
+        // "styles.css" resolves against the URL's parent ("/styles.css") rather than
+        // "/spectator/styles.css" — the exact bug class this catches (a relative href/src 404s in
+        // a real browser; only an absolute "/spectator/..." reference survives unchanged).
+        var documentUri = new Uri(client.BaseAddress!, "/spectator");
+
         foreach (Match match in Regex.Matches(html, @"(?:src|href)\s*=\s*""([^""]+)"""))
         {
             var reference = match.Groups[1].Value;
             if (reference.StartsWith("http", StringComparison.OrdinalIgnoreCase)) continue;
-            var path = reference.StartsWith('/') ? reference : $"/spectator/{reference}";
+            var path = new Uri(documentUri, reference).AbsolutePath;
             var asset = await client.GetAsync(path);
             if (asset.IsSuccessStatusCode)
                 bundle.Add((path, await asset.Content.ReadAsStringAsync()));

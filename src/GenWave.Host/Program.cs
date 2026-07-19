@@ -119,15 +119,19 @@ app.UseOutputCache();
 app.MapControllers();
 
 // GET / — the public listener's landing route (SPEC F64.1). Redirects to /spectator, the
-// spectator single-page app (PLAN T16); marked SpectatorSurface so it is gated exactly like every
-// other spectator route — by Station:SpectatorMode (SurfaceGateMiddleware's existing check) and,
-// once Spectator:PublicPort is set, the public-listener isolation check — and reachable on the
-// internal port too, same as the rest of the spectator surface. Until T16 ships the page itself,
-// the redirect target 404s on follow — expected, the one fact this leaves red (STORY-172's
-// ScenarioRootLandsOnThePage).
+// spectator single-page app (PLAN T16, MapSpectatorPage below); marked SpectatorSurface so it is
+// gated exactly like every other spectator route — by Station:SpectatorMode (SurfaceGateMiddleware's
+// existing check) and, once Spectator:PublicPort is set, the public-listener isolation check — and
+// reachable on the internal port too, same as the rest of the spectator surface.
 app.MapGet("/", () => Results.Redirect("/spectator"))
     .WithMetadata(new SpectatorSurfaceAttribute())
     .RequireAuthorization(AuthorizationPolicies.Spectator);
+
+// The spectator single-page app itself (SPEC F63.1–F63.5, STORY-173): hand-written HTML/CSS/JS
+// served straight from wwwroot/spectator via endpoint routing, not UseStaticFiles — see
+// SpectatorPageEndpoints for why static-file middleware would dodge both the surface gate and the
+// public-listener isolation check.
+app.MapSpectatorPage();
 
 // Liveness probe — anonymous so the (conditional) deny-by-default policy never 401s it.
 app.MapHealthChecks("/health").AllowAnonymous();
