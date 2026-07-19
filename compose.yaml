@@ -177,6 +177,9 @@ services:
   admin_ui:
     build:
       context: ./admin-ui
+    profiles: ["admin"]                           # F61.4/STORY-166: Appliance/Headless boxes clear
+                                                   # COMPOSE_PROFILES in .env so no Node runtime runs;
+                                                   # Operator/Standard's default .env keeps it enabled.
     networks: [core]                             # reaches the api over the core network
     ports:
       - "3000:3000"                              # Admin UI, direct on localhost

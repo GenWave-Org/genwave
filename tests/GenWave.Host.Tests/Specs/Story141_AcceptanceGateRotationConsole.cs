@@ -57,8 +57,12 @@ public static class FeatureAcceptanceGateRotationConsole
         // regression of Epic V's own F41–F45 zero-diff promise (which is about F41–F45 touching
         // neither file, still true). EngineScriptSha256 is untouched — T15 does not touch
         // engine/genwave.liq.
+        //
+        // ComposeYamlSha256 re-pinned AGAIN 2026-07-18 (PLAN T17, SPEC F61.4, STORY-166): admin_ui
+        // gained `profiles: ["admin"]` — another intentional edit from a LATER epic, still not a
+        // regression of Epic V's own F41–F45 zero-diff promise. EngineScriptSha256 unchanged.
         const string EngineScriptSha256 = "a256fd3f2797ed9b52e3f8507e8ca610aa02218e2fedc5c231369f0ccaab9bd6";
-        const string ComposeYamlSha256  = "7ee9bd761988f3b558aa956e5b3108b3c2ca421260a0bd95b827e2506c6e5ab2";
+        const string ComposeYamlSha256  = "e368588851814f74c30838ceeab2ca6d53de4128b63ab7ea437a712864162555";
 
         [Fact]
         public void EngineScriptByteMatchesMain()
