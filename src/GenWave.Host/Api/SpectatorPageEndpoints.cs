@@ -30,6 +30,7 @@ static class SpectatorPageEndpoints
     const string JavaScriptContentType = "text/javascript; charset=utf-8";
     const string StylesheetContentType = "text/css; charset=utf-8";
     const string FontContentType = "font/woff2";
+    const string IconContentType = "image/x-icon";
 
     public static void MapSpectatorPage(this IEndpointRouteBuilder app)
     {
@@ -56,6 +57,7 @@ static class SpectatorPageEndpoints
         {
             "app.js" => ServeFile(context, env, "app.js", JavaScriptContentType, AssetMaxAgeSeconds),
             "styles.css" => ServeFile(context, env, "styles.css", StylesheetContentType, AssetMaxAgeSeconds),
+            "favicon.ico" => ServeFile(context, env, "favicon.ico", IconContentType, AssetMaxAgeSeconds),
             _ => Results.NotFound(),
         };
 
