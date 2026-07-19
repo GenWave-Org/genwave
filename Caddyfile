@@ -1,0 +1,15 @@
+# Caddyfile — reference public-station front door (see DEPLOYMENT.md, used by compose.demo.yaml).
+# PUBLIC_HOST comes from .env (e.g. radio.example.com); Caddy substitutes {$VAR} from its
+# environment and handles TLS issuance for that hostname automatically.
+{$PUBLIC_HOST} {
+    # Match the Icecast mount first — mount name is literally /stream (icecast.xml.tmpl).
+    handle /stream* {
+        reverse_proxy icecast:8000
+    }
+
+    # Everything else goes to the public listener. Only SpectatorSurface + /health answer
+    # there; nothing else is reachable through this route no matter what path is requested.
+    handle {
+        reverse_proxy api:8081
+    }
+}

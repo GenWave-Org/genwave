@@ -6,6 +6,8 @@ No hand-built audio engine. A C# / .NET 10 control plane orchestrates [Liquidsoa
 
 This is **GenWave Home**, the AGPL edition — see [License](#license).
 
+🎧 **Hear it live:** [demo.genwaveradio.com](https://demo.genwaveradio.com/) — the public demo station, running the [reference appliance topology](DEPLOYMENT.md): watch what's on the air and tune in!
+
 
 ## Quickstart
 
