@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Logging;
 
 namespace GenWave.Host.Api;
 
@@ -69,8 +70,8 @@ public sealed class BulkRatingController(
         var updated = await rating.BulkVoteAsync(mediaQuery, direction, scope, ct);
 
         logger.LogInformation(
-            "BulkVote direction={Direction} filter={@Filter} updated={Updated}",
-            direction, request.Filter, updated);
+            "BulkVote direction={Direction} filter={Filter} updated={Updated}",
+            direction, LogSanitize.Strip(request.Filter), updated);
 
         return Ok(new { updated });
     }
@@ -97,8 +98,8 @@ public sealed class BulkRatingController(
         var updated = await rating.BulkSetNeverPlayAsync(mediaQuery, request.NeverPlay, scope, ct);
 
         logger.LogInformation(
-            "BulkSetNeverPlay neverPlay={NeverPlay} filter={@Filter} updated={Updated}",
-            request.NeverPlay, request.Filter, updated);
+            "BulkSetNeverPlay neverPlay={NeverPlay} filter={Filter} updated={Updated}",
+            request.NeverPlay, LogSanitize.Strip(request.Filter), updated);
 
         return Ok(new { updated });
     }

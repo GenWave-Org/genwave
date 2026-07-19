@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Default for all jobs (CodeQL actions/missing-workflow-permissions). The `images` job
+# declares its own broader grant, which overrides this.
+permissions:
+  contents: read
+
 jobs:
   build-test:
     runs-on: ubuntu-latest

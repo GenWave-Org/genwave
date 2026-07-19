@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Logging;
 
 namespace GenWave.Host.Api;
 
@@ -225,8 +226,8 @@ public sealed class MediaController(
         }
 
         logger.LogInformation(
-            "BulkReassign toLibraryId={ToLibraryId} filter={@Filter} updated={Updated}",
-            toLibraryId, filter, updated.Value);
+            "BulkReassign toLibraryId={ToLibraryId} filter={Filter} updated={Updated}",
+            toLibraryId, LogSanitize.Strip(filter), updated.Value);
 
         // AC3: destination out of scope → set X-Out-Of-Scope header and include outOfScope body field.
         var outOfScope = OutOfScopeWarning.ApplyIfOutOfScope(Response, toLibraryId, stationScope);
@@ -274,8 +275,8 @@ public sealed class MediaController(
         var affected = await adminWrite.SetEligibilityAsync(filter, request.Eligible, scope, ct);
 
         logger.LogInformation(
-            "BulkSetEligibility eligible={Eligible} filter={@Filter} affected={Affected}",
-            request.Eligible, request.Filter, affected);
+            "BulkSetEligibility eligible={Eligible} filter={Filter} affected={Affected}",
+            request.Eligible, LogSanitize.Strip(request.Filter), affected);
 
         return Ok(new { affected });
     }
