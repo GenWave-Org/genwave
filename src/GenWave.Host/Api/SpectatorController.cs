@@ -44,6 +44,7 @@ public sealed class SpectatorController(
     NowPlayingService nowPlayingService,
     PlayHistoryService playHistoryService,
     IMediaCatalog catalog,
+    IListenerStatsSource listenerStats,
     IOptionsMonitor<StationOptions> stationMonitor) : ControllerBase
 {
     /// <summary>Hard cap on <c>GET /spectator/api/play-history</c> entries (SPEC F62.6), independent
@@ -80,21 +81,28 @@ public sealed class SpectatorController(
     /// (generated patter text and persona identity are operator content); a real track surfaces as
     /// <c>{state:"onAir", kind:"track", title, artist, startedAt, durationMs}</c>.
     /// </para>
+    /// <para>
+    /// Every shape also carries <c>listeners</c> (SPEC F62.12 addendum, STORY-179, gitea-#10) —
+    /// always present, read fresh from <see cref="IListenerStatsSource"/>, null when Icecast's
+    /// admin stats cannot be determined right now (never an error, never fabricated).
+    /// </para>
     /// </summary>
     [HttpGet("now-playing")]
     [OutputCache(PolicyName = SpectatorOutputCachePolicies.NowPlaying)]
     [SpectatorCacheControl(5)]
-    public IActionResult GetNowPlaying()
+    public async Task<IActionResult> GetNowPlaying(CancellationToken ct)
     {
         var snapshot = nowPlayingService.GetSnapshot(SingleStation.IdString);
+        var listeners = await listenerStats.GetListenerCountAsync(ct);
 
         if (snapshot is null || snapshot.IsDrain)
-            return Ok(new SpectatorStandbyNowPlaying());
+            return Ok(new SpectatorStandbyNowPlaying(listeners));
 
         if (snapshot.MediaId is { } mediaId && mediaId.StartsWith("tts:", StringComparison.Ordinal))
-            return Ok(new SpectatorPatterNowPlaying(snapshot.StartedAt, snapshot.DurationMs));
+            return Ok(new SpectatorPatterNowPlaying(snapshot.StartedAt, snapshot.DurationMs, listeners));
 
-        return Ok(new SpectatorTrackNowPlaying(snapshot.Title, snapshot.Artist, snapshot.StartedAt, snapshot.DurationMs));
+        return Ok(new SpectatorTrackNowPlaying(
+            snapshot.Title, snapshot.Artist, snapshot.StartedAt, snapshot.DurationMs, listeners));
     }
 
     /// <summary>

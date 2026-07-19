@@ -64,8 +64,13 @@ public static class FeatureAcceptanceGateCurationSettings
         // ComposeYamlSha256 re-pinned AGAIN 2026-07-18 (PLAN T17, SPEC F61.4, STORY-166): admin_ui
         // gained `profiles: ["admin"]` — another intentional edit from a LATER epic, not a
         // regression of F52–F56 touching neither file. EngineScriptSha256 unchanged.
+        //
+        // ComposeYamlSha256 re-pinned YET AGAIN 2026-07-18 (PLAN T21, SPEC F62.12 addendum,
+        // STORY-179): the api service gained Icecast__StatsUrl/Icecast__AdminPassword env vars for
+        // the spectator listener-count poll — another intentional edit from a LATER epic, not a
+        // regression of F52–F56 touching neither file. EngineScriptSha256 unchanged.
         const string EngineScriptSha256 = "a256fd3f2797ed9b52e3f8507e8ca610aa02218e2fedc5c231369f0ccaab9bd6";
-        const string ComposeYamlSha256  = "e368588851814f74c30838ceeab2ca6d53de4128b63ab7ea437a712864162555";
+        const string ComposeYamlSha256  = "23490e050a79e87b6763e64e3b89ae507a1fa682b40f7e9029601221188f5446";
 
         [Fact]
         public void EngineScriptByteMatchesMain()

@@ -14,7 +14,13 @@ namespace GenWave.Host.Api;
 /// Track duration, if known (SPEC F50.3/F66.2). Null until the Host's duration rehydrator recovers
 /// it from the catalog — never fabricated.
 /// </param>
-public sealed record SpectatorTrackNowPlaying(string? Title, string? Artist, DateTimeOffset StartedAt, int? DurationMs)
+/// <param name="Listeners">
+/// Live listener count (SPEC F62.12 addendum, STORY-179, gitea-#10), read from
+/// <see cref="GenWave.Core.Abstractions.IListenerStatsSource"/>. Null when Icecast's admin stats
+/// are unconfigured or unreachable — never fabricated, never surfaced as an error.
+/// </param>
+public sealed record SpectatorTrackNowPlaying(
+    string? Title, string? Artist, DateTimeOffset StartedAt, int? DurationMs, int? Listeners)
 {
     public string State => "onAir";
     public string Kind => "track";

@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.HttpOverrides;
+using GenWave.Core.Abstractions;
 using GenWave.Host.Api;
 using GenWave.Host.Configuration;
 using GenWave.Host.Options;
 using GenWave.Host.Playout;
 using GenWave.Host.Seeding;
+using GenWave.Host.Stats;
 using GenWave.MediaLibrary;
 using GenWave.Orchestration;
 using GenWave.Tts;
@@ -58,6 +60,14 @@ builder.Services
 // the matching compose port mapping, never a live PUT. Read live via
 // IOptionsMonitor<SpectatorOptions> by SurfaceGateMiddleware.
 builder.Services.Configure<SpectatorOptions>(cfg.GetSection(SpectatorOptions.SectionName));
+
+// Icecast admin-stats listener count (SPEC F62.12 addendum, STORY-179, gitea-#10): env/compose-only,
+// deliberately absent from StationSettingsAllowlist (AdminPassword is a secret, F19.3) — same
+// exclusion shape as SpectatorOptions above. The 2s timeout here is IcecastListenerStatsSource's
+// own resilience budget (SpectatorController.GetNowPlaying awaits this on every uncached request).
+builder.Services.Configure<IcecastOptions>(cfg.GetSection(IcecastOptions.SectionName));
+builder.Services.AddHttpClient<IcecastListenerStatsSource>(client => client.Timeout = TimeSpan.FromSeconds(2));
+builder.Services.AddSingleton<IListenerStatsSource>(sp => sp.GetRequiredService<IcecastListenerStatsSource>());
 
 builder.Services.AddControllers();
 

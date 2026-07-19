@@ -128,6 +128,13 @@ public static class FeatureComposeEnvDriftGuard
         // Admin__Password/ProxyOptions: flipping it requires a container recreate, never a live PUT.
         "ASPNETCORE_URLS",
         "Spectator__PublicPort",
+        // Icecast admin-stats listener count (SPEC F62.12 addendum, STORY-179, PLAN T21,
+        // gitea-#10). Icecast__StatsUrl is infra wiring (a container-network address), not an
+        // operator-editable setting — same shape as Spectator__PublicPort above. Icecast__AdminPassword
+        // is a secret and MUST NEVER become allowlist-readable (SPEC F19.3) — the same exclusion as
+        // Admin__Password/ConnectionStrings:* above.
+        "Icecast__StatsUrl",
+        "Icecast__AdminPassword",
     };
 
     /// <summary>

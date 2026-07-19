@@ -151,6 +151,11 @@ services:
       Tts__Format: "wav"
       Tts__RenderBudgetSeconds: "30"
       Tts__CacheRoot: "/tts"
+      # Icecast admin-stats listener count (SPEC F62.12 addendum, STORY-179, gitea-#10). Env/compose-
+      # only, deliberately absent from StationSettingsAllowlist — Icecast__AdminPassword is a secret
+      # (F19.3), never readable or writable through the settings API.
+      Icecast__StatsUrl: http://icecast:8000
+      Icecast__AdminPassword: ${ICECAST_ADMIN_PASSWORD:?}
     volumes:
       - ${MEDIA_DIR:?}:/media:ro                # READ-ONLY: the library scans + analyses, never writes
       - tts:/tts                                # READ-WRITE: api writes TTS clips here for engine to play

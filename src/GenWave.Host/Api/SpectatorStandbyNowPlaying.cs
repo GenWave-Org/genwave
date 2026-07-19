@@ -6,7 +6,12 @@ namespace GenWave.Host.Api;
 /// drain token is on-air. Both collapse to this single shape — the public surface never sees a 503
 /// and never sees the word "drain" (F62.5).
 /// </summary>
-public sealed record SpectatorStandbyNowPlaying
+/// <param name="Listeners">
+/// Live listener count (SPEC F62.12 addendum, STORY-179, gitea-#10), read from
+/// <see cref="GenWave.Core.Abstractions.IListenerStatsSource"/>. Null when Icecast's admin stats
+/// are unconfigured or unreachable — never fabricated, never surfaced as an error.
+/// </param>
+public sealed record SpectatorStandbyNowPlaying(int? Listeners)
 {
     public string State => "standby";
 }

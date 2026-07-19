@@ -8,7 +8,12 @@ namespace GenWave.Host.Api;
 /// </summary>
 /// <param name="StartedAt">UTC wall-clock instant the patter started, for elapsed-time computation.</param>
 /// <param name="DurationMs">Measured patter duration (SPEC F66.1) — never fabricated.</param>
-public sealed record SpectatorPatterNowPlaying(DateTimeOffset StartedAt, int? DurationMs)
+/// <param name="Listeners">
+/// Live listener count (SPEC F62.12 addendum, STORY-179, gitea-#10), read from
+/// <see cref="GenWave.Core.Abstractions.IListenerStatsSource"/>. Null when Icecast's admin stats
+/// are unconfigured or unreachable — never fabricated, never surfaced as an error.
+/// </param>
+public sealed record SpectatorPatterNowPlaying(DateTimeOffset StartedAt, int? DurationMs, int? Listeners)
 {
     public string State => "onAir";
     public string Kind => "patter";
