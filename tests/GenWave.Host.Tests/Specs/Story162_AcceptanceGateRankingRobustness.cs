@@ -73,8 +73,13 @@ public static class FeatureAcceptanceGateRankingRobustness
         // STORY-179): a third intentional edit that DOES touch compose.yaml — the api service
         // gained Icecast__StatsUrl/Icecast__AdminPassword env vars for the spectator listener-count
         // poll. EngineScriptSha256 unchanged — T21 does not touch engine/genwave.liq.
+        // ComposeYamlSha256 re-pinned 2026-07-19 (kokoro image bump): the kokoro service moved to
+        // kokoro-fastapi-cpu v0.6.0 and gained a mem_limit backstop for the upstream RSS leak
+        // (remsky/Kokoro-FastAPI#453) — an intentional ops edit from outside this epic, not a
+        // regression of its zero-diff promise. EngineScriptSha256 is untouched.
+        //
         const string EngineScriptSha256 = "a256fd3f2797ed9b52e3f8507e8ca610aa02218e2fedc5c231369f0ccaab9bd6";
-        const string ComposeYamlSha256  = "23490e050a79e87b6763e64e3b89ae507a1fa682b40f7e9029601221188f5446";
+        const string ComposeYamlSha256  = "bcff1c88105845cef82314dd774336095b1df38ec07e084038547bc374ea1b25";
 
         [Fact]
         public void EngineScriptByteMatchesMain()
