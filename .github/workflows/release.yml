@@ -83,8 +83,17 @@ jobs:
 
       # gh CLI over a third-party action -- it's preinstalled on the runner and needs only the
       # default token. No repo write beyond the Release object itself (not a commit, not a push).
+      # Idempotent: a release created through the GitHub UI ("Draft a new release") creates the
+      # tag AND the Release together, so this workflow still fires on the tag push and must not
+      # 422 on the already-existing Release (observed on v2.0.0). Bare-tag pushes still get their
+      # Release created here.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GW_TAG: ${{ github.ref_name }}
-        run: gh release create "$GW_TAG" --generate-notes --title "$GW_TAG"
+        run: |
+          if gh release view "$GW_TAG" --json name >/dev/null 2>&1; then
+            echo "Release $GW_TAG already exists (UI-created) -- skipping creation."
+          else
+            gh release create "$GW_TAG" --generate-notes --title "$GW_TAG"
+          fi
