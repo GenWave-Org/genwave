@@ -1,0 +1,125 @@
+# =============================================================================
+# compose.demo.yaml — the public-station overlay (SPEC F64.3; field-tested topology).
+#
+#   docker compose -f compose.yaml -f compose.demo.yaml up -d
+#
+# What it does on top of compose.yaml:
+#   * Caddy front door: TLS for ${PUBLIC_HOST}, routes /stream* -> icecast and
+#     everything else -> api:8081 (the spectator-only public listener)
+#   * api + icecast run the published GHCR release images (pull_policy: always —
+#     a demo box never source-builds; bump the tag per release)
+#   * api ports locked down: 8080 loopback-only (SSH tunnel), 8081 not host-published
+#   * admin_ui loopback-only, for the temporary-admin recipe in DEPLOYMENT.md
+#   * ollama DJ brain: pinned, model kept resident, cpu+mem fenced so generation
+#     can never starve real-time playout
+#
+# .env additions this file reads: PUBLIC_HOST=radio.example.com
+# Requires Docker Compose v2.24+ (the `!override` merge tag).
+# =============================================================================
+
+# Pin the `core` subnet so Proxy:TrustedNetworks below is deterministic instead of
+# whatever Docker happens to auto-assign.
+networks:
+  core:
+    ipam:
+      config:
+        - subnet: 172.28.20.0/24
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    networks: [core]
+    ports:
+      - "80:80"                 # ACME http-01 + https redirect
+      - "443:443"
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+      icecast:
+        condition: service_healthy
+    restart: unless-stopped
+
+  admin_ui:
+    # Base compose publishes 3000:3000 on 0.0.0.0 — loopback-only on a public box;
+    # reach it through an SSH tunnel (ssh -L 3000:127.0.0.1:3000). Only runs at all
+    # when COMPOSE_PROFILES=admin (temporary-admin recipe in DEPLOYMENT.md).
+    ports: !override
+      - "127.0.0.1:3000:3000"
+
+  ollama:
+    image: ollama/ollama:0.9.6            # PIN — tested; `latest` drifts
+    networks: [core]                      # api reaches it at http://ollama:11434
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      OLLAMA_HOST: 0.0.0.0
+      # Keep the DJ model resident: cold loads on a fenced CPU blow straight through
+      # Llm:TimeoutSeconds (observed: cold ~25s+, warm well under). Memory cost lives
+      # inside the fence below either way.
+      OLLAMA_KEEP_ALIVE: "-1"
+    # No ports, no OLLAMA_ORIGINS — nothing outside the core network talks to it.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"                     # fence: copywriting is render-ahead + cached;
+          memory: 3072M                   # DJ generation must never starve playout
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  ollama-init:
+    # One-shot: pulls the DJ model on first boot, then exits (idempotent; no-op when
+    # the ollama-data volume already holds the weights). Keep the model in lockstep
+    # with the Llm:Model setting.
+    image: ollama/ollama:0.9.6
+    networks: [core]
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["ollama", "pull", "llama3.2:3b"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  icecast:
+    image: ghcr.io/genwave-org/genwave-icecast:home-v2.0.1   # bump per release
+    pull_policy: always
+
+  api:
+    image: ghcr.io/genwave-org/genwave:home-v2.0.1           # bump per release
+    pull_policy: always
+    # compose.yaml's base `ports:` publishes BOTH 8080 and 8081 on 0.0.0.0 — fine for
+    # Operator/Standard (LAN reachability is the point there), wrong for a public box.
+    # Compose list-type keys MERGE across `-f` files by default: a plain `ports:`
+    # override here would APPEND to the base list, not replace it, leaving 0.0.0.0:8080
+    # and 0.0.0.0:8081 published right alongside whatever you add here. The `!override`
+    # merge tag (Compose Specification) is what actually replaces the list. Verify with
+    # `docker compose -f compose.yaml -f compose.demo.yaml config` — see DEPLOYMENT.md.
+    ports: !override
+      - "127.0.0.1:8080:8080"
+      # No 8081 entry at all — Caddy reaches api:8081 over the `core` network; a public
+      # box has no reason to ever publish it to the host.
+    environment:
+      # Caddy lives on `core` at 172.28.20.0/24 (pinned above) — trust ITS
+      # X-Forwarded-For so the spectator rate limiter sees the real client IP, not
+      # Caddy's. Never widen beyond the fronting proxy's own subnet.
+      Proxy__TrustedNetworks__0: "172.28.20.0/24"
+      # Appliance posture by default: the admin plane does not exist (404, both
+      # listeners, login included). Flip to "true" + COMPOSE_PROFILES=admin for the
+      # temporary-admin recipe in DEPLOYMENT.md, and flip back when done.
+      Admin__Enabled: "false"
+      Station__SpectatorMode: "true"
+      Station__PublicStreamUrl: "/stream"
+
+volumes:
+  caddy_data: {}
+  ollama-data: {}
