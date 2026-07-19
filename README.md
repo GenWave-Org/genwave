@@ -1,10 +1,10 @@
 # GenWave — Broadcast Audio Streaming Service
 
 [![CI](https://github.com/GenWave-Org/genwave/actions/workflows/ci.yml/badge.svg)](https://github.com/GenWave-Org/genwave/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/GenWave-Org/genwave)](https://github.com/GenWave-Org/genwave/releases)
-[![NuGet](https://img.shields.io/nuget/v/GenWave.Abstractions?label=GenWave.Abstractions)](https://www.nuget.org/packages/GenWave.Abstractions)
-[![License](https://img.shields.io/github/license/GenWave-Org/genwave)](LICENSE)
-[![Demo station](https://img.shields.io/website?url=https%3A%2F%2Fdemo.genwaveradio.com%2Fhealth&label=demo%20station&up_message=on%20air&down_message=off%20air&up_color=brightgreen&down_color=red)](https://demo.genwaveradio.com/)
+[![Release](https://badgen.net/github/release/GenWave-Org/genwave)](https://github.com/GenWave-Org/genwave/releases)
+[![NuGet](https://badgen.net/nuget/v/GenWave.Abstractions)](https://www.nuget.org/packages/GenWave.Abstractions)
+[![License](https://badgen.net/github/license/GenWave-Org/genwave)](LICENSE)
+[![Demo on-air](https://github.com/GenWave-Org/genwave/actions/workflows/demo-health.yml/badge.svg)](https://demo.genwaveradio.com/)
 
 A self-hosted internet radio station: one shared broadcast stream, **equal-power crossfades**, and **loudness level-matching** so quiet and loud tracks play back at a consistent volume. It never emits dead air. Deployed entirely via Docker.
 

@@ -1,0 +1,24 @@
+# Probes the public demo station's health route on a schedule. Exists for two reasons:
+#   1. Its status badge is the README's "demo on-air" indicator (GitHub-native — no
+#      third-party badge service in the loop, unlike shields.io's website check).
+#   2. A failing run means the demo appliance is down — Actions emails the org on failure.
+# NOTE: GitHub auto-disables scheduled workflows after 60 days without repo activity;
+# any commit re-arms it.
+name: demo on-air
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe https://demo.genwaveradio.com/health
+        # --retry rides out transient blips so the badge only goes red when the
+        # station is actually unreachable, not on a single dropped request.
+        run: curl --fail --silent --show-error --max-time 30 --retry 3 --retry-delay 15 https://demo.genwaveradio.com/health
