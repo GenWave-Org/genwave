@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Logging;
 using LoudnessMeasurement = GenWave.Core.Domain.Loudness;
 
 /// <summary>
@@ -71,7 +72,7 @@ public sealed class SafeSegmentAuthor(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Safe-segment synthesis failed (voice {Voice})", voice);
+            logger.LogWarning(ex, "Safe-segment synthesis failed (voice {Voice})", LogSanitize.Strip(voice));
             return SafeSegmentAuthorResult.Failure(SafeSegmentFailureReason.SynthesisFailed, ex.Message);
         }
 
