@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Logging;
 
 namespace GenWave.Host.Api;
 
@@ -141,8 +142,8 @@ public sealed class ReenrichController(
         var scheduled = await adminReenrichment.ScheduleBulkAsync(mediaQuery, parsedFields, scope, ct);
 
         logger.LogInformation(
-            "BulkReenrich fields={Fields} filter={@Filter} scheduled={Scheduled}",
-            parsedFields, filter, scheduled);
+            "BulkReenrich fields={Fields} filter={Filter} scheduled={Scheduled}",
+            parsedFields, LogSanitize.Strip(filter), scheduled);
 
         return Ok(new { scheduled });
     }

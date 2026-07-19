@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Logging;
 using GenWave.Host.Auth;
 
 namespace GenWave.Host.Api;
@@ -68,7 +69,7 @@ public sealed class LibrariesController(
         var result = await adminWrite.CreateAsync(name, ct);
 
         if (result is LibraryWriteResult.Created created)
-            logger.LogInformation("Library created id={LibraryId} name={LibraryName}", created.Id, name);
+            logger.LogInformation("Library created id={LibraryId} name={LibraryName}", created.Id, LogSanitize.Strip(name));
 
         return result switch
         {
@@ -112,7 +113,7 @@ public sealed class LibrariesController(
         var result = await adminWrite.RenameAsync(id, name, ct);
 
         if (result is LibraryWriteResult.Renamed)
-            logger.LogInformation("Library renamed id={LibraryId} newName={LibraryName}", id, name);
+            logger.LogInformation("Library renamed id={LibraryId} newName={LibraryName}", id, LogSanitize.Strip(name));
 
         return result switch
         {
