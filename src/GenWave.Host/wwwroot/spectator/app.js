@@ -15,7 +15,9 @@
 const NOW_PLAYING_POLL_MS = 5000;
 const HISTORY_STATS_POLL_MS = 30000;
 const CLOCK_TICK_MS = 1000;
-const MAX_HISTORY_ROWS = 20;
+// The API serves up to 20 entries (SPEC F62.6); the pane shows only the freshest few and
+// older rows simply fall off as new tracks air (operator request, 2026-07-19).
+const MAX_HISTORY_ROWS = 6;
 
 /** @type {{kind: "standby"} | {kind: "track"|"patter", title?: string, artist?: string, startedAt: Date, durationMs: number|null}} */
 let nowPlaying = { kind: "standby" };
@@ -57,10 +59,22 @@ async function pollNowPlaying() {
             durationMs: payload.durationMs ?? null,
           }
         : { kind: "standby" };
+    renderListenerCount(payload.listeners ?? null);
   } catch (error) {
     console.error(error);
   }
   renderNowPlaying();
+}
+
+/** @param {number|null} listeners — null = Icecast stats unavailable; hide rather than guess. */
+function renderListenerCount(listeners) {
+  const element = document.getElementById("listener-count");
+  if (listeners == null) {
+    element.hidden = true;
+    return;
+  }
+  element.hidden = false;
+  element.textContent = listeners === 1 ? "1 listener tuned in" : `${listeners} listeners tuned in`;
 }
 
 function renderNowPlaying() {
