@@ -58,8 +58,14 @@ public static class FeatureAcceptanceGateRankingRobustness
     {
         // Pinned 2026-07-16 — identical hashes to Story141's/Story147's/Story153's own pins:
         // F57–F64 touch neither file, so the byte content is unchanged since Epic V shipped.
+        //
+        // ComposeYamlSha256 re-pinned 2026-07-18 (PLAN T15, SPEC F64.1/F64.2, STORY-172): F64 is
+        // this very story — T15 is the one intentional edit that DOES touch compose.yaml (the api
+        // service gained the public-listener port mapping (8081) plus ASPNETCORE_URLS/
+        // Spectator__PublicPort env vars). EngineScriptSha256 is untouched — T15 does not touch
+        // engine/genwave.liq.
         const string EngineScriptSha256 = "a256fd3f2797ed9b52e3f8507e8ca610aa02218e2fedc5c231369f0ccaab9bd6";
-        const string ComposeYamlSha256  = "20b3dc53f3ce9a2ace0f131e64edee0900afea101511979fb2f1baaf5ebb45b9";
+        const string ComposeYamlSha256  = "7ee9bd761988f3b558aa956e5b3108b3c2ca421260a0bd95b827e2506c6e5ab2";
 
         [Fact]
         public void EngineScriptByteMatchesMain()

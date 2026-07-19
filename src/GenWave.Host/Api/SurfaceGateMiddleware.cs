@@ -13,14 +13,15 @@ namespace GenWave.Host.Api;
 /// <c>UseAuthentication</c> (so a disabled surface never reaches identity checks at all —
 /// existence is decided first). See <c>Program.cs</c> for the exact pipeline position.
 ///
-/// Both flags are read live, per request, via <see cref="IOptionsMonitor{T}.CurrentValue"/> —
-/// never captured at startup — so a container recreate with a new env value takes effect on the
+/// All three settings are read live, per request, via <see cref="IOptionsMonitor{T}.CurrentValue"/>
+/// — never captured at startup — so a container recreate with a new env value takes effect on the
 /// very next request.
 /// </summary>
 public sealed class SurfaceGateMiddleware(
     RequestDelegate next,
     IOptionsMonitor<AdminOptions> adminOptions,
-    IOptionsMonitor<StationOptions> stationOptions)
+    IOptionsMonitor<StationOptions> stationOptions,
+    IOptionsMonitor<SpectatorOptions> spectatorOptions)
 {
     public async Task InvokeAsync(HttpContext context)
     {
@@ -38,6 +39,26 @@ public sealed class SurfaceGateMiddleware(
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
+        }
+
+        // Public listener isolation (SPEC F64.1/F64.2, STORY-172): when the operator has bound a
+        // dedicated public port (Spectator:PublicPort > 0) and THIS request arrived on it, only
+        // the spectator surface and /health may respond — admin, /media/*, /internal/* 404 here,
+        // regardless of Admin:Enabled/Station:SpectatorMode, so a fronting-proxy misroute onto the
+        // public port is structurally harmless. A request on any OTHER local port (the internal
+        // port, or no public port configured at all) is entirely unaffected by this check.
+        var publicPort = spectatorOptions.CurrentValue.PublicPort;
+        if (publicPort > 0 && context.Connection.LocalPort == publicPort)
+        {
+            var isHealthCheck = context.Request.Path.StartsWithSegments(
+                "/health", StringComparison.OrdinalIgnoreCase);
+            var isSpectatorSurface = endpoint?.Metadata.GetMetadata<SpectatorSurfaceAttribute>() is not null;
+
+            if (!isHealthCheck && !isSpectatorSurface)
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
         }
 
         await next(context);

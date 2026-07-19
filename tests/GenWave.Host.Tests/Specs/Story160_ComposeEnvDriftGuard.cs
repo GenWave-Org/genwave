@@ -122,6 +122,12 @@ public static class FeatureComposeEnvDriftGuard
         // TTS render format/cache mount — infra, not operator-editable.
         "Tts__Format",
         "Tts__CacheRoot",
+        // Public listener (SPEC F64.1/F64.2, STORY-172, PLAN T15). ASPNETCORE_URLS is Kestrel/host
+        // wiring, not a GenWave config key at all. Spectator__PublicPort is env/compose-only —
+        // SpectatorOptions's doc comment names the same StationSettingsAllowlist exclusion as
+        // Admin__Password/ProxyOptions: flipping it requires a container recreate, never a live PUT.
+        "ASPNETCORE_URLS",
+        "Spectator__PublicPort",
     };
 
     /// <summary>

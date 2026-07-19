@@ -53,6 +53,12 @@ builder.Services
     // Named OutputCache policies for the public spectator surface (SPEC F62.10, STORY-171/T13).
     .AddGenWaveSpectatorOutputCaching();
 
+// Public listener config (SPEC F64.1/F64.2, STORY-172): env/compose-only, deliberately absent
+// from StationSettingsAllowlist — flipping Spectator:PublicPort requires a container recreate plus
+// the matching compose port mapping, never a live PUT. Read live via
+// IOptionsMonitor<SpectatorOptions> by SurfaceGateMiddleware.
+builder.Services.Configure<SpectatorOptions>(cfg.GetSection(SpectatorOptions.SectionName));
+
 builder.Services.AddControllers();
 
 // Liveness endpoint for the compose healthcheck. No checks registered = 200 Healthy when up.
@@ -111,6 +117,17 @@ app.UseAuthorization();
 app.UseOutputCache();
 
 app.MapControllers();
+
+// GET / — the public listener's landing route (SPEC F64.1). Redirects to /spectator, the
+// spectator single-page app (PLAN T16); marked SpectatorSurface so it is gated exactly like every
+// other spectator route — by Station:SpectatorMode (SurfaceGateMiddleware's existing check) and,
+// once Spectator:PublicPort is set, the public-listener isolation check — and reachable on the
+// internal port too, same as the rest of the spectator surface. Until T16 ships the page itself,
+// the redirect target 404s on follow — expected, the one fact this leaves red (STORY-172's
+// ScenarioRootLandsOnThePage).
+app.MapGet("/", () => Results.Redirect("/spectator"))
+    .WithMetadata(new SpectatorSurfaceAttribute())
+    .RequireAuthorization(AuthorizationPolicies.Spectator);
 
 // Liveness probe — anonymous so the (conditional) deny-by-default policy never 401s it.
 app.MapHealthChecks("/health").AllowAnonymous();

@@ -108,6 +108,10 @@ services:
     networks: [core, data]                      # core -> engine, data -> db
     ports:
       - "8080:8080"                             # control-plane API, direct on localhost
+      - "8081:8081"                             # public spectator listener (SPEC F64.1/F64.2, STORY-172) —
+                                                 # Standard mode wants LAN reachability, same as 8080; the
+                                                 # demo/appliance topology (PLAN T19) instead reaches it only
+                                                 # via Caddy on the core network.
     depends_on:
       db:
         condition: service_healthy              # schema must exist before first query
@@ -122,6 +126,13 @@ services:
       ConnectionStrings__Station: "Host=db;Database=genwave;Username=station_svc;Password=${STATION_DB_PASSWORD:?};Search Path=station"
       # Single admin password for the Admin UI login. Empty = open API (local-dev convenience).
       Admin__Password: "${ADMIN_PASSWORD:-}"
+      # Public listener (SPEC F64.1/F64.2, STORY-172): the app never force-binds a port — Kestrel
+      # binds whatever ASPNETCORE_URLS lists, so :8081 is added alongside the existing :8080.
+      # Spectator__PublicPort tells SurfaceGateMiddleware which local port is public-only: on it,
+      # only the spectator surface + /health respond — admin, /media/*, /internal/* 404 regardless
+      # of any other flag. Env/compose-only, deliberately not in the settings allowlist.
+      ASPNETCORE_URLS: "http://+:8080;http://+:8081"
+      Spectator__PublicPort: "8081"
       Liquidsoap__Host: engine
       Liquidsoap__Port: "1234"
       Liquidsoap__QueueId: "q"
