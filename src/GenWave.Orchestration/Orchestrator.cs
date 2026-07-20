@@ -60,6 +60,15 @@ using GenWave.Core.Domain;
 /// <paramref name="cadenceProvider"/> follows one line below) — never cached in a field — so a live
 /// <c>Station:Name</c>/<c>Station:Voice</c> edit reaches the very next unit's segments with no
 /// process restart.
+///
+/// The station-id cadence check (below) never builds its <see cref="SegmentRequest"/> directly
+/// (SPEC F74.1/F74.2, STORY-197): it enqueues a deferral into <paramref name="deferralQueue"/>,
+/// which <see cref="EnqueuePatterAsync"/> drains in the same pass. This planning pass IS the next
+/// track boundary — a whole unit (back-announce/station-id/lead-in/music) is queued atomically
+/// before the next track ever reaches air — so draining here can never land mid-track. Routing
+/// even an always-immediately-due trigger through the queue formalizes the seam a future deferred
+/// producer (e.g. a wall-clock-scheduled handoff) shares: enqueue whenever its own trigger fires,
+/// drain only at a boundary.
 /// </summary>
 public sealed class Orchestrator(
     IStationIdentityProvider identityProvider,
@@ -70,7 +79,8 @@ public sealed class Orchestrator(
     ITtsSegmentSource tts,
     IActivePersonaAccessor personaAccessor,
     ILogger<Orchestrator> logger,
-    IRenderBudgetProvider renderBudgetProvider) : INextItemProvider
+    IRenderBudgetProvider renderBudgetProvider,
+    SpeechDeferralQueue deferralQueue) : INextItemProvider
 {
     readonly Queue<MediaItem> buffer = new();
     MediaItem? previousTrack;
@@ -178,10 +188,27 @@ public sealed class Orchestrator(
         // the guard (SPEC F42.1, STORY-136, closes gitea-#216): the FIRST station ID airs only once N
         // units have elapsed, never at boot — unitCount == 0 % N == 0 used to fire on the very
         // first unit, which is exactly the boot-blast this guard now excludes.
+        //
+        // The trigger no longer builds the segment itself (SPEC F74.1/F74.2, STORY-197): it
+        // enqueues a deferral, and the drain immediately below picks it up in this SAME boundary
+        // pass (see class remarks for why that is still "never mid-track"). Supersede (F74.2) is
+        // the queue's job, not this check's — a second same-kind enqueue before the next drain
+        // would simply replace this one.
         if (cadence.StationIdEveryNUnits > 0
             && unitCount > 0
             && unitCount % cadence.StationIdEveryNUnits == 0)
         {
+            deferralQueue.Enqueue(SpeechDeferralKind.StationId, "cadence: Station:Cadence:StationIdEveryNUnits");
+        }
+
+        // Drain every deferral due at this boundary. Today the only producer is the cadence check
+        // just above, always due "now" — but this loop is written for ANY due deferral, including
+        // one enqueued by a future producer several units ago (SPEC F74.1 — "regardless of
+        // wall-clock slip").
+        foreach (var deferral in deferralQueue.TryDequeueDue(DateTimeOffset.UtcNow))
+        {
+            if (deferral.Kind != SpeechDeferralKind.StationId) continue; // only kind wired so far
+
             var (voice, personaName) = await ResolvePersonaAsync(identity.Voice, ct);
             var req = new SegmentRequest(
                 SegmentKind.StationId,

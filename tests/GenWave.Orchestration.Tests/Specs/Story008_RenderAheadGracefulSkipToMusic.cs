@@ -33,7 +33,8 @@ public static class FeatureRenderAheadGracefulSkipToMusic
         return new Orchestrator(
             identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, ttsSource,
             new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(renderBudget ?? TimeSpan.FromSeconds(30)));
+            new FakeRenderBudgetProvider(renderBudget ?? TimeSpan.FromSeconds(30)),
+            new SpeechDeferralQueue(TimeProvider.System));
     }
 
     // ---------------------------------------------------------------------
@@ -246,7 +247,8 @@ public static class FeatureRenderAheadGracefulSkipToMusic
             var o2 = new Orchestrator(
                 identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, tts,
                 new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-                new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)));
+                new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
+                new SpeechDeferralQueue(TimeProvider.System));
             var ctx = new PlayoutContext([]);
 
             // Unit 1: LeadIn dropped (null), so first item is Music

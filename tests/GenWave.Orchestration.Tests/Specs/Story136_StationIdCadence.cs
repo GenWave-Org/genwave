@@ -42,7 +42,8 @@ public static class FeatureStationIdCadence
         return new Orchestrator(
             identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, tts,
             new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)));
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
+            new SpeechDeferralQueue(TimeProvider.System));
     }
 
     static List<MediaItem> ProduceN(Orchestrator orchestrator, int n)

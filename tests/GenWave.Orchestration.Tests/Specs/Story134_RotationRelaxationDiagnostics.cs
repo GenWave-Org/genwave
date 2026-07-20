@@ -46,7 +46,8 @@ public static class FeatureRotationRelaxationDiagnostics
         var orchestrator = new Orchestrator(
             identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog,
             new FakeTtsSegmentSource(), new FakeActivePersonaAccessor(), logger,
-            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)));
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
+            new SpeechDeferralQueue(TimeProvider.System));
         return (orchestrator, catalog, logger);
     }
 
