@@ -82,6 +82,20 @@ export function PersonaIcon(props: IconProps): ReactNode {
   );
 }
 
+/** Booth log nav glyph (PLAN T40, STORY-195) — a ruled ledger page: bound frame + header rule +
+ * text lines, reading as "the log book" distinct from Catalog's plain unbound rule lines. */
+export function BoothLogIcon(props: IconProps): ReactNode {
+  return (
+    <IconBase {...props}>
+      <rect x="3" y="1.75" width="10" height="12.5" rx="1.2" />
+      <line x1="3" y1="4.5" x2="13" y2="4.5" />
+      <line x1="5.5" y1="7.25" x2="10.5" y2="7.25" />
+      <line x1="5.5" y1="9.75" x2="10.5" y2="9.75" />
+      <line x1="5.5" y1="12.25" x2="9" y2="12.25" />
+    </IconBase>
+  );
+}
+
 export function SettingsIcon(props: IconProps): ReactNode {
   return (
     <IconBase {...props}>

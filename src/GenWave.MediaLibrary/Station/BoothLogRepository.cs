@@ -28,6 +28,12 @@ namespace GenWave.MediaLibrary.Station;
 sealed class BoothLogRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<BoothLogOptions> options)
     : IBoothLogAppender, IBoothLogReader
 {
+    const string SelectColumns =
+        """
+        select id::bigint as id, occurred_at, kind, summary
+        from station.booth_log
+        """;
+
     /// <inheritdoc/>
     public async Task AppendAsync(string kind, string summary, CancellationToken ct)
     {
@@ -59,22 +65,34 @@ sealed class BoothLogRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<Boot
         // @BeforeId)` is the exact keyset-continuation predicate for this ORDER BY (occurred_at
         // DESC, id DESC) — no OFFSET, so a concurrently-inserted row can never shift an
         // already-served page.
-        var rows = (await conn.QueryAsync<BoothLogEntry>(new CommandDefinition(
-            """
-            select id::bigint as id, occurred_at, kind, summary
-            from station.booth_log
-            where @BeforeOccurredAt is null
-               or (occurred_at, id) < (@BeforeOccurredAt, @BeforeId)
-            order by occurred_at desc, id desc
-            limit @Limit
-            """,
-            new
-            {
-                BeforeOccurredAt = before?.OccurredAt,
-                BeforeId = before?.Id,
-                Limit = take + 1,
-            },
-            cancellationToken: ct))).ToList();
+        //
+        // Branched into two statements rather than one `@BeforeOccurredAt is null or (...) < (...)`
+        // predicate: with `before = null` every parameter in that row-value comparison is untyped
+        // (Dapper sends a plain null for both DateTime? and long?), and Postgres's parser cannot
+        // infer a type for `$1`/`$2` from a ROW() comparison the same way it can from a plain
+        // `col is null or col < $1` shape — it fails 42P08 ("could not determine data type of
+        // parameter") before the query ever runs, no null-cursor row need exist. The cursor branch
+        // below has no null parameters, so its types resolve from the columns being compared.
+        var command = before is null
+            ? new CommandDefinition(
+                $"""
+                {SelectColumns}
+                order by occurred_at desc, id desc
+                limit @Limit
+                """,
+                new { Limit = take + 1 },
+                cancellationToken: ct)
+            : new CommandDefinition(
+                $"""
+                {SelectColumns}
+                where (occurred_at, id) < (@BeforeOccurredAt, @BeforeId)
+                order by occurred_at desc, id desc
+                limit @Limit
+                """,
+                new { BeforeOccurredAt = before.OccurredAt, BeforeId = before.Id, Limit = take + 1 },
+                cancellationToken: ct);
+
+        var rows = (await conn.QueryAsync<BoothLogEntry>(command)).ToList();
 
         var hasMore = rows.Count > take;
         var entries = rows.Take(take).ToList();

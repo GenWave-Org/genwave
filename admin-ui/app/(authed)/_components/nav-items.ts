@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import {
+  BoothLogIcon,
   CatalogIcon,
   DashboardIcon,
   LiveIcon,
@@ -28,6 +29,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/catalog", label: "Catalog", Icon: CatalogIcon },
   { href: "/safe-content", label: "Safe content", Icon: SafeContentIcon },
   { href: "/personas", label: "Personas", Icon: PersonaIcon },
+  { href: "/booth-log", label: "Booth log", Icon: BoothLogIcon },
   { href: "/settings", label: "Settings", Icon: SettingsIcon },
 ];
 

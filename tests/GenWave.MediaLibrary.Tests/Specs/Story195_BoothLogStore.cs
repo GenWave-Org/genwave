@@ -9,6 +9,7 @@
 
 using System.Threading.Channels;
 using Dapper;
+using GenWave.Core.Domain;
 using GenWave.Core.Events;
 using GenWave.MediaLibrary.Station;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -132,6 +133,83 @@ public static class FeatureBoothLogStore
             var rows = await AllRowsAsync(db);
             Assert.Single(rows);
             Assert.Equal("Started 'New Song' by New Artist", rows[0].Summary);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — keyset paging against the REAL database (F72.2)
+    //
+    // The null-cursor first page and the cursor-continuation page are two different SQL statements
+    // in BoothLogRepository.ReadAsync (see its own remarks): only a real Postgres round-trip proves
+    // BOTH resolve, which is exactly the coverage gap (42P08, "could not determine data type of
+    // parameter") that let the null-cursor shape ship broken behind the Host fake reader.
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioReadPaging(DatabaseFixture db)
+    {
+        /// <summary>
+        /// Five rows, oldest to newest by 10-second steps — wide enough apart that no two
+        /// <c>occurred_at</c> values can collide, so newest-first order is unambiguous.
+        /// </summary>
+        static async Task<BoothLogRepository> SeedFiveRowsAsync(DatabaseFixture db)
+        {
+            await db.ResetBoothLogAsync();
+            await InsertRowAsync(db, "track-started", "Started 'First Song' by Artist A", TimeSpan.FromSeconds(50));
+            await InsertRowAsync(db, "track-started", "Started 'Second Song' by Artist B", TimeSpan.FromSeconds(40));
+            await InsertRowAsync(db, "track-started", "Started 'Third Song' by Artist C", TimeSpan.FromSeconds(30));
+            await InsertRowAsync(db, "track-started", "Started 'Fourth Song' by Artist D", TimeSpan.FromSeconds(20));
+            await InsertRowAsync(db, "track-started", "Started 'Fifth Song' by Artist E", TimeSpan.FromSeconds(10));
+            return Store(db);
+        }
+
+        [Fact]
+        public async Task First_page_with_no_cursor_returns_newest_first_with_next_before()
+        {
+            // Given five rows and no cursor (the shape that 500'd: a null @BeforeOccurredAt /
+            // @BeforeId against real Postgres)...
+            var store = await SeedFiveRowsAsync(db);
+
+            // When the first page is read against the REAL repository...
+            var page = await store.ReadAsync(before: null, take: 2, CancellationToken.None);
+
+            // Then it succeeds, newest-first, with a cursor to continue (more rows exist).
+            Assert.Equal(["Started 'Fifth Song' by Artist E", "Started 'Fourth Song' by Artist D"],
+                page.Entries.Select(e => e.Summary));
+            Assert.NotNull(page.NextBefore);
+        }
+
+        [Fact]
+        public async Task Cursor_page_continues_without_duplicates_or_gaps()
+        {
+            // Given five rows, read as a first page of two...
+            var store = await SeedFiveRowsAsync(db);
+            var page1 = await store.ReadAsync(before: null, take: 2, CancellationToken.None);
+
+            // When the next page is read using the first page's cursor...
+            var page2 = await store.ReadAsync(page1.NextBefore, take: 2, CancellationToken.None);
+
+            // Then it continues strictly after page 1 — no row repeated, none skipped.
+            Assert.Equal(["Started 'Third Song' by Artist C", "Started 'Second Song' by Artist B"],
+                page2.Entries.Select(e => e.Summary));
+            Assert.Empty(page1.Entries.Select(e => e.Id).Intersect(page2.Entries.Select(e => e.Id)));
+        }
+
+        [Fact]
+        public async Task Final_page_has_no_next_before()
+        {
+            // Given five rows, paged two at a time through pages 1 and 2...
+            var store = await SeedFiveRowsAsync(db);
+            var page1 = await store.ReadAsync(before: null, take: 2, CancellationToken.None);
+            var page2 = await store.ReadAsync(page1.NextBefore, take: 2, CancellationToken.None);
+
+            // When the final page is read...
+            var page3 = await store.ReadAsync(page2.NextBefore, take: 2, CancellationToken.None);
+
+            // Then it holds the one remaining (oldest) row and signals no further pages.
+            Assert.Equal(["Started 'First Song' by Artist A"], page3.Entries.Select(e => e.Summary));
+            Assert.Null(page3.NextBefore);
         }
     }
 }
