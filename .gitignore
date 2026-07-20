@@ -9,6 +9,9 @@ obj/
 # Claude session artifacts
 docs/
 
+# Internal-only analysis — must stay ignored even if docs/ is ever un-ignored
+docs/audit/
+
 # Smoke-test artifacts
 smoke-candidates.json
 *.wav

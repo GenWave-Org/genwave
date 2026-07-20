@@ -93,6 +93,13 @@ services:
   icecast:
     image: ghcr.io/genwave-org/genwave-icecast:home-v2.0.1   # bump per release
     pull_policy: always
+    # Base compose publishes 8000:8000 on 0.0.0.0 — right for LAN listening in
+    # Operator/Standard, wrong on a public box: Icecast serves status.xsl (listener
+    # counts, server version; aliased at "/") and /admin (password-only, no rate
+    # limiting) on that same port, straight past Caddy. Same list-merge gotcha as
+    # api below — without `!override` the base publish survives the overlay merge.
+    # Caddy reaches icecast:8000 over the `core` network; nothing is host-published.
+    ports: !override []
 
   api:
     image: ghcr.io/genwave-org/genwave:home-v2.0.1           # bump per release
