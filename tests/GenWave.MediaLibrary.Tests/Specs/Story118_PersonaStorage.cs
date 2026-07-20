@@ -137,9 +137,12 @@ public static class FeaturePersonaStorage
         {
             // Simulate pre-migration: DROP TABLE IF EXISTS station.persona. Station_svc owns the
             // table (db/06 ran `set role station_svc` before creating it), so drop it over the same
-            // station_svc-authenticated connection the repository itself uses.
+            // station_svc-authenticated connection the repository itself uses. CASCADE (STORY-192):
+            // once station.persona_memory exists (SPEC F71.1) its FK into station.persona blocks a
+            // plain DROP; CASCADE drops that FK along with the table, exactly like a real operator
+            // dropping and recreating a very old station.persona would need to.
             await using (var conn = await db.StationDataSource.OpenConnectionAsync())
-                await conn.ExecuteAsync("DROP TABLE IF EXISTS station.persona");
+                await conn.ExecuteAsync("DROP TABLE IF EXISTS station.persona CASCADE");
 
             Assert.False(await TableExistsAsync(db));
 
@@ -148,6 +151,13 @@ public static class FeaturePersonaStorage
             // already exists by the time any other spec runs db/09, so `if not exists` always
             // no-ops there). Only this drop-then-run proves db/09's own column list is correct.
             RunMigrationScript(db);
+
+            // STORY-192: db/09 alone only ever recreates the pre-F71.1 shape (it predates the card
+            // schema) — a real operator upgrading a database this old would run every subsequent
+            // numbered script in order, so re-apply db/11 too. This also restores
+            // station.persona_memory (dropped above via CASCADE) for every other spec sharing this
+            // database, regardless of test execution order.
+            db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "11-persona-card-migration.sh"));
 
             // After: the table exists with the same F35.1 shape as fresh init (both paths converge).
             Assert.True(await TableExistsAsync(db));

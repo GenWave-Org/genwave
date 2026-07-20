@@ -11,6 +11,11 @@ namespace GenWave.MediaLibrary.Station;
 /// <see cref="NpgsqlDataSource"/> — mirrors <see cref="Catalog.AdminLibraryRepository"/>'s wiring,
 /// but against the <c>station</c> schema/role rather than <c>library</c>. Not registered in DI and
 /// has no consumer yet — a later Epic T task wires both.
+///
+/// <see cref="CreateAsync"/>/<see cref="UpdateAsync"/> also keep the F71.1 card columns
+/// (<c>slug</c>, <c>definition</c>, <c>enabled</c>) reconciled on every write via
+/// <see cref="LegacyPersonaCardMapper"/> (STORY-192) — <see cref="IPersonaStore"/>'s own contract is
+/// unchanged; this is a storage-layer detail invisible to every existing consumer.
 /// </summary>
 sealed class PersonaRepository(NpgsqlDataSource dataSource) : IPersonaStore
 {
@@ -50,16 +55,20 @@ sealed class PersonaRepository(NpgsqlDataSource dataSource) : IPersonaStore
     /// </summary>
     public async Task<PersonaWriteResult> CreateAsync(PersonaDraft draft, CancellationToken ct)
     {
+        var slug = LegacyPersonaCardMapper.Slugify(draft.Name);
+        var definition = PersonaCardSerializer.Serialize(
+            LegacyPersonaCardMapper.BuildCard(draft.Name, draft.Backstory, draft.Style, draft.Voice));
+
         try
         {
             await using var conn = await dataSource.OpenConnectionAsync(ct);
             var persona = await conn.QuerySingleAsync<Persona>(new CommandDefinition(
                 """
-                insert into station.persona (name, backstory, style, voice)
-                values (@Name, @Backstory, @Style, @Voice)
+                insert into station.persona (name, backstory, style, voice, slug, definition, enabled)
+                values (@Name, @Backstory, @Style, @Voice, @Slug, @Definition::jsonb, true)
                 returning id::bigint as id, name, backstory, style, voice, created_at, updated_at
                 """,
-                draft,
+                new { draft.Name, draft.Backstory, draft.Style, draft.Voice, Slug = slug, Definition = definition },
                 cancellationToken: ct));
             return new PersonaWriteResult.Created(persona);
         }
@@ -77,17 +86,22 @@ sealed class PersonaRepository(NpgsqlDataSource dataSource) : IPersonaStore
     /// </summary>
     public async Task<PersonaWriteResult> UpdateAsync(long id, PersonaDraft draft, CancellationToken ct)
     {
+        var slug = LegacyPersonaCardMapper.Slugify(draft.Name);
+        var definition = PersonaCardSerializer.Serialize(
+            LegacyPersonaCardMapper.BuildCard(draft.Name, draft.Backstory, draft.Style, draft.Voice));
+
         try
         {
             await using var conn = await dataSource.OpenConnectionAsync(ct);
             var persona = await conn.QuerySingleOrDefaultAsync<Persona>(new CommandDefinition(
                 """
                 update station.persona
-                set name = @Name, backstory = @Backstory, style = @Style, voice = @Voice, updated_at = now()
+                set name = @Name, backstory = @Backstory, style = @Style, voice = @Voice,
+                    slug = @Slug, definition = @Definition::jsonb, updated_at = now()
                 where id = @Id
                 returning id::bigint as id, name, backstory, style, voice, created_at, updated_at
                 """,
-                new { draft.Name, draft.Backstory, draft.Style, draft.Voice, Id = id },
+                new { draft.Name, draft.Backstory, draft.Style, draft.Voice, Slug = slug, Definition = definition, Id = id },
                 cancellationToken: ct));
             return persona is null
                 ? new PersonaWriteResult.NotFound()

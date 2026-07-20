@@ -70,14 +70,16 @@ public sealed class DatabaseFixture : IAsyncLifetime
     /// <summary>
     /// Truncate <c>station.persona</c> and reset its identity (STORY-118). The library-schema
     /// <see cref="ResetAsync"/> never reaches the station schema (library_svc has no grants there),
-    /// and station.persona has no FK relationship to library.media for that reset to cascade into
-    /// even if it did — so persona tests get their own reset, over <see cref="StationDataSource"/>.
+    /// so persona tests get their own reset, over <see cref="StationDataSource"/>. CASCADE (STORY-192):
+    /// once <c>station.persona_memory</c> exists (SPEC F71.1) its FK into <c>station.persona</c> makes
+    /// Postgres refuse a plain TRUNCATE regardless of row count — same reason <see cref="ResetAsync"/>
+    /// itself needed CASCADE once <c>library.media_rating</c> existed.
     /// </summary>
     public async Task ResetStationAsync()
     {
         await using var conn = await StationDataSource.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "truncate table station.persona restart identity";
+        cmd.CommandText = "truncate table station.persona restart identity cascade";
         await cmd.ExecuteNonQueryAsync();
     }
 

@@ -57,13 +57,43 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	-- DJ persona storage (SPEC F35.1, STORY-118, Epic T). Lives in this same station schema/role —
 	-- same station_svc owner, same isolation guarantee station.settings already has. '' voice is a
 	-- deliberate sentinel meaning "use the station's own Station:Voice", not "unset".
+	--
+	-- slug/definition/enabled (SPEC F71.1, STORY-192): the persona-card foundation, reconciled onto
+	-- this same table rather than a second one — name/backstory/style/voice stay exactly as STORY-118
+	-- shipped them (PersonaRepository's admin CRUD still reads/writes those columns unchanged) while
+	-- slug/definition/enabled are the F71.1 card projection PersonaRepository keeps in sync on every
+	-- write (see GenWave.MediaLibrary.Station.LegacyPersonaCardMapper). The DEFAULT expressions below
+	-- are a safety net only, for a row created outside PersonaRepository (never the app's own path):
+	-- a fresh table has no rows to backfill, so nothing more elaborate is needed here.
 	CREATE TABLE IF NOT EXISTS station.persona (
 	  id         serial      PRIMARY KEY,
 	  name       text        NOT NULL UNIQUE,
 	  backstory  text        NOT NULL DEFAULT '',
 	  style      text        NOT NULL DEFAULT '',
 	  voice      text        NOT NULL DEFAULT '',
+	  slug       text        NOT NULL UNIQUE DEFAULT ('persona-' || nextval('station.persona_id_seq')::text),
+	  definition jsonb       NOT NULL DEFAULT '{}'::jsonb,
+	  enabled    boolean     NOT NULL DEFAULT true,
 	  created_at timestamptz NOT NULL DEFAULT now(),
 	  updated_at timestamptz NOT NULL DEFAULT now()
 	);
-SQL
+
+	-- Persona memory (SPEC F71.1, STORY-192): accrued/authored bits and callbacks a future
+	-- orchestrator task (STORY-194) records/recalls. FK CASCADE — deleting a persona deletes its
+	-- memory with it, never orphaned rows. The recall index is the spec'd shape verbatim:
+	-- newest-aired-first per (persona, kind), with never-aired (NULL last_aired_at) rows sorted
+	-- first so "never aired" beats "aired long ago" for anti-repeat/callback recall (STORY-194).
+	CREATE TABLE IF NOT EXISTS station.persona_memory (
+	  id            serial      PRIMARY KEY,
+	  persona_id    integer     NOT NULL REFERENCES station.persona (id) ON DELETE CASCADE,
+	  kind          text        NOT NULL,                                       -- e.g. 'bit', 'callback' — open, evolving set (F71.4)
+	  content       text        NOT NULL,
+	  source        text        NOT NULL CHECK (source IN ('authored', 'accrued')),  -- F71.6: authored rows are eviction-exempt
+	  aired_count   integer     NOT NULL DEFAULT 0,
+	  last_aired_at timestamptz,                                                -- null = never aired
+	  created_at    timestamptz NOT NULL DEFAULT now()
+	);
+
+	CREATE INDEX IF NOT EXISTS persona_memory_recall
+	  ON station.persona_memory (persona_id, kind, last_aired_at DESC NULLS FIRST);
+	SQL
