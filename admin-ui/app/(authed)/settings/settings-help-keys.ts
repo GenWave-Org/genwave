@@ -32,6 +32,8 @@ export const SETTINGS_HELP_KEYS = [
   "Station:PublicStreamUrl",
   "Tts:Endpoint",
   "Tts:Corrections",
+  "Tts:Fallback:Endpoint",
+  "Tts:Fallback:Voice",
   "Llm:Endpoint",
   "Llm:Model",
   "Llm:TimeoutSeconds",

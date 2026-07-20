@@ -81,6 +81,14 @@ public static class StationSettingsAllowlist
         // compiled SpeechCorrectionSet on every change — a PUT here reaches the very next render
         // with no api restart.
         new("Tts:Corrections",                                SettingApplyMode.Live,          SettingKind.String,     ""),
+        // Piper local-fallback engine (SPEC F70.1, STORY-190): FallbackTtsSynthesizer
+        // (GenWave.Tts) reads both via IOptionsMonitor<TtsFallbackOptions> per render, so a PUT
+        // here reaches the very next render with no api restart. Empty Endpoint is legal and is
+        // the disabled state — Piper not deployed, routing stays Kokoro-only (zero behavior
+        // change); the shipped compose.yaml sets a real value for its own `piper` sidecar. Voice is
+        // documentation only (see TtsFallbackOptions' own remarks) — it is never sent on the wire.
+        new("Tts:Fallback:Endpoint",                          SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Tts:Fallback:Voice",                             SettingApplyMode.Live,          SettingKind.String,     ""),
         new("Llm:Endpoint",                                   SettingApplyMode.Live,          SettingKind.String,     ""),
         new("Llm:Model",                                      SettingApplyMode.Live,          SettingKind.String,     ""),
         new("Llm:TimeoutSeconds",                             SettingApplyMode.Live,          SettingKind.Number,     "seconds"),

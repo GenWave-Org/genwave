@@ -143,6 +143,12 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "Operator pronunciation corrections applied to every spoken line before it reaches Kokoro " +
     "(e.g. \"MacLeod\" → \"Muh-cloud\"). A JSON array of {from, to} pairs; empty means no " +
     "corrections.",
+  "Tts:Fallback:Endpoint":
+    "The Piper local fallback TTS service base URL — used automatically when Kokoro is " +
+    "unhealthy or a render fails. Leave empty to disable the fallback engine entirely.",
+  "Tts:Fallback:Voice":
+    "The Piper voice model the fallback service is expected to be running — informational " +
+    "only; it is not sent with each render and does not change which voice Piper speaks with.",
   "Llm:Endpoint":
     "The LLM completion service base URL used to author patter copy — leave empty to disable " +
     "LLM-authored copy and fall back to templated copy.",

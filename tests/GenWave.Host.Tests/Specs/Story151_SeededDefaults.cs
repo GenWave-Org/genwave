@@ -146,6 +146,13 @@ public static class FeatureSeededDefaults
         // fact is what closes it (F63.1).
         ["Loudness:TargetLufs"] = "-16",
         ["Loudness:CeilingDbtp"] = "-1",
+        // Piper local fallback (SPEC F70.1, STORY-190, PLAN T34): unlike Llm:Endpoint (an honest
+        // blank — Ollama is a demo-only add-on), compose.yaml's base stack deploys a `piper`
+        // sidecar for every topology and points the api at it here, so a genuine fresh deploy has
+        // the fallback enabled out of the box — NOT a HonestlyBlankKeys entry. TtsFallbackOptions'
+        // own C# default stays empty/disabled for a bare (piper-less) deployment or test.
+        ["Tts:Fallback:Endpoint"] = "http://piper:5000",
+        ["Tts:Fallback:Voice"] = "en_US-lessac-medium",
     };
 
     static IConfiguration FreshDeployConfig() =>

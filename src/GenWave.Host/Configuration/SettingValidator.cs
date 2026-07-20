@@ -153,6 +153,15 @@ public sealed class SettingValidator(IConfiguration configuration)
             // {from, to} string pairs; empty ("[]" or blank) means no corrections and is legal.
             ["Tts:Corrections"] = IsValidCorrectionsArray,
 
+            // Piper local-fallback engine (SPEC F70.1, STORY-190) — Endpoint mirrors Llm:Endpoint's
+            // own shape: empty is the legal disabled state (Piper not deployed, F70.1), any
+            // non-empty value must be an absolute http/https URL. Voice is free text, same
+            // "no shape to police" story as Llm:Model — it is never sent on the wire
+            // (TtsFallbackOptions' own remarks), only compared by an operator against what the
+            // compose `piper` sidecar was actually started with.
+            ["Tts:Fallback:Endpoint"] = v => string.IsNullOrEmpty(v) || IsAbsoluteHttpUri(v),
+            ["Tts:Fallback:Voice"] = AlwaysValid,
+
             // LLM endpoint (F34.2, F36.2) — empty is the legal disabled state (blurbs stay
             // templated); any non-empty value must be an absolute http/https URL.
             ["Llm:Endpoint"] = v => string.IsNullOrEmpty(v) || IsAbsoluteHttpUri(v),
@@ -495,6 +504,8 @@ public sealed class SettingValidator(IConfiguration configuration)
             => $"Value '{value}' is not valid for '{key}'. Must be a non-empty absolute http/https URL.",
         var k when k.Equals("Tts:Corrections", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a JSON array of {{\"from\":\"...\",\"to\":\"...\"}} objects, e.g. [] or [{{\"from\":\"MacLeod\",\"to\":\"Muh-cloud\"}}].",
+        var k when k.Equals("Tts:Fallback:Endpoint", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable the Piper fallback engine.",
         var k when k.Equals("Llm:Endpoint", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable LLM-authored copy.",
         var k when k.Equals("Llm:TimeoutSeconds", StringComparison.OrdinalIgnoreCase)

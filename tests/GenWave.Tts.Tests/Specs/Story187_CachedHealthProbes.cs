@@ -184,5 +184,60 @@ public static class FeatureCachedDependencyHealthProbes
             // When/Then it throws — the driver, not the probe, decides the verdict's reason text
             await Assert.ThrowsAsync<HttpRequestException>(() => probe.ProbeAsync(CancellationToken.None));
         }
+
+        [Fact]
+        public static async Task Piper_probe_reports_not_configured_without_any_http_call_when_endpoint_is_empty()
+        {
+            // Given Tts:Fallback:Endpoint is empty — Piper not deployed (F70.1)
+            var handler = new FakeHttpMessageHandler((_, _) =>
+                throw new InvalidOperationException("must not call out when unconfigured"));
+            using var http = new HttpClient(handler);
+            var optionsMonitor = new TestOptionsMonitor<TtsFallbackOptions>(new TtsFallbackOptions { Endpoint = "" });
+            var probe = new PiperHealthProbe(http, optionsMonitor);
+
+            // When it is probed
+            var healthy = await probe.ProbeAsync(CancellationToken.None);
+
+            // Then it reports false (not-configured) and never calls out
+            Assert.False(healthy);
+            Assert.Empty(handler.Requests);
+        }
+
+        [Fact]
+        public static async Task Piper_probe_reports_healthy_on_the_no_text_500_a_real_piper_server_always_returns()
+        {
+            // Given a configured Piper endpoint that answers 500 — piper.http_server's ONE route
+            // always 500s absent a `?text=` query, even when the process is perfectly healthy
+            // (verified against the real artibex/piper-http image; see this probe's own remarks)
+            var handler = new FakeHttpMessageHandler((_, _) =>
+                Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError)));
+            using var http = new HttpClient(handler);
+            var optionsMonitor = new TestOptionsMonitor<TtsFallbackOptions>(new TtsFallbackOptions { Endpoint = "http://piper:5000" });
+            var probe = new PiperHealthProbe(http, optionsMonitor);
+
+            // When it is probed
+            var healthy = await probe.ProbeAsync(CancellationToken.None);
+
+            // Then it reports healthy anyway — reachability, not status code, is the signal here —
+            // and hit the root path (no dedicated health route exists on this wrapper)
+            Assert.True(healthy);
+            var request = Assert.Single(handler.Requests);
+            Assert.NotNull(request.RequestUri);
+            Assert.Equal("/", request.RequestUri.AbsolutePath);
+        }
+
+        [Fact]
+        public static async Task Piper_probe_throws_when_the_endpoint_is_unreachable_so_the_prober_can_record_a_reason()
+        {
+            // Given Piper is unreachable (connection refused, DNS failure, ...)
+            var handler = new FakeHttpMessageHandler((_, _) =>
+                throw new HttpRequestException("connection refused"));
+            using var http = new HttpClient(handler);
+            var optionsMonitor = new TestOptionsMonitor<TtsFallbackOptions>(new TtsFallbackOptions { Endpoint = "http://piper:5000" });
+            var probe = new PiperHealthProbe(http, optionsMonitor);
+
+            // When/Then it throws — the driver, not the probe, decides the verdict's reason text
+            await Assert.ThrowsAsync<HttpRequestException>(() => probe.ProbeAsync(CancellationToken.None));
+        }
     }
 }

@@ -30,6 +30,17 @@ public static class TtsServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // Piper fallback options (SPEC F70.1, STORY-190) — registered unconditionally, mirroring
+        // LlmOptions below: an empty Tts:Fallback:Endpoint just means FallbackTtsSynthesizer stays
+        // a pass-through to Kokoro. IOptionsMonitor<TtsFallbackOptions> (not IOptions) is what both
+        // FallbackTtsSynthesizer and PiperTtsSynthesizer/PiperHealthProbe read per call, so a live
+        // edit to Tts:Fallback:Endpoint/Voice applies without a restart.
+        services
+            .AddOptions<TtsFallbackOptions>()
+            .Bind(configuration.GetSection(TtsFallbackOptions.Section))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         // LLM options — registered unconditionally (SPEC F34.2); an empty Llm:Endpoint just means
         // LlmCopyWriter stays disabled. IOptionsMonitor<LlmOptions> (not IOptions) is what
         // LlmCopyWriter reads per render, so a live edit to Llm:Endpoint/Model/TimeoutSeconds/
@@ -86,6 +97,12 @@ public static class TtsServiceCollectionExtensions
         services.AddHttpClient<KokoroHealthProbe>();
         services.AddSingleton<IDependencyProbe>(sp => sp.GetRequiredService<KokoroHealthProbe>());
 
+        // Piper fallback probe (SPEC F70.1, F70.2, STORY-190) — third IDependencyProbe entry;
+        // DependencyHealthProber (and the Host's DependencyHealthProbeService driving it) needed no
+        // change at all to pick this up.
+        services.AddHttpClient<PiperHealthProbe>();
+        services.AddSingleton<IDependencyProbe>(sp => sp.GetRequiredService<PiperHealthProbe>());
+
         // TTS wiring: ISegmentCopyWriter is the copy-writer seam (SPEC F34.1) TtsSegmentSource
         // consumes. TemplateCopyWriter is registered concretely as the terminal fallback rung;
         // LlmCopyWriter (SPEC F34.2-F34.5) authors LeadIn/BackAnnounce from the configured LLM and
@@ -129,6 +146,10 @@ public static class TtsServiceCollectionExtensions
         // every keystroke.
         services.AddHttpClient<KokoroVoiceLister>();
 
+        // Piper fallback client (SPEC F70.1, STORY-190) — same no-BaseAddress discipline,
+        // Tts:Fallback:Endpoint read fresh per call inside PiperTtsSynthesizer.
+        services.AddHttpClient<PiperTtsSynthesizer>();
+
         // LlmCopyWriter's HTTP client (SPEC F34.3, F36.2): deliberately no BaseAddress here — the
         // endpoint comes from IOptionsMonitor<LlmOptions>.CurrentValue per render, so a live PUT
         // to Llm:Endpoint takes effect on the next call without an api restart.
@@ -148,18 +169,31 @@ public static class TtsServiceCollectionExtensions
                     sp.GetRequiredService<KokoroVoiceLister>(),
                     sp.GetRequiredService<IOptionsMonitor<TtsOptions>>(),
                     TimeSpan.FromMinutes(5)))
+            // FallbackTtsSynthesizer (SPEC F70.1, F70.4, STORY-190) sits BELOW
+            // NormalizingTtsSynthesizer, routing each render to Kokoro (primary) or Piper
+            // (fallback) — see its own remarks for the routing rule. Registered concretely once;
+            // nothing else in this project resolves it directly.
+            .AddSingleton<FallbackTtsSynthesizer>(sp =>
+                new FallbackTtsSynthesizer(
+                    sp.GetRequiredService<KokoroTtsSynthesizer>(),
+                    sp.GetRequiredService<PiperTtsSynthesizer>(),
+                    sp.GetRequiredService<IDependencyHealth>(),
+                    sp.GetRequiredService<IOptionsMonitor<TtsFallbackOptions>>(),
+                    sp.GetRequiredService<ILogger<FallbackTtsSynthesizer>>()))
             // The typed HttpClient factory registers KokoroTtsSynthesizer as transient; the
             // singleton every caller (TtsSegmentSource, SafeSegmentAuthor, TtsPreviewController)
-            // actually resolves is NormalizingTtsSynthesizer (SPEC F68.1, STORY-185) decorating it —
-            // the single Normalize call site sits here, not in any of those callers. Registered
-            // concretely ONCE and exposed under BOTH seams it implements (mirrors LlmCopyWriter's
+            // actually resolves is NormalizingTtsSynthesizer (SPEC F68.1, STORY-185) decorating
+            // FallbackTtsSynthesizer (T34) decorating KokoroTtsSynthesizer/PiperTtsSynthesizer —
+            // the single Normalize call site sits here, not in any of those callers, and runs
+            // exactly once whichever engine ultimately renders. Registered concretely ONCE and
+            // exposed under BOTH seams it implements (mirrors LlmCopyWriter's
             // ISegmentCopyWriter/IPersonaPreviewWriter split) — the on-air ITtsSynthesizer and the
             // preview-only ISpeechNormalizationPreview (SPEC F68.6, STORY-186 AC2) — so the admin
             // normalize-preview endpoint reuses the exact same normalization instance the feeder
             // does, never a second parallel one.
             .AddSingleton<NormalizingTtsSynthesizer>(sp =>
                 new NormalizingTtsSynthesizer(
-                    sp.GetRequiredService<KokoroTtsSynthesizer>(),
+                    sp.GetRequiredService<FallbackTtsSynthesizer>(),
                     sp.GetRequiredService<SpeechCorrectionProvider>(),
                     sp.GetRequiredService<CorrectionsFiredStats>(),
                     sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>()))
