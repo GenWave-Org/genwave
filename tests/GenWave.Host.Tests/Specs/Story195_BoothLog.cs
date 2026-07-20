@@ -1,62 +1,220 @@
-// STORY-195 — Booth log
+// STORY-195 — Booth log (WIRE, admin-feed half)
 //
-// BDD specification — xUnit (SPEC F72.1–F72.4). Pending scaffold; /build-loop (PLAN T39)
-// implements and removes Skip. The admin-UI feed page is T40 (browser-verified).
+// BDD specification — xUnit (SPEC F72.2, F72.4). Host.Tests has no station Postgres by convention
+// (MediaLibrary.Tests owns DB Integration) — this file covers the endpoint's paging/admin-only/
+// not-public behavior behind a fake IBoothLogReader (the endpoint's read seam). The narrative-row
+// content (F72.1) and retention (F72.3) — both real-DB behavior a fake store would never exercise
+// honestly — live in GenWave.MediaLibrary.Tests/Specs/Story195_BoothLogStore.cs instead, driving
+// real event objects through the real BoothLogWriter/BoothLogDrainService into a real (test) DB.
+// The admin-UI feed page is T40 (browser-verified).
 
-using Xunit;
+using System.Net;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
+using GenWave.Host.Api;
 
 namespace GenWave.Host.Tests.Specs;
 
+// ── In-process fakes ──────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// In-memory <see cref="IBoothLogReader"/> double: performs the SAME keyset-paging predicate
+/// <c>BoothLogRepository.ReadAsync</c> does (row-wise <c>(occurred_at, id) &lt; before</c>,
+/// newest-first) over a fixed, caller-supplied (already newest-first) row set — so a scenario proves
+/// the CONTROLLER's cursor round-trip honestly without a real database. Records every call.
+/// </summary>
+file sealed class FakeBoothLogReader(IReadOnlyList<BoothLogEntry> allNewestFirst) : IBoothLogReader
+{
+    public List<(BoothLogCursor? Before, int Take)> Calls { get; } = [];
+
+    public Task<BoothLogPage> ReadAsync(BoothLogCursor? before, int take, CancellationToken ct)
+    {
+        Calls.Add((before, take));
+
+        var candidates = before is null
+            ? allNewestFirst
+            : allNewestFirst.Where(e => IsBefore(e, before)).ToList();
+
+        var page = candidates.Take(take).ToList();
+        var nextBefore = candidates.Count > take ? new BoothLogCursor(page[^1].OccurredAt, page[^1].Id) : null;
+
+        return Task.FromResult(new BoothLogPage(page, nextBefore));
+    }
+
+    static bool IsBefore(BoothLogEntry e, BoothLogCursor cursor) =>
+        e.OccurredAt < cursor.OccurredAt || (e.OccurredAt == cursor.OccurredAt && e.Id < cursor.Id);
+}
+
+/// <summary>Builds a <see cref="BoothLogController"/> wired to the given fake reader.</summary>
+file static class BoothLogControllerFactory
+{
+    public static BoothLogController Build(IBoothLogReader reader) => new(reader);
+}
+
+// ── WebApplicationFactory for the auth/surface posture ACs ──────────────────────────────────────────
+
+/// <summary>
+/// Minimal <see cref="WebApplicationFactory{TEntryPoint}"/> that brings up the real HTTP pipeline
+/// (routing, auth, the surface gate) while removing hosted services that would attempt real
+/// Liquidsoap/Postgres connections. Mirrors Story163's <c>PoliciesWebFactory</c>/Story171's
+/// <c>SpectatorHardeningWebFactory</c> shape — neither scenario below ever resolves
+/// <see cref="IBoothLogReader"/> (401 is rejected by auth middleware before the controller is ever
+/// constructed), so the booth log's own connection string is left at its (empty, dev-mode) default.
+/// </summary>
+file sealed class BoothLogApiWebFactory(bool spectatorMode = false) : WebApplicationFactory<Program>
+{
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development");
+        if (spectatorMode)
+        {
+            builder.UseSetting("Station:SpectatorMode", "true");
+            builder.UseSetting("Station:PublicStreamUrl", "https://demo.example/stream");
+        }
+
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IHostedService>();
+            services.RemoveAll<IMediaCatalog>();
+            services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
+            services.RemoveAll<IActivePersonaAccessor>();
+            services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
+        });
+    }
+
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        var prevLibrary = Environment.GetEnvironmentVariable("ConnectionStrings__Library");
+        var prevAdmin = Environment.GetEnvironmentVariable("Admin__Password");
+        Environment.SetEnvironmentVariable("ConnectionStrings__Library", "Host=nowhere;Database=test");
+        Environment.SetEnvironmentVariable("Admin__Password", "test-password-x7z");
+        try
+        {
+            return base.CreateHost(builder);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ConnectionStrings__Library", prevLibrary);
+            Environment.SetEnvironmentVariable("Admin__Password", prevAdmin);
+        }
+    }
+}
+
+// ── Specs ────────────────────────────────────────────────────────────────────────────────────────
+
 public static class FeatureBoothLog
 {
-    private const string Pending = "pending — PLAN T39 (/build-loop)";
+    static BoothLogEntry Entry(long id, DateTime occurredAt, string kind, string summary) =>
+        new(id, occurredAt, kind, summary);
 
-    public static class ScenarioNarrativeRows
+    static readonly DateTime Now = new(2026, 7, 20, 12, 0, 0, DateTimeKind.Utc);
+
+    // Five rows, newest-first — the fixed row set every ScenarioAdminFeed fact pages over.
+    static readonly BoothLogEntry[] FiveRowsNewestFirst =
+    [
+        Entry(5, Now, "track-started", "Started 'Fifth Song' by Artist E"),
+        Entry(4, Now.AddMinutes(-1), "patter-aired", "Patter aired (LeadIn, voice: af_heart)"),
+        Entry(3, Now.AddMinutes(-2), "track-started", "Started 'Third Song' by Artist C"),
+        Entry(2, Now.AddMinutes(-3), "mode-changed", "LLM degradation: Normal → Soft (…)"),
+        Entry(1, Now.AddMinutes(-4), "track-started", "Started 'First Song' by Artist A"),
+    ];
+
+    // ── HAPPY PATH ────────────────────────────────────────────────────────
+
+    public sealed class ScenarioAdminFeed
     {
-        [Fact(Skip = Pending)]
-        public static void Station_events_land_as_narrative_rows()
+        [Fact]
+        public async Task Endpoint_pages_newest_first_with_stable_paging()
         {
-            // Given track starts, patter airs, and a mode change occurring
-            // When  the booth_log table is read
-            // Then  each event has a narrative row with occurred_at, kind, and
-            //       operator-readable summary (F72.1)
-            Assert.Fail(Pending);
+            // Given booth log rows spanning several pages...
+            var controller = BoothLogControllerFactory.Build(new FakeBoothLogReader(FiveRowsNewestFirst));
+
+            // When the AdminOnly endpoint is paged, two rows at a time...
+            var page1 = Assert.IsType<BoothLogPageDto>(
+                Assert.IsType<OkObjectResult>(await controller.List(before: null, take: 2, CancellationToken.None)).Value);
+            var page2 = Assert.IsType<BoothLogPageDto>(
+                Assert.IsType<OkObjectResult>(await controller.List(before: page1.NextBefore, take: 2, CancellationToken.None)).Value);
+            var page3 = Assert.IsType<BoothLogPageDto>(
+                Assert.IsType<OkObjectResult>(await controller.List(before: page2.NextBefore, take: 2, CancellationToken.None)).Value);
+
+            // Then rows return newest-first with stable paging — every row exactly once, in order,
+            // and the final page's cursor is exhausted.
+            Assert.Equal(["Started 'Fifth Song' by Artist E", "Patter aired (LeadIn, voice: af_heart)"],
+                page1.Entries.Select(e => e.Summary));
+            Assert.NotNull(page1.NextBefore);
+
+            Assert.Equal(["Started 'Third Song' by Artist C", "LLM degradation: Normal → Soft (…)"],
+                page2.Entries.Select(e => e.Summary));
+            Assert.NotNull(page2.NextBefore);
+
+            Assert.Equal(["Started 'First Song' by Artist A"], page3.Entries.Select(e => e.Summary));
+            Assert.Null(page3.NextBefore);
+        }
+
+        [Fact]
+        public async Task Malformed_cursor_returns_400()
+        {
+            var controller = BoothLogControllerFactory.Build(new FakeBoothLogReader([]));
+
+            var result = await controller.List(before: "not-a-cursor", take: 10, CancellationToken.None);
+
+            Assert.IsType<BadRequestObjectResult>(result);
+        }
+
+        [Fact]
+        public async Task Anonymous_request_is_rejected()
+        {
+            // Given no session cookie...
+            await using var factory = new BoothLogApiWebFactory();
+            var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+            // When the AdminOnly endpoint is requested...
+            var response = await client.GetAsync("/api/booth-log");
+
+            // Then it is rejected, same as every other admin route.
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
     }
 
-    public static class ScenarioAdminFeed
-    {
-        [Fact(Skip = Pending)]
-        public static void Endpoint_pages_newest_first_with_stable_paging()
-        {
-            // Given booth log rows spanning several pages
-            // When  the AdminOnly endpoint is paged
-            // Then  rows return newest-first with stable paging (F72.2)
-            Assert.Fail(Pending);
-        }
-    }
+    // ── SAD PATH ──────────────────────────────────────────────────────────
 
-    public static class ScenarioRetention
+    public sealed class SadPathPublicSurface
     {
-        [Fact(Skip = Pending)]
-        public static void Insert_evicts_rows_older_than_the_retention_window()
+        [Fact]
+        public async Task No_booth_log_content_or_endpoint_is_publicly_reachable()
         {
-            // Given rows older than the retention window
-            // When  a new row is inserted
-            // Then  expired rows are gone and the table stays bounded (F72.3)
-            Assert.Fail(Pending);
-        }
-    }
+            // Given SpectatorMode on...
+            await using var factory = new BoothLogApiWebFactory(spectatorMode: true);
+            var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
-    public static class SadPathPublicSurface
-    {
-        [Fact(Skip = Pending)]
-        public static void No_booth_log_content_or_endpoint_is_publicly_reachable()
-        {
-            // Given SpectatorMode on
-            // When  every spectator payload and route is enumerated
-            // Then  no booth log content or endpoint is reachable publicly (F72.4)
-            Assert.Fail(Pending);
+            // When the booth log route is requested without a session...
+            var response = await client.GetAsync("/api/booth-log");
+
+            // Then it is never publicly reachable — the same AdminOnly gate as with SpectatorMode off.
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+
+            // And when every route is enumerated...
+            var endpoint = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints
+                .Single(e => (e as RouteEndpoint)?.RoutePattern.RawText
+                    ?.Equals("api/booth-log", StringComparison.OrdinalIgnoreCase) == true);
+
+            // Then the booth log endpoint carries the AdminOnly policy, not Spectator, and no
+            // SpectatorSurface marker — it is not classified (or reachable) as a spectator/public
+            // route by construction (F72.4).
+            var policies = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Select(a => a.Policy).ToList();
+            Assert.Contains(AuthorizationPolicies.AdminOnly, policies);
+            Assert.DoesNotContain(AuthorizationPolicies.Spectator, policies);
+            Assert.Null(endpoint.Metadata.GetMetadata<SpectatorSurfaceAttribute>());
+            Assert.NotNull(endpoint.Metadata.GetMetadata<AdminSurfaceAttribute>());
         }
     }
 }

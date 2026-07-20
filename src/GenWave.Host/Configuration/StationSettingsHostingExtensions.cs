@@ -52,6 +52,13 @@ static class StationSettingsHostingExtensions
         // throws (WARN + null on any miss).
         builder.Services.AddSingleton<IActivePersonaAccessor, ActivePersonaAccessor>();
 
+        // Booth log (SPEC F72.1-F72.3, STORY-195): same station_svc connection string as the
+        // settings overlay/persona store above — station.booth_log lives in the same schema. Adds
+        // the store (IBoothLogAppender/IBoothLogReader), the queue, and the drain hosted service;
+        // AddGenWavePlayout composes BoothLogWriter (IBoothLogEventConsumer) into the host's ONE
+        // IStationEventSink binding.
+        builder.Services.AddBoothLog(stationConnStr, builder.Configuration);
+
         return builder;
     }
 }

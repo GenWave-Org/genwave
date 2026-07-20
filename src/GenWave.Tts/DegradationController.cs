@@ -2,6 +2,8 @@ namespace GenWave.Tts;
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using GenWave.Core.Abstractions;
+using GenWave.Core.Events;
 
 /// <summary>
 /// The LLM degradation state machine (SPEC F69.1–F69.5, STORY-188): Normal/Soft/Hard, one step at
@@ -70,8 +72,13 @@ public sealed class DegradationController(
     IOptionsMonitor<LlmOptions> llmOptions,
     IOptionsMonitor<DegradationOptions> degradationOptions,
     TimeProvider timeProvider,
-    ILogger<DegradationController> logger)
+    ILogger<DegradationController> logger,
+    IStationEventSink? events = null)
 {
+    // Mode-change publish seam (SPEC F72.1, STORY-195, T39 — depends on this class's own T32
+    // transitions); no-op unless the host binds a real sink (gitea-#246).
+    readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
+
     /// <summary>Cause shown while <see cref="LlmOptions.Endpoint"/> is empty — see the class remarks.</summary>
     public const string NotConfiguredCause = "LLM not configured (Llm:Endpoint is empty)";
 
@@ -196,6 +203,8 @@ public sealed class DegradationController(
 
         logger.LogInformation(
             "LLM degradation mode {Previous} -> {New} ({Cause})", previous, newMode, cause);
+
+        events.Publish(new DegradationModeChanged(previous.ToString(), newMode.ToString(), cause));
     }
 
     DegradationSnapshot Snapshot() => new(mode, pinned, since, cause);
