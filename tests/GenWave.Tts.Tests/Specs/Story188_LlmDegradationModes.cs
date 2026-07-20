@@ -93,7 +93,7 @@ public static class FeatureLlmDegradationModes
         var template = new TemplateCopyWriter(new PatterTemplateRenderer());
         var llmWriter = new LlmCopyWriter(
             template, new FakeHttpClientFactory(), llmOptions, holder, new FakeActivePersonaAccessor(),
-            new CapturingLogger<LlmCopyWriter>());
+            new CapturingLogger<LlmCopyWriter>(), clock);
         var writer = new DegradationGatedCopyWriter(controller, llmWriter, template, degradationOptions, clock);
         return (writer, template, controller, holder, health, clock, llmOptions);
     }
@@ -423,7 +423,7 @@ public static class FeatureLlmDegradationModes
             // Given Hard mode active
             await using var mock = await MockCompletionsServer.StartAsync();
             mock.Mode = MockCompletionsMode.Fail;
-            var (controller, holder, _, _, llmOptions, _) = BuildController(mock.BaseUri.ToString(), pin: "hard");
+            var (controller, holder, _, clock, llmOptions, _) = BuildController(mock.BaseUri.ToString(), pin: "hard");
             Assert.Equal(DegradationMode.Hard, controller.Evaluate().Mode);
 
             // The operator-explicit seam (IPersonaPreviewWriter) is registered directly against
@@ -432,7 +432,7 @@ public static class FeatureLlmDegradationModes
             // in sight, to prove the "never gated" property holds structurally, not by a runtime check.
             IPersonaPreviewWriter previewWriter = new LlmCopyWriter(
                 new TemplateCopyWriter(new PatterTemplateRenderer()), new FakeHttpClientFactory(), llmOptions,
-                holder, new FakeActivePersonaAccessor(), new CapturingLogger<LlmCopyWriter>());
+                holder, new FakeActivePersonaAccessor(), new CapturingLogger<LlmCopyWriter>(), clock);
 
             // When an operator triggers an explicit preview/test render
             var result = await previewWriter.WritePreviewAsync(LeadInRequest(), personaOverride: null, CancellationToken.None);

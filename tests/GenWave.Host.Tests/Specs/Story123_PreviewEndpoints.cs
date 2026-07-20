@@ -91,6 +91,12 @@ file sealed class FakePersonaStore : IPersonaStore
 
     public Task<PersonaWriteResult> DeleteAsync(long id, CancellationToken ct) =>
         throw new NotSupportedException("Preview never writes through IPersonaStore.");
+
+    // Never reached by these scenarios either (FakeActivePersonaAccessor below only overrides
+    // ResolveAsync — ResolveCardAsync stays the interface's own no-card default) — a plain null is
+    // enough to satisfy IPersonaStore without asserting anything about a path nothing here exercises.
+    public Task<PersonaCard?> GetCardByIdAsync(long id, CancellationToken ct) =>
+        Task.FromResult<PersonaCard?>(null);
 }
 
 /// <summary>Unused-by-preview <see cref="IStationSettingsStore"/> double — the constructor

@@ -32,6 +32,11 @@ sealed class ActivePersonaAccessor(
     // process restart or an id change both naturally re-arm it.
     long lastWarnedActiveId;
 
+    // Separate from lastWarnedActiveId (T37, STORY-193): ResolveAsync and ResolveCardAsync are two
+    // independent reads of the SAME activeId, each with its own WarnOnce dedup — sharing one field
+    // would let one method's warn silently suppress the other's for a genuinely distinct failure.
+    long lastWarnedCardActiveId;
+
     public async Task<Persona?> ResolveAsync(CancellationToken ct)
     {
         var activeId = stationMonitor.CurrentValue.Persona.ActiveId;
@@ -71,6 +76,46 @@ sealed class ActivePersonaAccessor(
     void WarnOnce(long activeId, Action logAction)
     {
         if (Interlocked.Exchange(ref lastWarnedActiveId, activeId) == activeId)
+            return;
+
+        logAction();
+    }
+
+    /// <summary>
+    /// SPEC F71.1/F71.3/F71.7 (STORY-193): the card-definition counterpart to <see cref="ResolveAsync"/>,
+    /// re-reading <c>Station:Persona:ActiveId</c> fresh exactly the same way.
+    /// </summary>
+    public async Task<PersonaCard?> ResolveCardAsync(CancellationToken ct)
+    {
+        var activeId = stationMonitor.CurrentValue.Persona.ActiveId;
+
+        if (activeId <= 0)
+            return null;
+
+        try
+        {
+            // A missing/card-less row degrades silently here — NO log: ResolveAsync's own call for
+            // this same activeId already reports a stale ActiveId once (its own WarnOnce); logging
+            // it again from this sibling method would just double the line for one event.
+            return await personaStore.GetCardByIdAsync(activeId, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Unlike a missing row, an unexpected store fault IS worth its own line — ResolveAsync's
+            // own catch block only covers ITS OWN GetByIdAsync call, not this one.
+            WarnCardOnce(activeId, () => logger.LogWarning(ex,
+                "Failed to resolve active persona card id={ActiveId} — degrading to no card", activeId));
+            return null;
+        }
+    }
+
+    void WarnCardOnce(long activeId, Action logAction)
+    {
+        if (Interlocked.Exchange(ref lastWarnedCardActiveId, activeId) == activeId)
             return;
 
         logAction();

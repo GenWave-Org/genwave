@@ -40,7 +40,8 @@ public static class FeaturePersonaPreviewWriter
             }),
             holder,
             new FakeActivePersonaAccessor(),
-            new CapturingLogger<LlmCopyWriter>());
+            new CapturingLogger<LlmCopyWriter>(),
+            TimeProvider.System);
         return (writer, holder);
     }
 

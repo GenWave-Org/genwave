@@ -17,7 +17,7 @@ public static class FeaturePersonaStorage
     // Helpers
     // ---------------------------------------------------------------------
 
-    static PersonaRepository Repo(DatabaseFixture db) => new(db.StationDataSource);
+    static PersonaRepository Repo(DatabaseFixture db) => new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
 
     /// <summary>
     /// Returns (data_type, is_nullable, column_default) for the named column on

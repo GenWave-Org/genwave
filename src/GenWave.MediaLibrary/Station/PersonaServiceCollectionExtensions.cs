@@ -17,12 +17,17 @@ public static class PersonaServiceCollectionExtensions
     /// <summary>
     /// Registers <see cref="IPersonaStore"/> over a dedicated <see cref="NpgsqlDataSource"/> built
     /// from <paramref name="connectionString"/> (the same value the caller passes to
-    /// <c>ConnectionStrings:Station</c>-backed services). The data source is constructed lazily
-    /// inside the factory — not eagerly here — so an empty connection string (dev/test hosts that
-    /// never configure Station) never blocks composition; the failure only surfaces if a request
-    /// actually resolves <see cref="IPersonaStore"/>.
+    /// <c>ConnectionStrings:Station</c>-backed services). The data source build itself is wrapped
+    /// in a <see cref="Lazy{T}"/> (T37, STORY-193 review finding) rather than run inline in this
+    /// factory: an empty connection string (dev/test hosts, or any deployment that simply doesn't
+    /// use personas — <c>ConnectionStrings:Station</c> defaults to <c>""</c>) throws the moment
+    /// <see cref="NpgsqlDataSourceBuilder.Build"/> runs, and merely RESOLVING
+    /// <see cref="IPersonaStore"/> from DI — which now happens on every TTS render via
+    /// <c>ActivePersonaCorrectionsCache</c>, not only on persona-specific requests — must never be
+    /// enough to trigger that. See <see cref="PersonaRepository"/>'s own remarks for the full
+    /// "resolves AND USES" distinction this preserves.
     /// </summary>
     public static IServiceCollection AddPersonaStore(this IServiceCollection services, string connectionString) =>
         services.AddSingleton<IPersonaStore>(
-            _ => new PersonaRepository(new NpgsqlDataSourceBuilder(connectionString).Build()));
+            _ => new PersonaRepository(new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build())));
 }

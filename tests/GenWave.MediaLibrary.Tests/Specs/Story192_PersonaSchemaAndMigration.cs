@@ -23,7 +23,7 @@ public static class FeaturePersonaSchemaAndMigration
     static void RunCardMigrationScript(DatabaseFixture db) =>
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "11-persona-card-migration.sh"));
 
-    static PersonaRepository Repo(DatabaseFixture db) => new(db.StationDataSource);
+    static PersonaRepository Repo(DatabaseFixture db) => new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
 
     static PersonaCardMigrator Migrator(DatabaseFixture db, Persona? active) =>
         new(db.StationDataSource, new FakeActivePersonaAccessor(active), NullLogger<PersonaCardMigrator>.Instance);
@@ -218,6 +218,49 @@ public static class FeaturePersonaSchemaAndMigration
                 "Backstory: grew up chasing pirate radio\nStyle: wry and warm";
 
             Assert.Equal(preMigrationPersonaSection, card.Soul);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // SAD PATH — the default persona's snapshot soul survives an ordinary edit (review follow-up, T37)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioDefaultPersonaEditGuard(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task EditingTheDefaultPersonaPreservesItsSnapshotSoulWhenLegacyFieldsAreEmpty()
+        {
+            // Given the migrated default persona row: PersonaCardMigrator's own insert never
+            // populates its legacy backstory/style columns (they stay at their empty defaults),
+            // while its definition.soul holds a one-time snapshot of whichever persona was active
+            // at migration time.
+            RunCardMigrationScript(db);
+            await db.ResetStationAsync();
+            var repo = Repo(db);
+            var active = Assert.IsType<PersonaWriteResult.Created>(
+                await repo.CreateAsync(
+                    new PersonaDraft("Nova Q", "grew up chasing pirate radio", "wry and warm", "af_heart"),
+                    CancellationToken.None)).Persona;
+            await Migrator(db, active).RunAsync(CancellationToken.None);
+
+            await using var conn = await db.StationDataSource.OpenConnectionAsync();
+            var defaultId = await conn.ExecuteScalarAsync<long>(
+                "select id::bigint from station.persona where slug = @slug",
+                new { slug = PersonaCardMigrator.DefaultSlug });
+
+            // When an admin edits the default persona through the ordinary repository path (renamed,
+            // new voice) without ever supplying backstory/style — its legacy fields were already
+            // empty, so LegacyPersonaCardMapper.BuildCard would otherwise rebuild an empty soul...
+            var outcome = await repo.UpdateAsync(
+                defaultId, new PersonaDraft("Default", "", "", "new-voice"), CancellationToken.None);
+            Assert.IsType<PersonaWriteResult.Updated>(outcome);
+
+            // Then the pre-existing snapshot soul is preserved rather than wiped to empty.
+            var card = await repo.GetCardByIdAsync(defaultId, CancellationToken.None);
+            Assert.NotNull(card);
+            Assert.Contains("grew up chasing pirate radio", card.Soul);
         }
     }
 }

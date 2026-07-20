@@ -25,4 +25,17 @@ public interface IActivePersonaAccessor
     /// implementation.
     /// </summary>
     Task<Persona?> ResolveAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Resolves the active persona's card definition (SPEC F71.1, F71.3, F71.7) — the
+    /// quirks/corrections/soul document, this seam's F71 counterpart to <see cref="ResolveAsync"/>'s
+    /// legacy shape. Same never-throws contract: no active persona, a card-less row, or any store
+    /// fault all resolve to <see langword="null"/>, never a stall.
+    ///
+    /// Default-implemented (not abstract) so this Q3 addition to a published MIT contract
+    /// (<c>GenWave.Abstractions</c>) stays strictly additive — every implementer that predates F71
+    /// (a test double, or a host built against an older SDK version) keeps compiling unchanged and
+    /// simply reports "no card" until it opts in with a real override.
+    /// </summary>
+    Task<PersonaCard?> ResolveCardAsync(CancellationToken ct) => Task.FromResult<PersonaCard?>(null);
 }

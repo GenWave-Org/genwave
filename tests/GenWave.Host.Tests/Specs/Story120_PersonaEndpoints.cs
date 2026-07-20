@@ -78,6 +78,11 @@ file sealed class FakePersonaStore : IPersonaStore
         DeleteCalls.Add(id);
         return Task.FromResult(DeleteResult);
     }
+
+    // Not exercised by Story120's CRUD scenarios (none of them read a card) — a plain null keeps
+    // this double satisfying IPersonaStore without scripting a path nothing here calls.
+    public Task<PersonaCard?> GetCardByIdAsync(long id, CancellationToken ct) =>
+        Task.FromResult<PersonaCard?>(null);
 }
 
 /// <summary>

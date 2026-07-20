@@ -44,6 +44,20 @@ public sealed class SpeechCorrectionProvider : IDisposable
     /// <summary>The current immutable snapshot of operator corrections.</summary>
     public SpeechCorrectionSet Current => current;
 
+    /// <summary>
+    /// The station-over-card merge seam (SPEC F71.7, STORY-193): compiles <paramref
+    /// name="cardCorrections"/> the same way <see cref="Current"/>'s own station rules are compiled
+    /// (<see cref="SpeechCorrectionSet.Create"/>) and merges them beneath <paramref
+    /// name="stationSet"/> via <see cref="SpeechCorrectionSet.Merge"/> — station wins on an
+    /// identical <see cref="SpeechCorrection.From"/> (case-insensitive). A free function rather
+    /// than an instance method: it needs no state of its own beyond the two sets handed to it, so
+    /// callers (<see cref="NormalizingTtsSynthesizer"/>) can build the merged snapshot at their own
+    /// render-time cadence without this provider knowing anything about the card side at all.
+    /// </summary>
+    public static SpeechCorrectionSet BuildMerged(
+        SpeechCorrectionSet stationSet, IReadOnlyList<SpeechCorrection> cardCorrections) =>
+        SpeechCorrectionSet.Merge(stationSet, SpeechCorrectionSet.Create(cardCorrections));
+
     static SpeechCorrectionSet Build(TtsCorrectionsOptions options, ILogger logger)
     {
         if (string.IsNullOrWhiteSpace(options.Corrections))

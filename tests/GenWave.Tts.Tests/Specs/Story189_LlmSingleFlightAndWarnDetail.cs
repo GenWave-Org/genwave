@@ -54,7 +54,8 @@ public static class FeatureLlmSingleFlight
                 new TestOptionsMonitor<LlmOptions>(Options("http://mock-llm.invalid")),
                 new LlmCopyStatusHolder(),
                 new FakeActivePersonaAccessor(),
-                new CapturingLogger<LlmCopyWriter>());
+                new CapturingLogger<LlmCopyWriter>(),
+                TimeProvider.System);
 
             // When their backend calls are traced (the handler counts overlapping SendAsync calls
             // — each call holds its slot for a short delay so an un-gated pair would overlap it)
@@ -87,7 +88,8 @@ public static class FeatureLlmSingleFlight
                 new TestOptionsMonitor<LlmOptions>(Options(mock.BaseUri.ToString())),
                 new LlmCopyStatusHolder(),
                 new FakeActivePersonaAccessor(),
-                logger);
+                logger,
+                TimeProvider.System);
             var request = LeadInRequest();
 
             // When the warning is logged

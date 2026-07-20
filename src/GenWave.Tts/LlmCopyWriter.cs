@@ -20,10 +20,18 @@ using GenWave.Core.Domain;
 /// <see cref="GenWave.Core.Abstractions.ITtsSegmentSource"/> (F12.4 extended).
 ///
 /// <paramref name="personaAccessor"/> is resolved once per LeadIn/BackAnnounce render (SPEC F35.2,
-/// F35.3) — never for the templated kinds or a disabled writer — and, when it yields a persona,
-/// composes an appended backstory + style section onto the baked system prompt (see
-/// <see cref="BuildPersonaSection"/>). No persona active, or one with empty Backstory/Style, leaves
-/// the prompt exactly as it was before T6 (F35.2 — blurbs work persona-less).
+/// F35.3, F71.3) — never for the templated kinds or a disabled writer — both for the legacy
+/// <c>Persona</c> row AND its card counterpart, composing an appended soul + sampled-quirks section
+/// onto the baked system prompt (see <see cref="LlmPromptBuilder.BuildPersonaSection"/>). No persona
+/// active, and no soul/quirks to show, leaves the prompt exactly as it was before T6 (F35.2 —
+/// blurbs work persona-less).
+///
+/// <para>
+/// The DJ's clock (SPEC F71.8, gh-#13, STORY-193): <paramref name="timeProvider"/> stamps every
+/// prompt this writer builds — persona active or not — with the current date/weekday/time in
+/// station-local terms (see <see cref="LlmPromptBuilder.BuildStationClockLine"/>), so the model
+/// answers from the injected clock rather than inventing one.
+/// </para>
 ///
 /// <para>
 /// Every backend completion call — on-air (<see cref="WriteAsync"/>) and preview
@@ -39,7 +47,8 @@ public sealed class LlmCopyWriter(
     IOptionsMonitor<LlmOptions> optionsMonitor,
     LlmCopyStatusHolder statusHolder,
     IActivePersonaAccessor personaAccessor,
-    ILogger<LlmCopyWriter> logger) : ISegmentCopyWriter, IPersonaPreviewWriter
+    ILogger<LlmCopyWriter> logger,
+    TimeProvider timeProvider) : ISegmentCopyWriter, IPersonaPreviewWriter
 {
     /// <summary>Name of the <see cref="IHttpClientFactory"/> client this writer resolves (registered in Program.cs).</summary>
     public const string HttpClientName = "Llm";
@@ -64,12 +73,6 @@ public sealed class LlmCopyWriter(
     /// next caller in line.
     /// </summary>
     readonly SemaphoreSlim singleFlight = new(1, 1);
-
-    // T6 reviewer follow-up (T4): Backstory/Style are unbounded operator-entered text (F35.1 has no
-    // length cap on the persona row) that flows straight into an LLM prompt. Capped per-field rather
-    // than left open so one oversized persona can't balloon every render's request body / token
-    // spend; a few thousand chars is generous for backstory/style prose while still bounding it.
-    const int MaxPersonaSectionFieldChars = 4000;
 
     static readonly Regex NewlinePattern = new(@"\r\n|\r|\n", RegexOptions.Compiled);
     static readonly Regex BracketStageDirectionPattern = new(@"\[[^\]]*\]", RegexOptions.Compiled);
@@ -113,7 +116,11 @@ public sealed class LlmCopyWriter(
             // call already sits inside the catch-all below, so an unexpected fault still degrades
             // to the template rung like every other miss (F12.4).
             persona = await personaAccessor.ResolveAsync(ct);
-            var raw = await RequestCompletionAsync(cfg, request, persona, ct);
+            // The card counterpart (SPEC F71.1, F71.3, STORY-193) — same never-throws, re-read-fresh
+            // contract as ResolveAsync above. Soul/quirks are sourced from THIS, with legacy
+            // Backstory/Style as the fallback (see LlmPromptBuilder.BuildSoul's own remarks).
+            var card = await personaAccessor.ResolveCardAsync(ct);
+            var raw = await RequestCompletionAsync(cfg, request, persona, card, ct);
             var cleaned = CleanCopy(raw, cfg.MaxCopyChars);
             if (cleaned is null)
             {
@@ -175,7 +182,13 @@ public sealed class LlmCopyWriter(
         var attemptedAt = DateTimeOffset.UtcNow;
         try
         {
-            var raw = await RequestCompletionAsync(cfg, request, personaOverride, ct);
+            // No card here, by design: a preview audits the EXPLICIT personaOverride the caller
+            // handed in (an in-progress admin edit, possibly never saved) — there is no "active
+            // persona's card" to resolve that would correspond to it. Soul falls back to the
+            // legacy Backstory/Style composition (see LlmPromptBuilder.BuildSoul); quirks stay
+            // absent. The clock (F71.8) still reaches this prompt regardless — it lives in
+            // LlmPromptBuilder.BuildUserContent, not here.
+            var raw = await RequestCompletionAsync(cfg, request, personaOverride, card: null, ct);
             var cleaned = CleanCopy(raw, cfg.MaxCopyChars);
             return cleaned is null
                 ? new PersonaPreviewResult.Failed("The LLM returned empty or over-length copy.")
@@ -231,7 +244,7 @@ public sealed class LlmCopyWriter(
     }
 
     async Task<string> RequestCompletionAsync(
-        LlmOptions cfg, SegmentRequest request, Persona? persona, CancellationToken ct)
+        LlmOptions cfg, SegmentRequest request, Persona? persona, PersonaCard? card, CancellationToken ct)
     {
         // Single-flight (SPEC F69.6, gh-#36): acquired BEFORE the per-call timeout clock starts, so
         // a caller queued behind another generation is waiting its turn, not burning its own
@@ -256,8 +269,8 @@ public sealed class LlmCopyWriter(
                 model = cfg.Model,
                 messages = new object[]
                 {
-                    new { role = "system", content = BuildSystemPrompt(BuildPersonaSection(persona)) },
-                    new { role = "user", content = BuildUserContent(request) },
+                    new { role = "system", content = LlmPromptBuilder.BuildSystemPrompt(LlmPromptBuilder.BuildPersonaSection(persona, card)) },
+                    new { role = "user", content = LlmPromptBuilder.BuildUserContent(request, LlmPromptBuilder.BuildStationClockLine(timeProvider)) },
                 },
             };
 
@@ -282,71 +295,6 @@ public sealed class LlmCopyWriter(
         {
             singleFlight.Release();
         }
-    }
-
-    /// <summary>
-    /// Baked house scaffold for the system prompt (SPEC F34.3): personality-neutral radio DJ, 1-2
-    /// spoken sentences, no stage directions. <paramref name="personaSection"/> (SPEC F35.2, F35.3)
-    /// appends an active persona's backstory + style beneath the scaffold; null/empty (no active
-    /// persona, or one with no non-empty Backstory/Style) leaves the neutral scaffold untouched —
-    /// blurbs work persona-less exactly as before T6.
-    /// </summary>
-    static string BuildSystemPrompt(string? personaSection)
-    {
-        const string Scaffold =
-            "You are a personality-neutral radio DJ writing live station patter. Write exactly one " +
-            "or two sentences of spoken copy to be read aloud on air. Plain spoken words only - no " +
-            "stage directions, no emoji, no markdown formatting, no sound-effect cues. You may " +
-            "embellish with genuine knowledge of the track, artist, or era.";
-
-        return string.IsNullOrEmpty(personaSection) ? Scaffold : $"{Scaffold}\n\n{personaSection}";
-    }
-
-    /// <summary>
-    /// Composes the persona section from <see cref="Persona.Backstory"/> + <see cref="Persona.Style"/>
-    /// (SPEC F35.2, F35.3): each present field becomes one labeled line, empty fields are skipped
-    /// entirely, and a persona with neither yields null (falls back to the neutral scaffold — the
-    /// "neutral otherwise" half of F35.2, not just the no-persona case). Each field is capped at
-    /// <see cref="MaxPersonaSectionFieldChars"/> before it reaches the prompt.
-    /// </summary>
-    static string? BuildPersonaSection(Persona? persona)
-    {
-        if (persona is null)
-            return null;
-
-        var lines = new List<string>();
-        if (!string.IsNullOrEmpty(persona.Backstory))
-            lines.Add($"Backstory: {Truncate(persona.Backstory, MaxPersonaSectionFieldChars)}");
-        if (!string.IsNullOrEmpty(persona.Style))
-            lines.Add($"Style: {Truncate(persona.Style, MaxPersonaSectionFieldChars)}");
-
-        return lines.Count == 0 ? null : string.Join('\n', lines);
-    }
-
-    static string Truncate(string text, int maxChars) =>
-        text.Length <= maxChars ? text : text[..maxChars];
-
-    static string BuildUserContent(SegmentRequest request)
-    {
-        var lines = new List<string>
-        {
-            $"Station: {request.StationName}",
-            $"Local time: {request.LocalNow:yyyy-MM-dd HH:mm}",
-            request.Kind == SegmentKind.LeadIn
-                ? "Segment: lead-in for the upcoming track."
-                : "Segment: back-announce for the track that just played.",
-        };
-
-        if (request.Track is { } track)
-        {
-            lines.Add($"Title: {track.Title}");
-            if (!string.IsNullOrEmpty(track.Artist)) lines.Add($"Artist: {track.Artist}");
-            if (!string.IsNullOrEmpty(track.Album)) lines.Add($"Album: {track.Album}");
-            if (!string.IsNullOrEmpty(track.Genre)) lines.Add($"Genre: {track.Genre}");
-            if (track.Year is { } year) lines.Add($"Year: {year}");
-        }
-
-        return string.Join('\n', lines);
     }
 
     /// <summary>
