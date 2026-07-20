@@ -73,6 +73,14 @@ public static class StationSettingsAllowlist
         // "disabled TTS" state. Llm:ApiKey is deliberately absent from this list — env-only secret
         // (F19.3), never readable or writable through this API (see SettingValidator's rejection).
         new("Tts:Endpoint",                                   SettingApplyMode.Live,          SettingKind.String,     ""),
+        // Operator pronunciation corrections (SPEC F68.1, F68.5, STORY-185) — a JSON-encoded array
+        // of {from, to} pairs stored as ONE opaque string-kind value (the overlay only expands a
+        // stored array into indexed keys for arrays of SCALARS, not objects — see
+        // StationSettingsConfigurationProvider.ExtractArrayItems). SpeechCorrectionProvider
+        // (GenWave.Tts) reads it via IOptionsMonitor<TtsCorrectionsOptions> and rebuilds the
+        // compiled SpeechCorrectionSet on every change — a PUT here reaches the very next render
+        // with no api restart.
+        new("Tts:Corrections",                                SettingApplyMode.Live,          SettingKind.String,     ""),
         new("Llm:Endpoint",                                   SettingApplyMode.Live,          SettingKind.String,     ""),
         new("Llm:Model",                                      SettingApplyMode.Live,          SettingKind.String,     ""),
         new("Llm:TimeoutSeconds",                             SettingApplyMode.Live,          SettingKind.Number,     "seconds"),

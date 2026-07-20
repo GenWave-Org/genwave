@@ -17,6 +17,10 @@ namespace GenWave.Tts;
 /// </summary>
 public static partial class SpeechText
 {
+    // Fixpoint cap for StripThinkBlocks (T28 review carry-forward) — deeper <think> nesting than
+    // any real LLM output; guards the render path from a pathological input, never a real one.
+    private const int MaxThinkNestingDepth = 64;
+
     /// <summary>Runs <paramref name="text"/> through every normalization pass in spec'd order.</summary>
     public static string Normalize(string text, SpeechCorrectionSet corrections)
     {
@@ -39,14 +43,22 @@ public static partial class SpeechText
         // further nested "<think>"), so a single Replace resolves one level of nesting at a time.
         // Looping to a fixpoint peels nested blocks from the inside out until none remain — this
         // is what keeps a doubly-nested block from leaking its outer layer's text (F68.3).
+        //
+        // Capped at MaxThinkNestingDepth passes (T28 review carry-forward, wired live in T29): far
+        // deeper nesting than any real LLM output produces, so this only ever bites a pathological
+        // input. On cap-hit the loop falls through to the unclosed/orphan strips below rather than
+        // spinning — the same "never stall the render path" discipline as SpeechCorrectionSet's own
+        // 250ms per-rule match timeout.
         var stripped = text;
         string beforePass;
+        var pass = 0;
         do
         {
             beforePass = stripped;
             stripped = ThinkBlockRx().Replace(stripped, string.Empty);
+            pass++;
         }
-        while (stripped != beforePass);
+        while (stripped != beforePass && pass < MaxThinkNestingDepth);
 
         // An unclosed <think> at end (no closing tag reached) is stripped conservatively to the
         // end of the string — nothing downstream should ever see partial reasoning text (F68.3).

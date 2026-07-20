@@ -138,6 +138,10 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
   "Tts:Endpoint":
     "The Kokoro TTS service base URL used to render all spoken patter — must be a non-empty " +
     "absolute http/https URL; there is no \"disabled TTS\" state.",
+  "Tts:Corrections":
+    "Operator pronunciation corrections applied to every spoken line before it reaches Kokoro " +
+    "(e.g. \"MacLeod\" → \"Muh-cloud\"). A JSON array of {from, to} pairs; empty means no " +
+    "corrections.",
   "Llm:Endpoint":
     "The LLM completion service base URL used to author patter copy — leave empty to disable " +
     "LLM-authored copy and fall back to templated copy.",

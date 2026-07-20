@@ -39,6 +39,15 @@ public static class TtsServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // Operator pronunciation corrections (SPEC F68.5, STORY-185) — a raw JSON leaf, not
+        // DataAnnotations-validated: malformed JSON degrades to no corrections with a WARN
+        // (SpeechCorrectionProvider) rather than failing boot, since Tts:Corrections is
+        // operator-authored data, not deployment topology.
+        services
+            .AddOptions<TtsCorrectionsOptions>()
+            .Bind(configuration.GetSection(TtsCorrectionsOptions.Section));
+        services.AddSingleton<SpeechCorrectionProvider>();
+
         // TTS wiring: ISegmentCopyWriter is the copy-writer seam (SPEC F34.1) TtsSegmentSource
         // consumes. TemplateCopyWriter is registered concretely as the terminal fallback rung;
         // LlmCopyWriter (SPEC F34.2-F34.5) is the seam's active implementation — it authors
@@ -94,9 +103,15 @@ public static class TtsServiceCollectionExtensions
                     sp.GetRequiredService<KokoroVoiceLister>(),
                     sp.GetRequiredService<IOptionsMonitor<TtsOptions>>(),
                     TimeSpan.FromMinutes(5)))
-            // The typed HttpClient factory registers KokoroTtsSynthesizer as transient; expose it
-            // via the singleton interface by resolving from the factory on first use.
-            .AddSingleton<ITtsSynthesizer>(sp => sp.GetRequiredService<KokoroTtsSynthesizer>());
+            // The typed HttpClient factory registers KokoroTtsSynthesizer as transient; the
+            // singleton ITtsSynthesizer every caller (TtsSegmentSource, SafeSegmentAuthor,
+            // TtsPreviewController) actually resolves is NormalizingTtsSynthesizer (SPEC F68.1,
+            // STORY-185) decorating it — the single Normalize call site sits here, not in any of
+            // those callers.
+            .AddSingleton<ITtsSynthesizer>(sp =>
+                new NormalizingTtsSynthesizer(
+                    sp.GetRequiredService<KokoroTtsSynthesizer>(),
+                    sp.GetRequiredService<SpeechCorrectionProvider>()));
 
         return services;
     }

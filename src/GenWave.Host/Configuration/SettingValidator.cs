@@ -149,6 +149,10 @@ public sealed class SettingValidator(IConfiguration configuration)
             // http/https URL is required; empty is rejected (mirrors TtsOptions' [Required, Url]).
             ["Tts:Endpoint"] = v => !string.IsNullOrEmpty(v) && IsAbsoluteHttpUri(v),
 
+            // Operator pronunciation corrections (SPEC F68.5, STORY-185) — a JSON array of
+            // {from, to} string pairs; empty ("[]" or blank) means no corrections and is legal.
+            ["Tts:Corrections"] = IsValidCorrectionsArray,
+
             // LLM endpoint (F34.2, F36.2) — empty is the legal disabled state (blurbs stay
             // templated); any non-empty value must be an absolute http/https URL.
             ["Llm:Endpoint"] = v => string.IsNullOrEmpty(v) || IsAbsoluteHttpUri(v),
@@ -407,6 +411,51 @@ public sealed class SettingValidator(IConfiguration configuration)
         }
     }
 
+    /// <summary>
+    /// Validates <c>Tts:Corrections</c> (SPEC F68.5): a JSON array where every element is an object
+    /// carrying string <c>from</c>/<c>to</c> properties (case-insensitive property names, mirroring
+    /// <c>SpeechCorrection</c>'s own JSON binding in <c>GenWave.Tts.SpeechCorrectionProvider</c>). An
+    /// empty array, or a blank value, is legal — "no corrections configured". A blank/whitespace
+    /// <c>from</c> on an individual rule is NOT rejected here: <c>SpeechCorrectionSet.Create</c>
+    /// already treats it as a no-op rule by design, so this validator only guards JSON shape, not
+    /// rule usefulness.
+    /// </summary>
+    static bool IsValidCorrectionsArray(string v)
+    {
+        if (string.IsNullOrWhiteSpace(v)) return true;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(v);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Array) return false;
+
+            foreach (var element in root.EnumerateArray())
+            {
+                if (element.ValueKind != JsonValueKind.Object) return false;
+                if (!HasStringProperty(element, "from")) return false;
+                if (!HasStringProperty(element, "to")) return false;
+            }
+
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    static bool HasStringProperty(JsonElement element, string propertyName)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                return property.Value.ValueKind == JsonValueKind.String;
+        }
+
+        return false;
+    }
+
     static string BuildRangeError(string key, string value) => key switch
     {
         var k when k.Equals("Station:Name", StringComparison.OrdinalIgnoreCase)
@@ -436,6 +485,8 @@ public sealed class SettingValidator(IConfiguration configuration)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between 0 and {StationIdEveryNUnitsMax} (0 disables).",
         var k when k.Equals("Tts:Endpoint", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a non-empty absolute http/https URL.",
+        var k when k.Equals("Tts:Corrections", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be a JSON array of {{\"from\":\"...\",\"to\":\"...\"}} objects, e.g. [] or [{{\"from\":\"MacLeod\",\"to\":\"Muh-cloud\"}}].",
         var k when k.Equals("Llm:Endpoint", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable LLM-authored copy.",
         var k when k.Equals("Llm:TimeoutSeconds", StringComparison.OrdinalIgnoreCase)

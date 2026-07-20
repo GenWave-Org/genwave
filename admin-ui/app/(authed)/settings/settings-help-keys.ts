@@ -31,6 +31,7 @@ export const SETTINGS_HELP_KEYS = [
   "Station:SpectatorMode",
   "Station:PublicStreamUrl",
   "Tts:Endpoint",
+  "Tts:Corrections",
   "Llm:Endpoint",
   "Llm:Model",
   "Llm:TimeoutSeconds",
