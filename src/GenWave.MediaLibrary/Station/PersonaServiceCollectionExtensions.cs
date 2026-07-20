@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using Npgsql;
 
@@ -30,4 +32,30 @@ public static class PersonaServiceCollectionExtensions
     public static IServiceCollection AddPersonaStore(this IServiceCollection services, string connectionString) =>
         services.AddSingleton<IPersonaStore>(
             _ => new PersonaRepository(new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build())));
+
+    /// <summary>
+    /// Registers <see cref="IPersonaMemory"/> (SPEC F71.4-F71.6, STORY-194) the same lazy way
+    /// <see cref="AddPersonaStore"/> registers <see cref="IPersonaStore"/>, over the same
+    /// <paramref name="connectionString"/> — and binds/validates <see cref="PersonaMemoryOptions"/>
+    /// (<c>Persona:Memory:CapPerKind</c>) from <paramref name="configuration"/>.
+    ///
+    /// T38 ships this registration deliberately without a Host call site (mirrors
+    /// <see cref="IPersonaStore"/>'s own original shape — "no DI registration and no consumer land
+    /// with this seam" — except here the DI half is what this task delivers; the plan sequences
+    /// wiring the actual Host call, alongside the prompt-assembly consumer, with Q4's persona work).
+    /// </summary>
+    public static IServiceCollection AddPersonaMemoryStore(
+        this IServiceCollection services, string connectionString, IConfiguration configuration)
+    {
+        services
+            .AddOptions<PersonaMemoryOptions>()
+            .Bind(configuration.GetSection(PersonaMemoryOptions.Section))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        return services.AddSingleton<IPersonaMemory>(sp =>
+            new PersonaMemoryRepository(
+                new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build()),
+                sp.GetRequiredService<IOptions<PersonaMemoryOptions>>()));
+    }
 }
