@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Api;
 using GenWave.Host.Configuration;
+using GenWave.Host.Health;
 using GenWave.Host.Options;
 using GenWave.Host.Playout;
 using GenWave.Host.Seeding;
@@ -50,6 +51,10 @@ builder.Services
     .AddGenWavePlayout()
     // Boot seed: branded safe-loop backstop (F27.6), one-shot + idempotent.
     .AddGenWaveSafeLoopSeed(cfg)
+    // Background dependency health probes (SPEC F70.2, STORY-187): cached Ollama/Kokoro verdicts
+    // a future render-time fallback decision (T34) reads synchronously — no health check ever
+    // runs inside the render window.
+    .AddGenWaveDependencyHealth(cfg)
     // Admin surface: admin options, Data Protection, cookie auth, deny-by-default policy.
     .AddGenWaveAdminApi(cfg)
     // Named OutputCache policies for the public spectator surface (SPEC F62.10, STORY-171/T13).

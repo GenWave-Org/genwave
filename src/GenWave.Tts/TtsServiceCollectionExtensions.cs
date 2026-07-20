@@ -53,6 +53,25 @@ public static class TtsServiceCollectionExtensions
         // lifetime, incremented by NormalizingTtsSynthesizer and read by GET /api/tts/corrections-stats.
         services.AddSingleton<CorrectionsFiredStats>();
 
+        // Dependency health probes (SPEC F70.2, STORY-187): the verdict store lives here — TTS
+        // owns the read seam its own render-time fallback logic (T34) will consume — registered
+        // concretely once and exposed under IDependencyHealth, mirroring the
+        // NormalizingTtsSynthesizer/LlmCopyWriter "one instance, every interface" shape below.
+        // The probes themselves live here too (Ollama/Kokoro endpoints are Tts:Endpoint/
+        // Llm:Endpoint, already this project's own options) with the same no-BaseAddress typed
+        // HttpClient discipline as KokoroTtsSynthesizer/KokoroVoiceLister — each is added to the
+        // IDependencyProbe collection declaratively; the Host's DependencyHealthProbeService
+        // (GenWave.Host) resolves IEnumerable<IDependencyProbe> and drives the cadence, wholly
+        // unaware of which probes exist.
+        services.AddSingleton<DependencyHealthStore>();
+        services.AddSingleton<IDependencyHealth>(sp => sp.GetRequiredService<DependencyHealthStore>());
+
+        services.AddHttpClient<OllamaHealthProbe>();
+        services.AddSingleton<IDependencyProbe>(sp => sp.GetRequiredService<OllamaHealthProbe>());
+
+        services.AddHttpClient<KokoroHealthProbe>();
+        services.AddSingleton<IDependencyProbe>(sp => sp.GetRequiredService<KokoroHealthProbe>());
+
         // TTS wiring: ISegmentCopyWriter is the copy-writer seam (SPEC F34.1) TtsSegmentSource
         // consumes. TemplateCopyWriter is registered concretely as the terminal fallback rung;
         // LlmCopyWriter (SPEC F34.2-F34.5) is the seam's active implementation — it authors
