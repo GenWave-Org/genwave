@@ -41,7 +41,9 @@ public static class FeaturePersonaPromptSections
             new LlmCopyStatusHolder(),
             accessor,
             new CapturingLogger<LlmCopyWriter>(),
-            TimeProvider.System);
+            TimeProvider.System,
+            new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+            new FakeDegradationModeReader());
 
     static string ExtractSystemContent(string body)
     {

@@ -48,7 +48,9 @@ public static class FeatureLlmCopyWriter
             holder,
             new FakeActivePersonaAccessor(),
             logger,
-            TimeProvider.System);
+            TimeProvider.System,
+            new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+            new FakeDegradationModeReader());
         return (writer, holder, logger);
     }
 
@@ -146,7 +148,9 @@ public static class FeatureLlmCopyWriter
                 new LlmCopyStatusHolder(),
                 new FakeActivePersonaAccessor(),
                 new CapturingLogger<LlmCopyWriter>(),
-                TimeProvider.System);
+                TimeProvider.System,
+                new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                new FakeDegradationModeReader());
 
             var track = new MediaItem(
                 "m1", "/media/x.mp3", "Astral Plane", default, Artist: "Valerie June",

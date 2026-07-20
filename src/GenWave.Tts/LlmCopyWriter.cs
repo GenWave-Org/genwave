@@ -40,6 +40,17 @@ using GenWave.Core.Domain;
 /// backend double each other's latency, so this writer (a DI singleton, see
 /// <c>TtsServiceCollectionExtensions</c>) holds the one gate both seams share.
 /// </para>
+///
+/// <para>
+/// The SAME single recording point (SPEC F73.1, STORY-196, T41) is also where every call — on-air,
+/// Soft-cadence, or preview — lands in <see cref="LlmCallRing"/>, the admin call inspector's
+/// in-memory ring: prompt, raw response, timing, outcome, and the degradation mode active at call
+/// time (<see cref="IDegradationModeReader.CurrentMode"/>, read fresh right here rather than passed
+/// in — a preview never passes through <see cref="DegradationGatedCopyWriter"/>, so there is no
+/// caller-supplied mode to reuse for that path; reading it uniformly for every path keeps this the
+/// one recording point instead of two). Never logged, never persisted — see <see cref="LlmCallRing"/>'s
+/// own remarks.
+/// </para>
 /// </summary>
 public sealed class LlmCopyWriter(
     TemplateCopyWriter fallback,
@@ -48,7 +59,9 @@ public sealed class LlmCopyWriter(
     LlmCopyStatusHolder statusHolder,
     IActivePersonaAccessor personaAccessor,
     ILogger<LlmCopyWriter> logger,
-    TimeProvider timeProvider) : ISegmentCopyWriter, IPersonaPreviewWriter
+    TimeProvider timeProvider,
+    LlmCallRing callRing,
+    IDegradationModeReader degradationMode) : ISegmentCopyWriter, IPersonaPreviewWriter
 {
     /// <summary>Name of the <see cref="IHttpClientFactory"/> client this writer resolves (registered in Program.cs).</summary>
     public const string HttpClientName = "Llm";
@@ -246,10 +259,27 @@ public sealed class LlmCopyWriter(
     async Task<string> RequestCompletionAsync(
         LlmOptions cfg, SegmentRequest request, Persona? persona, PersonaCard? card, CancellationToken ct)
     {
+        // Captured up front, once, for LlmCallRing (SPEC F73.1, T41) — startedAt mirrors
+        // LlmCopyStatusHolder's own attemptedAt semantics (includes any single-flight queueing wait
+        // below), and mode is read fresh right here rather than threaded in as a parameter: a
+        // preview call never passes through DegradationGatedCopyWriter (SPEC F69.4), so there is no
+        // caller-evaluated mode available for that path, and reading IDegradationModeReader
+        // uniformly for every path keeps this the one recording point instead of two.
+        var startedAt = timeProvider.GetUtcNow();
+        var mode = degradationMode.CurrentMode;
+
+        // Hoisted above the try (mirrors WriteAsync's own cfg/persona hoisting, T3 review finding)
+        // so a fault EARLIER than prompt assembly (e.g. a malformed endpoint URI) still lets the
+        // catch-all below record whatever prompt context existed at that point — null here, in that
+        // one early case.
+        string? systemPrompt = null;
+        string? userPrompt = null;
+
         // Single-flight (SPEC F69.6, gh-#36): acquired BEFORE the per-call timeout clock starts, so
         // a caller queued behind another generation is waiting its turn, not burning its own
         // Llm:TimeoutSeconds budget — and a caller whose own ct cancels while still queued (e.g.
-        // shutdown) throws right out of WaitAsync without ever holding the gate.
+        // shutdown) throws right out of WaitAsync without ever holding the gate (and without ever
+        // reaching LlmCallRing.Record below — nothing was actually attempted).
         await singleFlight.WaitAsync(ct);
         try
         {
@@ -257,6 +287,12 @@ public sealed class LlmCopyWriter(
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(cfg.TimeoutSeconds));
 
             var http = httpClientFactory.CreateClient(HttpClientName);
+
+            // Built before the request goes out (moved ahead of EndpointUri.Combine, T41 review
+            // finding) so systemPrompt/userPrompt are available to the ring for every failure this
+            // method can raise, not just the ones after prompt assembly.
+            systemPrompt = LlmPromptBuilder.BuildSystemPrompt(LlmPromptBuilder.BuildPersonaSection(persona, card));
+            userPrompt = LlmPromptBuilder.BuildUserContent(request, LlmPromptBuilder.BuildStationClockLine(timeProvider));
 
             // No boot-frozen BaseAddress (F36.2) — the endpoint is read from CurrentValue above and an
             // absolute URI is built per call (EndpointUri preserves a subpath in Llm:Endpoint, e.g.
@@ -269,8 +305,8 @@ public sealed class LlmCopyWriter(
                 model = cfg.Model,
                 messages = new object[]
                 {
-                    new { role = "system", content = LlmPromptBuilder.BuildSystemPrompt(LlmPromptBuilder.BuildPersonaSection(persona, card)) },
-                    new { role = "user", content = LlmPromptBuilder.BuildUserContent(request, LlmPromptBuilder.BuildStationClockLine(timeProvider)) },
+                    new { role = "system", content = systemPrompt },
+                    new { role = "user", content = userPrompt },
                 },
             };
 
@@ -289,13 +325,55 @@ public sealed class LlmCopyWriter(
             response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx
 
             var payload = await response.Content.ReadFromJsonAsync<ChatCompletionResponse>(timeoutCts.Token);
-            return payload?.Choices?.FirstOrDefault()?.Message?.Content ?? string.Empty;
+            var text = payload?.Choices?.FirstOrDefault()?.Message?.Content ?? string.Empty;
+
+            // Ok records the RAW reply (SPEC F73.1) — a later CleanCopy rejection (empty/over-length)
+            // is a hygiene decision the caller makes, not a fact about whether the call itself
+            // succeeded; see LlmCallOutcome.Ok's own remarks.
+            callRing.Record(
+                systemPrompt, userPrompt, text, startedAt, ElapsedMs(startedAt),
+                LlmCallOutcome.Ok, statusDetail: null, mode);
+            return text;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The caller cancelled (e.g. shutdown) — not our own Llm:TimeoutSeconds budget expiring,
+            // and not a call outcome worth a ring entry either (mirrors WriteAsync's/WritePreviewAsync's
+            // own handling of this exact case). Propagate untouched.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var (outcome, detail) = ClassifyForRing(ex);
+            callRing.Record(
+                systemPrompt, userPrompt, response: null, startedAt, ElapsedMs(startedAt),
+                outcome, detail, mode);
+            throw;
         }
         finally
         {
             singleFlight.Release();
         }
     }
+
+    long ElapsedMs(DateTimeOffset startedAt) => (long)(timeProvider.GetUtcNow() - startedAt).TotalMilliseconds;
+
+    /// <summary>
+    /// Classifies a completion fault for <see cref="LlmCallRing"/> (SPEC F73.1): the ONE other
+    /// <see cref="OperationCanceledException"/> source reaching this catch-all (the caller's own
+    /// cancellation is already filtered out by the clause above) is <c>RequestCompletionAsync</c>'s
+    /// own <c>timeoutCts</c> firing — <see cref="LlmCallOutcome.Timeout"/>, distinct from a generic
+    /// <see cref="LlmCallOutcome.Failed"/>. Deliberately independent of <see cref="LogFailure"/>'s
+    /// own <c>detail</c> switch (SPEC F69.7) — that one feeds a WARN line and has no need to split
+    /// out timeout, so duplicating this small a classification is simpler than threading a shared
+    /// helper through two call sites with different needs.
+    /// </summary>
+    static (LlmCallOutcome Outcome, string Detail) ClassifyForRing(Exception ex) => ex switch
+    {
+        OperationCanceledException => (LlmCallOutcome.Timeout, "Llm:TimeoutSeconds exceeded"),
+        HttpRequestException { StatusCode: { } status } => (LlmCallOutcome.Failed, $"HTTP {(int)status}"),
+        _ => (LlmCallOutcome.Failed, ex.GetType().Name),
+    };
 
     /// <summary>
     /// Copy hygiene (SPEC F34.5): trims, unwraps one layer of wrapping quotes, collapses newlines to
