@@ -1,39 +1,173 @@
 // STORY-181 — Compose host-publish guard in CI
 //
-// BDD specification — xUnit (SPEC F67.1). Pending scaffold; /build-loop (PLAN T25)
-// implements and removes Skip. These facts drive the guard script via Process against
-// real/fixture overlays. AC2 (CI workflow wiring) is verified in T25's review, not
-// unit-specced; F67.2 outside-in verification is the 🖐️ T24 manual task.
+// BDD specification — xUnit (SPEC F67.1). Drives the real guard script
+// (tools/check-compose-publish.sh) via Process against real/fixture overlays.
+//
+// AC1 exercises the actual repo compose files through `docker compose config` — it needs
+// the docker CLI, so it carries the repo's established Category=Integration trait (docker
+// may not be available in every test environment; the CI wiring for this exact path is a
+// dedicated workflow step that always has docker — see .github/workflows/
+// compose-publish-guard.yml, reviewed for AC2 rather than unit-specced here).
+//
+// AC3 drives the script's --config-file mode with a hand-built fixture, so it needs no
+// docker CLI at all and runs in the ordinary (non-Integration) suite.
 
-using Xunit;
+using System.Diagnostics;
 
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureComposeHostPublishGuard
 {
-    private const string Pending = "pending — PLAN T25 (/build-loop)";
+    static string RepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
+            dir = dir.Parent;
+
+        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
+        return dir.FullName;
+    }
+
+    static string ScriptPath => Path.Combine(RepoRoot(), "tools", "check-compose-publish.sh");
+
+    static (int ExitCode, string StdOut, string StdErr) RunGuardScript(params string[] args)
+    {
+        var startInfo = new ProcessStartInfo("bash")
+        {
+            WorkingDirectory = RepoRoot(),
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add(ScriptPath);
+        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
+
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("failed to start check-compose-publish.sh");
+
+        var stdOut = process.StandardOutput.ReadToEnd();
+        var stdErr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        return (process.ExitCode, stdOut, stdErr);
+    }
 
     public static class ScenarioCurrentOverlayPasses
     {
-        [Fact(Skip = Pending)]
+        [Fact]
+        [Trait("Category", "Integration")]
         public static void Guard_exits_zero_reporting_only_caddy_published()
         {
             // Given the merged config of compose.yaml + compose.demo.yaml
             // When  the guard script runs
             // Then  it exits 0, reporting 0.0.0.0 publishes only for caddy 80/443 (F67.1)
-            Assert.Fail(Pending);
+            var (exitCode, stdOut, stdErr) = RunGuardScript();
+
+            Assert.True(exitCode == 0, $"expected exit 0, got {exitCode}\nstdout:\n{stdOut}\nstderr:\n{stdErr}");
+            Assert.Contains("caddy:80", stdOut, StringComparison.Ordinal);
+            Assert.Contains("caddy:443", stdOut, StringComparison.Ordinal);
         }
     }
 
     public static class SadPathRegression
     {
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Reintroduced_public_publish_fails_naming_service_and_port()
         {
             // Given a test overlay re-adding a 0.0.0.0 publish on a non-proxy service
             // When  the guard script runs against it
             // Then  it exits non-zero naming the offending service and port (F67.1)
-            Assert.Fail(Pending);
+            //
+            // Fixture reintroduces exactly the regression fixed in 05303ce: caddy still
+            // publishes 80/443, but icecast is (incorrectly) re-published to every
+            // interface — pre-rendered as `docker compose config --format json` would
+            // shape it, so this needs no docker CLI (--config-file mode).
+            const string fixtureJson = """
+                {
+                  "services": {
+                    "caddy": {
+                      "ports": [
+                        {"mode": "ingress", "target": 80, "published": "80", "protocol": "tcp"},
+                        {"mode": "ingress", "target": 443, "published": "443", "protocol": "tcp"}
+                      ]
+                    },
+                    "api": {
+                      "ports": [
+                        {"mode": "ingress", "host_ip": "127.0.0.1", "target": 8080, "published": "8080", "protocol": "tcp"}
+                      ]
+                    },
+                    "icecast": {
+                      "ports": [
+                        {"mode": "ingress", "target": 8000, "published": "8000", "protocol": "tcp"}
+                      ]
+                    }
+                  }
+                }
+                """;
+
+            var fixturePath = Path.Combine(Path.GetTempPath(), $"check-compose-publish-regression-{Guid.NewGuid():N}.json");
+            File.WriteAllText(fixturePath, fixtureJson);
+            try
+            {
+                var (exitCode, stdOut, stdErr) = RunGuardScript("--config-file", fixturePath);
+                var combinedOutput = stdOut + stdErr;
+
+                Assert.NotEqual(0, exitCode);
+                Assert.Contains("icecast", combinedOutput, StringComparison.Ordinal);
+                Assert.Contains("8000", combinedOutput, StringComparison.Ordinal);
+            }
+            finally
+            {
+                File.Delete(fixturePath);
+            }
+        }
+
+        [Fact]
+        public static void Ipv6_wildcard_publish_fails_naming_service_and_port()
+        {
+            // Given a test overlay publishing a non-caddy service with host_ip "::"
+            // When  the guard script runs against it
+            // Then  it exits non-zero naming the offending service and port (F67.1)
+            //
+            // Locks the fail-open bug shut: an IPv6 wildcard bind ("::" binds every
+            // interface, IPv4 and IPv6 alike) is not "" or "0.0.0.0", so a check that only
+            // special-cases those two literal strings would wrongly wave it through as
+            // loopback. host_ip must be recognized as loopback-only (127.*, ::1,
+            // ::ffff:127.*) to be treated as safe — everything else, including this one,
+            // stays subject to the caddy-80/443 allowlist.
+            const string fixtureJson = """
+                {
+                  "services": {
+                    "caddy": {
+                      "ports": [
+                        {"mode": "ingress", "target": 80, "published": "80", "protocol": "tcp"},
+                        {"mode": "ingress", "target": 443, "published": "443", "protocol": "tcp"}
+                      ]
+                    },
+                    "icecast": {
+                      "ports": [
+                        {"mode": "ingress", "host_ip": "::", "target": 8000, "published": "8000", "protocol": "tcp"}
+                      ]
+                    }
+                  }
+                }
+                """;
+
+            var fixturePath = Path.Combine(Path.GetTempPath(), $"check-compose-publish-ipv6-{Guid.NewGuid():N}.json");
+            File.WriteAllText(fixturePath, fixtureJson);
+            try
+            {
+                var (exitCode, stdOut, stdErr) = RunGuardScript("--config-file", fixturePath);
+                var combinedOutput = stdOut + stdErr;
+
+                Assert.NotEqual(0, exitCode);
+                Assert.Contains("icecast", combinedOutput, StringComparison.Ordinal);
+                Assert.Contains("8000", combinedOutput, StringComparison.Ordinal);
+            }
+            finally
+            {
+                File.Delete(fixturePath);
+            }
         }
     }
 }

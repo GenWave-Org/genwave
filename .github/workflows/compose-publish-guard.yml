@@ -1,0 +1,35 @@
+# Compose host-publish guard (SPEC F67.1, STORY-181). Runs tools/check-compose-publish.sh
+# against the real merged public-overlay config (docker compose -f compose.yaml
+# -f compose.demo.yaml config) and fails the build if anything other than caddy 80/443
+# publishes a 0.0.0.0 host port — the Icecast :8000 gotcha fixed in 05303ce, pinned shut.
+# Scoped to the files that can cause it: the compose files, the Caddyfile, and the guard
+# itself. ubuntu-latest ships both docker and jq, so no extra tooling install is needed.
+name: compose publish guard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'compose.yaml'
+      - 'compose.demo.yaml'
+      - 'Caddyfile'
+      - 'tools/check-compose-publish.sh'
+      - '.github/workflows/compose-publish-guard.yml'
+  pull_request:
+    paths:
+      - 'compose.yaml'
+      - 'compose.demo.yaml'
+      - 'Caddyfile'
+      - 'tools/check-compose-publish.sh'
+      - '.github/workflows/compose-publish-guard.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Guard public-overlay host publishes
+        run: bash tools/check-compose-publish.sh
