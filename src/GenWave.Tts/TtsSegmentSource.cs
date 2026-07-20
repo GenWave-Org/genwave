@@ -45,7 +45,10 @@ public sealed class TtsSegmentSource(
             if (!fileExists)
             {
                 Directory.CreateDirectory(targetDir);
-                var synthPath = await synthesizer.SynthesizeAsync(copy.Text, request.Voice, ct);
+                // Kind-aware overload (SPEC F70.3, STORY-191): this is the one caller that knows a
+                // real SegmentKind — FallbackTtsSynthesizer reads it to consult Tts:EngineByKind.
+                var synthPath = await synthesizer.SynthesizeAsync(
+                    new TtsRenderContext(copy.Text, request.Voice, request.Kind), ct);
                 File.Move(synthPath, path, overwrite: true);
             }
 

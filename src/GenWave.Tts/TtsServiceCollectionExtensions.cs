@@ -41,6 +41,15 @@ public static class TtsServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // Per-kind engine override map (SPEC F70.3, STORY-191) — a raw JSON leaf, not
+        // DataAnnotations-validated: malformed JSON (or an unknown kind/engine entry) degrades to
+        // no per-kind overrides with a WARN (TtsEngineByKindProvider) rather than failing boot,
+        // mirroring Tts:Corrections' own operator-data discipline below.
+        services
+            .AddOptions<TtsEngineByKindOptions>()
+            .Bind(configuration.GetSection(TtsEngineByKindOptions.Section));
+        services.AddSingleton<TtsEngineByKindProvider>();
+
         // LLM options — registered unconditionally (SPEC F34.2); an empty Llm:Endpoint just means
         // LlmCopyWriter stays disabled. IOptionsMonitor<LlmOptions> (not IOptions) is what
         // LlmCopyWriter reads per render, so a live edit to Llm:Endpoint/Model/TimeoutSeconds/
@@ -179,7 +188,8 @@ public static class TtsServiceCollectionExtensions
                     sp.GetRequiredService<PiperTtsSynthesizer>(),
                     sp.GetRequiredService<IDependencyHealth>(),
                     sp.GetRequiredService<IOptionsMonitor<TtsFallbackOptions>>(),
-                    sp.GetRequiredService<ILogger<FallbackTtsSynthesizer>>()))
+                    sp.GetRequiredService<ILogger<FallbackTtsSynthesizer>>(),
+                    sp.GetRequiredService<TtsEngineByKindProvider>()))
             // The typed HttpClient factory registers KokoroTtsSynthesizer as transient; the
             // singleton every caller (TtsSegmentSource, SafeSegmentAuthor, TtsPreviewController)
             // actually resolves is NormalizingTtsSynthesizer (SPEC F68.1, STORY-185) decorating

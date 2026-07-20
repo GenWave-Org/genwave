@@ -1,6 +1,8 @@
 using System.Globalization;
+using System.Linq;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
+using GenWave.Core.Domain;
 
 namespace GenWave.Host.Configuration;
 
@@ -161,6 +163,11 @@ public sealed class SettingValidator(IConfiguration configuration)
             // compose `piper` sidecar was actually started with.
             ["Tts:Fallback:Endpoint"] = v => string.IsNullOrEmpty(v) || IsAbsoluteHttpUri(v),
             ["Tts:Fallback:Voice"] = AlwaysValid,
+
+            // Per-kind TTS engine override map (SPEC F70.3, STORY-191) — a JSON object whose keys
+            // are valid SegmentKind names and whose values are a known engine name; empty/blank is
+            // legal ("no per-kind overrides configured", byte-identical to pre-feature routing).
+            ["Tts:EngineByKind"] = IsValidEngineByKindMap,
 
             // LLM endpoint (F34.2, F36.2) — empty is the legal disabled state (blurbs stay
             // templated); any non-empty value must be an absolute http/https URL.
@@ -462,6 +469,53 @@ public sealed class SettingValidator(IConfiguration configuration)
         }
     }
 
+    /// <summary>
+    /// Validates <c>Tts:EngineByKind</c> (SPEC F70.3, STORY-191): a JSON object whose keys are
+    /// valid <see cref="SegmentKind"/> names (case-insensitive, mirroring
+    /// <c>GenWave.Tts.TtsEngineByKindProvider</c>'s own parse) and whose values name a known engine
+    /// — <c>kokoro</c> or <c>piper</c> (also case-insensitive). An empty object, or a blank value,
+    /// is legal — "no per-kind overrides configured", identical to pre-feature routing (F70.3's
+    /// empty-map contract).
+    /// </summary>
+    static bool IsValidEngineByKindMap(string v)
+    {
+        if (string.IsNullOrWhiteSpace(v)) return true;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(v);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return false;
+
+            foreach (var property in root.EnumerateObject())
+            {
+                // Enum.TryParse<SegmentKind> alone accepts numeric strings (e.g. "0" parses to
+                // SegmentKind.StationId, its underlying int value) — reject anything that isn't one
+                // of the enum's actual NAMES first, mirroring TtsEngineByKindProvider's own guard.
+                if (!IsDefinedSegmentKindName(property.Name)) return false;
+                if (!Enum.TryParse<SegmentKind>(property.Name, ignoreCase: true, out _)) return false;
+                if (property.Value.ValueKind != JsonValueKind.String) return false;
+
+                var engine = property.Value.GetString();
+                if (engine is null) return false;
+                if (!engine.Equals("kokoro", StringComparison.OrdinalIgnoreCase)
+                    && !engine.Equals("piper", StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    // Enum.TryParse<SegmentKind> alone accepts numeric strings ("0" parses to SegmentKind.StationId,
+    // its underlying int value) — reject anything that isn't one of the enum's actual NAMES first.
+    static bool IsDefinedSegmentKindName(string name) =>
+        Enum.GetNames<SegmentKind>().Any(n => n.Equals(name, StringComparison.OrdinalIgnoreCase));
+
     static bool HasStringProperty(JsonElement element, string propertyName)
     {
         foreach (var property in element.EnumerateObject())
@@ -506,6 +560,10 @@ public sealed class SettingValidator(IConfiguration configuration)
             => $"Value '{value}' is not valid for '{key}'. Must be a JSON array of {{\"from\":\"...\",\"to\":\"...\"}} objects, e.g. [] or [{{\"from\":\"MacLeod\",\"to\":\"Muh-cloud\"}}].",
         var k when k.Equals("Tts:Fallback:Endpoint", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable the Piper fallback engine.",
+        var k when k.Equals("Tts:EngineByKind", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be a JSON object mapping speech kind names " +
+               "(StationId, LeadIn, BackAnnounce, TimeDate) to \"kokoro\" or \"piper\", e.g. {{}} or " +
+               "{{\"StationId\":\"piper\"}}.",
         var k when k.Equals("Llm:Endpoint", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable LLM-authored copy.",
         var k when k.Equals("Llm:TimeoutSeconds", StringComparison.OrdinalIgnoreCase)

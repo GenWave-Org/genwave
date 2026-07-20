@@ -107,8 +107,11 @@ public static class FeatureSeededDefaults
     /// state (F34.2 for the LLM pair; F62.8 for PublicStreamUrl, where empty means the spectator
     /// "about" panel hides the player; F68.5/F68.8 for Tts:Corrections, where empty means no
     /// operator corrections are configured — the MacLeod rule is demo-station SEED DATA in
-    /// compose.demo.yaml, never a C# default), not a bug the F55.1 seeding contract covers. Every
-    /// other allowlisted key's C# default is non-empty.
+    /// compose.demo.yaml, never a C# default), not a bug the F55.1 seeding contract covers.
+    /// Tts:EngineByKind (SPEC F70.3, STORY-191) joins this set on the identical rationale: empty is
+    /// its spec'd default (F70.3, "Default: empty map") — every kind falls through to the existing
+    /// F70.1 health-based routing, and no compose topology needs to pin one. Every other
+    /// allowlisted key's C# default is non-empty.
     /// </summary>
     static readonly IReadOnlySet<string> HonestlyBlankKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -116,6 +119,7 @@ public static class FeatureSeededDefaults
         "Llm:Model",
         "Station:PublicStreamUrl",
         "Tts:Corrections",
+        "Tts:EngineByKind",
     };
 
     /// <summary>

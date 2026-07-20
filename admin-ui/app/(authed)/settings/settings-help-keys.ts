@@ -34,6 +34,7 @@ export const SETTINGS_HELP_KEYS = [
   "Tts:Corrections",
   "Tts:Fallback:Endpoint",
   "Tts:Fallback:Voice",
+  "Tts:EngineByKind",
   "Llm:Endpoint",
   "Llm:Model",
   "Llm:TimeoutSeconds",

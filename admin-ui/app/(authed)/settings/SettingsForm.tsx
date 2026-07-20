@@ -149,6 +149,11 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
   "Tts:Fallback:Voice":
     "The Piper voice model the fallback service is expected to be running — informational " +
     "only; it is not sent with each render and does not change which voice Piper speaks with.",
+  "Tts:EngineByKind":
+    "Pins specific speech kinds to a specific engine, e.g. {\"StationId\":\"piper\"} so a short " +
+    "ident always uses the cheap voice. A JSON object mapping StationId/LeadIn/BackAnnounce/" +
+    "TimeDate to \"kokoro\" or \"piper\"; empty means every kind uses the normal Kokoro-first, " +
+    "Piper-fallback routing.",
   "Llm:Endpoint":
     "The LLM completion service base URL used to author patter copy — leave empty to disable " +
     "LLM-authored copy and fall back to templated copy.",

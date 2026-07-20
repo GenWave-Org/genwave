@@ -2,6 +2,7 @@ namespace GenWave.Tts;
 
 using Microsoft.Extensions.Logging;
 using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
 
 /// <summary>
 /// The single hand-off point from booth-bound copy to the TTS renderer (SPEC F68.1). Every caller
@@ -33,12 +34,22 @@ public sealed class NormalizingTtsSynthesizer(
     CorrectionsFiredStats firedStats,
     ILogger<NormalizingTtsSynthesizer> logger) : ITtsSynthesizer, ISpeechNormalizationPreview
 {
-    public Task<string> SynthesizeAsync(string text, string voice, CancellationToken ct)
+    public Task<string> SynthesizeAsync(string text, string voice, CancellationToken ct) =>
+        SynthesizeAsync(new TtsRenderContext(text, voice, Kind: null), ct);
+
+    /// <summary>
+    /// Kind-aware overload (SPEC F70.3, STORY-191): normalizes exactly as the plain two-arg overload
+    /// always has, but relays <see cref="TtsRenderContext.Kind"/> unchanged to <paramref
+    /// name="inner"/> (typically <see cref="FallbackTtsSynthesizer"/>) so its per-kind engine map can
+    /// see which speech kind is rendering. This decorator never inspects <c>Kind</c> itself —
+    /// normalization and correction firing are kind-agnostic — it only relays it downstream.
+    /// </summary>
+    public Task<string> SynthesizeAsync(TtsRenderContext context, CancellationToken ct)
     {
         var snapshot = corrections.Current;
-        var normalized = RunNormalize(text, snapshot);
-        ReportFiredCorrections(text, voice, snapshot);
-        return inner.SynthesizeAsync(normalized, voice, ct);
+        var normalized = RunNormalize(context.Text, snapshot);
+        ReportFiredCorrections(context.Text, context.Voice, snapshot);
+        return inner.SynthesizeAsync(context with { Text = normalized }, ct);
     }
 
     /// <inheritdoc/>
