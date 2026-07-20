@@ -202,6 +202,10 @@ public sealed class SettingValidator(IConfiguration configuration)
             // exclusive-positive like GW_XFADE_*; F53.1 adds the inclusive ceiling.
             ["Library:CueDetection:MinSilenceDurationSec"] = v => IsDoubleAboveAndAtMost(v, MinSilenceDurationSecMin, MinSilenceDurationSecMax),
             ["Library:Energy:WindowSeconds"] = v => IsDoubleAboveAndAtMost(v, EnergyWindowSecondsMin, EnergyWindowSecondsMax),
+
+            // LLM degradation pin (SPEC F69.3, STORY-188) — exactly the four values
+            // DegradationController's parser recognizes; case-insensitive, mirroring that parser.
+            ["Llm:DegradationPin"] = IsValidDegradationPin,
         };
 
     // ── Per-key validation ─────────────────────────────────────────────────────────────────────
@@ -302,6 +306,10 @@ public sealed class SettingValidator(IConfiguration configuration)
     // requires a delegate for every allowlisted key, so this documents "no constraint" explicitly
     // rather than omitting the entry (which SettingValidator.Validate would report as a bug).
     static bool AlwaysValid(string v) => true;
+
+    // Llm:DegradationPin (SPEC F69.3) — "auto" (leaves the mode automatic) or a pinned mode name.
+    static bool IsValidDegradationPin(string v) =>
+        v.Trim().ToLowerInvariant() is "auto" or "normal" or "soft" or "hard";
 
     /// <summary>
     /// An absolute, well-formed http/https URL (used for <c>Tts:Endpoint</c>/<c>Llm:Endpoint</c>,
@@ -518,6 +526,8 @@ public sealed class SettingValidator(IConfiguration configuration)
         var k when k.Equals("Station:PublicStreamUrl", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be empty, an absolute http/https URL, " +
                "or a same-origin root-relative path starting with a single '/' (not '//'); no '\"', '<', '>', '\\', control characters, or whitespace.",
+        var k when k.Equals("Llm:DegradationPin", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be one of: auto, normal, soft, hard.",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }

@@ -50,6 +50,7 @@ export const SETTINGS_HELP_KEYS = [
   "GW_SAFE_GAP_SECONDS",
   "Library:CueDetection:MinSilenceDurationSec",
   "Library:Energy:WindowSeconds",
+  "Llm:DegradationPin",
 ] as const;
 
 export type SettingsHelpKey = (typeof SETTINGS_HELP_KEYS)[number];

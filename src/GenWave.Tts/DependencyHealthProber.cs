@@ -23,6 +23,14 @@ public sealed class DependencyHealthProber(
     ILogger<DependencyHealthProber> logger)
 {
     /// <summary>
+    /// Reason recorded when <see cref="IDependencyProbe.ProbeAsync"/> returns false — "disabled by
+    /// design" (e.g. empty <c>Llm:Endpoint</c>, SPEC F34.2), never an actual probe failure. Shared
+    /// so a reader (<see cref="DegradationController"/>'s probe-driven drop, SPEC F69.2) can tell
+    /// this apart from a genuine outage without re-deriving the string.
+    /// </summary>
+    public const string NotConfiguredReason = "not configured";
+
+    /// <summary>
     /// Probes once immediately — so a verdict exists as soon as possible after boot rather than
     /// only after the first full interval elapses — then again every <paramref name="interval"/>
     /// until <paramref name="ct"/> is cancelled.
@@ -58,7 +66,7 @@ public sealed class DependencyHealthProber(
         try
         {
             var healthy = await probe.ProbeAsync(timeoutCts.Token);
-            store.Record(probe.DependencyName, healthy, healthy ? null : "not configured");
+            store.Record(probe.DependencyName, healthy, healthy ? null : NotConfiguredReason);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

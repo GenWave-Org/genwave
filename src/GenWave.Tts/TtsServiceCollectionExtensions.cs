@@ -33,12 +33,26 @@ public static class TtsServiceCollectionExtensions
         // LLM options — registered unconditionally (SPEC F34.2); an empty Llm:Endpoint just means
         // LlmCopyWriter stays disabled. IOptionsMonitor<LlmOptions> (not IOptions) is what
         // LlmCopyWriter reads per render, so a live edit to Llm:Endpoint/Model/TimeoutSeconds/
-        // MaxCopyChars applies without a restart (F36.2).
+        // MaxCopyChars applies without a restart (F36.2). DegradationPin (SPEC F69.3) rides the
+        // same options class/section — it is one more Llm:* leaf, not a separate config surface.
         services
             .AddOptions<LlmOptions>()
             .Bind(configuration.GetSection(LlmOptions.Section))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+
+        // Degradation thresholds (SPEC F69.2, STORY-188) — deployment-tunable, not allowlisted
+        // (see DegradationOptions' own remarks for why). ValidateOnStart mirrors every other
+        // options class in this method.
+        services
+            .AddOptions<DegradationOptions>()
+            .Bind(configuration.GetSection(DegradationOptions.Section))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // Injected clock for DegradationController's cooldown math (no DateTime.Now anywhere in
+        // this feature) — TryAdd so a host or test that already registers its own TimeProvider wins.
+        services.TryAddSingleton(TimeProvider.System);
 
         // Operator pronunciation corrections (SPEC F68.5, STORY-185) — a raw JSON leaf, not
         // DataAnnotations-validated: malformed JSON degrades to no corrections with a WARN
@@ -74,24 +88,31 @@ public static class TtsServiceCollectionExtensions
 
         // TTS wiring: ISegmentCopyWriter is the copy-writer seam (SPEC F34.1) TtsSegmentSource
         // consumes. TemplateCopyWriter is registered concretely as the terminal fallback rung;
-        // LlmCopyWriter (SPEC F34.2-F34.5) is the seam's active implementation — it authors
-        // LeadIn/BackAnnounce from the configured LLM and degrades to TemplateCopyWriter on any
-        // miss, including a disabled (empty Llm:Endpoint) writer. LlmCopyStatusHolder is the
-        // in-memory last-attempt record GET /api/status (STORY-125) reads.
+        // LlmCopyWriter (SPEC F34.2-F34.5) authors LeadIn/BackAnnounce from the configured LLM and
+        // degrades to TemplateCopyWriter on any miss, including a disabled (empty Llm:Endpoint)
+        // writer. LlmCopyStatusHolder is the in-memory last-attempt record GET /api/status
+        // (STORY-125) reads, and now also DegradationController's drop signal (SPEC F69.2).
+        //
+        // ISegmentCopyWriter itself resolves to DegradationGatedCopyWriter (SPEC F69.1, F69.4,
+        // STORY-188), NOT LlmCopyWriter directly — the one and only place degradation mode gates a
+        // render (see its own remarks). IPersonaPreviewWriter stays bound straight to LlmCopyWriter,
+        // unchanged, so operator-explicit previews never pass through the gate at all.
         services
             .AddSingleton<PatterTemplateRenderer>()
             .AddSingleton<TemplateCopyWriter>()
             .AddSingleton<LlmCopyStatusHolder>()
+            .AddSingleton<DegradationController>()
             // LlmCopyWriter also consumes IActivePersonaAccessor (a host-registered seam) —
             // resolved per LLM render only, composing the active persona's backstory + style into
             // the prompt (SPEC F35.2/F35.3). Registered concretely ONCE and exposed under BOTH
-            // seams it implements — the on-air ISegmentCopyWriter (always-succeeds, template
+            // seams it implements — the on-air copy-writer chain (always-succeeds, template
             // fallback) and the preview-only IPersonaPreviewWriter (never silently degrades, SPEC
             // F35.6/T7) — so the persona preview endpoint reuses the exact same prompt-building/
             // hygiene instance the feeder does, never a second parallel writer.
             .AddSingleton<LlmCopyWriter>()
-            .AddSingleton<ISegmentCopyWriter>(sp => sp.GetRequiredService<LlmCopyWriter>())
             .AddSingleton<IPersonaPreviewWriter>(sp => sp.GetRequiredService<LlmCopyWriter>())
+            .AddSingleton<DegradationGatedCopyWriter>()
+            .AddSingleton<ISegmentCopyWriter>(sp => sp.GetRequiredService<DegradationGatedCopyWriter>())
             .AddSingleton<ITtsSegmentSource, TtsSegmentSource>();
 
         // TTS/voices clients deliberately carry no BaseAddress (SPEC F36.1–F36.2, F36.4) —

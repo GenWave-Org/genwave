@@ -208,6 +208,12 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
   "Library:Energy:WindowSeconds":
     "The length of the intro/outro window measured for energy analysis, in seconds. Applies " +
     "the next time a file is (re-)analyzed. Must be greater than 0, at most 60.",
+
+  // ── LLM degradation (SPEC F69.3) ───────────────────────────────────────────────────────────
+  "Llm:DegradationPin":
+    "Pins the LLM degradation mode instead of letting it auto-adjust to failures/recoveries. " +
+    "\"auto\" (default) follows automatically; \"normal\", \"soft\", or \"hard\" holds that mode " +
+    "until this is set back to \"auto\".",
 };
 
 /**

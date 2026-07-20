@@ -301,6 +301,12 @@ public static class FeatureSeededDefaults
                 llmDefaults.MaxCopyChars,
                 int.Parse(RequireValue(config, "Llm:MaxCopyChars"), NumberStyles.Integer, CultureInfo.InvariantCulture));
 
+            // Llm:DegradationPin (SPEC F69.3, STORY-188) — seeded "auto" alongside the T32 feature
+            // itself, closing the same gitea-#231 root cause before it can ever open for this key.
+            Assert.Equal(
+                llmDefaults.DegradationPin,
+                RequireValue(config, "Llm:DegradationPin"));
+
             Assert.Equal(
                 ttsDefaults.BlurbRetentionHours,
                 int.Parse(RequireValue(config, "Tts:BlurbRetentionHours"), NumberStyles.Integer, CultureInfo.InvariantCulture));

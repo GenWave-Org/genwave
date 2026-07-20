@@ -153,6 +153,12 @@ public static class StationSettingsAllowlist
         // for an already-enriched row.
         new("Library:CueDetection:MinSilenceDurationSec",     SettingApplyMode.Enrichment,    SettingKind.Number,     "seconds"),
         new("Library:Energy:WindowSeconds",                   SettingApplyMode.Enrichment,    SettingKind.Number,     "seconds"),
+
+        // LLM degradation pin (SPEC F69.3, STORY-188) — DegradationController (GenWave.Tts) reads
+        // this fresh via IOptionsMonitor<LlmOptions> on every evaluation, so a live PUT here
+        // pins/unpins the mode with no api restart. "auto" (the LlmOptions default) leaves the
+        // mode fully automatic; "normal"/"soft"/"hard" holds it.
+        new("Llm:DegradationPin",                             SettingApplyMode.Live,          SettingKind.String,     ""),
     };
 
     /// <summary>All operator-editable settings, keyed by configuration key.</summary>
