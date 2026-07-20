@@ -27,14 +27,30 @@ public static partial class SpeechText
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(corrections);
 
-        var scrubbed = StripThinkBlocks(text);
-        var withoutMarkdown = StripMarkdown(scrubbed);
-        var decoded = WebUtility.HtmlDecode(withoutMarkdown);
-        var corrected = corrections.Apply(decoded);
+        var decoded = PrepareForCorrections(text);
+        var corrected = corrections.Apply(decoded, out _);
         var expanded = ExpandUnits(corrected);
         var withAnd = expanded.Replace("&", " and ");
 
         return CollapseWhitespace(withAnd);
+    }
+
+    /// <summary>
+    /// Runs every normalization pass that precedes operator corrections — think-strip,
+    /// markdown-strip, HTML-entity decode — the exact text <see cref="SpeechCorrectionSet.Apply"/>
+    /// matches against inside <see cref="Normalize"/> (F68.2). Internal (same-assembly) rather than
+    /// a second public overload of <see cref="Normalize"/>, so <see cref="NormalizingTtsSynthesizer"/>
+    /// can determine which rules would actually fire for observability (SPEC F68.7) without
+    /// re-deriving this pipeline or guessing from raw, pre-cleanup text — and without disturbing
+    /// <see cref="Normalize"/>'s own signature/overload set (STORY-185's single-call-site guard).
+    /// </summary>
+    internal static string PrepareForCorrections(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        var scrubbed = StripThinkBlocks(text);
+        var withoutMarkdown = StripMarkdown(scrubbed);
+        return WebUtility.HtmlDecode(withoutMarkdown);
     }
 
     private static string StripThinkBlocks(string text)

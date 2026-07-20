@@ -73,15 +73,26 @@ public sealed class SpeechCorrectionSet
         return new SpeechCorrectionSet([(regex, replacement, pattern)]);
     }
 
-    /// <summary>Applies every rule in order, skipping any rule whose match times out.</summary>
-    internal string Apply(string text)
+    /// <summary>
+    /// Applies every rule in order, skipping any rule whose match times out. <paramref
+    /// name="firedFroms"/> carries every rule's <see cref="SpeechCorrection.From"/> that actually
+    /// changed the text, in rule order — empty when nothing fired. This set stays pure (SPEC
+    /// F68.7): no logging or counting happens here; <see cref="NormalizingTtsSynthesizer"/> is the
+    /// sole reader of <paramref name="firedFroms"/> and does that work itself.
+    /// </summary>
+    internal string Apply(string text, out IReadOnlyList<string> firedFroms)
     {
         var result = text;
-        foreach (var (pattern, to, _) in rules)
+        List<string>? fired = null;
+
+        foreach (var (pattern, to, from) in rules)
         {
             try
             {
+                var before = result;
                 result = pattern.Replace(result, _ => to);
+                if (result != before)
+                    (fired ??= []).Add(from);
             }
             catch (RegexMatchTimeoutException)
             {
@@ -89,6 +100,7 @@ public sealed class SpeechCorrectionSet
             }
         }
 
+        firedFroms = fired ?? new List<string>();
         return result;
     }
 

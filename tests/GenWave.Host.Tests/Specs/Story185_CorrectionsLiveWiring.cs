@@ -29,6 +29,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Api;
 using GenWave.Host.Configuration;
@@ -145,9 +146,16 @@ file sealed class CorrectionsLiveWiringWebFactory(RecordingEngineSynthesizer eng
 
             // The one network edge this suite cannot reach — the real SpeechCorrectionProvider
             // singleton (AddGenWaveTts) still decorates it via the real NormalizingTtsSynthesizer.
+            // CorrectionsFiredStats and ILogger<NormalizingTtsSynthesizer> (STORY-186 AC3) both
+            // still resolve from the real DI graph — AddGenWaveTts registers the former, and
+            // logging is wired unconditionally by the host.
             services.RemoveAll<ITtsSynthesizer>();
             services.AddSingleton<ITtsSynthesizer>(sp =>
-                new NormalizingTtsSynthesizer(engine, sp.GetRequiredService<SpeechCorrectionProvider>()));
+                new NormalizingTtsSynthesizer(
+                    engine,
+                    sp.GetRequiredService<SpeechCorrectionProvider>(),
+                    sp.GetRequiredService<CorrectionsFiredStats>(),
+                    sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>()));
         });
     }
 
