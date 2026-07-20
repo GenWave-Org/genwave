@@ -14,9 +14,10 @@ public static class OrchestrationServiceCollectionExtensions
     /// <summary>
     /// SEAM 1: <see cref="Orchestrator"/> is the <see cref="INextItemProvider"/> — interleaved
     /// music + TTS patter per the live cadence config. Every constructor dependency is a seam the
-    /// host (or a module) has already registered: identity/scope/cadence/rotation/render-budget
-    /// providers, <c>IMediaCatalog</c>, <c>ITtsSegmentSource</c>, <c>IActivePersonaAccessor</c>,
-    /// and the <see cref="SpeechDeferralQueue"/> this method also registers.
+    /// host (or a module) has already registered: identity/scope/cadence/rotation/render-budget/
+    /// boundary-bias providers, <c>IMediaCatalog</c>, <c>ITtsSegmentSource</c>,
+    /// <c>IActivePersonaAccessor</c>, and the <see cref="SpeechDeferralQueue"/>/<see cref="TimeProvider"/>
+    /// this method also registers.
     /// </summary>
     public static IServiceCollection AddGenWaveOrchestration(this IServiceCollection services)
     {

@@ -170,7 +170,8 @@ public static class FeatureSettingsSurfaceCompletion
             var orchestrator = new Orchestrator(
                 identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, tts,
                 new NoOpActivePersonaAccessor(), NullLogger<Orchestrator>.Instance, budgetProvider,
-                new SpeechDeferralQueue(TimeProvider.System));
+                new SpeechDeferralQueue(TimeProvider.System),
+                TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
             var ctx = new PlayoutContext([]);
 
             // Unit 1 — budget (20ms) is far shorter than the render delay (300ms): the lead-in is

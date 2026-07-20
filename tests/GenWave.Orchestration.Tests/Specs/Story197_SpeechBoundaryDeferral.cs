@@ -36,7 +36,7 @@ public static class FeatureSpeechBoundaryDeferral
         StationIdEveryNUnits = 0,
     };
 
-    static Orchestrator BuildOrchestrator(CadenceConfig cadence, SpeechDeferralQueue deferralQueue) =>
+    static Orchestrator BuildOrchestrator(CadenceConfig cadence, SpeechDeferralQueue deferralQueue, TimeProvider clock) =>
         new(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
             new FakeStationScopeProvider(new LibraryScope([1L])),
@@ -47,7 +47,9 @@ public static class FeatureSpeechBoundaryDeferral
             new FakeActivePersonaAccessor(),
             NullLogger<Orchestrator>.Instance,
             new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
-            deferralQueue);
+            deferralQueue,
+            clock,
+            new FakeBoundaryBiasProvider(TimeSpan.Zero));
 
     static bool IsStationId(MediaItem item) =>
         item.MediaId.StartsWith("tts:stationid", StringComparison.OrdinalIgnoreCase);
@@ -62,7 +64,7 @@ public static class FeatureSpeechBoundaryDeferral
         {
             var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-07-20T00:00:00Z"));
             var queue = new SpeechDeferralQueue(clock);
-            var orchestrator = BuildOrchestrator(CadenceOff, queue);
+            var orchestrator = BuildOrchestrator(CadenceOff, queue, clock);
             var ctx = new PlayoutContext([]);
 
             // Given an ident deferral queued mid-track: the first unit is already fully handed
@@ -130,7 +132,7 @@ public static class FeatureSpeechBoundaryDeferral
 
             // Given queued deferrals: the pre-restart process runs far enough (4 units) for its
             // cadence (N=2) to have produced exactly one station id.
-            var beforeRestart = BuildOrchestrator(cadence, new SpeechDeferralQueue(clock));
+            var beforeRestart = BuildOrchestrator(cadence, new SpeechDeferralQueue(clock), clock);
             var producedBeforeRestart = new List<MediaItem>();
             for (var i = 0; i < 4; i++)
             {
@@ -144,7 +146,7 @@ public static class FeatureSpeechBoundaryDeferral
             // brand new queue (empty, F74.4 — nothing persisted to leak forward) and a brand new
             // Orchestrator (its unit counter, the "schedule state" F74.4 regenerates from,
             // restarts at zero exactly like a fresh boot, SPEC F42.1).
-            var afterRestart = BuildOrchestrator(cadence, new SpeechDeferralQueue(clock));
+            var afterRestart = BuildOrchestrator(cadence, new SpeechDeferralQueue(clock), clock);
 
             // Then due deferrals regenerate — nothing carried over survives to double-air on the
             // very first post-restart unit...

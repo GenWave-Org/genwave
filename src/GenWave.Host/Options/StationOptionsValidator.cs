@@ -27,10 +27,11 @@ using Microsoft.Extensions.Options;
 /// </para>
 ///
 /// <para>
-/// Guards <c>Station:Cadence:StationIdEveryNUnits</c> (SPEC F42.2) and
-/// <c>Station:Rotation:RecentWindow</c> / <c>Station:Rotation:ArtistSeparation</c> (SPEC F41.6):
-/// each must be non-negative (0 disables the corresponding behavior). These three properties
-/// carry a DataAnnotations <c>[Range(0, int.MaxValue)]</c> attribute as documentation, but
+/// Guards <c>Station:Cadence:StationIdEveryNUnits</c> (SPEC F42.2),
+/// <c>Station:Rotation:RecentWindow</c> / <c>Station:Rotation:ArtistSeparation</c> (SPEC F41.6),
+/// and <c>Station:BoundaryBias:LookaheadMinutes</c> (SPEC F74.3): each must be non-negative (0
+/// disables the corresponding behavior). These properties carry a DataAnnotations
+/// <c>[Range(0, int.MaxValue)]</c> attribute as documentation, but
 /// <c>ValidateDataAnnotations()</c> on the root <see cref="StationOptions"/> in <c>Program.cs</c>
 /// does NOT recurse into nested option classes — so this validator is the only thing that
 /// actually enforces the floor at boot.
@@ -79,6 +80,11 @@ public sealed class StationOptionsValidator(ILogger<StationOptionsValidator> log
             return ValidateOptionsResult.Fail(
                 "Station:Rotation:ArtistSeparation must be non-negative " +
                 "(0 disables artist separation).");
+
+        if (options.BoundaryBias.LookaheadMinutes < 0)
+            return ValidateOptionsResult.Fail(
+                "Station:BoundaryBias:LookaheadMinutes must be non-negative " +
+                "(0 disables boundary-aware selection bias).");
 
         if (options.SafeScope.LibraryIds.Count == 0)
         {

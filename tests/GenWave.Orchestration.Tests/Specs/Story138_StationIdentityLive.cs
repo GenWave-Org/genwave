@@ -47,7 +47,8 @@ public static class FeatureStationIdentityLive
             identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, tts,
             new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
             new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
-            new SpeechDeferralQueue(TimeProvider.System));
+            new SpeechDeferralQueue(TimeProvider.System),
+            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
         return (orchestrator, tts, identityProvider);
     }
 

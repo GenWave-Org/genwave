@@ -168,7 +168,8 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
             identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, segmentSource,
             new NoOpActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
             new FakeRenderBudgetProvider(renderBudget),
-            new SpeechDeferralQueue(TimeProvider.System));
+            new SpeechDeferralQueue(TimeProvider.System),
+            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
     }
 
     // -------------------------------------------------------------------------

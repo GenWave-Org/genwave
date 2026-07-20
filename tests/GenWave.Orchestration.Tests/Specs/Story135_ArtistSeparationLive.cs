@@ -39,7 +39,8 @@ public static class FeatureArtistSeparationLive
             identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog,
             new FakeTtsSegmentSource(), new FakeActivePersonaAccessor(), logger,
             new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
-            new SpeechDeferralQueue(TimeProvider.System));
+            new SpeechDeferralQueue(TimeProvider.System),
+            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
         return (orchestrator, catalog, rotationProvider, logger);
     }
 
