@@ -83,6 +83,12 @@ public static class TtsServiceCollectionExtensions
             .Bind(configuration.GetSection(TtsCorrectionsOptions.Section));
         services.AddSingleton<SpeechCorrectionProvider>();
 
+        // Card-corrections half of the F71.7 merge seam (STORY-193): a bounded-TTL cache over the
+        // active persona's card, resolved through the Host-provided IActivePersonaAccessor (the
+        // same seam LlmCopyWriter reads for prompt assembly) — see its own remarks for exactly why
+        // a TTL, not an OnChange subscription, is the honest mechanism at this layer.
+        services.AddSingleton<ActivePersonaCorrectionsCache>();
+
         // Fired-rule observability (SPEC F68.7, STORY-186 AC3) — one counter set for the process
         // lifetime, incremented by NormalizingTtsSynthesizer and read by GET /api/tts/corrections-stats.
         services.AddSingleton<CorrectionsFiredStats>();
@@ -205,6 +211,7 @@ public static class TtsServiceCollectionExtensions
                 new NormalizingTtsSynthesizer(
                     sp.GetRequiredService<FallbackTtsSynthesizer>(),
                     sp.GetRequiredService<SpeechCorrectionProvider>(),
+                    sp.GetRequiredService<ActivePersonaCorrectionsCache>(),
                     sp.GetRequiredService<CorrectionsFiredStats>(),
                     sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>()))
             .AddSingleton<ITtsSynthesizer>(sp => sp.GetRequiredService<NormalizingTtsSynthesizer>())

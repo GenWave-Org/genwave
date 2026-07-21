@@ -27,10 +27,17 @@ using GenWave.Core.Domain;
 /// changed the text, read back by <c>GET /api/tts/corrections-stats</c>. <see cref="SpeechCorrectionSet"/>
 /// itself stays pure (it only reports which rules fired via an out parameter); this decorator is
 /// where that report becomes a log line and a counter.
+///
+/// <see cref="personaCorrections"/> supplies the card half of the F71.7 merge (STORY-193): every
+/// real render refreshes it (bounded by its own staleness window — see its class remarks) before
+/// <see cref="SpeechCorrectionProvider.BuildMerged"/> builds the snapshot <see cref="RunNormalize"/>
+/// actually matches against, so station rules win over an identical card rule at the one place the
+/// merged set is built.
 /// </summary>
 public sealed class NormalizingTtsSynthesizer(
     ITtsSynthesizer inner,
     SpeechCorrectionProvider corrections,
+    ActivePersonaCorrectionsCache personaCorrections,
     CorrectionsFiredStats firedStats,
     ILogger<NormalizingTtsSynthesizer> logger) : ITtsSynthesizer, ISpeechNormalizationPreview
 {
@@ -44,16 +51,22 @@ public sealed class NormalizingTtsSynthesizer(
     /// see which speech kind is rendering. This decorator never inspects <c>Kind</c> itself —
     /// normalization and correction firing are kind-agnostic — it only relays it downstream.
     /// </summary>
-    public Task<string> SynthesizeAsync(TtsRenderContext context, CancellationToken ct)
+    public async Task<string> SynthesizeAsync(TtsRenderContext context, CancellationToken ct)
     {
-        var snapshot = corrections.Current;
+        // Real render only (SPEC F71.7): refreshes personaCorrections.Current when its own TTL has
+        // elapsed, then builds the merged snapshot fresh for THIS render — never called from
+        // Preview below, which reads whatever the cache last held with no refresh (see
+        // ActivePersonaCorrectionsCache's own remarks on the two paths' different staleness bounds).
+        await personaCorrections.RefreshIfStaleAsync(ct);
+        var snapshot = SpeechCorrectionProvider.BuildMerged(corrections.Current, personaCorrections.Current);
         var normalized = RunNormalize(context.Text, snapshot);
         ReportFiredCorrections(context.Text, context.Voice, snapshot);
-        return inner.SynthesizeAsync(context with { Text = normalized }, ct);
+        return await inner.SynthesizeAsync(context with { Text = normalized }, ct);
     }
 
     /// <inheritdoc/>
-    public string Preview(string text) => RunNormalize(text, corrections.Current);
+    public string Preview(string text) =>
+        RunNormalize(text, SpeechCorrectionProvider.BuildMerged(corrections.Current, personaCorrections.Current));
 
     /// <summary>
     /// The one call to <see cref="SpeechText.Normalize"/> in this codebase (SPEC F68.1) — both

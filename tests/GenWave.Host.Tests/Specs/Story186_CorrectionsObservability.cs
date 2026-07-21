@@ -153,6 +153,7 @@ file sealed class CorrectionsObservabilityWebFactory(
                 new NormalizingTtsSynthesizer(
                     engine,
                     sp.GetRequiredService<SpeechCorrectionProvider>(),
+                    sp.GetRequiredService<ActivePersonaCorrectionsCache>(),
                     sp.GetRequiredService<CorrectionsFiredStats>(),
                     sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>()));
         });

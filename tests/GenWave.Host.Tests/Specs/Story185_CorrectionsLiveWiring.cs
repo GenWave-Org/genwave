@@ -154,6 +154,7 @@ file sealed class CorrectionsLiveWiringWebFactory(RecordingEngineSynthesizer eng
                 new NormalizingTtsSynthesizer(
                     engine,
                     sp.GetRequiredService<SpeechCorrectionProvider>(),
+                    sp.GetRequiredService<ActivePersonaCorrectionsCache>(),
                     sp.GetRequiredService<CorrectionsFiredStats>(),
                     sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>()));
         });

@@ -51,6 +51,9 @@ builder.Services
     .AddGenWavePlayout()
     // Boot seed: branded safe-loop backstop (F27.6), one-shot + idempotent.
     .AddGenWaveSafeLoopSeed(cfg)
+    // Boot migration: reconciles station.persona onto the F71.1 card schema and ensures the
+    // slug:"default" persona row (SPEC F71.2, STORY-192), one-shot + idempotent.
+    .AddGenWavePersonaCardMigration(cfg)
     // Background dependency health probes (SPEC F70.2, STORY-187): cached Ollama/Kokoro verdicts
     // a future render-time fallback decision (T34) reads synchronously — no health check ever
     // runs inside the render window.

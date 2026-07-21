@@ -38,4 +38,14 @@ public interface IPersonaStore
     /// if no such persona exists.
     /// </summary>
     Task<PersonaWriteResult> DeleteAsync(long id, CancellationToken ct);
+
+    /// <summary>
+    /// Returns the persona-card definition for <paramref name="id"/> (SPEC F71.1, F71.3, F71.7) —
+    /// the quirks/corrections/soul document a <see cref="Persona"/> row's <c>definition</c> column
+    /// carries, distinct from <see cref="GetByIdAsync"/>'s legacy backstory/style/voice shape. Null
+    /// when no such row exists, or when the row still carries the schema-migration sentinel
+    /// (<c>'{}'::jsonb</c>, not yet reconciled by <c>PersonaCardMigrator</c>) — a real card is
+    /// either fully present or not returned at all, never a half-populated one.
+    /// </summary>
+    Task<PersonaCard?> GetCardByIdAsync(long id, CancellationToken ct);
 }

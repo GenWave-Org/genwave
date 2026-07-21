@@ -40,7 +40,8 @@ public static class FeaturePersonaPromptSections
             }),
             new LlmCopyStatusHolder(),
             accessor,
-            new CapturingLogger<LlmCopyWriter>());
+            new CapturingLogger<LlmCopyWriter>(),
+            TimeProvider.System);
 
     static string ExtractSystemContent(string body)
     {

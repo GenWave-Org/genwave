@@ -32,6 +32,7 @@ public static class FeaturePersonaAttributionArtistStamping
             analyzer,
             cueAnalyzer,
             NoCorrections.Provider(),
+            NoCorrections.PersonaCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
             NullLogger<TtsSegmentSource>.Instance);
 

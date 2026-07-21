@@ -16,7 +16,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
         FakeTtsSynthesizer synth,
         FakeLoudnessAnalyzer analyzer,
         FakeCueAnalyzer cueAnalyzer,
-        string cacheRoot)
+        string cacheRoot,
+        ActivePersonaCorrectionsCache? personaCache = null)
     {
         var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
         return new TtsSegmentSource(
@@ -25,12 +26,29 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             analyzer,
             cueAnalyzer,
             NoCorrections.Provider(),
+            personaCache ?? NoCorrections.PersonaCache(),
             opts,
             NullLogger<TtsSegmentSource>.Instance);
     }
 
     static SegmentRequest StationIdRequest() =>
         new(SegmentKind.StationId, "af_heart", "GenWave", null, DateTimeOffset.UtcNow, "test-station");
+
+    /// <summary>
+    /// Minimal, valid <see cref="PersonaCard"/> carrying only the corrections under test — every
+    /// other field is filler content the card-corrections cache-key specs below don't assert on.
+    /// </summary>
+    static PersonaCard CardWithCorrections(params PersonaCorrection[] corrections) =>
+        new(
+            SchemaVersion: 1,
+            Name: "Test Persona",
+            Tagline: "Test tagline",
+            Soul: "Test soul",
+            Quirks: [],
+            Voice: new VoiceSpec(Engine: "", VoiceId: "af_heart", Pace: 1.0, Language: "en"),
+            EnergyDisposition: 0,
+            Lore: [],
+            Corrections: corrections);
 
     // ------------------------------------------------------------------
     // HAPPY PATH
@@ -215,12 +233,14 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             // one production hand-off corrections apply through) with no corrections configured yet...
             var correctionsMonitor = new ChangeableOptionsMonitor<TtsCorrectionsOptions>(new TtsCorrectionsOptions());
             var corrections = new SpeechCorrectionProvider(correctionsMonitor, NullLogger<SpeechCorrectionProvider>.Instance);
+            var personaCache = NoCorrections.PersonaCache();
             var normalizingSynth = new NormalizingTtsSynthesizer(
-                innerSynth, corrections, new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance);
+                innerSynth, corrections, personaCache,
+                new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance);
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Coming up, a deep cut from MacLeod."),
-                normalizingSynth, analyzer, new FakeCueAnalyzer(), corrections, opts,
+                normalizingSynth, analyzer, new FakeCueAnalyzer(), corrections, personaCache, opts,
                 NullLogger<TtsSegmentSource>.Instance);
             var request = StationIdRequest();
 
@@ -281,12 +301,18 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
                 NullLogger<SpeechCorrectionProvider>.Instance);
             var innerSynth = new FakeTtsSynthesizer();
             synths.Add(innerSynth);
+            // A brand-new ActivePersonaCorrectionsCache too — no active persona in either "process",
+            // so its ContentHash always folds to the same stable "no-card-corrections" sentinel
+            // regardless of which instance computes it (STORY Q3.3's own station-only-deployment
+            // requirement: a restart must never re-key a station-only cache).
+            var personaCache = NoCorrections.PersonaCache();
             var normalizingSynth = new NormalizingTtsSynthesizer(
-                innerSynth, provider, new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance);
+                innerSynth, provider, personaCache,
+                new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance);
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter(CorrectedText),
-                normalizingSynth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), provider, opts,
+                normalizingSynth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), provider, personaCache, opts,
                 NullLogger<TtsSegmentSource>.Instance);
 
             return (source, innerSynth);
@@ -344,6 +370,140 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
             foreach (var synth in synths)
                 if (Directory.Exists(synth.OutputDirectory)) Directory.Delete(synth.OutputDirectory, recursive: true);
+        }
+    }
+
+    // Folds the ACTIVE persona-card corrections fingerprint into the cache key (companion fix to
+    // ScenarioCorrectionsRebuildReKeysTheCache above, this time on the CARD side of the F71.7
+    // merge): NormalizingTtsSynthesizer applies the MERGED station-over-card set, not the station
+    // set alone, so a card correction change must re-key an evergreen cached clip exactly as a
+    // station corrections rebuild does — otherwise the corrected pronunciation never reaches an
+    // already-cached StationId/LeadIn/BackAnnounce clip.
+    public sealed class ScenarioCardCorrectionsChangeReKeysTheCache : IDisposable
+    {
+        readonly string cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        readonly FakeLoudnessAnalyzer analyzer = new();
+        readonly FakeTtsSynthesizer innerSynth = new();
+        readonly FakeActivePersonaAccessor personaAccessor = new();
+        readonly FakeTimeProvider clock = new(DateTimeOffset.UtcNow);
+
+        [Fact]
+        public async Task CardCorrectionsChangeForcesResynthesisWithTheNewRuleApplied()
+        {
+            // Given a station-ID clip rendered once with the active persona's card carrying a
+            // correction for "MacLeod"...
+            personaAccessor.Card = CardWithCorrections(new PersonaCorrection("MacLeod", "Muh-cloud"));
+            var personaCache = new ActivePersonaCorrectionsCache(personaAccessor, clock);
+            var normalizingSynth = new NormalizingTtsSynthesizer(
+                innerSynth, NoCorrections.Provider(), personaCache,
+                new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance);
+            var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
+            var source = new TtsSegmentSource(
+                new FakeSegmentCopyWriter("Coming up, a deep cut from MacLeod."),
+                normalizingSynth, analyzer, new FakeCueAnalyzer(), NoCorrections.Provider(), personaCache, opts,
+                NullLogger<TtsSegmentSource>.Instance);
+            var request = StationIdRequest();
+
+            var first = await source.RenderAsync(request, CancellationToken.None);
+            Assert.Equal(1, innerSynth.CallCount);
+            Assert.Equal("Coming up, a deep cut from Muh-cloud.", innerSynth.LastText);
+
+            // When an operator edits the card's correction rule, and the cache's bounded staleness
+            // window has elapsed (the same TTL RefreshIfStaleAsync always applies)...
+            personaAccessor.Card = CardWithCorrections(new PersonaCorrection("MacLeod", "Mac Cloud"));
+            clock.Advance(ActivePersonaCorrectionsCache.StalenessBound);
+
+            // Then the very next render of the SAME text re-keys the cache, invokes the synthesizer
+            // again, and the corrected pronunciation reaches it.
+            var second = await source.RenderAsync(request, CancellationToken.None);
+            Assert.Equal(2, innerSynth.CallCount);
+            Assert.Equal("Coming up, a deep cut from Mac Cloud.", innerSynth.LastText);
+            Assert.NotEqual(first!.MediaId, second!.MediaId);
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            if (Directory.Exists(innerSynth.OutputDirectory)) Directory.Delete(innerSynth.OutputDirectory, recursive: true);
+        }
+    }
+
+    // A Station:Persona:ActiveId switch — a DIFFERENT card becoming active, not an edit to the same
+    // one — must re-key the cache the same way an edit does: the merged corrections set the
+    // synthesizer applies changed, so the cache key must change with it.
+    public sealed class ScenarioPersonaSwitchReKeysTheCache : IDisposable
+    {
+        readonly string cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        readonly FakeLoudnessAnalyzer analyzer = new();
+        readonly FakeTtsSynthesizer innerSynth = new();
+        readonly FakeActivePersonaAccessor personaAccessor = new();
+        readonly FakeTimeProvider clock = new(DateTimeOffset.UtcNow);
+
+        [Fact]
+        public async Task SwitchingTheActivePersonaCardForcesResynthesisWithTheNewCardsRuleApplied()
+        {
+            // Given a station-ID clip rendered once while persona A (whose card corrects "MacLeod"
+            // to "Muh-cloud") is active...
+            personaAccessor.Card = CardWithCorrections(new PersonaCorrection("MacLeod", "Muh-cloud"));
+            var personaCache = new ActivePersonaCorrectionsCache(personaAccessor, clock);
+            var normalizingSynth = new NormalizingTtsSynthesizer(
+                innerSynth, NoCorrections.Provider(), personaCache,
+                new CorrectionsFiredStats(), NullLogger<NormalizingTtsSynthesizer>.Instance);
+            var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
+            var source = new TtsSegmentSource(
+                new FakeSegmentCopyWriter("Coming up, a deep cut from MacLeod."),
+                normalizingSynth, analyzer, new FakeCueAnalyzer(), NoCorrections.Provider(), personaCache, opts,
+                NullLogger<TtsSegmentSource>.Instance);
+            var request = StationIdRequest();
+
+            var first = await source.RenderAsync(request, CancellationToken.None);
+            Assert.Equal("Coming up, a deep cut from Muh-cloud.", innerSynth.LastText);
+
+            // When the operator activates a DIFFERENT persona whose OWN card corrects "MacLeod" to
+            // something else entirely, and the cache's TTL has elapsed...
+            personaAccessor.Card = CardWithCorrections(new PersonaCorrection("MacLeod", "Big Mac"));
+            clock.Advance(ActivePersonaCorrectionsCache.StalenessBound);
+
+            // Then the very next render of the SAME text re-keys the cache and picks up the newly
+            // active persona's rule, never the previous persona's stale audio.
+            var second = await source.RenderAsync(request, CancellationToken.None);
+            Assert.Equal(2, innerSynth.CallCount);
+            Assert.Equal("Coming up, a deep cut from Big Mac.", innerSynth.LastText);
+            Assert.NotEqual(first!.MediaId, second!.MediaId);
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            if (Directory.Exists(innerSynth.OutputDirectory)) Directory.Delete(innerSynth.OutputDirectory, recursive: true);
+        }
+    }
+
+    // Station-only deployments (no active persona at all, F71.7's default) must never see the cache
+    // key drift: ActivePersonaCorrectionsCache.ContentHash has to fold to the SAME stable sentinel
+    // no matter how many independent instances read it, or a plain station running with no persona
+    // feature configured would still see phantom re-keying. This is also exactly the property
+    // ScenarioRestartLifecycleNeitherOrphansNorCollidesTheCache above depends on to keep its HIT
+    // assertions green now that every BuildInstance call constructs its own fresh
+    // ActivePersonaCorrectionsCache.
+    public sealed class ScenarioStationOnlyDeploymentKeepsAStableCacheKey
+    {
+        [Fact]
+        public async Task NoActivePersonaAcrossIndependentCachesYieldsTheSameContentHash()
+        {
+            // Given two independent ActivePersonaCorrectionsCache instances — standing in for two
+            // separate renders, or two sides of a restart — over accessors reporting no active
+            // persona at all...
+            var cacheA = new ActivePersonaCorrectionsCache(new FakeActivePersonaAccessor(), TimeProvider.System);
+            var cacheB = new ActivePersonaCorrectionsCache(new FakeActivePersonaAccessor(), TimeProvider.System);
+            await cacheA.RefreshIfStaleAsync(CancellationToken.None);
+            await cacheB.RefreshIfStaleAsync(CancellationToken.None);
+
+            // Then both fold to the exact same stable "no card corrections" fingerprint — never a
+            // hash of empty input that could vary — and it never collides with the station side's
+            // own "no corrections" sentinel either.
+            Assert.Equal(cacheA.ContentHash, cacheB.ContentHash);
+            Assert.NotEqual(NoCorrections.Provider().ContentHash, cacheA.ContentHash);
         }
     }
 
