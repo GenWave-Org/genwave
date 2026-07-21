@@ -22,6 +22,7 @@ public sealed class StatusController(
     IOptionsMonitor<StationOptions> stationMonitor,
     IOptionsMonitor<LlmOptions> llmMonitor,
     LlmCopyStatusHolder llmStatusHolder,
+    DegradationController degradationController,
     IActivePersonaAccessor personaAccessor,
     ProcessStartTime startTime) : ControllerBase
 {
@@ -29,7 +30,8 @@ public sealed class StatusController(
     /// GET /api/status — cookie-auth (covered by the deny-by-default fallback policy when
     /// Admin:Password is set, same as every other <c>/api/*</c> controller). Returns:
     /// <c>{ startedAt, catalog: { ready, enriching, failed, unavailable }, safeScope: { libraryIds, playable },
-    /// llm: { enabled, model, activePersona, lastOutcome, lastAttemptAt } }</c>.
+    /// llm: { enabled, model, activePersona, lastOutcome, lastAttemptAt },
+    /// degradation: { mode, pinned, since, cause } }</c>.
     ///
     /// <c>Station:SafeScope:LibraryIds</c> is read via <see cref="IOptionsMonitor{TOptions}.CurrentValue"/>
     /// on every call — not a boot-time snapshot — so a live <c>PUT /api/settings</c> edit
@@ -49,6 +51,14 @@ public sealed class StatusController(
     /// to null on any miss, F35.5). This endpoint has no <c>IHttpClientFactory</c>/completions
     /// dependency at all, by construction — an idle station polling this endpoint sends the LLM zero
     /// requests.
+    ///
+    /// <c>degradation</c> (SPEC F69.5, STORY-188) comes from
+    /// <see cref="DegradationController.Evaluate"/> — called here, not just read from a cached
+    /// field, so a just-applied pin or an elapsed probe cooldown is visible on THIS poll rather than
+    /// waiting for the next playout render (see that method's own remarks for why this never
+    /// performs I/O). <c>mode</c> is lowercase (<c>"normal"</c>/<c>"soft"</c>/<c>"hard"</c>);
+    /// <c>pinned</c> is true while <c>Llm:DegradationPin</c> holds <c>mode</c>; <c>since</c> is when
+    /// the current mode was entered; <c>cause</c> is the human-readable reason for it.
     /// </summary>
     [HttpGet("status")]
     public async Task<IActionResult> Get(CancellationToken ct)
@@ -62,6 +72,7 @@ public sealed class StatusController(
         var llmConfig = llmMonitor.CurrentValue;
         var llmEnabled = !string.IsNullOrEmpty(llmConfig.Endpoint);
         var lastAttempt = llmStatusHolder.Last;
+        var degradation = degradationController.Evaluate();
 
         return Ok(new
         {
@@ -87,6 +98,13 @@ public sealed class StatusController(
                     ? null
                     : lastAttempt.Outcome == LlmAttemptOutcome.Ok ? "ok" : "failed",
                 lastAttemptAt = lastAttempt?.AttemptedAt,
+            },
+            degradation = new
+            {
+                mode = degradation.Mode.ToString().ToLowerInvariant(),
+                pinned = degradation.Pinned,
+                since = degradation.Since,
+                cause = degradation.Cause,
             },
         });
     }

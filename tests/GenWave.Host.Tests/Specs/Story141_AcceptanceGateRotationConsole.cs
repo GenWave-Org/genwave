@@ -71,8 +71,14 @@ public static class FeatureAcceptanceGateRotationConsole
         // (remsky/Kokoro-FastAPI#453) — an intentional ops edit from outside this epic, not a
         // regression of its zero-diff promise. EngineScriptSha256 is untouched.
         //
+        // ComposeYamlSha256 re-pinned 2026-07-20 (PLAN T34, SPEC F70.1, STORY-190): a new `piper`
+        // service (Piper local-fallback TTS sidecar) plus Tts__Fallback__Endpoint/
+        // Tts__Fallback__Voice env vars on the api service and a piper_models volume — another
+        // intentional edit from a LATER epic, still not a regression of Epic V's own F41–F45
+        // zero-diff promise. EngineScriptSha256 is untouched — T34 does not touch engine/genwave.liq.
+        //
         const string EngineScriptSha256 = "a256fd3f2797ed9b52e3f8507e8ca610aa02218e2fedc5c231369f0ccaab9bd6";
-        const string ComposeYamlSha256  = "bcff1c88105845cef82314dd774336095b1df38ec07e084038547bc374ea1b25";
+        const string ComposeYamlSha256  = "3660ed44a38cceaba0c17d82bae5f201df405f270ec58ed235baf9448a83f317";
 
         [Fact]
         public void EngineScriptByteMatchesMain()

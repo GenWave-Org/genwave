@@ -27,6 +27,9 @@ volumes:
   # Authored safe-loop segments (F27) — api renders + writes, engine only ever plays (F11.12).
   # Kept separate from /media (F11.4): generated artifacts never enter the read-only library mount.
   authored: {}
+  # Downloaded Piper voice model (SPEC F70.1, STORY-190) — persisted so a container restart
+  # doesn't re-fetch it from huggingface.
+  piper_models: {}
 
 services:
   db:
@@ -151,6 +154,11 @@ services:
       Tts__Format: "wav"
       Tts__RenderBudgetSeconds: "30"
       Tts__CacheRoot: "/tts"
+      # Piper local fallback (SPEC F70.1, STORY-190): FallbackTtsSynthesizer routes here when
+      # Kokoro is unhealthy or a render throws. Matches the `piper` service's own MODEL_DOWNLOAD_LINK
+      # voice below — Tts__Fallback__Voice is documentation only (never sent on the wire).
+      Tts__Fallback__Endpoint: "http://piper:5000"
+      Tts__Fallback__Voice: "en_US-lessac-medium"
       # Icecast admin-stats listener count (SPEC F62.12 addendum, STORY-179, gitea-#10). Env/compose-
       # only, deliberately absent from StationSettingsAllowlist — Icecast__AdminPassword is a secret
       # (F19.3), never readable or writable through the settings API.
@@ -182,6 +190,37 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
+
+  piper:
+    # PIN — artibex/piper-http publishes exactly one tag (`latest`); no versioned tag exists to
+    # pin against instead (checked via `docker manifest inspect`/Docker Hub's tags API at wiring
+    # time). Pinned by the DIGEST that tag resolved to, so this is immutable regardless of what
+    # `latest` becomes upstream — re-verify (`docker manifest inspect artibex/piper-http:latest`)
+    # and bump the digest at each deliberate upgrade.
+    image: artibex/piper-http@sha256:87cc63665fda1a6dfecb139408552b1d2d8a440ed3f6ef3cdabe10661c184a28
+    networks: [core]                                    # internal only; no host ports
+    environment:
+      # Wraps upstream `piper.http_server`: downloads this ONNX voice model to MODEL_TARGET_FOLDER
+      # on first boot (persisted in the piper_models volume below) and serves it for the container's
+      # lifetime — matches the api's Tts__Fallback__Voice above (en_US-lessac-medium).
+      MODEL_DOWNLOAD_LINK: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx?download=true"
+      SPEAKER: "0"
+    volumes:
+      - piper_models:/app/models
+    # CPU-only min-spec: the onnx runtime + a "medium" quality voice model comfortably fits well
+    # under 1GiB; a hard cap here is the same fail-closed backstop as kokoro's above, just sized
+    # to Piper's much smaller footprint.
+    mem_limit: 768m
+    healthcheck:
+      # Plain TCP-connect check, same idiom as kokoro/icecast/engine above — piper.http_server's
+      # one route (`/`) 500s on every request without a `?text=` query, even when perfectly
+      # healthy, so an HTTP-level healthcheck would misreport a healthy server as down.
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/5000'"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 60s   # first boot downloads the voice model from huggingface
     restart: unless-stopped
 
   admin_ui:

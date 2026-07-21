@@ -32,6 +32,9 @@ export const SETTINGS_HELP_KEYS = [
   "Station:PublicStreamUrl",
   "Tts:Endpoint",
   "Tts:Corrections",
+  "Tts:Fallback:Endpoint",
+  "Tts:Fallback:Voice",
+  "Tts:EngineByKind",
   "Llm:Endpoint",
   "Llm:Model",
   "Llm:TimeoutSeconds",
@@ -50,6 +53,7 @@ export const SETTINGS_HELP_KEYS = [
   "GW_SAFE_GAP_SECONDS",
   "Library:CueDetection:MinSilenceDurationSec",
   "Library:Energy:WindowSeconds",
+  "Llm:DegradationPin",
 ] as const;
 
 export type SettingsHelpKey = (typeof SETTINGS_HELP_KEYS)[number];

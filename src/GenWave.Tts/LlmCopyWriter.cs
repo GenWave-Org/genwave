@@ -24,6 +24,14 @@ using GenWave.Core.Domain;
 /// composes an appended backstory + style section onto the baked system prompt (see
 /// <see cref="BuildPersonaSection"/>). No persona active, or one with empty Backstory/Style, leaves
 /// the prompt exactly as it was before T6 (F35.2 — blurbs work persona-less).
+///
+/// <para>
+/// Every backend completion call — on-air (<see cref="WriteAsync"/>) and preview
+/// (<see cref="WritePreviewAsync"/>) alike — is serialized single-flight through
+/// <see cref="RequestCompletionAsync"/> (SPEC F69.6, gh-#36): two concurrent renders on the same
+/// backend double each other's latency, so this writer (a DI singleton, see
+/// <c>TtsServiceCollectionExtensions</c>) holds the one gate both seams share.
+/// </para>
 /// </summary>
 public sealed class LlmCopyWriter(
     TemplateCopyWriter fallback,
@@ -44,6 +52,18 @@ public sealed class LlmCopyWriter(
     /// 1 MiB is generous headroom over any real completion payload.
     /// </summary>
     public const long MaxResponseContentBytes = 1_048_576;
+
+    /// <summary>
+    /// Serializes every backend completion call (SPEC F69.6, gh-#36) — concurrent CPU generations on
+    /// the same backend double each other's latency, so at most one <see cref="RequestCompletionAsync"/>
+    /// runs at a time, whether it arrived via the on-air path or a persona preview. A queueing wait
+    /// (<c>WaitAsync(ct)</c>), not a skip-if-busy latch (contrast
+    /// <c>GenWave.MediaLibrary.Scan.ScanService</c>'s own single-flight semaphore): a caller waits its
+    /// turn rather than being dropped, and a caller whose own token cancels while still queued throws
+    /// straight out of <c>WaitAsync</c> without ever acquiring the gate, so it can never hold up the
+    /// next caller in line.
+    /// </summary>
+    readonly SemaphoreSlim singleFlight = new(1, 1);
 
     // T6 reviewer follow-up (T4): Backstory/Style are unbounded operator-entered text (F35.1 has no
     // length cap on the persona row) that flows straight into an LLM prompt. Capped per-field rather
@@ -70,13 +90,19 @@ public sealed class LlmCopyWriter(
             return await fallback.WriteAsync(request, ct);
 
         var attemptedAt = DateTimeOffset.UtcNow;
+        // Hoisted above the try (SPEC F69.7 review finding) so the catch-all below can still cite
+        // them as call context even when the fault is EARLIER than the line that would have set
+        // them — e.g. an OptionsValidationException thrown from the CurrentValue getter itself,
+        // before cfg is ever assigned.
+        LlmOptions? cfg = null;
+        Persona? persona = null;
         try
         {
             // CurrentValue is read INSIDE the try (T3 review finding): a live edit that leaves
             // Llm:* failing its own validators raises OptionsValidationException from this very
             // property getter, and that must land on the catch-all below like any other miss
             // (F12.4), not escape past the fallback ladder toward the caller.
-            var cfg = optionsMonitor.CurrentValue;
+            cfg = optionsMonitor.CurrentValue;
             if (string.IsNullOrEmpty(cfg.Endpoint))
                 return await fallback.WriteAsync(request, ct);
 
@@ -86,15 +112,14 @@ public sealed class LlmCopyWriter(
             // effect on the very next segment. The accessor's own contract never throws, but this
             // call already sits inside the catch-all below, so an unexpected fault still degrades
             // to the template rung like every other miss (F12.4).
-            var persona = await personaAccessor.ResolveAsync(ct);
+            persona = await personaAccessor.ResolveAsync(ct);
             var raw = await RequestCompletionAsync(cfg, request, persona, ct);
             var cleaned = CleanCopy(raw, cfg.MaxCopyChars);
             if (cleaned is null)
             {
                 statusHolder.Record(LlmAttemptOutcome.Failed, attemptedAt);
-                logger.LogWarning(
-                    "LLM copy for {Kind} was empty or exceeded Llm:MaxCopyChars after cleanup; falling back to template",
-                    request.Kind);
+                LogFailure(request, persona, cfg.Model, attemptedAt, exception: null,
+                    reason: "empty or exceeded Llm:MaxCopyChars after cleanup");
                 return await fallback.WriteAsync(request, ct);
             }
 
@@ -113,9 +138,10 @@ public sealed class LlmCopyWriter(
         {
             // Everything else lands here: our own timeout CTS firing, a non-2xx status
             // (EnsureSuccessStatusCode), a connect failure, a malformed endpoint URI, bad JSON.
-            // Every one of these degrades to the template rung with exactly one WARN (F34.4).
+            // Every one of these degrades to the template rung with exactly one WARN (F34.4),
+            // carrying the exception type/status plus call context (F69.7).
             statusHolder.Record(LlmAttemptOutcome.Failed, attemptedAt);
-            logger.LogWarning(ex, "LLM completion for {Kind} failed; falling back to template", request.Kind);
+            LogFailure(request, persona, cfg?.Model, attemptedAt, ex, reason: null);
             return await fallback.WriteAsync(request, ct);
         }
     }
@@ -146,6 +172,7 @@ public sealed class LlmCopyWriter(
         if (string.IsNullOrEmpty(cfg.Endpoint))
             return new PersonaPreviewResult.Failed("The LLM endpoint is not configured.");
 
+        var attemptedAt = DateTimeOffset.UtcNow;
         try
         {
             var raw = await RequestCompletionAsync(cfg, request, personaOverride, ct);
@@ -164,52 +191,102 @@ public sealed class LlmCopyWriter(
         {
             // Same failure surface WriteAsync degrades from (our own timeout CTS, a non-2xx
             // status, a connect failure, a malformed endpoint URI, bad JSON) — the preview
-            // reports it honestly instead of substituting template text (F35.6).
-            logger.LogWarning(ex, "LLM preview completion for {Kind} failed", request.Kind);
+            // reports it honestly instead of substituting template text (F35.6), and the WARN
+            // carries the exception type/status plus call context exactly like WriteAsync's own
+            // catch-all (F69.7).
+            LogFailure(request, personaOverride, cfg.Model, attemptedAt, ex, reason: null, previewOnly: true);
             return new PersonaPreviewResult.Failed("The LLM request failed. Check the server logs for details.");
         }
+    }
+
+    /// <summary>
+    /// One consistent WARN for every failure this writer produces (SPEC F69.7 — closes the
+    /// detail-free warn gap): states either the exception type (or, for a non-2xx response, the
+    /// HTTP status the runtime already captured on <see cref="HttpRequestException.StatusCode"/>)
+    /// or, for a same-call content reject that never threw, <paramref name="reason"/> — plus enough
+    /// call context (segment kind, persona identity if one was in scope, station, model, elapsed
+    /// ms) to diagnose the miss from this one line. Deliberately excludes the prompt itself:
+    /// backstory/style/user copy is operator content that belongs in the ring inspector (T41), never
+    /// at WARN.
+    /// </summary>
+    void LogFailure(
+        SegmentRequest request, Persona? persona, string? model, DateTimeOffset attemptedAt,
+        Exception? exception, string? reason, bool previewOnly = false)
+    {
+        var detail = exception switch
+        {
+            HttpRequestException { StatusCode: { } status } => $"HTTP {(int)status}",
+            { } ex => ex.GetType().Name,
+            null => reason ?? "unknown failure",
+        };
+        var elapsedMs = (long)(DateTimeOffset.UtcNow - attemptedAt).TotalMilliseconds;
+        var outcome = previewOnly ? "reporting failure to the preview caller" : "falling back to template";
+
+        // Operator-authored values (persona name, model, exception-derived detail) are
+        // newline-stripped so they can't forge additional log entries (CodeQL cs/log-forging).
+        logger.LogWarning(
+            exception,
+            "LLM completion failed for {Kind} on station {StationId} (persona: {PersonaName}, " +
+            "model: {Model}, elapsed: {ElapsedMs}ms): {Detail} — {Outcome}",
+            request.Kind, request.StationId,
+            (persona?.Name ?? "none").ReplaceLineEndings(" "),
+            (model ?? "unknown").ReplaceLineEndings(" "),
+            elapsedMs,
+            detail.ReplaceLineEndings(" "), outcome);
     }
 
     async Task<string> RequestCompletionAsync(
         LlmOptions cfg, SegmentRequest request, Persona? persona, CancellationToken ct)
     {
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(cfg.TimeoutSeconds));
-
-        var http = httpClientFactory.CreateClient(HttpClientName);
-
-        // No boot-frozen BaseAddress (F36.2) — the endpoint is read from CurrentValue above and an
-        // absolute URI is built per call (EndpointUri preserves a subpath in Llm:Endpoint, e.g.
-        // https://host/openai — a plain new Uri(base, "/v1/...") would drop it, T3 review finding),
-        // so a live PUT to Llm:Endpoint applies on the next render.
-        var requestUri = EndpointUri.Combine(cfg.Endpoint, "/v1/chat/completions");
-
-        var body = new
+        // Single-flight (SPEC F69.6, gh-#36): acquired BEFORE the per-call timeout clock starts, so
+        // a caller queued behind another generation is waiting its turn, not burning its own
+        // Llm:TimeoutSeconds budget — and a caller whose own ct cancels while still queued (e.g.
+        // shutdown) throws right out of WaitAsync without ever holding the gate.
+        await singleFlight.WaitAsync(ct);
+        try
         {
-            model = cfg.Model,
-            messages = new object[]
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(cfg.TimeoutSeconds));
+
+            var http = httpClientFactory.CreateClient(HttpClientName);
+
+            // No boot-frozen BaseAddress (F36.2) — the endpoint is read from CurrentValue above and an
+            // absolute URI is built per call (EndpointUri preserves a subpath in Llm:Endpoint, e.g.
+            // https://host/openai — a plain new Uri(base, "/v1/...") would drop it, T3 review finding),
+            // so a live PUT to Llm:Endpoint applies on the next render.
+            var requestUri = EndpointUri.Combine(cfg.Endpoint, "/v1/chat/completions");
+
+            var body = new
             {
-                new { role = "system", content = BuildSystemPrompt(BuildPersonaSection(persona)) },
-                new { role = "user", content = BuildUserContent(request) },
-            },
-        };
+                model = cfg.Model,
+                messages = new object[]
+                {
+                    new { role = "system", content = BuildSystemPrompt(BuildPersonaSection(persona)) },
+                    new { role = "user", content = BuildUserContent(request) },
+                },
+            };
 
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri)
-        {
-            Content = JsonContent.Create(body),
-        };
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri)
+            {
+                Content = JsonContent.Create(body),
+            };
 
-        // Bearer header rides only when an ApiKey is configured (env-only, F19.3/F34.3).
-        if (!string.IsNullOrEmpty(cfg.ApiKey))
-        {
-            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.ApiKey);
+            // Bearer header rides only when an ApiKey is configured (env-only, F19.3/F34.3).
+            if (!string.IsNullOrEmpty(cfg.ApiKey))
+            {
+                httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.ApiKey);
+            }
+
+            var response = await http.SendAsync(httpRequest, timeoutCts.Token);
+            response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx
+
+            var payload = await response.Content.ReadFromJsonAsync<ChatCompletionResponse>(timeoutCts.Token);
+            return payload?.Choices?.FirstOrDefault()?.Message?.Content ?? string.Empty;
         }
-
-        var response = await http.SendAsync(httpRequest, timeoutCts.Token);
-        response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx
-
-        var payload = await response.Content.ReadFromJsonAsync<ChatCompletionResponse>(timeoutCts.Token);
-        return payload?.Choices?.FirstOrDefault()?.Message?.Content ?? string.Empty;
+        finally
+        {
+            singleFlight.Release();
+        }
     }
 
     /// <summary>

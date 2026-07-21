@@ -27,6 +27,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -37,6 +38,12 @@ using GenWave.Tts;
 namespace GenWave.Host.Tests.Specs;
 
 // ── In-process fakes ──────────────────────────────────────────────────────────
+
+/// <summary>No dependency has ever been probed — every lookup returns null, same as a fresh boot.</summary>
+file sealed class FakeDependencyHealth : IDependencyHealth
+{
+    public DependencyHealthVerdict? GetVerdict(string dependencyName) => null;
+}
 
 /// <summary>
 /// Minimal <see cref="IOptionsMonitor{T}"/> that returns <see cref="CurrentValue"/> on every read.
@@ -138,17 +145,34 @@ public static class FeatureStatusEndpoint
     static StatusController BuildController(
         IMediaCatalog catalog,
         IOptionsMonitor<StationOptions> stationMonitor,
-        DateTimeOffset? startedAt = null) =>
-        new(
+        DateTimeOffset? startedAt = null)
+    {
+        var llmOptions = new FakeOptionsMonitor<LlmOptions>(new LlmOptions());
+        var statusHolder = new LlmCopyStatusHolder();
+
+        // STORY-188's degradation aggregate rides the same StatusController.Get response — every
+        // scenario here is unrelated to it (catalog/safeScope only), so an unpinned, never-failed
+        // controller (Normal) is enough to leave those pre-existing assertions unaffected.
+        var degradationController = new DegradationController(
+            new FakeDependencyHealth(),
+            statusHolder,
+            llmOptions,
+            new FakeOptionsMonitor<DegradationOptions>(new DegradationOptions()),
+            TimeProvider.System,
+            NullLogger<DegradationController>.Instance);
+
+        return new(
             catalog,
             stationMonitor,
-            new FakeOptionsMonitor<LlmOptions>(new LlmOptions()),
-            new LlmCopyStatusHolder(),
+            llmOptions,
+            statusHolder,
+            degradationController,
             new FakeActivePersonaAccessor(),
             new ProcessStartTime(startedAt ?? new DateTimeOffset(2026, 7, 11, 9, 30, 0, TimeSpan.Zero)))
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };
+    }
 
     /// <summary>Serializes an <see cref="OkObjectResult"/>'s value and parses it back as JSON — the
     /// same shape the wire would carry, without spinning up a full HTTP pipeline.</summary>

@@ -81,6 +81,24 @@ public static class StationSettingsAllowlist
         // compiled SpeechCorrectionSet on every change — a PUT here reaches the very next render
         // with no api restart.
         new("Tts:Corrections",                                SettingApplyMode.Live,          SettingKind.String,     ""),
+        // Piper local-fallback engine (SPEC F70.1, STORY-190): FallbackTtsSynthesizer
+        // (GenWave.Tts) reads both via IOptionsMonitor<TtsFallbackOptions> per render, so a PUT
+        // here reaches the very next render with no api restart. Empty Endpoint is legal and is
+        // the disabled state — Piper not deployed, routing stays Kokoro-only (zero behavior
+        // change); the shipped compose.yaml sets a real value for its own `piper` sidecar. Voice is
+        // documentation only (see TtsFallbackOptions' own remarks) — it is never sent on the wire.
+        new("Tts:Fallback:Endpoint",                          SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Tts:Fallback:Voice",                             SettingApplyMode.Live,          SettingKind.String,     ""),
+        // Per-kind TTS engine override map (SPEC F70.3, STORY-191): a JSON-encoded object mapping
+        // SegmentKind names to an engine name ("kokoro"/"piper"), e.g.
+        // {"StationId":"piper","LeadIn":"kokoro"} — the same "single opaque string-kind setting"
+        // pattern as Tts:Corrections just above (the overlay only expands stored JSON ARRAYS into
+        // indexed keys, not objects). GenWave.Tts.TtsEngineByKindProvider reads it via
+        // IOptionsMonitor<TtsEngineByKindOptions> and rebuilds the compiled TtsEngineOverrideMap on
+        // every change — a PUT here reaches the very next render with no api restart. Empty/absent
+        // is legal and is the default (F70.3): every kind falls through to the existing F70.1
+        // health-based Kokoro/Piper routing, unchanged.
+        new("Tts:EngineByKind",                               SettingApplyMode.Live,          SettingKind.String,     ""),
         new("Llm:Endpoint",                                   SettingApplyMode.Live,          SettingKind.String,     ""),
         new("Llm:Model",                                      SettingApplyMode.Live,          SettingKind.String,     ""),
         new("Llm:TimeoutSeconds",                             SettingApplyMode.Live,          SettingKind.Number,     "seconds"),
@@ -153,6 +171,12 @@ public static class StationSettingsAllowlist
         // for an already-enriched row.
         new("Library:CueDetection:MinSilenceDurationSec",     SettingApplyMode.Enrichment,    SettingKind.Number,     "seconds"),
         new("Library:Energy:WindowSeconds",                   SettingApplyMode.Enrichment,    SettingKind.Number,     "seconds"),
+
+        // LLM degradation pin (SPEC F69.3, STORY-188) — DegradationController (GenWave.Tts) reads
+        // this fresh via IOptionsMonitor<LlmOptions> on every evaluation, so a live PUT here
+        // pins/unpins the mode with no api restart. "auto" (the LlmOptions default) leaves the
+        // mode fully automatic; "normal"/"soft"/"hard" holds it.
+        new("Llm:DegradationPin",                             SettingApplyMode.Live,          SettingKind.String,     ""),
     };
 
     /// <summary>All operator-editable settings, keyed by configuration key.</summary>

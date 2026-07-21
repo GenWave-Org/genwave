@@ -31,4 +31,15 @@ public sealed class LlmOptions
     /// or returned by the settings API.
     /// </summary>
     public string ApiKey { get; set; } = "";
+
+    /// <summary>
+    /// Live pin for the LLM degradation mode (SPEC F69.3, STORY-188): <c>"auto"</c> (default)
+    /// leaves the mode fully automatic; <c>"normal"</c>/<c>"soft"</c>/<c>"hard"</c> (case-insensitive)
+    /// holds that mode and suspends auto drop/raise until this is reset back to <c>"auto"</c>.
+    /// Allowlisted and validated in <c>GenWave.Host</c> (<c>StationSettingsAllowlist</c>,
+    /// <c>SettingValidator</c>); read fresh by <see cref="DegradationController"/> on every
+    /// evaluation via <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}"/>, so a
+    /// live <c>PUT /api/settings</c> applies with no api restart.
+    /// </summary>
+    public string DegradationPin { get; set; } = "auto";
 }

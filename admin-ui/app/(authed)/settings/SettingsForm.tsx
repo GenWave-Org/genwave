@@ -143,6 +143,17 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "Operator pronunciation corrections applied to every spoken line before it reaches Kokoro " +
     "(e.g. \"MacLeod\" → \"Muh-cloud\"). A JSON array of {from, to} pairs; empty means no " +
     "corrections.",
+  "Tts:Fallback:Endpoint":
+    "The Piper local fallback TTS service base URL — used automatically when Kokoro is " +
+    "unhealthy or a render fails. Leave empty to disable the fallback engine entirely.",
+  "Tts:Fallback:Voice":
+    "The Piper voice model the fallback service is expected to be running — informational " +
+    "only; it is not sent with each render and does not change which voice Piper speaks with.",
+  "Tts:EngineByKind":
+    "Pins specific speech kinds to a specific engine, e.g. {\"StationId\":\"piper\"} so a short " +
+    "ident always uses the cheap voice. A JSON object mapping StationId/LeadIn/BackAnnounce/" +
+    "TimeDate to \"kokoro\" or \"piper\"; empty means every kind uses the normal Kokoro-first, " +
+    "Piper-fallback routing.",
   "Llm:Endpoint":
     "The LLM completion service base URL used to author patter copy — leave empty to disable " +
     "LLM-authored copy and fall back to templated copy.",
@@ -208,6 +219,12 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
   "Library:Energy:WindowSeconds":
     "The length of the intro/outro window measured for energy analysis, in seconds. Applies " +
     "the next time a file is (re-)analyzed. Must be greater than 0, at most 60.",
+
+  // ── LLM degradation (SPEC F69.3) ───────────────────────────────────────────────────────────
+  "Llm:DegradationPin":
+    "Pins the LLM degradation mode instead of letting it auto-adjust to failures/recoveries. " +
+    "\"auto\" (default) follows automatically; \"normal\", \"soft\", or \"hard\" holds that mode " +
+    "until this is set back to \"auto\".",
 };
 
 /**

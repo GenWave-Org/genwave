@@ -107,8 +107,11 @@ public static class FeatureSeededDefaults
     /// state (F34.2 for the LLM pair; F62.8 for PublicStreamUrl, where empty means the spectator
     /// "about" panel hides the player; F68.5/F68.8 for Tts:Corrections, where empty means no
     /// operator corrections are configured — the MacLeod rule is demo-station SEED DATA in
-    /// compose.demo.yaml, never a C# default), not a bug the F55.1 seeding contract covers. Every
-    /// other allowlisted key's C# default is non-empty.
+    /// compose.demo.yaml, never a C# default), not a bug the F55.1 seeding contract covers.
+    /// Tts:EngineByKind (SPEC F70.3, STORY-191) joins this set on the identical rationale: empty is
+    /// its spec'd default (F70.3, "Default: empty map") — every kind falls through to the existing
+    /// F70.1 health-based routing, and no compose topology needs to pin one. Every other
+    /// allowlisted key's C# default is non-empty.
     /// </summary>
     static readonly IReadOnlySet<string> HonestlyBlankKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -116,6 +119,7 @@ public static class FeatureSeededDefaults
         "Llm:Model",
         "Station:PublicStreamUrl",
         "Tts:Corrections",
+        "Tts:EngineByKind",
     };
 
     /// <summary>
@@ -146,6 +150,13 @@ public static class FeatureSeededDefaults
         // fact is what closes it (F63.1).
         ["Loudness:TargetLufs"] = "-16",
         ["Loudness:CeilingDbtp"] = "-1",
+        // Piper local fallback (SPEC F70.1, STORY-190, PLAN T34): unlike Llm:Endpoint (an honest
+        // blank — Ollama is a demo-only add-on), compose.yaml's base stack deploys a `piper`
+        // sidecar for every topology and points the api at it here, so a genuine fresh deploy has
+        // the fallback enabled out of the box — NOT a HonestlyBlankKeys entry. TtsFallbackOptions'
+        // own C# default stays empty/disabled for a bare (piper-less) deployment or test.
+        ["Tts:Fallback:Endpoint"] = "http://piper:5000",
+        ["Tts:Fallback:Voice"] = "en_US-lessac-medium",
     };
 
     static IConfiguration FreshDeployConfig() =>
@@ -300,6 +311,12 @@ public static class FeatureSeededDefaults
             Assert.Equal(
                 llmDefaults.MaxCopyChars,
                 int.Parse(RequireValue(config, "Llm:MaxCopyChars"), NumberStyles.Integer, CultureInfo.InvariantCulture));
+
+            // Llm:DegradationPin (SPEC F69.3, STORY-188) — seeded "auto" alongside the T32 feature
+            // itself, closing the same gitea-#231 root cause before it can ever open for this key.
+            Assert.Equal(
+                llmDefaults.DegradationPin,
+                RequireValue(config, "Llm:DegradationPin"));
 
             Assert.Equal(
                 ttsDefaults.BlurbRetentionHours,

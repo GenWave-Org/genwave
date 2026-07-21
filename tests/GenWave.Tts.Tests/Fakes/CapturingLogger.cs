@@ -8,6 +8,10 @@ public sealed class CapturingLogger<T> : ILogger<T>
 {
     public List<string> Warnings { get; } = [];
 
+    /// <summary>Every message logged at any level, in order (SPEC F69.5, STORY-188) — a mode
+    /// transition logs at Information, below <see cref="Warnings"/>' Warning-and-above floor.</summary>
+    public List<string> Messages { get; } = [];
+
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
     public bool IsEnabled(LogLevel logLevel) => true;
@@ -16,7 +20,9 @@ public sealed class CapturingLogger<T> : ILogger<T>
         LogLevel logLevel, EventId eventId, TState state, Exception? exception,
         Func<TState, Exception?, string> formatter)
     {
+        var message = formatter(state, exception);
+        Messages.Add(message);
         if (logLevel >= LogLevel.Warning)
-            Warnings.Add(formatter(state, exception));
+            Warnings.Add(message);
     }
 }

@@ -30,15 +30,49 @@ public static class TtsServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // Piper fallback options (SPEC F70.1, STORY-190) — registered unconditionally, mirroring
+        // LlmOptions below: an empty Tts:Fallback:Endpoint just means FallbackTtsSynthesizer stays
+        // a pass-through to Kokoro. IOptionsMonitor<TtsFallbackOptions> (not IOptions) is what both
+        // FallbackTtsSynthesizer and PiperTtsSynthesizer/PiperHealthProbe read per call, so a live
+        // edit to Tts:Fallback:Endpoint/Voice applies without a restart.
+        services
+            .AddOptions<TtsFallbackOptions>()
+            .Bind(configuration.GetSection(TtsFallbackOptions.Section))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // Per-kind engine override map (SPEC F70.3, STORY-191) — a raw JSON leaf, not
+        // DataAnnotations-validated: malformed JSON (or an unknown kind/engine entry) degrades to
+        // no per-kind overrides with a WARN (TtsEngineByKindProvider) rather than failing boot,
+        // mirroring Tts:Corrections' own operator-data discipline below.
+        services
+            .AddOptions<TtsEngineByKindOptions>()
+            .Bind(configuration.GetSection(TtsEngineByKindOptions.Section));
+        services.AddSingleton<TtsEngineByKindProvider>();
+
         // LLM options — registered unconditionally (SPEC F34.2); an empty Llm:Endpoint just means
         // LlmCopyWriter stays disabled. IOptionsMonitor<LlmOptions> (not IOptions) is what
         // LlmCopyWriter reads per render, so a live edit to Llm:Endpoint/Model/TimeoutSeconds/
-        // MaxCopyChars applies without a restart (F36.2).
+        // MaxCopyChars applies without a restart (F36.2). DegradationPin (SPEC F69.3) rides the
+        // same options class/section — it is one more Llm:* leaf, not a separate config surface.
         services
             .AddOptions<LlmOptions>()
             .Bind(configuration.GetSection(LlmOptions.Section))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+
+        // Degradation thresholds (SPEC F69.2, STORY-188) — deployment-tunable, not allowlisted
+        // (see DegradationOptions' own remarks for why). ValidateOnStart mirrors every other
+        // options class in this method.
+        services
+            .AddOptions<DegradationOptions>()
+            .Bind(configuration.GetSection(DegradationOptions.Section))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // Injected clock for DegradationController's cooldown math (no DateTime.Now anywhere in
+        // this feature) — TryAdd so a host or test that already registers its own TimeProvider wins.
+        services.TryAddSingleton(TimeProvider.System);
 
         // Operator pronunciation corrections (SPEC F68.5, STORY-185) — a raw JSON leaf, not
         // DataAnnotations-validated: malformed JSON degrades to no corrections with a WARN
@@ -53,26 +87,58 @@ public static class TtsServiceCollectionExtensions
         // lifetime, incremented by NormalizingTtsSynthesizer and read by GET /api/tts/corrections-stats.
         services.AddSingleton<CorrectionsFiredStats>();
 
+        // Dependency health probes (SPEC F70.2, STORY-187): the verdict store lives here — TTS
+        // owns the read seam its own render-time fallback logic (T34) will consume — registered
+        // concretely once and exposed under IDependencyHealth, mirroring the
+        // NormalizingTtsSynthesizer/LlmCopyWriter "one instance, every interface" shape below.
+        // The probes themselves live here too (Ollama/Kokoro endpoints are Tts:Endpoint/
+        // Llm:Endpoint, already this project's own options) with the same no-BaseAddress typed
+        // HttpClient discipline as KokoroTtsSynthesizer/KokoroVoiceLister — each is added to the
+        // IDependencyProbe collection declaratively; the Host's DependencyHealthProbeService
+        // (GenWave.Host) resolves IEnumerable<IDependencyProbe> and drives the cadence, wholly
+        // unaware of which probes exist.
+        services.AddSingleton<DependencyHealthStore>();
+        services.AddSingleton<IDependencyHealth>(sp => sp.GetRequiredService<DependencyHealthStore>());
+
+        services.AddHttpClient<OllamaHealthProbe>();
+        services.AddSingleton<IDependencyProbe>(sp => sp.GetRequiredService<OllamaHealthProbe>());
+
+        services.AddHttpClient<KokoroHealthProbe>();
+        services.AddSingleton<IDependencyProbe>(sp => sp.GetRequiredService<KokoroHealthProbe>());
+
+        // Piper fallback probe (SPEC F70.1, F70.2, STORY-190) — third IDependencyProbe entry;
+        // DependencyHealthProber (and the Host's DependencyHealthProbeService driving it) needed no
+        // change at all to pick this up.
+        services.AddHttpClient<PiperHealthProbe>();
+        services.AddSingleton<IDependencyProbe>(sp => sp.GetRequiredService<PiperHealthProbe>());
+
         // TTS wiring: ISegmentCopyWriter is the copy-writer seam (SPEC F34.1) TtsSegmentSource
         // consumes. TemplateCopyWriter is registered concretely as the terminal fallback rung;
-        // LlmCopyWriter (SPEC F34.2-F34.5) is the seam's active implementation — it authors
-        // LeadIn/BackAnnounce from the configured LLM and degrades to TemplateCopyWriter on any
-        // miss, including a disabled (empty Llm:Endpoint) writer. LlmCopyStatusHolder is the
-        // in-memory last-attempt record GET /api/status (STORY-125) reads.
+        // LlmCopyWriter (SPEC F34.2-F34.5) authors LeadIn/BackAnnounce from the configured LLM and
+        // degrades to TemplateCopyWriter on any miss, including a disabled (empty Llm:Endpoint)
+        // writer. LlmCopyStatusHolder is the in-memory last-attempt record GET /api/status
+        // (STORY-125) reads, and now also DegradationController's drop signal (SPEC F69.2).
+        //
+        // ISegmentCopyWriter itself resolves to DegradationGatedCopyWriter (SPEC F69.1, F69.4,
+        // STORY-188), NOT LlmCopyWriter directly — the one and only place degradation mode gates a
+        // render (see its own remarks). IPersonaPreviewWriter stays bound straight to LlmCopyWriter,
+        // unchanged, so operator-explicit previews never pass through the gate at all.
         services
             .AddSingleton<PatterTemplateRenderer>()
             .AddSingleton<TemplateCopyWriter>()
             .AddSingleton<LlmCopyStatusHolder>()
+            .AddSingleton<DegradationController>()
             // LlmCopyWriter also consumes IActivePersonaAccessor (a host-registered seam) —
             // resolved per LLM render only, composing the active persona's backstory + style into
             // the prompt (SPEC F35.2/F35.3). Registered concretely ONCE and exposed under BOTH
-            // seams it implements — the on-air ISegmentCopyWriter (always-succeeds, template
+            // seams it implements — the on-air copy-writer chain (always-succeeds, template
             // fallback) and the preview-only IPersonaPreviewWriter (never silently degrades, SPEC
             // F35.6/T7) — so the persona preview endpoint reuses the exact same prompt-building/
             // hygiene instance the feeder does, never a second parallel writer.
             .AddSingleton<LlmCopyWriter>()
-            .AddSingleton<ISegmentCopyWriter>(sp => sp.GetRequiredService<LlmCopyWriter>())
             .AddSingleton<IPersonaPreviewWriter>(sp => sp.GetRequiredService<LlmCopyWriter>())
+            .AddSingleton<DegradationGatedCopyWriter>()
+            .AddSingleton<ISegmentCopyWriter>(sp => sp.GetRequiredService<DegradationGatedCopyWriter>())
             .AddSingleton<ITtsSegmentSource, TtsSegmentSource>();
 
         // TTS/voices clients deliberately carry no BaseAddress (SPEC F36.1–F36.2, F36.4) —
@@ -88,6 +154,10 @@ public static class TtsServiceCollectionExtensions
         // with a ~5 min in-memory TTL so a Safe content form load never round-trips Kokoro on
         // every keystroke.
         services.AddHttpClient<KokoroVoiceLister>();
+
+        // Piper fallback client (SPEC F70.1, STORY-190) — same no-BaseAddress discipline,
+        // Tts:Fallback:Endpoint read fresh per call inside PiperTtsSynthesizer.
+        services.AddHttpClient<PiperTtsSynthesizer>();
 
         // LlmCopyWriter's HTTP client (SPEC F34.3, F36.2): deliberately no BaseAddress here — the
         // endpoint comes from IOptionsMonitor<LlmOptions>.CurrentValue per render, so a live PUT
@@ -108,18 +178,32 @@ public static class TtsServiceCollectionExtensions
                     sp.GetRequiredService<KokoroVoiceLister>(),
                     sp.GetRequiredService<IOptionsMonitor<TtsOptions>>(),
                     TimeSpan.FromMinutes(5)))
+            // FallbackTtsSynthesizer (SPEC F70.1, F70.4, STORY-190) sits BELOW
+            // NormalizingTtsSynthesizer, routing each render to Kokoro (primary) or Piper
+            // (fallback) — see its own remarks for the routing rule. Registered concretely once;
+            // nothing else in this project resolves it directly.
+            .AddSingleton<FallbackTtsSynthesizer>(sp =>
+                new FallbackTtsSynthesizer(
+                    sp.GetRequiredService<KokoroTtsSynthesizer>(),
+                    sp.GetRequiredService<PiperTtsSynthesizer>(),
+                    sp.GetRequiredService<IDependencyHealth>(),
+                    sp.GetRequiredService<IOptionsMonitor<TtsFallbackOptions>>(),
+                    sp.GetRequiredService<ILogger<FallbackTtsSynthesizer>>(),
+                    sp.GetRequiredService<TtsEngineByKindProvider>()))
             // The typed HttpClient factory registers KokoroTtsSynthesizer as transient; the
             // singleton every caller (TtsSegmentSource, SafeSegmentAuthor, TtsPreviewController)
-            // actually resolves is NormalizingTtsSynthesizer (SPEC F68.1, STORY-185) decorating it —
-            // the single Normalize call site sits here, not in any of those callers. Registered
-            // concretely ONCE and exposed under BOTH seams it implements (mirrors LlmCopyWriter's
+            // actually resolves is NormalizingTtsSynthesizer (SPEC F68.1, STORY-185) decorating
+            // FallbackTtsSynthesizer (T34) decorating KokoroTtsSynthesizer/PiperTtsSynthesizer —
+            // the single Normalize call site sits here, not in any of those callers, and runs
+            // exactly once whichever engine ultimately renders. Registered concretely ONCE and
+            // exposed under BOTH seams it implements (mirrors LlmCopyWriter's
             // ISegmentCopyWriter/IPersonaPreviewWriter split) — the on-air ITtsSynthesizer and the
             // preview-only ISpeechNormalizationPreview (SPEC F68.6, STORY-186 AC2) — so the admin
             // normalize-preview endpoint reuses the exact same normalization instance the feeder
             // does, never a second parallel one.
             .AddSingleton<NormalizingTtsSynthesizer>(sp =>
                 new NormalizingTtsSynthesizer(
-                    sp.GetRequiredService<KokoroTtsSynthesizer>(),
+                    sp.GetRequiredService<FallbackTtsSynthesizer>(),
                     sp.GetRequiredService<SpeechCorrectionProvider>(),
                     sp.GetRequiredService<CorrectionsFiredStats>(),
                     sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>()))
