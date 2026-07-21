@@ -96,6 +96,12 @@ public static class MediaLibraryServiceCollectionExtensions
         // resolves regardless, so Host boot is unaffected. MaxResponseContentBufferSize bounds a
         // recording-search reply (review finding, mirrors LlmCopyWriter's own Program.cs bound) — a
         // misbehaving/compromised endpoint can't make this client buffer an unbounded response body.
+        //
+        // TimeProvider.System / MusicBrainzRateLimiter (SPEC F76.1): one rate limiter for the whole
+        // process — TryAdd so a host or test that already registers its own TimeProvider wins (the
+        // same GenWave.Tts/GenWave.Orchestration precedent).
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton<MusicBrainzRateLimiter>();
         services.Configure<YearLookupOptions>(configuration.GetSection(YearLookupOptions.Section));
         services.AddHttpClient<MusicBrainzYearLookup>(client =>
         {

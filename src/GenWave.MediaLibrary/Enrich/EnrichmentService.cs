@@ -34,13 +34,16 @@ namespace GenWave.MediaLibrary.Enrich;
 /// as energy. Loudness/cue are NOT re-run. Bounded to the same
 /// <see cref="CueDetectionOptions.BackfillBatchSize"/> per iteration.
 ///
-/// Additionally runs a backfill loop for <c>ready</c> rows missing a release year (SPEC F48.3):
-/// picks up rows where <c>year IS NULL AND year_lookup_at IS NULL</c> and both artist and title are
-/// non-blank, and runs <see cref="IYearLookup"/> on each — SEQUENTIALLY, with at least a 1-second
-/// pause between request starts and exactly one request in flight (MusicBrainz rate etiquette).
-/// Skips entirely, with no claim query at all, when <c>Library:YearLookup:Enabled</c> reads false
-/// (F48.5) — the live kill switch stops claiming before the very next tick, no api restart. Bounded
-/// to the same <see cref="CueDetectionOptions.BackfillBatchSize"/> per tick.
+/// Additionally runs a backfill loop for <c>ready</c> rows missing a release year (SPEC F48.3,
+/// F76.2): picks up rows where <c>year IS NULL AND year_lookup_missed_at IS NULL</c> and both artist
+/// and title are non-blank, and runs <see cref="IYearLookup"/> on each — SEQUENTIALLY, one row
+/// awaited at a time, never two calls in flight together. The MusicBrainz 1 req/s etiquette pacing
+/// itself is NOT hand-rolled here (a hand-rolled per-loop delay only paces THIS loop, not every
+/// caller): it lives in <c>MusicBrainzRateLimiter</c>, a process-wide gate <c>MusicBrainzYearLookup</c>
+/// awaits immediately before every HTTP call (SPEC F76.1), so it holds regardless of which code path
+/// drives the client. Skips entirely, with no claim query at all, when <c>Library:YearLookup:Enabled</c>
+/// reads false (F48.5) — the live kill switch stops claiming before the very next tick, no api
+/// restart. Bounded to the same <see cref="CueDetectionOptions.BackfillBatchSize"/> per tick.
 ///
 /// No separate scheduler or admin endpoint — all backfills fire as sub-tasks of this service.
 /// </summary>
@@ -383,17 +386,10 @@ sealed class EnrichmentService(
         // simply never treated as failing.
         var anyCallFailed = false;
 
-        for (var i = 0; i < batch.Count; i++)
+        foreach (var row in batch)
         {
-            var row = batch[i];
-
-            // MusicBrainz rate etiquette (F48.3): at least 1s between request STARTS, one request
-            // in flight — a fixed delay before every attempt but the first is sufficient; no
-            // Date/time bookkeeping needed since this loop is already strictly sequential (awaited).
-            if (i > 0)
-                await Task.Delay(TimeSpan.FromSeconds(1), ct);
-
             int? year = null;
+            var rowCallFailed = false;
             try
             {
                 year = await yearLookup.TryLookupAsync(row.Artist ?? string.Empty, row.Title ?? string.Empty, row.Album, ct);
@@ -408,15 +404,19 @@ sealed class EnrichmentService(
                 // guard is defense-in-depth only, mirroring BackfillBpmAsync/BackfillEnergyAsync — a
                 // misbehaving implementation must not take the whole backfill loop down.
                 log.LogWarning(ex, "Backfill year lookup failed for {Artist} - {Title}", row.Artist, row.Title);
-                anyCallFailed = true;
+                rowCallFailed = true;
             }
 
             if (yearLookup is IYearLookupDiagnostics diagnostics && diagnostics.LastCallFailed)
+                rowCallFailed = true;
+
+            if (rowCallFailed)
                 anyCallFailed = true;
 
-            // Sentinel is stamped unconditionally by the write method regardless of outcome
-            // (SPEC F48.3/F48.4) — success, low confidence, or failure all count as "attempted".
-            await repo.WriteYearLookupResultAsync(row.Id, year, ct);
+            // year_lookup_at is stamped unconditionally (attempted-at telemetry); the
+            // year_lookup_missed_at re-claim gate is stamped ONLY for a genuine miss — never for a
+            // failed round trip, which stays eligible and is retried next tick (SPEC F76.2).
+            await repo.WriteYearLookupResultAsync(row.Id, year, rowCallFailed, ct);
         }
 
         if (anyCallFailed)
