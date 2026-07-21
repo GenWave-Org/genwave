@@ -26,9 +26,16 @@ namespace GenWave.MediaLibrary.Station;
 /// are self-idempotent by construction (the sentinel definition marks "not yet reconciled"; the
 /// default row's existence is checked by slug before any insert), so no separate marker table is
 /// needed. Any failure degrades to a WARN and the host starts normally — the next boot retries.
+///
+/// <paramref name="dataSource"/> is a <see cref="Lazy{T}"/> (mirrors <see cref="PersonaRepository"/>'s
+/// own T37/STORY-193 fix): <see cref="RunAsync"/> is the only place <c>.Value</c> is dereferenced, so
+/// an empty/dev-mode <c>ConnectionStrings:Station</c> — no <c>Station</c> Postgres configured is a
+/// documented supported deployment — throws no earlier than that first hosted-service tick, landing
+/// inside this type's own try/catch (WARN + next-boot retry) instead of during DI composition, where
+/// nothing catches it and it would kill host boot outright.
 /// </summary>
 public sealed class PersonaCardMigrator(
-    NpgsqlDataSource dataSource,
+    Lazy<NpgsqlDataSource> dataSource,
     IActivePersonaAccessor activePersonaAccessor,
     ILogger<PersonaCardMigrator> logger)
 {
@@ -48,7 +55,7 @@ public sealed class PersonaCardMigrator(
     {
         try
         {
-            await using var conn = await dataSource.OpenConnectionAsync(ct);
+            await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
             await ReconcileLegacyRowsAsync(conn, ct);
             await EnsureDefaultPersonaAsync(conn, ct);
         }
