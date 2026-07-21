@@ -1,7 +1,5 @@
 namespace GenWave.Tts;
 
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -26,16 +24,10 @@ public sealed class SpeechCorrectionProvider : IDisposable
 {
     // Sentinel for "no rules configured" — a stable literal rather than SHA256-of-empty-string, so
     // the no-corrections case never depends on the hash algorithm's own behavior on empty input and
-    // reads unambiguously in logs/cache-file names.
+    // reads unambiguously in logs/cache-file names. Distinct from
+    // ActivePersonaCorrectionsCache's own "no-card-corrections" sentinel (the card side of the
+    // F71.7 merge) so the two independent "no rules" cases can never collide with each other either.
     const string EmptyContentHash = "no-corrections";
-
-    // ASCII Unit Separator / Record Separator — delimits a pair's two fields, and each pair from the
-    // next, with control characters no operator-authored From/To text will plausibly contain. Two
-    // distinct rule sets can then never fold to the same canonical string through field-boundary
-    // ambiguity (e.g. From="A", To="BC" vs From="AB", To="C" would otherwise both canonicalize to
-    // the same "ABC" with a plain concatenation).
-    const char FieldSeparator = '\u001F';
-    const char PairSeparator = '\u001E';
 
     static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -82,14 +74,15 @@ public sealed class SpeechCorrectionProvider : IDisposable
         SpeechCorrectionSet.Merge(stationSet, SpeechCorrectionSet.Create(cardCorrections));
 
     /// <summary>
-    /// Deterministic content fingerprint of the current correction rules (SPEC F68.5) — a short
-    /// SHA-256 hex digest over the canonical, ordered (From, To) pairs <see cref="Current"/>
-    /// actually compiled; a rule set with no rules at all yields the stable constant
-    /// <c>"no-corrections"</c> rather than a hash of empty input. Same rules always fold to the same
-    /// fingerprint, in this process or the next one — unlike a process-local counter, it does not
-    /// reset to a colliding starting value across a container redeploy. This is the term
-    /// <see cref="TtsSegmentSource"/> folds into its cache key: same rules → same key across
-    /// restarts, changed rules → a new key on the very next render.
+    /// Deterministic content fingerprint of the current correction rules (SPEC F68.5), via <see
+    /// cref="CorrectionsFingerprint.Compute"/> over the canonical, ordered (From, To) pairs <see
+    /// cref="Current"/> actually compiled; a rule set with no rules at all yields the stable
+    /// constant <c>"no-corrections"</c> rather than a hash of empty input. Same rules always fold to
+    /// the same fingerprint, in this process or the next one — unlike a process-local counter, it
+    /// does not reset to a colliding starting value across a container redeploy. This is one of the
+    /// two terms <see cref="TtsSegmentSource"/> folds into its cache key (the other is <see
+    /// cref="ActivePersonaCorrectionsCache.ContentHash"/>, the card side of the F71.7 merge): same
+    /// rules → same key across restarts, changed rules → a new key on the very next render.
     /// </summary>
     public string ContentHash => snapshot.ContentHash;
 
@@ -130,16 +123,8 @@ public sealed class SpeechCorrectionProvider : IDisposable
         }
     }
 
-    static string ComputeContentHash(SpeechCorrectionSet set)
-    {
-        var pairs = set.RulePairs.ToList();
-        if (pairs.Count == 0)
-            return EmptyContentHash;
-
-        var canonical = string.Join(PairSeparator, pairs.Select(pair => $"{pair.From}{FieldSeparator}{pair.To}"));
-        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
-        return Convert.ToHexString(digest)[..16];
-    }
+    static string ComputeContentHash(SpeechCorrectionSet set) =>
+        CorrectionsFingerprint.Compute(set.RulePairs, EmptyContentHash);
 
     public void Dispose() => subscription?.Dispose();
 

@@ -86,7 +86,8 @@ public static class FeatureCopyWriterSeam
             var copyWriter = new FakeSegmentCopyWriter("Spin this one up, folks.");
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
             var source = new TtsSegmentSource(
-                copyWriter, synth, analyzer, new FakeCueAnalyzer(), NoCorrections.Provider(), opts,
+                copyWriter, synth, analyzer, new FakeCueAnalyzer(), NoCorrections.Provider(),
+                NoCorrections.PersonaCache(), opts,
                 NullLogger<TtsSegmentSource>.Instance);
 
             await source.RenderAsync(StationIdRequest(), CancellationToken.None);
