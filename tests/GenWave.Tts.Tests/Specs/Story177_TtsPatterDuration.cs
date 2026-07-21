@@ -28,6 +28,7 @@ public static class FeatureTtsPatterDuration
             analyzer,
             cueAnalyzer,
             NoCorrections.Provider(),
+            NoCorrections.PersonaCache(),
             opts,
             NullLogger<TtsSegmentSource>.Instance);
     }

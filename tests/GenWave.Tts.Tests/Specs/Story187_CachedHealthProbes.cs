@@ -36,7 +36,10 @@ public static class FeatureCachedDependencyHealthProbes
             var afterReads = probe.CallCount;
 
             await cts.CancelAsync();
-            await Assert.ThrowsAsync<OperationCanceledException>(() => runTask);
+            // ThrowsAnyAsync, not ThrowsAsync: which await the cancellation interrupts is a race
+            // (PeriodicTimer tick vs Task.Delay), and the loser surfaces TaskCanceledException —
+            // an OperationCanceledException subclass the exact-type assert rejected on slow CI.
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runTask);
 
             // Then reads return the cached snapshot, and probe calls happened only on the
             // configured interval — nowhere near once per read (50 reads, far fewer probe calls)

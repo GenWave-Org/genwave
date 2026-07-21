@@ -28,6 +28,7 @@ public static class FeatureTtsSegmentSourceCueAnalysis
             analyzer,
             cueAnalyzer,
             NoCorrections.Provider(),
+            NoCorrections.PersonaCache(),
             opts,
             NullLogger<TtsSegmentSource>.Instance);
     }
