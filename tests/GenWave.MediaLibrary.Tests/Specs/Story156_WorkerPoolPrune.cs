@@ -22,11 +22,9 @@ public static class FeatureWorkerPoolPrune
     /// never opened by the happy-path facts below, which only ever grow workers against an EMPTY,
     /// still-open channel blocked on the read; retirement is always driven by cancellation, never by
     /// completing the channel (an already-completed, empty channel makes <c>WaitToReadAsync</c> return
-    /// synchronously, which — pre-existing, independent of this fix — would let a newly-spawned worker
-    /// run to completion inside <c>ReconcileWorkerPool</c>'s own growth loop and never actually count
-    /// toward the desired headcount; out of scope for F59's lifecycle-hygiene-only prune). Mirrors
-    /// Story139's own DisconnectedRepo convention so these facts stay DB-free and run in the filtered
-    /// CI wall.
+    /// synchronously — see <c>ScenarioCompletedEmptyChannelDoesNotSpin</c> below, gh-#6, for that case
+    /// on its own). Mirrors Story139's own DisconnectedRepo convention so these facts stay DB-free and
+    /// run in the filtered CI wall.
     /// </summary>
     static MediaRepository DisconnectedRepo(Channel<long> enrichQueue) =>
         new(
@@ -130,6 +128,49 @@ public static class FeatureWorkerPoolPrune
 
                 Assert.Equal(1, svc.TrackedWorkerTaskCount);
             }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // REGRESSION (gh-#6) — a completed-and-empty enrich channel must not spin
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public sealed class ScenarioCompletedEmptyChannelDoesNotSpin
+    {
+        [Fact]
+        public async Task ReconcileReturnsPromptlyInsteadOfSpinningForever()
+        {
+            // Writer completed with nothing ever written: Reader.Completion is satisfied immediately,
+            // so WaitToReadAsync would return an already-completed `false` to any worker that read it.
+            // Pre-fix, ReconcileWorkerPool's growth loop kept respawning workers that retired before
+            // the loop's next check ever saw activeWorkerCount rise — a hot spin, forever, under
+            // workerTasksLock. Run on a background thread and bound with a timeout so a regression
+            // hangs this test instead of the whole CI run.
+            var queue = Channel.CreateUnbounded<long>();
+            queue.Writer.Complete();
+            var options = new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions { EnrichmentConcurrency = 4 });
+            var svc = NewService(queue, options);
+
+            var reconcile = Task.Run(() => svc.ReconcileWorkerPool(CancellationToken.None));
+            var winner = await Task.WhenAny(reconcile, Task.Delay(TimeSpan.FromSeconds(5)));
+
+            Assert.Same(reconcile, winner);
+        }
+
+        [Fact]
+        public async Task NoWorkerIsLeftTrackedAfterReconcilingAgainstTheCompletedChannel()
+        {
+            var queue = Channel.CreateUnbounded<long>();
+            queue.Writer.Complete();
+            var options = new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions { EnrichmentConcurrency = 4 });
+            var svc = NewService(queue, options);
+
+            await Task.Run(() => svc.ReconcileWorkerPool(CancellationToken.None))
+                .WaitAsync(TimeSpan.FromSeconds(5));
+
+            // Growth bailed out before spawning anything against a reader that can never again
+            // yield an item — the tracked set (and the live headcount) stays at zero, not 4.
+            Assert.Equal(0, svc.TrackedWorkerTaskCount);
         }
     }
 

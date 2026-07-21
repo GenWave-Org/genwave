@@ -141,6 +141,23 @@ sealed class EnrichmentService(
 
             while (Volatile.Read(ref activeWorkerCount) < desired)
             {
+                // gh-#6: a completed-AND-empty enrich channel makes WaitToReadAsync return an
+                // already-completed `false` synchronously — a newly-spawned WorkerAsync would run
+                // to completion (and decrement activeWorkerCount right back down) before this loop's
+                // next iteration even runs, so the count above never rises and this spins hot forever
+                // holding workerTasksLock. Reader.Completion mirrors that exact condition (it only
+                // completes once the writer is done AND every item has been drained) without needing
+                // to spawn a worker just to find out — bail instead of spinning. Not reachable today
+                // (no caller ever calls enrichQueue.Writer.Complete()), but growing against a reader
+                // that will never again yield an item is futile regardless of how it got that way.
+                if (enrichQueue.Reader.Completion.IsCompleted)
+                {
+                    log.LogWarning(
+                        "Enrich queue reader is completed; stopping worker pool growth at {Count} (desired {Desired})",
+                        Volatile.Read(ref activeWorkerCount), desired);
+                    break;
+                }
+
                 Interlocked.Increment(ref activeWorkerCount);
                 workerTasks.Add(WorkerAsync(ct));
             }
