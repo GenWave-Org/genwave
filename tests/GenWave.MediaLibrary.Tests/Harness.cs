@@ -321,11 +321,12 @@ static class Harness
             "select tags_edited_at from library.media where id = @id", new { id });
     }
 
-    public static async Task<(DateTime? CueAnalyzedAt, DateTime? EnergyAnalyzedAt, DateTime? BpmAnalyzedAt, DateTime? YearLookupAt)> AnalyzedAtOfAsync(DatabaseFixture f, long id)
+    public static async Task<(DateTime? CueAnalyzedAt, DateTime? EnergyAnalyzedAt, DateTime? BpmAnalyzedAt, DateTime? YearLookupAt, DateTime? YearLookupMissedAt)> AnalyzedAtOfAsync(DatabaseFixture f, long id)
     {
         await using var conn = await f.DataSource.OpenConnectionAsync();
-        return await conn.QuerySingleAsync<(DateTime?, DateTime?, DateTime?, DateTime?)>(
-            "select cue_analyzed_at, energy_analyzed_at, bpm_analyzed_at, year_lookup_at from library.media where id = @id", new { id });
+        return await conn.QuerySingleAsync<(DateTime?, DateTime?, DateTime?, DateTime?, DateTime?)>(
+            "select cue_analyzed_at, energy_analyzed_at, bpm_analyzed_at, year_lookup_at, year_lookup_missed_at " +
+            "from library.media where id = @id", new { id });
     }
 
     public static async Task<int> CountMediaRowsAsync(DatabaseFixture f)

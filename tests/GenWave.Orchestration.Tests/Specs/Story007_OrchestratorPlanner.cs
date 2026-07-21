@@ -34,7 +34,9 @@ public static class FeatureOrchestratorPlanner
         return new Orchestrator(
             identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, ttsSource,
             new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(renderBudget ?? TimeSpan.FromSeconds(30)));
+            new FakeRenderBudgetProvider(renderBudget ?? TimeSpan.FromSeconds(30)),
+            new SpeechDeferralQueue(TimeProvider.System),
+            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
     }
 
     static List<MediaItem> ProduceN(Orchestrator orchestrator, int n)
@@ -265,7 +267,9 @@ public static class FeatureOrchestratorPlanner
             var orchestrator = new Orchestrator(
                 identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, tts,
                 new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-                new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)));
+                new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
+                new SpeechDeferralQueue(TimeProvider.System),
+                TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
             var ctx = new PlayoutContext([]);
 
             // Unit 1 — cadence has LeadIn off: the pulled item is music, no lead-in precedes it.

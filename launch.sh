@@ -25,21 +25,16 @@ docker compose up "${UP_ARGS[@]}" db
 # in-place upgrades (ADD COLUMN IF NOT EXISTS), so applying them on every launch is safe and
 # keeps the schema converged BEFORE the api (which queries the new columns) starts — otherwise
 # the api crash-loops on a missing column and the stream falls back to the safe loop.
-echo "==> applying in-place schema migrations (idempotent)"
 db_cid="$(docker compose ps -q db)"
 for _ in $(seq 1 30); do
   if [ "$(docker inspect "$db_cid" --format '{{.State.Health.Status}}' 2>/dev/null)" = "healthy" ]; then break; fi
   sleep 2
 done
-for migration in db/*-migration.sh; do
-  [ -f "$migration" ] || continue
-  printf '    %s ... ' "$migration"
-  if docker compose exec -T db bash -s < "$migration" >/dev/null 2>&1; then
-    echo "ok"
-  else
-    echo "FAILED — check 'docker compose logs db'"
-  fi
-done
+# The migration loop itself now lives in ./migrate.sh (also usable standalone against a
+# running stack that isn't being launched — see its header). --keep-going preserves this
+# script's historical behaviour exactly: a failing migration is reported but never stops
+# the launch, so `|| true` keeps that true here too.
+./migrate.sh --keep-going || true
 
 echo "==> bringing the rest of the stack up"
 docker compose up "${UP_ARGS[@]}"

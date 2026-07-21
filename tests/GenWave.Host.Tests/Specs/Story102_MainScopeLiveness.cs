@@ -212,7 +212,9 @@ public static class FeatureMainScopeLiveness
             var orchestrator = new Orchestrator(
                 identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, new NoOpTtsSegmentSource(),
                 new NoOpActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-                new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)));
+                new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
+                new SpeechDeferralQueue(TimeProvider.System),
+                TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
 
             await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
             Assert.Equal(new long[] { 1L }, catalog.Scopes[0].LibraryIds);
@@ -285,7 +287,9 @@ public static class FeatureMainScopeLiveness
             var orchestrator = new Orchestrator(
                 identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, new NoOpTtsSegmentSource(),
                 new NoOpActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-                new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)));
+                new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
+                new SpeechDeferralQueue(TimeProvider.System),
+                TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
 
             var item = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
 

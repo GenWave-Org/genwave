@@ -147,6 +147,22 @@ Appliance boot (`compose.demo.yaml` defaults):
   plays at `/stream`, and `/api/status`, `/api/auth/login`, `/internal/engine-config`,
   `/media/random` all return **404**.
 
+**Applying migrations** (upgrading an already-running demo box — new images/compose
+files pulled, schema didn't come along automatically): this topology never runs
+`launch.sh` (that script assumes and launches the source-build dev stack), so
+`./migrate.sh` is the sanctioned way to converge the schema against the *running* `db`
+service, no teardown or relaunch required:
+
+```bash
+docker compose -f compose.yaml -f compose.demo.yaml pull
+./migrate.sh -f compose.yaml -f compose.demo.yaml
+docker compose -f compose.yaml -f compose.demo.yaml up -d
+```
+
+Every `db/*-migration.sh` is an idempotent in-place upgrade (`ADD COLUMN IF NOT EXISTS`
+and the like), so running it with nothing new to apply is a safe no-op. `--dry-run`
+lists what would run without touching anything; see `./migrate.sh --help`.
+
 **Temporary admin access** (settings, personas, catalog curation on the public box):
 
 1. Edit `compose.demo.yaml`'s `api` env: `Admin__Enabled: "true"`.
@@ -160,3 +176,85 @@ Appliance boot (`compose.demo.yaml` defaults):
 internet, no Caddy), none of this file applies — leave `Admin__Enabled` at its default
 `true`, set `Station__SpectatorMode: "true"`, and point a kiosk browser at
 `http://<host>:8081/` (compose.yaml already publishes 8081 for exactly this).
+
+---
+
+## ☁️ Cloudflare tunnel (optional)
+
+An alternative to the Caddy topology above: instead of publishing anything on the host at
+all, a [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+connector reaches out from inside the `core` network to Cloudflare's edge, which then
+routes your public hostname back to it. This used to run **outside the repo** as
+hand-maintained, unversioned infrastructure with no observability; it's now the optional
+`cloudflared` service in `compose.yaml`, off by default.
+
+### Enabling it
+
+1. In the Cloudflare Zero Trust dashboard: **Networks → Tunnels → Create a tunnel**
+   (remote-managed). Add a public hostname pointing at whichever service you want exposed
+   (e.g. `api:8081` for the spectator surface, `icecast:8000` for the raw stream).
+2. Copy the connector token from **Configure → Install and run a connector** into `.env`:
+   `TUNNEL_TOKEN=...`.
+3. Add `tunnel` to `COMPOSE_PROFILES` (e.g. `COMPOSE_PROFILES=admin,tunnel`, or just
+   `tunnel` on a headless box) and `docker compose up -d cloudflared` (or a full `up -d`
+   — every other service is unaffected).
+
+`TUNNEL_TOKEN` is deliberately NOT `${TUNNEL_TOKEN:?}` like this file's other secrets —
+that form breaks `docker compose config` even with the profile inactive (compose
+interpolates every service's environment before filtering by profile). Leaving it blank
+is safe when the profile is off; the container itself refuses to run and exits
+immediately with a clear log line if the profile is active with a blank or invalid token.
+
+### What `/ready` and `/metrics` give you
+
+cloudflared's own metrics server (bound to `2000` inside the `core` network, never
+published on the host) exposes:
+
+- **`/ready`** — JSON readiness: HTTP 200 plus the number of active edge connections once
+  the tunnel has registered at least one. This is what the container healthcheck uses
+  (`cloudflared tunnel --metrics 127.0.0.1:2000 ready`, cloudflared's own readiness
+  subcommand — the image is distroless with no shell, so there's no `curl`/`wget` to
+  reach for here).
+- **`/metrics`** — Prometheus text format: connection counts, request/response stats,
+  build info, and more.
+
+### Checking health
+
+```bash
+docker compose ps cloudflared          # healthy / unhealthy / starting, same as any other service
+docker compose logs cloudflared        # connector registration, edge location, any errors
+```
+
+To probe the endpoints directly from another container on the `core` network (there's no
+host port to hit from outside):
+
+```bash
+docker compose exec cloudflared cloudflared tunnel --metrics 127.0.0.1:2000 ready
+docker compose exec api curl -fsS http://cloudflared:2000/metrics | head
+```
+
+Opting into a host-side probe is a deliberate, local-only change — never commit it:
+```yaml
+    ports: ["127.0.0.1:2000:2000"]   # loopback only; add locally if you want to curl from the host
+```
+
+### Restart posture
+
+`restart: unless-stopped`, same as every other service — same posture, no independent
+supervision. A crashed connector (bad token, network blip) restarts automatically;
+`docker compose logs cloudflared` shows why it crashed if it keeps doing so.
+
+### Alerting — an honest note
+
+Nothing in this repo pages you on tunnel failure today. Two ways to close that gap
+yourself, in increasing order of effort:
+
+- **Scrape `/metrics`** with your own Prometheus (or any metrics collector) pointed at
+  `cloudflared:2000` from inside the `core` network, and alert on it there.
+- **Probe the public hostname from outside**, the same way `.github/workflows/
+  demo-health.yml` polls the demo station's `/health` on a schedule and lets GitHub
+  Actions email the org on failure — point an equivalent scheduled probe at whatever
+  route the tunnel exposes publicly (e.g. `/health` if it's fronting the api).
+
+Either is a few lines to wire up; neither ships by default, so silence from this stack
+does not by itself mean the tunnel is up.

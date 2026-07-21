@@ -84,8 +84,15 @@ public static class FeatureAcceptanceGateRankingRobustness
         // intentional edit from a LATER epic. EngineScriptSha256 unchanged — T34 does not touch
         // engine/genwave.liq.
         //
+        // ComposeYamlSha256 re-pinned 2026-07-20 (Q3 housekeeping, "cloudflared observability",
+        // SPEC F77): a new, optional `cloudflared` service (profiles: ["tunnel"], off by default,
+        // no host ports) — versions the tunnel that previously ran outside the repo as unmanaged
+        // infrastructure, with a healthcheck/metrics contract. Another intentional edit from a
+        // LATER epic, not a regression of this epic's zero-diff promise. EngineScriptSha256
+        // unchanged — this task does not touch engine/genwave.liq.
+        //
         const string EngineScriptSha256 = "a256fd3f2797ed9b52e3f8507e8ca610aa02218e2fedc5c231369f0ccaab9bd6";
-        const string ComposeYamlSha256  = "3660ed44a38cceaba0c17d82bae5f201df405f270ec58ed235baf9448a83f317";
+        const string ComposeYamlSha256  = "5d7b1d8d589e1f3750a90668b439e6e60928a3806c5dd519d66352b067b390dc";
 
         [Fact]
         public void EngineScriptByteMatchesMain()

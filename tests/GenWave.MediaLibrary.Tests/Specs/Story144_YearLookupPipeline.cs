@@ -34,13 +34,14 @@ public static class FeatureYearLookupPipeline
         public string? State { get; set; }
         public int? Year { get; set; }
         public DateTime? YearLookupAt { get; set; }
+        public DateTime? YearLookupMissedAt { get; set; }
     }
 
     static async Task<YearRow> SelectYearRowAsync(DatabaseFixture db, long id)
     {
         await using var conn = await db.DataSource.OpenConnectionAsync();
         return await conn.QuerySingleAsync<YearRow>(
-            "select state, year, year_lookup_at from library.media where id = @id", new { id });
+            "select state, year, year_lookup_at, year_lookup_missed_at from library.media where id = @id", new { id });
     }
 
     /// <summary>
@@ -72,13 +73,13 @@ public static class FeatureYearLookupPipeline
             await db.ResetAsync();
             var repo = Harness.Repo(db);
 
-            // Eligible: year null, year_lookup_at null, artist/title non-blank.
+            // Eligible: year null, year_lookup_missed_at null, artist/title non-blank.
             var eligible = await SeedRowAsync(repo, artist: "The Testers", title: "Testing Waters");
             // Already has a year — never claimed (F48.4).
             var hasYear = await SeedRowAsync(repo, artist: "Someone Else", title: "Another Song", year: 1999);
-            // Already attempted (sentinel stamped) — not reclaimed (F48.3).
+            // Already attempted and MISSED (sentinel stamped) — not reclaimed (F48.3, F76.2).
             var alreadyAttempted = await SeedRowAsync(repo, artist: "Been Tried", title: "No Match");
-            await repo.WriteYearLookupResultAsync(alreadyAttempted, null, CancellationToken.None);
+            await repo.WriteYearLookupResultAsync(alreadyAttempted, null, callFailed: false, CancellationToken.None);
             // Blank artist — nothing to search MusicBrainz with, never claimed.
             var blankArtist = await SeedRowAsync(repo, artist: "  ", title: "Untitled Instrumental");
 
@@ -139,7 +140,15 @@ public static class FeatureYearLookupPipeline
     }
 
     // ---------------------------------------------------------------------
-    // PACING — sequential, one in flight, >= 1s spacing (F48.3)
+    // PACING — sequential, one in flight (F48.3)
+    //
+    // The >= 1s inter-request SPACING itself moved off this loop entirely (SPEC F76.1, STORY-200):
+    // it used to be a Task.Delay hand-rolled right here, pacing only this one caller. It is now
+    // MusicBrainzRateLimiter — a shared, process-wide gate MusicBrainzYearLookup awaits immediately
+    // before every HTTP call, so the etiquette rule holds no matter what drives the client. That
+    // pacing is pinned deterministically (a fake clock, no real sleep) in
+    // Specs/Story200_MusicBrainzEtiquette.cs; this loop's own remaining contract is simply that it
+    // never overlaps two lookups at once.
     // ---------------------------------------------------------------------
 
     [Collection(DatabaseCollection.Name)]
@@ -162,26 +171,6 @@ public static class FeatureYearLookupPipeline
 
             Assert.Equal(2, fake.Calls);
             Assert.Equal(1, fake.MaxObservedConcurrency);
-        }
-
-        [Fact]
-        public async Task ConsecutiveRequestsAreSpacedAtLeastOneSecond()
-        {
-            await db.ResetAsync();
-            var repo = Harness.Repo(db);
-            await SeedRowAsync(repo, artist: "Artist One", title: "Song One");
-            await SeedRowAsync(repo, artist: "Artist Two", title: "Song Two");
-
-            var fake = new FakeYearLookup();
-            fake.SetFallback(null);
-            var svc = Harness.BackfillYearLookupWith(repo, fake);
-
-            await svc.BackfillYearLookupAsync(CancellationToken.None);
-
-            Assert.Equal(2, fake.CallStarts.Count);
-            var gap = fake.CallStarts[1] - fake.CallStarts[0];
-            // >= 900ms tolerates scheduler jitter rather than pinning the exact 1000ms delay.
-            Assert.True(gap.TotalMilliseconds >= 900, $"Expected >= 900ms between starts, got {gap.TotalMilliseconds}ms");
         }
     }
 
@@ -243,10 +232,12 @@ public static class FeatureYearLookupPipeline
             var row = await SelectYearRowAsync(db, id);
             Assert.Null(row.Year);
             Assert.NotNull(row.YearLookupAt);
+            // A genuine miss stamps the F76.2 re-claim gate too — this row is excluded going forward.
+            Assert.NotNull(row.YearLookupMissedAt);
         }
 
         [Fact]
-        public async Task AFailedAttemptStampsTheSentinelSoTheRowIsNotReclaimed()
+        public async Task AFailedAttemptStampsTheAttemptedAtTelemetryOnly()
         {
             await db.ResetAsync();
             var repo = Harness.Repo(db);
@@ -261,10 +252,33 @@ public static class FeatureYearLookupPipeline
             var row = await SelectYearRowAsync(db, id);
             Assert.Null(row.Year);
             Assert.NotNull(row.YearLookupAt);
+            // Unlike a genuine miss, a failed round trip never stamps the F76.2 re-claim gate — this
+            // is what leaves the row eligible for the very next pass (SPEC F76.2).
+            Assert.Null(row.YearLookupMissedAt);
+        }
 
-            // Run again — the sentinel means this row is no longer claimed; calls do not increase.
+        [Fact]
+        public async Task AFailedAttemptLeavesTheRowEligibleSoTheNextPassRetriesIt()
+        {
+            // SPEC F76.2 (STORY-200) supersedes the old F48.3 assumption that ANY attempt — including
+            // an endpoint failure — permanently excludes a row: an outage is transient, so a row that
+            // merely failed to complete a round trip must be retried on the very next pass, never
+            // stamped away like a genuine miss.
+            await db.ResetAsync();
+            var repo = Harness.Repo(db);
+            await SeedRowAsync(repo, artist: "The Testers", title: "Testing Waters");
+
+            var fake = new FakeYearLookup();
+            fake.SetFallback(null, failed: true);   // every attempt this tick fails
+            var svc = Harness.BackfillYearLookupWith(repo, fake);
+
             await svc.BackfillYearLookupAsync(CancellationToken.None);
             Assert.Equal(1, fake.Calls);
+
+            // Run again — the row was never miss-stamped (it merely failed), so it is reclaimed and
+            // MusicBrainz is asked again; calls increase.
+            await svc.BackfillYearLookupAsync(CancellationToken.None);
+            Assert.Equal(2, fake.Calls);
         }
 
         [Fact]
@@ -408,7 +422,7 @@ public static class FeatureYearLookupPipeline
             await db.ResetAsync();
             var repo = Harness.Repo(db);
             var id = await SeedRowAsync(repo, artist: "The Testers", title: "Testing Waters", year: 1975);
-            await repo.WriteYearLookupResultAsync(id, 1975, CancellationToken.None);
+            await repo.WriteYearLookupResultAsync(id, 1975, callFailed: false, CancellationToken.None);
 
             var before = await SelectYearRowAsync(db, id);
             Assert.Equal(1975, before.Year);
