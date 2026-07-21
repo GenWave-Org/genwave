@@ -135,6 +135,17 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	    end
 	  ) stored;
 
+	-- energy: percentile rank of integrated_lufs within the READY library (SPEC F80.1, STORY-211) —
+	-- NOT track_energy above (a fixed per-row linear scale) and NOT intro_energy/outro_energy
+	-- (STORY-033 RMS levels). Unlike track_energy this cannot be a generated column: a percentile is
+	-- relative to every OTHER ready row, which Postgres generated columns cannot reference. It is
+	-- instead recomputed by a single set-based UPDATE
+	-- (MediaRepository.RecomputeEnergyPercentilesAsync) piggybacked on the enrichment second tier
+	-- (SPEC F80.2) — see MediaRepository.WriteEnrichmentAsync (nulls it on every LUFS write) and
+	-- MediaRepository.HasStaleEnergyPercentilesAsync (the piggyback trigger). NULL = not yet ranked.
+	alter table library.media
+	  add column energy real;
+
 	-- Composite partial index: scope-filtered random-ready pick (replaces scalar media_ready).
 	create index media_scope_ready on library.media (library_id, state) where state = 'ready';
 	create index media_artist      on library.media (artist);                       -- ready for criteria queries

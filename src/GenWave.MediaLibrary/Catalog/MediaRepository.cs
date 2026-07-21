@@ -870,6 +870,50 @@ sealed class MediaRepository(
             cancellationToken: ct));
     }
 
+    // ── Energy percentile (SPEC F80.1/F80.2, STORY-211) ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Whether any ready row's <c>integrated_lufs</c> has moved (added or changed) since <c>energy</c>
+    /// was last computed for it — the F80.2 piggyback trigger. <see cref="WriteEnrichmentAsync"/>
+    /// nulls <c>energy</c> unconditionally on every LUFS (re)write, so a claimable row here is exactly
+    /// "a second-tier enrichment pass touched LUFS since the last recompute" — no separate bookkeeping
+    /// timestamp needed. A batch that wrote no LUFS (e.g. a cue/BPM/year-lookup-only pass) leaves this
+    /// false, so <see cref="EnrichmentService.RecomputeEnergyPercentileAsync"/> skips the recompute.
+    /// </summary>
+    public async Task<bool> HasStaleEnergyPercentilesAsync(CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        return await conn.ExecuteScalarAsync<bool>(new CommandDefinition(
+            "select exists(select 1 from library.media " +
+            "where state = 'ready' and integrated_lufs is not null and energy is null)",
+            cancellationToken: ct));
+    }
+
+    /// <summary>
+    /// Recomputes <c>energy</c> (SPEC F80.1) for the whole ready library in one set-based UPDATE:
+    /// <c>percent_rank()</c> of <c>integrated_lufs</c> over the ready population. Non-ready rows are
+    /// excluded from both the ranking population and the write, so a row's stale LUFS surviving a
+    /// state change (e.g. to <c>unavailable</c>/<c>failed</c>) never skews another row's rank.
+    /// Recomputes every ready row, not just the ones that were dirtied — a percentile is only
+    /// meaningful relative to the full population, so one added/changed row shifts every other row's
+    /// rank too. Idempotent: re-running with no LUFS change reproduces the same ranks.
+    /// </summary>
+    public async Task RecomputeEnergyPercentilesAsync(CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await conn.ExecuteAsync(new CommandDefinition("""
+            with ranked as (
+              select id, percent_rank() over (order by integrated_lufs) as pct
+              from library.media
+              where state = 'ready' and integrated_lufs is not null
+            )
+            update library.media m
+            set energy = ranked.pct
+            from ranked
+            where m.id = ranked.id
+            """, cancellationToken: ct));
+    }
+
     /// <summary>
     /// Rows eligible for a MusicBrainz year lookup: <c>state='ready'</c>, <c>year IS NULL</c>,
     /// <c>year_lookup_missed_at IS NULL</c>, and both artist and title are non-blank (SPEC F48.3,
@@ -967,6 +1011,13 @@ sealed class MediaRepository(
               energy_analyzed_at = @EnergyAnalyzedAt,
               bpm                = @Bpm,
               bpm_analyzed_at    = @BpmAnalyzedAt,
+              -- energy (SPEC F80.1/F80.2, STORY-211): the LUFS-percentile column, NOT the
+              -- intro_energy/outro_energy above. Nulled unconditionally every time integrated_lufs is
+              -- (re)written — added or changed — so this row is picked up by
+              -- HasStaleEnergyPercentilesAsync the next time the enrichment second tier checks for a
+              -- population that has moved (RecomputeEnergyPercentilesAsync recomputes the whole ready
+              -- library in one pass; a single row's own energy is meaningless until that pass runs).
+              energy      = null,
               state       = 'ready',
               enriched_at = now()
             where id = @id

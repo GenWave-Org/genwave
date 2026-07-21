@@ -45,6 +45,15 @@ namespace GenWave.MediaLibrary.Enrich;
 /// reads false (F48.5) — the live kill switch stops claiming before the very next tick, no api
 /// restart. Bounded to the same <see cref="CueDetectionOptions.BackfillBatchSize"/> per tick.
 ///
+/// Additionally recomputes the <c>energy</c> percentile column at the end of every backfill loop tick
+/// (SPEC F80.1/F80.2, STORY-211): <c>energy</c> is the percentile rank of <c>integrated_lufs</c>
+/// within the READY library, and is only meaningful relative to the whole population — so rather than
+/// a per-row backfill claim, this checks once per tick whether any ready row's LUFS moved since the
+/// last recompute (<see cref="MediaRepository.HasStaleEnergyPercentilesAsync"/>) and, if so, reranks
+/// the entire ready library in one set-based UPDATE
+/// (<see cref="MediaRepository.RecomputeEnergyPercentilesAsync"/>). A tick that touched no LUFS (e.g.
+/// cue/BPM/year-lookup only) skips the recompute entirely.
+///
 /// No separate scheduler or admin endpoint — all backfills fire as sub-tasks of this service.
 /// </summary>
 sealed class EnrichmentService(
@@ -275,6 +284,7 @@ sealed class EnrichmentService(
                 await BackfillEnergyAsync(ct);
                 await BackfillBpmAsync(ct);
                 await BackfillYearLookupAsync(ct);
+                await RecomputeEnergyPercentileAsync(ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -439,5 +449,22 @@ sealed class EnrichmentService(
         if (anyCallFailed)
             log.LogWarning(
                 "MusicBrainz year lookup appears unreachable this tick; {Count} row(s) attempted", batch.Count);
+    }
+
+    /// <summary>
+    /// The F80.2 piggyback: recomputes the <c>energy</c> percentile column across the whole ready
+    /// library, but ONLY when at least one ready row's LUFS was added or changed since the last
+    /// recompute (<see cref="MediaRepository.HasStaleEnergyPercentilesAsync"/>) — a tick that touched
+    /// no LUFS (e.g. cue/BPM/year-lookup only) issues no recompute UPDATE at all. Unlike the other
+    /// backfill passes above, this is never claim-batched by row count: a percentile is meaningless
+    /// for less than the full ready population, so a stale hit always reranks every ready row in one
+    /// set-based UPDATE (<see cref="MediaRepository.RecomputeEnergyPercentilesAsync"/>).
+    /// internal for integration testing — drive the recompute pass directly.
+    /// </summary>
+    internal async Task RecomputeEnergyPercentileAsync(CancellationToken ct)
+    {
+        if (!await repo.HasStaleEnergyPercentilesAsync(ct)) return;
+        log.LogInformation("Recomputing energy percentiles across the ready library (SPEC F80.2)");
+        await repo.RecomputeEnergyPercentilesAsync(ct);
     }
 }
