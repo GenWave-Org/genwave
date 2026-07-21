@@ -235,12 +235,17 @@ public sealed class LlmCopyWriter(
         var elapsedMs = (long)(DateTimeOffset.UtcNow - attemptedAt).TotalMilliseconds;
         var outcome = previewOnly ? "reporting failure to the preview caller" : "falling back to template";
 
+        // Operator-authored values (persona name, model, exception-derived detail) are
+        // newline-stripped so they can't forge additional log entries (CodeQL cs/log-forging).
         logger.LogWarning(
             exception,
             "LLM completion failed for {Kind} on station {StationId} (persona: {PersonaName}, " +
             "model: {Model}, elapsed: {ElapsedMs}ms): {Detail} — {Outcome}",
-            request.Kind, request.StationId, persona?.Name ?? "none", model ?? "unknown", elapsedMs,
-            detail, outcome);
+            request.Kind, request.StationId,
+            (persona?.Name ?? "none").ReplaceLineEndings(" "),
+            (model ?? "unknown").ReplaceLineEndings(" "),
+            elapsedMs,
+            detail.ReplaceLineEndings(" "), outcome);
     }
 
     async Task<string> RequestCompletionAsync(
