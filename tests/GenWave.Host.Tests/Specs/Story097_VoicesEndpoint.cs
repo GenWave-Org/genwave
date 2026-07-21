@@ -55,15 +55,13 @@ file sealed class FakeOptionsMonitor<T>(T value) : IOptionsMonitor<T>
 /// <c>Admin:Password</c> so the deny-by-default fallback policy is active, points
 /// <c>Tts:Endpoint</c> at a <see cref="KokoroVoicesStubServer"/> instead of a real Kokoro, and
 /// removes hosted services that would attempt real Liquidsoap/DB connections — mirrors Story084's
-/// <c>StatusApiWebFactory</c> exactly (env vars, not <c>UseSetting</c>: Program.cs reads
-/// <c>Admin:Password</c> and <c>Tts:Endpoint</c> before <c>builder.Build()</c>, earlier than a
-/// <c>ConfigureWebHost</c>-registered override is visible).
+/// <c>StatusApiWebFactory</c> exactly. All three settings are injected per-instance via
+/// <c>ConfigureWebHost</c>'s <c>UseSetting</c> (colon-form keys), which reaches Program.cs's
+/// composition-time reads (verified empirically) — no process environment variable is mutated, so
+/// no other test class can race with it.
 /// </summary>
 file sealed class VoicesApiWebFactory(Uri kokoroBaseUri) : WebApplicationFactory<Program>
 {
-    const string LibraryConnVar = "ConnectionStrings__Library";
-    const string AdminPasswordVar = "Admin__Password";
-    const string TtsEndpointVar = "Tts__Endpoint";
     internal const string Password = "test-password-voices-r2";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -71,32 +69,15 @@ file sealed class VoicesApiWebFactory(Uri kokoroBaseUri) : WebApplicationFactory
         // Development config provides Station:Id/Name/Voice/Scope/SafeScope so ValidateOnStart()
         // is satisfied without injecting them manually.
         builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
+        builder.UseSetting("Tts:Endpoint", kokoroBaseUri.ToString());
 
         builder.ConfigureTestServices(services =>
         {
             // Remove ALL hosted services — no Liquidsoap or DB connections during this test.
             services.RemoveAll<IHostedService>();
         });
-    }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        var prevLibrary = Environment.GetEnvironmentVariable(LibraryConnVar);
-        var prevAdmin   = Environment.GetEnvironmentVariable(AdminPasswordVar);
-        var prevTts     = Environment.GetEnvironmentVariable(TtsEndpointVar);
-        Environment.SetEnvironmentVariable(LibraryConnVar, "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable(AdminPasswordVar, Password);
-        Environment.SetEnvironmentVariable(TtsEndpointVar, kokoroBaseUri.ToString());
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(LibraryConnVar, prevLibrary);
-            Environment.SetEnvironmentVariable(AdminPasswordVar, prevAdmin);
-            Environment.SetEnvironmentVariable(TtsEndpointVar, prevTts);
-        }
     }
 }
 
@@ -128,11 +109,6 @@ public static class FeatureVoicesEndpoint
     // HAPPY PATH
     // ---------------------------------------------------------------------
 
-    // ScenarioVoicesProxied.RealRequestThroughTheProductionPipelineReturnsVoices drives
-    // VoicesApiWebFactory, which mutates process-global env vars for its boot window (shared
-    // technique with Story056/Story058/Story084) — opts this whole class into the serializing
-    // collection rather than racing the other such factories under xUnit's default parallelism.
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioVoicesProxied
     {
         [Fact]
@@ -213,9 +189,6 @@ public static class FeatureVoicesEndpoint
         }
     }
 
-    // VoicesApiWebFactory mutates process-global env vars for its boot window — opts this class
-    // into the serializing collection (see EnvVarMutatingWebFactoryCollection).
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioDenyByDefault
     {
         [Fact]

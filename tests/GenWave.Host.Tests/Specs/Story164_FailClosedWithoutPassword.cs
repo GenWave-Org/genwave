@@ -43,12 +43,28 @@ file sealed class CapturingWarningLoggerProvider : ILoggerProvider
     }
 }
 
-/// <summary>Boots the host with Admin__Password UNSET (empty password) — the fail-closed case.</summary>
+/// <summary>
+/// Boots the host with Admin__Password UNSET (empty password) — the fail-closed case. Unlike every
+/// other <c>WebApplicationFactory</c> in this suite, <c>Admin__Password</c> is still mutated through
+/// the real process environment here rather than <c>ConfigureWebHost</c>'s <c>UseSetting</c>: this
+/// spec's whole point is proving the plane is fail-closed when the password is truly ABSENT, and
+/// <c>UseSetting</c>/<c>ConfigureHostConfiguration</c>'s injected value sits at a LOWER configuration
+/// precedence than a real environment variable (verified empirically) — so it cannot force absence
+/// if the box already happens to export <c>Admin__Password</c> (e.g. a dev shell that sourced
+/// <c>.env</c> for compose). Explicitly nulling the real env var is the only mechanism that
+/// guarantees true absence regardless of ambient state. This is the sole remaining
+/// process-env-mutating factory in the suite (see <see cref="EnvVarMutatingWebFactoryCollection"/>),
+/// so its three scenarios below staying in that collection still fully serializes it against itself
+/// — nothing else in the suite mutates this key anymore, so there is no cross-class race left.
+/// <c>ConnectionStrings:Library</c> carries no such absence requirement (it just needs A value), so
+/// it uses the ordinary per-instance <c>UseSetting</c> mechanism like every other factory.
+/// </summary>
 file sealed class NoPasswordWebFactory(CapturingWarningLoggerProvider logs) : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IHostedService>();
@@ -62,9 +78,7 @@ file sealed class NoPasswordWebFactory(CapturingWarningLoggerProvider logs) : We
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
-        var prevLib = Environment.GetEnvironmentVariable("ConnectionStrings__Library");
         var prevAdmin = Environment.GetEnvironmentVariable("Admin__Password");
-        Environment.SetEnvironmentVariable("ConnectionStrings__Library", "Host=nowhere;Database=test");
         Environment.SetEnvironmentVariable("Admin__Password", null);
         try
         {
@@ -72,7 +86,6 @@ file sealed class NoPasswordWebFactory(CapturingWarningLoggerProvider logs) : We
         }
         finally
         {
-            Environment.SetEnvironmentVariable("ConnectionStrings__Library", prevLib);
             Environment.SetEnvironmentVariable("Admin__Password", prevAdmin);
         }
     }

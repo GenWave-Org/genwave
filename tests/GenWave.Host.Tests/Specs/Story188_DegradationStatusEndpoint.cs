@@ -97,8 +97,6 @@ file sealed class RecordingEngineSynthesizer : ITtsSynthesizer
 /// </summary>
 file sealed class DegradationStatusWebFactory : WebApplicationFactory<Program>
 {
-    const string LibraryConnVar = "ConnectionStrings__Library";
-    const string AdminPasswordVar = "Admin__Password";
     internal const string Password = "test-password-x7z";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -107,6 +105,12 @@ file sealed class DegradationStatusWebFactory : WebApplicationFactory<Program>
         // ValidateOnStart() is satisfied without injecting them manually. Llm:Endpoint stays unset
         // (empty) — this suite never needs a real/mock LLM endpoint (see the file header).
         builder.UseEnvironment("Development");
+
+        // AddMediaLibrary/AddGenWaveAdminApi read these at composition time in Program.cs —
+        // UseSetting (colon-form) reaches those reads (verified empirically), so no process env
+        // var is mutated and no other test class can race with this per-instance value.
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
 
         builder.ConfigureTestServices(services =>
         {
@@ -139,26 +143,6 @@ file sealed class DegradationStatusWebFactory : WebApplicationFactory<Program>
             services.AddSingleton<ICueAnalyzer>(new FakeCueAnalyzer());
         });
     }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        // AddMediaLibrary/AddGenWaveAdminApi read these before any ConfigureWebHost hook is visible
-        // to Program.cs (see EnvVarMutatingWebFactoryCollection's remarks) — injected via the
-        // environment, same as Story125's/Story185's factories.
-        var prevLibrary = Environment.GetEnvironmentVariable(LibraryConnVar);
-        var prevAdmin = Environment.GetEnvironmentVariable(AdminPasswordVar);
-        Environment.SetEnvironmentVariable(LibraryConnVar, "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable(AdminPasswordVar, Password);
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(LibraryConnVar, prevLibrary);
-            Environment.SetEnvironmentVariable(AdminPasswordVar, prevAdmin);
-        }
-    }
 }
 
 // ── Specs ────────────────────────────────────────────────────────────────────────────────────────
@@ -170,7 +154,6 @@ public static class FeatureDegradationStatusEndpoint
             new MediaItem("m1", "/media/x.mp3", "Astral Plane", default, "Valerie June"),
             DateTimeOffset.UtcNow, "test-station");
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioModeTransitionObservableDuringPlayout
     {
         [Fact]

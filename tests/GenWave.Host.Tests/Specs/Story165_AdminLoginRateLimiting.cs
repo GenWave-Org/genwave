@@ -23,6 +23,8 @@ file sealed class LoginLimitWebFactory() : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IHostedService>();
@@ -32,30 +34,12 @@ file sealed class LoginLimitWebFactory() : WebApplicationFactory<Program>
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
         });
     }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        var prevLib = Environment.GetEnvironmentVariable("ConnectionStrings__Library");
-        var prevAdmin = Environment.GetEnvironmentVariable("Admin__Password");
-        Environment.SetEnvironmentVariable("ConnectionStrings__Library", "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable("Admin__Password", Password);
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ConnectionStrings__Library", prevLib);
-            Environment.SetEnvironmentVariable("Admin__Password", prevAdmin);
-        }
-    }
 }
 
 public static class FeatureAdminLoginRateLimiting
 {
     // ── HAPPY PATH ────────────────────────────────────────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioNormalLoginUnaffected
     {
         [Fact]
@@ -72,7 +56,6 @@ public static class FeatureAdminLoginRateLimiting
 
     // ── SAD PATH ──────────────────────────────────────────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioBurstIsThrottled
     {
         [Fact]

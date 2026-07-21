@@ -92,24 +92,23 @@ file sealed class FakeScopeCaptureCatalog(MediaReference? readyTrack) : IMediaCa
 /// controllable fake. The safe-track endpoint's <c>AllowAnonymous</c> must bypass that policy.
 /// </summary>
 /// <remarks>
-/// Configuration strategy: <c>ConfigureAppConfiguration</c> runs AFTER the program entry
-/// point has already read <c>ConnectionStrings:Library</c> for <c>AddMediaLibrary</c>, so it
-/// cannot inject that value in time. Instead, the connection string is injected via an
-/// environment variable BEFORE the factory creates the host, which IS picked up by the early
-/// <c>WebApplication.CreateBuilder</c> env-var source. The variable is cleared after the host
-/// is disposed to avoid test pollution.
+/// Configuration strategy: both settings are injected per-instance via <c>ConfigureWebHost</c>'s
+/// <c>UseSetting</c> (colon-form keys) rather than process environment variables — this reaches
+/// <c>AddMediaLibrary</c>'s composition-time <c>GetConnectionString("Library")</c> read in
+/// Program.cs (verified empirically), so no shared process state is mutated and no other test
+/// class can race with it. A non-reachable host is fine: <see cref="IMediaCatalog"/> is replaced
+/// with a fake in <c>ConfigureTestServices</c>, so the real <c>NpgsqlDataSource</c> is never
+/// resolved during this test.
 /// </remarks>
 file sealed class SafeTrackWebFactory(IMediaCatalog catalog) : WebApplicationFactory<Program>
 {
-    // Unique enough to avoid colliding with a real connection string in the environment.
-    const string LibraryConnVar = "ConnectionStrings__Library";
-    const string AdminPasswordVar = "Admin__Password";
-
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // Development config includes Station:Id/Name/Voice/Scope and Tts:Endpoint —
         // all the values required to pass ValidateOnStart().
         builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", "s3cret");
 
         builder.ConfigureTestServices(services =>
         {
@@ -122,27 +121,6 @@ file sealed class SafeTrackWebFactory(IMediaCatalog catalog) : WebApplicationFac
             services.RemoveAll<IMediaCatalog>();
             services.AddSingleton(catalog);
         });
-    }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        // Inject the Library connection string via env vars before the host is built,
-        // so AddMediaLibrary(cfg) (which reads it early in Program.cs) finds a non-empty value.
-        // A non-reachable host is fine: IMediaCatalog is replaced with a fake in ConfigureTestServices,
-        // so the real NpgsqlDataSource is never resolved during this test.
-        var prevLibrary = Environment.GetEnvironmentVariable(LibraryConnVar);
-        var prevAdmin   = Environment.GetEnvironmentVariable(AdminPasswordVar);
-        Environment.SetEnvironmentVariable(LibraryConnVar, "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable(AdminPasswordVar, "s3cret");
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(LibraryConnVar, prevLibrary);
-            Environment.SetEnvironmentVariable(AdminPasswordVar, prevAdmin);
-        }
     }
 }
 
@@ -222,12 +200,6 @@ public static class FeatureSafeTrackEndpoint
     // HAPPY PATH
     // ---------------------------------------------------------------------
 
-    // SafeTrackWebFactory.CreateHost mutates the Admin__Password / ConnectionStrings__Library
-    // process env vars for the boot window — shared with Story058's/Story084's factories, so this
-    // class opts into the serializing collection (see EnvVarMutatingWebFactoryCollection) rather
-    // than racing them under xUnit's default parallelism (two factories building a host on
-    // separate threads at once could each bake in the OTHER's env-var value).
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioEndpointIsReachableAnonymously
     {
         [Fact]

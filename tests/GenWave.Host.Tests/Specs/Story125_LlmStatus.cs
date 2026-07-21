@@ -74,22 +74,16 @@ file sealed class CountingHttpClientFactory : IHttpClientFactory
 /// <summary>
 /// <see cref="WebApplicationFactory{TEntryPoint}"/> for the no-polling proof: brings up the REAL
 /// production DI graph (Program.cs's own <c>LlmCopyWriter</c>/<c>LlmOptions</c> registrations,
-/// untouched) with a genuinely enabled <c>Llm:Endpoint</c> — set via environment variables rather
-/// than <c>ConfigureAppConfiguration</c> because <c>LlmOptions</c>' <c>ValidateOnStart()</c> and
-/// every other config read in Program.cs run against whatever the configuration root already holds
-/// by the time <c>WebApplicationFactory</c>'s own hooks are visible (mirrors Story084's
-/// <c>StatusApiWebFactory</c>: env vars are process-global and already loaded into the
-/// configuration provider by build time, a <c>ConfigureWebHost</c>-registered override is not).
+/// untouched) with a genuinely enabled <c>Llm:Endpoint</c> — set via <c>ConfigureWebHost</c>'s
+/// <c>UseSetting</c> (colon-form keys), which reaches <c>LlmOptions</c>' <c>ValidateOnStart()</c>
+/// and every other composition-time config read in Program.cs (verified empirically), so no
+/// process environment variable is mutated and no other test class can race with it.
 /// <see cref="IMediaCatalog"/>/<see cref="IActivePersonaAccessor"/> are faked purely so this test
 /// never needs a live Postgres — <see cref="IHttpClientFactory"/> is the ONE seam this scenario
 /// actually cares about and is left real everywhere except itself.
 /// </summary>
 file sealed class LlmStatusWebFactory : WebApplicationFactory<Program>
 {
-    const string LibraryConnVar = "ConnectionStrings__Library";
-    const string AdminPasswordVar = "Admin__Password";
-    const string LlmEndpointVar = "Llm__Endpoint";
-    const string LlmModelVar = "Llm__Model";
     internal const string Password = "test-password-x7z";
 
     internal CountingHttpClientFactory HttpClientFactory { get; } = new();
@@ -99,6 +93,12 @@ file sealed class LlmStatusWebFactory : WebApplicationFactory<Program>
         // Development config provides Station:Id/Name/Voice/Scope/SafeScope and Tts:Endpoint so
         // ValidateOnStart() is satisfied without injecting them manually.
         builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
+        // Genuinely enabled (SPEC F34.2) — the negative this scenario proves is meaningful only if
+        // the writer is actually wired to dial out, not merely disabled by an empty endpoint.
+        builder.UseSetting("Llm:Endpoint", "https://llm.invalid/v1");
+        builder.UseSetting("Llm:Model", "gpt-4o-mini");
 
         builder.ConfigureTestServices(services =>
         {
@@ -124,31 +124,6 @@ file sealed class LlmStatusWebFactory : WebApplicationFactory<Program>
             services.RemoveAll<IHttpClientFactory>();
             services.AddSingleton<IHttpClientFactory>(HttpClientFactory);
         });
-    }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        var prevLibrary  = Environment.GetEnvironmentVariable(LibraryConnVar);
-        var prevAdmin    = Environment.GetEnvironmentVariable(AdminPasswordVar);
-        var prevEndpoint = Environment.GetEnvironmentVariable(LlmEndpointVar);
-        var prevModel    = Environment.GetEnvironmentVariable(LlmModelVar);
-        Environment.SetEnvironmentVariable(LibraryConnVar, "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable(AdminPasswordVar, Password);
-        // Genuinely enabled (SPEC F34.2) — the negative this scenario proves is meaningful only if
-        // the writer is actually wired to dial out, not merely disabled by an empty endpoint.
-        Environment.SetEnvironmentVariable(LlmEndpointVar, "https://llm.invalid/v1");
-        Environment.SetEnvironmentVariable(LlmModelVar, "gpt-4o-mini");
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(LibraryConnVar, prevLibrary);
-            Environment.SetEnvironmentVariable(AdminPasswordVar, prevAdmin);
-            Environment.SetEnvironmentVariable(LlmEndpointVar, prevEndpoint);
-            Environment.SetEnvironmentVariable(LlmModelVar, prevModel);
-        }
     }
 }
 
@@ -269,12 +244,6 @@ public static class FeatureLlmStatus
     // SAD PATH — status must never generate LLM traffic
     // ---------------------------------------------------------------------
 
-    // LlmStatusWebFactory.CreateHost mutates the Admin__Password / ConnectionStrings__Library /
-    // Llm__Endpoint / Llm__Model process env vars for the boot window — shared with every other
-    // env-var-mutating factory in this test project, so this class opts into the serializing
-    // collection (see EnvVarMutatingWebFactoryCollection) rather than racing them under xUnit's
-    // default parallelism.
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioNoActiveHealthPolling
     {
         [Fact]

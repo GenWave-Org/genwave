@@ -81,6 +81,9 @@ file sealed class BoothLogApiWebFactory(bool spectatorMode = false) : WebApplica
             builder.UseSetting("Station:PublicStreamUrl", "https://demo.example/stream");
         }
 
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", "test-password-x7z");
+
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IHostedService>();
@@ -89,23 +92,6 @@ file sealed class BoothLogApiWebFactory(bool spectatorMode = false) : WebApplica
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
         });
-    }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        var prevLibrary = Environment.GetEnvironmentVariable("ConnectionStrings__Library");
-        var prevAdmin = Environment.GetEnvironmentVariable("Admin__Password");
-        Environment.SetEnvironmentVariable("ConnectionStrings__Library", "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable("Admin__Password", "test-password-x7z");
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ConnectionStrings__Library", prevLibrary);
-            Environment.SetEnvironmentVariable("Admin__Password", prevAdmin);
-        }
     }
 }
 

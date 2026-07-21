@@ -127,39 +127,16 @@ file sealed class SimulatedPortStartupFilter(int port) : IStartupFilter
 /// </summary>
 file sealed class LlmCallInspectorWebFactory(string llmEndpoint) : WebApplicationFactory<Program>
 {
-    const string LibraryConnVar = "ConnectionStrings__Library";
-    const string AdminPasswordVar = "Admin__Password";
-    const string LlmEndpointVar = "Llm__Endpoint";
-    const string LlmModelVar = "Llm__Model";
     internal const string Password = "test-password-x9k3";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
+        builder.UseSetting("Llm:Endpoint", llmEndpoint);
+        builder.UseSetting("Llm:Model", "test-model");
         builder.ConfigureTestServices(services => services.RemoveAll<IHostedService>());
-    }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        var prevLibrary = Environment.GetEnvironmentVariable(LibraryConnVar);
-        var prevAdmin = Environment.GetEnvironmentVariable(AdminPasswordVar);
-        var prevEndpoint = Environment.GetEnvironmentVariable(LlmEndpointVar);
-        var prevModel = Environment.GetEnvironmentVariable(LlmModelVar);
-        Environment.SetEnvironmentVariable(LibraryConnVar, "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable(AdminPasswordVar, Password);
-        Environment.SetEnvironmentVariable(LlmEndpointVar, llmEndpoint);
-        Environment.SetEnvironmentVariable(LlmModelVar, "test-model");
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(LibraryConnVar, prevLibrary);
-            Environment.SetEnvironmentVariable(AdminPasswordVar, prevAdmin);
-            Environment.SetEnvironmentVariable(LlmEndpointVar, prevEndpoint);
-            Environment.SetEnvironmentVariable(LlmModelVar, prevModel);
-        }
     }
 }
 
@@ -175,6 +152,8 @@ file sealed class LlmCallInspectorSurfaceWebFactory(int? simulatedPublicPort) : 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", "test-password-x7z");
         builder.UseSetting("Station:SpectatorMode", "true");
         builder.UseSetting("Spectator:PublicPort", PublicPort.ToString());
         builder.ConfigureTestServices(services =>
@@ -183,23 +162,6 @@ file sealed class LlmCallInspectorSurfaceWebFactory(int? simulatedPublicPort) : 
             if (simulatedPublicPort is int port)
                 services.AddSingleton<IStartupFilter>(new SimulatedPortStartupFilter(port));
         });
-    }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        var prevLibrary = Environment.GetEnvironmentVariable("ConnectionStrings__Library");
-        var prevAdmin = Environment.GetEnvironmentVariable("Admin__Password");
-        Environment.SetEnvironmentVariable("ConnectionStrings__Library", "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable("Admin__Password", "test-password-x7z");
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ConnectionStrings__Library", prevLibrary);
-            Environment.SetEnvironmentVariable("Admin__Password", prevAdmin);
-        }
     }
 }
 
@@ -229,7 +191,6 @@ public static class FeatureLlmCallInspector
 
     // ── HAPPY PATH — ring contents through the production pipeline (F73.1, AC1) ────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioRingContentsThroughTheProductionPipeline : IAsyncLifetime
     {
         LlmCompletionsStub stub = null!;
@@ -272,7 +233,6 @@ public static class FeatureLlmCallInspector
 
     // ── SAD PATH — admin-only, never public, on both listeners (F73.2, AC2) ─────────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioAdminOnlyOnBothListeners
     {
         [Fact]
@@ -346,7 +306,6 @@ public static class FeatureLlmCallInspector
             Assert.Same(first, second);
         }
 
-        [Collection(EnvVarMutatingWebFactoryCollection.Name)]
         public sealed class ScenarioRestartClears
         {
             [Fact]

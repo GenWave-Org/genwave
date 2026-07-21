@@ -24,6 +24,8 @@ file sealed class SpectatorNowPlayingWebFactory() : WebApplicationFactory<Progra
     {
         builder.UseEnvironment("Development");
         builder.UseSetting("Station:SpectatorMode", "true");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", "test-password-x7z");
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IHostedService>();
@@ -32,23 +34,6 @@ file sealed class SpectatorNowPlayingWebFactory() : WebApplicationFactory<Progra
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
         });
-    }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        var prevLib = Environment.GetEnvironmentVariable("ConnectionStrings__Library");
-        var prevAdmin = Environment.GetEnvironmentVariable("Admin__Password");
-        Environment.SetEnvironmentVariable("ConnectionStrings__Library", "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable("Admin__Password", "test-password-x7z");
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ConnectionStrings__Library", prevLib);
-            Environment.SetEnvironmentVariable("Admin__Password", prevAdmin);
-        }
     }
 }
 
@@ -86,7 +71,6 @@ public static class FeatureSpectatorNowPlaying
 
     // ── HAPPY PATH ────────────────────────────────────────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioOnAirTrack
     {
         [Fact]
@@ -131,7 +115,6 @@ public static class FeatureSpectatorNowPlaying
         }
     }
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioWarmingCollapsesToStandby
     {
         [Fact]
@@ -151,7 +134,6 @@ public static class FeatureSpectatorNowPlaying
         }
     }
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioDrainCollapsesToStandby
     {
         [Fact]
@@ -173,7 +155,6 @@ public static class FeatureSpectatorNowPlaying
 
     // ── SAD PATH (disclosure) ─────────────────────────────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioPatterIsAnonymized
     {
         [Fact]

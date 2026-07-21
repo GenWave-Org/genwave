@@ -91,13 +91,18 @@ file sealed class FakeMediaRating : IMediaRating
 /// </summary>
 file sealed class RatingApiWebFactory(bool withAdminPassword) : WebApplicationFactory<Program>
 {
-    const string LibraryConnVar = "ConnectionStrings__Library";
-
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // Development config provides Station:Id/Name/Voice/Scope/SafeScope and Tts:Endpoint
         // so ValidateOnStart() is satisfied without injecting them manually.
         builder.UseEnvironment("Development");
+
+        // AddMediaLibrary reads the Library connection string at composition time in Program.cs —
+        // UseSetting (colon-form) reaches that read (verified empirically), so no process env var
+        // is mutated and no other test class can race with this per-instance value. A
+        // non-reachable host is fine: neither of these two scenarios ever resolves IMediaRating —
+        // the request is rejected by auth/routing middleware before RatingController is constructed.
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
 
         if (withAdminPassword)
         {
@@ -109,24 +114,6 @@ file sealed class RatingApiWebFactory(bool withAdminPassword) : WebApplicationFa
             // Remove ALL hosted services — no Liquidsoap or DB connections during this test.
             services.RemoveAll<IHostedService>();
         });
-    }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        // AddMediaLibrary reads Library connection string early in Program.cs (before
-        // ConfigureTestServices runs), so it is injected via the environment. A non-reachable
-        // host is fine: neither of these two scenarios ever resolves IMediaRating — the request
-        // is rejected by auth/routing middleware before RatingController is constructed.
-        var prev = Environment.GetEnvironmentVariable(LibraryConnVar);
-        Environment.SetEnvironmentVariable(LibraryConnVar, "Host=nowhere;Database=test");
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(LibraryConnVar, prev);
-        }
     }
 }
 
@@ -313,11 +300,6 @@ public static class FeatureRatingEndpoints
         }
     }
 
-    // RatingApiWebFactory.CreateHost mutates the ConnectionStrings__Library process env var for
-    // the boot window — shared with Story056's/Story058's/Story084's factories, so this class
-    // opts into the serializing collection (see EnvVarMutatingWebFactoryCollection) rather than
-    // racing them under xUnit's default parallelism.
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioDenyByDefaultPosture
     {
         [Fact]

@@ -47,6 +47,8 @@ file sealed class PublicListenerWebFactory(int? simulatedPort) : WebApplicationF
         builder.UseEnvironment("Development");
         builder.UseSetting("Station:SpectatorMode", "true");
         builder.UseSetting("Spectator:PublicPort", PublicPort.ToString());
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IHostedService>();
@@ -58,30 +60,12 @@ file sealed class PublicListenerWebFactory(int? simulatedPort) : WebApplicationF
                 services.AddSingleton<IStartupFilter>(new SimulatedPortStartupFilter(port));
         });
     }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        var prevLib = Environment.GetEnvironmentVariable("ConnectionStrings__Library");
-        var prevAdmin = Environment.GetEnvironmentVariable("Admin__Password");
-        Environment.SetEnvironmentVariable("ConnectionStrings__Library", "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable("Admin__Password", Password);
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ConnectionStrings__Library", prevLib);
-            Environment.SetEnvironmentVariable("Admin__Password", prevAdmin);
-        }
-    }
 }
 
 public static class FeaturePublicListenerIsolation
 {
     // ── HAPPY PATH ────────────────────────────────────────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioSpectatorSurfaceRespondsOnThePublicPort
     {
         [Theory]
@@ -104,7 +88,6 @@ public static class FeaturePublicListenerIsolation
         }
     }
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioRootLandsOnThePage
     {
         [Fact]
@@ -119,7 +102,6 @@ public static class FeaturePublicListenerIsolation
         }
     }
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioInternalListenerUnaffected
     {
         [Fact]
@@ -136,7 +118,6 @@ public static class FeaturePublicListenerIsolation
 
     // ── SAD PATH ──────────────────────────────────────────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioEverythingElseDoesNotExistPublicly
     {
         [Theory]

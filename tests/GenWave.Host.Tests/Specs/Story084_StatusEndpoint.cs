@@ -63,15 +63,14 @@ file sealed class FakeOptionsMonitor<T> : IOptionsMonitor<T>
 /// <see cref="WebApplicationFactory{TEntryPoint}"/> for the deployed-pipeline scenarios. Sets
 /// <c>Admin:Password</c> so the deny-by-default fallback policy is active, removes hosted services
 /// that would attempt real Liquidsoap/DB connections, and replaces <see cref="IMediaCatalog"/> with
-/// a controllable fake — mirrors Story056's <c>SafeTrackWebFactory</c> exactly (both settings go
-/// through the environment, not <c>UseSetting</c>: Program.cs reads <c>Admin:Password</c> to decide
-/// the fallback policy, and <c>AddMediaLibrary</c> reads the Library connection string, both before
-/// <c>builder.Build()</c> — earlier than a <c>ConfigureWebHost</c>-registered override is visible).
+/// a controllable fake — mirrors Story056's <c>SafeTrackWebFactory</c> exactly. Both settings are
+/// injected per-instance via <c>ConfigureWebHost</c>'s <c>UseSetting</c> (colon-form keys), which
+/// reaches <c>AddMediaLibrary</c>'s composition-time <c>GetConnectionString("Library")</c> read in
+/// Program.cs (verified empirically) — no process environment variable is mutated, so no other test
+/// class can race with it.
 /// </summary>
 file sealed class StatusApiWebFactory(IMediaCatalog catalog) : WebApplicationFactory<Program>
 {
-    const string LibraryConnVar = "ConnectionStrings__Library";
-    const string AdminPasswordVar = "Admin__Password";
     internal const string Password = "test-password-x7z";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -80,6 +79,8 @@ file sealed class StatusApiWebFactory(IMediaCatalog catalog) : WebApplicationFac
         // ValidateOnStart() is satisfied without injecting them manually (Station:SafeScope:LibraryIds
         // defaults to [1] there).
         builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
 
         builder.ConfigureTestServices(services =>
         {
@@ -101,23 +102,6 @@ file sealed class StatusApiWebFactory(IMediaCatalog catalog) : WebApplicationFac
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
         });
-    }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        var prevLibrary = Environment.GetEnvironmentVariable(LibraryConnVar);
-        var prevAdmin   = Environment.GetEnvironmentVariable(AdminPasswordVar);
-        Environment.SetEnvironmentVariable(LibraryConnVar, "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable(AdminPasswordVar, Password);
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(LibraryConnVar, prevLibrary);
-            Environment.SetEnvironmentVariable(AdminPasswordVar, prevAdmin);
-        }
     }
 }
 
@@ -321,11 +305,6 @@ public static class FeatureStatusEndpoint
         }
     }
 
-    // StatusApiWebFactory.CreateHost mutates the Admin__Password / ConnectionStrings__Library
-    // process env vars for the boot window — shared with Story056/Story058's factories, so this
-    // class (and ScenarioDenyByDefault below) opts into the serializing collection (see
-    // EnvVarMutatingWebFactoryCollection) rather than racing them under xUnit's default parallelism.
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioDeployedEndpoint
     {
         [Fact]
@@ -364,7 +343,6 @@ public static class FeatureStatusEndpoint
 
     // ── SAD PATH ──────────────────────────────────────────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioDenyByDefault
     {
         [Fact]
