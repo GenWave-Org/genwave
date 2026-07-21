@@ -61,4 +61,7 @@ public sealed class StationOptions
 
     /// <summary>Rotation anti-repeat/artist-separation knobs (SPEC F41.6). Bound to <c>Station:Rotation</c>.</summary>
     public StationRotationOptions Rotation { get; set; } = new();
+
+    /// <summary>Boundary-aware selection bias knobs (SPEC F74.3, STORY-198). Bound to <c>Station:BoundaryBias</c>.</summary>
+    public StationBoundaryBiasOptions BoundaryBias { get; set; } = new();
 }

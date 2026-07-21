@@ -313,7 +313,7 @@ public static class FeatureYearLookupOldestQualifying
             }));
             var http = new HttpClient(handler);
             IOptionsMonitor<YearLookupOptions> options = new FakeOptionsMonitor<YearLookupOptions>(new YearLookupOptions());
-            return (new MusicBrainzYearLookup(http, options), handler);
+            return (new MusicBrainzYearLookup(http, options, new MusicBrainzRateLimiter(TimeProvider.System)), handler);
         }
     }
 
@@ -331,6 +331,6 @@ public static class FeatureYearLookupOldestQualifying
         }));
         var http = new HttpClient(handler);
         IOptionsMonitor<YearLookupOptions> options = new FakeOptionsMonitor<YearLookupOptions>(new YearLookupOptions());
-        return new MusicBrainzYearLookup(http, options);
+        return new MusicBrainzYearLookup(http, options, new MusicBrainzRateLimiter(TimeProvider.System));
     }
 }

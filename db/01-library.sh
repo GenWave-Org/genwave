@@ -100,8 +100,16 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	  bpm_analyzed_at      timestamptz,
 
 	  -- year_lookup_at: timestamp of the last MusicBrainz year-lookup attempt (Epic X / SPEC F48,
-	  -- gitea-#208). Stamped regardless of outcome so the claim predicate never retries the same row.
-	  year_lookup_at       timestamptz,
+	  -- gitea-#208). Stamped regardless of outcome (success, miss, or endpoint failure) -- an
+	  -- "attempted at" telemetry marker only; it no longer gates re-claiming on its own (SPEC F76.2).
+	  year_lookup_at         timestamptz,
+
+	  -- year_lookup_missed_at: the actual MusicBrainz re-claim gate (SPEC F76.2, STORY-200). Stamped
+	  -- ONLY for a genuine miss -- a completed round trip with no confident match above MinScore.
+	  -- An endpoint failure/timeout leaves this NULL, so the row is retried next backfill tick;
+	  -- only a real "no such recording" answer is ever excluded permanently. Same reusable idiom a
+	  -- future enrichment slice (e.g. mood tagging) can copy verbatim: "<domain>_lookup_missed_at".
+	  year_lookup_missed_at timestamptz,
 
 	  discovered_at   timestamptz not null default now(),
 	  enriched_at     timestamptz

@@ -57,7 +57,12 @@ static class StationOptionsServiceCollectionExtensions
             // wraps IOptionsMonitor<TtsOptions> and re-reads CurrentValue on every call, so a live
             // PUT /api/settings edit to Tts:RenderBudgetSeconds applies to the very next unit's
             // renders.
-            .AddSingleton<IRenderBudgetProvider, OptionsMonitorRenderBudgetProvider>();
+            .AddSingleton<IRenderBudgetProvider, OptionsMonitorRenderBudgetProvider>()
+            // Boundary-bias seam (SPEC F74.3, STORY-198): wraps IOptionsMonitor<StationOptions> so a
+            // config-provider reload of Station:BoundaryBias:LookaheadMinutes reaches the
+            // Orchestrator without a restart — but, unlike the four bindings above, this knob is
+            // NOT joined to the settings allowlist (v1: boot/env-tunable only, no PUT write path).
+            .AddSingleton<IBoundaryBiasProvider, OptionsMonitorBoundaryBiasProvider>();
 
         return services;
     }

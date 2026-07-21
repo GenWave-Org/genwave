@@ -872,17 +872,24 @@ sealed class MediaRepository(
 
     /// <summary>
     /// Rows eligible for a MusicBrainz year lookup: <c>state='ready'</c>, <c>year IS NULL</c>,
-    /// <c>year_lookup_at IS NULL</c>, and both artist and title are non-blank (SPEC F48.3) — a blank
-    /// tag has nothing to search MusicBrainz with, so it is never claimed (and, unlike the other
-    /// backfills, never gets its sentinel stamped either — it simply isn't selected by this query,
-    /// pending an operator tag fix). Limited to <paramref name="limit"/> rows per tick.
+    /// <c>year_lookup_missed_at IS NULL</c>, and both artist and title are non-blank (SPEC F48.3,
+    /// F76.2) — a blank tag has nothing to search MusicBrainz with, so it is never claimed (and,
+    /// unlike the other backfills, never gets its sentinel stamped either — it simply isn't selected
+    /// by this query, pending an operator tag fix).
+    ///
+    /// Gated on <c>year_lookup_missed_at</c>, NOT the older <c>year_lookup_at</c> "attempted"
+    /// timestamp: an endpoint failure stamps the latter (telemetry — see
+    /// <see cref="WriteYearLookupResultAsync"/>) but never the former, so a row that merely hit a
+    /// transient outage stays eligible and is retried next tick, while a genuine miss (a completed
+    /// round trip with no confident match) is excluded permanently (SPEC F76.2's "second pass over a
+    /// miss-stamped library issues zero calls"). Limited to <paramref name="limit"/> rows per tick.
     /// </summary>
     public async Task<IReadOnlyList<YearLookupClaimRow>> ListYearLookupClaimsAsync(int limit, CancellationToken ct)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var rows = await conn.QueryAsync<YearLookupClaimRow>(new CommandDefinition(
             "select id, artist, title, album from library.media " +
-            "where state = 'ready' and year is null and year_lookup_at is null " +
+            "where state = 'ready' and year is null and year_lookup_missed_at is null " +
             "and coalesce(trim(artist), '') <> '' and coalesce(trim(title), '') <> '' " +
             "limit @limit",
             new { limit }, cancellationToken: ct));
@@ -890,23 +897,34 @@ sealed class MediaRepository(
     }
 
     /// <summary>
-    /// Writes the outcome of one MusicBrainz year lookup attempt; <c>year_lookup_at</c> is stamped
-    /// unconditionally — success, low confidence, or failure — so the backfill predicate never
-    /// re-claims this row (SPEC F48.3). <c>year</c> is written ONLY when the column is currently
-    /// <c>null</c> — a <c>CASE</c> guard in the UPDATE itself, not a pre-read, so a concurrent write
-    /// (e.g. an operator's PATCH landing between the claim and this write) can never be clobbered by
-    /// a stale lookup result (SPEC F48.4). No other column, including <c>tags_edited_at</c>, is
-    /// touched — this is an enrichment pass, never an operator edit.
+    /// Writes the outcome of one MusicBrainz year lookup attempt (SPEC F48.3, F76.2).
+    /// <c>year_lookup_at</c> is stamped unconditionally — success, low confidence, or failure — as an
+    /// "attempted at" telemetry marker; it no longer gates re-claiming on its own (see
+    /// <see cref="ListYearLookupClaimsAsync"/>). <c>year_lookup_missed_at</c> — the actual re-claim
+    /// gate — is stamped ONLY for a genuine miss: <paramref name="year"/> is null AND
+    /// <paramref name="callFailed"/> is <see langword="false"/> (a completed round trip that simply
+    /// found no confident match). A failed round trip (<paramref name="callFailed"/> true) leaves it
+    /// untouched, so the row is retried on the very next pass rather than stamped away forever — the
+    /// etiquette rule this column exists to enforce (never re-asking a question already answered,
+    /// while never giving up on one that was never actually asked).
+    ///
+    /// <paramref name="year"/> is written ONLY when the column is currently <c>null</c> — a
+    /// <c>CASE</c> guard in the UPDATE itself, not a pre-read, so a concurrent write (e.g. an
+    /// operator's PATCH landing between the claim and this write) can never be clobbered by a stale
+    /// lookup result (SPEC F48.4). No other column, including <c>tags_edited_at</c>, is touched —
+    /// this is an enrichment pass, never an operator edit.
     /// </summary>
-    public async Task WriteYearLookupResultAsync(long id, int? year, CancellationToken ct)
+    public async Task WriteYearLookupResultAsync(long id, int? year, bool callFailed, CancellationToken ct)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await conn.ExecuteAsync(new CommandDefinition(
             "update library.media set " +
             "year = case when year is null then @year else year end, " +
-            "year_lookup_at = now() " +
+            "year_lookup_at = now(), " +
+            "year_lookup_missed_at = " +
+            "  case when @year is null and not @callFailed then now() else year_lookup_missed_at end " +
             "where id = @id",
-            new { id, year },
+            new { id, year, callFailed },
             cancellationToken: ct));
     }
 
@@ -979,9 +997,9 @@ sealed class MediaRepository(
 
     /// <summary>
     /// Lands <paramref name="insert"/> directly in <c>state='ready'</c> — one INSERT, no enricher
-    /// round-trip. <c>tags_edited_at</c> and all FOUR <c>*_analyzed_at</c>/lookup sentinels
-    /// (<c>cue_analyzed_at</c>, <c>energy_analyzed_at</c>, <c>bpm_analyzed_at</c>, <c>year_lookup_at</c>)
-    /// are stamped unconditionally in the same statement:
+    /// round-trip. <c>tags_edited_at</c> and every <c>*_analyzed_at</c>/lookup sentinel
+    /// (<c>cue_analyzed_at</c>, <c>energy_analyzed_at</c>, <c>bpm_analyzed_at</c>, <c>year_lookup_at</c>,
+    /// <c>year_lookup_missed_at</c>) are stamped unconditionally in the same statement:
     /// <list type="bullet">
     /// <item><c>tags_edited_at</c> freezes the brand tags exactly like an operator edit (F18.3) —
     /// re-scan/backfill never overwrites them.</item>
@@ -991,12 +1009,13 @@ sealed class MediaRepository(
     /// <see cref="WriteEnrichmentAsync"/> does for a scanned file's first enrichment pass. Authored
     /// rows are TTS/jingle content: aubio has no tempo to find, so <c>bpm</c> itself stays null
     /// (attempted-not-applicable, same shape as cue/energy).</item>
-    /// <item><c>year_lookup_at</c> is likewise stamped unconditionally (<c>year</c> stays null) —
-    /// authored station patter/jingles are never real-world releases, so they must never be sent to
-    /// MusicBrainz; without this stamp the F48.3 claim predicate (<c>year IS NULL AND
-    /// year_lookup_at IS NULL</c> + non-blank artist/title) would claim every authored row exactly
-    /// once, leaking its (station-authored) artist/title to an external service (X5 review finding —
-    /// the same invariant <c>bpm_analyzed_at</c> protects, applied to the fourth sentinel).</item>
+    /// <item><c>year_lookup_at</c> AND <c>year_lookup_missed_at</c> are likewise stamped
+    /// unconditionally (<c>year</c> stays null) — authored station patter/jingles are never
+    /// real-world releases, so they must never be sent to MusicBrainz; without both stamps the F76.2
+    /// claim predicate (<c>year IS NULL AND year_lookup_missed_at IS NULL</c> + non-blank
+    /// artist/title) would claim every authored row exactly once, leaking its (station-authored)
+    /// artist/title to an external service (X5 review finding — the same invariant
+    /// <c>bpm_analyzed_at</c> protects, applied to the fourth/fifth sentinel).</item>
     /// </list>
     /// An unknown <see cref="AuthoredMediaInsert.LibraryId"/> is rejected by the existing foreign key
     /// on <c>library.media.library_id</c> — the exception is intentionally left unmapped; the single
@@ -1015,6 +1034,7 @@ sealed class MediaRepository(
               intro_energy, outro_energy, energy_analyzed_at,
               bpm_analyzed_at,
               year_lookup_at,
+              year_lookup_missed_at,
               enriched_at
             ) values (
               @path, @format, @sizeBytes, @mtime, 'ready', @libraryId,
@@ -1023,6 +1043,7 @@ sealed class MediaRepository(
               @integratedLufs, @truePeakDbtp, @measurable,
               @cueInSec, @cueOutSec, now(),
               @introEnergy, @outroEnergy, now(),
+              now(),
               now(),
               now(),
               now()
@@ -1067,7 +1088,10 @@ sealed class MediaRepository(
     ///   Loudness — integrated_lufs, true_peak_dbtp, measurable → null; state = 'discovered'.
     ///   Tags    — tags_edited_at → null; state = 'discovered'.
     ///   Bpm     — bpm, bpm_analyzed_at → null; state unchanged.
-    ///   Year    — year_lookup_at → null ONLY; year itself is untouched; state unchanged (SPEC F48.6).
+    ///   Year    — year_lookup_at, year_lookup_missed_at → null ONLY; year itself is untouched;
+    ///             state unchanged (SPEC F48.6). Both sentinels reset together — clearing only the
+    ///             older "attempted" timestamp would leave the F76.2 miss stamp in place, and the
+    ///             row would stay excluded from the very re-lookup this reset requests.
     /// When both Loudness and Tags are requested, <c>state = 'discovered'</c> appears once.
     /// </summary>
     static string BuildReenrichSetClauses(ReenrichFields fields)
@@ -1108,9 +1132,12 @@ sealed class MediaRepository(
 
         if (fields.HasFlag(ReenrichFields.Year))
         {
-            // Sentinel only (SPEC F48.6) — deliberately NOT "year = null" alongside it; a wrong
+            // Sentinels only (SPEC F48.6) — deliberately NOT "year = null" alongside them; a wrong
             // year's correction surface is the F18 PATCH, not a re-roll of this lookup.
             parts.Add("year_lookup_at = null");
+            // year_lookup_missed_at is the F76.2 re-claim gate; resetting only the sibling above
+            // would leave a miss-stamped row permanently excluded from the next backfill tick.
+            parts.Add("year_lookup_missed_at = null");
         }
 
         // state = 'discovered' is added once regardless of whether Loudness, Tags, or both are set.

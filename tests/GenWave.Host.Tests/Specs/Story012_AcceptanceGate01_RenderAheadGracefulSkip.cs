@@ -175,7 +175,9 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
         return new Orchestrator(
             identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, segmentSource,
             new NoOpActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
-            new FakeRenderBudgetProvider(renderBudget));
+            new FakeRenderBudgetProvider(renderBudget),
+            new SpeechDeferralQueue(TimeProvider.System),
+            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
     }
 
     // -------------------------------------------------------------------------

@@ -30,19 +30,23 @@ cp .env.example .env
 ./launch.sh
 ```
 
-Six services start: `db`, `icecast`, `engine`, `api`, `kokoro` (TTS synthesizer), and `admin_ui` (operator console).
+Seven services start: `db`, `icecast`, `engine`, `api`, `kokoro` (TTS synthesizer), `piper` (CPU-only fallback TTS), and `admin_ui` (operator console).
 
 - **Stream:** `http://localhost:8000/stream` — open it in any audio player
 - **Admin UI:** `http://localhost:3000` — log in with the password set in `ADMIN_PASSWORD`
 - **API:** `http://localhost:8080` — anonymous hot path (`GET /media/random`, `GET /media/{id}`, `GET /health`) plus the cookie-auth admin surface under `/api/*`
 
-On first boot the library scans `MEDIA_DIR`, enriches each file (loudness + cue + energy + BPM + tags, plus a high-confidence MusicBrainz release-year lookup when the tags carry none — disable-able live via `Library:YearLookup:Enabled`), and the feeder begins pulling ready tracks. Until the first tracks are ready, the engine plays the safe-rotation source — a curated library scope (`Station:SafeScope:LibraryIds`) pulled via `GET /internal/safe-track`. On a fresh deploy, a one-shot boot seed creates a `safe` library, renders a branded TTS announcement ("Please Stand By"), and points SafeScope at it — so drains air the announcement, not a random track; an operator-set SafeScope is never overwritten. If the scope resolves empty, `mksafe` emits silence as a logged degraded mode. The Orchestrator interleaves TTS patter (station IDs, lead-ins, back-announces, time checks) with music once Kokoro is up. When an `Llm:Endpoint` is configured (Settings page — live, no restart), lead-ins and back-announces become LLM-authored copy, optionally in an operator-authored DJ persona's voice (Personas page); with no LLM configured — or on any LLM failure — the template patter airs unchanged. Station identity (`STATION_NAME`, voice, scope) defaults to `GWAV 108.8` / `af_heart` / library 1 — override via env if needed.
+On first boot the library scans `MEDIA_DIR`, enriches each file (loudness + cue + energy + BPM + tags, plus a high-confidence MusicBrainz release-year lookup when the tags carry none — disable-able live via `Library:YearLookup:Enabled`), and the feeder begins pulling ready tracks. Until the first tracks are ready, the engine plays the safe-rotation source — a curated library scope (`Station:SafeScope:LibraryIds`) pulled via `GET /internal/safe-track`. On a fresh deploy, a one-shot boot seed creates a `safe` library, renders a branded TTS announcement ("Please Stand By"), and points SafeScope at it — so drains air the announcement, not a random track; an operator-set SafeScope is never overwritten. If the scope resolves empty, `mksafe` emits silence as a logged degraded mode. The Orchestrator interleaves TTS patter (station IDs, lead-ins, back-announces, time checks) with music once Kokoro is up. When an `Llm:Endpoint` is configured (Settings page — live, no restart), lead-ins and back-announces become LLM-authored copy, optionally in an operator-authored DJ persona's voice (Personas page); with no LLM configured the template patter airs unchanged. Station identity (`STATION_NAME`, voice, scope) defaults to `GWAV 108.8` / `af_heart` / library 1 — override via env if needed.
+
+### Resilience & operator tools
+
+The broadcast never depends on a sick dependency. **LLM failure is a mode, not an error**: consecutive failures walk the station Normal → Soft (one real LLM attempt per cooldown window, template copy otherwise) → Hard (zero LLM calls); background health probes plus a cooldown walk it back up, and an operator can pin any mode live (`Llm:DegradationPin`). **TTS failure is inaudible**: if Kokoro is down or a render throws, the segment re-renders on the Piper fallback engine through the same loudness pipeline — kill the Kokoro container mid-broadcast and the next patter still airs. Every spoken line passes one normalization chokepoint (reasoning-block scrub, markdown strip, operator **pronunciation corrections** — editable with live preview under Settings → TTS, e.g. `MacLeod → Muh-cloud`). The **Booth log** page answers "what did the DJ do and say at 9:14" as a persistent narrative feed (track starts, patter, mode changes, 14-day retention), with an **LLM call inspector** tab showing the last ~50 calls (prompt, response, timing, mode — in-memory, never persisted). MusicBrainz lookups are throttled to 1 req/s with a version-stamped User-Agent, and misses are stamped so they're never re-asked.
 
 ## Repository layout
 
 ```
 .
-├─ compose.yaml            # 6-service topology: db, icecast, engine, api, kokoro, admin_ui
+├─ compose.yaml            # 7-service topology: db, icecast, engine, api, kokoro, piper, admin_ui
 ├─ .env.example            # secrets template → copy to .env
 ├─ engine/
 │  └─ genwave.liq          # Liquidsoap playout script
@@ -56,7 +60,10 @@ On first boot the library scans `MEDIA_DIR`, enriches each file (loudness + cue 
 │  ├─ 07-library-management-migration.sh # idempotent: adds UNIQUE(name) on library.library (F20)
 │  ├─ 08-rating-migration.sh          # idempotent: library.media_rating 1:1 extension table (F33)
 │  ├─ 09-persona-migration.sh         # idempotent: station.persona table (F35)
-│  └─ 10-enrichment2-migration.sh     # idempotent: bpm, year_lookup_at, track_energy generated column, media_year index (F46–F48)
+│  ├─ 10-enrichment2-migration.sh     # idempotent: bpm, year_lookup_at, track_energy generated column, media_year index (F46–F48)
+│  ├─ 11-persona-card-migration.sh    # idempotent: persona slug/definition jsonb/enabled + persona_memory + recall index (F71)
+│  ├─ 12-booth-log-migration.sh       # idempotent: station.booth_log + paging index (F72)
+│  └─ 13-year-lookup-etiquette-migration.sh # idempotent: year_lookup_missed_at miss-stamp gate (F76)
 ├─ icecast/
 │  ├─ Dockerfile           # self-owned Icecast2 image
 │  ├─ entrypoint.sh        # renders passwords from env, runs Icecast
@@ -148,7 +155,8 @@ GenWave's epic-by-epic history — v1 broadcast playout through Ranking & robust
 ## Operational notes
 
 - The Liquidsoap **control port (1234) is unauthenticated and never published**. To inspect it: `docker compose exec engine bash` then connect to `localhost:1234` from inside the container.
-- Icecast `/admin` and `/status` share the public port 8000 — password-protected but reachable. Add a TLS reverse proxy before exposing this publicly.
+- Icecast `/admin` and `/status` share port 8000 — password-protected but reachable on the LAN. **Never publish 8000 on a public box**: the [reference public topology](DEPLOYMENT.md) fronts everything with Caddy and un-publishes it, and CI enforces the posture via `tools/check-compose-publish.sh` (0.0.0.0 publishes allowed only for the proxy).
+- **Upgrading an existing deployment:** `./launch.sh` applies every `db/*-migration.sh` idempotently on each boot — a raw `docker compose up` does **not**, so run `launch.sh` (or apply `db/11`–`13` by hand) after pulling a new release.
 - Secrets live only in `.env` (gitignored). Promote to Docker secrets before anything public.
 - If you change `duration=` in `engine/genwave.liq`, pass the matching `CROSSFADE=` to `smoke_test.sh` so its analysis windows line up.
 - The `crossfade` operator behavior and `output.icecast.metadata` on-air signal are specific to Liquidsoap 2.4.x. The engine image is pinned to `v2.4.4` in `compose.yaml` — do not change the pin without re-running the smoke test.
@@ -156,6 +164,8 @@ GenWave's epic-by-epic history — v1 broadcast playout through Ranking & robust
 ## Built with AI assistance
 
 GenWave is developed openly with AI as a force multiplier for the people (me) building it — not a replacement for them. Design decisions, reviews, and sign-offs are human; the `.claude/` toolkit in this repository is part of how the project is built and you're welcome to use it. The same deal applies to contributions — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+If you want the workflows/skills I use in GenWave for your own projects, you can find them [here](https://ai.bigmachine.io/c/hello), along with a lot of other awesome AI resources. Hats off to Rob Conery for his awesome [Claude Code Toolkit](https://ai.bigmachine.io/c/free-stuff/roll-your-own-claude-code-toolkit-bc0a72)!
 
 ## Contributing
 

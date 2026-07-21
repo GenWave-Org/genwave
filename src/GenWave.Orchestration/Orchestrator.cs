@@ -60,6 +60,25 @@ using GenWave.Core.Domain;
 /// <paramref name="cadenceProvider"/> follows one line below) — never cached in a field — so a live
 /// <c>Station:Name</c>/<c>Station:Voice</c> edit reaches the very next unit's segments with no
 /// process restart.
+///
+/// The station-id cadence check (below) never builds its <see cref="SegmentRequest"/> directly
+/// (SPEC F74.1/F74.2, STORY-197): it enqueues a deferral into <paramref name="deferralQueue"/>,
+/// which <see cref="EnqueuePatterAsync"/> drains in the same pass. This planning pass IS the next
+/// track boundary — a whole unit (back-announce/station-id/lead-in/music) is queued atomically
+/// before the next track ever reaches air — so draining here can never land mid-track. Routing
+/// even an always-immediately-due trigger through the queue formalizes the seam a future deferred
+/// producer (e.g. a wall-clock-scheduled handoff) shares: enqueue whenever its own trigger fires,
+/// drain only at a boundary.
+///
+/// Music selection is boundary-aware (SPEC F74.3, STORY-198): <see cref="SelectMusicCandidateAsync"/>
+/// checks <paramref name="deferralQueue"/>'s <see cref="SpeechDeferralQueue.NextDue"/> before every
+/// pick and, only when something is due strictly in the future within
+/// <paramref name="boundaryBiasProvider"/>'s lookahead window, softly biases the pick toward
+/// whichever sampled candidate's end lands closest to that due time — never a hard filter, and
+/// subordinate to rotation (F41.1/F41.3 tiering still governs which candidates even get sampled).
+/// Outside that window (the common case today — see that method's remarks) this degrades to
+/// exactly the one <see cref="IMediaCatalog.GetRotationCandidateAsync"/> call this Orchestrator
+/// has always made.
 /// </summary>
 public sealed class Orchestrator(
     IStationIdentityProvider identityProvider,
@@ -70,8 +89,18 @@ public sealed class Orchestrator(
     ITtsSegmentSource tts,
     IActivePersonaAccessor personaAccessor,
     ILogger<Orchestrator> logger,
-    IRenderBudgetProvider renderBudgetProvider) : INextItemProvider
+    IRenderBudgetProvider renderBudgetProvider,
+    SpeechDeferralQueue deferralQueue,
+    TimeProvider timeProvider,
+    IBoundaryBiasProvider boundaryBiasProvider) : INextItemProvider
 {
+    /// <summary>
+    /// How many independent rotation-tiered samples <see cref="SelectMusicCandidateAsync"/> draws
+    /// when the boundary-bias window is active (SPEC F74.3) — enough to see a few distinct tier-1
+    /// rows in even a modest library without turning every biased pick into a database hot loop.
+    /// </summary>
+    const int BoundarySampleAttempts = 5;
+
     readonly Queue<MediaItem> buffer = new();
     MediaItem? previousTrack;
     int unitCount;
@@ -92,7 +121,7 @@ public sealed class Orchestrator(
         // either — so a live scope edit (SPEC F30) or rotation edit (F41.6) takes effect on the
         // very next pull with no process restart.
         var artistSeparation = rotationProvider.Current.ArtistSeparation;
-        var candidate = await catalog.GetRotationCandidateAsync(
+        var candidate = await SelectMusicCandidateAsync(
             scopeProvider.Current, orderedRecentIds, artistSeparation, ct);
         if (candidate is null)
         {
@@ -130,6 +159,81 @@ public sealed class Orchestrator(
         unitCount++;
 
         return buffer.Dequeue();
+    }
+
+    /// <summary>
+    /// Picks the next music candidate — SPEC F41.1/F41.3 tiering is unchanged and still governs
+    /// which candidates are even eligible — and, when a pending deferral
+    /// (<see cref="SpeechDeferralQueue.NextDue"/>) is due strictly in the future within
+    /// <see cref="boundaryBiasProvider"/>'s lookahead window (SPEC F74.3, STORY-198), softly biases
+    /// that pick toward whichever sampled candidate's end lands closest to the due time.
+    ///
+    /// <para>
+    /// A due-now-or-overdue deferral (the only shape today's cadence producer ever enqueues, per
+    /// SPEC F74.1) takes the plain unbiased path below: it drains at THIS boundary regardless of
+    /// which track follows next, so there is no future "land the end near due" moment left to aim
+    /// for. The bias only ever activates for a deferral a producer enqueued AHEAD of its own due
+    /// time — no such producer exists yet (STORY-198 builds the seam a future wall-clock-scheduled
+    /// one, e.g. a show handoff, will use).
+    /// </para>
+    ///
+    /// <para>
+    /// Soft bias, never a filter (AC2): every sample stays eligible for selection regardless of its
+    /// score, so a library with only long tracks near a deadline still gets one — this never
+    /// re-queries with a narrower predicate, it only re-ranks what <see cref="catalog"/>'s own
+    /// tiered query already returned. A candidate with no measured <c>DurationMs</c> (not yet
+    /// enriched) carries no score and is never preferred or penalized for it — neutral, picked only
+    /// as a last resort when every sample lacks a duration.
+    /// </para>
+    ///
+    /// <para>
+    /// Sampling re-issues the SAME rotation-tiered query (identical scope/recent-ids/artist-separation
+    /// args) up to <see cref="BoundarySampleAttempts"/> times rather than requiring a new multi-row
+    /// catalog method: <see cref="IMediaCatalog.GetRotationCandidateAsync"/>'s own tiered
+    /// <c>ORDER BY ... random() LIMIT 1</c> already draws from the whole rotation-valid pool, so
+    /// repeat calls approximate a pool without widening that interface's contract. Outside the bias
+    /// window this degrades to exactly one call — today's behavior, unchanged.
+    /// </para>
+    /// </summary>
+    async Task<RotationCandidate?> SelectMusicCandidateAsync(
+        LibraryScope scope, IReadOnlyList<string> orderedRecentIds, int artistSeparation, CancellationToken ct)
+    {
+        var due = deferralQueue.NextDue;
+        var untilDue = due is null ? default : due.Value - timeProvider.GetUtcNow();
+
+        if (due is null || untilDue <= TimeSpan.Zero || untilDue > boundaryBiasProvider.Current)
+            return await catalog.GetRotationCandidateAsync(scope, orderedRecentIds, artistSeparation, ct);
+
+        RotationCandidate? best = null;
+        TimeSpan? bestDiff = null;
+        RotationCandidate? firstUnscored = null;
+
+        for (var attempt = 0; attempt < BoundarySampleAttempts; attempt++)
+        {
+            var sample = await catalog.GetRotationCandidateAsync(scope, orderedRecentIds, artistSeparation, ct);
+            if (sample is null)
+            {
+                // Nothing sampled yet at all — a genuine drain (F41.2), not a bias artifact.
+                if (best is null && firstUnscored is null) return null;
+                break; // the pool emptied mid-sample; keep whatever was already sampled.
+            }
+
+            if (sample.Media.DurationMs is int durationMs)
+            {
+                var diff = (TimeSpan.FromMilliseconds(durationMs) - untilDue).Duration();
+                if (bestDiff is null || diff < bestDiff)
+                {
+                    best = sample;
+                    bestDiff = diff;
+                }
+            }
+            else
+            {
+                firstUnscored ??= sample;
+            }
+        }
+
+        return best ?? firstUnscored;
     }
 
     async Task EnqueuePatterAsync(MediaItem? prev, MediaItem next, CancellationToken ct)
@@ -178,10 +282,29 @@ public sealed class Orchestrator(
         // the guard (SPEC F42.1, STORY-136, closes gitea-#216): the FIRST station ID airs only once N
         // units have elapsed, never at boot — unitCount == 0 % N == 0 used to fire on the very
         // first unit, which is exactly the boot-blast this guard now excludes.
+        //
+        // The trigger no longer builds the segment itself (SPEC F74.1/F74.2, STORY-197): it
+        // enqueues a deferral, and the drain immediately below picks it up in this SAME boundary
+        // pass (see class remarks for why that is still "never mid-track"). Supersede (F74.2) is
+        // the queue's job, not this check's — a second same-kind enqueue before the next drain
+        // would simply replace this one.
         if (cadence.StationIdEveryNUnits > 0
             && unitCount > 0
             && unitCount % cadence.StationIdEveryNUnits == 0)
         {
+            deferralQueue.Enqueue(SpeechDeferralKind.StationId, "cadence: Station:Cadence:StationIdEveryNUnits");
+        }
+
+        // Drain every deferral due at this boundary. Today the only producer is the cadence check
+        // just above, always due "now" — but this loop is written for ANY due deferral, including
+        // one enqueued by a future producer several units ago (SPEC F74.1 — "regardless of
+        // wall-clock slip"). Reads the SAME injected clock SelectMusicCandidateAsync compares
+        // NextDue against (SPEC F74.3) — one clock for both halves of this seam, never a mix of a
+        // real and a fake one.
+        foreach (var deferral in deferralQueue.TryDequeueDue(timeProvider.GetUtcNow()))
+        {
+            if (deferral.Kind != SpeechDeferralKind.StationId) continue; // only kind wired so far
+
             var (voice, personaName) = await ResolvePersonaAsync(identity.Voice, ct);
             var req = new SegmentRequest(
                 SegmentKind.StationId,

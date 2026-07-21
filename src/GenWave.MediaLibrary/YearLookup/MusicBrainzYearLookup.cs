@@ -2,6 +2,7 @@ namespace GenWave.MediaLibrary.YearLookup;
 
 using System.Globalization;
 using System.Net.Http.Json;
+using System.Reflection;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
@@ -36,11 +37,28 @@ using GenWave.MediaLibrary.Options;
 /// a legal "no confident match" — a successful round trip clears it regardless of whether a
 /// candidate qualified. This is purely additive to the class; the <see cref="IYearLookup"/> contract
 /// itself is unchanged.
+///
+/// MusicBrainz etiquette (SPEC F76.1): every request awaits <see cref="MusicBrainzRateLimiter"/> —
+/// a shared, process-wide gate, not a delay hand-rolled by whichever caller happens to drive this
+/// class today — immediately before it is sent, and carries a descriptive <see cref="UserAgent"/>
+/// identifying GenWave and a contact URL, built from the build-stamped
+/// <see cref="AssemblyInformationalVersionAttribute"/> (SPEC F65.1) rather than a hardcoded literal.
 /// </summary>
-public sealed class MusicBrainzYearLookup(HttpClient http, IOptionsMonitor<YearLookupOptions> optionsMonitor)
+public sealed class MusicBrainzYearLookup(
+    HttpClient http, IOptionsMonitor<YearLookupOptions> optionsMonitor, MusicBrainzRateLimiter rateLimiter)
     : IYearLookup, IYearLookupDiagnostics
 {
-    const string UserAgent = "GenWave/1.0 (+https://github.com/GenWave-Org/genwave)";
+    /// <summary>The project's public repository — the "contact URL" half of the etiquette User-Agent.</summary>
+    const string ProjectUrl = "https://github.com/GenWave-Org/genwave";
+
+    /// <summary>
+    /// "GenWave/&lt;version&gt; (+repo)" (SPEC F76.1). The version segment is read once, from this
+    /// assembly's own build-stamped <see cref="AssemblyInformationalVersionAttribute"/> (SPEC F65.1)
+    /// — never a hardcoded literal that silently goes stale — falling back to "unknown" for a dev
+    /// build with no stamp at all (mirrors <c>SpectatorController.HostVersion</c>'s own fallback).
+    /// </summary>
+    static readonly string UserAgent =
+        $"GenWave/{typeof(MusicBrainzYearLookup).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown"} (+{ProjectUrl})";
 
     /// <summary>
     /// Response-buffer ceiling for this typed client (review finding — mirrors
@@ -63,6 +81,11 @@ public sealed class MusicBrainzYearLookup(HttpClient http, IOptionsMonitor<YearL
     {
         try
         {
+            // Etiquette gate FIRST (SPEC F76.1), against the caller's own token — a call parked
+            // behind a busy gate is being paced, not timed out, so this must not draw against the
+            // per-call TimeoutSeconds budget started below.
+            await rateLimiter.WaitTurnAsync(ct);
+
             var cfg = optionsMonitor.CurrentValue;
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(cfg.TimeoutSeconds));

@@ -51,7 +51,7 @@ public sealed class ReenrichController(
     ///   <c>loudness</c>— integrated_lufs, true_peak_dbtp, measurable → NULL; state = 'discovered'.
     ///   <c>tags</c>    — tags_edited_at → NULL; state = 'discovered'.
     ///   <c>bpm</c>     — bpm, bpm_analyzed_at → NULL; state unchanged.
-    ///   <c>year</c>    — year_lookup_at → NULL ONLY (year itself untouched); state unchanged.
+    ///   <c>year</c>    — year_lookup_at, year_lookup_missed_at → NULL ONLY (year itself untouched); state unchanged.
     /// </para>
     ///
     /// Response: 202 (body-less) on success; 400 unknown fields; 404 unknown id.
