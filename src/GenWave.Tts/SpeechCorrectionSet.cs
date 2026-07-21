@@ -30,13 +30,17 @@ public sealed class SpeechCorrectionSet
     /// <see cref="SpeechCorrection.From"/> is null, empty, or whitespace-only is skipped rather
     /// than compiled: a blank rule is a no-op by intent, never a corruptor — an unguarded empty
     /// pattern matches at every position in the text and would shred it character by character.
+    /// A null element in <paramref name="corrections"/> itself — System.Text.Json happily produces
+    /// one from a stored array like <c>"[null]"</c>, even though nothing here declares that shape —
+    /// is skipped the same way, so a malformed row degrades this rule rather than throwing an NRE
+    /// that would escape <see cref="SpeechCorrectionProvider.Build"/>'s degrade-to-Empty contract.
     /// </summary>
     public static SpeechCorrectionSet Create(IEnumerable<SpeechCorrection> corrections)
     {
         ArgumentNullException.ThrowIfNull(corrections);
 
         var compiled = corrections
-            .Where(correction => !string.IsNullOrWhiteSpace(correction.From))
+            .Where(correction => correction is not null && !string.IsNullOrWhiteSpace(correction.From))
             .Select(correction => (Pattern: CompilePattern(correction.From), correction.To, correction.From))
             .ToList();
 
@@ -59,6 +63,15 @@ public sealed class SpeechCorrectionSet
 
         return new SpeechCorrectionSet(merged);
     }
+
+    /// <summary>
+    /// The compiled rules' (From, To) pairs, in the exact order <see cref="Apply"/> walks them.
+    /// Exists solely so <see cref="SpeechCorrectionProvider"/> can derive its content-fingerprint
+    /// cache-key term (SPEC F68.5) from what this set actually compiled — after the null/blank-From
+    /// filtering <see cref="Create"/> already applies — rather than re-deriving or duplicating that
+    /// filter against the raw operator JSON.
+    /// </summary>
+    internal IEnumerable<(string From, string To)> RulePairs => rules.Select(rule => (rule.From, rule.To));
 
     /// <summary>
     /// Test-only seam: compiles a single rule from a raw regular expression pattern, bypassing the

@@ -36,6 +36,7 @@ public static class FeatureBlurbAudioGc
             synth,
             new FakeLoudnessAnalyzer(),
             new FakeCueAnalyzer(),
+            NoCorrections.Provider(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions
             {
                 CacheRoot = cacheRoot,

@@ -143,11 +143,16 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
         var synthesizer = new KokoroTtsSynthesizer(http, ttsOptsMonitor);
         var analyzer    = new FakeLoudnessAnalyzer();
 
+        var correctionsProvider = new SpeechCorrectionProvider(
+            new FakeOptionsMonitor<TtsCorrectionsOptions>(new TtsCorrectionsOptions()),
+            NullLogger<SpeechCorrectionProvider>.Instance);
+
         var segmentSource = new TtsSegmentSource(
             new TemplateCopyWriter(new PatterTemplateRenderer()),
             synthesizer,
             analyzer,
             new FakeCueAnalyzer(),
+            correctionsProvider,
             ttsOptsMonitor,
             NullLogger<TtsSegmentSource>.Instance);
 

@@ -7,13 +7,15 @@ namespace GenWave.Tts;
 /// The single normalization chokepoint every booth-bound string passes through immediately before
 /// TTS (SPEC F68). Pure and static: no I/O, no settings reads, zero non-BCL dependencies —
 /// corrections are passed in by the caller. Passes run in a fixed order: think-strip, then
-/// markdown strip, then HTML-entity decode, then operator corrections, then digit-anchored unit
-/// expansion, then entity-safe <c>&amp;</c>-to-"and", then whitespace collapse (F68.2). Think-strip
-/// runs first because nothing downstream should ever process leaked reasoning text; markdown runs
-/// before entity decode so a bolded degree symbol still reaches the unit-expansion pass; operator
-/// corrections run after cleanup (so a rule matches the readable text an operator sees in admin)
-/// and before the built-in expansions (so a correction can pre-empt one); whitespace collapse runs
-/// last to tidy whatever the earlier passes left behind.
+/// markdown strip, then HTML-entity decode, then think-strip again, then operator corrections, then
+/// digit-anchored unit expansion, then entity-safe <c>&amp;</c>-to-"and", then whitespace collapse
+/// (F68.2). Think-strip runs first because nothing downstream should ever process leaked reasoning
+/// text; markdown runs before entity decode so a bolded degree symbol still reaches the
+/// unit-expansion pass; think-strip runs a second time immediately after entity decode because an
+/// HTML-encoded <c>&amp;lt;think&amp;gt;</c> block only becomes a literal tag at that point — the
+/// first pass never saw it (F68.3); operator corrections run after cleanup (so a rule matches the
+/// readable text an operator sees in admin) and before the built-in expansions (so a correction can
+/// pre-empt one); whitespace collapse runs last to tidy whatever the earlier passes left behind.
 /// </summary>
 public static partial class SpeechText
 {
@@ -37,12 +39,13 @@ public static partial class SpeechText
 
     /// <summary>
     /// Runs every normalization pass that precedes operator corrections — think-strip,
-    /// markdown-strip, HTML-entity decode — the exact text <see cref="SpeechCorrectionSet.Apply"/>
-    /// matches against inside <see cref="Normalize"/> (F68.2). Internal (same-assembly) rather than
-    /// a second public overload of <see cref="Normalize"/>, so <see cref="NormalizingTtsSynthesizer"/>
-    /// can determine which rules would actually fire for observability (SPEC F68.7) without
-    /// re-deriving this pipeline or guessing from raw, pre-cleanup text — and without disturbing
-    /// <see cref="Normalize"/>'s own signature/overload set (STORY-185's single-call-site guard).
+    /// markdown-strip, HTML-entity decode, then think-strip again — the exact text
+    /// <see cref="SpeechCorrectionSet.Apply"/> matches against inside <see cref="Normalize"/>
+    /// (F68.2). Internal (same-assembly) rather than a second public overload of
+    /// <see cref="Normalize"/>, so <see cref="NormalizingTtsSynthesizer"/> can determine which rules
+    /// would actually fire for observability (SPEC F68.7) without re-deriving this pipeline or
+    /// guessing from raw, pre-cleanup text — and without disturbing <see cref="Normalize"/>'s own
+    /// signature/overload set (STORY-185's single-call-site guard).
     /// </summary>
     internal static string PrepareForCorrections(string text)
     {
@@ -50,7 +53,16 @@ public static partial class SpeechText
 
         var scrubbed = StripThinkBlocks(text);
         var withoutMarkdown = StripMarkdown(scrubbed);
-        return WebUtility.HtmlDecode(withoutMarkdown);
+        var decoded = WebUtility.HtmlDecode(withoutMarkdown);
+
+        // An HTML-encoded think tag (e.g. "&lt;think&gt;secret&lt;/think&gt;") is not literal
+        // "<think>...</think>" until AFTER HtmlDecode runs above — the first StripThinkBlocks pass
+        // never saw it as a tag at all, just inert text. Stripping again here closes that gap
+        // (F68.3): a fully-encoded block, and a block that mixes literal and encoded tags at
+        // different nesting levels, both resolve to plain literal tags by this point and are
+        // removed the same way. Idempotent on text with no encoded tags, so this is a no-op pass
+        // for the overwhelming common case.
+        return StripThinkBlocks(decoded);
     }
 
     private static string StripThinkBlocks(string text)

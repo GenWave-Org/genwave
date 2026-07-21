@@ -31,6 +31,7 @@ public static class FeaturePersonaAttributionArtistStamping
             synth,
             analyzer,
             cueAnalyzer,
+            NoCorrections.Provider(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
             NullLogger<TtsSegmentSource>.Instance);
 
