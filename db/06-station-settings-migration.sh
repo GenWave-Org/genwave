@@ -128,7 +128,14 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  id          bigserial   PRIMARY KEY,
 	  occurred_at timestamptz NOT NULL DEFAULT now(),
 	  kind        text        NOT NULL,
-	  summary     text        NOT NULL
+	  summary     text        NOT NULL,
+	  -- nullable-fk (SPEC F84.6, STORY-215): the persona on air when a TRACK-START row aired,
+	  -- stamped by the booth-log drain loop at write time — never inferred later. NULL for every
+	  -- non-track row, a persona-less airing, or a row that predates this column; all three are
+	  -- equally "un-thumbable" for taste accrual (T70). ON DELETE SET NULL, not CASCADE (unlike
+	  -- persona_memory/persona_taste below): deleting a persona must never delete booth-log HISTORY
+	  -- rows — it only degrades their stamp to unstamped, the same un-thumbable state above.
+	  persona_id  integer     REFERENCES station.persona (id) ON DELETE SET NULL
 	);
 
 	-- Keyset paging spine (SPEC F72.2): newest-first (occurred_at DESC, id DESC) with no OFFSET —

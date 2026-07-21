@@ -44,7 +44,7 @@ public sealed class BoothLogController(IBoothLogReader store) : ControllerBase
         var page = await store.ReadAsync(cursor, effectiveTake, ct);
 
         return Ok(new BoothLogPageDto(
-            page.Entries.Select(e => new BoothLogEntryDto(e.OccurredAt, e.Kind, e.Summary)).ToList(),
+            page.Entries.Select(e => new BoothLogEntryDto(e.OccurredAt, e.Kind, e.Summary, e.PersonaId)).ToList(),
             page.NextBefore?.ToString()));
     }
 }

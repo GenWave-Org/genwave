@@ -13,7 +13,8 @@ namespace GenWave.MediaLibrary.Station;
 /// parameter (an empty/dev-mode <c>ConnectionStrings:Station</c> must never block boot; the failure
 /// only surfaces if a caller actually appends or reads).
 ///
-/// <b>Retention runs inside <see cref="AppendAsync"/>'s own transaction</b> (SPEC F72.3), in
+/// <b>Retention runs inside the same transaction as the insert</b> (SPEC F72.3, see
+/// <see cref="InsertAndEvictAsync"/>, which <see cref="AppendAsync"/> calls), in
 /// application code rather than a separate job or <c>plpgsql</c> trigger: at hobby-station event
 /// rates (one row per track start/patter/mode change, never a hot inner loop) a DELETE on every
 /// insert is cheap, and it guarantees the table never grows unbounded without needing a second
@@ -28,21 +29,54 @@ namespace GenWave.MediaLibrary.Station;
 sealed class BoothLogRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<BoothLogOptions> options)
     : IBoothLogAppender, IBoothLogReader
 {
+    // Postgres SQLSTATE code for foreign-key violation — mirrors MediaRatingRepository/MediaRepository.
+    const string ForeignKeyViolation = "23503";
+
+    // persona_id is `integer` at rest (mirrors station.persona.id's own `serial` width) but every id
+    // in this project's C# projection is `long` — cast on the way out, same reason PersonaRepository's
+    // own SelectColumns casts id::bigint (and PersonaTasteRepository casts persona_id::bigint):
+    // Dapper's record-constructor mapping matches column CLR type to parameter type exactly, so an
+    // uncast int4 column fails to bind a `long?` constructor parameter.
     const string SelectColumns =
         """
-        select id::bigint as id, occurred_at, kind, summary
+        select id::bigint as id, occurred_at, kind, summary, persona_id::bigint as persona_id
         from station.booth_log
         """;
 
-    /// <inheritdoc/>
-    public async Task AppendAsync(string kind, string summary, CancellationToken ct)
+    /// <summary>
+    /// <paramref name="personaId"/> (SPEC F84.6, STORY-215) was captured SYNCHRONOUSLY by
+    /// <see cref="BoothLogWriter.Publish"/> at air time, well before this append ever runs — a new
+    /// edge that drain-time resolution never had: the persona can be DELETED in the gap between air
+    /// and this call, leaving <paramref name="personaId"/> a dangling reference. That insert fails
+    /// the <c>persona_id</c> FK (23503) even though <c>booth_log.persona_id</c>'s own <c>ON DELETE SET
+    /// NULL</c> already protects every row persisted BEFORE the delete — SET NULL cannot help a row
+    /// that has not been inserted yet. Caught here specifically and retried unstamped: the booth-log
+    /// row itself must never be dropped over a stamp that went stale mid-flight.
+    /// </summary>
+    public async Task AppendAsync(string kind, string summary, long? personaId, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+
+        try
+        {
+            await InsertAndEvictAsync(conn, kind, summary, personaId, ct);
+        }
+        catch (PostgresException ex) when (ex.SqlState == ForeignKeyViolation && personaId is not null)
+        {
+            // The failed attempt's `await using var tx` already rolled back (disposal runs as the
+            // exception unwinds InsertAndEvictAsync, before it reaches this catch) — the connection
+            // is clean, so retrying a fresh transaction on the SAME conn is safe.
+            await InsertAndEvictAsync(conn, kind, summary, personaId: null, ct);
+        }
+    }
+
+    async Task InsertAndEvictAsync(NpgsqlConnection conn, string kind, string summary, long? personaId, CancellationToken ct)
+    {
         await using var tx = await conn.BeginTransactionAsync(ct);
 
         await conn.ExecuteAsync(new CommandDefinition(
-            "insert into station.booth_log (kind, summary) values (@Kind, @Summary)",
-            new { Kind = kind, Summary = summary },
+            "insert into station.booth_log (kind, summary, persona_id) values (@Kind, @Summary, @PersonaId)",
+            new { Kind = kind, Summary = summary, PersonaId = personaId },
             transaction: tx,
             cancellationToken: ct));
 

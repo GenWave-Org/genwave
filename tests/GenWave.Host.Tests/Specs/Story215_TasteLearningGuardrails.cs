@@ -5,7 +5,24 @@
 // without brakes). Entry-point scenarios drive the real thumb routes (WebApplicationFactory);
 // the zero-input simulation drives the real ranker loop.
 
+using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
+using GenWave.Host.Api;
+using Microsoft.AspNetCore.Mvc;
+
 namespace GenWave.Host.Tests.Specs;
+
+/// <summary>
+/// Fixed single-page <see cref="IBoothLogReader"/> double (STORY-215, T60) — this file only needs to
+/// prove the controller/DTO projects a row's persona stamp through unchanged; the real keyset-paging
+/// behavior is Story195_BoothLog.cs's own concern (its own <c>FakeBoothLogReader</c> is file-scoped
+/// there, so this file scripts its own minimal double rather than reaching across files).
+/// </summary>
+file sealed class FixedPageBoothLogReader(BoothLogPage page) : IBoothLogReader
+{
+    public Task<BoothLogPage> ReadAsync(BoothLogCursor? before, int take, CancellationToken ct) =>
+        Task.FromResult(page);
+}
 
 public static class FeatureTasteLearningGuardrails
 {
@@ -38,11 +55,25 @@ public static class FeatureTasteLearningGuardrails
     {
         // Arrange (T60/T70): a row aired under persona A; persona B is now active; thumb the row.
 
-        [Fact(Skip = "Pending T60 — see docs/PLAN.md")]
-        public static void TrackRowsCarryTheOnAirPersonaId()
+        [Fact]
+        public static async Task TrackRowsCarryTheOnAirPersonaId()
         {
-            // stamped at air time, additive column/payload (F84.6)
-            Assert.Fail("pending T60");
+            // Given a booth-log track row stamped with the persona that was active when it aired
+            // (F84.6) — the reader/API path never re-derives this from whatever persona happens to
+            // be active NOW; it simply reflects whatever the write path stamped.
+            const long personaAId = 7;
+            var stampedRow = new BoothLogEntry(1, DateTime.UtcNow, "track-started",
+                "Started 'Night Drive' by The Waveforms", PersonaId: personaAId);
+            var reader = new FixedPageBoothLogReader(new BoothLogPage([stampedRow], NextBefore: null));
+            var controller = new BoothLogController(reader);
+
+            // When the admin feed reads it back...
+            var page = Assert.IsType<BoothLogPageDto>(
+                Assert.IsType<OkObjectResult>(await controller.List(before: null, take: 10, CancellationToken.None)).Value);
+
+            // Then the API row carries that same persona id — stamped at air time, additive
+            // column/payload (F84.6).
+            Assert.Equal(personaAId, page.Entries.Single().PersonaId);
         }
 
         [Fact(Skip = "Pending T70 — see docs/PLAN.md")]

@@ -10,6 +10,11 @@ namespace GenWave.Core.Abstractions;
 /// </summary>
 public interface IBoothLogAppender
 {
-    /// <summary>Appends one narrative row (<paramref name="kind"/>, <paramref name="summary"/>), stamped <c>now()</c>.</summary>
-    Task AppendAsync(string kind, string summary, CancellationToken ct);
+    /// <summary>
+    /// Appends one narrative row (<paramref name="kind"/>, <paramref name="summary"/>), stamped
+    /// <c>now()</c>. <paramref name="personaId"/> (SPEC F84.6, STORY-215) is the persona active on
+    /// air at write time for a TRACK-START row — <see langword="null"/> for every other kind, or a
+    /// persona-less airing.
+    /// </summary>
+    Task AppendAsync(string kind, string summary, long? personaId, CancellationToken ct);
 }

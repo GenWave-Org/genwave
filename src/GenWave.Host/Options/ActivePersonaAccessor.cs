@@ -120,4 +120,22 @@ sealed class ActivePersonaAccessor(
 
         logAction();
     }
+
+    /// <summary>
+    /// SPEC F84.6, STORY-215: a pure <see cref="IOptionsMonitor{StationOptions}.CurrentValue"/> read —
+    /// no persona-store round trip, no WARN, no caching beyond what <see cref="IOptionsMonitor{T}"/>
+    /// already does. <see cref="BoothLogWriter"/> calls this synchronously on its hot path to stamp
+    /// the persona on air AT THE MOMENT a track starts, before the row ever reaches the drain queue.
+    /// Unlike <see cref="ResolveAsync"/> this never validates the id against <c>IPersonaStore</c> — a
+    /// stale/dangling id (the persona deleted moments later) is a booth-log append-time concern
+    /// (<c>BoothLogRepository.AppendAsync</c>'s own FK-violation degrade), not this accessor's.
+    /// </summary>
+    public long? ActivePersonaId
+    {
+        get
+        {
+            var activeId = stationMonitor.CurrentValue.Persona.ActiveId;
+            return activeId <= 0 ? null : activeId;
+        }
+    }
 }

@@ -11,6 +11,15 @@ namespace GenWave.MediaLibrary.Station;
 /// by design — a DB outage or latency spike here never reaches the feeder tick or a TTS render. A
 /// failed append is logged and the entry dropped (never retried, never crashes the loop), per the
 /// sink contract's "must never affect playout" posture.
+///
+/// <see cref="BoothLogEntryRequest.PersonaId"/> (SPEC F84.6, STORY-215) arrives here already resolved
+/// — <see cref="BoothLogWriter.Publish"/> captured it SYNCHRONOUSLY at air time, before the entry ever
+/// reached this queue. This loop persists it verbatim and never calls
+/// <see cref="IActivePersonaAccessor"/> itself: re-resolving here, at drain time, would mis-stamp a
+/// row that backed up behind a bounded-queue backlog with whatever persona is active once the
+/// backlog clears rather than the one that was on air when the row was created — exactly the "never
+/// inferred after the fact" failure F84.6 rules out. A persona deleted between air and this drain is
+/// an append-time (FK) concern, degraded inside <c>BoothLogRepository.AppendAsync</c>, not here.
 /// </summary>
 sealed class BoothLogDrainService(
     ChannelReader<BoothLogEntryRequest> queue,
@@ -32,7 +41,7 @@ sealed class BoothLogDrainService(
     {
         try
         {
-            await store.AppendAsync(request.Kind, request.Summary, ct);
+            await store.AppendAsync(request.Kind, request.Summary, request.PersonaId, ct);
         }
         catch (OperationCanceledException)
         {

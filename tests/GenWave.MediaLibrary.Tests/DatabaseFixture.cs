@@ -74,6 +74,12 @@ public sealed class DatabaseFixture : IAsyncLifetime
     /// once <c>station.persona_memory</c> exists (SPEC F71.1) its FK into <c>station.persona</c> makes
     /// Postgres refuse a plain TRUNCATE regardless of row count — same reason <see cref="ResetAsync"/>
     /// itself needed CASCADE once <c>library.media_rating</c> existed.
+    ///
+    /// STORY-215: also sweeps <c>station.booth_log</c> — TRUNCATE CASCADE follows every FK into the
+    /// truncated table regardless of its <c>ON DELETE</c> action, so <c>booth_log.persona_id</c>'s
+    /// <c>ON DELETE SET NULL</c> (F84.6) does not exempt it here the way it does a real DELETE. No
+    /// existing caller asserts booth-log survival across this reset; <see cref="ResetBoothLogAsync"/>
+    /// is the explicit reset for tests that care about booth-log content.
     /// </summary>
     public async Task ResetStationAsync()
     {
