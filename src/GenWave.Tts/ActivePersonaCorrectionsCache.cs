@@ -40,20 +40,49 @@ public sealed class ActivePersonaCorrectionsCache(IActivePersonaAccessor persona
     /// close to per-render DB traffic.</summary>
     public static readonly TimeSpan StalenessBound = TimeSpan.FromSeconds(30);
 
+    // Sentinel for "no active persona, or an active card with no corrections" — a stable literal
+    // rather than a hash of empty input, distinct from SpeechCorrectionProvider's own
+    // "no-corrections" sentinel (the station side of the F71.7 merge) so the two independent "no
+    // rules" cases can never collide with each other either. A station-only deployment (no active
+    // persona at all) always folds to this one constant, so its TtsSegmentSource cache key never
+    // drifts across renders or restarts.
+    const string EmptyContentHash = "no-card-corrections";
+
     readonly SemaphoreSlim refreshGate = new(1, 1);
 
     DateTimeOffset lastRefreshedAt = DateTimeOffset.MinValue;
-    volatile IReadOnlyList<SpeechCorrection> current = [];
+
+    // Corrections and ContentHash are always derived from the SAME refresh and swapped together via
+    // one reference assignment — never two independent volatile fields (mirrors
+    // SpeechCorrectionProvider's own Snapshot discipline) — so a reader can never observe Current
+    // from one refresh paired with ContentHash from another.
+    volatile Snapshot snapshot = new([], EmptyContentHash);
 
     /// <summary>The most recently cached card corrections — see the class remarks for exactly how stale
     /// this is allowed to be depending on which path is reading it.</summary>
-    public IReadOnlyList<SpeechCorrection> Current => current;
+    public IReadOnlyList<SpeechCorrection> Current => snapshot.Corrections;
+
+    /// <summary>
+    /// Deterministic content fingerprint of the CURRENT card-corrections snapshot (SPEC F71.7), via
+    /// <see cref="CorrectionsFingerprint.Compute"/> over the canonical, ordered (From, To) pairs
+    /// actually compiled from <see cref="Current"/> (after the null/blank-From filtering <see
+    /// cref="SpeechCorrectionSet.Create"/> applies) — the same canonicalization idiom as <see
+    /// cref="SpeechCorrectionProvider.ContentHash"/>, with its own stable empty sentinel (see <see
+    /// cref="EmptyContentHash"/>) rather than the station side's. This is the other of the two terms
+    /// <see cref="TtsSegmentSource"/> folds into its cache key: same card rules → same key, a card
+    /// edit or a persona switch → a new key on the render that next observes it. Inherits <see
+    /// cref="RefreshIfStaleAsync"/>'s own staleness bound — this fingerprint can lag a card
+    /// change/persona switch by up to <see cref="StalenessBound"/>, exactly as long as <see
+    /// cref="Current"/> itself can.
+    /// </summary>
+    public string ContentHash => snapshot.ContentHash;
 
     /// <summary>
     /// Re-reads the active persona's card through <see cref="IActivePersonaAccessor.ResolveCardAsync"/>
-    /// and refreshes <see cref="Current"/> when the cache has aged past <see cref="StalenessBound"/>;
-    /// a no-op otherwise. Never throws (mirrors the accessor's own never-throws contract): a
-    /// no-persona/no-card/store-fault result all resolve to an empty correction list rather than
+    /// and refreshes <see cref="Current"/>/<see cref="ContentHash"/> together when the cache has aged
+    /// past <see cref="StalenessBound"/>; a no-op otherwise. Never throws (mirrors the accessor's own
+    /// never-throws contract): a no-persona/no-card/store-fault result all resolve to an empty
+    /// correction list (and the stable <see cref="EmptyContentHash"/> sentinel) rather than
     /// propagating.
     /// </summary>
     public async Task RefreshIfStaleAsync(CancellationToken ct)
@@ -71,9 +100,10 @@ public sealed class ActivePersonaCorrectionsCache(IActivePersonaAccessor persona
                 return;
 
             var card = await personaAccessor.ResolveCardAsync(ct);
-            current = card is { Corrections.Count: > 0 }
+            IReadOnlyList<SpeechCorrection> corrections = card is { Corrections.Count: > 0 }
                 ? card.Corrections.Select(correction => new SpeechCorrection(correction.From, correction.To)).ToList()
                 : [];
+            snapshot = new Snapshot(corrections, ComputeContentHash(corrections));
             lastRefreshedAt = now;
         }
         finally
@@ -81,4 +111,9 @@ public sealed class ActivePersonaCorrectionsCache(IActivePersonaAccessor persona
             refreshGate.Release();
         }
     }
+
+    static string ComputeContentHash(IReadOnlyList<SpeechCorrection> corrections) =>
+        CorrectionsFingerprint.Compute(SpeechCorrectionSet.Create(corrections).RulePairs, EmptyContentHash);
+
+    sealed record Snapshot(IReadOnlyList<SpeechCorrection> Corrections, string ContentHash);
 }

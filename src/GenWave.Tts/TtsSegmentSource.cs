@@ -15,6 +15,7 @@ public sealed class TtsSegmentSource(
     ILoudnessAnalyzer analyzer,
     ICueAnalyzer cueAnalyzer,
     SpeechCorrectionProvider corrections,
+    ActivePersonaCorrectionsCache personaCorrections,
     IOptionsMonitor<TtsOptions> options,
     ILogger<TtsSegmentSource> logger,
     IStationEventSink? events = null) : ITtsSegmentSource
@@ -37,12 +38,29 @@ public sealed class TtsSegmentSource(
             // instead of a frozen snapshot changes nothing observable for them.
             var cfg = options.CurrentValue;
             var copy = await copyWriter.WriteAsync(request, ct);
-            // corrections.ContentHash folds into the cache key (SPEC F68.5) so a corrections
-            // rebuild — triggered by a PUT /api/settings save — re-keys every subsequent cache
-            // lookup: the very next render of the same (text, voice, station) misses, falls through
-            // to synthesizer.SynthesizeAsync below (NormalizingTtsSynthesizer — the only place
-            // corrections actually apply), and lands under a new hash. This class never reads a
-            // correction rule itself, only the fingerprint saying "these are the rules in effect".
+            // corrections.ContentHash (station rules) AND personaCorrections.ContentHash (the
+            // active persona card's rules, SPEC F71.7) both fold into the cache key (SPEC F68.5) so
+            // EITHER a corrections rebuild (PUT /api/settings), a card edit, or a
+            // Station:Persona:ActiveId switch re-keys every subsequent cache lookup: the very next
+            // render of the same (text, voice, station) misses, falls through to
+            // synthesizer.SynthesizeAsync below (NormalizingTtsSynthesizer — the only place either
+            // set of corrections actually applies, via SpeechCorrectionProvider.BuildMerged's
+            // station-over-card merge), and lands under a new hash. This class never reads a
+            // correction rule itself, only the two fingerprints saying "these are the rules in
+            // effect on each side of the merge".
+            //
+            // Ordering matters: RefreshIfStaleAsync is awaited BEFORE computing the hash below —
+            // NOT left for NormalizingTtsSynthesizer's own call inside SynthesizeAsync to discover
+            // first — so the key and the eventual render read the SAME generation of
+            // personaCorrections in the common case (this cache is a DI singleton; its own refresh
+            // is idempotent and gated, so NormalizingTtsSynthesizer's later call is just a fast
+            // already-fresh no-op). Reversing this order would let the key capture the PRE-refresh
+            // snapshot while the render — on a cache miss — applies the POST-refresh one: a fresh
+            // synthesis would then land under a hash that no longer matches what was actually
+            // spoken, and the file would sit orphaned until the next render recomputes with the new
+            // snapshot and re-hits it (self-healing next render — same accepted mid-render race
+            // TtsSegmentSource already tolerates elsewhere, just moved to a different trigger).
+            //
             // A deterministic content fingerprint — NOT SpeechCorrectionProvider.Version (a
             // process-local counter that resets to 0 at every construction) — is required here: the
             // TTS cache directory is a named Docker volume and its files are never swept on their
@@ -57,7 +75,17 @@ public sealed class TtsSegmentSource(
             // disk cost on the evergreen stationDir cache (a named volume with no retention sweep of
             // its own): correctness on the very next spoken line matters more here than reclaiming a
             // few stale audio files.
-            var hash = ComputeHash(copy.Text, request.Voice, request.StationId, corrections.ContentHash);
+            //
+            // Staleness bound inherited, honestly: personaCorrections.ContentHash can itself lag a
+            // real card edit/persona switch by up to ActivePersonaCorrectionsCache.StalenessBound
+            // (its own refresh is a bounded poll, not an instant subscription — see its class
+            // remarks) — the cache key can never be MORE current than the rules it is keying on. A
+            // station-only deployment (no active persona at all) is unaffected: personaCorrections
+            // always folds to its own stable "no card corrections" sentinel there, so this term
+            // never varies for a station running with no persona feature in play.
+            await personaCorrections.RefreshIfStaleAsync(ct);
+            var hash = ComputeHash(
+                copy.Text, request.Voice, request.StationId, corrections.ContentHash, personaCorrections.ContentHash);
             var stationDir = Path.Combine(cfg.CacheRoot, request.StationId);
             var targetDir = copy.FreshPerAiring ? Path.Combine(stationDir, BlurbsDirName) : stationDir;
             var path = Path.Combine(targetDir, $"{hash}.{cfg.Format}");
@@ -179,7 +207,9 @@ public sealed class TtsSegmentSource(
         }
     }
 
-    static string ComputeHash(string text, string voice, string stationId, string correctionsContentHash) =>
+    static string ComputeHash(
+        string text, string voice, string stationId, string correctionsContentHash, string personaCorrectionsContentHash) =>
         Convert.ToHexString(SHA256.HashData(
-            Encoding.UTF8.GetBytes(text + "|" + voice + "|" + stationId + "|" + correctionsContentHash)));
+            Encoding.UTF8.GetBytes(
+                text + "|" + voice + "|" + stationId + "|" + correctionsContentHash + "|" + personaCorrectionsContentHash)));
 }
