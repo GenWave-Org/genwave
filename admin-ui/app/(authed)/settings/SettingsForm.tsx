@@ -6,6 +6,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import type { LibraryDto } from "@/lib/library";
+import { CorrectionsSettingControl } from "./CorrectionsSettingControl";
 import { PersonaSettingControl } from "./PersonaSettingControl";
 import { SafeScopeAvailabilityBadge } from "./SafeScopeAvailabilityBadge";
 import type { SettingsHelpKey } from "./settings-help-keys";
@@ -138,6 +139,10 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
   "Tts:Endpoint":
     "The Kokoro TTS service base URL used to render all spoken patter — must be a non-empty " +
     "absolute http/https URL; there is no \"disabled TTS\" state.",
+  "Tts:Corrections":
+    "Operator pronunciation corrections applied to every spoken line before it reaches Kokoro " +
+    "(e.g. \"MacLeod\" → \"Muh-cloud\"). A JSON array of {from, to} pairs; empty means no " +
+    "corrections.",
   "Llm:Endpoint":
     "The LLM completion service base URL used to author patter copy — leave empty to disable " +
     "LLM-authored copy and fall back to templated copy.",
@@ -229,6 +234,7 @@ function helpTextFor(key: string): string | undefined {
 const SETTING_CONTROL_REGISTRY: Record<string, ComponentType<SettingControlProps>> = {
   "Station:Voice": VoiceSettingControl,
   "Station:Persona:ActiveId": PersonaSettingControl,
+  "Tts:Corrections": CorrectionsSettingControl,
 };
 
 /** applyMode badge copy (SPEC F28.12 wording verbatim; F44.3 adds the third "enrichment" mode). */

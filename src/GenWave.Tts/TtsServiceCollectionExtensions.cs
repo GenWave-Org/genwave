@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Events;
@@ -38,6 +39,19 @@ public static class TtsServiceCollectionExtensions
             .Bind(configuration.GetSection(LlmOptions.Section))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+
+        // Operator pronunciation corrections (SPEC F68.5, STORY-185) — a raw JSON leaf, not
+        // DataAnnotations-validated: malformed JSON degrades to no corrections with a WARN
+        // (SpeechCorrectionProvider) rather than failing boot, since Tts:Corrections is
+        // operator-authored data, not deployment topology.
+        services
+            .AddOptions<TtsCorrectionsOptions>()
+            .Bind(configuration.GetSection(TtsCorrectionsOptions.Section));
+        services.AddSingleton<SpeechCorrectionProvider>();
+
+        // Fired-rule observability (SPEC F68.7, STORY-186 AC3) — one counter set for the process
+        // lifetime, incremented by NormalizingTtsSynthesizer and read by GET /api/tts/corrections-stats.
+        services.AddSingleton<CorrectionsFiredStats>();
 
         // TTS wiring: ISegmentCopyWriter is the copy-writer seam (SPEC F34.1) TtsSegmentSource
         // consumes. TemplateCopyWriter is registered concretely as the terminal fallback rung;
@@ -94,9 +108,23 @@ public static class TtsServiceCollectionExtensions
                     sp.GetRequiredService<KokoroVoiceLister>(),
                     sp.GetRequiredService<IOptionsMonitor<TtsOptions>>(),
                     TimeSpan.FromMinutes(5)))
-            // The typed HttpClient factory registers KokoroTtsSynthesizer as transient; expose it
-            // via the singleton interface by resolving from the factory on first use.
-            .AddSingleton<ITtsSynthesizer>(sp => sp.GetRequiredService<KokoroTtsSynthesizer>());
+            // The typed HttpClient factory registers KokoroTtsSynthesizer as transient; the
+            // singleton every caller (TtsSegmentSource, SafeSegmentAuthor, TtsPreviewController)
+            // actually resolves is NormalizingTtsSynthesizer (SPEC F68.1, STORY-185) decorating it —
+            // the single Normalize call site sits here, not in any of those callers. Registered
+            // concretely ONCE and exposed under BOTH seams it implements (mirrors LlmCopyWriter's
+            // ISegmentCopyWriter/IPersonaPreviewWriter split) — the on-air ITtsSynthesizer and the
+            // preview-only ISpeechNormalizationPreview (SPEC F68.6, STORY-186 AC2) — so the admin
+            // normalize-preview endpoint reuses the exact same normalization instance the feeder
+            // does, never a second parallel one.
+            .AddSingleton<NormalizingTtsSynthesizer>(sp =>
+                new NormalizingTtsSynthesizer(
+                    sp.GetRequiredService<KokoroTtsSynthesizer>(),
+                    sp.GetRequiredService<SpeechCorrectionProvider>(),
+                    sp.GetRequiredService<CorrectionsFiredStats>(),
+                    sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>()))
+            .AddSingleton<ITtsSynthesizer>(sp => sp.GetRequiredService<NormalizingTtsSynthesizer>())
+            .AddSingleton<ISpeechNormalizationPreview>(sp => sp.GetRequiredService<NormalizingTtsSynthesizer>());
 
         return services;
     }

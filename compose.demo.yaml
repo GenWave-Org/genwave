@@ -126,6 +126,11 @@ services:
       Admin__Enabled: "false"
       Station__SpectatorMode: "true"
       Station__PublicStreamUrl: "/stream"
+      # Demo pronunciation correction (SPEC F68.8, STORY-185) — settings DATA, not a code default:
+      # this station's DJ persona says "MacLeod" a lot, and Kokoro mangles it. Same seeding shape as
+      # the Station__* overrides above (env default, GET /api/settings reports source="default");
+      # an operator can still override it live via PUT /api/settings.
+      Tts__Corrections: '[{"from":"MacLeod","to":"Muh-cloud"}]'
 
 volumes:
   caddy_data: {}
