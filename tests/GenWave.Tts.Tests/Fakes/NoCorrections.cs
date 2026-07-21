@@ -16,4 +16,16 @@ public static class NoCorrections
         new(
             new TestOptionsMonitor<TtsCorrectionsOptions>(new TtsCorrectionsOptions()),
             NullLogger<SpeechCorrectionProvider>.Instance);
+
+    /// <summary>
+    /// Sibling of <see cref="Provider"/> on the card side of the F71.7 merge: a real
+    /// <see cref="ActivePersonaCorrectionsCache"/> over an accessor with no active persona at all —
+    /// what every render/cache spec that isn't itself exercising the persona-card cache needs just
+    /// to satisfy <see cref="TtsSegmentSource"/>'s constructor (its cache key also folds in
+    /// <see cref="ActivePersonaCorrectionsCache.ContentHash"/>). <see cref="TimeProvider.System"/> is
+    /// fine here: with no card ever returned, every refresh folds to the same stable
+    /// "no-card-corrections" sentinel regardless of when it runs.
+    /// </summary>
+    public static ActivePersonaCorrectionsCache PersonaCache() =>
+        new(new FakeActivePersonaAccessor(), TimeProvider.System);
 }
