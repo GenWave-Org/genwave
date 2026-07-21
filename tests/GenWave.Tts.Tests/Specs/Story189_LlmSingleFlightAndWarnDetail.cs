@@ -55,7 +55,9 @@ public static class FeatureLlmSingleFlight
                 new LlmCopyStatusHolder(),
                 new FakeActivePersonaAccessor(),
                 new CapturingLogger<LlmCopyWriter>(),
-                TimeProvider.System);
+                TimeProvider.System,
+                new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                new FakeDegradationModeReader());
 
             // When their backend calls are traced (the handler counts overlapping SendAsync calls
             // — each call holds its slot for a short delay so an un-gated pair would overlap it)
@@ -89,7 +91,9 @@ public static class FeatureLlmSingleFlight
                 new LlmCopyStatusHolder(),
                 new FakeActivePersonaAccessor(),
                 logger,
-                TimeProvider.System);
+                TimeProvider.System,
+                new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                new FakeDegradationModeReader());
             var request = LeadInRequest();
 
             // When the warning is logged

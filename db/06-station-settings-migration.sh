@@ -96,4 +96,20 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 
 	CREATE INDEX IF NOT EXISTS persona_memory_recall
 	  ON station.persona_memory (persona_id, kind, last_aired_at DESC NULLS FIRST);
+
+	-- Booth log (SPEC F72.1-F72.3, STORY-195): the operator-readable "what the DJ did and said"
+	-- narrative feed — track starts, patter airs, degradation mode changes. Retention (default 14
+	-- days, BoothLog:RetentionDays) is enforced at insert time in application code (BoothLogRepository),
+	-- not here — this table has no TTL of its own. Never on any spectator/public surface (F72.4).
+	CREATE TABLE IF NOT EXISTS station.booth_log (
+	  id          bigserial   PRIMARY KEY,
+	  occurred_at timestamptz NOT NULL DEFAULT now(),
+	  kind        text        NOT NULL,
+	  summary     text        NOT NULL
+	);
+
+	-- Keyset paging spine (SPEC F72.2): newest-first (occurred_at DESC, id DESC) with no OFFSET —
+	-- matches BoothLogRepository.ReadAsync's ORDER BY / row-comparison predicate exactly.
+	CREATE INDEX IF NOT EXISTS booth_log_paging
+	  ON station.booth_log (occurred_at DESC, id DESC);
 	SQL

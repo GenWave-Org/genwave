@@ -23,10 +23,20 @@ static class PlayoutServiceCollectionExtensions
             // NowPlayingService itself, so there is no DI cycle.
             .AddSingleton<DurationRehydrator>()
             .AddSingleton<NowPlayingService>()
-            // The host's event-sink binding (gitea-#246): TrackAired → play history; everything else
-            // no-op. Deliberately a plain Add (not TryAdd) so it wins over the no-op defaults the
-            // library extensions register; a module replaces or decorates THIS binding.
-            .AddSingleton<IStationEventSink, PlayHistoryEventSink>()
+            .AddSingleton<PlayHistoryEventSink>()
+            // The host's event-sink binding (gitea-#246): composes PlayHistoryEventSink
+            // (TrackAired -> play history ring) and the booth log's BoothLogWriter
+            // (IBoothLogEventConsumer, SPEC F72.1, STORY-195) into the ONE binding every publisher
+            // resolves — see CompositeStationEventSink's own remarks. Deliberately a plain Add
+            // (not TryAdd) so it wins over the no-op defaults the library extensions register; a
+            // future consumer is added to the list this factory builds, not by re-wiring either
+            // existing sink.
+            .AddSingleton<IStationEventSink>(sp => new CompositeStationEventSink(
+                [
+                    sp.GetRequiredService<PlayHistoryEventSink>(),
+                    sp.GetRequiredService<IBoothLogEventConsumer>(),
+                ],
+                sp.GetRequiredService<ILogger<CompositeStationEventSink>>()))
             // The engine-control seam, bound to the configured Liquidsoap host. Station name on
             // the push path is read live through IStationIdentityProvider (SPEC F44.1).
             .AddSingleton<ILiquidsoapControl>(sp => new LiquidsoapControl(

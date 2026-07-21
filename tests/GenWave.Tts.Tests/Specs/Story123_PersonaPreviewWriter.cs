@@ -41,7 +41,9 @@ public static class FeaturePersonaPreviewWriter
             holder,
             new FakeActivePersonaAccessor(),
             new CapturingLogger<LlmCopyWriter>(),
-            TimeProvider.System);
+            TimeProvider.System,
+            new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+            new FakeDegradationModeReader());
         return (writer, holder);
     }
 

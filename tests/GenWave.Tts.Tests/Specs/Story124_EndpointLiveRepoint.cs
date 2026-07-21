@@ -114,7 +114,9 @@ public static class FeatureEndpointLiveRepoint
                 new LlmCopyStatusHolder(),
                 new FakeActivePersonaAccessor(),
                 new CapturingLogger<LlmCopyWriter>(),
-                TimeProvider.System);
+                TimeProvider.System,
+                new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                new FakeDegradationModeReader());
 
             var before = await writer.WriteAsync(LeadInRequest(), CancellationToken.None);
             Assert.Equal(mockA.ReplyContent, before.Text);

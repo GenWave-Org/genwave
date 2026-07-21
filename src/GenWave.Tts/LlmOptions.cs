@@ -42,4 +42,14 @@ public sealed class LlmOptions
     /// live <c>PUT /api/settings</c> applies with no api restart.
     /// </summary>
     public string DegradationPin { get; set; } = "auto";
+
+    /// <summary>
+    /// Ring size for the LLM call inspector (SPEC F73.1, STORY-196, T41): <see cref="LlmCallRing"/>
+    /// keeps this many of the most recent completed LLM calls in memory, newest first — never
+    /// persisted (F73.3). Read fresh via <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}"/>
+    /// on every <see cref="LlmCallRing.Record"/> call, mirroring every other live-adjustable leaf on
+    /// this options class.
+    /// </summary>
+    [Range(1, int.MaxValue)]
+    public int CallRingCapacity { get; set; } = 50;
 }

@@ -134,6 +134,15 @@ public static class TtsServiceCollectionExtensions
             .AddSingleton<TemplateCopyWriter>()
             .AddSingleton<LlmCopyStatusHolder>()
             .AddSingleton<DegradationController>()
+            // IDegradationModeReader (SPEC F73.1, STORY-196, T41): the same DegradationController
+            // singleton above, exposed under the narrow read-only seam LlmCopyWriter depends on for
+            // its LlmCallRing mode stamp — mirrors the IDependencyHealth/DependencyHealthStore "one
+            // instance, multiple interfaces" shape a few lines below.
+            .AddSingleton<IDegradationModeReader>(sp => sp.GetRequiredService<DegradationController>())
+            // LlmCallRing (SPEC F73.1-F73.4, STORY-196, T41): the admin call inspector's in-memory
+            // ring — GET /api/llm-calls (GenWave.Host) reads the SAME singleton LlmCopyWriter
+            // records into. No persistence dependency of any kind (F73.3) — see its own remarks.
+            .AddSingleton<LlmCallRing>()
             // LlmCopyWriter also consumes IActivePersonaAccessor (a host-registered seam) —
             // resolved per LLM render only, composing the active persona's backstory + style into
             // the prompt (SPEC F35.2/F35.3). Registered concretely ONCE and exposed under BOTH

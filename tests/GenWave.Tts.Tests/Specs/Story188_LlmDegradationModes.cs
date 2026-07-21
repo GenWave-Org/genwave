@@ -93,7 +93,7 @@ public static class FeatureLlmDegradationModes
         var template = new TemplateCopyWriter(new PatterTemplateRenderer());
         var llmWriter = new LlmCopyWriter(
             template, new FakeHttpClientFactory(), llmOptions, holder, new FakeActivePersonaAccessor(),
-            new CapturingLogger<LlmCopyWriter>(), clock);
+            new CapturingLogger<LlmCopyWriter>(), clock, new LlmCallRing(llmOptions), controller);
         var writer = new DegradationGatedCopyWriter(controller, llmWriter, template, degradationOptions, clock);
         return (writer, template, controller, holder, health, clock, llmOptions);
     }
@@ -433,7 +433,8 @@ public static class FeatureLlmDegradationModes
             // in sight, to prove the "never gated" property holds structurally, not by a runtime check.
             IPersonaPreviewWriter previewWriter = new LlmCopyWriter(
                 new TemplateCopyWriter(new PatterTemplateRenderer()), new FakeHttpClientFactory(), llmOptions,
-                holder, new FakeActivePersonaAccessor(), new CapturingLogger<LlmCopyWriter>(), clock);
+                holder, new FakeActivePersonaAccessor(), new CapturingLogger<LlmCopyWriter>(), clock,
+                new LlmCallRing(llmOptions), controller);
 
             // When an operator triggers an explicit preview/test render
             var result = await previewWriter.WritePreviewAsync(LeadInRequest(), personaOverride: null, CancellationToken.None);

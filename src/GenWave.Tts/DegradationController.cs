@@ -2,6 +2,8 @@ namespace GenWave.Tts;
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using GenWave.Core.Abstractions;
+using GenWave.Core.Events;
 
 /// <summary>
 /// The LLM degradation state machine (SPEC F69.1–F69.5, STORY-188): Normal/Soft/Hard, one step at
@@ -70,8 +72,13 @@ public sealed class DegradationController(
     IOptionsMonitor<LlmOptions> llmOptions,
     IOptionsMonitor<DegradationOptions> degradationOptions,
     TimeProvider timeProvider,
-    ILogger<DegradationController> logger)
+    ILogger<DegradationController> logger,
+    IStationEventSink? events = null) : IDegradationModeReader
 {
+    // Mode-change publish seam (SPEC F72.1, STORY-195, T39 — depends on this class's own T32
+    // transitions); no-op unless the host binds a real sink (gitea-#246).
+    readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
+
     /// <summary>Cause shown while <see cref="LlmOptions.Endpoint"/> is empty — see the class remarks.</summary>
     public const string NotConfiguredCause = "LLM not configured (Llm:Endpoint is empty)";
 
@@ -196,9 +203,33 @@ public sealed class DegradationController(
 
         logger.LogInformation(
             "LLM degradation mode {Previous} -> {New} ({Cause})", previous, newMode, cause);
+
+        events.Publish(new DegradationModeChanged(previous.ToString(), newMode.ToString(), cause));
     }
 
     DegradationSnapshot Snapshot() => new(mode, pinned, since, cause);
+
+    /// <summary>
+    /// <see cref="IDegradationModeReader"/> (SPEC F73.1, STORY-196, T41): the LLM call ring's mode
+    /// stamp for a call this controller never itself gates — a persona preview bypasses
+    /// <see cref="DegradationGatedCopyWriter"/> (and its own bracketing <see cref="Evaluate"/>
+    /// calls) entirely (SPEC F69.4), so <see cref="LlmCopyWriter"/> reads the currently-applied mode
+    /// straight off <c>this.mode</c> instead. A plain field read under the same <c>gate</c> lock
+    /// <see cref="Evaluate"/> already uses — the critical section is one field read, so any
+    /// contention with a concurrent <see cref="Evaluate"/> call is momentary, and this getter never
+    /// calls out to anything that could itself wait on another lock (no I/O, no nested acquisition),
+    /// so it can never be the second half of a deadlock.
+    /// </summary>
+    public DegradationMode CurrentMode
+    {
+        get
+        {
+            lock (gate)
+            {
+                return mode;
+            }
+        }
+    }
 
     static DegradationMode? ParsePin(string pin) => pin.Trim().ToLowerInvariant() switch
     {

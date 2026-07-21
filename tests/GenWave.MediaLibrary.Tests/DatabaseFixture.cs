@@ -83,6 +83,18 @@ public sealed class DatabaseFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
+    /// <summary>
+    /// Truncate <c>station.booth_log</c> and reset its identity (STORY-195). No CASCADE needed —
+    /// unlike <see cref="ResetStationAsync"/>'s target, nothing has a FK into this table.
+    /// </summary>
+    public async Task ResetBoothLogAsync()
+    {
+        await using var conn = await StationDataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "truncate table station.booth_log restart identity";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     async Task WaitForSchemaAsync()
     {
         for (var attempt = 0; attempt < 30; attempt++)

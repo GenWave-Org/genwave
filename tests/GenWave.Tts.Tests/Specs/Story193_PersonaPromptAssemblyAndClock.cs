@@ -64,7 +64,9 @@ public static class FeaturePersonaPromptAssemblyAndClock
             new LlmCopyStatusHolder(),
             accessor,
             new CapturingLogger<LlmCopyWriter>(),
-            timeProvider ?? TimeProvider.System);
+            timeProvider ?? TimeProvider.System,
+            new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+            new FakeDegradationModeReader());
 
     static string ExtractMessageContent(string body, string role)
     {
