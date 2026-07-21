@@ -30,7 +30,7 @@ cp .env.example .env
 ./launch.sh
 ```
 
-Seven services start: `db`, `icecast`, `engine`, `api`, `kokoro` (TTS synthesizer), `piper` (CPU-only fallback TTS), and `admin_ui` (operator console). An optional eighth — a Cloudflare tunnel with health/metrics observability — is available behind `COMPOSE_PROFILES=tunnel` (see [DEPLOYMENT.md](DEPLOYMENT.md)).
+Seven services start: `db`, `icecast`, `engine`, `api`, `kokoro` (TTS synthesizer), `piper` (CPU-only fallback TTS), and `admin_ui` (operator console). Two optional services ride compose profiles: a Cloudflare tunnel with health/metrics observability (`tunnel`) and a Grafana Alloy log shipper (`logging`) — `./launch.sh --with logging,tunnel` activates them; see [DEPLOYMENT.md](DEPLOYMENT.md) and [`observability/`](observability/).
 
 - **Stream:** `http://localhost:8000/stream` — open it in any audio player
 - **Admin UI:** `http://localhost:3000` — log in with the password set in `ADMIN_PASSWORD`
@@ -70,11 +70,13 @@ The broadcast never depends on a sick dependency. **LLM failure is a mode, not a
 │  ├─ entrypoint.sh        # renders passwords from env, runs Icecast
 │  └─ icecast.xml.tmpl     # hardened single-mount config
 ├─ admin-ui/               # Next.js (App Router) operator console (`:3000`)
+├─ observability/          # the observability contract: Alloy config, label conventions, Grafana dashboards as code (F78)
 ├─ tools/
 │  ├─ find_smoke_candidates.cs   # picks a divergent-gain track pair for the smoke test
 │  ├─ smoke_test.sh              # manual pre-release regression gate (no human listening required)
 │  ├─ onair_gate.sh              # §0 on-air acceptance gate (live engine)
-│  └─ check-compose-publish.sh   # CI guard: 0.0.0.0 host publishes allowed only for the front proxy (F67.1)
+│  ├─ check-compose-publish.sh   # CI guard: 0.0.0.0 host publishes allowed only for the front proxy (F67.1)
+│  └─ check-compose-socket.sh    # CI guard: docker.sock read-only + alloy-only, every profile combo (F78.2)
 └─ src/                    # C# solution (.NET 10)
    ├─ GenWave.Abstractions/  #   the SDK contract surface: selection, catalog read, events, TTS seams
    ├─ GenWave.Core/          #   domain + engine-facing abstractions; zero I/O
@@ -151,7 +153,6 @@ GenWave's epic-by-epic history — v1 broadcast playout through Ranking & robust
 
 ## Roadmap
 
-- **Observability expansion (designed, unbuilt)** — fleet log shipping (Grafana Alloy → Loki/Grafana) over Cloudflare-Access-gated tunnels, plus `launch.sh` presets (`--pinned`, `--with`). Spec: [`docs/SPEC.md`](docs/SPEC.md) F78.
 - **Deferred** — authored-file GC (gitea-#205), legacy contract cleanup (gitea-#206).
 - **Beat-matching + set-level sequencing** — BPM/beat-aware transitions and energy-curve scheduling beyond per-pair crossfade duration. Deferred as YAGNI.
 
