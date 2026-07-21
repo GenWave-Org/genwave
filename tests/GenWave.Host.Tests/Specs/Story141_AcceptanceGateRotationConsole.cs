@@ -96,8 +96,15 @@ public static class FeatureAcceptanceGateRotationConsole
         // discriminates on the contiguous phrase "is ready", which only the 200 "Alloy is
         // ready." body contains.
         //
+        // ComposeYamlSha256 re-pinned 2026-07-21 (PR #68): kokoro's container healthcheck now
+        // curls kokoro-fastapi's dedicated /health route instead of the TCP-connect idiom,
+        // which wrote a bare newline into uvicorn's socket and logged `Invalid HTTP request
+        // received.` on every 5s interval (~720 lines/h) — same probe-noise class as gh-#64,
+        // just container-side. Intentional ops edit; EngineScriptSha256 unchanged —
+        // engine/genwave.liq untouched.
+        //
         const string EngineScriptSha256 = "a256fd3f2797ed9b52e3f8507e8ca610aa02218e2fedc5c231369f0ccaab9bd6";
-        const string ComposeYamlSha256  = "3c414ed2d8c0e09e2969a5ae5f1f741f431993207fb21738103e0166204c14d5";
+        const string ComposeYamlSha256  = "9ddd169329ef5b092638d1e67279272fc4d7b9f350dcc330cb455d7d92faf981";
 
         [Fact]
         public void EngineScriptByteMatchesMain()
