@@ -3,6 +3,7 @@
 // BDD specification — xUnit (SPEC F68.1–F68.4, F68.6).
 
 using System.Reflection;
+using System.Text.Json;
 using GenWave.Tts;
 using Xunit;
 
@@ -136,6 +137,36 @@ public static class FeatureSpeechTextNormalization
             //       trapped between the inner and outer closing tags (F68.3)
             Assert.Equal("done", result);
         }
+
+        [Fact]
+        public static void Html_encoded_think_block_never_survives_normalization()
+        {
+            // Given a think block that arrives entirely HTML-entity-encoded — no literal "<" or ">"
+            //       anywhere — the shape a producer that HTML-encodes its output would leak (F68.3)
+            const string input = "Coming up next. &lt;think&gt;secret reasoning&lt;/think&gt; More content.";
+
+            // When  it is normalized
+            var result = SpeechText.Normalize(input, SpeechCorrectionSet.Empty);
+
+            // Then  the decoded think block is stripped, not just decoded and shipped to TTS
+            Assert.Equal("Coming up next. More content.", result);
+        }
+
+        [Fact]
+        public static void Nested_mixed_literal_and_encoded_think_blocks_never_survive_normalization()
+        {
+            // Given an HTML-encoded outer think block wrapping a literal inner think block — the
+            //       inner pair is only visible to the FIRST think-strip pass; the outer pair only
+            //       becomes literal after HTML-entity decode runs (F68.3)
+            const string input = "&lt;think&gt;outer <think>inner</think> tail&lt;/think&gt;done";
+
+            // When  it is normalized
+            var result = SpeechText.Normalize(input, SpeechCorrectionSet.Empty);
+
+            // Then  neither the literal inner block nor the encoded-then-decoded outer block
+            //       survives
+            Assert.Equal("done", result);
+        }
     }
 
     public static class SadPathHostileCorrections
@@ -190,6 +221,23 @@ public static class FeatureSpeechTextNormalization
 
             // Then  the input survives byte-identical — a blank rule is a no-op, never a corruptor
             Assert.Equal(input, result);
+        }
+
+        [Fact]
+        public static void Null_entry_in_corrections_list_is_skipped_not_thrown()
+        {
+            // Given a corrections list containing an actual null element — System.Text.Json
+            // deserializes the JSON array "[null]" into exactly that (it does not enforce
+            // SpeechCorrection's non-nullable From/To), even though nothing in this codebase ever
+            // constructs a null SpeechCorrection by hand
+            var rules = JsonSerializer.Deserialize<List<SpeechCorrection>>("[null]");
+            Assert.NotNull(rules);
+
+            // When Create compiles the set
+            var exception = Record.Exception(() => SpeechCorrectionSet.Create(rules!));
+
+            // Then it does not throw — the null entry is skipped exactly like a blank From (F68.5)
+            Assert.Null(exception);
         }
     }
 }

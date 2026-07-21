@@ -27,6 +27,7 @@ public static class FeatureTtsSegmentSourceCueAnalysis
             synth,
             analyzer,
             cueAnalyzer,
+            NoCorrections.Provider(),
             opts,
             NullLogger<TtsSegmentSource>.Instance);
     }

@@ -14,6 +14,7 @@ public sealed class TtsSegmentSource(
     ITtsSynthesizer synthesizer,
     ILoudnessAnalyzer analyzer,
     ICueAnalyzer cueAnalyzer,
+    SpeechCorrectionProvider corrections,
     IOptionsMonitor<TtsOptions> options,
     ILogger<TtsSegmentSource> logger,
     IStationEventSink? events = null) : ITtsSegmentSource
@@ -36,7 +37,27 @@ public sealed class TtsSegmentSource(
             // instead of a frozen snapshot changes nothing observable for them.
             var cfg = options.CurrentValue;
             var copy = await copyWriter.WriteAsync(request, ct);
-            var hash = ComputeHash(copy.Text, request.Voice, request.StationId);
+            // corrections.ContentHash folds into the cache key (SPEC F68.5) so a corrections
+            // rebuild — triggered by a PUT /api/settings save — re-keys every subsequent cache
+            // lookup: the very next render of the same (text, voice, station) misses, falls through
+            // to synthesizer.SynthesizeAsync below (NormalizingTtsSynthesizer — the only place
+            // corrections actually apply), and lands under a new hash. This class never reads a
+            // correction rule itself, only the fingerprint saying "these are the rules in effect".
+            // A deterministic content fingerprint — NOT SpeechCorrectionProvider.Version (a
+            // process-local counter that resets to 0 at every construction) — is required here: the
+            // TTS cache directory is a named Docker volume and its files are never swept on their
+            // own (only blurbsDir entries are, see SweepBlurbs below), so it outlives any container
+            // redeploy. A counter-based key would let a fresh process's version=0 collide with
+            // orphaned pre-redeploy entries and serve stale pronunciation again; the same rules
+            // always fold to the same fingerprint across restarts, and changed rules always fold to
+            // a new one, so a redeploy can never accidentally resurrect a stale cache entry.
+            // Without SOME such term here, an evergreen StationId/LeadIn/BackAnnounce clip
+            // (FreshPerAiring:false, never GC'd) would keep airing the OLD pronunciation forever.
+            // The file at the stale hash is simply orphaned, never rewritten or deleted — accepted
+            // disk cost on the evergreen stationDir cache (a named volume with no retention sweep of
+            // its own): correctness on the very next spoken line matters more here than reclaiming a
+            // few stale audio files.
+            var hash = ComputeHash(copy.Text, request.Voice, request.StationId, corrections.ContentHash);
             var stationDir = Path.Combine(cfg.CacheRoot, request.StationId);
             var targetDir = copy.FreshPerAiring ? Path.Combine(stationDir, BlurbsDirName) : stationDir;
             var path = Path.Combine(targetDir, $"{hash}.{cfg.Format}");
@@ -155,6 +176,7 @@ public sealed class TtsSegmentSource(
         }
     }
 
-    static string ComputeHash(string text, string voice, string stationId) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text + "|" + voice + "|" + stationId)));
+    static string ComputeHash(string text, string voice, string stationId, string correctionsContentHash) =>
+        Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(text + "|" + voice + "|" + stationId + "|" + correctionsContentHash)));
 }
