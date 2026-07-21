@@ -97,6 +97,29 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	CREATE INDEX IF NOT EXISTS persona_memory_recall
 	  ON station.persona_memory (persona_id, kind, last_aired_at DESC NULLS FIRST);
 
+	-- Persona taste (SPEC F82.1, F84.1-F84.3; STORY-213; ARCHITECTURE.md "Personalities on air"): the
+	-- persona's opinions in one shape across all three provenances — hand-authored (imported with the
+	-- card, F79.1), operator-nudged (a direct edit), and accrued (learned from operator thumbs, F84.1,
+	-- once F84's guardrails land). FK CASCADE mirrors persona_memory above: deleting a persona deletes
+	-- its taste with it, never orphaned rows. predicate/context are JSONB documents
+	-- (GenWave.Core.Domain.TastePredicate/TasteContext, T56) rather than relational columns — an
+	-- evolving match/gate shape with no query pattern yet justifying first-class columns. The ranker
+	-- (T63) and the accrual/eviction write path (T70, F84.3's cap-50-weakest-evicted) are later tasks;
+	-- this table has no consumer yet (T59).
+	CREATE TABLE IF NOT EXISTS station.persona_taste (
+	  id         serial      PRIMARY KEY,
+	  persona_id integer     NOT NULL REFERENCES station.persona (id) ON DELETE CASCADE,
+	  predicate  jsonb       NOT NULL,
+	  context    jsonb       NOT NULL,
+	  weight     real        NOT NULL CHECK (weight BETWEEN -1 AND 1),
+	  source     text        NOT NULL CHECK (source IN ('authored', 'operator', 'accrued')),
+	  created_at timestamptz NOT NULL DEFAULT now(),
+	  updated_at timestamptz NOT NULL DEFAULT now()
+	);
+
+	CREATE INDEX IF NOT EXISTS persona_taste_persona_source
+	  ON station.persona_taste (persona_id, source);
+
 	-- Booth log (SPEC F72.1-F72.3, STORY-195): the operator-readable "what the DJ did and said"
 	-- narrative feed — track starts, patter airs, degradation mode changes. Retention (default 14
 	-- days, BoothLog:RetentionDays) is enforced at insert time in application code (BoothLogRepository),

@@ -58,4 +58,18 @@ public static class PersonaServiceCollectionExtensions
                 new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build()),
                 sp.GetRequiredService<IOptions<PersonaMemoryOptions>>()));
     }
+
+    /// <summary>
+    /// Registers <see cref="IPersonaTasteStore"/> (SPEC F82.1, F84.1-F84.3; STORY-213) the same lazy
+    /// way <see cref="AddPersonaStore"/> registers <see cref="IPersonaStore"/>, over the same
+    /// <paramref name="connectionString"/>. No options to bind — F84.3's cap/eviction tunables belong
+    /// to the accrual write path (T70), not this seam.
+    ///
+    /// T59 ships this registration deliberately without a Host call site (mirrors
+    /// <see cref="AddPersonaMemoryStore"/>'s own original shape): the ranker (T63) and card import
+    /// (T66-T69) are the first consumers, landing in later tasks.
+    /// </summary>
+    public static IServiceCollection AddPersonaTasteStore(this IServiceCollection services, string connectionString) =>
+        services.AddSingleton<IPersonaTasteStore>(
+            _ => new PersonaTasteRepository(new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build())));
 }
