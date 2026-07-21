@@ -9,7 +9,8 @@
 // real container, so it is Integration and remains the T49 acceptance to verify
 // empirically before unskipping (F77.3 precedent: never assume image behavior).
 //
-// Pending until T49 (/build-loop unskips).
+// Unskipped by T49 — grafana/alloy:v1.18.0 pinned in compose.yaml, observability/alloy/
+// config.alloy + observability/LABELS.md wired.
 
 using System.Diagnostics;
 using System.Text.Json;
@@ -19,8 +20,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureAlloyLoggingProfile
 {
-    const string Pending = "pending: T49 — alloy logging profile (unskip in /build-loop)";
-
     static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
@@ -79,21 +78,21 @@ public static class FeatureAlloyLoggingProfile
         static readonly Lazy<JsonDocument> WithLogging = new(() => RenderConfig(loggingProfile: true, demoOverlay: false));
         static readonly Lazy<JsonDocument> WithoutLogging = new(() => RenderConfig(loggingProfile: false, demoOverlay: false));
 
-        [Fact(Skip = Pending)]
+        [Fact]
         [Trait("Category", "Integration")]
         public static void Alloy_is_absent_without_the_profile()
         {
             Assert.False(WithoutLogging.Value.RootElement.GetProperty("services").TryGetProperty("alloy", out _));
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         [Trait("Category", "Integration")]
         public static void Alloy_exists_with_the_profile()
         {
             Assert.True(WithLogging.Value.RootElement.GetProperty("services").TryGetProperty("alloy", out _));
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         [Trait("Category", "Integration")]
         public static void Alloy_image_is_pinned_by_tag()
         {
@@ -101,14 +100,14 @@ public static class FeatureAlloyLoggingProfile
             Assert.Matches(new Regex(@"^grafana/alloy:(?!latest$).+"), image);
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         [Trait("Category", "Integration")]
         public static void Alloy_publishes_no_host_port()
         {
             Assert.False(WithLogging.Value.RootElement.GetProperty("services").GetProperty("alloy").TryGetProperty("ports", out _));
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         [Trait("Category", "Integration")]
         public static void No_service_hard_depends_on_alloy()
         {
@@ -126,16 +125,21 @@ public static class FeatureAlloyLoggingProfile
             Assert.Empty(dependents);
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         [Trait("Category", "Integration")]
         public static void Alloy_declares_a_readiness_healthcheck()
         {
+            // Must discriminate on the contiguous phrase "is ready", not just "ready": this
+            // image's not-ready body is "Alloy is not ready." (200 body "Alloy is ready." once
+            // up), which still contains "ready" as a bare substring. A probe that only checks
+            // for "ready" (e.g. a bare `grep -qi ready`) reports healthy for BOTH bodies and
+            // would fail this assertion — it never emits the discriminator phrase "is ready".
             var alloy = WithLogging.Value.RootElement.GetProperty("services").GetProperty("alloy");
             Assert.True(alloy.TryGetProperty("healthcheck", out var healthcheck)
-                && healthcheck.GetProperty("test").ToString().Contains("ready", StringComparison.OrdinalIgnoreCase));
+                && healthcheck.GetProperty("test").ToString().Contains("is ready", StringComparison.OrdinalIgnoreCase));
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         [Trait("Category", "Integration")]
         public static void Push_url_env_is_empty_default_when_unset()
         {
@@ -147,7 +151,7 @@ public static class FeatureAlloyLoggingProfile
 
     public static class ScenarioPublishGuardIndifference
     {
-        [Fact(Skip = Pending)]
+        [Fact]
         [Trait("Category", "Integration")]
         public static void Publish_guard_exits_zero_with_logging_profile_active()
         {
@@ -187,7 +191,7 @@ public static class FeatureAlloyLoggingProfile
     {
         static readonly string[] ContractLabels = ["service", "station", "env"];
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Labels_doc_declares_exactly_the_contract_labels()
         {
             // observability/LABELS.md lists indexed labels as `- \`<name>\`` bullets
@@ -197,7 +201,7 @@ public static class FeatureAlloyLoggingProfile
             Assert.Equal(ContractLabels.Order().ToArray(), declared);
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Alloy_config_indexes_exactly_the_contract_labels()
         {
             // The delivery-side label block in config.alloy is delimited by the markers
@@ -213,7 +217,7 @@ public static class FeatureAlloyLoggingProfile
 
     public static class SadPathFailLoudOnEmptyPushUrl
     {
-        [Fact(Skip = Pending)]
+        [Fact]
         [Trait("Category", "Integration")]
         public static void Container_refuses_to_run_without_a_push_url()
         {

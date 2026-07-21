@@ -77,8 +77,19 @@ public static class FeatureAcceptanceGateEnrichment2
         // LATER epic, not a regression of F46–F51 touching neither file. EngineScriptSha256
         // unchanged — this task does not touch engine/genwave.liq.
         //
+        // ComposeYamlSha256 re-pinned 2026-07-21 (PLAN T49, SPEC F78.1/F78.3/F78.4/F78.5,
+        // STORY-202): a new, optional `alloy` log-shipper service (profiles: ["logging"], off by
+        // default, no host ports) plus a new `alloy_data` named volume — versions the log
+        // shipper for the F78 observability expansion. Another intentional edit from a LATER
+        // epic, not a regression of F46–F51 touching neither file. EngineScriptSha256 unchanged
+        // — this task does not touch engine/genwave.liq. Re-pinned again same day (T49 review
+        // fix, SPEC F78.5): the alloy healthcheck's bare `grep -qi ready` matched Alloy's
+        // not-ready body too ("Alloy is not ready." still contains "ready" as a substring),
+        // reporting healthy for a not-ready Alloy — now discriminates on the contiguous phrase
+        // "is ready", which only the 200 "Alloy is ready." body contains.
+        //
         const string EngineScriptSha256 = "a256fd3f2797ed9b52e3f8507e8ca610aa02218e2fedc5c231369f0ccaab9bd6";
-        const string ComposeYamlSha256  = "5d7b1d8d589e1f3750a90668b439e6e60928a3806c5dd519d66352b067b390dc";
+        const string ComposeYamlSha256  = "3c414ed2d8c0e09e2969a5ae5f1f741f431993207fb21738103e0166204c14d5";
 
         [Fact]
         public void EngineScriptByteMatchesMain()

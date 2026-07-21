@@ -32,6 +32,9 @@ volumes:
   # Downloaded Piper voice model (SPEC F70.1, STORY-190) — persisted so a container restart
   # doesn't re-fetch it from huggingface.
   piper_models: {}
+  # Alloy's WAL + Docker-tailing positions file (SPEC F78.1, STORY-202) — persisted so a
+  # container restart resumes tailing where it left off instead of re-shipping from scratch.
+  alloy_data: {}
 
 services:
   db:
@@ -292,4 +295,81 @@ services:
       retries: 6
       start_period: 20s
     mem_limit: 128m   # real footprint is ~20-30MiB idle; generous headroom, same backstop idiom as above
+    restart: unless-stopped
+
+  alloy:
+    # OPTIONAL log shipper (SPEC F78.1/F78.3/F78.4/F78.5, STORY-202, PLAN T49) — tails every
+    # genwave container's stdout/stderr and pushes to Loki (observability/alloy/config.alloy
+    # owns the pipeline; observability/LABELS.md owns the label contract). Off by default —
+    # profiles: ["logging"] — enable with COMPOSE_PROFILES=admin,logging (or just `logging` on
+    # a headless box) once LOKI_PUSH_URL is set.
+    image: grafana/alloy:v1.18.0   # PIN — `docker manifest inspect` + `docker pull` verified 2026-07-21
+    profiles: ["logging"]
+    networks: [core]
+    # Read-only docker.sock carve-out (SPEC F78.2) — the ONLY service in this file that may
+    # mount it, and only read-only. tools/check-compose-socket.sh pins this shut across every
+    # profile combination this repo renders; see that script's header for the full rationale.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy_data:/var/lib/alloy/data   # WAL + Docker-tailing positions file
+    environment:
+      # Every other secret in this file uses `${VAR:?}` (fail loudly at render time) — that
+      # idiom does NOT work here, same F77.4/cloudflared TUNNEL_TOKEN rationale: compose
+      # interpolates every service's environment unconditionally before filtering by profile,
+      # so a `:?` on any of these would break `docker compose config` even with the "logging"
+      # profile inactive. So these stay `:-` (empty default); the fail-closed guarantee instead
+      # comes from this service's own entrypoint below refusing to start on an empty push URL.
+      LOKI_PUSH_URL: "${LOKI_PUSH_URL:-}"
+      LOKI_ACCESS_CLIENT_ID: "${LOKI_ACCESS_CLIENT_ID:-}"
+      LOKI_ACCESS_CLIENT_SECRET: "${LOKI_ACCESS_CLIENT_SECRET:-}"
+      # Label contract (SPEC F78.3, observability/LABELS.md): this deployment's `station`/`env`
+      # identity. Sensible bare-launch defaults — a from-source `docker compose up` with no .env
+      # entries for these still ships clearly-a-dev-box labels rather than failing to start.
+      ALLOY_STATION_LABEL: "${ALLOY_STATION_LABEL:-genwave}"
+      ALLOY_ENV_LABEL: "${ALLOY_ENV_LABEL:-dev}"
+    # No `ports:` — the debug/readiness HTTP server binds 127.0.0.1 only inside the container
+    # (Alloy's own default), same posture as the engine's control port above.
+    #
+    # Fail-loud on an empty push URL (SPEC F78.4): verified empirically against this pinned
+    # image that Alloy does NOT do this itself — `loki.write`'s `endpoint.url` is validated
+    # lazily (Go's net/url.Parse accepts "" and any scheme-less string without error), so
+    # `alloy run` with LOKI_PUSH_URL="" starts cleanly and just never ships anything, silently.
+    # Only a genuinely MISSING required attribute fails `alloy run` at load — and the Alloy
+    # config language has no ternary/conditional-include to omit `url` only when the env var is
+    # empty (confirmed: `cond ? a : b` is a parse error). So the config can't fail loud on its
+    # own; this entrypoint override is the fail-closed guarantee instead — refuses to exec Alloy
+    # at all when LOKI_PUSH_URL is empty, exiting 1 immediately (verified: `docker compose
+    # --profile logging run --rm --no-deps alloy` with it empty exits 1 in under a second, never
+    # runs silently without shipping).
+    entrypoint:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        if [ -z "$${LOKI_PUSH_URL:-}" ]; then
+          echo "alloy: LOKI_PUSH_URL is empty -- refusing to start without a Loki push target (SPEC F78.4)." >&2
+          exit 1
+        fi
+        exec alloy run /etc/alloy/config.alloy --storage.path=/var/lib/alloy/data
+    healthcheck:
+      # This image ships bash + sh but no curl/wget (`docker run --rm --entrypoint sh
+      # grafana/alloy:v1.18.0 -c 'command -v curl wget'` finds neither, verified against this
+      # pinned tag — F77.3 precedent: never assume a shell has an HTTP client). Alloy's own
+      # readiness endpoint is plain HTTP with no dedicated CLI probe subcommand (unlike
+      # cloudflared's `tunnel ready`), so bash's `/dev/tcp` pseudo-device stands in as the HTTP
+      # client: open the socket, write a raw GET, grep the response body for Alloy's exact ready
+      # phrase. This image's /-/ready DOES have a real not-ready window: 503 "Alloy is not
+      # ready." before the HTTP server's internal readiness flips, then 200 "Alloy is ready."
+      # once it does (verified live against this pinned image). A bare `grep -qi ready` matches
+      # BOTH bodies — "Alloy is not ready." still contains "ready" as a substring — so it would
+      # report healthy while Alloy is still not ready. Discriminating on the contiguous phrase
+      # "is ready" instead rejects "Alloy is not ready." (no "is ready" substring there, only
+      # "is not ready") and matches only "Alloy is ready.".
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/12345; printf \"GET /-/ready HTTP/1.0\\r\\n\\r\\n\" >&3; grep -qi \"is ready\" <&3'"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    mem_limit: 256m   # generous headroom for a single-daemon log-tailing sidecar; same backstop idiom as above
     restart: unless-stopped

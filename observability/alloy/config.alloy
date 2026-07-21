@@ -1,0 +1,90 @@
+// observability/alloy/config.alloy — Grafana Alloy log-shipper pipeline (SPEC F78.1/F78.3/
+// F78.4, STORY-202, PLAN T49). Tails every genwave-stack container's stdout/stderr via the
+// read-only docker.sock carve-out (compose.yaml `alloy` service, profiles: ["logging"], SPEC
+// F78.2 / tools/check-compose-socket.sh) and pushes to Loki at LOKI_PUSH_URL.
+//
+// LAN path: point straight at a home-lab loki:3100, leave LOKI_ACCESS_CLIENT_ID/SECRET unset.
+// Off-LAN path: point at the Access-gated loki.<home-zone> hostname with those two set — F78.7's
+// service-token gate does the actual enforcement at Cloudflare's edge; this pipeline only ever
+// attaches the headers.
+//
+// Contract: observability/LABELS.md — every shipped line carries exactly `service`, `station`,
+// `env` as indexed labels. Everything else is line content.
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+
+  // Scope to this stack only (compose.yaml `name: genwave`) — never tail an unrelated
+  // container sharing the same Docker host. Defense in depth alongside the read-only,
+  // alloy-only socket carve-out (SPEC F78.2 / tools/check-compose-socket.sh).
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=genwave"]
+  }
+}
+
+// Promotes each container's compose service name (e.g. "api", "engine", "icecast") to the
+// `service` label. Verified empirically against the pinned image (T49): loki.source.docker
+// turns every non-`__`-prefixed target label into a real Loki stream label, so this one
+// relabel rule is all the `service` label needs.
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  forward_to = [loki.process.containers.receiver]
+}
+
+// Defense in depth: drop anything besides the three contract labels before delivery, so a
+// future discovery tweak (or an upstream Alloy default) can never silently widen the indexed
+// set. `station`/`env` aren't attached until loki.write below (external_labels), so at this
+// point in the pipeline this only ever actually keeps `service` — harmless no-op for the
+// other two names, and it stays correct the day either one moves earlier in the pipeline.
+loki.process "containers" {
+  forward_to = [loki.write.loki.receiver]
+
+  stage.label_keep {
+    values = ["service", "station", "env"]
+  }
+}
+
+loki.write "loki" {
+  endpoint {
+    url = sys.env("LOKI_PUSH_URL")
+
+    // Cloudflare Access service-token headers (SPEC F78.7). Deviation from a strictly
+    // "conditional" header: Alloy's config language has no ternary/conditional-include (only
+    // typed attributes — verified empirically, T49: `cond ? a : b` is a parse error), so a
+    // `map(string)` attribute can't omit a key based on whether LOKI_ACCESS_CLIENT_ID/SECRET
+    // are set. Cleanest available approach: always attach both headers, empty string when
+    // unset. LAN path (both blank): two harmless empty headers ride along, ignored by a Loki
+    // with no Access gate in front of it. Off-LAN path: the real values fill in and
+    // Cloudflare enforces the gate at the edge.
+    headers = {
+      "CF-Access-Client-Id"     = sys.env("LOKI_ACCESS_CLIENT_ID"),
+      "CF-Access-Client-Secret" = sys.env("LOKI_ACCESS_CLIENT_SECRET"),
+    }
+  }
+
+  // SPEC F78.3 label contract (observability/LABELS.md): exactly these three labels are
+  // indexed on every shipped line. `service` here is a safety-net default only — every real
+  // stream already carries its own per-container `service` value, set above by the
+  // discovery.relabel rule, and external_labels never overrides a label a stream already has
+  // (verified empirically against the pinned image, T49: the per-stream value always wins).
+  // `station`/`env` are this deployment's identity, sourced from ALLOY_STATION_LABEL/
+  // ALLOY_ENV_LABEL (compose.yaml environment, documented in LABELS.md).
+  external_labels = {
+    // labels:begin
+    service = "unknown",
+    station = sys.env("ALLOY_STATION_LABEL"),
+    env     = sys.env("ALLOY_ENV_LABEL"),
+    // labels:end
+  }
+}
