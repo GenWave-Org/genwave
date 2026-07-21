@@ -118,7 +118,8 @@ public static class FeatureLlmDegradationModes
                     var synth = new FakeTtsSynthesizer();
                     var ttsOptions = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
                     var source = new TtsSegmentSource(
-                        gated, synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), ttsOptions,
+                        gated, synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(),
+                        NoCorrections.Provider(), ttsOptions,
                         new CapturingLogger<TtsSegmentSource>());
 
                     try
