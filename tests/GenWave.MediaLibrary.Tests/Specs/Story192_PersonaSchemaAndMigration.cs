@@ -26,7 +26,9 @@ public static class FeaturePersonaSchemaAndMigration
     static PersonaRepository Repo(DatabaseFixture db) => new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
 
     static PersonaCardMigrator Migrator(DatabaseFixture db, Persona? active) =>
-        new(db.StationDataSource, new FakeActivePersonaAccessor(active), NullLogger<PersonaCardMigrator>.Instance);
+        new(
+            new Lazy<NpgsqlDataSource>(() => db.StationDataSource),
+            new FakeActivePersonaAccessor(active), NullLogger<PersonaCardMigrator>.Instance);
 
     /// <summary>A fixed <see cref="IActivePersonaAccessor"/> answer — no live options/store needed.</summary>
     sealed class FakeActivePersonaAccessor(Persona? persona) : IActivePersonaAccessor
