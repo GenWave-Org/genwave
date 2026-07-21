@@ -11,6 +11,13 @@
 //
 // AC3 drives the script's --config-file mode with a hand-built fixture, so it needs no
 // docker CLI at all and runs in the ordinary (non-Integration) suite.
+//
+// ScenarioTunnelProfilePasses (cloudflared observability, Q3 housekeeping) pins that the
+// optional `cloudflared` service (profiles: ["tunnel"], off by default, no `ports:` at all)
+// never regresses the host-publish posture: it renders the real merged config WITH the
+// "tunnel" profile active via `docker compose --profile tunnel config --format json`, then
+// drives the guard's --config-file mode against that render. Needs the docker CLI (to render),
+// so it carries Category=Integration like AC1.
 
 using System.Diagnostics;
 
@@ -66,6 +73,82 @@ public static class FeatureComposeHostPublishGuard
             Assert.True(exitCode == 0, $"expected exit 0, got {exitCode}\nstdout:\n{stdOut}\nstderr:\n{stdErr}");
             Assert.Contains("caddy:80", stdOut, StringComparison.Ordinal);
             Assert.Contains("caddy:443", stdOut, StringComparison.Ordinal);
+        }
+    }
+
+    public static class ScenarioTunnelProfilePasses
+    {
+        [Fact]
+        [Trait("Category", "Integration")]
+        public static void Guard_exits_zero_with_tunnel_profile_rendered_via_config_file()
+        {
+            // Given the merged compose.yaml + compose.demo.yaml config, rendered WITH the
+            // optional "tunnel" profile active (cloudflared observability, Q3 housekeeping)
+            // When  that render is fed to the guard through --config-file mode
+            // Then  it still exits 0 — cloudflared publishes no host ports at all, so activating
+            //       its profile can never regress the caddy-80/443-only invariant (F67.1)
+            var configJson = RenderMergedConfigWithTunnelProfile(RepoRoot());
+
+            var fixturePath = Path.Combine(Path.GetTempPath(), $"check-compose-publish-tunnel-profile-{Guid.NewGuid():N}.json");
+            File.WriteAllText(fixturePath, configJson);
+            try
+            {
+                var (exitCode, stdOut, stdErr) = RunGuardScript("--config-file", fixturePath);
+
+                Assert.True(exitCode == 0, $"expected exit 0, got {exitCode}\nstdout:\n{stdOut}\nstderr:\n{stdErr}");
+                Assert.Contains("caddy:80", stdOut, StringComparison.Ordinal);
+                Assert.Contains("caddy:443", stdOut, StringComparison.Ordinal);
+            }
+            finally
+            {
+                File.Delete(fixturePath);
+            }
+        }
+
+        static string RenderMergedConfigWithTunnelProfile(string repoRoot)
+        {
+            var startInfo = new ProcessStartInfo("docker")
+            {
+                WorkingDirectory = repoRoot,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            foreach (var arg in new[]
+            {
+                "compose", "-f", "compose.yaml", "-f", "compose.demo.yaml",
+                "--profile", "tunnel", "config", "--format", "json",
+            })
+            {
+                startInfo.ArgumentList.Add(arg);
+            }
+
+            // Same dummy-secret idiom as the guard script's own docker-invoking path (see its
+            // header comment): `config` only merges and substitutes text, it never talks to a
+            // daemon or starts a container, so these never reach a running service.
+            startInfo.Environment["POSTGRES_PASSWORD"] = "story181-dummy";
+            startInfo.Environment["LIBRARY_DB_PASSWORD"] = "story181-dummy";
+            startInfo.Environment["STATION_DB_PASSWORD"] = "story181-dummy";
+            startInfo.Environment["ICECAST_SOURCE_PASSWORD"] = "story181-dummy";
+            startInfo.Environment["ICECAST_ADMIN_PASSWORD"] = "story181-dummy";
+            startInfo.Environment["ADMIN_PASSWORD"] = "story181-dummy";
+            startInfo.Environment["MEDIA_DIR"] = Path.GetTempPath();
+            startInfo.Environment["PUBLIC_HOST"] = "story181-tunnel-profile.invalid";
+            // cloudflared's TUNNEL_TOKEN is deliberately `${TUNNEL_TOKEN:-}` (compose.yaml) —
+            // config renders fine whether or not this is set, so it's left to the ambient
+            // environment / unset.
+
+            using var process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("failed to start docker compose config");
+
+            var stdOut = process.StandardOutput.ReadToEnd();
+            var stdErr = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+
+            if (process.ExitCode != 0)
+                throw new InvalidOperationException($"docker compose config (tunnel profile) failed (exit {process.ExitCode}): {stdErr}");
+
+            return stdOut;
         }
     }
 
