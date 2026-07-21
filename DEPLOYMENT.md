@@ -147,6 +147,22 @@ Appliance boot (`compose.demo.yaml` defaults):
   plays at `/stream`, and `/api/status`, `/api/auth/login`, `/internal/engine-config`,
   `/media/random` all return **404**.
 
+**Applying migrations** (upgrading an already-running demo box — new images/compose
+files pulled, schema didn't come along automatically): this topology never runs
+`launch.sh` (that script assumes and launches the source-build dev stack), so
+`./migrate.sh` is the sanctioned way to converge the schema against the *running* `db`
+service, no teardown or relaunch required:
+
+```bash
+docker compose -f compose.yaml -f compose.demo.yaml pull
+./migrate.sh -f compose.yaml -f compose.demo.yaml
+docker compose -f compose.yaml -f compose.demo.yaml up -d
+```
+
+Every `db/*-migration.sh` is an idempotent in-place upgrade (`ADD COLUMN IF NOT EXISTS`
+and the like), so running it with nothing new to apply is a safe no-op. `--dry-run`
+lists what would run without touching anything; see `./migrate.sh --help`.
+
 **Temporary admin access** (settings, personas, catalog curation on the public box):
 
 1. Edit `compose.demo.yaml`'s `api` env: `Admin__Enabled: "true"`.
