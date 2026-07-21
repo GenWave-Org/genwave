@@ -3,7 +3,9 @@
 # elsewhere with its own .env (MEDIA_DIR, STATION_NAME, ports). No proxy, no tenancy.
 #
 # Networks:
-#   core  : api <-> engine <-> icecast <-> kokoro, and admin_ui -> api (app traffic)
+#   core  : api <-> engine <-> icecast <-> kokoro, and admin_ui -> api (app traffic).
+#           cloudflared (profile "tunnel", off by default) also lives here so it can reach
+#           api:8080/api:8081/admin_ui:3000 as tunnel ingress targets.
 #   data  : api <-> db only (Postgres is invisible to engine/icecast/kokoro)
 #
 # Security-critical rule: the engine's Liquidsoap control port (1234) is UNAUTHENTICATED.
@@ -246,4 +248,48 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    restart: unless-stopped
+
+  cloudflared:
+    # OPTIONAL, versioned Cloudflare Tunnel (Q3 housekeeping: this previously ran OUTSIDE the
+    # repo as unmanaged infrastructure with zero observability). Off by default — profiles:
+    # ["tunnel"] — enable with COMPOSE_PROFILES=admin,tunnel (or just `tunnel` on a headless
+    # box) once TUNNEL_TOKEN is set. See DEPLOYMENT.md "Cloudflare tunnel (optional)" for setup
+    # (creating the tunnel/token in the Cloudflare dashboard) and the observability contract
+    # (readiness, metrics, alerting posture).
+    image: cloudflare/cloudflared:2026.7.2   # PIN — `docker manifest inspect` verified 2026-07-20
+    profiles: ["tunnel"]
+    networks: [core]                          # reaches api:8080/api:8081/admin_ui:3000 as ingress targets
+    command: ["tunnel", "--no-autoupdate", "--metrics", "0.0.0.0:2000", "run"]
+    environment:
+      # Every other secret in this file uses `${VAR:?}` (fail loudly at render time) — that idiom
+      # does NOT work here: compose interpolates every service's environment unconditionally
+      # before filtering by profile, so a `:?` on this line breaks `docker compose config`
+      # even with the "tunnel" profile inactive (verified: `error while interpolating
+      # services.cloudflared.environment.TUNNEL_TOKEN: required variable ... is missing a
+      # value`, thrown on the default profile-off render with no --profile flag at all). So this
+      # stays `:-` (empty default), and the fail-closed behaviour instead comes from cloudflared
+      # itself: an empty or invalid TUNNEL_TOKEN makes the container exit immediately with a
+      # clear log line ("cloudflared tunnel run" requires the ID or name of the tunnel... /
+      # "Provided Tunnel token is not valid.") — verified empirically against this pinned image.
+      # `restart: unless-stopped` then crash-loops it visibly in `docker compose ps`/`logs`
+      # rather than silently running without a tunnel.
+      TUNNEL_TOKEN: "${TUNNEL_TOKEN:-}"
+    # No `ports:` — /ready and /metrics stay network-internal, same posture as the engine's
+    # control port above. To probe from the host for ad-hoc debugging, opt in locally (never
+    # commit this): add `ports: ["127.0.0.1:2000:2000"]`.
+    healthcheck:
+      # This image is distroless — no shell, no wget/curl (`docker run --rm --entrypoint sh
+      # cloudflare/cloudflared:2026.7.2` fails with "executable file not found in $PATH",
+      # verified against this pinned tag). cloudflared ships its own readiness probe instead:
+      # `cloudflared tunnel ready` calls the local metrics server's /ready endpoint and returns
+      # the matching exit code, so exec form (CMD, not CMD-SHELL) needs no shell either. Verified
+      # live against this image: exits 1 before the tunnel registers a connection, exits 0 once
+      # /ready reports a connected tunnel (readyConnections >= 1).
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    mem_limit: 128m   # real footprint is ~20-30MiB idle; generous headroom, same backstop idiom as above
     restart: unless-stopped
