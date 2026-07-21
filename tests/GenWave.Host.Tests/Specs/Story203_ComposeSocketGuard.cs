@@ -8,8 +8,6 @@
 // /var/run/docker.sock is bind-mounted read-only into `alloy` and into nothing else.
 // The guard lands (T48) BEFORE the carve-out exists (T49) — it first passes proving the
 // trivial no-socket case.
-//
-// Pending until T48 (/build-loop unskips).
 
 using System.Diagnostics;
 
@@ -17,8 +15,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureComposeSocketGuard
 {
-    const string Pending = "pending: T48 — socket guard (unskip in /build-loop)";
-
     static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
@@ -51,7 +47,7 @@ public static class FeatureComposeSocketGuard
 
     public static class ScenarioCurrentConfigPasses
     {
-        [Fact(Skip = Pending)]
+        [Fact]
         [Trait("Category", "Integration")]
         public static void Guard_exits_zero_across_all_profile_combinations()
         {
@@ -102,7 +98,7 @@ public static class FeatureComposeSocketGuard
             }
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Another_service_mounting_the_socket_fails_naming_it()
         {
             // Given a render where `api` also mounts docker.sock (even read-only)
@@ -114,7 +110,32 @@ public static class FeatureComposeSocketGuard
                 $"expected failure naming 'api' (exit {exitCode}):\n{output}");
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
+        public static void A_service_mounting_run_docker_sock_fails_naming_it()
+        {
+            // Given a render where a non-alloy service mounts /run/docker.sock (long syntax) —
+            //       the /var/run -> /run symlink target, not the literal /var/run/... string
+            // When  the guard runs in --config-file mode
+            // Then  it exits non-zero naming the offender — basename matching catches it even
+            //       though it never matches "/var/run/docker.sock" verbatim
+            const string fixtureJson = """
+                {
+                  "services": {
+                    "api": {
+                      "volumes": [
+                        {"type": "bind", "source": "/run/docker.sock", "target": "/run/docker.sock"}
+                      ]
+                    }
+                  }
+                }
+                """;
+            var (exitCode, output) = RunAgainstFixture(fixtureJson);
+
+            Assert.True(exitCode != 0 && output.Contains("api", StringComparison.Ordinal),
+                $"expected failure naming 'api' (exit {exitCode}):\n{output}");
+        }
+
+        [Fact]
         public static void A_writable_alloy_socket_mount_fails()
         {
             // Given a render where alloy's own socket mount lost read_only

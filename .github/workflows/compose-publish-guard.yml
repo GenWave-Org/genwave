@@ -1,10 +1,13 @@
-# Compose host-publish guard (SPEC F67.1, STORY-181). Runs tools/check-compose-publish.sh
-# against the real merged public-overlay config (docker compose -f compose.yaml
-# -f compose.demo.yaml config) and fails the build if anything other than caddy 80/443
-# publishes a 0.0.0.0 host port — the Icecast :8000 gotcha fixed in 05303ce, pinned shut.
-# Scoped to the files that can cause it: the compose files, the Caddyfile, and the guard
-# itself. ubuntu-latest ships both docker and jq, so no extra tooling install is needed.
-name: compose publish guard
+# Compose config guards. Each renders the merged compose config (docker compose -f compose.yaml
+# [-f compose.demo.yaml] config) and pins a security invariant shut so it can never silently
+# regress. Scoped to the files that can cause either guard to fail. ubuntu-latest ships both
+# docker and jq, so no extra tooling install is needed.
+#
+#   publish guard (SPEC F67.1, STORY-181): fails the build if anything other than caddy 80/443
+#     publishes a 0.0.0.0 host port — the Icecast :8000 gotcha fixed in 05303ce, pinned shut.
+#   socket guard (SPEC F78.2, STORY-203): fails the build if /var/run/docker.sock is bind-mounted
+#     anywhere but `alloy`, or into `alloy` without read_only — the docker-socket carve-out.
+name: compose config guards
 
 on:
   push:
@@ -14,6 +17,7 @@ on:
       - 'compose.demo.yaml'
       - 'Caddyfile'
       - 'tools/check-compose-publish.sh'
+      - 'tools/check-compose-socket.sh'
       - '.github/workflows/compose-publish-guard.yml'
   pull_request:
     paths:
@@ -21,6 +25,7 @@ on:
       - 'compose.demo.yaml'
       - 'Caddyfile'
       - 'tools/check-compose-publish.sh'
+      - 'tools/check-compose-socket.sh'
       - '.github/workflows/compose-publish-guard.yml'
 
 permissions:
@@ -33,3 +38,5 @@ jobs:
       - uses: actions/checkout@v7
       - name: Guard public-overlay host publishes
         run: bash tools/check-compose-publish.sh
+      - name: Guard docker-socket carve-out
+        run: bash tools/check-compose-socket.sh
