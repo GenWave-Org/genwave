@@ -47,6 +47,7 @@ The broadcast never depends on a sick dependency. **LLM failure is a mode, not a
 ```
 .
 ├─ compose.yaml            # 7-service topology: db, icecast, engine, api, kokoro, piper, admin_ui
+│                          #   (+ optional cloudflared behind COMPOSE_PROFILES=tunnel)
 ├─ .env.example            # secrets template → copy to .env
 ├─ engine/
 │  └─ genwave.liq          # Liquidsoap playout script
@@ -150,6 +151,7 @@ GenWave's epic-by-epic history — v1 broadcast playout through Ranking & robust
 
 ## Roadmap
 
+- **Observability expansion (designed, unbuilt)** — fleet log shipping (Grafana Alloy → Loki/Grafana) over Cloudflare-Access-gated tunnels, plus `launch.sh` presets (`--pinned`, `--with`). Spec: [`docs/SPEC.md`](docs/SPEC.md) F78.
 - **Deferred** — authored-file GC (gitea-#205), legacy contract cleanup (gitea-#206).
 - **Beat-matching + set-level sequencing** — BPM/beat-aware transitions and energy-curve scheduling beyond per-pair crossfade duration. Deferred as YAGNI.
 
