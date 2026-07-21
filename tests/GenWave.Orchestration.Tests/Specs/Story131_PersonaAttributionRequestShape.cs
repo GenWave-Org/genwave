@@ -48,7 +48,9 @@ public static class FeaturePersonaAttributionRequestShape
         var tts = new FakeTtsSegmentSource();
         var orchestrator = new Orchestrator(
             identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, tts, accessor,
-            NullLogger<Orchestrator>.Instance, new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)));
+            NullLogger<Orchestrator>.Instance, new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
+            new SpeechDeferralQueue(TimeProvider.System),
+            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
         return (orchestrator, tts);
     }
 

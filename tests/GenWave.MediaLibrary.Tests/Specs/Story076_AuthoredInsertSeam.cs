@@ -87,21 +87,24 @@ public static class FeatureAuthoredInsertSeam
         public async Task CueAndEnergyAnalyzedAtAreSetSoBackfillNeverClaimsTheRow()
         {
             // F27.1 note in PLAN.md: cue_analyzed_at / energy_analyzed_at / bpm_analyzed_at /
-            // year_lookup_at MUST be set unconditionally (even when Cue/Energy are null) so the
-            // F13/F17/STORY-142/F48.3 backfill predicates never re-claim this row. year_lookup_at
-            // in particular (X5 review finding) stops the year-lookup backfill from ever sending an
-            // authored row's station-authored artist/title to MusicBrainz.
+            // year_lookup_at / year_lookup_missed_at MUST be set unconditionally (even when
+            // Cue/Energy are null) so the F13/F17/STORY-142/F48.3/F76.2 backfill predicates never
+            // re-claim this row. year_lookup_missed_at in particular (X5 review finding, extended
+            // STORY-200) is the ACTUAL re-claim gate now — stamping only year_lookup_at would no
+            // longer be enough to stop the year-lookup backfill from sending an authored row's
+            // station-authored artist/title to MusicBrainz.
             await db.ResetAsync();
             IAuthoredCatalogWriter writer = Harness.Repo(db);
 
             var insert = Harness.AuthoredInsert(cue: null, energy: null);
             var id = await writer.InsertAuthoredAsync(insert, CancellationToken.None);
 
-            var (cueAnalyzedAt, energyAnalyzedAt, bpmAnalyzedAt, yearLookupAt) = await Harness.AnalyzedAtOfAsync(db, id);
+            var (cueAnalyzedAt, energyAnalyzedAt, bpmAnalyzedAt, yearLookupAt, yearLookupMissedAt) = await Harness.AnalyzedAtOfAsync(db, id);
             Assert.NotNull(cueAnalyzedAt);
             Assert.NotNull(energyAnalyzedAt);
             Assert.NotNull(bpmAnalyzedAt);
             Assert.NotNull(yearLookupAt);
+            Assert.NotNull(yearLookupMissedAt);
         }
 
         [Fact]

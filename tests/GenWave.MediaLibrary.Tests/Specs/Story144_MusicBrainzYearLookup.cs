@@ -8,6 +8,7 @@
 // test reaches the network; the ONE real MusicBrainz request is X10(c)'s sanctioned gate exception.
 
 using System.Net;
+using System.Reflection;
 using System.Text;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
@@ -98,14 +99,21 @@ public static class FeatureMusicBrainzYearLookup
         [Fact]
         public async Task RequestsCarryTheDescriptiveUserAgent()
         {
+            // The exact User-Agent format/version derivation is STORY-200's own concern
+            // (Specs/Story200_MusicBrainzEtiquette.cs, SPEC F76.1); this fact only pins that SOME
+            // descriptive, GenWave-identifying header rides along, matching the STORY-144 contract.
             const string fixture = """{ "recordings": [] }""";
 
             var lookup = BuildLookup(fixture, out var requests);
             await lookup.TryLookupAsync("The Testers", "Testing Waters", null, CancellationToken.None);
 
+            var expectedVersion =
+                typeof(MusicBrainzYearLookup).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                    ?.InformationalVersion
+                ?? "unknown";
             var request = Assert.Single(requests);
             Assert.Equal(
-                "GenWave/1.0 (+https://github.com/GenWave-Org/genwave)",
+                $"GenWave/{expectedVersion} (+https://github.com/GenWave-Org/genwave)",
                 request.Headers.UserAgent.ToString());
         }
 
@@ -207,7 +215,7 @@ public static class FeatureMusicBrainzYearLookup
             });
             var http = new HttpClient(handler);
             var options = new FakeOptionsMonitor<YearLookupOptions>(new YearLookupOptions { TimeoutSeconds = 1 });
-            var lookup = new MusicBrainzYearLookup(http, options);
+            var lookup = new MusicBrainzYearLookup(http, options, new MusicBrainzRateLimiter(TimeProvider.System));
 
             var year = await lookup.TryLookupAsync("The Testers", "Testing Waters", null, CancellationToken.None);
 
@@ -258,7 +266,7 @@ public static class FeatureMusicBrainzYearLookup
             });
             var http = new HttpClient(handler);
             var options = new FakeOptionsMonitor<YearLookupOptions>(new YearLookupOptions { TimeoutSeconds = 1 });
-            var lookup = new MusicBrainzYearLookup(http, options);
+            var lookup = new MusicBrainzYearLookup(http, options, new MusicBrainzRateLimiter(TimeProvider.System));
 
             await lookup.TryLookupAsync("The Testers", "Testing Waters", null, CancellationToken.None);
 
@@ -282,6 +290,6 @@ public static class FeatureMusicBrainzYearLookup
 
         var http = new HttpClient(handler);
         IOptionsMonitor<YearLookupOptions> options = new FakeOptionsMonitor<YearLookupOptions>(new YearLookupOptions());
-        return new MusicBrainzYearLookup(http, options);
+        return new MusicBrainzYearLookup(http, options, new MusicBrainzRateLimiter(TimeProvider.System));
     }
 }

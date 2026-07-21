@@ -54,13 +54,14 @@ public enum ReenrichFields
     Bpm = 16,
 
     /// <summary>
-    /// Reset the <c>year_lookup_at</c> sentinel ONLY — unlike every sibling flag, the underlying
-    /// value (<c>year</c>) is left untouched. Retrying the MusicBrainz lookup (e.g. after a since-
-    /// fixed endpoint outage) must never clobber a year that was already written; a *wrong* year's
-    /// correction surface is the F18 PATCH, not this reset. The row stays <c>ready</c> and selectable;
-    /// the F48.3 backfill predicate (<c>state='ready' AND year IS NULL AND year_lookup_at IS NULL</c>)
-    /// reclaims it — but only fires a fresh lookup when <c>year</c> is ALSO still null, so this reset
-    /// is a no-op for a row that already has a year (SPEC F48.6).
+    /// Reset the <c>year_lookup_at</c> AND <c>year_lookup_missed_at</c> sentinels ONLY — unlike every
+    /// sibling flag, the underlying value (<c>year</c>) is left untouched. Retrying the MusicBrainz
+    /// lookup (e.g. after a since-fixed endpoint outage, or to re-roll a stamped miss) must never
+    /// clobber a year that was already written; a *wrong* year's correction surface is the F18
+    /// PATCH, not this reset. The row stays <c>ready</c> and selectable; the F76.2 backfill predicate
+    /// (<c>state='ready' AND year IS NULL AND year_lookup_missed_at IS NULL</c>) reclaims it — but
+    /// only fires a fresh lookup when <c>year</c> is ALSO still null, so this reset is a no-op for a
+    /// row that already has a year (SPEC F48.6).
     /// </summary>
     Year = 32,
 
