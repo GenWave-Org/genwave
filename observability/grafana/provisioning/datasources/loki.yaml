@@ -1,0 +1,19 @@
+# Grafana file-provisioned Loki datasource (SPEC F78.9, STORY-204).
+#
+# uid "loki" is the stable reference every dashboard JSON under
+# observability/grafana/dashboards/ targets — keep it in sync if you rename it.
+#
+# url below is the in-stack address for this repo's own compose.yaml (the "logging"
+# profile's alloy -> a scratch/local Loki on the compose network). genwave-infra copies
+# this file when file-provisioning its own Grafana and overrides `url` to point at its
+# real Loki instance — do not hardcode a home-lab hostname here (SPEC F78.11).
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    isDefault: true
+    editable: false

@@ -4,8 +4,6 @@
 // observability/grafana/ — no docker, no Grafana: dashboard JSON parses, the Ops board
 // declares the station/env template variables, a file-provisioning skeleton accompanies
 // it, and every committed query selects on contract labels only.
-//
-// Pending until T50 (/build-loop unskips).
 
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -14,8 +12,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureDashboardsAreCode
 {
-    const string Pending = "pending: T50 — Ops dashboard + provisioning (unskip in /build-loop)";
-
     static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
@@ -33,30 +29,34 @@ public static class FeatureDashboardsAreCode
 
     public static class ScenarioDashboardAndProvisioningShape
     {
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void At_least_the_ops_dashboard_exists()
         {
             Assert.Contains(DashboardFiles(), f => Path.GetFileName(f).Contains("ops", StringComparison.OrdinalIgnoreCase));
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Every_committed_dashboard_parses_as_json()
         {
             Assert.All(DashboardFiles(), f => JsonDocument.Parse(File.ReadAllText(f)).Dispose());
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Ops_dashboard_declares_station_and_env_template_variables()
         {
             var opsPath = DashboardFiles().Single(f => Path.GetFileName(f).Contains("ops", StringComparison.OrdinalIgnoreCase));
             using var dashboard = JsonDocument.Parse(File.ReadAllText(opsPath));
             var variables = dashboard.RootElement.GetProperty("templating").GetProperty("list")
-                .EnumerateArray().Select(v => v.GetProperty("name").GetString()).ToArray();
+                .EnumerateArray().Select(v => v.GetProperty("name").GetString()).ToHashSet();
 
-            Assert.Superset(new HashSet<string?> { "station", "env" }, variables.ToHashSet());
+            // Exactly {station, env}: both must be present (per SPEC F78.9, the Ops board's
+            // slicing dimensions), and no undeclared extra template variables either —
+            // Assert.Equal on two HashSet<T> is a set comparison (order-independent), so this
+            // single assertion catches both a missing variable and a stray one.
+            Assert.Equal(new HashSet<string?> { "station", "env" }, variables);
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void A_file_provisioning_skeleton_accompanies_the_dashboards()
         {
             // Grafana file provisioning: a datasource yaml and a dashboard-provider yaml
@@ -71,7 +71,7 @@ public static class FeatureDashboardsAreCode
     {
         static readonly HashSet<string> ContractLabels = ["service", "station", "env"];
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Every_query_selects_on_contract_labels_only()
         {
             // Extract every LogQL stream selector `{k="v", k2=~"v2"}` from every "expr"
