@@ -230,6 +230,27 @@ public static class FeatureCachedDependencyHealthProbes
         }
 
         [Fact]
+        public static async Task Piper_probe_uses_OPTIONS_so_a_healthy_server_logs_nothing()
+        {
+            // Given a configured Piper endpoint (gh-#64: GET/HEAD on piper.http_server's route
+            // execute the handler and log a ValueError traceback per probe — 360 error lines/hour
+            // of telemetry noise from a healthy server; Flask answers OPTIONS without invoking the
+            // handler at all, verified against the pinned artibex/piper-http digest 2026-07-21)
+            var handler = new FakeHttpMessageHandler((_, _) =>
+                Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)));
+            using var http = new HttpClient(handler);
+            var optionsMonitor = new TestOptionsMonitor<TtsFallbackOptions>(new TtsFallbackOptions { Endpoint = "http://piper:5000" });
+            var probe = new PiperHealthProbe(http, optionsMonitor);
+
+            // When it is probed
+            await probe.ProbeAsync(CancellationToken.None);
+
+            // Then the request method is OPTIONS — the one verb that keeps piper's error log quiet
+            var request = Assert.Single(handler.Requests);
+            Assert.Equal(HttpMethod.Options, request.Method);
+        }
+
+        [Fact]
         public static async Task Piper_probe_throws_when_the_endpoint_is_unreachable_so_the_prober_can_record_a_reason()
         {
             // Given Piper is unreachable (connection refused, DNS failure, ...)
