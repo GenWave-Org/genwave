@@ -1,0 +1,20 @@
+# Grafana file-provisioning dashboard provider (SPEC F78.9, STORY-204).
+#
+# Dashboards-as-code: `allowUiUpdates: false` means changes only ever land by editing
+# the JSON under observability/grafana/dashboards/ and shipping a PR — never by
+# clicking "Save" in a running Grafana. `path` is where the dashboards/ directory is
+# mounted into the Grafana container; genwave-infra bind-mounts (or copies) this
+# repo's observability/grafana/dashboards/ there.
+apiVersion: 1
+
+providers:
+  - name: GenWave
+    orgId: 1
+    folder: GenWave
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/genwave-dashboards
+      foldersFromFilesStructure: false

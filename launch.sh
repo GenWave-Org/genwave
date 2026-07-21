@@ -6,26 +6,168 @@
 #
 # Single-station stack. Everything is published on localhost — no proxy, no FQDNs.
 #
+# Presets (STORY-201 / SPEC F78.10):
+#   ./launch.sh              dev flow (default, unchanged): teardown, db-first up, wait for
+#                             db healthy, ./migrate.sh --keep-going, full up, status.
+#   ./launch.sh --pinned     demo/appliance flow: pull -> migrate.sh -> up -d against
+#                             compose.yaml + compose.demo.yaml. NEVER builds — it's meant
+#                             for a box that only ever runs published GHCR images. See
+#                             DEPLOYMENT.md's "Applying migrations".
+#   ./launch.sh --with a,b   merge a,b into COMPOSE_PROFILES (env var, else .env's value)
+#                             for this launch's compose invocations.
+#   ./launch.sh --dry-run    print the exact command plan (one per line, "plan> "-prefixed)
+#                             plus the effective profile set ("plan-profiles> "), then exit
+#                             0. Touches nothing — no docker/compose call is made at all.
+#
+# Presets compose, e.g. the sanctioned demo-box launch:
+#   ./launch.sh --pinned --with logging,tunnel
+#
 # Env overrides:
-#   BUILD=1 ./launch.sh     # force a rebuild on the way up
+#   BUILD=1 ./launch.sh      force a rebuild on the way up — dev flow only. BUILD=1 with
+#                             --pinned is a hard error (--pinned never builds).
 set -euo pipefail
 cd "$(dirname "$0")"
+
+usage() {
+  awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"
+}
+
+PINNED=0
+DRY_RUN=0
+WITH=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --pinned)
+      PINNED=1
+      shift
+      ;;
+    --with)
+      [ $# -ge 2 ] || { echo "launch.sh: --with needs a value" >&2; usage >&2; exit 2; }
+      WITH="$2"
+      shift 2
+      ;;
+    --with=*)
+      WITH="${1#*=}"
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "launch.sh: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+# --build never applies to --pinned (it only ever runs pulled images) — reject the
+# combination up front, before any docker/compose call is made.
+if [ "$PINNED" = "1" ] && [ "${BUILD:-0}" = "1" ]; then
+  echo "launch.sh: BUILD=1 is incompatible with --pinned (--pinned never builds)." >&2
+  exit 2
+fi
+
+# --- compose file selection: plain dev stack, or +compose.demo.yaml under --pinned -----
+COMPOSE_ARGS=()
+MIGRATE_ARGS=()
+if [ "$PINNED" = "1" ]; then
+  COMPOSE_ARGS=(-f compose.yaml -f compose.demo.yaml)
+  MIGRATE_ARGS=(-f compose.yaml -f compose.demo.yaml)
+fi
+
+compose() {
+  docker compose "${COMPOSE_ARGS[@]}" "$@"
+}
+
+# Human-readable rendering of the compose invocation, for both the dry-run plan and error
+# messages — avoids a dangling double space when COMPOSE_ARGS is empty (dev flow).
+compose_display() {
+  if [ "${#COMPOSE_ARGS[@]}" -eq 0 ]; then
+    echo "docker compose"
+  else
+    echo "docker compose ${COMPOSE_ARGS[*]}"
+  fi
+}
+
+# --- profile merge (--with): existing COMPOSE_PROFILES (env, else .env) + the given list -
+base_profiles="${COMPOSE_PROFILES:-}"
+if [ -z "$base_profiles" ] && [ -f .env ]; then
+  base_profiles="$(grep -E '^COMPOSE_PROFILES=' .env | tail -n1 | cut -d= -f2-)"
+fi
+
+EFFECTIVE_PROFILES="$base_profiles"
+if [ -n "$WITH" ]; then
+  if [ -n "$EFFECTIVE_PROFILES" ]; then
+    EFFECTIVE_PROFILES="$EFFECTIVE_PROFILES,$WITH"
+  else
+    EFFECTIVE_PROFILES="$WITH"
+  fi
+fi
+[ -n "$EFFECTIVE_PROFILES" ] && export COMPOSE_PROFILES="$EFFECTIVE_PROFILES"
 
 UP_ARGS=(-d)
 [ "${BUILD:-0}" = "1" ] && UP_ARGS+=(--build)
 
+plan_line() { printf 'plan> %s\n' "$*"; }
+plan_profiles() { printf 'plan-profiles> %s\n' "$EFFECTIVE_PROFILES"; }
+
+if [ "$PINNED" = "1" ]; then
+  # --- pinned/demo flow: pull -> migrate.sh -> up -d, never builds -----------------------
+  if [ "$DRY_RUN" = "1" ]; then
+    plan_line "$(compose_display) pull"
+    plan_line "./migrate.sh ${MIGRATE_ARGS[*]}"
+    plan_line "$(compose_display) up -d"
+    plan_line "$(compose_display) ps"
+    plan_profiles
+    exit 0
+  fi
+
+  echo "==> pulling published images"
+  compose pull
+
+  echo "==> applying schema migrations against the running db"
+  ./migrate.sh "${MIGRATE_ARGS[@]}"
+
+  echo "==> bringing the stack up"
+  compose up -d
+
+  echo "==> stack status"
+  compose ps
+  exit 0
+fi
+
+# --- dev flow (default): teardown, db-first up, health wait, migrate, full up ------------
+if [ "$DRY_RUN" = "1" ]; then
+  plan_line "$(compose_display) down --remove-orphans"
+  plan_line "$(compose_display) up ${UP_ARGS[*]} db"
+  plan_line "$(compose_display) ps -q db"
+  plan_line "docker inspect <db container> --format {{.State.Health.Status}} (poll until healthy, up to 30x2s)"
+  plan_line "./migrate.sh --keep-going"
+  plan_line "$(compose_display) up ${UP_ARGS[*]}"
+  plan_line "$(compose_display) ps"
+  plan_profiles
+  exit 0
+fi
+
 echo "==> tearing down stack"
-docker compose down --remove-orphans
+compose down --remove-orphans
 
 echo "==> bringing the database up first"
-docker compose up "${UP_ARGS[@]}" db
+compose up "${UP_ARGS[@]}" db
 
 # The persistent pgdata volume only runs db/01-library.sh on a FRESH volume; an existing
 # volume never picks up schema added since. The db/*-migration.sh scripts are idempotent
 # in-place upgrades (ADD COLUMN IF NOT EXISTS), so applying them on every launch is safe and
 # keeps the schema converged BEFORE the api (which queries the new columns) starts — otherwise
 # the api crash-loops on a missing column and the stream falls back to the safe loop.
-db_cid="$(docker compose ps -q db)"
+db_cid="$(compose ps -q db)"
 for _ in $(seq 1 30); do
   if [ "$(docker inspect "$db_cid" --format '{{.State.Health.Status}}' 2>/dev/null)" = "healthy" ]; then break; fi
   sleep 2
@@ -37,10 +179,10 @@ done
 ./migrate.sh --keep-going || true
 
 echo "==> bringing the rest of the stack up"
-docker compose up "${UP_ARGS[@]}"
+compose up "${UP_ARGS[@]}"
 
 echo "==> stack status"
-docker compose ps
+compose ps
 
 echo
 echo "==> access points (all on localhost — no proxy)"

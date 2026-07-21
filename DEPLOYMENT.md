@@ -148,10 +148,16 @@ Appliance boot (`compose.demo.yaml` defaults):
   `/media/random` all return **404**.
 
 **Applying migrations** (upgrading an already-running demo box — new images/compose
-files pulled, schema didn't come along automatically): this topology never runs
-`launch.sh` (that script assumes and launches the source-build dev stack), so
-`./migrate.sh` is the sanctioned way to converge the schema against the *running* `db`
-service, no teardown or relaunch required:
+files pulled, schema didn't come along automatically): use `launch.sh`'s `--pinned`
+preset (STORY-201), which is exactly this topology's sanctioned launch/upgrade path —
+`launch.sh` bare assumes the source-build dev stack, `--pinned` doesn't:
+
+```bash
+./launch.sh --pinned
+```
+
+Under the hood `--pinned` runs, against `compose.yaml` + `compose.demo.yaml`, and never
+builds:
 
 ```bash
 docker compose -f compose.yaml -f compose.demo.yaml pull
@@ -161,14 +167,21 @@ docker compose -f compose.yaml -f compose.demo.yaml up -d
 
 Every `db/*-migration.sh` is an idempotent in-place upgrade (`ADD COLUMN IF NOT EXISTS`
 and the like), so running it with nothing new to apply is a safe no-op. `--dry-run`
-lists what would run without touching anything; see `./migrate.sh --help`.
+prints the exact command plan without touching anything — `./launch.sh --pinned --dry-run`
+or, for just the migration step, `./migrate.sh --help`.
+
+Combine with `--with` to also activate compose profiles (e.g. `logging`, `tunnel`) on the
+same launch: `./launch.sh --pinned --with logging,tunnel` merges them into whatever
+`COMPOSE_PROFILES` is already set (env or `.env`).
 
 **Temporary admin access** (settings, personas, catalog curation on the public box):
 
 1. Edit `compose.demo.yaml`'s `api` env: `Admin__Enabled: "true"`.
 2. `COMPOSE_PROFILES=admin docker compose -f compose.yaml -f compose.demo.yaml up -d`
    — recreates `api`, starts `admin_ui` on loopback only.
-3. Tunnel in: `ssh -L 3000:127.0.0.1:3000 you@your-box` → `http://localhost:3000`.
+3. Tunnel in: `ssh -L 3000:127.0.0.1:3000 you@your-box` → `http://localhost:3000`. If
+   Cloudflare Access is fronting this box (see "Zero Trust Access (optional)" below),
+   prefer that route for routine admin — this SSH tunnel stays as break-glass only.
 4. When done, revert the flag and re-`up` without the profile. The public surface is
    unaffected throughout — spectators never notice.
 
@@ -258,3 +271,55 @@ yourself, in increasing order of effort:
 
 Either is a few lines to wire up; neither ships by default, so silence from this stack
 does not by itself mean the tunnel is up.
+
+### Zero Trust Access (optional)
+
+Cloudflare Access can front a tunnel's public hostnames with authentication before a
+request ever reaches a service — same tunnel, an extra gate in front of it. Generic
+pattern only (SPEC F78.11): no real hostnames, zones, or tokens belong in this repo;
+concrete apps/policies/hostnames live in the operator's private infra repo, never here.
+
+Two Access application shapes cover this stack's two audiences:
+
+- **Human app** (admin UI / Grafana) — tunnel public hostname (e.g.
+  `admin.radio.example.com`) → service (`admin_ui:3000`; same shape for a Grafana
+  hostname pointed at `grafana:3000` in the observability stack). Access self-hosted app
+  on that hostname, allow policy = an email allowlist, login methods **Google** (primary)
+  **+ One-Time PIN** (fallback). Both matter: a single login method means an IdP
+  hiccup — Google outage, misconfigured SSO — is a lockout, not an inconvenience; the PIN
+  fallback keeps the door open.
+- **Machine app** (Loki push) — tunnel public hostname (e.g.
+  `loki.homelab.example.com`) → `loki:3100`. Access policy = **Service Auth**
+  (non-identity), backed by a service token. The client authenticates by sending
+  `CF-Access-Client-Id` / `CF-Access-Client-Secret` headers with every push request —
+  exactly what the `alloy` logging profile does, sourced from the `LOKI_ACCESS_CLIENT_ID`
+  / `LOKI_ACCESS_CLIENT_SECRET` env vars (`compose.yaml`'s `alloy` service; header
+  attachment lives in `observability/alloy/config.alloy`; label contract in
+  `observability/LABELS.md`).
+
+Verification recipes (curl-able — these are the observable contracts, SPEC F78.6/F78.7):
+
+```bash
+# Human app: unauthenticated GET redirects to the Access login, never app bytes
+curl -sI https://admin.radio.example.com/ | grep -i '^location:'
+# -> 302 to https://<team>.cloudflareaccess.com/... (never a 200 with page markup)
+
+# Machine app: push without token headers is rejected at the edge, before Loki sees it
+curl -sI -X POST https://loki.homelab.example.com/loki/api/v1/push
+# -> 403
+
+# Machine app: push with valid token headers succeeds
+curl -sI -X POST https://loki.homelab.example.com/loki/api/v1/push \
+  -H "CF-Access-Client-Id: <CF_ACCESS_CLIENT_ID>" \
+  -H "CF-Access-Client-Secret: <CF_ACCESS_CLIENT_SECRET>"
+# -> 204
+```
+
+With Access in front, routine admin work (settings, personas, catalog curation) needs no
+SSH tunnel at all — hit the Access-gated hostname directly instead. Plain SSH (see
+"Temporary admin access" above) stays the **break-glass** route when Access itself is
+unreachable: `api:8080` remains loopback-published either way, unaffected by whether
+Access fronts anything.
+
+Record-keeping: concrete apps, policies, and hostnames live in the operator's private
+infra repo, never in this one (SPEC F78.11).
