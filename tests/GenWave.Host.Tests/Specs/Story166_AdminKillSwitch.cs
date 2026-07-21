@@ -30,6 +30,8 @@ file sealed class KillSwitchWebFactory(bool adminEnabled, bool spectatorMode) : 
         // Both flags are read at request time (IOptionsMonitor), so UseSetting is early enough.
         builder.UseSetting("Admin:Enabled", adminEnabled ? "true" : "false");
         builder.UseSetting("Station:SpectatorMode", spectatorMode ? "true" : "false");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IHostedService>();
@@ -38,23 +40,6 @@ file sealed class KillSwitchWebFactory(bool adminEnabled, bool spectatorMode) : 
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
         });
-    }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        var prevLib = Environment.GetEnvironmentVariable("ConnectionStrings__Library");
-        var prevAdmin = Environment.GetEnvironmentVariable("Admin__Password");
-        Environment.SetEnvironmentVariable("ConnectionStrings__Library", "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable("Admin__Password", Password);
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ConnectionStrings__Library", prevLib);
-            Environment.SetEnvironmentVariable("Admin__Password", prevAdmin);
-        }
     }
 }
 
@@ -88,7 +73,6 @@ public static class FeatureAdminKillSwitch
 
     // ── HAPPY PATH ────────────────────────────────────────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioAdminPlaneVanishes
     {
         [Fact]
@@ -112,7 +96,6 @@ public static class FeatureAdminKillSwitch
         }
     }
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioNonAdminSurfacesUnaffected
     {
         // /media/{id} is excluded here: with an empty fake catalog it 404s for its own reasons,
@@ -133,7 +116,6 @@ public static class FeatureAdminKillSwitch
         }
     }
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioAllFourModesBoot
     {
         [Theory]
@@ -154,7 +136,6 @@ public static class FeatureAdminKillSwitch
 
     // ── SAD PATH ──────────────────────────────────────────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioFlagInvisibleToTheApi
     {
         static async Task<HttpClient> LoggedInClientAsync(WebApplicationFactory<Program> factory)

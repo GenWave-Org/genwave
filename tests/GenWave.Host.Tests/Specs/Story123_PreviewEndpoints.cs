@@ -237,13 +237,16 @@ file static class PreviewControllerFactory
 /// </summary>
 file sealed class PersonaPreviewApiWebFactory(bool withAdminPassword) : WebApplicationFactory<Program>
 {
-    const string LibraryConnVar = "ConnectionStrings__Library";
-
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // Development config provides Station:Id/Name/Voice/Scope/SafeScope and Tts:Endpoint
         // so ValidateOnStart() is satisfied without injecting them manually.
         builder.UseEnvironment("Development");
+
+        // AddMediaLibrary reads the Library connection string at composition time in Program.cs —
+        // UseSetting (colon-form) reaches that read (verified empirically), so no process env var
+        // is mutated and no other test class can race with this per-instance value.
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
 
         if (withAdminPassword)
         {
@@ -255,20 +258,6 @@ file sealed class PersonaPreviewApiWebFactory(bool withAdminPassword) : WebAppli
             // Remove ALL hosted services — no Liquidsoap or DB connections during this test.
             services.RemoveAll<IHostedService>();
         });
-    }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        var prev = Environment.GetEnvironmentVariable(LibraryConnVar);
-        Environment.SetEnvironmentVariable(LibraryConnVar, "Host=nowhere;Database=test");
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(LibraryConnVar, prev);
-        }
     }
 }
 
@@ -440,11 +429,6 @@ public static class FeaturePreviewEndpoints
         }
     }
 
-    // PersonaPreviewApiWebFactory.CreateHost mutates the ConnectionStrings__Library process env var
-    // for the boot window — shared with every other env-var-mutating factory in this test project
-    // (Story056/058/084/112/120's factories), so this class opts into the serializing collection
-    // (see EnvVarMutatingWebFactoryCollection) rather than racing them under xUnit's default parallelism.
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioGates
     {
         [Fact]

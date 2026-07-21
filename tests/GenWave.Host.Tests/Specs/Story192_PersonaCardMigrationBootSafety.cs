@@ -65,8 +65,6 @@ file sealed class CapturingLogger<T> : ILogger<T>
 /// </summary>
 file sealed class PersonaCardMigrationBootWebFactory : WebApplicationFactory<Program>
 {
-    const string LibraryConnVar = "ConnectionStrings__Library";
-
     public CapturingLogger<PersonaCardMigrator> MigratorLogger { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -78,6 +76,12 @@ file sealed class PersonaCardMigrationBootWebFactory : WebApplicationFactory<Pro
         // changes.
         builder.UseEnvironment("Development");
         builder.UseSetting("ConnectionStrings:Station", "");
+
+        // AddMediaLibrary reads the Library connection string at composition time in Program.cs —
+        // UseSetting (colon-form) reaches that read (verified empirically), so no process env var
+        // is mutated and no other test class can race with this per-instance value. A
+        // non-reachable host is fine — this fact never resolves IMediaCatalog.
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
 
         builder.ConfigureTestServices(services =>
         {
@@ -91,34 +95,12 @@ file sealed class PersonaCardMigrationBootWebFactory : WebApplicationFactory<Pro
             services.AddSingleton<ILogger<PersonaCardMigrator>>(MigratorLogger);
         });
     }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        // AddMediaLibrary reads Library connection string early in Program.cs (before
-        // ConfigureTestServices runs), so it is injected via the environment. A non-reachable host is
-        // fine — this fact never resolves IMediaCatalog (mirrors Story120's PersonaApiWebFactory).
-        var prev = Environment.GetEnvironmentVariable(LibraryConnVar);
-        Environment.SetEnvironmentVariable(LibraryConnVar, "Host=nowhere;Database=test");
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(LibraryConnVar, prev);
-        }
-    }
 }
 
 // ── In-process tests ──────────────────────────────────────────────────────────────────────────────
 
 public static class FeaturePersonaCardMigrationBootSafety
 {
-    // PersonaCardMigrationBootWebFactory.CreateHost mutates the ConnectionStrings__Library process
-    // env var for the boot window — shared with Story056's/Story058's/Story084's/Story112's/
-    // Story120's factories, so this class opts into the serializing collection (see
-    // EnvVarMutatingWebFactoryCollection) rather than racing them under xUnit's default parallelism.
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioEmptyStationConnectionStringDegradesInsteadOfCrashing
     {
         [Fact]

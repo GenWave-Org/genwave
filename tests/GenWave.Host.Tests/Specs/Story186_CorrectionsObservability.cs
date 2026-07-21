@@ -126,13 +126,17 @@ file sealed class CapturingDebugLoggerProvider : ILoggerProvider
 file sealed class CorrectionsObservabilityWebFactory(
     RecordingEngineSynthesizer engine, CapturingDebugLoggerProvider logs) : WebApplicationFactory<Program>
 {
-    const string LibraryConnVar = "ConnectionStrings__Library";
-    const string AdminPasswordVar = "Admin__Password";
     internal const string Password = "test-password-x8a2";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
+
+        // AddMediaLibrary/AddGenWaveAdminApi read these at composition time in Program.cs —
+        // UseSetting (colon-form) reaches those reads (verified empirically), so no process env
+        // var is mutated and no other test class can race with this per-instance value.
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
 
         builder.ConfigureLogging(logging =>
         {
@@ -158,23 +162,6 @@ file sealed class CorrectionsObservabilityWebFactory(
                     sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>()));
         });
     }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        var prevLibrary = Environment.GetEnvironmentVariable(LibraryConnVar);
-        var prevAdmin = Environment.GetEnvironmentVariable(AdminPasswordVar);
-        Environment.SetEnvironmentVariable(LibraryConnVar, "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable(AdminPasswordVar, Password);
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(LibraryConnVar, prevLibrary);
-            Environment.SetEnvironmentVariable(AdminPasswordVar, prevAdmin);
-        }
-    }
 }
 
 // ── Specs ────────────────────────────────────────────────────────────────────────────────────────
@@ -185,7 +172,6 @@ file sealed record CorrectionStat(string From, long Fired);
 
 public static class FeatureCorrectionsObservability
 {
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioFiredRuleObservability
     {
         [Fact]

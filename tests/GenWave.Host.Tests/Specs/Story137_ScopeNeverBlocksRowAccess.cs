@@ -99,7 +99,6 @@ file sealed class ScopeNeverBlocksWebFactory(
     IAdminMediaReenrichment reenrichment,
     LibraryScope stationScope) : WebApplicationFactory<Program>
 {
-    const string LibraryConnVar = "ConnectionStrings__Library";
     internal const string Password = "test-password-x7z";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -107,6 +106,13 @@ file sealed class ScopeNeverBlocksWebFactory(
         // Development config provides Station:Id/Name/Voice/Scope/SafeScope and Tts:Endpoint
         // so ValidateOnStart() is satisfied without injecting them manually.
         builder.UseEnvironment("Development");
+
+        // AddMediaLibrary reads the Library connection string at composition time in Program.cs —
+        // UseSetting (colon-form) reaches that read (verified empirically), so no process env var
+        // is mutated and no other test class can race with this per-instance value. A
+        // non-reachable host is fine: every seam that would touch it is replaced with a fake below.
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
 
         builder.ConfigureTestServices(services =>
         {
@@ -130,26 +136,6 @@ file sealed class ScopeNeverBlocksWebFactory(
             services.RemoveAll<IStationScopeProvider>();
             services.AddSingleton<IStationScopeProvider>(new FakeStationScopeProvider(stationScope));
         });
-    }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        // AddMediaLibrary reads Library connection string early in Program.cs (before
-        // ConfigureTestServices runs), so it is injected via the environment. A non-reachable
-        // host is fine: every seam that would touch it is replaced with a fake above.
-        var prevLib = Environment.GetEnvironmentVariable(LibraryConnVar);
-        var prevAdmin = Environment.GetEnvironmentVariable("Admin__Password");
-        Environment.SetEnvironmentVariable(LibraryConnVar, "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable("Admin__Password", Password);
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(LibraryConnVar, prevLib);
-            Environment.SetEnvironmentVariable("Admin__Password", prevAdmin);
-        }
     }
 }
 
@@ -186,11 +172,6 @@ public static class FeatureScopeNeverBlocksRowAccess
         Eligible: true,
         Version: version);
 
-    // ScopeNeverBlocksWebFactory.CreateHost mutates the ConnectionStrings__Library process env var
-    // for the boot window — shared with Story056's/Story058's/Story112's factories, so every
-    // scenario class below opts into the serializing collection (see
-    // EnvVarMutatingWebFactoryCollection) rather than racing them under xUnit's default parallelism.
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioOutOfScopeRowsAreReachableWithTheSignal
     {
         static readonly LibraryScope StationScope = new([1L]);
@@ -316,7 +297,6 @@ public static class FeatureScopeNeverBlocksRowAccess
 
     // ── Sad path ────────────────────────────────────────────────────────────────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioTheRemainingWallsStand
     {
         static readonly LibraryScope StationScope = new([1L]);

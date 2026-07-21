@@ -123,8 +123,6 @@ file sealed class RecordingEngineSynthesizer : ITtsSynthesizer
 /// </summary>
 file sealed class CorrectionsLiveWiringWebFactory(RecordingEngineSynthesizer engine) : WebApplicationFactory<Program>
 {
-    const string LibraryConnVar = "ConnectionStrings__Library";
-    const string AdminPasswordVar = "Admin__Password";
     internal const string Password = "test-password-x7z";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -132,6 +130,12 @@ file sealed class CorrectionsLiveWiringWebFactory(RecordingEngineSynthesizer eng
         // Development config provides Station:Id/Name/Voice/Scope/SafeScope and Tts:Endpoint so
         // ValidateOnStart() is satisfied without injecting them manually.
         builder.UseEnvironment("Development");
+
+        // AddMediaLibrary/AddGenWaveAdminApi read these at composition time in Program.cs —
+        // UseSetting (colon-form) reaches those reads (verified empirically), so no process env
+        // var is mutated and no other test class can race with this per-instance value.
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
 
         builder.ConfigureTestServices(services =>
         {
@@ -159,26 +163,6 @@ file sealed class CorrectionsLiveWiringWebFactory(RecordingEngineSynthesizer eng
                     sp.GetRequiredService<ILogger<NormalizingTtsSynthesizer>>()));
         });
     }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        // AddMediaLibrary/AddGenWaveAdminApi read these before any ConfigureWebHost hook is visible
-        // to Program.cs (see EnvVarMutatingWebFactoryCollection's remarks) — injected via the
-        // environment, same as Story058's/Story084's factories.
-        var prevLibrary = Environment.GetEnvironmentVariable(LibraryConnVar);
-        var prevAdmin = Environment.GetEnvironmentVariable(AdminPasswordVar);
-        Environment.SetEnvironmentVariable(LibraryConnVar, "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable(AdminPasswordVar, Password);
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(LibraryConnVar, prevLibrary);
-            Environment.SetEnvironmentVariable(AdminPasswordVar, prevAdmin);
-        }
-    }
 }
 
 // ── Specs ────────────────────────────────────────────────────────────────────────────────────────
@@ -192,7 +176,6 @@ public static class FeatureCorrectionsLiveWiring
 
     static string SrcRoot => Path.Combine(RepoRoot, "src");
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioLiveApply
     {
         [Fact]

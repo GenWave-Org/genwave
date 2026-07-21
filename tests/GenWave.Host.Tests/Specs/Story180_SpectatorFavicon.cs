@@ -22,6 +22,8 @@ file sealed class FaviconWebFactory(bool spectatorMode = true) : WebApplicationF
     {
         builder.UseEnvironment("Development");
         builder.UseSetting("Station:SpectatorMode", spectatorMode ? "true" : "false");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", "test-password-x7z");
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IHostedService>();
@@ -30,23 +32,6 @@ file sealed class FaviconWebFactory(bool spectatorMode = true) : WebApplicationF
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
         });
-    }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        var prevLib = Environment.GetEnvironmentVariable("ConnectionStrings__Library");
-        var prevAdmin = Environment.GetEnvironmentVariable("Admin__Password");
-        Environment.SetEnvironmentVariable("ConnectionStrings__Library", "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable("Admin__Password", "test-password-x7z");
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ConnectionStrings__Library", prevLib);
-            Environment.SetEnvironmentVariable("Admin__Password", prevAdmin);
-        }
     }
 }
 
@@ -63,7 +48,6 @@ public static class FeatureSpectatorFavicon
 
     // ── HAPPY PATH ────────────────────────────────────────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioFaviconServedAndLinked
     {
         [Fact]
@@ -105,7 +89,6 @@ public static class FeatureSpectatorFavicon
 
     // ── SAD PATH ──────────────────────────────────────────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioFaviconIsSurfaceGated
     {
         [Fact]

@@ -90,6 +90,8 @@ file sealed class ListenerCountWebFactory(string? statsUrl, string? adminPasswor
         builder.UseSetting("Station:SpectatorMode", "true");
         if (statsUrl is not null) builder.UseSetting("Icecast:StatsUrl", statsUrl);
         if (adminPassword is not null) builder.UseSetting("Icecast:AdminPassword", adminPassword);
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", "test-password-x7z");
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IHostedService>();
@@ -98,23 +100,6 @@ file sealed class ListenerCountWebFactory(string? statsUrl, string? adminPasswor
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
         });
-    }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        var prevLib = Environment.GetEnvironmentVariable("ConnectionStrings__Library");
-        var prevAdmin = Environment.GetEnvironmentVariable("Admin__Password");
-        Environment.SetEnvironmentVariable("ConnectionStrings__Library", "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable("Admin__Password", "test-password-x7z");
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ConnectionStrings__Library", prevLib);
-            Environment.SetEnvironmentVariable("Admin__Password", prevAdmin);
-        }
     }
 }
 
@@ -136,7 +121,6 @@ public static class FeatureSpectatorListenerCount
 
     // ── HAPPY PATH ────────────────────────────────────────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioListenersFromIcecastStats
     {
         [Fact]
@@ -177,7 +161,6 @@ public static class FeatureSpectatorListenerCount
 
     // ── SAD PATH ──────────────────────────────────────────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioUnknownCountIsNullNeverAnError
     {
         [Fact]

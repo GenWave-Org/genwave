@@ -25,6 +25,8 @@ file sealed class SpectatorHistoryWebFactory(IMediaCatalog catalog) : WebApplica
     {
         builder.UseEnvironment("Development");
         builder.UseSetting("Station:SpectatorMode", "true");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", "test-password-x7z");
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IHostedService>();
@@ -33,23 +35,6 @@ file sealed class SpectatorHistoryWebFactory(IMediaCatalog catalog) : WebApplica
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
         });
-    }
-
-    protected override IHost CreateHost(IHostBuilder builder)
-    {
-        var prevLib = Environment.GetEnvironmentVariable("ConnectionStrings__Library");
-        var prevAdmin = Environment.GetEnvironmentVariable("Admin__Password");
-        Environment.SetEnvironmentVariable("ConnectionStrings__Library", "Host=nowhere;Database=test");
-        Environment.SetEnvironmentVariable("Admin__Password", "test-password-x7z");
-        try
-        {
-            return base.CreateHost(builder);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ConnectionStrings__Library", prevLib);
-            Environment.SetEnvironmentVariable("Admin__Password", prevAdmin);
-        }
     }
 }
 
@@ -81,7 +66,6 @@ public static class FeatureSpectatorHistoryAndStats
 
     // ── HAPPY PATH ────────────────────────────────────────────────────────
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioHistoryShape
     {
         [Fact]
@@ -134,7 +118,6 @@ public static class FeatureSpectatorHistoryAndStats
         }
     }
 
-    [Collection(EnvVarMutatingWebFactoryCollection.Name)]
     public sealed class ScenarioStatsCountsOnly
     {
         static WebApplicationFactory<Program> FactoryWithCounts() =>
