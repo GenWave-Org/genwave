@@ -7,8 +7,6 @@
 // touching Docker — so every preset is assertable with no daemon, no teardown, no
 // stack. The sad path (BUILD=1 + --pinned) must error before any docker invocation,
 // dry-run or not. No spec here needs the docker CLI; none carry Category=Integration.
-//
-// Pending until T47 (/build-loop unskips).
 
 using System.Diagnostics;
 
@@ -16,8 +14,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureLaunchScriptPresets
 {
-    const string Pending = "pending: T47 — launch.sh presets (unskip in /build-loop)";
-
     static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
@@ -60,14 +56,14 @@ public static class FeatureLaunchScriptPresets
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
             new(() => RunLaunch(null, "--dry-run"));
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Plan_tears_the_stack_down_first()
         {
             // Given no arguments (dev flow)  When --dry-run  Then the plan starts with teardown
             Assert.Contains(PlanLines(Run.Value.StdOut), l => l.Contains("compose down", StringComparison.Ordinal));
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Plan_brings_db_up_before_the_full_stack()
         {
             var lines = PlanLines(Run.Value.StdOut);
@@ -76,19 +72,19 @@ public static class FeatureLaunchScriptPresets
             Assert.True(dbUp >= 0 && fullUp > dbUp, $"expected db-first up ordering; plan:\n{Run.Value.StdOut}");
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Plan_runs_migrations()
         {
             Assert.Contains(PlanLines(Run.Value.StdOut), l => l.Contains("migrate.sh", StringComparison.Ordinal));
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Plan_omits_the_demo_overlay()
         {
             Assert.DoesNotContain(PlanLines(Run.Value.StdOut), l => l.Contains("compose.demo.yaml", StringComparison.Ordinal));
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Plan_omits_pull()
         {
             Assert.DoesNotContain(PlanLines(Run.Value.StdOut), l => l.Contains("compose pull", StringComparison.Ordinal));
@@ -100,13 +96,13 @@ public static class FeatureLaunchScriptPresets
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
             new(() => RunLaunch(null, "--pinned", "--dry-run"));
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Plan_pulls_published_images()
         {
             Assert.Contains(PlanLines(Run.Value.StdOut), l => l.Contains("compose", StringComparison.Ordinal) && l.Contains("pull", StringComparison.Ordinal));
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Plan_uses_the_demo_overlay_throughout()
         {
             Assert.All(
@@ -114,14 +110,14 @@ public static class FeatureLaunchScriptPresets
                 l => Assert.Contains("compose.demo.yaml", l, StringComparison.Ordinal));
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Plan_runs_migrate_with_the_overlay_flags()
         {
             Assert.Contains(PlanLines(Run.Value.StdOut), l =>
                 l.Contains("migrate.sh", StringComparison.Ordinal) && l.Contains("compose.demo.yaml", StringComparison.Ordinal));
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Plan_never_builds()
         {
             Assert.DoesNotContain(PlanLines(Run.Value.StdOut), l => l.Contains("--build", StringComparison.Ordinal) || l.Contains("compose build", StringComparison.Ordinal));
@@ -135,20 +131,20 @@ public static class FeatureLaunchScriptPresets
                 new Dictionary<string, string> { ["COMPOSE_PROFILES"] = "admin" },
                 "--with", "logging,tunnel", "--dry-run"));
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Effective_profiles_keep_the_env_profiles()
         {
             // launch.sh --dry-run prints the effective profile set as "plan-profiles> a,b,c"
             Assert.Contains("admin", ProfilesLine(), StringComparison.Ordinal);
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Effective_profiles_include_logging()
         {
             Assert.Contains("logging", ProfilesLine(), StringComparison.Ordinal);
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Effective_profiles_include_tunnel()
         {
             Assert.Contains("tunnel", ProfilesLine(), StringComparison.Ordinal);
@@ -164,13 +160,13 @@ public static class FeatureLaunchScriptPresets
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
             new(() => RunLaunch(null, "--pinned", "--with", "logging,tunnel", "--dry-run"));
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void The_sanctioned_demo_launch_uses_the_overlay()
         {
             Assert.Contains(PlanLines(Run.Value.StdOut), l => l.Contains("compose.demo.yaml", StringComparison.Ordinal));
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void The_sanctioned_demo_launch_activates_both_profiles()
         {
             var profiles = Run.Value.StdOut.Split('\n').FirstOrDefault(l => l.StartsWith("plan-profiles> ", StringComparison.Ordinal)) ?? "";
@@ -184,13 +180,13 @@ public static class FeatureLaunchScriptPresets
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
             new(() => RunLaunch(new Dictionary<string, string> { ["BUILD"] = "1" }, "--pinned"));
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Exits_non_zero_before_touching_the_stack()
         {
             Assert.NotEqual(0, Run.Value.ExitCode);
         }
 
-        [Fact(Skip = Pending)]
+        [Fact]
         public static void Names_the_conflict()
         {
             Assert.Contains("--pinned", Run.Value.StdOut + Run.Value.StdErr, StringComparison.Ordinal);

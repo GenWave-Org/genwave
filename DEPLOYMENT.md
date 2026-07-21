@@ -148,10 +148,16 @@ Appliance boot (`compose.demo.yaml` defaults):
   `/media/random` all return **404**.
 
 **Applying migrations** (upgrading an already-running demo box — new images/compose
-files pulled, schema didn't come along automatically): this topology never runs
-`launch.sh` (that script assumes and launches the source-build dev stack), so
-`./migrate.sh` is the sanctioned way to converge the schema against the *running* `db`
-service, no teardown or relaunch required:
+files pulled, schema didn't come along automatically): use `launch.sh`'s `--pinned`
+preset (STORY-201), which is exactly this topology's sanctioned launch/upgrade path —
+`launch.sh` bare assumes the source-build dev stack, `--pinned` doesn't:
+
+```bash
+./launch.sh --pinned
+```
+
+Under the hood `--pinned` runs, against `compose.yaml` + `compose.demo.yaml`, and never
+builds:
 
 ```bash
 docker compose -f compose.yaml -f compose.demo.yaml pull
@@ -161,7 +167,12 @@ docker compose -f compose.yaml -f compose.demo.yaml up -d
 
 Every `db/*-migration.sh` is an idempotent in-place upgrade (`ADD COLUMN IF NOT EXISTS`
 and the like), so running it with nothing new to apply is a safe no-op. `--dry-run`
-lists what would run without touching anything; see `./migrate.sh --help`.
+prints the exact command plan without touching anything — `./launch.sh --pinned --dry-run`
+or, for just the migration step, `./migrate.sh --help`.
+
+Combine with `--with` to also activate compose profiles (e.g. `logging`, `tunnel`) on the
+same launch: `./launch.sh --pinned --with logging,tunnel` merges them into whatever
+`COMPOSE_PROFILES` is already set (env or `.env`).
 
 **Temporary admin access** (settings, personas, catalog curation on the public box):
 
