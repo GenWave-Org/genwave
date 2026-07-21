@@ -90,7 +90,11 @@ public sealed class NormalizingTtsSynthesizer(
         foreach (var from in firedFroms)
         {
             firedStats.RecordFired(from);
-            logger.LogDebug("TTS correction fired: from={CorrectionFrom} voice={Voice}", from, voice);
+            // Operator-authored rule text and voice id are newline-stripped so they can't
+            // forge additional log entries (CodeQL cs/log-forging).
+            logger.LogDebug(
+                "TTS correction fired: from={CorrectionFrom} voice={Voice}",
+                from.ReplaceLineEndings(" "), voice.ReplaceLineEndings(" "));
         }
     }
 }

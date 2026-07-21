@@ -46,6 +46,7 @@ public static class FeatureTtsFallbackEngine
             router,
             analyzer,
             cueAnalyzer,
+            NoCorrections.Provider(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
             logger ?? NullLogger<TtsSegmentSource>.Instance);
 
