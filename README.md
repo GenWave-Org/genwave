@@ -30,7 +30,7 @@ cp .env.example .env
 ./launch.sh
 ```
 
-Seven services start: `db`, `icecast`, `engine`, `api`, `kokoro` (TTS synthesizer), `piper` (CPU-only fallback TTS), and `admin_ui` (operator console).
+Seven services start: `db`, `icecast`, `engine`, `api`, `kokoro` (TTS synthesizer), `piper` (CPU-only fallback TTS), and `admin_ui` (operator console). An optional eighth — a Cloudflare tunnel with health/metrics observability — is available behind `COMPOSE_PROFILES=tunnel` (see [DEPLOYMENT.md](DEPLOYMENT.md)).
 
 - **Stream:** `http://localhost:8000/stream` — open it in any audio player
 - **Admin UI:** `http://localhost:3000` — log in with the password set in `ADMIN_PASSWORD`
@@ -72,7 +72,8 @@ The broadcast never depends on a sick dependency. **LLM failure is a mode, not a
 ├─ tools/
 │  ├─ find_smoke_candidates.cs   # picks a divergent-gain track pair for the smoke test
 │  ├─ smoke_test.sh              # manual pre-release regression gate (no human listening required)
-│  └─ onair_gate.sh              # §0 on-air acceptance gate (live engine)
+│  ├─ onair_gate.sh              # §0 on-air acceptance gate (live engine)
+│  └─ check-compose-publish.sh   # CI guard: 0.0.0.0 host publishes allowed only for the front proxy (F67.1)
 └─ src/                    # C# solution (.NET 10)
    ├─ GenWave.Abstractions/  #   the SDK contract surface: selection, catalog read, events, TTS seams
    ├─ GenWave.Core/          #   domain + engine-facing abstractions; zero I/O
@@ -156,7 +157,7 @@ GenWave's epic-by-epic history — v1 broadcast playout through Ranking & robust
 
 - The Liquidsoap **control port (1234) is unauthenticated and never published**. To inspect it: `docker compose exec engine bash` then connect to `localhost:1234` from inside the container.
 - Icecast `/admin` and `/status` share port 8000 — password-protected but reachable on the LAN. **Never publish 8000 on a public box**: the [reference public topology](DEPLOYMENT.md) fronts everything with Caddy and un-publishes it, and CI enforces the posture via `tools/check-compose-publish.sh` (0.0.0.0 publishes allowed only for the proxy).
-- **Upgrading an existing deployment:** `./launch.sh` applies every `db/*-migration.sh` idempotently on each boot — a raw `docker compose up` does **not**, so run `launch.sh` (or apply `db/11`–`13` by hand) after pulling a new release.
+- **Upgrading an existing deployment:** run `./migrate.sh` after pulling a new release — it applies every `db/*-migration.sh` idempotently against the running stack (`./migrate.sh -f compose.yaml -f compose.demo.yaml` on a demo/appliance box; see [DEPLOYMENT.md](DEPLOYMENT.md)). `./launch.sh` does this automatically for the dev stack; a raw `docker compose up` does **not**.
 - Secrets live only in `.env` (gitignored). Promote to Docker secrets before anything public.
 - If you change `duration=` in `engine/genwave.liq`, pass the matching `CROSSFADE=` to `smoke_test.sh` so its analysis windows line up.
 - The `crossfade` operator behavior and `output.icecast.metadata` on-air signal are specific to Liquidsoap 2.4.x. The engine image is pinned to `v2.4.4` in `compose.yaml` — do not change the pin without re-running the smoke test.
