@@ -25,21 +25,24 @@ public static class FeatureCachedDependencyHealthProbes
             using var cts = new CancellationTokenSource();
             var runTask = prober.RunAsync(TimeSpan.FromMilliseconds(30), TimeSpan.FromSeconds(5), cts.Token);
 
-            // When verdicts are read repeatedly while the background loop keeps ticking on its
-            // own cadence
+            // When the loop has ticked on its own cadence for a while, is then stopped, and
+            // verdicts are read repeatedly. The stop comes BEFORE the read burst: with the loop
+            // still running, a 30ms tick landing mid-burst adds a legitimate probe call and fails
+            // the zero-delta assert below on a slow runner (observed on CI: 6 vs 7) — stopped,
+            // "reads add zero probe calls" is deterministic instead of a race against the timer.
             await Task.Delay(TimeSpan.FromMilliseconds(150));
+            await cts.CancelAsync();
+            // ThrowsAnyAsync, not ThrowsAsync: which await the cancellation interrupts is a race
+            // (PeriodicTimer tick vs Task.Delay), and the loser surfaces TaskCanceledException —
+            // an OperationCanceledException subclass the exact-type assert rejected on slow CI.
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runTask);
+
             var beforeReads = probe.CallCount;
             for (var i = 0; i < 50; i++)
             {
                 _ = store.GetVerdict(probe.DependencyName);
             }
             var afterReads = probe.CallCount;
-
-            await cts.CancelAsync();
-            // ThrowsAnyAsync, not ThrowsAsync: which await the cancellation interrupts is a race
-            // (PeriodicTimer tick vs Task.Delay), and the loser surfaces TaskCanceledException —
-            // an OperationCanceledException subclass the exact-type assert rejected on slow CI.
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runTask);
 
             // Then reads return the cached snapshot, and probe calls happened only on the
             // configured interval — nowhere near once per read (50 reads, far fewer probe calls)
