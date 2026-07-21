@@ -146,6 +146,20 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	alter table library.media
 	  add column energy real;
 
+	-- moods: up to MoodVocabulary.MaxMoodsPerTrack (3) tags drawn from the fixed vocabulary that
+	-- lives in GenWave.Abstractions (SPEC F85.1, F85.2, STORY-216). Populated by a second-tier
+	-- enrichment pass (T72, mood tagger); T58 ships storage + the write path only, so a fresh
+	-- install leaves every row NULL until that pass runs (same "re-derives on the next pass"
+	-- convention as energy above and track_energy before it). The write path itself
+	-- (MediaRepository.WriteMoodsAsync) is the vocabulary gate: it rejects, as a whole, any write
+	-- naming a term outside the vocabulary (F85.1) BEFORE this UPDATE ever runs — deliberately no
+	-- per-term CHECK here, since the vocabulary is versioned in C#, not SQL, and a future term
+	-- addition must never require a migration. The count cap IS spec-pinned and version-independent
+	-- (F85.2, "≤3"), so it is enforced twice, defense-in-depth: once here, once at the write path.
+	alter table library.media
+	  add column moods text[]
+	    check (moods is null or cardinality(moods) <= 3);
+
 	-- Composite partial index: scope-filtered random-ready pick (replaces scalar media_ready).
 	create index media_scope_ready on library.media (library_id, state) where state = 'ready';
 	create index media_artist      on library.media (artist);                       -- ready for criteria queries

@@ -914,6 +914,36 @@ sealed class MediaRepository(
             """, cancellationToken: ct));
     }
 
+    // ── Moods (SPEC F85.1/F85.2, STORY-216) ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Writes up to <see cref="MoodVocabulary.MaxMoodsPerTrack"/> moods for a track — the F85.1
+    /// write-time vocabulary gate. Every entry of <paramref name="moods"/> is checked against
+    /// <see cref="MoodVocabulary.Terms"/> and the count against the cap BEFORE any SQL is issued;
+    /// a single out-of-vocabulary entry or an over-cap set rejects the WHOLE write, never a partial
+    /// one — the tagger (T72) cannot invent a mood, and a rejection here is a storage-level
+    /// backstop that holds regardless of what upstream parsing already filtered out.
+    /// <paramref name="moods"/> may be empty (a track attempted but assigned no mood); there is no
+    /// lower-bound check here — F85.4's "require ≥ 1 survivor" is the tagger's own parse-time rule
+    /// for what counts as a miss, not a storage invariant this method enforces.
+    /// </summary>
+    public async Task<MoodWriteResult> WriteMoodsAsync(long id, IReadOnlyList<string> moods, CancellationToken ct)
+    {
+        if (moods.Count > MoodVocabulary.MaxMoodsPerTrack)
+            return MoodWriteResult.TooManyMoods;
+
+        foreach (var mood in moods)
+            if (!MoodVocabulary.Contains(mood))
+                return MoodWriteResult.UnknownMood;
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var affected = await conn.ExecuteAsync(new CommandDefinition(
+            "update library.media set moods = @moods where id = @id",
+            new { id, moods = moods.ToArray() }, cancellationToken: ct));
+
+        return affected > 0 ? MoodWriteResult.Written : MoodWriteResult.NotFound;
+    }
+
     /// <summary>
     /// Rows eligible for a MusicBrainz year lookup: <c>state='ready'</c>, <c>year IS NULL</c>,
     /// <c>year_lookup_missed_at IS NULL</c>, and both artist and title are non-blank (SPEC F48.3,
