@@ -23,4 +23,12 @@ public abstract record PersonaPreviewResult
     /// (no raw exception text/stack) — the controller maps this straight to a 502 ProblemDetails.
     /// </summary>
     public sealed record Failed(string Detail) : PersonaPreviewResult;
+
+    /// <summary>
+    /// The LLM's single-flight gate (SPEC F69.6) was still held by an on-air render when the
+    /// preview's bounded queue wait (<c>Llm:PreviewQueueWaitSeconds</c>) expired. Nothing was
+    /// attempted and nothing failed — the interactive caller is declined fast instead of queueing
+    /// unboundedly behind a render-ahead burst; the controller maps this to a 503 with Retry-After.
+    /// </summary>
+    public sealed record Busy : PersonaPreviewResult;
 }

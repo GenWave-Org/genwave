@@ -27,6 +27,16 @@ public sealed class LlmOptions
     public int MaxCopyChars { get; set; } = 450;
 
     /// <summary>
+    /// How long a persona preview waits for the single-flight LLM gate before declining with
+    /// <see cref="GenWave.Core.Domain.PersonaPreviewResult.Busy"/> (503 to the operator). Only the
+    /// interactive preview path is bounded — on-air renders keep the original unbounded wait
+    /// (F69.6), since their queueing is render-ahead time, not a human staring at a spinner.
+    /// <c>0</c> means decline immediately unless the gate is free.
+    /// </summary>
+    [Range(0, int.MaxValue)]
+    public int PreviewQueueWaitSeconds { get; set; } = 5;
+
+    /// <summary>
     /// Optional bearer token for the endpoint. Env-only per the F19.3 secrets rule — never stored in
     /// or returned by the settings API.
     /// </summary>

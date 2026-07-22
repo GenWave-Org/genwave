@@ -434,6 +434,29 @@ public static class FeaturePreviewEndpoints
         }
     }
 
+    public sealed class ScenarioLlmBusyIsA503NotAWait
+    {
+        [Fact]
+        public async Task CopyPreviewReturns503WithRetryAfterWhenTheLlmGateIsBusy()
+        {
+            // Gate held by an on-air render → 503 + Retry-After, declined fast; the title is the
+            // operator-facing toast (F35.7), so it must say busy-try-again, not "failed".
+            var writer = new FakePersonaPreviewWriter { Result = new PersonaPreviewResult.Busy() };
+            var controller = PreviewControllerFactory.BuildPersonaController(
+                writer, new FakeActivePersonaAccessor(), new FakeAdminMediaLookup());
+
+            var result = await controller.Preview(
+                new PersonaPreviewRequest(null, null, null, null, null, null, null), CancellationToken.None);
+
+            var problem = Assert.IsType<ObjectResult>(result);
+            Assert.Equal(StatusCodes.Status503ServiceUnavailable, problem.StatusCode);
+            var details = Assert.IsType<ProblemDetails>(problem.Value);
+            Assert.Equal(StatusCodes.Status503ServiceUnavailable, details.Status);
+            Assert.Contains("busy", details.Title, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("30", controller.Response.Headers.RetryAfter);
+        }
+    }
+
     public sealed class ScenarioTtsSynthesisFailureIsA502 : IDisposable
     {
         readonly string outputDirectory = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
