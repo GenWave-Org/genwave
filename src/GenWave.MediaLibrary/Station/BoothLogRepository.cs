@@ -39,7 +39,8 @@ sealed class BoothLogRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<Boot
     // uncast int4 column fails to bind a `long?` constructor parameter.
     const string SelectColumns =
         """
-        select id::bigint as id, occurred_at, kind, summary, persona_id::bigint as persona_id
+        select id::bigint as id, occurred_at, kind, summary, persona_id::bigint as persona_id,
+               pick::text as pick
         from station.booth_log
         """;
 

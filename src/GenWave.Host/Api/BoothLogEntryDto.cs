@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace GenWave.Host.Api;
 
 /// <summary>
@@ -8,5 +10,18 @@ namespace GenWave.Host.Api;
 /// track-start row — <see langword="null"/> for every other kind, a persona-less airing, or a row
 /// that predates the column. The admin UI (T71) uses <see cref="PersonaId"/>'s presence to decide
 /// whether a row is thumbable for taste, and <see cref="Id"/> as the thumb's POST target.
+///
+/// <see cref="Pick"/> (SPEC F86.2, STORY-217, PLAN T74) mirrors the row's stored
+/// <see cref="GenWave.Core.Domain.BoothLogPickStamp"/> — fired-rule summaries, signed weights, and
+/// the exploration flag. <c>JsonIgnore(WhenWritingNull)</c> makes it ABSENT from the JSON, not
+/// null-valued, for a row whose stored pick is null (engine-initiated play, persona-off pick, or a
+/// row predating the column) — same discipline <see cref="GenWave.Core.Domain.PersonaCard.Taste"/>
+/// already established for an optional collection field.
 /// </summary>
-public sealed record BoothLogEntryDto(long Id, DateTime OccurredAt, string Kind, string Summary, long? PersonaId);
+public sealed record BoothLogEntryDto(
+    long Id,
+    DateTime OccurredAt,
+    string Kind,
+    string Summary,
+    long? PersonaId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BoothLogPickDto? Pick = null);

@@ -6,8 +6,11 @@
 // (F83.1) — fired-rule summaries, signed weights, exploration flag. Null for: rows predating the
 // column, engine-initiated plays, persona-off picks. Never backfilled (F84.6 precedent).
 // Scores/pool/degradation are deliberately NOT stored (F86.1) — assert their absence, not just the
-// presence of the rest. T74 wires GET /api/booth-log's own exposure of the stamp — those
-// scenarios/facts stay pending below.
+// presence of the rest. PLAN T74 wires GET /api/booth-log's own exposure of the stamp
+// (ScenarioApiExposesTheStamp + NullPickRowsOmitThePickFieldFromTheApi below): BoothLogRepository's
+// read side surfaces the stored pick jsonb text on BoothLogEntry, and BoothLogController deserializes
+// it through BoothLogPickStampSerializer into BoothLogEntryDto.Pick — JsonIgnore(WhenWritingNull)
+// makes a null stamp ABSENT from the wire rather than a null-valued field.
 //
 // Write-side entry-point discipline: BoothLogWriter/BoothLogDrainService/BoothLogEntryRequest are
 // internal to GenWave.MediaLibrary (no InternalsVisibleTo to this project) — every write-side
@@ -24,9 +27,11 @@ using GenWave.Core.Domain;
 using GenWave.Core.Events;
 using GenWave.Host.Api;
 using GenWave.MediaLibrary.Station;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -100,10 +105,53 @@ file static class BoothLogWriteHarness
     }
 }
 
+/// <summary>
+/// In-memory <see cref="IBoothLogReader"/> double for the T74 API-exposure facts — a fixed row set,
+/// no keyset paging (each fact below reads a single row well within <c>take</c>). Mirrors
+/// <c>Story195_BoothLog.cs</c>'s own <c>FakeBoothLogReader</c> idiom, scoped to this file since that
+/// type is itself <see langword="file"/>-private to its own file.
+/// </summary>
+file sealed class ApiFakeBoothLogReader(IReadOnlyList<BoothLogEntry> rows) : IBoothLogReader
+{
+    public Task<BoothLogPage> ReadAsync(BoothLogCursor? before, int take, CancellationToken ct) =>
+        Task.FromResult(new BoothLogPage(rows.Take(take).ToList(), NextBefore: null));
+}
+
+/// <summary>
+/// <see cref="IPersonaTasteAccrualStore"/> stub for this file's API-exposure facts, none of which
+/// exercise the taste-thumb route — only <see cref="BoothLogController.List"/>'s pick exposure is
+/// this file's T74 concern.
+/// </summary>
+file sealed class NotSupportedPersonaTasteAccrualStore : IPersonaTasteAccrualStore
+{
+    public Task<TasteThumbOutcome> ThumbAsync(long boothLogId, TasteThumbDirection direction, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story217's API-exposure facts.");
+}
+
+/// <summary>
+/// Builds a real <see cref="BoothLogController"/> wired to the given fake reader (Story123's
+/// controller/factory idiom) — the production controller's own mapping/serialization code runs
+/// unmodified; only the repository seam is faked.
+/// </summary>
+file static class BoothLogApiControllerFactory
+{
+    public static BoothLogController Build(IBoothLogReader reader) =>
+        new(reader, new NotSupportedPersonaTasteAccrualStore(), NullLogger<BoothLogController>.Instance);
+}
+
+/// <summary>
+/// Shared serializer options for this file's API-exposure facts (T74) — camelCase, matching
+/// ASP.NET Core's <c>AddControllers()</c> default (Program.cs never overrides <c>JsonOptions</c>),
+/// so serializing through it is an honest stand-in for what a real GET /api/booth-log response body
+/// actually looks like.
+/// </summary>
+file static class ApiWireJson
+{
+    public static readonly JsonSerializerOptions Options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+}
+
 public static class FeatureBoothLogPickStamp
 {
-    const string Pending = "Pending T74 — GET /api/booth-log pick exposure; see docs/PLAN.md Phase V24";
-
     static TasteRule ArtistRule(string artist, double weight) =>
         new(new TastePredicate(artist, null, null), new TasteContext([], null, null), weight);
 
@@ -189,19 +237,49 @@ public static class FeatureBoothLogPickStamp
 
     public sealed class ScenarioApiExposesTheStamp
     {
-        // Arrange (when built): a stamped track row exists; GET /api/booth-log is driven
-        // through the production controller pipeline.
-
-        [Fact(Skip = Pending)]
-        public void StampedTrackRowCarriesPickWithRuleSummariesAndWeights()
+        /// <summary>
+        /// Arrange + act shared by every fact below: a track-start row already stamped (via
+        /// <see cref="BoothLogPickStampSerializer"/>, the same jsonb text a real write would have
+        /// produced) with two fired rules (artist +0.6, genre −0.3) and isExploration=false, read
+        /// back through the REAL <see cref="BoothLogController.List"/> pipeline (Story123's
+        /// controller/factory idiom) and serialized exactly as production would — each fact below
+        /// asserts one thing about the resulting entry's "pick" JSON element.
+        /// </summary>
+        static async Task<JsonElement> DriveOneStampedRowAsync()
         {
-            // The entry's pick.firedRules mirrors the stored summaries + weights (F86.2).
+            var stamp = new BoothLogPickStamp(
+                [new BoothLogFiredRuleSummary("The Weeknd", 0.6), new BoothLogFiredRuleSummary("Synthwave", -0.3)],
+                IsExploration: false);
+            var entry = new BoothLogEntry(
+                1, DateTime.UtcNow, "track-started", "Started 'Night Drive' by The Waveforms",
+                PersonaId: 7, Pick: BoothLogPickStampSerializer.Serialize(stamp));
+
+            var controller = BoothLogApiControllerFactory.Build(new ApiFakeBoothLogReader([entry]));
+            var result = Assert.IsType<OkObjectResult>(await controller.List(before: null, take: 10, CancellationToken.None));
+
+            var json = JsonSerializer.Serialize(result.Value, ApiWireJson.Options);
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.GetProperty("entries")[0].GetProperty("pick").Clone();
         }
 
-        [Fact(Skip = Pending)]
-        public void StampedTrackRowCarriesTheExplorationFlag()
+        [Fact]
+        public async Task StampedTrackRowCarriesPickWithRuleSummariesAndWeights()
         {
-            // The entry's pick.isExploration mirrors the stored flag (F86.2).
+            var pick = await DriveOneStampedRowAsync();
+
+            var rules = pick.GetProperty("firedRules").EnumerateArray()
+                .Select(rule => (Summary: rule.GetProperty("summary").GetString(), Weight: rule.GetProperty("weight").GetDouble()))
+                .ToList();
+
+            Assert.Equal([("The Weeknd", 0.6), ("Synthwave", -0.3)], rules);
+        }
+
+        [Fact]
+        public async Task StampedTrackRowCarriesTheExplorationFlag()
+        {
+            var pick = await DriveOneStampedRowAsync();
+
+            Assert.False(pick.GetProperty("isExploration").GetBoolean());
         }
     }
 
@@ -262,11 +340,54 @@ public static class FeatureBoothLogPickStamp
             Assert.Null(appender.Calls[0].Pick);
         }
 
-        [Fact(Skip = Pending)]
-        public void NullPickRowsOmitThePickFieldFromTheApi()
+        [Fact]
+        public async Task NullPickRowsOmitThePickFieldFromTheApi()
         {
-            // GET /api/booth-log entries for null-pick rows carry NO pick field —
-            // absent, not null-valued (F86.2).
+            // Given a track-start row whose stored pick is null (engine-initiated, persona-off, or
+            // pre-column — all indistinguishable at this layer)...
+            var entry = new BoothLogEntry(
+                77, DateTime.UtcNow, "track-started", "Started 'Static' by Nobody", PersonaId: null, Pick: null);
+
+            // When GET /api/booth-log is driven through the production controller pipeline
+            // (Story123's controller/factory idiom) and the response is serialized exactly as
+            // production would (ASP.NET Core's default camelCase JsonOptions)...
+            var controller = BoothLogApiControllerFactory.Build(new ApiFakeBoothLogReader([entry]));
+            var result = Assert.IsType<OkObjectResult>(await controller.List(before: null, take: 10, CancellationToken.None));
+            var json = JsonSerializer.Serialize(result.Value, ApiWireJson.Options);
+            using var document = JsonDocument.Parse(json);
+
+            // Then the entry's "pick" field is entirely ABSENT from the JSON — not present with a
+            // null value (F86.2).
+            var wireEntry = document.RootElement.GetProperty("entries")[0];
+            Assert.False(wireEntry.TryGetProperty("pick", out _));
+        }
+    }
+
+    public sealed class ScenarioCorruptPickDegradesGracefully
+    {
+        [Fact]
+        public async Task OffSchemaPickRendersWithNoPickFieldAndThePageStill200s()
+        {
+            // Given a row whose stored pick is valid JSON but off-schema — "{}" carries neither
+            // firedRules nor isExploration, so BoothLogPickStamp.FiredRules deserializes to null
+            // despite its own non-nullable annotation (JSON binds constructor parameters by
+            // reflection, not through the record's own constructor, so nothing there enforces it)...
+            var entry = new BoothLogEntry(
+                99, DateTime.UtcNow, "track-started", "Started 'Glitch' by Nobody", PersonaId: 3, Pick: "{}");
+
+            // When GET /api/booth-log is driven through the production controller pipeline
+            // (Story123's controller/factory idiom)...
+            var controller = BoothLogApiControllerFactory.Build(new ApiFakeBoothLogReader([entry]));
+            var result = await controller.List(before: null, take: 10, CancellationToken.None);
+
+            // Then the page still 200s — one corrupt row degrades to "no pick chips" for that row
+            // rather than killing the whole feed (F72.2 outranks the decorative F86.1 field) — and
+            // the entry's "pick" field is entirely absent, not a null-valued field.
+            var ok = Assert.IsType<OkObjectResult>(result);
+            var json = JsonSerializer.Serialize(ok.Value, ApiWireJson.Options);
+            using var document = JsonDocument.Parse(json);
+            var wireEntry = document.RootElement.GetProperty("entries")[0];
+            Assert.False(wireEntry.TryGetProperty("pick", out _));
         }
     }
 

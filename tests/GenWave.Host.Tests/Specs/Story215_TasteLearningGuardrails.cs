@@ -35,6 +35,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -313,7 +314,7 @@ public static class FeatureTasteLearningGuardrails
         {
             var accrual = new FakePersonaTasteAccrualStore();
             accrual.Rows.Add(new FakeBoothLogRow { Id = 1, PersonaId = 7, Artist = "The Waveforms" });
-            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual);
+            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual, NullLogger<BoothLogController>.Instance);
 
             var result = await controller.ThumbTaste(1, new TasteThumbRequest("up"), CancellationToken.None);
 
@@ -337,7 +338,7 @@ public static class FeatureTasteLearningGuardrails
             var accrual = new FakePersonaTasteAccrualStore();
             accrual.Rows.Add(new FakeBoothLogRow { Id = 1, PersonaId = 7, Artist = "The Waveforms" });
             accrual.Rows.Add(new FakeBoothLogRow { Id = 2, PersonaId = 7, Artist = "The Waveforms" });
-            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual);
+            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual, NullLogger<BoothLogController>.Instance);
 
             await controller.ThumbTaste(1, new TasteThumbRequest("up"), CancellationToken.None);
             await controller.ThumbTaste(2, new TasteThumbRequest("up"), CancellationToken.None);
@@ -353,7 +354,7 @@ public static class FeatureTasteLearningGuardrails
             var accrual = new FakePersonaTasteAccrualStore();
             for (var i = 1; i <= 6; i++)
                 accrual.Rows.Add(new FakeBoothLogRow { Id = i, PersonaId = 7, Artist = "The Waveforms" });
-            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual);
+            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual, NullLogger<BoothLogController>.Instance);
 
             for (var i = 1; i <= 6; i++)
                 await controller.ThumbTaste(i, new TasteThumbRequest("up"), CancellationToken.None);
@@ -378,7 +379,7 @@ public static class FeatureTasteLearningGuardrails
             var stampedRow = new BoothLogEntry(rowId, DateTime.UtcNow, "track-started",
                 "Started 'Night Drive' by The Waveforms", PersonaId: personaAId);
             var reader = new FixedPageBoothLogReader(new BoothLogPage([stampedRow], NextBefore: null));
-            var controller = new BoothLogController(reader, new FakePersonaTasteAccrualStore());
+            var controller = new BoothLogController(reader, new FakePersonaTasteAccrualStore(), NullLogger<BoothLogController>.Instance);
 
             // When the admin feed reads it back...
             var page = Assert.IsType<BoothLogPageDto>(
@@ -407,7 +408,7 @@ public static class FeatureTasteLearningGuardrails
             accrual.TasteRows.Add(new PersonaTasteEntry(
                 1, personaBId, new TasteRule(new TastePredicate("The Waveforms", null, null), new TasteContext([], null, null), 0.6),
                 PersonaTasteSource.Accrued, DateTime.UtcNow, DateTime.UtcNow));
-            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual);
+            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual, NullLogger<BoothLogController>.Instance);
 
             // When the operator thumbs that row up...
             await controller.ThumbTaste(1, new TasteThumbRequest("up"), CancellationToken.None);
@@ -435,7 +436,7 @@ public static class FeatureTasteLearningGuardrails
             var seeded = Enumerable.Range(0, 50).Select(i => (Artist: $"Artist{i}", Weight: i == 0 ? 0.01 : 0.5));
             TasteLearningFixture.SeedAccruedRows(accrual, personaId, seeded);
             accrual.Rows.Add(new FakeBoothLogRow { Id = 1, PersonaId = personaId, Artist = "New Artist" });
-            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual);
+            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual, NullLogger<BoothLogController>.Instance);
 
             // When a thumb creates a new (51st) rule...
             await controller.ThumbTaste(1, new TasteThumbRequest("up"), CancellationToken.None);
@@ -464,7 +465,7 @@ public static class FeatureTasteLearningGuardrails
             accrual.TasteRows.Add(authored);
             accrual.TasteRows.Add(operatorRow);
             accrual.Rows.Add(new FakeBoothLogRow { Id = 1, PersonaId = personaId, Artist = "New Artist" });
-            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual);
+            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual, NullLogger<BoothLogController>.Instance);
 
             // When a thumb pushes the accrued count past the cap...
             await controller.ThumbTaste(1, new TasteThumbRequest("up"), CancellationToken.None);
@@ -513,7 +514,7 @@ public static class FeatureTasteLearningGuardrails
             // idempotent per (persona, airing, direction) (F84.5)
             var accrual = new FakePersonaTasteAccrualStore();
             accrual.Rows.Add(new FakeBoothLogRow { Id = 1, PersonaId = 7, Artist = "The Waveforms" });
-            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual);
+            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual, NullLogger<BoothLogController>.Instance);
 
             await controller.ThumbTaste(1, new TasteThumbRequest("up"), CancellationToken.None);
             var second = await controller.ThumbTaste(1, new TasteThumbRequest("up"), CancellationToken.None);
@@ -535,7 +536,7 @@ public static class FeatureTasteLearningGuardrails
             // call from the server's point of view (F84.5).
             var accrual = new FakePersonaTasteAccrualStore();
             accrual.Rows.Add(new FakeBoothLogRow { Id = 9, PersonaId = 3, Artist = "Static" });
-            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual);
+            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual, NullLogger<BoothLogController>.Instance);
 
             await controller.ThumbTaste(9, new TasteThumbRequest("down"), CancellationToken.None);
             var second = await controller.ThumbTaste(9, new TasteThumbRequest("down"), CancellationToken.None);
@@ -553,7 +554,7 @@ public static class FeatureTasteLearningGuardrails
             // rows predating the stamp (or persona-less airings) are not thumbable for taste (F84.6)
             var accrual = new FakePersonaTasteAccrualStore();
             accrual.Rows.Add(new FakeBoothLogRow { Id = 2, PersonaId = null, Artist = null });
-            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual);
+            var controller = new BoothLogController(TasteLearningFixture.EmptyReader(), accrual, NullLogger<BoothLogController>.Instance);
 
             var result = await controller.ThumbTaste(2, new TasteThumbRequest("up"), CancellationToken.None);
 
