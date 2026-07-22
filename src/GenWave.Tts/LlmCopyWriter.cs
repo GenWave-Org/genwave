@@ -51,6 +51,29 @@ using GenWave.Core.Domain;
 /// one recording point instead of two). Never logged, never persisted — see <see cref="LlmCallRing"/>'s
 /// own remarks.
 /// </para>
+///
+/// <para>
+/// The anti-repetition posture (SPEC F83.1, STORY-214, T65): <see cref="previousBreakTasteNotes"/>
+/// remembers the immediately preceding ON-AIR break's fired-rule descriptions, in-memory, so
+/// <see cref="LlmPromptBuilder.BuildUserContent"/> can ask for different phrasing when the SAME
+/// taste note would otherwise land twice in a row. Deliberately NOT F71.4's <c>persona_memory</c>
+/// recall windows — that is a Postgres-backed, cross-restart "kind:bit" callback system for
+/// narrative bits/jokes that this writer never touches today; reaching for it here would be new
+/// architecture wired in for one prompt marker, not reuse.
+///
+/// Both the read and the write live INSIDE <see cref="RequestCompletionAsync"/>'s own single-flight
+/// critical section, not around it (T65 review finding): <c>Orchestrator.EnqueuePatterAsync</c>
+/// starts one unit's BackAnnounce and LeadIn renders concurrently — both TTS renders are kicked off
+/// before either is awaited — so a read/write pair taken OUTSIDE the gate could have the second
+/// render capture the snapshot from before the first render's own write ever lands, and the two
+/// would never compare against each other. Doing both only once <see cref="RequestCompletionAsync"/>
+/// actually holds <see cref="singleFlight"/> guarantees the second of any concurrent pair always
+/// sees the first's freshly-written notes. Read only, and written only, when the call originates
+/// from <see cref="WriteAsync"/> (<c>updateTasteMemory: true</c>) — <see cref="WritePreviewAsync"/>
+/// passes <c>updateTasteMemory: false</c> and always renders against an empty list, so auditioning a
+/// persona in the admin UI can never perturb what the NEXT real on-air break considers "recently
+/// voiced".
+/// </para>
 /// </summary>
 public sealed class LlmCopyWriter(
     TemplateCopyWriter fallback,
@@ -86,6 +109,19 @@ public sealed class LlmCopyWriter(
     /// next caller in line.
     /// </summary>
     readonly SemaphoreSlim singleFlight = new(1, 1);
+
+    /// <summary>
+    /// SPEC F83.1 (STORY-214, PLAN T65) — the previous ON-AIR break's fired-rule descriptions (see
+    /// <see cref="LlmPromptBuilder.DescribeFiredRules"/>). Read and written EXCLUSIVELY inside
+    /// <see cref="RequestCompletionAsync"/>'s own single-flight critical section (T65 review
+    /// finding) — never out here in <see cref="WriteAsync"/> — see the class remarks above for why:
+    /// two renders belonging to the same unit are started concurrently, so a read/write pair taken
+    /// outside <see cref="singleFlight"/>'s gate would race. Only touched when that call's
+    /// <c>updateTasteMemory</c> parameter is true (an on-air <see cref="WriteAsync"/> call); a
+    /// <see cref="WritePreviewAsync"/> call passes <c>false</c> and never reads or writes it. Starts
+    /// empty (first-ever break has no "previous" to avoid repeating).
+    /// </summary>
+    IReadOnlyList<string> previousBreakTasteNotes = [];
 
     static readonly Regex NewlinePattern = new(@"\r\n|\r|\n", RegexOptions.Compiled);
     static readonly Regex BracketStageDirectionPattern = new(@"\[[^\]]*\]", RegexOptions.Compiled);
@@ -133,7 +169,11 @@ public sealed class LlmCopyWriter(
             // contract as ResolveAsync above. Soul/quirks are sourced from THIS, with legacy
             // Backstory/Style as the fallback (see LlmPromptBuilder.BuildSoul's own remarks).
             var card = await personaAccessor.ResolveCardAsync(ct);
-            var raw = await RequestCompletionAsync(cfg, request, persona, card, ct);
+            // updateTasteMemory: true — this is an on-air call, so previousBreakTasteNotes is both
+            // read and (on success) overwritten INSIDE RequestCompletionAsync's own single-flight
+            // critical section (SPEC F83.1, T65 review finding); see that method's own remarks for
+            // why the field can no longer be touched out here.
+            var raw = await RequestCompletionAsync(cfg, request, persona, card, updateTasteMemory: true, ct);
             var cleaned = CleanCopy(raw, cfg.MaxCopyChars);
             if (cleaned is null)
             {
@@ -170,11 +210,14 @@ public sealed class LlmCopyWriter(
     /// <see cref="IPersonaPreviewWriter"/> (SPEC F35.6, STORY-123) — reuses
     /// <see cref="RequestCompletionAsync"/> (identical prompt composition) and
     /// <see cref="CleanCopy"/> (identical hygiene) so the previewed text is provably what the
-    /// on-air <see cref="WriteAsync"/> path would have produced for the same request/persona. The
-    /// one deliberate difference: NOTHING here degrades to <paramref name="fallback"/> on an LLM
-    /// miss for LeadIn/BackAnnounce — that would misrepresent the persona being auditioned — and
-    /// this method never records to <see cref="LlmCopyStatusHolder"/> (that holder tracks on-air
-    /// attempts for <c>GET /api/status</c>; preview activity never airs and must not appear there).
+    /// on-air <see cref="WriteAsync"/> path would have produced for the same request/persona.
+    /// Deliberate differences: NOTHING here degrades to <paramref name="fallback"/> on an LLM miss
+    /// for LeadIn/BackAnnounce — that would misrepresent the persona being auditioned — this method
+    /// never records to <see cref="LlmCopyStatusHolder"/> (that holder tracks on-air attempts for
+    /// <c>GET /api/status</c>; preview activity never airs and must not appear there), and it always
+    /// passes <c>updateTasteMemory: false</c> to <see cref="RequestCompletionAsync"/> (SPEC F83.1,
+    /// T65) — auditioning a card is not a real on-air break, so it neither reads nor perturbs
+    /// <see cref="previousBreakTasteNotes"/>.
     /// </summary>
     public async Task<PersonaPreviewResult> WritePreviewAsync(
         SegmentRequest request, Persona? personaOverride, CancellationToken ct)
@@ -201,7 +244,8 @@ public sealed class LlmCopyWriter(
             // legacy Backstory/Style composition (see LlmPromptBuilder.BuildSoul); quirks stay
             // absent. The clock (F71.8) still reaches this prompt regardless — it lives in
             // LlmPromptBuilder.BuildUserContent, not here.
-            var raw = await RequestCompletionAsync(cfg, request, personaOverride, card: null, ct);
+            var raw = await RequestCompletionAsync(
+                cfg, request, personaOverride, card: null, updateTasteMemory: false, ct);
             var cleaned = CleanCopy(raw, cfg.MaxCopyChars);
             return cleaned is null
                 ? new PersonaPreviewResult.Failed("The LLM returned empty or over-length copy.")
@@ -262,7 +306,8 @@ public sealed class LlmCopyWriter(
     }
 
     async Task<string> RequestCompletionAsync(
-        LlmOptions cfg, SegmentRequest request, Persona? persona, PersonaCard? card, CancellationToken ct)
+        LlmOptions cfg, SegmentRequest request, Persona? persona, PersonaCard? card,
+        bool updateTasteMemory, CancellationToken ct)
     {
         // Captured up front, once, for LlmCallRing (SPEC F73.1, T41) — startedAt mirrors
         // LlmCopyStatusHolder's own attemptedAt semantics (includes any single-flight queueing wait
@@ -297,7 +342,16 @@ public sealed class LlmCopyWriter(
             // finding) so systemPrompt/userPrompt are available to the ring for every failure this
             // method can raise, not just the ones after prompt assembly.
             systemPrompt = LlmPromptBuilder.BuildSystemPrompt(LlmPromptBuilder.BuildPersonaSection(persona, card));
-            userPrompt = LlmPromptBuilder.BuildUserContent(request, LlmPromptBuilder.BuildStationClockLine(timeProvider));
+
+            // Read HERE — after WaitAsync above, i.e. already inside the single-flight critical
+            // section — not by the caller before this method was ever invoked (SPEC F83.1, T65
+            // review finding): Orchestrator.EnqueuePatterAsync starts a unit's BackAnnounce and
+            // LeadIn renders concurrently, so reading the field any earlier could race the second
+            // render's snapshot against the first render's own write. Only an on-air call
+            // (updateTasteMemory) reads the real field; a preview always compares against empty.
+            IReadOnlyList<string> previouslyVoicedTasteNotes = updateTasteMemory ? previousBreakTasteNotes : [];
+            userPrompt = LlmPromptBuilder.BuildUserContent(
+                request, LlmPromptBuilder.BuildStationClockLine(timeProvider), previouslyVoicedTasteNotes);
 
             // No boot-frozen BaseAddress (F36.2) — the endpoint is read from CurrentValue above and an
             // absolute URI is built per call (EndpointUri preserves a subpath in Llm:Endpoint, e.g.
@@ -331,6 +385,16 @@ public sealed class LlmCopyWriter(
 
             var payload = await response.Content.ReadFromJsonAsync<ChatCompletionResponse>(timeoutCts.Token);
             var text = payload?.Choices?.FirstOrDefault()?.Message?.Content ?? string.Empty;
+
+            // Written HERE, STILL inside the single-flight critical section (SPEC F83.1, T65 review
+            // finding) — only for an on-air call (updateTasteMemory), and only once the call has
+            // actually succeeded; an exception anywhere above skips straight to the catch-all below,
+            // leaving the field untouched for whichever break renders next. Doing the write before
+            // singleFlight.Release() (in the finally below) is what guarantees the second render of
+            // a concurrent BackAnnounce/LeadIn pair always sees THIS break's fresh notes rather than
+            // a snapshot taken before this call ever ran.
+            if (updateTasteMemory)
+                previousBreakTasteNotes = LlmPromptBuilder.DescribeFiredRules(request.Track?.PersonaPick?.FiredRules ?? []);
 
             // Ok records the RAW reply (SPEC F73.1) — a later CleanCopy rejection (empty/over-length)
             // is a hygiene decision the caller makes, not a fact about whether the call itself
