@@ -39,6 +39,18 @@ public static class LiquidsoapAnnotationBuilder
             ? $"gw_intro_energy=\"{Escape(intro.ToString("G", CultureInfo.InvariantCulture))}\"," +
               $"gw_outro_energy=\"{Escape(outro.ToString("G", CultureInfo.InvariantCulture))}\","
             : string.Empty;
+        // gh-#80: a TTS blurb shorter than the cross() window makes Liquidsoap hit end-of-track
+        // while buffering and warn "crossfade duration is longer than the track's duration"
+        // (observed as an on-air stutter, 2026-07-22). liq_cross_duration is cross()'s built-in
+        // per-track override (its default override_duration key, v2.4.4 cross.ml): stamping
+        // half the blurb's measured duration — clamped to [0.2s, 3.0s] — bounds the window on
+        // BOTH sides of the blurb (the override is processed even while the blurb's head is
+        // being buffered as the incoming track) and auto-resets on the next track. Music tracks
+        // never carry it; when TTS cue analysis failed (null DurationMs) nothing is stamped —
+        // same honest-absence rule as every other enrichment field here.
+        var ttsCrossField = isTts && item.DurationMs is { } durationMs
+            ? $"liq_cross_duration=\"{Math.Clamp(durationMs / 1000.0 * 0.5, 0.2, 3.0).ToString("F2", CultureInfo.InvariantCulture)}\","
+            : string.Empty;
 
         return
             $"annotate:track_id=\"{Escape(item.MediaId)}\"," +
@@ -49,6 +61,7 @@ public static class LiquidsoapAnnotationBuilder
             artistField +
             cueFields +
             energyFields +
+            ttsCrossField +
             $"title=\"{Escape(item.Title)}\":{item.Locator}";
     }
 
