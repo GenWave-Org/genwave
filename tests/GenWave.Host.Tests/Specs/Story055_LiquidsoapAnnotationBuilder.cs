@@ -110,6 +110,32 @@ public static class FeatureLiquidsoapAnnotationBuilder
             Assert.Contains("gw_intro_energy=\"0.34\"", result, StringComparison.Ordinal);
             Assert.Contains("gw_outro_energy=\"0.28\"", result, StringComparison.Ordinal);
         }
+
+        [Fact]
+        public void MeasuredTtsItemStampsHalfDurationClampedCrossOverride()
+        {
+            // gh-#80 — a 2400ms blurb stamps liq_cross_duration="1.20" (half its measured
+            // duration) so cross()'s window can never outlast the blurb on either side.
+            var item = new MediaItem("tts:abc", "/tts/abc.wav", "Blurb", DefaultLoudness,
+                DurationMs: 2400);
+
+            var result = LiquidsoapAnnotationBuilder.Build(item, 0.0, string.Empty, string.Empty);
+
+            Assert.Contains("liq_cross_duration=\"1.20\"", result, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void LongTtsItemClampsCrossOverrideToThreeSeconds()
+        {
+            // gh-#80 — half of 30s would be 15s; the stamp caps at 3.00 (the engine's own safe
+            // fallback fade) so a long TTS segment still crossfades like any other item.
+            var item = new MediaItem("tts:long", "/tts/long.wav", "Long blurb", DefaultLoudness,
+                DurationMs: 30_000);
+
+            var result = LiquidsoapAnnotationBuilder.Build(item, 0.0, string.Empty, string.Empty);
+
+            Assert.Contains("liq_cross_duration=\"3.00\"", result, StringComparison.Ordinal);
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -142,6 +168,24 @@ public static class FeatureLiquidsoapAnnotationBuilder
 
             Assert.DoesNotContain("gw_intro_energy", result, StringComparison.Ordinal);
             Assert.DoesNotContain("gw_outro_energy", result, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void CrossOverrideIsOmittedForMusicAndForUnmeasuredTts()
+        {
+            // gh-#80 — music never carries liq_cross_duration (its window stays energy-aware),
+            // and a TTS item whose cue analysis failed (null DurationMs) stamps nothing rather
+            // than fabricating a duration — the same honest-absence rule as cue/energy fields.
+            var music = new MediaItem("30", "/media/30.mp3", "Track", DefaultLoudness,
+                DurationMs: 180_000);
+            var unmeasuredTts = new MediaItem("tts:x", "/tts/x.wav", "Blurb", DefaultLoudness);
+
+            Assert.DoesNotContain("liq_cross_duration",
+                LiquidsoapAnnotationBuilder.Build(music, 0.0, string.Empty, string.Empty),
+                StringComparison.Ordinal);
+            Assert.DoesNotContain("liq_cross_duration",
+                LiquidsoapAnnotationBuilder.Build(unmeasuredTts, 0.0, string.Empty, string.Empty),
+                StringComparison.Ordinal);
         }
 
         [Fact]
