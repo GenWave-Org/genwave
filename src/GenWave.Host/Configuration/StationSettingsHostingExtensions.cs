@@ -46,6 +46,13 @@ static class StationSettingsHostingExtensions
         // actually resolves IPersonaStore.
         builder.Services.AddPersonaStore(stationConnStr);
 
+        // Persona memory store (SPEC F71.4-F71.6, STORY-194) — same station_svc connection string,
+        // same lazy-data-source story as AddPersonaStore just above. STORY-194 shipped this
+        // registration deliberately without a Host call site ("no consumer lands with this seam");
+        // the card-export route (SPEC F79.1, STORY-208, PLAN T66) is that first consumer, reading
+        // authored persona_memory rows for a card's lore[].
+        builder.Services.AddPersonaMemoryStore(stationConnStr, builder.Configuration);
+
         // Persona taste store (SPEC F82.1, F84.1-F84.3; STORY-213, PLAN T64) — same station_svc
         // connection string, same lazy-data-source story as AddPersonaStore just above. T59 shipped
         // this registration deliberately without a Host call site ("the ranker (T63) and card

@@ -97,6 +97,35 @@ file sealed class FakePersonaStore : IPersonaStore
     // enough to satisfy IPersonaStore without asserting anything about a path nothing here exercises.
     public Task<PersonaCard?> GetCardByIdAsync(long id, CancellationToken ct) =>
         Task.FromResult<PersonaCard?>(null);
+
+    // Export (T66) is not exercised by these preview scenarios — Story208 owns that coverage.
+    public Task<long?> GetIdBySlugAsync(string slug, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story123's preview scenarios.");
+}
+
+/// <summary>Unused-by-preview <see cref="IPersonaMemory"/> double — the constructor dependency
+/// exists for the sibling export action (T66), never called by these preview scenarios.</summary>
+file sealed class NotUsedPersonaMemory : IPersonaMemory
+{
+    public Task<long> RecordAsync(long personaId, string kind, string content, PersonaMemorySource source, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story123's preview scenarios.");
+
+    public Task MarkAiredAsync(long id, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story123's preview scenarios.");
+
+    public Task<IReadOnlyList<PersonaMemoryEntry>> RecallAsync(long personaId, RecallSpec spec, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story123's preview scenarios.");
+
+    public Task<IReadOnlyList<PersonaMemoryEntry>> ListAsync(long personaId, PersonaMemorySource source, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story123's preview scenarios.");
+}
+
+/// <summary>Unused-by-preview <see cref="IPersonaTasteReader"/> double — same reason as
+/// <see cref="NotUsedPersonaMemory"/> above.</summary>
+file sealed class NotUsedPersonaTasteReader : IPersonaTasteReader
+{
+    public Task<IReadOnlyList<PersonaTasteEntry>> ListAsync(long personaId, PersonaTasteSource? source, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story123's preview scenarios.");
 }
 
 /// <summary>Unused-by-preview <see cref="IStationSettingsStore"/> double — the constructor
@@ -182,6 +211,8 @@ file static class PreviewControllerFactory
             personaAccessor,
             mediaLookup,
             scopeProvider ?? new FakeStationScopeProvider(new LibraryScope([1])),
+            new NotUsedPersonaMemory(),
+            new NotUsedPersonaTasteReader(),
             NullLogger<PersonaController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

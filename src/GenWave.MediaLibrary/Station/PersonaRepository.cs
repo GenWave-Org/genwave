@@ -176,4 +176,20 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
 
         return string.IsNullOrEmpty(json) || json == "{}" ? null : PersonaCardSerializer.Deserialize(json);
     }
+
+    /// <summary>
+    /// F79.1/F79.3's slug-to-id primitive (STORY-208/209): the export/import routes address a
+    /// persona by its <c>slug</c>, but every other table a card export/import touches
+    /// (<c>persona_memory</c>, <c>persona_taste</c>) keys off the numeric id. A scalar lookup rather
+    /// than folding this into <see cref="GetCardByIdAsync"/> — callers that only need the id (to then
+    /// query those other tables) never pay for deserializing a definition they will not use.
+    /// </summary>
+    public async Task<long?> GetIdBySlugAsync(string slug, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        return await conn.ExecuteScalarAsync<long?>(new CommandDefinition(
+            "select id::bigint from station.persona where slug = @slug",
+            new { slug },
+            cancellationToken: ct));
+    }
 }

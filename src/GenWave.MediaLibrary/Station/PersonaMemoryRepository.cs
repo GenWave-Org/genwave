@@ -138,6 +138,28 @@ sealed class PersonaMemoryRepository(Lazy<NpgsqlDataSource> dataSource, IOptions
         return rows.ToList();
     }
 
+    /// <summary>
+    /// Export's source-filtered read (SPEC F79.1, STORY-208): every row for
+    /// <paramref name="personaId"/> in <paramref name="source"/>, every <c>kind</c>, no aired-recency
+    /// gate — <see cref="RecallAsync"/>'s windows exist for prompt assembly, not for "every authored
+    /// row this persona has". Ordered by id (authoring/insertion order) — a human reading an exported
+    /// card's <c>lore[]</c> benefits more from that than from any recall-relevant ordering.
+    /// </summary>
+    public async Task<IReadOnlyList<PersonaMemoryEntry>> ListAsync(long personaId, PersonaMemorySource source, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<PersonaMemoryEntry>(new CommandDefinition(
+            $"""
+            {SelectColumns}
+            where persona_id = @PersonaId and source = @Source
+            order by id
+            """,
+            new { PersonaId = personaId, Source = ToSourceText(source) },
+            cancellationToken: ct));
+
+        return rows.ToList();
+    }
+
     static string ToSourceText(PersonaMemorySource source) => source switch
     {
         PersonaMemorySource.Authored => "authored",

@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -10,7 +11,8 @@ namespace GenWave.Host.Api;
 
 /// <summary>
 /// DJ persona CRUD for the Admin UI (SPEC F35.4, STORY-120): <c>GET/POST/PATCH/DELETE /api/personas</c>
-/// over <see cref="IPersonaStore"/>.
+/// over <see cref="IPersonaStore"/>. Also serves the portable card export (SPEC F79.1, STORY-208,
+/// PLAN T66): <c>GET /api/personas/{slug}/export</c>.
 ///
 /// DELIBERATE F18.6 DEVIATION — NO <c>If-Match</c>/ETag anywhere in this controller. Every other
 /// admin write surface (media tags, library rename) carries optimistic concurrency because a
@@ -35,6 +37,8 @@ public sealed class PersonaController(
     IActivePersonaAccessor personaAccessor,
     IAdminMediaLookup mediaLookup,
     IStationScopeProvider scopeProvider,
+    IPersonaMemory personaMemory,
+    IPersonaTasteReader personaTaste,
     ILogger<PersonaController> logger) : ControllerBase
 {
     // The F19 allowlist key this controller's delete-clears-active write targets (F35.5).
@@ -198,6 +202,44 @@ public sealed class PersonaController(
         };
     }
 
+    /// <summary>
+    /// GET /api/personas/{slug}/export — the portable card (SPEC F79.1, F79.2; STORY-208): the
+    /// stored <c>persona.definition</c> with its <c>lore[]</c>/<c>taste[]</c> REPLACED by a fresh,
+    /// source-filtered read of <c>persona_memory</c>/<c>persona_taste</c> (<c>source='authored'</c>
+    /// only) — never the stored definition's own (vestigial, F71.2 always-empty-at-migration)
+    /// <c>lore</c> field, and never an unfiltered read trimmed down afterward in this method. Zero
+    /// accrued/operator rows reach the response BY CONSTRUCTION: <see cref="IPersonaMemory.ListAsync"/>
+    /// and <see cref="IPersonaTasteReader.ListAsync"/> are called with the source fixed to
+    /// <see cref="PersonaMemorySource.Authored"/>/<see cref="PersonaTasteSource.Authored"/> — there is
+    /// no unfiltered overload reachable from this action for a future edit to regress into. 404 for an
+    /// unknown slug (F79.1, AC4); the response's <c>Content-Disposition</c> names the file
+    /// <c>&lt;slug&gt;.persona.json</c> verbatim via <see cref="ControllerBase.File(byte[], string, string)"/>
+    /// (safe filename-header encoding — never a hand-built header string).
+    /// </summary>
+    [HttpGet("{slug}/export")]
+    public async Task<IActionResult> Export(string slug, CancellationToken ct)
+    {
+        var id = await personaStore.GetIdBySlugAsync(slug, ct);
+        if (id is null)
+            return NotFound(UnknownSlugProblem(slug));
+
+        var card = await personaStore.GetCardByIdAsync(id.Value, ct);
+        if (card is null)
+            return NotFound(UnknownSlugProblem(slug));
+
+        var lore = await personaMemory.ListAsync(id.Value, PersonaMemorySource.Authored, ct);
+        var taste = await personaTaste.ListAsync(id.Value, PersonaTasteSource.Authored, ct);
+
+        var exportCard = card with
+        {
+            Lore = lore.Select(entry => entry.Content).ToArray(),
+            Taste = taste.Select(entry => entry.Rule).ToArray(),
+        };
+
+        var json = PersonaCardSerializer.Serialize(exportCard);
+        return File(Encoding.UTF8.GetBytes(json), "application/json", $"{slug}.persona.json");
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -338,5 +380,12 @@ public sealed class PersonaController(
         Status = StatusCodes.Status404NotFound,
         Title  = "Not found.",
         Detail = $"No persona with id {id} exists.",
+    };
+
+    static ProblemDetails UnknownSlugProblem(string slug) => new()
+    {
+        Status = StatusCodes.Status404NotFound,
+        Title  = "Not found.",
+        Detail = $"No persona with slug \"{slug}\" exists.",
     };
 }

@@ -36,4 +36,15 @@ public interface IPersonaMemory
     /// most-recently-aired), matching the <c>persona_memory_recall</c> index.
     /// </summary>
     Task<IReadOnlyList<PersonaMemoryEntry>> RecallAsync(long personaId, RecallSpec spec, CancellationToken ct);
+
+    /// <summary>
+    /// Returns every memory row for <paramref name="personaId"/> in <paramref name="source"/> — the
+    /// card-export endpoint's read (SPEC F79.1, STORY-208). Unlike <see cref="RecallAsync"/>, this is
+    /// not scoped to any one <c>kind</c> or aired-recency window: export wants every authored bit,
+    /// callback, and note a persona carries, not a prompt-assembly-sized slice of one kind.
+    /// <paramref name="source"/> is REQUIRED — there is no "every source" overload — so the only
+    /// <c>persona_memory</c> read the export path can reach is filtered at the SQL layer; it can never
+    /// regress into reading everything and trimming accrued rows out afterward in application code.
+    /// </summary>
+    Task<IReadOnlyList<PersonaMemoryEntry>> ListAsync(long personaId, PersonaMemorySource source, CancellationToken ct);
 }
