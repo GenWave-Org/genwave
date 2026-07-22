@@ -64,4 +64,7 @@ public sealed class StationOptions
 
     /// <summary>Boundary-aware selection bias knobs (SPEC F74.3, STORY-198). Bound to <c>Station:BoundaryBias</c>.</summary>
     public StationBoundaryBiasOptions BoundaryBias { get; set; } = new();
+
+    /// <summary>Station-default 24/7 segment envelope knobs (SPEC F81.3, STORY-212). Bound to <c>Station:Envelope</c>.</summary>
+    public StationEnvelopeOptions Envelope { get; set; } = new();
 }

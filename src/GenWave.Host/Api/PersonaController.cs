@@ -1,3 +1,6 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -10,7 +13,8 @@ namespace GenWave.Host.Api;
 
 /// <summary>
 /// DJ persona CRUD for the Admin UI (SPEC F35.4, STORY-120): <c>GET/POST/PATCH/DELETE /api/personas</c>
-/// over <see cref="IPersonaStore"/>.
+/// over <see cref="IPersonaStore"/>. Also serves the portable card export (SPEC F79.1, STORY-208,
+/// PLAN T66): <c>GET /api/personas/{slug}/export</c>.
 ///
 /// DELIBERATE F18.6 DEVIATION — NO <c>If-Match</c>/ETag anywhere in this controller. Every other
 /// admin write surface (media tags, library rename) carries optimistic concurrency because a
@@ -27,7 +31,7 @@ namespace GenWave.Host.Api;
 [Route("api/personas")]
 [AdminSurface]
 [Authorize(Policy = AuthorizationPolicies.AdminOnly)]
-public sealed class PersonaController(
+public sealed partial class PersonaController(
     IPersonaStore personaStore,
     IStationSettingsStore settingsStore,
     IOptionsMonitor<StationOptions> stationMonitor,
@@ -35,10 +39,17 @@ public sealed class PersonaController(
     IActivePersonaAccessor personaAccessor,
     IAdminMediaLookup mediaLookup,
     IStationScopeProvider scopeProvider,
+    IPersonaMemory personaMemory,
+    IPersonaTasteReader personaTaste,
+    IPersonaImportStore personaImportStore,
+    ITtsVoiceLister voiceLister,
     ILogger<PersonaController> logger) : ControllerBase
 {
     // The F19 allowlist key this controller's delete-clears-active write targets (F35.5).
     internal const string ActiveIdKey = "Station:Persona:ActiveId";
+
+    // SPEC F79.6 — enforced BEFORE deserialization, see Import's own remarks.
+    const int MaxImportBytes = 256 * 1024;
 
     /// <summary>GET /api/personas — every persona row, ordered by name (F35.4).</summary>
     [HttpGet]
@@ -198,7 +209,213 @@ public sealed class PersonaController(
         };
     }
 
+    /// <summary>
+    /// GET /api/personas/{slug}/export — the portable card (SPEC F79.1, F79.2; STORY-208): the
+    /// stored <c>persona.definition</c> with its <c>lore[]</c>/<c>taste[]</c> REPLACED by a fresh,
+    /// source-filtered read of <c>persona_memory</c>/<c>persona_taste</c> (<c>source='authored'</c>
+    /// only) — never the stored definition's own (vestigial, F71.2 always-empty-at-migration)
+    /// <c>lore</c> field, and never an unfiltered read trimmed down afterward in this method. Zero
+    /// accrued/operator rows reach the response BY CONSTRUCTION: <see cref="IPersonaMemory.ListAsync"/>
+    /// and <see cref="IPersonaTasteReader.ListAsync"/> are called with the source fixed to
+    /// <see cref="PersonaMemorySource.Authored"/>/<see cref="PersonaTasteSource.Authored"/> — there is
+    /// no unfiltered overload reachable from this action for a future edit to regress into. 404 for an
+    /// unknown slug (F79.1, AC4); the response's <c>Content-Disposition</c> names the file
+    /// <c>&lt;slug&gt;.persona.json</c> verbatim via <see cref="ControllerBase.File(byte[], string, string)"/>
+    /// (safe filename-header encoding — never a hand-built header string).
+    /// </summary>
+    [HttpGet("{slug}/export")]
+    public async Task<IActionResult> Export(string slug, CancellationToken ct)
+    {
+        var id = await personaStore.GetIdBySlugAsync(slug, ct);
+        if (id is null)
+            return NotFound(UnknownSlugProblem(slug));
+
+        var card = await personaStore.GetCardByIdAsync(id.Value, ct);
+        if (card is null)
+            return NotFound(UnknownSlugProblem(slug));
+
+        var lore = await personaMemory.ListAsync(id.Value, PersonaMemorySource.Authored, ct);
+        var taste = await personaTaste.ListAsync(id.Value, PersonaTasteSource.Authored, ct);
+
+        var exportCard = card with
+        {
+            Lore = lore.Select(entry => entry.Content).ToArray(),
+            Taste = taste.Select(entry => entry.Rule).ToArray(),
+        };
+
+        var json = PersonaCardSerializer.Serialize(exportCard);
+        return File(Encoding.UTF8.GetBytes(json), "application/json", $"{slug}.persona.json");
+    }
+
+    /// <summary>
+    /// POST /api/personas/{slug}/import — upserts a persona from a portable <c>&lt;slug&gt;.persona.json</c>
+    /// card (SPEC F79.2, F79.3, F79.4, F79.6; STORY-209, PLAN T67). Every gate below runs BEFORE
+    /// <see cref="IPersonaImportStore.ImportAsync"/> — the one transactional write — so a rejection at
+    /// ANY of them means nothing was ever written (F79.6):
+    /// <list type="number">
+    /// <item>Slug format: the same lowercase/digit/single-hyphen shape
+    /// <c>LegacyPersonaCardMapper.Slugify</c> ever PRODUCES, checked here as a REJECT rather than a
+    /// silent auto-correct — a bad slug in an import request is an operator/tooling error worth
+    /// surfacing, not fixing up quietly.</item>
+    /// <item>Payload size: capped at <see cref="MaxImportBytes"/>, enforced by
+    /// <see cref="ReadBoundedBodyAsync"/> reading the body itself with a running-total guard — see
+    /// that method's remarks for why <see cref="RequestSizeLimitAttribute"/> alone is not enough.</item>
+    /// <item>Deserialization IS the validation (F71.1, F79.6): <see cref="PersonaCardSerializer.Deserialize"/>
+    /// is the only parse of the body, ever. A syntactically malformed body
+    /// (<see cref="JsonException"/>) or an in-range-looking-but-invalid field — e.g. a
+    /// <c>TasteRule.Weight</c> outside <c>[-1, 1]</c>, which throws <see cref="ArgumentOutOfRangeException"/>
+    /// from inside that record's own constructor on every construction path including this one
+    /// (carried PLAN T67 review note) — both map to 400, never an unhandled 500.</item>
+    /// <item>Schema major (F79.2): a card whose <see cref="PersonaCard.SchemaVersion"/> exceeds
+    /// <see cref="PersonaCard.CurrentSchemaVersion"/> is refused, the message naming both.</item>
+    /// </list>
+    /// Voice resolution (F79.4, <see cref="ResolveVoiceAsync"/>) runs after every gate above passes,
+    /// still before the write — its outcome (the legacy voice column to persist, plus any warning)
+    /// feeds straight into the <see cref="PersonaImportRequest"/> the write receives. The write's own
+    /// only failure mode, a name collision, maps to 409 — the same status every other write action on
+    /// this controller already uses for <see cref="PersonaWriteResult.NameConflict"/>.
+    /// </summary>
+    [HttpPost("{slug}/import")]
+    [Consumes("application/json")]
+    [RequestSizeLimit(MaxImportBytes)]
+    public async Task<IActionResult> Import(string slug, CancellationToken ct)
+    {
+        if (!SlugFormat().IsMatch(slug))
+            return BadRequest(BadSlugProblem(slug));
+
+        var (json, oversized) = await ReadBoundedBodyAsync(ct);
+        if (oversized)
+            return StatusCode(StatusCodes.Status413PayloadTooLarge, OversizedProblem());
+
+        PersonaCard? card;
+        try
+        {
+            card = PersonaCardSerializer.Deserialize(json);
+        }
+        catch (JsonException ex)
+        {
+            return BadRequest(MalformedCardProblem(ex.Message));
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return BadRequest(MalformedCardProblem(ex.Message));
+        }
+
+        if (card is null)
+            return BadRequest(MalformedCardProblem("The payload deserialized to no card."));
+
+        if (card.SchemaVersion > PersonaCard.CurrentSchemaVersion)
+            return BadRequest(NewerSchemaProblem(card.SchemaVersion));
+
+        var (legacyVoice, warnings) = await ResolveVoiceAsync(card.Voice, ct);
+
+        var outcome = await personaImportStore.ImportAsync(new PersonaImportRequest(slug, legacyVoice, card), ct);
+
+        if (outcome is PersonaImportOutcome.Imported succeeded)
+            logger.LogInformation(
+                "Persona imported slug={Slug} id={PersonaId} created={WasCreated} warnings={WarningCount}",
+                slug, succeeded.PersonaId, succeeded.WasCreated, warnings.Count);
+
+        return outcome switch
+        {
+            PersonaImportOutcome.Imported { WasCreated: true } imported =>
+                StatusCode(StatusCodes.Status201Created, new PersonaImportResponse(imported.PersonaId, slug, card.Name, warnings)),
+            PersonaImportOutcome.Imported imported =>
+                Ok(new PersonaImportResponse(imported.PersonaId, slug, card.Name, warnings)),
+            PersonaImportOutcome.NameConflict => Conflict(NameConflictProblem(card.Name)),
+            _ => StatusCode(StatusCodes.Status500InternalServerError),
+        };
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Reads <c>Request.Body</c> up to <see cref="MaxImportBytes"/> bytes, never trusting a
+    /// client-declared <c>Content-Length</c> alone (SPEC F79.6; security-api's fail-closed posture —
+    /// a chunked request carries no <c>Content-Length</c> header at all, so a header-only check would
+    /// let one through unbounded). The declared-length check is a fast reject when the client is
+    /// honest about it; the running-total check while reading is what actually enforces the cap
+    /// either way. Returns <c>Oversized: true</c> the instant the total crosses the cap, without
+    /// buffering anything past that point.
+    ///
+    /// <see cref="RequestSizeLimitAttribute"/> is ALSO applied to <see cref="Import"/> — real defense
+    /// in depth for a Kestrel deployment, where exceeding it can short-circuit even earlier — but it
+    /// is <see cref="Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature"/>-based and
+    /// <c>TestServer</c> (this route's own test suite) does not enforce that feature the way Kestrel's
+    /// transport does; this method is what actually makes the 256 KB cap real and testable regardless
+    /// of host.
+    /// </summary>
+    async Task<(string Json, bool Oversized)> ReadBoundedBodyAsync(CancellationToken ct)
+    {
+        if (Request.ContentLength is long declared && declared > MaxImportBytes)
+            return (string.Empty, true);
+
+        using var buffer = new MemoryStream();
+        var chunk = new byte[8192];
+        int read;
+        while ((read = await Request.Body.ReadAsync(chunk, ct)) > 0)
+        {
+            if (buffer.Length + read > MaxImportBytes)
+                return (string.Empty, true);
+
+            buffer.Write(chunk, 0, read);
+        }
+
+        return (Encoding.UTF8.GetString(buffer.ToArray()), false);
+    }
+
+    /// <summary>
+    /// Resolves <paramref name="voice"/> against this station's live TTS voice list (SPEC F79.4).
+    /// <see cref="VoiceSpec.Engine"/> plays no part in the check: this codebase has exactly one
+    /// configurable TTS backend at a time (<see cref="ITtsVoiceLister"/> lists "the voice ids
+    /// installed on the configured backend", singular — there is no per-engine dimension to route on
+    /// yet), so only <see cref="VoiceSpec.VoiceId"/> membership is checked. An empty
+    /// <see cref="VoiceSpec.VoiceId"/> already means "use the station default" and always resolves,
+    /// with no lookup at all.
+    ///
+    /// ENGINE-DOWN POSTURE (deliberate call, PLAN T67): a fault from <see cref="voiceLister"/> resolves
+    /// the card's voice AS GIVEN, with NO warning — never "can't verify, so warn anyway". F79.4 exists
+    /// so import succeeds on a stranger's station; a fault here most often means the TTS container is
+    /// mid-boot (this project's own compose bring-up ordering), and crying "unresolved" on a voice
+    /// that is actually installed the moment the container finishes starting would be a false alarm on
+    /// every import performed during that window — the more astonishing failure mode, not the less. A
+    /// voice that genuinely never resolves gets its warning the next time this route runs with the
+    /// engine reachable.
+    /// </summary>
+    async Task<(string LegacyVoice, IReadOnlyList<string> Warnings)> ResolveVoiceAsync(VoiceSpec voice, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(voice.VoiceId))
+            return (string.Empty, []);
+
+        IReadOnlyList<string> voices;
+        try
+        {
+            voices = await voiceLister.ListVoicesAsync(ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogWarning(ex, "Voice list unreachable during persona import — accepting the card's voice unverified");
+            return (voice.VoiceId, []);
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Voice list timed out during persona import — accepting the card's voice unverified");
+            return (voice.VoiceId, []);
+        }
+
+        if (voices.Contains(voice.VoiceId, StringComparer.Ordinal))
+            return (voice.VoiceId, []);
+
+        return (string.Empty,
+            [$"Voice \"{voice.VoiceId}\" is not available on this station; using the station default voice instead."]);
+    }
+
+    // Mirrors LegacyPersonaCardMapper.Slugify's own character class (lowercase letters, digits,
+    // single hyphens) expressed as a REJECT rather than a TRANSFORM — Slugify exists to turn an
+    // arbitrary persona name into a legal slug; this exists to refuse an illegal one arriving over
+    // the wire, never to silently fix it up.
+    [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$")]
+    private static partial Regex SlugFormat();
 
     /// <summary>
     /// Resolves the persona <see cref="Preview"/> should use, per the three-way precedence
@@ -338,5 +555,42 @@ public sealed class PersonaController(
         Status = StatusCodes.Status404NotFound,
         Title  = "Not found.",
         Detail = $"No persona with id {id} exists.",
+    };
+
+    static ProblemDetails UnknownSlugProblem(string slug) => new()
+    {
+        Status = StatusCodes.Status404NotFound,
+        Title  = "Not found.",
+        Detail = $"No persona with slug \"{slug}\" exists.",
+    };
+
+    static ProblemDetails BadSlugProblem(string slug) => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Invalid slug.",
+        Detail = $"\"{slug}\" is not a valid persona slug (lowercase letters, digits, and single hyphens only).",
+    };
+
+    static ProblemDetails OversizedProblem() => new()
+    {
+        Status = StatusCodes.Status413PayloadTooLarge,
+        Title  = "Payload too large.",
+        Detail = $"Persona cards are capped at {MaxImportBytes / 1024} KB.",
+    };
+
+    static ProblemDetails MalformedCardProblem(string detail) => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Malformed persona card.",
+        Detail = detail,
+    };
+
+    static ProblemDetails NewerSchemaProblem(int cardSchemaVersion) => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Unsupported schema version.",
+        Detail =
+            $"Card schema version {cardSchemaVersion} is newer than this station's supported version " +
+            $"{PersonaCard.CurrentSchemaVersion}.",
     };
 }

@@ -48,4 +48,12 @@ public interface IPersonaStore
     /// either fully present or not returned at all, never a half-populated one.
     /// </summary>
     Task<PersonaCard?> GetCardByIdAsync(long id, CancellationToken ct);
+
+    /// <summary>
+    /// Resolves a persona's id from its <c>slug</c> (SPEC F71.1's <c>UNIQUE(slug)</c> column) — the
+    /// primitive the export/import routes (F79.1, F79.3; STORY-208/209) need before they can read
+    /// <c>persona_memory</c>/<c>persona_taste</c>, both of which key off the numeric id, never the
+    /// slug. Null when no persona holds that slug.
+    /// </summary>
+    Task<long?> GetIdBySlugAsync(string slug, CancellationToken ct);
 }

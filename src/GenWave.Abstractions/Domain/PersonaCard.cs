@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace GenWave.Core.Domain;
 
 /// <summary>
@@ -17,6 +19,15 @@ namespace GenWave.Core.Domain;
 /// quirks per generation and never concatenates all of them (SPEC F71.3; wiring lands in STORY-193,
 /// not here). <see cref="EnergyDisposition"/> is a station-DJ energy knob in the <c>-1..+1</c> range;
 /// out-of-range values are a future prompt-assembly concern, not a card-construction one.
+///
+/// <see cref="Taste"/> (SPEC F79.1, F79.2, F82.1; ARCHITECTURE.md "Personalities on air") is
+/// **additive** — the card stays schema major 1 — and carries only <c>source='authored'</c>
+/// <see cref="TasteRule"/>s; export contains zero accrued/operator rows (F79.1), those live only in
+/// the station's own <c>persona_taste</c> table. Unlike <see cref="Quirks"/>/<see cref="Lore"/>/
+/// <see cref="Corrections"/>, <see cref="Taste"/> is nullable and omitted from JSON when null rather
+/// than always written as <c>[]</c>: every card built before this field existed omits it entirely,
+/// so a pre-F79 byte-stable pin round-trips unchanged (a caller that wants an explicit "no taste
+/// rules yet" writes <c>[]</c> itself, which serializes just like the sibling collections).
 /// </summary>
 public sealed record PersonaCard(
     int SchemaVersion,
@@ -27,4 +38,16 @@ public sealed record PersonaCard(
     VoiceSpec Voice,
     double EnergyDisposition,
     IReadOnlyList<string> Lore,
-    IReadOnlyList<PersonaCorrection> Corrections);
+    IReadOnlyList<PersonaCorrection> Corrections,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TasteRule>? Taste = null)
+{
+    /// <summary>
+    /// The only <see cref="SchemaVersion"/> major this codebase writes or, on import, accepts (SPEC
+    /// F71.1, F79.2) — single source of truth for both writers: <c>LegacyPersonaCardMapper.BuildCard</c>
+    /// stamps every reconciled card with this value, and the import route (STORY-209, PLAN T67)
+    /// rejects any card whose <see cref="SchemaVersion"/> exceeds it, naming both versions in the
+    /// rejection (F79.2's forward-compat contract — a NEWER major is refused; unknown fields within
+    /// the CURRENT major are silently tolerated by ordinary deserialization).
+    /// </summary>
+    public const int CurrentSchemaVersion = 1;
+}

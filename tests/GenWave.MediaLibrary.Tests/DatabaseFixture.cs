@@ -74,6 +74,12 @@ public sealed class DatabaseFixture : IAsyncLifetime
     /// once <c>station.persona_memory</c> exists (SPEC F71.1) its FK into <c>station.persona</c> makes
     /// Postgres refuse a plain TRUNCATE regardless of row count — same reason <see cref="ResetAsync"/>
     /// itself needed CASCADE once <c>library.media_rating</c> existed.
+    ///
+    /// STORY-215: also sweeps <c>station.booth_log</c> — TRUNCATE CASCADE follows every FK into the
+    /// truncated table regardless of its <c>ON DELETE</c> action, so <c>booth_log.persona_id</c>'s
+    /// <c>ON DELETE SET NULL</c> (F84.6) does not exempt it here the way it does a real DELETE. No
+    /// existing caller asserts booth-log survival across this reset; <see cref="ResetBoothLogAsync"/>
+    /// is the explicit reset for tests that care about booth-log content.
     /// </summary>
     public async Task ResetStationAsync()
     {
@@ -84,14 +90,17 @@ public sealed class DatabaseFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// Truncate <c>station.booth_log</c> and reset its identity (STORY-195). No CASCADE needed —
-    /// unlike <see cref="ResetStationAsync"/>'s target, nothing has a FK into this table.
+    /// Truncate <c>station.booth_log</c> and reset its identity (STORY-195). CASCADE (STORY-215,
+    /// PLAN T70): once <c>station.persona_taste_thumb</c> exists (SPEC F84.5) its FK into
+    /// <c>station.booth_log</c> makes Postgres refuse a plain TRUNCATE regardless of row count — same
+    /// reason <see cref="ResetStationAsync"/> itself needed CASCADE once <c>station.persona_memory</c>
+    /// existed.
     /// </summary>
     public async Task ResetBoothLogAsync()
     {
         await using var conn = await StationDataSource.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "truncate table station.booth_log restart identity";
+        cmd.CommandText = "truncate table station.booth_log restart identity cascade";
         await cmd.ExecuteNonQueryAsync();
     }
 

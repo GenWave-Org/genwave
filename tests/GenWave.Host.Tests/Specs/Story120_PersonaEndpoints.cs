@@ -83,6 +83,36 @@ file sealed class FakePersonaStore : IPersonaStore
     // this double satisfying IPersonaStore without scripting a path nothing here calls.
     public Task<PersonaCard?> GetCardByIdAsync(long id, CancellationToken ct) =>
         Task.FromResult<PersonaCard?>(null);
+
+    // Export (T66) is Story208's own coverage, not Story120's CRUD scenarios.
+    public Task<long?> GetIdBySlugAsync(string slug, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story120's CRUD scenarios.");
+}
+
+/// <summary>Unused-by-CRUD <see cref="IPersonaMemory"/> double (T66 added this constructor
+/// dependency to <see cref="PersonaController"/> for its export endpoint; none of this file's CRUD
+/// scenarios call it).</summary>
+file sealed class NotUsedPersonaMemory : IPersonaMemory
+{
+    public Task<long> RecordAsync(long personaId, string kind, string content, PersonaMemorySource source, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story120's CRUD scenarios.");
+
+    public Task MarkAiredAsync(long id, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story120's CRUD scenarios.");
+
+    public Task<IReadOnlyList<PersonaMemoryEntry>> RecallAsync(long personaId, RecallSpec spec, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story120's CRUD scenarios.");
+
+    public Task<IReadOnlyList<PersonaMemoryEntry>> ListAsync(long personaId, PersonaMemorySource source, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story120's CRUD scenarios.");
+}
+
+/// <summary>Unused-by-CRUD <see cref="IPersonaTasteReader"/> double — same reason as
+/// <see cref="NotUsedPersonaMemory"/> above.</summary>
+file sealed class NotUsedPersonaTasteReader : IPersonaTasteReader
+{
+    public Task<IReadOnlyList<PersonaTasteEntry>> ListAsync(long personaId, PersonaTasteSource? source, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story120's CRUD scenarios.");
 }
 
 /// <summary>
@@ -151,6 +181,25 @@ file sealed class NotUsedAdminMediaLookup : IAdminMediaLookup
 {
     public Task<(AdminMediaDto Row, long LibraryId)?> GetByIdWithLibraryAsync(long id, CancellationToken ct) =>
         Task.FromResult<(AdminMediaDto Row, long LibraryId)?>(null);
+}
+
+/// <summary>
+/// Unused-by-these-scenarios <see cref="IPersonaImportStore"/> double (T67 added this constructor
+/// dependency to <see cref="PersonaController"/> for its import endpoint; none of this file's CRUD
+/// scenarios call it). Throws if a scenario ever does reach it — Story209 owns the real coverage.
+/// </summary>
+file sealed class NotUsedPersonaImportStore : IPersonaImportStore
+{
+    public Task<PersonaImportOutcome> ImportAsync(PersonaImportRequest request, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story120's CRUD scenarios.");
+}
+
+/// <summary>Unused-by-these-scenarios <see cref="ITtsVoiceLister"/> double — same reason as
+/// <see cref="NotUsedPersonaImportStore"/> above.</summary>
+file sealed class NotUsedTtsVoiceLister : ITtsVoiceLister
+{
+    public Task<IReadOnlyList<string>> ListVoicesAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story120's CRUD scenarios.");
 }
 
 /// <summary>
@@ -235,6 +284,8 @@ public static class FeaturePersonaEndpoints
             store, settingsStore, stationMonitor,
             new NotUsedPersonaPreviewWriter(), new NotUsedActivePersonaAccessor(),
             new NotUsedAdminMediaLookup(), new FakeStationScopeProvider(LibraryScope.None),
+            new NotUsedPersonaMemory(), new NotUsedPersonaTasteReader(),
+            new NotUsedPersonaImportStore(), new NotUsedTtsVoiceLister(),
             NullLogger<PersonaController>.Instance);
 
     static IConfiguration BuildConfig(IEnumerable<KeyValuePair<string, string?>> values) =>

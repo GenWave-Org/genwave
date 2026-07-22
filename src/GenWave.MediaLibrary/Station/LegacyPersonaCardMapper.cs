@@ -16,9 +16,6 @@ namespace GenWave.MediaLibrary.Station;
 /// </summary>
 static partial class LegacyPersonaCardMapper
 {
-    /// <summary>The only <see cref="PersonaCard.SchemaVersion"/> this reconciliation writes (F71.1).</summary>
-    public const int CurrentSchemaVersion = 1;
-
     /// <summary>
     /// Builds a card with empty <see cref="PersonaCard.Quirks"/>/<see cref="PersonaCard.Lore"/>/
     /// <see cref="PersonaCard.Corrections"/> and a neutral <see cref="PersonaCard.EnergyDisposition"/>
@@ -27,7 +24,7 @@ static partial class LegacyPersonaCardMapper
     /// </summary>
     public static PersonaCard BuildCard(string name, string backstory, string style, string voice) =>
         new(
-            SchemaVersion: CurrentSchemaVersion,
+            SchemaVersion: PersonaCard.CurrentSchemaVersion,
             Name: name,
             Tagline: "",
             Soul: BuildSoul(backstory, style),

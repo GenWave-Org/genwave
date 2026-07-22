@@ -38,6 +38,14 @@ using Microsoft.Extensions.Options;
 /// </para>
 ///
 /// <para>
+/// Guards <c>Station:Envelope:EnergyMin</c>/<c>EnergyMax</c> (SPEC F80.1, F81.1, STORY-212): both
+/// must fall within <c>[0, 1]</c> (same "documentation-only [Range], this validator is the real
+/// floor" story as the nested knobs above) and <c>EnergyMin</c> must not exceed <c>EnergyMax</c> —
+/// mirrors <see cref="GenWave.Abstractions.Playout.EnergyRange"/>'s own construction-time invariant,
+/// so a misconfigured station never boots into a self-contradictory energy band.
+/// </para>
+///
+/// <para>
 /// Registered as a singleton and triggered by <c>ValidateOnStart()</c> in
 /// <c>Program.cs</c>.
 /// </para>
@@ -85,6 +93,18 @@ public sealed class StationOptionsValidator(ILogger<StationOptionsValidator> log
             return ValidateOptionsResult.Fail(
                 "Station:BoundaryBias:LookaheadMinutes must be non-negative " +
                 "(0 disables boundary-aware selection bias).");
+
+        if (options.Envelope.EnergyMin is < 0.0 or > 1.0)
+            return ValidateOptionsResult.Fail(
+                "Station:Envelope:EnergyMin must be within [0, 1].");
+
+        if (options.Envelope.EnergyMax is < 0.0 or > 1.0)
+            return ValidateOptionsResult.Fail(
+                "Station:Envelope:EnergyMax must be within [0, 1].");
+
+        if (options.Envelope.EnergyMin > options.Envelope.EnergyMax)
+            return ValidateOptionsResult.Fail(
+                "Station:Envelope:EnergyMin must not exceed Station:Envelope:EnergyMax.");
 
         if (options.SafeScope.LibraryIds.Count == 0)
         {

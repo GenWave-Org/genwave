@@ -21,4 +21,13 @@ namespace GenWave.Core.Domain;
 /// <c>tts:*</c> patter segments carry the cue analyzer's measured CueOutSec, rounded to the nearest
 /// millisecond, when cue analysis succeeded (SPEC F66.1) — null when it failed. Never fabricated.
 /// </param>
-public sealed record MediaItem(string MediaId, string Locator, string Title, Loudness Loudness, string? Artist = null, CuePoints? Cue = null, double? IntroEnergy = null, double? OutroEnergy = null, string? Album = null, string? Genre = null, int? Year = null, int? DurationMs = null);
+/// <param name="PersonaPick">
+/// SPEC F82.6, F83.1 (STORY-213, PLAN T64) — the persona ranker's diagnostics for this pick, carried
+/// straight from <see cref="RotationCandidate.PersonaPick"/> once <c>Orchestrator.GetNextAsync</c>
+/// narrows the winning candidate to this item; <see langword="null"/> for every envelope-only ladder
+/// pick, including the common persona-off case. This item rides on into <see cref="SegmentRequest.Track"/>
+/// as the previous/next track for a back-announce/lead-in, so a future copywriter consumer (T65) can
+/// read <see cref="PersonaPickDiagnostics.FiredRules"/>/<see cref="PersonaPickDiagnostics.IsExploration"/>
+/// off whichever track is airing, with no separate lookup.
+/// </param>
+public sealed record MediaItem(string MediaId, string Locator, string Title, Loudness Loudness, string? Artist = null, CuePoints? Cue = null, double? IntroEnergy = null, double? OutroEnergy = null, string? Album = null, string? Genre = null, int? Year = null, int? DurationMs = null, PersonaPickDiagnostics? PersonaPick = null);

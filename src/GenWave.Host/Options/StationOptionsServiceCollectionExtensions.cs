@@ -62,7 +62,12 @@ static class StationOptionsServiceCollectionExtensions
             // config-provider reload of Station:BoundaryBias:LookaheadMinutes reaches the
             // Orchestrator without a restart — but, unlike the four bindings above, this knob is
             // NOT joined to the settings allowlist (v1: boot/env-tunable only, no PUT write path).
-            .AddSingleton<IBoundaryBiasProvider, OptionsMonitorBoundaryBiasProvider>();
+            .AddSingleton<IBoundaryBiasProvider, OptionsMonitorBoundaryBiasProvider>()
+            // Live envelope seam (SPEC F81.3, STORY-212): Station:Envelope:* is advertised Live in
+            // the settings allowlist. Wraps IOptionsMonitor<StationOptions> and re-reads
+            // CurrentValue on every call, so a live PUT /api/settings genre/energy edit applies to
+            // the Orchestrator's very next pick with no api restart.
+            .AddSingleton<IEnvelopeProvider, OptionsMonitorEnvelopeProvider>();
 
         return services;
     }

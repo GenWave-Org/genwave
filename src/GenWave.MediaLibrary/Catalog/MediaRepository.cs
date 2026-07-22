@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Threading.Channels;
 using Dapper;
 using Microsoft.Extensions.Logging;
+using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Events;
@@ -129,10 +130,7 @@ sealed class MediaRepository(
         // orderedRecentIds is oldest-first, most-recent LAST (F41.1); tts:* ids are already stripped by
         // the Orchestrator, but any id that still fails to parse is silently dropped — mirrors
         // GetRandomReadyAsync's exclude-list parsing.
-        var recentIds = new List<long>(orderedRecentIds.Count);
-        foreach (var s in orderedRecentIds)
-            if (long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v))
-                recentIds.Add(v);
+        var recentIds = ParseIds(orderedRecentIds);
 
         // Tier 2 only compares against the artists of the LAST artistSeparation entries; a
         // non-positive separation disables the tier by supplying an empty comparison set.
@@ -174,6 +172,196 @@ sealed class MediaRepository(
             cancellationToken: ct));
 
         return row?.ToCandidate(logger);
+    }
+
+    /// <summary>Shared recent-id parse for the tiered rotation queries (F41.1): oldest-first list of
+    /// opaque string ids, any entry that fails to parse as our bigint id is silently dropped.</summary>
+    static List<long> ParseIds(IReadOnlyList<string> ids)
+    {
+        var parsed = new List<long>(ids.Count);
+        foreach (var s in ids)
+            if (long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v))
+                parsed.Add(v);
+        return parsed;
+    }
+
+    /// <summary>
+    /// SPEC F81.4/F81.1, STORY-212 — <see cref="GetRotationCandidateAsync"/>'s exact tiered
+    /// rotation-window/artist-separation query, additionally constrained by construction to
+    /// <paramref name="envelope"/>. Two extra WHERE predicates are ANDed into the same single-query
+    /// candidate fetch — never a wider fetch narrowed afterward in C#:
+    /// <list type="bullet">
+    /// <item><b>Genre allow-list</b> — omitted entirely when <see cref="SegmentEnvelope.Genres"/> is
+    /// empty (F81.1's "empty Genres = all genres"); otherwise a case-insensitive
+    /// <c>lower(genre) = any(...)</c> membership test, mirroring <see cref="BuildAdminWhere"/>'s
+    /// <c>GenresExact</c> predicate. A <c>NULL</c> genre never matches a non-empty list — an
+    /// untagged track cannot claim membership in a genre-curated envelope.</item>
+    /// <item><b>Energy band</b> — <c>energy BETWEEN Min AND Max</c>, but <c>energy IS NULL</c> always
+    /// passes. Decision (SPEC F81.4, documented per the task's explicit call): <c>energy</c> is a
+    /// population-wide percentile that only exists once <see cref="RecomputeEnergyPercentilesAsync"/>
+    /// has run since a row's last <see cref="WriteEnrichmentAsync"/> (SPEC F80.2's piggyback,
+    /// batched, not per-row-instant) — a freshly enriched, fully <c>ready + measurable</c> row can
+    /// legitimately have <c>NULL</c> energy for a while. Excluding it would let enrichment lag
+    /// silence an otherwise-playable track, which no envelope is worth. This is the opposite call
+    /// from the genre predicate above: an absent genre tag is permanently unknown, not a lag state,
+    /// so it stays excluded from a constrained list.</item>
+    /// </list>
+    /// Both predicates compose with, rather than replace, the existing rotation-window/artist-tier
+    /// ORDER BY and playable base predicate — F81.2's "the envelope filters; the bias ranks" applies
+    /// one level down here too: rotation preference still orders the pool, the envelope only decides
+    /// who is in it. Null is returned only when the scope is empty or the resulting
+    /// envelope-and-rotation-constrained pool is (mirrors <see cref="GetRotationCandidateAsync"/>'s
+    /// own never-drains contract) — the SPEC F81.6 relax-then-degrade ladder for a genuinely empty
+    /// pool is the provider's job (a later task), not this query's.
+    /// </summary>
+    public async Task<RotationCandidate?> GetEnvelopeCandidateAsync(
+        LibraryScope scope,
+        IReadOnlyList<string> orderedRecentIds,
+        int artistSeparation,
+        SegmentEnvelope envelope,
+        CancellationToken ct)
+    {
+        // Default-deny: no scope means no access, no SQL issued.
+        if (scope.IsEmpty) return null;
+
+        var recentIds = ParseIds(orderedRecentIds);
+
+        var recentArtistIds = artistSeparation > 0
+            ? recentIds.Skip(Math.Max(0, recentIds.Count - artistSeparation)).ToArray()
+            : [];
+
+        long? mostRecentId = recentIds.Count > 0 ? recentIds[^1] : null;
+
+        // Omitted entirely (not passed as a typed-null array parameter) when Genres is empty — the
+        // predicate simply doesn't exist in that case, which IS "no genre constraint" by
+        // construction rather than a null-check Postgres has to reason about.
+        var genresLower = envelope.Genres.Count > 0
+            ? envelope.Genres.Select(g => g.ToLowerInvariant()).ToArray()
+            : null;
+        var genrePredicate = genresLower is not null ? "and lower(m.genre) = any(@genresLower)" : "";
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<RotationCandidateRow>(new CommandDefinition($"""
+            select
+              m.id, m.path, m.format, m.state, m.title, m.duration_ms, m.sample_rate, m.channels,
+              m.bitrate_kbps, m.artist, m.album, m.genre, m.year, m.integrated_lufs, m.true_peak_dbtp,
+              m.measurable, m.cue_in_sec, m.cue_out_sec, m.intro_energy, m.outro_energy,
+              (m.id = any(@recentIds)) as repeated_recent,
+              (
+                m.artist is not null and trim(m.artist) <> ''
+                and exists (
+                  select 1 from library.media rm
+                  where rm.id = any(@recentArtistIds)
+                    and rm.artist is not null and trim(rm.artist) <> ''
+                    and lower(trim(rm.artist)) = lower(trim(m.artist))
+                )
+              ) as repeated_artist
+            from library.media m
+            left join library.media_rating r on r.media_id = m.id
+            where m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)
+              and m.library_id = any(@libraryIds)
+              and (m.energy is null or (m.energy >= @energyMin and m.energy <= @energyMax))
+              {genrePredicate}
+            order by
+              repeated_recent asc,
+              repeated_artist asc,
+              coalesce(m.id = @mostRecentId, false) asc,
+              random()
+            limit 1
+            """,
+            new
+            {
+                recentIds, recentArtistIds, mostRecentId,
+                libraryIds = scope.LibraryIds.ToArray(),
+                genresLower,
+                energyMin = envelope.EnergyRange.Min,
+                energyMax = envelope.EnergyRange.Max,
+            },
+            cancellationToken: ct));
+
+        return row?.ToCandidate(logger);
+    }
+
+    /// <summary>
+    /// SPEC F82.2, STORY-213 (PLAN T64) — <see cref="GetEnvelopeCandidateAsync"/>'s SAME
+    /// by-construction envelope+rotation-tier filtering and playable predicate, widened from
+    /// <c>LIMIT 1</c> to <c>LIMIT @limit</c> so <c>GenWave.Orchestration.PersonaRanker</c> has a real
+    /// candidate POOL — not one row — to score. Additionally projects <c>energy</c> (the LUFS
+    /// percentile, SPEC F80.1 — <see langword="null"/> while enrichment lags, same story as this
+    /// method's own energy-band WHERE predicate) and <c>moods</c> (SPEC F85.1; empty until a future
+    /// mood-tagger enrichment pass lands data) onto each row — the two fields <see cref="MediaReference"/>
+    /// itself does not surface that the ranker's score/taste-match formulas need.
+    /// <paramref name="limit"/> is clamped to <c>[1, 200]</c>, the same ceiling <see cref="ListAsync"/>
+    /// enforces, so a misconfigured <c>PersonaRanker:TopK</c> can never turn one pick into an
+    /// unbounded fetch. Empty <paramref name="scope"/> short-circuits to an empty pool (default-deny),
+    /// no SQL issued.
+    /// </summary>
+    public async Task<IReadOnlyList<EnvelopeCandidateRow>> GetEnvelopeCandidatePoolAsync(
+        LibraryScope scope,
+        IReadOnlyList<string> orderedRecentIds,
+        int artistSeparation,
+        SegmentEnvelope envelope,
+        int limit,
+        CancellationToken ct)
+    {
+        // Default-deny: no scope means no access, no SQL issued.
+        if (scope.IsEmpty) return [];
+
+        var recentIds = ParseIds(orderedRecentIds);
+
+        var recentArtistIds = artistSeparation > 0
+            ? recentIds.Skip(Math.Max(0, recentIds.Count - artistSeparation)).ToArray()
+            : [];
+
+        long? mostRecentId = recentIds.Count > 0 ? recentIds[^1] : null;
+
+        var genresLower = envelope.Genres.Count > 0
+            ? envelope.Genres.Select(g => g.ToLowerInvariant()).ToArray()
+            : null;
+        var genrePredicate = genresLower is not null ? "and lower(m.genre) = any(@genresLower)" : "";
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<EnvelopeCandidatePoolRow>(new CommandDefinition($"""
+            select
+              m.id, m.path, m.format, m.state, m.title, m.duration_ms, m.sample_rate, m.channels,
+              m.bitrate_kbps, m.artist, m.album, m.genre, m.year, m.integrated_lufs, m.true_peak_dbtp,
+              m.measurable, m.cue_in_sec, m.cue_out_sec, m.intro_energy, m.outro_energy,
+              m.energy, m.moods,
+              (m.id = any(@recentIds)) as repeated_recent,
+              (
+                m.artist is not null and trim(m.artist) <> ''
+                and exists (
+                  select 1 from library.media rm
+                  where rm.id = any(@recentArtistIds)
+                    and rm.artist is not null and trim(rm.artist) <> ''
+                    and lower(trim(rm.artist)) = lower(trim(m.artist))
+                )
+              ) as repeated_artist
+            from library.media m
+            left join library.media_rating r on r.media_id = m.id
+            where m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)
+              and m.library_id = any(@libraryIds)
+              and (m.energy is null or (m.energy >= @energyMin and m.energy <= @energyMax))
+              {genrePredicate}
+            order by
+              repeated_recent asc,
+              repeated_artist asc,
+              coalesce(m.id = @mostRecentId, false) asc,
+              random()
+            limit @limit
+            """,
+            new
+            {
+                recentIds, recentArtistIds, mostRecentId,
+                libraryIds = scope.LibraryIds.ToArray(),
+                genresLower,
+                energyMin = envelope.EnergyRange.Min,
+                energyMax = envelope.EnergyRange.Max,
+                limit = Math.Clamp(limit, 1, 200),
+            },
+            cancellationToken: ct));
+
+        return rows.Select(r => r.ToPoolCandidate(logger)).ToList();
     }
 
     public async Task<PagedResult<MediaReference>> ListAsync(LibraryScope scope, MediaQuery query, CancellationToken ct)
@@ -870,6 +1058,128 @@ sealed class MediaRepository(
             cancellationToken: ct));
     }
 
+    // ── Energy percentile (SPEC F80.1/F80.2, STORY-211) ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Whether any ready row's <c>integrated_lufs</c> has moved (added or changed) since <c>energy</c>
+    /// was last computed for it — the F80.2 piggyback trigger. <see cref="WriteEnrichmentAsync"/>
+    /// nulls <c>energy</c> unconditionally on every LUFS (re)write, so a claimable row here is exactly
+    /// "a second-tier enrichment pass touched LUFS since the last recompute" — no separate bookkeeping
+    /// timestamp needed. A batch that wrote no LUFS (e.g. a cue/BPM/year-lookup-only pass) leaves this
+    /// false, so <see cref="EnrichmentService.RecomputeEnergyPercentileAsync"/> skips the recompute.
+    /// </summary>
+    public async Task<bool> HasStaleEnergyPercentilesAsync(CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        return await conn.ExecuteScalarAsync<bool>(new CommandDefinition(
+            "select exists(select 1 from library.media " +
+            "where state = 'ready' and integrated_lufs is not null and energy is null)",
+            cancellationToken: ct));
+    }
+
+    /// <summary>
+    /// Recomputes <c>energy</c> (SPEC F80.1) for the whole ready library in one set-based UPDATE:
+    /// <c>percent_rank()</c> of <c>integrated_lufs</c> over the ready population. Non-ready rows are
+    /// excluded from both the ranking population and the write, so a row's stale LUFS surviving a
+    /// state change (e.g. to <c>unavailable</c>/<c>failed</c>) never skews another row's rank.
+    /// Recomputes every ready row, not just the ones that were dirtied — a percentile is only
+    /// meaningful relative to the full population, so one added/changed row shifts every other row's
+    /// rank too. Idempotent: re-running with no LUFS change reproduces the same ranks.
+    /// </summary>
+    public async Task RecomputeEnergyPercentilesAsync(CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await conn.ExecuteAsync(new CommandDefinition("""
+            with ranked as (
+              select id, percent_rank() over (order by integrated_lufs) as pct
+              from library.media
+              where state = 'ready' and integrated_lufs is not null
+            )
+            update library.media m
+            set energy = ranked.pct
+            from ranked
+            where m.id = ranked.id
+            """, cancellationToken: ct));
+    }
+
+    // ── Moods (SPEC F85.1/F85.2, STORY-216) ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Writes up to <see cref="MoodVocabulary.MaxMoodsPerTrack"/> moods for a track — the F85.1
+    /// write-time vocabulary gate. Every entry of <paramref name="moods"/> is checked against
+    /// <see cref="MoodVocabulary.Terms"/> and the count against the cap BEFORE any SQL is issued;
+    /// a single out-of-vocabulary entry or an over-cap set rejects the WHOLE write, never a partial
+    /// one — the tagger (T72) cannot invent a mood, and a rejection here is a storage-level
+    /// backstop that holds regardless of what upstream parsing already filtered out.
+    /// <paramref name="moods"/> may be empty (a track attempted but assigned no mood); there is no
+    /// lower-bound check here — F85.4's "require ≥ 1 survivor" is the tagger's own parse-time rule
+    /// for what counts as a miss, not a storage invariant this method enforces.
+    /// </summary>
+    public async Task<MoodWriteResult> WriteMoodsAsync(long id, IReadOnlyList<string> moods, CancellationToken ct)
+    {
+        if (moods.Count > MoodVocabulary.MaxMoodsPerTrack)
+            return MoodWriteResult.TooManyMoods;
+
+        foreach (var mood in moods)
+            if (!MoodVocabulary.Contains(mood))
+                return MoodWriteResult.UnknownMood;
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var affected = await conn.ExecuteAsync(new CommandDefinition(
+            "update library.media set moods = @moods where id = @id",
+            new { id, moods = moods.ToArray() }, cancellationToken: ct));
+
+        return affected > 0 ? MoodWriteResult.Written : MoodWriteResult.NotFound;
+    }
+
+    /// <summary>
+    /// Rows eligible for mood tagging (SPEC F85.2, T72): <c>state='ready'</c>, <c>moods IS NULL</c>,
+    /// <c>mood_tag_missed_at IS NULL</c>, and both artist and title are non-blank — mirrors
+    /// <see cref="ListYearLookupClaimsAsync"/>'s own F76 shape exactly (a blank tag gives the tagger
+    /// nothing to describe, so it is never claimed, and never stamped either, pending an operator tag
+    /// fix). Gated on <c>mood_tag_missed_at</c>, NOT the row simply having <c>moods IS NULL</c> alone —
+    /// a genuine miss also leaves <c>moods</c> null, so the sentinel is what tells the two states apart
+    /// (see <see cref="StampMoodTagAttemptAsync"/>). Limited to <paramref name="limit"/> rows per tick.
+    /// </summary>
+    public async Task<IReadOnlyList<MoodTagClaimRow>> ListMoodTagClaimsAsync(int limit, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<MoodTagClaimRow>(new CommandDefinition(
+            "select id, artist, title, genre from library.media " +
+            "where state = 'ready' and moods is null and mood_tag_missed_at is null " +
+            "and coalesce(trim(artist), '') <> '' and coalesce(trim(title), '') <> '' " +
+            "limit @limit",
+            new { limit }, cancellationToken: ct));
+        return rows.AsList();
+    }
+
+    /// <summary>
+    /// Stamps the outcome of one mood-tagger attempt (SPEC F85.2, T72) — the F76 MusicBrainz
+    /// etiquette pattern applied to moods. Called once per row per attempt, in ADDITION to (never
+    /// instead of) <see cref="WriteMoodsAsync"/> when the tagger actually produced a non-empty,
+    /// in-vocabulary mood set — <see cref="WriteMoodsAsync"/>'s own vocabulary/cap rejection remains
+    /// the ONE backstop for what gets stored; this method never re-validates moods itself.
+    ///
+    /// <c>mood_tagged_at</c> is stamped unconditionally — success, miss, or failure — as an
+    /// "attempted at" telemetry marker (mirrors <c>year_lookup_at</c>); it does not gate re-claiming
+    /// on its own. <c>mood_tag_missed_at</c> — the actual re-claim gate
+    /// (<see cref="ListMoodTagClaimsAsync"/>) — is stamped ONLY when <paramref name="missed"/> is
+    /// true: a completed round trip that produced zero in-vocabulary survivors (SPEC F85.4). Both a
+    /// failed round trip and a successfully written mood set pass <paramref name="missed"/> false —
+    /// the former stays eligible and is retried next tick; the latter is naturally excluded from then
+    /// on because <c>moods</c> is no longer null.
+    /// </summary>
+    public async Task StampMoodTagAttemptAsync(long id, bool missed, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await conn.ExecuteAsync(new CommandDefinition(
+            "update library.media set " +
+            "mood_tagged_at = now(), " +
+            "mood_tag_missed_at = case when @missed then now() else mood_tag_missed_at end " +
+            "where id = @id",
+            new { id, missed }, cancellationToken: ct));
+    }
+
     /// <summary>
     /// Rows eligible for a MusicBrainz year lookup: <c>state='ready'</c>, <c>year IS NULL</c>,
     /// <c>year_lookup_missed_at IS NULL</c>, and both artist and title are non-blank (SPEC F48.3,
@@ -967,6 +1277,13 @@ sealed class MediaRepository(
               energy_analyzed_at = @EnergyAnalyzedAt,
               bpm                = @Bpm,
               bpm_analyzed_at    = @BpmAnalyzedAt,
+              -- energy (SPEC F80.1/F80.2, STORY-211): the LUFS-percentile column, NOT the
+              -- intro_energy/outro_energy above. Nulled unconditionally every time integrated_lufs is
+              -- (re)written — added or changed — so this row is picked up by
+              -- HasStaleEnergyPercentilesAsync the next time the enrichment second tier checks for a
+              -- population that has moved (RecomputeEnergyPercentilesAsync recomputes the whole ready
+              -- library in one pass; a single row's own energy is meaningless until that pass runs).
+              energy      = null,
               state       = 'ready',
               enriched_at = now()
             where id = @id

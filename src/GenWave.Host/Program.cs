@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Api;
 using GenWave.Host.Configuration;
+using GenWave.Host.Enrichment;
 using GenWave.Host.Health;
 using GenWave.Host.Options;
 using GenWave.Host.Playout;
@@ -43,10 +44,20 @@ builder.Services
     .AddMediaLibrary(cfg)
     // TTS: options, copy-writer chain (LLM → template fallback), synthesizer/voices clients.
     .AddGenWaveTts(cfg)
+    // The mood-tagger batch's degradation gate (SPEC F85.3, STORY-216, T72): bridges
+    // GenWave.MediaLibrary's EnrichmentService to Tts's F69 degradation state without
+    // GenWave.MediaLibrary ever referencing GenWave.Tts. MUST run after .AddGenWaveTts(cfg) above
+    // (IDegradationModeReader/LlmOptions).
+    .AddGenWaveMoodTaggingGate()
     // Safe-loop authoring pipeline (F27): TTS render → jingle-bed mix → measure → authored insert.
     .AddGenWaveSafeSegmentAuthoring()
     // SEAM 1: the Orchestrator is the INextItemProvider (music + TTS patter interleave).
     .AddGenWaveOrchestration()
+    // Real ranker-backed persona pick provider (SPEC F81.6 rung 0, F82; STORY-213, PLAN T64) —
+    // MUST run after AddGenWaveOrchestration so its AddSingleton<IPersonaPickProvider> wins over
+    // that call's own TryAddSingleton<..., NoOpPersonaPickProvider> default (see this extension's
+    // own remarks).
+    .AddGenWavePersonaRanking(cfg)
     // Playout chain: engine control → feeder → feeder service → PlayoutSupervisor (hosted).
     .AddGenWavePlayout()
     // Boot seed: branded safe-loop backstop (F27.6), one-shot + idempotent.

@@ -97,6 +97,29 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	CREATE INDEX IF NOT EXISTS persona_memory_recall
 	  ON station.persona_memory (persona_id, kind, last_aired_at DESC NULLS FIRST);
 
+	-- Persona taste (SPEC F82.1, F84.1-F84.3; STORY-213; ARCHITECTURE.md "Personalities on air"): the
+	-- persona's opinions in one shape across all three provenances — hand-authored (imported with the
+	-- card, F79.1), operator-nudged (a direct edit), and accrued (learned from operator thumbs, F84.1,
+	-- once F84's guardrails land). FK CASCADE mirrors persona_memory above: deleting a persona deletes
+	-- its taste with it, never orphaned rows. predicate/context are JSONB documents
+	-- (GenWave.Core.Domain.TastePredicate/TasteContext, T56) rather than relational columns — an
+	-- evolving match/gate shape with no query pattern yet justifying first-class columns. The ranker
+	-- (T63) and the accrual/eviction write path (T70, F84.3's cap-50-weakest-evicted) are later tasks;
+	-- this table has no consumer yet (T59).
+	CREATE TABLE IF NOT EXISTS station.persona_taste (
+	  id         serial      PRIMARY KEY,
+	  persona_id integer     NOT NULL REFERENCES station.persona (id) ON DELETE CASCADE,
+	  predicate  jsonb       NOT NULL,
+	  context    jsonb       NOT NULL,
+	  weight     real        NOT NULL CHECK (weight BETWEEN -1 AND 1),
+	  source     text        NOT NULL CHECK (source IN ('authored', 'operator', 'accrued')),
+	  created_at timestamptz NOT NULL DEFAULT now(),
+	  updated_at timestamptz NOT NULL DEFAULT now()
+	);
+
+	CREATE INDEX IF NOT EXISTS persona_taste_persona_source
+	  ON station.persona_taste (persona_id, source);
+
 	-- Booth log (SPEC F72.1-F72.3, STORY-195): the operator-readable "what the DJ did and said"
 	-- narrative feed — track starts, patter airs, degradation mode changes. Retention (default 14
 	-- days, BoothLog:RetentionDays) is enforced at insert time in application code (BoothLogRepository),
@@ -105,11 +128,42 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  id          bigserial   PRIMARY KEY,
 	  occurred_at timestamptz NOT NULL DEFAULT now(),
 	  kind        text        NOT NULL,
-	  summary     text        NOT NULL
+	  summary     text        NOT NULL,
+	  -- nullable-fk (SPEC F84.6, STORY-215): the persona on air when a TRACK-START row aired,
+	  -- stamped by the booth-log drain loop at write time — never inferred later. NULL for every
+	  -- non-track row, a persona-less airing, or a row that predates this column; all three are
+	  -- equally "un-thumbable" for taste accrual (T70). ON DELETE SET NULL, not CASCADE (unlike
+	  -- persona_memory/persona_taste below): deleting a persona must never delete booth-log HISTORY
+	  -- rows — it only degrades their stamp to unstamped, the same un-thumbable state above.
+	  persona_id  integer     REFERENCES station.persona (id) ON DELETE SET NULL,
+	  -- SPEC F84.1, STORY-215, PLAN T70: the same track's STRUCTURED artist, captured the same
+	  -- synchronous-at-air-time way as persona_id above and for the same reason — the accrual write
+	  -- path needs a real artist value to build an artist-predicate rule from, never a regex over
+	  -- summary's narrative prose. NULL for every non-track row or a track aired with no known
+	  -- artist. Never surfaced through IBoothLogReader/BoothLogEntry — read directly by the accrual
+	  -- store only, inside the same transaction as the nudge it attributes.
+	  artist      text
 	);
 
 	-- Keyset paging spine (SPEC F72.2): newest-first (occurred_at DESC, id DESC) with no OFFSET —
 	-- matches BoothLogRepository.ReadAsync's ORDER BY / row-comparison predicate exactly.
 	CREATE INDEX IF NOT EXISTS booth_log_paging
 	  ON station.booth_log (occurred_at DESC, id DESC);
+
+	-- Persona taste thumb ledger (SPEC F84.5, STORY-215, PLAN T70): the durable idempotency record
+	-- for an operator taste thumb, keyed (persona_id, booth_log_id, direction) — a double-tap, or a
+	-- now-playing + booth-log tap on the SAME airing/direction, is the exact same row, so
+	-- `ON CONFLICT ... DO NOTHING` is the entire dedup mechanism (never in-memory, which would forget
+	-- on every restart). Also the durable source T71's "already thumbed" UI state reads. FK CASCADE
+	-- on both columns: a deleted persona or an evicted (retention-swept) booth-log row makes its own
+	-- thumb-ledger rows meaningless, so they go with it — unlike booth_log.persona_id's own ON DELETE
+	-- SET NULL (a HISTORY-row survival concern that does not apply to this ledger).
+	CREATE TABLE IF NOT EXISTS station.persona_taste_thumb (
+	  id           bigserial   PRIMARY KEY,
+	  persona_id   integer     NOT NULL REFERENCES station.persona (id) ON DELETE CASCADE,
+	  booth_log_id bigint      NOT NULL REFERENCES station.booth_log (id) ON DELETE CASCADE,
+	  direction    text        NOT NULL CHECK (direction IN ('up', 'down')),
+	  created_at   timestamptz NOT NULL DEFAULT now(),
+	  UNIQUE (persona_id, booth_log_id, direction)
+	);
 	SQL

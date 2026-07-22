@@ -5,8 +5,13 @@ import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "@/components/ui/toast";
+import { useVoiceList } from "@/lib/use-voice-list";
 import { VoiceControl } from "../safe-content/VoiceControl";
+import { PersonaExportLink } from "./PersonaExportLink";
+import { PersonaImportPanel } from "./PersonaImportPanel";
 import { PersonaPreview } from "./PersonaPreview";
+import { readErrorMessage } from "./persona-http";
+import { usePersonaVoiceWarning } from "./use-persona-voice-warning";
 import type { PersonaDto } from "./types";
 
 export interface PersonasClientProps {
@@ -25,30 +30,6 @@ interface PersonaRequestBody {
   backstory: string;
   style: string;
   voice?: string;
-}
-
-/** ProblemDetails body shape returned on 400/409 from the personas CRUD endpoints. */
-interface ProblemDetailsBody {
-  detail?: string;
-}
-
-function isProblemDetailsBody(raw: unknown): raw is ProblemDetailsBody {
-  return typeof raw === "object" && raw !== null;
-}
-
-/** Extracts the ProblemDetails `detail` message from a failed response, falling back to a
- * generic one — the detail-first convention every other CRUD mutation on this page (and
- * SafeContentClient/LibrariesTab) already uses; contrast PersonaPreview's title-first reader. */
-async function readErrorMessage(resp: Response): Promise<string> {
-  try {
-    const raw = (await resp.json()) as unknown;
-    if (isProblemDetailsBody(raw) && typeof raw.detail === "string" && raw.detail !== "") {
-      return raw.detail;
-    }
-  } catch {
-    // malformed or empty body — fall through to the generic message
-  }
-  return `Unexpected error (${resp.status})`;
 }
 
 type FormMode = { kind: "create" } | { kind: "edit"; id: number };
@@ -101,6 +82,13 @@ const HEADER_CELL = "py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[
  * single-writer deviation — see `PersonaController`), so writes here go straight through `fetch`
  * rather than the ETag-bearing `useRowPatch` hook; failures toast per F31.3, mirroring
  * SafeContentClient/LibrariesTab's detail-first ProblemDetails reader.
+ *
+ * PLAN T68 (STORY-209/210, SPEC F79) adds three more surfaces: `PersonaExportLink` per row
+ * (a plain download anchor, F79.1); `PersonaImportPanel` (file → preview → confirm → import,
+ * F79.4–F79.6) whose success refreshes this list via `refreshPersonas` rather than splicing a
+ * partial row in (the import response carries no full `PersonaDto`); and the F79.4/F79.5
+ * import-warning banner in the edit form, derived on read by `usePersonaVoiceWarning` and linked
+ * to the `VoiceControl` picker right below it.
  */
 export function PersonasClient({ initialPersonas, initialActiveId }: PersonasClientProps): ReactNode {
   const confirm = useConfirm();
@@ -115,7 +103,28 @@ export function PersonasClient({ initialPersonas, initialActiveId }: PersonasCli
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [activatingId, setActivatingId] = useState<number | null>(null);
 
+  // F79.4/F79.5 import-warning derivation: the live voice list (shared implementation with
+  // VoiceControl's own dropdown, see useVoiceList's remarks) compared against the edit-form
+  // candidate's export card. null candidate outside the edit form clears any prior warning.
+  const voiceList = useVoiceList();
+  const editingPersona = mode.kind === "edit" ? personas.find((p) => p.id === mode.id) ?? null : null;
+  const voiceWarning = usePersonaVoiceWarning(editingPersona, voiceList);
+
   const isNameBlank = form.name.trim() === "";
+
+  /** Re-reads the full persona list (SPEC F79.3's import upsert may create or update a row this
+   * component has no local copy of yet) — called after a successful import; best-effort, since
+   * the import itself already succeeded and toasted (F28.9). */
+  async function refreshPersonas(): Promise<void> {
+    try {
+      const resp = await fetch("/api/personas");
+      if (resp.ok) {
+        setPersonas((await resp.json()) as PersonaDto[]);
+      }
+    } catch {
+      // stale list until the next action — not a lost write.
+    }
+  }
 
   function startEdit(persona: PersonaDto): void {
     setMode({ kind: "edit", id: persona.id });
@@ -309,7 +318,19 @@ export function PersonasClient({ initialPersonas, initialActiveId }: PersonasCli
             />
           </div>
 
+          {voiceWarning !== null && (
+            <p role="alert" className="text-[0.82rem] text-danger">
+              Voice &quot;{voiceWarning.voiceId}&quot; from the imported card isn&apos;t available on
+              this station — the persona is using the station default.{" "}
+              <a href="#persona-voice" className="font-semibold underline">
+                Pick a voice below
+              </a>
+              .
+            </p>
+          )}
+
           <VoiceControl
+            id="persona-voice"
             value={form.voice}
             onChange={(voice) => setForm((prev) => ({ ...prev, voice }))}
             disabled={isSaving}
@@ -335,6 +356,17 @@ export function PersonasClient({ initialPersonas, initialActiveId }: PersonasCli
               backstory: form.backstory,
               style: form.style,
               voice: form.voice,
+            }}
+          />
+        </div>
+      </section>
+
+      <section aria-label="Import persona" className="rounded-[6px] border border-line bg-surface p-5">
+        <h2 className="font-display text-[1.1rem] text-ink">Import a persona</h2>
+        <div className="mt-4">
+          <PersonaImportPanel
+            onImported={() => {
+              void refreshPersonas();
             }}
           />
         </div>
@@ -419,6 +451,7 @@ export function PersonasClient({ initialPersonas, initialActiveId }: PersonasCli
                             >
                               Delete
                             </Button>
+                            <PersonaExportLink persona={persona} />
                           </div>
                           <PersonaPreview
                             target={{ kind: "saved", personaId: persona.id, voice: persona.voice }}

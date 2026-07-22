@@ -54,10 +54,21 @@ file sealed class FakeBoothLogReader(IReadOnlyList<BoothLogEntry> allNewestFirst
         e.OccurredAt < cursor.OccurredAt || (e.OccurredAt == cursor.OccurredAt && e.Id < cursor.Id);
 }
 
+/// <summary>
+/// <see cref="IPersonaTasteAccrualStore"/> stub for this file's facts, none of which exercise the
+/// taste-thumb route (STORY-215, PLAN T70) — only the paging/admin-surface behavior behind
+/// <see cref="IBoothLogReader"/> is this file's concern.
+/// </summary>
+file sealed class NotSupportedPersonaTasteAccrualStore : IPersonaTasteAccrualStore
+{
+    public Task<TasteThumbOutcome> ThumbAsync(long boothLogId, TasteThumbDirection direction, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story195_BoothLog.cs's paging/admin-surface facts.");
+}
+
 /// <summary>Builds a <see cref="BoothLogController"/> wired to the given fake reader.</summary>
 file static class BoothLogControllerFactory
 {
-    public static BoothLogController Build(IBoothLogReader reader) => new(reader);
+    public static BoothLogController Build(IBoothLogReader reader) => new(reader, new NotSupportedPersonaTasteAccrualStore());
 }
 
 // ── WebApplicationFactory for the auth/surface posture ACs ──────────────────────────────────────────

@@ -165,7 +165,29 @@ static class LlmPromptBuilder
             $"Current date/time (station-local): {stationLocalNow.ToString("dddd, MMMM d, yyyy, h:mm tt", CultureInfo.InvariantCulture)}";
     }
 
-    public static string BuildUserContent(SegmentRequest request, string stationClockLine)
+    /// <summary>
+    /// SPEC F83.2 — the exploration lampshade: the pick came from the bias-blind exploration slice
+    /// (<c>PersonaRanker.PickAsync</c>'s own contract guarantees <see cref="PersonaPickDiagnostics.FiredRules"/>
+    /// is empty in this case — bias-blind by construction, never a post-hoc zeroing), so there is
+    /// nothing to attribute it to. States plainly that the pick sits outside the persona's usual
+    /// taste and invites an OPTIONAL lampshade ("not my usual...") — never a fired rule.
+    /// </summary>
+    const string ExplorationLampshadeLine =
+        "Taste note: this pick sits outside the persona's usual taste (an exploration pick) - you " +
+        "may lampshade that on air (e.g. \"not my usual pick, but...\"); never credit it to a taste rule.";
+
+    /// <summary>
+    /// Composes the user-content half of the prompt (SPEC F34.3, F71.8, F83.1-F83.3): station/time/
+    /// clock/segment framing, then whatever the track itself carries (title/artist/album/genre/year —
+    /// unchanged since before F71), then, last, an OPTIONAL persona-taste line (see
+    /// <see cref="BuildTasteLine"/>) so it reads as one more piece of color about THIS track rather
+    /// than a separate directive. <paramref name="previouslyVoicedTasteNotes"/> is the immediately
+    /// preceding ON-AIR break's fired-rule descriptions (see <see cref="DescribeFiredRules"/>) — see
+    /// <see cref="LlmCopyWriter"/>'s own remarks on where that memory lives and why a preview never
+    /// supplies it.
+    /// </summary>
+    public static string BuildUserContent(
+        SegmentRequest request, string stationClockLine, IReadOnlyList<string> previouslyVoicedTasteNotes)
     {
         var lines = new List<string>
         {
@@ -184,8 +206,80 @@ static class LlmPromptBuilder
             if (!string.IsNullOrEmpty(track.Album)) lines.Add($"Album: {track.Album}");
             if (!string.IsNullOrEmpty(track.Genre)) lines.Add($"Genre: {track.Genre}");
             if (track.Year is { } year) lines.Add($"Year: {year}");
+
+            var tasteLine = BuildTasteLine(track.PersonaPick, previouslyVoicedTasteNotes);
+            if (tasteLine is not null)
+                lines.Add(tasteLine);
         }
 
         return string.Join('\n', lines);
     }
+
+    /// <summary>
+    /// SPEC F83.1, F83.2, F83.3 (STORY-214, PLAN T65) — the persona-taste line, or null when there is
+    /// nothing to say. Three shapes, in priority order:
+    ///
+    /// <list type="bullet">
+    /// <item>
+    /// <paramref name="personaPick"/> is null (F83.3) — no persona pick backed this track (persona
+    /// layer off, or any envelope-only ladder pick with no ranker involved, SPEC F81.6) — returns
+    /// null unconditionally, even when <paramref name="previouslyVoicedTasteNotes"/> is non-empty
+    /// (a stale marker from an earlier persona-on break must never leak into a persona-off prompt).
+    /// Nothing is appended, so a persona-off prompt is byte-identical to the pre-F82 shape — the
+    /// regression pin.
+    /// </item>
+    /// <item>
+    /// <see cref="PersonaPickDiagnostics.IsExploration"/> (F83.2) returns
+    /// <see cref="ExplorationLampshadeLine"/> — <see cref="PersonaPickDiagnostics.FiredRules"/> is
+    /// empty by construction for an exploration pick, so this branch never has a rule to attribute
+    /// the pick to either way.
+    /// </item>
+    /// <item>
+    /// One or more <see cref="PersonaPickDiagnostics.FiredRules"/> (F83.1) — phrased as OPTIONAL
+    /// color ("may mention"), never a mandate: the persona's own taste rules are a hint the copy MAY
+    /// use, not a script it has to read. When this break's fired-rule descriptions overlap
+    /// <paramref name="previouslyVoicedTasteNotes"/> at all, an extra sentence asks for different
+    /// phrasing (or silence) — the anti-repetition posture — rather than let the same color line
+    /// repeat break after break.
+    /// </item>
+    /// </list>
+    /// </summary>
+    static string? BuildTasteLine(PersonaPickDiagnostics? personaPick, IReadOnlyList<string> previouslyVoicedTasteNotes)
+    {
+        if (personaPick is null)
+            return null;
+
+        if (personaPick.IsExploration)
+            return ExplorationLampshadeLine;
+
+        if (personaPick.FiredRules.Count == 0)
+            return null;
+
+        var notes = DescribeFiredRules(personaPick.FiredRules);
+        var summary = string.Join("; ", notes);
+        var recentlyVoiced = notes.Any(previouslyVoicedTasteNotes.Contains);
+
+        var line =
+            $"Taste note: this pick matches the persona's taste for {summary} - you may mention this " +
+            "if it fits naturally; it's color, not a requirement.";
+
+        return recentlyVoiced
+            ? line + " You voiced this same taste note on the last break too - vary the phrasing, or leave it out this time."
+            : line;
+    }
+
+    /// <summary>
+    /// One short, spoken-friendly phrase per fired <see cref="TasteRule"/> (artist over genre over
+    /// tag — mirrors <c>Orchestrator.FormatFiredRule</c>'s own precedence for its debug line, worded
+    /// here for a human ear rather than a log grep). Exposed (not <see langword="private"/>) so
+    /// <see cref="LlmCopyWriter"/> can compute the SAME descriptions for the break it just rendered
+    /// and remember them as next break's <c>previouslyVoicedTasteNotes</c> — one description function,
+    /// used on both the "what did we just say" and "what are we about to say" sides of the
+    /// anti-repetition comparison.
+    /// </summary>
+    public static IReadOnlyList<string> DescribeFiredRules(IReadOnlyList<TasteRule> firedRules) =>
+        firedRules.Select(DescribeFiredRule).ToList();
+
+    static string DescribeFiredRule(TasteRule rule) =>
+        rule.Predicate.Artist ?? rule.Predicate.Genre ?? rule.Predicate.Tag ?? "this pick";
 }

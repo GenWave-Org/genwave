@@ -39,10 +39,17 @@ interface EntryOverrides {
   occurredAt?: string;
   kind?: string;
   summary?: string;
+  id?: number;
 }
+
+// Auto-incrementing default so every row this file fabricates gets its own id without every call
+// site having to name one — mirrors the wire's own row-identity field (PLAN T71), which
+// `BoothLogFeed` now keys its rows by.
+let nextEntryId = 1;
 
 function makeEntry(overrides: EntryOverrides = {}) {
   return {
+    id: nextEntryId++,
     occurredAt: "2026-01-01T10:04:00.000Z",
     kind: "track-started",
     summary: "Started 'Astral Plane' by Valerie June",

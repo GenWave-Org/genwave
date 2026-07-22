@@ -57,6 +57,18 @@ public static class StationSettingsAllowlist
         new("Station:Rotation:RecentWindow",                  SettingApplyMode.Live,          SettingKind.Number,     "tracks"),
         new("Station:Rotation:ArtistSeparation",              SettingApplyMode.Live,          SettingKind.Number,     "tracks"),
 
+        // Station-default segment envelope (SPEC F80.1, F81.1/F81.3, STORY-212) — the v1 24/7,
+        // no-schedule-grid envelope the eventual envelope-only provider (a later task) consumes.
+        // Genres is a JSON-encoded array of genre names stored as ONE opaque string-kind value —
+        // same idiom as Tts:Corrections just below (the overlay only expands stored arrays into
+        // indexed keys for arrays it already knows to bind as a typed list); empty/blank/"[]" means
+        // no genre constraint (F81.1). EnergyMin/EnergyMax are the [0,1] percentile band (F80.1);
+        // 0/1 is the full range, i.e. no energy constraint. Live so a PUT reaches the envelope-only
+        // provider's very next pick with no api restart, once that provider exists.
+        new("Station:Envelope:Genres",                       SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Station:Envelope:EnergyMin",                     SettingApplyMode.Live,          SettingKind.Number,     ""),
+        new("Station:Envelope:EnergyMax",                     SettingApplyMode.Live,          SettingKind.Number,     ""),
+
         // Spectator surface (SPEC F62.1, F62.8, STORY-167/170) — both read live via
         // IOptionsMonitor<StationOptions> by SurfaceGateMiddleware (SpectatorMode) and the
         // spectator "about" endpoint (PublicStreamUrl), so a PUT here reaches the very next

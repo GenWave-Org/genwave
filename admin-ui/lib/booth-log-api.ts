@@ -10,6 +10,23 @@ export interface BoothLogEntry {
   occurredAt: string;
   kind: string;
   summary: string;
+  /**
+   * The row's own DB id (SPEC F84.1, F84.6; STORY-215, PLAN T71) — the wire's airing identity:
+   * the taste-thumb POST target (`POST /api/booth-log/{id}/taste-thumb`) for this row directly,
+   * and (via the latest track-started row) for the now-playing surface too. Also the stable React
+   * key `BoothLogFeed` renders each row by — `occurredAt`+index would shift under a new head-page
+   * poll and remount every row's `PersonaTasteThumbs`, resetting its settled thumb state.
+   *
+   * Emitted by `BoothLogEntryDto` (src/GenWave.Host/Api/BoothLogEntryDto.cs) as of this same task
+   * (T71) — the domain `BoothLogEntry` record has always carried `Id`; the DTO/controller now
+   * include it alongside `PersonaId` (added in T60).
+   */
+  id: number;
+  /** Persona stamped on air for a track-start row (SPEC F84.6, added in T60); `null`/absent for
+   * every other kind, a persona-less airing, or a row that predates the column. Gates whether this
+   * row's taste-thumb control renders at all — a row without one offers no control, not a
+   * disabled one (F84.6). */
+  personaId: number | null;
 }
 
 /** One newest-first keyset page (SPEC F72.2) — `nextBefore` is `null` once this is the oldest page. */

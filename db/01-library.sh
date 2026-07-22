@@ -135,6 +135,44 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	    end
 	  ) stored;
 
+	-- energy: percentile rank of integrated_lufs within the READY library (SPEC F80.1, STORY-211) —
+	-- NOT track_energy above (a fixed per-row linear scale) and NOT intro_energy/outro_energy
+	-- (STORY-033 RMS levels). Unlike track_energy this cannot be a generated column: a percentile is
+	-- relative to every OTHER ready row, which Postgres generated columns cannot reference. It is
+	-- instead recomputed by a single set-based UPDATE
+	-- (MediaRepository.RecomputeEnergyPercentilesAsync) piggybacked on the enrichment second tier
+	-- (SPEC F80.2) — see MediaRepository.WriteEnrichmentAsync (nulls it on every LUFS write) and
+	-- MediaRepository.HasStaleEnergyPercentilesAsync (the piggyback trigger). NULL = not yet ranked.
+	alter table library.media
+	  add column energy real;
+
+	-- moods: up to MoodVocabulary.MaxMoodsPerTrack (3) tags drawn from the fixed vocabulary that
+	-- lives in GenWave.Abstractions (SPEC F85.1, F85.2, STORY-216). Populated by a second-tier
+	-- enrichment pass (T72, mood tagger); T58 ships storage + the write path only, so a fresh
+	-- install leaves every row NULL until that pass runs (same "re-derives on the next pass"
+	-- convention as energy above and track_energy before it). The write path itself
+	-- (MediaRepository.WriteMoodsAsync) is the vocabulary gate: it rejects, as a whole, any write
+	-- naming a term outside the vocabulary (F85.1) BEFORE this UPDATE ever runs — deliberately no
+	-- per-term CHECK here, since the vocabulary is versioned in C#, not SQL, and a future term
+	-- addition must never require a migration. The count cap IS spec-pinned and version-independent
+	-- (F85.2, "≤3"), so it is enforced twice, defense-in-depth: once here, once at the write path.
+	alter table library.media
+	  add column moods text[]
+	    check (moods is null or cardinality(moods) <= 3);
+
+	-- mood_tagged_at / mood_tag_missed_at (SPEC F85.2, F85.4, STORY-216, T72): the F76 MusicBrainz
+	-- etiquette pattern applied to moods -- mirrors year_lookup_at/year_lookup_missed_at exactly.
+	-- mood_tagged_at is stamped unconditionally on every tagger attempt (success, miss, or endpoint
+	-- failure) as an "attempted at" telemetry marker; it does not gate re-claiming on its own.
+	-- mood_tag_missed_at is the actual re-claim gate (MediaRepository.ListMoodTagClaimsAsync): stamped
+	-- ONLY for a genuine miss -- a completed round trip that produced zero in-vocabulary survivors
+	-- (SPEC F85.4). A failed round trip leaves both moods and mood_tag_missed_at untouched, so the row
+	-- stays eligible and is retried on the very next backfill tick -- never re-asking a question
+	-- already answered, while never giving up on one that was never actually asked.
+	alter table library.media
+	  add column mood_tagged_at     timestamptz,
+	  add column mood_tag_missed_at timestamptz;
+
 	-- Composite partial index: scope-filtered random-ready pick (replaces scalar media_ready).
 	create index media_scope_ready on library.media (library_id, state) where state = 'ready';
 	create index media_artist      on library.media (artist);                       -- ready for criteria queries

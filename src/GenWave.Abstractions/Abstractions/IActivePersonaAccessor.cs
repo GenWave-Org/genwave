@@ -38,4 +38,20 @@ public interface IActivePersonaAccessor
     /// simply reports "no card" until it opts in with a real override.
     /// </summary>
     Task<PersonaCard?> ResolveCardAsync(CancellationToken ct) => Task.FromResult<PersonaCard?>(null);
+
+    /// <summary>
+    /// Synchronous, in-memory read of the active persona id (SPEC F84.6, STORY-215) — no store round
+    /// trip, unlike <see cref="ResolveAsync"/>. Exists for a caller that sits on a hot path which must
+    /// return promptly (<see cref="IStationEventSink"/>'s own contract) and so cannot await a
+    /// persona-store read to capture "who is on air right now": the booth log stamps
+    /// this value AT AIR TIME rather than resolving it later when the row is eventually persisted,
+    /// which is exactly what "stamped at air time, never inferred after the fact" requires.
+    ///
+    /// Same never-throws, same null contract as <see cref="ResolveAsync"/>: <see langword="null"/>
+    /// for the default "no persona" state. Default-implemented as "no persona" for the same additive
+    /// reason <see cref="ResolveCardAsync"/> is — every pre-F84.6 implementer (a test double, an
+    /// older SDK consumer) keeps compiling unchanged and simply reports "no active persona" until it
+    /// opts in with a real override.
+    /// </summary>
+    long? ActivePersonaId => null;
 }

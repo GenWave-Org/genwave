@@ -9,6 +9,7 @@
 
 using System.Threading.Channels;
 using Dapper;
+using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Events;
 using GenWave.MediaLibrary.Station;
@@ -26,6 +27,18 @@ public static class FeatureBoothLogStore
     /// <summary>Dapper-mapped projection for this file's own direct-SQL assertions (not the
     /// production <see cref="GenWave.Core.Domain.BoothLogEntry"/> shape — no id needed here).</summary>
     sealed record BoothLogRow(DateTime OccurredAt, string Kind, string Summary);
+
+    /// <summary>
+    /// Fixed "no active persona" answer (STORY-215) — this file's own scenarios pin narrative
+    /// content and retention, never persona attribution, so every writer here publishes persona-less
+    /// (its <see cref="IActivePersonaAccessor.ActivePersonaId"/> falls back to the interface's own
+    /// default — <see langword="null"/>). The stamping behavior itself is covered by
+    /// Story215_BoothLogPersonaStamp.cs.
+    /// </summary>
+    sealed class NoActivePersonaAccessor : IActivePersonaAccessor
+    {
+        public Task<Persona?> ResolveAsync(CancellationToken ct) => Task.FromResult<Persona?>(null);
+    }
 
     // Fully-qualified (rather than `using Microsoft.Extensions.Options;`) — see Story194's own
     // remarks: this file's namespace nests under GenWave.MediaLibrary, which already has a sibling
@@ -69,7 +82,7 @@ public static class FeatureBoothLogStore
             // BoothLogDrainService's real per-item work persists via the real BoothLogRepository...
             await db.ResetBoothLogAsync();
             var channel = Channel.CreateBounded<BoothLogEntryRequest>(16);
-            var writer = new BoothLogWriter(channel.Writer, NullLogger<BoothLogWriter>.Instance);
+            var writer = new BoothLogWriter(channel.Writer, new NoActivePersonaAccessor(), NullLogger<BoothLogWriter>.Instance);
             var store = Store(db);
             var drain = new BoothLogDrainService(channel.Reader, store, NullLogger<BoothLogDrainService>.Instance);
 
@@ -99,7 +112,7 @@ public static class FeatureBoothLogStore
             // Given an event kind the booth log has no narrative for (a library mutation)...
             await db.ResetBoothLogAsync();
             var channel = Channel.CreateBounded<BoothLogEntryRequest>(16);
-            var writer = new BoothLogWriter(channel.Writer, NullLogger<BoothLogWriter>.Instance);
+            var writer = new BoothLogWriter(channel.Writer, new NoActivePersonaAccessor(), NullLogger<BoothLogWriter>.Instance);
 
             // When it is published through the real consumer...
             writer.Publish(new LibraryMutated("created", 1));
@@ -127,7 +140,7 @@ public static class FeatureBoothLogStore
             var store = Store(db, retentionDays: 1);
 
             // When a new row is inserted...
-            await store.AppendAsync("track-started", "Started 'New Song' by New Artist", CancellationToken.None);
+            await store.AppendAsync("track-started", "Started 'New Song' by New Artist", personaId: null, artist: null, ct: CancellationToken.None);
 
             // Then the expired rows are gone and only the new row remains — the table stays bounded.
             var rows = await AllRowsAsync(db);

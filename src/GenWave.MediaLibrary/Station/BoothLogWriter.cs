@@ -19,16 +19,29 @@ namespace GenWave.MediaLibrary.Station;
 /// outage/backlog) drops the newest entry with a WARN rather than ever stalling playout — the sink
 /// contract's "must return promptly" holds unconditionally.
 /// </summary>
-sealed class BoothLogWriter(ChannelWriter<BoothLogEntryRequest> queue, ILogger<BoothLogWriter> logger)
-    : IBoothLogEventConsumer
+sealed class BoothLogWriter(
+    ChannelWriter<BoothLogEntryRequest> queue,
+    IActivePersonaAccessor personaAccessor,
+    ILogger<BoothLogWriter> logger) : IBoothLogEventConsumer
 {
     public void Publish(StationEvent evt)
     {
+        // Persona stamp captured HERE, synchronously, at air time (SPEC F84.6, STORY-215) — not
+        // later by BoothLogDrainService. IActivePersonaAccessor.ActivePersonaId is a pure in-memory
+        // read (no store round trip), safe on this hot path. Capturing it now rather than at drain
+        // time is the whole point: the queue between here and the drain loop is bounded (512) and can
+        // back up under a DB outage — resolving at drain time would mis-stamp an already-queued
+        // track-start with whatever persona is active once the backlog clears, not the one that was
+        // actually on air when the track started. Only a track-start row is ever a stamp candidate;
+        // patter/mode-change rows always publish PersonaId: null.
         var request = evt switch
         {
-            TrackAired t => new BoothLogEntryRequest("track-started", Summarize(t)),
-            SegmentGenerated s => new BoothLogEntryRequest("patter-aired", Summarize(s)),
-            DegradationModeChanged d => new BoothLogEntryRequest("mode-changed", Summarize(d)),
+            // Artist (SPEC F84.1, STORY-215, PLAN T70) rides the same capture-at-publish-time
+            // discipline as PersonaId just above — never re-derived later, never surfaced through
+            // IBoothLogReader.
+            TrackAired t => new BoothLogEntryRequest("track-started", Summarize(t), personaAccessor.ActivePersonaId, t.Artist),
+            SegmentGenerated s => new BoothLogEntryRequest("patter-aired", Summarize(s), PersonaId: null),
+            DegradationModeChanged d => new BoothLogEntryRequest("mode-changed", Summarize(d), PersonaId: null),
             _ => null,
         };
         if (request is null) return;
