@@ -46,6 +46,13 @@ public sealed class AuthController(
         // headers carry the real client IP and the Access-verified identity when a Cloudflare
         // tunnel fronts the plane — both empty ("-") on LAN paths, which is itself the signal
         // that the caller bypassed Access.
+        //
+        // CodeQL cs/exposure-of-sensitive-information fires on logging the email — that
+        // disclosure is deliberate and IS this endpoint's audit contract: attributing admin
+        // login attempts to an identity is the point (gh-#74 exists because a real triage
+        // could not). The sink is the operator's own log pipeline, not a user-facing response;
+        // masking would reduce the audit log below its reason to exist. Alerts dismissed
+        // as won't-fix with this rationale.
         var remote = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         var cfConnectingIp = SanitizeHeader(HttpContext.Request.Headers["CF-Connecting-IP"]);
         var accessUser = SanitizeHeader(HttpContext.Request.Headers["Cf-Access-Authenticated-User-Email"]);
