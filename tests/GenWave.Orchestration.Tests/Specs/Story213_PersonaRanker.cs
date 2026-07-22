@@ -4,7 +4,9 @@
 // provider chain with the per-pick debug line. The ranker is deterministic and LLM-free —
 // distribution facts run it thousands of times in-memory with a seeded RNG, no I/O.
 
+using Microsoft.Extensions.Logging;
 using GenWave.Abstractions.Playout;
+using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Orchestration.Tests.Fakes;
 
@@ -24,6 +26,20 @@ public static class FeaturePersonaRanker
 
     static PersonaRanker BuildRanker(IRandomSource randomSource, IReadOnlyList<TasteRule>? rules = null, PersonaRankerOptions? options = null) =>
         new(new FakePersonaTasteReader(rules ?? []), randomSource, TimeProvider.System, options ?? new PersonaRankerOptions());
+
+    static MediaReference MakeRef(string id, string? artist, string? genre = "Rock") => new(
+        MediaId: id,
+        Locator: $"/media/{id}.mp3",
+        Title: $"Track {id}",
+        Loudness: new Loudness(-23.0, -1.0, true),
+        DurationMs: null,
+        SampleRate: null,
+        Channels: null,
+        BitrateKbps: null,
+        Artist: artist,
+        Album: null,
+        Genre: genre,
+        Year: null);
 
     public static class ScenarioPredicateAndContextMatching
     {
@@ -155,19 +171,65 @@ public static class FeaturePersonaRanker
     public static class ScenarioSignatureRuleShiftsSunday
     {
         // Arrange (T64): one authored Sunday-morning artist rule; simulated Sunday-morning
-        // and weekday clocks over the same pool.
+        // and weekday clocks over the same pool. FakeTimeProvider's LocalTimeZone (fixed to UTC,
+        // STORY-213/T64) makes station-local day/hour equal the UTC instant we construct — no
+        // dependency on whatever timezone the test happens to run under.
 
-        [Fact(Skip = "Pending T64 — see docs/PLAN.md")]
-        public static void SundayMorningPicksShiftTowardTheArtist()
+        static readonly TasteContext SundayMorning = new(DaysOfWeek: [DayOfWeek.Sunday], StartHour: 6, EndHour: 12);
+
+        static IReadOnlyList<PersonaRankCandidate> ZeppelinPool() =>
+        [
+            MakeCandidate("zep1", "Led Zeppelin", genre: "Rock", energy: 0.5),
+            MakeCandidate("other1", "Other Artist A", genre: "Rock", energy: 0.5),
+            MakeCandidate("other2", "Other Artist B", genre: "Rock", energy: 0.5),
+            MakeCandidate("other3", "Other Artist C", genre: "Rock", energy: 0.5),
+        ];
+
+        static async Task<double> ZeppelinShareAsync(PersonaRanker ranker, IReadOnlyList<PersonaRankCandidate> pool, int iterations)
         {
-            // the Sunday-Zeppelin acceptance (F82.2/F82.3): pick share rises measurably
-            Assert.Fail("pending T64");
+            var zepCount = 0;
+            for (var i = 0; i < iterations; i++)
+            {
+                var result = await ranker.PickAsync(personaId: 1, energyDisposition: 0.0, new EnergyRange(0.0, 1.0), pool, CancellationToken.None);
+                Assert.NotNull(result);
+                if (result.Candidate.MediaId == "zep1") zepCount++;
+            }
+
+            return (double)zepCount / iterations;
         }
 
-        [Fact(Skip = "Pending T64 — see docs/PLAN.md")]
-        public static void WeekdayBehaviorIsUnchanged()
+        [Fact]
+        public static async Task SundayMorningPicksShiftTowardTheArtist()
         {
-            Assert.Fail("pending T64");
+            // the Sunday-Zeppelin acceptance (F82.2/F82.3): pick share rises measurably past the
+            // one-in-four (25%) uniform baseline once the Sunday-morning rule gates open.
+            var rule = new TasteRule(new TastePredicate(Artist: "Led Zeppelin", Genre: null, Tag: null), SundayMorning, Weight: 1.0);
+            var pool = ZeppelinPool();
+
+            // 2026-07-19 09:00 UTC is a Sunday, inside the rule's 06:00-12:00 window.
+            var sundayClock = new FakeTimeProvider(new DateTimeOffset(2026, 7, 19, 9, 0, 0, TimeSpan.Zero));
+            var ranker = new PersonaRanker(new FakePersonaTasteReader([rule]), new SeededRandomSource(seed: 21), sundayClock, new PersonaRankerOptions());
+
+            var share = await ZeppelinShareAsync(ranker, pool, iterations: 600);
+
+            Assert.True(share > 0.40, $"expected a measurable Sunday shift toward the artist, got {share:F3}");
+        }
+
+        [Fact]
+        public static async Task WeekdayBehaviorIsUnchanged()
+        {
+            // the SAME rule, present but never gated open on a weekday — picks stay at the uniform
+            // one-in-four baseline (F82.1's day gate holds).
+            var rule = new TasteRule(new TastePredicate(Artist: "Led Zeppelin", Genre: null, Tag: null), SundayMorning, Weight: 1.0);
+            var pool = ZeppelinPool();
+
+            // 2026-07-22 09:00 UTC is a Wednesday — outside the rule's day gate entirely.
+            var weekdayClock = new FakeTimeProvider(new DateTimeOffset(2026, 7, 22, 9, 0, 0, TimeSpan.Zero));
+            var ranker = new PersonaRanker(new FakePersonaTasteReader([rule]), new SeededRandomSource(seed: 21), weekdayClock, new PersonaRankerOptions());
+
+            var share = await ZeppelinShareAsync(ranker, pool, iterations: 600);
+
+            Assert.InRange(share, 0.15, 0.35);
         }
     }
 
@@ -175,11 +237,58 @@ public static class FeaturePersonaRanker
     {
         // Arrange (T64): a completed pick through the wired provider chain; capture the log.
 
-        [Fact(Skip = "Pending T64 — see docs/PLAN.md")]
-        public static void OneLineCarriesAllSixAnswerFields()
+        [Fact]
+        public static async Task OneLineCarriesAllSixAnswerFields()
         {
             // envelope id, pool size, top-3 scores, fired rules, exploration flag, degradation step (F82.6)
-            Assert.Fail("pending T64");
+            var rule = new TasteRule(new TastePredicate(Artist: "Boards of Canada", Genre: null, Tag: null), AnyTime, Weight: 0.9);
+            var pool = new[]
+            {
+                new EnvelopeCandidateRow(MakeRef("bc1", "Boards of Canada"), Energy: 0.5, Moods: [], RepeatedRecent: false, RepeatedArtist: false),
+                new EnvelopeCandidateRow(MakeRef("other1", "Other Artist"), Energy: 0.5, Moods: [], RepeatedRecent: false, RepeatedArtist: false),
+            };
+            var catalog = new FakePersonaPoolCatalog(pool);
+
+            var persona = new Persona(7, "DJ Test", "", "", "", DateTime.UnixEpoch, DateTime.UnixEpoch);
+            var card = new PersonaCard(1, "DJ Test", "", "", [], new VoiceSpec("kokoro", "", 1.0, "en"), EnergyDisposition: 0.0, [], []);
+            var personaAccessor = new FakeActivePersonaAccessor { Persona = persona, Card = card };
+
+            // exploration roll (0.99, above the 5% floor) ⇒ not exploration; sample roll (0.0) ⇒ picks
+            // the highest-scored candidate — the fired rule makes that "bc1".
+            var ranker = new PersonaRanker(new FakePersonaTasteReader([rule]), new StubRandomSource(0.99, 0.0), TimeProvider.System, new PersonaRankerOptions());
+            var provider = new RankerPersonaPickProvider(catalog, personaAccessor, ranker, new PersonaRankerOptions());
+
+            var identityProvider = new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default"));
+            var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
+            var cadenceProvider = new FakeCadenceProvider(new CadenceConfig
+            {
+                LeadInBeforeEachTrack = false,
+                BackAnnounceAfterEachTrack = false,
+                StationIdEveryNUnits = 0,
+            });
+            var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings { ArtistSeparation = 0 });
+            var logger = new CapturingLogger<Orchestrator>();
+            var orchestrator = new Orchestrator(
+                identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog,
+                new FakeTtsSegmentSource(), personaAccessor, logger,
+                new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
+                new SpeechDeferralQueue(TimeProvider.System),
+                TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero),
+                new FakeEnvelopeProvider(SegmentEnvelope.StationDefault),
+                provider);
+
+            var item = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            Assert.NotNull(item);
+            Assert.Equal("bc1", item.MediaId);
+
+            var debugLine = Assert.Single(logger.Entries, e => e.Level == LogLevel.Debug);
+            Assert.Contains("envelope=station-default", debugLine.Message);
+            Assert.Contains("pool=2", debugLine.Message);
+            Assert.Contains("top3=[0.900", debugLine.Message);
+            Assert.Contains("Boards of Canada", debugLine.Message);
+            Assert.Contains("exploration=False", debugLine.Message);
+            Assert.Contains("degradation=none", debugLine.Message);
         }
     }
 

@@ -8,8 +8,13 @@ namespace GenWave.MediaLibrary.Catalog;
 /// same flat columns as <see cref="MediaRow"/> plus the two preference-tier booleans, computed in the
 /// same query (no C# artist state, F41.3) and mapped by <c>MatchNamesWithUnderscores</c> exactly like
 /// the base columns.
+///
+/// Not sealed (STORY-213, PLAN T64): <see cref="EnvelopeCandidatePoolRow"/> extends this exact shape
+/// with the two extra columns <c>GetEnvelopeCandidatePoolAsync</c> adds — rather than duplicating
+/// every <see cref="MediaRow"/>/<see cref="RepeatedRecent"/>/<see cref="RepeatedArtist"/> property a
+/// second time.
 /// </summary>
-sealed class RotationCandidateRow : MediaRow
+class RotationCandidateRow : MediaRow
 {
     /// <summary>Tier 1 (F41.3): the picked id was among <c>orderedRecentIds</c>.</summary>
     public bool RepeatedRecent { get; set; }

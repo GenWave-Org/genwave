@@ -46,6 +46,16 @@ static class StationSettingsHostingExtensions
         // actually resolves IPersonaStore.
         builder.Services.AddPersonaStore(stationConnStr);
 
+        // Persona taste store (SPEC F82.1, F84.1-F84.3; STORY-213, PLAN T64) — same station_svc
+        // connection string, same lazy-data-source story as AddPersonaStore just above. T59 shipped
+        // this registration deliberately without a Host call site ("the ranker (T63) and card
+        // import (T66-T69) are the first consumers"); this is that first call site. IPersonaTasteReader
+        // is the narrower read-only seam PersonaRanker actually depends on (F84.2 structural) — bound
+        // against the SAME singleton instance, so there is exactly one IPersonaTasteStore in the
+        // container regardless of which seam a consumer asks for.
+        builder.Services.AddPersonaTasteStore(stationConnStr);
+        builder.Services.AddSingleton<IPersonaTasteReader>(sp => sp.GetRequiredService<IPersonaTasteStore>());
+
         // ActivePersonaAccessor (SPEC F35.2, F35.5): the ONE seam the Orchestrator and the
         // preview/status endpoints read the live active persona through — re-reads
         // IOptionsMonitor<StationOptions> + IPersonaStore per call, never a stale snapshot, never

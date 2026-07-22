@@ -282,6 +282,88 @@ sealed class MediaRepository(
         return row?.ToCandidate(logger);
     }
 
+    /// <summary>
+    /// SPEC F82.2, STORY-213 (PLAN T64) — <see cref="GetEnvelopeCandidateAsync"/>'s SAME
+    /// by-construction envelope+rotation-tier filtering and playable predicate, widened from
+    /// <c>LIMIT 1</c> to <c>LIMIT @limit</c> so <c>GenWave.Orchestration.PersonaRanker</c> has a real
+    /// candidate POOL — not one row — to score. Additionally projects <c>energy</c> (the LUFS
+    /// percentile, SPEC F80.1 — <see langword="null"/> while enrichment lags, same story as this
+    /// method's own energy-band WHERE predicate) and <c>moods</c> (SPEC F85.1; empty until a future
+    /// mood-tagger enrichment pass lands data) onto each row — the two fields <see cref="MediaReference"/>
+    /// itself does not surface that the ranker's score/taste-match formulas need.
+    /// <paramref name="limit"/> is clamped to <c>[1, 200]</c>, the same ceiling <see cref="ListAsync"/>
+    /// enforces, so a misconfigured <c>PersonaRanker:TopK</c> can never turn one pick into an
+    /// unbounded fetch. Empty <paramref name="scope"/> short-circuits to an empty pool (default-deny),
+    /// no SQL issued.
+    /// </summary>
+    public async Task<IReadOnlyList<EnvelopeCandidateRow>> GetEnvelopeCandidatePoolAsync(
+        LibraryScope scope,
+        IReadOnlyList<string> orderedRecentIds,
+        int artistSeparation,
+        SegmentEnvelope envelope,
+        int limit,
+        CancellationToken ct)
+    {
+        // Default-deny: no scope means no access, no SQL issued.
+        if (scope.IsEmpty) return [];
+
+        var recentIds = ParseIds(orderedRecentIds);
+
+        var recentArtistIds = artistSeparation > 0
+            ? recentIds.Skip(Math.Max(0, recentIds.Count - artistSeparation)).ToArray()
+            : [];
+
+        long? mostRecentId = recentIds.Count > 0 ? recentIds[^1] : null;
+
+        var genresLower = envelope.Genres.Count > 0
+            ? envelope.Genres.Select(g => g.ToLowerInvariant()).ToArray()
+            : null;
+        var genrePredicate = genresLower is not null ? "and lower(m.genre) = any(@genresLower)" : "";
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<EnvelopeCandidatePoolRow>(new CommandDefinition($"""
+            select
+              m.id, m.path, m.format, m.state, m.title, m.duration_ms, m.sample_rate, m.channels,
+              m.bitrate_kbps, m.artist, m.album, m.genre, m.year, m.integrated_lufs, m.true_peak_dbtp,
+              m.measurable, m.cue_in_sec, m.cue_out_sec, m.intro_energy, m.outro_energy,
+              m.energy, m.moods,
+              (m.id = any(@recentIds)) as repeated_recent,
+              (
+                m.artist is not null and trim(m.artist) <> ''
+                and exists (
+                  select 1 from library.media rm
+                  where rm.id = any(@recentArtistIds)
+                    and rm.artist is not null and trim(rm.artist) <> ''
+                    and lower(trim(rm.artist)) = lower(trim(m.artist))
+                )
+              ) as repeated_artist
+            from library.media m
+            left join library.media_rating r on r.media_id = m.id
+            where m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)
+              and m.library_id = any(@libraryIds)
+              and (m.energy is null or (m.energy >= @energyMin and m.energy <= @energyMax))
+              {genrePredicate}
+            order by
+              repeated_recent asc,
+              repeated_artist asc,
+              coalesce(m.id = @mostRecentId, false) asc,
+              random()
+            limit @limit
+            """,
+            new
+            {
+                recentIds, recentArtistIds, mostRecentId,
+                libraryIds = scope.LibraryIds.ToArray(),
+                genresLower,
+                energyMin = envelope.EnergyRange.Min,
+                energyMax = envelope.EnergyRange.Max,
+                limit = Math.Clamp(limit, 1, 200),
+            },
+            cancellationToken: ct));
+
+        return rows.Select(r => r.ToPoolCandidate(logger)).ToList();
+    }
+
     public async Task<PagedResult<MediaReference>> ListAsync(LibraryScope scope, MediaQuery query, CancellationToken ct)
     {
         // Default-deny: no scope means no access, no SQL issued.

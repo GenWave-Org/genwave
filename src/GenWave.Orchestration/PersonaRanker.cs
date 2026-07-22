@@ -71,7 +71,8 @@ public sealed class PersonaRanker(
             .ToList();
 
         var (chosen, _, firedRules) = Sample(topK);
-        return new PickResult(chosen, isExploration, firedRules);
+        var topScores = topK.Select(entry => entry.Score).ToList();
+        return new PickResult(chosen, isExploration, firedRules, topScores);
     }
 
     double EffectiveExplorationRate => Math.Max(options.ExplorationRate, MinimumExplorationRate);

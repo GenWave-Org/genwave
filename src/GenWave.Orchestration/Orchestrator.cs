@@ -1,5 +1,6 @@
 namespace GenWave.Orchestration;
 
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
@@ -119,6 +120,22 @@ public sealed class Orchestrator(
     /// </summary>
     const int BoundarySampleAttempts = 5;
 
+    /// <summary>
+    /// SPEC F82.6 — v1's per-pick debug line names the envelope that governed the pick. v1 ships
+    /// exactly one 24/7 station-default envelope (SPEC F81.3, no schedule grid) so this is a fixed
+    /// sentinel rather than a field on <see cref="SegmentEnvelope"/> itself, which carries no id.
+    /// </summary>
+    const string EnvelopeId = "station-default";
+
+    // SPEC F81.6's degradation-step vocabulary — the per-pick debug line's sixth field. "None" covers
+    // both a winning rung-0 persona pick AND a rung-1 (unrelaxed) envelope-only pick: neither gave up
+    // anything the envelope originally asked for.
+    const string DegradationStepNone = "none";
+    const string DegradationStepRotation = "rotation";
+    const string DegradationStepEnergy = "energy";
+    const string DegradationStepGenres = "genres";
+    const string DegradationStepTerminal = "terminal";
+
     // Defaults (SPEC F81.2/F81.3): every pre-F81 test/module construction site keeps compiling and
     // behaving exactly as before — no envelope constraint, no persona layer — mirrors the
     // IStationEventSink? events = null → NoOpStationEventSink.Instance idiom used elsewhere in this
@@ -176,6 +193,12 @@ public sealed class Orchestrator(
         }
 
         var track = candidate.Media.ToMediaItem();
+
+        // Carries SPEC F82.6/F83.1's persona-pick diagnostics from the selection-time RotationCandidate
+        // onto the playout-facing MediaItem (T65's staged carrier — see RotationCandidate.PersonaPick's
+        // own remarks) — null for every envelope-only pick, including the common persona-off case.
+        if (candidate.PersonaPick is { } personaPickDiagnostics)
+            track = track with { PersonaPick = personaPickDiagnostics };
 
         await EnqueuePatterAsync(previousTrack, track, ct);
         buffer.Enqueue(track);
@@ -294,13 +317,16 @@ public sealed class Orchestrator(
     /// </para>
     ///
     /// <para>
-    /// Energy is not part of this re-check: <see cref="MediaReference"/> does not surface the
-    /// population-percentile <c>energy</c> value the catalog's own query filters on (only
-    /// <see cref="MediaReference.IntroEnergy"/>/<see cref="MediaReference.OutroEnergy"/>, a different
-    /// per-track cue-point measure) — from this layer's point of view every candidate's envelope
-    /// energy is unknown, and SPEC F81.4's own rule is that an unknown/NULL energy always satisfies
-    /// the band. Re-deriving the percentile here would duplicate the catalog's own source of truth
-    /// rather than trust it.
+    /// Energy IS part of this re-check as of PLAN T64 (SPEC F81.5, T62 review carry-over):
+    /// <see cref="RotationCandidate.Energy"/> — populated by <see cref="RankerPersonaPickProvider"/>'s
+    /// own <c>EnvelopeCandidateRow</c> mapping, still <see langword="null"/> for every candidate the
+    /// envelope-only ladder itself produces (<see cref="IMediaCatalog.GetRotationCandidateAsync"/>/
+    /// <see cref="IMediaCatalog.GetEnvelopeCandidateAsync"/> never populate it) — is checked against
+    /// <paramref name="envelope"/>'s energy band the same way <see cref="IMediaCatalog.GetEnvelopeCandidateAsync"/>'s
+    /// own predicate does: <see langword="null"/> always passes (enrichment lag must never silence a
+    /// pick, SPEC F81.4). A candidate whose provider never populated <c>Energy</c> is therefore
+    /// unaffected by this leg — this re-check gained a capability, it did not tighten one that used to
+    /// pass everything.
     /// </para>
     /// </summary>
     async Task<RotationCandidate?> SelectEnvelopeAwareCandidateAsync(
@@ -311,15 +337,23 @@ public sealed class Orchestrator(
         var personaPick = await TryPersonaPickAsync(scope, orderedRecentIds, artistSeparation, envelope, ct);
         if (personaPick is not null)
         {
-            if (SatisfiesEnvelopeGenre(personaPick.Media, envelope)) return personaPick;
+            if (SatisfiesEnvelope(personaPick, envelope))
+            {
+                LogPerPickDebugLine(personaPick, DegradationStepNone);
+                return personaPick;
+            }
 
             logger.LogWarning(
-                "Persona pick {MediaId} violated the segment envelope's genre allow-list on " +
-                "re-check — discarding and re-running envelope-only (SPEC F81.5, trust-but-verify).",
-                personaPick.Media.MediaId);
+                "Persona pick {MediaId} violated the segment envelope on re-check ({Violation}) — " +
+                "discarding and re-running envelope-only (SPEC F81.5, trust-but-verify).",
+                personaPick.Media.MediaId, DescribeEnvelopeViolation(personaPick, envelope));
         }
 
-        return await SelectEnvelopeLadderAsync(scope, orderedRecentIds, artistSeparation, envelope, ct);
+        var (candidate, degradationStep) =
+            await SelectEnvelopeLadderAsync(scope, orderedRecentIds, artistSeparation, envelope, ct);
+        if (candidate is not null)
+            LogPerPickDebugLine(candidate, degradationStep);
+        return candidate;
     }
 
     /// <summary>
@@ -380,7 +414,7 @@ public sealed class Orchestrator(
     /// already do — they are skipped rather than repeating the identical no-op call three more times.
     /// </para>
     /// </summary>
-    async Task<RotationCandidate?> SelectEnvelopeLadderAsync(
+    async Task<(RotationCandidate? Candidate, string DegradationStep)> SelectEnvelopeLadderAsync(
         LibraryScope scope,
         IReadOnlyList<string> orderedRecentIds,
         int artistSeparation,
@@ -389,8 +423,8 @@ public sealed class Orchestrator(
     {
         // Rung 1: the common case — full envelope, full rotation preference.
         var candidate = await catalog.GetEnvelopeCandidateAsync(scope, orderedRecentIds, artistSeparation, envelope, ct);
-        if (candidate is not null) return candidate;
-        if (scope.IsEmpty) return null;
+        if (candidate is not null) return (candidate, DegradationStepNone);
+        if (scope.IsEmpty) return (null, DegradationStepNone);
 
         // Rung 2: relax ROTATION first (hygiene, not law) — the SAME envelope, queried with no
         // rotation-window/artist-separation preference at all rather than widening genre/energy.
@@ -400,7 +434,7 @@ public sealed class Orchestrator(
                 "Envelope-constrained pool empty — relaxing the rotation window (anti-repeat + " +
                 "artist-separation) before any envelope law bends (SPEC F81.6).");
             candidate = await catalog.GetEnvelopeCandidateAsync(scope, [], 0, envelope, ct);
-            if (candidate is not null) return candidate;
+            if (candidate is not null) return (candidate, DegradationStepRotation);
         }
 
         // Rung 3: relax ENERGY — the genre allow-list stays; the energy band widens to
@@ -413,7 +447,7 @@ public sealed class Orchestrator(
                 "Envelope-constrained pool still empty with rotation relaxed — relaxing the energy " +
                 "band to unconstrained (SPEC F81.6).");
             candidate = await catalog.GetEnvelopeCandidateAsync(scope, [], 0, energyRelaxed, ct);
-            if (candidate is not null) return candidate;
+            if (candidate is not null) return (candidate, DegradationStepEnergy);
         }
 
         // Rung 4: relax GENRES — the last envelope knob to give way (skipped if the allow-list was
@@ -425,7 +459,7 @@ public sealed class Orchestrator(
                 "Envelope-constrained pool still empty with energy relaxed — relaxing the genre " +
                 "allow-list to admit every genre (SPEC F81.6).");
             candidate = await catalog.GetEnvelopeCandidateAsync(scope, [], 0, genresRelaxed, ct);
-            if (candidate is not null) return candidate;
+            if (candidate is not null) return (candidate, DegradationStepGenres);
         }
 
         // Terminal: the plain pre-envelope query — SPEC F81.6's never-silence floor. Its own F41.1
@@ -436,8 +470,15 @@ public sealed class Orchestrator(
             "Envelope-constrained pool still empty with every envelope/rotation knob relaxed — " +
             "falling back to the base playable query with no envelope at all (SPEC F81.6, " +
             "never-silence).");
-        return await catalog.GetRotationCandidateAsync(scope, orderedRecentIds, artistSeparation, ct);
+        candidate = await catalog.GetRotationCandidateAsync(scope, orderedRecentIds, artistSeparation, ct);
+        return (candidate, DegradationStepTerminal);
     }
+
+    /// <summary>
+    /// SPEC F81.5's full re-check — both legs must pass for a rung-0 persona pick to be trusted.
+    /// </summary>
+    static bool SatisfiesEnvelope(RotationCandidate candidate, SegmentEnvelope envelope) =>
+        SatisfiesEnvelopeGenre(candidate.Media, envelope) && SatisfiesEnvelopeEnergy(candidate.Energy, envelope);
 
     /// <summary>
     /// SPEC F81.5's re-check, genre half: empty allow-list admits everything; a non-empty list
@@ -450,6 +491,57 @@ public sealed class Orchestrator(
         envelope.Genres.Count == 0 ||
         (media.Genre is not null &&
             envelope.Genres.Any(g => string.Equals(g, media.Genre, StringComparison.OrdinalIgnoreCase)));
+
+    /// <summary>
+    /// SPEC F81.5's re-check, energy half (T62 review carry-over, PLAN T64) — mirrors
+    /// <c>MediaRepository.GetEnvelopeCandidateAsync</c>'s own energy-band WHERE predicate exactly
+    /// (SPEC F81.4): a <see langword="null"/> <see cref="RotationCandidate.Energy"/> always passes
+    /// (enrichment lag must never silence a pick) — only a real, out-of-band percentile fails.
+    /// </summary>
+    static bool SatisfiesEnvelopeEnergy(double? energy, SegmentEnvelope envelope) =>
+        energy is null || (energy >= envelope.EnergyRange.Min && energy <= envelope.EnergyRange.Max);
+
+    /// <summary>Names which leg(s) of <see cref="SatisfiesEnvelope"/> a discarded persona pick violated, for the WARN.</summary>
+    static string DescribeEnvelopeViolation(RotationCandidate candidate, SegmentEnvelope envelope)
+    {
+        var reasons = new List<string>(2);
+        if (!SatisfiesEnvelopeGenre(candidate.Media, envelope)) reasons.Add("genre");
+        if (!SatisfiesEnvelopeEnergy(candidate.Energy, envelope)) reasons.Add("energy");
+        return string.Join("+", reasons);
+    }
+
+    /// <summary>
+    /// SPEC F82.6 — the one per-pick debug line: envelope id, pool size, the winning pick's top-3
+    /// scores, which taste rules fired, the exploration flag, and which degradation rung (SPEC F81.6)
+    /// actually supplied the pick. Fires on EVERY music pick — persona-off included — so the ladder's
+    /// own degradation step is always visible, mirroring the <c>LiquidsoapControl</c> per-command
+    /// convention (a per-tick line belongs at Debug, not Information — SPEC F82.6's own "per-pick"
+    /// framing puts it in the same high-frequency bucket).
+    /// <paramref name="candidate"/>'s <see cref="RotationCandidate.PersonaPick"/> is null for every
+    /// envelope-only ladder pick (including the common case where no persona is even active) — the
+    /// pool/top3/firedRules/exploration fields all read as empty/false in that case, never omitted
+    /// from the line.
+    /// </summary>
+    void LogPerPickDebugLine(RotationCandidate candidate, string degradationStep)
+    {
+        var diagnostics = candidate.PersonaPick;
+        var topScores = diagnostics is null
+            ? ""
+            : string.Join(", ", diagnostics.TopScores.Select(s => s.ToString("F3", CultureInfo.InvariantCulture)));
+        var firedRules = diagnostics is null
+            ? ""
+            : string.Join("; ", diagnostics.FiredRules.Select(FormatFiredRule));
+
+        logger.LogDebug(
+            "Pick — envelope={EnvelopeId} pool={PoolSize} top3=[{TopScores}] firedRules=[{FiredRules}] " +
+            "exploration={IsExploration} degradation={DegradationStep}",
+            EnvelopeId, diagnostics?.PoolSize ?? 0, topScores, firedRules,
+            diagnostics?.IsExploration ?? false, degradationStep);
+    }
+
+    /// <summary>One short "what:weight" summary per fired taste rule for the debug line — not a full serialization.</summary>
+    static string FormatFiredRule(TasteRule rule) =>
+        $"{rule.Predicate.Artist ?? rule.Predicate.Genre ?? rule.Predicate.Tag ?? "any"}:{rule.Weight.ToString("F2", CultureInfo.InvariantCulture)}";
 
     async Task EnqueuePatterAsync(MediaItem? prev, MediaItem next, CancellationToken ct)
     {

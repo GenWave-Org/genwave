@@ -47,6 +47,11 @@ builder.Services
     .AddGenWaveSafeSegmentAuthoring()
     // SEAM 1: the Orchestrator is the INextItemProvider (music + TTS patter interleave).
     .AddGenWaveOrchestration()
+    // Real ranker-backed persona pick provider (SPEC F81.6 rung 0, F82; STORY-213, PLAN T64) —
+    // MUST run after AddGenWaveOrchestration so its AddSingleton<IPersonaPickProvider> wins over
+    // that call's own TryAddSingleton<..., NoOpPersonaPickProvider> default (see this extension's
+    // own remarks).
+    .AddGenWavePersonaRanking(cfg)
     // Playout chain: engine control → feeder → feeder service → PlayoutSupervisor (hosted).
     .AddGenWavePlayout()
     // Boot seed: branded safe-loop backstop (F27.6), one-shot + idempotent.

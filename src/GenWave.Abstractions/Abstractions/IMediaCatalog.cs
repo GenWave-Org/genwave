@@ -166,6 +166,41 @@ public interface IMediaCatalog
         GetRotationCandidateAsync(scope, orderedRecentIds, artistSeparation, ct);
 
     /// <summary>
+    /// SPEC F82.2 (STORY-213, PLAN T64) — <see cref="GetEnvelopeCandidateAsync"/>'s exact
+    /// by-construction envelope+rotation-tier filtering, widened to a POOL of up to
+    /// <paramref name="limit"/> rows (rather than one) so <c>GenWave.Orchestration.PersonaRanker</c>
+    /// has a real candidate set to score — never a wider, unconstrained fetch narrowed afterward in
+    /// C# (F81.2 applies to this seam too). Each row additionally carries
+    /// <see cref="EnvelopeCandidateRow.Energy"/>/<see cref="EnvelopeCandidateRow.Moods"/>, the two
+    /// fields <see cref="MediaReference"/> itself does not surface that the ranker's score/taste-match
+    /// formulas need. Null/empty <paramref name="scope"/> short-circuits to an empty pool (default-deny).
+    ///
+    /// Default-implemented (not abstract) so this Q4 addition to the published MIT contract
+    /// (<c>GenWave.Abstractions</c>) stays strictly additive — mirrors <see cref="GetEnvelopeCandidateAsync"/>'s
+    /// own precedent: every pre-F82 implementer (a test double, or a host built against an older SDK
+    /// version) keeps compiling unchanged, falling back to AT MOST ONE row (via
+    /// <see cref="GetEnvelopeCandidateAsync"/>, with a <see langword="null"/>
+    /// <see cref="EnvelopeCandidateRow.Energy"/> and empty <see cref="EnvelopeCandidateRow.Moods"/>)
+    /// until it opts in with a real, pool-shaped override — the concrete catalog implementation in
+    /// <c>GenWave.MediaLibrary</c> is the only production override. <paramref name="limit"/> is
+    /// ignored by this fallback; it can never return more than the one row
+    /// <see cref="GetEnvelopeCandidateAsync"/> itself would.
+    /// </summary>
+    async Task<IReadOnlyList<EnvelopeCandidateRow>> GetEnvelopeCandidatePoolAsync(
+        LibraryScope scope,
+        IReadOnlyList<string> orderedRecentIds,
+        int artistSeparation,
+        SegmentEnvelope envelope,
+        int limit,
+        CancellationToken ct)
+    {
+        var candidate = await GetEnvelopeCandidateAsync(scope, orderedRecentIds, artistSeparation, envelope, ct);
+        return candidate is null
+            ? []
+            : [new EnvelopeCandidateRow(candidate.Media, null, [], candidate.RepeatedRecent, candidate.RepeatedArtist)];
+    }
+
+    /// <summary>
     /// Paged, filtered list of catalog entries scoped to the given libraries (T041). An empty scope
     /// short-circuits to an empty result without touching the database (default-deny).
     /// </summary>
