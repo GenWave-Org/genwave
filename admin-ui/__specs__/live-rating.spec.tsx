@@ -105,6 +105,11 @@ interface FetchState {
   ratings: MockResult;
   vote: MockResult;
   neverPlay: MockResult;
+  /** PLAN T71 (SPEC F84.6) — the taste-thumb resolution poll and persona directory fetch LiveView
+   * now also fires; harmless empty defaults since none of this file's scenarios exercise persona
+   * taste (see persona-taste-thumbs.spec.tsx for that coverage). */
+  boothLog: MockResult;
+  personas: MockResult;
 }
 
 function defaultState(overrides: Partial<FetchState> = {}): FetchState {
@@ -114,6 +119,8 @@ function defaultState(overrides: Partial<FetchState> = {}): FetchState {
     ratings: ok([]),
     vote: ok({ score: 51 }),
     neverPlay: ok({ neverPlay: true }),
+    boothLog: ok({ entries: [], nextBefore: null }),
+    personas: ok([]),
     ...overrides,
   };
 }
@@ -129,6 +136,8 @@ function endpointKeyFor(url: string): keyof FetchState {
   if (url.includes("/vote")) return "vote";
   if (url.includes("/never-play")) return "neverPlay";
   if (url.includes("/play-history")) return "history";
+  if (url.includes("/api/booth-log")) return "boothLog";
+  if (url.includes("/api/personas")) return "personas";
   return "now";
 }
 

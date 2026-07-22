@@ -18,6 +18,16 @@ interface NowPlayingCardProps {
    * rendering controls for at all (a `tts:*` patter announcement on air gets none).
    */
   ratingControls?: ReactNode;
+  /**
+   * Opt-in persona-taste-thumb slot (SPEC F84.1, F84.6-F84.7) — omitted entirely by the Dashboard
+   * (same read-only posture as `ratingControls`, F33.12), supplied by the Live page only, and
+   * rendered on its own line below `ratingControls` so the two affordances never visually merge
+   * into one control cluster (F84.7's visual-distinctness requirement extends to layout, not just
+   * the controls themselves). Like `ratingControls`, this card has no idea what a taste thumb is
+   * or how to resolve which booth-log row/persona it belongs to — the Live page already does that
+   * resolution (see `useNowPlayingTasteAttribution`) before ever handing this a node to render.
+   */
+  tasteThumbControls?: ReactNode;
 }
 
 // Decorative dial-marking strip under the elapsed readout — a receiver
@@ -42,7 +52,7 @@ const DIAL_MARKS = Array.from({ length: DIAL_MARK_COUNT }, (_, index) => index);
  * aesthetic treats both as the same faceplate treatment, so this card is
  * imported directly rather than duplicated or given a variant prop.
  */
-export function NowPlayingCard({ state, error, ratingControls }: NowPlayingCardProps): ReactNode {
+export function NowPlayingCard({ state, error, ratingControls, tasteThumbControls }: NowPlayingCardProps): ReactNode {
   const startedAt = state?.kind === "track" ? state.startedAt : null;
   const elapsedSeconds = useElapsedSeconds(startedAt);
   const trackProgress =
@@ -130,6 +140,7 @@ export function NowPlayingCard({ state, error, ratingControls }: NowPlayingCardP
           )}
 
           {ratingControls && <div className="mt-3">{ratingControls}</div>}
+          {tasteThumbControls && <div className="mt-2">{tasteThumbControls}</div>}
         </div>
       )}
 

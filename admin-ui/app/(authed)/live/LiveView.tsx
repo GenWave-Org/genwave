@@ -3,10 +3,13 @@
 import type { ReactNode } from "react";
 import { usePoll } from "@/lib/use-poll";
 import { fetchNowPlaying, fetchPlayHistory, isCatalogMediaId } from "@/lib/broadcast-api";
+import { personaNameOrFallback, usePersonaDirectory } from "@/lib/use-persona-directory";
 import { NowPlayingCard } from "../_components/NowPlayingCard";
+import { PersonaTasteThumbs } from "../_components/PersonaTasteThumbs";
 import { RatingControls, type RatingControlsValue } from "../_components/RatingControls";
 import { PlayHistoryTable } from "./PlayHistoryTable";
 import { DEFAULT_RATING, useLiveRatings } from "./useLiveRatings";
+import { useNowPlayingTasteAttribution } from "./useNowPlayingTasteAttribution";
 
 interface LiveViewProps {
   /** Test-only injection point, threaded to the clock formatter; production omits this and gets the browser's local zone. */
@@ -31,6 +34,15 @@ interface LiveViewProps {
  * independent poller (`useLiveRatings`, same F16.6-style cadence) derived
  * from the ids currently visible here — `fetchNowPlaying`/`fetchPlayHistory`
  * calls above are untouched.
+ *
+ * Persona taste (SPEC F84.1, F84.6-F84.7; STORY-215): the now-playing card also gets an opt-in
+ * `tasteThumbControls` slot, resolved from TWO more independent sources — `useNowPlayingTasteAttribution`
+ * (which booth-log row/persona this moment's thumb credits, per that hook's own doc comment) and
+ * `usePersonaDirectory` (persona id -> name, one fetch per mount). A persona-less/predating-the-
+ * column airing resolves to no attribution at all, so no control renders (F84.6) — this page never
+ * falls back to "whichever persona is active now". `key={attribution.boothLogRowId}` forces the
+ * control to remount (and its own settled-direction state to reset) whenever a new track's row
+ * swaps in, rather than inheriting the previous track's disabled buttons.
  */
 export function LiveView({ timeZone }: LiveViewProps = {}): ReactNode {
   const nowPlaying = usePoll(fetchNowPlaying);
@@ -54,12 +66,25 @@ export function LiveView({ timeZone }: LiveViewProps = {}): ReactNode {
       />
     ) : undefined;
 
+  const personaDirectory = usePersonaDirectory();
+  const tasteAttribution = useNowPlayingTasteAttribution();
+
+  const nowPlayingTasteThumbControls =
+    nowPlaying.data?.kind === "track" && tasteAttribution !== null ? (
+      <PersonaTasteThumbs
+        key={tasteAttribution.boothLogRowId}
+        boothLogRowId={tasteAttribution.boothLogRowId}
+        personaName={personaNameOrFallback(personaDirectory, tasteAttribution.personaId)}
+      />
+    ) : undefined;
+
   return (
     <div className="space-y-6">
       <NowPlayingCard
         state={nowPlaying.data}
         error={nowPlaying.error}
         ratingControls={nowPlayingRatingControls}
+        tasteThumbControls={nowPlayingTasteThumbControls}
       />
       <PlayHistoryTable
         entries={playHistory.data}

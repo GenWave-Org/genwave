@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatUpSince } from "@/lib/format-clock";
 import type { BoothLogEntry } from "@/lib/booth-log-api";
 import { cn } from "@/lib/utils";
+import { PersonaTasteThumbs } from "../_components/PersonaTasteThumbs";
 
 interface BoothLogFeedProps {
   entries: BoothLogEntry[] | null;
@@ -17,6 +18,18 @@ interface BoothLogFeedProps {
   onLoadMore: () => void;
   /** Test-only injection point for the timestamp formatter; production omits this and gets the browser's local zone. */
   timeZone?: string;
+  /** Resolves a stamped `personaId` to a display name (SPEC F84.6-F84.7) — owned by
+   * `BoothLogView`'s `usePersonaDirectory`, threaded down as a plain function so this component
+   * stays presentational and never touches the directory's own loading/error state. */
+  personaName: (personaId: number) => string;
+}
+
+/** True only for a persona-stamped track-start row (SPEC F84.6) — every other row (a different
+ * kind, or a track-started row with no persona stamp) offers no taste-thumb control at all, not a
+ * disabled one. `typeof` rather than `!== null` deliberately covers a row that omits the field
+ * entirely (predates the column) the same way it covers an explicit `null`. */
+function isThumbable(entry: BoothLogEntry): entry is BoothLogEntry & { personaId: number } {
+  return entry.kind === "track-started" && typeof entry.personaId === "number";
 }
 
 /** Human copy for the three narrative kinds this feed's writer produces (SPEC F72.1,
@@ -67,6 +80,7 @@ export function BoothLogFeed({
   loadMoreError,
   onLoadMore,
   timeZone,
+  personaName,
 }: BoothLogFeedProps): ReactNode {
   const loading = entries === null && !error;
   const neverLoaded = entries === null && error;
@@ -115,22 +129,33 @@ export function BoothLogFeed({
                 </th>
                 <th
                   scope="col"
-                  className="py-2 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2"
+                  className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2"
                 >
                   Summary
+                </th>
+                <th
+                  scope="col"
+                  className="py-2 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2"
+                >
+                  Taste
                 </th>
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry, index) => (
-                <tr key={`${entry.occurredAt}-${index}`} className="border-b border-line last:border-b-0">
+              {entries.map((entry) => (
+                <tr key={entry.id} className="border-b border-line last:border-b-0">
                   <td className="py-2 pr-3 whitespace-nowrap tabular-nums text-mute">
                     {formatUpSince(entry.occurredAt, { timeZone })}
                   </td>
                   <td className="py-2 pr-3">
                     <BoothLogKindBadge kind={entry.kind} />
                   </td>
-                  <td className="py-2 text-ink">{entry.summary}</td>
+                  <td className="py-2 pr-3 text-ink">{entry.summary}</td>
+                  <td className="py-2">
+                    {isThumbable(entry) && (
+                      <PersonaTasteThumbs boothLogRowId={entry.id} personaName={personaName(entry.personaId)} />
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

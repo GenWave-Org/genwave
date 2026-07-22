@@ -184,3 +184,26 @@ export function RestoreIcon(props: IconProps): ReactNode {
     </IconBase>
   );
 }
+
+/** Persona taste-thumb-up glyph (SPEC F84.7, STORY-215) — a literal thumb silhouette, deliberately
+ * NOT {@link VoteUpIcon}'s chevron: the two controls must read as different affordances at a
+ * glance ("curate the library" vs "teach the DJ"), not just carry different copy. */
+export function TasteThumbUpIcon(props: IconProps): ReactNode {
+  return (
+    <IconBase {...props}>
+      <path d="M6.3 8.5h-2V14h2z" />
+      <path d="M6.3 8.5 8 4.4a1.2 1.2 0 0 1 2.3.5v2.2h2a1.1 1.1 0 0 1 1.08 1.3l-.66 3.5a1.1 1.1 0 0 1-1.08.9H7.3a1 1 0 0 1-1-1V8.5z" />
+    </IconBase>
+  );
+}
+
+/** Persona taste-thumb-down glyph (SPEC F84.7, STORY-215) — the same thumb silhouette mirrored,
+ * distinct from {@link VoteDownIcon}'s chevron for the same reason as {@link TasteThumbUpIcon}. */
+export function TasteThumbDownIcon(props: IconProps): ReactNode {
+  return (
+    <IconBase {...props}>
+      <path d="M6.3 7.5h-2V2h2z" />
+      <path d="M6.3 7.5 8 11.6a1.2 1.2 0 0 0 2.3-.5V8.9h2a1.1 1.1 0 0 0 1.08-1.3l-.66-3.5A1.1 1.1 0 0 0 11.64 3H7.3a1 1 0 0 0-1 1v3.5z" />
+    </IconBase>
+  );
+}

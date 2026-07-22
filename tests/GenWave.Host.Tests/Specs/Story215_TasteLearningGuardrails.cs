@@ -373,8 +373,9 @@ public static class FeatureTasteLearningGuardrails
             // Given a booth-log track row stamped with the persona that was active when it aired
             // (F84.6) — the reader/API path never re-derives this from whatever persona happens to
             // be active NOW; it simply reflects whatever the write path stamped.
+            const long rowId = 1;
             const long personaAId = 7;
-            var stampedRow = new BoothLogEntry(1, DateTime.UtcNow, "track-started",
+            var stampedRow = new BoothLogEntry(rowId, DateTime.UtcNow, "track-started",
                 "Started 'Night Drive' by The Waveforms", PersonaId: personaAId);
             var reader = new FixedPageBoothLogReader(new BoothLogPage([stampedRow], NextBefore: null));
             var controller = new BoothLogController(reader, new FakePersonaTasteAccrualStore());
@@ -384,8 +385,12 @@ public static class FeatureTasteLearningGuardrails
                 Assert.IsType<OkObjectResult>(await controller.List(before: null, take: 10, CancellationToken.None)).Value);
 
             // Then the API row carries that same persona id — stamped at air time, additive
-            // column/payload (F84.6).
-            Assert.Equal(personaAId, page.Entries.Single().PersonaId);
+            // column/payload (F84.6) — AND the row's own DB id (F84.1, PLAN T71): the admin UI's
+            // taste-thumb POST target (POST /api/booth-log/{id}/taste-thumb) is this exact value,
+            // never re-derived, so the projection must not drop it.
+            var entry = page.Entries.Single();
+            Assert.Equal(personaAId, entry.PersonaId);
+            Assert.Equal(rowId, entry.Id);
         }
 
         [Fact]

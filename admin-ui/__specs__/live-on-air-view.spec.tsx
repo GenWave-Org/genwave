@@ -99,18 +99,27 @@ function networkError(): MockResult {
 interface FetchState {
   now: MockResult;
   history: MockResult;
+  /** PLAN T71 (SPEC F84.6) — the taste-thumb resolution poll LiveView now also fires; harmless
+   * empty defaults here since none of this file's scenarios exercise persona taste. */
+  boothLog: MockResult;
+  personas: MockResult;
 }
 
 function defaultState(overrides: Partial<FetchState> = {}): FetchState {
   return {
     now: ok(makeTrack()),
     history: ok([]),
+    boothLog: ok({ entries: [], nextBefore: null }),
+    personas: ok([]),
     ...overrides,
   };
 }
 
 function endpointKeyFor(url: string): keyof FetchState {
-  return url.includes("play-history") ? "history" : "now";
+  if (url.includes("play-history")) return "history";
+  if (url.includes("/api/booth-log")) return "boothLog";
+  if (url.includes("/api/personas")) return "personas";
+  return "now";
 }
 
 function installFetchMock(initial: FetchState) {
