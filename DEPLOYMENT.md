@@ -321,5 +321,24 @@ SSH tunnel at all — hit the Access-gated hostname directly instead. Plain SSH 
 unreachable: `api:8080` remains loopback-published either way, unaffected by whether
 Access fronts anything.
 
+### Limits of the Access gate — an honest note
+
+Access is enforced **at Cloudflare's edge, on the tunnel hostname only**. Two consequences
+worth stating plainly:
+
+- **The origin trusts topology, not tokens.** Nothing in the api validates the
+  `Cf-Access-Jwt-Assertion` JWT Access attaches to authenticated requests. A caller that
+  reaches Caddy/api over the LAN gets the real login form with Access never consulted, and
+  a misrouted tunnel hostname or deleted Access app silently drops the gate. The admin
+  password is therefore still load-bearing on every non-edge path — treat it accordingly.
+  Origin-side JWT validation (config-gated, fail-closed) is
+  [gh-#75](https://github.com/GenWave-Org/genwave/issues/75).
+- **Failed logins are anonymous in the logs.** `AuthController` records only
+  "Login failed: wrong admin password" — no remote IP, no `CF-Connecting-IP`, no
+  `Cf-Access-Authenticated-User-Email` — and neither Caddy nor cloudflared emits access
+  logs, so "was that the operator or an intruder?" can't be answered from logs today.
+  Caller-identity logging on auth failures is
+  [gh-#74](https://github.com/GenWave-Org/genwave/issues/74).
+
 Record-keeping: concrete apps, policies, and hostnames live in the operator's private
 infra repo, never in this one (SPEC F78.11).
