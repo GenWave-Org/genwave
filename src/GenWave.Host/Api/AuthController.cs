@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Primitives;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Auth;
 using GenWave.Host.Options;
@@ -40,19 +41,41 @@ public sealed class AuthController(
     {
         var configured = adminOptions.Value.Password;
 
+        // gh-#74: every login outcome logs who was at the door. RemoteIpAddress is already
+        // XFF-corrected for callers transiting caddy (Proxy:TrustedNetworks, T13); the two CF
+        // headers carry the real client IP and the Access-verified identity when a Cloudflare
+        // tunnel fronts the plane — both empty ("-") on LAN paths, which is itself the signal
+        // that the caller bypassed Access.
+        var remote = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        var cfConnectingIp = SanitizeHeader(HttpContext.Request.Headers["CF-Connecting-IP"]);
+        var accessUser = SanitizeHeader(HttpContext.Request.Headers["Cf-Access-Authenticated-User-Email"]);
+
         // No configured password = fail-closed (SPEC F60.4): login can never succeed, so no
         // cookie is ever issued. Otherwise require a constant-time match.
         if (string.IsNullOrEmpty(configured) || !FixedTimeEquals(request.Password, configured))
         {
-            logger.LogWarning("Login failed: wrong admin password");
+            logger.LogWarning(
+                "Login failed: wrong admin password (remote: {RemoteIp}, cf-connecting-ip: {CfConnectingIp}, access-user: {AccessUser})",
+                remote, cfConnectingIp, accessUser);
             return Unauthorized(new { message = InvalidCredentialsMessage });
         }
 
         var claims = new[] { new Claim(ClaimTypes.Name, "admin") };
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "Cookie"));
         await HttpContext.SignInAsync("Cookie", principal, new AuthenticationProperties { IsPersistent = true });
+        logger.LogInformation(
+            "Admin login succeeded (remote: {RemoteIp}, cf-connecting-ip: {CfConnectingIp}, access-user: {AccessUser})",
+            remote, cfConnectingIp, accessUser);
         return NoContent();
     }
+
+    /// <summary>
+    /// Header values are caller-controlled: newline-strip them so a crafted header can't forge
+    /// additional log entries (CodeQL cs/log-forging — same rule as LlmCopyWriter's persona
+    /// fields), and collapse absent to "-" so the log line shape is constant.
+    /// </summary>
+    static string SanitizeHeader(StringValues value) =>
+        StringValues.IsNullOrEmpty(value) ? "-" : value.ToString().ReplaceLineEndings(" ");
 
     /// <summary>Clears the auth cookie, returns 204.</summary>
     [HttpPost("auth/logout")]
