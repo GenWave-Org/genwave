@@ -5,12 +5,16 @@ namespace GenWave.Core.Abstractions;
 /// <summary>
 /// SEAM (SPEC F82.1, F84.1-F84.3; STORY-213; ARCHITECTURE.md "Personalities on air") — CRUD access to
 /// <c>station.persona_taste</c>: a persona's authored/operator/accrued taste opinions. This seam ships
-/// the contract and its store only — no consumer lands with it yet. The ranker (T63) reads via
-/// <see cref="ListAsync"/>; card import (T66-T69) and the accrual thumb endpoint (T70) write via
-/// <see cref="InsertAsync"/>/<see cref="ReplaceAsync"/>; F84.3's cap-50-weakest-evicted eviction and
-/// F84's ±0.2 nudge math are T70's, layered on top of these primitives rather than shipped here.
+/// the contract and its store only — no consumer lands with it yet. Card import (T66-T69) and the
+/// accrual thumb endpoint (T70) write via <see cref="InsertAsync"/>/<see cref="ReplaceAsync"/>/
+/// <see cref="DeleteAsync"/>; F84.3's cap-50-weakest-evicted eviction and F84's ±0.2 nudge math are
+/// T70's, layered on top of these primitives rather than shipped here.
+///
+/// <see cref="IPersonaTasteReader"/> — this store's read-only supertype — is the narrower seam the
+/// ranker (T63) actually depends on (F84.2 structural: the ranker has no code path that writes this
+/// table, and depending on the reader alone means it cannot even see one to reach for).
 /// </summary>
-public interface IPersonaTasteStore
+public interface IPersonaTasteStore : IPersonaTasteReader
 {
     /// <summary>
     /// Inserts a new row unconditionally — no identity check against existing rows. Returns the new
@@ -28,12 +32,6 @@ public interface IPersonaTasteStore
     /// (existing on update, new on insert).
     /// </summary>
     Task<long> ReplaceAsync(long personaId, TasteRule rule, PersonaTasteSource source, CancellationToken ct);
-
-    /// <summary>
-    /// Lists every row for <paramref name="personaId"/>, optionally narrowed to one
-    /// <paramref name="source"/> (<see langword="null"/> = every source).
-    /// </summary>
-    Task<IReadOnlyList<PersonaTasteEntry>> ListAsync(long personaId, PersonaTasteSource? source, CancellationToken ct);
 
     /// <summary>
     /// Deletes every row for <paramref name="personaId"/> in <paramref name="source"/> — the bulk
