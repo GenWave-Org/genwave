@@ -101,7 +101,7 @@ the *admin* plane with TLS. Documented gap: enable `XForwardedProto` in the same
 
 `compose.demo.yaml` runs ollama pinned, fenced, and resident — all three matter:
 
-- **Fence (1 CPU / 3GB):** Liquidsoap is a real-time audio process; an unfenced LLM
+- **Fence (1 CPU / 6GB):** Liquidsoap is a real-time audio process; an unfenced LLM
   generation will starve it and cause audible dropouts. Copywriting is render-ahead and
   cached — the DJ doesn't need speed, playout needs headroom.
 - **`OLLAMA_KEEP_ALIVE=-1`:** by default ollama unloads idle models after ~5 minutes, so
