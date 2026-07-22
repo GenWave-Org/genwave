@@ -25,7 +25,7 @@ public static class FeaturePersonaPreviewWriter
         new(SegmentKind.StationId, "af_heart", "GenWave", null, DateTimeOffset.UtcNow, "test-station");
 
     static (LlmCopyWriter Writer, LlmCopyStatusHolder Holder) BuildWriter(
-        string endpoint, int timeoutSeconds = 5, int maxCopyChars = 450)
+        string endpoint, int timeoutSeconds = 5, int maxCopyChars = 450, int previewQueueWaitSeconds = 5)
     {
         var holder = new LlmCopyStatusHolder();
         var writer = new LlmCopyWriter(
@@ -37,6 +37,7 @@ public static class FeaturePersonaPreviewWriter
                 Model = "test-model",
                 TimeoutSeconds = timeoutSeconds,
                 MaxCopyChars = maxCopyChars,
+                PreviewQueueWaitSeconds = previewQueueWaitSeconds,
             }),
             holder,
             new FakeActivePersonaAccessor(),
@@ -182,6 +183,44 @@ public static class FeaturePersonaPreviewWriter
             var result = await writer.WritePreviewAsync(LeadInRequest(), null, CancellationToken.None);
 
             Assert.IsType<PersonaPreviewResult.Failed>(result);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // GATE BUSY — a preview declines fast instead of queueing behind on-air
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioGateHeldByOnAirRender : IAsyncLifetime
+    {
+        MockCompletionsServer mock = null!;
+
+        public async Task InitializeAsync() => mock = await MockCompletionsServer.StartAsync(MockCompletionsMode.Delay);
+
+        public async Task DisposeAsync() => await mock.DisposeAsync();
+
+        [Fact]
+        public async Task PreviewReturnsBusyInsteadOfQueueingBehindTheSingleFlightGate()
+        {
+            // Generous on-air timeout so the Delay-mode call provably holds the gate for the whole
+            // test; zero preview wait so the decline is immediate once the gate is seen held.
+            var (writer, _) = BuildWriter(mock.BaseUri.ToString(), timeoutSeconds: 60, previewQueueWaitSeconds: 0);
+
+            using var onAirCts = new CancellationTokenSource();
+            var onAir = writer.WriteAsync(LeadInRequest(), onAirCts.Token);
+
+            // The gate is only held once the on-air call's HTTP request is in flight — wait for the
+            // mock to see it before asserting anything about contention.
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (mock.RequestCount == 0 && DateTime.UtcNow < deadline)
+                await Task.Delay(25);
+            Assert.True(mock.RequestCount > 0, "the on-air render never reached the mock LLM");
+
+            var result = await writer.WritePreviewAsync(LeadInRequest(), null, CancellationToken.None);
+
+            Assert.IsType<PersonaPreviewResult.Busy>(result);
+
+            onAirCts.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => onAir);
         }
     }
 

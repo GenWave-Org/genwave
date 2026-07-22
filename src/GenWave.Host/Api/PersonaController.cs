@@ -152,7 +152,10 @@ public sealed partial class PersonaController(
     /// POST /api/personas/preview — auditions a persona's copy through the REAL
     /// <see cref="IPersonaPreviewWriter"/> (SPEC F35.6, STORY-123): 200 <c>{ text }</c> on success;
     /// 502 ProblemDetails on any LLM failure — NEVER a silently-substituted template (that would
-    /// misrepresent the persona being auditioned). The persona previewed is, in order: a saved
+    /// misrepresent the persona being auditioned); 503 ProblemDetails (+ Retry-After) when the
+    /// single-flight LLM gate is busy with an on-air render past the preview's bounded queue wait
+    /// (<c>Llm:PreviewQueueWaitSeconds</c>) — decline fast, never park the operator behind a
+    /// render-ahead burst. The persona previewed is, in order: a saved
     /// persona by <c>personaId</c> (400 if unknown — it is a body field, not a route id, so this
     /// mirrors the 400 the other body-field validations in this controller already use rather than
     /// 404); an unsaved draft built from whichever of <c>name</c>/<c>backstory</c>/<c>style</c>/
@@ -199,6 +202,7 @@ public sealed partial class PersonaController(
         return result switch
         {
             PersonaPreviewResult.Success s => Ok(new PersonaPreviewResponse(s.Text)),
+            PersonaPreviewResult.Busy => LlmBusyProblem(),
             PersonaPreviewResult.Failed f => StatusCode(StatusCodes.Status502BadGateway, new ProblemDetails
             {
                 Status = StatusCodes.Status502BadGateway,
@@ -207,6 +211,25 @@ public sealed partial class PersonaController(
             }),
             _ => StatusCode(StatusCodes.Status500InternalServerError),
         };
+    }
+
+    /// <summary>
+    /// 503 + Retry-After for a preview declined because the single-flight LLM gate is held by an
+    /// on-air render: the writer waited <c>Llm:PreviewQueueWaitSeconds</c>, then gave up rather than
+    /// queueing the operator behind a render-ahead burst (which is what used to surface as an
+    /// opaque proxy-timeout 500). The title is the operator-facing message — the Admin UI toasts
+    /// ProblemDetails titles (F35.7) — and Retry-After matches one fenced-CPU generation, so "a
+    /// moment" is honest.
+    /// </summary>
+    IActionResult LlmBusyProblem()
+    {
+        Response.Headers.RetryAfter = "30";
+        return StatusCode(StatusCodes.Status503ServiceUnavailable, new ProblemDetails
+        {
+            Status = StatusCodes.Status503ServiceUnavailable,
+            Title  = "The LLM is busy with an on-air render — try again in a moment.",
+            Detail = "Previews wait briefly for the LLM, then decline rather than queue behind on-air segment renders.",
+        });
     }
 
     /// <summary>

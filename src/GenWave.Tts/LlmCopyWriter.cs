@@ -173,7 +173,8 @@ public sealed class LlmCopyWriter(
             // read and (on success) overwritten INSIDE RequestCompletionAsync's own single-flight
             // critical section (SPEC F83.1, T65 review finding); see that method's own remarks for
             // why the field can no longer be touched out here.
-            var raw = await RequestCompletionAsync(cfg, request, persona, card, updateTasteMemory: true, ct);
+            var raw = await RequestCompletionAsync(
+                cfg, request, persona, card, updateTasteMemory: true, queueWaitBudget: null, ct);
             var cleaned = CleanCopy(raw, cfg.MaxCopyChars);
             if (cleaned is null)
             {
@@ -245,7 +246,8 @@ public sealed class LlmCopyWriter(
             // absent. The clock (F71.8) still reaches this prompt regardless — it lives in
             // LlmPromptBuilder.BuildUserContent, not here.
             var raw = await RequestCompletionAsync(
-                cfg, request, personaOverride, card: null, updateTasteMemory: false, ct);
+                cfg, request, personaOverride, card: null, updateTasteMemory: false,
+                queueWaitBudget: TimeSpan.FromSeconds(cfg.PreviewQueueWaitSeconds), ct);
             var cleaned = CleanCopy(raw, cfg.MaxCopyChars);
             return cleaned is null
                 ? new PersonaPreviewResult.Failed("The LLM returned empty or over-length copy.")
@@ -256,6 +258,16 @@ public sealed class LlmCopyWriter(
             // The caller cancelled — not our own Llm:TimeoutSeconds budget expiring. Propagate;
             // this is not an LLM failure to report as a preview result.
             throw;
+        }
+        catch (LlmGateBusyException)
+        {
+            // Not a failure either — the gate is held by an on-air render and nothing was
+            // attempted, so no WARN (F69.7's contract covers failed attempts). One INFO line so an
+            // operator-facing 503 stays correlatable with server logs.
+            logger.LogInformation(
+                "Persona preview declined: LLM busy with another render (gave up after {WaitSeconds}s queue wait)",
+                cfg.PreviewQueueWaitSeconds);
+            return new PersonaPreviewResult.Busy();
         }
         catch (Exception ex)
         {
@@ -307,7 +319,7 @@ public sealed class LlmCopyWriter(
 
     async Task<string> RequestCompletionAsync(
         LlmOptions cfg, SegmentRequest request, Persona? persona, PersonaCard? card,
-        bool updateTasteMemory, CancellationToken ct)
+        bool updateTasteMemory, TimeSpan? queueWaitBudget, CancellationToken ct)
     {
         // Captured up front, once, for LlmCallRing (SPEC F73.1, T41) — startedAt mirrors
         // LlmCopyStatusHolder's own attemptedAt semantics (includes any single-flight queueing wait
@@ -330,7 +342,20 @@ public sealed class LlmCopyWriter(
         // Llm:TimeoutSeconds budget — and a caller whose own ct cancels while still queued (e.g.
         // shutdown) throws right out of WaitAsync without ever holding the gate (and without ever
         // reaching LlmCallRing.Record below — nothing was actually attempted).
-        await singleFlight.WaitAsync(ct);
+        //
+        // A non-null queueWaitBudget (preview path only) bounds that wait: an operator staring at
+        // a spinner must not queue behind a render-ahead burst, so a miss throws LlmGateBusyException
+        // — still before the gate is held and before anything is attempted, so it skips the ring
+        // and every catch below by the same nothing-was-attempted logic as a queued cancel.
+        if (queueWaitBudget is { } budget)
+        {
+            if (!await singleFlight.WaitAsync(budget, ct))
+                throw new LlmGateBusyException();
+        }
+        else
+        {
+            await singleFlight.WaitAsync(ct);
+        }
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
