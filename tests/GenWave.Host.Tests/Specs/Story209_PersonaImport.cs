@@ -1,8 +1,7 @@
 // STORY-209 — Card import lands safely on a stranger's station
 //
 // BDD specification — xUnit (SPEC F79.2, F79.3, F79.4, F79.6, F79.7). PLAN T67 wires the import
-// endpoint; T69 is the cross-station round-trip proof (ScenarioFreshImport below stays pending —
-// that scenario needs a REAL export-then-import round trip across two stations, T69's own job).
+// endpoint; T69 is the cross-station round-trip proof.
 //
 // Mirrors Story208's WebApplicationFactory idiom exactly: real routing/auth/content-negotiation
 // pipeline, IPersonaImportStore/ITtsVoiceLister replaced by scriptable fakes, no live Postgres.
@@ -10,6 +9,23 @@
 // upsert-by-slug + delete-authored-then-insert semantics (never touching accrued rows), so
 // "accrued state survives a re-import" is a fact about the CONTROLLER's request shape reaching the
 // store correctly, not an artifact of a fake that happens to keep everything forever.
+//
+// ScenarioFreshImport below (T69) is a GENUINE two-station HTTP round trip — the F79.7 acceptance
+// sentence, literally: TWO WebApplicationFactory<Program> instances, "station A" (its own
+// IPersonaStore/IPersonaMemory/IPersonaTasteReader fakes, mirroring Story208's own
+// PersonaExportWebFactory) serves the REAL GET /api/personas/{slug}/export route, and the resulting
+// response BYTES — the exact wire payload a real export produces — are POSTed, unmodified, to a
+// completely separate "station B" PersonaImportWebFactory's REAL POST .../import route. Every fact
+// below asserts on station B's own store, so what is proven is the controller pair's actual
+// serialization contract round-tripping across two independent hosts, not two methods called
+// in-process against shared fakes.
+//
+// The repository-layer proof — the real PersonaImportRepository/PersonaRepository/
+// PersonaMemoryRepository/PersonaTasteRepository against actual Postgres, closing the T66/T67 review
+// gates this file's fakes cannot (GetIdBySlugAsync, PersonaMemoryRepository.ListAsync, the F79.6
+// transactional guarantee, the real UNIQUE(name) 409/rollback, operator-row survival, a genuine
+// mid-import fault) — lives in GenWave.MediaLibrary.Tests/Specs/Story209_PersonaImportRepository.cs
+// instead, per the T60/Story215 precedent: Host.Tests has no station-Postgres convention.
 
 using System.Net;
 using System.Net.Http.Json;
@@ -198,6 +214,195 @@ file static class PersonaReImportFixture
     }
 }
 
+// ── "Station A" export-side fakes (T69: the genuine two-station HTTP round trip) ───────────────────
+//
+// Deliberately separate from the import-side fakes above: ScenarioFreshImport needs a SECOND, wholly
+// independent WebApplicationFactory<Program> that serves the real GET .../export route — mirrors
+// Story208_PersonaExport.cs's own FakePersonaStore/FakePersonaMemory/FakePersonaTasteStore/
+// PersonaExportWebFactory exactly (that file's versions are `file`-scoped and so are not visible here;
+// duplicating the minimal shape is cheaper and clearer than threading them across files).
+
+/// <summary>Scriptable, slug-keyed <see cref="IPersonaStore"/> double — station A's persona table.</summary>
+file sealed class FakeStationAPersonaStore : IPersonaStore
+{
+    readonly Dictionary<string, long> idsBySlug = [];
+    readonly Dictionary<long, PersonaCard> cardsById = [];
+
+    public void Seed(string slug, long id, PersonaCard card)
+    {
+        idsBySlug[slug] = id;
+        cardsById[id] = card;
+    }
+
+    public Task<long?> GetIdBySlugAsync(string slug, CancellationToken ct) =>
+        Task.FromResult(idsBySlug.TryGetValue(slug, out var id) ? id : (long?)null);
+
+    public Task<PersonaCard?> GetCardByIdAsync(long id, CancellationToken ct) =>
+        Task.FromResult(cardsById.TryGetValue(id, out var card) ? card : null);
+
+    public Task<IReadOnlyList<Persona>> GetAllAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by ScenarioFreshImport's station-A export.");
+
+    public Task<Persona?> GetByIdAsync(long id, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by ScenarioFreshImport's station-A export.");
+
+    public Task<PersonaWriteResult> CreateAsync(PersonaDraft draft, CancellationToken ct) =>
+        throw new NotSupportedException("Station A's export never writes through IPersonaStore.");
+
+    public Task<PersonaWriteResult> UpdateAsync(long id, PersonaDraft draft, CancellationToken ct) =>
+        throw new NotSupportedException("Station A's export never writes through IPersonaStore.");
+
+    public Task<PersonaWriteResult> DeleteAsync(long id, CancellationToken ct) =>
+        throw new NotSupportedException("Station A's export never writes through IPersonaStore.");
+}
+
+/// <summary>Self-filtering <see cref="IPersonaMemory"/> double — same source-filter idiom as Story208's own.</summary>
+file sealed class FakeStationAPersonaMemory : IPersonaMemory
+{
+    public List<PersonaMemoryEntry> Rows { get; } = [];
+
+    public Task<IReadOnlyList<PersonaMemoryEntry>> ListAsync(long personaId, PersonaMemorySource source, CancellationToken ct)
+    {
+        IReadOnlyList<PersonaMemoryEntry> result =
+            Rows.Where(r => r.PersonaId == personaId && r.Source == source).ToList();
+        return Task.FromResult(result);
+    }
+
+    public Task<long> RecordAsync(long personaId, string kind, string content, PersonaMemorySource source, CancellationToken ct) =>
+        throw new NotSupportedException("Station A's export never writes through IPersonaMemory.");
+
+    public Task MarkAiredAsync(long id, CancellationToken ct) =>
+        throw new NotSupportedException("Station A's export never writes through IPersonaMemory.");
+
+    public Task<IReadOnlyList<PersonaMemoryEntry>> RecallAsync(long personaId, RecallSpec spec, CancellationToken ct) =>
+        throw new NotSupportedException("Station A's export reads via ListAsync, never RecallAsync.");
+}
+
+/// <summary>Self-filtering <see cref="IPersonaTasteStore"/> double — same source-filter idiom as Story208's own.</summary>
+file sealed class FakeStationATasteStore : IPersonaTasteStore
+{
+    public List<PersonaTasteEntry> Rows { get; } = [];
+
+    public Task<IReadOnlyList<PersonaTasteEntry>> ListAsync(long personaId, PersonaTasteSource? source, CancellationToken ct)
+    {
+        IReadOnlyList<PersonaTasteEntry> result =
+            Rows.Where(r => r.PersonaId == personaId && (source is null || r.Source == source)).ToList();
+        return Task.FromResult(result);
+    }
+
+    public Task<long> InsertAsync(long personaId, TasteRule rule, PersonaTasteSource source, CancellationToken ct) =>
+        throw new NotSupportedException("Station A's export never writes through IPersonaTasteStore.");
+
+    public Task<long> ReplaceAsync(long personaId, TasteRule rule, PersonaTasteSource source, CancellationToken ct) =>
+        throw new NotSupportedException("Station A's export never writes through IPersonaTasteStore.");
+
+    public Task<int> DeleteAsync(long personaId, PersonaTasteSource source, CancellationToken ct) =>
+        throw new NotSupportedException("Station A's export never writes through IPersonaTasteStore.");
+}
+
+/// <summary>
+/// A wholly independent <see cref="WebApplicationFactory{TEntryPoint}"/> standing in for "station A":
+/// serves the real <c>GET /api/personas/{slug}/export</c> route over
+/// <see cref="FakeStationAPersonaStore"/>/<see cref="FakeStationAPersonaMemory"/>/
+/// <see cref="FakeStationATasteStore"/> — mirrors Story208's own <c>PersonaExportWebFactory</c>. Never
+/// shares a process-level fake with <see cref="PersonaImportWebFactory"/> (station B) — the only thing
+/// that crosses between them is the exported response's own bytes, exactly like two real stations.
+/// </summary>
+file sealed class StationAExportWebFactory(
+    FakeStationAPersonaStore store, FakeStationAPersonaMemory memory, FakeStationATasteStore taste)
+    : WebApplicationFactory<Program>
+{
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", PersonaImportWebFactory.Password);
+
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IHostedService>();
+
+            services.RemoveAll<IPersonaStore>();
+            services.AddSingleton<IPersonaStore>(store);
+
+            services.RemoveAll<IPersonaMemory>();
+            services.AddSingleton<IPersonaMemory>(memory);
+
+            services.RemoveAll<IPersonaTasteStore>();
+            services.RemoveAll<IPersonaTasteReader>();
+            services.AddSingleton<IPersonaTasteStore>(taste);
+            services.AddSingleton<IPersonaTasteReader>(taste);
+        });
+    }
+}
+
+/// <summary>
+/// Arranges station A as a LIVING persona (character/voice/pronunciations/signature taste PLUS one
+/// accrued memory row and one accrued taste row — F79.1's "a persona that has both" shape) and
+/// returns the real <c>GET .../export</c> response bytes — the exact wire payload
+/// <c>ScenarioFreshImport</c>'s facts POST, unmodified, to station B.
+/// </summary>
+file static class StationARoundTripFixture
+{
+    public const string Slug = PersonaImportFixture.Slug;
+    const long PersonaId = 42;
+
+    public static async Task<string> ExportAsync()
+    {
+        var store = new FakeStationAPersonaStore();
+        store.Seed(Slug, PersonaId, PersonaImportFixture.BuildCard());
+
+        var memory = new FakeStationAPersonaMemory();
+        var now = DateTime.UtcNow;
+        memory.Rows.Add(new PersonaMemoryEntry(
+            1, PersonaId, "lore", "Once got lost inside a 20-minute Tangerine Dream fade.",
+            PersonaMemorySource.Authored, 0, null, now));
+        memory.Rows.Add(new PersonaMemoryEntry(
+            2, PersonaId, "bit", "Accrued bit nobody authored — must never cross stations.",
+            PersonaMemorySource.Accrued, 2, now, now));
+
+        var taste = new FakeStationATasteStore();
+        taste.Rows.Add(new PersonaTasteEntry(1, PersonaId, PersonaImportFixture.DefaultRule, PersonaTasteSource.Authored, now, now));
+        taste.Rows.Add(new PersonaTasteEntry(
+            2, PersonaId,
+            new TasteRule(new TastePredicate("Nickelback", null, null), new TasteContext([], null, null), -0.9),
+            PersonaTasteSource.Accrued, now, now));
+
+        await using var stationA = new StationAExportWebFactory(store, memory, taste);
+        var client = stationA.CreateClient();
+        var login = await client.PostAsJsonAsync("/api/auth/login", new { password = PersonaImportWebFactory.Password });
+        Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
+
+        var response = await client.GetAsync($"/api/personas/{Slug}/export");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return await response.Content.ReadAsStringAsync();
+    }
+
+    /// <summary>
+    /// Runs the full round trip — station A export, POSTed into a brand-new station B
+    /// <see cref="PersonaImportWebFactory"/> — and returns station B's own store plus the import
+    /// response, for <c>ScenarioFreshImport</c>'s facts to assert on. Declared here (file-scoped)
+    /// rather than as a local helper inside <c>ScenarioFreshImport</c> itself: its return type carries
+    /// <see cref="FakePersonaImportStore"/>, a file-scoped type that cannot appear in a member
+    /// signature of that non-file-scoped class (mirrors <see cref="PersonaReImportFixture"/>'s own
+    /// documented reason above).
+    /// </summary>
+    public static async Task<(FakePersonaImportStore Store, HttpResponseMessage Response)> ImportIntoFreshStationBAsync()
+    {
+        var exported = await ExportAsync();
+
+        var store = new FakePersonaImportStore();
+        await using var stationB = new PersonaImportWebFactory(store, new FakeTtsVoiceLister { Voices = ["af_heart"] });
+        var client = stationB.CreateClient();
+        var login = await client.PostAsJsonAsync("/api/auth/login", new { password = PersonaImportWebFactory.Password });
+        Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
+
+        var response = await client.PostAsync(
+            $"/api/personas/{Slug}/import", new StringContent(exported, Encoding.UTF8, "application/json"));
+        return (store, response);
+    }
+}
+
 // ── Specs ──────────────────────────────────────────────────────────────────────────────────────────
 
 public static class FeaturePersonaCardImport
@@ -219,40 +424,76 @@ public static class FeaturePersonaCardImport
 
     public static class ScenarioFreshImport
     {
-        // Arrange (T67/T69): an export produced from a seeded "station A" persona (character,
-        // voice, pronunciations, signature taste) imported into a fresh station via the API.
+        // Arrange (T69): a REAL export from station A (StationARoundTripFixture above — a living
+        // persona with character/voice/pronunciations/signature taste PLUS accrued state) POSTed,
+        // unmodified, to a wholly separate station B PersonaImportWebFactory's REAL import route. Every
+        // fact below re-runs the full round trip via StationARoundTripFixture.ImportIntoFreshStationBAsync
+        // (mirrors this file's own per-fact-factory convention elsewhere) and asserts on station B's OWN
+        // store — never station A's.
 
-        [Fact(Skip = "Pending T69 — see docs/PLAN.md")]
-        public static void ImportedPersonaCarriesTheSameCharacterFields()
+        [Fact]
+        public static async Task ImportedPersonaCarriesTheSameCharacterFields()
         {
             // soul/quirks/tagline byte-equal after round-trip (F79.7)
-            Assert.Fail("pending T69");
+            var (store, response) = await StationARoundTripFixture.ImportIntoFreshStationBAsync();
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+
+            var card = store.BySlug[StationARoundTripFixture.Slug].Card;
+            Assert.Equal("DJ Nova", card.Name);
+            Assert.Equal("Late-night gravity.", card.Tagline);
+            Assert.Equal("A slow-orbit voice for the small hours.", card.Soul);
+            Assert.Equal(["Never says goodnight twice."], card.Quirks);
         }
 
-        [Fact(Skip = "Pending T69 — see docs/PLAN.md")]
-        public static void ImportedPersonaCarriesTheSameVoiceSettings()
+        [Fact]
+        public static async Task ImportedPersonaCarriesTheSameVoiceSettings()
         {
-            Assert.Fail("pending T69");
+            var (store, response) = await StationARoundTripFixture.ImportIntoFreshStationBAsync();
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+
+            var stored = store.BySlug[StationARoundTripFixture.Slug];
+            Assert.Equal(new VoiceSpec("kokoro", "af_heart", 1.0, "en"), stored.Card.Voice);
+            Assert.Equal("af_heart", stored.LegacyVoice); // resolved on station B, not the default fallback
         }
 
-        [Fact(Skip = "Pending T69 — see docs/PLAN.md")]
-        public static void ImportedPersonaCarriesThePronunciations()
+        [Fact]
+        public static async Task ImportedPersonaCarriesThePronunciations()
         {
             // card corrections present and merged UNDER station rules (F71.7 unchanged)
-            Assert.Fail("pending T69");
+            var (store, response) = await StationARoundTripFixture.ImportIntoFreshStationBAsync();
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+
+            Assert.Equal(
+                [new PersonaCorrection("Nova", "NOH-vah")],
+                store.BySlug[StationARoundTripFixture.Slug].Card.Corrections);
         }
 
-        [Fact(Skip = "Pending T69 — see docs/PLAN.md")]
-        public static void ImportedPersonaCarriesTheSignatureTaste()
+        [Fact]
+        public static async Task ImportedPersonaCarriesTheSignatureTaste()
         {
             // authored taste rows exist with source='authored' (F79.3)
-            Assert.Fail("pending T69");
+            var (store, response) = await StationARoundTripFixture.ImportIntoFreshStationBAsync();
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+
+            var personaId = store.BySlug[StationARoundTripFixture.Slug].Id;
+            var authoredTaste = store.TasteRows
+                .Where(r => r.PersonaId == personaId && r.Source == PersonaTasteSource.Authored)
+                .ToList();
+
+            var entry = Assert.Single(authoredTaste);
+            Assert.Equal("Led Zeppelin", entry.Rule.Predicate.Artist);
+            Assert.Equal(0.75, entry.Rule.Weight);
         }
 
-        [Fact(Skip = "Pending T69 — see docs/PLAN.md")]
-        public static void ImportedPersonaHasEmptyAccruedMemory()
+        [Fact]
+        public static async Task ImportedPersonaHasEmptyAccruedMemory()
         {
-            Assert.Fail("pending T69");
+            var (store, response) = await StationARoundTripFixture.ImportIntoFreshStationBAsync();
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+
+            var personaId = store.BySlug[StationARoundTripFixture.Slug].Id;
+            Assert.DoesNotContain(store.MemoryRows, r => r.PersonaId == personaId && r.Source == PersonaMemorySource.Accrued);
+            Assert.DoesNotContain(store.TasteRows, r => r.PersonaId == personaId && r.Source == PersonaTasteSource.Accrued);
         }
     }
 
