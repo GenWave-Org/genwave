@@ -7,6 +7,7 @@ using GenWave.Core.Domain;
 using GenWave.Core.Events;
 using GenWave.Loudness;
 using GenWave.MediaLibrary.Catalog;
+using GenWave.MediaLibrary.Mood;
 using GenWave.MediaLibrary.Options;
 using GenWave.MediaLibrary.YearLookup;
 
@@ -54,6 +55,16 @@ namespace GenWave.MediaLibrary.Enrich;
 /// (<see cref="MediaRepository.RecomputeEnergyPercentilesAsync"/>). A tick that touched no LUFS (e.g.
 /// cue/BPM/year-lookup only) skips the recompute entirely.
 ///
+/// Additionally runs a backfill loop for <c>ready</c> rows missing mood tags (SPEC F85.2-F85.4,
+/// STORY-216, T72): picks up rows where <c>moods IS NULL AND mood_tag_missed_at IS NULL</c> and both
+/// artist and title are non-blank, and runs <see cref="IMoodTagger"/> on each — SEQUENTIALLY, one row
+/// awaited at a time, mirroring the year-lookup pass above. Gated FIRST by <see cref="ILlmBatchGate"/>
+/// (SPEC F85.3): a Soft/Hard-degraded or unconfigured LLM skips the ENTIRE pass with one log line and
+/// zero claim queries, never per-track noise — mood tagging must never compete with on-air
+/// copywriting for a fenced model. Both dependencies are optional (default null); see the
+/// constructor's own remarks for why. Bounded to the same
+/// <see cref="CueDetectionOptions.BackfillBatchSize"/> per tick as every other backfill pass.
+///
 /// No separate scheduler or admin endpoint — all backfills fire as sub-tasks of this service.
 /// </summary>
 sealed class EnrichmentService(
@@ -68,6 +79,17 @@ sealed class EnrichmentService(
     IBpmAnalyzer bpmAnalyzer,
     IYearLookup yearLookup,
     IOptionsMonitor<YearLookupOptions> yearLookupOptions,
+    // Mood tagging (SPEC F85.2-F85.4, STORY-216, T72) — the newest backfill pass, and the first one
+    // that is optional BY DESIGN rather than just absent in a test double: an unconfigured/degraded
+    // LLM is a first-class supported state (F69), so "not wired at all" is simply the limiting case
+    // of that same state. Optional (default null), unlike yearLookup above, purely so the ~10
+    // existing Harness.cs factories that build an EnrichmentService for unrelated backfills (cue,
+    // energy, bpm, year) keep compiling unchanged — mirrors the `events` parameter's own established
+    // "no-op unless the host binds a real thing" idiom in this exact class, applied to a second
+    // cross-cutting collaborator. A null moodTagger or null llmBatchGate makes the mood-tag backfill
+    // pass a true no-op: no claim query, no log line (see BackfillMoodTagAsync).
+    IMoodTagger? moodTagger = null,
+    ILlmBatchGate? llmBatchGate = null,
     IStationEventSink? events = null) : BackgroundService
 {
     // EnrichmentCompleted publish seam (gitea-#246); no-op unless the host binds a real sink.
@@ -284,6 +306,7 @@ sealed class EnrichmentService(
                 await BackfillEnergyAsync(ct);
                 await BackfillBpmAsync(ct);
                 await BackfillYearLookupAsync(ct);
+                await BackfillMoodTagAsync(ct);
                 await RecomputeEnergyPercentileAsync(ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -449,6 +472,99 @@ sealed class EnrichmentService(
         if (anyCallFailed)
             log.LogWarning(
                 "MusicBrainz year lookup appears unreachable this tick; {Count} row(s) attempted", batch.Count);
+    }
+
+    /// <summary>
+    /// The mood-tag backfill pass (SPEC F85.2-F85.4, STORY-216, T72) — internal for integration
+    /// testing, drives the pass directly.
+    /// <para>
+    /// Not wired (either dependency null, the common case for a test double built by an unrelated
+    /// Harness factory) is a silent no-op: no gate evaluation, no claim query, no log line.
+    /// </para>
+    /// <para>
+    /// When wired, <see cref="ILlmBatchGate.Evaluate"/> runs FIRST, before any claim query (SPEC
+    /// F85.3) — a Soft/Hard-degraded or unconfigured LLM logs exactly ONE line for the whole tick and
+    /// returns; mood tagging must never compete with on-air copywriting for a fenced model. Only once
+    /// the gate allows does this issue <see cref="MediaRepository.ListMoodTagClaimsAsync"/> and, for
+    /// each claimed row, one sequential <see cref="IMoodTagger.TagAsync"/> call — mirrors
+    /// <see cref="BackfillYearLookupAsync"/>'s own one-row-at-a-time pacing and failed-vs-miss split
+    /// (<see cref="IMoodTaggerDiagnostics"/> mirrors <see cref="IYearLookupDiagnostics"/> exactly).
+    /// </para>
+    /// <para>
+    /// A non-empty result is written through <see cref="MediaRepository.WriteMoodsAsync"/> — T58's own
+    /// validating write path is the ONE backstop for what actually lands in the <c>moods</c> column;
+    /// this method never re-validates a mood set itself. Every row, regardless of outcome, gets
+    /// exactly one <see cref="MediaRepository.StampMoodTagAttemptAsync"/> call (the F76 etiquette
+    /// stamp): a failed round trip stamps attempted-at only (retried next tick); a genuine miss (zero
+    /// survivors) additionally stamps the re-claim gate; a written mood set needs no miss stamp at all
+    /// since <c>moods</c> is no longer null.
+    /// </para>
+    /// </summary>
+    internal async Task BackfillMoodTagAsync(CancellationToken ct)
+    {
+        if (moodTagger is null || llmBatchGate is null) return;
+
+        var decision = llmBatchGate.Evaluate();
+        if (!decision.Allowed)
+        {
+            log.LogInformation("Mood tagging batch skipped this tick: {Reason}", decision.Reason);
+            return;
+        }
+
+        var batch = await repo.ListMoodTagClaimsAsync(cueOptions.Value.BackfillBatchSize, ct);
+        if (batch.Count == 0) return;
+        log.LogInformation("Tagging moods for {Count} ready rows", batch.Count);
+
+        var anyCallFailed = false;
+
+        foreach (var row in batch)
+        {
+            IReadOnlyList<string> moods = [];
+            try
+            {
+                moods = await moodTagger.TagAsync(row.Artist, row.Title, row.Genre, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // The Core contract promises IMoodTagger never throws past its boundary (F85.4); this
+                // guard is defense-in-depth only, mirroring BackfillYearLookupAsync's own catch-all.
+                log.LogWarning(ex, "Mood tagging failed for {Artist} - {Title}", row.Artist, row.Title);
+            }
+
+            var rowCallFailed = moodTagger is IMoodTaggerDiagnostics diagnostics && diagnostics.LastCallFailed;
+            if (rowCallFailed)
+                anyCallFailed = true;
+
+            if (!rowCallFailed && moods.Count > 0)
+            {
+                var result = await repo.WriteMoodsAsync(row.Id, moods, ct);
+                if (result != MoodWriteResult.Written)
+                {
+                    // Defense-in-depth only — MoodTagParser already filters to the vocabulary and
+                    // caps at MaxMoodsPerTrack, so WriteMoodsAsync should never actually reject this
+                    // in practice. Treated as a failure, not a miss: don't stamp the row away
+                    // permanently for what would be this pipeline's own bug, not the model's.
+                    log.LogWarning(
+                        "Mood write rejected ({Result}) for media {Id}; will retry", result, row.Id);
+                    rowCallFailed = true;
+                    anyCallFailed = true;
+                }
+            }
+
+            // mood_tagged_at is stamped unconditionally (attempted-at telemetry); the
+            // mood_tag_missed_at re-claim gate is stamped ONLY for a genuine miss — never for a
+            // failed round trip, which stays eligible and is retried next tick (SPEC F85.4, F76.2).
+            var missed = !rowCallFailed && moods.Count == 0;
+            await repo.StampMoodTagAttemptAsync(row.Id, missed, ct);
+        }
+
+        if (anyCallFailed)
+            log.LogWarning(
+                "Mood tagger LLM appears unreachable this tick; {Count} row(s) attempted", batch.Count);
     }
 
     /// <summary>

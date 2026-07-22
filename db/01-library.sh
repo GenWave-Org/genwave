@@ -160,6 +160,19 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	  add column moods text[]
 	    check (moods is null or cardinality(moods) <= 3);
 
+	-- mood_tagged_at / mood_tag_missed_at (SPEC F85.2, F85.4, STORY-216, T72): the F76 MusicBrainz
+	-- etiquette pattern applied to moods -- mirrors year_lookup_at/year_lookup_missed_at exactly.
+	-- mood_tagged_at is stamped unconditionally on every tagger attempt (success, miss, or endpoint
+	-- failure) as an "attempted at" telemetry marker; it does not gate re-claiming on its own.
+	-- mood_tag_missed_at is the actual re-claim gate (MediaRepository.ListMoodTagClaimsAsync): stamped
+	-- ONLY for a genuine miss -- a completed round trip that produced zero in-vocabulary survivors
+	-- (SPEC F85.4). A failed round trip leaves both moods and mood_tag_missed_at untouched, so the row
+	-- stays eligible and is retried on the very next backfill tick -- never re-asking a question
+	-- already answered, while never giving up on one that was never actually asked.
+	alter table library.media
+	  add column mood_tagged_at     timestamptz,
+	  add column mood_tag_missed_at timestamptz;
+
 	-- Composite partial index: scope-filtered random-ready pick (replaces scalar media_ready).
 	create index media_scope_ready on library.media (library_id, state) where state = 'ready';
 	create index media_artist      on library.media (artist);                       -- ready for criteria queries

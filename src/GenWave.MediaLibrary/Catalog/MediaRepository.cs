@@ -1133,6 +1133,54 @@ sealed class MediaRepository(
     }
 
     /// <summary>
+    /// Rows eligible for mood tagging (SPEC F85.2, T72): <c>state='ready'</c>, <c>moods IS NULL</c>,
+    /// <c>mood_tag_missed_at IS NULL</c>, and both artist and title are non-blank — mirrors
+    /// <see cref="ListYearLookupClaimsAsync"/>'s own F76 shape exactly (a blank tag gives the tagger
+    /// nothing to describe, so it is never claimed, and never stamped either, pending an operator tag
+    /// fix). Gated on <c>mood_tag_missed_at</c>, NOT the row simply having <c>moods IS NULL</c> alone —
+    /// a genuine miss also leaves <c>moods</c> null, so the sentinel is what tells the two states apart
+    /// (see <see cref="StampMoodTagAttemptAsync"/>). Limited to <paramref name="limit"/> rows per tick.
+    /// </summary>
+    public async Task<IReadOnlyList<MoodTagClaimRow>> ListMoodTagClaimsAsync(int limit, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<MoodTagClaimRow>(new CommandDefinition(
+            "select id, artist, title, genre from library.media " +
+            "where state = 'ready' and moods is null and mood_tag_missed_at is null " +
+            "and coalesce(trim(artist), '') <> '' and coalesce(trim(title), '') <> '' " +
+            "limit @limit",
+            new { limit }, cancellationToken: ct));
+        return rows.AsList();
+    }
+
+    /// <summary>
+    /// Stamps the outcome of one mood-tagger attempt (SPEC F85.2, T72) — the F76 MusicBrainz
+    /// etiquette pattern applied to moods. Called once per row per attempt, in ADDITION to (never
+    /// instead of) <see cref="WriteMoodsAsync"/> when the tagger actually produced a non-empty,
+    /// in-vocabulary mood set — <see cref="WriteMoodsAsync"/>'s own vocabulary/cap rejection remains
+    /// the ONE backstop for what gets stored; this method never re-validates moods itself.
+    ///
+    /// <c>mood_tagged_at</c> is stamped unconditionally — success, miss, or failure — as an
+    /// "attempted at" telemetry marker (mirrors <c>year_lookup_at</c>); it does not gate re-claiming
+    /// on its own. <c>mood_tag_missed_at</c> — the actual re-claim gate
+    /// (<see cref="ListMoodTagClaimsAsync"/>) — is stamped ONLY when <paramref name="missed"/> is
+    /// true: a completed round trip that produced zero in-vocabulary survivors (SPEC F85.4). Both a
+    /// failed round trip and a successfully written mood set pass <paramref name="missed"/> false —
+    /// the former stays eligible and is retried next tick; the latter is naturally excluded from then
+    /// on because <c>moods</c> is no longer null.
+    /// </summary>
+    public async Task StampMoodTagAttemptAsync(long id, bool missed, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await conn.ExecuteAsync(new CommandDefinition(
+            "update library.media set " +
+            "mood_tagged_at = now(), " +
+            "mood_tag_missed_at = case when @missed then now() else mood_tag_missed_at end " +
+            "where id = @id",
+            new { id, missed }, cancellationToken: ct));
+    }
+
+    /// <summary>
     /// Rows eligible for a MusicBrainz year lookup: <c>state='ready'</c>, <c>year IS NULL</c>,
     /// <c>year_lookup_missed_at IS NULL</c>, and both artist and title are non-blank (SPEC F48.3,
     /// F76.2) — a blank tag has nothing to search MusicBrainz with, so it is never claimed (and,

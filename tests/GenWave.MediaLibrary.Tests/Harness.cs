@@ -8,6 +8,7 @@ using GenWave.Core.Domain;
 using GenWave.Loudness;
 using GenWave.MediaLibrary.Catalog;
 using GenWave.MediaLibrary.Enrich;
+using GenWave.MediaLibrary.Mood;
 using GenWave.MediaLibrary.Options;
 using GenWave.MediaLibrary.Scan;
 using GenWave.MediaLibrary.Tests.Fakes;
@@ -256,6 +257,37 @@ static class Harness
             new FakeBpmAnalyzer(),
             yearLookup,
             yearLookupOptions ?? DefaultYearLookupOptions());
+
+    /// <summary>
+    /// Builds an EnrichmentService wired for mood-tag backfill tests (SPEC F85.2-F85.4, STORY-216,
+    /// T72): a REAL <see cref="OllamaMoodTagger"/> backed by <paramref name="handler"/> (the Story187
+    /// fake-<see cref="HttpMessageHandler"/> idiom — no test reaches the network) so the constrained-
+    /// output parse runs against genuine HTTP response bodies, not a pre-parsed in-memory double.
+    /// <paramref name="gate"/> defaults to allowed (<see cref="FakeLlmBatchGate"/>'s own default) so a
+    /// fact not about F85.3 degradation doesn't need to think about it; <paramref name="logger"/>
+    /// defaults to a no-op logger, swapped for a <see cref="CapturingLogger{T}"/> by the degradation
+    /// skip-log fact. Loudness/cue/energy/bpm/year-lookup are all no-ops — this backfill pass is not
+    /// under test.
+    /// </summary>
+    public static EnrichmentService BackfillMoodTagWith(
+        MediaRepository repo, HttpMessageHandler handler,
+        ILlmBatchGate? gate = null, ILogger<EnrichmentService>? logger = null) =>
+        new(repo,
+            new Enricher(new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FakeEnergyAnalyzer(), new FakeBpmAnalyzer(), NullLogger<Enricher>.Instance),
+            Channel.CreateUnbounded<long>(),
+            new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
+            logger ?? NullLogger<EnrichmentService>.Instance,
+            new FakeCueAnalyzer(),
+            Microsoft.Extensions.Options.Options.Create(new CueDetectionOptions()),
+            new FakeEnergyAnalyzer(),
+            new FakeBpmAnalyzer(),
+            new FakeYearLookup(),
+            DefaultYearLookupOptions(),
+            new OllamaMoodTagger(
+                new HttpClient(handler),
+                new FakeOptionsMonitor<MoodTaggerOptions>(
+                    new MoodTaggerOptions { Endpoint = "http://fake-llm", Model = "test-model" })),
+            gate ?? new FakeLlmBatchGate());
 
     public static List<long> DrainIds(Channel<long> queue)
     {

@@ -8,6 +8,7 @@ using GenWave.Core.Events;
 using GenWave.Loudness;
 using GenWave.MediaLibrary.Catalog;
 using GenWave.MediaLibrary.Enrich;
+using GenWave.MediaLibrary.Mood;
 using GenWave.MediaLibrary.Options;
 using GenWave.MediaLibrary.Scan;
 using GenWave.MediaLibrary.YearLookup;
@@ -108,6 +109,21 @@ public static class MediaLibraryServiceCollectionExtensions
             client.MaxResponseContentBufferSize = MusicBrainzYearLookup.MaxResponseContentBytes;
         });
         services.AddSingleton<IYearLookup>(sp => sp.GetRequiredService<MusicBrainzYearLookup>());
+
+        // Mood tagger (SPEC F85.2-F85.4, STORY-216, T72). Same "no boot-frozen BaseAddress" shape as
+        // MusicBrainzYearLookup above — MoodTaggerOptions is read fresh via IOptionsMonitor per call.
+        // Bound to the SAME "Llm" config section GenWave.Tts's own LlmOptions binds (see
+        // MoodTaggerOptions' own remarks for why this is a second options class, not a cross-module
+        // reference). Inert until GenWave.Host also registers ILlmBatchGate (over Tts's degradation
+        // reader, which MediaLibrary must never reference) — EnrichmentService's mood-tag backfill
+        // treats either dependency being absent as a no-op, so the DI graph resolves regardless and
+        // Host boot is unaffected either way.
+        services.Configure<MoodTaggerOptions>(configuration.GetSection(MoodTaggerOptions.Section));
+        services.AddHttpClient<OllamaMoodTagger>(client =>
+        {
+            client.MaxResponseContentBufferSize = OllamaMoodTagger.MaxResponseContentBytes;
+        });
+        services.AddSingleton<IMoodTagger>(sp => sp.GetRequiredService<OllamaMoodTagger>());
 
         // Scan availability grace (SPEC F58, closes gitea-#223) — Library:Scan:MissThreshold read fresh
         // per tick via IOptionsMonitor<ScanOptions>, the same F44.2 shape as Library:ScanIntervalSeconds
