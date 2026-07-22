@@ -90,14 +90,17 @@ public sealed class DatabaseFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// Truncate <c>station.booth_log</c> and reset its identity (STORY-195). No CASCADE needed —
-    /// unlike <see cref="ResetStationAsync"/>'s target, nothing has a FK into this table.
+    /// Truncate <c>station.booth_log</c> and reset its identity (STORY-195). CASCADE (STORY-215,
+    /// PLAN T70): once <c>station.persona_taste_thumb</c> exists (SPEC F84.5) its FK into
+    /// <c>station.booth_log</c> makes Postgres refuse a plain TRUNCATE regardless of row count — same
+    /// reason <see cref="ResetStationAsync"/> itself needed CASCADE once <c>station.persona_memory</c>
+    /// existed.
     /// </summary>
     public async Task ResetBoothLogAsync()
     {
         await using var conn = await StationDataSource.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "truncate table station.booth_log restart identity";
+        cmd.CommandText = "truncate table station.booth_log restart identity cascade";
         await cmd.ExecuteNonQueryAsync();
     }
 

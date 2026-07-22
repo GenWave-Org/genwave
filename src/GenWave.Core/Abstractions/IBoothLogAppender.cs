@@ -14,7 +14,12 @@ public interface IBoothLogAppender
     /// Appends one narrative row (<paramref name="kind"/>, <paramref name="summary"/>), stamped
     /// <c>now()</c>. <paramref name="personaId"/> (SPEC F84.6, STORY-215) is the persona active on
     /// air at write time for a TRACK-START row — <see langword="null"/> for every other kind, or a
-    /// persona-less airing.
+    /// persona-less airing. <paramref name="artist"/> (SPEC F84.1, STORY-215, PLAN T70) is that same
+    /// track's artist, captured the same way and for the same reason: the accrual write path needs a
+    /// STRUCTURED artist to build an artist-predicate rule from, never a regex over
+    /// <paramref name="summary"/>'s narrative prose. Never surfaced through <see cref="IBoothLogReader"/>
+    /// — read directly by the accrual store only. <see langword="null"/> for every non-track row or a
+    /// track aired with no known artist.
     /// </summary>
-    Task AppendAsync(string kind, string summary, long? personaId, CancellationToken ct);
+    Task AppendAsync(string kind, string summary, long? personaId, string? artist, CancellationToken ct);
 }

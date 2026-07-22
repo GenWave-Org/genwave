@@ -51,32 +51,33 @@ sealed class BoothLogRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<Boot
     /// the <c>persona_id</c> FK (23503) even though <c>booth_log.persona_id</c>'s own <c>ON DELETE SET
     /// NULL</c> already protects every row persisted BEFORE the delete — SET NULL cannot help a row
     /// that has not been inserted yet. Caught here specifically and retried unstamped: the booth-log
-    /// row itself must never be dropped over a stamp that went stale mid-flight.
+    /// row itself must never be dropped over a stamp that went stale mid-flight. <paramref name="artist"/>
+    /// (SPEC F84.1, STORY-215, PLAN T70) is plain text — no FK, no degrade path of its own.
     /// </summary>
-    public async Task AppendAsync(string kind, string summary, long? personaId, CancellationToken ct)
+    public async Task AppendAsync(string kind, string summary, long? personaId, string? artist, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
 
         try
         {
-            await InsertAndEvictAsync(conn, kind, summary, personaId, ct);
+            await InsertAndEvictAsync(conn, kind, summary, personaId, artist, ct);
         }
         catch (PostgresException ex) when (ex.SqlState == ForeignKeyViolation && personaId is not null)
         {
             // The failed attempt's `await using var tx` already rolled back (disposal runs as the
             // exception unwinds InsertAndEvictAsync, before it reaches this catch) — the connection
             // is clean, so retrying a fresh transaction on the SAME conn is safe.
-            await InsertAndEvictAsync(conn, kind, summary, personaId: null, ct);
+            await InsertAndEvictAsync(conn, kind, summary, personaId: null, artist, ct);
         }
     }
 
-    async Task InsertAndEvictAsync(NpgsqlConnection conn, string kind, string summary, long? personaId, CancellationToken ct)
+    async Task InsertAndEvictAsync(NpgsqlConnection conn, string kind, string summary, long? personaId, string? artist, CancellationToken ct)
     {
         await using var tx = await conn.BeginTransactionAsync(ct);
 
         await conn.ExecuteAsync(new CommandDefinition(
-            "insert into station.booth_log (kind, summary, persona_id) values (@Kind, @Summary, @PersonaId)",
-            new { Kind = kind, Summary = summary, PersonaId = personaId },
+            "insert into station.booth_log (kind, summary, persona_id, artist) values (@Kind, @Summary, @PersonaId, @Artist)",
+            new { Kind = kind, Summary = summary, PersonaId = personaId, Artist = artist },
             transaction: tx,
             cancellationToken: ct));
 

@@ -63,6 +63,11 @@ static class StationSettingsHostingExtensions
         builder.Services.AddPersonaTasteStore(stationConnStr);
         builder.Services.AddSingleton<IPersonaTasteReader>(sp => sp.GetRequiredService<IPersonaTasteStore>());
 
+        // Persona taste ACCRUAL store (SPEC F84.1-F84.6; STORY-215, PLAN T70) — same station_svc
+        // connection string. Deliberately its own registration/interface, never widening
+        // IPersonaTasteStore/IPersonaTasteReader: BoothLogController.ThumbTaste is its only consumer.
+        builder.Services.AddPersonaTasteAccrualStore(stationConnStr);
+
         // Persona import store (SPEC F79.3, F79.6; STORY-209, PLAN T67) — same station_svc
         // connection string, own lazy data source (see AddPersonaImportStore's own remarks). The
         // import route (PersonaController.Import) is its only consumer.

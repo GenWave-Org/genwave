@@ -84,4 +84,18 @@ public static class PersonaServiceCollectionExtensions
     public static IServiceCollection AddPersonaImportStore(this IServiceCollection services, string connectionString) =>
         services.AddSingleton<IPersonaImportStore>(
             _ => new PersonaImportRepository(new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build())));
+
+    /// <summary>
+    /// Registers <see cref="IPersonaTasteAccrualStore"/> (SPEC F84.1-F84.6; STORY-215, PLAN T70) the
+    /// same lazy way <see cref="AddPersonaStore"/> registers <see cref="IPersonaStore"/>, over the
+    /// same <paramref name="connectionString"/> — a SEPARATE <see cref="NpgsqlDataSource"/> instance
+    /// from <see cref="AddPersonaTasteStore"/>'s (mirrors <see cref="AddPersonaImportStore"/>'s own
+    /// remarks: one extra idle pool, not one extra live connection). This store reads/writes both
+    /// <c>station.booth_log</c> (attribution) and <c>station.persona_taste</c> (the nudge/eviction) in
+    /// one transaction, so it is deliberately its own repository rather than a method added to
+    /// <see cref="PersonaTasteRepository"/> or <c>BoothLogRepository</c>.
+    /// </summary>
+    public static IServiceCollection AddPersonaTasteAccrualStore(this IServiceCollection services, string connectionString) =>
+        services.AddSingleton<IPersonaTasteAccrualStore>(
+            _ => new PersonaTasteAccrualRepository(new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build())));
 }

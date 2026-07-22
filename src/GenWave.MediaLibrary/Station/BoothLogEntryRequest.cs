@@ -14,5 +14,10 @@ namespace GenWave.MediaLibrary.Station;
 /// drain can back up (a DB outage/backlog), and resolving at drain time would mis-stamp an
 /// already-queued row with whatever persona is active by the time the backlog clears, not the one
 /// that was actually on air when the row was created.
+///
+/// <see cref="Artist"/> (SPEC F84.1, STORY-215, PLAN T70) rides the same track-start-only, captured-
+/// at-publish-time path as <see cref="PersonaId"/> — the accrual write path needs a structured artist
+/// to build an artist-predicate rule from, never a regex over <see cref="Summary"/>'s narrative prose.
+/// <see langword="null"/> for every other kind, or a track aired with no known artist.
 /// </summary>
-sealed record BoothLogEntryRequest(string Kind, string Summary, long? PersonaId);
+sealed record BoothLogEntryRequest(string Kind, string Summary, long? PersonaId, string? Artist = null);

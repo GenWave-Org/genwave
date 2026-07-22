@@ -135,11 +135,35 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  -- equally "un-thumbable" for taste accrual (T70). ON DELETE SET NULL, not CASCADE (unlike
 	  -- persona_memory/persona_taste below): deleting a persona must never delete booth-log HISTORY
 	  -- rows — it only degrades their stamp to unstamped, the same un-thumbable state above.
-	  persona_id  integer     REFERENCES station.persona (id) ON DELETE SET NULL
+	  persona_id  integer     REFERENCES station.persona (id) ON DELETE SET NULL,
+	  -- SPEC F84.1, STORY-215, PLAN T70: the same track's STRUCTURED artist, captured the same
+	  -- synchronous-at-air-time way as persona_id above and for the same reason — the accrual write
+	  -- path needs a real artist value to build an artist-predicate rule from, never a regex over
+	  -- summary's narrative prose. NULL for every non-track row or a track aired with no known
+	  -- artist. Never surfaced through IBoothLogReader/BoothLogEntry — read directly by the accrual
+	  -- store only, inside the same transaction as the nudge it attributes.
+	  artist      text
 	);
 
 	-- Keyset paging spine (SPEC F72.2): newest-first (occurred_at DESC, id DESC) with no OFFSET —
 	-- matches BoothLogRepository.ReadAsync's ORDER BY / row-comparison predicate exactly.
 	CREATE INDEX IF NOT EXISTS booth_log_paging
 	  ON station.booth_log (occurred_at DESC, id DESC);
+
+	-- Persona taste thumb ledger (SPEC F84.5, STORY-215, PLAN T70): the durable idempotency record
+	-- for an operator taste thumb, keyed (persona_id, booth_log_id, direction) — a double-tap, or a
+	-- now-playing + booth-log tap on the SAME airing/direction, is the exact same row, so
+	-- `ON CONFLICT ... DO NOTHING` is the entire dedup mechanism (never in-memory, which would forget
+	-- on every restart). Also the durable source T71's "already thumbed" UI state reads. FK CASCADE
+	-- on both columns: a deleted persona or an evicted (retention-swept) booth-log row makes its own
+	-- thumb-ledger rows meaningless, so they go with it — unlike booth_log.persona_id's own ON DELETE
+	-- SET NULL (a HISTORY-row survival concern that does not apply to this ledger).
+	CREATE TABLE IF NOT EXISTS station.persona_taste_thumb (
+	  id           bigserial   PRIMARY KEY,
+	  persona_id   integer     NOT NULL REFERENCES station.persona (id) ON DELETE CASCADE,
+	  booth_log_id bigint      NOT NULL REFERENCES station.booth_log (id) ON DELETE CASCADE,
+	  direction    text        NOT NULL CHECK (direction IN ('up', 'down')),
+	  created_at   timestamptz NOT NULL DEFAULT now(),
+	  UNIQUE (persona_id, booth_log_id, direction)
+	);
 	SQL

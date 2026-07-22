@@ -36,7 +36,10 @@ sealed class BoothLogWriter(
         // patter/mode-change rows always publish PersonaId: null.
         var request = evt switch
         {
-            TrackAired t => new BoothLogEntryRequest("track-started", Summarize(t), personaAccessor.ActivePersonaId),
+            // Artist (SPEC F84.1, STORY-215, PLAN T70) rides the same capture-at-publish-time
+            // discipline as PersonaId just above — never re-derived later, never surfaced through
+            // IBoothLogReader.
+            TrackAired t => new BoothLogEntryRequest("track-started", Summarize(t), personaAccessor.ActivePersonaId, t.Artist),
             SegmentGenerated s => new BoothLogEntryRequest("patter-aired", Summarize(s), PersonaId: null),
             DegradationModeChanged d => new BoothLogEntryRequest("mode-changed", Summarize(d), PersonaId: null),
             _ => null,
