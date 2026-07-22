@@ -127,6 +127,17 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "RecentWindow has no additional effect, and RecentWindow=0 disables artist separation too. " +
     "Accepted range: 0–100.",
 
+  // ── Station-default segment envelope (SPEC F80.1, F81.1, F81.3, STORY-212) ──────────────────
+  "Station:Envelope:Genres":
+    "The genre allow-list the station's single 24/7 envelope admits — a track outside this list " +
+    "never enters rotation. A JSON array of genre names; empty means every genre is allowed.",
+  "Station:Envelope:EnergyMin":
+    "The lowest energy percentile the envelope admits (0 = the least energetic ready track in " +
+    "the library). Accepted range: 0–1.",
+  "Station:Envelope:EnergyMax":
+    "The highest energy percentile the envelope admits (1 = the most energetic ready track in " +
+    "the library). Accepted range: 0–1.",
+
   // ── Spectator surface (SPEC F62.1, F62.8, STORY-167/170) ─────────────────────────────────────
   "Station:SpectatorMode":
     "Public read-only spectator page and API. Off by default; when on, /spectator serves " +

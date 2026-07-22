@@ -1,3 +1,4 @@
+using GenWave.Abstractions.Playout;
 using GenWave.Core.Domain;
 
 namespace GenWave.Core.Abstractions;
@@ -132,6 +133,37 @@ public interface IMediaCatalog
     /// </summary>
     Task<RotationCandidate?> GetRotationCandidateAsync(
         LibraryScope scope, IReadOnlyList<string> orderedRecentIds, int artistSeparation, CancellationToken ct);
+
+    /// <summary>
+    /// SPEC F81.4/F81.1 — <see cref="GetRotationCandidateAsync"/>'s exact tiered rotation-window /
+    /// artist-separation preference logic (F81.2's "envelope filters; the bias ranks" — this method
+    /// never replaces rotation, it composes with it), additionally constrained BY CONSTRUCTION to
+    /// <paramref name="envelope"/>'s genre allow-list and energy band: a track outside either never
+    /// enters the candidate pool, full stop — never a post-filter over a wider fetch.
+    /// <paramref name="envelope"/>'s <c>Genres</c> empty admits every genre; a <c>NULL</c> genre
+    /// never satisfies a non-empty list. A <c>NULL</c> <c>energy</c> (population-wide percentile
+    /// recompute lagging a recent enrichment write, SPEC F80.2) always passes the energy band —
+    /// enrichment lag must never silence an otherwise-ready track. Null only when the scope is empty
+    /// or the envelope-and-rotation-constrained playable pool is (same never-drains contract as
+    /// <see cref="GetRotationCandidateAsync"/>); the degradation ladder that relaxes rotation, then
+    /// energy, then genres when the pool is genuinely empty (SPEC F81.6) is the provider's job
+    /// (a later task), not this query's.
+    ///
+    /// Default-implemented (not abstract) so this Q4 addition to a published MIT contract
+    /// (<c>GenWave.Abstractions</c>) stays strictly additive — mirrors
+    /// <see cref="IActivePersonaAccessor.ResolveCardAsync"/>'s precedent: every pre-F81 implementer
+    /// (a test double, or a host built against an older SDK version) keeps compiling unchanged,
+    /// falling back to the envelope-blind <see cref="GetRotationCandidateAsync"/> until it opts in
+    /// with a real, envelope-aware override (the concrete catalog implementation in
+    /// <c>GenWave.MediaLibrary</c> is the only production override).
+    /// </summary>
+    Task<RotationCandidate?> GetEnvelopeCandidateAsync(
+        LibraryScope scope,
+        IReadOnlyList<string> orderedRecentIds,
+        int artistSeparation,
+        SegmentEnvelope envelope,
+        CancellationToken ct) =>
+        GetRotationCandidateAsync(scope, orderedRecentIds, artistSeparation, ct);
 
     /// <summary>
     /// Paged, filtered list of catalog entries scoped to the given libraries (T041). An empty scope

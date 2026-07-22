@@ -91,6 +91,13 @@ public sealed class SettingValidator(IConfiguration configuration)
     internal const int YearLookupMinScoreMin = 0;
     internal const int YearLookupMinScoreMax = 100;
 
+    // Station:Envelope:EnergyMin/EnergyMax (SPEC F80.1, F81.1, STORY-212) — StationEnvelopeOptions'
+    // own [Range(0.0, 1.0)] (documentation-only; StationOptionsValidator is the real boot floor,
+    // same "nested class, root ValidateDataAnnotations() doesn't recurse" story as the rotation/
+    // cadence knobs above). Min <= Max is a ValidateBatch cross-field check, mirroring GW_XFADE_*.
+    internal const double EnvelopeEnergyMin = 0.0;
+    internal const double EnvelopeEnergyMax = 1.0;
+
     // Maps each allowlisted key to a per-key (range + type) validator.
     static readonly Dictionary<string, Func<string, bool>> Validators =
         new(StringComparer.OrdinalIgnoreCase)
@@ -222,6 +229,13 @@ public sealed class SettingValidator(IConfiguration configuration)
             // LLM degradation pin (SPEC F69.3, STORY-188) — exactly the four values
             // DegradationController's parser recognizes; case-insensitive, mirroring that parser.
             ["Llm:DegradationPin"] = IsValidDegradationPin,
+
+            // Station-default segment envelope (SPEC F80.1, F81.1, STORY-212). Genres is a JSON
+            // array of non-blank strings; empty ("[]" or blank) is legal — no genre constraint.
+            // EnergyMin/EnergyMax are doubles in [0,1]; Min <= Max is checked in ValidateBatch.
+            ["Station:Envelope:Genres"] = IsValidGenresArray,
+            ["Station:Envelope:EnergyMin"] = v => IsDoubleInRange(v, EnvelopeEnergyMin, EnvelopeEnergyMax),
+            ["Station:Envelope:EnergyMax"] = v => IsDoubleInRange(v, EnvelopeEnergyMin, EnvelopeEnergyMax),
         };
 
     // ── Per-key validation ─────────────────────────────────────────────────────────────────────
@@ -267,6 +281,16 @@ public sealed class SettingValidator(IConfiguration configuration)
         if (effectiveMin.HasValue && effectiveMax.HasValue && effectiveMin.Value > effectiveMax.Value)
         {
             return $"GW_XFADE_MIN ({effectiveMin.Value}) must be ≤ GW_XFADE_MAX ({effectiveMax.Value}).";
+        }
+
+        // Station-default envelope (SPEC F81.1, STORY-212) — same effective-value cross-field
+        // shape as GW_XFADE_MIN/MAX above; mirrors EnergyRange's own construction-time invariant.
+        var effectiveEnergyMin = ResolveDouble(batch, "Station:Envelope:EnergyMin");
+        var effectiveEnergyMax = ResolveDouble(batch, "Station:Envelope:EnergyMax");
+
+        if (effectiveEnergyMin.HasValue && effectiveEnergyMax.HasValue && effectiveEnergyMin.Value > effectiveEnergyMax.Value)
+        {
+            return $"Station:Envelope:EnergyMin ({effectiveEnergyMin.Value}) must be ≤ Station:Envelope:EnergyMax ({effectiveEnergyMax.Value}).";
         }
 
         return null;
@@ -470,6 +494,36 @@ public sealed class SettingValidator(IConfiguration configuration)
     }
 
     /// <summary>
+    /// Validates <c>Station:Envelope:Genres</c> (SPEC F81.1, STORY-212): a JSON array where every
+    /// element is a non-blank string. An empty array, or a blank value, is legal — "no genre
+    /// constraint" (F81.1's empty-Genres-means-all-genres contract). Case is not normalized here —
+    /// matching is the query's job (case-insensitive), this validator only guards JSON shape.
+    /// </summary>
+    static bool IsValidGenresArray(string v)
+    {
+        if (string.IsNullOrWhiteSpace(v)) return true;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(v);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Array) return false;
+
+            foreach (var element in root.EnumerateArray())
+            {
+                if (element.ValueKind != JsonValueKind.String) return false;
+                if (string.IsNullOrWhiteSpace(element.GetString())) return false;
+            }
+
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Validates <c>Tts:EngineByKind</c> (SPEC F70.3, STORY-191): a JSON object whose keys are
     /// valid <see cref="SegmentKind"/> names (case-insensitive, mirroring
     /// <c>GenWave.Tts.TtsEngineByKindProvider</c>'s own parse) and whose values name a known engine
@@ -597,6 +651,11 @@ public sealed class SettingValidator(IConfiguration configuration)
                "or a same-origin root-relative path starting with a single '/' (not '//'); no '\"', '<', '>', '\\', control characters, or whitespace.",
         var k when k.Equals("Llm:DegradationPin", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be one of: auto, normal, soft, hard.",
+        var k when k.Equals("Station:Envelope:Genres", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be a JSON array of non-blank genre names, e.g. [] or [\"Rock\",\"Jazz\"].",
+        var k when k.Equals("Station:Envelope:EnergyMin", StringComparison.OrdinalIgnoreCase) ||
+                   k.Equals("Station:Envelope:EnergyMax", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be a number in [{EnvelopeEnergyMin}, {EnvelopeEnergyMax}].",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Threading.Channels;
 using Dapper;
 using Microsoft.Extensions.Logging;
+using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Events;
@@ -129,10 +130,7 @@ sealed class MediaRepository(
         // orderedRecentIds is oldest-first, most-recent LAST (F41.1); tts:* ids are already stripped by
         // the Orchestrator, but any id that still fails to parse is silently dropped — mirrors
         // GetRandomReadyAsync's exclude-list parsing.
-        var recentIds = new List<long>(orderedRecentIds.Count);
-        foreach (var s in orderedRecentIds)
-            if (long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v))
-                recentIds.Add(v);
+        var recentIds = ParseIds(orderedRecentIds);
 
         // Tier 2 only compares against the artists of the LAST artistSeparation entries; a
         // non-positive separation disables the tier by supplying an empty comparison set.
@@ -171,6 +169,114 @@ sealed class MediaRepository(
             limit 1
             """,
             new { recentIds, recentArtistIds, mostRecentId, libraryIds = scope.LibraryIds.ToArray() },
+            cancellationToken: ct));
+
+        return row?.ToCandidate(logger);
+    }
+
+    /// <summary>Shared recent-id parse for the tiered rotation queries (F41.1): oldest-first list of
+    /// opaque string ids, any entry that fails to parse as our bigint id is silently dropped.</summary>
+    static List<long> ParseIds(IReadOnlyList<string> ids)
+    {
+        var parsed = new List<long>(ids.Count);
+        foreach (var s in ids)
+            if (long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v))
+                parsed.Add(v);
+        return parsed;
+    }
+
+    /// <summary>
+    /// SPEC F81.4/F81.1, STORY-212 — <see cref="GetRotationCandidateAsync"/>'s exact tiered
+    /// rotation-window/artist-separation query, additionally constrained by construction to
+    /// <paramref name="envelope"/>. Two extra WHERE predicates are ANDed into the same single-query
+    /// candidate fetch — never a wider fetch narrowed afterward in C#:
+    /// <list type="bullet">
+    /// <item><b>Genre allow-list</b> — omitted entirely when <see cref="SegmentEnvelope.Genres"/> is
+    /// empty (F81.1's "empty Genres = all genres"); otherwise a case-insensitive
+    /// <c>lower(genre) = any(...)</c> membership test, mirroring <see cref="BuildAdminWhere"/>'s
+    /// <c>GenresExact</c> predicate. A <c>NULL</c> genre never matches a non-empty list — an
+    /// untagged track cannot claim membership in a genre-curated envelope.</item>
+    /// <item><b>Energy band</b> — <c>energy BETWEEN Min AND Max</c>, but <c>energy IS NULL</c> always
+    /// passes. Decision (SPEC F81.4, documented per the task's explicit call): <c>energy</c> is a
+    /// population-wide percentile that only exists once <see cref="RecomputeEnergyPercentilesAsync"/>
+    /// has run since a row's last <see cref="WriteEnrichmentAsync"/> (SPEC F80.2's piggyback,
+    /// batched, not per-row-instant) — a freshly enriched, fully <c>ready + measurable</c> row can
+    /// legitimately have <c>NULL</c> energy for a while. Excluding it would let enrichment lag
+    /// silence an otherwise-playable track, which no envelope is worth. This is the opposite call
+    /// from the genre predicate above: an absent genre tag is permanently unknown, not a lag state,
+    /// so it stays excluded from a constrained list.</item>
+    /// </list>
+    /// Both predicates compose with, rather than replace, the existing rotation-window/artist-tier
+    /// ORDER BY and playable base predicate — F81.2's "the envelope filters; the bias ranks" applies
+    /// one level down here too: rotation preference still orders the pool, the envelope only decides
+    /// who is in it. Null is returned only when the scope is empty or the resulting
+    /// envelope-and-rotation-constrained pool is (mirrors <see cref="GetRotationCandidateAsync"/>'s
+    /// own never-drains contract) — the SPEC F81.6 relax-then-degrade ladder for a genuinely empty
+    /// pool is the provider's job (a later task), not this query's.
+    /// </summary>
+    public async Task<RotationCandidate?> GetEnvelopeCandidateAsync(
+        LibraryScope scope,
+        IReadOnlyList<string> orderedRecentIds,
+        int artistSeparation,
+        SegmentEnvelope envelope,
+        CancellationToken ct)
+    {
+        // Default-deny: no scope means no access, no SQL issued.
+        if (scope.IsEmpty) return null;
+
+        var recentIds = ParseIds(orderedRecentIds);
+
+        var recentArtistIds = artistSeparation > 0
+            ? recentIds.Skip(Math.Max(0, recentIds.Count - artistSeparation)).ToArray()
+            : [];
+
+        long? mostRecentId = recentIds.Count > 0 ? recentIds[^1] : null;
+
+        // Omitted entirely (not passed as a typed-null array parameter) when Genres is empty — the
+        // predicate simply doesn't exist in that case, which IS "no genre constraint" by
+        // construction rather than a null-check Postgres has to reason about.
+        var genresLower = envelope.Genres.Count > 0
+            ? envelope.Genres.Select(g => g.ToLowerInvariant()).ToArray()
+            : null;
+        var genrePredicate = genresLower is not null ? "and lower(m.genre) = any(@genresLower)" : "";
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<RotationCandidateRow>(new CommandDefinition($"""
+            select
+              m.id, m.path, m.format, m.state, m.title, m.duration_ms, m.sample_rate, m.channels,
+              m.bitrate_kbps, m.artist, m.album, m.genre, m.year, m.integrated_lufs, m.true_peak_dbtp,
+              m.measurable, m.cue_in_sec, m.cue_out_sec, m.intro_energy, m.outro_energy,
+              (m.id = any(@recentIds)) as repeated_recent,
+              (
+                m.artist is not null and trim(m.artist) <> ''
+                and exists (
+                  select 1 from library.media rm
+                  where rm.id = any(@recentArtistIds)
+                    and rm.artist is not null and trim(rm.artist) <> ''
+                    and lower(trim(rm.artist)) = lower(trim(m.artist))
+                )
+              ) as repeated_artist
+            from library.media m
+            left join library.media_rating r on r.media_id = m.id
+            where m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)
+              and m.library_id = any(@libraryIds)
+              and (m.energy is null or (m.energy >= @energyMin and m.energy <= @energyMax))
+              {genrePredicate}
+            order by
+              repeated_recent asc,
+              repeated_artist asc,
+              coalesce(m.id = @mostRecentId, false) asc,
+              random()
+            limit 1
+            """,
+            new
+            {
+                recentIds, recentArtistIds, mostRecentId,
+                libraryIds = scope.LibraryIds.ToArray(),
+                genresLower,
+                energyMin = envelope.EnergyRange.Min,
+                energyMax = envelope.EnergyRange.Max,
+            },
             cancellationToken: ct));
 
         return row?.ToCandidate(logger);
