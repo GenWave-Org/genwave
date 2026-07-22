@@ -53,31 +53,37 @@ sealed class BoothLogRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<Boot
     /// that has not been inserted yet. Caught here specifically and retried unstamped: the booth-log
     /// row itself must never be dropped over a stamp that went stale mid-flight. <paramref name="artist"/>
     /// (SPEC F84.1, STORY-215, PLAN T70) is plain text — no FK, no degrade path of its own.
+    /// <paramref name="pick"/> (SPEC F86.1, STORY-217, PLAN T73) is likewise plain text (pre-serialized
+    /// jsonb, no FK) — the persona-id retry below never touches it either way.
     /// </summary>
-    public async Task AppendAsync(string kind, string summary, long? personaId, string? artist, CancellationToken ct)
+    public async Task AppendAsync(string kind, string summary, long? personaId, string? artist, string? pick, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
 
         try
         {
-            await InsertAndEvictAsync(conn, kind, summary, personaId, artist, ct);
+            await InsertAndEvictAsync(conn, kind, summary, personaId, artist, pick, ct);
         }
         catch (PostgresException ex) when (ex.SqlState == ForeignKeyViolation && personaId is not null)
         {
             // The failed attempt's `await using var tx` already rolled back (disposal runs as the
             // exception unwinds InsertAndEvictAsync, before it reaches this catch) — the connection
             // is clean, so retrying a fresh transaction on the SAME conn is safe.
-            await InsertAndEvictAsync(conn, kind, summary, personaId: null, artist, ct);
+            await InsertAndEvictAsync(conn, kind, summary, personaId: null, artist, pick, ct);
         }
     }
 
-    async Task InsertAndEvictAsync(NpgsqlConnection conn, string kind, string summary, long? personaId, string? artist, CancellationToken ct)
+    async Task InsertAndEvictAsync(
+        NpgsqlConnection conn, string kind, string summary, long? personaId, string? artist, string? pick, CancellationToken ct)
     {
         await using var tx = await conn.BeginTransactionAsync(ct);
 
         await conn.ExecuteAsync(new CommandDefinition(
-            "insert into station.booth_log (kind, summary, persona_id, artist) values (@Kind, @Summary, @PersonaId, @Artist)",
-            new { Kind = kind, Summary = summary, PersonaId = personaId, Artist = artist },
+            """
+            insert into station.booth_log (kind, summary, persona_id, artist, pick)
+            values (@Kind, @Summary, @PersonaId, @Artist, @Pick::jsonb)
+            """,
+            new { Kind = kind, Summary = summary, PersonaId = personaId, Artist = artist, Pick = pick },
             transaction: tx,
             cancellationToken: ct));
 

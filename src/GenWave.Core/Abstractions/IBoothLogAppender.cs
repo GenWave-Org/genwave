@@ -19,7 +19,10 @@ public interface IBoothLogAppender
     /// STRUCTURED artist to build an artist-predicate rule from, never a regex over
     /// <paramref name="summary"/>'s narrative prose. Never surfaced through <see cref="IBoothLogReader"/>
     /// — read directly by the accrual store only. <see langword="null"/> for every non-track row or a
-    /// track aired with no known artist.
+    /// track aired with no known artist. <paramref name="pick"/> (SPEC F86.1, STORY-217, PLAN T73) is
+    /// that same track's persona-pick stamp — the caller's already-serialized jsonb text (see
+    /// <c>GenWave.Core.Domain.BoothLogPickStampSerializer</c>), or <see langword="null"/> for every
+    /// non-track row, an engine-initiated play, or a persona-off pick. Never backfilled.
     /// </summary>
-    Task AppendAsync(string kind, string summary, long? personaId, string? artist, CancellationToken ct);
+    Task AppendAsync(string kind, string summary, long? personaId, string? artist, string? pick, CancellationToken ct);
 }

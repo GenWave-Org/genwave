@@ -19,5 +19,12 @@ namespace GenWave.MediaLibrary.Station;
 /// at-publish-time path as <see cref="PersonaId"/> — the accrual write path needs a structured artist
 /// to build an artist-predicate rule from, never a regex over <see cref="Summary"/>'s narrative prose.
 /// <see langword="null"/> for every other kind, or a track aired with no known artist.
+///
+/// <see cref="Pick"/> (SPEC F86.1, STORY-217, PLAN T73) rides the SAME capture-at-publish-time
+/// discipline: <see cref="BoothLogWriter.Publish"/> reads it straight off the <see cref="TrackAired"/>
+/// event's own <c>PersonaPick</c> — which <c>PlayoutFeeder</c> already captured synchronously at push
+/// time — and pre-serializes it to the exact F86.1 jsonb text (or <see langword="null"/>) before this
+/// request ever reaches the queue, so <see cref="BoothLogDrainService"/> persists it verbatim like
+/// every other field here.
 /// </summary>
-sealed record BoothLogEntryRequest(string Kind, string Summary, long? PersonaId, string? Artist = null);
+sealed record BoothLogEntryRequest(string Kind, string Summary, long? PersonaId, string? Artist = null, string? Pick = null);

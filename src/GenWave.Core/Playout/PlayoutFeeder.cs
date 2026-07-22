@@ -54,10 +54,12 @@ public sealed class PlayoutFeeder(
     readonly HashSet<string> chainIds = new(StringComparer.Ordinal);
 
     // Last-pushed item metadata: retained so the TrackAired event can supply title/artist/gainDb/
-    // durationMs when a new track_id comes on-air (the feeder doesn't receive the MediaItem on
-    // advance, only at push). DurationMs is stamped from the MediaItem at push time (SPEC F50.2) —
-    // an engine-initiated entry (populated from ExtractAnnotations below) always carries null, since
-    // duration never rides the annotate line.
+    // durationMs/personaPick when a new track_id comes on-air (the feeder doesn't receive the
+    // MediaItem on advance, only at push). DurationMs is stamped from the MediaItem at push time
+    // (SPEC F50.2) — an engine-initiated entry (populated from ExtractAnnotations below) always
+    // carries null, since duration never rides the annotate line. PersonaPick (SPEC F82.6/F83.1/
+    // F86.1, PLAN T73) rides the same push-time capture: an engine-initiated entry always carries
+    // null too — the feeder never pushed it, so there was never a persona pick behind it.
     //
     // Lifetime is decoupled from the anti-repeat ring (SPEC F57.1 — closes gitea-#229): an entry survives
     // while its id is (a) the current on-air id, (b) a member of the current pushed chain
@@ -68,7 +70,7 @@ public sealed class PlayoutFeeder(
     // to a ring dequeue is retired: an id legally occupying multiple ring slots (the F41 relaxation
     // ladder on small catalogs) keeps its feeder-authoritative metadata until the LAST occurrence
     // leaves.
-    readonly Dictionary<string, (string? Title, string? Artist, double GainDb, int? DurationMs)> pushedMeta
+    readonly Dictionary<string, (string? Title, string? Artist, double GainDb, int? DurationMs, PersonaPickDiagnostics? PersonaPick)> pushedMeta
         = new(StringComparer.Ordinal);
 
     // Media ids whose pushedMeta entry is feeder-authoritative — set at PushAsync time from the
@@ -129,14 +131,14 @@ public sealed class PlayoutFeeder(
                 {
                     Remember(mediaId);
                     var (title, artist, gainDb) = meta.ExtractAnnotations();
-                    pushedMeta[mediaId] = (title, artist, gainDb, DurationMs: null);
+                    pushedMeta[mediaId] = (title, artist, gainDb, DurationMs: null, PersonaPick: null);
                 }
 
                 // Publish the advance (e.g. for PlayHistoryService's sink). The event carries only
                 // Core-friendly primitives — no Host types cross this seam.
                 {
                     pushedMeta.TryGetValue(mediaId, out var pm);
-                    events.Publish(new TrackAired(mediaId, pm.Title, pm.Artist, pm.GainDb, advancedAt, pm.DurationMs));
+                    events.Publish(new TrackAired(mediaId, pm.Title, pm.Artist, pm.GainDb, advancedAt, pm.DurationMs, pm.PersonaPick));
                 }
             }
 
@@ -202,7 +204,7 @@ public sealed class PlayoutFeeder(
                 // F16.6 stands). item.DurationMs carries the tts:* segment's measured cue-derived
                 // duration (F66.1) or the catalog's stored value for music; only an engine-initiated
                 // advance (elsewhere in this method) is null, rehydrated later at the Host layer (F66.2).
-                pushedMeta[item.MediaId] = (item.Title, item.Artist, gainDb, item.DurationMs);
+                pushedMeta[item.MediaId] = (item.Title, item.Artist, gainDb, item.DurationMs, item.PersonaPick);
                 feederOwnedIds.Add(item.MediaId);
                 chainIds.Add(item.MediaId);
                 chainEndId = item.MediaId;
@@ -225,7 +227,7 @@ public sealed class PlayoutFeeder(
         // Publish the updated on-air state so the Host layer can serve it without a telnet call.
         // We only reach this point when id was non-null (the early return above guards cold-start).
         string? currentMediaId = onAirIsReal ? onAirId : null;
-        (string? Title, string? Artist, double GainDb, int? DurationMs) currentMeta = currentMediaId is not null
+        (string? Title, string? Artist, double GainDb, int? DurationMs, PersonaPickDiagnostics? PersonaPick) currentMeta = currentMediaId is not null
             ? pushedMeta.GetValueOrDefault(currentMediaId)
             : default;
 
