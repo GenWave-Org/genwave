@@ -36,13 +36,23 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: admin-ui/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npx jest
       - run: npm run build
+
+  # DEPLOYMENT.md restates concrete compose.demo.yaml values (resource fence, model, pins) and
+  # pin-bump commits touch only the compose file — this job fails the PR when they disagree
+  # (gh-#77; the 3GB/6GB fence drift shipped unnoticed for two releases).
+  doc-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check DEPLOYMENT.md against compose.demo.yaml
+        run: ./tools/check-doc-drift.sh
 
   # Images publish only from main pushes; PRs prove they still build via the jobs above plus
   # the docker build here being cheap to re-verify locally. Tagged `home-*` per the runbook —
