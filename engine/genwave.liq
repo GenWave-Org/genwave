@@ -66,7 +66,13 @@ q = blank.eat(threshold=-50., max_blank=1.5, q)
 #     voice → *     : butt splice. Voice clips are short and tight — fades on a voice sound
 #       wrong, and the next item starting clean right after speech is correct.
 #     cross() duration= must equal xfade_max so the buffer window covers the widest possible
-#     overlap; smoke_test.sh's CROSSFADE default must match. ---
+#     overlap; smoke_test.sh's CROSSFADE default must match.
+#     TTS blurbs shorter than this window would hit end-of-track while cross() buffers and log
+#     "crossfade duration is longer than the track's duration" (gh-#80, on-air stutter
+#     2026-07-22). The feeder therefore stamps liq_cross_duration — cross()'s default
+#     override_duration metadata — on every measured TTS item (LiquidsoapAnnotationBuilder),
+#     bounding the window to at most half the blurb; the override auto-resets on the next
+#     track (persist_override=false is cross()'s default). No engine-side change needed. ---
 def gw_transition(a, b) =
   if b.metadata["gw_tts"] == "true" and a.metadata["gw_tts"] != "true" then
     # The 0.1s fade.in is load-bearing twice over: it softens the voice onset AND keeps both
