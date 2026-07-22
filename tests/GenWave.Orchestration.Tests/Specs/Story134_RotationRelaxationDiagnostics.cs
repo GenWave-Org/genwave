@@ -110,15 +110,18 @@ public static class FeatureRotationRelaxationDiagnostics
         [Fact]
         public async Task ANullSelectionProducesAWarnNamingTheZeroPlayablePool()
         {
-            // ready == null ⇒ FakeMediaCatalog.GetRotationCandidateAsync returns null — the
-            // zero-playable-pool case (F41.2), distinct from a relaxation.
+            // ready == null ⇒ every catalog query (envelope-aware ladder rungs AND the terminal
+            // GetRotationCandidateAsync, PLAN T62/SPEC F81.6) returns null — a genuinely empty pool
+            // fires its own ladder-relaxation WARNs first (this catalog's default RotationSettings
+            // ArtistSeparation=2 makes the rotation rung non-trivial), but exactly ONE warning names
+            // the terminal zero-playable-pool case (F41.2), distinct from any relaxation.
             var (orchestrator, _, logger) = BuildOrchestrator(null);
             var ctx = new PlayoutContext([]);
 
             await orchestrator.GetNextAsync(ctx, CancellationToken.None);
 
-            var warning = Assert.Single(logger.Warnings);
-            Assert.Contains("zero playable", warning, StringComparison.OrdinalIgnoreCase);
+            var warning = Assert.Single(
+                logger.Warnings, w => w.Contains("zero playable", StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain("relaxed", warning, StringComparison.OrdinalIgnoreCase);
         }
 
@@ -130,11 +133,14 @@ public static class FeatureRotationRelaxationDiagnostics
 
             var first = await orchestrator.GetNextAsync(ctx, CancellationToken.None);
             Assert.Null(first);
+            var callsAfterFirstTick = catalog.RotationCallOrderedRecentIds.Count;
 
-            // The catalog is consulted again on the next tick — no stall, no exception (F6.3).
+            // The catalog is consulted again on the next tick — no stall, no exception (F6.3). The
+            // exact per-tick call count is an envelope-ladder implementation detail (PLAN T62); the
+            // invariant this pins is that the SECOND tick genuinely retries rather than short-circuiting.
             var ex = await Record.ExceptionAsync(() => orchestrator.GetNextAsync(ctx, CancellationToken.None));
             Assert.Null(ex);
-            Assert.Equal(2, catalog.RotationCallOrderedRecentIds.Count);
+            Assert.True(catalog.RotationCallOrderedRecentIds.Count > callsAfterFirstTick);
         }
     }
 }

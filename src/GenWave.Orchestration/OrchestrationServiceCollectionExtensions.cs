@@ -15,9 +15,9 @@ public static class OrchestrationServiceCollectionExtensions
     /// SEAM 1: <see cref="Orchestrator"/> is the <see cref="INextItemProvider"/> — interleaved
     /// music + TTS patter per the live cadence config. Every constructor dependency is a seam the
     /// host (or a module) has already registered: identity/scope/cadence/rotation/render-budget/
-    /// boundary-bias providers, <c>IMediaCatalog</c>, <c>ITtsSegmentSource</c>,
-    /// <c>IActivePersonaAccessor</c>, and the <see cref="SpeechDeferralQueue"/>/<see cref="TimeProvider"/>
-    /// this method also registers.
+    /// boundary-bias/envelope providers, <c>IMediaCatalog</c>, <c>ITtsSegmentSource</c>,
+    /// <c>IActivePersonaAccessor</c>, and the <see cref="SpeechDeferralQueue"/>/<see cref="TimeProvider"/>/
+    /// <see cref="IPersonaPickProvider"/> this method also registers.
     /// </summary>
     public static IServiceCollection AddGenWaveOrchestration(this IServiceCollection services)
     {
@@ -32,6 +32,11 @@ public static class OrchestrationServiceCollectionExtensions
         // producer besides the Orchestrator's own cadence check can enqueue into the SAME
         // instance the Orchestrator drains.
         services.TryAddSingleton<SpeechDeferralQueue>();
+
+        // The SPEC F81.6 rung-0 seam (STORY-212/213): TryAdd so a module that binds a real
+        // ranker-backed IPersonaPickProvider (PLAN T64) wins over this default — until then every
+        // pick is envelope-only (F81.2).
+        services.TryAddSingleton<IPersonaPickProvider, NoOpPersonaPickProvider>();
 
         return services.AddSingleton<INextItemProvider, Orchestrator>();
     }
