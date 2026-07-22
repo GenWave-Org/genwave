@@ -68,6 +68,6 @@ db/                          # Postgres init scripts
 | `/explore` | `docs/PROJECT.md` | Define problem, users, goals, scope |
 | `/design` | `docs/ARCHITECTURE.md`, `docs/SPEC.md` | Architecture + feature spec |
 | `/plan` | `docs/STORIES.md`, `docs/PLAN.md` | Stories + ordered task DAG |
-| `/document` | `README.md`, `docs/MEMORY.md` | Reconcile docs with reality |
+| `/document` | `README.md`, `DEPLOYMENT.md`, `docs/MEMORY.md` | Reconcile docs with reality |
 
 Each doc has one owner command — don't write another command's file.
