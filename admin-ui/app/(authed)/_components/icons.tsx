@@ -207,3 +207,17 @@ export function TasteThumbDownIcon(props: IconProps): ReactNode {
     </IconBase>
   );
 }
+
+/** Exploration-pick glyph (SPEC F86.3, F86.5; STORY-217, PLAN T75) — a three-pip die: the
+ * "rolled the dice" idea rendered as a geometric stroke icon rather than an emoji (Wireless
+ * anti-pattern: no emoji as icons), reused by {@link PickChips}' exploration badge. */
+export function ExplorationIcon(props: IconProps): ReactNode {
+  return (
+    <IconBase {...props}>
+      <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
+      <circle cx="5.5" cy="5.5" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="8" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="10.5" cy="10.5" r="0.9" fill="currentColor" stroke="none" />
+    </IconBase>
+  );
+}

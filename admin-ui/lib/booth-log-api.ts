@@ -3,6 +3,24 @@
 // api:8080), same convention as lib/broadcast-api.ts — never lib/api.ts's apiGet, which is
 // server-only.
 
+/** One entry of {@link BoothLogPick.firedRules} (SPEC F86.2-F86.3, STORY-217, PLAN T74/T75): a
+ * human-readable summary of the taste rule that fired and its signed weight (`[-1, 1]`) —
+ * mirrors `BoothLogFiredRuleDto` (src/GenWave.Host/Api/BoothLogFiredRuleDto.cs). */
+export interface BoothLogFiredRule {
+  summary: string;
+  weight: number;
+}
+
+/** Wire shape of a stamped row's `pick` field (SPEC F86.2-F86.3, F86.5; STORY-217, PLAN T74/T75)
+ * — mirrors `BoothLogPickDto`. `isExploration` and a non-empty `firedRules` never co-occur: an
+ * exploration pick's rules are always empty by the ranker's own contract (F83.2), and this shape
+ * is consumed accordingly (`PickChips` treats them as mutually exclusive by construction, not by
+ * trusting that invariant). */
+export interface BoothLogPick {
+  firedRules: BoothLogFiredRule[];
+  isExploration: boolean;
+}
+
 /** One narrative row (SPEC F72.1) — `kind` is a plain string on the wire (BoothLogEntryDto), not
  * a closed union: the admin UI must keep rendering a row for a kind it doesn't specifically
  * style rather than drop it, so a future event type never silently vanishes from the feed. */
@@ -27,6 +45,11 @@ export interface BoothLogEntry {
    * row's taste-thumb control renders at all — a row without one offers no control, not a
    * disabled one (F84.6). */
   personaId: number | null;
+  /** Fired-rule/exploration diagnostics stamped at air time (SPEC F86.1-F86.2, STORY-217, PLAN
+   * T73-T74) — ABSENT (never `null`) for engine-initiated plays, persona-off picks, and rows that
+   * predate the column, mirroring `BoothLogEntryDto.Pick`'s `JsonIgnore(WhenWritingNull)`
+   * discipline. Feeds `PickChips` directly. */
+  pick?: BoothLogPick;
 }
 
 /** One newest-first keyset page (SPEC F72.2) — `nextBefore` is `null` once this is the oldest page. */
