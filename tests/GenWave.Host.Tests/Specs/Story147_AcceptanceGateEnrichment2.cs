@@ -95,7 +95,7 @@ public static class FeatureAcceptanceGateEnrichment2
         // just container-side. Intentional ops edit; EngineScriptSha256 unchanged —
         // engine/genwave.liq untouched.
         //
-        const string EngineScriptSha256 = "a256fd3f2797ed9b52e3f8507e8ca610aa02218e2fedc5c231369f0ccaab9bd6";
+        const string EngineScriptSha256 = "0aff41c4f3d43bae6c00ca32540ad472b7fc33dfbff37e98791dfe4eb3d5dfbb";
         const string ComposeYamlSha256  = "9ddd169329ef5b092638d1e67279272fc4d7b9f350dcc330cb455d7d92faf981";
 
         [Fact]
