@@ -128,6 +128,22 @@ file sealed class NotUsedPersonaTasteReader : IPersonaTasteReader
         throw new NotSupportedException("Not exercised by Story123's preview scenarios.");
 }
 
+/// <summary>Unused-by-preview <see cref="IPersonaImportStore"/> double — the constructor dependency
+/// exists for the sibling import action (T67), never called by these preview scenarios.</summary>
+file sealed class NotUsedPersonaImportStore : IPersonaImportStore
+{
+    public Task<PersonaImportOutcome> ImportAsync(PersonaImportRequest request, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story123's preview scenarios.");
+}
+
+/// <summary>Unused-by-preview <see cref="ITtsVoiceLister"/> double — same reason as
+/// <see cref="NotUsedPersonaImportStore"/> above.</summary>
+file sealed class NotUsedTtsVoiceLister : ITtsVoiceLister
+{
+    public Task<IReadOnlyList<string>> ListVoicesAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story123's preview scenarios.");
+}
+
 /// <summary>Unused-by-preview <see cref="IStationSettingsStore"/> double — the constructor
 /// dependency exists for the sibling CRUD actions, none of which these scenarios call.</summary>
 file sealed class NotUsedStationSettingsStore : IStationSettingsStore
@@ -213,6 +229,8 @@ file static class PreviewControllerFactory
             scopeProvider ?? new FakeStationScopeProvider(new LibraryScope([1])),
             new NotUsedPersonaMemory(),
             new NotUsedPersonaTasteReader(),
+            new NotUsedPersonaImportStore(),
+            new NotUsedTtsVoiceLister(),
             NullLogger<PersonaController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

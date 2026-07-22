@@ -184,6 +184,25 @@ file sealed class NotUsedAdminMediaLookup : IAdminMediaLookup
 }
 
 /// <summary>
+/// Unused-by-these-scenarios <see cref="IPersonaImportStore"/> double (T67 added this constructor
+/// dependency to <see cref="PersonaController"/> for its import endpoint; none of this file's CRUD
+/// scenarios call it). Throws if a scenario ever does reach it — Story209 owns the real coverage.
+/// </summary>
+file sealed class NotUsedPersonaImportStore : IPersonaImportStore
+{
+    public Task<PersonaImportOutcome> ImportAsync(PersonaImportRequest request, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story120's CRUD scenarios.");
+}
+
+/// <summary>Unused-by-these-scenarios <see cref="ITtsVoiceLister"/> double — same reason as
+/// <see cref="NotUsedPersonaImportStore"/> above.</summary>
+file sealed class NotUsedTtsVoiceLister : ITtsVoiceLister
+{
+    public Task<IReadOnlyList<string>> ListVoicesAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story120's CRUD scenarios.");
+}
+
+/// <summary>
 /// Minimal <see cref="ILogger{T}"/> that collects Warning-and-above messages for assertion
 /// (mirrors GenWave.Tts.Tests' <c>CapturingLogger&lt;T&gt;</c>). Test-scope only.
 /// </summary>
@@ -266,6 +285,7 @@ public static class FeaturePersonaEndpoints
             new NotUsedPersonaPreviewWriter(), new NotUsedActivePersonaAccessor(),
             new NotUsedAdminMediaLookup(), new FakeStationScopeProvider(LibraryScope.None),
             new NotUsedPersonaMemory(), new NotUsedPersonaTasteReader(),
+            new NotUsedPersonaImportStore(), new NotUsedTtsVoiceLister(),
             NullLogger<PersonaController>.Instance);
 
     static IConfiguration BuildConfig(IEnumerable<KeyValuePair<string, string?>> values) =>

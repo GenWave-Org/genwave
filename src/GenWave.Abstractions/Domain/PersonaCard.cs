@@ -39,4 +39,15 @@ public sealed record PersonaCard(
     double EnergyDisposition,
     IReadOnlyList<string> Lore,
     IReadOnlyList<PersonaCorrection> Corrections,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TasteRule>? Taste = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TasteRule>? Taste = null)
+{
+    /// <summary>
+    /// The only <see cref="SchemaVersion"/> major this codebase writes or, on import, accepts (SPEC
+    /// F71.1, F79.2) — single source of truth for both writers: <c>LegacyPersonaCardMapper.BuildCard</c>
+    /// stamps every reconciled card with this value, and the import route (STORY-209, PLAN T67)
+    /// rejects any card whose <see cref="SchemaVersion"/> exceeds it, naming both versions in the
+    /// rejection (F79.2's forward-compat contract — a NEWER major is refused; unknown fields within
+    /// the CURRENT major are silently tolerated by ordinary deserialization).
+    /// </summary>
+    public const int CurrentSchemaVersion = 1;
+}

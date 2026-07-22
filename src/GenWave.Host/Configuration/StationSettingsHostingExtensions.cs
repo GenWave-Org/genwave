@@ -63,6 +63,11 @@ static class StationSettingsHostingExtensions
         builder.Services.AddPersonaTasteStore(stationConnStr);
         builder.Services.AddSingleton<IPersonaTasteReader>(sp => sp.GetRequiredService<IPersonaTasteStore>());
 
+        // Persona import store (SPEC F79.3, F79.6; STORY-209, PLAN T67) — same station_svc
+        // connection string, own lazy data source (see AddPersonaImportStore's own remarks). The
+        // import route (PersonaController.Import) is its only consumer.
+        builder.Services.AddPersonaImportStore(stationConnStr);
+
         // ActivePersonaAccessor (SPEC F35.2, F35.5): the ONE seam the Orchestrator and the
         // preview/status endpoints read the live active persona through — re-reads
         // IOptionsMonitor<StationOptions> + IPersonaStore per call, never a stale snapshot, never

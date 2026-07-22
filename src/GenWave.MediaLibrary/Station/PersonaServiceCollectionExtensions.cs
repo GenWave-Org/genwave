@@ -72,4 +72,16 @@ public static class PersonaServiceCollectionExtensions
     public static IServiceCollection AddPersonaTasteStore(this IServiceCollection services, string connectionString) =>
         services.AddSingleton<IPersonaTasteStore>(
             _ => new PersonaTasteRepository(new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build())));
+
+    /// <summary>
+    /// Registers <see cref="IPersonaImportStore"/> (SPEC F79.3, F79.6; STORY-209, PLAN T67) the same
+    /// lazy way <see cref="AddPersonaStore"/> registers <see cref="IPersonaStore"/>, over the same
+    /// <paramref name="connectionString"/> — a SEPARATE <see cref="NpgsqlDataSource"/> instance from
+    /// the other three (rather than sharing one), matching this codebase's existing "each store
+    /// builds its own lazy data source" convention throughout this file; Npgsql pools connections per
+    /// data source, so this costs one extra idle pool, not one extra live connection.
+    /// </summary>
+    public static IServiceCollection AddPersonaImportStore(this IServiceCollection services, string connectionString) =>
+        services.AddSingleton<IPersonaImportStore>(
+            _ => new PersonaImportRepository(new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build())));
 }
