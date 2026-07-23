@@ -93,3 +93,18 @@ jobs:
             ./icecast
           docker push ghcr.io/genwave-org/genwave-icecast:home-${{ github.sha }}
           docker push ghcr.io/genwave-org/genwave-icecast:home-latest
+      # gh-#93: the admin UI image must publish alongside api/icecast or a --pinned demo box
+      # silently runs whatever it built at first deploy. The admin-ui job (a `needs` of this one)
+      # has already type-checked/tested the same tree; this build bakes the default
+      # BACKEND_URL=http://api:8080 from admin-ui/Dockerfile, correct for every compose topology.
+      - name: Build + push Admin UI image
+        run: |
+          docker build \
+            --label org.opencontainers.image.source=https://github.com/GenWave-Org/genwave \
+            --label org.opencontainers.image.description="GenWave Home admin UI" \
+            --label org.opencontainers.image.licenses=AGPL-3.0-only \
+            -t ghcr.io/genwave-org/genwave-admin-ui:home-${{ github.sha }} \
+            -t ghcr.io/genwave-org/genwave-admin-ui:home-latest \
+            ./admin-ui
+          docker push ghcr.io/genwave-org/genwave-admin-ui:home-${{ github.sha }}
+          docker push ghcr.io/genwave-org/genwave-admin-ui:home-latest
