@@ -8,11 +8,20 @@
 # Env overrides:
 #   CONFIG=Debug ./build.sh     # default Release
 #   SKIP_TESTS=1 ./build.sh     # build but don't run tests
+#   SKIP_PREFLIGHT=1 ./build.sh # bypass machine preflight checks (gh-#19 escape hatch)
 set -euo pipefail
 cd "$(dirname "$0")"
 
 SLN="GenWave.sln"
 CONFIG="${CONFIG:-Release}"
+
+# --- 0. preflight (gh-#19): fail with guidance BEFORE any tool is invoked ---------------
+# The docker compose build below renders compose.yaml, whose ${VAR:?} secrets fail the run
+# from three tools deep with no advice — so the machine and .env are checked up front.
+. tools/preflight.sh
+[ -f "$SLN" ] && preflight_dotnet_sdk 10
+preflight_docker
+preflight_env_secrets
 
 # Tag-derived version stamp (SPEC F65.1, STORY-175): never committed to source, no csproj
 # <Version> — derived once here from git and threaded into the api image's InformationalVersion.

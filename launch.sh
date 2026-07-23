@@ -25,8 +25,11 @@
 # Env overrides:
 #   BUILD=1 ./launch.sh      force a rebuild on the way up — dev flow only. BUILD=1 with
 #                             --pinned is a hard error (--pinned never builds).
+#   SKIP_PREFLIGHT=1 ./launch.sh  bypass machine preflight checks (gh-#19 escape hatch).
 set -euo pipefail
 cd "$(dirname "$0")"
+
+. tools/preflight.sh
 
 usage() {
   awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"
@@ -99,7 +102,9 @@ compose_display() {
 # --- profile merge (--with): existing COMPOSE_PROFILES (env, else .env) + the given list -
 base_profiles="${COMPOSE_PROFILES:-}"
 if [ -z "$base_profiles" ] && [ -f .env ]; then
-  base_profiles="$(grep -E '^COMPOSE_PROFILES=' .env | tail -n1 | cut -d= -f2-)"
+  # `|| true` (gh-#19): an .env without COMPOSE_PROFILES is a valid config, not a pipefail
+  # that silently aborts the whole launch under set -e.
+  base_profiles="$(grep -E '^COMPOSE_PROFILES=' .env | tail -n1 | cut -d= -f2- || true)"
 fi
 
 EFFECTIVE_PROFILES="$base_profiles"
@@ -129,14 +134,35 @@ if [ "$PINNED" = "1" ]; then
     exit 0
   fi
 
+  # gh-#19 preflight — after --dry-run (which must touch nothing and needs no Docker),
+  # before the first real docker call.
+  preflight_docker
+  preflight_env_secrets
+
   echo "==> pulling published images"
-  compose pull
+  if ! compose pull; then
+    preflight_fail "Image pull failed — the running stack was NOT touched." \
+      "Check network/GHCR reachability, then re-run: ./launch.sh --pinned" \
+      "The previous images are still local; the stack keeps running as-is."
+  fi
 
   echo "==> applying schema migrations against the running db"
-  ./migrate.sh "${MIGRATE_ARGS[@]}"
+  if ! ./migrate.sh "${MIGRATE_ARGS[@]}"; then
+    preflight_fail "Schema migration failed — the stack was NOT restarted onto the new images." \
+      "Inspect the db: $(compose_display) logs db" \
+      "Migrations are idempotent — fix the cause and re-run: ./launch.sh --pinned"
+  fi
 
   echo "==> bringing the stack up"
-  compose up -d
+  # A failed partial up on an appliance is deliberately NOT rolled back with `down`:
+  # whatever is still broadcasting keeps broadcasting (never-silent outranks tidiness).
+  # Report precisely and say how to proceed instead.
+  if ! compose up -d; then
+    compose ps || true
+    preflight_fail "Bringing the stack up failed part-way (status above)." \
+      "Inspect the failing service: $(compose_display) logs <service>" \
+      "Re-run when fixed: ./launch.sh --pinned (up is idempotent — it converges the rest)."
+  fi
 
   echo "==> stack status"
   compose ps
@@ -156,11 +182,32 @@ if [ "$DRY_RUN" = "1" ]; then
   exit 0
 fi
 
+# gh-#19 preflight — after --dry-run (which must touch nothing and needs no Docker),
+# before teardown ever starts: a machine that can't finish the launch never loses the
+# stack it already had.
+preflight_docker
+preflight_env_secrets
+
+# gh-#19 never-half-a-stack: once teardown has begun, any failure funnels here — take the
+# partial stack down again so the user is left at a clean, known zero (the one state a
+# re-run of ./launch.sh always starts from), never with half the services wedged.
+fail_and_rollback() {
+  local problem="$1"
+  shift
+  echo "==> launch failed — rolling the partial stack back down (never-half-a-stack, gh-#19)"
+  compose down --remove-orphans || true
+  preflight_fail "$problem" "$@"
+}
+
 echo "==> tearing down stack"
 compose down --remove-orphans
 
 echo "==> bringing the database up first"
-compose up "${UP_ARGS[@]}" db
+if ! compose up "${UP_ARGS[@]}" db; then
+  fail_and_rollback "The database service failed to start." \
+    "Inspect it: $(compose_display) logs db" \
+    "The stack is fully down — fix the cause and re-run: ./launch.sh"
+fi
 
 # The persistent pgdata volume only runs db/01-library.sh on a FRESH volume; an existing
 # volume never picks up schema added since. The db/*-migration.sh scripts are idempotent
@@ -168,10 +215,19 @@ compose up "${UP_ARGS[@]}" db
 # keeps the schema converged BEFORE the api (which queries the new columns) starts — otherwise
 # the api crash-loops on a missing column and the stream falls back to the safe loop.
 db_cid="$(compose ps -q db)"
+db_healthy=0
 for _ in $(seq 1 30); do
-  if [ "$(docker inspect "$db_cid" --format '{{.State.Health.Status}}' 2>/dev/null)" = "healthy" ]; then break; fi
+  if [ "$(docker inspect "$db_cid" --format '{{.State.Health.Status}}' 2>/dev/null)" = "healthy" ]; then db_healthy=1; break; fi
   sleep 2
 done
+# gh-#19: falling through silently used to let migrate fail (or the api crash-loop on a
+# missing column) with no advice — an unhealthy db after 60s is now a hard, explained stop.
+if [ "$db_healthy" != "1" ]; then
+  fail_and_rollback "The database did not become healthy within 60s." \
+    "Inspect it: $(compose_display) logs db" \
+    "A corrupt pgdata volume or bad POSTGRES_PASSWORD are the usual causes." \
+    "The stack is fully down — fix the cause and re-run: ./launch.sh"
+fi
 # The migration loop itself now lives in ./migrate.sh (also usable standalone against a
 # running stack that isn't being launched — see its header). --keep-going preserves this
 # script's historical behaviour exactly: a failing migration is reported but never stops
@@ -179,7 +235,11 @@ done
 ./migrate.sh --keep-going || true
 
 echo "==> bringing the rest of the stack up"
-compose up "${UP_ARGS[@]}"
+if ! compose up "${UP_ARGS[@]}"; then
+  fail_and_rollback "Bringing the full stack up failed part-way." \
+    "Inspect the failing service: $(compose_display) logs <service>" \
+    "The stack is fully down — fix the cause and re-run: ./launch.sh"
+fi
 
 echo "==> stack status"
 compose ps
