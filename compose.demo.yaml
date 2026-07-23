@@ -47,7 +47,7 @@ services:
     restart: unless-stopped
 
   admin_ui:
-    image: ghcr.io/genwave-org/genwave-admin-ui:home-v2.4.2  # bump per release
+    image: ghcr.io/genwave-org/genwave-admin-ui:home-v2.5.0  # bump per release
     pull_policy: always
     # `!reset` drops the base `build:` context entirely: a demo box must pull this image or
     # fail loudly — never silently fall back to building (and then forever running) local
@@ -61,7 +61,7 @@ services:
       - "127.0.0.1:3000:3000"
 
   engine:
-    image: ghcr.io/genwave-org/genwave-engine:home-v2.4.2    # bump per release
+    image: ghcr.io/genwave-org/genwave-engine:home-v2.5.0    # bump per release
     pull_policy: always
     # Same !reset rationale as admin_ui above (gh-#93). Note genwave.liq is a bind mount
     # from the checkout (see compose.yaml), NOT baked into this image — the image carries
@@ -112,7 +112,7 @@ services:
     restart: "no"
 
   icecast:
-    image: ghcr.io/genwave-org/genwave-icecast:home-v2.4.2   # bump per release
+    image: ghcr.io/genwave-org/genwave-icecast:home-v2.5.0   # bump per release
     pull_policy: always
     # Base compose publishes 8000:8000 on 0.0.0.0 — right for LAN listening in
     # Operator/Standard, wrong on a public box: Icecast serves status.xsl (listener
@@ -123,7 +123,7 @@ services:
     ports: !override []
 
   api:
-    image: ghcr.io/genwave-org/genwave:home-v2.4.2           # bump per release
+    image: ghcr.io/genwave-org/genwave:home-v2.5.0           # bump per release
     pull_policy: always
     # compose.yaml's base `ports:` publishes BOTH 8080 and 8081 on 0.0.0.0 — fine for
     # Operator/Standard (LAN reachability is the point there), wrong for a public box.
