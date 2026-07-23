@@ -13,4 +13,12 @@ public interface IBoothLogReader
     /// (<see langword="null"/> = the newest page), up to <paramref name="take"/> rows.
     /// </summary>
     Task<BoothLogPage> ReadAsync(BoothLogCursor? before, int take, CancellationToken ct);
+
+    /// <summary>
+    /// gh-#99 — the stamped catalog media id of booth-log row <paramref name="id"/>:
+    /// <see langword="null"/> for a missing row, a non-track row, or a row that predates the
+    /// <c>media_id</c> column. The taste-thumb endpoint resolves this first, checks safe-scope
+    /// membership on the library connection, and only then lets the accrual write proceed.
+    /// </summary>
+    Task<long?> GetMediaIdAsync(long id, CancellationToken ct);
 }

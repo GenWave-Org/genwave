@@ -23,6 +23,8 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
 
+using GenWave.Host.Tests.Fakes;
+
 namespace GenWave.Host.Tests.Specs;
 
 // ── In-process fakes ──────────────────────────────────────────────────────────────────────────────
@@ -53,6 +55,9 @@ file sealed class FakeBoothLogReader(IReadOnlyList<BoothLogEntry> allNewestFirst
 
     static bool IsBefore(BoothLogEntry e, BoothLogCursor cursor) =>
         e.OccurredAt < cursor.OccurredAt || (e.OccurredAt == cursor.OccurredAt && e.Id < cursor.Id);
+
+    public Task<long?> GetMediaIdAsync(long id, CancellationToken ct) =>
+        Task.FromResult(allNewestFirst.FirstOrDefault(e => e.Id == id)?.MediaId);
 }
 
 /// <summary>
@@ -70,7 +75,8 @@ file sealed class NotSupportedPersonaTasteAccrualStore : IPersonaTasteAccrualSto
 file static class BoothLogControllerFactory
 {
     public static BoothLogController Build(IBoothLogReader reader) =>
-        new(reader, new NotSupportedPersonaTasteAccrualStore(), NullLogger<BoothLogController>.Instance);
+        new(reader, new NotSupportedPersonaTasteAccrualStore(), new FakeMediaLibraryMembership(),
+            new FakeSafeScopeProvider(), NullLogger<BoothLogController>.Instance);
 }
 
 // ── WebApplicationFactory for the auth/surface posture ACs ──────────────────────────────────────────

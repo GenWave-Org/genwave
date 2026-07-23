@@ -51,7 +51,7 @@ public static class FeatureTasteAccrualRepository
     static async Task<long> SeedTrackRowAsync(DatabaseFixture db, long? personaId, string? artist)
     {
         var repo = BoothLogRepo(db);
-        await repo.AppendAsync("track-started", "Started 'Song' by Someone", personaId, artist, pick: null, CancellationToken.None);
+        await repo.AppendAsync("track-started", "Started 'Song' by Someone", personaId, artist, pick: null, mediaId: null, CancellationToken.None);
         var page = await repo.ReadAsync(before: null, take: 1, CancellationToken.None);
         return page.Entries.Single().Id;
     }

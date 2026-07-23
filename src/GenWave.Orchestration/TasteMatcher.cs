@@ -37,9 +37,13 @@ public static class TasteMatcher
     static bool MatchesContext(TasteContext context, DayOfWeek day, int hour) =>
         MatchesDay(context.DaysOfWeek, day) && MatchesHour(context.StartHour, context.EndHour, hour);
 
-    /// <summary>Empty day list means "every day" — no day gate (SPEC F82.1).</summary>
-    static bool MatchesDay(IReadOnlyList<DayOfWeek> daysOfWeek, DayOfWeek day) =>
-        daysOfWeek.Count == 0 || daysOfWeek.Contains(day);
+    /// <summary>Empty day list means "every day" — no day gate (SPEC F82.1). A null list gets the
+    /// same meaning (gh-#87): a context of <c>{}</c> deserializes <see cref="TasteContext.DaysOfWeek"/>
+    /// to null despite the record's non-nullable annotation (STJ fills constructor parameters by
+    /// reflection), and the least-astonishing reading of "no day list at all" is "no day gate" —
+    /// never an NRE that silently disables the rule.</summary>
+    static bool MatchesDay(IReadOnlyList<DayOfWeek>? daysOfWeek, DayOfWeek day) =>
+        daysOfWeek is null || daysOfWeek.Count == 0 || daysOfWeek.Contains(day);
 
     /// <summary>Either bound left null leaves that side open (SPEC F82.1); the window is
     /// [start, end) — end is exclusive.</summary>

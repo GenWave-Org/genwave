@@ -40,6 +40,7 @@ interface BoothLogEntryFixture {
   summary?: string;
   id?: number;
   personaId?: number | null;
+  tasteExcluded?: boolean;
 }
 
 function makeBoothLogEntry(overrides: BoothLogEntryFixture = {}) {
@@ -390,6 +391,32 @@ describe("Feature: Persona taste thumbs", () => {
       expect(screen.getByText("Started 'Unstamped Track'")).toBeInTheDocument();
       // No control at all (F84.6) — not a disabled one, matching the house empty-state pattern
       // PlayHistoryTable already uses for a tts:* row's rating cell.
+      expect(screen.queryByRole("button", { name: /Taste (up|down) for/ })).not.toBeInTheDocument();
+    });
+
+    it("offers no taste thumb on a safe-content row, even a persona-stamped one (gh-#99)", async () => {
+      installBoothLogFetchMock(
+        defaultBoothLogState({
+          head: ok({
+            entries: [
+              makeBoothLogEntry({
+                id: 12,
+                personaId: 7,
+                tasteExcluded: true,
+                summary: "Started 'Please Stand By (Station Default)'",
+              }),
+            ],
+            nextBefore: null,
+          }),
+        })
+      );
+
+      renderBoothLog();
+      await flush();
+
+      expect(screen.getByText("Started 'Please Stand By (Station Default)'")).toBeInTheDocument();
+      // Safe-loop tracks and station IDs never accrue taste — same no-control-not-disabled
+      // posture as the unstamped row above; the endpoint refuses the write independently.
       expect(screen.queryByRole("button", { name: /Taste (up|down) for/ })).not.toBeInTheDocument();
     });
 

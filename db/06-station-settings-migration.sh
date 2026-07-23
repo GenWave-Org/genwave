@@ -150,7 +150,13 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  -- column — never backfilled (F84.6 precedent). Scores, pool size, and degradation step are
 	  -- deliberately NOT stored — those rename with ranker tuning; the F82.6 debug log line remains
 	  -- their one durable-enough record.
-	  pick        jsonb
+	  pick        jsonb,
+	  -- gh-#99: the aired catalog row's numeric library.media id, captured at publish time the same
+	  -- way as persona_id/artist above. NULL for every non-track row, a non-catalog id, or a row that
+	  -- predates this column. Deliberately NO foreign key — library.media lives on the other side of
+	  -- the schema-role boundary (station_svc has no grant there); the Host resolves safe-scope
+	  -- membership for the taste-thumb exclusion via the library connection instead.
+	  media_id    bigint
 	);
 
 	-- Keyset paging spine (SPEC F72.2): newest-first (occurred_at DESC, id DESC) with no OFFSET —

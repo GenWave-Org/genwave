@@ -7,6 +7,7 @@
 // BDD specification — xUnit. Integration: hits real Postgres via DatabaseCollection —
 // the tiered ORDER BY is selection SQL, provable only against the real planner.
 
+using GenWave.MediaLibrary.Tests.Fakes;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.MediaLibrary.Catalog;
@@ -19,7 +20,7 @@ public static class FeatureRotationNeverDrainsCatalogQuery
     // Helpers
     // ---------------------------------------------------------------------
 
-    static MediaRatingRepository RatingRepo(DatabaseFixture db) => new(db.DataSource);
+    static MediaRatingRepository RatingRepo(DatabaseFixture db) => new(db.DataSource, new FakeSafeScopeProvider());
 
     /// <summary>Inserts a ready + measurable + eligible row in library 1 with the given artist
     /// (default shared artist "a" so recency-only facts don't accidentally trip the artist tier).</summary>

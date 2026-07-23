@@ -33,6 +33,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 
+using GenWave.Host.Tests.Fakes;
+
 namespace GenWave.Host.Tests.Specs;
 
 /// <summary>
@@ -46,11 +48,11 @@ file sealed class FakeBoothLogAppender : IBoothLogAppender
 {
     readonly SemaphoreSlim appended = new(0);
 
-    public List<(string Kind, string Summary, long? PersonaId, string? Artist, string? Pick)> Calls { get; } = [];
+    public List<(string Kind, string Summary, long? PersonaId, string? Artist, string? Pick, long? MediaId)> Calls { get; } = [];
 
-    public Task AppendAsync(string kind, string summary, long? personaId, string? artist, string? pick, CancellationToken ct)
+    public Task AppendAsync(string kind, string summary, long? personaId, string? artist, string? pick, long? mediaId, CancellationToken ct)
     {
-        lock (Calls) Calls.Add((kind, summary, personaId, artist, pick));
+        lock (Calls) Calls.Add((kind, summary, personaId, artist, pick, mediaId));
         appended.Release();
         return Task.CompletedTask;
     }
@@ -115,6 +117,9 @@ file sealed class ApiFakeBoothLogReader(IReadOnlyList<BoothLogEntry> rows) : IBo
 {
     public Task<BoothLogPage> ReadAsync(BoothLogCursor? before, int take, CancellationToken ct) =>
         Task.FromResult(new BoothLogPage(rows.Take(take).ToList(), NextBefore: null));
+
+    public Task<long?> GetMediaIdAsync(long id, CancellationToken ct) =>
+        Task.FromResult(rows.FirstOrDefault(e => e.Id == id)?.MediaId);
 }
 
 /// <summary>
@@ -136,7 +141,8 @@ file sealed class NotSupportedPersonaTasteAccrualStore : IPersonaTasteAccrualSto
 file static class BoothLogApiControllerFactory
 {
     public static BoothLogController Build(IBoothLogReader reader) =>
-        new(reader, new NotSupportedPersonaTasteAccrualStore(), NullLogger<BoothLogController>.Instance);
+        new(reader, new NotSupportedPersonaTasteAccrualStore(), new FakeMediaLibraryMembership(),
+            new FakeSafeScopeProvider(), NullLogger<BoothLogController>.Instance);
 }
 
 /// <summary>

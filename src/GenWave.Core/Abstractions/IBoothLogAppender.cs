@@ -23,6 +23,10 @@ public interface IBoothLogAppender
     /// that same track's persona-pick stamp — the caller's already-serialized jsonb text (see
     /// <c>GenWave.Core.Domain.BoothLogPickStampSerializer</c>), or <see langword="null"/> for every
     /// non-track row, an engine-initiated play, or a persona-off pick. Never backfilled.
+    /// <paramref name="mediaId"/> (gh-#99) is the aired row's numeric catalog id — captured the same
+    /// way, <see langword="null"/> for every non-track row or a non-catalog id. It exists so the
+    /// Host can resolve safe-scope membership for the taste-thumb exclusion on the library
+    /// connection; <c>station.booth_log</c> itself can never join <c>library.media</c>.
     /// </summary>
-    Task AppendAsync(string kind, string summary, long? personaId, string? artist, string? pick, CancellationToken ct);
+    Task AppendAsync(string kind, string summary, long? personaId, string? artist, string? pick, long? mediaId, CancellationToken ct);
 }

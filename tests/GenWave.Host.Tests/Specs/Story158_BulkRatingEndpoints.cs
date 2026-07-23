@@ -25,6 +25,8 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
 
+using GenWave.Host.Tests.Fakes;
+
 namespace GenWave.Host.Tests.Specs;
 
 // ── In-process fakes ──────────────────────────────────────────────────────────────────────────────
@@ -79,7 +81,8 @@ file sealed class FakeMediaRating : IMediaRating
 file static class BulkRatingControllerFactory
 {
     public static BulkRatingController Build(FakeMediaRating rating, LibraryScope stationScope) =>
-        new(rating, new FakeStationScopeProvider(stationScope), NullLogger<BulkRatingController>.Instance);
+        new(rating, new FakeStationScopeProvider(stationScope), new FakeSafeScopeProvider(),
+            NullLogger<BulkRatingController>.Instance);
 }
 
 // ── WebApplicationFactory for the content-type posture AC ────────────────────────────────────────

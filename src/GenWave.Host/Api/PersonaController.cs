@@ -603,7 +603,7 @@ public sealed partial class PersonaController(
     /// of the precedence logic re-derived by hand.
     /// </summary>
     static string PredicateSummary(TastePredicate predicate) =>
-        predicate.Artist ?? predicate.Genre ?? predicate.Tag ?? "any track";
+        predicate.LabelOr("any track");
 
     // Trims the name and defaults the optional fields to "" — mirrors Persona.Voice's "" = station
     // default sentinel for all three optional fields, not just voice.

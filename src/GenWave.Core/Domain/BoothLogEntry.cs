@@ -18,4 +18,5 @@ namespace GenWave.Core.Domain;
 /// engine-initiated play, a persona-off pick, or a row that predates the column.
 /// </summary>
 public sealed record BoothLogEntry(
-    long Id, DateTime OccurredAt, string Kind, string Summary, long? PersonaId = null, string? Pick = null);
+    long Id, DateTime OccurredAt, string Kind, string Summary, long? PersonaId = null, string? Pick = null,
+    long? MediaId = null);

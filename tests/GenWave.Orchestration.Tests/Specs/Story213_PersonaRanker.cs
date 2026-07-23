@@ -4,7 +4,9 @@
 // provider chain with the per-pick debug line. The ranker is deterministic and LLM-free —
 // distribution facts run it thousands of times in-memory with a seeded RNG, no I/O.
 
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -25,7 +27,7 @@ public static class FeaturePersonaRanker
         new(MediaId: id, Artist: artist, Genre: genre, Moods: moods ?? [], Energy: energy, RotationScore: rotationScore);
 
     static PersonaRanker BuildRanker(IRandomSource randomSource, IReadOnlyList<TasteRule>? rules = null, PersonaRankerOptions? options = null) =>
-        new(new FakePersonaTasteReader(rules ?? []), randomSource, TimeProvider.System, options ?? new PersonaRankerOptions());
+        new(new FakePersonaTasteReader(rules ?? []), randomSource, TimeProvider.System, options ?? new PersonaRankerOptions(), NullLogger<PersonaRanker>.Instance);
 
     static MediaReference MakeRef(string id, string? artist, string? genre = "Rock") => new(
         MediaId: id,
@@ -208,7 +210,7 @@ public static class FeaturePersonaRanker
 
             // 2026-07-19 09:00 UTC is a Sunday, inside the rule's 06:00-12:00 window.
             var sundayClock = new FakeTimeProvider(new DateTimeOffset(2026, 7, 19, 9, 0, 0, TimeSpan.Zero));
-            var ranker = new PersonaRanker(new FakePersonaTasteReader([rule]), new SeededRandomSource(seed: 21), sundayClock, new PersonaRankerOptions());
+            var ranker = new PersonaRanker(new FakePersonaTasteReader([rule]), new SeededRandomSource(seed: 21), sundayClock, new PersonaRankerOptions(), NullLogger<PersonaRanker>.Instance);
 
             var share = await ZeppelinShareAsync(ranker, pool, iterations: 600);
 
@@ -225,7 +227,7 @@ public static class FeaturePersonaRanker
 
             // 2026-07-22 09:00 UTC is a Wednesday — outside the rule's day gate entirely.
             var weekdayClock = new FakeTimeProvider(new DateTimeOffset(2026, 7, 22, 9, 0, 0, TimeSpan.Zero));
-            var ranker = new PersonaRanker(new FakePersonaTasteReader([rule]), new SeededRandomSource(seed: 21), weekdayClock, new PersonaRankerOptions());
+            var ranker = new PersonaRanker(new FakePersonaTasteReader([rule]), new SeededRandomSource(seed: 21), weekdayClock, new PersonaRankerOptions(), NullLogger<PersonaRanker>.Instance);
 
             var share = await ZeppelinShareAsync(ranker, pool, iterations: 600);
 
@@ -255,7 +257,7 @@ public static class FeaturePersonaRanker
 
             // exploration roll (0.99, above the 5% floor) ⇒ not exploration; sample roll (0.0) ⇒ picks
             // the highest-scored candidate — the fired rule makes that "bc1".
-            var ranker = new PersonaRanker(new FakePersonaTasteReader([rule]), new StubRandomSource(0.99, 0.0), TimeProvider.System, new PersonaRankerOptions());
+            var ranker = new PersonaRanker(new FakePersonaTasteReader([rule]), new StubRandomSource(0.99, 0.0), TimeProvider.System, new PersonaRankerOptions(), NullLogger<PersonaRanker>.Instance);
             var provider = new RankerPersonaPickProvider(catalog, personaAccessor, ranker, new PersonaRankerOptions());
 
             var identityProvider = new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default"));
@@ -376,6 +378,76 @@ public static class FeaturePersonaRanker
 
             Assert.NotNull(result);
             Assert.Equal("disliked", result.Candidate.MediaId);
+        }
+    }
+
+    public static class ScenarioGarbageRulesNeverSilentlyDisable
+    {
+        // Arrange (gh-#87): a persona_taste context of `{}` deserializes TasteContext.DaysOfWeek to
+        // null (STJ missing-property default) — pre-fix, TasteMatcher.MatchesDay NRE'd on every pick
+        // evaluation and the swallow upstream degraded the whole persona layer to envelope-only,
+        // silently. Both legs pinned here: null-tolerant matching, and a WARN + skip (never a fault)
+        // for any rule whose evaluation still throws.
+
+        /// <summary>Captures WARN records so the gh-#87 "never silently disabled" contract is assertable.</summary>
+        sealed class CapturingLogger : ILogger<PersonaRanker>
+        {
+            public List<string> Warnings { get; } = [];
+
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                if (logLevel == LogLevel.Warning)
+                    Warnings.Add(formatter(state, exception));
+            }
+        }
+
+        [Fact]
+        public static void NullDaysOfWeekMeansNoDayGate()
+        {
+            // The exact production shape: `{}` deserialized through STJ leaves DaysOfWeek null
+            // despite the record's non-nullable annotation.
+            var offSchemaContext = JsonSerializer.Deserialize<TasteContext>("{}")
+                ?? throw new InvalidOperationException("'{}' deserialized to null");
+            Assert.Null(offSchemaContext.DaysOfWeek);
+
+            var rule = new TasteRule(new TastePredicate(Artist: "Led Zeppelin", Genre: null, Tag: null), offSchemaContext, Weight: 1.0);
+            var candidate = MakeCandidate("m1", "Led Zeppelin", genre: null, energy: 0.5);
+
+            // Same semantics as [] — fires every day, never throws.
+            Assert.True(TasteMatcher.Matches(rule, candidate, DayOfWeek.Sunday, hour: 8));
+            Assert.True(TasteMatcher.Matches(rule, candidate, DayOfWeek.Monday, hour: 8));
+        }
+
+        [Fact]
+        public static async Task AThrowingRuleWarnsOnceAndThePickContinues()
+        {
+            // A candidate with a null Moods list (garbage no production seam produces, simulating any
+            // future off-schema shape) makes MatchesTag throw for every rule that carries a Tag.
+            var throwingRule = new TasteRule(new TastePredicate(Artist: null, Genre: null, Tag: "mellow"), AnyTime, Weight: 1.0);
+            var healthyRule = new TasteRule(new TastePredicate(Artist: "Other Artist", Genre: null, Tag: null), AnyTime, Weight: 1.0);
+            var poisoned = new PersonaRankCandidate(MediaId: "poisoned", Artist: "Someone", Genre: null, Moods: null!, Energy: 0.5, RotationScore: 0.0);
+            var favored = new PersonaRankCandidate(MediaId: "favored", Artist: "Other Artist", Genre: null, Moods: null!, Energy: 0.5, RotationScore: 0.0);
+
+            var logger = new CapturingLogger();
+            var ranker = new PersonaRanker(
+                new FakePersonaTasteReader([throwingRule, healthyRule]), new StubRandomSource(0.99, 0.0),
+                TimeProvider.System, new PersonaRankerOptions(), logger);
+            var range = new EnergyRange(0.0, 1.0);
+
+            var result = await ranker.PickAsync(1, 0.0, range, [poisoned, favored], CancellationToken.None);
+
+            // The pick survives, the healthy rule still fires, and the faulted rule WARNs exactly
+            // once for the whole pick — not once per candidate.
+            Assert.NotNull(result);
+            Assert.Equal("favored", result.Candidate.MediaId);
+            Assert.Contains(healthyRule, result.FiredRules);
+            Assert.Single(logger.Warnings);
+            Assert.Contains("gh-#87", logger.Warnings[0]);
         }
     }
 }

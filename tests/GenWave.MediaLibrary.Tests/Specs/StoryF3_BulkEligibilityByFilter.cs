@@ -12,6 +12,7 @@
 // HTTP-layer scenarios (auth, POST round-trip) live in
 // GenWave.Host.Tests/Specs/StoryF3_BulkEligibilityEndpoint.cs (operator-gated).
 
+using GenWave.MediaLibrary.Tests.Fakes;
 using Dapper;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -418,7 +419,7 @@ public static class FeatureBulkEligibilityByFilter
     [Trait("Category", "Integration")]
     public sealed class ScenarioListAdminCarriesRatingState(DatabaseFixture db)
     {
-        static MediaRatingRepository RatingRepo(DatabaseFixture f) => new(f.DataSource);
+        static MediaRatingRepository RatingRepo(DatabaseFixture f) => new(f.DataSource, new FakeSafeScopeProvider());
 
         [Fact]
         public async Task ListAdminCarriesTheVotedScoreForARatedRow()
@@ -484,7 +485,7 @@ public static class FeatureBulkEligibilityByFilter
     [Trait("Category", "Integration")]
     public sealed class ScenarioNeverPlayFilter(DatabaseFixture db)
     {
-        static MediaRatingRepository RatingRepo(DatabaseFixture f) => new(f.DataSource);
+        static MediaRatingRepository RatingRepo(DatabaseFixture f) => new(f.DataSource, new FakeSafeScopeProvider());
 
         [Fact]
         public async Task NeverPlayTrueReturnsExactlyTheFlaggedRow()
@@ -579,7 +580,7 @@ public static class FeatureBulkEligibilityByFilter
                 new { mtime = Harness.Mtime, lib2Id });
             await repo.WriteEnrichmentAsync(lib2FlaggedId, Harness.ReadyResult(measurable: true), CancellationToken.None);
 
-            var ratingRepo = new MediaRatingRepository(db.DataSource);
+            var ratingRepo = new MediaRatingRepository(db.DataSource, new FakeSafeScopeProvider());
             await ratingRepo.SetNeverPlayAsync(lib1FlaggedId.ToString(), true, CancellationToken.None);
             await ratingRepo.SetNeverPlayAsync(lib2FlaggedId.ToString(), true, CancellationToken.None);
 

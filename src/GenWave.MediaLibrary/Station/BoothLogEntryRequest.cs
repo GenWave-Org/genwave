@@ -26,5 +26,12 @@ namespace GenWave.MediaLibrary.Station;
 /// time — and pre-serializes it to the exact F86.1 jsonb text (or <see langword="null"/>) before this
 /// request ever reaches the queue, so <see cref="BoothLogDrainService"/> persists it verbatim like
 /// every other field here.
+///
+/// <see cref="MediaId"/> (gh-#99) rides the same track-start-only path: the aired catalog row's
+/// numeric id, parsed from <see cref="TrackAired"/>'s own media id at publish time —
+/// <see langword="null"/> for every other kind or a non-catalog id. It is what lets the Host answer
+/// "was this airing safe-scope content?" for the taste-thumb exclusion, since <c>station.booth_log</c>
+/// itself can never join <c>library.media</c> (schema-role boundary).
 /// </summary>
-sealed record BoothLogEntryRequest(string Kind, string Summary, long? PersonaId, string? Artist = null, string? Pick = null);
+sealed record BoothLogEntryRequest(
+    string Kind, string Summary, long? PersonaId, string? Artist = null, string? Pick = null, long? MediaId = null);

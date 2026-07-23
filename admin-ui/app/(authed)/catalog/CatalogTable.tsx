@@ -324,11 +324,14 @@ export function CatalogTable({
                   <td className="py-2 pr-3">
                     <div className="flex items-center gap-2">
                       {neverPlay && <NeverPlayBadge />}
-                      <NeverPlayControl
-                        mediaId={item.mediaId}
-                        neverPlay={neverPlay}
-                        onChange={(next) => handleNeverPlayChange(item.mediaId, next)}
-                      />
+                      {/* gh-#99: safe-scope rows (rateable: false) get no control, not a disabled one */}
+                      {item.rateable !== false && (
+                        <NeverPlayControl
+                          mediaId={item.mediaId}
+                          neverPlay={neverPlay}
+                          onChange={(next) => handleNeverPlayChange(item.mediaId, next)}
+                        />
+                      )}
                     </div>
                   </td>
                   <td className="py-2 pr-3 text-right tabular-nums text-ink">{formatDuration(item.durationMs)}</td>

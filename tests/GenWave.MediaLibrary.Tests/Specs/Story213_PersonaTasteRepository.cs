@@ -192,4 +192,39 @@ public static class FeaturePersonaTasteRepository
                 new { personaId }));
         }
     }
+
+    // ---------------------------------------------------------------------
+    // SAD PATH — off-schema context normalization (gh-#87)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class SadPathOffSchemaContext(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AContextOfEmptyObjectReadsBackWithAnEmptyDayList()
+        {
+            // Given a row whose context is `{}` — the exact shape a persona card import or a
+            // hand-edited row can store (gh-#87): STJ deserializes its missing daysOfWeek to null
+            // despite TasteContext's non-nullable annotation...
+            await db.ResetStationAsync();
+            var personaId = await CreatePersonaAsync(db, "Off Schema DJ");
+            await using var conn = await db.StationDataSource.OpenConnectionAsync();
+            await conn.ExecuteAsync(
+                """
+                insert into station.persona_taste (persona_id, predicate, context, weight, source)
+                values (@personaId, '{"artist":"Led Zeppelin"}'::jsonb, '{}'::jsonb, 0.5, 'authored')
+                """,
+                new { personaId });
+
+            // When it is listed back through the one read seam every consumer goes through...
+            var listed = await Repo(db).ListAsync(personaId, source: null, CancellationToken.None);
+
+            // Then DaysOfWeek is normalized to [] — the domain type's non-null contract actually
+            // holds downstream, and null and [] mean the same "no day gate" (SPEC F82.1).
+            var rule = Assert.Single(listed).Rule;
+            Assert.NotNull(rule.Context.DaysOfWeek);
+            Assert.Empty(rule.Context.DaysOfWeek);
+        }
+    }
 }

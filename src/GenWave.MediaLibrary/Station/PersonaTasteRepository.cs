@@ -127,12 +127,22 @@ sealed class PersonaTasteRepository(Lazy<NpgsqlDataSource> dataSource) : IPerson
         new TasteRule(
             JsonSerializer.Deserialize<TastePredicate>(row.Predicate, PersonaCardSerializer.Options)
                 ?? throw new InvalidOperationException("station.persona_taste.predicate deserialized to null"),
-            JsonSerializer.Deserialize<TasteContext>(row.Context, PersonaCardSerializer.Options)
-                ?? throw new InvalidOperationException("station.persona_taste.context deserialized to null"),
+            Normalize(JsonSerializer.Deserialize<TasteContext>(row.Context, PersonaCardSerializer.Options)
+                ?? throw new InvalidOperationException("station.persona_taste.context deserialized to null")),
             row.Weight),
         ToSource(row.Source),
         row.CreatedAt,
         row.UpdatedAt);
+
+    /// <summary>
+    /// gh-#87 — a stored context of <c>{}</c> (persona card import, a hand-edited row) deserializes
+    /// <see cref="TasteContext.DaysOfWeek"/> to null despite the record's non-nullable annotation
+    /// (STJ fills constructor parameters by reflection). Coalescing here, at the one read seam every
+    /// consumer goes through, makes the domain type's non-null contract actually hold downstream —
+    /// null and <c>[]</c> both mean "no day gate" (SPEC F82.1).
+    /// </summary>
+    static TasteContext Normalize(TasteContext context) =>
+        context.DaysOfWeek is null ? context with { DaysOfWeek = [] } : context;
 
     static string ToSourceText(PersonaTasteSource source) => source switch
     {
