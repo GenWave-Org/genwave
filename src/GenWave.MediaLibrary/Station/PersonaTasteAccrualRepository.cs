@@ -44,11 +44,6 @@ sealed class PersonaTasteAccrualRepository(Lazy<NpgsqlDataSource> dataSource) : 
     const float MinWeight = -1.0f;
     const float MaxWeight = 1.0f;
 
-    // SPEC F84.3 — accrued-rule cap per persona. Authored/operator rows are exempt BY CONSTRUCTION:
-    // every query below that touches the cap is scoped to `source = 'accrued'`, so there is no second
-    // WHERE clause anywhere else that could drift out of sync with this exemption.
-    const int Cap = 50;
-
     const string TrackStartedKind = "track-started";
 
     static readonly TasteContext NoGate = new([], null, null);
@@ -152,8 +147,10 @@ sealed class PersonaTasteAccrualRepository(Lazy<NpgsqlDataSource> dataSource) : 
                 cancellationToken: ct));
         }
 
-        // F84.3 — cap-50-weakest-evicted, IN THE SAME TRANSACTION as the nudge above. A no-op unless
-        // this persona's accrued row count just crossed the cap.
+        // F84.3 — cap-weakest-evicted (IPersonaTasteAccrualStore.Cap), IN THE SAME TRANSACTION as the
+        // nudge above. Authored/operator rows are exempt BY CONSTRUCTION: scoped to `source =
+        // 'accrued'` here, the only WHERE clause that touches the cap at all. A no-op unless this
+        // persona's accrued row count just crossed the cap.
         await conn.ExecuteAsync(new CommandDefinition(
             """
             delete from station.persona_taste
@@ -164,7 +161,7 @@ sealed class PersonaTasteAccrualRepository(Lazy<NpgsqlDataSource> dataSource) : 
               offset @Cap
             )
             """,
-            new { PersonaId = personaId, Cap },
+            new { PersonaId = personaId, Cap = IPersonaTasteAccrualStore.Cap },
             transaction: tx,
             cancellationToken: ct));
 

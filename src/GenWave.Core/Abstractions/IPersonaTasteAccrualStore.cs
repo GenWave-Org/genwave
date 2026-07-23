@@ -16,6 +16,16 @@ namespace GenWave.Core.Abstractions;
 public interface IPersonaTasteAccrualStore
 {
     /// <summary>
+    /// Per-persona accrued-rule cap (SPEC F84.3) — the single source of truth for the number every
+    /// caller that cares about it must reference, never re-declare.
+    /// <c>GenWave.MediaLibrary.Station.PersonaTasteAccrualRepository</c>'s own cap-50-weakest-evicted
+    /// sweep enforces it, and <c>PersonaController.Taste</c> (SPEC F86.6, PLAN T77) surfaces it
+    /// alongside the live accrued count so the Admin UI's cap meter (PLAN T78) never hardcodes its
+    /// own copy of this number.
+    /// </summary>
+    public const int Cap = 50;
+
+    /// <summary>
     /// Nudges (or creates) the accrued artist rule for whichever persona was stamped on booth-log row
     /// <paramref name="boothLogId"/> at air time (F84.1, F84.6) — never whichever persona happens to
     /// be active NOW. One route shape serves both the now-playing and booth-log admin surfaces
