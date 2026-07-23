@@ -29,6 +29,14 @@ else
   drift "fence: doc says \"${doc_fence:-<not found>}\", compose says \"$expected_fence\" (cpus=$cpus_raw, memory=${mem_mb}M)"
 fi
 
+# --- Pair 1b (gh-#20): HARDWARE.md restates the same fence — same drift class, same guard.
+if grep -qF "$expected_fence" HARDWARE.md; then
+  ok "fence: HARDWARE.md states \"$expected_fence\""
+else
+  hw_fence=$(grep -oE '[0-9]+ CPU / [0-9]+ GB' HARDWARE.md | head -1 || true)
+  drift "fence: HARDWARE.md says \"${hw_fence:-<not found>}\", compose says \"$expected_fence\""
+fi
+
 # --- Pair 2: ollama-init model name → stated verbatim in the doc. ------------------------
 model=$(sed -n 's/.*"ollama", "pull", "\([^"]*\)".*/\1/p' compose.demo.yaml | head -1)
 if [[ -z "$model" ]]; then
