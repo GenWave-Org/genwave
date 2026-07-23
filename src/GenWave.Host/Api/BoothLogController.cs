@@ -21,7 +21,7 @@ namespace GenWave.Host.Api;
 [ApiController]
 [Route("api/booth-log")]
 [AdminSurface]
-[Authorize(Policy = AuthorizationPolicies.AdminOnly)]
+[Authorize(Policy = AuthorizationPolicies.PlayoutRead)]
 public sealed class BoothLogController(
     IBoothLogReader store,
     IPersonaTasteAccrualStore accrual,
@@ -120,6 +120,11 @@ public sealed class BoothLogController(
     /// </summary>
     [HttpPost("{id:long}/taste-thumb")]
     [Consumes("application/json")]
+    // gh-#8: the one WRITE on this otherwise read-only surface. [Authorize] attributes COMPOSE
+    // (AND): a thumb needs the class's PlayoutRead AND Curation — deliberately, since thumbing
+    // from the booth log means seeing the log and shaping taste. Identical gate today (both map
+    // to AdminOnlyRequirement); the distinction only bites once an RBAC module differentiates.
+    [Authorize(Policy = AuthorizationPolicies.Curation)]
     public async Task<IActionResult> ThumbTaste(long id, [FromBody] TasteThumbRequest request, CancellationToken ct)
     {
         if (!TryParseDirection(request.Direction, out var direction))

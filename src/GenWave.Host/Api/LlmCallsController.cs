@@ -18,7 +18,7 @@ namespace GenWave.Host.Api;
 [ApiController]
 [Route("api/llm-calls")]
 [AdminSurface]
-[Authorize(Policy = AuthorizationPolicies.AdminOnly)]
+[Authorize(Policy = AuthorizationPolicies.PlayoutRead)]
 public sealed class LlmCallsController(LlmCallRing ring) : ControllerBase
 {
     /// <summary>

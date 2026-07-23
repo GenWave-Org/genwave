@@ -434,14 +434,16 @@ public static class FeaturePersonaTasteInspector
     public sealed class ScenarioAdminPlaneOnly
     {
         [Fact]
-        public async Task TasteEndpointRequiresTheAdminOnlyPolicy()
+        public async Task TasteEndpointRequiresAnAdminPlanePolicy()
         {
             await using var factory = new PersonaTasteRouteWebFactory();
 
             var endpoint = Assert.Single(TastePathEndpoints(factory.Services));
 
             var policies = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Select(a => a.Policy).ToList();
-            Assert.Contains(AuthorizationPolicies.AdminOnly, policies);
+            // gh-#8: the admin plane split AdminOnly into granular names — the pin is "admin-plane, never
+            // spectator/anonymous", not one specific name.
+            Assert.Contains(policies, p => AuthorizationPolicies.AdminPlanePolicies.Contains(p));
         }
 
         [Fact]

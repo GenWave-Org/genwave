@@ -17,7 +17,7 @@ namespace GenWave.Host.Api;
 [ApiController]
 [Route("api")]
 [AdminSurface]
-[Authorize(Policy = AuthorizationPolicies.AdminOnly)]
+[Authorize(Policy = AuthorizationPolicies.Operator)]
 public sealed class VoicesController(
     ITtsVoiceLister voiceLister,
     ILogger<VoicesController> logger) : ControllerBase
