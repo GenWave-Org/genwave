@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Time.Testing;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Playout;
 using GenWave.Tts;
@@ -82,7 +83,8 @@ file sealed class IcecastStatsStub : IDisposable
     public void Dispose() => listener.Close();
 }
 
-file sealed class ListenerCountWebFactory(string? statsUrl, string? adminPassword) : WebApplicationFactory<Program>
+file sealed class ListenerCountWebFactory(
+    string? statsUrl, string? adminPassword, TimeProvider? timeProvider = null) : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -99,6 +101,15 @@ file sealed class ListenerCountWebFactory(string? statsUrl, string? adminPasswor
             services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
+
+            // gh-#106: the memo-window facts pin IcecastListenerStatsSource's clock so a slow CI
+            // runner can never expire the window mid-fact. Facts that don't care leave the
+            // production TimeProvider.System binding untouched.
+            if (timeProvider is not null)
+            {
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton(timeProvider);
+            }
         });
     }
 }
@@ -191,8 +202,11 @@ public static class FeatureSpectatorListenerCount
         [Fact]
         public async Task RepeatedRequestsWithinTheMemoWindowPollIcecastOnce()
         {
+            // gh-#106: the clock is FROZEN — the memo window cannot expire mid-fact no matter how
+            // slow the runner is (the wall-clock version of this fact flaked on a cold CI box).
+            var clock = new FakeTimeProvider();
             using var stub = new IcecastStatsStub("ice-admin-pw", listeners: 4);
-            await using var factory = new ListenerCountWebFactory(stub.BaseUrl, "ice-admin-pw");
+            await using var factory = new ListenerCountWebFactory(stub.BaseUrl, "ice-admin-pw", clock);
             var client = factory.CreateClient();
 
             await client.GetAsync("/spectator/api/now-playing");
@@ -201,6 +215,31 @@ public static class FeatureSpectatorListenerCount
             await client.GetAsync("/spectator/api/now-playing");
 
             Assert.Equal(first, stub.RequestCount);
+        }
+
+        [Fact]
+        public async Task AdvancingPastTheMemoWindowPollsIcecastExactlyOnceMore()
+        {
+            // gh-#106 companion: the memo EXPIRES on the same injected clock — advance past the
+            // ~10s window and exactly one fresh poll happens, however many requests follow it.
+            var clock = new FakeTimeProvider();
+            using var stub = new IcecastStatsStub("ice-admin-pw", listeners: 4);
+            await using var factory = new ListenerCountWebFactory(stub.BaseUrl, "ice-admin-pw", clock);
+            var client = factory.CreateClient();
+
+            await client.GetAsync("/spectator/api/now-playing");
+            var first = stub.RequestCount;
+
+            clock.Advance(TimeSpan.FromSeconds(11));
+
+            // The now-playing OUTPUT cache (5s, wall-clock) may still serve the whole response
+            // without touching the source — hit the source's own seam directly instead, so this
+            // fact pins the MEMO's expiry, not the output cache's.
+            var source = factory.Services.GetRequiredService<IListenerStatsSource>();
+            await source.GetListenerCountAsync(CancellationToken.None);
+            await source.GetListenerCountAsync(CancellationToken.None);
+
+            Assert.Equal(first + 1, stub.RequestCount);
         }
     }
 }

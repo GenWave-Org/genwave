@@ -22,12 +22,16 @@ using GenWave.Host.Options;
 /// own 5s dedupe: a cache MISS still shares one Icecast round-trip with any other miss inside the
 /// memo window, so a spike of concurrent spectators never fans out into a spike of admin-stats
 /// polls. A plain lock-guarded timestamped field — the <c>CachedVoiceLister</c> idiom (no
-/// <c>IMemoryCache</c>: one singleton process holding exactly one cached value).
+/// <c>IMemoryCache</c>: one singleton process holding exactly one cached value). The memo clock is
+/// <paramref name="timeProvider"/>, never wall-clock read directly (gh-#106 — the same
+/// injected-clock discipline as <c>MusicBrainzRateLimiter</c>/<c>PersonaRanker</c>), so the
+/// memo-window spec is deterministic on a runner of any speed.
 /// </para>
 /// </summary>
 public sealed class IcecastListenerStatsSource(
     HttpClient http,
     IOptionsMonitor<IcecastOptions> optionsMonitor,
+    TimeProvider timeProvider,
     ILogger<IcecastListenerStatsSource> logger) : IListenerStatsSource
 {
     static readonly TimeSpan MemoWindow = TimeSpan.FromSeconds(10);
@@ -46,7 +50,7 @@ public sealed class IcecastListenerStatsSource(
         lock (gate)
         {
             memoValue = value;
-            memoExpiresAt = DateTimeOffset.UtcNow + MemoWindow;
+            memoExpiresAt = timeProvider.GetUtcNow() + MemoWindow;
         }
 
         return value;
@@ -56,7 +60,7 @@ public sealed class IcecastListenerStatsSource(
     {
         lock (gate)
         {
-            if (DateTimeOffset.UtcNow < memoExpiresAt)
+            if (timeProvider.GetUtcNow() < memoExpiresAt)
             {
                 value = memoValue;
                 return true;
