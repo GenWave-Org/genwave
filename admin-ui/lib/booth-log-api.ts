@@ -50,6 +50,10 @@ export interface BoothLogEntry {
    * predate the column, mirroring `BoothLogEntryDto.Pick`'s `JsonIgnore(WhenWritingNull)`
    * discipline. Feeds `PickChips` directly. */
   pick?: BoothLogPick;
+  /** gh-#99 — `true` for a track-start row whose media is safe-scope content (safe-loop tracks,
+   * station IDs): render NO taste thumbs regardless of `personaId`. Optional so an older API
+   * shape keeps the pre-#99 behavior. */
+  tasteExcluded?: boolean;
 }
 
 /** One newest-first keyset page (SPEC F72.2) — `nextBefore` is `null` once this is the oldest page. */

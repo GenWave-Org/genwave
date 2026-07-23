@@ -50,4 +50,5 @@ public sealed record AdminMediaDto(
     bool NeverPlay = false,
     double? Bpm = null,
     double? TrackEnergy = null,
-    IReadOnlyList<string>? Moods = null);
+    IReadOnlyList<string>? Moods = null,
+    bool Rateable = true);

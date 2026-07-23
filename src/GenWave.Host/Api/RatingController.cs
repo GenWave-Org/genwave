@@ -10,15 +10,23 @@ namespace GenWave.Host.Api;
 /// (<c>POST .../vote</c>), a never-play toggle (<c>PUT .../never-play</c>), and a batch read
 /// (<c>GET /api/ratings</c>) over <see cref="IMediaRating"/>.
 ///
-/// DELIBERATE F23.4 DEVIATION (SPEC F33.5) — DO NOT ADD SCOPE CHECKS HERE. Every endpoint below
+/// DELIBERATE F23.4 DEVIATION (SPEC F33.5) — DO NOT ADD MAIN-SCOPE CHECKS HERE. Every endpoint below
 /// operates on any catalog row by id with NO <see cref="IStationScopeProvider"/> /
 /// <c>Station:Scope:LibraryIds</c> gating, unlike <see cref="MediaController"/>'s single-row 403
 /// rule (F23.4). Rationale (the gitea-#203-trap that this deliberately avoids reintroducing): the Live
-/// page surfaces plays from ANY scope, and safe-loop plays routinely air OUTSIDE main scope on the
+/// page surfaces plays from ANY scope, and music routinely airs OUTSIDE main scope on the
 /// default deploy shape — a scope-gated vote/X control would 403 on exactly the rows an operator
 /// most wants to rate. Rating is standalone from curation (F33.7): it is a per-row concern, not a
-/// rotation-scope one. A reviewer seeing scope checks reintroduced into this controller should
+/// rotation-scope one. A reviewer seeing MAIN-scope checks reintroduced into this controller should
 /// fail the change.
+///
+/// The one exclusion that DOES apply — enforced inside <see cref="IMediaRating"/>, not here — is the
+/// gh-#99 SAFE-scope carve-out: rows in a <c>Station:SafeScope:LibraryIds</c> library (the seeded
+/// safe loop, authored safe segments, station IDs) are functional audio, never rateable, and a
+/// never-play write against them could silence the never-silent fallback itself. Such writes come
+/// back <see cref="RatingWriteResult.SafeContentExcluded"/> and map to 403 below. This narrows, but
+/// does not reverse, F33.5: the original rationale was written when "safe-loop plays outside main
+/// scope" were assumed rateable; #99 rules they are not.
 ///
 /// No <c>If-Match</c>/ETag anywhere in this controller: a vote is an atomic clamped increment and
 /// a never-play set is idempotent (F33.3/F33.4) — neither has anything to conflict on, and neither
@@ -60,6 +68,7 @@ public sealed class RatingController(IMediaRating rating) : ControllerBase
         {
             RatingWriteResult.Updated  => Ok(new { score = outcome.Score }),
             RatingWriteResult.NotFound => NotFound(),
+            RatingWriteResult.SafeContentExcluded => SafeContentProblem(),
             _ => StatusCode(StatusCodes.Status500InternalServerError),
         };
     }
@@ -82,9 +91,20 @@ public sealed class RatingController(IMediaRating rating) : ControllerBase
         {
             RatingWriteResult.Updated  => Ok(new { neverPlay = outcome.NeverPlay }),
             RatingWriteResult.NotFound => NotFound(),
+            RatingWriteResult.SafeContentExcluded => SafeContentProblem(),
             _ => StatusCode(StatusCodes.Status500InternalServerError),
         };
     }
+
+    /// <summary>gh-#99 — the one refusal shape both write endpoints share for safe-scope rows.</summary>
+    ObjectResult SafeContentProblem() => StatusCode(
+        StatusCodes.Status403Forbidden,
+        new ProblemDetails
+        {
+            Status = StatusCodes.Status403Forbidden,
+            Title  = "Safe content is not rateable.",
+            Detail = "This row is safe-loop/station-ID content (Station:SafeScope:LibraryIds) — votes and never-play do not apply (gh-#99).",
+        });
 
     /// <summary>
     /// GET /api/ratings?ids=1,2,tts:x — batch rating read (F33.2, F33.9). The comma-separated

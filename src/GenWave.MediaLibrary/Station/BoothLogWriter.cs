@@ -44,7 +44,8 @@ sealed class BoothLogWriter(
             // reading it here — rather than re-deriving anything — is the whole point (one source of
             // truth shared with the copywriter, F83.1).
             TrackAired t => new BoothLogEntryRequest(
-                "track-started", Summarize(t), personaAccessor.ActivePersonaId, t.Artist, BuildPickStamp(t.PersonaPick)),
+                "track-started", Summarize(t), personaAccessor.ActivePersonaId, t.Artist, BuildPickStamp(t.PersonaPick),
+                ParseMediaId(t.MediaId)),
             SegmentGenerated s => new BoothLogEntryRequest("patter-aired", Summarize(s), PersonaId: null),
             DegradationModeChanged d => new BoothLogEntryRequest("mode-changed", Summarize(d), PersonaId: null),
             _ => null,
@@ -63,6 +64,15 @@ sealed class BoothLogWriter(
     /// </summary>
     static string? BuildPickStamp(PersonaPickDiagnostics? diagnostics) =>
         diagnostics is null ? null : BoothLogPickStampSerializer.Serialize(BoothLogPickStamp.FromDiagnostics(diagnostics));
+
+    /// <summary>
+    /// gh-#99 — the aired row's numeric catalog id, or <see langword="null"/> for a non-catalog id
+    /// (e.g. <c>tts:*</c>). Same capture-at-publish-time discipline as every stamp above.
+    /// </summary>
+    static long? ParseMediaId(string mediaId) =>
+        long.TryParse(mediaId, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var id)
+            ? id
+            : null;
 
     static string Summarize(TrackAired t) => (t.Title, t.Artist) switch
     {

@@ -35,6 +35,10 @@ export interface AdminMediaDto {
    * nullable) so pre-T80 `AdminMediaDto` object literals across the test suite keep compiling
    * unchanged, mirroring the `artistExact`/`genresExact` precedent on {@link BulkFilter}. */
   moods?: string[] | null;
+  /** gh-#99 — `false` for safe-scope content (safe-loop tracks, station IDs): render NO
+   * never-play control at all, not a disabled one (the write endpoint refuses it regardless).
+   * Optional so pre-#99 object literals keep compiling; absent means rateable. */
+  rateable?: boolean;
 }
 
 /** Parsed `X-Pagination: total=…,pages=…,page=…,limit=…` header. */

@@ -40,7 +40,7 @@ sealed class BoothLogRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<Boot
     const string SelectColumns =
         """
         select id::bigint as id, occurred_at, kind, summary, persona_id::bigint as persona_id,
-               pick::text as pick
+               pick::text as pick, media_id
         from station.booth_log
         """;
 
@@ -57,34 +57,34 @@ sealed class BoothLogRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<Boot
     /// <paramref name="pick"/> (SPEC F86.1, STORY-217, PLAN T73) is likewise plain text (pre-serialized
     /// jsonb, no FK) — the persona-id retry below never touches it either way.
     /// </summary>
-    public async Task AppendAsync(string kind, string summary, long? personaId, string? artist, string? pick, CancellationToken ct)
+    public async Task AppendAsync(string kind, string summary, long? personaId, string? artist, string? pick, long? mediaId, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
 
         try
         {
-            await InsertAndEvictAsync(conn, kind, summary, personaId, artist, pick, ct);
+            await InsertAndEvictAsync(conn, kind, summary, personaId, artist, pick, mediaId, ct);
         }
         catch (PostgresException ex) when (ex.SqlState == ForeignKeyViolation && personaId is not null)
         {
             // The failed attempt's `await using var tx` already rolled back (disposal runs as the
             // exception unwinds InsertAndEvictAsync, before it reaches this catch) — the connection
             // is clean, so retrying a fresh transaction on the SAME conn is safe.
-            await InsertAndEvictAsync(conn, kind, summary, personaId: null, artist, pick, ct);
+            await InsertAndEvictAsync(conn, kind, summary, personaId: null, artist, pick, mediaId, ct);
         }
     }
 
     async Task InsertAndEvictAsync(
-        NpgsqlConnection conn, string kind, string summary, long? personaId, string? artist, string? pick, CancellationToken ct)
+        NpgsqlConnection conn, string kind, string summary, long? personaId, string? artist, string? pick, long? mediaId, CancellationToken ct)
     {
         await using var tx = await conn.BeginTransactionAsync(ct);
 
         await conn.ExecuteAsync(new CommandDefinition(
             """
-            insert into station.booth_log (kind, summary, persona_id, artist, pick)
-            values (@Kind, @Summary, @PersonaId, @Artist, @Pick::jsonb)
+            insert into station.booth_log (kind, summary, persona_id, artist, pick, media_id)
+            values (@Kind, @Summary, @PersonaId, @Artist, @Pick::jsonb, @MediaId)
             """,
-            new { Kind = kind, Summary = summary, PersonaId = personaId, Artist = artist, Pick = pick },
+            new { Kind = kind, Summary = summary, PersonaId = personaId, Artist = artist, Pick = pick, MediaId = mediaId },
             transaction: tx,
             cancellationToken: ct));
 
@@ -141,5 +141,15 @@ sealed class BoothLogRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<Boot
         var nextBefore = hasMore ? new BoothLogCursor(entries[^1].OccurredAt, entries[^1].Id) : null;
 
         return new BoothLogPage(entries, nextBefore);
+    }
+
+    /// <inheritdoc/>
+    public async Task<long?> GetMediaIdAsync(long id, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        return await conn.ExecuteScalarAsync<long?>(new CommandDefinition(
+            "select media_id from station.booth_log where id = @Id",
+            new { Id = id },
+            cancellationToken: ct));
     }
 }

@@ -17,6 +17,12 @@ namespace GenWave.Host.Api;
 /// null-valued, for a row whose stored pick is null (engine-initiated play, persona-off pick, or a
 /// row predating the column) — same discipline <see cref="GenWave.Core.Domain.PersonaCard.Taste"/>
 /// already established for an optional collection field.
+///
+/// <see cref="TasteExcluded"/> (gh-#99) is true for a track-start row whose stamped media id lives
+/// in a <c>Station:SafeScope:LibraryIds</c> library — safe-loop tracks and station IDs. The admin
+/// UI renders NO taste thumbs for such a row (regardless of <see cref="PersonaId"/>), and the thumb
+/// endpoint independently refuses it. Computed at read time against the live safe scope, so a
+/// SafeScope edit governs the very next page.
 /// </summary>
 public sealed record BoothLogEntryDto(
     long Id,
@@ -24,4 +30,5 @@ public sealed record BoothLogEntryDto(
     string Kind,
     string Summary,
     long? PersonaId,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BoothLogPickDto? Pick = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BoothLogPickDto? Pick = null,
+    bool TasteExcluded = false);

@@ -8,6 +8,7 @@
 // Mirrors Story110_RatingPersistence (per-row) and Story148_FacetsAndExactFilterSql /
 // StoryF3_BulkEligibilityByFilter (shared WHERE builder, scope) idioms.
 
+using GenWave.MediaLibrary.Tests.Fakes;
 using Dapper;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -17,7 +18,7 @@ namespace GenWave.MediaLibrary.Tests.Specs;
 
 public static class FeatureBulkRatingSql
 {
-    static MediaRatingRepository RatingRepo(DatabaseFixture db) => new(db.DataSource);
+    static MediaRatingRepository RatingRepo(DatabaseFixture db) => new(db.DataSource, new FakeSafeScopeProvider());
 
     static async Task<int> CountRatingRowsAsync(DatabaseFixture db, long id)
     {

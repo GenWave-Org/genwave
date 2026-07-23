@@ -56,6 +56,13 @@ class MediaRow
     public bool NeverPlay { get; set; }
 
     /// <summary>
+    /// gh-#99 — false when the row's <c>library_id</c> falls in the live safe scope (projected as
+    /// <c>not (m.library_id = any(@safeLibraryIds))</c> by the admin list query). Defaults true for
+    /// every projection that doesn't select it, mirroring <see cref="Score"/>'s posture.
+    /// </summary>
+    public bool Rateable { get; set; } = true;
+
+    /// <summary>
     /// Mood tags (SPEC F85.1/F86.8) — <c>library.media.moods</c>, a Postgres <c>text[]</c>. Null
     /// until the mood tagger reaches (or misses on) the row; only populated by projections that
     /// select it (the admin queries), mirroring <see cref="TrackEnergy"/>'s pattern.
@@ -153,5 +160,6 @@ class MediaRow
         NeverPlay: NeverPlay,
         Bpm: Bpm,
         TrackEnergy: TrackEnergy,
-        Moods: Moods);
+        Moods: Moods,
+        Rateable: Rateable);
 }

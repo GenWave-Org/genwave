@@ -30,7 +30,9 @@ interface BoothLogFeedProps {
  * disabled one. `typeof` rather than `!== null` deliberately covers a row that omits the field
  * entirely (predates the column) the same way it covers an explicit `null`. */
 function isThumbable(entry: BoothLogEntry): entry is BoothLogEntry & { personaId: number } {
-  return entry.kind === "track-started" && typeof entry.personaId === "number";
+  // gh-#99: a safe-scope airing (safe-loop track, station ID) offers no thumb control either —
+  // same no-control-not-disabled posture as the persona gate below (the endpoint refuses it too).
+  return entry.kind === "track-started" && typeof entry.personaId === "number" && entry.tasteExcluded !== true;
 }
 
 /** Human copy for the three narrative kinds this feed's writer produces (SPEC F72.1,

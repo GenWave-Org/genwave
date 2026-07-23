@@ -34,6 +34,7 @@ namespace GenWave.Host.Api;
 public sealed class BulkRatingController(
     IMediaRating rating,
     IStationScopeProvider scopeProvider,
+    ISafeScopeProvider safeScopeProvider,
     ILogger<BulkRatingController> logger) : ControllerBase
 {
     /// <summary>
@@ -60,6 +61,9 @@ public sealed class BulkRatingController(
                 Detail = "direction must be \"up\" or \"down\".",
             });
         }
+
+        if (NamesSafeLibrary(request.Filter.LibraryId))
+            return SafeContentProblem();
 
         // Named library-id overrides the station rotation scope (F23.3): the named library
         // becomes the effective scope. An unnamed filter stays bounded by the station scope
@@ -90,6 +94,9 @@ public sealed class BulkRatingController(
     {
         if (request.Filter is null)
             return MissingFilterProblem();
+
+        if (NamesSafeLibrary(request.Filter.LibraryId))
+            return SafeContentProblem();
 
         // Same effective-scope contract as BulkVote (F61.3).
         var (scope, _) = EffectiveScope.Resolve(scopeProvider.Current, request.Filter.LibraryId);
@@ -128,6 +135,25 @@ public sealed class BulkRatingController(
         Title  = "filter is required.",
         Detail = "The request body must include a filter object.",
     });
+
+    /// <summary>
+    /// gh-#99 — a filter that explicitly names a safe-scope library gets a loud 403, not a silent
+    /// <c>updated: 0</c>: the repository's own carve-out would already match nothing, but an
+    /// operator deliberately sweeping the safe library deserves to be told why. Unnamed filters
+    /// never need this — the carve-out inside <see cref="IMediaRating"/>'s bulk SQL covers any
+    /// main-scope/safe-scope overlap quietly.
+    /// </summary>
+    bool NamesSafeLibrary(long? libraryId) =>
+        libraryId is long id && safeScopeProvider.Current.LibraryIds.Contains(id);
+
+    ObjectResult SafeContentProblem() => StatusCode(
+        StatusCodes.Status403Forbidden,
+        new ProblemDetails
+        {
+            Status = StatusCodes.Status403Forbidden,
+            Title  = "Safe content is not rateable.",
+            Detail = "The named library is safe-loop/station-ID content (Station:SafeScope:LibraryIds) — bulk votes and never-play do not apply (gh-#99).",
+        });
 
     /// <summary>
     /// Case-insensitive match against the only two valid direction values. Duplicated from
