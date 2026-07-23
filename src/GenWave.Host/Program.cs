@@ -88,6 +88,13 @@ builder.Services.Configure<IcecastOptions>(cfg.GetSection(IcecastOptions.Section
 builder.Services.AddHttpClient<IcecastListenerStatsSource>(client => client.Timeout = TimeSpan.FromSeconds(2));
 builder.Services.AddSingleton<IListenerStatsSource>(sp => sp.GetRequiredService<IcecastListenerStatsSource>());
 
+// gh-#10 (plugin-readiness P1.4): the listener-count time series — one sample every
+// ListenerStats:PollSeconds published through the station event sink for a future analytics
+// consumer. Rides the SAME IListenerStatsSource the spectator surface reads live.
+builder.Services.Configure<ListenerStatsOptions>(cfg.GetSection(ListenerStatsOptions.SectionName));
+builder.Services.AddSingleton<ListenerStatsSampler>();
+builder.Services.AddHostedService<ListenerStatsPollerService>();
+
 builder.Services.AddControllers();
 
 // Liveness endpoint for the compose healthcheck. No checks registered = 200 Healthy when up.
