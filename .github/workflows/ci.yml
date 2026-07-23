@@ -108,3 +108,16 @@ jobs:
             ./admin-ui
           docker push ghcr.io/genwave-org/genwave-admin-ui:home-${{ github.sha }}
           docker push ghcr.io/genwave-org/genwave-admin-ui:home-latest
+      # genwave.liq is bind-mounted at run time, not baked in — this image is the Liquidsoap
+      # version pin + entrypoint.sh (see release.yml's matching step).
+      - name: Build + push Engine image
+        run: |
+          docker build \
+            --label org.opencontainers.image.source=https://github.com/GenWave-Org/genwave \
+            --label org.opencontainers.image.description="GenWave Home Liquidsoap engine" \
+            --label org.opencontainers.image.licenses=AGPL-3.0-only \
+            -t ghcr.io/genwave-org/genwave-engine:home-${{ github.sha }} \
+            -t ghcr.io/genwave-org/genwave-engine:home-latest \
+            ./engine
+          docker push ghcr.io/genwave-org/genwave-engine:home-${{ github.sha }}
+          docker push ghcr.io/genwave-org/genwave-engine:home-latest
