@@ -6,8 +6,10 @@
 # What it does on top of compose.yaml:
 #   * Caddy front door: TLS for ${PUBLIC_HOST}, routes /stream* -> icecast and
 #     everything else -> api:8081 (the spectator-only public listener)
-#   * api + icecast run the published GHCR release images (pull_policy: always —
-#     a demo box never source-builds; bump the tag per release)
+#   * api + icecast + admin_ui + engine run the published GHCR release images
+#     (pull_policy: always — a demo box never source-builds; bump the tags per release.
+#     admin_ui/engine gained published images in v2.4.1, gh-#93: before that a --pinned
+#     box kept its first-deploy locally-built images forever)
 #   * api ports locked down: 8080 loopback-only (SSH tunnel), 8081 not host-published
 #   * admin_ui loopback-only, for the temporary-admin recipe in DEPLOYMENT.md
 #   * ollama DJ brain: pinned, model kept resident, cpu+mem fenced so generation
@@ -45,11 +47,26 @@ services:
     restart: unless-stopped
 
   admin_ui:
+    image: ghcr.io/genwave-org/genwave-admin-ui:home-v2.4.2  # bump per release
+    pull_policy: always
+    # `!reset` drops the base `build:` context entirely: a demo box must pull this image or
+    # fail loudly — never silently fall back to building (and then forever running) local
+    # source. That silent fallback is exactly how the box served a stale admin UI across
+    # two releases (gh-#93).
+    build: !reset null
     # Base compose publishes 3000:3000 on 0.0.0.0 — loopback-only on a public box;
     # reach it through an SSH tunnel (ssh -L 3000:127.0.0.1:3000). Only runs at all
     # when COMPOSE_PROFILES=admin (temporary-admin recipe in DEPLOYMENT.md).
     ports: !override
       - "127.0.0.1:3000:3000"
+
+  engine:
+    image: ghcr.io/genwave-org/genwave-engine:home-v2.4.2    # bump per release
+    pull_policy: always
+    # Same !reset rationale as admin_ui above (gh-#93). Note genwave.liq is a bind mount
+    # from the checkout (see compose.yaml), NOT baked into this image — the image carries
+    # the Liquidsoap version pin + entrypoint.sh; liq script changes arrive via git pull.
+    build: !reset null
 
   ollama:
     image: ollama/ollama:0.9.6            # PIN — tested; `latest` drifts
@@ -95,7 +112,7 @@ services:
     restart: "no"
 
   icecast:
-    image: ghcr.io/genwave-org/genwave-icecast:home-v2.4.0   # bump per release
+    image: ghcr.io/genwave-org/genwave-icecast:home-v2.4.2   # bump per release
     pull_policy: always
     # Base compose publishes 8000:8000 on 0.0.0.0 — right for LAN listening in
     # Operator/Standard, wrong on a public box: Icecast serves status.xsl (listener
@@ -106,7 +123,7 @@ services:
     ports: !override []
 
   api:
-    image: ghcr.io/genwave-org/genwave:home-v2.4.0           # bump per release
+    image: ghcr.io/genwave-org/genwave:home-v2.4.2           # bump per release
     pull_policy: always
     # compose.yaml's base `ports:` publishes BOTH 8080 and 8081 on 0.0.0.0 — fine for
     # Operator/Standard (LAN reachability is the point there), wrong for a public box.

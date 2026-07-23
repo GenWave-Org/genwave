@@ -15,6 +15,10 @@ sealed class FakeTtsSegmentSource : ITtsSegmentSource
     public int RenderCallCount { get; private set; }
     public SegmentRequest? LastRequest { get; private set; }
 
+    /// <summary>Every request seen, in call order — for specs that assert on a specific
+    /// <see cref="SegmentKind"/> within a multi-segment unit (gh-#96).</summary>
+    public List<SegmentRequest> Requests { get; } = [];
+
     /// <summary>When non-null, each RenderAsync waits this long before returning.</summary>
     public TimeSpan? RenderDelay { get; set; }
 
@@ -22,6 +26,7 @@ sealed class FakeTtsSegmentSource : ITtsSegmentSource
     {
         RenderCallCount++;
         LastRequest = request;
+        Requests.Add(request);
 
         if (RenderDelay is { } delay)
             await Task.Delay(delay, ct);

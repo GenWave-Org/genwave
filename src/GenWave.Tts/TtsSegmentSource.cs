@@ -131,9 +131,11 @@ public sealed class TtsSegmentSource(
             // Display title is the station name, NOT the spoken text (issue gitea-#154) — players would
             // otherwise show the whole patter script as the now-playing title. Artist credits the
             // active persona reading the patter when one is active, else the station name (SPEC
-            // F39.2, gitea-#212): while a persona is on air it is that persona's voice reading every kind
-            // (StationId, TimeDate, LeadIn, BackAnnounce) alike, so the credit follows it. No active
-            // persona falls back to the gitea-#192/gitea-#172 brand rule unchanged (artist = <Station Name>) —
+            // F39.2, gitea-#212): while a persona is on air it is that persona's voice reading the
+            // DJ-spoken kinds (TimeDate, LeadIn, BackAnnounce) alike, so the credit follows it.
+            // StationId is the exception (gh-#96): station imaging always arrives with the station's
+            // own voice and PersonaName null, so its credit is the station name by construction. No
+            // active persona falls back to the gitea-#192/gitea-#172 brand rule unchanged (artist = <Station Name>) —
             // without it every station ID / lead-in / back-announce rendered "Unknown artist" in
             // the admin UI's now-playing and play-history surfaces. This is per-airing state, not
             // cached content: the cache key below never includes PersonaName, so a cache-hit render

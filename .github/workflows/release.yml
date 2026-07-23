@@ -3,9 +3,11 @@ name: Release
 # Tag-triggered release (SPEC F65.2, STORY-176): push a `v*` tag -> build+test, publish images
 # stamped with the tag as GW_VERSION, then create the GitHub Release. Mirrors ci.yml's `images`
 # job (same registry, same `home-*` tag prefix -- the Business edition gets its own prefix
-# elsewhere) but stamps the pushed tag instead of the commit sha, and only the api + icecast
-# images are published here since that is the only established GHCR publish convention today
-# (admin_ui/engine are built locally by build.sh/compose, not pushed to a registry).
+# elsewhere) but stamps the pushed tag instead of the commit sha. Publishes api + icecast +
+# every image compose can run pinned: api, icecast, admin_ui, and engine (gh-#93: a --pinned
+# demo box ran a stale locally-built admin_ui for two releases because it was never published;
+# engine had the same exposure). Note genwave.liq is a bind mount, not baked into the engine
+# image -- the image carries only the Liquidsoap version pin + entrypoint.sh.
 #
 # Pushing the tag is the ONLY manual act: this workflow never commits or pushes back to the repo.
 
@@ -80,6 +82,42 @@ jobs:
             ./icecast
           docker push "ghcr.io/genwave-org/genwave-icecast:home-$GW_TAG"
           docker push ghcr.io/genwave-org/genwave-icecast:home-latest
+
+      # BACKEND_URL is baked at build time (next.config.ts rewrites) and defaults to
+      # http://api:8080 in admin-ui/Dockerfile -- correct for every compose topology, so the
+      # published image needs no build-arg here.
+      - name: Build + push Admin UI image
+        env:
+          GW_TAG: ${{ github.ref_name }}
+        run: |
+          docker build \
+            --label org.opencontainers.image.source=https://github.com/GenWave-Org/genwave \
+            --label org.opencontainers.image.description="GenWave Home admin UI" \
+            --label org.opencontainers.image.licenses=AGPL-3.0-only \
+            --label "org.opencontainers.image.version=$GW_TAG" \
+            -t "ghcr.io/genwave-org/genwave-admin-ui:home-$GW_TAG" \
+            -t ghcr.io/genwave-org/genwave-admin-ui:home-latest \
+            ./admin-ui
+          docker push "ghcr.io/genwave-org/genwave-admin-ui:home-$GW_TAG"
+          docker push ghcr.io/genwave-org/genwave-admin-ui:home-latest
+
+      # genwave.liq is NOT in this image (bind-mounted from the checkout at run time) -- this
+      # publishes the Liquidsoap version pin + entrypoint.sh, the two parts a --pinned box
+      # could otherwise never receive after first deploy.
+      - name: Build + push Engine image
+        env:
+          GW_TAG: ${{ github.ref_name }}
+        run: |
+          docker build \
+            --label org.opencontainers.image.source=https://github.com/GenWave-Org/genwave \
+            --label org.opencontainers.image.description="GenWave Home Liquidsoap engine" \
+            --label org.opencontainers.image.licenses=AGPL-3.0-only \
+            --label "org.opencontainers.image.version=$GW_TAG" \
+            -t "ghcr.io/genwave-org/genwave-engine:home-$GW_TAG" \
+            -t ghcr.io/genwave-org/genwave-engine:home-latest \
+            ./engine
+          docker push "ghcr.io/genwave-org/genwave-engine:home-$GW_TAG"
+          docker push ghcr.io/genwave-org/genwave-engine:home-latest
 
       # gh CLI over a third-party action -- it's preinstalled on the runner and needs only the
       # default token. No repo write beyond the Release object itself (not a commit, not a push).

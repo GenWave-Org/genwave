@@ -65,7 +65,10 @@ using GenWave.Core.Domain;
 /// fresh per render (SPEC F35.2, F35.3, F35.5) — the active persona's voice when non-empty, else
 /// the station's own default voice — never cached, so a live activate/deactivate reaches the very
 /// next segment with no restart. One DB read per segment is negligible at cadence scale; this is the
-/// documented design, not a shortcut to revisit later.
+/// documented design, not a shortcut to revisit later. <see cref="SegmentKind.StationId"/> is the
+/// one carve-out (gh-#96): station IDs are station imaging — always the station's own voice and
+/// credit, never the persona's — so their build skips the accessor entirely (see the deferral
+/// drain in <see cref="EnqueuePatterAsync"/>).
 ///
 /// <see cref="SegmentRequest.PersonaName"/> is stamped from that SAME accessor read (SPEC F39.1,
 /// gitea-#212) — never a second call — so <c>Voice</c> and <c>PersonaName</c> on one <see cref="SegmentRequest"/>
@@ -612,15 +615,24 @@ public sealed class Orchestrator(
         {
             if (deferral.Kind != SpeechDeferralKind.StationId) continue; // only kind wired so far
 
-            var (voice, personaName) = await ResolvePersonaAsync(identity.Voice, ct);
+            // Station IDs are station imaging (gh-#96): ALWAYS the station's own voice and
+            // credit, never the active persona's — real-radio convention, the ID is the brand
+            // speaking, not the DJ. Deliberately no ResolvePersonaAsync here (LeadIn/BackAnnounce
+            // below stay persona-voiced), and deliberately not solved by touching
+            // Station:Persona:ActiveId — a future multi-DJ scheduler slots personas in and out,
+            // and imaging must stay the station's voice regardless of who is in the chair.
+            // PersonaName stays null so the airing credits the station
+            // (TtsSegmentSource: Artist = PersonaName ?? StationName). The TTS cache key
+            // contains the voice, so a live Station:Voice edit re-keys and re-renders the ID at
+            // its next slot with no regen tooling.
             var req = new SegmentRequest(
                 SegmentKind.StationId,
-                voice,
+                identity.Voice,
                 identity.Name,
                 null,
                 DateTimeOffset.UtcNow,
                 identity.Id,
-                personaName);
+                PersonaName: null);
             pendingRenders.Add(tts.RenderAsync(req, ct));
         }
 
