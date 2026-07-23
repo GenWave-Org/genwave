@@ -9,4 +9,14 @@ namespace GenWave.Core.Domain;
 /// Case-insensitive comparison against catalog data is the ranker's concern (F82.5, a later task);
 /// this shape only carries what the rule is about.
 /// </summary>
-public sealed record TastePredicate(string? Artist, string? Genre, string? Tag);
+public sealed record TastePredicate(string? Artist, string? Genre, string? Tag)
+{
+    /// <summary>
+    /// The one home of the display-label precedence (gh-#89): the most specific non-null field
+    /// names the rule — artist over genre over tag — falling back to <paramref name="fallback"/>
+    /// for the match-anything predicate. Callers keep their own surface-appropriate fallback wording
+    /// ("this pick" in prose, "any" in the debug log, "any track" in the taste table) — that
+    /// divergence is deliberate and documented at each call site; the precedence itself is not.
+    /// </summary>
+    public string LabelOr(string fallback) => Artist ?? Genre ?? Tag ?? fallback;
+}

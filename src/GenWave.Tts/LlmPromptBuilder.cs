@@ -281,5 +281,5 @@ static class LlmPromptBuilder
         firedRules.Select(DescribeFiredRule).ToList();
 
     static string DescribeFiredRule(TasteRule rule) =>
-        rule.Predicate.Artist ?? rule.Predicate.Genre ?? rule.Predicate.Tag ?? "this pick";
+        rule.Predicate.LabelOr("this pick");
 }
