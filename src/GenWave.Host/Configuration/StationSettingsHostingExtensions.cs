@@ -86,6 +86,19 @@ static class StationSettingsHostingExtensions
         // IStationEventSink binding.
         builder.Services.AddBoothLog(stationConnStr, builder.Configuration);
 
+        // Request store (SPEC F87, STORY-224, PLAN T86): same station_svc connection string as
+        // every other registration above — station.request lives in the same schema. Read directly
+        // from configuration here (`.Get<RequestsOptions>()`, not IOptions<RequestsOptions>):
+        // GenWave.MediaLibrary cannot reference GenWave.Host's options types, and this runs before
+        // the DI container is built, so RequestRepository's ctor takes WishRetentionHours as a
+        // plain already-resolved value instead (see RequestRepository's own remarks). The separate
+        // `.AddOptions<RequestsOptions>()...ValidateOnStart()` call in Program.cs is what a future
+        // T87/T88 IOptionsMonitor<RequestsOptions> consumer (WishMaxLength, the throttle knobs)
+        // reads live from — this line only needs the one field early.
+        var requestsOptions = builder.Configuration.GetSection(RequestsOptions.Section).Get<RequestsOptions>()
+            ?? new RequestsOptions();
+        builder.Services.AddRequestStore(stationConnStr, requestsOptions.WishRetentionHours);
+
         return builder;
     }
 }

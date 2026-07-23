@@ -150,6 +150,17 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "(e.g. https://your-station.example). Empty means no artwork URL is ever sent to listening " +
     "clients.",
 
+  // ── Listener requests (SPEC F87.2, F87.6, STORY-224) ─────────────────────────────────────────
+  "Station:Requests:Enabled":
+    "Public listener request line. Off by default; when off, the request endpoint 404s like any " +
+    "other disabled surface.",
+  "Station:Requests:OverrideEnvelope":
+    "When on, a matched request bypasses the envelope's genre/energy band and rotation-recency " +
+    "to air sooner — operator never-play/eligibility vetoes still apply either way.",
+  "Station:Requests:WindowMinutes":
+    "How long an unfulfilled request stays eligible to air before it expires. Accepted range: " +
+    "1–1440.",
+
   // ── TTS / LLM endpoints (SPEC F36.1–F36.4) ─────────────────────────────────────────────────
   "Tts:Endpoint":
     "The Kokoro TTS service base URL used to render all spoken patter — must be a non-empty " +

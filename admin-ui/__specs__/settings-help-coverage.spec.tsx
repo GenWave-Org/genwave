@@ -32,6 +32,8 @@ const BOOLEAN_KEYS = new Set<SettingsHelpKey>([
   "Station:Cadence:LeadInBeforeEachTrack",
   "Station:Cadence:BackAnnounceAfterEachTrack",
   "Library:YearLookup:Enabled",
+  "Station:Requests:Enabled",
+  "Station:Requests:OverrideEnvelope",
 ]);
 
 const NUMBER_LIST_KEYS = new Set<SettingsHelpKey>([

@@ -79,4 +79,7 @@ public sealed class StationOptions
 
     /// <summary>Station-default 24/7 segment envelope knobs (SPEC F81.3, STORY-212). Bound to <c>Station:Envelope</c>.</summary>
     public StationEnvelopeOptions Envelope { get; set; } = new();
+
+    /// <summary>The three live-editable listener-request knobs (SPEC F87.2, F87.6, STORY-224). Bound to <c>Station:Requests</c>.</summary>
+    public StationRequestsOptions Requests { get; set; } = new();
 }

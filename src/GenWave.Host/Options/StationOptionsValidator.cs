@@ -46,6 +46,12 @@ using Microsoft.Extensions.Options;
 /// </para>
 ///
 /// <para>
+/// Guards <c>Station:Requests:WindowMinutes</c> (SPEC F87.6, STORY-224): must be a positive integer
+/// (same "documentation-only [Range], this validator is the real floor" story as the nested knobs
+/// above) — a request that expires the instant it arrives (or before) makes fulfillment impossible.
+/// </para>
+///
+/// <para>
 /// Registered as a singleton and triggered by <c>ValidateOnStart()</c> in
 /// <c>Program.cs</c>.
 /// </para>
@@ -105,6 +111,10 @@ public sealed class StationOptionsValidator(ILogger<StationOptionsValidator> log
         if (options.Envelope.EnergyMin > options.Envelope.EnergyMax)
             return ValidateOptionsResult.Fail(
                 "Station:Envelope:EnergyMin must not exceed Station:Envelope:EnergyMax.");
+
+        if (options.Requests.WindowMinutes < 1)
+            return ValidateOptionsResult.Fail(
+                "Station:Requests:WindowMinutes must be a positive integer.");
 
         if (options.SafeScope.LibraryIds.Count == 0)
         {

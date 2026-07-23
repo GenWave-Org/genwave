@@ -106,6 +106,16 @@ builder.Services
     .ValidateOnStart();
 builder.Services.AddSingleton<ArtworkService>();
 
+// Listener-request throttle knobs (SPEC F87, STORY-224, PLAN T86): env/compose-only, deliberately
+// absent from StationSettingsAllowlist — an operator-tuned deployment setting, not a live PUT (the
+// three keys that ARE live editable live on StationOptions.Requests, Station:Requests:* instead).
+// ValidateOnStart mirrors ArtworkOptions just above.
+builder.Services
+    .AddOptions<RequestsOptions>()
+    .Bind(cfg.GetSection(RequestsOptions.Section))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
 builder.Services.AddControllers();
 
 // Liveness endpoint for the compose healthcheck. No checks registered = 200 Healthy when up.

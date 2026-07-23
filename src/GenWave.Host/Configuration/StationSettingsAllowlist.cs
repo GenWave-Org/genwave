@@ -85,6 +85,19 @@ public static class StationSettingsAllowlist
         // exactly mirroring PublicStreamUrl's "empty hides the player" shape just above.
         new("Station:PublicBaseUrl",                          SettingApplyMode.Live,          SettingKind.String,     ""),
 
+        // Listener requests (SPEC F87.2, F87.6, STORY-224, PLAN T86) — the three live-editable
+        // knobs on StationRequestsOptions (the rest of the F87 throttle surface binds from the
+        // env/compose-only RequestsOptions instead, deliberately absent from this allowlist).
+        // Enabled is the F87.2 kill switch: false ⇒ the endpoint 404s (F61 surface-off semantics),
+        // never a distinguishable "requests are closed" response — read live via
+        // IOptionsMonitor<StationOptions> by the T87 intake endpoint, so a PUT here reaches the
+        // very next request with no api restart. OverrideEnvelope (default true) governs whether a
+        // matched request bypasses envelope genre/energy and rotation-recency at fulfillment
+        // (T90). WindowMinutes is how long an unfulfilled request stays live before expiring.
+        new("Station:Requests:Enabled",                       SettingApplyMode.Live,          SettingKind.Boolean,    ""),
+        new("Station:Requests:OverrideEnvelope",               SettingApplyMode.Live,          SettingKind.Boolean,    ""),
+        new("Station:Requests:WindowMinutes",                  SettingApplyMode.Live,          SettingKind.Number,     "minutes"),
+
         // TTS/LLM endpoint liveness (SPEC F36.1–F36.4, T8): KokoroTtsSynthesizer/KokoroVoiceLister
         // and LlmCopyWriter read these via IOptionsMonitor per call (no boot-frozen BaseAddress), so
         // a PUT here reroutes the very next render/voices call — no api restart. Llm:Endpoint is
