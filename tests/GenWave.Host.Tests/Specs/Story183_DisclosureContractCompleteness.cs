@@ -86,6 +86,16 @@ public static class FeatureDisclosureContractCompleteness
         new(typeof(SpectatorPlayHistoryResponse),
             new SpectatorPlayHistoryResponse([]),
             ["entries"]),
+
+        // requests (SPEC F87.1, STORY-224, PLAN T87) — the 202 body is fixed/constant regardless
+        // of wish content (no oracle); the submission DTO is blessed too so a future field bound
+        // onto it (mass assignment) fails here first.
+        new(typeof(SpectatorRequestAccepted),
+            new SpectatorRequestAccepted(),
+            ["status", "note"]),
+        new(typeof(SpectatorRequestSubmission),
+            new SpectatorRequestSubmission("more jazz please"),
+            ["wish"]),
     ];
 
     /// <summary>
@@ -102,6 +112,11 @@ public static class FeatureDisclosureContractCompleteness
         // GET /spectator/api/artwork/{token} (SPEC F88.3, STORY-222, PLAN T84): serves a file
         // (jpeg or the station icon), never a JSON payload — nothing to bless as a DTO shape.
         typeof(SpectatorArtworkController),
+        // POST /spectator/api/requests (SPEC F87, STORY-224, PLAN T87): the controller itself is
+        // never serialized. Its kill-switch marker, RequestsSurfaceAttribute, is named "Requests*"
+        // rather than "Spectator*" (unlike SpectatorSurfaceAttribute) so it falls outside this
+        // scan's own Spectator-prefix filter below — nothing to bless for it here.
+        typeof(SpectatorRequestsController),
     ];
 
     public static class ScenarioExactShapesPinned

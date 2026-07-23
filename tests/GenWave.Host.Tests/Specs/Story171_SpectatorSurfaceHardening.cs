@@ -9,6 +9,7 @@ using System.Net;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
@@ -143,6 +144,17 @@ public static class FeatureSpectatorSurfaceHardening
 
             Assert.All(spectatorEndpoints, endpoint =>
             {
+                // POST /spectator/api/requests (SPEC F87, STORY-224, PLAN T87) is the one
+                // deliberate exception to F62.3's GET-only invariant, written into the plan as
+                // "this codebase's FIRST public anonymous WRITE endpoint" — it still carries the
+                // Spectator policy (F60.2 demands no cookie) but is gated by its own kill switch
+                // (RequestsSurfaceAttribute) and dedicated cooldown+daily-cap limiter instead of by
+                // being read-only. Its own contract lives in Story224_RequestIntake.cs.
+                var isRequestsIntake = endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()
+                    is { ControllerName: "SpectatorRequests" };
+                if (isRequestsIntake)
+                    return;
+
                 var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? [];
                 Assert.True(methods.All(m => m is "GET" or "HEAD"),
                     $"'{endpoint.DisplayName}' accepts [{string.Join(",", methods)}] under the Spectator policy (F62.3).");

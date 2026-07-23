@@ -8,11 +8,17 @@ namespace GenWave.MediaLibrary.Station;
 
 /// <summary>
 /// The booth log's <see cref="IStationEventSink"/> consumer (SPEC F72.1, STORY-195): translates the
-/// three named narrative kinds — track starts (<see cref="TrackAired"/>), patter airs
-/// (<see cref="SegmentGenerated"/>), and degradation mode changes (<see cref="DegradationModeChanged"/>,
-/// T32/STORY-188) — into an operator-readable (kind, summary) pair and enqueues it for
-/// <see cref="BoothLogDrainService"/> to persist. Every other event type (library mutations, settings
-/// writes, enrichment completion, …) is ignored — it carries no booth-log narrative.
+/// named narrative kinds — track starts (<see cref="TrackAired"/>), patter airs
+/// (<see cref="SegmentGenerated"/>), degradation mode changes (<see cref="DegradationModeChanged"/>,
+/// T32/STORY-188), and listener-request intake (<see cref="RequestReceived"/>/
+/// <see cref="RequestEvicted"/>, SPEC F87.8, STORY-224, PLAN T87) — into an operator-readable
+/// (kind, summary) pair and enqueues it for <see cref="BoothLogDrainService"/> to persist. Every
+/// other event type (library mutations, settings writes, enrichment completion, …) is ignored — it
+/// carries no booth-log narrative.
+///
+/// The request rows carry NO wish text (F87.7/F87.8 discipline) — their summaries below are fixed
+/// literals, not derived from anything on the event, because <see cref="RequestReceived"/>/
+/// <see cref="RequestEvicted"/> structurally carry nothing else to derive from.
 ///
 /// <see cref="Publish"/> sits on the same hot paths <see cref="IStationEventSink"/>'s own contract
 /// warns about (the feeder tick, a TTS render) — it never touches Postgres itself. The channel write
@@ -48,6 +54,8 @@ sealed class BoothLogWriter(
                 ParseMediaId(t.MediaId)),
             SegmentGenerated s => new BoothLogEntryRequest("patter-aired", Summarize(s), PersonaId: null),
             DegradationModeChanged d => new BoothLogEntryRequest("mode-changed", Summarize(d), PersonaId: null),
+            RequestReceived => new BoothLogEntryRequest("request-received", "Request received", PersonaId: null),
+            RequestEvicted => new BoothLogEntryRequest("request-evicted", "Request evicted (pending cap)", PersonaId: null),
             _ => null,
         };
         if (request is null) return;

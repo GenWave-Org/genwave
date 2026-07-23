@@ -58,9 +58,9 @@ static class AdminApiServiceCollectionExtensions
         // AuthorizationPolicies for the single registration point (SPEC F60).
         services.AddGenWaveAuthorizationPolicies();
 
-        // Named rate-limiter policies (Login today; the spectator limiter joins here in T13) —
-        // see RateLimiterPolicies for the single registration point (SPEC F61.5).
-        services.AddGenWaveRateLimiting();
+        // Named rate-limiter policies (Login, Spectator, and the F87.3 Requests cooldown+daily-cap
+        // limiter) — see RateLimiterPolicies for the single registration point (SPEC F61.5).
+        services.AddGenWaveRateLimiting(configuration);
 
         return services;
     }
