@@ -77,6 +77,11 @@ public static class MediaLibraryServiceCollectionExtensions
         // on library.media.
         services.AddSingleton<IMediaLibraryMembership, MediaLibraryMembershipRepository>();
 
+        // Artwork token seam (SPEC F88.2, gh-#105, STORY-222): lazy per-track token generation +
+        // token→media resolution. No consumer yet — T84 wires GET /spectator/api/artwork/{token}
+        // onto this.
+        services.AddSingleton<IArtworkTokenStore, ArtworkTokenRepository>();
+
         // Library read: name lookup + all-libraries-with-count for the admin library list endpoint.
         services.AddSingleton<ILibraryRepository, LibraryRepository>();
         // Library admin write: create/rename/delete (Epic J, STORY-047).
