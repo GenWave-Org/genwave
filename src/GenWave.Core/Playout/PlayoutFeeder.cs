@@ -151,6 +151,15 @@ public sealed class PlayoutFeeder(
                 // forever (F24.1/F29.9, gitea-#192). Missing or unparseable fields degrade to null/0
                 // (F7.4). DurationMs is always null here — an engine-initiated play never carries a
                 // fabricated duration (SPEC F50.2).
+                //
+                // F57.4 NARROWING (Epic Z / Z1 review ruling 2026-07-15, gh-#5) — NOT a defect:
+                // this guard means "not CURRENTLY feeder-owned", not "never pushed". An id still
+                // ring-live from a feeder push that later airs ENGINE-INITIATED (e.g. safe rotation
+                // drawing the same catalog track) skips this branch and keeps serving its pushed
+                // metadata — which is correct and strictly more complete (real durationMs,
+                // full-precision gainDb). The engine-echo self-heal above therefore applies to ids
+                // not currently feeder-owned; the still-owned entry releases on on-air departure,
+                // and never-silent is untouched either way.
                 if (!feederOwnedIds.Contains(mediaId))
                 {
                     Remember(mediaId);
