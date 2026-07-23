@@ -84,13 +84,15 @@ jobs:
           docker push ghcr.io/genwave-org/genwave-icecast:home-latest
 
       # BACKEND_URL is baked at build time (next.config.ts rewrites) and defaults to
-      # http://api:8080 in admin-ui/Dockerfile -- correct for every compose topology, so the
-      # published image needs no build-arg here.
-      - name: Build + push Admin UI image
+      # http://api:8080 in admin-ui/Dockerfile -- correct for every compose topology, so that
+      # one needs no build-arg here. GW_VERSION feeds the footer's version stamp (gh-#7), the
+      # same tag value the API image bakes into InformationalVersion.
+      - name: Build + push Admin UI image (GW_VERSION=${{ github.ref_name }})
         env:
           GW_TAG: ${{ github.ref_name }}
         run: |
           docker build \
+            --build-arg "GW_VERSION=$GW_TAG" \
             --label org.opencontainers.image.source=https://github.com/GenWave-Org/genwave \
             --label org.opencontainers.image.description="GenWave Home admin UI" \
             --label org.opencontainers.image.licenses=AGPL-3.0-only \

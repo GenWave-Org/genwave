@@ -46,14 +46,15 @@ fi
 
 # --- 2. Docker images -------------------------------------------------------------------
 if [ -f src/GenWave.Host/Dockerfile ]; then
-  echo "==> docker compose build (icecast, engine, admin_ui)"
-  docker compose build icecast engine admin_ui
+  echo "==> docker compose build (icecast, engine)"
+  docker compose build icecast engine
 
-  # api takes GW_VERSION via --build-arg (compose.yaml stays untouched — no build.args: entry;
-  # the Dockerfile's ARG GW_VERSION=0.0.0-dev default means a plain `docker compose build` still
-  # works without this flag).
-  echo "==> docker compose build api (GW_VERSION=${GW_VERSION})"
-  docker compose build --build-arg GW_VERSION="${GW_VERSION}" api
+  # api and admin_ui take GW_VERSION via --build-arg (compose.yaml stays untouched — no
+  # build.args: entry; both Dockerfiles' ARG GW_VERSION=0.0.0-dev default means a plain
+  # `docker compose build` still works without this flag). The api stamps it into
+  # InformationalVersion (SPEC F65.1); the admin_ui inlines it into the version footer (gh-#7).
+  echo "==> docker compose build api admin_ui (GW_VERSION=${GW_VERSION})"
+  docker compose build --build-arg GW_VERSION="${GW_VERSION}" api admin_ui
 else
   echo "==> docker compose build icecast (api image arrives in Phase 6)"
   docker compose build icecast
