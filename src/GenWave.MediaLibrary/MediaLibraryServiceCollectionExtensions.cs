@@ -72,6 +72,11 @@ public static class MediaLibraryServiceCollectionExtensions
         services.AddSingleton<MediaRatingRepository>();
         services.AddSingleton<IMediaRating>(sp => sp.GetRequiredService<MediaRatingRepository>());
 
+        // gh-#99: the narrow cross-schema membership answer the taste-thumb/booth-log surfaces
+        // need — resolved on the library connection because station_svc deliberately has no grant
+        // on library.media.
+        services.AddSingleton<IMediaLibraryMembership, MediaLibraryMembershipRepository>();
+
         // Library read: name lookup + all-libraries-with-count for the admin library list endpoint.
         services.AddSingleton<ILibraryRepository, LibraryRepository>();
         // Library admin write: create/rename/delete (Epic J, STORY-047).

@@ -5,6 +5,7 @@
 // real planner. S3 lands the predicate in GetRandomReadyAsync and the status counts.
 // See docs/PLAN.md Epic S.
 
+using GenWave.MediaLibrary.Tests.Fakes;
 using Dapper;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -18,7 +19,7 @@ public static class FeatureNeverPlaySelectionSuppression
     // Helpers
     // ---------------------------------------------------------------------
 
-    static MediaRatingRepository RatingRepo(DatabaseFixture db) => new(db.DataSource);
+    static MediaRatingRepository RatingRepo(DatabaseFixture db) => new(db.DataSource, new FakeSafeScopeProvider());
 
     /// <summary>Inserts a ready + measurable + eligible row in library 1 — a selectable row.</summary>
     static async Task<long> InsertSelectableRowAsync(DatabaseFixture db, string path)

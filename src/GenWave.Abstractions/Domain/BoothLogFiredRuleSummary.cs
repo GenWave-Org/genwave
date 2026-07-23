@@ -19,5 +19,5 @@ public sealed record BoothLogFiredRuleSummary(string Summary, double Weight)
     /// not a debug-log token.
     /// </summary>
     public static BoothLogFiredRuleSummary FromTasteRule(TasteRule rule) =>
-        new(rule.Predicate.Artist ?? rule.Predicate.Genre ?? rule.Predicate.Tag ?? "this pick", rule.Weight);
+        new(rule.Predicate.LabelOr("this pick"), rule.Weight);
 }

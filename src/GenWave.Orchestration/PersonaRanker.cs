@@ -1,6 +1,7 @@
 using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using Microsoft.Extensions.Logging;
 
 namespace GenWave.Orchestration;
 
@@ -9,7 +10,10 @@ namespace GenWave.Orchestration;
 /// envelope-filtered candidate pool against a persona's taste rules and a disposition-positioned
 /// energy target, then softmax-samples the Top-K. This is the ranker only: PLAN T64 wires it into
 /// <c>Orchestrator</c>'s <see cref="IPersonaPickProvider"/> seam and adds the per-pick debug log
-/// (SPEC F82.6) — nothing here touches the Orchestrator, and nothing here logs.
+/// (SPEC F82.6) — nothing here touches the Orchestrator. The ONE thing this type logs is a
+/// taste rule whose evaluation threw (gh-#87): a silently disabled rule contradicts the F82.6
+/// "why did it play that?" observability contract, so it gets a WARN (once per rule per pick)
+/// and the pick continues without that rule instead of faulting the whole persona layer.
 ///
 /// <para>
 /// Depends on <see cref="IPersonaTasteReader"/> — never the write-capable
@@ -31,7 +35,8 @@ public sealed class PersonaRanker(
     IPersonaTasteReader tasteReader,
     IRandomSource randomSource,
     TimeProvider timeProvider,
-    PersonaRankerOptions options)
+    PersonaRankerOptions options,
+    ILogger<PersonaRanker> logger)
 {
     /// <summary>
     /// SPEC F82.4 — the hard exploration floor: an operator setting of 0 (or anything below this)
@@ -64,8 +69,9 @@ public sealed class PersonaRanker(
         var (day, hour) = StationLocalNow();
         var target = EnergyTarget.Compute(range, energyDisposition);
 
+        var faultedRules = new HashSet<TasteRule>();
         var topK = candidates
-            .Select(candidate => Score(candidate, rules, day, hour, target))
+            .Select(candidate => Score(candidate, rules, faultedRules, day, hour, target))
             .OrderByDescending(entry => entry.Score)
             .Take(Math.Max(1, options.TopK))
             .ToList();
@@ -87,11 +93,38 @@ public sealed class PersonaRanker(
     /// SPEC F82.2 — <c>rotationScore + Σ matched-taste·biasGain − |energy − target|·energyPull</c>.
     /// A negative-weight rule still adds to the sum (it is just negative — dislikes rank down, they
     /// are never filtered from the pool here or anywhere upstream of it, SPEC F82.1).
+    ///
+    /// A rule whose evaluation throws (gh-#87 — e.g. an off-schema context that survived every write
+    /// seam) is WARNed once per pick via <paramref name="faultedRules"/> and skipped for every
+    /// candidate — one bad rule never faults the whole persona layer down to envelope-only, and it
+    /// never disables silently either.
     /// </summary>
     (PersonaRankCandidate Candidate, double Score, IReadOnlyList<TasteRule> FiredRules) Score(
-        PersonaRankCandidate candidate, IReadOnlyList<TasteRule> rules, DayOfWeek day, int hour, double target)
+        PersonaRankCandidate candidate, IReadOnlyList<TasteRule> rules, HashSet<TasteRule> faultedRules,
+        DayOfWeek day, int hour, double target)
     {
-        var fired = rules.Where(rule => TasteMatcher.Matches(rule, candidate, day, hour)).ToList();
+        var fired = new List<TasteRule>();
+        foreach (var rule in rules)
+        {
+            if (faultedRules.Contains(rule))
+                continue;
+
+            try
+            {
+                if (TasteMatcher.Matches(rule, candidate, day, hour))
+                    fired.Add(rule);
+            }
+            catch (Exception ex)
+            {
+                faultedRules.Add(rule);
+                logger.LogWarning(
+                    ex,
+                    "Taste rule {Rule} threw during evaluation — skipping it for this pick (gh-#87; a " +
+                    "silently disabled rule contradicts SPEC F82.6).",
+                    rule.Predicate.LabelOr("any"));
+            }
+        }
+
         var tasteBias = fired.Sum(rule => rule.Weight) * options.BiasGain;
         var energyPenalty = Math.Abs(candidate.Energy - target) * options.EnergyPull;
         return (candidate, candidate.RotationScore + tasteBias - energyPenalty, fired);

@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { usePoll } from "@/lib/use-poll";
-import { fetchNowPlaying, fetchPlayHistory, isCatalogMediaId } from "@/lib/broadcast-api";
+import { fetchNowPlaying, fetchPlayHistory, isCatalogMediaId, isRateable } from "@/lib/broadcast-api";
 import { personaNameOrFallback, usePersonaDirectory } from "@/lib/use-persona-directory";
 import { NowPlayingCard } from "../_components/NowPlayingCard";
 import { PersonaTasteThumbs } from "../_components/PersonaTasteThumbs";
@@ -67,8 +67,10 @@ export function LiveView({ timeZone }: LiveViewProps = {}): ReactNode {
 
   const { ratings, applyRating } = useLiveRatings(visibleIds);
 
+  // gh-#99: safe-scope content (safe-loop tracks, station IDs) renders no rating control at all —
+  // the server stamps `rateable: false` on the batch ratings read and refuses the write regardless.
   const nowPlayingRatingControls =
-    nowPlayingMediaId !== null ? (
+    nowPlayingMediaId !== null && isRateable(ratings.get(nowPlayingMediaId)) ? (
       <RatingControls
         mediaId={nowPlayingMediaId}
         value={ratings.get(nowPlayingMediaId) ?? DEFAULT_RATING}

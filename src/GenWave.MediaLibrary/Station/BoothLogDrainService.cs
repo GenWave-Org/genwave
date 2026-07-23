@@ -46,7 +46,7 @@ sealed class BoothLogDrainService(
     {
         try
         {
-            await store.AppendAsync(request.Kind, request.Summary, request.PersonaId, request.Artist, request.Pick, ct);
+            await store.AppendAsync(request.Kind, request.Summary, request.PersonaId, request.Artist, request.Pick, request.MediaId, ct);
         }
         catch (OperationCanceledException)
         {

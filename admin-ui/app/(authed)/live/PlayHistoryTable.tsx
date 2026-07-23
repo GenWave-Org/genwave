@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatClockTime, formatDurationCell } from "@/lib/format-clock";
-import { isCatalogMediaId, type PlayHistoryEntry, type RatingEntry } from "@/lib/broadcast-api";
+import { isCatalogMediaId, isRateable, type PlayHistoryEntry, type RatingEntry } from "@/lib/broadcast-api";
 import { RatingControls, type RatingControlsValue } from "../_components/RatingControls";
 import { DEFAULT_RATING } from "./useLiveRatings";
 
@@ -129,7 +129,8 @@ export function PlayHistoryTable({
                     {formatDurationCell(entry.durationMs)}
                   </td>
                   <td className="py-2">
-                    {isCatalogMediaId(entry.mediaId) && (
+                    {/* gh-#99: safe-scope rows (rateable: false) get no control, not a disabled one */}
+                    {isCatalogMediaId(entry.mediaId) && isRateable(ratings.get(entry.mediaId)) && (
                       <RatingControls
                         mediaId={entry.mediaId}
                         value={ratings.get(entry.mediaId) ?? DEFAULT_RATING}

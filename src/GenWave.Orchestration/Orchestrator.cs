@@ -544,7 +544,7 @@ public sealed class Orchestrator(
 
     /// <summary>One short "what:weight" summary per fired taste rule for the debug line — not a full serialization.</summary>
     static string FormatFiredRule(TasteRule rule) =>
-        $"{rule.Predicate.Artist ?? rule.Predicate.Genre ?? rule.Predicate.Tag ?? "any"}:{rule.Weight.ToString("F2", CultureInfo.InvariantCulture)}";
+        $"{rule.Predicate.LabelOr("any")}:{rule.Weight.ToString("F2", CultureInfo.InvariantCulture)}";
 
     async Task EnqueuePatterAsync(MediaItem? prev, MediaItem next, CancellationToken ct)
     {

@@ -20,6 +20,7 @@ sealed class MediaRepository(
     NpgsqlDataSource dataSource,
     ILogger<MediaRepository> logger,
     Channel<long> enrichQueue,
+    ISafeScopeProvider safeScope,
     IStationEventSink? events = null)
     : IMediaCatalog, IAdminMediaLookup, IAdminMediaQuery, IAdminMediaWrite, IAdminMediaReenrichment,
       IAuthoredCatalogWriter
@@ -537,6 +538,10 @@ sealed class MediaRepository(
         filterParams.Add("offset", offset);
         filterParams.Add("limit", limit);
 
+        // gh-#99 — rateable is projected per row against the LIVE safe scope; an empty scope's
+        // empty array makes `= any(...)` false for every row, i.e. everything rateable.
+        filterParams.Add("safeLibraryIds", safeScope.Current.LibraryIds.ToArray());
+
         var sql = $"""
             select id, path, format, state, title, duration_ms, sample_rate, channels, bitrate_kbps,
                    artist, album, genre, year, integrated_lufs, true_peak_dbtp, measurable,
@@ -544,6 +549,7 @@ sealed class MediaRepository(
                    eligible, m.xmin::text as xmin,
                    coalesce(r.score, 50) as score, coalesce(r.never_play, false) as never_play,
                    m.moods,
+                   not (m.library_id = any(@safeLibraryIds)) as rateable,
                    count(*) over() as total_count
             from library.media m
             left join library.media_rating r on r.media_id = m.id

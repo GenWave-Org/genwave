@@ -31,6 +31,9 @@ function latestTrackStartAttribution(page: BoothLogPage | null): NowPlayingTaste
   if (page === null || !Array.isArray(page.entries)) return null;
   const row = page.entries.find((entry) => entry.kind === "track-started" && typeof entry.personaId === "number");
   if (row === undefined || typeof row.personaId !== "number") return null;
+  // gh-#99: a safe-scope airing (safe-loop track, station ID) resolves to null — no taste thumbs
+  // on the Live card, the same no-control posture the booth-log feed applies to the same row.
+  if (row.tasteExcluded === true) return null;
   return { boothLogRowId: row.id, personaId: row.personaId, pick: row.pick };
 }
 

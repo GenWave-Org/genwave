@@ -67,6 +67,17 @@ export interface RatingEntry {
   mediaId: string;
   score: number;
   neverPlay: boolean;
+  /** gh-#99 — `false` for safe-scope content (safe-loop tracks, station IDs): render NO vote or
+   * never-play control at all, not a disabled one. Optional so a cached/older API shape (absent
+   * field) keeps the pre-#99 behavior: everything rateable. */
+  rateable?: boolean;
+}
+
+/** gh-#99 — the one gate every rating surface shares: an entry is rateable unless the server
+ * said otherwise. `undefined` (no entry fetched yet, or an older API) stays rateable — the write
+ * endpoints refuse safe content independently, so this is presentation, not enforcement. */
+export function isRateable(entry: RatingEntry | undefined): boolean {
+  return entry?.rateable !== false;
 }
 
 export type VoteDirection = "up" | "down";

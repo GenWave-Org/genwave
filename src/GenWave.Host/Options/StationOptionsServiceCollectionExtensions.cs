@@ -42,6 +42,10 @@ static class StationOptionsServiceCollectionExtensions
             // CurrentValue on every call, so a live PUT /api/settings scope edit applies without
             // an api restart.
             .AddSingleton<IStationScopeProvider, OptionsMonitorStationScopeProvider>()
+            // Live safe-scope seam (gh-#99): the mirror binding for Station:SafeScope:LibraryIds —
+            // read by every safe-content exclusion check (rating endpoints, taste thumbs) so a live
+            // SafeScope edit governs the very next check, same as the main-scope seam above.
+            .AddSingleton<ISafeScopeProvider, OptionsMonitorSafeScopeProvider>()
             // Live cadence seam (gitea-#211 — F30.1's precedent applied to cadence): Station:Cadence:*
             // is advertised Live in the settings allowlist but used to be read from the
             // boot-frozen StationContext singleton (since retired). Wraps

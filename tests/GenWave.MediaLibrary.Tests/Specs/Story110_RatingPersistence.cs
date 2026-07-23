@@ -5,6 +5,7 @@
 // class R8/Q2 taught (MEMORY.md 2026-07-11); a fake IMediaRating cannot certify either.
 // S2 lands MediaRatingRepository; see docs/PLAN.md Epic S.
 
+using GenWave.MediaLibrary.Tests.Fakes;
 using Dapper;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -18,7 +19,7 @@ public static class FeatureRatingPersistence
     // Helpers
     // ---------------------------------------------------------------------
 
-    static MediaRatingRepository RatingRepo(DatabaseFixture db) => new(db.DataSource);
+    static MediaRatingRepository RatingRepo(DatabaseFixture db) => new(db.DataSource, new FakeSafeScopeProvider());
 
     /// <summary>Inserts a fresh library.media row (state='discovered') and returns its id.</summary>
     static async Task<long> InsertMediaRowAsync(DatabaseFixture db, string path)

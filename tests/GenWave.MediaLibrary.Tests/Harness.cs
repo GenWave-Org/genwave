@@ -23,7 +23,8 @@ static class Harness
     public static readonly DateTime Mtime = new(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     public static MediaRepository Repo(DatabaseFixture f, Channel<long>? enrichQueue = null) =>
-        new(f.DataSource, NullLogger<MediaRepository>.Instance, enrichQueue ?? Channel.CreateUnbounded<long>());
+        new(f.DataSource, NullLogger<MediaRepository>.Instance, enrichQueue ?? Channel.CreateUnbounded<long>(),
+            new Fakes.FakeSafeScopeProvider());
 
     /// <summary>
     /// Builds a <see cref="ScanService"/> against a real repository/media root. <paramref name="missThreshold"/>

@@ -23,7 +23,11 @@ namespace GenWave.Host.Api;
 [AdminSurface]
 [Authorize(Policy = AuthorizationPolicies.AdminOnly)]
 public sealed class BoothLogController(
-    IBoothLogReader store, IPersonaTasteAccrualStore accrual, ILogger<BoothLogController> logger) : ControllerBase
+    IBoothLogReader store,
+    IPersonaTasteAccrualStore accrual,
+    IMediaLibraryMembership membership,
+    ISafeScopeProvider safeScope,
+    ILogger<BoothLogController> logger) : ControllerBase
 {
     const int DefaultTake = 50;
     const int MaxTake = 200;
@@ -52,8 +56,15 @@ public sealed class BoothLogController(
 
         var page = await store.ReadAsync(cursor, effectiveTake, ct);
 
+        // gh-#99 — one batch membership resolve per page: which stamped media ids are safe-scope
+        // content. Rows flagged here render no taste thumbs; ThumbTaste refuses them independently.
+        var stampedIds = page.Entries.Select(e => e.MediaId).OfType<long>().ToList();
+        var safeContentIds = await membership.FilterToLibrariesAsync(stampedIds, safeScope.Current, ct);
+
         return Ok(new BoothLogPageDto(
-            page.Entries.Select(e => new BoothLogEntryDto(e.Id, e.OccurredAt, e.Kind, e.Summary, e.PersonaId, ToPickDto(e.Id, e.Pick))).ToList(),
+            page.Entries.Select(e => new BoothLogEntryDto(
+                e.Id, e.OccurredAt, e.Kind, e.Summary, e.PersonaId, ToPickDto(e.Id, e.Pick),
+                TasteExcluded: e.MediaId is long mediaId && safeContentIds.Contains(mediaId))).ToList(),
             page.NextBefore?.ToString()));
     }
 
@@ -119,6 +130,24 @@ public sealed class BoothLogController(
                 Title  = "Invalid direction.",
                 Detail = "direction must be \"up\" or \"down\".",
             });
+        }
+
+        // gh-#99 — safe-scope content never accrues taste: a safe-loop track or station ID airing
+        // would teach the persona an artist rule for the STATION's own name. Resolved here, on the
+        // library connection, because the accrual store's transaction runs as station_svc, which
+        // deliberately cannot join library.media. The row being immutable makes this two-step safe.
+        if (await store.GetMediaIdAsync(id, ct) is long mediaId)
+        {
+            var safeContent = await membership.FilterToLibrariesAsync([mediaId], safeScope.Current, ct);
+            if (safeContent.Contains(mediaId))
+            {
+                return BadRequest(new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title  = "Not thumbable.",
+                    Detail = $"Booth-log row {id} is safe-loop/station-ID content (Station:SafeScope:LibraryIds) — taste thumbs do not apply (gh-#99).",
+                });
+            }
         }
 
         var outcome = await accrual.ThumbAsync(id, direction, ct);

@@ -12,11 +12,23 @@ namespace GenWave.MediaLibrary.Catalog;
 /// <c>library.media_rating</c> — a 1:1 extension table kept deliberately separate from
 /// <c>library.media</c> so a vote or never-play set never bumps that row's <c>xmin</c> (F33.1).
 /// Connection-per-query against the library's own <see cref="NpgsqlDataSource"/>, mirroring
-/// <see cref="MediaRepository"/>'s wiring — singleton-safe with no captive dependency. No
+/// <see cref="MediaRepository"/>'s wiring — singleton-safe with no captive dependency. No MAIN
 /// <see cref="LibraryScope"/> gating anywhere (F33.5): rating is a per-row concern, not a
 /// rotation-scope one.
+///
+/// <para>
+/// The ONE library-membership check this seam does apply is the gh-#99 SAFE-scope exclusion, via
+/// <paramref name="safeScope"/> (re-read live on every call): rows in a
+/// <c>Station:SafeScope:LibraryIds</c> library — the seeded safe loop, authored safe segments,
+/// station IDs — are functional audio, not rateable music. Writes against them return
+/// <see cref="RatingWriteResult.SafeContentExcluded"/>; reads stamp <see cref="MediaRating.Rateable"/>
+/// false; bulk sweeps never match them. This is NOT the F33.5 main-scope gating the class remarks
+/// above forbid — that rationale (a Live-page vote must reach safe-loop plays airing outside main
+/// scope) predates #99's ruling that such plays are not rateable at all.
+/// </para>
 /// </summary>
-sealed class MediaRatingRepository(NpgsqlDataSource dataSource, IStationEventSink? events = null) : IMediaRating
+sealed class MediaRatingRepository(
+    NpgsqlDataSource dataSource, ISafeScopeProvider safeScope, IStationEventSink? events = null) : IMediaRating
 {
     // MediaMutated publish seam for rating writes (gitea-#246); no-op unless the host binds a real sink.
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
@@ -42,6 +54,10 @@ sealed class MediaRatingRepository(NpgsqlDataSource dataSource, IStationEventSin
         try
         {
             await using var conn = await dataSource.OpenConnectionAsync(ct);
+
+            if (await IsSafeContentAsync(conn, id, ct))
+                return new VoteOutcome(RatingWriteResult.SafeContentExcluded, null);
+
             var score = await conn.ExecuteScalarAsync<int>(new CommandDefinition("""
                 insert into library.media_rating (media_id, score)
                 values (@id, least(100, greatest(0, 50 + @delta)))
@@ -77,6 +93,10 @@ sealed class MediaRatingRepository(NpgsqlDataSource dataSource, IStationEventSin
         try
         {
             await using var conn = await dataSource.OpenConnectionAsync(ct);
+
+            if (await IsSafeContentAsync(conn, id, ct))
+                return new NeverPlayOutcome(RatingWriteResult.SafeContentExcluded, null);
+
             var value = await conn.ExecuteScalarAsync<bool>(new CommandDefinition("""
                 insert into library.media_rating (media_id, never_play)
                 values (@id, @neverPlay)
@@ -116,9 +136,11 @@ sealed class MediaRatingRepository(NpgsqlDataSource dataSource, IStationEventSin
             return [];
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var ids = parsed.Select(p => p.Id).Distinct().ToArray();
+        var safeContentIds = await SafeContentIdsAsync(conn, ids, ct);
         var rows = await conn.QueryAsync<(long MediaId, int Score, bool NeverPlay)>(new CommandDefinition(
             "select media_id, score, never_play from library.media_rating where media_id = any(@ids)",
-            new { ids = parsed.Select(p => p.Id).Distinct().ToArray() },
+            new { ids },
             cancellationToken: ct));
 
         var byId = rows.ToDictionary(r => r.MediaId, r => (r.Score, r.NeverPlay));
@@ -127,10 +149,58 @@ sealed class MediaRatingRepository(NpgsqlDataSource dataSource, IStationEventSin
         foreach (var (original, id) in parsed)
         {
             var (score, neverPlay) = byId.TryGetValue(id, out var found) ? found : (50, false);
-            results.Add(new MediaRating(original, score, neverPlay));
+            results.Add(new MediaRating(original, score, neverPlay, Rateable: !safeContentIds.Contains(id)));
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// gh-#99 — appends the safe-scope carve-out to a <see cref="MediaRepository.BuildAdminWhere"/>
+    /// fragment so a bulk sweep never matches safe-content rows, even when the operator's filter
+    /// names a safe library explicitly. No-op (no SQL fragment, no parameter) when the safe scope is
+    /// empty — the pre-#99 behavior.
+    /// </summary>
+    string ExcludeSafeContent(string where, Dapper.DynamicParameters filterParams)
+    {
+        var scope = safeScope.Current;
+        if (scope.IsEmpty)
+            return where;
+
+        filterParams.Add("safeLibraryIds", scope.LibraryIds.ToArray());
+        return where + " and not (library_id = any(@safeLibraryIds))";
+    }
+
+    /// <summary>
+    /// gh-#99 — true when the row's <c>library_id</c> falls in the live safe scope. Evaluated fresh
+    /// per write (never cached) so a live SafeScope edit governs the very next vote; an empty safe
+    /// scope short-circuits to false with no SQL — the pre-#99 behavior.
+    /// </summary>
+    async Task<bool> IsSafeContentAsync(NpgsqlConnection conn, long id, CancellationToken ct)
+    {
+        var scope = safeScope.Current;
+        if (scope.IsEmpty)
+            return false;
+
+        return await conn.ExecuteScalarAsync<bool>(new CommandDefinition(
+            "select exists (select 1 from library.media where id = @id and library_id = any(@libraryIds))",
+            new { id, libraryIds = scope.LibraryIds.ToArray() },
+            cancellationToken: ct));
+    }
+
+    /// <summary>Batch shape of <see cref="IsSafeContentAsync"/> for the read path (gh-#99).</summary>
+    async Task<HashSet<long>> SafeContentIdsAsync(NpgsqlConnection conn, long[] ids, CancellationToken ct)
+    {
+        var scope = safeScope.Current;
+        if (scope.IsEmpty || ids.Length == 0)
+            return [];
+
+        var rows = await conn.QueryAsync<long>(new CommandDefinition(
+            "select id from library.media where id = any(@ids) and library_id = any(@libraryIds)",
+            new { ids, libraryIds = scope.LibraryIds.ToArray() },
+            cancellationToken: ct));
+
+        return rows.ToHashSet();
     }
 
     /// <summary>
@@ -151,6 +221,7 @@ sealed class MediaRatingRepository(NpgsqlDataSource dataSource, IStationEventSin
         if (scope.IsEmpty) return 0;
 
         var (where, filterParams) = MediaRepository.BuildAdminWhere(filter, scope);
+        where = ExcludeSafeContent(where, filterParams);
         var delta = direction == VoteDirection.Up ? 1 : -1;
         filterParams.Add("delta", delta);
 
@@ -186,6 +257,7 @@ sealed class MediaRatingRepository(NpgsqlDataSource dataSource, IStationEventSin
         if (scope.IsEmpty) return 0;
 
         var (where, filterParams) = MediaRepository.BuildAdminWhere(filter, scope);
+        where = ExcludeSafeContent(where, filterParams);
         filterParams.Add("neverPlay", neverPlay);
 
         var sql = $"""
