@@ -235,10 +235,10 @@ public static class FeatureRatingPersistence
             var patch = new MediaPatch(Title: "Post-Vote Title", Artist: null, Album: null, Genre: null, Year: null, Eligible: null, LibraryId: null);
             var scope = new LibraryScope([1L]);
 
-            var result = await ((IAdminMediaWrite)mediaRepo).UpdateAsync(
+            var result = await ((IAdminMediaWrite)mediaRepo).UpdateReturningVersionAsync(
                 id.ToString(), patch, xminBefore, scope, CancellationToken.None);
 
-            Assert.Equal(MediaWriteResult.Updated, result);
+            Assert.Equal(MediaWriteResult.Updated, result.Result);
         }
     }
 

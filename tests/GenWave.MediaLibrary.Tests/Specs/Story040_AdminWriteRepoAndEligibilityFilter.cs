@@ -3,7 +3,7 @@
 // BDD specification — xUnit. Integration via DatabaseCollection (real Postgres).
 // Mirrors Story032_CatalogProjectsEnergyColumns for the write side.
 // Covers:
-//   • UpdateAsync returns Updated / Conflict / NotFound correctly (OutOfScope retired by SPEC
+//   • UpdateReturningVersionAsync returns Updated / Conflict / NotFound correctly (legacy UpdateAsync retired, gh-#4) (OutOfScope retired by SPEC
 //     F43.2, Epic V, closes gitea-#203 — scope no longer gates the single-row write)
 //   • eligible=false rows are never returned by GetRandomReadyAsync
 //   • all-ineligible → GetRandomReadyAsync returns null (no selection = null, not crash)
@@ -20,7 +20,7 @@ namespace GenWave.MediaLibrary.Tests.Specs;
 public static class FeatureAdminWriteRepoAndEligibilityFilter
 {
     // ─────────────────────────────────────────────────────────────────────────
-    // HAPPY PATH — UpdateAsync returns Updated
+    // HAPPY PATH — UpdateReturningVersionAsync returns Updated
     // ─────────────────────────────────────────────────────────────────────────
 
     [Collection(DatabaseCollection.Name)]
@@ -41,9 +41,9 @@ public static class FeatureAdminWriteRepoAndEligibilityFilter
             var patch = new MediaPatch(Title: "New Title", Artist: "New Artist", Album: null, Genre: null, Year: null, Eligible: null, LibraryId: null);
             var scope = new LibraryScope([1L]);
 
-            var result = await ((IAdminMediaWrite)repo).UpdateAsync(id.ToString(), patch, xmin, scope, CancellationToken.None);
+            var result = await ((IAdminMediaWrite)repo).UpdateReturningVersionAsync(id.ToString(), patch, xmin, scope, CancellationToken.None);
 
-            Assert.Equal(MediaWriteResult.Updated, result);
+            Assert.Equal(MediaWriteResult.Updated, result.Result);
 
             // Verify columns persisted.
             await using var conn = await db.DataSource.OpenConnectionAsync();
@@ -66,7 +66,7 @@ public static class FeatureAdminWriteRepoAndEligibilityFilter
             var patch = new MediaPatch(Title: "Stamped", Artist: null, Album: null, Genre: null, Year: null, Eligible: null, LibraryId: null);
             var scope = new LibraryScope([1L]);
 
-            await ((IAdminMediaWrite)repo).UpdateAsync(id.ToString(), patch, xmin, scope, CancellationToken.None);
+            await ((IAdminMediaWrite)repo).UpdateReturningVersionAsync(id.ToString(), patch, xmin, scope, CancellationToken.None);
 
             await using var conn = await db.DataSource.OpenConnectionAsync();
             var tagsEditedAt = await conn.ExecuteScalarAsync<DateTime?>(
@@ -88,7 +88,7 @@ public static class FeatureAdminWriteRepoAndEligibilityFilter
             var patch = new MediaPatch(Title: null, Artist: null, Album: null, Genre: null, Year: null, Eligible: false, LibraryId: null);
             var scope = new LibraryScope([1L]);
 
-            await ((IAdminMediaWrite)repo).UpdateAsync(id.ToString(), patch, xmin, scope, CancellationToken.None);
+            await ((IAdminMediaWrite)repo).UpdateReturningVersionAsync(id.ToString(), patch, xmin, scope, CancellationToken.None);
 
             await using var conn = await db.DataSource.OpenConnectionAsync();
             var tagsEditedAt = await conn.ExecuteScalarAsync<DateTime?>(
@@ -109,8 +109,8 @@ public static class FeatureAdminWriteRepoAndEligibilityFilter
             var patch = new MediaPatch(Title: null, Artist: null, Album: null, Genre: null, Year: null, Eligible: false, LibraryId: null);
             var scope = new LibraryScope([1L]);
 
-            var result = await ((IAdminMediaWrite)repo).UpdateAsync(id.ToString(), patch, xmin, scope, CancellationToken.None);
-            Assert.Equal(MediaWriteResult.Updated, result);
+            var result = await ((IAdminMediaWrite)repo).UpdateReturningVersionAsync(id.ToString(), patch, xmin, scope, CancellationToken.None);
+            Assert.Equal(MediaWriteResult.Updated, result.Result);
 
             await using var conn = await db.DataSource.OpenConnectionAsync();
             var eligible = await conn.ExecuteScalarAsync<bool>(
@@ -141,9 +141,9 @@ public static class FeatureAdminWriteRepoAndEligibilityFilter
             var patch = new MediaPatch(Title: "Should Not Persist", Artist: null, Album: null, Genre: null, Year: null, Eligible: null, LibraryId: null);
             var scope = new LibraryScope([1L]);
 
-            var result = await ((IAdminMediaWrite)repo).UpdateAsync(id.ToString(), patch, staleVersion, scope, CancellationToken.None);
+            var result = await ((IAdminMediaWrite)repo).UpdateReturningVersionAsync(id.ToString(), patch, staleVersion, scope, CancellationToken.None);
 
-            Assert.Equal(MediaWriteResult.Conflict, result);
+            Assert.Equal(MediaWriteResult.Conflict, result.Result);
 
             // The title must not have changed.
             await using var conn = await db.DataSource.OpenConnectionAsync();
@@ -172,9 +172,9 @@ public static class FeatureAdminWriteRepoAndEligibilityFilter
             var scope = new LibraryScope([1L]);
 
             // id 999999 does not exist.
-            var result = await ((IAdminMediaWrite)repo).UpdateAsync("999999", patch, "0", scope, CancellationToken.None);
+            var result = await ((IAdminMediaWrite)repo).UpdateReturningVersionAsync("999999", patch, "0", scope, CancellationToken.None);
 
-            Assert.Equal(MediaWriteResult.NotFound, result);
+            Assert.Equal(MediaWriteResult.NotFound, result.Result);
         }
     }
 
@@ -204,9 +204,9 @@ public static class FeatureAdminWriteRepoAndEligibilityFilter
             // Scope that does NOT include library 1 — no longer a gate (SPEC F43.2).
             var wrongScope = new LibraryScope([99L]);
 
-            var result = await ((IAdminMediaWrite)repo).UpdateAsync(id.ToString(), patch, xmin, wrongScope, CancellationToken.None);
+            var result = await ((IAdminMediaWrite)repo).UpdateReturningVersionAsync(id.ToString(), patch, xmin, wrongScope, CancellationToken.None);
 
-            Assert.Equal(MediaWriteResult.Updated, result);
+            Assert.Equal(MediaWriteResult.Updated, result.Result);
         }
     }
 
