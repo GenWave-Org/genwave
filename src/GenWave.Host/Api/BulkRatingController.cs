@@ -30,7 +30,7 @@ namespace GenWave.Host.Api;
 [ApiController]
 [Route("api")]
 [AdminSurface]
-[Authorize(Policy = AuthorizationPolicies.AdminOnly)]
+[Authorize(Policy = AuthorizationPolicies.Curation)]
 public sealed class BulkRatingController(
     IMediaRating rating,
     IStationScopeProvider scopeProvider,
