@@ -48,6 +48,15 @@ namespace GenWave.Core.Abstractions;
 /// <c>NeverPlay</c>) so <see cref="IAdminMediaQuery.ListAdminAsync"/> and every bulk write path
 /// (<c>SetEligibilityAsync</c>, <c>BulkReassignAsync</c>, <c>ScheduleBulkAsync</c>) inherit them.
 /// </para>
+/// <para>
+/// <c>MoodsExact</c> (SPEC F86.8, STORY-220) is the mood counterpart to <c>GenresExact</c>, but
+/// matches against an ARRAY column (<c>library.media.moods</c>, text[]) rather than a scalar one:
+/// a row matches if ANY of its stored moods case-insensitively equals ANY listed term — two ORs
+/// composed (across the row's own moods, and across the query's repeated <c>mood-exact</c>
+/// values), not one. A <c>null</c> or empty list applies no filter; a <c>null</c>-moods (untagged)
+/// row never matches once the filter is active — there is nothing to compare against. Folded into
+/// the same shared WHERE-builder as the other exact filters, so it ANDs with them for free.
+/// </para>
 /// </summary>
 public sealed record MediaQuery(
     string? State = null,
@@ -64,7 +73,8 @@ public sealed record MediaQuery(
     bool? YearMissing = null,
     string? ArtistExact = null,
     string? AlbumExact = null,
-    IReadOnlyList<string>? GenresExact = null);
+    IReadOnlyList<string>? GenresExact = null,
+    IReadOnlyList<string>? MoodsExact = null);
 
 /// <summary>A paged result set with total count and page count (T041).</summary>
 public sealed record PagedResult<T>(

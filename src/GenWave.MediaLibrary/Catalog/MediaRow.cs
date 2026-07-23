@@ -56,6 +56,13 @@ class MediaRow
     public bool NeverPlay { get; set; }
 
     /// <summary>
+    /// Mood tags (SPEC F85.1/F86.8) — <c>library.media.moods</c>, a Postgres <c>text[]</c>. Null
+    /// until the mood tagger reaches (or misses on) the row; only populated by projections that
+    /// select it (the admin queries), mirroring <see cref="TrackEnergy"/>'s pattern.
+    /// </summary>
+    public string[]? Moods { get; set; }
+
+    /// <summary>
     /// Postgres system column <c>xmin</c> — the transaction id that last wrote this row.
     /// Exposed as a string for use as an optimistic-concurrency token (ETag) on the admin write path.
     /// Dapper maps this because <c>MatchNamesWithUnderscores</c> is enabled globally and the column is
@@ -145,5 +152,6 @@ class MediaRow
         Score: Score,
         NeverPlay: NeverPlay,
         Bpm: Bpm,
-        TrackEnergy: TrackEnergy);
+        TrackEnergy: TrackEnergy,
+        Moods: Moods);
 }

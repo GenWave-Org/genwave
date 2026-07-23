@@ -42,7 +42,7 @@ sealed class MediaRepository(
         "select id, library_id, path, format, state, title, duration_ms, sample_rate, channels, bitrate_kbps, " +
         "artist, album, genre, year, integrated_lufs, true_peak_dbtp, measurable, " +
         "cue_in_sec, cue_out_sec, intro_energy, outro_energy, bpm, track_energy, eligible, m.xmin::text as xmin, " +
-        "coalesce(r.score, 50) as score, coalesce(r.never_play, false) as never_play " +
+        "coalesce(r.score, 50) as score, coalesce(r.never_play, false) as never_play, m.moods " +
         "from library.media m left join library.media_rating r on r.media_id = m.id";
 
     public async Task<MediaReference?> GetByIdAsync(LibraryScope scope, string mediaId, CancellationToken ct)
@@ -543,6 +543,7 @@ sealed class MediaRepository(
                    cue_in_sec, cue_out_sec, intro_energy, outro_energy, bpm, track_energy,
                    eligible, m.xmin::text as xmin,
                    coalesce(r.score, 50) as score, coalesce(r.never_play, false) as never_play,
+                   m.moods,
                    count(*) over() as total_count
             from library.media m
             left join library.media_rating r on r.media_id = m.id
@@ -595,6 +596,16 @@ sealed class MediaRepository(
     /// OR-match via <c>lower(genre) = any(@genresExact)</c> against a pre-lowercased array — a null or
     /// empty <c>GenresExact</c> applies no filter.
     ///
+    /// <c>MoodsExact</c> (SPEC F86.8) is genre's array-column counterpart: <c>moods</c> is a
+    /// <c>text[]</c>, so a scalar <c>= any(@array)</c> predicate cannot express it. Instead
+    /// <c>exists (select 1 from unnest(moods) as mood where lower(mood) = any(@moodsExact))</c>
+    /// case-insensitively matches ANY of the row's stored moods against ANY listed term — the two
+    /// ORs the spec calls for (across the row's own moods, and across repeated <c>mood-exact</c>
+    /// occurrences) in one predicate. <c>unnest(NULL::text[])</c> yields zero rows, so a
+    /// null-moods (untagged) row structurally never satisfies the EXISTS once the filter is
+    /// active — no separate "moods is not null" guard is needed. A null or empty <c>MoodsExact</c>
+    /// applies no filter, same as <c>GenresExact</c>.
+    ///
     /// Blank/whitespace-only exact values are treated as absent, not as a real (and unmatchable)
     /// equality target: a native GET form serializes every sibling filter input, so the Catalog
     /// bulk-toolbar's request body can carry <c>"albumExact":""</c> even when the operator only
@@ -603,9 +614,9 @@ sealed class MediaRepository(
     /// an empty sibling <c>album-exact</c> field affected 0 of 2 matching rows). This is the single
     /// implementation point every browse + bulk write path shares, so ignoring a blank here keeps
     /// browse and bulk symmetric everywhere at once; a blank exact match is operator-meaningless
-    /// regardless of layer, so ignoring it is least-astonishment. <c>GenresExact</c> mirrors this by
-    /// dropping blank entries before the count check, so a list of only blanks (e.g. <c>[""]</c>)
-    /// also applies no filter.
+    /// regardless of layer, so ignoring it is least-astonishment. <c>GenresExact</c>/<c>MoodsExact</c>
+    /// mirror this by dropping blank entries before the count check, so a list of only blanks
+    /// (e.g. <c>[""]</c>) also applies no filter.
     /// </summary>
     internal static (string Where, DynamicParameters Params) BuildAdminWhere(MediaQuery query, LibraryScope scope)
     {
@@ -615,6 +626,8 @@ sealed class MediaRepository(
         var albumExact  = string.IsNullOrWhiteSpace(query.AlbumExact)  ? null : query.AlbumExact;
         var genresExact = query.GenresExact?.Where(g => !string.IsNullOrWhiteSpace(g)).ToArray();
         if (genresExact is { Length: 0 }) genresExact = null;
+        var moodsExact = query.MoodsExact?.Where(m => !string.IsNullOrWhiteSpace(m)).ToArray();
+        if (moodsExact is { Length: 0 }) moodsExact = null;
 
         if (query.State is not null)    parts.Add("state = @state");
         if (query.Artist is not null)   parts.Add("artist ILIKE @artist");
@@ -628,6 +641,7 @@ sealed class MediaRepository(
         if (artistExact is not null)    parts.Add("lower(artist) = lower(@artistExact)");
         if (albumExact is not null)     parts.Add("lower(album) = lower(@albumExact)");
         if (genresExact is not null)    parts.Add("lower(genre) = any(@genresExact)");
+        if (moodsExact is not null)     parts.Add("exists (select 1 from unnest(moods) as mood where lower(mood) = any(@moodsExact))");
 
         var p = new DynamicParameters();
         p.Add("libraryIds", scope.LibraryIds.ToArray());
@@ -643,6 +657,7 @@ sealed class MediaRepository(
         p.Add("artistExact", artistExact);
         p.Add("albumExact",  albumExact);
         p.Add("genresExact", genresExact?.Select(g => g.ToLowerInvariant()).ToArray());
+        p.Add("moodsExact",  moodsExact?.Select(m => m.ToLowerInvariant()).ToArray());
 
         return (string.Join(" and ", parts), p);
     }
