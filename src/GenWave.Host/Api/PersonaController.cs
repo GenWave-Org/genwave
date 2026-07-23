@@ -271,6 +271,36 @@ public sealed partial class PersonaController(
     }
 
     /// <summary>
+    /// GET /api/personas/{id}/taste — the persona's taste rules grouped by source, plus the accrued
+    /// count against the cap (SPEC F86.6, STORY-219, PLAN T77). Read-only BY CONSTRUCTION: this is
+    /// the only HTTP verb this controller maps under <c>{id}/taste</c>, and this release adds no
+    /// taste write surface beyond the existing thumb endpoint
+    /// (<see cref="BoothLogController.ThumbTaste"/>, SPEC F84.1) — an inspector, never a second
+    /// mutation path. Unlike <see cref="Export"/>'s deliberately Authored-only, source-filtered
+    /// <see cref="IPersonaTasteReader.ListAsync"/> call, this route calls it with
+    /// <c>source: null</c> — every source, on purpose, since grouping ALL of them for the operator to
+    /// inspect is the entire point (F86.9: admin-plane only, never reachable from a spectator
+    /// surface — this controller's class-level <see cref="AdminSurfaceAttribute"/>/AdminOnly policy
+    /// covers this action the same as every other one here). 404 for an unknown persona id.
+    /// </summary>
+    [HttpGet("{id:long}/taste")]
+    public async Task<IActionResult> Taste(long id, CancellationToken ct)
+    {
+        var persona = await personaStore.GetByIdAsync(id, ct);
+        if (persona is null)
+            return NotFound(NotFoundProblem(id));
+
+        var rules = await personaTaste.ListAsync(id, source: null, ct);
+
+        return Ok(new PersonaTasteResponseDto(
+            RulesBySource(rules, PersonaTasteSource.Authored),
+            RulesBySource(rules, PersonaTasteSource.Operator),
+            RulesBySource(rules, PersonaTasteSource.Accrued),
+            rules.Count(r => r.Source == PersonaTasteSource.Accrued),
+            IPersonaTasteAccrualStore.Cap));
+    }
+
+    /// <summary>
     /// POST /api/personas/{slug}/import — upserts a persona from a portable <c>&lt;slug&gt;.persona.json</c>
     /// card (SPEC F79.2, F79.3, F79.4, F79.6; STORY-209, PLAN T67). Every gate below runs BEFORE
     /// <see cref="IPersonaImportStore.ImportAsync"/> — the one transactional write — so a rejection at
@@ -549,6 +579,31 @@ public sealed partial class PersonaController(
 
     static PersonaDto ToDto(Persona persona) =>
         new(persona.Id, persona.Name, persona.Backstory, persona.Style, persona.Voice);
+
+    static IReadOnlyList<PersonaTasteRuleDto> RulesBySource(
+        IReadOnlyList<PersonaTasteEntry> rules, PersonaTasteSource source) =>
+        rules.Where(r => r.Source == source).Select(ToTasteRuleDto).ToArray();
+
+    static PersonaTasteRuleDto ToTasteRuleDto(PersonaTasteEntry entry) => new(
+        PredicateSummary(entry.Rule.Predicate),
+        entry.Rule.Context.DaysOfWeek,
+        entry.Rule.Context.StartHour,
+        entry.Rule.Context.EndHour,
+        entry.Rule.Weight,
+        entry.UpdatedAt);
+
+    /// <summary>
+    /// Predicate summary for one taste rule (SPEC F86.6) — the SAME artist-over-genre-over-tag
+    /// precedence <see cref="BoothLogFiredRuleSummary.FromTasteRule"/> already established for a
+    /// FIRED rule's pick-stamp label, but with its OWN fallback: a taste rule with no predicate field
+    /// set at all matches every track, so "any track" reads correctly here — the pick-stamp's "this
+    /// pick" (describing one already-resolved airing) and the ranker's own debug-log "any" token
+    /// would both read oddly in a standing table of taste opinions. A third documented divergence
+    /// (see <see cref="BoothLogFiredRuleSummary"/>'s own remarks for the first two), not a fourth copy
+    /// of the precedence logic re-derived by hand.
+    /// </summary>
+    static string PredicateSummary(TastePredicate predicate) =>
+        predicate.Artist ?? predicate.Genre ?? predicate.Tag ?? "any track";
 
     // Trims the name and defaults the optional fields to "" — mirrors Persona.Voice's "" = station
     // default sentinel for all three optional fields, not just voice.

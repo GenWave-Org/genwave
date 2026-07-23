@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -10,6 +10,7 @@ import { VoiceControl } from "../safe-content/VoiceControl";
 import { PersonaExportLink } from "./PersonaExportLink";
 import { PersonaImportPanel } from "./PersonaImportPanel";
 import { PersonaPreview } from "./PersonaPreview";
+import { PersonaTasteSection } from "./PersonaTasteSection";
 import { readErrorMessage } from "./persona-http";
 import { usePersonaVoiceWarning } from "./use-persona-voice-warning";
 import type { PersonaDto } from "./types";
@@ -89,6 +90,12 @@ const HEADER_CELL = "py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[
  * partial row in (the import response carries no full `PersonaDto`); and the F79.4/F79.5
  * import-warning banner in the edit form, derived on read by `usePersonaVoiceWarning` and linked
  * to the `VoiceControl` picker right below it.
+ *
+ * PLAN T78 (STORY-219, SPEC F86.7) adds a per-row "Taste" disclosure toggle (mirrors
+ * LlmCallsFeed's own expanded-detail-row idiom: a `Set` of expanded ids, an extra full-width `<tr>`
+ * beneath the toggled row). `PersonaTasteSection` owns the lazy fetch itself — mounting it only
+ * once a row is expanded is what keeps `GET /api/personas/{id}/taste` from firing for every row on
+ * page load.
  */
 export function PersonasClient({ initialPersonas, initialActiveId }: PersonasClientProps): ReactNode {
   const confirm = useConfirm();
@@ -102,6 +109,7 @@ export function PersonasClient({ initialPersonas, initialActiveId }: PersonasCli
 
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [activatingId, setActivatingId] = useState<number | null>(null);
+  const [expandedTasteIds, setExpandedTasteIds] = useState<ReadonlySet<number>>(new Set());
 
   // F79.4/F79.5 import-warning derivation: the live voice list (shared implementation with
   // VoiceControl's own dropdown, see useVoiceList's remarks) compared against the edit-form
@@ -124,6 +132,21 @@ export function PersonasClient({ initialPersonas, initialActiveId }: PersonasCli
     } catch {
       // stale list until the next action — not a lost write.
     }
+  }
+
+  /** Toggles the Taste disclosure for one persona row (SPEC F86.7) — mirrors LlmCallsFeed's own
+   * expanded-id-set toggle. Collapsing simply unmounts `PersonaTasteSection`; re-expanding fetches
+   * again rather than caching a stale read, matching this section's read-only-inspector posture. */
+  function toggleTaste(id: number): void {
+    setExpandedTasteIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   }
 
   function startEdit(persona: PersonaDto): void {
@@ -406,59 +429,80 @@ export function PersonasClient({ initialPersonas, initialActiveId }: PersonasCli
               <tbody>
                 {personas.map((persona) => {
                   const isActive = persona.id === activeId;
+                  const isTasteExpanded = expandedTasteIds.has(persona.id);
                   return (
-                    <tr key={persona.id} className="border-b border-line last:border-b-0">
-                      <td className="py-2 pr-3 text-ink">
-                        <span data-testid={`persona-name-${persona.name}`}>{persona.name}</span>
-                        {isActive && (
-                          <span className="ml-2 inline-flex items-center rounded-[999px] bg-accent px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-ink">
-                            Active
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-2 pr-3 text-mute">{summarizeStyle(persona.style)}</td>
-                      <td className="py-2 pr-3 text-mute">{displayVoice(persona.voice)}</td>
-                      <td className="py-2 pr-3">
-                        <div className="flex flex-col gap-2">
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              aria-label={`Edit ${persona.name}`}
-                              onClick={() => startEdit(persona)}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              aria-label={`${isActive ? "Deactivate" : "Activate"} ${persona.name}`}
-                              disabled={activatingId === persona.id}
-                              onClick={() => {
-                                void handleActivate(persona);
-                              }}
-                            >
-                              {isActive ? "Deactivate" : "Activate"}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              aria-label={`Delete ${persona.name}`}
-                              disabled={deletingId === persona.id}
-                              onClick={() => {
-                                void handleDelete(persona);
-                              }}
-                            >
-                              Delete
-                            </Button>
-                            <PersonaExportLink persona={persona} />
+                    <Fragment key={persona.id}>
+                      <tr className="border-b border-line last:border-b-0">
+                        <td className="py-2 pr-3 text-ink">
+                          <span data-testid={`persona-name-${persona.name}`}>{persona.name}</span>
+                          {isActive && (
+                            <span className="ml-2 inline-flex items-center rounded-[999px] bg-accent px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-ink">
+                              Active
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-3 text-mute">{summarizeStyle(persona.style)}</td>
+                        <td className="py-2 pr-3 text-mute">{displayVoice(persona.voice)}</td>
+                        <td className="py-2 pr-3">
+                          <div className="flex flex-col gap-2">
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                aria-label={`Edit ${persona.name}`}
+                                onClick={() => startEdit(persona)}
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                aria-label={`${isActive ? "Deactivate" : "Activate"} ${persona.name}`}
+                                disabled={activatingId === persona.id}
+                                onClick={() => {
+                                  void handleActivate(persona);
+                                }}
+                              >
+                                {isActive ? "Deactivate" : "Activate"}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                aria-label={`Delete ${persona.name}`}
+                                disabled={deletingId === persona.id}
+                                onClick={() => {
+                                  void handleDelete(persona);
+                                }}
+                              >
+                                Delete
+                              </Button>
+                              <PersonaExportLink persona={persona} />
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                aria-expanded={isTasteExpanded}
+                                aria-label={`${isTasteExpanded ? "Hide" : "Show"} taste for ${persona.name}`}
+                                onClick={() => toggleTaste(persona.id)}
+                              >
+                                {isTasteExpanded ? "Hide taste" : "Taste"}
+                              </Button>
+                            </div>
+                            <PersonaPreview
+                              target={{ kind: "saved", personaId: persona.id, voice: persona.voice }}
+                            />
                           </div>
-                          <PersonaPreview
-                            target={{ kind: "saved", personaId: persona.id, voice: persona.voice }}
-                          />
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+                      </tr>
+                      {isTasteExpanded && (
+                        <tr className="border-b border-line last:border-b-0">
+                          <td colSpan={4} className="py-3">
+                            <div className="rounded-[6px] border border-line bg-surface-2 p-3">
+                              <PersonaTasteSection personaId={persona.id} personaName={persona.name} />
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>

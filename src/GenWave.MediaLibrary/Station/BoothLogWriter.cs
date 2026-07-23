@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
 using GenWave.Core.Events;
 using Microsoft.Extensions.Logging;
 
@@ -38,8 +39,12 @@ sealed class BoothLogWriter(
         {
             // Artist (SPEC F84.1, STORY-215, PLAN T70) rides the same capture-at-publish-time
             // discipline as PersonaId just above — never re-derived later, never surfaced through
-            // IBoothLogReader.
-            TrackAired t => new BoothLogEntryRequest("track-started", Summarize(t), personaAccessor.ActivePersonaId, t.Artist),
+            // IBoothLogReader. Pick (SPEC F86.1, STORY-217, PLAN T73) rides the SAME discipline: t's
+            // own PersonaPick was already captured synchronously by PlayoutFeeder at push time, so
+            // reading it here — rather than re-deriving anything — is the whole point (one source of
+            // truth shared with the copywriter, F83.1).
+            TrackAired t => new BoothLogEntryRequest(
+                "track-started", Summarize(t), personaAccessor.ActivePersonaId, t.Artist, BuildPickStamp(t.PersonaPick)),
             SegmentGenerated s => new BoothLogEntryRequest("patter-aired", Summarize(s), PersonaId: null),
             DegradationModeChanged d => new BoothLogEntryRequest("mode-changed", Summarize(d), PersonaId: null),
             _ => null,
@@ -49,6 +54,15 @@ sealed class BoothLogWriter(
         if (!queue.TryWrite(request))
             logger.LogWarning("Booth log queue full — dropping {Kind} entry", request.Kind);
     }
+
+    /// <summary>
+    /// SPEC F86.1 — <see langword="null"/> for every engine-initiated advance and every persona-off
+    /// pick (<paramref name="diagnostics"/> itself is null in both cases); otherwise the F86.1
+    /// jsonb text, narrowed to firedRules/isExploration only (scores, pool size, and the degradation
+    /// step are deliberately never persisted — see <see cref="BoothLogPickStamp"/>'s own remarks).
+    /// </summary>
+    static string? BuildPickStamp(PersonaPickDiagnostics? diagnostics) =>
+        diagnostics is null ? null : BoothLogPickStampSerializer.Serialize(BoothLogPickStamp.FromDiagnostics(diagnostics));
 
     static string Summarize(TrackAired t) => (t.Title, t.Artist) switch
     {

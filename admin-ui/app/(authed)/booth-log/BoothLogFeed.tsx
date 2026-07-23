@@ -8,6 +8,7 @@ import { formatUpSince } from "@/lib/format-clock";
 import type { BoothLogEntry } from "@/lib/booth-log-api";
 import { cn } from "@/lib/utils";
 import { PersonaTasteThumbs } from "../_components/PersonaTasteThumbs";
+import { PickChips } from "../_components/PickChips";
 
 interface BoothLogFeedProps {
   entries: BoothLogEntry[] | null;
@@ -71,6 +72,11 @@ function BoothLogKindBadge({ kind }: { kind: string }): ReactNode {
  * loaded) — composed here through `useBoothLogFeed` instead of `usePoll` directly, since this
  * page additionally accumulates "Load more" pages (see that hook's doc comment for the
  * refresh/paging interaction this renders).
+ *
+ * "Why this pick" (SPEC F86.3, F86.5; STORY-217, PLAN T75): the Summary cell also renders
+ * `PickChips` below the row's own text — a separate cell from the Taste column's
+ * `PersonaTasteThumbs`, so the two affordances never visually merge. `PickChips` itself renders
+ * nothing for a row whose `pick` is absent, so an unstamped row's Summary cell is unchanged.
  */
 export function BoothLogFeed({
   entries,
@@ -150,7 +156,10 @@ export function BoothLogFeed({
                   <td className="py-2 pr-3">
                     <BoothLogKindBadge kind={entry.kind} />
                   </td>
-                  <td className="py-2 pr-3 text-ink">{entry.summary}</td>
+                  <td className="py-2 pr-3 text-ink">
+                    {entry.summary}
+                    <PickChips pick={entry.pick} className="mt-1.5" />
+                  </td>
                   <td className="py-2">
                     {isThumbable(entry) && (
                       <PersonaTasteThumbs boothLogRowId={entry.id} personaName={personaName(entry.personaId)} />

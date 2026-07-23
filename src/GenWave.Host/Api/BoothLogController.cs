@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using GenWave.Core.Abstractions;
@@ -21,7 +22,8 @@ namespace GenWave.Host.Api;
 [Route("api/booth-log")]
 [AdminSurface]
 [Authorize(Policy = AuthorizationPolicies.AdminOnly)]
-public sealed class BoothLogController(IBoothLogReader store, IPersonaTasteAccrualStore accrual) : ControllerBase
+public sealed class BoothLogController(
+    IBoothLogReader store, IPersonaTasteAccrualStore accrual, ILogger<BoothLogController> logger) : ControllerBase
 {
     const int DefaultTake = 50;
     const int MaxTake = 200;
@@ -51,8 +53,50 @@ public sealed class BoothLogController(IBoothLogReader store, IPersonaTasteAccru
         var page = await store.ReadAsync(cursor, effectiveTake, ct);
 
         return Ok(new BoothLogPageDto(
-            page.Entries.Select(e => new BoothLogEntryDto(e.Id, e.OccurredAt, e.Kind, e.Summary, e.PersonaId)).ToList(),
+            page.Entries.Select(e => new BoothLogEntryDto(e.Id, e.OccurredAt, e.Kind, e.Summary, e.PersonaId, ToPickDto(e.Id, e.Pick))).ToList(),
             page.NextBefore?.ToString()));
+    }
+
+    /// <summary>
+    /// <paramref name="pick"/> is the row's raw <c>booth_log.pick</c> jsonb text (or
+    /// <see langword="null"/>, SPEC F86.1) — deserialized through the one canonical
+    /// <see cref="BoothLogPickStampSerializer"/> and narrowed to this endpoint's wire shape
+    /// (F86.2). <see langword="null"/> in, <see langword="null"/> out: <see cref="BoothLogEntryDto.Pick"/>'s
+    /// own <c>JsonIgnore(WhenWritingNull)</c> is what turns that into an ABSENT field on the wire.
+    ///
+    /// F72.2 (a working feed) takes priority over F86.1 (a decorative field): a stored
+    /// <paramref name="pick"/> that is off-schema JSON (e.g. <c>{}</c> — every property missing, so
+    /// <c>FiredRules</c> deserializes to <see langword="null"/> despite the record's own non-nullable
+    /// annotation, since JSON deserialization fills constructor parameters by reflection, not through
+    /// the record's own constructor) or not even valid JSON (<see cref="JsonException"/>) never 500s
+    /// the whole page over one bad row — it degrades to "no pick chips" for that row, with ONE warning
+    /// logged (row id included) so the corruption stays discoverable.
+    /// </summary>
+    BoothLogPickDto? ToPickDto(long rowId, string? pick)
+    {
+        if (pick is null)
+            return null;
+
+        BoothLogPickStamp? stamp;
+        try
+        {
+            stamp = BoothLogPickStampSerializer.Deserialize(pick);
+        }
+        catch (JsonException ex)
+        {
+            logger.LogWarning(ex, "Booth-log row {RowId} has a pick that failed to deserialize — omitting it from the response", rowId);
+            return null;
+        }
+
+        if (stamp?.FiredRules is null)
+        {
+            logger.LogWarning("Booth-log row {RowId} has an off-schema pick stamp — omitting it from the response", rowId);
+            return null;
+        }
+
+        return new BoothLogPickDto(
+            stamp.FiredRules.Select(rule => new BoothLogFiredRuleDto(rule.Summary, rule.Weight)).ToList(),
+            stamp.IsExploration);
     }
 
     /// <summary>

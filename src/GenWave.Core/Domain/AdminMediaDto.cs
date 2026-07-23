@@ -22,6 +22,11 @@ namespace GenWave.Core.Domain;
 /// perceptual energy generated column (F47.1, null until <c>integrated_lufs</c> is measured).
 /// Both ride the same single browse/detail projection as every other enrichment column — the
 /// default values here exist only so older call sites keep compiling without naming them.
+///
+/// <c>Moods</c> (SPEC F86.8) surfaces the fixed-vocabulary mood tags (F85.1) a track has been
+/// assigned; <c>null</c> for a row the mood tagger hasn't reached (or missed) yet — never an
+/// empty array standing in for "untagged", so the UI can tell "no moods yet" apart from "tagged,
+/// zero survivors" if that distinction ever matters.
 /// </summary>
 public sealed record AdminMediaDto(
     string MediaId,
@@ -44,4 +49,5 @@ public sealed record AdminMediaDto(
     int Score = 50,
     bool NeverPlay = false,
     double? Bpm = null,
-    double? TrackEnergy = null);
+    double? TrackEnergy = null,
+    IReadOnlyList<string>? Moods = null);

@@ -20,6 +20,11 @@ namespace GenWave.MediaLibrary.Station;
 /// backlog clears rather than the one that was on air when the row was created — exactly the "never
 /// inferred after the fact" failure F84.6 rules out. A persona deleted between air and this drain is
 /// an append-time (FK) concern, degraded inside <c>BoothLogRepository.AppendAsync</c>, not here.
+///
+/// <see cref="BoothLogEntryRequest.Pick"/> (SPEC F86.1, STORY-217, PLAN T73) arrives the same way —
+/// already resolved to its final jsonb text (or <see langword="null"/>) by
+/// <see cref="BoothLogWriter.Publish"/> — and is persisted verbatim, never re-serialized or
+/// re-derived here.
 /// </summary>
 sealed class BoothLogDrainService(
     ChannelReader<BoothLogEntryRequest> queue,
@@ -41,7 +46,7 @@ sealed class BoothLogDrainService(
     {
         try
         {
-            await store.AppendAsync(request.Kind, request.Summary, request.PersonaId, request.Artist, ct);
+            await store.AppendAsync(request.Kind, request.Summary, request.PersonaId, request.Artist, request.Pick, ct);
         }
         catch (OperationCanceledException)
         {

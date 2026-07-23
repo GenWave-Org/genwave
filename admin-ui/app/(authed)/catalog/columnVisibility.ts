@@ -1,9 +1,12 @@
-/** The three Enrichment 2.0 signal columns, hidden by default (SPEC F49.3 — the literal gitea-#190
- * "off by default, turned on when needed"). Every other Catalog column is not toggleable this
+/** The Enrichment 2.0 signal columns (year/bpm/energy, hidden by default — SPEC F49.3, the literal
+ * gitea-#190 "off by default, turned on when needed") plus the Moods column (SPEC F86.8), which
+ * joins the same toggle/persistence mechanism. Every other Catalog column is not toggleable this
  * phase. */
-export type OptionalCatalogColumn = "year" | "bpm" | "energy";
+export type OptionalCatalogColumn = "year" | "bpm" | "energy" | "moods";
 
-export const OPTIONAL_CATALOG_COLUMNS: readonly OptionalCatalogColumn[] = ["year", "bpm", "energy"];
+export const OPTIONAL_CATALOG_COLUMNS: readonly OptionalCatalogColumn[] = [
+  "year", "bpm", "energy", "moods",
+];
 
 export const CATALOG_COLUMN_VISIBILITY_STORAGE_KEY = "genwave.catalog.columns";
 
@@ -11,6 +14,7 @@ const COLUMN_LABELS: Record<OptionalCatalogColumn, string> = {
   year: "Year",
   bpm: "BPM",
   energy: "Energy",
+  moods: "Moods",
 };
 
 export function columnLabel(column: OptionalCatalogColumn): string {

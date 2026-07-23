@@ -75,6 +75,27 @@ function NeverPlayBadge(): ReactNode {
   );
 }
 
+/** Moods cell (SPEC F86.8) — one bordered chip per mood tag, the shipped source-tag chip style
+ * (design-aesthetic: "3px-radius bordered chip for source tags"), same visual language as
+ * NeverPlayBadge and the filter chips above. Renders nothing (an empty cell, not an em-dash) for
+ * a `null`/absent/empty moods row — the tagger hasn't reached it, and an empty cell reads as
+ * "nothing here yet" without implying a missing measurement the way BPM/Energy's em-dash does. */
+function MoodTags({ moods }: { moods: string[] | null | undefined }): ReactNode {
+  if (moods === null || moods === undefined || moods.length === 0) return null;
+  return (
+    <ul aria-label="Moods" className="flex flex-wrap gap-1">
+      {moods.map((mood) => (
+        <li
+          key={mood}
+          className="inline-flex w-fit items-center rounded-[3px] border border-accent-2 px-1.5 py-0.5 text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-accent-2"
+        >
+          {mood}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 const HEADER_CELL = "py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2";
 const HEADER_CELL_RIGHT =
   "py-2 pr-3 text-right text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2";
@@ -114,8 +135,8 @@ export function CatalogTable({
   // filter/page fetch (or this same toggle's own `router.refresh()`) already carries server truth.
   const [neverPlayOverrides, setNeverPlayOverrides] = useState<Map<string, boolean>>(new Map());
 
-  // Year/BPM/Energy column visibility (SPEC F49.3) — persisted in localStorage, default hidden
-  // (empty array). Existing columns are not toggleable this phase.
+  // Year/BPM/Energy/Moods column visibility (SPEC F49.3, F86.8) — persisted in localStorage,
+  // default hidden (empty array). Existing columns are not toggleable this phase.
   const [visibleColumns, setVisibleColumns] = usePersistedState<OptionalCatalogColumn[]>(
     CATALOG_COLUMN_VISIBILITY_STORAGE_KEY,
     [],
@@ -124,6 +145,7 @@ export function CatalogTable({
   const showYear = visibleColumns.includes("year");
   const showBpm = visibleColumns.includes("bpm");
   const showEnergy = visibleColumns.includes("energy");
+  const showMoods = visibleColumns.includes("moods");
 
   function toggleColumn(column: OptionalCatalogColumn): void {
     setVisibleColumns(
@@ -259,6 +281,12 @@ export function CatalogTable({
                   Energy
                 </th>
               )}
+              {/* Moods (SPEC F86.8) — hidden by default, toggled via ColumnsToggle. */}
+              {showMoods && (
+                <th scope="col" className={HEADER_CELL}>
+                  Moods
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -312,6 +340,11 @@ export function CatalogTable({
                   )}
                   {showEnergy && (
                     <td className="py-2 pr-3 text-right tabular-nums text-ink">{formatEnergyCell(item.trackEnergy)}</td>
+                  )}
+                  {showMoods && (
+                    <td className="py-2 pr-3">
+                      <MoodTags moods={item.moods} />
+                    </td>
                   )}
                 </tr>
               );

@@ -142,7 +142,15 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  -- summary's narrative prose. NULL for every non-track row or a track aired with no known
 	  -- artist. Never surfaced through IBoothLogReader/BoothLogEntry — read directly by the accrual
 	  -- store only, inside the same transaction as the nudge it attributes.
-	  artist      text
+	  artist      text,
+	  -- SPEC F86.1, STORY-217, PLAN T73: the fired-rule summaries + exploration flag from the SAME
+	  -- PersonaPickDiagnostics the copywriter reads (F83.1) — one source of truth, no re-derivation.
+	  -- Stamped by the booth-log drain loop at write time, same as persona_id/artist above. NULL for
+	  -- every non-track row, an engine-initiated play, a persona-off pick, or a row that predates this
+	  -- column — never backfilled (F84.6 precedent). Scores, pool size, and degradation step are
+	  -- deliberately NOT stored — those rename with ranker tuning; the F82.6 debug log line remains
+	  -- their one durable-enough record.
+	  pick        jsonb
 	);
 
 	-- Keyset paging spine (SPEC F72.2): newest-first (occurred_at DESC, id DESC) with no OFFSET —

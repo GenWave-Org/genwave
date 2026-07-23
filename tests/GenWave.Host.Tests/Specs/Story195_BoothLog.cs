@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
@@ -68,7 +69,8 @@ file sealed class NotSupportedPersonaTasteAccrualStore : IPersonaTasteAccrualSto
 /// <summary>Builds a <see cref="BoothLogController"/> wired to the given fake reader.</summary>
 file static class BoothLogControllerFactory
 {
-    public static BoothLogController Build(IBoothLogReader reader) => new(reader, new NotSupportedPersonaTasteAccrualStore());
+    public static BoothLogController Build(IBoothLogReader reader) =>
+        new(reader, new NotSupportedPersonaTasteAccrualStore(), NullLogger<BoothLogController>.Instance);
 }
 
 // ── WebApplicationFactory for the auth/surface posture ACs ──────────────────────────────────────────

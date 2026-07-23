@@ -30,6 +30,11 @@ export interface AdminMediaDto {
    * invalidate an open edit form. */
   score: number;
   neverPlay: boolean;
+  /** Fixed-vocabulary mood tags (SPEC F86.8) — `null`/absent for a row the mood tagger hasn't
+   * reached (or missed) yet, never an empty array standing in for "untagged". Optional (not just
+   * nullable) so pre-T80 `AdminMediaDto` object literals across the test suite keep compiling
+   * unchanged, mirroring the `artistExact`/`genresExact` precedent on {@link BulkFilter}. */
+  moods?: string[] | null;
 }
 
 /** Parsed `X-Pagination: total=…,pages=…,page=…,limit=…` header. */

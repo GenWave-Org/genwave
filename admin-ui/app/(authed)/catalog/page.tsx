@@ -8,6 +8,7 @@ import { CatalogTable } from "./CatalogTable";
 import { LibrariesTab } from "./LibrariesTab";
 import { YearFilterControl } from "./YearFilterControl";
 import { FacetFilterControl } from "./FacetFilterControl";
+import { MoodFilterControl } from "./MoodFilterControl";
 import { Tooltip } from "@/components/ui/tooltip";
 import type { AdminMediaDto, BulkFilter, Pagination } from "./types";
 
@@ -33,6 +34,9 @@ interface MediaSearchParams {
   "artist-exact"?: string;
   "album-exact"?: string;
   "genre-exact"?: string | string[];
+  /** SPEC F86.8 mood-exact filter, fed by the mood picker (fixed `MoodVocabulary`, no facet
+   * fetch). Repeatable like `genre-exact`; {@link moodExactValues} normalizes both shapes. */
+  "mood-exact"?: string | string[];
 }
 
 interface CatalogPageProps {
@@ -80,6 +84,14 @@ function genreExactValues(sp: MediaSearchParams): string[] {
   return list.filter((v) => v.trim() !== "");
 }
 
+/** Same normalization as {@link genreExactValues}, for `mood-exact` (SPEC F86.8). */
+function moodExactValues(sp: MediaSearchParams): string[] {
+  const raw = sp["mood-exact"];
+  if (raw === undefined) return [];
+  const list = Array.isArray(raw) ? raw : [raw];
+  return list.filter((v) => v.trim() !== "");
+}
+
 /**
  * Normalizes one URL-parsed string filter value for the bulk-write body (SPEC F52.4 defect fix —
  * reproduced live: `?artist-exact=Queen` sent a bulk body with `"albumExact":""`, which
@@ -105,7 +117,8 @@ type FilterField =
   | "year-missing"
   | "artist-exact"
   | "album-exact"
-  | "genre-exact";
+  | "genre-exact"
+  | "mood-exact";
 
 interface AppendFilterParamsOptions {
   /** Filter fields to leave out entirely — the active-filter chips' "clear this one" links. */
@@ -113,6 +126,8 @@ interface AppendFilterParamsOptions {
   /** Drops just this one value out of the (possibly multi-valued) genre-exact set, keeping the
    * rest — clearing a single genre chip must not also drop every other picked genre. */
   omitGenreExactValue?: string;
+  /** Same as {@link omitGenreExactValue}, for mood-exact (SPEC F86.8). */
+  omitMoodExactValue?: string;
 }
 
 /**
@@ -140,6 +155,11 @@ function appendFilterParams(query: URLSearchParams, sp: MediaSearchParams, optio
   if (!omit.has("genre-exact")) {
     for (const value of genreExactValues(sp)) {
       if (value !== options.omitGenreExactValue) query.append("genre-exact", value);
+    }
+  }
+  if (!omit.has("mood-exact")) {
+    for (const value of moodExactValues(sp)) {
+      if (value !== options.omitMoodExactValue) query.append("mood-exact", value);
     }
   }
 }
@@ -198,6 +218,16 @@ function buildClearGenreExactValueUrl(sp: MediaSearchParams, value: string): str
   return `/catalog${qs ? `?${qs}` : ""}`;
 }
 
+/** The catalog URL with just one picked mood removed, the rest of a multi-mood selection (and
+ * every other active filter) kept (SPEC F86.8) — one mood chip's clear link, mirroring
+ * {@link buildClearGenreExactValueUrl}. */
+function buildClearMoodExactValueUrl(sp: MediaSearchParams, value: string): string {
+  const query = new URLSearchParams();
+  appendFilterParams(query, sp, { omitMoodExactValue: value });
+  const qs = query.toString();
+  return `/catalog${qs ? `?${qs}` : ""}`;
+}
+
 interface YearFilterChip {
   label: string;
 }
@@ -231,7 +261,8 @@ function isFilterActive(sp: MediaSearchParams): boolean {
     sp["year-missing"] === "true" ||
     (sp["artist-exact"] !== undefined && sp["artist-exact"] !== "") ||
     (sp["album-exact"] !== undefined && sp["album-exact"] !== "") ||
-    genreExactValues(sp).length > 0
+    genreExactValues(sp).length > 0 ||
+    moodExactValues(sp).length > 0
   );
 }
 
@@ -272,6 +303,13 @@ function resolveFilterChips(sp: MediaSearchParams): FilterChip[] {
       key: `genre-exact:${value}`,
       label: `Genre: ${value}`,
       clearHref: buildClearGenreExactValueUrl(sp, value),
+    });
+  }
+  for (const value of moodExactValues(sp)) {
+    chips.push({
+      key: `mood-exact:${value}`,
+      label: `Mood: ${value}`,
+      clearHref: buildClearMoodExactValueUrl(sp, value),
     });
   }
 
@@ -351,6 +389,10 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps): P
     artistExact: normalizeFilterValue(sp["artist-exact"]),
     albumExact: normalizeFilterValue(sp["album-exact"]),
     genresExact: genreExactValues(sp),
+    // No moodsExact here, deliberately: the bulk write endpoints (BulkReassign/Eligibility/
+    // Reenrich/Rating) never grew a mood-exact filter field alongside T79's browse-only one — a
+    // mood-only browse must not light up by-filter bulk mode over a set the bulk endpoints can't
+    // actually narrow by, mirroring the never-play precedent (F33.7, hasBulkFilter's own doc).
   };
 
   return (
@@ -422,6 +464,8 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps): P
           initialExactValues={genreExactValues(sp)}
           libraryId={sp["library-id"]}
         />
+
+        <MoodFilterControl initialValues={moodExactValues(sp)} />
 
         <div className="flex flex-col gap-1.5">
           <label htmlFor="eligible" className="text-[0.82rem] font-semibold text-mute">

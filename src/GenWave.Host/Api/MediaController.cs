@@ -50,6 +50,12 @@ public sealed class MediaController(
     ///                  <c>q</c> still searches album and remains combinable
     ///   genre-exact  — repeatable; case-insensitive EQUALITY match, OR'd across every occurrence
     ///                  (SPEC F52.3); naming this alongside <c>genre</c> → 400 (mutual exclusion)
+    ///   mood-exact   — repeatable; case-insensitive EQUALITY match against ANY of a row's moods,
+    ///                  OR'd across every occurrence (SPEC F86.8); no substring counterpart exists
+    ///                  for mood, so this never conflicts with anything. An out-of-vocabulary term
+    ///                  is not an error — it simply matches nothing, since the vocabulary lives in
+    ///                  the client-side <c>MoodVocabulary</c> constant (F86.8), not a server-side
+    ///                  validator here.
     ///   page         — 1-based page number (default 1)
     ///   limit        — items per page, clamped to [1, 200] (default 50)
     ///
@@ -59,7 +65,8 @@ public sealed class MediaController(
     /// Every row carries camelCase <c>score</c>/<c>neverPlay</c> resolved via a LEFT JOIN +
     /// COALESCE against <c>library.media_rating</c> (SPEC F33.10); an unrated row reads the F33.2
     /// ledger default (score 50, not flagged). Every row also carries <c>bpm</c>/<c>trackEnergy</c>
-    /// (SPEC F49.2), null until analyzed/measured.
+    /// (SPEC F49.2), null until analyzed/measured, and <c>moods</c> (SPEC F86.8), null until the
+    /// mood tagger reaches (or misses on) the row.
     ///
     /// Response headers:
     ///   X-Pagination: total={n},pages={n},page={n},limit={n}
@@ -79,6 +86,7 @@ public sealed class MediaController(
         [FromQuery(Name = "artist-exact")] string? artistExact = null,
         [FromQuery(Name = "album-exact")] string? albumExact = null,
         [FromQuery(Name = "genre-exact")] string[]? genreExact = null,
+        [FromQuery(Name = "mood-exact")] string[]? moodExact = null,
         [FromQuery] int page = 1,
         [FromQuery] int limit = 50,
         CancellationToken ct = default)
@@ -146,7 +154,7 @@ public sealed class MediaController(
 
         var query = new MediaQuery(
             state, artist, genre, libraryId, q, page, limit, eligible, neverPlay,
-            year, decade, yearMissing, artistExact, albumExact, genreExact);
+            year, decade, yearMissing, artistExact, albumExact, genreExact, moodExact);
         var result = await adminQuery.ListAdminAsync(effectiveScope, query, ct);
 
         Response.Headers["X-Pagination"] =
