@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 import { cookies } from "next/headers";
 import { cn } from "@/lib/utils";
 import { parseTheme, THEME_COOKIE_NAME } from "@/lib/theme";
+import { VersionFooter } from "@/components/VersionFooter";
 import "./globals.css";
 
 // Fraunces — display serif (wordmark, page titles, track titles). Variable font
@@ -66,7 +67,11 @@ export default async function RootLayout({
       data-theme={theme ?? undefined}
       className={cn(fraunces.variable, sourceSans.variable)}
     >
-      <body>{children}</body>
+      <body>
+        {children}
+        {/* gh-#7: version/edition stamp on every page — root layout wraps authed + login alike */}
+        <VersionFooter />
+      </body>
     </html>
   );
 }

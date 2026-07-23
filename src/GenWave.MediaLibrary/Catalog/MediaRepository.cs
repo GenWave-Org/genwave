@@ -691,27 +691,11 @@ sealed class MediaRepository(
     ///   • row absent entirely → <see cref="MediaWriteResult.NotFound"/> (checked first — IDOR-safe)
     ///   • row present → version mismatch → <see cref="MediaWriteResult.Conflict"/>
     ///
-    /// Delegates to <see cref="UpdateCoreAsync"/> and discards the returned version — kept as a
-    /// distinct public method (rather than folded into <see cref="UpdateReturningVersionAsync"/>)
-    /// so STORY-039's pinned interface contract is undisturbed.
-    /// </summary>
-    public async Task<MediaWriteResult> UpdateAsync(
-        string id,
-        MediaPatch patch,
-        string expectedVersion,
-        LibraryScope scope,
-        CancellationToken ct)
-    {
-        var (result, _, _) = await UpdateCoreAsync(id, patch, expectedVersion, ct);
-        if (result == MediaWriteResult.Updated)
-            events.Publish(new MediaMutated("patch", ParseMediaId(id), 1));
-        return result;
-    }
-
-    /// <summary>
-    /// Same write as <see cref="UpdateAsync"/>, additionally returning the row's new <c>xmin</c>
-    /// token and current <c>library_id</c> straight from the UPDATE's <c>RETURNING</c> clause
-    /// (STORY-103; <c>LibraryId</c> added by SPEC F43.2) — no second read.
+    /// Returns the row's new <c>xmin</c> token and current <c>library_id</c> straight from the
+    /// UPDATE's <c>RETURNING</c> clause (STORY-103; <c>LibraryId</c> added by SPEC F43.2) — no
+    /// second read. The legacy plain-<c>MediaWriteResult</c> <c>UpdateAsync</c> wrapper was retired
+    /// by gh-#4 (zero production callers); <see cref="UpdateCoreAsync"/> still holds the SQL so
+    /// this method stays a thin outcome-shaping shell.
     /// </summary>
     public async Task<MediaUpdateOutcome> UpdateReturningVersionAsync(
         string id,
@@ -731,9 +715,9 @@ sealed class MediaRepository(
         long.TryParse(id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : null;
 
     /// <summary>
-    /// Shared implementation behind <see cref="UpdateAsync"/> and
-    /// <see cref="UpdateReturningVersionAsync"/> — the SQL and disambiguation logic exist exactly
-    /// once. Returns the row's post-write <c>xmin</c> and current <c>library_id</c> alongside the
+    /// The implementation behind <see cref="UpdateReturningVersionAsync"/> (its former second
+    /// caller, the legacy <c>UpdateAsync</c>, was retired by gh-#4).
+    /// Returns the row's post-write <c>xmin</c> and current <c>library_id</c> alongside the
     /// outcome; non-<c>Updated</c> outcomes always carry <c>null</c> for both. The library id lets
     /// endpoint-layer callers (Host project) add the <c>X-Out-Of-Scope</c> warning without a second
     /// read when the patch did not itself request a library reassignment (SPEC F43.2).

@@ -31,17 +31,18 @@ public static class FeatureCatalogWriteContracts
         }
 
         [Fact]
-        public void UpdateAsyncReturnsMediaWriteResultTask()
+        public void UpdateReturningVersionAsyncReturnsMediaUpdateOutcomeTask()
         {
-            var m = typeof(IAdminMediaWrite).GetMethod("UpdateAsync")!;
-            Assert.Equal(typeof(Task<MediaWriteResult>), m.ReturnType);
+            // gh-#4 re-pinned the contract from the legacy UpdateAsync to the ETag-returning path.
+            var m = typeof(IAdminMediaWrite).GetMethod("UpdateReturningVersionAsync")!;
+            Assert.Equal(typeof(Task<MediaUpdateOutcome>), m.ReturnType);
         }
 
         [Fact]
-        public void UpdateAsyncTakesIdPatchExpectedVersionScopeAndCancellationToken()
+        public void UpdateReturningVersionAsyncTakesIdPatchExpectedVersionScopeAndCancellationToken()
         {
             // params: (string id, MediaPatch patch, string expectedVersion, LibraryScope scope, CancellationToken ct)
-            var m = typeof(IAdminMediaWrite).GetMethod("UpdateAsync")!;
+            var m = typeof(IAdminMediaWrite).GetMethod("UpdateReturningVersionAsync")!;
             var p = m.GetParameters();
             Assert.Equal(5, p.Length);
             Assert.Equal(typeof(string), p[0].ParameterType);
@@ -49,6 +50,13 @@ public static class FeatureCatalogWriteContracts
             Assert.Equal(typeof(string), p[2].ParameterType);
             Assert.Equal(typeof(LibraryScope), p[3].ParameterType);
             Assert.Equal(typeof(CancellationToken), p[4].ParameterType);
+        }
+
+        [Fact]
+        public void TheLegacyUpdateAsyncStaysRetired()
+        {
+            // gh-#4 — zero production callers; a reintroduction would be dead contract surface.
+            Assert.Null(typeof(IAdminMediaWrite).GetMethod("UpdateAsync"));
         }
     }
 

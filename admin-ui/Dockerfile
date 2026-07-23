@@ -11,6 +11,11 @@ COPY . .
 # present here, not just at runtime. In this compose the backend is always the `api` service.
 ARG BACKEND_URL=http://api:8080
 ENV BACKEND_URL=$BACKEND_URL
+# gh-#7: the version footer's stamp. NEXT_PUBLIC_* vars are inlined by `next build`, so GW_VERSION
+# must be an ENV in THIS stage; the default keeps a plain `docker compose build` working and shows
+# as "0.0.0-dev" in the footer. build.sh and release.yml thread the git-describe/tag value in.
+ARG GW_VERSION=0.0.0-dev
+ENV NEXT_PUBLIC_GW_VERSION=$GW_VERSION
 RUN npm run build
 
 FROM node:22-alpine AS runner
