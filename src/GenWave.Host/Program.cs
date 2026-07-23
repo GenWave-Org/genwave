@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.HttpOverrides;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Api;
+using GenWave.Host.Artwork;
 using GenWave.Host.Configuration;
 using GenWave.Host.Enrichment;
 using GenWave.Host.Health;
@@ -94,6 +95,16 @@ builder.Services.AddSingleton<IListenerStatsSource>(sp => sp.GetRequiredService<
 builder.Services.Configure<ListenerStatsOptions>(cfg.GetSection(ListenerStatsOptions.SectionName));
 builder.Services.AddSingleton<ListenerStatsSampler>();
 builder.Services.AddHostedService<ListenerStatsPollerService>();
+
+// Per-track artwork extraction cache (SPEC F88.3, STORY-222, PLAN T84): env/compose-only, same
+// deployment-topology class as Tts:CacheRoot — ValidateOnStart mirrors every other options class
+// bound this way (see ArtworkOptions' own remarks for why CacheDir defaults under the tts volume).
+builder.Services
+    .AddOptions<ArtworkOptions>()
+    .Bind(cfg.GetSection(ArtworkOptions.Section))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddSingleton<ArtworkService>();
 
 builder.Services.AddControllers();
 

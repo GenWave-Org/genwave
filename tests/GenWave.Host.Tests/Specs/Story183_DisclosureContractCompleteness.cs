@@ -99,6 +99,9 @@ public static class FeatureDisclosureContractCompleteness
         typeof(SpectatorController),
         typeof(SpectatorCacheControlAttribute),
         typeof(SpectatorSurfaceAttribute),
+        // GET /spectator/api/artwork/{token} (SPEC F88.3, STORY-222, PLAN T84): serves a file
+        // (jpeg or the station icon), never a JSON payload — nothing to bless as a DTO shape.
+        typeof(SpectatorArtworkController),
     ];
 
     public static class ScenarioExactShapesPinned
