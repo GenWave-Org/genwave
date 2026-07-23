@@ -203,9 +203,10 @@ describe("Feature: Year, BPM, and energy in the catalog — on demand", () => {
       }
 
       openColumnsPanel();
-      // Only the three optional signals are offered — no existing column is toggleable this phase.
+      // Only the optional signal columns are offered — year/bpm/energy (this feature) plus moods
+      // (T80, SPEC F86.8, which joined the same toggle) — no existing column is toggleable.
       const panel = screen.getByRole("group", { name: "Toggle columns" });
-      expect(within(panel).getAllByRole("checkbox")).toHaveLength(3);
+      expect(within(panel).getAllByRole("checkbox")).toHaveLength(4);
     });
 
     it("closes the Columns panel on Escape", async () => {
