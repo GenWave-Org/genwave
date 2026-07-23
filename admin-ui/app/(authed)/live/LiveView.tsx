@@ -6,6 +6,7 @@ import { fetchNowPlaying, fetchPlayHistory, isCatalogMediaId } from "@/lib/broad
 import { personaNameOrFallback, usePersonaDirectory } from "@/lib/use-persona-directory";
 import { NowPlayingCard } from "../_components/NowPlayingCard";
 import { PersonaTasteThumbs } from "../_components/PersonaTasteThumbs";
+import { PickChips } from "../_components/PickChips";
 import { RatingControls, type RatingControlsValue } from "../_components/RatingControls";
 import { PlayHistoryTable } from "./PlayHistoryTable";
 import { DEFAULT_RATING, useLiveRatings } from "./useLiveRatings";
@@ -43,6 +44,15 @@ interface LiveViewProps {
  * falls back to "whichever persona is active now". `key={attribution.boothLogRowId}` forces the
  * control to remount (and its own settled-direction state to reset) whenever a new track's row
  * swaps in, rather than inheriting the previous track's disabled buttons.
+ *
+ * Why this pick (SPEC F86.4, STORY-218, PLAN T76): the now-playing card also gets an opt-in
+ * `pickChips` slot, sourced from that SAME `useNowPlayingTasteAttribution` resolution's `pick`
+ * field — no second, now-playing-specific diagnostics fetch. This page hands `PickChips` the raw
+ * `pick` (possibly `undefined`) directly and does NOT re-check its shape first — whether that
+ * renders chips, a badge, or nothing (an absent pick, or a present-but-empty
+ * `{firedRules: [], isExploration: false}`, the majority production shape) is `PickChips`'s own
+ * gate to own, exactly like `BoothLogFeed`'s bare call site (PLAN T75); duplicating that gate here
+ * would just be a second place for it to drift out of sync.
  */
 export function LiveView({ timeZone }: LiveViewProps = {}): ReactNode {
   const nowPlaying = usePoll(fetchNowPlaying);
@@ -78,6 +88,9 @@ export function LiveView({ timeZone }: LiveViewProps = {}): ReactNode {
       />
     ) : undefined;
 
+  const nowPlayingPickChips =
+    nowPlaying.data?.kind === "track" ? <PickChips pick={tasteAttribution?.pick} className="mt-2" /> : undefined;
+
   return (
     <div className="space-y-6">
       <NowPlayingCard
@@ -85,6 +98,7 @@ export function LiveView({ timeZone }: LiveViewProps = {}): ReactNode {
         error={nowPlaying.error}
         ratingControls={nowPlayingRatingControls}
         tasteThumbControls={nowPlayingTasteThumbControls}
+        pickChips={nowPlayingPickChips}
       />
       <PlayHistoryTable
         entries={playHistory.data}

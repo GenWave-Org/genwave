@@ -28,6 +28,19 @@ interface NowPlayingCardProps {
    * resolution (see `useNowPlayingTasteAttribution`) before ever handing this a node to render.
    */
   tasteThumbControls?: ReactNode;
+  /**
+   * Opt-in why-this-pick slot (SPEC F86.4, STORY-218, PLAN T76) — the caller's `<PickChips />`
+   * element, rendered BARE (`{pickChips}`, no wrapper `<div>`), mirroring `BoothLogFeed`'s own
+   * bare `<PickChips pick={entry.pick} className="mt-1.5" />` call (PLAN T75). This is load-
+   * bearing, not cosmetic: `PickChips` renders `null` not just for an absent/`undefined` pick but
+   * also for a *present* pick that matched no rule and wasn't exploration
+   * (`{firedRules: [], isExploration: false}` — the majority production shape). A `pickChips &&
+   * <div>...</div>` wrapper here would be truthy for that element regardless of what it renders
+   * internally, leaving a stray empty `<div>` in the DOM. Rendering bare instead means this card
+   * never has to duplicate `PickChips`'s own render-nothing gate — the spacing/margin is the
+   * caller's job via `PickChips`'s own `className` prop, exactly like `BoothLogFeed`'s call site.
+   */
+  pickChips?: ReactNode;
 }
 
 // Decorative dial-marking strip under the elapsed readout — a receiver
@@ -52,7 +65,13 @@ const DIAL_MARKS = Array.from({ length: DIAL_MARK_COUNT }, (_, index) => index);
  * aesthetic treats both as the same faceplate treatment, so this card is
  * imported directly rather than duplicated or given a variant prop.
  */
-export function NowPlayingCard({ state, error, ratingControls, tasteThumbControls }: NowPlayingCardProps): ReactNode {
+export function NowPlayingCard({
+  state,
+  error,
+  ratingControls,
+  tasteThumbControls,
+  pickChips,
+}: NowPlayingCardProps): ReactNode {
   const startedAt = state?.kind === "track" ? state.startedAt : null;
   const elapsedSeconds = useElapsedSeconds(startedAt);
   const trackProgress =
@@ -96,6 +115,8 @@ export function NowPlayingCard({ state, error, ratingControls, tasteThumbControl
           </h2>
           <p className="text-[0.9rem] text-mute">{state.artist ?? "Unknown artist"}</p>
           <p className="mt-1 text-[0.82rem] tabular-nums text-mute">{state.gainDb.toFixed(2)} dB</p>
+
+          {pickChips}
 
           {trackProgress === null ? (
             <>
