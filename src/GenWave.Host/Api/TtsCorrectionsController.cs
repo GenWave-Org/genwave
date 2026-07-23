@@ -13,7 +13,7 @@ namespace GenWave.Host.Api;
 [ApiController]
 [Route("api/tts")]
 [AdminSurface]
-[Authorize(Policy = AuthorizationPolicies.AdminOnly)]
+[Authorize(Policy = AuthorizationPolicies.Settings)]
 public sealed class TtsCorrectionsController(
     ISpeechNormalizationPreview preview,
     CorrectionsFiredStats stats) : ControllerBase

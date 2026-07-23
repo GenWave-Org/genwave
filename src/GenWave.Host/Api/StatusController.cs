@@ -16,7 +16,7 @@ namespace GenWave.Host.Api;
 [ApiController]
 [Route("api")]
 [AdminSurface]
-[Authorize(Policy = AuthorizationPolicies.AdminOnly)]
+[Authorize(Policy = AuthorizationPolicies.PlayoutRead)]
 public sealed class StatusController(
     IMediaCatalog catalog,
     IOptionsMonitor<StationOptions> stationMonitor,

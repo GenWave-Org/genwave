@@ -261,7 +261,7 @@ public static class FeatureLlmCallInspector
         }
 
         [Fact]
-        public async Task The_route_carries_AdminOnly_and_no_spectator_marker()
+        public async Task The_route_carries_an_admin_plane_policy_and_no_spectator_marker()
         {
             // Structural proof, not just a runtime probe (mirrors Story195_BoothLog's own
             // SadPathPublicSurface): this endpoint is classified as admin, never spectator, by
@@ -273,7 +273,9 @@ public static class FeatureLlmCallInspector
                     ?.Equals("api/llm-calls", StringComparison.OrdinalIgnoreCase) == true);
 
             var policies = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Select(a => a.Policy).ToList();
-            Assert.Contains(AuthorizationPolicies.AdminOnly, policies);
+            // gh-#8: the admin plane split AdminOnly into granular names — the pin is "admin-plane, never
+            // spectator/anonymous", not one specific name.
+            Assert.Contains(policies, p => AuthorizationPolicies.AdminPlanePolicies.Contains(p));
             Assert.DoesNotContain(AuthorizationPolicies.Spectator, policies);
             Assert.Null(endpoint.Metadata.GetMetadata<SpectatorSurfaceAttribute>());
             Assert.NotNull(endpoint.Metadata.GetMetadata<AdminSurfaceAttribute>());

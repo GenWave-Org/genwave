@@ -28,7 +28,7 @@ namespace GenWave.Host.Api;
 [ApiController]
 [Route("api/tts")]
 [AdminSurface]
-[Authorize(Policy = AuthorizationPolicies.AdminOnly)]
+[Authorize(Policy = AuthorizationPolicies.Operator)]
 public sealed class TtsPreviewController(
     ITtsSynthesizer synthesizer,
     IOptionsMonitor<StationOptions> stationMonitor,

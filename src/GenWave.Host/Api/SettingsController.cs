@@ -22,7 +22,7 @@ namespace GenWave.Host.Api;
 [ApiController]
 [Route("api")]
 [AdminSurface]
-[Authorize(Policy = AuthorizationPolicies.AdminOnly)]
+[Authorize(Policy = AuthorizationPolicies.Settings)]
 public sealed class SettingsController(
     IConfiguration configuration,
     IStationSettingsStore store,

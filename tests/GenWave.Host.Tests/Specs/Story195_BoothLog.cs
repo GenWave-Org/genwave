@@ -216,7 +216,9 @@ public static class FeatureBoothLog
             // SpectatorSurface marker — it is not classified (or reachable) as a spectator/public
             // route by construction (F72.4).
             var policies = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Select(a => a.Policy).ToList();
-            Assert.Contains(AuthorizationPolicies.AdminOnly, policies);
+            // gh-#8: the admin plane split AdminOnly into granular names — the pin is "admin-plane, never
+            // spectator/anonymous", not one specific name.
+            Assert.Contains(policies, p => AuthorizationPolicies.AdminPlanePolicies.Contains(p));
             Assert.DoesNotContain(AuthorizationPolicies.Spectator, policies);
             Assert.Null(endpoint.Metadata.GetMetadata<SpectatorSurfaceAttribute>());
             Assert.NotNull(endpoint.Metadata.GetMetadata<AdminSurfaceAttribute>());
