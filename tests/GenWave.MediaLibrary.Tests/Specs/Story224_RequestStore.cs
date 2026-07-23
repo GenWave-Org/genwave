@@ -234,6 +234,161 @@ public static class FeatureRequestStore
     }
 
     // ---------------------------------------------------------------------
+    // HAPPY PATH — GetForParseAsync (SPEC F87.4, STORY-225, PLAN T88)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioGetForParse(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task An_unparsed_pending_row_is_returned_for_parsing()
+        {
+            // Given a freshly-inserted, never-parsed pending row...
+            await db.ResetRequestAsync();
+            var id = await InsertRawRowAsync(db, "something dreamy by Zeppelin", null, null, null, "pending", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the parser asks for it...
+            var result = await repo.GetForParseAsync(id, CancellationToken.None);
+
+            // Then its wish/id/expiry come back.
+            Assert.NotNull(result);
+            Assert.Equal(id, result!.Id);
+            Assert.Equal("something dreamy by Zeppelin", result.Wish);
+        }
+
+        [Fact]
+        public async Task An_already_parsed_row_is_not_returned_again()
+        {
+            // Given a pending row that already carries a parsed predicate (a prior MarkParsedAsync
+            // call, or a race with a duplicate queue entry)...
+            await db.ResetRequestAsync();
+            var id = await InsertRawRowAsync(db, "something dreamy by Zeppelin", "Led Zeppelin", null, null, "pending", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the parser asks for it again...
+            var result = await repo.GetForParseAsync(id, CancellationToken.None);
+
+            // Then nothing comes back — it is no longer a legal parse target.
+            Assert.Null(result);
+        }
+
+        [Fact]
+        public async Task A_non_pending_row_is_not_returned()
+        {
+            // Given a row that already reached a terminal outcome...
+            await db.ResetRequestAsync();
+            var id = await InsertRawRowAsync(db, "something dreamy by Zeppelin", null, null, null, "fulfilled", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the parser asks for it...
+            var result = await repo.GetForParseAsync(id, CancellationToken.None);
+
+            // Then nothing comes back.
+            Assert.Null(result);
+        }
+
+        [Fact]
+        public async Task A_nonexistent_id_returns_null()
+        {
+            await db.ResetRequestAsync();
+            var repo = Repo(db);
+
+            var result = await repo.GetForParseAsync(999_999, CancellationToken.None);
+
+            Assert.Null(result);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — ListUnparsedPendingIdsAsync, the startup recovery sweep source (F87.4, STORY-225, PLAN T88)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioListUnparsedPending(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task Only_pending_never_parsed_rows_are_listed_oldest_first()
+        {
+            // Given two never-parsed pending rows at distinct ages, plus one already-parsed pending
+            // row and one non-pending row that must both be excluded...
+            await db.ResetRequestAsync();
+            var oldestId = await InsertRawRowAsync(db, "oldest", null, null, null, "pending", TimeSpan.FromMinutes(10));
+            var newestId = await InsertRawRowAsync(db, "newest", null, null, null, "pending", TimeSpan.FromMinutes(1));
+            await InsertRawRowAsync(db, "already parsed", "Some Artist", null, null, "pending", TimeSpan.Zero);
+            await InsertRawRowAsync(db, "already fulfilled", null, null, null, "fulfilled", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the recovery sweep lists unparsed pending ids...
+            var ids = await repo.ListUnparsedPendingIdsAsync(CancellationToken.None);
+
+            // Then only the two never-parsed pending rows come back, oldest received first.
+            Assert.Equal([oldestId, newestId], ids);
+        }
+
+        [Fact]
+        public async Task An_empty_table_lists_nothing()
+        {
+            await db.ResetRequestAsync();
+            var repo = Repo(db);
+
+            var ids = await repo.ListUnparsedPendingIdsAsync(CancellationToken.None);
+
+            Assert.Empty(ids);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — MarkParsedAsync (SPEC F87.4, STORY-225, PLAN T88)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioMarkParsed(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task Predicates_land_and_status_stays_pending_when_something_was_found()
+        {
+            // Given an unparsed pending row...
+            await db.ResetRequestAsync();
+            var id = await InsertRawRowAsync(db, "something dreamy by Zeppelin", null, null, null, "pending", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the parser writes back a non-empty predicate set...
+            await repo.MarkParsedAsync(id, "Led Zeppelin", null, ["dreamy"], unmatched: false, CancellationToken.None);
+
+            // Then the predicates land and status is untouched — still pending, ready for T89's matcher.
+            var row = await ReadRowAsync(db, id);
+            Assert.Equal("Led Zeppelin", row.Artist);
+            Assert.Null(row.Title);
+            Assert.NotNull(row.Moods);
+            Assert.Equal(["dreamy"], row.Moods);
+            Assert.Equal("pending", row.Status);
+        }
+
+        [Fact]
+        public async Task An_empty_everything_parse_flips_status_to_unmatched()
+        {
+            // Given an unparsed pending row the parser cannot shape at all...
+            await db.ResetRequestAsync();
+            var id = await InsertRawRowAsync(db, "asdkjhqwlekjhasd", null, null, null, "pending", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the parser writes back an empty predicate set with unmatched: true...
+            await repo.MarkParsedAsync(id, null, null, [], unmatched: true, CancellationToken.None);
+
+            // Then status flips to unmatched (F87.4) and the row now falls outside the "unparsed" set.
+            var row = await ReadRowAsync(db, id);
+            Assert.Null(row.Artist);
+            Assert.Null(row.Title);
+            Assert.Equal("unmatched", row.Status);
+            Assert.Empty(await repo.ListUnparsedPendingIdsAsync(CancellationToken.None));
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // SAD PATH — the status CHECK constraint has teeth
     // ---------------------------------------------------------------------
 

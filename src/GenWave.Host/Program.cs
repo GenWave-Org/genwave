@@ -7,6 +7,7 @@ using GenWave.Host.Enrichment;
 using GenWave.Host.Health;
 using GenWave.Host.Options;
 using GenWave.Host.Playout;
+using GenWave.Host.Requests;
 using GenWave.Host.Seeding;
 using GenWave.Host.Stats;
 using GenWave.MediaLibrary;
@@ -50,6 +51,10 @@ builder.Services
     // GenWave.MediaLibrary ever referencing GenWave.Tts. MUST run after .AddGenWaveTts(cfg) above
     // (IDegradationModeReader/LlmOptions).
     .AddGenWaveMoodTaggingGate()
+    // Listener-request wish parser (SPEC F87.4, STORY-225, PLAN T88): the channel-fed background
+    // service + IWishParser pair (LLM-backed, deterministic fallback). Same ordering constraint as
+    // AddGenWaveMoodTaggingGate above — needs IDegradationModeReader/LlmOptions from AddGenWaveTts.
+    .AddGenWaveRequestParsing()
     // Safe-loop authoring pipeline (F27): TTS render → jingle-bed mix → measure → authored insert.
     .AddGenWaveSafeSegmentAuthoring()
     // SEAM 1: the Orchestrator is the INextItemProvider (music + TTS patter interleave).

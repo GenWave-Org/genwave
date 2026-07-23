@@ -1,5 +1,6 @@
 using Dapper;
 using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
 using Npgsql;
 
 namespace GenWave.MediaLibrary.Station;
@@ -86,6 +87,72 @@ sealed class RequestRepository(Lazy<NpgsqlDataSource> dataSource, int wishRetent
               limit 1
             )
             """,
+            cancellationToken: ct));
+    }
+
+    /// <summary>
+    /// The "unparsed" discriminator (see <see cref="IRequestStore"/>'s own remarks) applied as a
+    /// single-row WHERE clause: <c>wish is not null</c> guards against the (practically unreachable —
+    /// the 24h retention window is far longer than any realistic <c>WindowMinutes</c> fulfillment
+    /// window) case of a row whose text was already swept while still somehow pending and unparsed —
+    /// nothing for a parser to read in that case either way.
+    /// </summary>
+    public async Task<UnparsedRequest?> GetForParseAsync(long id, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<UnparsedRequest?>(new CommandDefinition(
+            // Columns aliased to the record's own PascalCase parameter names: Dapper's
+            // constructor-matching path for a positional record (unlike its property-setter
+            // fallback) matches column name to parameter name directly and does NOT apply
+            // DefaultTypeMap.MatchNamesWithUnderscores' snake_case->PascalCase translation.
+            """
+            select id::bigint as "Id", wish as "Wish", expires_at as "ExpiresAt"
+            from station.request
+            where id = @Id
+              and status = 'pending'
+              and wish is not null
+              and artist is null
+              and title is null
+              and moods is null
+            """,
+            new { Id = id },
+            cancellationToken: ct));
+    }
+
+    /// <summary>Startup recovery sweep source (see <see cref="IRequestStore"/>'s own remarks) —
+    /// oldest first, so a long backlog re-parses in received order.</summary>
+    public async Task<IReadOnlyList<long>> ListUnparsedPendingIdsAsync(CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var ids = await conn.QueryAsync<long>(new CommandDefinition(
+            """
+            select id::bigint
+            from station.request
+            where status = 'pending'
+              and wish is not null
+              and artist is null
+              and title is null
+              and moods is null
+            order by received_at asc, id asc
+            """,
+            cancellationToken: ct));
+        return ids.AsList();
+    }
+
+    public async Task MarkParsedAsync(
+        long id, string? artist, string? title, IReadOnlyList<string> moods, bool unmatched, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        await conn.ExecuteAsync(new CommandDefinition(
+            """
+            update station.request
+            set artist = @Artist,
+                title = @Title,
+                moods = @Moods,
+                status = case when @Unmatched then 'unmatched' else status end
+            where id = @Id
+            """,
+            new { Id = id, Artist = artist, Title = title, Moods = moods.ToArray(), Unmatched = unmatched },
             cancellationToken: ct));
     }
 }

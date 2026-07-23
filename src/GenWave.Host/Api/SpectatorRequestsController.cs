@@ -1,6 +1,8 @@
+using System.Threading.Channels;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Events;
@@ -31,6 +33,13 @@ namespace GenWave.Host.Api;
 /// published below (<see cref="RequestReceived"/>/<see cref="RequestEvicted"/>) structurally carry
 /// no wish text either — see their own remarks.
 /// </para>
+/// <para>
+/// <c>requestParseQueue</c> (SPEC F87.4, STORY-225, PLAN T88): a non-blocking
+/// <see cref="ChannelWriter{T}.TryWrite"/> nudges <c>RequestParserService</c> to parse the fresh row
+/// promptly — a full/backed-up queue just means that row waits for the parser's own startup recovery
+/// sweep on the next restart (see <c>RequestParsingServiceCollectionExtensions</c>'s own remarks); an
+/// anonymous POST must never wait on parsing.
+/// </para>
 /// </summary>
 [ApiController]
 [Route("spectator/api")]
@@ -42,7 +51,9 @@ public sealed class SpectatorRequestsController(
     IRequestStore requestStore,
     IOptionsMonitor<StationOptions> stationMonitor,
     IOptions<RequestsOptions> requestsOptions,
-    IStationEventSink events) : ControllerBase
+    IStationEventSink events,
+    ChannelWriter<long> requestParseQueue,
+    ILogger<SpectatorRequestsController> logger) : ControllerBase
 {
     /// <summary>
     /// POST /spectator/api/requests — SPEC F87.1-F87.3, F87.8. Flow: a null/blank/over-length wish
@@ -81,8 +92,12 @@ public sealed class SpectatorRequestsController(
         }
 
         var windowMinutes = stationMonitor.CurrentValue.Requests.WindowMinutes;
-        await requestStore.InsertAsync(wish, DateTimeOffset.UtcNow.AddMinutes(windowMinutes), ct);
+        var id = await requestStore.InsertAsync(wish, DateTimeOffset.UtcNow.AddMinutes(windowMinutes), ct);
         events.Publish(new RequestReceived());
+
+        // Prompt-parse nudge (SPEC F87.4, STORY-225, PLAN T88) — see this class's own remarks.
+        if (!requestParseQueue.TryWrite(id))
+            logger.LogDebug("Wish-parse queue full — request {Id} will be picked up by the next recovery sweep", id);
 
         return Accepted(new SpectatorRequestAccepted());
     }
