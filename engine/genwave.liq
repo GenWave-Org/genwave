@@ -185,7 +185,12 @@ end
 
 # --- Broadcast. Source password and host from env (compose injects them).
 #     ICECAST_HOST defaults to "icecast" — one deployment broadcasts one station; a second
-#     station is a second deployment that sets its own ICECAST_HOST if it needs to. ---
+#     station is a second deployment that sets its own ICECAST_HOST if it needs to.
+#     icy_metadata (SPEC F88.4-F88.5, STORY-223, PLAN T85) is the engine-default list
+#     (song/title/artist/genre/date/album/tracknum/comment/dj/next) PLUS "url": the C# feeder
+#     stamps url="<PublicBaseUrl>/spectator/api/artwork/<token-or-station>" on every push whenever
+#     Station:PublicBaseUrl is set (empty = no url key at all, so this list entry forwards
+#     nothing — never a stale/empty StreamUrl). ---
 output.icecast(
   %mp3(bitrate=192),
   host=environment.get("ICECAST_HOST", default="icecast"),
@@ -194,5 +199,6 @@ output.icecast(
   password=environment.get("ICECAST_SOURCE_PASSWORD"),
   name=station_name, description=station_name,
   icy_song=gw_icy_song,
+  icy_metadata=["song", "title", "artist", "genre", "date", "album", "tracknum", "comment", "dj", "next", "url"],
   genwave
 )

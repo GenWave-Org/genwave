@@ -40,6 +40,8 @@ public static class FeatureRequestAnnotationCompleteness
             },
             stationId: "st-01",
             new FakeStationIdentityProvider(new StationIdentity("st-01", "GenWave", "af_heart")),
+            new ArtworkUrlResolver(
+                new FakeOptionsMonitor<StationOptions>(new StationOptions()), new FakeArtworkTokenStore()),
             NullLogger<LiquidsoapControl>.Instance);
 
     // ---------------------------------------------------------------------

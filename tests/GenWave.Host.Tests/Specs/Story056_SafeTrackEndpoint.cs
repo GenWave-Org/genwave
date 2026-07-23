@@ -131,6 +131,15 @@ public static class FeatureSafeTrackEndpoint
     const string OperatorGated = "Operator-gated — requires live engine container calling the endpoint over core; see docs/PLAN.md Epic K";
 
     /// <summary>
+    /// STORY-223/PLAN T85 wired <see cref="ArtworkUrlResolver"/> onto this endpoint's signature —
+    /// none of STORY-056's own facts are about artwork, so every call site shares one resolver
+    /// backed by an empty <c>Station:PublicBaseUrl</c> (the F88.5 default), which never touches
+    /// <see cref="FakeArtworkTokenStore"/>.
+    /// </summary>
+    static ArtworkUrlResolver NoArtworkResolver() =>
+        new(new FakeOptionsMonitor<StationOptions>(new StationOptions()), new FakeArtworkTokenStore());
+
+    /// <summary>
     /// Builds a ready, measurable <see cref="MediaReference"/> for use in tests.
     /// Loudness is set to -20 LUFS / -2 dBTP so gain computation produces a non-zero value.
     /// </summary>
@@ -182,6 +191,7 @@ public static class FeatureSafeTrackEndpoint
             catalog,
             new FakeOptionsMonitor<StationOptions>(stationOpts),
             new FakeOptionsMonitor<LoudnessOptions>(loudnessOpts ?? new LoudnessOptions()),
+            NoArtworkResolver(),
             NullLogger.Instance,
             ctx.Response,
             CancellationToken.None);
@@ -278,6 +288,7 @@ public static class FeatureSafeTrackEndpoint
                 catalog,
                 new FakeOptionsMonitor<StationOptions>(stationOpts),
                 new FakeOptionsMonitor<LoudnessOptions>(new LoudnessOptions()),
+                NoArtworkResolver(),
                 NullLogger.Instance,
                 new DefaultHttpContext().Response,
                 CancellationToken.None);
@@ -304,6 +315,7 @@ public static class FeatureSafeTrackEndpoint
                 catalog,
                 new FakeOptionsMonitor<StationOptions>(stationOpts),
                 new FakeOptionsMonitor<LoudnessOptions>(new LoudnessOptions()),
+                NoArtworkResolver(),
                 NullLogger.Instance,
                 new DefaultHttpContext().Response,
                 CancellationToken.None);
@@ -349,6 +361,7 @@ public static class FeatureSafeTrackEndpoint
                 catalog,
                 new FakeOptionsMonitor<StationOptions>(stationOpts),
                 new FakeOptionsMonitor<LoudnessOptions>(new LoudnessOptions()),
+                NoArtworkResolver(),
                 NullLogger.Instance,
                 ctx.Response,
                 CancellationToken.None);
@@ -375,6 +388,7 @@ public static class FeatureSafeTrackEndpoint
             // First call: SafeScope=[1]
             await InternalEndpoints.HandleSafeTrackAsync(
                 catalog, stationMonitor, loudnessMonitor,
+                NoArtworkResolver(),
                 NullLogger.Instance,
                 new DefaultHttpContext().Response, CancellationToken.None);
 
@@ -384,6 +398,7 @@ public static class FeatureSafeTrackEndpoint
             // Second call: SafeScope=[2] — must use the new scope, not the old one.
             await InternalEndpoints.HandleSafeTrackAsync(
                 catalog, stationMonitor, loudnessMonitor,
+                NoArtworkResolver(),
                 NullLogger.Instance,
                 new DefaultHttpContext().Response, CancellationToken.None);
 

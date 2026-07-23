@@ -78,6 +78,13 @@ public static class StationSettingsAllowlist
         new("Station:SpectatorMode",                          SettingApplyMode.Live,          SettingKind.Boolean,    ""),
         new("Station:PublicStreamUrl",                        SettingApplyMode.Live,          SettingKind.String,     ""),
 
+        // Artwork/station-icon URL base (SPEC F88.4–F88.5, STORY-223, PLAN T85) — read live via
+        // IOptionsMonitor<StationOptions> by ArtworkUrlResolver on every feeder push, so a PUT here
+        // reaches the very next push with no api restart. Empty is legal and is the default: F88.5's
+        // contract is that NO url= annotation is ever emitted (music or TTS) while this is blank,
+        // exactly mirroring PublicStreamUrl's "empty hides the player" shape just above.
+        new("Station:PublicBaseUrl",                          SettingApplyMode.Live,          SettingKind.String,     ""),
+
         // TTS/LLM endpoint liveness (SPEC F36.1–F36.4, T8): KokoroTtsSynthesizer/KokoroVoiceLister
         // and LlmCopyWriter read these via IOptionsMonitor per call (no boot-frozen BaseAddress), so
         // a PUT here reroutes the very next render/voices call — no api restart. Llm:Endpoint is

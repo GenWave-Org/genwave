@@ -22,6 +22,8 @@ public static class FeatureFeederStampsEnergyAnnotations
             },
             stationId: "st-01",
             new FakeStationIdentityProvider(new StationIdentity("st-01", "GenWave", "af_heart")),
+            new ArtworkUrlResolver(
+                new FakeOptionsMonitor<StationOptions>(new StationOptions()), new FakeArtworkTokenStore()),
             NullLogger<LiquidsoapControl>.Instance);
 
     static readonly GenWave.Core.Domain.Loudness DefaultLoudness = new(-16.0, -1.0, Measurable: true);

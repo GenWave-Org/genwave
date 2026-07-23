@@ -33,6 +33,7 @@ export const SETTINGS_HELP_KEYS = [
   "Station:Envelope:EnergyMax",
   "Station:SpectatorMode",
   "Station:PublicStreamUrl",
+  "Station:PublicBaseUrl",
   "Tts:Endpoint",
   "Tts:Corrections",
   "Tts:Fallback:Endpoint",

@@ -154,6 +154,11 @@ public sealed class SettingValidator(IConfiguration configuration)
             ["Station:SpectatorMode"] = IsBool,
             ["Station:PublicStreamUrl"] = IsSafePublicStreamUrl,
 
+            // Artwork/station-icon URL base (SPEC F88.4–F88.5, STORY-223) — an operator-supplied URL
+            // an eventual metadata-aware player fetches, exactly PublicStreamUrl's own risk profile,
+            // so it reuses the identical SSRF/markup-injection guard rather than a parallel copy.
+            ["Station:PublicBaseUrl"] = IsSafePublicStreamUrl,
+
             // TTS endpoint (F36.1–F36.2) — there is no "disabled TTS" state, so an absolute
             // http/https URL is required; empty is rejected (mirrors TtsOptions' [Required, Url]).
             ["Tts:Endpoint"] = v => !string.IsNullOrEmpty(v) && IsAbsoluteHttpUri(v),
@@ -362,9 +367,9 @@ public sealed class SettingValidator(IConfiguration configuration)
         && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 
     /// <summary>
-    /// Guards <c>Station:PublicStreamUrl</c> (F62.1, F62.8) against both the SSRF/open-redirect
-    /// class of bug and markup injection into the future public <c>&lt;audio src&gt;</c>/about
-    /// panel:
+    /// Guards <c>Station:PublicStreamUrl</c> (F62.1, F62.8) — and, identically, <c>Station:PublicBaseUrl</c>
+    /// (F88.4–F88.5, STORY-223) — against both the SSRF/open-redirect class of bug and markup
+    /// injection into the future public <c>&lt;audio src&gt;</c>/about panel:
     ///   • empty is legal (hides the player),
     ///   • '"', '&lt;', '&gt;', '\', control characters, and whitespace are rejected outright —
     ///     <see cref="Uri.TryCreate(string, UriKind, out Uri)"/> happily accepts all of these
@@ -646,7 +651,8 @@ public sealed class SettingValidator(IConfiguration configuration)
             => $"Value '{value}' is not valid for '{key}'. Must be greater than {MinSilenceDurationSecMin} and at most {MinSilenceDurationSecMax}.",
         var k when k.Equals("Library:Energy:WindowSeconds", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be greater than {EnergyWindowSecondsMin} and at most {EnergyWindowSecondsMax}.",
-        var k when k.Equals("Station:PublicStreamUrl", StringComparison.OrdinalIgnoreCase)
+        var k when k.Equals("Station:PublicStreamUrl", StringComparison.OrdinalIgnoreCase) ||
+                   k.Equals("Station:PublicBaseUrl", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be empty, an absolute http/https URL, " +
                "or a same-origin root-relative path starting with a single '/' (not '//'); no '\"', '<', '>', '\\', control characters, or whitespace.",
         var k when k.Equals("Llm:DegradationPin", StringComparison.OrdinalIgnoreCase)

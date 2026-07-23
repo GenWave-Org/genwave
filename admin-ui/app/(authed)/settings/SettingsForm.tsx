@@ -145,6 +145,10 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
   "Station:PublicStreamUrl":
     "Public stream URL for the spectator page player (e.g. /stream behind the reference proxy). " +
     "Empty hides the player.",
+  "Station:PublicBaseUrl":
+    "Public base URL feeder pushes resolve per-track artwork and station-icon URLs against " +
+    "(e.g. https://your-station.example). Empty means no artwork URL is ever sent to listening " +
+    "clients.",
 
   // ── TTS / LLM endpoints (SPEC F36.1–F36.4) ─────────────────────────────────────────────────
   "Tts:Endpoint":

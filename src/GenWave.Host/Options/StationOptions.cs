@@ -36,6 +36,18 @@ public sealed class StationOptions
     /// </summary>
     public string PublicStreamUrl { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The base URL feeder annotations resolve per-track artwork/station-icon URLs against (SPEC
+    /// F88.4–F88.5, STORY-223, PLAN T85). Not required — defaults to empty, which is the F88.5
+    /// contract in full: no push (music or TTS) ever carries a <c>url=</c> annotation, and
+    /// <c>genwave.liq</c>'s ICY metadata forwards nothing for that key. Once non-empty, every
+    /// music push carries <c>{PublicBaseUrl}/spectator/api/artwork/{token}</c> and every TTS push
+    /// carries the reserved station-icon path (see <see cref="GenWave.Host.Engine.ArtworkUrlResolver"/>)
+    /// — same URL-safety guard as <see cref="PublicStreamUrl"/> (<c>SettingValidator.IsSafePublicStreamUrl</c>),
+    /// since both are operator-supplied URLs an eventual client fetches.
+    /// </summary>
+    public string PublicBaseUrl { get; set; } = string.Empty;
+
     /// <summary>The set of library ids this station is permitted to draw from. Must be non-empty.</summary>
     public StationScopeOptions Scope { get; set; } = new();
 

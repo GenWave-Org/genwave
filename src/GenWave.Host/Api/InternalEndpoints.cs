@@ -78,10 +78,11 @@ static class InternalEndpoints
             IMediaCatalog catalog,
             IOptionsMonitor<StationOptions> stationMonitor,
             IOptionsMonitor<LoudnessOptions> loudnessMonitor,
+            ArtworkUrlResolver artworkUrlResolver,
             ILoggerFactory loggerFactory,
             HttpResponse response,
             CancellationToken ct) =>
-            HandleSafeTrackAsync(catalog, stationMonitor, loudnessMonitor,
+            HandleSafeTrackAsync(catalog, stationMonitor, loudnessMonitor, artworkUrlResolver,
                 loggerFactory.CreateLogger(typeof(InternalEndpoints)), response, ct));
 
         return group;
@@ -100,6 +101,7 @@ static class InternalEndpoints
         IMediaCatalog catalog,
         IOptionsMonitor<StationOptions> stationMonitor,
         IOptionsMonitor<LoudnessOptions> loudnessMonitor,
+        ArtworkUrlResolver artworkUrlResolver,
         ILogger logger,
         HttpResponse response,
         CancellationToken ct)
@@ -130,7 +132,11 @@ static class InternalEndpoints
         var item = reference.ToMediaItem();
 
         var gainDb = Gain.NormGainDb(reference.Loudness, loudness.TargetLufs, loudness.CeilingDbtp);
-        var annotation = LiquidsoapAnnotationBuilder.Build(item, gainDb, station.Id, station.Name);
+        // artworkUrl (SPEC F88.4–F88.5, STORY-223, PLAN T85): the safe rotation is a real,
+        // catalog-drawn music push exactly like the feeder's own — it carries the identical
+        // per-track artwork URL, resolved through the same shared ArtworkUrlResolver.
+        var artworkUrl = await artworkUrlResolver.ResolveAsync(item, ct);
+        var annotation = LiquidsoapAnnotationBuilder.Build(item, gainDb, station.Id, station.Name, artworkUrl);
 
         return Results.Text(annotation, contentType: "text/plain");
     }
