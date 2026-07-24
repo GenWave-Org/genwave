@@ -15,10 +15,10 @@ PR**: add a row to the deployments table with your specs and what worked (or did
 ## 📦 Known deployments
 
 ### Computer Systems
-| Machine | CPU / arch | RAM | Role | Status | Notes | Verifier |
-|---|---|---|---|:---:|---|---|
-| `demo.genwaveradio.com` appliance (CCX23) | x86-64 | 16GB | Public demo station, full stack + admin + LLM + tunnel + logging | 🟢 | Runs the pinned release 24/7 (health-probed by CI). Source of the one live-observed sizing fact: ollama at a 3 GB fence OOM-killed constantly; stable at **1 CPU / 6GB** (observed 2026-07-21, v2.2.0 rollout) | GenWave |
-| Development machine | x86-64 | 512GB | `./launch.sh` dev flow, full stack from source | 🟢 | Ubuntu 25.04 + Docker | GenWave |
+| Machine | Arch | Core/vCPU Count | RAM | Storage | Role | Status | Notes | Verifier |
+|---|---|:---:|:---:|:---:|---|:---:|---|---|
+| `demo.genwaveradio.com` appliance (CCX23) | x86-64 | 4 | 16GB | 80GB | Public demo station, full stack + admin + LLM + tunnel + logging | 🟢 | Runs the pinned release 24/7 (health-probed by CI). Source of the one live-observed sizing fact: ollama at a 3 GB fence OOM-killed constantly; stable at **1 CPU / 6GB** (observed 2026-07-21, v2.2.0 rollout) | GenWave |
+| Development machine | x86-64 | 112 | 512GB | 4TB | `./launch.sh` dev flow, full stack from source | 🟢 | Ubuntu 25.04 + Docker on Dell Precision 7920 Tower| GenWave |
 
 ### Internet Radios
 | Make | Model | Status | Notes | Verifier |
@@ -46,7 +46,7 @@ Configured limits come from `compose.yaml` / `compose.demo.yaml`; "real footprin
 notes recorded alongside them.
 
 | Service | Configured limit | Real footprint | Confidence | Notes |
-|---|---|---|:---:|---|
+|---|:---:|---|:---:|---|
 | `kokoro` (TTS) | 3 GB cap | ~1.2 GiB fresh baseline | 🟢 footprint / 🟡 cap | Cap is a fail-closed backstop, not a requirement |
 | `ollama` (DJ brain, demo profile) | **1 CPU / 6GB fence** | needs > 3 GB with `llama3.2:3b` resident (`KEEP_ALIVE=-1`) | 🟢 | Live-observed: 3 GB fence = constant OOM kills. Cold model load ~25 s+; a full persona prompt on one fenced core takes ~25–30 s even warm — set `Llm:TimeoutSeconds: 60`. Size the model to the fence |
 | `piper` (fallback TTS) | 768 MB cap | well under 1 GiB with a "medium" voice | 🟢 footprint / 🟡 cap | ONNX runtime + `en_US-lessac-medium`, downloaded on first boot |
@@ -79,7 +79,7 @@ These totals are **derived** from the numbers above — nobody has bisected a re
 ## 🤝 Contributing an entry
 
 1. Run the stack (`./launch.sh`, or the `--pinned` appliance flow — see [DEPLOYMENT.md](DEPLOYMENT.md)).
-2. Note CPU model, core count, RAM, storage, and which profiles you ran (`admin`, `logging`,
+2. Note CPU model, core count, RAM, storage, and which profiles you ran (`--pinned`, `admin`, `logging`,
    `tunnel`, the demo LLM overlay).
 3. PR a row into **Known deployments** with 🟢 for what you verified and a note for anything that
    needed tuning (e.g. a different ollama fence). Problems are as valuable as successes — file
