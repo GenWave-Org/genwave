@@ -5,11 +5,11 @@ using GenWave.Core.Domain;
 /// <summary>
 /// Write/read seam for <c>station.request</c> (SPEC F87, STORY-224, PLAN T86). Started narrow: T86
 /// shipped only what T87's intake endpoint needed — insert (with the wish-retention sweep) plus the
-/// station-wide pending-cap eviction path. T88 (STORY-225) adds exactly what the wish parser needs —
-/// <see cref="GetForParseAsync"/>, <see cref="ListUnparsedPendingIdsAsync"/>,
-/// <see cref="MarkParsedAsync"/> — and nothing a later rung (T89 matcher, T90 fulfillment) would
-/// need, which still land their own members in their own tasks rather than speculatively arriving
-/// here now.
+/// station-wide pending-cap eviction path. T88 (STORY-225) added exactly what the wish parser needs —
+/// <see cref="GetForParseAsync"/>, <see cref="ListUnparsedPendingIdsAsync"/>, <see cref="MarkParsedAsync"/>.
+/// T89 (STORY-226) adds exactly what the catalog matcher needs — <see cref="MarkMatchedAsync"/>,
+/// <see cref="MarkUnmatchedAsync"/> — and nothing T90's fulfillment rung would need, which still
+/// lands its own members in its own task rather than speculatively arriving here now.
 ///
 /// <para>
 /// "Unparsed" discriminator (used by both new read members): <c>status = 'pending' AND artist IS
@@ -89,4 +89,21 @@ public interface IRequestStore
     /// </summary>
     Task MarkParsedAsync(
         long id, string? artist, string? title, IReadOnlyList<string> moods, bool unmatched, CancellationToken ct);
+
+    /// <summary>
+    /// Records a successful catalog match (SPEC F87.5, STORY-226, PLAN T89): stamps
+    /// <paramref name="mediaId"/> into <c>matched_media_id</c>. <c>status</c> is left untouched —
+    /// still <c>pending</c>, ready for T90's fulfillment rung to consult (F87.6); a match is not a
+    /// fulfillment. Called at most once per row, immediately after <see cref="MarkParsedAsync"/>
+    /// leaves it pending with a non-empty artist/title predicate.
+    /// </summary>
+    Task MarkMatchedAsync(long id, long mediaId, CancellationToken ct);
+
+    /// <summary>
+    /// Flips a row to <c>unmatched</c> (SPEC F87.5) when its artist/title predicate found no catalog
+    /// row AND it carries no mood predicate either — nothing left to try. A row with a mood predicate
+    /// on a match miss stays <c>pending</c> instead (a vibe request, resolved later at pick time via
+    /// the F86.8 mood-filter machinery) — this member is never called for that case.
+    /// </summary>
+    Task MarkUnmatchedAsync(long id, CancellationToken ct);
 }

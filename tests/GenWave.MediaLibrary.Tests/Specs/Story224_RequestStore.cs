@@ -389,6 +389,56 @@ public static class FeatureRequestStore
     }
 
     // ---------------------------------------------------------------------
+    // HAPPY PATH — MarkMatchedAsync / MarkUnmatchedAsync (SPEC F87.5, STORY-226, PLAN T89)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioMarkMatched(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task A_matched_id_lands_and_status_stays_pending()
+        {
+            // Given a row already parsed with a held artist predicate...
+            await db.ResetRequestAsync();
+            var id = await InsertRawRowAsync(db, "something dreamy by Zeppelin", "Led Zeppelin", null, null, "pending", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the matcher stamps a catalog hit...
+            await repo.MarkMatchedAsync(id, mediaId: 7L, CancellationToken.None);
+
+            // Then matched_media_id lands and status stays pending — a match is not a fulfillment (F87.6).
+            await using var conn = await db.StationDataSource.OpenConnectionAsync();
+            var (matchedMediaId, status) = await conn.QuerySingleAsync<(long?, string)>(
+                "select matched_media_id, status from station.request where id = @id", new { id });
+            Assert.Equal(7L, matchedMediaId);
+            Assert.Equal("pending", status);
+        }
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioMarkUnmatched(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task A_miss_with_nothing_left_to_try_flips_status_to_unmatched()
+        {
+            // Given a row already parsed with a held artist predicate the catalog has nothing for...
+            await db.ResetRequestAsync();
+            var id = await InsertRawRowAsync(db, "something by a band nobody has", "A Band That Does Not Exist", null, null, "pending", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the matcher gives up on it...
+            await repo.MarkUnmatchedAsync(id, CancellationToken.None);
+
+            // Then status flips to unmatched — silently, no other column is touched (F87.5).
+            var row = await ReadRowAsync(db, id);
+            Assert.Equal("unmatched", row.Status);
+            Assert.Equal("A Band That Does Not Exist", row.Artist);
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // SAD PATH — the status CHECK constraint has teeth
     // ---------------------------------------------------------------------
 

@@ -87,9 +87,13 @@ public static class FeatureWishParsing
             new SingleHandlerHttpClientFactory(handler), llmOptions, deterministic, factory.CreateLogger<LlmWishParser>());
         var degradation = new FakeDegradationModeReader { CurrentMode = mode };
         var channel = Channel.CreateBounded<long>(8);
+        // T89's matching fold-in reaches this class's constructor now too; a fresh no-match fake here
+        // keeps this file's own parse-only assertions unaffected — Story226_RequestMatcherDecisions.cs
+        // (Host.Tests) owns exercising the matcher itself.
+        var matcher = new RequestMatcher(new FakeRequestCatalogProbe(), store);
 
         return new RequestParserService(
-            channel.Reader, store, llmParser, deterministic, degradation, llmOptions, factory.CreateLogger<RequestParserService>());
+            channel.Reader, store, llmParser, deterministic, degradation, llmOptions, matcher, factory.CreateLogger<RequestParserService>());
     }
 
     // ---------------------------------------------------------------------

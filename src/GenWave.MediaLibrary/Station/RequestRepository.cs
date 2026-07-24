@@ -155,4 +155,24 @@ sealed class RequestRepository(Lazy<NpgsqlDataSource> dataSource, int wishRetent
             new { Id = id, Artist = artist, Title = title, Moods = moods.ToArray(), Unmatched = unmatched },
             cancellationToken: ct));
     }
+
+    /// <summary>Stamps the match, leaves <c>status</c> untouched (see <see cref="IRequestStore"/>'s
+    /// own remarks — still <c>pending</c>, T90's fulfillment rung decides what happens next).</summary>
+    public async Task MarkMatchedAsync(long id, long mediaId, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        await conn.ExecuteAsync(new CommandDefinition(
+            "update station.request set matched_media_id = @MediaId where id = @Id",
+            new { Id = id, MediaId = mediaId },
+            cancellationToken: ct));
+    }
+
+    public async Task MarkUnmatchedAsync(long id, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        await conn.ExecuteAsync(new CommandDefinition(
+            "update station.request set status = 'unmatched' where id = @Id",
+            new { Id = id },
+            cancellationToken: ct));
+    }
 }

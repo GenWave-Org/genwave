@@ -47,6 +47,10 @@ static class RequestParsingServiceCollectionExtensions
 
         services.AddSingleton<DeterministicWishParser>();
         services.AddSingleton<LlmWishParser>();
+        // SPEC F87.5, STORY-226, PLAN T89: the catalog-match decision tree RequestParserService folds
+        // into this same pipeline right after each parse. Needs IRequestCatalogProbe (AddMediaLibrary)
+        // and IRequestStore (AddRequestStore) — both already registered before this extension runs.
+        services.AddSingleton<RequestMatcher>();
         services.AddHostedService<RequestParserService>();
 
         return services;

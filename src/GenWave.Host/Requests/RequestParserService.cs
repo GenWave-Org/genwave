@@ -10,7 +10,11 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Channel-fed background parser (SPEC F87.4, STORY-225, PLAN T88): turns a pending request's wish
 /// into structured predicates (artist/title/moods) and writes the outcome back through
-/// <see cref="IRequestStore.MarkParsedAsync"/>.
+/// <see cref="IRequestStore.MarkParsedAsync"/>. <see cref="ParseOneAsync"/> then folds catalog
+/// matching (SPEC F87.5, STORY-226, PLAN T89) into the SAME pipeline right after that write, handing
+/// off to <see cref="RequestMatcher"/> — a second hosted service would need its own feed/discriminator
+/// over <c>station.request</c> for zero benefit, since matching needs exactly the predicates this
+/// method already just parsed.
 ///
 /// <para>
 /// Mode is read fresh PER WISH, at the moment of parse — never cached across requests or across this
@@ -52,6 +56,7 @@ sealed class RequestParserService(
     DeterministicWishParser deterministicParser,
     IDegradationModeReader degradationMode,
     IOptionsMonitor<LlmOptions> llmOptions,
+    RequestMatcher matcher,
     ILogger<RequestParserService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -108,6 +113,12 @@ sealed class RequestParserService(
 
             var parsed = await parser.ParseAsync(request.Wish, ct);
             await store.MarkParsedAsync(id, parsed.Artist, parsed.Title, parsed.Moods, unmatched: parsed.IsEmpty, ct);
+
+            // Matching (SPEC F87.5, PLAN T89) continues the SAME pipeline right here — an empty parse
+            // is already unmatched (the write above), so RequestMatcher is only ever reached with a
+            // predicate actually worth probing the catalog for.
+            if (!parsed.IsEmpty)
+                await matcher.MatchAsync(id, parsed.Artist, parsed.Title, parsed.Moods, ct);
 
             logger.LogInformation(
                 "Parsed request {Id} via {Parser}: {Outcome}",

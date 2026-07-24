@@ -31,6 +31,9 @@ sealed class FakeRequestStore : IRequestStore
 
     public List<(long Id, string? Artist, string? Title, IReadOnlyList<string> Moods, bool Unmatched)> MarkParsedCalls { get; } = [];
 
+    public List<(long Id, long MediaId)> MarkMatchedCalls { get; } = [];
+    public List<long> MarkUnmatchedCalls { get; } = [];
+
     public Task<long> InsertAsync(string wish, DateTimeOffset expiresAt, CancellationToken ct)
     {
         Inserted.Add((wish, expiresAt));
@@ -61,6 +64,18 @@ sealed class FakeRequestStore : IRequestStore
     {
         MarkParsedCalls.Add((id, artist, title, moods, unmatched));
         UnparsedById.Remove(id);
+        return Task.CompletedTask;
+    }
+
+    public Task MarkMatchedAsync(long id, long mediaId, CancellationToken ct)
+    {
+        MarkMatchedCalls.Add((id, mediaId));
+        return Task.CompletedTask;
+    }
+
+    public Task MarkUnmatchedAsync(long id, CancellationToken ct)
+    {
+        MarkUnmatchedCalls.Add(id);
         return Task.CompletedTask;
     }
 }
