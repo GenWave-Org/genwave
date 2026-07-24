@@ -170,6 +170,13 @@ and the like), so running it with nothing new to apply is a safe no-op. `--dry-r
 prints the exact command plan without touching anything — `./launch.sh --pinned --dry-run`
 or, for just the migration step, `./migrate.sh --help`.
 
+Since gh-#19, `launch.sh` **preflights before touching the stack** (Docker running,
+compose plugin, `.env` secrets present and non-placeholder) and every failure exit says
+how to proceed. On the pinned flow a failed pull or migration explicitly leaves the
+running stack alone, and a part-way `up` is *not* rolled back — whatever is still
+broadcasting keeps broadcasting; the failure report says how to converge. `SKIP_PREFLIGHT=1`
+bypasses the checks.
+
 Combine with `--with` to also activate compose profiles (e.g. `logging`, `tunnel`) on the
 same launch: `./launch.sh --pinned --with logging,tunnel` merges them into whatever
 `COMPOSE_PROFILES` is already set (env or `.env`).
@@ -333,12 +340,11 @@ worth stating plainly:
   password is therefore still load-bearing on every non-edge path — treat it accordingly.
   Origin-side JWT validation (config-gated, fail-closed) is
   [gh-#75](https://github.com/GenWave-Org/genwave/issues/75).
-- **Failed logins are anonymous in the logs.** `AuthController` records only
-  "Login failed: wrong admin password" — no remote IP, no `CF-Connecting-IP`, no
-  `Cf-Access-Authenticated-User-Email` — and neither Caddy nor cloudflared emits access
-  logs, so "was that the operator or an intruder?" can't be answered from logs today.
-  Caller-identity logging on auth failures is
-  [gh-#74](https://github.com/GenWave-Org/genwave/issues/74).
+- **Failed logins DO log who was at the door** (gh-#74, shipped v2.3.1): every login
+  outcome records the caller's remote IP (XFF-corrected behind a trusted proxy) and the
+  `Cf-Access-Authenticated-User-Email` header when Access forwarded one — so "was that
+  the operator or an intruder?" is answerable from the api's own logs. Note the Access
+  identity is logged, not validated (the first bullet still applies).
 
 Record-keeping: concrete apps, policies, and hostnames live in the operator's private
 infra repo, never in this one (SPEC F78.11).
