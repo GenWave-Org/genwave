@@ -39,6 +39,32 @@
       <p class="hint" id="listener-count" aria-live="polite" hidden></p>
     </section>
 
+    <!-- Hidden by default: shown only once the one-shot about fetch confirms requestsEnabled
+         (SPEC F87.11, STORY-229, PLAN T92). Absence when disabled is deliberate — the same
+         silence as POST /spectator/api/requests' own 404, not a disabled-state message. -->
+    <section class="card" id="request-section" aria-labelledby="request-heading" hidden>
+      <h2 class="section-title" id="request-heading">Request a song</h2>
+      <form class="request-form" id="request-form">
+        <label class="request-label" for="request-wish">What do you want to hear?</label>
+        <div class="request-row">
+          <!-- maxlength mirrors Requests:WishMaxLength's default (140) — a client-side courtesy
+               only; the server enforces the real, operator-configurable cap. -->
+          <input
+            type="text"
+            id="request-wish"
+            name="wish"
+            class="request-input"
+            maxlength="140"
+            required
+            autocomplete="off"
+            placeholder="Artist or song title"
+          />
+          <button type="submit" class="request-submit">Send</button>
+        </div>
+      </form>
+      <p class="request-message" id="request-message" aria-live="polite" role="status"></p>
+    </section>
+
     <section class="card" aria-labelledby="history-heading">
       <h2 class="section-title" id="history-heading">Recently played</h2>
       <ul class="history" id="history-list"></ul>

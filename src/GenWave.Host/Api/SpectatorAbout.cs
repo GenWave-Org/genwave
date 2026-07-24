@@ -17,9 +17,17 @@ namespace GenWave.Host.Api;
 /// The public Icecast stream URL (<c>Station:PublicStreamUrl</c>), read live. Empty string — never
 /// null — when the operator has not set one; the spectator page treats that as "no player".
 /// </param>
+/// <param name="RequestsEnabled">
+/// Whether listener song requests are currently open (<c>Station:Requests:Enabled</c>), read live
+/// (SPEC F87.11, STORY-229, PLAN T92) — the one new pinned public field the requests epic adds
+/// here. The page's wish form renders only when this is true; when false, the form's absence is
+/// the same silence as <c>POST /spectator/api/requests</c>' own 404 — no distinguishable "requests
+/// are closed" state either way.
+/// </param>
 public sealed record SpectatorAbout(
     string StationName,
     string Version,
     string License,
     string ProjectUrl,
-    string StreamUrl);
+    string StreamUrl,
+    bool RequestsEnabled);
