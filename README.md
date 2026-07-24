@@ -17,18 +17,25 @@ This is **GenWave Home**, the AGPL edition — see [License](#license).
 
 ## Quickstart
 
-You need Docker (with Compose) and a music library of `.mp3`/`.flac` files.
+You need Docker (with Compose v2.24+) and a music library of `.mp3`/`.flac` files — see
+[HARDWARE.md](HARDWARE.md) for what GenWave runs on and how to size a box.
 
 ```bash
 cp .env.example .env
 # edit .env: set POSTGRES_PASSWORD, LIBRARY_DB_PASSWORD, STATION_DB_PASSWORD,
 #            ICECAST_SOURCE_PASSWORD, ICECAST_ADMIN_PASSWORD,
 #            MEDIA_DIR (absolute path to your library),
-#            and ADMIN_PASSWORD (admin UI login; leave blank for open API in local dev)
+#            and ADMIN_PASSWORD (admin UI login; empty = the admin plane is
+#            locked entirely — fail-closed, the stream still runs)
 
 ./build.sh
 ./launch.sh
 ```
+
+Both scripts preflight the machine before touching anything (Docker running, compose
+plugin, .NET SDK, `.env` secrets) and every failure exit says how to proceed; a launch
+that fails part-way rolls the stack back down rather than leaving half of it running.
+`SKIP_PREFLIGHT=1` bypasses the checks on unusual setups.
 
 Seven services start: `db`, `icecast`, `engine`, `api`, `kokoro` (TTS synthesizer), `piper` (CPU-only fallback TTS), and `admin_ui` (operator console). Two optional services ride compose profiles: a Cloudflare tunnel with health/metrics observability (`tunnel`) and a Grafana Alloy log shipper (`logging`) — `./launch.sh --with logging,tunnel` activates them; see [DEPLOYMENT.md](DEPLOYMENT.md) and [`observability/`](observability/).
 
@@ -47,24 +54,14 @@ The broadcast never depends on a sick dependency. **LLM failure is a mode, not a
 ```
 .
 ├─ compose.yaml            # 7-service topology: db, icecast, engine, api, kokoro, piper, admin_ui
-│                          #   (+ optional cloudflared behind COMPOSE_PROFILES=tunnel)
+│                          #   (+ optional cloudflared [tunnel] and alloy [logging] profiles)
 ├─ .env.example            # secrets template → copy to .env
 ├─ engine/
 │  └─ genwave.liq          # Liquidsoap playout script
 ├─ db/
-│  ├─ 01-library.sh                   # library schema + library_svc role (canonical fresh install)
-│  ├─ 02-library-id-migration.sh      # idempotent: adds library.library + library_id FK
-│  ├─ 03-cue-points-migration.sh      # idempotent: adds cue_in_sec, cue_out_sec, cue_analyzed_at
-│  ├─ 04-energy-migration.sh          # idempotent: adds intro_energy, outro_energy, energy_analyzed_at
-│  ├─ 05-catalog-writes-migration.sh  # idempotent: adds eligible + tags_edited_at on library.media
-│  ├─ 06-station-settings-migration.sh # idempotent: station schema + station_svc role + station.settings
-│  ├─ 07-library-management-migration.sh # idempotent: adds UNIQUE(name) on library.library (F20)
-│  ├─ 08-rating-migration.sh          # idempotent: library.media_rating 1:1 extension table (F33)
-│  ├─ 09-persona-migration.sh         # idempotent: station.persona table (F35)
-│  ├─ 10-enrichment2-migration.sh     # idempotent: bpm, year_lookup_at, track_energy generated column, media_year index (F46–F48)
-│  ├─ 11-persona-card-migration.sh    # idempotent: persona slug/definition jsonb/enabled + persona_memory + recall index (F71)
-│  ├─ 12-booth-log-migration.sh       # idempotent: station.booth_log + paging index (F72)
-│  └─ 13-year-lookup-etiquette-migration.sh # idempotent: year_lookup_missed_at miss-stamp gate (F76)
+│  ├─ 01-library.sh        # library schema + library_svc role (canonical fresh install)
+│  └─ 02..22-*-migration.sh # idempotent in-place upgrades, one per shipped feature —
+│                          #   each header says what it adds; ./migrate.sh applies them all
 ├─ icecast/
 │  ├─ Dockerfile           # self-owned Icecast2 image
 │  ├─ entrypoint.sh        # renders passwords from env, runs Icecast
@@ -75,8 +72,11 @@ The broadcast never depends on a sick dependency. **LLM failure is a mode, not a
 │  ├─ find_smoke_candidates.cs   # picks a divergent-gain track pair for the smoke test
 │  ├─ smoke_test.sh              # manual pre-release regression gate (no human listening required)
 │  ├─ onair_gate.sh              # §0 on-air acceptance gate (live engine)
+│  ├─ test-pronunciation.sh      # hear how TTS says a name; iterate spellings, then add a speech correction (gh-#37)
+│  ├─ preflight.sh               # shared machine/env checks sourced by build.sh + launch.sh (gh-#19)
 │  ├─ check-compose-publish.sh   # CI guard: 0.0.0.0 host publishes allowed only for the front proxy (F67.1)
-│  └─ check-compose-socket.sh    # CI guard: docker.sock read-only + alloy-only, every profile combo (F78.2)
+│  ├─ check-compose-socket.sh    # CI guard: docker.sock read-only + alloy-only, every profile combo (F78.2)
+│  └─ check-doc-drift.sh         # CI guard: DEPLOYMENT.md/HARDWARE.md values match the compose files (gh-#77)
 └─ src/                    # C# solution (.NET 10)
    ├─ GenWave.Abstractions/  #   the SDK contract surface: selection, catalog read, events, TTS seams
    ├─ GenWave.Core/          #   domain + engine-facing abstractions; zero I/O
@@ -153,7 +153,8 @@ GenWave's epic-by-epic history — v1 broadcast playout through Ranking & robust
 
 ## Roadmap
 
-- **Deferred** — authored-file GC (gitea-#205), legacy contract cleanup (gitea-#206).
+- **Per-track album art in players** (ICY `StreamUrl`) — spike complete, viable ([gh-#105](https://github.com/GenWave-Org/genwave/issues/105)); gated on an Icecast ≥ 2.5.0 image bump (2.4.4 drops the metadata field, and EOLs 2026-12-31).
+- **Deferred** — authored-file GC ([gh-#3](https://github.com/GenWave-Org/genwave/issues/3)), origin-side Access JWT validation ([gh-#75](https://github.com/GenWave-Org/genwave/issues/75)), migration-runner adoption ([gh-#12](https://github.com/GenWave-Org/genwave/issues/12)).
 - **Beat-matching + set-level sequencing** — BPM/beat-aware transitions and energy-curve scheduling beyond per-pair crossfade duration. Deferred as YAGNI.
 
 ## Operational notes
