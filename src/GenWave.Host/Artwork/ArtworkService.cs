@@ -75,15 +75,12 @@ public sealed class ArtworkService(IOptionsMonitor<ArtworkOptions> options, ILog
         }
         catch (Exception ex)
         {
-            // Media id never appears here (only the token and the library path), and this is
-            // Debug, not Warning+ — the house rule (IcecastListenerStatsSource precedent) is that
-            // identifying detail is fine at Debug but never at a level a public-surface log ships
-            // by default. The token is re-validated to its 32-lowercase-hex shape before logging
-            // (CodeQL log-injection finding on PR #124): every caller-reachable path already
-            // resolves the token through the same gate, so this guard is structural belt-and-
-            // braces — a value that somehow bypassed it logs as a constant, never raw input.
-            var safeToken = IsHex32(token) ? token : "<malformed>";
-            logger.LogDebug(ex, "Artwork extraction failed for token {Token} ({MediaPath})", safeToken, mediaPath);
+            // Media id never appears here, and this is Debug, not Warning+ — the house rule
+            // (IcecastListenerStatsSource precedent). The TOKEN is deliberately absent too
+            // (CodeQL cs/log-forging on PR #124): it is the one request-derived value in this
+            // method, and the DB-sourced media path already identifies the row — logging zero
+            // user-derived bytes beats sanitizing them.
+            logger.LogDebug(ex, "Artwork extraction failed ({MediaPath})", mediaPath);
             RememberArtless(token);
             return null;
         }
@@ -178,13 +175,4 @@ public sealed class ArtworkService(IOptionsMonitor<ArtworkOptions> options, ILog
         }
     }
 
-    /// <summary>The same 32-lowercase-hex shape <c>ArtworkTokenRepository</c> gates on — the
-    /// log-sanitization barrier for the one place a token value reaches a log line.</summary>
-    static bool IsHex32(string value)
-    {
-        if (value.Length != 32) return false;
-        foreach (var c in value)
-            if (c is not ((>= '0' and <= '9') or (>= 'a' and <= 'f'))) return false;
-        return true;
-    }
 }
