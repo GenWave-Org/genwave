@@ -24,6 +24,10 @@ jobs:
         run: dotnet build GenWave.sln --no-restore --configuration Release
       # Integration tests need fixture-managed side containers (Postgres, Kokoro) — they run
       # on-demand on a dev box, not in CI (same policy as the pre-migration pipeline).
+      # ffmpeg: the F88 artwork specs (Story222) drive the REAL binary — both fixture generation
+      # and the extraction under test — matching the api image, which ships ffmpeg (gh-#105).
+      - name: Install ffmpeg (artwork specs drive the real binary)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
       - name: Test
         run: dotnet test GenWave.sln --no-build --configuration Release --filter "Category!=Integration"
 
