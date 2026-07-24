@@ -177,14 +177,31 @@ static class LlmPromptBuilder
         "may lampshade that on air (e.g. \"not my usual pick, but...\"); never credit it to a taste rule.";
 
     /// <summary>
-    /// Composes the user-content half of the prompt (SPEC F34.3, F71.8, F83.1-F83.3): station/time/
-    /// clock/segment framing, then whatever the track itself carries (title/artist/album/genre/year —
-    /// unchanged since before F71), then, last, an OPTIONAL persona-taste line (see
-    /// <see cref="BuildTasteLine"/>) so it reads as one more piece of color about THIS track rather
-    /// than a separate directive. <paramref name="previouslyVoicedTasteNotes"/> is the immediately
-    /// preceding ON-AIR break's fired-rule descriptions (see <see cref="DescribeFiredRules"/>) — see
-    /// <see cref="LlmCopyWriter"/>'s own remarks on where that memory lives and why a preview never
-    /// supplies it.
+    /// SPEC F87.7 (STORY-228, PLAN T91) — the request-color instruction line for a lead-in whose
+    /// track was pulled onto air by the fulfillment rung (<see cref="MediaItem.RequestFulfilled"/>,
+    /// carried straight from <c>GenWave.Orchestration.Orchestrator</c>'s own carry-through, PLAN T90).
+    /// A CONSTANT instruction, never interpolation — there is no wish text, no parsed predicate, and
+    /// no listener-supplied fragment anywhere in <see cref="SegmentRequest"/> or <see cref="MediaItem"/>
+    /// for this line (or anything else in this prompt) to interpolate from; see
+    /// <c>GenWave.Tts.Tests.Specs.Story228_RequestShoutOut</c>'s reflection fact for the structural
+    /// proof. Deliberately vague about who/why: the copy MAY acknowledge the request line, but must
+    /// never invent or imply a specific listener, message, or reason — the model was never shown one.
+    /// </summary>
+    const string RequestLineAcknowledgmentLine =
+        "Request note: this track came in from the station's request line - mention that on air (e.g. " +
+        "\"got this one in from the request line\"); never say who requested it or why, and never " +
+        "repeat any listener wording - you were never shown any.";
+
+    /// <summary>
+    /// Composes the user-content half of the prompt (SPEC F34.3, F71.8, F83.1-F83.3, F87.7): station/
+    /// time/clock/segment framing, then whatever the track itself carries (title/artist/album/genre/
+    /// year — unchanged since before F71), then an OPTIONAL request-color line (SPEC F87.7, PLAN T91 —
+    /// see <see cref="RequestLineAcknowledgmentLine"/>) for a fulfilled track's own lead-in only, then,
+    /// last, an OPTIONAL persona-taste line (see <see cref="BuildTasteLine"/>) so each reads as one
+    /// more piece of color about THIS track rather than a separate directive.
+    /// <paramref name="previouslyVoicedTasteNotes"/> is the immediately preceding ON-AIR break's
+    /// fired-rule descriptions (see <see cref="DescribeFiredRules"/>) — see <see cref="LlmCopyWriter"/>'s
+    /// own remarks on where that memory lives and why a preview never supplies it.
     /// </summary>
     public static string BuildUserContent(
         SegmentRequest request, string stationClockLine, IReadOnlyList<string> previouslyVoicedTasteNotes)
@@ -206,6 +223,12 @@ static class LlmPromptBuilder
             if (!string.IsNullOrEmpty(track.Album)) lines.Add($"Album: {track.Album}");
             if (!string.IsNullOrEmpty(track.Genre)) lines.Add($"Genre: {track.Genre}");
             if (track.Year is { } year) lines.Add($"Year: {year}");
+
+            // SPEC F87.7: only a fulfilled track's OWN lead-in carries request color — never its
+            // back-announce (a fulfilled track that already aired still carries RequestFulfilled on
+            // MediaItem, so Kind gates this, not just the flag).
+            if (request.Kind == SegmentKind.LeadIn && track.RequestFulfilled)
+                lines.Add(RequestLineAcknowledgmentLine);
 
             var tasteLine = BuildTasteLine(track.PersonaPick, previouslyVoicedTasteNotes);
             if (tasteLine is not null)

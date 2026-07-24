@@ -13,12 +13,23 @@ public sealed class PatterTemplateRenderer
     /// Returns the patter text for <paramref name="request"/>.
     /// Null-<see cref="SegmentRequest.Track"/> cases produce safe fallback
     /// phrasings — never literal "null", never a <see cref="NullReferenceException"/>.
+    ///
+    /// <see cref="SegmentKind.LeadIn"/> carries an extra request-color variant (SPEC F87.7, PLAN T91):
+    /// when the upcoming track's own <see cref="MediaItem.RequestFulfilled"/> is set (PLAN T90's
+    /// carry-through), the generic "got this one in from the request line" acknowledgment leads the
+    /// same title/artist phrasing the plain variant already uses — station-known catalog metadata
+    /// only, never the wish text or a parsed predicate (neither of which this type — or anything
+    /// reaching this renderer — ever carries).
     /// </summary>
     public string Expand(SegmentRequest request) => request.Kind switch
     {
         SegmentKind.StationId    => $"You're listening to {request.StationName}.",
         SegmentKind.LeadIn       => request.Track switch
                                     {
+                                        { RequestFulfilled: true, Artist.Length: > 0 } t =>
+                                            $"Got this one in from the request line: {t.Title} by {t.Artist}.",
+                                        { RequestFulfilled: true } t =>
+                                            $"Got this one in from the request line: {t.Title}.",
                                         { Artist.Length: > 0 } t => $"Coming up: {t.Title} by {t.Artist}.",
                                         { } t                    => $"Coming up: {t.Title}.",
                                         null                     => "Coming up next.",
