@@ -1,6 +1,19 @@
 # Caddyfile — reference public-station front door (see DEPLOYMENT.md, used by compose.demo.yaml).
 # PUBLIC_HOST comes from .env (e.g. radio.example.com); Caddy substitutes {$VAR} from its
 # environment and handles TLS issuance for that hostname automatically.
+{
+    servers {
+        # gh-#129: without this, Caddy (v2.5+) treats its downstream — the cloudflared connector
+        # on the compose network — as untrusted, STRIPS the incoming X-Forwarded-For (which
+        # carries the real client IP from Cloudflare's edge), and substitutes the container
+        # address. Every public visitor then rate-limits as one caller. private_ranges trusts
+        # exactly the compose-network hop; Caddy preserves + appends, and the api's own
+        # KnownNetworks walk (Proxy:TrustedNetworks) resolves the first untrusted address —
+        # the listener's real IP.
+        trusted_proxies static private_ranges
+    }
+}
+
 {$PUBLIC_HOST} {
     # Match the Icecast mount first — mount name is literally /stream (icecast.xml.tmpl).
     handle /stream* {

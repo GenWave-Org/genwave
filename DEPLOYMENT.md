@@ -95,6 +95,17 @@ isn't publicly routed at all), but it stops being low-stakes the moment anyone f
 the *admin* plane with TLS. Documented gap: enable `XForwardedProto` in the same
 `ForwardedHeadersOptions` block before doing that.
 
+**Both halves of the chain must trust their hop (gh-#129).** The reference topology is
+two proxies deep (cloudflared → Caddy), and each layer defaults to distrust: Caddy
+v2.5+ *strips* inbound `X-Forwarded-For` unless the `Caddyfile` declares
+`trusted_proxies` (the shipped one does), and the api's forwarded-headers walk stops
+after ONE hop unless `Proxy:TrustedNetworks` is set (which also lifts the hop limit —
+the walk then runs to the first untrusted address, the real client). Miss either half
+and every public visitor resolves to a container IP: per-IP rate limits (the request
+line, the spectator 120/min) collapse into one shared partition — observed live as
+cross-IP 429s the day requests launched. Verify after deploy: a login line's
+`remote:` must show a real public IP, never `172.x`.
+
 ---
 
 ## 🧠 The DJ brain (ollama) on a shared box

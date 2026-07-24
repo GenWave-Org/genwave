@@ -143,6 +143,16 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor;
     foreach (var cidr in proxyOptions.TrustedNetworks)
         options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(cidr));
+
+    // gh-#129: the reference public topology is TWO trusted hops (cloudflared → Caddy). The
+    // middleware's default ForwardLimit=1 stops the XFF walk on the inner proxy's container
+    // address, so every public visitor rate-limits (and logs) as ONE caller — observed live as
+    // cross-IP 429s on the request line. With any trusted network configured, let the walk run
+    // until the first UNTRUSTED address (the real client): trust is enforced by KnownIPNetworks,
+    // never by hop-count truncation. No trusted networks ⇒ default limit stays — the middleware
+    // remains inert for direct-exposure deployments.
+    if (proxyOptions.TrustedNetworks.Count > 0)
+        options.ForwardLimit = null;
 });
 
 var app = builder.Build();
