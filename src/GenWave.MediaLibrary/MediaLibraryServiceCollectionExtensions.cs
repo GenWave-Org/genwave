@@ -77,6 +77,16 @@ public static class MediaLibraryServiceCollectionExtensions
         // on library.media.
         services.AddSingleton<IMediaLibraryMembership, MediaLibraryMembershipRepository>();
 
+        // SPEC F87.5, STORY-226, PLAN T89: the listener-request matcher's catalog probe — same
+        // cross-schema-boundary rationale as IMediaLibraryMembership above (station_svc has no grant
+        // on library.media). First consumer: GenWave.Host.Requests.RequestMatcher.
+        services.AddSingleton<IRequestCatalogProbe, RequestCatalogProbeRepository>();
+
+        // Artwork token seam (SPEC F88.2, gh-#105, STORY-222): lazy per-track token generation +
+        // token→media resolution. No consumer yet — T84 wires GET /spectator/api/artwork/{token}
+        // onto this.
+        services.AddSingleton<IArtworkTokenStore, ArtworkTokenRepository>();
+
         // Library read: name lookup + all-libraries-with-count for the admin library list endpoint.
         services.AddSingleton<ILibraryRepository, LibraryRepository>();
         // Library admin write: create/rename/delete (Epic J, STORY-047).

@@ -173,11 +173,23 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	  add column mood_tagged_at     timestamptz,
 	  add column mood_tag_missed_at timestamptz;
 
+	-- artwork_token (gh-#105, SPEC F88.2, STORY-222): random 128-bit value (32 lowercase hex
+	-- chars), generated lazily by ArtworkTokenRepository.GetOrCreateTokenAsync on a row's first
+	-- need. NULL for every row until then -- never backfilled, since a token is only ever minted
+	-- for a track that actually airs. No FK: this column lives entirely within library.media.
+	alter table library.media
+	  add column artwork_token text;
+
 	-- Composite partial index: scope-filtered random-ready pick (replaces scalar media_ready).
 	create index media_scope_ready on library.media (library_id, state) where state = 'ready';
 	create index media_artist      on library.media (artist);                       -- ready for criteria queries
 	create index media_genre       on library.media (genre);
 	create index media_year        on library.media (year);                        -- decade/year filter spine (F49.5)
+
+	-- media_artwork_token (gh-#105, SPEC F88.2): partial (see 23-artwork-token-migration.sh for
+	-- why partial rather than a plain unique index) -- non-enumerability itself comes from the
+	-- token's randomness, not this index.
+	create unique index media_artwork_token on library.media (artwork_token) where artwork_token is not null;
 
 	-- Rating (SPEC F33, STORY-109): a 1:1 extension table, deliberately not columns on library.media.
 	-- A vote must never bump library.media's xmin, or an open F18.6 tag-edit's If-Match would 409 on

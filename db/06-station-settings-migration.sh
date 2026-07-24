@@ -180,4 +180,33 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  created_at   timestamptz NOT NULL DEFAULT now(),
 	  UNIQUE (persona_id, booth_log_id, direction)
 	);
+
+	-- Listener requests (SPEC F87, STORY-224, PLAN T86, gh-#105-era epoch): the first public WRITE.
+	-- wish is nulled by an insert-time sweep once received_at is older than Requests:WishRetentionHours
+	-- (default 24h) — the SAME "eviction runs inside the insert's own transaction" discipline
+	-- booth_log's own retention sweep established above; artist/title/moods (the PARSED predicates)
+	-- and the row's outcome (status/matched_media_id/fulfilled_at) are never swept and stay
+	-- indefinitely. matched_media_id deliberately carries NO foreign key: library.media lives on the
+	-- other side of the schema-role boundary (station_svc has no grant there) — the exact
+	-- booth_log.media_id precedent just above. See db/24-request-migration.sh for the in-place
+	-- upgrade path this table also ships as, and its own remarks for the fuller rationale.
+	CREATE TABLE IF NOT EXISTS station.request (
+	  id               bigserial   PRIMARY KEY,
+	  received_at      timestamptz NOT NULL DEFAULT now(),
+	  wish             text,
+	  artist           text,
+	  title            text,
+	  moods            text[],
+	  status           text        NOT NULL DEFAULT 'pending'
+	                     CHECK (status IN ('pending', 'fulfilled', 'expired', 'unmatched')),
+	  matched_media_id bigint,
+	  fulfilled_at     timestamptz,
+	  expires_at       timestamptz NOT NULL
+	);
+
+	-- The one query shape every consumer needs: "find the oldest live pending request" (fulfillment,
+	-- T90) and "count/evict pending rows" (the PendingCap throttle, T87) both filter on status and
+	-- order/compare against expires_at.
+	CREATE INDEX IF NOT EXISTS request_pending
+	  ON station.request (status, expires_at);
 	SQL

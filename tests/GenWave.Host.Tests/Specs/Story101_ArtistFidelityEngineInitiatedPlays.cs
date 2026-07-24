@@ -31,6 +31,7 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Playout;
 using GenWave.Host.Api;
+using GenWave.Host.Engine;
 using GenWave.Host.Options;
 using GenWave.Host.Playout;
 
@@ -79,6 +80,8 @@ public static class FeatureArtistFidelityEngineInitiatedPlays
                 catalog,
                 new FixedOptionsMonitor<StationOptions>(stationOpts),
                 new FixedOptionsMonitor<LoudnessOptions>(new LoudnessOptions()),
+                new ArtworkUrlResolver(
+                    new FixedOptionsMonitor<StationOptions>(stationOpts), new FakeArtworkTokenStore()),
                 NullLogger.Instance,
                 ctx.Response,
                 CancellationToken.None);

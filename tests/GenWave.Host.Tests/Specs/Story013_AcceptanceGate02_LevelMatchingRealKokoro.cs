@@ -194,6 +194,8 @@ public static class FeatureAcceptanceGate02LevelMatchingRealKokoro
                 },
                 stationId: "st-01",
                 new FakeStationIdentityProvider(new StationIdentity("st-01", "GenWave", "af_heart")),
+                new ArtworkUrlResolver(
+                    new FakeOptionsMonitor<StationOptions>(new StationOptions()), new FakeArtworkTokenStore()),
                 NullLogger<LiquidsoapControl>.Instance);
 
             ttsItem = new MediaItem("tts:abc123", "/tmp/abc123.wav", "You're listening to GenWave.", FixedLoudness);

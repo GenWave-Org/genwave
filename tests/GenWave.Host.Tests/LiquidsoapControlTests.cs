@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using GenWave.Core.Domain;
 using GenWave.Host.Engine;
 using GenWave.Host.Options;
@@ -38,6 +39,9 @@ public class LiquidsoapControlTests
         on_air_timestamp="1780971600.0"
         """;
 
+    // Station:PublicBaseUrl defaults empty (STORY-223, PLAN T85) — every fact in this file exercises
+    // the pre-F88 push shape unless a test overrides it, so ArtworkUrlResolver never touches
+    // FakeArtworkTokenStore here.
     static LiquidsoapControl Control(FakeEngineServer server) =>
         new(new LiquidsoapOptions
             {
@@ -47,6 +51,7 @@ public class LiquidsoapControlTests
             },
             stationId: "st-01",
             new FakeStationIdentityProvider(new StationIdentity("st-01", "GenWave", "af_heart")),
+            new ArtworkUrlResolver(new FakeOptionsMonitor<StationOptions>(new StationOptions()), new FakeArtworkTokenStore()),
             NullLogger<LiquidsoapControl>.Instance);
 
     [Fact]

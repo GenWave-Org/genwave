@@ -1,11 +1,13 @@
 using Microsoft.AspNetCore.HttpOverrides;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Api;
+using GenWave.Host.Artwork;
 using GenWave.Host.Configuration;
 using GenWave.Host.Enrichment;
 using GenWave.Host.Health;
 using GenWave.Host.Options;
 using GenWave.Host.Playout;
+using GenWave.Host.Requests;
 using GenWave.Host.Seeding;
 using GenWave.Host.Stats;
 using GenWave.MediaLibrary;
@@ -49,6 +51,10 @@ builder.Services
     // GenWave.MediaLibrary ever referencing GenWave.Tts. MUST run after .AddGenWaveTts(cfg) above
     // (IDegradationModeReader/LlmOptions).
     .AddGenWaveMoodTaggingGate()
+    // Listener-request wish parser (SPEC F87.4, STORY-225, PLAN T88): the channel-fed background
+    // service + IWishParser pair (LLM-backed, deterministic fallback). Same ordering constraint as
+    // AddGenWaveMoodTaggingGate above — needs IDegradationModeReader/LlmOptions from AddGenWaveTts.
+    .AddGenWaveRequestParsing()
     // Safe-loop authoring pipeline (F27): TTS render → jingle-bed mix → measure → authored insert.
     .AddGenWaveSafeSegmentAuthoring()
     // SEAM 1: the Orchestrator is the INextItemProvider (music + TTS patter interleave).
@@ -58,6 +64,11 @@ builder.Services
     // that call's own TryAddSingleton<..., NoOpPersonaPickProvider> default (see this extension's
     // own remarks).
     .AddGenWavePersonaRanking(cfg)
+    // Real fulfillment-rung source (SPEC F87.6, STORY-227, PLAN T90) — MUST run after
+    // AddGenWaveOrchestration so its AddSingleton<IRequestFulfillmentSource> wins over that call's
+    // own TryAddSingleton<..., NoOpRequestFulfillmentSource> default (mirrors AddGenWavePersonaRanking's
+    // own ordering rule one line above).
+    .AddGenWaveRequestFulfillment()
     // Playout chain: engine control → feeder → feeder service → PlayoutSupervisor (hosted).
     .AddGenWavePlayout()
     // Boot seed: branded safe-loop backstop (F27.6), one-shot + idempotent.
@@ -94,6 +105,26 @@ builder.Services.AddSingleton<IListenerStatsSource>(sp => sp.GetRequiredService<
 builder.Services.Configure<ListenerStatsOptions>(cfg.GetSection(ListenerStatsOptions.SectionName));
 builder.Services.AddSingleton<ListenerStatsSampler>();
 builder.Services.AddHostedService<ListenerStatsPollerService>();
+
+// Per-track artwork extraction cache (SPEC F88.3, STORY-222, PLAN T84): env/compose-only, same
+// deployment-topology class as Tts:CacheRoot — ValidateOnStart mirrors every other options class
+// bound this way (see ArtworkOptions' own remarks for why CacheDir defaults under the tts volume).
+builder.Services
+    .AddOptions<ArtworkOptions>()
+    .Bind(cfg.GetSection(ArtworkOptions.Section))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddSingleton<ArtworkService>();
+
+// Listener-request throttle knobs (SPEC F87, STORY-224, PLAN T86): env/compose-only, deliberately
+// absent from StationSettingsAllowlist — an operator-tuned deployment setting, not a live PUT (the
+// three keys that ARE live editable live on StationOptions.Requests, Station:Requests:* instead).
+// ValidateOnStart mirrors ArtworkOptions just above.
+builder.Services
+    .AddOptions<RequestsOptions>()
+    .Bind(cfg.GetSection(RequestsOptions.Section))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
 builder.Services.AddControllers();
 

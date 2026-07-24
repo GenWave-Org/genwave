@@ -40,18 +40,24 @@ using GenWave.Core.Domain;
 /// rows" (F41.2) — logs a WARN naming the drain and returns null non-fatally (F6.3 stands).
 ///
 /// <para>
-/// Every music pick is envelope-aware (SPEC F81, STORY-212): <see cref="SelectEnvelopeAwareCandidateAsync"/>
-/// is the seam that has replaced the direct <see cref="IMediaCatalog.GetRotationCandidateAsync"/> call
-/// sites below. It tries <paramref name="personaPickProvider"/> first (rung 0 — a no-op today, SPEC
-/// F81.2: playout never depends on the persona layer existing; PLAN T64 wires a real ranker in), then
-/// falls back to the by-construction-filtered <see cref="IMediaCatalog.GetEnvelopeCandidateAsync"/>
-/// with <paramref name="envelopeProvider"/>'s live envelope (read fresh per pick, same F30.1
-/// discipline). Whatever either source returns is re-checked against the envelope (trust-but-verify,
-/// SPEC F81.5) before this Orchestrator trusts it. When the envelope-constrained pool is genuinely
-/// empty, a degradation ladder (SPEC F81.6) relaxes rotation, then energy, then genres — each rung
-/// logging a loud WARN naming what gave way — before falling back to the plain
+/// Every music pick consults <paramref name="requestFulfillmentSource"/> FIRST (SPEC F87.6, rung -1: a
+/// live pending listener request short-circuits the pick entirely, ahead of persona ranking and the
+/// envelope-only ladder alike — a no-op today unless a host binds the real
+/// <c>RequestFulfillmentProvider</c>, PLAN T90) — see <see cref="SelectMusicCandidateAsync"/>'s own
+/// remarks for exactly where that single consultation sits relative to its boundary-bias resample
+/// loop (PLAN T90 review: the rung must run ONCE per pick, never once per sample). Failing that, every
+/// pick is envelope-aware (SPEC F81, STORY-212): <see cref="SelectEnvelopeAwareCandidateAsync"/> is the
+/// seam that has replaced the direct <see cref="IMediaCatalog.GetRotationCandidateAsync"/> call sites
+/// below. It tries <paramref name="personaPickProvider"/> first (rung 0 — a no-op today, SPEC F81.2:
+/// playout never depends on the persona layer existing; PLAN T64 wires a real ranker in), then falls
+/// back to the by-construction-filtered <see cref="IMediaCatalog.GetEnvelopeCandidateAsync"/> with
+/// <paramref name="envelopeProvider"/>'s live envelope (read fresh per pick, same F30.1 discipline).
+/// Whatever either source returns is re-checked against the envelope (trust-but-verify, SPEC F81.5)
+/// before this Orchestrator trusts it. When the envelope-constrained pool is genuinely empty, a
+/// degradation ladder (SPEC F81.6) relaxes rotation, then energy, then genres — each rung logging a
+/// loud WARN naming what gave way — before falling back to the plain
 /// <see cref="IMediaCatalog.GetRotationCandidateAsync"/> query as the final never-silence rung. See
-/// <see cref="SelectEnvelopeAwareCandidateAsync"/>'s own remarks for the full rung order.
+/// <see cref="SelectEnvelopeAwareCandidateAsync"/>'s own remarks for the full rung order below rung -1.
 /// </para>
 ///
 /// <paramref name="renderBudgetProvider"/> caps how long any single TTS render may take, read fresh
@@ -114,7 +120,8 @@ public sealed class Orchestrator(
     TimeProvider timeProvider,
     IBoundaryBiasProvider boundaryBiasProvider,
     IEnvelopeProvider? envelopeProvider = null,
-    IPersonaPickProvider? personaPickProvider = null) : INextItemProvider
+    IPersonaPickProvider? personaPickProvider = null,
+    IRequestFulfillmentSource? requestFulfillmentSource = null) : INextItemProvider
 {
     /// <summary>
     /// How many independent rotation-tiered samples <see cref="SelectMusicCandidateAsync"/> draws
@@ -145,6 +152,8 @@ public sealed class Orchestrator(
     // codebase (e.g. GenWave.Tts.TtsSegmentSource).
     readonly IEnvelopeProvider envelopeProvider = envelopeProvider ?? StationDefaultEnvelopeProvider.Instance;
     readonly IPersonaPickProvider personaPickProvider = personaPickProvider ?? NoOpPersonaPickProvider.Instance;
+    readonly IRequestFulfillmentSource requestFulfillmentSource =
+        requestFulfillmentSource ?? NoOpRequestFulfillmentSource.Instance;
 
     readonly Queue<MediaItem> buffer = new();
     MediaItem? previousTrack;
@@ -203,6 +212,11 @@ public sealed class Orchestrator(
         if (candidate.PersonaPick is { } personaPickDiagnostics)
             track = track with { PersonaPick = personaPickDiagnostics };
 
+        // SPEC F87.6/F87.7 marker vehicle to a future copywriter consumer (T91) — rides the same
+        // RotationCandidate -> MediaItem carry-through PersonaPick just used, immediately above.
+        if (candidate.RequestFulfilled)
+            track = track with { RequestFulfilled = true };
+
         await EnqueuePatterAsync(previousTrack, track, ct);
         buffer.Enqueue(track);
 
@@ -218,6 +232,21 @@ public sealed class Orchestrator(
     /// (<see cref="SpeechDeferralQueue.NextDue"/>) is due strictly in the future within
     /// <see cref="boundaryBiasProvider"/>'s lookahead window (SPEC F74.3, STORY-198), softly biases
     /// that pick toward whichever sampled candidate's end lands closest to the due time.
+    ///
+    /// <para>
+    /// <b>Rung -1 sits HERE, above the sampler (SPEC F87.6, PLAN T90 review carry-over):</b>
+    /// <see cref="TryFulfillPendingRequestAsync"/> is consulted exactly ONCE per pick, before the
+    /// due/bias branch below even runs, and a hit short-circuits the ENTIRE pick — bias loop
+    /// included. It used to live one level down, inside <see cref="SelectEnvelopeAwareCandidateAsync"/>,
+    /// which the bias loop below calls up to <see cref="BoundarySampleAttempts"/> times per pick; a
+    /// non-idempotent CAS-stamp-and-publish side effect run from inside a method whose whole contract
+    /// is "safe to resample" is a bug two ways at once — a stamped request's track could still lose
+    /// the timing comparison and never air while narrated fulfilled, and every extra sample stamped
+    /// (and published) one more pending request that should have waited its turn. Hoisting the
+    /// consultation up here makes <see cref="SelectEnvelopeAwareCandidateAsync"/> a pure, freely
+    /// repeatable sampler again and gives every pick exactly one CAS attempt, full stop, regardless of
+    /// whether the bias loop below ever activates.
+    /// </para>
     ///
     /// <para>
     /// A due-now-or-overdue deferral (the only shape today's cadence producer ever enqueues, per
@@ -251,6 +280,12 @@ public sealed class Orchestrator(
     async Task<RotationCandidate?> SelectMusicCandidateAsync(
         LibraryScope scope, IReadOnlyList<string> orderedRecentIds, int artistSeparation, CancellationToken ct)
     {
+        // Rung -1, once per pick (SPEC F87.6, PLAN T90 review) — see this method's own remarks for
+        // why this sits above the due/bias branch rather than inside the sampler it guards.
+        var envelope = envelopeProvider.Current;
+        if (await TryFulfillPendingRequestAsync(envelope, ct) is { } fulfilledCandidate)
+            return fulfilledCandidate;
+
         var due = deferralQueue.NextDue;
         var untilDue = due is null ? default : due.Value - timeProvider.GetUtcNow();
 
@@ -295,6 +330,17 @@ public sealed class Orchestrator(
     /// here instead. The live envelope (<paramref name="envelopeProvider"/>, read fresh — never
     /// cached — same F30.1 discipline every sibling provider follows) governs both rung 0 and the
     /// ladder below.
+    ///
+    /// <para>
+    /// <b>Pure and freely repeatable (PLAN T90 review carry-over):</b> this method has NO side
+    /// effects of its own beyond logging — <see cref="SelectMusicCandidateAsync"/>'s boundary-bias
+    /// loop calls it up to <see cref="BoundarySampleAttempts"/> times per single pick to approximate
+    /// sampling from a pool (see that method's own remarks), so re-running it must never do anything
+    /// that is not safe to do 5 times over. The one-shot request-fulfillment consultation (SPEC
+    /// F87.6, rung -1) does NOT live here for exactly that reason — it CAS-stamps a request row and
+    /// publishes an event, neither of which is idempotent, so it is consulted exactly ONCE per pick,
+    /// one level up in <see cref="SelectMusicCandidateAsync"/>, before this sampler ever runs.
+    /// </para>
     ///
     /// <para>
     /// <b>Rung 0 — persona pick (SPEC F81.6):</b> <see cref="TryPersonaPickAsync"/> tries
@@ -357,6 +403,48 @@ public sealed class Orchestrator(
         if (candidate is not null)
             LogPerPickDebugLine(candidate, degradationStep);
         return candidate;
+    }
+
+    /// <summary>
+    /// SPEC F87.6 rung -1: never lets a fault in <see cref="requestFulfillmentSource"/> escape as a
+    /// faulted pick — mirrors <see cref="TryPersonaPickAsync"/>'s own catch posture one rung down. A
+    /// fulfillment is logged at Information (request id, matched-vs-vibe, the media id) rather than
+    /// riding the per-pick Debug line below: that line's envelope/pool/topScores/firedRules vocabulary
+    /// describes a persona/envelope-ladder pick, not a request short-circuit, and would read as an
+    /// empty, confusing line for this rung.
+    ///
+    /// <para>
+    /// Called from <see cref="SelectMusicCandidateAsync"/> — ONE level above
+    /// <see cref="SelectEnvelopeAwareCandidateAsync"/>'s own boundary-bias resample loop, never from
+    /// inside it (PLAN T90 review carry-over) — exactly ONCE per pick regardless of whether that loop
+    /// activates: the CAS-stamp-and-publish this triggers is a one-shot side effect (SPEC F87.6),
+    /// never safe to repeat across a bias loop's up-to-<see cref="BoundarySampleAttempts"/> resamples.
+    /// </para>
+    /// </summary>
+    async Task<RotationCandidate?> TryFulfillPendingRequestAsync(SegmentEnvelope envelope, CancellationToken ct)
+    {
+        try
+        {
+            var fulfillment = await requestFulfillmentSource.TryFulfillAsync(envelope, ct);
+            if (fulfillment is null) return null;
+
+            logger.LogInformation(
+                "Fulfilling pending request {RequestId} ({Kind}) with track {MediaId} (SPEC F87.6).",
+                fulfillment.RequestId, fulfillment.WasVibe ? "vibe" : "matched", fulfillment.Candidate.Media.MediaId);
+            return fulfillment.Candidate;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Request fulfillment layer faulted — degrading to the normal pick chain (SPEC F87.6, " +
+                "mirrors F81.6's rung-0 catch posture).");
+            return null;
+        }
     }
 
     /// <summary>

@@ -52,15 +52,26 @@ public static class FeatureIcecastTwoFive
 
     public static class ScenarioMetadataContractHolds
     {
-        // Pinned 2026-07-23 (PLAN T82): engine/genwave.liq's gw_icy_song StreamTitle builder —
+        // Pinned 2026-07-23 (PLAN T82); re-pinned 2026-07-23 (PLAN T85, STORY-223, SPEC F88.4) —
+        // the epoch change T85's own PLAN line sanctions: output.icecast now carries an explicit
+        // icy_metadata=[...] list (the engine default plus "url"), so the C# feeder's
+        // Station:PublicBaseUrl-driven url= annotation actually reaches the ICY StreamUrl a
+        // metadata-aware client sees. engine/genwave.liq's gw_icy_song StreamTitle builder —
         // statically guarded by Story182/FeatureListenerMetadataDisclosure to consume only
-        // artist/title and touch no internal metadata key — is untouched by this Icecast 2.5.0
-        // rebuild. Re-asserting Story182's own "artist/title only" fact here would duplicate it
-        // verbatim, so this pins the file's bytes instead: unlike a targeted content check, a
-        // whole-file hash also catches an edit Story182's regexes wouldn't (e.g. reordering
-        // outside the gw_icy_song block). The live T26 ICY/status-page capture against the
-        // running 2.5.0 image is T82's manual half, re-run once at deploy — not exercised here.
-        const string EngineScriptSha256 = "0aff41c4f3d43bae6c00ca32540ad472b7fc33dfbff37e98791dfe4eb3d5dfbb";
+        // artist/title and touch no internal metadata key — is untouched by either this rebuild
+        // or T85's icy_metadata addition. Re-asserting Story182's own "artist/title only" fact
+        // here would duplicate it verbatim, so this pins the file's bytes instead: unlike a
+        // targeted content check, a whole-file hash also catches an edit Story182's regexes
+        // wouldn't (e.g. reordering outside the gw_icy_song block). The live T26 ICY/status-page
+        // capture against the running 2.5.0 image is T82's manual half; the live per-track
+        // StreamUrl observation against the compose stack is T93/T94's — neither is exercised here.
+        //
+        // T93 epoch (F88.4 export fix) — T85's icy_metadata addition alone was not sufficient:
+        // settings.encoder.metadata.export (the gate a few lines above icy_metadata in the file)
+        // never carried "url", so the annotation was filtered out before icy_song/icy_metadata saw
+        // it and StreamUrl never reached listeners (Story230 gate's live-run finding). Re-pinned
+        // to the one-line export-list fix.
+        const string EngineScriptSha256 = "11c8b3b59b4b641dc59fa4217e935442573adf04f8e756934e23593b17677049";
 
         [Fact]
         public static void StreamTitleBuilderInputsRemainPinned()

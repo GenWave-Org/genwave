@@ -17,11 +17,20 @@ public static class LiquidsoapAnnotationBuilder
     /// <param name="gainDb">Target replay-gain correction in dB.</param>
     /// <param name="stationId">Station identifier stamped onto every track (issue gitea-#148).</param>
     /// <param name="stationName">Station display name stamped onto every track (issue gitea-#148).</param>
+    /// <param name="artworkUrl">
+    /// The item's resolved artwork/station-icon URL (SPEC F88.4–F88.5, STORY-223, PLAN T85), or
+    /// <see langword="null"/>/empty to omit the key entirely — the F88.5 "empty base ⇒ no url=
+    /// anywhere" contract, and this method's own honest-absence discipline (same shape as
+    /// <see cref="MediaItem.Cue"/>/<see cref="MediaItem.IntroEnergy"/> above). A caller resolves
+    /// the value through the async, I/O-bearing <see cref="ArtworkUrlResolver"/> and passes a
+    /// plain string here, so this method itself stays pure and synchronous.
+    /// </param>
     /// <returns>
     /// A single-line string of the form
     /// <c>annotate:track_id="…",station_id="…",...,title="…":/locator</c>.
     /// </returns>
-    public static string Build(MediaItem item, double gainDb, string stationId, string stationName)
+    public static string Build(
+        MediaItem item, double gainDb, string stationId, string stationName, string? artworkUrl = null)
     {
         var isTts = item.MediaId.StartsWith("tts:", StringComparison.Ordinal);
         // F38.1: artist is always stamped — explicitly empty when the row has none. The telnet
@@ -51,6 +60,12 @@ public static class LiquidsoapAnnotationBuilder
         var ttsCrossField = isTts && item.DurationMs is { } durationMs
             ? $"liq_cross_duration=\"{Math.Clamp(durationMs / 1000.0 * 0.5, 0.2, 3.0).ToString("F2", CultureInfo.InvariantCulture)}\","
             : string.Empty;
+        // SPEC F88.4–F88.5 (STORY-223, PLAN T85): omit-when-empty, same discipline as cueFields/
+        // energyFields above — a blank Station:PublicBaseUrl (the default) means artworkUrl always
+        // arrives null/empty here, so this annotation stays byte-identical to every pre-F88 push.
+        var urlField = string.IsNullOrEmpty(artworkUrl)
+            ? string.Empty
+            : $"url=\"{Escape(artworkUrl)}\",";
 
         return
             $"annotate:track_id=\"{Escape(item.MediaId)}\"," +
@@ -60,6 +75,7 @@ public static class LiquidsoapAnnotationBuilder
             $"replay_gain=\"{gainDb.ToString("0.00", CultureInfo.InvariantCulture)} dB\"," +
             artistField +
             cueFields +
+            urlField +
             energyFields +
             ttsCrossField +
             $"title=\"{Escape(item.Title)}\":{item.Locator}";

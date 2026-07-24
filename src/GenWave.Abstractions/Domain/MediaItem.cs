@@ -30,4 +30,13 @@ namespace GenWave.Core.Domain;
 /// read <see cref="PersonaPickDiagnostics.FiredRules"/>/<see cref="PersonaPickDiagnostics.IsExploration"/>
 /// off whichever track is airing, with no separate lookup.
 /// </param>
-public sealed record MediaItem(string MediaId, string Locator, string Title, Loudness Loudness, string? Artist = null, CuePoints? Cue = null, double? IntroEnergy = null, double? OutroEnergy = null, string? Album = null, string? Genre = null, int? Year = null, int? DurationMs = null, PersonaPickDiagnostics? PersonaPick = null);
+/// <param name="RequestFulfilled">
+/// SPEC F87.6/F87.7 (STORY-227, PLAN T90) — <see langword="true"/> when this track was pulled onto
+/// air by the fulfillment rung's short-circuit rather than persona/envelope selection, carried
+/// straight from <see cref="RotationCandidate.RequestFulfilled"/> the same way <see cref="PersonaPick"/>
+/// rides across from <see cref="RotationCandidate.PersonaPick"/>. Reaches <see cref="SegmentRequest.Track"/>
+/// for the lead-in <c>Orchestrator.EnqueuePatterAsync</c> builds for this exact track, so a future
+/// copywriter consumer (T91) can color the lead-in with a generic "got this one in from the request
+/// line" acknowledgment — never the wish text or parsed predicates (F87.7's disclosure law).
+/// </param>
+public sealed record MediaItem(string MediaId, string Locator, string Title, Loudness Loudness, string? Artist = null, CuePoints? Cue = null, double? IntroEnergy = null, double? OutroEnergy = null, string? Album = null, string? Genre = null, int? Year = null, int? DurationMs = null, PersonaPickDiagnostics? PersonaPick = null, bool RequestFulfilled = false);

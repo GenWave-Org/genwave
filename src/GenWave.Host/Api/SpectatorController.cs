@@ -154,9 +154,11 @@ public sealed class SpectatorController(
     }
 
     /// <summary>
-    /// GET /spectator/api/about — the public identity panel (SPEC F62.8, F65.3): station name and
-    /// public stream URL read live from <see cref="StationOptions"/>, alongside the build-stamped
-    /// version, license, and canonical project URL, which cannot change at runtime.
+    /// GET /spectator/api/about — the public identity panel (SPEC F62.8, F65.3): station name,
+    /// public stream URL, and the listener-requests toggle read live from <see cref="StationOptions"/>
+    /// (the latter added by SPEC F87.11, STORY-229, PLAN T92 — see <see cref="SpectatorAbout.RequestsEnabled"/>),
+    /// alongside the build-stamped version, license, and canonical project URL, which cannot change
+    /// at runtime.
     /// </summary>
     [HttpGet("about")]
     [OutputCache(PolicyName = SpectatorOutputCachePolicies.About)]
@@ -164,7 +166,8 @@ public sealed class SpectatorController(
     public IActionResult GetAbout()
     {
         var options = stationMonitor.CurrentValue;
-        return Ok(new SpectatorAbout(options.Name, HostVersion, License, ProjectUrl, options.PublicStreamUrl));
+        return Ok(new SpectatorAbout(
+            options.Name, HostVersion, License, ProjectUrl, options.PublicStreamUrl, options.Requests.Enabled));
     }
 
     static object ToPublicEntry(PlayHistoryEntry entry) =>

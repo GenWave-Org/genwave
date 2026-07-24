@@ -23,10 +23,23 @@ namespace GenWave.Core.Domain;
 /// (SPEC F81.6) — the debug-line/T65 taste-context carrier; every envelope-only ladder pick,
 /// including the common persona-off case, leaves it <see langword="null"/>.
 /// </para>
+///
+/// <para>
+/// <see cref="RequestFulfilled"/> (SPEC F87.6/F87.7, STORY-227, PLAN T90) is <see langword="true"/>
+/// only for a candidate <c>GenWave.Orchestration.RequestFulfillmentProvider</c> resolved from a live
+/// pending listener request — the fulfillment rung that short-circuits ahead of
+/// <see cref="PersonaPick"/>'s own rung, so the two are mutually exclusive in practice (a fulfilled
+/// pick never also carries persona diagnostics). Carried through onto <see cref="MediaItem.RequestFulfilled"/>
+/// the same way <see cref="PersonaPick"/> itself rides onto <see cref="MediaItem.PersonaPick"/> — the
+/// marker vehicle a future copywriter consumer (T91) reads at prompt time. Deliberately NOT part of
+/// the persisted F86.1 booth-log pick jsonb (<c>BoothLogPickStamp</c>'s shape is pinned) — this field
+/// only ever travels the in-memory Orchestrator → TTS prompt-assembly path.
+/// </para>
 /// </summary>
 public sealed record RotationCandidate(
     MediaReference Media,
     bool RepeatedRecent,
     bool RepeatedArtist,
     double? Energy = null,
-    PersonaPickDiagnostics? PersonaPick = null);
+    PersonaPickDiagnostics? PersonaPick = null,
+    bool RequestFulfilled = false);

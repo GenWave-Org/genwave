@@ -1,0 +1,680 @@
+// STORY-224 — Anyone can ask; nobody can probe (DB-backed half)
+//
+// BDD specification — xUnit (SPEC F87.1, F87.3, F87.8). Postgres-backed (Category=Integration,
+// shared DatabaseFixture) — the insert-time retention sweep, the pending-cap eviction, and the
+// status CHECK constraint's teeth are real-DB behavior a fake store would never exercise
+// honestly. T86 lands db/24 (folded into db/06 for this fixture, per its own remarks) +
+// RequestRepository — exactly what T87's intake endpoint needs (Insert-with-sweep, CountPending,
+// EvictOldestPending). The endpoint itself is Host.Tests' own Story224_RequestIntake.cs, T87's scope
+// — this file owns none of that surface, only the store beneath it.
+
+using Dapper;
+using GenWave.MediaLibrary.Station;
+using Npgsql;
+
+namespace GenWave.MediaLibrary.Tests.Specs;
+
+public static class FeatureRequestStore
+{
+    // ---------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------
+
+    static RequestRepository Repo(DatabaseFixture db, int wishRetentionHours = 24) =>
+        new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource), wishRetentionHours);
+
+    /// <summary>
+    /// Dapper-mapped projection for this file's own direct-SQL assertions. Settable properties, not
+    /// a positional record — <c>Moods</c>' <c>text[]</c> column reports as the general
+    /// <see cref="Array"/> CLR type through the reader (rather than the concrete <c>string[]</c>),
+    /// which Dapper's stricter constructor-matching (used for positional records — the shape
+    /// <see cref="PersonaTasteRow"/>/<see cref="BoothLogRepository"/>'s row records use, neither of
+    /// which projects an array column) rejects; the property-setter path this shape falls back to
+    /// coerces it instead, mirroring <see cref="Catalog.MediaRow.Moods"/>'s own settable-property
+    /// convention. <c>DateTime</c>, not <c>DateTimeOffset</c> — Npgsql's default <c>timestamptz</c>
+    /// reader shape.
+    /// </summary>
+    sealed record RequestRow
+    {
+        public string? Wish { get; init; }
+        public string? Artist { get; init; }
+        public string? Title { get; init; }
+        public string[]? Moods { get; init; }
+        public string Status { get; init; } = "";
+        public DateTime ReceivedAt { get; init; }
+        public DateTime ExpiresAt { get; init; }
+    }
+
+    static async Task<RequestRow> ReadRowAsync(DatabaseFixture db, long id)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        return await conn.QuerySingleAsync<RequestRow>(
+            """
+            select wish, artist, title, moods, status, received_at, expires_at
+            from station.request where id = @id
+            """,
+            new { id });
+    }
+
+    static async Task<int> CountAllRowsAsync(DatabaseFixture db)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        return await conn.ExecuteScalarAsync<int>("select count(*)::int from station.request");
+    }
+
+    /// <summary>
+    /// Inserts a fully-populated row directly (bypassing the repository) so the retention/eviction
+    /// scenarios can control <c>received_at</c> and pre-set parsed predicates/status the repository
+    /// itself never writes (that is the parser/matcher's job, T88/T89).
+    /// </summary>
+    static async Task<long> InsertRawRowAsync(
+        DatabaseFixture db, string? wish, string? artist, string? title, string[]? moods,
+        string status, TimeSpan receivedAgo)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        return await conn.ExecuteScalarAsync<long>(
+            """
+            insert into station.request (received_at, wish, artist, title, moods, status, expires_at)
+            values (now() - make_interval(secs => @receivedAgoSeconds), @wish, @artist, @title,
+                    @moods, @status, now() + interval '15 minutes')
+            returning id
+            """,
+            new
+            {
+                receivedAgoSeconds = receivedAgo.TotalSeconds,
+                wish, artist, title, moods, status,
+            });
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — insert round trip (F87.1, AC2)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioInsert(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task A_new_wish_lands_pending_with_the_given_expiry()
+        {
+            // Given no prior requests...
+            await db.ResetRequestAsync();
+            var expiresAt = DateTimeOffset.UtcNow.AddMinutes(15);
+            var repo = Repo(db);
+
+            // When one wish is inserted...
+            var id = await repo.InsertAsync("something dreamier by Zeppelin", expiresAt, CancellationToken.None);
+
+            // Then it lands pending, holding the wish text and the caller's expiry.
+            var row = await ReadRowAsync(db, id);
+            Assert.Equal("something dreamier by Zeppelin", row.Wish);
+            Assert.Equal("pending", row.Status);
+            Assert.Equal(expiresAt.UtcDateTime, row.ExpiresAt, TimeSpan.FromSeconds(1));
+            Assert.True(row.ReceivedAt > DateTime.UtcNow.AddMinutes(-1));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — insert-time wish retention sweep (F87.8)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioRetentionSweep(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task Insert_nulls_wish_text_on_rows_older_than_retention_but_keeps_predicates_and_outcome()
+        {
+            // Given an old row past the 24h retention window, already parsed and matched...
+            await db.ResetRequestAsync();
+            var oldId = await InsertRawRowAsync(
+                db, wish: "something dreamier by Zeppelin", artist: "Led Zeppelin", title: null,
+                moods: ["chill", "dreamy"], status: "unmatched", receivedAgo: TimeSpan.FromHours(48));
+            var repo = Repo(db, wishRetentionHours: 24);
+
+            // When a new wish is inserted (the sweep runs inside that SAME insert's transaction)...
+            await repo.InsertAsync("a new wish", DateTimeOffset.UtcNow.AddMinutes(15), CancellationToken.None);
+
+            // Then the old row's wish text is gone, but its parsed predicates and outcome survive.
+            var oldRow = await ReadRowAsync(db, oldId);
+            Assert.Null(oldRow.Wish);
+            Assert.Equal("Led Zeppelin", oldRow.Artist);
+            Assert.NotNull(oldRow.Moods);
+            Assert.Equal(["chill", "dreamy"], oldRow.Moods);
+            Assert.Equal("unmatched", oldRow.Status);
+        }
+
+        [Fact]
+        public async Task A_row_inside_the_retention_window_keeps_its_wish_text()
+        {
+            // Given a recent row, well inside a 24h retention window...
+            await db.ResetRequestAsync();
+            var recentId = await InsertRawRowAsync(
+                db, wish: "still fresh", artist: null, title: null, moods: null,
+                status: "pending", receivedAgo: TimeSpan.FromHours(1));
+            var repo = Repo(db, wishRetentionHours: 24);
+
+            // When a new wish is inserted (the sweep runs, but has nothing old to touch)...
+            await repo.InsertAsync("a new wish", DateTimeOffset.UtcNow.AddMinutes(15), CancellationToken.None);
+
+            // Then the recent row's wish text is untouched.
+            var recentRow = await ReadRowAsync(db, recentId);
+            Assert.Equal("still fresh", recentRow.Wish);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — pending count (F87.3)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioCountPending(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task Only_pending_rows_are_counted()
+        {
+            // Given two pending rows and one already fulfilled...
+            await db.ResetRequestAsync();
+            await InsertRawRowAsync(db, "a", null, null, null, "pending", TimeSpan.Zero);
+            await InsertRawRowAsync(db, "b", null, null, null, "pending", TimeSpan.Zero);
+            await InsertRawRowAsync(db, "c", null, null, null, "fulfilled", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the pending count is read...
+            var count = await repo.CountPendingAsync(CancellationToken.None);
+
+            // Then only the two pending rows are counted.
+            Assert.Equal(2, count);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — oldest-pending eviction (F87.3)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioEvictOldestPending(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task Eviction_removes_exactly_the_oldest_pending_row()
+        {
+            // Given three pending rows at distinct ages, oldest first...
+            await db.ResetRequestAsync();
+            var oldestId = await InsertRawRowAsync(db, "oldest", null, null, null, "pending", TimeSpan.FromMinutes(30));
+            var middleId = await InsertRawRowAsync(db, "middle", null, null, null, "pending", TimeSpan.FromMinutes(20));
+            var newestId = await InsertRawRowAsync(db, "newest", null, null, null, "pending", TimeSpan.FromMinutes(10));
+            var repo = Repo(db);
+
+            // When the pending cap evicts...
+            await repo.EvictOldestPendingAsync(CancellationToken.None);
+
+            // Then exactly the oldest row is gone; the other two remain untouched.
+            Assert.Equal(2, await CountAllRowsAsync(db));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => ReadRowAsync(db, oldestId));
+            Assert.Equal("middle", (await ReadRowAsync(db, middleId)).Wish);
+            Assert.Equal("newest", (await ReadRowAsync(db, newestId)).Wish);
+        }
+
+        [Fact]
+        public async Task Eviction_is_a_no_op_when_no_pending_row_exists()
+        {
+            // Given only a non-pending row...
+            await db.ResetRequestAsync();
+            await InsertRawRowAsync(db, "already fulfilled", null, null, null, "fulfilled", TimeSpan.FromMinutes(30));
+            var repo = Repo(db);
+
+            // When eviction runs...
+            await repo.EvictOldestPendingAsync(CancellationToken.None);
+
+            // Then nothing was removed — there was no pending row to evict.
+            Assert.Equal(1, await CountAllRowsAsync(db));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — GetForParseAsync (SPEC F87.4, STORY-225, PLAN T88)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioGetForParse(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task An_unparsed_pending_row_is_returned_for_parsing()
+        {
+            // Given a freshly-inserted, never-parsed pending row...
+            await db.ResetRequestAsync();
+            var id = await InsertRawRowAsync(db, "something dreamy by Zeppelin", null, null, null, "pending", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the parser asks for it...
+            var result = await repo.GetForParseAsync(id, CancellationToken.None);
+
+            // Then its wish/id/expiry come back.
+            Assert.NotNull(result);
+            Assert.Equal(id, result!.Id);
+            Assert.Equal("something dreamy by Zeppelin", result.Wish);
+        }
+
+        [Fact]
+        public async Task An_already_parsed_row_is_not_returned_again()
+        {
+            // Given a pending row that already carries a parsed predicate (a prior MarkParsedAsync
+            // call, or a race with a duplicate queue entry)...
+            await db.ResetRequestAsync();
+            var id = await InsertRawRowAsync(db, "something dreamy by Zeppelin", "Led Zeppelin", null, null, "pending", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the parser asks for it again...
+            var result = await repo.GetForParseAsync(id, CancellationToken.None);
+
+            // Then nothing comes back — it is no longer a legal parse target.
+            Assert.Null(result);
+        }
+
+        [Fact]
+        public async Task A_non_pending_row_is_not_returned()
+        {
+            // Given a row that already reached a terminal outcome...
+            await db.ResetRequestAsync();
+            var id = await InsertRawRowAsync(db, "something dreamy by Zeppelin", null, null, null, "fulfilled", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the parser asks for it...
+            var result = await repo.GetForParseAsync(id, CancellationToken.None);
+
+            // Then nothing comes back.
+            Assert.Null(result);
+        }
+
+        [Fact]
+        public async Task A_nonexistent_id_returns_null()
+        {
+            await db.ResetRequestAsync();
+            var repo = Repo(db);
+
+            var result = await repo.GetForParseAsync(999_999, CancellationToken.None);
+
+            Assert.Null(result);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — ListUnparsedPendingIdsAsync, the startup recovery sweep source (F87.4, STORY-225, PLAN T88)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioListUnparsedPending(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task Only_pending_never_parsed_rows_are_listed_oldest_first()
+        {
+            // Given two never-parsed pending rows at distinct ages, plus one already-parsed pending
+            // row and one non-pending row that must both be excluded...
+            await db.ResetRequestAsync();
+            var oldestId = await InsertRawRowAsync(db, "oldest", null, null, null, "pending", TimeSpan.FromMinutes(10));
+            var newestId = await InsertRawRowAsync(db, "newest", null, null, null, "pending", TimeSpan.FromMinutes(1));
+            await InsertRawRowAsync(db, "already parsed", "Some Artist", null, null, "pending", TimeSpan.Zero);
+            await InsertRawRowAsync(db, "already fulfilled", null, null, null, "fulfilled", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the recovery sweep lists unparsed pending ids...
+            var ids = await repo.ListUnparsedPendingIdsAsync(CancellationToken.None);
+
+            // Then only the two never-parsed pending rows come back, oldest received first.
+            Assert.Equal([oldestId, newestId], ids);
+        }
+
+        [Fact]
+        public async Task An_empty_table_lists_nothing()
+        {
+            await db.ResetRequestAsync();
+            var repo = Repo(db);
+
+            var ids = await repo.ListUnparsedPendingIdsAsync(CancellationToken.None);
+
+            Assert.Empty(ids);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — MarkParsedAsync (SPEC F87.4, STORY-225, PLAN T88)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioMarkParsed(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task Predicates_land_and_status_stays_pending_when_something_was_found()
+        {
+            // Given an unparsed pending row...
+            await db.ResetRequestAsync();
+            var id = await InsertRawRowAsync(db, "something dreamy by Zeppelin", null, null, null, "pending", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the parser writes back a non-empty predicate set...
+            await repo.MarkParsedAsync(id, "Led Zeppelin", null, ["dreamy"], unmatched: false, CancellationToken.None);
+
+            // Then the predicates land and status is untouched — still pending, ready for T89's matcher.
+            var row = await ReadRowAsync(db, id);
+            Assert.Equal("Led Zeppelin", row.Artist);
+            Assert.Null(row.Title);
+            Assert.NotNull(row.Moods);
+            Assert.Equal(["dreamy"], row.Moods);
+            Assert.Equal("pending", row.Status);
+        }
+
+        [Fact]
+        public async Task An_empty_everything_parse_flips_status_to_unmatched()
+        {
+            // Given an unparsed pending row the parser cannot shape at all...
+            await db.ResetRequestAsync();
+            var id = await InsertRawRowAsync(db, "asdkjhqwlekjhasd", null, null, null, "pending", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the parser writes back an empty predicate set with unmatched: true...
+            await repo.MarkParsedAsync(id, null, null, [], unmatched: true, CancellationToken.None);
+
+            // Then status flips to unmatched (F87.4) and the row now falls outside the "unparsed" set.
+            var row = await ReadRowAsync(db, id);
+            Assert.Null(row.Artist);
+            Assert.Null(row.Title);
+            Assert.Equal("unmatched", row.Status);
+            Assert.Empty(await repo.ListUnparsedPendingIdsAsync(CancellationToken.None));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — MarkMatchedAsync / MarkUnmatchedAsync (SPEC F87.5, STORY-226, PLAN T89)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioMarkMatched(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task A_matched_id_lands_and_status_stays_pending()
+        {
+            // Given a row already parsed with a held artist predicate...
+            await db.ResetRequestAsync();
+            var id = await InsertRawRowAsync(db, "something dreamy by Zeppelin", "Led Zeppelin", null, null, "pending", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the matcher stamps a catalog hit...
+            await repo.MarkMatchedAsync(id, mediaId: 7L, CancellationToken.None);
+
+            // Then matched_media_id lands and status stays pending — a match is not a fulfillment (F87.6).
+            await using var conn = await db.StationDataSource.OpenConnectionAsync();
+            var (matchedMediaId, status) = await conn.QuerySingleAsync<(long?, string)>(
+                "select matched_media_id, status from station.request where id = @id", new { id });
+            Assert.Equal(7L, matchedMediaId);
+            Assert.Equal("pending", status);
+        }
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioMarkUnmatched(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task A_miss_with_nothing_left_to_try_flips_status_to_unmatched()
+        {
+            // Given a row already parsed with a held artist predicate the catalog has nothing for...
+            await db.ResetRequestAsync();
+            var id = await InsertRawRowAsync(db, "something by a band nobody has", "A Band That Does Not Exist", null, null, "pending", TimeSpan.Zero);
+            var repo = Repo(db);
+
+            // When the matcher gives up on it...
+            await repo.MarkUnmatchedAsync(id, CancellationToken.None);
+
+            // Then status flips to unmatched — silently, no other column is touched (F87.5).
+            var row = await ReadRowAsync(db, id);
+            Assert.Equal("unmatched", row.Status);
+            Assert.Equal("A Band That Does Not Exist", row.Artist);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Helpers — SPEC F87.6, STORY-227, PLAN T90
+    // ---------------------------------------------------------------------
+
+    /// <summary>Inserts a row shaped for the fulfillment rung directly (bypassing the repository) —
+    /// <paramref name="expiresIn"/> may be negative to seed an already-past-window row.</summary>
+    static async Task<long> InsertFulfillmentCandidateAsync(
+        DatabaseFixture db, long? matchedMediaId, string[]? moods, string status,
+        TimeSpan receivedAgo, TimeSpan expiresIn)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        return await conn.ExecuteScalarAsync<long>(
+            """
+            insert into station.request (received_at, matched_media_id, moods, status, expires_at)
+            values (now() - make_interval(secs => @receivedAgoSeconds), @matchedMediaId, @moods, @status,
+                    now() + make_interval(secs => @expiresInSeconds))
+            returning id
+            """,
+            new
+            {
+                receivedAgoSeconds = receivedAgo.TotalSeconds,
+                matchedMediaId, moods, status,
+                expiresInSeconds = expiresIn.TotalSeconds,
+            });
+    }
+
+    static async Task<string> StatusOfAsync(DatabaseFixture db, long id)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        return await conn.QuerySingleAsync<string>("select status from station.request where id = @id", new { id });
+    }
+
+    static async Task<DateTime?> FulfilledAtOfAsync(DatabaseFixture db, long id)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        return await conn.ExecuteScalarAsync<DateTime?>(
+            "select fulfilled_at from station.request where id = @id", new { id });
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — GetOldestLiveAsync (SPEC F87.6, STORY-227, PLAN T90)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioGetOldestLive(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task TheOldestQualifyingPendingRowIsReturnedFirst()
+        {
+            // Given two qualifying (matched) pending rows at distinct ages...
+            await db.ResetRequestAsync();
+            var oldestId = await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: 7, moods: null, status: "pending",
+                receivedAgo: TimeSpan.FromMinutes(10), expiresIn: TimeSpan.FromMinutes(10));
+            await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: 8, moods: null, status: "pending",
+                receivedAgo: TimeSpan.FromMinutes(1), expiresIn: TimeSpan.FromMinutes(10));
+            var repo = Repo(db);
+
+            // When the fulfillment rung asks for the oldest live request...
+            var found = await repo.GetOldestLiveAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // Then the older row comes back.
+            Assert.Equal(oldestId, found?.Id);
+        }
+
+        [Fact]
+        public async Task AMoodsOnlyRowQualifiesJustLikeAMatchedRow()
+        {
+            // Given a vibe (moods-only) pending row with no catalog match...
+            await db.ResetRequestAsync();
+            var id = await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: null, moods: ["dreamy"], status: "pending",
+                receivedAgo: TimeSpan.Zero, expiresIn: TimeSpan.FromMinutes(10));
+            var repo = Repo(db);
+
+            // When the fulfillment rung asks...
+            var found = await repo.GetOldestLiveAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // Then the vibe row qualifies.
+            Assert.Equal(id, found?.Id);
+        }
+
+        [Fact]
+        public async Task ARowWithNeitherAMatchNorMoodsIsNeverReturned()
+        {
+            // Given a pending row with no predicate at all (e.g. still awaiting the parser)...
+            await db.ResetRequestAsync();
+            await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: null, moods: null, status: "pending",
+                receivedAgo: TimeSpan.Zero, expiresIn: TimeSpan.FromMinutes(10));
+            var repo = Repo(db);
+
+            // When the fulfillment rung asks...
+            var found = await repo.GetOldestLiveAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // Then nothing qualifies.
+            Assert.Null(found);
+        }
+
+        [Fact]
+        public async Task ARowPastItsWindowIsExcludedEvenIfStillMarkedPending()
+        {
+            // Given a matched pending row whose expiry has already passed (not yet swept)...
+            await db.ResetRequestAsync();
+            await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: 7, moods: null, status: "pending",
+                receivedAgo: TimeSpan.FromMinutes(20), expiresIn: TimeSpan.FromMinutes(-5));
+            var repo = Repo(db);
+
+            // When the fulfillment rung asks (now, before any sweep runs)...
+            var found = await repo.GetOldestLiveAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // Then the stale row is excluded on its own — the rung never has to trust the status
+            // column alone to keep a past-window row out.
+            Assert.Null(found);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — ExpireStaleAsync (SPEC F87.6, STORY-227, PLAN T90)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioExpireStale(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task PastWindowPendingRowsFlipToExpiredAndAreCounted()
+        {
+            // Given one pending row past its window and one still live...
+            await db.ResetRequestAsync();
+            var staleId = await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: 1, moods: null, status: "pending",
+                receivedAgo: TimeSpan.FromMinutes(20), expiresIn: TimeSpan.FromMinutes(-5));
+            var liveId = await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: 2, moods: null, status: "pending",
+                receivedAgo: TimeSpan.Zero, expiresIn: TimeSpan.FromMinutes(10));
+            var repo = Repo(db);
+
+            // When the opportunistic sweep runs...
+            var expiredCount = await repo.ExpireStaleAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // Then exactly the one stale row flips, and only it is counted.
+            Assert.Equal(1, expiredCount);
+            Assert.Equal("expired", await StatusOfAsync(db, staleId));
+            Assert.Equal("pending", await StatusOfAsync(db, liveId));
+        }
+
+        [Fact]
+        public async Task NonPendingRowsPastTheirWindowAreLeftAlone()
+        {
+            // Given an already-fulfilled row whose expiry has long passed...
+            await db.ResetRequestAsync();
+            var id = await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: 1, moods: null, status: "fulfilled",
+                receivedAgo: TimeSpan.FromMinutes(30), expiresIn: TimeSpan.FromMinutes(-20));
+            var repo = Repo(db);
+
+            // When the sweep runs...
+            var expiredCount = await repo.ExpireStaleAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // Then nothing changes — the sweep only ever touches pending rows.
+            Assert.Equal(0, expiredCount);
+            Assert.Equal("fulfilled", await StatusOfAsync(db, id));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — TryMarkFulfilledAsync (SPEC F87.6, STORY-227, PLAN T90)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTryMarkFulfilled(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task APendingRowFlipsToFulfilledAndStampsFulfilledAt()
+        {
+            // Given a live pending row...
+            await db.ResetRequestAsync();
+            var id = await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: 1, moods: null, status: "pending",
+                receivedAgo: TimeSpan.Zero, expiresIn: TimeSpan.FromMinutes(10));
+            var repo = Repo(db);
+
+            // When the fulfillment rung stamps its one-shot CAS...
+            var swapped = await repo.TryMarkFulfilledAsync(id, CancellationToken.None);
+
+            // Then it lands, and fulfilled_at is stamped.
+            Assert.True(swapped);
+            Assert.Equal("fulfilled", await StatusOfAsync(db, id));
+            Assert.NotNull(await FulfilledAtOfAsync(db, id));
+        }
+
+        [Fact]
+        public async Task ARowNoLongerPendingLosesTheCas()
+        {
+            // Given a row already expired (a concurrent sweep or a second attempt got there first)...
+            await db.ResetRequestAsync();
+            var id = await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: 1, moods: null, status: "expired",
+                receivedAgo: TimeSpan.FromMinutes(20), expiresIn: TimeSpan.FromMinutes(-5));
+            var repo = Repo(db);
+
+            // When a fulfillment attempt still tries to claim it...
+            var swapped = await repo.TryMarkFulfilledAsync(id, CancellationToken.None);
+
+            // Then the CAS is lost — the row is untouched.
+            Assert.False(swapped);
+            Assert.Equal("expired", await StatusOfAsync(db, id));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // SAD PATH — the status CHECK constraint has teeth
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioStatusCheckConstraint(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task An_unrecognized_status_is_rejected_by_the_database_itself()
+        {
+            // Given no prior requests...
+            await db.ResetRequestAsync();
+            await using var conn = await db.StationDataSource.OpenConnectionAsync();
+
+            // When a direct INSERT tries a status outside the CHECK's four-value set...
+            // Then the database itself rejects it — regardless of what the repository would ever write.
+            await Assert.ThrowsAsync<PostgresException>(() => conn.ExecuteAsync(
+                """
+                insert into station.request (status, expires_at)
+                values ('bogus', now() + interval '15 minutes')
+                """));
+        }
+    }
+}

@@ -41,6 +41,16 @@ public sealed class SurfaceGateMiddleware(
             return;
         }
 
+        // Listener-request kill switch (SPEC F87.2, STORY-224, PLAN T87): independent of
+        // Station:SpectatorMode above — see RequestsSurfaceAttribute's own remarks for why this
+        // runs here (before the rate limiter) rather than as an in-action check.
+        if (endpoint?.Metadata.GetMetadata<RequestsSurfaceAttribute>() is not null
+            && !stationOptions.CurrentValue.Requests.Enabled)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
         // Public listener isolation (SPEC F64.1/F64.2, STORY-172): when the operator has bound a
         // dedicated public port (Spectator:PublicPort > 0) and THIS request arrived on it, only
         // the spectator surface and /health may respond — admin, /media/*, /internal/* 404 here,

@@ -25,6 +25,7 @@ sealed class LiquidsoapControl(
     LiquidsoapOptions options,
     string stationId,
     IStationIdentityProvider identityProvider,
+    ArtworkUrlResolver artworkUrlResolver,
     ILogger<LiquidsoapControl> log)
     : ILiquidsoapControl
 {
@@ -70,8 +71,11 @@ sealed class LiquidsoapControl(
         // safe-track endpoint (K2b) produces byte-identical strings without duplicating logic.
         // Station name is read live (SPEC F44.1, gitea-#196) — never cached in a field — so a
         // Station:Name settings edit is stamped onto the very next push, no api restart.
+        // artworkUrl (SPEC F88.4–F88.5, STORY-223, PLAN T85) is resolved HERE — the first async
+        // point on this push path — rather than inside the pure, synchronous annotation builder.
+        var artworkUrl = await artworkUrlResolver.ResolveAsync(item, ct);
         var annotation = LiquidsoapAnnotationBuilder.Build(
-            item, gainDb, stationId, identityProvider.Current.Name);
+            item, gainDb, stationId, identityProvider.Current.Name, artworkUrl);
         var response = await SendAsync($"{cfg.QueueId}.push {annotation}", ct);
         // A successful q.push returns a numeric RID; anything else is a rejection (e.g. "ERROR").
         // Validate and throw so the caller's try/catch logs a visible error and Fix 1's drain-retry

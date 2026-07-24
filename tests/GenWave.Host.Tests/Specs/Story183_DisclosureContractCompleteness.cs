@@ -70,11 +70,12 @@ public static class FeatureDisclosureContractCompleteness
             new SpectatorStats(5, 3, 2),
             ["ready", "enriching", "failed"]),
 
-        // about (SPEC F62.8, F65.3)
+        // about (SPEC F62.8, F65.3; requestsEnabled added by SPEC F87.11, STORY-229, PLAN T92 —
+        // the one new pinned public field the requests epic adds to this shape)
         new(typeof(SpectatorAbout),
             new SpectatorAbout("GenWave Radio", "2.0.0", "AGPL-3.0-or-later",
-                "https://github.com/GenWave-Org/genwave", "https://demo.example/stream"),
-            ["stationName", "version", "license", "projectUrl", "streamUrl"]),
+                "https://github.com/GenWave-Org/genwave", "https://demo.example/stream", true),
+            ["stationName", "version", "license", "projectUrl", "streamUrl", "requestsEnabled"]),
 
         // play-history (SPEC F62.6) — no media id, gain/loudness, or duration on either entry
         new(typeof(SpectatorPlayHistoryTrackEntry),
@@ -86,6 +87,16 @@ public static class FeatureDisclosureContractCompleteness
         new(typeof(SpectatorPlayHistoryResponse),
             new SpectatorPlayHistoryResponse([]),
             ["entries"]),
+
+        // requests (SPEC F87.1, STORY-224, PLAN T87) — the 202 body is fixed/constant regardless
+        // of wish content (no oracle); the submission DTO is blessed too so a future field bound
+        // onto it (mass assignment) fails here first.
+        new(typeof(SpectatorRequestAccepted),
+            new SpectatorRequestAccepted(),
+            ["status", "note"]),
+        new(typeof(SpectatorRequestSubmission),
+            new SpectatorRequestSubmission("more jazz please"),
+            ["wish"]),
     ];
 
     /// <summary>
@@ -99,6 +110,14 @@ public static class FeatureDisclosureContractCompleteness
         typeof(SpectatorController),
         typeof(SpectatorCacheControlAttribute),
         typeof(SpectatorSurfaceAttribute),
+        // GET /spectator/api/artwork/{token} (SPEC F88.3, STORY-222, PLAN T84): serves a file
+        // (jpeg or the station icon), never a JSON payload — nothing to bless as a DTO shape.
+        typeof(SpectatorArtworkController),
+        // POST /spectator/api/requests (SPEC F87, STORY-224, PLAN T87): the controller itself is
+        // never serialized. Its kill-switch marker, RequestsSurfaceAttribute, is named "Requests*"
+        // rather than "Spectator*" (unlike SpectatorSurfaceAttribute) so it falls outside this
+        // scan's own Spectator-prefix filter below — nothing to bless for it here.
+        typeof(SpectatorRequestsController),
     ];
 
     public static class ScenarioExactShapesPinned

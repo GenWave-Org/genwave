@@ -241,6 +241,72 @@ audio:focus-visible {
   color: var(--mute);
 }
 
+/* ── Request form ─────────────────────────────────────────────────────────── */
+
+.request-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.request-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.request-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.request-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background-color: var(--surface-2);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+}
+
+.request-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.request-submit {
+  flex: none;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0 1.1rem;
+  border: none;
+  border-radius: 6px;
+  background-color: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.request-submit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.request-message {
+  margin: 0.6rem 0 0;
+  min-height: 1.2em;
+  color: var(--mute);
+  font-size: 0.85rem;
+}
+
 /* ── History ──────────────────────────────────────────────────────────────── */
 
 .history {

@@ -114,13 +114,17 @@ public static class FeatureSeededDefaults
     /// Station:Envelope:Genres (SPEC F81.1, STORY-212) joins on the same rationale: empty is its
     /// spec'd default ("empty Genres = all genres") — a fresh install's single station-default
     /// envelope constrains no genre until an operator narrows it, and no compose topology needs to
-    /// pin one. Every other allowlisted key's C# default is non-empty.
+    /// pin one. Station:PublicBaseUrl (SPEC F88.4–F88.5, STORY-223, PLAN T85) joins on
+    /// PublicStreamUrl's own identical rationale: empty is the honest default, and F88.5's whole
+    /// contract IS that blank — no artwork URL is ever sent to a listening client until an
+    /// operator sets one. Every other allowlisted key's C# default is non-empty.
     /// </summary>
     static readonly IReadOnlySet<string> HonestlyBlankKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "Llm:Endpoint",
         "Llm:Model",
         "Station:PublicStreamUrl",
+        "Station:PublicBaseUrl",
         "Tts:Corrections",
         "Tts:EngineByKind",
         "Station:Envelope:Genres",
@@ -328,6 +332,21 @@ public static class FeatureSeededDefaults
 
             // llmDefaults.Endpoint/Model are deliberately NOT asserted here — they are the two
             // honest blanks (F34.2); ScenarioFreshDeployHasNoLyingBlanks pins that separately.
+
+            // Station:Requests:* (SPEC F87.2, F87.6, STORY-224, PLAN T86) — seeded alongside the
+            // feature itself, same "close gitea-#231 before it can ever open for this key" discipline
+            // as Llm:DegradationPin above. Enabled's own default is false (0 is a legal, non-blank
+            // seed — RequireValue only rejects an EMPTY value, not "false").
+            var requestsDefaults = new StationRequestsOptions();
+            Assert.Equal(
+                requestsDefaults.Enabled,
+                bool.Parse(RequireValue(config, "Station:Requests:Enabled")));
+            Assert.Equal(
+                requestsDefaults.OverrideEnvelope,
+                bool.Parse(RequireValue(config, "Station:Requests:OverrideEnvelope")));
+            Assert.Equal(
+                requestsDefaults.WindowMinutes,
+                int.Parse(RequireValue(config, "Station:Requests:WindowMinutes"), NumberStyles.Integer, CultureInfo.InvariantCulture));
         }
     }
 

@@ -98,6 +98,14 @@ public sealed class SettingValidator(IConfiguration configuration)
     internal const double EnvelopeEnergyMin = 0.0;
     internal const double EnvelopeEnergyMax = 1.0;
 
+    // Station:Requests:WindowMinutes (SPEC F87.6, STORY-224) — StationRequestsOptions' own
+    // [Range(1, int.MaxValue)] floor (documentation-only; StationOptionsValidator is the real boot
+    // floor, same nested-class story as the rotation/cadence/envelope knobs above). F53.1 adds the
+    // ceiling: 1440 minutes (24h) is generous headroom before "the window never closes" stops
+    // meaning anything.
+    internal const int RequestsWindowMinutesMin = 1;
+    internal const int RequestsWindowMinutesMax = 1440;
+
     // Maps each allowlisted key to a per-key (range + type) validator.
     static readonly Dictionary<string, Func<string, bool>> Validators =
         new(StringComparer.OrdinalIgnoreCase)
@@ -153,6 +161,11 @@ public sealed class SettingValidator(IConfiguration configuration)
             // (rejects "//evil.com" protocol-relative, markup/control characters, whitespace).
             ["Station:SpectatorMode"] = IsBool,
             ["Station:PublicStreamUrl"] = IsSafePublicStreamUrl,
+
+            // Artwork/station-icon URL base (SPEC F88.4–F88.5, STORY-223) — an operator-supplied URL
+            // an eventual metadata-aware player fetches, exactly PublicStreamUrl's own risk profile,
+            // so it reuses the identical SSRF/markup-injection guard rather than a parallel copy.
+            ["Station:PublicBaseUrl"] = IsSafePublicStreamUrl,
 
             // TTS endpoint (F36.1–F36.2) — there is no "disabled TTS" state, so an absolute
             // http/https URL is required; empty is rejected (mirrors TtsOptions' [Required, Url]).
@@ -236,6 +249,14 @@ public sealed class SettingValidator(IConfiguration configuration)
             ["Station:Envelope:Genres"] = IsValidGenresArray,
             ["Station:Envelope:EnergyMin"] = v => IsDoubleInRange(v, EnvelopeEnergyMin, EnvelopeEnergyMax),
             ["Station:Envelope:EnergyMax"] = v => IsDoubleInRange(v, EnvelopeEnergyMin, EnvelopeEnergyMax),
+
+            // Listener requests (SPEC F87.2, F87.6, STORY-224, PLAN T86) — Enabled is the F87.2 kill
+            // switch (plain bool, same shape as every other surface toggle above); OverrideEnvelope
+            // is the F87.6 fulfillment-bypass flag, default true. WindowMinutes mirrors
+            // StationRequestsOptions' own [Range(1, int.MaxValue)] floor; F53.1 adds the ceiling.
+            ["Station:Requests:Enabled"] = IsBool,
+            ["Station:Requests:OverrideEnvelope"] = IsBool,
+            ["Station:Requests:WindowMinutes"] = v => IsIntInRange(v, RequestsWindowMinutesMin, RequestsWindowMinutesMax),
         };
 
     // ── Per-key validation ─────────────────────────────────────────────────────────────────────
@@ -362,9 +383,9 @@ public sealed class SettingValidator(IConfiguration configuration)
         && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 
     /// <summary>
-    /// Guards <c>Station:PublicStreamUrl</c> (F62.1, F62.8) against both the SSRF/open-redirect
-    /// class of bug and markup injection into the future public <c>&lt;audio src&gt;</c>/about
-    /// panel:
+    /// Guards <c>Station:PublicStreamUrl</c> (F62.1, F62.8) — and, identically, <c>Station:PublicBaseUrl</c>
+    /// (F88.4–F88.5, STORY-223) — against both the SSRF/open-redirect class of bug and markup
+    /// injection into the future public <c>&lt;audio src&gt;</c>/about panel:
     ///   • empty is legal (hides the player),
     ///   • '"', '&lt;', '&gt;', '\', control characters, and whitespace are rejected outright —
     ///     <see cref="Uri.TryCreate(string, UriKind, out Uri)"/> happily accepts all of these
@@ -646,7 +667,8 @@ public sealed class SettingValidator(IConfiguration configuration)
             => $"Value '{value}' is not valid for '{key}'. Must be greater than {MinSilenceDurationSecMin} and at most {MinSilenceDurationSecMax}.",
         var k when k.Equals("Library:Energy:WindowSeconds", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be greater than {EnergyWindowSecondsMin} and at most {EnergyWindowSecondsMax}.",
-        var k when k.Equals("Station:PublicStreamUrl", StringComparison.OrdinalIgnoreCase)
+        var k when k.Equals("Station:PublicStreamUrl", StringComparison.OrdinalIgnoreCase) ||
+                   k.Equals("Station:PublicBaseUrl", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be empty, an absolute http/https URL, " +
                "or a same-origin root-relative path starting with a single '/' (not '//'); no '\"', '<', '>', '\\', control characters, or whitespace.",
         var k when k.Equals("Llm:DegradationPin", StringComparison.OrdinalIgnoreCase)
@@ -656,6 +678,11 @@ public sealed class SettingValidator(IConfiguration configuration)
         var k when k.Equals("Station:Envelope:EnergyMin", StringComparison.OrdinalIgnoreCase) ||
                    k.Equals("Station:Envelope:EnergyMax", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a number in [{EnvelopeEnergyMin}, {EnvelopeEnergyMax}].",
+        var k when k.Equals("Station:Requests:Enabled", StringComparison.OrdinalIgnoreCase) ||
+                   k.Equals("Station:Requests:OverrideEnvelope", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
+        var k when k.Equals("Station:Requests:WindowMinutes", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {RequestsWindowMinutesMin} and {RequestsWindowMinutesMax} (minutes).",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }

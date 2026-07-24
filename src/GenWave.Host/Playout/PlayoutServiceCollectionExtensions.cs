@@ -37,12 +37,20 @@ static class PlayoutServiceCollectionExtensions
                     sp.GetRequiredService<IBoothLogEventConsumer>(),
                 ],
                 sp.GetRequiredService<ILogger<CompositeStationEventSink>>()))
+            // Artwork/station-icon URL resolution on the push path (SPEC F88.4–F88.5, STORY-223,
+            // PLAN T85) — shared by LiquidsoapControl.PushAsync and the safe-track endpoint
+            // (InternalEndpoints), mirroring how LiquidsoapAnnotationBuilder itself is shared
+            // between the two. Depends only on IOptionsMonitor<StationOptions> (bound by
+            // AddGenWaveStationOptions) and IArtworkTokenStore (bound by AddMediaLibrary) —
+            // Program.cs runs both before AddGenWavePlayout.
+            .AddSingleton<ArtworkUrlResolver>()
             // The engine-control seam, bound to the configured Liquidsoap host. Station name on
             // the push path is read live through IStationIdentityProvider (SPEC F44.1).
             .AddSingleton<ILiquidsoapControl>(sp => new LiquidsoapControl(
                 sp.GetRequiredService<IOptions<LiquidsoapOptions>>().Value,
                 SingleStation.IdString,
                 sp.GetRequiredService<IStationIdentityProvider>(),
+                sp.GetRequiredService<ArtworkUrlResolver>(),
                 sp.GetRequiredService<ILogger<LiquidsoapControl>>()))
             // Loudness target/ceiling are deliberate boot-time values (engine-side knobs apply on
             // restart) — snapshot IOptions, not a live monitor.

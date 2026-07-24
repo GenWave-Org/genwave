@@ -1,13 +1,15 @@
 // GenWave spectator page — vanilla JS, no build step (SPEC F63.3–F63.5).
 //
-// Every network call targets the public read-only surface at /spectator/api/* — never
-// /api/* (the admin plane). Three independent cadences:
+// Every network call targets the public surface at /spectator/api/* — never /api/* (the admin
+// plane). Three independent read cadences, plus one write:
 //   - now-playing: polled every 5s, plus a 1s-tick clock so the progress bar/elapsed
 //     readout advances between polls without hammering the server.
 //   - play-history + stats: polled every 30s (their SpectatorCacheControl/OutputCache
 //     policies match this cadence server-side).
-//   - about: fetched once — station identity, license, and the live stream URL rarely
-//     change, and a poll would gain nothing.
+//   - about: fetched once — station identity, license, live stream URL, and the
+//     listener-requests toggle rarely change, and a poll would gain nothing.
+//   - the wish form (SPEC F87.11, STORY-229): a one-shot POST on submit, gated on
+//     about.requestsEnabled from the fetch above; see that section's own remarks.
 // A failed poll is swallowed and retried on the next tick; the page never swaps to an
 // error state — it just keeps showing the last known-good render (or the initial
 // "Loading…" placeholder if nothing has resolved yet).
@@ -214,6 +216,7 @@ async function loadAbout() {
     document.title = `${stationName} — Spectator`;
     document.getElementById("station-name").textContent = stationName;
     if (nowPlaying.kind === "standby") renderNowPlaying();
+    renderRequestVisibility(about.requestsEnabled === true);
 
     const sourceLink = document.createElement("a");
     sourceLink.href = about.projectUrl;
@@ -242,6 +245,53 @@ async function loadAbout() {
   }
 }
 
+// ── Request form (SPEC F87.11, STORY-229) ────────────────────────────────────
+//
+// Visibility is decided once, from the same one-shot about fetch above: requestsEnabled changes
+// rarely (an operator flipping Station:Requests:Enabled), so a page reload picking up the change
+// is an acceptable lag. Submission never renders the server's response body — constant thank-you
+// text on any 2xx, and the same gentle message for a 429 or any other failure, so no state (was it
+// throttled? malformed? a server error?) ever leaks to the caller, matching the endpoint's own
+// no-oracle discipline (SPEC F87.1).
+
+const REQUEST_THANK_YOU = "Thanks — your request is in the queue.";
+const REQUEST_BUSY = "The request line is busy — try again in a few minutes.";
+
+function renderRequestVisibility(enabled) {
+  document.getElementById("request-section").hidden = !enabled;
+}
+
+async function submitRequest(wish) {
+  const response = await fetch("/spectator/api/requests", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ wish }),
+  });
+  return response.ok;
+}
+
+function initRequestForm() {
+  const form = document.getElementById("request-form");
+  const input = document.getElementById("request-wish");
+  const message = document.getElementById("request-message");
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const wish = input.value.trim();
+    if (!wish) return;
+
+    let accepted = false;
+    try {
+      accepted = await submitRequest(wish);
+    } catch (error) {
+      console.error(error);
+    }
+
+    message.textContent = accepted ? REQUEST_THANK_YOU : REQUEST_BUSY;
+    if (accepted) input.value = "";
+  });
+}
+
 // ── Wiring ───────────────────────────────────────────────────────────────────
 
 function init() {
@@ -249,6 +299,7 @@ function init() {
   pollNowPlaying();
   pollHistory();
   pollStats();
+  initRequestForm();
 
   setInterval(pollNowPlaying, NOW_PLAYING_POLL_MS);
   setInterval(() => {

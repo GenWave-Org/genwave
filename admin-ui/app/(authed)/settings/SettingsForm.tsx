@@ -145,6 +145,21 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
   "Station:PublicStreamUrl":
     "Public stream URL for the spectator page player (e.g. /stream behind the reference proxy). " +
     "Empty hides the player.",
+  "Station:PublicBaseUrl":
+    "Public base URL feeder pushes resolve per-track artwork and station-icon URLs against " +
+    "(e.g. https://your-station.example). Empty means no artwork URL is ever sent to listening " +
+    "clients.",
+
+  // ── Listener requests (SPEC F87.2, F87.6, STORY-224) ─────────────────────────────────────────
+  "Station:Requests:Enabled":
+    "Public listener request line. Off by default; when off, the request endpoint 404s like any " +
+    "other disabled surface.",
+  "Station:Requests:OverrideEnvelope":
+    "When on, a matched request bypasses the envelope's genre/energy band and rotation-recency " +
+    "to air sooner — operator never-play/eligibility vetoes still apply either way.",
+  "Station:Requests:WindowMinutes":
+    "How long an unfulfilled request stays eligible to air before it expires. Accepted range: " +
+    "1–1440.",
 
   // ── TTS / LLM endpoints (SPEC F36.1–F36.4) ─────────────────────────────────────────────────
   "Tts:Endpoint":

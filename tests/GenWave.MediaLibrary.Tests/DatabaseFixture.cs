@@ -104,6 +104,21 @@ public sealed class DatabaseFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
+    /// <summary>
+    /// Truncate <c>station.request</c> and reset its identity (SPEC F87, STORY-224, PLAN T86). No
+    /// FK references this table — <c>matched_media_id</c> is a bare <c>bigint</c> with no FK (the
+    /// <c>booth_log.media_id</c> precedent) — so no CASCADE is required yet, unlike
+    /// <see cref="ResetStationAsync"/>/<see cref="ResetBoothLogAsync"/>, both of which needed it only
+    /// once a later table's FK into them forced Postgres's hand.
+    /// </summary>
+    public async Task ResetRequestAsync()
+    {
+        await using var conn = await StationDataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "truncate table station.request restart identity";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     async Task WaitForSchemaAsync()
     {
         for (var attempt = 0; attempt < 30; attempt++)
