@@ -28,8 +28,10 @@ public static class FeatureAcceptanceGatePersonalitiesOnAir
 
     public static class ScenarioEngineAndComposeCarryZeroDiffFromMain
     {
-        // T85 epoch (F88.4) — re-confirmed at T93
-        const string EngineScriptSha256 = "2a957efaa5ba96923cb3554ab1eefcd1fcbf943df0ddd5b53d20c8d5e8fb10bf";
+        // T93 epoch (F88.4 export fix) — settings.encoder.metadata.export now carries "url" too,
+        // so the C# feeder's url= annotation actually reaches the ICY StreamUrl (see the
+        // Story230 gate's live-run finding).
+        const string EngineScriptSha256 = "11c8b3b59b4b641dc59fa4217e935442573adf04f8e756934e23593b17677049";
         const string ComposeYamlSha256  = "9ddd169329ef5b092638d1e67279272fc4d7b9f350dcc330cb455d7d92faf981";
 
         [Fact]

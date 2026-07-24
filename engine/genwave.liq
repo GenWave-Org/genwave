@@ -158,9 +158,13 @@ genwave = mksafe(genwave)
 #     unreliable request-level state. APPEND so the defaults (title for the smoke test, etc.) survive.
 #     "replay_gain" joins the list so engine-initiated plays' frames carry the stamped gain (F37.2,
 #     gitea-#200) — the feeder's shipped ExtractAnnotations parses it already; the key just never arrived.
+#     "url" joins the list per F88.4/T93's live-run finding: icy_metadata below only forwards a
+#     custom annotate field that ALSO survives this export gate — T85 added "url" to icy_metadata
+#     but never here, so the feeder's stamped url="..." annotation was silently dropped before
+#     icy_song/icy_metadata ever saw it, and ICY StreamUrl never reached listeners.
 settings.encoder.metadata.export :=
   list.append(settings.encoder.metadata.export(),
-              ["track_id", "station_id", "station_name", "on_air", "on_air_timestamp", "replay_gain"])
+              ["track_id", "station_id", "station_name", "on_air", "on_air_timestamp", "replay_gain", "url"])
 
 # Build StreamTitle as "<station> | <artist> - <title>", degrading gracefully when tags are missing
 # (mirrors the icy_song default of artist/title/null, with the station prefixed).

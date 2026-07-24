@@ -65,7 +65,13 @@ public static class FeatureIcecastTwoFive
         // wouldn't (e.g. reordering outside the gw_icy_song block). The live T26 ICY/status-page
         // capture against the running 2.5.0 image is T82's manual half; the live per-track
         // StreamUrl observation against the compose stack is T93/T94's — neither is exercised here.
-        const string EngineScriptSha256 = "2a957efaa5ba96923cb3554ab1eefcd1fcbf943df0ddd5b53d20c8d5e8fb10bf";
+        //
+        // T93 epoch (F88.4 export fix) — T85's icy_metadata addition alone was not sufficient:
+        // settings.encoder.metadata.export (the gate a few lines above icy_metadata in the file)
+        // never carried "url", so the annotation was filtered out before icy_song/icy_metadata saw
+        // it and StreamUrl never reached listeners (Story230 gate's live-run finding). Re-pinned
+        // to the one-line export-list fix.
+        const string EngineScriptSha256 = "11c8b3b59b4b641dc59fa4217e935442573adf04f8e756934e23593b17677049";
 
         [Fact]
         public static void StreamTitleBuilderInputsRemainPinned()
