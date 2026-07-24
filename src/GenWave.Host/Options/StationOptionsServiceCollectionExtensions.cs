@@ -71,7 +71,12 @@ static class StationOptionsServiceCollectionExtensions
             // the settings allowlist. Wraps IOptionsMonitor<StationOptions> and re-reads
             // CurrentValue on every call, so a live PUT /api/settings genre/energy edit applies to
             // the Orchestrator's very next pick with no api restart.
-            .AddSingleton<IEnvelopeProvider, OptionsMonitorEnvelopeProvider>();
+            .AddSingleton<IEnvelopeProvider, OptionsMonitorEnvelopeProvider>()
+            // Live request-override seam (SPEC F87.6, STORY-227, PLAN T90): Station:Requests:OverrideEnvelope
+            // is advertised Live in the settings allowlist. Wraps IOptionsMonitor<StationOptions> and
+            // re-reads CurrentValue on every call, so a live PUT /api/settings edit applies to the
+            // fulfillment rung's very next attempt with no api restart.
+            .AddSingleton<IRequestOverrideEnvelopeProvider, OptionsMonitorRequestOverrideEnvelopeProvider>();
 
         return services;
     }

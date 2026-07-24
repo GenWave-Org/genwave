@@ -1,4 +1,6 @@
+using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
 
 namespace GenWave.Host.Tests;
 
@@ -18,4 +20,12 @@ sealed class FakeRequestCatalogProbe : IRequestCatalogProbe
         Calls.Add((artist, title));
         return Task.FromResult(Result);
     }
+
+    // Not exercised by STORY-226 specs (this fake's own scope) — STORY-227's fulfillment-rung facts
+    // drive GenWave.Orchestration.Tests' own FakeRequestCatalogProbe instead.
+    public Task<MediaReference?> GetSelectableByIdAsync(long mediaId, SegmentEnvelope? envelope, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by this fake's own STORY-226 specs.");
+
+    public Task<MediaReference?> FindVibeAsync(IReadOnlyList<string> moods, SegmentEnvelope? envelope, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by this fake's own STORY-226 specs.");
 }

@@ -38,6 +38,11 @@ public static class OrchestrationServiceCollectionExtensions
         // pick is envelope-only (F81.2).
         services.TryAddSingleton<IPersonaPickProvider, NoOpPersonaPickProvider>();
 
+        // The SPEC F87.6 fulfillment rung, one step ahead of the persona seam above (STORY-227,
+        // PLAN T90): TryAdd so a host that binds the real RequestFulfillmentProvider wins over this
+        // default — until then no pending request ever short-circuits a pick.
+        services.TryAddSingleton<IRequestFulfillmentSource, NoOpRequestFulfillmentSource>();
+
         return services.AddSingleton<INextItemProvider, Orchestrator>();
     }
 }

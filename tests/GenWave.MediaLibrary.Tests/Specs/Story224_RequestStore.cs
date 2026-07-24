@@ -439,6 +439,221 @@ public static class FeatureRequestStore
     }
 
     // ---------------------------------------------------------------------
+    // Helpers — SPEC F87.6, STORY-227, PLAN T90
+    // ---------------------------------------------------------------------
+
+    /// <summary>Inserts a row shaped for the fulfillment rung directly (bypassing the repository) —
+    /// <paramref name="expiresIn"/> may be negative to seed an already-past-window row.</summary>
+    static async Task<long> InsertFulfillmentCandidateAsync(
+        DatabaseFixture db, long? matchedMediaId, string[]? moods, string status,
+        TimeSpan receivedAgo, TimeSpan expiresIn)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        return await conn.ExecuteScalarAsync<long>(
+            """
+            insert into station.request (received_at, matched_media_id, moods, status, expires_at)
+            values (now() - make_interval(secs => @receivedAgoSeconds), @matchedMediaId, @moods, @status,
+                    now() + make_interval(secs => @expiresInSeconds))
+            returning id
+            """,
+            new
+            {
+                receivedAgoSeconds = receivedAgo.TotalSeconds,
+                matchedMediaId, moods, status,
+                expiresInSeconds = expiresIn.TotalSeconds,
+            });
+    }
+
+    static async Task<string> StatusOfAsync(DatabaseFixture db, long id)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        return await conn.QuerySingleAsync<string>("select status from station.request where id = @id", new { id });
+    }
+
+    static async Task<DateTime?> FulfilledAtOfAsync(DatabaseFixture db, long id)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        return await conn.ExecuteScalarAsync<DateTime?>(
+            "select fulfilled_at from station.request where id = @id", new { id });
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — GetOldestLiveAsync (SPEC F87.6, STORY-227, PLAN T90)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioGetOldestLive(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task TheOldestQualifyingPendingRowIsReturnedFirst()
+        {
+            // Given two qualifying (matched) pending rows at distinct ages...
+            await db.ResetRequestAsync();
+            var oldestId = await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: 7, moods: null, status: "pending",
+                receivedAgo: TimeSpan.FromMinutes(10), expiresIn: TimeSpan.FromMinutes(10));
+            await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: 8, moods: null, status: "pending",
+                receivedAgo: TimeSpan.FromMinutes(1), expiresIn: TimeSpan.FromMinutes(10));
+            var repo = Repo(db);
+
+            // When the fulfillment rung asks for the oldest live request...
+            var found = await repo.GetOldestLiveAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // Then the older row comes back.
+            Assert.Equal(oldestId, found?.Id);
+        }
+
+        [Fact]
+        public async Task AMoodsOnlyRowQualifiesJustLikeAMatchedRow()
+        {
+            // Given a vibe (moods-only) pending row with no catalog match...
+            await db.ResetRequestAsync();
+            var id = await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: null, moods: ["dreamy"], status: "pending",
+                receivedAgo: TimeSpan.Zero, expiresIn: TimeSpan.FromMinutes(10));
+            var repo = Repo(db);
+
+            // When the fulfillment rung asks...
+            var found = await repo.GetOldestLiveAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // Then the vibe row qualifies.
+            Assert.Equal(id, found?.Id);
+        }
+
+        [Fact]
+        public async Task ARowWithNeitherAMatchNorMoodsIsNeverReturned()
+        {
+            // Given a pending row with no predicate at all (e.g. still awaiting the parser)...
+            await db.ResetRequestAsync();
+            await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: null, moods: null, status: "pending",
+                receivedAgo: TimeSpan.Zero, expiresIn: TimeSpan.FromMinutes(10));
+            var repo = Repo(db);
+
+            // When the fulfillment rung asks...
+            var found = await repo.GetOldestLiveAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // Then nothing qualifies.
+            Assert.Null(found);
+        }
+
+        [Fact]
+        public async Task ARowPastItsWindowIsExcludedEvenIfStillMarkedPending()
+        {
+            // Given a matched pending row whose expiry has already passed (not yet swept)...
+            await db.ResetRequestAsync();
+            await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: 7, moods: null, status: "pending",
+                receivedAgo: TimeSpan.FromMinutes(20), expiresIn: TimeSpan.FromMinutes(-5));
+            var repo = Repo(db);
+
+            // When the fulfillment rung asks (now, before any sweep runs)...
+            var found = await repo.GetOldestLiveAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // Then the stale row is excluded on its own — the rung never has to trust the status
+            // column alone to keep a past-window row out.
+            Assert.Null(found);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — ExpireStaleAsync (SPEC F87.6, STORY-227, PLAN T90)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioExpireStale(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task PastWindowPendingRowsFlipToExpiredAndAreCounted()
+        {
+            // Given one pending row past its window and one still live...
+            await db.ResetRequestAsync();
+            var staleId = await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: 1, moods: null, status: "pending",
+                receivedAgo: TimeSpan.FromMinutes(20), expiresIn: TimeSpan.FromMinutes(-5));
+            var liveId = await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: 2, moods: null, status: "pending",
+                receivedAgo: TimeSpan.Zero, expiresIn: TimeSpan.FromMinutes(10));
+            var repo = Repo(db);
+
+            // When the opportunistic sweep runs...
+            var expiredCount = await repo.ExpireStaleAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // Then exactly the one stale row flips, and only it is counted.
+            Assert.Equal(1, expiredCount);
+            Assert.Equal("expired", await StatusOfAsync(db, staleId));
+            Assert.Equal("pending", await StatusOfAsync(db, liveId));
+        }
+
+        [Fact]
+        public async Task NonPendingRowsPastTheirWindowAreLeftAlone()
+        {
+            // Given an already-fulfilled row whose expiry has long passed...
+            await db.ResetRequestAsync();
+            var id = await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: 1, moods: null, status: "fulfilled",
+                receivedAgo: TimeSpan.FromMinutes(30), expiresIn: TimeSpan.FromMinutes(-20));
+            var repo = Repo(db);
+
+            // When the sweep runs...
+            var expiredCount = await repo.ExpireStaleAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // Then nothing changes — the sweep only ever touches pending rows.
+            Assert.Equal(0, expiredCount);
+            Assert.Equal("fulfilled", await StatusOfAsync(db, id));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — TryMarkFulfilledAsync (SPEC F87.6, STORY-227, PLAN T90)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTryMarkFulfilled(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task APendingRowFlipsToFulfilledAndStampsFulfilledAt()
+        {
+            // Given a live pending row...
+            await db.ResetRequestAsync();
+            var id = await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: 1, moods: null, status: "pending",
+                receivedAgo: TimeSpan.Zero, expiresIn: TimeSpan.FromMinutes(10));
+            var repo = Repo(db);
+
+            // When the fulfillment rung stamps its one-shot CAS...
+            var swapped = await repo.TryMarkFulfilledAsync(id, CancellationToken.None);
+
+            // Then it lands, and fulfilled_at is stamped.
+            Assert.True(swapped);
+            Assert.Equal("fulfilled", await StatusOfAsync(db, id));
+            Assert.NotNull(await FulfilledAtOfAsync(db, id));
+        }
+
+        [Fact]
+        public async Task ARowNoLongerPendingLosesTheCas()
+        {
+            // Given a row already expired (a concurrent sweep or a second attempt got there first)...
+            await db.ResetRequestAsync();
+            var id = await InsertFulfillmentCandidateAsync(
+                db, matchedMediaId: 1, moods: null, status: "expired",
+                receivedAgo: TimeSpan.FromMinutes(20), expiresIn: TimeSpan.FromMinutes(-5));
+            var repo = Repo(db);
+
+            // When a fulfillment attempt still tries to claim it...
+            var swapped = await repo.TryMarkFulfilledAsync(id, CancellationToken.None);
+
+            // Then the CAS is lost — the row is untouched.
+            Assert.False(swapped);
+            Assert.Equal("expired", await StatusOfAsync(db, id));
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // SAD PATH — the status CHECK constraint has teeth
     // ---------------------------------------------------------------------
 

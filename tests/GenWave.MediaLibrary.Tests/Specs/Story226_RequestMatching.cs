@@ -11,10 +11,16 @@
 // Story226_RequestMatcherDecisions.cs against a fake probe/store instead. Together the two files carry
 // the same five facts this file was originally authored pending, split along the seam the project
 // references actually allow.
+//
+// Also covers the two T90 additions to the SAME probe (SPEC F87.6, STORY-227): GetSelectableByIdAsync
+// (the fulfillment rung's law-and-optionally-envelope re-check for a T89 match) and FindVibeAsync (the
+// mood-machinery resolution for a vibe request) — same file, same repository, same probe concern.
 
 using Dapper;
+using GenWave.Abstractions.Playout;
 using GenWave.MediaLibrary.Catalog;
 using GenWave.MediaLibrary.Tests.Fakes;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GenWave.MediaLibrary.Tests.Specs;
 
@@ -24,7 +30,8 @@ public static class FeatureRequestMatching
     // Helpers
     // ---------------------------------------------------------------------
 
-    static RequestCatalogProbeRepository Probe(DatabaseFixture db) => new(db.DataSource, new FakeSafeScopeProvider());
+    static RequestCatalogProbeRepository Probe(DatabaseFixture db) =>
+        new(db.DataSource, new FakeSafeScopeProvider(), NullLogger<RequestCatalogProbeRepository>.Instance);
 
     static MediaRatingRepository RatingRepo(DatabaseFixture db) => new(db.DataSource, new FakeSafeScopeProvider());
 
@@ -229,7 +236,8 @@ public static class FeatureRequestMatching
                 "Please Stand By (Station Default)");
 
             // Act: probe with the live safe scope covering that library.
-            var found = await new RequestCatalogProbeRepository(db.DataSource, new FakeSafeScopeProvider(safeLibraryId))
+            var found = await new RequestCatalogProbeRepository(
+                    db.DataSource, new FakeSafeScopeProvider(safeLibraryId), NullLogger<RequestCatalogProbeRepository>.Instance)
                 .FindBestAsync(null, "please stand by", CancellationToken.None);
 
             // Assert: null — a listener request must not be able to reach content the operator has
@@ -249,12 +257,177 @@ public static class FeatureRequestMatching
                 "Please Stand By (Station Default)");
 
             // Act: probe with no safe scope configured.
-            var found = await new RequestCatalogProbeRepository(db.DataSource, new FakeSafeScopeProvider())
+            var found = await new RequestCatalogProbeRepository(
+                    db.DataSource, new FakeSafeScopeProvider(), NullLogger<RequestCatalogProbeRepository>.Instance)
                 .FindBestAsync(null, "please stand by", CancellationToken.None);
 
             // Assert: the row matches — proving the safe scope, not something else about the row,
             // was doing the excluding above.
             Assert.Equal(safeMediaId, found);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — GetSelectableByIdAsync (SPEC F87.6, STORY-227, PLAN T90)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioGetSelectableById(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task ASelectableRowIsReturnedWhenNoEnvelopeIsSupplied()
+        {
+            // Arrange: a plain ready+measurable+eligible row.
+            await db.ResetAsync();
+            var id = await InsertSelectableTrackAsync(db, "/req/selectable-bypass.flac", "Led Zeppelin", "Kashmir");
+
+            // Act: the OverrideEnvelope=true bypass path — no envelope constraint at all.
+            var found = await Probe(db).GetSelectableByIdAsync(id, envelope: null, CancellationToken.None);
+
+            // Assert: the row comes back.
+            Assert.Equal(id.ToString(), found?.MediaId);
+        }
+
+        [Fact]
+        public async Task ANeverPlayRowIsNeverSelectableRegardlessOfEnvelope()
+        {
+            // Arrange: the T89-matched row was since flagged never_play by an operator.
+            await db.ResetAsync();
+            var id = await InsertSelectableTrackAsync(db, "/req/selectable-veto.flac", "Led Zeppelin", "Kashmir");
+            await RatingRepo(db).SetNeverPlayAsync(id.ToString(), true, CancellationToken.None);
+
+            // Act.
+            var found = await Probe(db).GetSelectableByIdAsync(id, envelope: null, CancellationToken.None);
+
+            // Assert: null — the veto is law regardless of OverrideEnvelope.
+            Assert.Null(found);
+        }
+
+        [Fact]
+        public async Task ARowOutsideASuppliedEnvelopeIsExcluded()
+        {
+            // Arrange: a Jazz row, and an envelope admitting only Rock.
+            await db.ResetAsync();
+            var id = await InsertSelectableTrackAsync(db, "/req/selectable-off-envelope.flac", "Miles Davis", "So What");
+            await using (var conn = await db.DataSource.OpenConnectionAsync())
+                await conn.ExecuteAsync("update library.media set genre = 'Jazz' where id = @id", new { id });
+            var envelope = new SegmentEnvelope(TimeOnly.MinValue, TimeOnly.MaxValue, ["Rock"], EnergyRange.Unconstrained);
+
+            // Act: the OverrideEnvelope=false path — envelope supplied.
+            var found = await Probe(db).GetSelectableByIdAsync(id, envelope, CancellationToken.None);
+
+            // Assert: null — the row's genre doesn't satisfy the supplied envelope.
+            Assert.Null(found);
+        }
+
+        [Fact]
+        public async Task ARowInsideASuppliedEnvelopeIsSelectable()
+        {
+            // Arrange: a Rock row and an envelope admitting Rock.
+            await db.ResetAsync();
+            var id = await InsertSelectableTrackAsync(db, "/req/selectable-in-envelope.flac", "Led Zeppelin", "Kashmir");
+            await using (var conn = await db.DataSource.OpenConnectionAsync())
+                await conn.ExecuteAsync("update library.media set genre = 'Rock' where id = @id", new { id });
+            var envelope = new SegmentEnvelope(TimeOnly.MinValue, TimeOnly.MaxValue, ["Rock"], EnergyRange.Unconstrained);
+
+            // Act.
+            var found = await Probe(db).GetSelectableByIdAsync(id, envelope, CancellationToken.None);
+
+            // Assert: the row comes back.
+            Assert.Equal(id.ToString(), found?.MediaId);
+        }
+
+        [Fact]
+        public async Task ARowInsideTheLiveSafeScopeIsNeverSelectable()
+        {
+            // Arrange: an otherwise-selectable row seeded in a library the live safe scope covers.
+            await db.ResetAsync();
+            var safeLibraryId = await CreateLibraryAsync(db, "selectable-safe-scope");
+            var id = await InsertSelectableTrackInLibraryAsync(
+                db, safeLibraryId, "/req/selectable-safe-scope.flac", "Station", "Please Stand By");
+
+            // Act: probe with the live safe scope covering that library.
+            var found = await new RequestCatalogProbeRepository(
+                    db.DataSource, new FakeSafeScopeProvider(safeLibraryId), NullLogger<RequestCatalogProbeRepository>.Instance)
+                .GetSelectableByIdAsync(id, envelope: null, CancellationToken.None);
+
+            // Assert: null — safe content is never requestable.
+            Assert.Null(found);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — FindVibeAsync (SPEC F87.6, STORY-227, PLAN T90)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioFindVibe(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task ARowSharingAMoodIsFound()
+        {
+            // Arrange: a selectable row tagged with a mood the request also names.
+            await db.ResetAsync();
+            var id = await InsertSelectableTrackAsync(db, "/req/vibe-match.flac", "Some Artist", "Some Song");
+            await Harness.Repo(db).WriteMoodsAsync(id, ["dreamy"], CancellationToken.None);
+
+            // Act: the OverrideEnvelope=true bypass path.
+            var found = await Probe(db).FindVibeAsync(["dreamy"], envelope: null, CancellationToken.None);
+
+            // Assert: the tagged row comes back.
+            Assert.Equal(id.ToString(), found?.MediaId);
+        }
+
+        [Fact]
+        public async Task ARowWithNoOverlappingMoodIsNotFound()
+        {
+            // Arrange: a selectable row tagged with an unrelated mood.
+            await db.ResetAsync();
+            var id = await InsertSelectableTrackAsync(db, "/req/vibe-no-overlap.flac", "Some Artist", "Some Song");
+            await Harness.Repo(db).WriteMoodsAsync(id, ["triumphant"], CancellationToken.None);
+
+            // Act.
+            var found = await Probe(db).FindVibeAsync(["dreamy"], envelope: null, CancellationToken.None);
+
+            // Assert: null — no mood overlap.
+            Assert.Null(found);
+        }
+
+        [Fact]
+        public async Task ANeverPlayRowIsNeverAVibeMatch()
+        {
+            // Arrange: a mood-tagged row flagged never_play.
+            await db.ResetAsync();
+            var id = await InsertSelectableTrackAsync(db, "/req/vibe-veto.flac", "Some Artist", "Some Song");
+            await Harness.Repo(db).WriteMoodsAsync(id, ["dreamy"], CancellationToken.None);
+            await RatingRepo(db).SetNeverPlayAsync(id.ToString(), true, CancellationToken.None);
+
+            // Act.
+            var found = await Probe(db).FindVibeAsync(["dreamy"], envelope: null, CancellationToken.None);
+
+            // Assert: null — the veto is law regardless of OverrideEnvelope.
+            Assert.Null(found);
+        }
+
+        [Fact]
+        public async Task ARowInsideTheLiveSafeScopeIsNeverAVibeMatch()
+        {
+            // Arrange: a mood-tagged row seeded in a library the live safe scope covers.
+            await db.ResetAsync();
+            var safeLibraryId = await CreateLibraryAsync(db, "vibe-safe-scope");
+            var id = await InsertSelectableTrackInLibraryAsync(
+                db, safeLibraryId, "/req/vibe-safe-scope.flac", "Station", "Please Stand By");
+            await Harness.Repo(db).WriteMoodsAsync(id, ["dreamy"], CancellationToken.None);
+
+            // Act: probe with the live safe scope covering that library.
+            var found = await new RequestCatalogProbeRepository(
+                    db.DataSource, new FakeSafeScopeProvider(safeLibraryId), NullLogger<RequestCatalogProbeRepository>.Instance)
+                .FindVibeAsync(["dreamy"], envelope: null, CancellationToken.None);
+
+            // Assert: null — safe content is never requestable.
+            Assert.Null(found);
         }
     }
 }

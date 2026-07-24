@@ -8,8 +8,9 @@ using GenWave.Core.Domain;
 /// station-wide pending-cap eviction path. T88 (STORY-225) added exactly what the wish parser needs —
 /// <see cref="GetForParseAsync"/>, <see cref="ListUnparsedPendingIdsAsync"/>, <see cref="MarkParsedAsync"/>.
 /// T89 (STORY-226) adds exactly what the catalog matcher needs — <see cref="MarkMatchedAsync"/>,
-/// <see cref="MarkUnmatchedAsync"/> — and nothing T90's fulfillment rung would need, which still
-/// lands its own members in its own task rather than speculatively arriving here now.
+/// <see cref="MarkUnmatchedAsync"/>. T90 (STORY-227, SPEC F87.6) adds exactly what the fulfillment
+/// rung needs — <see cref="GetOldestLiveAsync"/>, <see cref="ExpireStaleAsync"/>,
+/// <see cref="TryMarkFulfilledAsync"/>.
 ///
 /// <para>
 /// "Unparsed" discriminator (used by both new read members): <c>status = 'pending' AND artist IS
@@ -106,4 +107,36 @@ public interface IRequestStore
     /// the F86.8 mood-filter machinery) — this member is never called for that case.
     /// </summary>
     Task MarkUnmatchedAsync(long id, CancellationToken ct);
+
+    /// <summary>
+    /// The oldest still-live pending row with something for the fulfillment rung to try (SPEC F87.6,
+    /// STORY-227, PLAN T90): <c>status = 'pending'</c>, not yet past <paramref name="now"/>'s
+    /// <c>expires_at</c>, and carrying EITHER a T89 catalog match (<c>matched_media_id</c>) OR at
+    /// least one parsed mood (a vibe request) — never neither, and never both meaningfully (a matched
+    /// row's moods are irrelevant once matched_media_id exists; the fulfillment rung always prefers
+    /// the match). Oldest by <c>received_at</c> first, same tie-break as every other "oldest pending"
+    /// read in this interface. <see langword="null"/> when nothing qualifies — the ordinary "no live
+    /// request to fulfill" outcome, not an error.
+    /// </summary>
+    Task<FulfillableRequest?> GetOldestLiveAsync(DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// Flips every <c>pending</c> row whose <c>expires_at</c> has passed <paramref name="now"/> to
+    /// <c>expired</c> (SPEC F87.6) and returns how many rows were flipped. Called opportunistically at
+    /// the top of every fulfillment attempt (a cheap indexed UPDATE) rather than on a dedicated timer —
+    /// requests expire promptly without needing their own background service. The caller (the
+    /// fulfillment rung) is responsible for any booth-log narration; this member itself only writes
+    /// the status column.
+    /// </summary>
+    Task<int> ExpireStaleAsync(DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// The one-shot compare-and-swap (SPEC F87.6): flips row <paramref name="id"/> from
+    /// <c>pending</c> to <c>fulfilled</c> (stamping <c>fulfilled_at = now()</c>) ONLY if it is still
+    /// <c>pending</c> at the moment of the write, returning whether the swap actually landed.
+    /// <see langword="false"/> means the row was no longer pending by the time this call reached the
+    /// database (already fulfilled/expired/unmatched by a concurrent attempt) — the caller must treat
+    /// that exactly like "nothing to fulfill this pick," never retry the same id.
+    /// </summary>
+    Task<bool> TryMarkFulfilledAsync(long id, CancellationToken ct);
 }

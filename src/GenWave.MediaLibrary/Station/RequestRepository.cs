@@ -175,4 +175,50 @@ sealed class RequestRepository(Lazy<NpgsqlDataSource> dataSource, int wishRetent
             new { Id = id },
             cancellationToken: ct));
     }
+
+    /// <summary>
+    /// SPEC F87.6, STORY-227, PLAN T90 — oldest-first (see <see cref="IRequestStore"/>'s own remarks
+    /// for the tie-break convention), admitting only a row with a T89 match OR a non-empty mood
+    /// predicate: <c>cardinality(moods)</c> returns <see langword="null"/> for a <see langword="null"/>
+    /// array and <c>0</c> for an empty one, so <c>&gt; 0</c> alone (no separate "moods is not null"
+    /// guard) correctly excludes both.
+    /// </summary>
+    public async Task<FulfillableRequest?> GetOldestLiveAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<FulfillableRequestRow?>(new CommandDefinition(
+            """
+            select id::bigint as "Id", matched_media_id as "MatchedMediaId", moods as "Moods"
+            from station.request
+            where status = 'pending'
+              and expires_at >= @Now
+              and (matched_media_id is not null or cardinality(moods) > 0)
+            order by received_at asc, id asc
+            limit 1
+            """,
+            new { Now = now },
+            cancellationToken: ct));
+        return row?.ToFulfillableRequest();
+    }
+
+    public async Task<int> ExpireStaleAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        return await conn.ExecuteAsync(new CommandDefinition(
+            "update station.request set status = 'expired' where status = 'pending' and expires_at < @Now",
+            new { Now = now },
+            cancellationToken: ct));
+    }
+
+    /// <summary>The one-shot CAS (SPEC F87.6): the WHERE clause's own <c>status = 'pending'</c> guard
+    /// IS the compare; <c>ExecuteAsync</c>'s affected-row count IS the swap result.</summary>
+    public async Task<bool> TryMarkFulfilledAsync(long id, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var affected = await conn.ExecuteAsync(new CommandDefinition(
+            "update station.request set status = 'fulfilled', fulfilled_at = now() where id = @Id and status = 'pending'",
+            new { Id = id },
+            cancellationToken: ct));
+        return affected == 1;
+    }
 }

@@ -64,6 +64,11 @@ builder.Services
     // that call's own TryAddSingleton<..., NoOpPersonaPickProvider> default (see this extension's
     // own remarks).
     .AddGenWavePersonaRanking(cfg)
+    // Real fulfillment-rung source (SPEC F87.6, STORY-227, PLAN T90) — MUST run after
+    // AddGenWaveOrchestration so its AddSingleton<IRequestFulfillmentSource> wins over that call's
+    // own TryAddSingleton<..., NoOpRequestFulfillmentSource> default (mirrors AddGenWavePersonaRanking's
+    // own ordering rule one line above).
+    .AddGenWaveRequestFulfillment()
     // Playout chain: engine control → feeder → feeder service → PlayoutSupervisor (hosted).
     .AddGenWavePlayout()
     // Boot seed: branded safe-loop backstop (F27.6), one-shot + idempotent.

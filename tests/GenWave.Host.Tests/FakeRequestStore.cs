@@ -78,4 +78,16 @@ sealed class FakeRequestStore : IRequestStore
         MarkUnmatchedCalls.Add(id);
         return Task.CompletedTask;
     }
+
+    // Not exercised by STORY-224/225/226 specs (this fake's own scope) — STORY-227's fulfillment-rung
+    // facts drive GenWave.Orchestration.Tests' own FakeRequestStore instead (Orchestration.Tests can't
+    // reference this Host.Tests assembly, and vice versa).
+    public Task<FulfillableRequest?> GetOldestLiveAsync(DateTimeOffset now, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by this fake's own STORY-224/225/226 specs.");
+
+    public Task<int> ExpireStaleAsync(DateTimeOffset now, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by this fake's own STORY-224/225/226 specs.");
+
+    public Task<bool> TryMarkFulfilledAsync(long id, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by this fake's own STORY-224/225/226 specs.");
 }
