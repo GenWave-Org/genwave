@@ -1,31 +1,37 @@
 # 🖥️ Hardware Compatibility
 
-What GenWave actually runs on, what each service needs, and how confident we are in every claim.
+What GenWave actually runs on, what each service needs, and the confidence level for every claim.
 This file is the source of truth for hardware guidance (gh-#20) — **contribute your own box via
 PR**: add a row to the deployments table with your specs and what worked (or didn't).
 
 ## 🎨 Confidence legend
 
 | Mark | Meaning |
-|---|---|
+|:---:|---|
 | 🟢 | **Verified** — GenWave has demonstrably run here, or the number was measured/observed live |
 | 🟡 | **Expected** — derived from configured limits or design targets; not independently measured |
 | 🔴 | **Unverified / known-problematic** — no test has been run, or a problem was observed |
 
 ## 📦 Known deployments
 
-| Machine | CPU / arch | RAM | Role | Status | Notes |
-|---|---|---|---|---|---|
-| `demo.genwaveradio.com` appliance | *(unrecorded)* x86-64 | *(unrecorded)* | Public demo station, full stack + LLM + tunnel + logging | 🟢 | Runs the pinned release 24/7 (health-probed by CI). Source of the one live-observed sizing fact: ollama at a 3 GB fence OOM-killed constantly; stable at **1 CPU / 6GB** (observed 2026-07-21, v2.2.0 rollout) |
-| Development machines | x86-64 | *(varies)* | `./launch.sh` dev flow, full stack from source | 🟢 | Linux + Docker; no specs recorded |
+### Computer Systems
+| Machine | CPU / arch | RAM | Role | Status | Notes | Verifier |
+|---|---|---|---|:---:|---|---|
+| `demo.genwaveradio.com` appliance (CCX23) | x86-64 | 16GB | Public demo station, full stack + admin + LLM + tunnel + logging | 🟢 | Runs the pinned release 24/7 (health-probed by CI). Source of the one live-observed sizing fact: ollama at a 3 GB fence OOM-killed constantly; stable at **1 CPU / 6GB** (observed 2026-07-21, v2.2.0 rollout) | GenWave |
+| Development machine | x86-64 | 512GB | `./launch.sh` dev flow, full stack from source | 🟢 | Ubuntu 25.04 + Docker | GenWave |
 
-*Have GenWave running somewhere else — a NUC, an old laptop, a VPS? Add it here.*
+### Internet Radios
+| Make | Model | Status | Notes | Verifier |
+|---|---|:---:|---|---|
+| Grace Digital | Mondo Elite Classic | 🟢 | Works great! | GenWave |
+
+*Have GenWave running somewhere else — a NUC, an old laptop, a VPS? Add it here!*
 
 ## 🎯 Design target
 
 GenWave's stated hardware goal ([docs/PROJECT.md](docs/PROJECT.md)):
 
-> **a modest CPU-only box runs the whole station; features that require a GPU don't ship in year one.**
+> **A modest CPU-only box runs the whole station; features that require a GPU don't ship in year one (hopefully never).**
 
 - 🟢 **CPU-only by design** — TTS uses the CPU builds (`kokoro-fastapi-cpu`, Piper ONNX); the demo
   LLM (`llama3.2:3b` via ollama) runs CPU inference on one fenced core. No GPU is used anywhere.
@@ -40,13 +46,13 @@ Configured limits come from `compose.yaml` / `compose.demo.yaml`; "real footprin
 notes recorded alongside them.
 
 | Service | Configured limit | Real footprint | Confidence | Notes |
-|---|---|---|---|---|
+|---|---|---|:---:|---|
 | `kokoro` (TTS) | 3 GB cap | ~1.2 GiB fresh baseline | 🟢 footprint / 🟡 cap | Cap is a fail-closed backstop, not a requirement |
 | `ollama` (DJ brain, demo profile) | **1 CPU / 6GB fence** | needs > 3 GB with `llama3.2:3b` resident (`KEEP_ALIVE=-1`) | 🟢 | Live-observed: 3 GB fence = constant OOM kills. Cold model load ~25 s+; a full persona prompt on one fenced core takes ~25–30 s even warm — set `Llm:TimeoutSeconds: 60`. Size the model to the fence |
 | `piper` (fallback TTS) | 768 MB cap | well under 1 GiB with a "medium" voice | 🟢 footprint / 🟡 cap | ONNX runtime + `en_US-lessac-medium`, downloaded on first boot |
 | `cloudflared` (tunnel profile) | 128 MB cap | ~20–30 MiB idle | 🟢 | |
 | `alloy` (logging profile) | 256 MB cap | — | 🟡 | Single-daemon log-tailing sidecar |
-| `db` / `icecast` / `engine` / `api` / `admin_ui` | *(uncapped)* | modest | 🟡 | No limits configured; none has ever been the memory pressure point |
+| `db` / `icecast` / `engine` / `api` / `admin_ui` | *(uncapped)* | modest (observed range: 10-130MB) | 🟡 | No limits configured; none has ever been the memory pressure point |
 
 ## 📐 Sizing guidance (derived, not measured)
 
@@ -65,7 +71,7 @@ These totals are **derived** from the numbers above — nobody has bisected a re
 ## ✅ Software requirements
 
 | Requirement | Value | Confidence |
-|---|---|---|
+|---|---|:---:|
 | OS | Linux with Docker Engine (the only deployment shape ever run) | 🟢 |
 | Docker Compose | **v2.24+** (the demo overlay uses the `!override` merge tag) | 🟢 |
 | GPU | none — not used anywhere | 🟢 |
