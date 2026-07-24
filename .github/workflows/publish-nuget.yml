@@ -32,6 +32,10 @@ jobs:
       - name: Derive version from tag
         run: echo "PKG_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
+      # ffmpeg: the F88 artwork specs (Story222) drive the REAL binary (gh-#105) — same step
+      # as ci.yml's build-test; this gate runs its own test pass and needs it too.
+      - name: Install ffmpeg (artwork specs drive the real binary)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
       - name: Build + test first — never publish from a red tree
         run: |
           dotnet build GenWave.sln --configuration Release
