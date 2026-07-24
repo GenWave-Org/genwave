@@ -32,6 +32,10 @@ jobs:
         run: dotnet build GenWave.sln --no-restore --configuration Release
       # Same policy as ci.yml: integration tests need fixture-managed side containers and run
       # on a dev box, not here.
+      # ffmpeg: the F88 artwork specs (Story222) drive the REAL binary (gh-#105) — same step
+      # as ci.yml's build-test; this gate runs its own test pass and needs it too.
+      - name: Install ffmpeg (artwork specs drive the real binary)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
       - name: Test
         run: dotnet test GenWave.sln --no-build --configuration Release --filter "Category!=Integration"
 
