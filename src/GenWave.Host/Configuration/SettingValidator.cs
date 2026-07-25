@@ -80,6 +80,20 @@ public sealed class SettingValidator(IConfiguration configuration)
     internal const int LlmTimeoutSecondsMin = 1;
     internal const int LlmTimeoutSecondsMax = 300;
 
+    // DependencyHealth:* (SPEC F70.2, gh-#125) — floors mirror DependencyHealthOptions' own
+    // [Range(1, int.MaxValue)] (boot-enforced via ValidateDataAnnotations); the ceilings are F53.1
+    // settings-API-only. The interval ceiling is an hour: anything longer is indistinguishable from
+    // "probing is off", and the operator has a real kill switch in the endpoint settings instead.
+    // The threshold ceiling of 10 is deliberately tight — threshold × interval is how long a
+    // genuinely dead dependency stays undetected, so 10 at the default 30s cadence is already a
+    // 5-minute blind spot and further is a footgun, not a tuning option.
+    internal const int ProbeIntervalSecondsMin = 1;
+    internal const int ProbeIntervalSecondsMax = 3600;
+    internal const int ProbeTimeoutSecondsMin = 1;
+    internal const int ProbeTimeoutSecondsMax = 300;
+    internal const int UnhealthyThresholdMin = 1;
+    internal const int UnhealthyThresholdMax = 10;
+
     // Rotation/cadence knobs (SPEC F41.6/F42.2) — floor stays 0 (0 legally disables the knob;
     // [Range(0, int.MaxValue)] on the nested options class is documentation-only, StationOptionsValidator
     // is the real boot floor and is NOT tightened per F53.2). F53.1 adds the ceiling below.
@@ -214,6 +228,12 @@ public sealed class SettingValidator(IConfiguration configuration)
             ["Library:ScanIntervalSeconds"] = v => IsIntInRange(v, ScanIntervalSecondsMin, ScanIntervalSecondsMax),
             ["Library:EnrichmentConcurrency"] = v => IsIntInRange(v, EnrichmentConcurrencyMin, EnrichmentConcurrencyMax),
             ["Library:Scan:MissThreshold"] = v => IsIntInRange(v, ScanMissThresholdMin, ScanMissThresholdMax),
+
+            // Dependency-probe cadence (SPEC F70.2 AC1/AC3/AC5, gh-#125) — all three live, all
+            // three floored by DependencyHealthOptions' own [Range(1, int.MaxValue)] at boot.
+            ["DependencyHealth:ProbeIntervalSeconds"] = v => IsIntInRange(v, ProbeIntervalSecondsMin, ProbeIntervalSecondsMax),
+            ["DependencyHealth:ProbeTimeoutSeconds"] = v => IsIntInRange(v, ProbeTimeoutSecondsMin, ProbeTimeoutSecondsMax),
+            ["DependencyHealth:UnhealthyThreshold"] = v => IsIntInRange(v, UnhealthyThresholdMin, UnhealthyThresholdMax),
 
             // MusicBrainz year lookup (SPEC F48.5, X5, closes gitea-#208). Enabled is a plain bool kill
             // switch; Endpoint mirrors Tts:Endpoint's own "must be a non-empty absolute http/https
@@ -657,6 +677,12 @@ public sealed class SettingValidator(IConfiguration configuration)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {EnrichmentConcurrencyMin} and {EnrichmentConcurrencyMax} (workers).",
         var k when k.Equals("Library:Scan:MissThreshold", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {ScanMissThresholdMin} and {ScanMissThresholdMax} (consecutive misses).",
+        var k when k.Equals("DependencyHealth:ProbeIntervalSeconds", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {ProbeIntervalSecondsMin} and {ProbeIntervalSecondsMax} (seconds).",
+        var k when k.Equals("DependencyHealth:ProbeTimeoutSeconds", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {ProbeTimeoutSecondsMin} and {ProbeTimeoutSecondsMax} (seconds).",
+        var k when k.Equals("DependencyHealth:UnhealthyThreshold", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {UnhealthyThresholdMin} and {UnhealthyThresholdMax} (consecutive failures).",
         var k when k.Equals("Library:YearLookup:Enabled", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Library:YearLookup:Endpoint", StringComparison.OrdinalIgnoreCase)

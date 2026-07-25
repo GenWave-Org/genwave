@@ -246,6 +246,20 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "The length of the intro/outro window measured for energy analysis, in seconds. Applies " +
     "the next time a file is (re-)analyzed. Must be greater than 0, at most 60.",
 
+  // ── Dependency health probes (SPEC F70.2, gh-#125) ─────────────────────────────────────────
+  "DependencyHealth:ProbeIntervalSeconds":
+    "How often the station checks that Kokoro, Piper, Ollama and Icecast are still answering, in " +
+    "seconds. Applies to the next check — no restart. Must be between 1 and 3600.",
+  "DependencyHealth:ProbeTimeoutSeconds":
+    "How long one health check waits for an answer before counting as a failure, in seconds. " +
+    "Kokoro stops answering while it renders a clip, so a budget shorter than a typical render " +
+    "reports it down when it is merely busy. Must be between 1 and 300.",
+  "DependencyHealth:UnhealthyThreshold":
+    "How many checks in a row must fail before the station treats a service as down and starts " +
+    "using its fallback. 1 reacts fastest but flips on a single missed check; the default 2 " +
+    "ignores one-off blips. Higher values mean a genuinely dead service goes unnoticed for this " +
+    "many checks. Must be between 1 and 10.",
+
   // ── LLM degradation (SPEC F69.3) ───────────────────────────────────────────────────────────
   "Llm:DegradationPin":
     "Pins the LLM degradation mode instead of letting it auto-adjust to failures/recoveries. " +

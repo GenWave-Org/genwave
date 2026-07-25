@@ -60,6 +60,9 @@ export const SETTINGS_HELP_KEYS = [
   "GW_SAFE_GAP_SECONDS",
   "Library:CueDetection:MinSilenceDurationSec",
   "Library:Energy:WindowSeconds",
+  "DependencyHealth:ProbeIntervalSeconds",
+  "DependencyHealth:ProbeTimeoutSeconds",
+  "DependencyHealth:UnhealthyThreshold",
   "Llm:DegradationPin",
 ] as const;
 

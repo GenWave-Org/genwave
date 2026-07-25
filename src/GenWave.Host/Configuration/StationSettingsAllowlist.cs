@@ -204,6 +204,26 @@ public static class StationSettingsAllowlist
         new("Library:CueDetection:MinSilenceDurationSec",     SettingApplyMode.Enrichment,    SettingKind.Number,     "seconds"),
         new("Library:Energy:WindowSeconds",                   SettingApplyMode.Enrichment,    SettingKind.Number,     "seconds"),
 
+        // Dependency health probes (SPEC F70.2 AC1/AC3/AC5, gh-#125) — DependencyHealthProbeService
+        // hands the prober a Func<DependencyProbeCadence> that reads IOptionsMonitor fresh, and the
+        // prober re-evaluates it every cycle (retuning PeriodicTimer.Period after each tick, the
+        // same live shape as Library:ScanIntervalSeconds above), so a PUT here reaches the very next
+        // probe with no api restart.
+        //
+        // These three were deliberately EXCLUDED from this allowlist when F70.2 shipped —
+        // "deployment tuning, not operator-editable station config". gh-#125 reversed that: chasing
+        // a flapping Kokoro probe on a live station meant a compose edit and a redeploy to move one
+        // number, twice. Nothing here is a secret and nothing is engine-side, so the original
+        // exclusion bought no safety — only friction during an incident.
+        //
+        // Boot-floor note: DependencyHealthOptions IS wired via .AddOptions<T>()
+        // .ValidateDataAnnotations().ValidateOnStart() in Program.cs, so all three [Range(1, ...)]
+        // attributes are genuinely enforced at boot; SettingValidator adds the F53.1 ceilings that
+        // only apply on the settings-API path.
+        new("DependencyHealth:ProbeIntervalSeconds",          SettingApplyMode.Live,          SettingKind.Number,     "seconds"),
+        new("DependencyHealth:ProbeTimeoutSeconds",           SettingApplyMode.Live,          SettingKind.Number,     "seconds"),
+        new("DependencyHealth:UnhealthyThreshold",            SettingApplyMode.Live,          SettingKind.Number,     "failures"),
+
         // LLM degradation pin (SPEC F69.3, STORY-188) — DegradationController (GenWave.Tts) reads
         // this fresh via IOptionsMonitor<LlmOptions> on every evaluation, so a live PUT here
         // pins/unpins the mode with no api restart. "auto" (the LlmOptions default) leaves the

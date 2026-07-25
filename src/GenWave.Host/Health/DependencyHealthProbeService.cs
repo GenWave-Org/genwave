@@ -15,22 +15,21 @@ namespace GenWave.Host.Health;
 /// </summary>
 sealed class DependencyHealthProbeService(
     DependencyHealthProber prober,
-    IOptions<DependencyHealthOptions> options,
+    IOptionsMonitor<DependencyHealthOptions> options,
     ILogger<DependencyHealthProbeService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var cfg = options.Value;
+        var startup = CurrentCadence();
         logger.LogInformation(
-            "Dependency health probes started: every {IntervalSeconds}s, {TimeoutSeconds}s per-probe timeout",
-            cfg.ProbeIntervalSeconds, cfg.ProbeTimeoutSeconds);
+            "Dependency health probes started: every {IntervalSeconds}s, {TimeoutSeconds}s per-probe "
+            + "timeout, {UnhealthyThreshold} consecutive failures to flip a verdict",
+            startup.Interval.TotalSeconds, startup.PerProbeTimeout.TotalSeconds,
+            startup.UnhealthyThreshold);
 
         try
         {
-            await prober.RunAsync(
-                TimeSpan.FromSeconds(cfg.ProbeIntervalSeconds),
-                TimeSpan.FromSeconds(cfg.ProbeTimeoutSeconds),
-                stoppingToken);
+            await prober.RunAsync(CurrentCadence, stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -38,5 +37,23 @@ sealed class DependencyHealthProbeService(
         }
 
         logger.LogInformation("Dependency health probes stopped");
+    }
+
+    /// <summary>
+    /// The cadence as of right now — reads <see cref="IOptionsMonitor{T}.CurrentValue"/> fresh, and
+    /// is handed to the prober as a delegate so it is re-evaluated on every cycle rather than
+    /// frozen here at boot (gh-#125; the same live shape as <c>ScanService</c>'s
+    /// <c>Library:ScanIntervalSeconds</c> retune). The <c>Math.Max(1, …)</c> floors mirror
+    /// <c>ScanService</c>'s: <c>SettingValidator</c> already rejects out-of-range live edits, so
+    /// these only guard a hand-edited appsettings that bypasses it — a zero interval would spin
+    /// this loop hot.
+    /// </summary>
+    DependencyProbeCadence CurrentCadence()
+    {
+        var cfg = options.CurrentValue;
+        return new DependencyProbeCadence(
+            TimeSpan.FromSeconds(Math.Max(1, cfg.ProbeIntervalSeconds)),
+            TimeSpan.FromSeconds(Math.Max(1, cfg.ProbeTimeoutSeconds)),
+            Math.Max(1, cfg.UnhealthyThreshold));
     }
 }
