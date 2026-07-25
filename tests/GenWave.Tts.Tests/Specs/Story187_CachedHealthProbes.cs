@@ -11,6 +11,14 @@ namespace GenWave.Tts.Tests.Specs;
 
 public static class FeatureCachedDependencyHealthProbes
 {
+    /// <summary>
+    /// A cadence with the debounce OFF (threshold 1 — flip on the first failure), which is the
+    /// behavior every pre-gh-#125 fact in this file was written against. The AC5 debounce facts
+    /// live in <see cref="ScenarioProbeFlapDebounce"/> and set their own threshold explicitly.
+    /// </summary>
+    static DependencyProbeCadence Undebounced(TimeSpan perProbeTimeout) =>
+        new(TimeSpan.FromMilliseconds(30), perProbeTimeout, UnhealthyThreshold: 1);
+
     public static class ScenarioBackgroundCadence
     {
         [Fact]
@@ -23,7 +31,7 @@ public static class FeatureCachedDependencyHealthProbes
             var prober = new DependencyHealthProber([probe], store, NullLogger<DependencyHealthProber>.Instance);
 
             using var cts = new CancellationTokenSource();
-            var runTask = prober.RunAsync(TimeSpan.FromMilliseconds(30), TimeSpan.FromSeconds(5), cts.Token);
+            var runTask = prober.RunAsync(() => Undebounced(TimeSpan.FromSeconds(5)), cts.Token);
 
             // When the loop has ticked on its own cadence for a while, is then stopped, and
             // verdicts are read repeatedly. The stop comes BEFORE the read burst: with the loop
@@ -63,7 +71,7 @@ public static class FeatureCachedDependencyHealthProbes
             var probe = new FakeDependencyProbe(DependencyNames.Kokoro, healthy: false);
             var store = new DependencyHealthStore();
             var prober = new DependencyHealthProber([probe], store, NullLogger<DependencyHealthProber>.Instance);
-            await prober.RunCycleAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
+            await prober.RunCycleAsync(Undebounced(TimeSpan.FromSeconds(5)), CancellationToken.None);
 
             IDependencyHealth reader = store;
 
@@ -93,8 +101,8 @@ public static class FeatureCachedDependencyHealthProbes
             var store = new DependencyHealthStore();
             var prober = new DependencyHealthProber([probe], store, NullLogger<DependencyHealthProber>.Instance);
 
-            // When the next verdict is produced (one cycle, a short timeout)
-            await prober.RunCycleAsync(TimeSpan.FromMilliseconds(50), CancellationToken.None);
+            // When the next verdict is produced (one cycle, a short timeout, debounce off)
+            await prober.RunCycleAsync(Undebounced(TimeSpan.FromMilliseconds(50)), CancellationToken.None);
 
             // Then it reports unhealthy with the failure reason...
             var verdict = store.GetVerdict("slow-dep");
@@ -104,11 +112,190 @@ public static class FeatureCachedDependencyHealthProbes
 
             // ...and the probe service keeps running: a second cycle still completes cleanly,
             // never throwing out of RunCycleAsync
-            await prober.RunCycleAsync(TimeSpan.FromMilliseconds(50), CancellationToken.None);
+            await prober.RunCycleAsync(Undebounced(TimeSpan.FromMilliseconds(50)), CancellationToken.None);
             var secondVerdict = store.GetVerdict("slow-dep");
             Assert.NotNull(secondVerdict);
             Assert.False(secondVerdict.Healthy);
             Assert.Equal(2, secondVerdict.ConsecutiveFailureCount);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // SPEC F70.2 AC5 (gh-#125) — a transient probe failure must not flip the verdict. Kokoro
+    // serves /health from the event loop it renders on and blocks it for the whole render, so it
+    // misses isolated probes while perfectly alive; flipping on the first miss routed live patter
+    // to the Piper fallback ~25×/day on the demo box for no reason.
+    // ---------------------------------------------------------------------
+
+    public static class ScenarioProbeFlapDebounce
+    {
+        static DependencyProbeCadence Debounced(int threshold) =>
+            new(TimeSpan.FromMilliseconds(30), TimeSpan.FromMilliseconds(50), threshold);
+
+        [Fact]
+        public static async Task One_failed_probe_below_the_threshold_leaves_the_verdict_healthy()
+        {
+            // Given a dependency that has answered healthy at least once, then starts hanging
+            var probe = new FakeDependencyProbe("flappy-dep", healthy: true);
+            var store = new DependencyHealthStore();
+            var prober = new DependencyHealthProber([probe], store, NullLogger<DependencyHealthProber>.Instance);
+            await prober.RunCycleAsync(Debounced(threshold: 2), CancellationToken.None);
+            probe.Hang = true;
+
+            // When exactly one probe fails, under a threshold of 2
+            await prober.RunCycleAsync(Debounced(threshold: 2), CancellationToken.None);
+
+            // Then the published verdict is still healthy — nothing reroutes off the primary
+            var verdict = store.GetVerdict("flappy-dep");
+            Assert.NotNull(verdict);
+            Assert.True(verdict.Healthy);
+
+            // ...but the miss is recorded, so the next failure in a row can flip it
+            Assert.Equal(1, verdict.ConsecutiveFailureCount);
+
+            // ...and a healthy verdict never carries a reason (the F70.2 invariant holds through
+            // the debounce: the reason is dropped, not smuggled into a healthy snapshot)
+            Assert.Null(verdict.Reason);
+        }
+
+        [Fact]
+        public static async Task The_threshold_th_consecutive_failure_flips_the_verdict_with_its_reason()
+        {
+            // Given a dependency that hangs on every probe
+            var probe = new FakeDependencyProbe("dead-dep", healthy: true, hang: true);
+            var store = new DependencyHealthStore();
+            var prober = new DependencyHealthProber([probe], store, NullLogger<DependencyHealthProber>.Instance);
+
+            // When it fails twice in a row, under a threshold of 2
+            await prober.RunCycleAsync(Debounced(threshold: 2), CancellationToken.None);
+            Assert.True(store.GetVerdict("dead-dep")!.Healthy, "first failure must not flip the verdict");
+
+            await prober.RunCycleAsync(Debounced(threshold: 2), CancellationToken.None);
+
+            // Then the verdict flips unhealthy and carries the failure reason — a genuinely dead
+            // dependency is still caught, within threshold × interval
+            var verdict = store.GetVerdict("dead-dep");
+            Assert.NotNull(verdict);
+            Assert.False(verdict.Healthy);
+            Assert.Equal(2, verdict.ConsecutiveFailureCount);
+            Assert.Contains("timed out", verdict.Reason, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public static async Task A_healthy_probe_between_two_failures_resets_the_streak()
+        {
+            // Given a dependency that fails, recovers, then fails again — the exact gh-#125 shape,
+            // where isolated render-length stalls are minutes apart and never consecutive
+            var probe = new FakeDependencyProbe("intermittent-dep", healthy: true, hang: true);
+            var store = new DependencyHealthStore();
+            var prober = new DependencyHealthProber([probe], store, NullLogger<DependencyHealthProber>.Instance);
+
+            await prober.RunCycleAsync(Debounced(threshold: 2), CancellationToken.None);
+            probe.Hang = false;
+            await prober.RunCycleAsync(Debounced(threshold: 2), CancellationToken.None);
+            probe.Hang = true;
+
+            // When the second isolated failure lands
+            await prober.RunCycleAsync(Debounced(threshold: 2), CancellationToken.None);
+
+            // Then the verdict is STILL healthy: the intervening success reset the streak, so two
+            // non-consecutive misses never accumulate into a flip
+            var verdict = store.GetVerdict("intermittent-dep");
+            Assert.NotNull(verdict);
+            Assert.True(verdict.Healthy);
+            Assert.Equal(1, verdict.ConsecutiveFailureCount);
+        }
+
+        [Fact]
+        public static async Task A_threshold_of_one_preserves_the_original_flip_on_first_failure()
+        {
+            // Given the debounce explicitly disabled (threshold 1)
+            var probe = new FakeDependencyProbe("dep", healthy: true, hang: true);
+            var store = new DependencyHealthStore();
+            var prober = new DependencyHealthProber([probe], store, NullLogger<DependencyHealthProber>.Instance);
+
+            // When one probe fails
+            await prober.RunCycleAsync(Debounced(threshold: 1), CancellationToken.None);
+
+            // Then it flips immediately — the pre-gh-#125 contract, still available to an operator
+            // who wants the twitchiest possible detection
+            var verdict = store.GetVerdict("dep");
+            Assert.NotNull(verdict);
+            Assert.False(verdict.Healthy);
+        }
+
+        [Fact]
+        public static async Task A_deliberately_unconfigured_dependency_is_never_debounced()
+        {
+            // Given a probe reporting "disabled by design" (ProbeAsync returns false — e.g. an
+            // empty Llm:Endpoint, SPEC F34.2) rather than failing
+            var probe = new FakeDependencyProbe("unconfigured-dep", healthy: false);
+            var store = new DependencyHealthStore();
+            var prober = new DependencyHealthProber([probe], store, NullLogger<DependencyHealthProber>.Instance);
+
+            // When one cycle runs under a threshold that WOULD debounce a failure
+            await prober.RunCycleAsync(Debounced(threshold: 2), CancellationToken.None);
+
+            // Then it is published immediately: not-configured is a deterministic declaration the
+            // probe repeats every cycle, not a flap, and F69.2's probe-driven drop must not read
+            // an unconfigured dependency as healthy for an interval
+            var verdict = store.GetVerdict("unconfigured-dep");
+            Assert.NotNull(verdict);
+            Assert.False(verdict.Healthy);
+            Assert.Equal(DependencyHealthProber.NotConfiguredReason, verdict.Reason);
+        }
+    }
+
+    public static class ScenarioLiveCadence
+    {
+        [Fact]
+        public static async Task Each_cycle_re_reads_the_cadence_so_an_edit_needs_no_restart()
+        {
+            // Given a running prober whose cadence delegate is backed by a mutable value — the
+            // IOptionsMonitor stand-in (gh-#125: the knobs are allowlisted and Live, so a settings
+            // PUT must reach the very next probe with no api restart)
+            var probe = new FakeDependencyProbe("dep", healthy: true, hang: true);
+            var store = new DependencyHealthStore();
+            var prober = new DependencyHealthProber([probe], store, NullLogger<DependencyHealthProber>.Instance);
+
+            var threshold = 5;
+            DependencyProbeCadence Current() =>
+                new(TimeSpan.FromMilliseconds(20), TimeSpan.FromMilliseconds(40),
+                    Volatile.Read(ref threshold));
+
+            using var cts = new CancellationTokenSource();
+            var runTask = prober.RunAsync(Current, cts.Token);
+
+            // When the threshold is lowered underneath the running loop — the probe has been
+            // failing all along, but under threshold 5 it never flipped
+            await Task.Delay(TimeSpan.FromMilliseconds(150));
+            Assert.True(store.GetVerdict("dep")?.Healthy, "threshold 5 should not have flipped yet");
+            Volatile.Write(ref threshold, 1);
+
+            // Then the very next cycle applies the new value and flips the verdict — no restart
+            var flipped = await WaitUntil(() => store.GetVerdict("dep")?.Healthy == false,
+                TimeSpan.FromSeconds(2));
+
+            await cts.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runTask);
+
+            Assert.True(flipped, "expected the lowered threshold to apply without restarting the loop");
+        }
+
+        static async Task<bool> WaitUntil(Func<bool> condition, TimeSpan budget)
+        {
+            var deadline = DateTimeOffset.UtcNow + budget;
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                if (condition())
+                {
+                    return true;
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(10));
+            }
+
+            return condition();
         }
     }
 
