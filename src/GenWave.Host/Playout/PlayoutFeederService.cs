@@ -59,11 +59,17 @@ sealed class PlayoutFeederService : IHostedService
 
     public async Task StopAsync(CancellationToken ct)
     {
-        if (cts is null || executeTask is null) return;
-        await cts.CancelAsync();
+        // Shutdown can reach this more than once (supervisor stop + host teardown) — gh-#156:
+        // when the first call's WaitAsync outlived ShutdownTimeout, its finally had disposed the
+        // source but left the field set, and the re-entry cancelled a disposed CTS. Claim the
+        // fields up front so every call after the first is a no-op.
+        var stopCts = Interlocked.Exchange(ref cts, null);
+        var running = Interlocked.Exchange(ref executeTask, null);
+        if (stopCts is null || running is null) return;
+        await stopCts.CancelAsync();
         try
         {
-            await executeTask.WaitAsync(ct);
+            await running.WaitAsync(ct);
         }
         catch (OperationCanceledException)
         {
@@ -71,7 +77,7 @@ sealed class PlayoutFeederService : IHostedService
         }
         finally
         {
-            cts.Dispose();
+            stopCts.Dispose();
         }
     }
 
