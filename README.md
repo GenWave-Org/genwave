@@ -15,6 +15,17 @@ This is **GenWave Home**, the AGPL edition — see [License](#license).
 🎧 **Hear it live:** [demo.genwaveradio.com](https://demo.genwaveradio.com/) — the public demo station, running the [reference appliance topology](DEPLOYMENT.md): watch what's on the air and tune in!
 
 
+## Why GenWave
+
+Twenty-plus years ago, in my first job as a software engineer, we pulled a lot of all-nighters — fueled by music that IT graciously let us keep on one of their servers (the Exchange server, if memory serves). We'd bring in CDs, IT would rip them, and when the last non-engineer left for the night, someone would fire up the playlist and start the stream.
+
+It was great, until it wasn't. The problem with playlists is that they're dumb: same music, same order, every time. Being engineers, we solved it — sort of. I wrote a playlist generator that jumbled the order on every run. Problem solved! Except now we were hearing B-sides and artists nobody recognized, with no good way to find out what was playing. It felt more like real radio, and it left us with a thought that stuck: *wouldn't it be cool if we had DJs to announce the music?* There was no way to build that back then, so we coerced our QA lead into recording a few sound bites, played one every X tracks, and christened the result FLAP Radio (because reasons).
+
+The itch never went away. Over the years I built a home version of FLAP Radio — still, honestly, a playlist randomizer — and I was never truly happy with it. Then, a couple of years ago, LLMs and TTS started making a serious splash, and the itch came back in earnest: the technology had finally caught up with the idea. This time GenWave was born for real — a station that never goes silent, knows what it's playing, and has a DJ who tells you about it.
+
+Scratch itched. 📻
+
+
 ## Quickstart
 
 You need Docker (with Compose v2.24+) and a music library of `.mp3`/`.flac` files — see
