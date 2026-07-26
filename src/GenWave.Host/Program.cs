@@ -126,6 +126,18 @@ builder.Services
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
+// Community-sourced content — currently just the Persona Catalog origin (SPEC F90.1, STORY-234,
+// PLAN T99). Live via IOptionsMonitor<CommunityOptions> (read by CommunityCatalogAccessor, T101's
+// eventual catalog endpoint consumer), so a PUT to Community:CatalogIndexUrl reaches the very next
+// catalog request with no api restart. ValidateOnStart mirrors ArtworkOptions/RequestsOptions
+// above; empty is a legal bound value (the F90.1 fail-closed kill switch), so no [Required].
+builder.Services
+    .AddOptions<CommunityOptions>()
+    .Bind(cfg.GetSection(CommunityOptions.Section))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddSingleton<CommunityCatalogAccessor>();
+
 builder.Services.AddControllers();
 
 // Liveness endpoint for the compose healthcheck. No checks registered = 200 Healthy when up.

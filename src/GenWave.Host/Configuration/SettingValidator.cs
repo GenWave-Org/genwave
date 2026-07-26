@@ -277,6 +277,11 @@ public sealed class SettingValidator(IConfiguration configuration)
             ["Station:Requests:Enabled"] = IsBool,
             ["Station:Requests:OverrideEnvelope"] = IsBool,
             ["Station:Requests:WindowMinutes"] = v => IsIntInRange(v, RequestsWindowMinutesMin, RequestsWindowMinutesMax),
+
+            // Persona Catalog origin (SPEC F90.1, STORY-234, PLAN T99) — empty is the F90.1 kill
+            // switch (catalog endpoints 404, admin UI hides the shelf), mirroring Llm:Endpoint/
+            // Tts:Fallback:Endpoint's own "empty legal, else absolute http/https" shape.
+            ["Community:CatalogIndexUrl"] = v => string.IsNullOrEmpty(v) || IsAbsoluteHttpUri(v),
         };
 
     // ── Per-key validation ─────────────────────────────────────────────────────────────────────
@@ -709,6 +714,8 @@ public sealed class SettingValidator(IConfiguration configuration)
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Station:Requests:WindowMinutes", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {RequestsWindowMinutesMin} and {RequestsWindowMinutesMax} (minutes).",
+        var k when k.Equals("Community:CatalogIndexUrl", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable the Persona Catalog entirely.",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }

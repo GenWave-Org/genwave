@@ -4,6 +4,16 @@
 // discipline: every scenario drives the production surface (WebApplicationFactory<Program>
 // against /api/catalog/*) with the upstream catalog faked at the HTTP boundary — never by
 // calling proxy internals.
+//
+// T99 (SPEC F90.1) is the one exception: it ships no endpoint, so its two facts below —
+// ScenarioValidatorEnforcesTheUrlRule and ScenarioAccessorIsFailClosed — are real, always-run
+// unit coverage of SettingValidator's Community:CatalogIndexUrl rule and CommunityCatalogAccessor,
+// the two seams T101 builds its endpoints on top of. Same "direct SettingValidator construction"
+// idiom as Story124_EndpointLiveness.cs/Story149_SettingCeilings.cs.
+
+using Microsoft.Extensions.Configuration;
+using GenWave.Host.Configuration;
+using GenWave.Host.Options;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -40,12 +50,15 @@ public static class FeatureCatalogProxyGuardedDoor
 
     public sealed class ScenarioRejectingEmptyUrl
     {
-        // Sad path — Given Community:CatalogIndexUrl = "" (fail-closed, F90.1).
+        // Sad path — Given Community:CatalogIndexUrl = "" (fail-closed, F90.1). T99 shipped the
+        // option, its validator (empty is legal — see ScenarioValidatorEnforcesTheUrlRule below),
+        // and the CommunityCatalogAccessor fail-closed read side T101 wires into these two
+        // endpoints; the endpoints themselves don't exist until T101.
 
-        [Fact(Skip = "Pending (T99/T101)")]
+        [Fact(Skip = "Pending (T101)")]
         public void IndexEndpointReturns404WhenUrlIsEmpty() { }
 
-        [Fact(Skip = "Pending (T99/T101)")]
+        [Fact(Skip = "Pending (T101)")]
         public void EntryEndpointReturns404WhenUrlIsEmpty() { }
     }
 
@@ -76,5 +89,129 @@ public static class FeatureCatalogProxyGuardedDoor
 
         [Fact(Skip = "Pending (T100/T101)")]
         public void OversizeCardIsWithheldBeforeCaching() { }
+    }
+
+    // ---------------------------------------------------------------------
+    // T99 — real, always-run coverage (SPEC F90.1): the option + validator + fail-closed accessor
+    // this whole story's endpoints (T100/T101) are built on top of.
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioValidatorEnforcesTheUrlRule
+    {
+        // Mirrors Llm:Endpoint/Tts:Fallback:Endpoint's own "empty legal, else absolute http/https"
+        // shape (Story124_EndpointLiveness.cs's sibling coverage for those two keys) — empty is the
+        // F90.1 kill switch, not an error.
+
+        static SettingValidator BuildValidator() => new(new ConfigurationBuilder().Build());
+
+        [Fact]
+        public void AnAbsoluteHttpsUrlIsAccepted()
+        {
+            var error = BuildValidator().Validate(
+                "Community:CatalogIndexUrl",
+                "https://raw.githubusercontent.com/GenWave-Org/genwave-catalog/main/index.json");
+
+            Assert.Null(error);
+        }
+
+        [Fact]
+        public void EmptyIsAcceptedAsTheFailClosedKillSwitch()
+        {
+            var error = BuildValidator().Validate("Community:CatalogIndexUrl", "");
+
+            Assert.Null(error);
+        }
+
+        [Fact]
+        public void ARelativePathIsRejected()
+        {
+            var error = BuildValidator().Validate("Community:CatalogIndexUrl", "index.json");
+
+            Assert.NotNull(error);
+        }
+
+        [Fact]
+        public void AnFtpSchemeIsRejected()
+        {
+            var error = BuildValidator().Validate(
+                "Community:CatalogIndexUrl", "ftp://example.test/index.json");
+
+            Assert.NotNull(error);
+        }
+
+        [Fact]
+        public void GarbageIsRejected()
+        {
+            var error = BuildValidator().Validate("Community:CatalogIndexUrl", "not a url");
+
+            Assert.NotNull(error);
+        }
+
+        [Fact]
+        public void TheRejectionMessageNamesTheUrlRule()
+        {
+            var error = BuildValidator().Validate("Community:CatalogIndexUrl", "not a url");
+
+            Assert.NotNull(error);
+            Assert.Contains("absolute http/https URL", error, StringComparison.Ordinal);
+        }
+    }
+
+    public sealed class ScenarioAccessorIsFailClosed
+    {
+        // CommunityCatalogAccessor is the fail-closed read side T101's endpoints consume — an
+        // empty CatalogIndexUrl (the F90.1 kill switch) must resolve to IsEnabled=false and a null
+        // IndexUrl, never an empty string a caller might mistake for "no constraint".
+
+        static CommunityCatalogAccessor BuildAccessor(string catalogIndexUrl)
+        {
+            var monitor = new FakeOptionsMonitor<CommunityOptions>(
+                new CommunityOptions { CatalogIndexUrl = catalogIndexUrl });
+            return new CommunityCatalogAccessor(monitor);
+        }
+
+        const string ConfiguredUrl = "https://raw.githubusercontent.com/GenWave-Org/genwave-catalog/main/index.json";
+
+        [Fact]
+        public void AConfiguredUrlIsEnabled()
+        {
+            var accessor = BuildAccessor(ConfiguredUrl);
+
+            Assert.True(accessor.IsEnabled);
+        }
+
+        [Fact]
+        public void AConfiguredUrlIsExposed()
+        {
+            var accessor = BuildAccessor(ConfiguredUrl);
+
+            Assert.Equal(ConfiguredUrl, accessor.IndexUrl);
+        }
+
+        [Fact]
+        public void AnEmptyUrlIsDisabled()
+        {
+            var accessor = BuildAccessor("");
+
+            Assert.False(accessor.IsEnabled);
+        }
+
+        [Fact]
+        public void AnEmptyUrlExposesNoIndexUrl()
+        {
+            var accessor = BuildAccessor("");
+
+            Assert.Null(accessor.IndexUrl);
+        }
+
+        [Fact]
+        public void AWhitespaceOnlyUrlIsAlsoDisabled()
+        {
+            // Mirrors IsNonBlank's own discipline elsewhere in the allowlist (Station:Name/Voice) —
+            // whitespace is not a real value, so it degrades to the same fail-closed state as "".
+            var accessor = BuildAccessor("   ");
+
+            Assert.False(accessor.IsEnabled);
+        }
     }
 }

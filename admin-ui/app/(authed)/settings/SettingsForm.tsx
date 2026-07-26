@@ -265,6 +265,12 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "Pins the LLM degradation mode instead of letting it auto-adjust to failures/recoveries. " +
     "\"auto\" (default) follows automatically; \"normal\", \"soft\", or \"hard\" holds that mode " +
     "until this is set back to \"auto\".",
+
+  // ── Persona Catalog (SPEC F90.1, STORY-234) ────────────────────────────────────────────────
+  "Community:CatalogIndexUrl":
+    "Where the Persona Catalog browses and imports personas from. Leave empty to disable the " +
+    "Persona Catalog entirely — both catalog endpoints stop responding and this admin UI hides " +
+    "the shelf. Changes apply live.",
 };
 
 /**
