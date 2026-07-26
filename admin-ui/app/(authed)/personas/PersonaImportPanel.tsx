@@ -3,8 +3,8 @@
 import { useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
+import { readErrorMessage } from "@/lib/problem-details";
 import { parsePersonaCardPreview, type PersonaCardPreview } from "./persona-card";
-import { readErrorMessage } from "./persona-http";
 import { personaSlug } from "./persona-slug";
 
 export interface PersonaImportPanelProps {

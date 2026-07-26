@@ -5,13 +5,13 @@ import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "@/components/ui/toast";
+import { readErrorMessage } from "@/lib/problem-details";
 import { useVoiceList } from "@/lib/use-voice-list";
 import { VoiceControl } from "../safe-content/VoiceControl";
 import { PersonaExportLink } from "./PersonaExportLink";
 import { PersonaImportPanel } from "./PersonaImportPanel";
 import { PersonaPreview } from "./PersonaPreview";
 import { PersonaTasteSection } from "./PersonaTasteSection";
-import { readErrorMessage } from "./persona-http";
 import { usePersonaVoiceWarning } from "./use-persona-voice-warning";
 import type { PersonaDto } from "./types";
 

@@ -82,6 +82,21 @@ export function PersonaIcon(props: IconProps): ReactNode {
   );
 }
 
+/** Persona Catalog nav glyph (PLAN T102, SPEC F90.4a) — three record-like cards of varying
+ * heights standing on a shelf line, reading as "browse the shelf" — distinct from
+ * {@link PersonaIcon}'s microphone (the roster already imported into this station) and
+ * {@link CatalogIcon}'s plain rule lines (the media library). */
+export function PersonaCatalogIcon(props: IconProps): ReactNode {
+  return (
+    <IconBase {...props}>
+      <line x1="2" y1="13" x2="14" y2="13" />
+      <rect x="3" y="6" width="3" height="7" rx="0.6" />
+      <rect x="7" y="3.5" width="3" height="9.5" rx="0.6" />
+      <rect x="11" y="7.5" width="3" height="5.5" rx="0.6" />
+    </IconBase>
+  );
+}
+
 /** Booth log nav glyph (PLAN T40, STORY-195) — a ruled ledger page: bound frame + header rule +
  * text lines, reading as "the log book" distinct from Catalog's plain unbound rule lines. */
 export function BoothLogIcon(props: IconProps): ReactNode {

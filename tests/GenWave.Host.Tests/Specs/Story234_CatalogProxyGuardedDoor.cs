@@ -252,6 +252,60 @@ public static class FeatureCatalogProxyGuardedDoor
         }
     }
 
+    public sealed class ScenarioEntryResponseShelfDisplayFields
+    {
+        // T102 — CatalogEntryResponse's DTO extension: the shelf's detail panel reads
+        // audience/bestFor (straight off the hash-verified index entry) and
+        // author/description/samplePatter (parsed out of meta.json) from THIS route, not the
+        // index route (which only ever carries slug/audience/bestFor, F90.2).
+
+        [Fact]
+        public async Task SuccessfulEntryFetchCarriesTheShelfDisplayFields()
+        {
+            var indexWithBestFor = $$"""
+                { "generatedAt": "2026-07-26", "entries": [
+                  { "slug": "valid-dj", "audience": "everyone", "bestFor": ["late-night", "chill"],
+                    "card": { "path": "entries/valid-dj/valid-dj.persona.json", "sha256": "{{CatalogFixtures.Sha256Hex(CatalogFixtures.ValidDjCard)}}" },
+                    "meta": { "path": "entries/valid-dj/valid-dj.meta.json", "sha256": "{{CatalogFixtures.Sha256Hex(CatalogFixtures.ValidDjMeta)}}" } } ] }
+                """;
+            var handler = CatalogFixtures.RoutedHandler(new Dictionary<string, string>
+            {
+                [CatalogFixtures.IndexUrl] = indexWithBestFor,
+                [CatalogFixtures.CardUrl("valid-dj")] = CatalogFixtures.ValidDjCard,
+                [CatalogFixtures.MetaUrl("valid-dj")] = CatalogFixtures.ValidDjMeta,
+            });
+            await using var factory = new CatalogApiWebFactory(handler);
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync("/api/catalog/entries/valid-dj");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<CatalogEntryResponse>();
+            Assert.Equal("everyone", body!.Audience);
+            Assert.Equal(["late-night", "chill"], body.BestFor);
+            Assert.Equal("Test Fixture", body.Author);
+            Assert.Equal("Green-variant fixture for tools/run_selftest.sh.", body.Description);
+            Assert.Equal(["Line one.", "Line two."], body.SamplePatter);
+        }
+
+        [Fact]
+        public async Task UnreachableEntryResponseLeavesTheShelfDisplayFieldsNull()
+        {
+            var handler = new FakeHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError)));
+            await using var factory = new CatalogApiWebFactory(handler);
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync("/api/catalog/entries/anything");
+
+            var body = await response.Content.ReadFromJsonAsync<CatalogEntryResponse>();
+            Assert.Null(body!.Audience);
+            Assert.Null(body.BestFor);
+            Assert.Null(body.Author);
+            Assert.Null(body.Description);
+            Assert.Null(body.SamplePatter);
+        }
+    }
+
     public sealed class ScenarioRejectingHostileIndex
     {
         // Sad path — Given an upstream index containing an absolute entry URL or a

@@ -8,7 +8,7 @@ import { logout } from "@/app/login/actions";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { CloseIcon, MenuIcon, SignOutIcon } from "./icons";
-import { NAV_ITEMS, NAV_LINK_CLASSES, isActiveSection } from "./nav-items";
+import { NAV_LINK_CLASSES, isActiveSection, visibleNavItems } from "./nav-items";
 
 const ICON_BUTTON_CLASSES =
   "flex h-10 w-10 shrink-0 items-center justify-center rounded-[6px] text-mute transition-colors duration-[120ms] ease-out hover:bg-surface hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
@@ -22,6 +22,9 @@ interface MobileNavProps {
    * still see the product brand.
    */
   stationName?: string;
+  /** Mirrors `Sidebar`'s own `catalogEnabled` prop (PLAN T102, SPEC F90.1) — both surfaces read
+   * the same server-resolved signal so they can never disagree on what's listed. */
+  catalogEnabled?: boolean;
 }
 
 /**
@@ -39,7 +42,7 @@ interface MobileNavProps {
  * `asChild` target, so Radix's own prop-cloning onto the real `<button>` is
  * unaffected.
  */
-export function MobileNav({ stationName = "GenWave" }: MobileNavProps): ReactNode {
+export function MobileNav({ stationName = "GenWave", catalogEnabled = false }: MobileNavProps): ReactNode {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
@@ -74,7 +77,7 @@ export function MobileNav({ stationName = "GenWave" }: MobileNavProps): ReactNod
 
           <nav aria-label="Sections" className="flex-1 px-3">
             <ul className="flex flex-col gap-1">
-              {NAV_ITEMS.map(({ href, label, Icon }) => {
+              {visibleNavItems(catalogEnabled).map(({ href, label, Icon }) => {
                 const active = isActiveSection(pathname, href);
                 return (
                   <li key={href}>

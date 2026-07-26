@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -125,10 +126,10 @@ public sealed partial class CatalogController(
 
         return result switch
         {
-            CatalogEntryFetchResult.Ok ok => Ok(new CatalogEntryResponse(
-                ok.Content.CardJson, ok.Content.MetaJson, ok.FetchedAt, Unreachable: false)),
+            CatalogEntryFetchResult.Ok ok => Ok(ToEntryResponse(ok)),
             CatalogEntryFetchResult.NotFound => NotFound(UnknownEntryProblem(slug)),
-            CatalogEntryFetchResult.Unreachable => Ok(new CatalogEntryResponse(null, null, null, Unreachable: true)),
+            CatalogEntryFetchResult.Unreachable => Ok(new CatalogEntryResponse(
+                null, null, null, Unreachable: true, null, null, null, null, null)),
             CatalogEntryFetchResult.HashMismatch =>
                 StatusCode(StatusCodes.Status502BadGateway, WithheldProblem("failed its integrity check")),
             CatalogEntryFetchResult.Oversize =>
@@ -150,6 +151,54 @@ public sealed partial class CatalogController(
         CatalogAudience.Mature => "mature",
         _ => throw new UnreachableException($"Unhandled {nameof(CatalogAudience)} value: {audience}."),
     };
+
+    /// <summary>
+    /// T102's DTO extension (see <see cref="CatalogEntryResponse"/>'s own remarks): projects
+    /// <see cref="CatalogEntryContent"/> — already hash-verified, already carrying
+    /// audience/bestFor straight off the index — into the full wire shape the shelf's detail panel
+    /// reads, parsing <see cref="CatalogEntryContent.MetaJson"/> ONLY for the three display fields
+    /// (author/description/samplePatter) meta.json alone carries.
+    /// </summary>
+    static CatalogEntryResponse ToEntryResponse(CatalogEntryFetchResult.Ok ok)
+    {
+        var meta = ParseMetaFields(ok.Content.MetaJson);
+        return new CatalogEntryResponse(
+            ok.Content.CardJson,
+            ok.Content.MetaJson,
+            ok.FetchedAt,
+            Unreachable: false,
+            ToWireAudience(ok.Content.Audience),
+            ok.Content.BestFor,
+            meta.Author,
+            meta.Description,
+            meta.SamplePatter ?? []);
+    }
+
+    static readonly JsonSerializerOptions MetaJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+    };
+
+    /// <summary>
+    /// Parses <see cref="CatalogEntryContent.MetaJson"/> for its shelf display fields. This content
+    /// already passed genwave-catalog's own CI schema validation before publish (F89.2) and this
+    /// station's own sha256 check before it ever reached here (F90.3) — a parse failure is not an
+    /// expected outcome, but degrading to an empty <see cref="CatalogEntryMetaJson"/> (every field
+    /// null/absent) rather than a 500 matches this whole controller's own "never an error page for
+    /// a shape issue" posture (see this controller's UNREACHABLE remarks).
+    /// </summary>
+    static CatalogEntryMetaJson ParseMetaFields(string metaJson)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<CatalogEntryMetaJson>(metaJson, MetaJsonOptions) ?? new CatalogEntryMetaJson();
+        }
+        catch (JsonException)
+        {
+            return new CatalogEntryMetaJson();
+        }
+    }
 
     /// <summary>
     /// Length bound BEFORE the regex (T101 review — parity with <c>PersonaController.Import</c>'s

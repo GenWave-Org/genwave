@@ -173,6 +173,41 @@ describe("Feature: App shell", () => {
   });
 
   // ---------------------------------------------------------------------------
+  describe("Scenario: Persona Catalog nav entry is feature-gated (PLAN T102, SPEC F90.1)", () => {
+    it("hides the Persona Catalog link by default (no live signal, fail-closed)", async () => {
+      mockedUsePathname.mockReturnValue("/dashboard");
+      const { Sidebar } = await import("../app/(authed)/_components/Sidebar");
+
+      render(<Sidebar />);
+
+      expect(screen.queryByRole("link", { name: "Persona Catalog" })).toBeNull();
+    });
+
+    it("lists the Persona Catalog link once the authed layout resolves catalogEnabled=true", async () => {
+      mockedUsePathname.mockReturnValue("/dashboard");
+      const { Sidebar } = await import("../app/(authed)/_components/Sidebar");
+
+      render(<Sidebar catalogEnabled />);
+
+      expect(screen.getByRole("link", { name: "Persona Catalog" })).toHaveAttribute(
+        "href",
+        "/persona-catalog"
+      );
+    });
+
+    it("mirrors the same gating in the sub-1024px drawer (MobileNav)", async () => {
+      mockedUsePathname.mockReturnValue("/dashboard");
+      const { MobileNav } = await import("../app/(authed)/_components/MobileNav");
+
+      render(<MobileNav catalogEnabled />);
+      fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
+
+      await screen.findByRole("dialog", { name: "Navigation" });
+      expect(screen.getByRole("link", { name: "Persona Catalog" })).toBeInTheDocument();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   describe("Scenario: breadcrumbs on nested routes only", () => {
     it("shows a Catalog → <mediaId> trail on the track-detail route (Q8 sets the real track title)", async () => {
       mockedUsePathname.mockReturnValue("/catalog/913");
