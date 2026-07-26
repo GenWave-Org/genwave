@@ -27,4 +27,22 @@ namespace GenWave.Core.Domain;
 /// keeps that authored intent legible on read (re-export, or a future "does this still not resolve"
 /// check) rather than losing it the moment it lands here.
 /// </param>
-public sealed record PersonaImportRequest(string Slug, string LegacyVoice, PersonaCard Card);
+/// <param name="ImportedFrom">
+/// The provenance stamp SPEC F90.7 requires <see cref="Abstractions.IPersonaImportStore.ImportAsync"/>
+/// to write to <c>station.persona.imported_from</c> on every import, insert or update: the catalog
+/// entry's slug for a catalog import, or <see cref="FileSource"/> for a file upload. Defaults to
+/// <see cref="FileSource"/> — <c>PersonaController.Import</c>'s own default when its optional
+/// <c>catalogSlug</c> query parameter is absent — so every existing caller that predates F90 (a plain
+/// file import) still stamps correctly without naming this parameter.
+/// </param>
+public sealed record PersonaImportRequest(
+    string Slug, string LegacyVoice, PersonaCard Card, string ImportedFrom = PersonaImportRequest.FileSource)
+{
+    /// <summary>
+    /// The provenance sentinel for a plain file-uploaded import (SPEC F90.7) — the ONE literal
+    /// "file" stamp value, hoisted so <see cref="ImportedFrom"/>'s own default,
+    /// <c>PersonaController.Import</c>, and every test asserting on it reference the same constant
+    /// rather than three independently-typed copies of the string.
+    /// </summary>
+    public const string FileSource = "file";
+}
