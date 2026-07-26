@@ -1,23 +1,33 @@
 // STORY-234 — The proxy: one guarded door to the shelf (SPEC F90.1–F90.4, PLAN T99–T101)
 //
-// BDD specification — xUnit, pending until /build-loop turns each fact live. Entry-point
-// discipline: every scenario drives the production surface (WebApplicationFactory<Program>
-// against /api/catalog/*) with the upstream catalog faked at the HTTP boundary — never by
-// calling proxy internals.
+// BDD specification — xUnit. Entry-point discipline: every T101 (WIRE) scenario drives the
+// production surface (WebApplicationFactory<Program> against the real /api/catalog/* routes, real
+// cookie auth via POST /api/auth/login) with the upstream catalog faked at the HTTP boundary via an
+// IHttpClientFactory replacement — never by calling CatalogController/CatalogProxyService
+// internals. See CatalogApiWebFactory below.
 //
 // T99 (SPEC F90.1) is the one exception: it ships no endpoint, so its two facts below —
 // ScenarioValidatorEnforcesTheUrlRule and ScenarioAccessorIsFailClosed — are real, always-run
 // unit coverage of SettingValidator's Community:CatalogIndexUrl rule and CommunityCatalogAccessor,
-// the two seams T101 builds its endpoints on top of. Same "direct SettingValidator construction"
-// idiom as Story124_EndpointLiveness.cs/Story149_SettingCeilings.cs.
+// the two seams T101's CatalogController builds its endpoints on top of. Same "direct
+// SettingValidator construction" idiom as Story124_EndpointLiveness.cs/Story149_SettingCeilings.cs.
 
 using System.Net;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using GenWave.Host.Api;
 using GenWave.Host.Catalog;
 using GenWave.Host.Configuration;
 using GenWave.Host.Options;
@@ -27,76 +37,360 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureCatalogProxyGuardedDoor
 {
+    // ---------------------------------------------------------------------
+    // T101 — endpoint-level coverage (SPEC F90.2-F90.4): the real /api/catalog/* routes, driven
+    // through WebApplicationFactory<Program> — CatalogApiWebFactory below. Proves CatalogController
+    // is actually wired to CatalogProxyService, not just that the service works in isolation (T100's
+    // job, further down this file).
+    // ---------------------------------------------------------------------
+
     public sealed class ScenarioFetchVerifyCache
     {
         // Given Community:CatalogIndexUrl configured and a valid faked upstream (index +
         // entries with correct sha256), When /api/catalog/index is called twice within TTL.
 
-        [Fact(Skip = "Pending (T100/T101)")]
-        public void FirstCallFetchesAndHashVerifiesTheIndex() { }
+        [Fact]
+        public async Task FirstCallFetchesAndHashVerifiesTheIndex()
+        {
+            var index = CatalogFixtures.BuildIndexJson(("valid-dj", CatalogFixtures.ValidDjCard, CatalogFixtures.ValidDjMeta));
+            var handler = CatalogFixtures.RoutedHandler(new Dictionary<string, string> { [CatalogFixtures.IndexUrl] = index });
+            await using var factory = new CatalogApiWebFactory(handler);
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
 
-        [Fact(Skip = "Pending (T100/T101)")]
-        public void SecondCallWithinTtlServesFromCacheWithoutUpstreamHit() { }
+            var response = await client.GetAsync("/api/catalog/index");
 
-        [Fact(Skip = "Pending (T100/T101)")]
-        public void ResponseCarriesTheFetchedAtTimestamp() { }
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<CatalogIndexResponse>();
+            Assert.Equal("valid-dj", Assert.Single(body!.Entries!).Slug);
+        }
 
-        [Fact(Skip = "Pending (T100/T101)")]
-        public void EntryFetchResolvesPathsRelativeToTheIndexUrl() { }
+        [Fact]
+        public async Task SecondCallWithinTtlServesFromCacheWithoutUpstreamHit()
+        {
+            var index = CatalogFixtures.BuildIndexJson(("valid-dj", CatalogFixtures.ValidDjCard, CatalogFixtures.ValidDjMeta));
+            var handler = CatalogFixtures.RoutedHandler(new Dictionary<string, string> { [CatalogFixtures.IndexUrl] = index });
+            await using var factory = new CatalogApiWebFactory(handler);
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            await client.GetAsync("/api/catalog/index");
+            await client.GetAsync("/api/catalog/index");
+
+            Assert.Single(handler.Requests);
+        }
+
+        [Fact]
+        public async Task ResponseCarriesTheFetchedAtTimestamp()
+        {
+            var index = CatalogFixtures.BuildIndexJson(("valid-dj", CatalogFixtures.ValidDjCard, CatalogFixtures.ValidDjMeta));
+            var handler = CatalogFixtures.RoutedHandler(new Dictionary<string, string> { [CatalogFixtures.IndexUrl] = index });
+            await using var factory = new CatalogApiWebFactory(handler);
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync("/api/catalog/index");
+
+            var body = await response.Content.ReadFromJsonAsync<CatalogIndexResponse>();
+            Assert.NotNull(body!.FetchedAt);
+            Assert.True((DateTimeOffset.UtcNow - body.FetchedAt!.Value).Duration() < TimeSpan.FromMinutes(1));
+        }
+
+        [Fact]
+        public async Task EntryFetchResolvesPathsRelativeToTheIndexUrl()
+        {
+            var index = CatalogFixtures.BuildIndexJson(("valid-dj", CatalogFixtures.ValidDjCard, CatalogFixtures.ValidDjMeta));
+            var handler = CatalogFixtures.RoutedHandler(new Dictionary<string, string>
+            {
+                [CatalogFixtures.IndexUrl] = index,
+                [CatalogFixtures.CardUrl("valid-dj")] = CatalogFixtures.ValidDjCard,
+                [CatalogFixtures.MetaUrl("valid-dj")] = CatalogFixtures.ValidDjMeta,
+            });
+            await using var factory = new CatalogApiWebFactory(handler);
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync("/api/catalog/entries/valid-dj");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<CatalogEntryResponse>();
+            Assert.Equal(CatalogFixtures.ValidDjCard, body!.Card);
+        }
     }
 
     public sealed class ScenarioStaleBeatsAbsent
     {
         // Given a warm cache, When the upstream starts failing and TTL expires.
 
-        [Fact(Skip = "Pending (T100/T101)")]
-        public void CachedIndexIsServedAfterUpstreamFailure() { }
+        static (FakeHttpMessageHandler Handler, Action FailNextCall) BuildFlakyIndexHandler(string indexJson)
+        {
+            var failing = false;
+            var handler = new FakeHttpMessageHandler((_, _) => Task.FromResult(failing
+                ? new HttpResponseMessage(HttpStatusCode.InternalServerError)
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(indexJson, Encoding.UTF8, "application/json") }));
+            return (handler, () => failing = true);
+        }
 
-        [Fact(Skip = "Pending (T100/T101)")]
-        public void StaleResponseKeepsItsOriginalFetchedAtTimestamp() { }
+        [Fact]
+        public async Task CachedIndexIsServedAfterUpstreamFailure()
+        {
+            var index = CatalogFixtures.BuildIndexJson(("valid-dj", CatalogFixtures.ValidDjCard, CatalogFixtures.ValidDjMeta));
+            var (handler, failNextCall) = BuildFlakyIndexHandler(index);
+            var clock = new FakeTimeProvider();
+            await using var factory = new CatalogApiWebFactory(handler, timeProvider: clock);
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            await client.GetAsync("/api/catalog/index");
+            failNextCall();
+            clock.Advance(TimeSpan.FromMinutes(16));
+            var response = await client.GetAsync("/api/catalog/index");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<CatalogIndexResponse>();
+            Assert.Equal("valid-dj", Assert.Single(body!.Entries!).Slug);
+        }
+
+        [Fact]
+        public async Task StaleResponseKeepsItsOriginalFetchedAtTimestamp()
+        {
+            var index = CatalogFixtures.BuildIndexJson(("valid-dj", CatalogFixtures.ValidDjCard, CatalogFixtures.ValidDjMeta));
+            var (handler, failNextCall) = BuildFlakyIndexHandler(index);
+            var clock = new FakeTimeProvider();
+            await using var factory = new CatalogApiWebFactory(handler, timeProvider: clock);
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            var first = await (await client.GetAsync("/api/catalog/index")).Content.ReadFromJsonAsync<CatalogIndexResponse>();
+            failNextCall();
+            clock.Advance(TimeSpan.FromMinutes(16));
+            var second = await (await client.GetAsync("/api/catalog/index")).Content.ReadFromJsonAsync<CatalogIndexResponse>();
+
+            Assert.Equal(first!.FetchedAt, second!.FetchedAt);
+        }
     }
 
     public sealed class ScenarioRejectingEmptyUrl
     {
         // Sad path — Given Community:CatalogIndexUrl = "" (fail-closed, F90.1). T99 shipped the
         // option, its validator (empty is legal — see ScenarioValidatorEnforcesTheUrlRule below),
-        // and the CommunityCatalogAccessor fail-closed read side T101 wires into these two
-        // endpoints; the endpoints themselves don't exist until T101.
+        // and the CommunityCatalogAccessor fail-closed read side T101's CatalogController wires
+        // into a bare 404 on both routes.
 
-        [Fact(Skip = "Pending (T101)")]
-        public void IndexEndpointReturns404WhenUrlIsEmpty() { }
+        [Fact]
+        public async Task IndexEndpointReturns404WhenUrlIsEmpty()
+        {
+            var handler = new FakeHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)));
+            await using var factory = new CatalogApiWebFactory(handler, catalogIndexUrl: "");
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
 
-        [Fact(Skip = "Pending (T101)")]
-        public void EntryEndpointReturns404WhenUrlIsEmpty() { }
+            var response = await client.GetAsync("/api/catalog/index");
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task EntryEndpointReturns404WhenUrlIsEmpty()
+        {
+            var handler = new FakeHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)));
+            await using var factory = new CatalogApiWebFactory(handler, catalogIndexUrl: "");
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync("/api/catalog/entries/valid-dj");
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+    }
+
+    public sealed class ScenarioRejectingMalformedSlug
+    {
+        // Sad path — Given a slug carrying a %0a trailing newline over the wire. Pins the SAME
+        // regression class PersonaController.SlugFormat's own remarks document (.NET's regex `$`
+        // matches immediately before a trailing '\n', not just true end-of-input) in THIS second
+        // file — CatalogController.SlugFormat anchors \A/\z, not ^/$, specifically to close it here
+        // too (T101 review).
+
+        [Fact]
+        public async Task TrailingNewlineSlugIsRejected()
+        {
+            var handler = new FakeHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)));
+            await using var factory = new CatalogApiWebFactory(handler);
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync("/api/catalog/entries/valid-dj%0a");
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+    }
+
+    public sealed class ScenarioEntryOutcomes
+    {
+        // Two more CatalogEntryFetchResult mappings the earlier scenarios don't reach: a slug that's
+        // well-formed but absent from a REACHABLE index (NotFound), and the entry route while the
+        // whole catalog is unreachable (the ratified design call — reuses the SAME graceful shape as
+        // the index route, not a 404).
+
+        [Fact]
+        public async Task UnknownSlugOnAReachableCatalogReturns404()
+        {
+            var index = CatalogFixtures.BuildIndexJson(("valid-dj", CatalogFixtures.ValidDjCard, CatalogFixtures.ValidDjMeta));
+            var handler = CatalogFixtures.RoutedHandler(new Dictionary<string, string> { [CatalogFixtures.IndexUrl] = index });
+            await using var factory = new CatalogApiWebFactory(handler);
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync("/api/catalog/entries/never-heard-of-it");
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task EntryRouteDuringWholeCatalogUnreachableIsGracefullyUnreachable()
+        {
+            var handler = new FakeHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError)));
+            await using var factory = new CatalogApiWebFactory(handler);
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync("/api/catalog/entries/anything");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<CatalogEntryResponse>();
+            Assert.True(body!.Unreachable);
+        }
     }
 
     public sealed class ScenarioRejectingHostileIndex
     {
         // Sad path — Given an upstream index containing an absolute entry URL or a
-        // path-traversing relative path (F90.2).
+        // path-traversing relative path (F90.2). Mirrors ScenarioHostileIndexRejected's own two
+        // fixtures further down this file (T100's direct-service-construction coverage) — duplicated
+        // here as plain literals rather than shared, since that scenario's fixtures are private to
+        // its own nested class.
 
-        [Fact(Skip = "Pending (T100/T101)")]
-        public void IndexWithAbsoluteEntryUrlIsRejectedWholesale() { }
+        const string AbsoluteEntryIndex = """
+            { "generatedAt": "2026-07-26", "entries": [
+              { "slug": "evil-dj", "audience": "everyone",
+                "card": { "path": "https://evil.test/x.persona.json", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+                "meta": { "path": "entries/evil-dj/evil-dj.meta.json", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" } } ] }
+            """;
 
-        [Fact(Skip = "Pending (T100/T101)")]
-        public void IndexWithPathTraversingEntryIsRejectedWholesale() { }
+        const string TraversalEntryIndex = """
+            { "generatedAt": "2026-07-26", "entries": [
+              { "slug": "evil-dj", "audience": "everyone",
+                "card": { "path": "../secret/evil-dj.persona.json", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+                "meta": { "path": "entries/evil-dj/evil-dj.meta.json", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" } } ] }
+            """;
 
-        [Fact(Skip = "Pending (T100/T101)")]
-        public void RejectionWarnNamesTheOffendingPath() { }
+        [Fact]
+        public async Task IndexWithAbsoluteEntryUrlIsRejectedWholesale()
+        {
+            var handler = CatalogFixtures.RoutedHandler(new Dictionary<string, string> { [CatalogFixtures.IndexUrl] = AbsoluteEntryIndex });
+            await using var factory = new CatalogApiWebFactory(handler);
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync("/api/catalog/index");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<CatalogIndexResponse>();
+            Assert.True(body!.Unreachable);
+        }
+
+        [Fact]
+        public async Task IndexWithPathTraversingEntryIsRejectedWholesale()
+        {
+            var handler = CatalogFixtures.RoutedHandler(new Dictionary<string, string> { [CatalogFixtures.IndexUrl] = TraversalEntryIndex });
+            await using var factory = new CatalogApiWebFactory(handler);
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync("/api/catalog/index");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<CatalogIndexResponse>();
+            Assert.True(body!.Unreachable);
+        }
+
+        [Fact]
+        public async Task RejectionWarnNamesTheOffendingPath()
+        {
+            var handler = CatalogFixtures.RoutedHandler(new Dictionary<string, string> { [CatalogFixtures.IndexUrl] = AbsoluteEntryIndex });
+            var capturingLogger = new CapturingLogger<CatalogProxyService>();
+            await using var factory = new CatalogApiWebFactory(handler, capturingLogger: capturingLogger);
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            await client.GetAsync("/api/catalog/index");
+
+            Assert.Contains(capturingLogger.Warnings, w => w.Contains("https://evil.test/x.persona.json", StringComparison.Ordinal));
+        }
     }
 
     public sealed class ScenarioRejectingTamperedContent
     {
         // Sad path — Given one entry whose fetched bytes mismatch the index sha256 (F90.3).
 
-        [Fact(Skip = "Pending (T100/T101)")]
-        public void MismatchedEntryIsWithheldWith502() { }
+        static string BuildIndexWithOneTamperedEntry()
+        {
+            var wrongCardHash = CatalogFixtures.Sha256Hex("not the real card bytes");
+            return $$"""
+                { "generatedAt": "2026-07-26", "entries": [
+                  { "slug": "valid-dj", "audience": "everyone",
+                    "card": { "path": "entries/valid-dj/valid-dj.persona.json", "sha256": "{{wrongCardHash}}" },
+                    "meta": { "path": "entries/valid-dj/valid-dj.meta.json", "sha256": "{{CatalogFixtures.Sha256Hex(CatalogFixtures.ValidDjMeta)}}" } },
+                  { "slug": "second-dj", "audience": "everyone",
+                    "card": { "path": "entries/second-dj/second-dj.persona.json", "sha256": "{{CatalogFixtures.Sha256Hex(CatalogFixtures.SecondDjCard)}}" },
+                    "meta": { "path": "entries/second-dj/second-dj.meta.json", "sha256": "{{CatalogFixtures.Sha256Hex(CatalogFixtures.SecondDjMeta)}}" } } ] }
+                """;
+        }
 
-        [Fact(Skip = "Pending (T100/T101)")]
-        public void RemainingEntriesStillServeWhileOneIsWithheld() { }
+        static FakeHttpMessageHandler BuildHandler() => CatalogFixtures.RoutedHandler(new Dictionary<string, string>
+        {
+            [CatalogFixtures.IndexUrl] = BuildIndexWithOneTamperedEntry(),
+            [CatalogFixtures.CardUrl("valid-dj")] = CatalogFixtures.ValidDjCard,
+            [CatalogFixtures.MetaUrl("valid-dj")] = CatalogFixtures.ValidDjMeta,
+            [CatalogFixtures.CardUrl("second-dj")] = CatalogFixtures.SecondDjCard,
+            [CatalogFixtures.MetaUrl("second-dj")] = CatalogFixtures.SecondDjMeta,
+        });
 
-        [Fact(Skip = "Pending (T100/T101)")]
-        public void OversizeCardIsWithheldBeforeCaching() { }
+        [Fact]
+        public async Task MismatchedEntryIsWithheldWith502()
+        {
+            await using var factory = new CatalogApiWebFactory(BuildHandler());
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync("/api/catalog/entries/valid-dj");
+
+            Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task RemainingEntriesStillServeWhileOneIsWithheld()
+        {
+            await using var factory = new CatalogApiWebFactory(BuildHandler());
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            await client.GetAsync("/api/catalog/entries/valid-dj");
+            var response = await client.GetAsync("/api/catalog/entries/second-dj");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<CatalogEntryResponse>();
+            Assert.Equal(CatalogFixtures.SecondDjCard, body!.Card);
+        }
+
+        [Fact]
+        public async Task OversizeCardIsWithheldBeforeCaching()
+        {
+            var oversizeCard = new string('a', CatalogProxyService.MaxCardBytes + 1);
+            var index = $$"""
+                { "generatedAt": "2026-07-26", "entries": [
+                  { "slug": "valid-dj", "audience": "everyone",
+                    "card": { "path": "entries/valid-dj/valid-dj.persona.json", "sha256": "{{CatalogFixtures.Sha256Hex(oversizeCard)}}" },
+                    "meta": { "path": "entries/valid-dj/valid-dj.meta.json", "sha256": "{{CatalogFixtures.Sha256Hex(CatalogFixtures.ValidDjMeta)}}" } } ] }
+                """;
+            var handler = CatalogFixtures.RoutedHandler(new Dictionary<string, string>
+            {
+                [CatalogFixtures.IndexUrl] = index,
+                [CatalogFixtures.CardUrl("valid-dj")] = oversizeCard,
+                [CatalogFixtures.MetaUrl("valid-dj")] = CatalogFixtures.ValidDjMeta,
+            });
+            await using var factory = new CatalogApiWebFactory(handler);
+            var client = await CatalogApiWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync("/api/catalog/entries/valid-dj");
+
+            Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -340,6 +634,97 @@ public static class FeatureCatalogProxyGuardedDoor
         {
             MaxResponseContentBufferSize = CatalogProxyService.MaxIndexBytes,
         };
+    }
+
+    /// <summary>
+    /// <see cref="WebApplicationFactory{TEntryPoint}"/> for T101's endpoint-level facts (further up
+    /// this file): boots the real Program.cs graph — routing, cookie auth, the production
+    /// <c>/api/catalog/*</c> routes — with <c>Community:CatalogIndexUrl</c> set to
+    /// <paramref name="catalogIndexUrl"/> and EVERY outbound HTTP call routed through
+    /// <paramref name="handler"/> via a whole-graph <see cref="IHttpClientFactory"/> replacement
+    /// (nothing else reachable from these routes/the auth pipeline resolves one, so this is simpler
+    /// and safer than overriding just <see cref="CatalogProxyService.HttpClientName"/>'s primary
+    /// handler post-registration) — mirrors Story097's <c>VoicesApiWebFactory</c>/Story237's
+    /// <c>PersonaProvenanceWebFactory</c>. <paramref name="timeProvider"/>/<paramref name="capturingLogger"/>
+    /// are optional per-fact overrides (only the TTL-expiry and WARN-content facts need them).
+    /// </summary>
+    sealed class CatalogApiWebFactory(
+        HttpMessageHandler handler,
+        string catalogIndexUrl = CatalogFixtures.IndexUrl,
+        TimeProvider? timeProvider = null,
+        ILogger<CatalogProxyService>? capturingLogger = null)
+        : WebApplicationFactory<Program>
+    {
+        internal const string Password = "test-password-catalog-endpoints";
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            // Development config provides Station:Id/Name/Voice/Scope/SafeScope so ValidateOnStart()
+            // is satisfied without injecting them manually — mirrors Story097/Story237.
+            builder.UseEnvironment("Development");
+            builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+            builder.UseSetting("Admin:Password", Password);
+            builder.UseSetting("Community:CatalogIndexUrl", catalogIndexUrl);
+
+            builder.ConfigureTestServices(services =>
+            {
+                // No Liquidsoap/DB connections during this test.
+                services.RemoveAll<IHostedService>();
+
+                services.RemoveAll<IHttpClientFactory>();
+                services.AddSingleton<IHttpClientFactory>(new SingleHandlerHttpClientFactory(handler));
+
+                if (capturingLogger is not null)
+                {
+                    services.RemoveAll<ILogger<CatalogProxyService>>();
+                    services.AddSingleton(capturingLogger);
+                }
+
+                // A fake clock is scoped to CatalogProxyService ALONE, via a factory registration —
+                // never a process-wide TimeProvider replacement. The DI-registered TimeProvider also
+                // drives ASP.NET Core's own cookie authentication ticket validation (post-configured
+                // from DI since .NET 8); swapping it out from under the WHOLE app would silently
+                // expire this factory's own login session the moment a fact advances the clock, an
+                // unrelated coupling this test has no business tripping over (confirmed empirically —
+                // a global TimeProvider swap turned every post-Advance() request 401).
+                if (timeProvider is not null)
+                {
+                    services.RemoveAll<CatalogProxyService>();
+                    services.AddSingleton(sp => new CatalogProxyService(
+                        sp.GetRequiredService<IHttpClientFactory>(),
+                        sp.GetRequiredService<CommunityCatalogAccessor>(),
+                        timeProvider,
+                        sp.GetRequiredService<ILogger<CatalogProxyService>>()));
+                }
+            });
+        }
+
+        /// <summary>Logs in via the real POST /api/auth/login round trip (mirrors Story097/Story237's own helper) and returns the cookie-bearing client.</summary>
+        public static async Task<HttpClient> LoggedInClientAsync(WebApplicationFactory<Program> factory)
+        {
+            var client = factory.CreateClient();
+            var login = await client.PostAsJsonAsync("/api/auth/login", new { password = Password });
+            Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
+            return client;
+        }
+    }
+
+    /// <summary>Minimal <see cref="ILogger{T}"/> that collects Warning-and-above messages for assertion (mirrors Story120's/Story192's own copy of this idiom).</summary>
+    sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<string> Warnings { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel >= LogLevel.Warning)
+                Warnings.Add(formatter(state, exception));
+        }
     }
 
     public sealed class ScenarioIndexFetchVerifyAndCache

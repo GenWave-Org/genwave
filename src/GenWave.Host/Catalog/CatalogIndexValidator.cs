@@ -37,8 +37,10 @@ internal static partial class CatalogIndexValidator
     // ONCE as source text (review finding: was inlined three times). A `const` (not `static
     // readonly`) because [GeneratedRegex] attribute arguments must be compile-time constants;
     // string `+` on `const string` operands is itself a compile-time constant expression, so this
-    // still composes normally into CardPathText/MetaPathText below.
-    const string SlugSegment = "[a-z0-9]+(-[a-z0-9]+)*";
+    // still composes normally into CardPathText/MetaPathText below. `internal` (T101 review finding):
+    // this IS the catalog's own slug vocabulary — CatalogController.SlugFormat composes its
+    // route-parameter check from this same const rather than inventing a second copy of the shape.
+    internal const string SlugSegment = "[a-z0-9]+(-[a-z0-9]+)*";
 
     // entries/<slug>/<name>.(persona|meta).json — the filename segment is the SAME shape as the
     // slug segment (SPEC F90.2/F89.2: schemas/index.schema.json's card/meta path patterns use this
