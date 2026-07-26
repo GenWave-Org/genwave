@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Api;
 using GenWave.Host.Artwork;
+using GenWave.Host.Catalog;
 using GenWave.Host.Configuration;
 using GenWave.Host.Enrichment;
 using GenWave.Host.Health;
@@ -137,6 +138,26 @@ builder.Services
     .ValidateDataAnnotations()
     .ValidateOnStart();
 builder.Services.AddSingleton<CommunityCatalogAccessor>();
+
+// Persona Catalog proxy (SPEC F90.2-F90.4, STORY-234, PLAN T100): the named client
+// CatalogProxyService resolves via IHttpClientFactory per call (see its own remarks on
+// HttpClientName for why this is a named client + plain AddSingleton, not a typed-client
+// transient). AllowAutoRedirect is disabled on the primary handler — a redirect response is a
+// fetch failure, never a hop this process takes (the SSRF ruling in CatalogProxyService's own
+// remarks). MaxResponseContentBufferSize is INERT under CatalogHttpFetcher's
+// HttpCompletionOption.ResponseHeadersRead (that option means SendAsync never auto-buffers, so
+// this setting is never consulted) — kept anyway, sized to the largest F90.3 cap, purely as a
+// regression backstop: if the completion option ever regresses back to buffering, the client
+// throws instead of buffering an unbounded body. CatalogHttpFetcher's own bounded streaming read
+// is what ACTUALLY enforces each per-file cap today.
+builder.Services
+    .AddHttpClient(CatalogProxyService.HttpClientName, client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(15);
+        client.MaxResponseContentBufferSize = CatalogProxyService.MaxIndexBytes;
+    })
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddSingleton<CatalogProxyService>();
 
 builder.Services.AddControllers();
 
