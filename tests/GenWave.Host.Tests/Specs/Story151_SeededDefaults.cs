@@ -347,6 +347,13 @@ public static class FeatureSeededDefaults
             Assert.Equal(
                 requestsDefaults.WindowMinutes,
                 int.Parse(RequireValue(config, "Station:Requests:WindowMinutes"), NumberStyles.Integer, CultureInfo.InvariantCulture));
+
+            // Community:CatalogIndexUrl (SPEC F90.1, STORY-234, PLAN T99) — seeded alongside the
+            // feature itself, same "close gitea-#231 before it can ever open for this key"
+            // discipline as Llm:DegradationPin/Station:Requests:* above.
+            Assert.Equal(
+                new CommunityOptions().CatalogIndexUrl,
+                RequireValue(config, "Community:CatalogIndexUrl"));
         }
     }
 

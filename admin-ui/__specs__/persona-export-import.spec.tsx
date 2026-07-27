@@ -1,11 +1,14 @@
 // @jest-environment jsdom
 // STORY-208/209 — Card export/import from the console (SPEC F79.1, F79.4–F79.6, PLAN T68)
+// STORY-236 — File-upload import retrofit: same review modal, no loophole (SPEC F90.6, PLAN T104)
 //
 // Runner: Jest (jsdom) + @testing-library/react. `PersonaExportLink` is a pure anchor, tested by
-// its rendered href. `PersonaImportPanel` owns the whole file → preview → confirm → import
-// narrative and is driven directly (it needs no ConfirmDialogProvider/Toaster context beyond the
-// Toaster mount for its own toast calls) with a mocked global fetch, mirroring voice-dropdown.spec
-// .tsx's sequenced-response style since this flow's calls happen in a fixed order (never fan-out).
+// its rendered href. `PersonaImportPanel` owns file selection → the shared `PersonaCardReviewModal`
+// (T103's catalog-door component, reused here verbatim) → import; its own section-rendering/error
+// states are pinned once in `persona-card-review-modal.spec.tsx` and are NOT re-asserted here — this
+// file only pins the panel-specific wiring: which file text reaches the modal, that no fetch fires
+// before Confirm, cancel's no-op, and the no-catalogSlug seam — mirroring
+// `persona-catalog-page.spec.tsx`'s own "wiring only" posture for the catalog door.
 
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
@@ -46,22 +49,11 @@ function makeFile(name: string, content: string, type = "application/json"): Fil
 /** jsdom's `HTMLInputElement.files` has no public setter; RTL's documented pattern (also used by
  * every file-upload test in the wild) is to shadow it with an own property before firing change.
  * The panel reads the file via `FileReader` (async, jsdom-only event loop tick — `Blob.text()`
- * isn't implemented in this project's jsdom version), so callers must await the preview/oversized
- * state settling before asserting on it; `waitForPicked` below does that. */
+ * isn't implemented in this project's jsdom version), so callers must await the modal (or the
+ * oversized/unreadable notice) settling before asserting on it. */
 function selectFile(input: HTMLInputElement, file: File): void {
   Object.defineProperty(input, "files", { value: [file], configurable: true });
   fireEvent.change(input);
-}
-
-/** Awaits the panel's post-FileReader state: either the preview region (ordinary/malformed pick)
- * or the oversized notice (size-capped pick), whichever this file produces. */
-async function waitForPicked(): Promise<void> {
-  await waitFor(() => {
-    const settled =
-      screen.queryByRole("region", { name: "Persona card preview" }) ??
-      screen.queryByText(/over the 256 KB limit/i);
-    expect(settled).not.toBeNull();
-  });
 }
 
 interface MockResponseSpec {
@@ -125,36 +117,46 @@ describe("Feature: Import a persona card", () => {
     jest.clearAllMocks();
   });
 
-  describe("Scenario: happy path — preview then confirm", () => {
-    it("previews name/tagline/voice/quirk+lore+taste counts before anything is uploaded", async () => {
+  describe("Scenario: file selection opens the same review modal the catalog door uses (STORY-236, PLAN T104)", () => {
+    it("renders the file's full text inside PersonaCardReviewModal, with no separate preview pane", async () => {
       renderPanel();
       const input = screen.getByLabelText("Persona card (.json)") as HTMLInputElement;
 
       selectFile(input, makeFile("radio-rex.persona.json", cardJson()));
 
-      await waitForPicked();
-
-      const preview = within(screen.getByRole("region", { name: "Persona card preview" }));
-      expect(preview.getByText("Radio Rex")).toBeInTheDocument();
-      expect(preview.getByText("Late-night lore")).toBeInTheDocument();
-      expect(preview.getByText("af_alloy")).toBeInTheDocument();
-      expect(preview.getByText("2")).toBeInTheDocument(); // Quirks
-      expect(preview.getByText("1")).toBeInTheDocument(); // Lore
-      expect(preview.getByText("3")).toBeInTheDocument(); // Taste rules
+      const dialog = await screen.findByRole("dialog");
+      const scoped = within(dialog);
+      expect(scoped.getByText("Radio Rex")).toBeInTheDocument();
+      expect(scoped.getByText("Late-night lore")).toBeInTheDocument();
+      expect(scoped.getByText("Once played a 40-minute Zeppelin side.")).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Persona card preview" })).not.toBeInTheDocument();
     });
 
-    it("POSTs the file's original bytes verbatim to the card's own slug", async () => {
+    it("issues zero fetch calls before Confirm is clicked", async () => {
+      const mockFetch = makeSequencedFetchMock([]);
+      renderPanel();
+      const input = screen.getByLabelText("Persona card (.json)") as HTMLInputElement;
+
+      selectFile(input, makeFile("radio-rex.persona.json", cardJson()));
+      await screen.findByRole("dialog");
+
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Scenario: confirm posts the file's original bytes, no catalogSlug (the T104 seam)", () => {
+    it("POSTs the file's raw text verbatim to /api/personas/{slug}/import, without a catalogSlug param", async () => {
       const mockFetch = makeSequencedFetchMock([
-        { status: 201, body: { id: 1, slug: "radio-rex", name: "Radio Rex", warnings: [] } },
+        { status: 201, body: { name: "Radio Rex", warnings: [] } },
       ]);
       renderPanel();
       const input = screen.getByLabelText("Persona card (.json)") as HTMLInputElement;
       const raw = cardJson();
       selectFile(input, makeFile("some-file-name.json", raw));
-      await waitForPicked();
+      const dialog = await screen.findByRole("dialog");
 
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Confirm import" }));
+        fireEvent.click(within(dialog).getByRole("button", { name: "Confirm import" }));
         await Promise.resolve();
       });
 
@@ -165,45 +167,52 @@ describe("Feature: Import a persona card", () => {
       expect(init.body).toBe(raw);
     });
 
-    it("shows created/updated plus any warnings once the import succeeds", async () => {
+    it("shows created/updated plus any warnings once the import succeeds, closes the modal, and refreshes the list", async () => {
       makeSequencedFetchMock([
         {
           status: 200,
-          body: { id: 1, slug: "radio-rex", name: "Radio Rex", warnings: ['Voice "af_ghost" is not available.'] },
+          body: { name: "Radio Rex", warnings: ['Voice "af_ghost" is not available.'] },
         },
-      ]);
-      renderPanel();
-      const input = screen.getByLabelText("Persona card (.json)") as HTMLInputElement;
-      selectFile(input, makeFile("radio-rex.persona.json", cardJson()));
-      await waitForPicked();
-
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Confirm import" }));
-        await Promise.resolve();
-      });
-
-      await waitFor(() => {
-        expect(screen.getByText(/"Radio Rex" updated\./)).toBeInTheDocument();
-      });
-      expect(screen.getByText('Voice "af_ghost" is not available.')).toBeInTheDocument();
-    });
-
-    it("calls onImported so the parent can refresh its list", async () => {
-      makeSequencedFetchMock([
-        { status: 201, body: { id: 1, slug: "radio-rex", name: "Radio Rex", warnings: [] } },
       ]);
       const onImported = jest.fn();
       renderPanel(onImported);
       const input = screen.getByLabelText("Persona card (.json)") as HTMLInputElement;
       selectFile(input, makeFile("radio-rex.persona.json", cardJson()));
-      await waitForPicked();
+      const dialog = await screen.findByRole("dialog");
 
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Confirm import" }));
+        fireEvent.click(within(dialog).getByRole("button", { name: "Confirm import" }));
         await Promise.resolve();
       });
 
-      await waitFor(() => expect(onImported).toHaveBeenCalledTimes(1));
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+      // Scoped to the panel's own success block, not the toast — sonner renders the SAME message
+      // text a second time in its own live region, which `screen.getByText` (unscoped) would find
+      // ambiguous.
+      const doneBlock = screen.getByRole("button", { name: "Import another" }).closest("div");
+      expect(doneBlock).not.toBeNull();
+      const scopedDone = within(doneBlock as HTMLElement);
+      expect(scopedDone.getByText(/"Radio Rex" updated\./)).toBeInTheDocument();
+      expect(scopedDone.getByText('Voice "af_ghost" is not available.')).toBeInTheDocument();
+      expect(onImported).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("Scenario: cancel abandons the attempt — no import request, file selection cleared (STORY-236 AC1)", () => {
+    it("closes the modal, issues no fetch, and clears the file input", async () => {
+      const mockFetch = makeSequencedFetchMock([]);
+      renderPanel();
+      const input = screen.getByLabelText("Persona card (.json)") as HTMLInputElement;
+      selectFile(input, makeFile("radio-rex.persona.json", cardJson()));
+      const dialog = await screen.findByRole("dialog");
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(input.value).toBe("");
     });
   });
 
@@ -211,24 +220,41 @@ describe("Feature: Import a persona card", () => {
   // SAD PATH
   // -------------------------------------------------------------------------
 
-  describe("Scenario: oversized payload is blocked before upload (sad path)", () => {
-    it("shows an honest too-large message and never calls fetch", async () => {
+  describe("Scenario: oversized payload is blocked before the modal ever opens (sad path)", () => {
+    it("shows an honest too-large message and never calls fetch or opens the review modal", async () => {
       const mockFetch = makeSequencedFetchMock([]);
       renderPanel();
       const input = screen.getByLabelText("Persona card (.json)") as HTMLInputElement;
 
       selectFile(input, makeFile("huge.persona.json", "a".repeat(300 * 1024)));
 
-      await waitForPicked();
+      await waitFor(() => {
+        expect(screen.getByText(/over the 256 KB limit/i)).toBeInTheDocument();
+      });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
 
-      expect(screen.getByText(/over the 256 KB limit/i)).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Confirm import" })).not.toBeInTheDocument();
+  describe("Scenario: a malformed file still opens the modal — ITS error state blocks Confirm, never this panel's (sad path)", () => {
+    it("opens the modal in its own 'couldn't be read' state with Confirm disabled, and never attempts import", async () => {
+      const mockFetch = makeSequencedFetchMock([]);
+      renderPanel();
+      const input = screen.getByLabelText("Persona card (.json)") as HTMLInputElement;
+      selectFile(input, makeFile("broken.persona.json", "not valid json"));
+
+      const dialog = await screen.findByRole("dialog");
+      const scoped = within(dialog);
+      expect(scoped.getByRole("alert")).toHaveTextContent(/couldn.t be read/i);
+      expect(scoped.getByRole("button", { name: "Confirm import" })).toBeDisabled();
+
+      fireEvent.click(scoped.getByRole("button", { name: "Confirm import" }));
       expect(mockFetch).not.toHaveBeenCalled();
     });
   });
 
   describe("Scenario: server rejects the import (sad path)", () => {
-    it("surfaces the newer-major message naming both versions (F79.2)", async () => {
+    it("surfaces the newer-major message naming both versions (F79.2), inside the modal", async () => {
       makeSequencedFetchMock([
         {
           status: 400,
@@ -238,16 +264,15 @@ describe("Feature: Import a persona card", () => {
       renderPanel();
       const input = screen.getByLabelText("Persona card (.json)") as HTMLInputElement;
       selectFile(input, makeFile("radio-rex.persona.json", cardJson({ schemaVersion: 7 })));
-      await waitForPicked();
+      const dialog = await screen.findByRole("dialog");
 
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Confirm import" }));
+        fireEvent.click(within(dialog).getByRole("button", { name: "Confirm import" }));
         await Promise.resolve();
       });
 
       await waitFor(() => {
-        const preview = within(screen.getByRole("region", { name: "Persona card preview" }));
-        expect(preview.getByRole("alert")).toHaveTextContent(
+        expect(within(dialog).getByRole("alert")).toHaveTextContent(
           "Card schema version 7 is newer than this station's supported version 1."
         );
       });
@@ -260,38 +285,17 @@ describe("Feature: Import a persona card", () => {
       renderPanel();
       const input = screen.getByLabelText("Persona card (.json)") as HTMLInputElement;
       selectFile(input, makeFile("radio-rex.persona.json", cardJson()));
-      await waitForPicked();
+      const dialog = await screen.findByRole("dialog");
 
       await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Confirm import" }));
+        fireEvent.click(within(dialog).getByRole("button", { name: "Confirm import" }));
         await Promise.resolve();
       });
 
       await waitFor(() => {
-        const preview = within(screen.getByRole("region", { name: "Persona card preview" }));
-        expect(preview.getByRole("alert")).toHaveTextContent('A persona named "Radio Rex" already exists.');
-      });
-    });
-
-    it("still lets a malformed file attempt import (server is the real validator)", async () => {
-      makeSequencedFetchMock([
-        { status: 400, body: { detail: "'x' is an invalid start of a value." } },
-      ]);
-      renderPanel();
-      const input = screen.getByLabelText("Persona card (.json)") as HTMLInputElement;
-      selectFile(input, makeFile("broken.persona.json", "not valid json"));
-      await waitForPicked();
-
-      expect(screen.getByText(/couldn.t preview/i)).toBeInTheDocument();
-
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Confirm import" }));
-        await Promise.resolve();
-      });
-
-      await waitFor(() => {
-        const preview = within(screen.getByRole("region", { name: "Persona card preview" }));
-        expect(preview.getByRole("alert")).toHaveTextContent("'x' is an invalid start of a value.");
+        expect(within(dialog).getByRole("alert")).toHaveTextContent(
+          'A persona named "Radio Rex" already exists.'
+        );
       });
     });
   });

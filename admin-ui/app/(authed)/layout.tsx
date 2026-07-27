@@ -21,6 +21,37 @@ interface StationDto {
   name: string;
 }
 
+/** The one F19 allowlist key this layout reads to know whether to list the Persona Catalog nav
+ * entry (SPEC F90.1) — mirrors `PersonasPage`'s own single-key read off `GET /api/settings`. */
+const CATALOG_INDEX_URL_KEY = "Community:CatalogIndexUrl";
+
+/** Shape of a `GET /api/settings` row — only the field this layout reads. */
+interface SettingRow {
+  key: string;
+  value: string;
+}
+
+/**
+ * Resolves whether the Persona Catalog nav entry should be listed (SPEC F90.1, PLAN T102):
+ * `Community:CatalogIndexUrl` non-empty is the SAME fail-closed signal `CommunityCatalogAccessor
+ * .IsEnabled` uses server-side for the actual `/api/catalog/*` routes — read here via the settings
+ * surface (a plain DB-backed read) rather than probing `/api/catalog/index` itself, which would
+ * mean every navigation on every page pays for a live upstream catalog fetch just to decide
+ * whether to show a sidebar link. Any failure (network error, non-200) degrades to `false` — fail
+ * closed, matching F90.1's own posture, never a link into a feature this layout couldn't confirm.
+ */
+async function fetchCatalogEnabled(cookieHeader: string): Promise<boolean> {
+  try {
+    const response = await apiGet("/api/settings", { cookies: cookieHeader });
+    if (!response.ok) return false;
+    const settings = (await response.json()) as SettingRow[];
+    const row = settings.find((s) => s.key === CATALOG_INDEX_URL_KEY);
+    return row !== undefined && row.value.trim() !== "";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Reads the live station name for the shell wordmark (SPEC F44.7, closes gitea-#195).
  * Falls back to the "GenWave" product brand on any failure — non-200, a
@@ -62,16 +93,20 @@ async function fetchStationName(cookieHeader: string): Promise<string> {
 // their own `overflow-x-auto` container instead (AC2).
 export default async function AuthedLayout({ children }: AuthedLayoutProps): Promise<ReactNode> {
   const cookieStore = await cookies();
-  const stationName = await fetchStationName(cookieStore.toString());
+  const cookieHeader = cookieStore.toString();
+  const [stationName, catalogEnabled] = await Promise.all([
+    fetchStationName(cookieHeader),
+    fetchCatalogEnabled(cookieHeader),
+  ]);
 
   return (
     <BreadcrumbTitleProvider>
       <div className="flex min-h-screen bg-bg text-ink">
-        <Sidebar stationName={stationName} />
+        <Sidebar stationName={stationName} catalogEnabled={catalogEnabled} />
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-line bg-surface px-4 sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
-              <MobileNav stationName={stationName} />
+              <MobileNav stationName={stationName} catalogEnabled={catalogEnabled} />
               <Breadcrumbs />
             </div>
             <ThemeToggle />

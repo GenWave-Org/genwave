@@ -13,6 +13,7 @@ const SECTION_LABELS: Record<string, string> = {
   live: "Live",
   catalog: "Catalog",
   "safe-content": "Safe content",
+  "persona-catalog": "Persona Catalog",
   settings: "Settings",
 };
 

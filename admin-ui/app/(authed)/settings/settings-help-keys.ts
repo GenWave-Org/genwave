@@ -64,6 +64,7 @@ export const SETTINGS_HELP_KEYS = [
   "DependencyHealth:ProbeTimeoutSeconds",
   "DependencyHealth:UnhealthyThreshold",
   "Llm:DegradationPin",
+  "Community:CatalogIndexUrl",
 ] as const;
 
 export type SettingsHelpKey = (typeof SETTINGS_HELP_KEYS)[number];

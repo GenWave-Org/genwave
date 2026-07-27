@@ -51,6 +51,10 @@ public sealed partial class PersonaController(
     // SPEC F79.6 — enforced BEFORE deserialization, see Import's own remarks.
     const int MaxImportBytes = 256 * 1024;
 
+    // SPEC F90.7 — a catalog entry's slug is a short, human-authored identifier; enforced BEFORE
+    // SlugFormat's regex, see Import's own remarks.
+    const int MaxCatalogSlugLength = 64;
+
     /// <summary>GET /api/personas — every persona row, ordered by name (F35.4).</summary>
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
@@ -302,14 +306,17 @@ public sealed partial class PersonaController(
 
     /// <summary>
     /// POST /api/personas/{slug}/import — upserts a persona from a portable <c>&lt;slug&gt;.persona.json</c>
-    /// card (SPEC F79.2, F79.3, F79.4, F79.6; STORY-209, PLAN T67). Every gate below runs BEFORE
-    /// <see cref="IPersonaImportStore.ImportAsync"/> — the one transactional write — so a rejection at
-    /// ANY of them means nothing was ever written (F79.6):
+    /// card (SPEC F79.2, F79.3, F79.4, F79.6, F90.7; STORY-209, STORY-237, PLAN T67, T98). Every gate
+    /// below runs BEFORE <see cref="IPersonaImportStore.ImportAsync"/> — the one transactional write —
+    /// so a rejection at ANY of them means nothing was ever written (F79.6):
     /// <list type="number">
     /// <item>Slug format: the same lowercase/digit/single-hyphen shape
     /// <c>LegacyPersonaCardMapper.Slugify</c> ever PRODUCES, checked here as a REJECT rather than a
     /// silent auto-correct — a bad slug in an import request is an operator/tooling error worth
     /// surfacing, not fixing up quietly.</item>
+    /// <item><paramref name="catalogSlug"/> format (F90.7): checked against the SAME
+    /// <see cref="SlugFormat"/> rule as the route slug above, when present — never silently dropped or
+    /// coerced.</item>
     /// <item>Payload size: capped at <see cref="MaxImportBytes"/>, enforced by
     /// <see cref="ReadBoundedBodyAsync"/> reading the body itself with a running-total guard — see
     /// that method's remarks for why <see cref="RequestSizeLimitAttribute"/> alone is not enough.</item>
@@ -327,14 +334,34 @@ public sealed partial class PersonaController(
     /// feeds straight into the <see cref="PersonaImportRequest"/> the write receives. The write's own
     /// only failure mode, a name collision, maps to 409 — the same status every other write action on
     /// this controller already uses for <see cref="PersonaWriteResult.NameConflict"/>.
+    ///
+    /// <paramref name="catalogSlug"/> (SPEC F90.7, STORY-237, PLAN T98, T103) is the ONLY provenance
+    /// signal this action passes to the store: present and valid ⇒
+    /// <see cref="PersonaImportRequest.ImportedFrom"/> is the catalog entry's own slug; absent ⇒ the
+    /// request's <see cref="PersonaImportRequest.ImportedFrom"/> default of
+    /// <see cref="PersonaImportRequest.FileSource"/> applies unchanged, so every caller that predates
+    /// F90 (a plain file upload, including every existing test in Story209_PersonaImport.cs) behaves
+    /// exactly as before.
     /// </summary>
     [HttpPost("{slug}/import")]
     [Consumes("application/json")]
     [RequestSizeLimit(MaxImportBytes)]
-    public async Task<IActionResult> Import(string slug, CancellationToken ct)
+    public async Task<IActionResult> Import(string slug, [FromQuery] string? catalogSlug, CancellationToken ct)
     {
         if (!SlugFormat().IsMatch(slug))
             return BadRequest(BadSlugProblem(slug));
+
+        if (!string.IsNullOrEmpty(catalogSlug))
+        {
+            // Length bound BEFORE the regex (cheap reject; also keeps a pathological input away from
+            // the regex engine at all) — matches SPEC F90.7's own "the entry slug" contract: a real
+            // catalog entry slug is a short, human-authored identifier, never anywhere near this long.
+            if (catalogSlug.Length > MaxCatalogSlugLength)
+                return BadRequest(CatalogSlugTooLongProblem(catalogSlug.Length));
+
+            if (!SlugFormat().IsMatch(catalogSlug))
+                return BadRequest(BadCatalogSlugProblem(catalogSlug));
+        }
 
         var (json, oversized) = await ReadBoundedBodyAsync(ct);
         if (oversized)
@@ -362,7 +389,9 @@ public sealed partial class PersonaController(
 
         var (legacyVoice, warnings) = await ResolveVoiceAsync(card.Voice, ct);
 
-        var outcome = await personaImportStore.ImportAsync(new PersonaImportRequest(slug, legacyVoice, card), ct);
+        var importedFrom = string.IsNullOrEmpty(catalogSlug) ? PersonaImportRequest.FileSource : catalogSlug;
+        var outcome = await personaImportStore.ImportAsync(
+            new PersonaImportRequest(slug, legacyVoice, card, importedFrom), ct);
 
         if (outcome is PersonaImportOutcome.Imported succeeded)
             logger.LogInformation(
@@ -467,7 +496,12 @@ public sealed partial class PersonaController(
     // single hyphens) expressed as a REJECT rather than a TRANSFORM — Slugify exists to turn an
     // arbitrary persona name into a legal slug; this exists to refuse an illegal one arriving over
     // the wire, never to silently fix it up.
-    [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$")]
+    //
+    // \A/\z, NOT ^/$ (security-api finding): .NET regex `$` matches immediately before a trailing
+    // '\n' (not just at the true end of input), so `^[a-z0-9]+(-[a-z0-9]+)*$` let a value like
+    // "dj-nova\n" — or, over the wire, "?catalogSlug=x%0A" — through this gate. \A/\z anchor to the
+    // absolute start/end of the string with no such exception.
+    [GeneratedRegex("\\A[a-z0-9]+(-[a-z0-9]+)*\\z")]
     private static partial Regex SlugFormat();
 
     /// <summary>
@@ -578,7 +612,9 @@ public sealed partial class PersonaController(
     };
 
     static PersonaDto ToDto(Persona persona) =>
-        new(persona.Id, persona.Name, persona.Backstory, persona.Style, persona.Voice);
+        new(
+            persona.Id, persona.Name, persona.Backstory, persona.Style, persona.Voice,
+            persona.ImportedFrom, persona.ImportedAt);
 
     static IReadOnlyList<PersonaTasteRuleDto> RulesBySource(
         IReadOnlyList<PersonaTasteEntry> rules, PersonaTasteSource source) =>
@@ -647,6 +683,24 @@ public sealed partial class PersonaController(
         Status = StatusCodes.Status400BadRequest,
         Title  = "Invalid slug.",
         Detail = $"\"{slug}\" is not a valid persona slug (lowercase letters, digits, and single hyphens only).",
+    };
+
+    // SPEC F90.7 — the optional catalogSlug query parameter shares the route slug's own naming rule
+    // (SlugFormat), so this names the parameter explicitly rather than reusing BadSlugProblem's route-
+    // slug-flavored title, avoiding an operator mistaking one 400 for the other.
+    static ProblemDetails BadCatalogSlugProblem(string catalogSlug) => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Invalid catalog slug.",
+        Detail =
+            $"\"{catalogSlug}\" is not a valid catalog slug (lowercase letters, digits, and single hyphens only).",
+    };
+
+    static ProblemDetails CatalogSlugTooLongProblem(int length) => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Invalid catalog slug.",
+        Detail = $"catalogSlug must be at most {MaxCatalogSlugLength} characters (got {length}).",
     };
 
     static ProblemDetails OversizedProblem() => new()

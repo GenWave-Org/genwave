@@ -40,7 +40,8 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
     // single-width C# id type. Mirrors MediaRow's xmin::text cast for the same "storage width differs
     // from the C# projection" reason.
     const string SelectColumns =
-        "select id::bigint as id, name, backstory, style, voice, created_at, updated_at from station.persona";
+        "select id::bigint as id, name, backstory, style, voice, created_at, updated_at, " +
+        "imported_from, imported_at from station.persona";
 
     public async Task<IReadOnlyList<Persona>> GetAllAsync(CancellationToken ct)
     {
@@ -64,7 +65,10 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
     /// Single-statement insert (F35.1). The insert IS the uniqueness check — a duplicate name raises
     /// a 23505 unique_violation on <c>station.persona</c>'s <c>UNIQUE(name)</c> constraint, caught here
     /// rather than pre-checked with a SELECT (no TOCTOU gap, no wasted round trip on the common path).
-    /// Mirrors <see cref="Catalog.AdminLibraryRepository.CreateAsync"/>.
+    /// Mirrors <see cref="Catalog.AdminLibraryRepository.CreateAsync"/>. Deliberately does not set
+    /// <c>imported_from</c>/<c>imported_at</c> (SPEC F90.7) — an authored-in-place persona keeps both
+    /// NULL by never naming them in the INSERT's column list; only
+    /// <c>PersonaImportRepository.ImportAsync</c> ever writes those two columns.
     /// </summary>
     public async Task<PersonaWriteResult> CreateAsync(PersonaDraft draft, CancellationToken ct)
     {
@@ -79,7 +83,8 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
                 """
                 insert into station.persona (name, backstory, style, voice, slug, definition, enabled)
                 values (@Name, @Backstory, @Style, @Voice, @Slug, @Definition::jsonb, true)
-                returning id::bigint as id, name, backstory, style, voice, created_at, updated_at
+                returning id::bigint as id, name, backstory, style, voice, created_at, updated_at,
+                    imported_from, imported_at
                 """,
                 new { draft.Name, draft.Backstory, draft.Style, draft.Voice, Slug = slug, Definition = definition },
                 cancellationToken: ct));
@@ -110,6 +115,10 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
     /// <c>definition.soul</c> whenever the freshly rebuilt one would be empty AND the existing one
     /// is not; every other field of the rebuilt definition (name, tagline, quirks, voice, ...) still
     /// overwrites normally.
+    ///
+    /// Like <see cref="CreateAsync"/>, this UPDATE never names <c>imported_from</c>/<c>imported_at</c>
+    /// (SPEC F90.7) — an admin edit to an imported persona leaves its provenance stamp exactly as the
+    /// last import left it, never clearing or refreshing it.
     /// </summary>
     public async Task<PersonaWriteResult> UpdateAsync(long id, PersonaDraft draft, CancellationToken ct)
     {
@@ -133,7 +142,8 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
                     end,
                     updated_at = now()
                 where id = @Id
-                returning id::bigint as id, name, backstory, style, voice, created_at, updated_at
+                returning id::bigint as id, name, backstory, style, voice, created_at, updated_at,
+                    imported_from, imported_at
                 """,
                 new { draft.Name, draft.Backstory, draft.Style, draft.Voice, Slug = slug, Definition = definition, Id = id },
                 cancellationToken: ct));

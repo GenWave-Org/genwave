@@ -42,6 +42,8 @@ const REX: PersonaDto = {
   backstory: "A grizzled late-night jock who has seen every format come and go.",
   style: "Warm, gravelly, brief.",
   voice: "af_alloy",
+  importedFrom: null,
+  importedAt: null,
 };
 
 const NOVA: PersonaDto = {
@@ -50,9 +52,16 @@ const NOVA: PersonaDto = {
   backstory: "An upbeat morning host.",
   style: "Bright and quick.",
   voice: "",
+  importedFrom: null,
+  importedAt: null,
 };
 
 const VOICE_IDS = ["af_alloy", "af_aoede"];
+
+// Provenance fixtures (SPEC F90.7, T105) — hoisted, typed ISO consts rather than inline literals
+// so the expected badge strings below read as plain, obviously-correct arithmetic on named values.
+const FILE_IMPORTED_AT: string = "2026-07-20T14:32:00Z";
+const CATALOG_IMPORTED_AT: string = "2026-07-21T09:05:00Z";
 
 // ---------------------------------------------------------------------------
 // Fetch mock — dispatched by "METHOD url", relative wire calls only (matches how
@@ -223,6 +232,8 @@ describe("Feature: Author personas from the console", () => {
         backstory: "Dry wit, deep crates.",
         style: "Deadpan.",
         voice: "",
+        importedFrom: null,
+        importedAt: null,
       };
       makeDispatchFetchMock({ "POST /api/personas": { status: 201, body: created } });
       renderClient({ initialPersonas: [] });
@@ -308,6 +319,37 @@ describe("Feature: Author personas from the console", () => {
       await waitFor(() => {
         expect(screen.getByText('A persona named "Radio Rex" already exists.')).toBeInTheDocument();
       });
+    });
+  });
+
+  describe("Scenario: provenance badge (SPEC F90.7, T105)", () => {
+    it("shows nothing for an authored-in-place persona (importedFrom/importedAt null)", () => {
+      makeDispatchFetchMock({});
+      renderClient({ initialPersonas: [REX, NOVA], timeZone: "UTC" });
+
+      expect(within(rowFor("Radio Rex")).queryByText(/^Imported/)).not.toBeInTheDocument();
+    });
+
+    it('badges a file import as the literal three-field "Imported · file · Jul 20, 2026" (timeZone="UTC" pinned for determinism, the StatusTiles/BoothLogFeed/LlmCallsFeed/PlayHistoryTable house idiom)', () => {
+      const fileImported: PersonaDto = { ...REX, importedFrom: "file", importedAt: FILE_IMPORTED_AT };
+      makeDispatchFetchMock({});
+      renderClient({ initialPersonas: [fileImported, NOVA], timeZone: "UTC" });
+
+      expect(within(rowFor("Radio Rex")).getByText("Imported · file · Jul 20, 2026")).toBeInTheDocument();
+    });
+
+    it('badges a catalog import with the raw slug verbatim, not prettified — literal "Imported · late-night-jazz-host · Jul 21, 2026"', () => {
+      const catalogImported: PersonaDto = {
+        ...NOVA,
+        importedFrom: "late-night-jazz-host",
+        importedAt: CATALOG_IMPORTED_AT,
+      };
+      makeDispatchFetchMock({});
+      renderClient({ initialPersonas: [REX, catalogImported], timeZone: "UTC" });
+
+      expect(
+        within(rowFor("Nova")).getByText("Imported · late-night-jazz-host · Jul 21, 2026")
+      ).toBeInTheDocument();
     });
   });
 

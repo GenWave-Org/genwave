@@ -65,17 +65,27 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	-- write (see GenWave.MediaLibrary.Station.LegacyPersonaCardMapper). The DEFAULT expressions below
 	-- are a safety net only, for a row created outside PersonaRepository (never the app's own path):
 	-- a fresh table has no rows to backfill, so nothing more elaborate is needed here.
+	--
+	-- imported_from/imported_at (SPEC F90.7, STORY-237, PLAN T98): provenance PersonaImportRepository
+	-- stamps on every import — the entry slug for a catalog import, the literal 'file' for a file
+	-- upload — and refreshes on every re-import. Both stay NULL for a persona PersonaRepository's own
+	-- CRUD ever created or edited (neither column appears in CreateAsync's INSERT or UpdateAsync's
+	-- UPDATE). Display-only for the Admin UI's provenance badge (T105): no FK, no index — nothing
+	-- selects, filters, or orders on either column. See db/25-persona-provenance-migration.sh for the
+	-- in-place upgrade path this table also ships as.
 	CREATE TABLE IF NOT EXISTS station.persona (
-	  id         serial      PRIMARY KEY,
-	  name       text        NOT NULL UNIQUE,
-	  backstory  text        NOT NULL DEFAULT '',
-	  style      text        NOT NULL DEFAULT '',
-	  voice      text        NOT NULL DEFAULT '',
-	  slug       text        NOT NULL UNIQUE DEFAULT ('persona-' || nextval('station.persona_id_seq')::text),
-	  definition jsonb       NOT NULL DEFAULT '{}'::jsonb,
-	  enabled    boolean     NOT NULL DEFAULT true,
-	  created_at timestamptz NOT NULL DEFAULT now(),
-	  updated_at timestamptz NOT NULL DEFAULT now()
+	  id            serial      PRIMARY KEY,
+	  name          text        NOT NULL UNIQUE,
+	  backstory     text        NOT NULL DEFAULT '',
+	  style         text        NOT NULL DEFAULT '',
+	  voice         text        NOT NULL DEFAULT '',
+	  slug          text        NOT NULL UNIQUE DEFAULT ('persona-' || nextval('station.persona_id_seq')::text),
+	  definition    jsonb       NOT NULL DEFAULT '{}'::jsonb,
+	  enabled       boolean     NOT NULL DEFAULT true,
+	  imported_from text,
+	  imported_at   timestamptz,
+	  created_at    timestamptz NOT NULL DEFAULT now(),
+	  updated_at    timestamptz NOT NULL DEFAULT now()
 	);
 
 	-- Persona memory (SPEC F71.1, STORY-192): accrued/authored bits and callbacks a future

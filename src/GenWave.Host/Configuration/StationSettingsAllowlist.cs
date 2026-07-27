@@ -229,6 +229,14 @@ public static class StationSettingsAllowlist
         // pins/unpins the mode with no api restart. "auto" (the LlmOptions default) leaves the
         // mode fully automatic; "normal"/"soft"/"hard" holds it.
         new("Llm:DegradationPin",                             SettingApplyMode.Live,          SettingKind.String,     ""),
+
+        // Persona Catalog origin (SPEC F90.1, STORY-234, PLAN T99) — CommunityCatalogAccessor reads
+        // this fresh via IOptionsMonitor<CommunityOptions>, so a live PUT here reaches the very next
+        // catalog request with no api restart (T101). Defaults to the official genwave-catalog
+        // index.json; EMPTY is the F90.1 fail-closed kill switch — both catalog endpoints 404 and
+        // the admin UI hides the shelf, the same F87.2/F61 surface-off idiom as every other kill
+        // switch on this list.
+        new("Community:CatalogIndexUrl",                      SettingApplyMode.Live,          SettingKind.String,     ""),
     };
 
     /// <summary>All operator-editable settings, keyed by configuration key.</summary>

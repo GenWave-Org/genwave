@@ -57,6 +57,12 @@ sealed class PersonaImportRepository(Lazy<NpgsqlDataSource> dataSource) : IPerso
     /// two-field shape — <see cref="PersonaRepository.UpdateAsync"/>'s own edit-wipe guard already
     /// keeps a later admin PATCH from clobbering this <c>definition.soul</c> with an empty rebuild
     /// (it preserves the existing soul whenever the freshly rebuilt one would be empty).
+    ///
+    /// <c>imported_from</c>/<c>imported_at</c> (SPEC F90.7) are stamped UNCONDITIONALLY on both the
+    /// insert and the update path — <paramref name="request"/>'s own
+    /// <see cref="PersonaImportRequest.ImportedFrom"/>, with <c>imported_at</c> always <c>now()</c> —
+    /// so a re-import onto a living persona refreshes the stamp exactly like every other field this
+    /// method rewrites, never leaving a stale provenance behind.
     /// </summary>
     static async Task<(long PersonaId, bool WasCreated)> UpsertPersonaAsync(
         NpgsqlConnection conn, NpgsqlTransaction tx, PersonaImportRequest request, string definition, CancellationToken ct)
@@ -73,10 +79,15 @@ sealed class PersonaImportRepository(Lazy<NpgsqlDataSource> dataSource) : IPerso
                 """
                 update station.persona
                 set name = @Name, backstory = '', style = '', voice = @Voice,
-                    definition = @Definition::jsonb, updated_at = now()
+                    definition = @Definition::jsonb, imported_from = @ImportedFrom, imported_at = now(),
+                    updated_at = now()
                 where id = @Id
                 """,
-                new { request.Card.Name, Voice = request.LegacyVoice, Definition = definition, Id = id },
+                new
+                {
+                    request.Card.Name, Voice = request.LegacyVoice, Definition = definition, Id = id,
+                    request.ImportedFrom,
+                },
                 transaction: tx,
                 cancellationToken: ct));
 
@@ -85,11 +96,15 @@ sealed class PersonaImportRepository(Lazy<NpgsqlDataSource> dataSource) : IPerso
 
         var newId = await conn.QuerySingleAsync<long>(new CommandDefinition(
             """
-            insert into station.persona (name, backstory, style, voice, slug, definition, enabled)
-            values (@Name, '', '', @Voice, @Slug, @Definition::jsonb, true)
+            insert into station.persona (name, backstory, style, voice, slug, definition, enabled, imported_from, imported_at)
+            values (@Name, '', '', @Voice, @Slug, @Definition::jsonb, true, @ImportedFrom, now())
             returning id::bigint
             """,
-            new { request.Card.Name, Voice = request.LegacyVoice, request.Slug, Definition = definition },
+            new
+            {
+                request.Card.Name, Voice = request.LegacyVoice, request.Slug, Definition = definition,
+                request.ImportedFrom,
+            },
             transaction: tx,
             cancellationToken: ct));
 

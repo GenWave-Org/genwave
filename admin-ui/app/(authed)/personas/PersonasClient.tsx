@@ -5,13 +5,14 @@ import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "@/components/ui/toast";
+import { formatDateStamp } from "@/lib/format-clock";
+import { readErrorMessage } from "@/lib/problem-details";
 import { useVoiceList } from "@/lib/use-voice-list";
 import { VoiceControl } from "../safe-content/VoiceControl";
 import { PersonaExportLink } from "./PersonaExportLink";
 import { PersonaImportPanel } from "./PersonaImportPanel";
 import { PersonaPreview } from "./PersonaPreview";
 import { PersonaTasteSection } from "./PersonaTasteSection";
-import { readErrorMessage } from "./persona-http";
 import { usePersonaVoiceWarning } from "./use-persona-voice-warning";
 import type { PersonaDto } from "./types";
 
@@ -20,6 +21,10 @@ export interface PersonasClientProps {
   initialPersonas: PersonaDto[];
   /** `Station:Persona:ActiveId` resolved server-side from GET /api/settings; `0` = none. */
   initialActiveId: number;
+  /** Test-only injection point for the provenance badge's `formatDateStamp` call; production omits
+   * this and gets the browser's local zone — the same StatusTiles/BoothLogFeed/LlmCallsFeed/
+   * PlayHistoryTable idiom, not a bespoke one. */
+  timeZone?: string;
 }
 
 /** The one F19 allowlist key the activate/deactivate control writes (SPEC F35.2). */
@@ -60,6 +65,29 @@ function displayVoice(voice: string): string {
   return voice.trim() === "" ? "Station default" : voice;
 }
 
+/** Provenance badge (SPEC F90.7, T105): "Imported · &lt;source&gt; · &lt;date&gt;" for an imported
+ * persona, nothing for one authored in place. `importedFrom` renders VERBATIM — `"file"` or a raw
+ * catalog slug — this is provenance, not decoration, so it is never prettified (ruled). The date
+ * uses `formatDateStamp` — `lib/format-clock.ts`'s bare-calendar-date formatter — NOT
+ * `formatUpSince` (that one folds its own `HH:MM · Mon D` pair, no year, into the string, which
+ * would both break the badge's literal three-field shape and silently collide two imports a year
+ * apart). `timeZone` is a plain pass-through from the page prop, the house test-injection idiom. */
+function ProvenanceBadge({
+  importedFrom,
+  importedAt,
+  timeZone,
+}: {
+  importedFrom: string;
+  importedAt: string;
+  timeZone?: string;
+}): ReactNode {
+  return (
+    <span className="ml-2 inline-flex items-center rounded-[3px] border border-line px-1.5 py-0.5 text-[0.68rem] text-mute">
+      {`Imported · ${importedFrom} · ${formatDateStamp(importedAt, { timeZone })}`}
+    </span>
+  );
+}
+
 function requestBodyFrom(form: FormValues): PersonaRequestBody {
   const body: PersonaRequestBody = {
     name: form.name.trim(),
@@ -96,8 +124,14 @@ const HEADER_CELL = "py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[
  * beneath the toggled row). `PersonaTasteSection` owns the lazy fetch itself — mounting it only
  * once a row is expanded is what keeps `GET /api/personas/{id}/taste` from firing for every row on
  * page load.
+ *
+ * PLAN T105 (STORY-237, SPEC F90.7) adds the `ProvenanceBadge` next to the name for a persona
+ * imported by either path (catalog or file, F90.5/F90.6) — nothing renders for one authored in
+ * place. The badge reads straight off the row's own `importedFrom`/`importedAt`; re-import (same
+ * `PersonaImportPanel` → `refreshPersonas` round trip T68 already wired) simply refreshes the list,
+ * which re-derives the badge with no bespoke handling here.
  */
-export function PersonasClient({ initialPersonas, initialActiveId }: PersonasClientProps): ReactNode {
+export function PersonasClient({ initialPersonas, initialActiveId, timeZone }: PersonasClientProps): ReactNode {
   const confirm = useConfirm();
   const [personas, setPersonas] = useState<PersonaDto[]>(initialPersonas);
   const [activeId, setActiveId] = useState<number>(initialActiveId);
@@ -439,6 +473,13 @@ export function PersonasClient({ initialPersonas, initialActiveId }: PersonasCli
                             <span className="ml-2 inline-flex items-center rounded-[999px] bg-accent px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-ink">
                               Active
                             </span>
+                          )}
+                          {persona.importedFrom !== null && persona.importedAt !== null && (
+                            <ProvenanceBadge
+                              importedFrom={persona.importedFrom}
+                              importedAt={persona.importedAt}
+                              timeZone={timeZone}
+                            />
                           )}
                         </td>
                         <td className="py-2 pr-3 text-mute">{summarizeStyle(persona.style)}</td>
