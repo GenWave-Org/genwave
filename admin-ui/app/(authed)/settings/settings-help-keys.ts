@@ -25,7 +25,6 @@ export const SETTINGS_HELP_KEYS = [
   "Station:Cadence:StationIdEveryNUnits",
   "Station:Scope:LibraryIds",
   "Station:SafeScope:LibraryIds",
-  "Station:Persona:ActiveId",
   "Station:Rotation:RecentWindow",
   "Station:Rotation:ArtistSeparation",
   "Station:Envelope:Genres",

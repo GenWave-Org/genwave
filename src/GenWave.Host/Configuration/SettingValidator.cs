@@ -155,12 +155,6 @@ public sealed class SettingValidator(IConfiguration configuration)
             // Relaxed from IsNonEmptyPositiveLongArray for STORY-068 / F25.2.
             ["Station:SafeScope:LibraryIds"] = IsPositiveLongArrayAllowEmpty,
 
-            // Active DJ persona — 0 (none) or a positive persona id (F35.2). Existence is NOT
-            // checked here: a stale id is legal and degrades at read time (ActivePersonaAccessor,
-            // F35.5), so this validator only guards the sign/shape, mirroring StationOptionsValidator's
-            // boot-time guard for the same field.
-            ["Station:Persona:ActiveId"] = IsNonNegativeLong,
-
             // Rotation knobs (SPEC F41.6) — integers in [0, ceiling]; 0 legally disables either knob
             // (mirrors StationRotationOptions' [Range(0, int.MaxValue)] floor; F53.1 adds the ceiling).
             ["Station:Rotation:RecentWindow"] = v => IsIntInRange(v, 0, RotationRecentWindowMax),
@@ -451,11 +445,6 @@ public sealed class SettingValidator(IConfiguration configuration)
         && !v.StartsWith("//", StringComparison.Ordinal)
         && Uri.TryCreate(v, UriKind.Relative, out _);
 
-    // Persona ids are `long` (the C# projection of station.persona's serial id, cast on the way
-    // out — mirrors PersonaRepository's own id::bigint cast), so this parses as long, not int.
-    static bool IsNonNegativeLong(string v) =>
-        long.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) && n >= 0;
-
     /// <summary>
     /// Validates a JSON-encoded array of positive library ids, e.g. <c>"[1,2]"</c>.
     /// Returns <see langword="true"/> when:
@@ -656,8 +645,6 @@ public sealed class SettingValidator(IConfiguration configuration)
             => $"Value '{value}' is not valid for '{key}'. Must be a non-empty JSON array of positive integer library ids, e.g. [1] or [1,2].",
         var k when k.Equals("Station:SafeScope:LibraryIds", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a JSON array of positive integer library ids (empty is permitted for degraded-mode; main scope requires non-empty), e.g. [] or [1,2].",
-        var k when k.Equals("Station:Persona:ActiveId", StringComparison.OrdinalIgnoreCase)
-            => $"Value '{value}' is not valid for '{key}'. Must be a non-negative integer persona id (0 = none).",
         var k when k.Equals("Station:Rotation:RecentWindow", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between 0 and {RotationRecentWindowMax} (0 disables).",
         var k when k.Equals("Station:Rotation:ArtistSeparation", StringComparison.OrdinalIgnoreCase)

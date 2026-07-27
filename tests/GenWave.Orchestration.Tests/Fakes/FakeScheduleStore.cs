@@ -25,11 +25,19 @@ sealed class FakeScheduleStore(ScheduleWeekSnapshot snapshot) : IScheduleStore
 
     public int LoadWeekAsyncCallCount { get; private set; }
 
+    /// <summary>Set to make the next <see cref="LoadWeekAsync"/> call throw, simulating an
+    /// <see cref="IScheduleStore"/> I/O fault (PLAN T120 review F3) — mirrors
+    /// <c>FakePersonaStore.ThrowOnGetById</c>'s convention one project up. Never cleared automatically:
+    /// a scenario proving recovery sets this back to <see langword="null"/> itself.</summary>
+    public Exception? ThrowOnLoadWeek { get; set; }
+
     public event Action? WeekChanged;
 
     public Task<ScheduleWeekSnapshot> LoadWeekAsync(CancellationToken ct)
     {
         LoadWeekAsyncCallCount++;
+        if (ThrowOnLoadWeek is { } ex) throw ex;
+
         return pendingLoad?.Task ?? Task.FromResult(current);
     }
 

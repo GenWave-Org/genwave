@@ -114,10 +114,6 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
   "Station:SafeScope:LibraryIds":
     "The libraries used for safe filler content when the main rotation drains — an empty list is " +
     "legal and falls back to silence (mksafe).",
-  "Station:Persona:ActiveId":
-    "The currently active DJ persona, if any — 0 means no persona; patter falls back to the " +
-    "station-branded voice and copy.",
-
   // ── Rotation resilience + artist separation (SPEC F41.6, F53.1, F56.1, closes gitea-#210/gitea-#213/gitea-#227) ─
   "Station:Rotation:RecentWindow":
     "How many recently-played tracks the rotation avoids repeating. 0 disables anti-repeat " +

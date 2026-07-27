@@ -92,13 +92,13 @@ file sealed class StatusApiWebFactory(IMediaCatalog catalog) : WebApplicationFac
             services.RemoveAll<IMediaCatalog>();
             services.AddSingleton(catalog);
 
-            // T9 (SPEC F34.8): StatusController now also resolves IActivePersonaAccessor. The real
-            // ActivePersonaAccessor takes IPersonaStore as a constructor dependency, and DI resolves
-            // constructor dependencies eagerly — so leaving the real accessor wired would force a
-            // real NpgsqlDataSource to build against Station's (unset in this test) connection
-            // string the moment the controller is constructed, never mind that Persona:ActiveId is 0
-            // and no method on the store would ever actually be called. Replaced with the fake, same
-            // as IMediaCatalog above.
+            // T9 (SPEC F34.8): StatusController resolves IActivePersonaAccessor. The real accessor
+            // is OnAirPersonaAccessor (SPEC F91.5, PLAN T120 — Station:Persona:ActiveId this comment
+            // used to name is retired), which resolves through CachingScheduleResolver/IScheduleStore
+            // before ever touching IPersonaStore — so leaving it wired would have this test's request
+            // hit a real Postgres query against Station's (unset in this test) connection string the
+            // moment StatusController's action actually calls it. Replaced with the fake, same as
+            // IMediaCatalog above.
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
         });

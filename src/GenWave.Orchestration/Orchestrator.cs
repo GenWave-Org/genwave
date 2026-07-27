@@ -130,13 +130,6 @@ public sealed class Orchestrator(
     /// </summary>
     const int BoundarySampleAttempts = 5;
 
-    /// <summary>
-    /// SPEC F82.6 — v1's per-pick debug line names the envelope that governed the pick. v1 ships
-    /// exactly one 24/7 station-default envelope (SPEC F81.3, no schedule grid) so this is a fixed
-    /// sentinel rather than a field on <see cref="SegmentEnvelope"/> itself, which carries no id.
-    /// </summary>
-    const string EnvelopeId = "station-default";
-
     // SPEC F81.6's degradation-step vocabulary — the per-pick debug line's sixth field. "None" covers
     // both a winning rung-0 persona pick AND a rung-1 (unrelaxed) envelope-only pick: neither gave up
     // anything the envelope originally asked for.
@@ -382,13 +375,19 @@ public sealed class Orchestrator(
         LibraryScope scope, IReadOnlyList<string> orderedRecentIds, int artistSeparation, CancellationToken ct)
     {
         var envelope = envelopeProvider.Current;
+        // Captured alongside envelope, at the same read point (SPEC F91.7) — a resolver-backed
+        // provider's Current/EnvelopeId are two independent reads of the same underlying snapshot,
+        // mirroring IActivePersonaAccessor's own documented "two independent reads" shape; a
+        // boundary landing in the narrow window between them degrades no worse than a
+        // stale-but-consistent per-pick debug line.
+        var envelopeId = envelopeProvider.EnvelopeId;
 
         var personaPick = await TryPersonaPickAsync(scope, orderedRecentIds, artistSeparation, envelope, ct);
         if (personaPick is not null)
         {
             if (SatisfiesEnvelope(personaPick, envelope))
             {
-                LogPerPickDebugLine(personaPick, DegradationStepNone);
+                LogPerPickDebugLine(personaPick, DegradationStepNone, envelopeId);
                 return personaPick;
             }
 
@@ -401,7 +400,7 @@ public sealed class Orchestrator(
         var (candidate, degradationStep) =
             await SelectEnvelopeLadderAsync(scope, orderedRecentIds, artistSeparation, envelope, ct);
         if (candidate is not null)
-            LogPerPickDebugLine(candidate, degradationStep);
+            LogPerPickDebugLine(candidate, degradationStep, envelopeId);
         return candidate;
     }
 
@@ -602,18 +601,21 @@ public sealed class Orchestrator(
     }
 
     /// <summary>
-    /// SPEC F82.6 — the one per-pick debug line: envelope id, pool size, the winning pick's top-3
-    /// scores, which taste rules fired, the exploration flag, and which degradation rung (SPEC F81.6)
-    /// actually supplied the pick. Fires on EVERY music pick — persona-off included — so the ladder's
-    /// own degradation step is always visible, mirroring the <c>LiquidsoapControl</c> per-command
-    /// convention (a per-tick line belongs at Debug, not Information — SPEC F82.6's own "per-pick"
-    /// framing puts it in the same high-frequency bucket).
+    /// SPEC F82.6/F91.7 — the one per-pick debug line: envelope id, pool size, the winning pick's
+    /// top-3 scores, which taste rules fired, the exploration flag, and which degradation rung (SPEC
+    /// F81.6) actually supplied the pick. Fires on EVERY music pick — persona-off included — so the
+    /// ladder's own degradation step is always visible, mirroring the <c>LiquidsoapControl</c>
+    /// per-command convention (a per-tick line belongs at Debug, not Information — SPEC F82.6's own
+    /// "per-pick" framing puts it in the same high-frequency bucket).
     /// <paramref name="candidate"/>'s <see cref="RotationCandidate.PersonaPick"/> is null for every
     /// envelope-only ladder pick (including the common case where no persona is even active) — the
     /// pool/top3/firedRules/exploration fields all read as empty/false in that case, never omitted
-    /// from the line.
+    /// from the line. <paramref name="envelopeId"/> is <see cref="envelopeProvider"/>'s own
+    /// <see cref="IEnvelopeProvider.EnvelopeId"/> — <c>"segment:{id}"</c> for a live schedule segment,
+    /// the station-default sentinel for a gap (SPEC F91.7) — read once by the caller alongside the
+    /// envelope itself, never re-read here.
     /// </summary>
-    void LogPerPickDebugLine(RotationCandidate candidate, string degradationStep)
+    void LogPerPickDebugLine(RotationCandidate candidate, string degradationStep, string envelopeId)
     {
         var diagnostics = candidate.PersonaPick;
         var topScores = diagnostics is null
@@ -626,7 +628,7 @@ public sealed class Orchestrator(
         logger.LogDebug(
             "Pick — envelope={EnvelopeId} pool={PoolSize} top3=[{TopScores}] firedRules=[{FiredRules}] " +
             "exploration={IsExploration} degradation={DegradationStep}",
-            EnvelopeId, diagnostics?.PoolSize ?? 0, topScores, firedRules,
+            envelopeId, diagnostics?.PoolSize ?? 0, topScores, firedRules,
             diagnostics?.IsExploration ?? false, degradationStep);
     }
 

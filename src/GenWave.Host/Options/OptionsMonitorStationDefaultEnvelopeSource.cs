@@ -7,18 +7,29 @@ using GenWave.Core.Abstractions;
 namespace GenWave.Host.Options;
 
 /// <summary>
-/// The Host-side half of the <see cref="IEnvelopeProvider"/> seam (SPEC F81.3, STORY-212): wraps
-/// <see cref="IOptionsMonitor{TOptions}"/> so the Orchestrator's envelope-aware pick reads the SAME
-/// live value <c>PUT /api/settings</c> writes (mirrors <see cref="OptionsMonitorBoundaryBiasProvider"/>).
+/// The Host-side implementation of <see cref="IStationDefaultEnvelopeSource"/> (SPEC F81.3, F91.4;
+/// STORY-212, STORY-241, PLAN T120): wraps <see cref="IOptionsMonitor{TOptions}"/> so both
+/// <c>GenWave.Orchestration.ScheduleResolver</c> (a grid gap, or a segment's NULL envelope field) and
+/// <c>GenWave.Orchestration.ScheduleEnvelopeProvider</c> (the process boot window, before the first
+/// schedule resolve) share ONE construction of "the station-default envelope from
+/// <c>Station:Envelope:*</c>".
+///
+/// <para>
+/// Was <c>OptionsMonitorEnvelopeProvider</c> — v1's ONLY <see cref="IEnvelopeProvider"/> binding,
+/// before the F91 format clock existed. <c>GenWave.Orchestration.ScheduleEnvelopeProvider</c> is the
+/// <see cref="IEnvelopeProvider"/> binding now; this type keeps the exact same <see cref="Current"/>
+/// construction, just re-homed onto the narrower seam that construction always really was.
+/// </para>
 ///
 /// Builds a new <see cref="SegmentEnvelope"/> from <see cref="StationEnvelopeOptions"/> on every call
 /// — nothing is cached here — <see cref="IOptionsMonitor{T}.CurrentValue"/> already is the cache.
 /// <see cref="SegmentEnvelope.StartsAt"/>/<see cref="SegmentEnvelope.EndsAt"/> are always the full day
-/// (SPEC F81.3's v1 24/7 scope; no schedule grid exists to narrow them).
+/// (the station-default envelope is never itself segment-shaped; only a real schedule row narrows
+/// them, via <c>ScheduleResolver.BuildSegmentEnvelope</c>).
 /// </summary>
-sealed class OptionsMonitorEnvelopeProvider(
+sealed class OptionsMonitorStationDefaultEnvelopeSource(
     IOptionsMonitor<StationOptions> stationMonitor,
-    ILogger<OptionsMonitorEnvelopeProvider> logger) : IEnvelopeProvider
+    ILogger<OptionsMonitorStationDefaultEnvelopeSource> logger) : IStationDefaultEnvelopeSource
 {
     public SegmentEnvelope Current
     {

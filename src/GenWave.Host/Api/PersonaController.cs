@@ -6,7 +6,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
-using GenWave.Host.Configuration;
 using GenWave.Host.Options;
 
 namespace GenWave.Host.Api;
@@ -33,7 +32,6 @@ namespace GenWave.Host.Api;
 [Authorize(Policy = AuthorizationPolicies.Settings)]
 public sealed partial class PersonaController(
     IPersonaStore personaStore,
-    IStationSettingsStore settingsStore,
     IOptionsMonitor<StationOptions> stationMonitor,
     IPersonaPreviewWriter previewWriter,
     IActivePersonaAccessor personaAccessor,
@@ -45,9 +43,6 @@ public sealed partial class PersonaController(
     ITtsVoiceLister voiceLister,
     ILogger<PersonaController> logger) : ControllerBase
 {
-    // The F19 allowlist key this controller's delete-clears-active write targets (F35.5).
-    internal const string ActiveIdKey = "Station:Persona:ActiveId";
-
     // SPEC F79.6 — enforced BEFORE deserialization, see Import's own remarks.
     const int MaxImportBytes = 256 * 1024;
 
@@ -118,11 +113,21 @@ public sealed partial class PersonaController(
     }
 
     /// <summary>
-    /// DELETE /api/personas/{id} — remove a persona. 204 on success; 404 for an unknown id.
-    /// Deleting the currently active persona clears <c>Station:Persona:ActiveId</c> back to
-    /// <c>0</c> IN THE SAME REQUEST (F35.5) — a stale id reached any other way still degrades
-    /// safely via <see cref="IActivePersonaAccessor"/>, but this is the one path that can prevent
-    /// the staleness outright.
+    /// DELETE /api/personas/{id} — remove a persona. 204 on success; 404 for an unknown id; 409 when
+    /// the persona still appears in the format-clock schedule (SPEC F91.9 — supersedes F35.5's
+    /// retired delete-clears-active write: <c>Station:Persona:ActiveId</c> no longer exists for a
+    /// delete to clear).
+    ///
+    /// <para>
+    /// PLAN T120 SCAFFOLDING, finished by PLAN T121: <see cref="IPersonaStore.DeleteAsync"/> maps the
+    /// FK RESTRICT on <c>station.segment_schedule.persona_id</c> to
+    /// <see cref="PersonaWriteResult.ScheduledElsewhere"/> itself (house precedent — the store, never
+    /// this controller, is where a raw Postgres SQLSTATE gets turned into a
+    /// <see cref="PersonaWriteResult"/> case; mirrors <see cref="PersonaWriteResult.NameConflict"/>'s
+    /// own unique_violation mapping). This action's own contribution is a GENERIC 409 — "still
+    /// scheduled, minus the offending slot names" — for that case. PLAN T121 replaces the generic body
+    /// with the real F91.9 shape: naming which day/time slots are blocking the delete.
+    /// </para>
     /// </summary>
     [HttpDelete("{id:long}")]
     public async Task<IActionResult> Delete(long id, CancellationToken ct)
@@ -130,24 +135,15 @@ public sealed partial class PersonaController(
         var result = await personaStore.DeleteAsync(id, ct);
 
         if (result is PersonaWriteResult.Deleted)
-        {
             logger.LogInformation("Persona deleted id={PersonaId}", id);
-
-            if (stationMonitor.CurrentValue.Persona.ActiveId == id)
-            {
-                // WriteAsync raises the overlay reload token — the very next
-                // IOptionsMonitor<StationOptions> read (including this request's own, were it to
-                // read again) sees ActiveId=0.
-                await settingsStore.WriteAsync(ActiveIdKey, 0, ct);
-                logger.LogInformation(
-                    "Cleared {Key} after deleting the active persona id={PersonaId}", ActiveIdKey, id);
-            }
-        }
+        else if (result is PersonaWriteResult.ScheduledElsewhere)
+            logger.LogWarning("Persona delete blocked: id={PersonaId} is still scheduled", id);
 
         return result switch
         {
             PersonaWriteResult.Deleted => NoContent(),
             PersonaWriteResult.NotFound => NotFound(NotFoundProblem(id)),
+            PersonaWriteResult.ScheduledElsewhere => Conflict(ScheduledPersonaProblem(id)),
             _ => StatusCode(StatusCodes.Status500InternalServerError),
         };
     }
@@ -669,6 +665,14 @@ public sealed partial class PersonaController(
         Status = StatusCodes.Status404NotFound,
         Title  = "Not found.",
         Detail = $"No persona with id {id} exists.",
+    };
+
+    // PLAN T120 scaffolding (SPEC F91.9) — generic on purpose; PLAN T121 names the offending slots.
+    static ProblemDetails ScheduledPersonaProblem(long id) => new()
+    {
+        Status = StatusCodes.Status409Conflict,
+        Title  = "Persona is scheduled.",
+        Detail = $"Persona {id} still appears in the format-clock schedule and cannot be deleted while scheduled.",
     };
 
     static ProblemDetails UnknownSlugProblem(string slug) => new()

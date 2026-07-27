@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
+using GenWave.Orchestration;
 
 namespace GenWave.Host.Options;
 
@@ -67,11 +68,20 @@ static class StationOptionsServiceCollectionExtensions
             // Orchestrator without a restart — but, unlike the four bindings above, this knob is
             // NOT joined to the settings allowlist (v1: boot/env-tunable only, no PUT write path).
             .AddSingleton<IBoundaryBiasProvider, OptionsMonitorBoundaryBiasProvider>()
-            // Live envelope seam (SPEC F81.3, STORY-212): Station:Envelope:* is advertised Live in
-            // the settings allowlist. Wraps IOptionsMonitor<StationOptions> and re-reads
-            // CurrentValue on every call, so a live PUT /api/settings genre/energy edit applies to
-            // the Orchestrator's very next pick with no api restart.
-            .AddSingleton<IEnvelopeProvider, OptionsMonitorEnvelopeProvider>()
+            // Station-default envelope seam (SPEC F81.3, F91.4; STORY-212, STORY-241, PLAN T120):
+            // Station:Envelope:* is advertised Live in the settings allowlist. Wraps
+            // IOptionsMonitor<StationOptions> and re-reads CurrentValue on every call — the fallback
+            // ScheduleResolver/ScheduleEnvelopeProvider (registered by AddGenWaveStationSettings)
+            // both consult for a grid gap, a segment's NULL envelope field, or the process boot
+            // window — so a live PUT /api/settings genre/energy edit still applies with no api
+            // restart, exactly as it did before the format clock existed.
+            .AddSingleton<IStationDefaultEnvelopeSource, OptionsMonitorStationDefaultEnvelopeSource>()
+            // Live envelope seam (SPEC F91.7, STORY-241, PLAN T120): re-backs IEnvelopeProvider over
+            // the schedule resolver (CachingScheduleResolver, registered by AddGenWaveStationSettings)
+            // instead of the single 24/7 station-default value above — the Orchestrator's envelope-
+            // aware pick and its per-pick debug line both observe the on-air segment's own envelope/
+            // EnvelopeId with zero call-site change (F91.5).
+            .AddSingleton<IEnvelopeProvider, ScheduleEnvelopeProvider>()
             // Live request-override seam (SPEC F87.6, STORY-227, PLAN T90): Station:Requests:OverrideEnvelope
             // is advertised Live in the settings allowlist. Wraps IOptionsMonitor<StationOptions> and
             // re-reads CurrentValue on every call, so a live PUT /api/settings edit applies to the

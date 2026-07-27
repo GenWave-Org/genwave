@@ -35,6 +35,12 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
     // Postgres SQLSTATE for unique_violation — mirrors AdminLibraryRepository's NameConflict mapping.
     const string UniqueViolation = "23505";
 
+    // Postgres SQLSTATE for foreign_key_violation — the FK RESTRICT on
+    // station.segment_schedule.persona_id (db/27, SPEC F91.9) fires here when DeleteAsync targets a
+    // persona still named by a schedule row (PLAN T120 review F4 — moved down from PersonaController,
+    // which used to catch the raw PostgresException itself).
+    const string ForeignKeyViolation = "23503";
+
     // id is `serial` (int4) at rest per the F35.1 schema — few dozen rows, never near 2^31 — but every
     // other id in this codebase is `long` (bigint), so it is cast on the way out for a consistent,
     // single-width C# id type. Mirrors MediaRow's xmin::text cast for the same "storage width differs
@@ -157,14 +163,30 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
         }
     }
 
+    /// <summary>
+    /// Plain SQL DELETE (SPEC F35.4). A persona still named by a <c>station.segment_schedule</c> row
+    /// raises the table's own <c>ON DELETE RESTRICT</c> (SPEC F91.9) as a <c>foreign_key_violation</c>,
+    /// caught here and mapped to <see cref="PersonaWriteResult.ScheduledElsewhere"/> — the same
+    /// caught-not-precomputed shape <see cref="CreateAsync"/>/<see cref="UpdateAsync"/> already use for
+    /// a name collision (no TOCTOU gap, no wasted pre-check round trip on the common path). PLAN T120
+    /// review F4: this mapping used to live in <c>PersonaController</c>, catching the raw
+    /// <c>PostgresException</c> directly — moved here so the controller never imports Npgsql at all.
+    /// </summary>
     public async Task<PersonaWriteResult> DeleteAsync(long id, CancellationToken ct)
     {
-        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-        var affected = await conn.ExecuteAsync(new CommandDefinition(
-            "delete from station.persona where id = @id",
-            new { id },
-            cancellationToken: ct));
-        return affected == 0 ? new PersonaWriteResult.NotFound() : new PersonaWriteResult.Deleted();
+        try
+        {
+            await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+            var affected = await conn.ExecuteAsync(new CommandDefinition(
+                "delete from station.persona where id = @id",
+                new { id },
+                cancellationToken: ct));
+            return affected == 0 ? new PersonaWriteResult.NotFound() : new PersonaWriteResult.Deleted();
+        }
+        catch (PostgresException ex) when (ex.SqlState == ForeignKeyViolation)
+        {
+            return new PersonaWriteResult.ScheduledElsewhere();
+        }
     }
 
     /// <summary>

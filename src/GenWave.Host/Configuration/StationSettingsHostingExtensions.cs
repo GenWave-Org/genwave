@@ -1,6 +1,7 @@
 using GenWave.Core.Abstractions;
 using GenWave.Host.Options;
 using GenWave.MediaLibrary.Station;
+using GenWave.Orchestration;
 
 namespace GenWave.Host.Configuration;
 
@@ -73,11 +74,27 @@ static class StationSettingsHostingExtensions
         // import route (PersonaController.Import) is its only consumer.
         builder.Services.AddPersonaImportStore(stationConnStr);
 
-        // ActivePersonaAccessor (SPEC F35.2, F35.5): the ONE seam the Orchestrator and the
-        // preview/status endpoints read the live active persona through — re-reads
-        // IOptionsMonitor<StationOptions> + IPersonaStore per call, never a stale snapshot, never
-        // throws (WARN + null on any miss).
-        builder.Services.AddSingleton<IActivePersonaAccessor, ActivePersonaAccessor>();
+        // Format-clock schedule store + resolver (SPEC F91.1, F91.3; STORY-240/241, PLAN T118-T120) —
+        // same station_svc connection string as every registration above; station.segment_schedule
+        // lives in the same schema. ScheduleRepository ships dark since T118 (AddScheduleStore itself
+        // registers no consumer); this is the first Host call site.
+        builder.Services.AddScheduleStore(stationConnStr);
+
+        // CachingScheduleResolver MUST be a singleton — its constructor subscribes to
+        // IScheduleStore.WeekChanged and never unsubscribes (no IDisposable), so a scoped/transient
+        // registration would leak one subscription (and the wrapped store reference) per instance
+        // created (T119 review F6, T119's own class remarks). ScheduleResolver itself is a pure
+        // (snapshot, wall clock) function with no state of its own — plain AddSingleton is enough,
+        // no lifetime hazard either way.
+        builder.Services.AddSingleton<ScheduleResolver>();
+        builder.Services.AddSingleton<CachingScheduleResolver>();
+
+        // OnAirPersonaAccessor (SPEC F35.2, F35.5, F91.5; STORY-241/242, PLAN T120): the ONE seam the
+        // Orchestrator and the preview/status endpoints read the live on-air persona through — now
+        // re-backed by CachingScheduleResolver instead of Station:Persona:ActiveId (retired, F91.5).
+        // Never throws (WARN + null on any miss) — same contract the retired ActivePersonaAccessor
+        // carried.
+        builder.Services.AddSingleton<IActivePersonaAccessor, OnAirPersonaAccessor>();
 
         // Booth log (SPEC F72.1-F72.3, STORY-195): same station_svc connection string as the
         // settings overlay/persona store above — station.booth_log lives in the same schema. Adds

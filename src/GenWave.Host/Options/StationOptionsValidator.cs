@@ -21,12 +21,6 @@ using Microsoft.Extensions.Options;
 /// </para>
 ///
 /// <para>
-/// Guards <c>Station:Persona:ActiveId</c> (SPEC F35.2): must be zero or a positive persona id.
-/// Existence is NOT checked here (a stale id is legal and degrades at read time, F35.5) — only
-/// the sign, which a negative value could never legitimately be.
-/// </para>
-///
-/// <para>
 /// Guards <c>Station:Cadence:StationIdEveryNUnits</c> (SPEC F42.2),
 /// <c>Station:Rotation:RecentWindow</c> / <c>Station:Rotation:ArtistSeparation</c> (SPEC F41.6),
 /// and <c>Station:BoundaryBias:LookaheadMinutes</c> (SPEC F74.3): each must be non-negative (0
@@ -73,11 +67,6 @@ public sealed class StationOptionsValidator(ILogger<StationOptionsValidator> log
         if (options.Safe.BedPadSeconds < 0)
             return ValidateOptionsResult.Fail(
                 "Station:Safe:BedPadSeconds must be non-negative " +
-                "(found a negative value).");
-
-        if (options.Persona.ActiveId < 0)
-            return ValidateOptionsResult.Fail(
-                "Station:Persona:ActiveId must be zero (none) or a positive persona id " +
                 "(found a negative value).");
 
         if (options.Cadence.StationIdEveryNUnits < 0)

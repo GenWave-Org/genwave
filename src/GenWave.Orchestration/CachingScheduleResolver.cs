@@ -39,7 +39,12 @@ public sealed class CachingScheduleResolver
 {
     readonly IScheduleStore store;
     readonly ScheduleResolver resolver;
-    ScheduleWeekSnapshot? snapshot;
+
+    // volatile (PLAN T120 review F1): TryGetCurrent reads this field from whatever thread the feeder
+    // tick/BoothLogWriter/RankerPersonaPickProvider happen to run on, with no lock — a plain field
+    // write in ResolveAsync could be reordered or cached per-CPU without this, letting a sync reader
+    // observe a torn/stale reference even after the async load has visibly completed elsewhere.
+    volatile ScheduleWeekSnapshot? snapshot;
     volatile bool dirty = true;
 
     public CachingScheduleResolver(IScheduleStore store, ScheduleResolver resolver)
@@ -69,6 +74,47 @@ public sealed class CachingScheduleResolver
         }
 
         return resolver.Resolve(snapshot);
+    }
+
+    /// <summary>
+    /// Synchronous, in-memory read of the on-air snapshot (SPEC F91.5, STORY-241/242, PLAN T120) —
+    /// no store round trip, no awaiting: re-derives <see cref="ScheduleResolver.Resolve"/> against
+    /// whichever <see cref="ScheduleWeekSnapshot"/> is already cached and the CURRENT wall clock, so
+    /// the answer is always as time-accurate as the wall clock itself even between async
+    /// <see cref="ResolveAsync"/> calls. Exists for a caller that sits on a hot/sync path and so
+    /// cannot await a reload — <c>OnAirPersonaAccessor.ActivePersonaId</c> and
+    /// <c>ScheduleEnvelopeProvider</c> are both built on this.
+    ///
+    /// <para>
+    /// <b>What keeps the cached snapshot fresh:</b> this method never reloads anything itself — only
+    /// <see cref="ResolveAsync"/> does. In production, <see cref="ResolveAsync"/> is reached every
+    /// unit plan via <c>OnAirPersonaAccessor.ResolveAsync</c> (awaited from
+    /// <c>Orchestrator.ResolvePersonaAsync</c> for the unit's lead-in/back-announce segments, and from
+    /// <c>RankerPersonaPickProvider.TryPickAsync</c> when the ranker is bound instead of
+    /// <c>NoOpPersonaPickProvider</c>), so the snapshot this method reads is at most one unit stale
+    /// REGARDLESS of which <c>IPersonaPickProvider</c> is configured — the persona-accessor refresh
+    /// path and the pick-provider seam are independent; a no-op pick provider does not starve this
+    /// one. A deployment whose cadence disables BOTH <c>LeadInBeforeEachTrack</c> and
+    /// <c>BackAnnounceAfterEachTrack</c> (neither the shipped default) is the one configuration where
+    /// no per-unit caller reaches <see cref="ResolveAsync"/> at all, and the cached snapshot would
+    /// then only advance on the next <see cref="IScheduleStore.WeekChanged"/>-triggered write.
+    /// </para>
+    ///
+    /// <para>
+    /// Returns <see langword="null"/> before the very first <see cref="ResolveAsync"/> call has
+    /// completed (the process boot window) — there is no cached <see cref="ScheduleWeekSnapshot"/>
+    /// yet to resolve against, and this method never triggers the load itself. Callers on this sync
+    /// surface tolerate that null exactly the way <c>BoothLogWriter</c> already tolerates a null/zero
+    /// persona id for a genuine gap: no persona stamped, nothing else.
+    /// </para>
+    /// </summary>
+    public OnAirSnapshot? TryGetCurrent()
+    {
+        // Single volatile read into a local (PLAN T120 review F1) — reading the field twice (once for
+        // the null check, once to pass to Resolve) would let a concurrent ResolveAsync swap the
+        // reference in between the two reads on another thread.
+        var current = snapshot;
+        return current is null ? null : resolver.Resolve(current);
     }
 
     void OnWeekChanged() => dirty = true;

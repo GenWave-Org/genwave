@@ -34,8 +34,10 @@ public interface IPersonaStore
 
     /// <summary>
     /// Deletes the persona identified by <paramref name="id"/>. Returns
-    /// <see cref="PersonaWriteResult.Deleted"/> on success, or <see cref="PersonaWriteResult.NotFound"/>
-    /// if no such persona exists.
+    /// <see cref="PersonaWriteResult.Deleted"/> on success, <see cref="PersonaWriteResult.NotFound"/>
+    /// if no such persona exists, or <see cref="PersonaWriteResult.ScheduledElsewhere"/> if the
+    /// persona still appears in the format-clock schedule (SPEC F91.9 — enforced by the DB's own FK
+    /// <c>ON DELETE RESTRICT</c>, not a pre-read).
     /// </summary>
     Task<PersonaWriteResult> DeleteAsync(long id, CancellationToken ct);
 
