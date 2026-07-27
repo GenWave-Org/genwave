@@ -72,7 +72,7 @@ The broadcast never depends on a sick dependency. **LLM failure is a mode, not a
 │  └─ genwave.liq          # Liquidsoap playout script
 ├─ db/
 │  ├─ 01-library.sh        # library schema + library_svc role (canonical fresh install)
-│  └─ 02..24-*-migration.sh # idempotent in-place upgrades, one per shipped feature —
+│  └─ 02..25-*-migration.sh # idempotent in-place upgrades, one per shipped feature —
 │                          #   each header says what it adds; ./migrate.sh applies them all
 ├─ icecast/
 │  ├─ Dockerfile           # self-owned Icecast2 image
