@@ -23,7 +23,7 @@ It was great, until it wasn't. The problem with playlists is that they're dumb: 
 
 The itch never went away. Over the years I built a home version of FLAP Radio. Still, honestly, a playlist randomizer, and I was never truly happy with it. Then, a couple of years ago, LLMs and TTS started making a serious splash, and the itch came back in earnest: the technology had finally caught up with the idea. This time GenWave was born for real: a station that never goes silent, knows what it's playing, and has a DJ who tells you about it.
 
-Scratch itched. 📻
+Itch scratched. 📻
 
 
 ## Quickstart
