@@ -8,14 +8,17 @@
 // (FakeBenchStore below, mirrors Story237_ImportProvenance.cs's FakePersonaStation) so a rejected
 // or accepted delete's actual effect on the row — not just the HTTP status — is provable.
 //
-// ScenarioBenchingByUnpainting is NOT covered in this file: its own Given/When ("a slot is removed
-// via PUT /api/schedule") names a wire endpoint T122 has not built yet, and proving "no longer
-// appears in any schedule row" needs a real station.segment_schedule to query against, which this
-// project has no Postgres fixture for (Story251's own remarks document this Host/MediaLibrary
-// split). The repository-level equivalent — ScheduleRepository.ReplaceWeekAsync unpainting a slot,
-// PersonaRepository proving the record survives — is Story247_BenchTransition.cs in
-// GenWave.MediaLibrary.Tests (real Postgres, Story240_ScheduleStore.cs's own fixture family). The
-// API-level round trip through GET/PUT /api/schedule re-pins here once T122/T129 land.
+// ScenarioBenchingByUnpainting (PLAN T122): now that PUT /api/schedule exists, this file re-pins it
+// at the wire layer using FakeScheduleStore (Fakes/FakeScheduleStore.cs, shared with
+// Story240_GridHoldsTheWeek.cs) alongside FakeBenchStore — a stateful echo double for IScheduleStore
+// that never re-implements ScheduleRepository's own per-cell validation, exactly like Story240's own
+// use of it. What this DOES honestly prove: unpainting a slot via PUT /api/schedule (submitting a
+// week that no longer names the persona) never touches IPersonaStore at all (the persona record
+// survives because nothing ever asked to delete it) and the very next GET /api/schedule carries no
+// row naming that persona. What it does NOT re-prove: ScheduleRepository's real validation/atomicity
+// behind that echo — that is Story247_BenchTransition.cs's job (GenWave.MediaLibrary.Tests, real
+// Postgres, Story240_ScheduleStore.cs's own fixture family) and Story240_GridHoldsTheWeek.cs's own
+// job for the DTO-mapping half.
 
 using System.Net;
 using System.Net.Http.Json;
@@ -29,6 +32,7 @@ using Microsoft.Extensions.Hosting;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
+using GenWave.Host.Tests.Fakes;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -145,10 +149,14 @@ file sealed class EmptyPersonaTasteReader : IPersonaTasteReader
 
 /// <summary>
 /// Boots the real Program.cs graph (routing, cookie auth, the production
-/// <c>POST/GET/DELETE /api/personas</c> routes) with <see cref="IPersonaStore"/> replaced by
-/// <paramref name="store"/> — mirrors Story237's <c>PersonaProvenanceWebFactory</c>.
+/// <c>POST/GET/DELETE /api/personas</c> and <c>GET/PUT /api/schedule</c> routes) with
+/// <see cref="IPersonaStore"/> replaced by <paramref name="store"/> and <see cref="IScheduleStore"/>
+/// replaced by <paramref name="scheduleStore"/> (defaults to a fresh, empty
+/// <see cref="FakeScheduleStore"/> when a scenario has no need to touch <c>/api/schedule</c> at all)
+/// — mirrors Story237's <c>PersonaProvenanceWebFactory</c>.
 /// </summary>
-file sealed class PersonaDeleteWebFactory(FakeBenchStore store) : WebApplicationFactory<Program>
+file sealed class PersonaDeleteWebFactory(FakeBenchStore store, FakeScheduleStore? scheduleStore = null)
+    : WebApplicationFactory<Program>
 {
     internal const string Password = "test-password-two-stage-firing";
 
@@ -165,6 +173,9 @@ file sealed class PersonaDeleteWebFactory(FakeBenchStore store) : WebApplication
 
             services.RemoveAll<IPersonaStore>();
             services.AddSingleton<IPersonaStore>(store);
+
+            services.RemoveAll<IScheduleStore>();
+            services.AddSingleton<IScheduleStore>(scheduleStore ?? new FakeScheduleStore());
 
             // Export (T66) also reads IPersonaMemory/IPersonaTasteReader — both real implementations
             // are Postgres-backed against ConnectionStrings:Station, which this factory leaves at its
@@ -202,17 +213,55 @@ public static class FeatureTwoStageFiring
 
     public sealed class ScenarioBenchingByUnpainting
     {
-        // Given a DJ scheduled in one slot, When that slot is removed via PUT /api/schedule.
-        //
-        // Pending T122 (PUT /api/schedule does not exist yet) — see this file's own header for why,
-        // and Story247_BenchTransition.cs (GenWave.MediaLibrary.Tests) for the repository-level proof
-        // of the same "unpainting" behavior that exists today.
+        // Given a DJ scheduled in one slot, When that slot is removed via PUT /api/schedule (a
+        // week submitted without any row naming that persona) — see this file's own header for the
+        // fake-vs-real judgment: FakeScheduleStore proves the WIRE effect (IPersonaStore untouched,
+        // GET /api/schedule reflects the unpaint); Story247_BenchTransition.cs proves the same
+        // behavior against the real repository.
 
-        [Fact(Skip = "Pending (T122): needs the real PUT /api/schedule endpoint — see Story247_BenchTransition.cs for the repository-level equivalent")]
-        public void PersonaRecordIsUntouched() { }
+        [Fact]
+        public async Task PersonaRecordIsUntouched()
+        {
+            var personaStore = new FakeBenchStore();
+            var scheduleStore = new FakeScheduleStore();
+            await using var factory = new PersonaDeleteWebFactory(personaStore, scheduleStore);
+            var client = await PersonaDeleteWebFactory.LoggedInClientAsync(factory);
+            var created = await CreateAsync(client, "Bench Transition DJ");
 
-        [Fact(Skip = "Pending (T122): needs the real PUT /api/schedule endpoint — see Story247_BenchTransition.cs for the repository-level equivalent")]
-        public void PersonaNoLongerAppearsInAnyScheduleRow() { }
+            var paint = await client.PutAsJsonAsync(
+                "/api/schedule",
+                new ScheduleWeekDto([new ScheduleSegmentDto(null, 1, 0, 600, created.Id, null, null, null)]));
+            Assert.Equal(HttpStatusCode.OK, paint.StatusCode);
+
+            // When: the week is replaced again, this time with no slot naming this persona at all —
+            // DELETE /api/personas is never called.
+            var unpaint = await client.PutAsJsonAsync("/api/schedule", new ScheduleWeekDto([]));
+            Assert.Equal(HttpStatusCode.OK, unpaint.StatusCode);
+
+            var afterList = await client.GetFromJsonAsync<PersonaDto[]>("/api/personas");
+            Assert.Contains(afterList!, p => p.Id == created.Id && p.Name == created.Name);
+        }
+
+        [Fact]
+        public async Task PersonaNoLongerAppearsInAnyScheduleRow()
+        {
+            var personaStore = new FakeBenchStore();
+            var scheduleStore = new FakeScheduleStore();
+            await using var factory = new PersonaDeleteWebFactory(personaStore, scheduleStore);
+            var client = await PersonaDeleteWebFactory.LoggedInClientAsync(factory);
+            var created = await CreateAsync(client, "Bench Transition DJ");
+            await client.PutAsJsonAsync(
+                "/api/schedule",
+                new ScheduleWeekDto([new ScheduleSegmentDto(null, 1, 0, 600, created.Id, null, null, null)]));
+
+            // When: unpainted — replaced with a week that never names this persona.
+            await client.PutAsJsonAsync("/api/schedule", new ScheduleWeekDto([]));
+
+            var response = await client.GetAsync("/api/schedule");
+            var body = await response.Content.ReadFromJsonAsync<ScheduleWeekDto>();
+            Assert.NotNull(body);
+            Assert.DoesNotContain(body.Segments, s => s.PersonaId == created.Id);
+        }
     }
 
     public sealed class ScenarioDeletingFromTheBench
