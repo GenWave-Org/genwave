@@ -173,6 +173,19 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	  add column mood_tagged_at     timestamptz,
 	  add column mood_tag_missed_at timestamptz;
 
+	-- explicit / explicit_source (SPEC F95.2, STORY-251, T110): per-track explicit/advisory
+	-- classification, orthogonal to the F95.5 never-play verdict (never-play still gates playout;
+	-- this pair only classifies). explicit is a plain nullable boolean -- NULL = unknown/unclassified,
+	-- never a sentinel false. explicit_source names WHO classified the row, constrained to the three
+	-- known origins (F95.3): 'tag' (an advisory flag already carried in the file's own metadata,
+	-- stamped first), 'llm' (the offline sweep asking a model about rows the tag pass left unknown),
+	-- 'operator' (an explicit admin override -- once stamped, later sweeps must never overwrite it).
+	-- Schema only here: no enrichment pass or admin endpoint writes either column yet (T112/T113/T115).
+	alter table library.media
+	  add column explicit        boolean,
+	  add column explicit_source text
+	    check (explicit_source is null or explicit_source in ('tag', 'llm', 'operator'));
+
 	-- artwork_token (gh-#105, SPEC F88.2, STORY-222): random 128-bit value (32 lowercase hex
 	-- chars), generated lazily by ArtworkTokenRepository.GetOrCreateTokenAsync on a row's first
 	-- need. NULL for every row until then -- never backfilled, since a token is only ever minted

@@ -43,7 +43,8 @@ sealed class MediaRepository(
         "select id, library_id, path, format, state, title, duration_ms, sample_rate, channels, bitrate_kbps, " +
         "artist, album, genre, year, integrated_lufs, true_peak_dbtp, measurable, " +
         "cue_in_sec, cue_out_sec, intro_energy, outro_energy, bpm, track_energy, eligible, m.xmin::text as xmin, " +
-        "coalesce(r.score, 50) as score, coalesce(r.never_play, false) as never_play, m.moods " +
+        "coalesce(r.score, 50) as score, coalesce(r.never_play, false) as never_play, m.moods, " +
+        "m.explicit, m.explicit_source " +
         "from library.media m left join library.media_rating r on r.media_id = m.id";
 
     public async Task<MediaReference?> GetByIdAsync(LibraryScope scope, string mediaId, CancellationToken ct)
@@ -548,7 +549,7 @@ sealed class MediaRepository(
                    cue_in_sec, cue_out_sec, intro_energy, outro_energy, bpm, track_energy,
                    eligible, m.xmin::text as xmin,
                    coalesce(r.score, 50) as score, coalesce(r.never_play, false) as never_play,
-                   m.moods,
+                   m.moods, m.explicit, m.explicit_source,
                    not (m.library_id = any(@safeLibraryIds)) as rateable,
                    count(*) over() as total_count
             from library.media m
