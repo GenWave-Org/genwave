@@ -237,6 +237,13 @@ public static class StationSettingsAllowlist
         // the admin UI hides the shelf, the same F87.2/F61 surface-off idiom as every other kill
         // switch on this list.
         new("Community:CatalogIndexUrl",                      SettingApplyMode.Live,          SettingKind.String,     ""),
+
+        // Audience posture (SPEC F95.1, STORY-250, PLAN T111) — everyone (default, fail-closed) |
+        // mature. Live so a PUT here reaches the very next selection query with no api restart,
+        // once T114 wires the shared pool predicate (rotation, request matcher, boundary bias —
+        // F95.4). No consumers yet: this task only adds the allowlist entry, the StationOptions
+        // property, and the SettingValidator guard.
+        new("Station:Audience",                               SettingApplyMode.Live,          SettingKind.String,     ""),
     };
 
     /// <summary>All operator-editable settings, keyed by configuration key.</summary>

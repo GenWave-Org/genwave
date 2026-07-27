@@ -82,4 +82,15 @@ public sealed class StationOptions
 
     /// <summary>The three live-editable listener-request knobs (SPEC F87.2, F87.6, STORY-224). Bound to <c>Station:Requests</c>.</summary>
     public StationRequestsOptions Requests { get; set; } = new();
+
+    /// <summary>
+    /// Audience posture (SPEC F95.1, STORY-250, PLAN T111): <c>"everyone"</c> (default,
+    /// fail-closed) or <c>"mature"</c> (case-insensitive — mirrors <c>Llm:DegradationPin</c>'s
+    /// own guard, <see cref="GenWave.Host.Configuration.SettingValidator"/>). <c>everyone</c> is
+    /// the safe default a fresh station boots into: nothing stamped
+    /// <c>explicit</c> may enter a candidate pool until an operator deliberately opts in to
+    /// <c>mature</c>. No consumer reads this yet — T114 wires the shared pool predicate
+    /// (rotation, request matcher, boundary bias) this drives (SPEC F95.4).
+    /// </summary>
+    public string Audience { get; set; } = "everyone";
 }

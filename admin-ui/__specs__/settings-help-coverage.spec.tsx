@@ -49,6 +49,7 @@ const STRING_KEYS = new Set<SettingsHelpKey>([
   "Llm:Model",
   "Library:YearLookup:Endpoint",
   "Community:CatalogIndexUrl",
+  "Station:Audience",
 ]);
 
 function kindAndUnitFor(key: SettingsHelpKey): Pick<SettingDto, "kind" | "unit"> {

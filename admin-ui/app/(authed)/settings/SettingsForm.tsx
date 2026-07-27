@@ -271,6 +271,12 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "Where the Persona Catalog browses and imports personas from. Leave empty to disable the " +
     "Persona Catalog entirely — both catalog endpoints stop responding and this admin UI hides " +
     "the shelf. Changes apply live.",
+
+  // ── Audience posture (SPEC F95.1, STORY-250) ───────────────────────────────────────────────
+  "Station:Audience":
+    "\"everyone\" (default) keeps every track stamped explicit out of the pool entirely — it " +
+    "never plays, displays, or reaches the DJ's mouth. \"mature\" plays everything, unmasked. " +
+    "Changes apply live.",
 };
 
 /**

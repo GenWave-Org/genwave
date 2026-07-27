@@ -354,6 +354,13 @@ public static class FeatureSeededDefaults
             Assert.Equal(
                 new CommunityOptions().CatalogIndexUrl,
                 RequireValue(config, "Community:CatalogIndexUrl"));
+
+            // Station:Audience (SPEC F95.1, STORY-250, PLAN T111) — seeded alongside the feature
+            // itself, same "close gitea-#231 before it can ever open for this key" discipline as
+            // Community:CatalogIndexUrl just above.
+            Assert.Equal(
+                new StationOptions().Audience,
+                RequireValue(config, "Station:Audience"));
         }
     }
 
