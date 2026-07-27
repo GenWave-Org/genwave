@@ -94,8 +94,8 @@ export type RatingFailureKind = "unauthorized" | "forbidden" | "not-found" | "ne
 /**
  * User-facing copy for a classified rating-mutation failure (SPEC F31.3) — the single source of
  * this wording, shared verbatim by every rating control (`RatingControls` on the Live page,
- * `NeverPlayControl` on the Catalog page, STORY-114/STORY-115) so the two surfaces can't drift
- * apart on the same failure.
+ * `NeverPlayControl` and `ExplicitOverrideControl` on the Catalog page, STORY-114/STORY-115/
+ * STORY-251) so all three surfaces can't drift apart on the same failure.
  */
 export function describeRatingFailure(kind: RatingFailureKind, status: number | null): string {
   switch (kind) {
@@ -129,6 +129,20 @@ export interface NeverPlaySuccess {
   neverPlay: boolean;
 }
 export type NeverPlayOutcome = NeverPlaySuccess | RatingFailure;
+
+/** Who stamped an explicit/advisory classification (SPEC F95.2/F95.3) — the automated tag pass,
+ * an LLM sweep, or an operator override via {@link setExplicitOverride}. Named so the wire's
+ * three-value vocabulary has exactly one definition, shared by {@link ExplicitOverrideSuccess}
+ * and the catalog `AdminMediaDto.explicitSource` (`app/(authed)/catalog/types.ts`) instead of each
+ * repeating — and risking drifting from — the same string-literal union. */
+export type ExplicitSource = "tag" | "llm" | "operator";
+
+export interface ExplicitOverrideSuccess {
+  ok: true;
+  explicit: boolean | null;
+  explicitSource: ExplicitSource | null;
+}
+export type ExplicitOverrideOutcome = ExplicitOverrideSuccess | RatingFailure;
 
 /** A media id this UI can vote/flag by id — the `RatingController` route requires a numeric
  * `long`; `tts:*` (and any other non-numeric) id would 404 the route entirely, so this same
@@ -172,17 +186,26 @@ export async function fetchRatings(mediaIds: readonly string[]): Promise<RatingE
   return (await response.json()) as RatingEntry[];
 }
 
-/** POST /api/media/{id}/vote (F33.3) — ±1 clamped to [0,100], applied atomically server-side.
- * Never throws: a non-2xx or network failure resolves to a classified `RatingFailure` so the
- * caller can toast a distinct message and leave its displayed score untouched. */
-export async function voteTrack(mediaId: string, direction: VoteDirection): Promise<VoteOutcome> {
+/**
+ * Shared fetch/try-catch/classify/parse idiom every rating-style write (`voteTrack`,
+ * `setNeverPlay`, `setExplicitOverride`) follows: POST/PUT a JSON `body`, a network failure or a
+ * non-2xx response both resolve to a classified {@link RatingFailure} — never throws, the whole
+ * point of the idiom — and a 2xx response's JSON is handed to `parseSuccess` to build the caller's
+ * specific success shape. One definition so the three call sites can't drift apart on it.
+ */
+async function writeRatingMutation<T extends object>(
+  path: string,
+  method: "POST" | "PUT",
+  body: unknown,
+  parseSuccess: (json: unknown) => T
+): Promise<({ ok: true } & T) | RatingFailure> {
   let response: Response;
   try {
-    response = await fetch(`/api/media/${mediaId}/vote`, {
-      method: "POST",
+    response = await fetch(path, {
+      method,
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ direction }),
+      body: JSON.stringify(body),
     });
   } catch {
     return { ok: false, kind: "network", status: null };
@@ -190,29 +213,48 @@ export async function voteTrack(mediaId: string, direction: VoteDirection): Prom
   if (!response.ok) {
     return { ok: false, kind: classifyRatingStatus(response.status), status: response.status };
   }
-  const body = (await response.json()) as { score: number };
-  return { ok: true, score: body.score };
+  return { ok: true, ...parseSuccess(await response.json()) };
+}
+
+/** POST /api/media/{id}/vote (F33.3) — ±1 clamped to [0,100], applied atomically server-side.
+ * Never throws: a non-2xx or network failure resolves to a classified `RatingFailure` so the
+ * caller can toast a distinct message and leave its displayed score untouched. */
+export async function voteTrack(mediaId: string, direction: VoteDirection): Promise<VoteOutcome> {
+  return writeRatingMutation(`/api/media/${mediaId}/vote`, "POST", { direction }, (json) => {
+    const body = json as { score: number };
+    return { score: body.score };
+  });
 }
 
 /** PUT /api/media/{id}/never-play (F33.4) — idempotent flag set. Never throws, same failure
  * contract as {@link voteTrack}. */
 export async function setNeverPlay(mediaId: string, neverPlay: boolean): Promise<NeverPlayOutcome> {
-  let response: Response;
-  try {
-    response = await fetch(`/api/media/${mediaId}/never-play`, {
-      method: "PUT",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ neverPlay }),
-    });
-  } catch {
-    return { ok: false, kind: "network", status: null };
-  }
-  if (!response.ok) {
-    return { ok: false, kind: classifyRatingStatus(response.status), status: response.status };
-  }
-  const body = (await response.json()) as { neverPlay: boolean };
-  return { ok: true, neverPlay: body.neverPlay };
+  return writeRatingMutation(`/api/media/${mediaId}/never-play`, "PUT", { neverPlay }, (json) => {
+    const body = json as { neverPlay: boolean };
+    return { neverPlay: body.neverPlay };
+  });
+}
+
+/**
+ * PUT /api/media/{id}/explicit (SPEC F95.3, F95.5, STORY-251, PLAN T115/T116) — operator override
+ * of the explicit/advisory classification. Same wire contract as {@link setNeverPlay}: idempotent,
+ * no If-Match, tri-state body `{ explicit: true | false | null }` — `null` clears the row back to
+ * unknown/unclassified, releasing it to the tag pass or the next LLM sweep. Never throws, same
+ * failure contract as {@link voteTrack}.
+ */
+export async function setExplicitOverride(
+  mediaId: string,
+  explicitValue: boolean | null
+): Promise<ExplicitOverrideOutcome> {
+  return writeRatingMutation(
+    `/api/media/${mediaId}/explicit`,
+    "PUT",
+    { explicit: explicitValue },
+    (json) => {
+      const body = json as { explicit: boolean | null; explicitSource: ExplicitSource | null };
+      return { explicit: body.explicit, explicitSource: body.explicitSource };
+    }
+  );
 }
 
 function isDrainWire(body: NowPlayingWire): body is NowPlayingDrainWire {

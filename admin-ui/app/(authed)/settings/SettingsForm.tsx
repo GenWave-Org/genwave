@@ -6,6 +6,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import type { LibraryDto } from "@/lib/library";
+import { AudienceSettingControl } from "./AudienceSettingControl";
 import { CorrectionsSettingControl } from "./CorrectionsSettingControl";
 import { PersonaSettingControl } from "./PersonaSettingControl";
 import { SafeScopeAvailabilityBadge } from "./SafeScopeAvailabilityBadge";
@@ -304,6 +305,7 @@ const SETTING_CONTROL_REGISTRY: Record<string, ComponentType<SettingControlProps
   "Station:Voice": VoiceSettingControl,
   "Station:Persona:ActiveId": PersonaSettingControl,
   "Tts:Corrections": CorrectionsSettingControl,
+  "Station:Audience": AudienceSettingControl,
 };
 
 /** applyMode badge copy (SPEC F28.12 wording verbatim; F44.3 adds the third "enrichment" mode). */
