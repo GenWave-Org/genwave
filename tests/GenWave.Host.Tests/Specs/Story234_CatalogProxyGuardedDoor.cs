@@ -1273,4 +1273,50 @@ public static class FeatureCatalogProxyGuardedDoor
             Assert.IsType<CatalogIndexFetchResult.Unreachable>(result);
         }
     }
+
+    public sealed class ScenarioLogLinesCannotBeForged
+    {
+        // CodeQL log-forging class (PR #170 review): the ONE catalog site where truly arbitrary
+        // remote bytes reach a log template is the index REJECTION reason, which quotes the
+        // offending value verbatim by design — on exactly the path where validation has not
+        // passed. LogSafeText is the seam every catalog log string crosses; these facts pin it.
+
+        [Fact]
+        public void CarriageReturnAndNewlineAreNeutralized()
+        {
+            var forged = "invalid slug 'x'\r\nlvl=error msg=\"fabricated line\"";
+
+            Assert.DoesNotMatch("[\r\n]", LogSafeText.Sanitize(forged));
+        }
+
+        [Fact]
+        public void AllOtherControlCharactersAreNeutralized()
+        {
+            var hostile = "a\u0000b\u001bc\u0007d\te";
+
+            Assert.Equal("a b c d e", LogSafeText.Sanitize(hostile));
+        }
+
+        [Fact]
+        public void OversizeValuesAreCappedWithAnEllipsis()
+        {
+            var flood = new string('x', 5000);
+
+            Assert.Equal(LogSafeText.MaxLength + 1, LogSafeText.Sanitize(flood).Length);
+        }
+
+        [Fact]
+        public void OrdinaryValuesPassThroughUntouched()
+        {
+            const string reason = "invalid slug 'Not-Valid'";
+
+            Assert.Equal(reason, LogSafeText.Sanitize(reason));
+        }
+
+        [Fact]
+        public void NullBecomesEmpty()
+        {
+            Assert.Equal("", LogSafeText.Sanitize(null));
+        }
+    }
 }

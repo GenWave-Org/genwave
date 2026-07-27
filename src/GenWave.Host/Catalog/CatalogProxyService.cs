@@ -122,7 +122,7 @@ public sealed class CatalogProxyService(
         // a UriFormatException straight out of this method.
         if (!TryParseIndexUri(url, out var indexUri))
         {
-            logger.LogWarning("Persona catalog index rejected: '{Url}' is not an absolute http/https URL", url);
+            logger.LogWarning("Persona catalog index rejected: '{Url}' is not an absolute http/https URL", LogSafeText.Sanitize(url));
             return new CatalogIndexFetchResult.Unreachable();
         }
 
@@ -319,13 +319,13 @@ public sealed class CatalogProxyService(
     {
         logger.LogWarning(
             "Persona catalog entry withheld: slug={Slug} part={Part} expected={Expected} actual={Actual}",
-            slug, mismatch.Part, mismatch.Expected, mismatch.Actual);
+            LogSafeText.Sanitize(slug), mismatch.Part, LogSafeText.Sanitize(mismatch.Expected), LogSafeText.Sanitize(mismatch.Actual));
         return new CatalogEntryFetchResult.HashMismatch(slug, mismatch.Part, mismatch.Expected, mismatch.Actual);
     }
 
     CatalogEntryFetchResult.Oversize WithheldOversize(string slug, EntryFetchOutcome.Oversize oversize)
     {
-        logger.LogWarning("Persona catalog entry withheld: slug={Slug} part={Part} exceeded its size cap", slug, oversize.Part);
+        logger.LogWarning("Persona catalog entry withheld: slug={Slug} part={Part} exceeded its size cap", LogSafeText.Sanitize(slug), oversize.Part);
         return new CatalogEntryFetchResult.Oversize(slug, oversize.Part);
     }
 
@@ -353,7 +353,7 @@ public sealed class CatalogProxyService(
                 if (CatalogIndexValidator.TryValidate(ok.Bytes, directory, out var entries, out var reason))
                     return entries;
 
-                logger.LogWarning("Persona catalog index rejected: {Reason}", reason);
+                logger.LogWarning("Persona catalog index rejected: {Reason}", LogSafeText.Sanitize(reason));
                 return null;
 
             case CatalogFetchOutcome.Oversize:
@@ -361,7 +361,7 @@ public sealed class CatalogProxyService(
                 return null;
 
             case CatalogFetchOutcome.NetworkFailure failure:
-                logger.LogWarning("Persona catalog index fetch failed: {Detail}", failure.Detail);
+                logger.LogWarning("Persona catalog index fetch failed: {Detail}", LogSafeText.Sanitize(failure.Detail));
                 return null;
 
             default:
