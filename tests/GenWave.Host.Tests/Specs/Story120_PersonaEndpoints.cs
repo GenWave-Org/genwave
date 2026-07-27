@@ -380,13 +380,16 @@ public static class FeaturePersonaEndpoints
         [Fact]
         public async Task DeletingAScheduledPersonaReturns409()
         {
-            // PLAN T120 scaffolding (SPEC F91.9): PersonaRepository maps the FK RESTRICT on
-            // station.segment_schedule.persona_id (SQLSTATE 23503) to
+            // PLAN T120/T121 (SPEC F91.9): PersonaRepository queries station.segment_schedule and
+            // maps a non-empty result (or the FK RESTRICT race backstop, SQLSTATE 23503) to
             // PersonaWriteResult.ScheduledElsewhere itself (T120 review F4 — the store, never this
-            // controller, turns a raw Postgres SQLSTATE into a PersonaWriteResult case); the
-            // controller answers a GENERIC 409 for that case. T121 replaces the body with one naming
-            // the offending slots.
-            var store = new FakePersonaStore { DeleteResult = new PersonaWriteResult.ScheduledElsewhere() };
+            // controller, turns a raw Postgres SQLSTATE into a PersonaWriteResult case). This fact
+            // just pins the shape (409, ProblemDetails) — the slot-naming 409 body itself is
+            // Story247_TwoStageFiring.cs's own coverage (ScenarioScheduledPersonasAreUndeletable).
+            var store = new FakePersonaStore
+            {
+                DeleteResult = new PersonaWriteResult.ScheduledElsewhere([new ScheduledSlot(DayOfWeek.Monday, 540, 720)]),
+            };
             var controller = BuildController(store, new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
 
             var result = await controller.Delete(5, CancellationToken.None);

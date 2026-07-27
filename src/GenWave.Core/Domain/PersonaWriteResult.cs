@@ -3,10 +3,10 @@ namespace GenWave.Core.Domain;
 /// <summary>
 /// Discriminated union expressing every outcome of an <see cref="Abstractions.IPersonaStore"/> write
 /// (SPEC F35.1, F35.4, F91.9; STORY-118). Mirrors <see cref="LibraryWriteResult"/>'s closed-hierarchy
-/// shape: cases that carry data (<see cref="Created"/>, <see cref="Updated"/>) are sealed records with
-/// a positional <see cref="Persona"/> payload; singleton cases (<see cref="Deleted"/>,
-/// <see cref="NotFound"/>, <see cref="NameConflict"/>, <see cref="ScheduledElsewhere"/>) carry none.
-/// The private constructor on the abstract base closes the hierarchy so callers can write exhaustive
+/// shape: cases that carry data (<see cref="Created"/>, <see cref="Updated"/>,
+/// <see cref="ScheduledElsewhere"/>) are sealed records with a positional payload; singleton cases
+/// (<see cref="Deleted"/>, <see cref="NotFound"/>, <see cref="NameConflict"/>) carry none. The
+/// private constructor on the abstract base closes the hierarchy so callers can write exhaustive
 /// pattern-match switches without a discard arm.
 /// </summary>
 public abstract record PersonaWriteResult
@@ -30,11 +30,16 @@ public abstract record PersonaWriteResult
 
     /// <summary>
     /// The delete was rejected because <c>station.segment_schedule.persona_id</c> still names this
-    /// persona (the FK's own <c>ON DELETE RESTRICT</c>, SPEC F91.9) — mapped from the store's own
-    /// caught <c>foreign_key_violation</c> (SQLSTATE 23503) rather than a raw <c>PostgresException</c>
-    /// ever reaching a caller (PLAN T120 review F4, mirrors <see cref="NameConflict"/>'s own
-    /// unique_violation mapping). PLAN T121 is expected to carry a payload naming the offending
-    /// day/time slots; this case stays a plain singleton until then.
+    /// persona (the FK's own <c>ON DELETE RESTRICT</c>, SPEC F91.9). <see cref="Slots"/> names every
+    /// offending row, in day-then-start-minute order — PLAN T121 replaces the T120 scaffolding's bare
+    /// singleton with this payload so <c>PersonaController.Delete</c>'s 409 body can name the slots
+    /// instead of staying generic. The common path: the store's <c>DeleteAsync</c> queries
+    /// <c>station.segment_schedule</c> BEFORE attempting the delete and returns exactly what it
+    /// found. The race backstop: a slot painted between that query and the DELETE still trips the
+    /// FK (caught <c>foreign_key_violation</c>, SQLSTATE 23503, mirrors <see cref="NameConflict"/>'s
+    /// own unique_violation mapping) — that path re-queries and returns whatever it finds, which may
+    /// be empty if the race closed the other way (the painted slot was itself removed again before
+    /// the re-query). See that method's own remarks for the full rationale.
     /// </summary>
-    public sealed record ScheduledElsewhere : PersonaWriteResult;
+    public sealed record ScheduledElsewhere(IReadOnlyList<ScheduledSlot> Slots) : PersonaWriteResult;
 }

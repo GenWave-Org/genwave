@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -113,20 +114,20 @@ public sealed partial class PersonaController(
     }
 
     /// <summary>
-    /// DELETE /api/personas/{id} — remove a persona. 204 on success; 404 for an unknown id; 409 when
-    /// the persona still appears in the format-clock schedule (SPEC F91.9 — supersedes F35.5's
-    /// retired delete-clears-active write: <c>Station:Persona:ActiveId</c> no longer exists for a
-    /// delete to clear).
+    /// DELETE /api/personas/{id} — remove a persona. 204 on success; 404 for an unknown id; 409,
+    /// naming every offending day/time slot, when the persona still appears in the format-clock
+    /// schedule (SPEC F91.9 — supersedes F35.5's retired delete-clears-active write:
+    /// <c>Station:Persona:ActiveId</c> no longer exists for a delete to clear).
     ///
     /// <para>
-    /// PLAN T120 SCAFFOLDING, finished by PLAN T121: <see cref="IPersonaStore.DeleteAsync"/> maps the
-    /// FK RESTRICT on <c>station.segment_schedule.persona_id</c> to
-    /// <see cref="PersonaWriteResult.ScheduledElsewhere"/> itself (house precedent — the store, never
-    /// this controller, is where a raw Postgres SQLSTATE gets turned into a
+    /// PLAN T121: <see cref="IPersonaStore.DeleteAsync"/> queries <c>station.segment_schedule</c>
+    /// BEFORE attempting the delete, so <see cref="PersonaWriteResult.ScheduledElsewhere"/> arrives
+    /// here already carrying its <see cref="PersonaWriteResult.ScheduledElsewhere.Slots"/> — the FK
+    /// RESTRICT is only the store's race backstop now, never the primary signal (house precedent: the
+    /// store, never this controller, is where a raw Postgres SQLSTATE becomes a
     /// <see cref="PersonaWriteResult"/> case; mirrors <see cref="PersonaWriteResult.NameConflict"/>'s
-    /// own unique_violation mapping). This action's own contribution is a GENERIC 409 — "still
-    /// scheduled, minus the offending slot names" — for that case. PLAN T121 replaces the generic body
-    /// with the real F91.9 shape: naming which day/time slots are blocking the delete.
+    /// own unique_violation mapping). This action's only job for that case is formatting those slots
+    /// into the 409 <c>Detail</c> an operator can read at a glance.
     /// </para>
     /// </summary>
     [HttpDelete("{id:long}")]
@@ -136,14 +137,15 @@ public sealed partial class PersonaController(
 
         if (result is PersonaWriteResult.Deleted)
             logger.LogInformation("Persona deleted id={PersonaId}", id);
-        else if (result is PersonaWriteResult.ScheduledElsewhere)
-            logger.LogWarning("Persona delete blocked: id={PersonaId} is still scheduled", id);
+        else if (result is PersonaWriteResult.ScheduledElsewhere scheduled)
+            logger.LogWarning(
+                "Persona delete blocked: id={PersonaId} slotCount={SlotCount}", id, scheduled.Slots.Count);
 
         return result switch
         {
             PersonaWriteResult.Deleted => NoContent(),
             PersonaWriteResult.NotFound => NotFound(NotFoundProblem(id)),
-            PersonaWriteResult.ScheduledElsewhere => Conflict(ScheduledPersonaProblem(id)),
+            PersonaWriteResult.ScheduledElsewhere scheduled => Conflict(ScheduledPersonaProblem(id, scheduled.Slots)),
             _ => StatusCode(StatusCodes.Status500InternalServerError),
         };
     }
@@ -667,13 +669,34 @@ public sealed partial class PersonaController(
         Detail = $"No persona with id {id} exists.",
     };
 
-    // PLAN T120 scaffolding (SPEC F91.9) — generic on purpose; PLAN T121 names the offending slots.
-    static ProblemDetails ScheduledPersonaProblem(long id) => new()
+    /// <summary>
+    /// SPEC F91.9 (PLAN T121) — names every slot blocking the delete, formatted for an operator to
+    /// read at a glance: <c>"Mon 09:00–12:00, Tue 14:00–16:00"</c>. <paramref name="slots"/> is empty
+    /// only on the store's race-backstop path (a slot re-queried after the FK fired, but no longer
+    /// found) — the detail falls back to the T120 scaffolding's generic wording for that one case,
+    /// since there is nothing left to name.
+    /// </summary>
+    static ProblemDetails ScheduledPersonaProblem(long id, IReadOnlyList<ScheduledSlot> slots) => new()
     {
         Status = StatusCodes.Status409Conflict,
         Title  = "Persona is scheduled.",
-        Detail = $"Persona {id} still appears in the format-clock schedule and cannot be deleted while scheduled.",
+        Detail = slots.Count > 0
+            ? $"Persona {id} is still scheduled and cannot be deleted: {string.Join(", ", slots.Select(FormatSlot))}."
+            : $"Persona {id} still appears in the format-clock schedule and cannot be deleted while scheduled.",
     };
+
+    // Invariant-culture abbreviated day name ("Mon", "Tue", ...) — never a station-configurable
+    // locale; this is an operator-facing admin message, not station-facing broadcast copy.
+    static string FormatSlot(ScheduledSlot slot) =>
+        $"{CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedDayName(slot.Day)} " +
+        $"{FormatMinutes(slot.StartMinute)}–{FormatMinutes(slot.EndMinute)}";
+
+    // Minutes-since-midnight as HH:mm — plain arithmetic, not TimeSpan's "hh" format specifier: a
+    // 1440-minute end (midnight, the grid's own maximum) rolls into TimeSpan's Days component, which
+    // "hh" ignores entirely, silently printing "00:00" for what is actually the end of the day.
+    static string FormatMinutes(int minutesSinceMidnight) =>
+        $"{(minutesSinceMidnight / 60).ToString("D2", CultureInfo.InvariantCulture)}:" +
+        $"{(minutesSinceMidnight % 60).ToString("D2", CultureInfo.InvariantCulture)}";
 
     static ProblemDetails UnknownSlugProblem(string slug) => new()
     {
