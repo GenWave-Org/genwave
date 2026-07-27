@@ -372,6 +372,7 @@ static class Harness
     public static EnrichmentResult ReadyResult(bool measurable) =>
         new(DurationMs: 180_000, SampleRate: 44_100, Channels: 2, BitrateKbps: 1000,
             Title: "t", Artist: "a", Album: "al", AlbumArtist: "aa", Genre: "g", TrackNo: 1, Year: 2020,
+            Explicit: null,
             IntegratedLufs: -14.0, TruePeakDbtp: -1.0, Measurable: measurable,
             CueInSec: null, CueOutSec: null, CueAnalyzedAt: DateTime.UtcNow,
             IntroEnergy: null, OutroEnergy: null, EnergyAnalyzedAt: DateTime.UtcNow,
@@ -389,6 +390,7 @@ static class Harness
         new(DurationMs: 180_000, SampleRate: 44_100, Channels: 2, BitrateKbps: 1000,
             Title: title ?? "t", Artist: artist ?? "a", Album: "al", AlbumArtist: "aa",
             Genre: genre ?? "g", TrackNo: 1, Year: year,
+            Explicit: null,
             IntegratedLufs: -14.0, TruePeakDbtp: -1.0, Measurable: true,
             CueInSec: null, CueOutSec: null, CueAnalyzedAt: DateTime.UtcNow,
             IntroEnergy: null, OutroEnergy: null, EnergyAnalyzedAt: DateTime.UtcNow,

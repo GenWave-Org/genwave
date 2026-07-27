@@ -7,10 +7,16 @@ namespace GenWave.MediaLibrary.Tests;
 /// <summary>Generates small real audio files (and a deliberately corrupt one) for enrichment tests.</summary>
 static class TestMedia
 {
-    /// <summary>A short sine tone with optional embedded tags, written via ffmpeg.</summary>
+    /// <summary>
+    /// A short sine tone with optional embedded tags, written via ffmpeg. <paramref name="itunesAdvisory"/>
+    /// writes the real-world ITUNESADVISORY explicit/advisory convention (SPEC F95.3) — an ID3v2 TXXX
+    /// user-text frame for an mp3 <paramref name="fileName"/>, a Vorbis comment field for a flac one;
+    /// ffmpeg round-trips either container from the same generic <c>-metadata</c> flag.
+    /// </summary>
     public static string CreateTone(
         string dir, string fileName,
         string? title = null, string? artist = null, string? album = null, string? genre = null, int? year = null,
+        string? itunesAdvisory = null,
         double seconds = 2.0, int frequency = 440)
     {
         var path = Path.Combine(dir, fileName);
@@ -33,6 +39,7 @@ static class TestMedia
         Meta("album", album);
         Meta("genre", genre);
         if (year is not null) Meta("date", year.Value.ToString(CultureInfo.InvariantCulture));
+        Meta("ITUNESADVISORY", itunesAdvisory);
 
         args.Add(path);
         RunFfmpeg(args);

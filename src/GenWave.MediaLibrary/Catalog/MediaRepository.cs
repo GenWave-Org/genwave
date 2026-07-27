@@ -1251,6 +1251,27 @@ sealed class MediaRepository(
     /// <c>tags_edited_at IS NULL</c> — i.e. the operator has not yet manually edited the row (W3
     /// sentinel). Loudness, cue, energy, and BPM columns are always (re)written; they are disjoint
     /// from the tag columns and operator edits never touch them.
+    ///
+    /// <c>explicit</c>/<c>explicit_source</c> (SPEC F95.2/F95.3, STORY-251, PLAN T112) are the tag
+    /// pass's own — deliberately separate — write rule, gated on <c>explicit_source</c> rather than
+    /// <c>tags_edited_at</c> (that sentinel is title/artist/genre's; the explicit flag's operator-wins
+    /// contract lives entirely in its own source column):
+    /// <list type="bullet">
+    /// <item><paramref name="r"/>'s <see cref="EnrichmentResult.Explicit"/> is <see langword="null"/>
+    /// (this pass found no advisory tag, or an unparseable one) → BOTH columns are left completely
+    /// untouched. This is the one case that is NOT a plain "always overwrite": a miss must never
+    /// blank out a value a prior tag/LLM/operator pass already stamped.</item>
+    /// <item><c>explicit_source</c> is currently <c>'operator'</c> → also untouched, regardless of
+    /// what this pass read — F95.3's operator-always-wins rule, enforced here at the one place tag
+    /// values land, not just at the (future, T115) override endpoint.</item>
+    /// <item>Otherwise (a real tag value, and the row isn't operator-owned) — the tag's evidence
+    /// wins: <c>explicit</c> is (re)set to the tag's value and <c>explicit_source</c> to
+    /// <c>'tag'</c>, whether the prior source was <c>NULL</c>, <c>'tag'</c> (a re-scan after the
+    /// file's tag changed on disk), or <c>'llm'</c> (a file tag is stronger evidence than the offline
+    /// sweep's guess, so it supersedes it on the next scan/enrich pass — this method is the ONLY
+    /// place that pass runs, so "re-scan stamps existing rows" falls out of the normal
+    /// discovered→enrich flow with no separate backfill job).</item>
+    /// </list>
     /// </summary>
     public async Task WriteEnrichmentAsync(long id, EnrichmentResult r, CancellationToken ct)
     {
@@ -1271,6 +1292,18 @@ sealed class MediaRepository(
               genre        = case when tags_edited_at is null then @Genre        else genre        end,
               track_no     = case when tags_edited_at is null then @TrackNo      else track_no     end,
               year         = case when tags_edited_at is null then @Year         else year         end,
+              -- Advisory/explicit flag (SPEC F95.3): a miss (@Explicit is null) or an operator-owned
+              -- row leaves BOTH columns untouched; otherwise the tag's value wins and stamps 'tag'.
+              explicit = case
+                when @Explicit is null then explicit
+                when explicit_source = 'operator' then explicit
+                else @Explicit
+              end,
+              explicit_source = case
+                when @Explicit is null then explicit_source
+                when explicit_source = 'operator' then explicit_source
+                else 'tag'
+              end,
               -- Loudness / cue / energy / bpm: always unconditional — enricher-owned, never operator-edited.
               integrated_lufs    = @IntegratedLufs,
               true_peak_dbtp     = @TruePeakDbtp,
@@ -1299,6 +1332,7 @@ sealed class MediaRepository(
                 id,
                 r.DurationMs, r.SampleRate, r.Channels, r.BitrateKbps,
                 r.Title, r.Artist, r.Album, r.AlbumArtist, r.Genre, r.TrackNo, r.Year,
+                r.Explicit,
                 r.IntegratedLufs, r.TruePeakDbtp, r.Measurable,
                 r.CueInSec, r.CueOutSec, r.CueAnalyzedAt,
                 r.IntroEnergy, r.OutroEnergy, r.EnergyAnalyzedAt,
