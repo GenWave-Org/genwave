@@ -21,6 +21,7 @@ sealed class MediaRepository(
     ILogger<MediaRepository> logger,
     Channel<long> enrichQueue,
     ISafeScopeProvider safeScope,
+    IAudiencePostureProvider audiencePosture,
     IStationEventSink? events = null)
     : IMediaCatalog, IAdminMediaLookup, IAdminMediaQuery, IAdminMediaWrite, IAdminMediaReenrichment,
       IAuthoredCatalogWriter
@@ -92,6 +93,11 @@ sealed class MediaRepository(
         // the never_play flag (default false via COALESCE for an unrated row) so an operator's "X" on
         // this row removes it from rotation immediately (F33.6) — this predicate is the ONE place
         // never_play is enforced for main rotation; score is intentionally never referenced (F33.8).
+        //
+        // No ExplicitPredicate() here: this backs /internal/safe-track, the operator-curated safe scope
+        // (gh-#99) — a separate universe from main rotation — and the never-silence floor must not trade
+        // a curation mistake for dead air. F95.4 enumerates exactly three paths; this is deliberately not
+        // a fourth.
         var exclude = new List<long>(excludeIds.Count);
         foreach (var s in excludeIds)
             if (long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v))
@@ -122,6 +128,17 @@ sealed class MediaRepository(
     /// </list>
     /// Both tier outcomes are selected alongside the row so the caller gets its relaxation flags in the
     /// same round trip. Null is returned only when the scope is empty or the playable pool is (F41.2).
+    ///
+    /// SPEC F95.4, STORY-250, PLAN T114 — the audience-posture exclusion threads through the SAME
+    /// "byte-identical playable predicate" convention this method's own remarks describe for
+    /// never-play: <see cref="audiencePosture"/> (read fresh, never cached — the F95.6 live-apply
+    /// guarantee) decides whether the fragment exists in the WHERE clause at all. On
+    /// <see cref="AudiencePosture.Mature"/> the fragment is omitted entirely — mirroring the empty-genre-list
+    /// idiom on <see cref="GetEnvelopeCandidateAsync"/> — so "mature plays everything, unmasked" is
+    /// literally "no predicate", not a predicate that always evaluates true. On
+    /// <see cref="AudiencePosture.Everyone"/> the fragment excludes <c>explicit = true</c> rows only;
+    /// <c>coalesce(m.explicit, false)</c> treats <c>NULL</c> (unclassified) as non-explicit, so an
+    /// unclassified track still plays (unknown-is-explicit was declined at /explore).
     /// </summary>
     public async Task<RotationCandidate?> GetRotationCandidateAsync(
         LibraryScope scope, IReadOnlyList<string> orderedRecentIds, int artistSeparation, CancellationToken ct)
@@ -143,8 +160,10 @@ sealed class MediaRepository(
         // Tier 3 is the single most-recent entry — the last element of the ordered list.
         long? mostRecentId = recentIds.Count > 0 ? recentIds[^1] : null;
 
+        var explicitPredicate = ExplicitPredicate();
+
         await using var conn = await dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<RotationCandidateRow>(new CommandDefinition("""
+        var row = await conn.QuerySingleOrDefaultAsync<RotationCandidateRow>(new CommandDefinition($"""
             select
               m.id, m.path, m.format, m.state, m.title, m.duration_ms, m.sample_rate, m.channels,
               m.bitrate_kbps, m.artist, m.album, m.genre, m.year, m.integrated_lufs, m.true_peak_dbtp,
@@ -163,6 +182,7 @@ sealed class MediaRepository(
             left join library.media_rating r on r.media_id = m.id
             where m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)
               and m.library_id = any(@libraryIds)
+              {explicitPredicate}
             order by
               repeated_recent asc,
               repeated_artist asc,
@@ -175,6 +195,19 @@ sealed class MediaRepository(
 
         return row?.ToCandidate(logger);
     }
+
+    /// <summary>
+    /// SPEC F95.4, STORY-250, PLAN T114 — the ONE audience-posture WHERE fragment shared by every
+    /// pool-predicate query this repository builds (<see cref="GetRotationCandidateAsync"/>,
+    /// <see cref="GetEnvelopeCandidateAsync"/>, <see cref="GetEnvelopeCandidatePoolAsync"/>): empty
+    /// (no constraint) on <see cref="AudiencePosture.Mature"/>, or <c>and not coalesce(m.explicit, false)</c>
+    /// on <see cref="AudiencePosture.Everyone"/> — mirrors <see cref="GetEnvelopeCandidateAsync"/>'s own
+    /// "omitted entirely, not merely always-true" genre-predicate idiom. <see cref="GetRandomReadyAsync"/>
+    /// is the deliberate fourth selection path over <c>library.media</c> that does NOT call this helper —
+    /// see the comment there for why F95.4 stops at three paths.
+    /// </summary>
+    string ExplicitPredicate() =>
+        audiencePosture.Current == AudiencePosture.Mature ? "" : "and not coalesce(m.explicit, false)";
 
     /// <summary>Shared recent-id parse for the tiered rotation queries (F41.1): oldest-first list of
     /// opaque string ids, any entry that fails to parse as our bigint id is silently dropped.</summary>
@@ -215,6 +248,10 @@ sealed class MediaRepository(
     /// envelope-and-rotation-constrained pool is (mirrors <see cref="GetRotationCandidateAsync"/>'s
     /// own never-drains contract) — the SPEC F81.6 relax-then-degrade ladder for a genuinely empty
     /// pool is the provider's job (a later task), not this query's.
+    ///
+    /// SPEC F95.4, STORY-250, PLAN T114 — <see cref="ExplicitPredicate"/> ANDs in the SAME
+    /// audience-posture fragment <see cref="GetRotationCandidateAsync"/> does, by the same
+    /// omitted-entirely-on-Mature construction.
     /// </summary>
     public async Task<RotationCandidate?> GetEnvelopeCandidateAsync(
         LibraryScope scope,
@@ -241,6 +278,7 @@ sealed class MediaRepository(
             ? envelope.Genres.Select(g => g.ToLowerInvariant()).ToArray()
             : null;
         var genrePredicate = genresLower is not null ? "and lower(m.genre) = any(@genresLower)" : "";
+        var explicitPredicate = ExplicitPredicate();
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<RotationCandidateRow>(new CommandDefinition($"""
@@ -264,6 +302,7 @@ sealed class MediaRepository(
               and m.library_id = any(@libraryIds)
               and (m.energy is null or (m.energy >= @energyMin and m.energy <= @energyMax))
               {genrePredicate}
+              {explicitPredicate}
             order by
               repeated_recent asc,
               repeated_artist asc,
@@ -297,6 +336,11 @@ sealed class MediaRepository(
     /// enforces, so a misconfigured <c>PersonaRanker:TopK</c> can never turn one pick into an
     /// unbounded fetch. Empty <paramref name="scope"/> short-circuits to an empty pool (default-deny),
     /// no SQL issued.
+    ///
+    /// SPEC F95.4, STORY-250, PLAN T114 — <see cref="ExplicitPredicate"/> ANDs in the SAME
+    /// audience-posture fragment <see cref="GetRotationCandidateAsync"/>/<see cref="GetEnvelopeCandidateAsync"/>
+    /// do, so the ranker's own candidate pool never sees an excluded row either — boundary bias
+    /// resamples this SAME query (never a separate one), so it inherits the exclusion for free.
     /// </summary>
     public async Task<IReadOnlyList<EnvelopeCandidateRow>> GetEnvelopeCandidatePoolAsync(
         LibraryScope scope,
@@ -321,6 +365,7 @@ sealed class MediaRepository(
             ? envelope.Genres.Select(g => g.ToLowerInvariant()).ToArray()
             : null;
         var genrePredicate = genresLower is not null ? "and lower(m.genre) = any(@genresLower)" : "";
+        var explicitPredicate = ExplicitPredicate();
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var rows = await conn.QueryAsync<EnvelopeCandidatePoolRow>(new CommandDefinition($"""
@@ -345,6 +390,7 @@ sealed class MediaRepository(
               and m.library_id = any(@libraryIds)
               and (m.energy is null or (m.energy >= @energyMin and m.energy <= @energyMax))
               {genrePredicate}
+              {explicitPredicate}
             order by
               repeated_recent asc,
               repeated_artist asc,

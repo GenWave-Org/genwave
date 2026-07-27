@@ -31,7 +31,8 @@ public static class FeatureRequestMatching
     // ---------------------------------------------------------------------
 
     static RequestCatalogProbeRepository Probe(DatabaseFixture db) =>
-        new(db.DataSource, new FakeSafeScopeProvider(), NullLogger<RequestCatalogProbeRepository>.Instance);
+        new(db.DataSource, new FakeSafeScopeProvider(), new FakeAudiencePostureProvider(),
+            NullLogger<RequestCatalogProbeRepository>.Instance);
 
     static MediaRatingRepository RatingRepo(DatabaseFixture db) => new(db.DataSource, new FakeSafeScopeProvider());
 
@@ -237,7 +238,8 @@ public static class FeatureRequestMatching
 
             // Act: probe with the live safe scope covering that library.
             var found = await new RequestCatalogProbeRepository(
-                    db.DataSource, new FakeSafeScopeProvider(safeLibraryId), NullLogger<RequestCatalogProbeRepository>.Instance)
+                    db.DataSource, new FakeSafeScopeProvider(safeLibraryId), new FakeAudiencePostureProvider(),
+                    NullLogger<RequestCatalogProbeRepository>.Instance)
                 .FindBestAsync(null, "please stand by", CancellationToken.None);
 
             // Assert: null — a listener request must not be able to reach content the operator has
@@ -258,7 +260,8 @@ public static class FeatureRequestMatching
 
             // Act: probe with no safe scope configured.
             var found = await new RequestCatalogProbeRepository(
-                    db.DataSource, new FakeSafeScopeProvider(), NullLogger<RequestCatalogProbeRepository>.Instance)
+                    db.DataSource, new FakeSafeScopeProvider(), new FakeAudiencePostureProvider(),
+                    NullLogger<RequestCatalogProbeRepository>.Instance)
                 .FindBestAsync(null, "please stand by", CancellationToken.None);
 
             // Assert: the row matches — proving the safe scope, not something else about the row,
@@ -349,7 +352,8 @@ public static class FeatureRequestMatching
 
             // Act: probe with the live safe scope covering that library.
             var found = await new RequestCatalogProbeRepository(
-                    db.DataSource, new FakeSafeScopeProvider(safeLibraryId), NullLogger<RequestCatalogProbeRepository>.Instance)
+                    db.DataSource, new FakeSafeScopeProvider(safeLibraryId), new FakeAudiencePostureProvider(),
+                    NullLogger<RequestCatalogProbeRepository>.Instance)
                 .GetSelectableByIdAsync(id, envelope: null, CancellationToken.None);
 
             // Assert: null — safe content is never requestable.
@@ -423,7 +427,8 @@ public static class FeatureRequestMatching
 
             // Act: probe with the live safe scope covering that library.
             var found = await new RequestCatalogProbeRepository(
-                    db.DataSource, new FakeSafeScopeProvider(safeLibraryId), NullLogger<RequestCatalogProbeRepository>.Instance)
+                    db.DataSource, new FakeSafeScopeProvider(safeLibraryId), new FakeAudiencePostureProvider(),
+                    NullLogger<RequestCatalogProbeRepository>.Instance)
                 .FindVibeAsync(["dreamy"], envelope: null, CancellationToken.None);
 
             // Assert: null — safe content is never requestable.

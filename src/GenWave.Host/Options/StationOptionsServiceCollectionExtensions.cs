@@ -76,7 +76,14 @@ static class StationOptionsServiceCollectionExtensions
             // is advertised Live in the settings allowlist. Wraps IOptionsMonitor<StationOptions> and
             // re-reads CurrentValue on every call, so a live PUT /api/settings edit applies to the
             // fulfillment rung's very next attempt with no api restart.
-            .AddSingleton<IRequestOverrideEnvelopeProvider, OptionsMonitorRequestOverrideEnvelopeProvider>();
+            .AddSingleton<IRequestOverrideEnvelopeProvider, OptionsMonitorRequestOverrideEnvelopeProvider>()
+            // Live audience-posture seam (SPEC F95.1/F95.4, STORY-250, PLAN T111/T114): Station:Audience
+            // is advertised Live in the settings allowlist. Wraps IOptionsMonitor<StationOptions> and
+            // re-reads CurrentValue on every call (through the AudiencePostureParser fail-closed seam),
+            // so a live PUT /api/settings edit reaches the very next candidate-pool query with no api
+            // restart — the rotation/envelope queries and the request-catalog probe all resolve this
+            // SAME binding (MediaLibraryServiceCollectionExtensions never registers a default).
+            .AddSingleton<IAudiencePostureProvider, OptionsMonitorAudiencePostureProvider>();
 
         return services;
     }
