@@ -8,6 +8,7 @@ using GenWave.Core.Domain;
 using GenWave.Loudness;
 using GenWave.MediaLibrary.Catalog;
 using GenWave.MediaLibrary.Enrich;
+using GenWave.MediaLibrary.ExplicitClassification;
 using GenWave.MediaLibrary.Mood;
 using GenWave.MediaLibrary.Options;
 using GenWave.MediaLibrary.Scan;
@@ -289,6 +290,40 @@ static class Harness
                 new FakeOptionsMonitor<MoodTaggerOptions>(
                     new MoodTaggerOptions { Endpoint = "http://fake-llm", Model = "test-model" })),
             gate ?? new FakeLlmBatchGate());
+
+    /// <summary>
+    /// Builds an EnrichmentService wired for explicit-classification backfill tests (SPEC F95.3,
+    /// STORY-251, T113): a REAL <see cref="OllamaExplicitClassifier"/> backed by <paramref name="handler"/>
+    /// (the Story187 fake-<see cref="HttpMessageHandler"/> idiom — no test reaches the network) so the
+    /// constrained-output parse runs against genuine HTTP response bodies, not a pre-parsed in-memory
+    /// double. Mirrors <see cref="BackfillMoodTagWith"/> exactly, one column pair later.
+    /// <paramref name="gate"/> defaults to allowed (<see cref="FakeLlmBatchGate"/>'s own default) so a
+    /// fact not about the F95.3 degradation skip doesn't need to think about it; <paramref name="logger"/>
+    /// defaults to a no-op logger, swapped for a <see cref="CapturingLogger{T}"/> by the degradation
+    /// skip-log fact. Loudness/cue/energy/bpm/year-lookup/mood-tag are all no-ops — this backfill pass
+    /// is not under test.
+    /// </summary>
+    public static EnrichmentService BackfillExplicitClassificationWith(
+        MediaRepository repo, HttpMessageHandler handler,
+        ILlmBatchGate? gate = null, ILogger<EnrichmentService>? logger = null) =>
+        new(repo,
+            new Enricher(new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FakeEnergyAnalyzer(), new FakeBpmAnalyzer(), NullLogger<Enricher>.Instance),
+            Channel.CreateUnbounded<long>(),
+            new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
+            logger ?? NullLogger<EnrichmentService>.Instance,
+            new FakeCueAnalyzer(),
+            Microsoft.Extensions.Options.Options.Create(new CueDetectionOptions()),
+            new FakeEnergyAnalyzer(),
+            new FakeBpmAnalyzer(),
+            new FakeYearLookup(),
+            DefaultYearLookupOptions(),
+            moodTagger: null,
+            llmBatchGate: gate ?? new FakeLlmBatchGate(),
+            events: null,
+            explicitClassifier: new OllamaExplicitClassifier(
+                new HttpClient(handler),
+                new FakeOptionsMonitor<ExplicitClassifierOptions>(
+                    new ExplicitClassifierOptions { Endpoint = "http://fake-llm", Model = "test-model" })));
 
     public static List<long> DrainIds(Channel<long> queue)
     {

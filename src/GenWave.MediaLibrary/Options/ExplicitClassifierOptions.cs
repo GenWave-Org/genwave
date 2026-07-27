@@ -1,0 +1,31 @@
+namespace GenWave.MediaLibrary.Options;
+
+/// <summary>
+/// The explicit-classification sweep's view of the SAME configured LLM endpoint
+/// <c>GenWave.Tts.LlmOptions</c> and <see cref="MoodTaggerOptions"/> already bind (SPEC F95.3 — "an
+/// F85-style offline batch LLM pass", singular configured LLM, not a second one an operator would
+/// need to duplicate). Its own options class for exactly the reason <see cref="MoodTaggerOptions"/>
+/// gives for its own existence: <c>GenWave.MediaLibrary</c> must never depend on <c>GenWave.Tts</c>,
+/// and a domain-specific type name reads better at this call site than routing a second feature
+/// through <see cref="MoodTaggerOptions"/>'s own name. The .NET options binder keys purely off the
+/// section path string, so this class, <see cref="MoodTaggerOptions"/>, and <c>GenWave.Tts.LlmOptions</c>
+/// all resolve the SAME live configuration value — an operator's <c>PUT /api/settings</c> edit to
+/// <c>Llm:Endpoint</c> reaches every reader identically, with no double-configuration and no api
+/// restart.
+/// </summary>
+public sealed class ExplicitClassifierOptions
+{
+    public const string Section = "Llm";
+
+    /// <summary>OpenAI-compatible chat-completions base URL. Empty = the LLM is unconfigured (F95.3).</summary>
+    public string Endpoint { get; set; } = "";
+
+    /// <summary>Model name passed to the completions call.</summary>
+    public string Model { get; set; } = "";
+
+    /// <summary>Per-completion budget in seconds; a miss counts as a failed round trip (F95.3).</summary>
+    public int TimeoutSeconds { get; set; } = 10;
+
+    /// <summary>Optional bearer token for the endpoint — env-only per the F19.3 secrets rule.</summary>
+    public string ApiKey { get; set; } = "";
+}

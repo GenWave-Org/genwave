@@ -1255,7 +1255,12 @@ sealed class MediaRepository(
     /// <c>explicit</c>/<c>explicit_source</c> (SPEC F95.2/F95.3, STORY-251, PLAN T112) are the tag
     /// pass's own — deliberately separate — write rule, gated on <c>explicit_source</c> rather than
     /// <c>tags_edited_at</c> (that sentinel is title/artist/genre's; the explicit flag's operator-wins
-    /// contract lives entirely in its own source column):
+    /// contract lives entirely in its own source column). This doc comment is the ONE canonical
+    /// statement of F95.3's classification precedence (operator &gt; tag &gt; llm) — the sweep's own
+    /// write path (<see cref="WriteExplicitClassificationResultAsync"/>) enforces the SAME rule over
+    /// its own, necessarily different, SQL CASE (a shared fragment would force one artificial
+    /// signature onto two genuinely different UPDATE statements) and points back here rather than
+    /// re-deriving it:
     /// <list type="bullet">
     /// <item><paramref name="r"/>'s <see cref="EnrichmentResult.Explicit"/> is <see langword="null"/>
     /// (this pass found no advisory tag, or an unparseable one) → BOTH columns are left completely
@@ -1339,6 +1344,69 @@ sealed class MediaRepository(
                 r.Bpm, r.BpmAnalyzedAt,
             },
             cancellationToken: ct));
+    }
+
+    // ── Explicit classification sweep (SPEC F95.3, STORY-251, T113) ─────────────────────────────────
+
+    /// <summary>
+    /// Rows eligible for the explicit-classification LLM sweep: <c>state='ready'</c>,
+    /// <c>explicit IS NULL</c>, <c>explicit_llm_missed_at IS NULL</c>, and both artist and title are
+    /// non-blank — mirrors <see cref="ListMoodTagClaimsAsync"/>'s exact F76 shape, one column pair
+    /// later.
+    ///
+    /// <c>explicit IS NULL</c> is doing double duty here, and deliberately so: every write path that
+    /// ever sets <c>explicit_source</c> (tag, llm, operator) also sets <c>explicit</c> to a real value
+    /// in the SAME statement, so a row is NEVER "sourced but still null". This one predicate is
+    /// therefore ALSO the entire enforcement of "already-classified rows are not re-asked" and "the
+    /// operator's value is never overwritten" (SPEC F95.3's precedence, canonically stated at
+    /// <see cref="WriteEnrichmentAsync"/>) — no separate <c>explicit_source</c> check is needed at
+    /// the claim step.
+    /// </summary>
+    public async Task<IReadOnlyList<ExplicitClassificationClaimRow>> ListExplicitClassificationClaimsAsync(int limit, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<ExplicitClassificationClaimRow>(new CommandDefinition(
+            "select id, artist, title from library.media " +
+            "where state = 'ready' and explicit is null and explicit_llm_missed_at is null " +
+            "and coalesce(trim(artist), '') <> '' and coalesce(trim(title), '') <> '' " +
+            "limit @limit",
+            new { limit }, cancellationToken: ct));
+        return rows.AsList();
+    }
+
+    /// <summary>
+    /// Writes the outcome of one explicit-classification sweep attempt (SPEC F95.3, STORY-251, T113)
+    /// — atomically, never a partial write:
+    /// <list type="bullet">
+    /// <item>A confident yes/no (<paramref name="verdict"/> not null) sets <c>explicit</c> +
+    /// <c>explicit_source = 'llm'</c> in the SAME statement — but ONLY when the column is CURRENTLY
+    /// <c>NULL</c> at the moment this UPDATE runs (a <c>CASE</c> guard reading the live row, not a
+    /// pre-read — mirrors <see cref="WriteYearLookupResultAsync"/>'s own SPEC F48.4 race guard), so a
+    /// concurrent tag pass or operator override landing between the claim and this write can never be
+    /// clobbered by a stale sweep result. No missed-at stamp is needed for a written verdict — moving
+    /// <c>explicit</c> off <c>NULL</c> already excludes the row from
+    /// <see cref="ListExplicitClassificationClaimsAsync"/> going forward, mirroring how a written mood
+    /// set needs no miss stamp of its own.</item>
+    /// <item>A genuine "unknown" (<paramref name="verdict"/> null — a completed round trip that
+    /// simply couldn't tell) stamps ONLY <c>explicit_llm_missed_at</c>;
+    /// <c>explicit</c>/<c>explicit_source</c> stay <c>NULL</c>/<c>NULL</c> — a real miss the sweep
+    /// must never re-ask.</item>
+    /// </list>
+    /// A failed round trip is never passed here at all (the F76 etiquette pattern: failed != missed)
+    /// — <see cref="Enrich.EnrichmentService.BackfillExplicitClassificationAsync"/>'s own loop skips
+    /// this call entirely on that outcome, leaving the row eligible and retried on the very next tick.
+    /// </summary>
+    public async Task WriteExplicitClassificationResultAsync(long id, bool? verdict, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await conn.ExecuteAsync(new CommandDefinition(
+            "update library.media set " +
+            "explicit = case when explicit is null and @verdict is not null then @verdict else explicit end, " +
+            "explicit_source = case when explicit is null and @verdict is not null then 'llm' else explicit_source end, " +
+            "explicit_llm_missed_at = " +
+            "  case when @verdict is null then now() else explicit_llm_missed_at end " +
+            "where id = @id",
+            new { id, verdict }, cancellationToken: ct));
     }
 
     /// <summary>A per-file enrichment failure: isolated, never crashes the worker (PRD §5.2).</summary>

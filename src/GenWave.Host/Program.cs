@@ -47,14 +47,14 @@ builder.Services
     .AddMediaLibrary(cfg)
     // TTS: options, copy-writer chain (LLM → template fallback), synthesizer/voices clients.
     .AddGenWaveTts(cfg)
-    // The mood-tagger batch's degradation gate (SPEC F85.3, STORY-216, T72): bridges
-    // GenWave.MediaLibrary's EnrichmentService to Tts's F69 degradation state without
-    // GenWave.MediaLibrary ever referencing GenWave.Tts. MUST run after .AddGenWaveTts(cfg) above
-    // (IDegradationModeReader/LlmOptions).
-    .AddGenWaveMoodTaggingGate()
+    // The offline batch LLM passes' shared degradation gate (SPEC F85.3, F95.3; STORY-216/T72 mood
+    // tagging, STORY-251/T113 explicit classification): bridges GenWave.MediaLibrary's
+    // EnrichmentService to Tts's F69 degradation state without GenWave.MediaLibrary ever referencing
+    // GenWave.Tts. MUST run after .AddGenWaveTts(cfg) above (IDegradationModeReader/LlmOptions).
+    .AddGenWaveLlmBatchGate()
     // Listener-request wish parser (SPEC F87.4, STORY-225, PLAN T88): the channel-fed background
     // service + IWishParser pair (LLM-backed, deterministic fallback). Same ordering constraint as
-    // AddGenWaveMoodTaggingGate above — needs IDegradationModeReader/LlmOptions from AddGenWaveTts.
+    // AddGenWaveLlmBatchGate above — needs IDegradationModeReader/LlmOptions from AddGenWaveTts.
     .AddGenWaveRequestParsing()
     // Safe-loop authoring pipeline (F27): TTS render → jingle-bed mix → measure → authored insert.
     .AddGenWaveSafeSegmentAuthoring()

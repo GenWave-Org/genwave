@@ -7,6 +7,7 @@ using GenWave.Core.Domain;
 using GenWave.Core.Events;
 using GenWave.Loudness;
 using GenWave.MediaLibrary.Catalog;
+using GenWave.MediaLibrary.ExplicitClassification;
 using GenWave.MediaLibrary.Mood;
 using GenWave.MediaLibrary.Options;
 using GenWave.MediaLibrary.YearLookup;
@@ -65,6 +66,19 @@ namespace GenWave.MediaLibrary.Enrich;
 /// constructor's own remarks for why. Bounded to the same
 /// <see cref="CueDetectionOptions.BackfillBatchSize"/> per tick as every other backfill pass.
 ///
+/// Additionally runs a backfill loop for <c>ready</c> rows missing an explicit classification (SPEC
+/// F95.3, STORY-251, T113): picks up rows where <c>explicit IS NULL AND explicit_llm_missed_at IS
+/// NULL</c> and both artist and title are non-blank, and runs <see cref="IExplicitClassifier"/> on
+/// each — SEQUENTIALLY, one row awaited at a time, mirroring the mood-tag pass immediately above it
+/// (same claim shape, same <see cref="ILlmBatchGate"/> gate checked FIRST, same Soft/Hard-degraded-
+/// or-unconfigured single-log-line skip). The tag pass (PLAN T112, <see cref="Catalog.MediaRepository.WriteEnrichmentAsync"/>)
+/// already stamped every row it could from file metadata; this sweep is strictly the "cover the
+/// rest" second tier for whatever the tag pass left <c>NULL</c> — a genuine "unknown" verdict is
+/// stamped so it is never re-asked, while a failed round trip stays eligible for the very next tick.
+/// Both dependencies are optional (default null, same "no-op unless wired" shape as
+/// <see cref="IMoodTagger"/>/<see cref="ILlmBatchGate"/> above) — see
+/// <see cref="BackfillExplicitClassificationAsync"/>'s own remarks.
+///
 /// No separate scheduler or admin endpoint — all backfills fire as sub-tasks of this service.
 /// </summary>
 sealed class EnrichmentService(
@@ -90,7 +104,15 @@ sealed class EnrichmentService(
     // pass a true no-op: no claim query, no log line (see BackfillMoodTagAsync).
     IMoodTagger? moodTagger = null,
     ILlmBatchGate? llmBatchGate = null,
-    IStationEventSink? events = null) : BackgroundService
+    IStationEventSink? events = null,
+    // Explicit classification (SPEC F95.3, STORY-251, T113) — the sweep's own LLM client, sharing
+    // llmBatchGate above rather than a second gate (SAME degradation checks, SAME "batch work never
+    // competes with on-air copywriting" rule, just a second consumer evaluating it). Optional (default
+    // null) for the identical reason moodTagger is: every pre-existing Harness.cs factory that builds
+    // an EnrichmentService for an unrelated backfill keeps compiling unchanged, and a null
+    // explicitClassifier makes this backfill pass a true no-op — no claim query, no log line (see
+    // BackfillExplicitClassificationAsync).
+    IExplicitClassifier? explicitClassifier = null) : BackgroundService
 {
     // EnrichmentCompleted publish seam (gitea-#246); no-op unless the host binds a real sink.
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
@@ -307,6 +329,7 @@ sealed class EnrichmentService(
                 await BackfillBpmAsync(ct);
                 await BackfillYearLookupAsync(ct);
                 await BackfillMoodTagAsync(ct);
+                await BackfillExplicitClassificationAsync(ct);
                 await RecomputeEnergyPercentileAsync(ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -565,6 +588,90 @@ sealed class EnrichmentService(
         if (anyCallFailed)
             log.LogWarning(
                 "Mood tagger LLM appears unreachable this tick; {Count} row(s) attempted", batch.Count);
+    }
+
+    /// <summary>
+    /// The explicit-classification backfill pass (SPEC F95.3, STORY-251, T113) — internal for
+    /// integration testing, drives the pass directly.
+    /// <para>
+    /// Not wired (either dependency null, the common case for a test double built by an unrelated
+    /// Harness factory) is a silent no-op: no gate evaluation, no claim query, no log line — mirrors
+    /// <see cref="BackfillMoodTagAsync"/> exactly.
+    /// </para>
+    /// <para>
+    /// When wired, <see cref="ILlmBatchGate.Evaluate"/> runs FIRST, before any claim query (SPEC
+    /// F95.3, mirrors F85.3) — the SAME gate <see cref="BackfillMoodTagAsync"/> checks, since batch
+    /// work of any kind must never compete with on-air copywriting for a fenced model; a Soft/Hard-
+    /// degraded or unconfigured LLM logs exactly ONE line for the whole tick and returns. Only once
+    /// the gate allows does this issue <see cref="Catalog.MediaRepository.ListExplicitClassificationClaimsAsync"/>
+    /// and, for each claimed row, one sequential <see cref="IExplicitClassifier.ClassifyAsync"/> call
+    /// — mirrors <see cref="BackfillMoodTagAsync"/>'s own one-row-at-a-time pacing and
+    /// failed-vs-miss split (<see cref="IExplicitClassifierDiagnostics"/> mirrors
+    /// <see cref="IMoodTaggerDiagnostics"/> exactly).
+    /// </para>
+    /// <para>
+    /// Every row's outcome lands in exactly ONE
+    /// <see cref="Catalog.MediaRepository.WriteExplicitClassificationResultAsync"/> call, which is
+    /// itself the ONE place that decides what "never a partial write" means for this pass (see that
+    /// method's own remarks) — this loop never writes to <c>library.media</c> directly.
+    /// </para>
+    /// </summary>
+    internal async Task BackfillExplicitClassificationAsync(CancellationToken ct)
+    {
+        if (explicitClassifier is null || llmBatchGate is null) return;
+
+        var decision = llmBatchGate.Evaluate();
+        if (!decision.Allowed)
+        {
+            log.LogInformation("Explicit classification batch skipped this tick: {Reason}", decision.Reason);
+            return;
+        }
+
+        var batch = await repo.ListExplicitClassificationClaimsAsync(cueOptions.Value.BackfillBatchSize, ct);
+        if (batch.Count == 0) return;
+        log.LogInformation("Classifying explicit content for {Count} ready rows", batch.Count);
+
+        var anyCallFailed = false;
+
+        foreach (var row in batch)
+        {
+            bool? verdict = null;
+            try
+            {
+                verdict = await explicitClassifier.ClassifyAsync(row.Artist, row.Title, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // The Core contract promises IExplicitClassifier never throws past its boundary
+                // (F95.3); this guard is defense-in-depth only, mirroring BackfillMoodTagAsync's own
+                // catch-all.
+                log.LogWarning(ex, "Explicit classification failed for {Artist} - {Title}", row.Artist, row.Title);
+            }
+
+            var rowCallFailed = explicitClassifier is IExplicitClassifierDiagnostics diagnostics && diagnostics.LastCallFailed;
+            if (rowCallFailed)
+            {
+                // A failed round trip touches NOTHING (see WriteExplicitClassificationResultAsync's own
+                // remarks) — skip the write entirely rather than issue an UPDATE whose every CASE is a
+                // no-op, which would just churn a dead tuple for no observable effect.
+                anyCallFailed = true;
+                continue;
+            }
+
+            // Never partial (SPEC F95.3): the verdict and its 'llm' source, or the miss stamp, land
+            // atomically in the SAME statement — see WriteExplicitClassificationResultAsync's own
+            // remarks for exactly which of the two outcomes this call produces (a failed round trip
+            // never reaches this call at all — see the continue above).
+            await repo.WriteExplicitClassificationResultAsync(row.Id, verdict, ct);
+        }
+
+        if (anyCallFailed)
+            log.LogWarning(
+                "Explicit classification LLM appears unreachable this tick; {Count} row(s) attempted", batch.Count);
     }
 
     /// <summary>

@@ -178,13 +178,25 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	-- this pair only classifies). explicit is a plain nullable boolean -- NULL = unknown/unclassified,
 	-- never a sentinel false. explicit_source names WHO classified the row, constrained to the three
 	-- known origins (F95.3): 'tag' (an advisory flag already carried in the file's own metadata,
-	-- stamped first), 'llm' (the offline sweep asking a model about rows the tag pass left unknown),
-	-- 'operator' (an explicit admin override -- once stamped, later sweeps must never overwrite it).
-	-- Schema only here: no enrichment pass or admin endpoint writes either column yet (T112/T113/T115).
+	-- stamped first by Enricher's TagLib read, T112), 'llm' (the offline sweep asking a model about
+	-- rows the tag pass left unknown, T113), 'operator' (an explicit admin override -- once stamped,
+	-- later sweeps must never overwrite it, T115).
+	--
+	-- explicit_llm_missed_at (T113): the sweep's own re-claim gate, the same "<domain>_missed_at"
+	-- idiom as mood_tag_missed_at/year_lookup_missed_at above -- stamped ONLY for a genuine "unknown"
+	-- verdict (a completed round trip that couldn't tell), never for a failed round trip (endpoint
+	-- unreachable), so a transient outage is retried next tick while a real "can't tell" answer is
+	-- excluded permanently. MediaRepository.ListExplicitClassificationClaimsAsync gates on
+	-- `explicit is null and explicit_llm_missed_at is null` -- the same `explicit IS NULL` predicate
+	-- also happens to be the entire enforcement of "never re-ask an already-classified row" and
+	-- "never overwrite an operator row", since every write path that sets explicit_source also sets
+	-- explicit to a real value in the same statement (see MediaRepository.WriteEnrichmentAsync's own
+	-- remarks for the canonical statement of this precedence).
 	alter table library.media
-	  add column explicit        boolean,
-	  add column explicit_source text
-	    check (explicit_source is null or explicit_source in ('tag', 'llm', 'operator'));
+	  add column explicit               boolean,
+	  add column explicit_source        text
+	    check (explicit_source is null or explicit_source in ('tag', 'llm', 'operator')),
+	  add column explicit_llm_missed_at timestamptz;
 
 	-- artwork_token (gh-#105, SPEC F88.2, STORY-222): random 128-bit value (32 lowercase hex
 	-- chars), generated lazily by ArtworkTokenRepository.GetOrCreateTokenAsync on a row's first

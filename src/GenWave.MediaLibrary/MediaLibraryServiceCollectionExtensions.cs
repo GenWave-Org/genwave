@@ -8,6 +8,7 @@ using GenWave.Core.Events;
 using GenWave.Loudness;
 using GenWave.MediaLibrary.Catalog;
 using GenWave.MediaLibrary.Enrich;
+using GenWave.MediaLibrary.ExplicitClassification;
 using GenWave.MediaLibrary.Mood;
 using GenWave.MediaLibrary.Options;
 using GenWave.MediaLibrary.Scan;
@@ -139,6 +140,21 @@ public static class MediaLibraryServiceCollectionExtensions
             client.MaxResponseContentBufferSize = OllamaMoodTagger.MaxResponseContentBytes;
         });
         services.AddSingleton<IMoodTagger>(sp => sp.GetRequiredService<OllamaMoodTagger>());
+
+        // Explicit classification sweep (SPEC F95.3, STORY-251, T113) — the exact same shape as the
+        // mood tagger immediately above, one column pair later: its own options class bound to the
+        // SAME "Llm" section (ExplicitClassifierOptions' own remarks explain why), no boot-frozen
+        // BaseAddress, MaxResponseContentBufferSize bounded the same way. Inert until GenWave.Host
+        // also registers ILlmBatchGate (already required by the mood tagger above, so a host wiring
+        // one wires both) — EnrichmentService's explicit-classification backfill treats either
+        // dependency being absent as a no-op, so the DI graph resolves regardless and Host boot is
+        // unaffected either way.
+        services.Configure<ExplicitClassifierOptions>(configuration.GetSection(ExplicitClassifierOptions.Section));
+        services.AddHttpClient<OllamaExplicitClassifier>(client =>
+        {
+            client.MaxResponseContentBufferSize = OllamaExplicitClassifier.MaxResponseContentBytes;
+        });
+        services.AddSingleton<IExplicitClassifier>(sp => sp.GetRequiredService<OllamaExplicitClassifier>());
 
         // Scan availability grace (SPEC F58, closes gitea-#223) — Library:Scan:MissThreshold read fresh
         // per tick via IOptionsMonitor<ScanOptions>, the same F44.2 shape as Library:ScanIntervalSeconds
