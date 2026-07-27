@@ -1,9 +1,7 @@
 // STORY-251 — Know which tracks are explicit (SPEC F95.2, F95.3, F95.5, PLAN T110/T112/T113/T115)
 //
-// BDD specification — xUnit, pending. db/26 schema + the layered tag → LLM sweep → operator
-// pipeline, driven against a real Postgres with the LLM faked at the HTTP boundary (T72
-// mood-tagger idiom). The operator override endpoint's wire facts (T115) drive the real
-// admin route via the Host factory.
+// BDD specification — xUnit. db/26 schema + the layered tag → LLM sweep → operator pipeline,
+// driven against a real Postgres with the LLM faked at the HTTP boundary (T72 mood-tagger idiom).
 //
 // T110 is Postgres-backed (Category=Integration) via DatabaseCollection, mirroring the
 // SchemaAndMigration family's shape (Story039_CatalogWriteColumnsSchemaAndMigration and
@@ -13,10 +11,23 @@
 // columns, runs db/26-explicit-classification-migration.sh in the compose testdb container, and
 // asserts the resulting shape, the CHECK's teeth, and a pre-existing row's NULL/NULL;
 // ScenarioRejectingUnknownSources and ScenarioMigrationIsIdempotent are this family's sad paths.
+//
+// T115 splits the SAME way gh-#99's own two-file split does, and the way Story250 splits its own
+// MediaLibrary/Host halves: the operator override ENDPOINT's wire facts (verb, route, request/
+// response shape, AdminOnly/Curation policy) live in Story251_ExplicitOverrideEndpoint.cs
+// (Host.Tests) — GenWave.MediaLibrary.Tests cannot construct ExplicitOverrideController itself (no
+// ProjectReference to GenWave.Host). What THIS file owns for T115: the repository-level write
+// (ScenarioTheOperatorAlwaysWins, driven directly against real Postgres via
+// MediaRepository.SetExplicitOverrideAsync — the same seam the endpoint calls into) and the F95.5
+// never-play orthogonality pin (ScenarioNeverPlayStaysOrthogonal), both genuinely SQL-provable only
+// against a real planner, unlike the endpoint's own wire contract.
 
 using System.Net;
 using System.Net.Http.Json;
 using Dapper;
+using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
+using GenWave.MediaLibrary.Catalog;
 using GenWave.MediaLibrary.Enrich;
 using GenWave.MediaLibrary.Tests.Fakes;
 using Npgsql;
@@ -616,9 +627,86 @@ public static class FeatureExplicitClassification
     public sealed class ScenarioTheOperatorAlwaysWins(DatabaseFixture db)
     {
         // Given an operator override (source operator) (F95.3), set via the real admin endpoint (T115).
+        //
+        // The endpoint's own wire contract (verb/route/request/response shape, AdminOnly/Curation
+        // policy) is pinned in Story251_ExplicitOverrideEndpoint.cs (Host.Tests) — see this file's
+        // header. What the two facts below pin is the seam BOTH the endpoint and this file drive:
+        // MediaRepository.SetExplicitOverrideAsync, against a real Postgres.
 
-        [Fact(Skip = "Pending (T115)")]
-        public void OverrideEndpointStampsSourceOperator() { }
+        [Fact]
+        public async Task SettingTrueOrFalseStampsSourceOperator()
+        {
+            // Both verdicts land the SAME source, unconditionally (F95.3's top precedence) — a
+            // second SetExplicitOverrideAsync call (true -> false) simply overwrites the first;
+            // there is no CASE guard to defer to, since an operator write beats everything.
+            await db.ResetAsync();
+            var repo = Harness.Repo(db);
+            var id = await repo.InsertDiscoveredAsync("/explicit-operator/override.flac", "flac", 1, Harness.Mtime, CancellationToken.None);
+            await repo.WriteEnrichmentAsync(id, Harness.ReadyResultWith(title: "Override Target", artist: "Someone"), CancellationToken.None);
+
+            var explicitOverride = (IMediaExplicitOverride)repo;
+
+            var setTrue = await explicitOverride.SetExplicitOverrideAsync(id, true, CancellationToken.None);
+            Assert.Equal(ExplicitOverrideResult.Updated, setTrue.Result);
+            Assert.Equal(true, setTrue.Explicit);
+            Assert.Equal("operator", setTrue.ExplicitSource);
+
+            var setFalse = await explicitOverride.SetExplicitOverrideAsync(id, false, CancellationToken.None);
+            Assert.Equal(ExplicitOverrideResult.Updated, setFalse.Result);
+            Assert.Equal(false, setFalse.Explicit);
+            Assert.Equal("operator", setFalse.ExplicitSource);
+
+            var columns = await ExplicitColumnsOfAsync(db, id);
+            Assert.Equal(false, columns.Explicit);
+            Assert.Equal("operator", columns.ExplicitSource);
+        }
+
+        [Fact]
+        public async Task ClearingWipesAllThreeColumnsIncludingTheMissStamp()
+        {
+            // A clear is not merely "forget the verdict" — it wipes explicit, explicit_source, AND
+            // the LLM sweep's own re-claim gate (explicit_llm_missed_at) back to NULL/NULL/NULL in
+            // the SAME statement, releasing the row so the tag pass or the next LLM sweep tick may
+            // reclassify it (F95.3).
+            await db.ResetAsync();
+            var repo = Harness.Repo(db);
+            var id = await repo.InsertDiscoveredAsync("/explicit-operator/clear.flac", "flac", 1, Harness.Mtime, CancellationToken.None);
+            await repo.WriteEnrichmentAsync(id, Harness.ReadyResultWith(title: "Clear Target", artist: "Someone"), CancellationToken.None);
+
+            var explicitOverride = (IMediaExplicitOverride)repo;
+            await explicitOverride.SetExplicitOverrideAsync(id, true, CancellationToken.None);
+
+            // Seed a miss stamp before clearing, so "wipes ALL THREE" has something real to wipe,
+            // not an already-null column.
+            await using (var conn = await db.DataSource.OpenConnectionAsync())
+                await conn.ExecuteAsync(
+                    "update library.media set explicit_llm_missed_at = now() where id = @id", new { id });
+
+            var cleared = await explicitOverride.SetExplicitOverrideAsync(id, null, CancellationToken.None);
+
+            Assert.Equal(ExplicitOverrideResult.Updated, cleared.Result);
+            Assert.Null(cleared.Explicit);
+            Assert.Null(cleared.ExplicitSource);
+
+            var columns = await ExplicitColumnsOfAsync(db, id);
+            Assert.Null(columns.Explicit);
+            Assert.Null(columns.ExplicitSource);
+            Assert.Null(await ExplicitLlmMissedAtOfAsync(db, id));
+        }
+
+        [Fact]
+        public async Task UnknownIdReturnsNotFoundAndWritesNothing()
+        {
+            await db.ResetAsync();
+            var repo = Harness.Repo(db);
+            var explicitOverride = (IMediaExplicitOverride)repo;
+
+            var outcome = await explicitOverride.SetExplicitOverrideAsync(999_999_999L, true, CancellationToken.None);
+
+            Assert.Equal(ExplicitOverrideResult.NotFound, outcome.Result);
+            Assert.Null(outcome.Explicit);
+            Assert.Null(outcome.ExplicitSource);
+        }
 
         [Fact]
         public async Task LaterSweepsNeverOverwriteOperatorRows()
@@ -647,11 +735,12 @@ public static class FeatureExplicitClassification
         [Fact]
         public async Task TagPassNeverOverwritesOperatorRows()
         {
-            // The T115 override endpoint doesn't exist yet, but the write-guard this task (T112) pins
-            // lives in WriteEnrichmentAsync's own CASE, not the endpoint — seed operator ownership
-            // directly in Postgres, then drive a REAL file with a contradicting advisory tag through
-            // the real enrichment path (Harness.Enrichment -> EnrichOneAsync) and assert the
-            // operator's stamp survives untouched.
+            // The write-guard this pins lives in WriteEnrichmentAsync's own CASE (T112), not the
+            // T115 override endpoint — seed operator ownership directly in Postgres (a stand-in for
+            // a prior real call to SetExplicitOverrideAsync, pinned separately above), then drive a
+            // REAL file with a contradicting advisory tag through the real enrichment path
+            // (Harness.Enrichment -> EnrichOneAsync) and assert the operator's stamp survives
+            // untouched.
             await db.ResetAsync();
             var dir = TestMedia.NewTempDir();
             try
@@ -676,12 +765,53 @@ public static class FeatureExplicitClassification
         }
     }
 
-    public sealed class ScenarioNeverPlayStaysOrthogonal
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioNeverPlayStaysOrthogonal(DatabaseFixture db)
     {
         // Given a track under a never-play verdict (F95.5): the flag classifies, the verdict rules.
+        // Pinned at the query level, SPEC F95.4/F95.5's own construction: never_play
+        // (coalesce(r.never_play, false)) and the audience-posture explicit predicate are
+        // INDEPENDENT WHERE conjuncts in GetRotationCandidateAsync — neither can override the
+        // other, because neither is ever referenced inside the other's expression.
 
-        [Fact(Skip = "Pending (T115)")]
-        public void VerdictOperatesUnchangedRegardlessOfClassification() { }
+        static MediaRatingRepository RatingRepo(DatabaseFixture f) => new(f.DataSource, new FakeSafeScopeProvider());
+
+        [Fact]
+        public async Task VerdictOperatesUnchangedRegardlessOfClassification()
+        {
+            // Posture Mature would otherwise admit an explicit=true row unmasked (F95.4) — proving
+            // never-play STILL excludes it here is the orthogonality pin: classifying a row
+            // (including via the operator override this task adds) never loosens or tightens the
+            // never-play verdict, and never-play never reads the explicit column at all.
+            await db.ResetAsync();
+            var repo = Harness.Repo(db, audiencePosture: new FakeAudiencePostureProvider(AudiencePosture.Mature));
+
+            var id = await repo.InsertDiscoveredAsync("/explicit-orthogonal/never-play-and-explicit.flac", "flac", 1, Harness.Mtime, CancellationToken.None);
+            await repo.WriteEnrichmentAsync(id, Harness.ReadyResultWith(title: "Orthogonal Track", artist: "Someone"), CancellationToken.None);
+
+            // Classification via the SAME operator-override seam the endpoint calls into.
+            var explicitOverride = (IMediaExplicitOverride)repo;
+            await explicitOverride.SetExplicitOverrideAsync(id, true, CancellationToken.None);
+
+            // Positive control: BEFORE never-play, posture Mature admits this explicit=true row
+            // unmasked (F95.4) — proving the classification write above didn't itself exclude it,
+            // so the null this fact ends on is provably never-play's doing, not a side effect of
+            // classifying.
+            var catalog = (IMediaCatalog)repo;
+            var candidateBeforeNeverPlay = await catalog.GetRotationCandidateAsync(
+                new LibraryScope([1L]), [], artistSeparation: 0, CancellationToken.None);
+            Assert.NotNull(candidateBeforeNeverPlay);
+
+            // Never-play lives in a wholly separate table (library.media_rating) — the classification
+            // write above touched zero rows there.
+            await RatingRepo(db).SetNeverPlayAsync(id.ToString(), true, CancellationToken.None);
+
+            var candidateAfterNeverPlay = await catalog.GetRotationCandidateAsync(
+                new LibraryScope([1L]), [], artistSeparation: 0, CancellationToken.None);
+
+            Assert.Null(candidateAfterNeverPlay);
+        }
     }
 
     [Collection(DatabaseCollection.Name)]

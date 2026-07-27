@@ -24,7 +24,7 @@ sealed class MediaRepository(
     IAudiencePostureProvider audiencePosture,
     IStationEventSink? events = null)
     : IMediaCatalog, IAdminMediaLookup, IAdminMediaQuery, IAdminMediaWrite, IAdminMediaReenrichment,
-      IAuthoredCatalogWriter
+      IAuthoredCatalogWriter, IMediaExplicitOverride
 {
     // MediaMutated publish seam for the admin writes (gitea-#246); no-op unless the host binds a real sink.
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
@@ -1453,6 +1453,55 @@ sealed class MediaRepository(
             "  case when @verdict is null then now() else explicit_llm_missed_at end " +
             "where id = @id",
             new { id, verdict }, cancellationToken: ct));
+    }
+
+    // ── Operator override (IMediaExplicitOverride — SPEC F95.3, F95.5, STORY-251, PLAN T115) ───────
+
+    /// <summary>
+    /// Sets or clears the operator's explicit-classification override — one UPDATE, every touched
+    /// column written atomically:
+    /// <list type="bullet">
+    /// <item><paramref name="explicitValue"/> is <see langword="null"/> (CLEAR) — wipes
+    /// <c>explicit</c>, <c>explicit_source</c>, AND <c>explicit_llm_missed_at</c> back to
+    /// <see langword="null"/> in the same statement. This releases the row: the tag pass
+    /// (<see cref="WriteEnrichmentAsync"/>) may reclassify it on its next scan/enrich, and
+    /// <see cref="ListExplicitClassificationClaimsAsync"/>'s <c>explicit_llm_missed_at is null</c>
+    /// arm lets the LLM sweep re-ask it too — a clear is not merely "forget the verdict", it is
+    /// "let every other source have another turn".</item>
+    /// <item>Otherwise — stamps <c>explicit = @explicitValue</c>, <c>explicit_source = 'operator'</c>
+    /// UNCONDITIONALLY. No CASE guard reading the row's current source is needed here (unlike
+    /// <see cref="WriteEnrichmentAsync"/> and <see cref="WriteExplicitClassificationResultAsync"/>,
+    /// which both defer to an existing 'operator' row before writing): this write IS the top of
+    /// F95.3's precedence (operator &gt; tag &gt; llm) — it beats everything by definition, so there
+    /// is nothing to defer to. <c>explicit_llm_missed_at</c> is left untouched on this branch: the
+    /// row already leaves <see cref="ListExplicitClassificationClaimsAsync"/>'s claim query the
+    /// moment <c>explicit</c> moves off <c>NULL</c>, exactly like a written LLM verdict.</item>
+    /// </list>
+    /// Unknown id → <see cref="ExplicitOverrideResult.NotFound"/>, nothing written (IDOR-safe — an
+    /// unknown id is the only outcome a caller can observe; no row state ever leaks). F95.5's
+    /// never-play orthogonality needs no guard here: <c>never_play</c> lives in the separate
+    /// <c>library.media_rating</c> table, which this statement never touches.
+    /// </summary>
+    public async Task<ExplicitOverrideOutcome> SetExplicitOverrideAsync(long mediaId, bool? explicitValue, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<(bool? Explicit, string? ExplicitSource)?>(new CommandDefinition(
+            """
+            update library.media set
+              explicit = @explicitValue,
+              explicit_source = case when @explicitValue is null then null else 'operator' end,
+              explicit_llm_missed_at =
+                case when @explicitValue is null then null else explicit_llm_missed_at end
+            where id = @mediaId
+            returning explicit, explicit_source
+            """,
+            new { mediaId, explicitValue }, cancellationToken: ct));
+
+        if (row is null)
+            return new ExplicitOverrideOutcome(ExplicitOverrideResult.NotFound, null, null);
+
+        events.Publish(new MediaMutated("explicit-override", mediaId, 1));
+        return new ExplicitOverrideOutcome(ExplicitOverrideResult.Updated, row.Value.Explicit, row.Value.ExplicitSource);
     }
 
     /// <summary>A per-file enrichment failure: isolated, never crashes the worker (PRD §5.2).</summary>
