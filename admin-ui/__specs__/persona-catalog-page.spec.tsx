@@ -1,25 +1,56 @@
 // @jest-environment jsdom
 // STORY-233 — Browsing the shelf (SPEC F90.4a, F90.6; PLAN T102)
+// STORY-235 — One click, eyes open: informed catalog import (SPEC F90.5, F90.6; PLAN T103)
 //
 // Runner: Jest (jsdom). RTL drives PersonaCatalogClient directly (mirrors the
 // PersonasClient/SafeContentClient harness in personas-page.spec.tsx). The server component
 // (page.tsx) is exercised separately via the catalog-pages.spec.ts tree-walker house pattern,
-// with a mocked global.fetch and next/headers.cookies().
+// with a mocked global.fetch and next/headers.cookies(). `next/navigation`'s `useRouter` is
+// mocked (mirrors catalog-selection-toolbar.spec.tsx's own pattern) so the T103 success path's
+// `router.push("/personas")` is observable without a real Next router. The review modal's OWN
+// section-rendering/confirm/cancel/error behavior is exercised directly in
+// persona-card-review-modal.spec.tsx — this file only pins the catalog-specific wiring: which
+// card text and catalogSlug reach the modal, and where a successful import lands.
 
 jest.mock("next/headers", () => ({
   cookies: jest.fn().mockResolvedValue({ toString: () => "session=test-cookie" }),
 }));
 
-import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
+jest.mock("next/navigation", () => ({
+  ...jest.requireActual("next/navigation"),
+  useRouter: jest.fn(),
+}));
+
+import { describe, it, expect, jest, beforeAll, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import type { ReactNode } from "react";
-import { PersonaCatalogClient } from "../app/(authed)/persona-catalog/PersonaCatalogClient";
+import type { useRouter } from "next/navigation";
+import { Toaster } from "@/components/ui/toast";
+import type { PersonaCatalogClient as PersonaCatalogClientComponent } from "../app/(authed)/persona-catalog/PersonaCatalogClient";
 import type {
   CatalogEntryDetailDto,
   CatalogIndexResponseDto,
   CatalogShelfEntryDto,
 } from "../app/(authed)/persona-catalog/types";
+
+const mockedUseRouter = jest
+  .requireMock<{ useRouter: typeof useRouter }>("next/navigation")
+  .useRouter as jest.MockedFunction<typeof useRouter>;
+
+// `PersonaCatalogClient` now calls `useRouter()` unconditionally (PLAN T103), so this module
+// must be `import()`ed AFTER `jest.mock("next/navigation", ...)` has registered — a static
+// top-level `import` here would bind the REAL `next/navigation` export before the mock factory
+// above ever runs (this project's SWC-based jest transform does not hoist `jest.mock` past a
+// static import the way babel-jest does), the same reason `catalog-selection-toolbar.spec.tsx`'s
+// `renderCatalogTable` helper and this file's own `PersonaCatalogPage` server-page tests below
+// both `await import(...)` too. Resolved once here rather than per-test, since every test needs
+// the same reference.
+let PersonaCatalogClient: typeof PersonaCatalogClientComponent;
+
+beforeAll(async () => {
+  ({ PersonaCatalogClient } = await import("../app/(authed)/persona-catalog/PersonaCatalogClient"));
+});
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -37,8 +68,24 @@ const MATURE_ENTRY: CatalogShelfEntryDto = {
   bestFor: [],
 };
 
+/** A minimal-but-real card behind Lena's entry (SPEC F90.5's "Entry = unchanged F79 card"
+ * decision) — the review modal needs a usable `name` to render at all; the disabled-button era's
+ * bare `"{}"` fixture only ever exercised the shelf-browsing tests above it. */
+const LENA_CARD_JSON = JSON.stringify({
+  schemaVersion: 1,
+  name: "Late Night Lena",
+  tagline: "Warm 2am company",
+  soul: "A late-night voice who never rushes a segue.",
+  quirks: ["hums between tracks"],
+  voice: { engine: "kokoro", voiceId: "af_lena", pace: 1.0, language: "en" },
+  energyDisposition: -0.2,
+  lore: [],
+  corrections: [],
+  taste: [],
+});
+
 const LENA_DETAIL: CatalogEntryDetailDto = {
-  card: "{}",
+  card: LENA_CARD_JSON,
   meta: "{}",
   fetchedAt: "2026-07-26T00:00:00Z",
   unreachable: false,
@@ -160,7 +207,7 @@ describe("Feature: Browsing the shelf", () => {
       expect(global.fetch).toHaveBeenCalledWith("/api/catalog/entries/late-night-lena");
     });
 
-    it("shows a visibly present but disabled Import button with a tooltip (T103 wires it)", async () => {
+    it("shows a live, enabled Import button once an entry is selected (STORY-235, PLAN T103)", async () => {
       global.fetch = jest
         .fn<typeof fetch>()
         .mockResolvedValue(makeJsonResponse(200, LENA_DETAIL)) as unknown as typeof fetch;
@@ -169,10 +216,8 @@ describe("Feature: Browsing the shelf", () => {
       fireEvent.click(screen.getByRole("button", { name: /Late Night Lena/ }));
 
       const importButton = await screen.findByRole("button", { name: "Import" });
-      expect(importButton).toHaveAttribute("aria-disabled", "true");
-
-      fireEvent.focus(importButton);
-      expect(screen.getByText("Import is coming in the next update")).toBeInTheDocument();
+      expect(importButton).not.toHaveAttribute("aria-disabled");
+      expect(importButton).toBeEnabled();
     });
   });
 
@@ -287,6 +332,96 @@ describe("Feature: Browsing the shelf", () => {
         screen.getByText("The shelf will be stocked soon — check back once the community catalog has entries.")
       ).toBeInTheDocument();
       expect(screen.queryByText("Catalog unreachable")).not.toBeInTheDocument();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature: Catalog import (STORY-235, SPEC F90.5/F90.6, PLAN T103)
+// ---------------------------------------------------------------------------
+//
+// The review modal's own section-rendering/confirm/cancel/error behavior is exercised directly
+// in persona-card-review-modal.spec.tsx. This block only pins the catalog-specific wiring: the
+// entry's own card text and slug reach the modal unchanged, and a successful import lands on
+// /personas — the "browser flow" ORCHESTRATOR acceptance's two jest-reachable halves.
+
+describe("Feature: Catalog import", () => {
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+    mockedUseRouter.mockReturnValue({ push: jest.fn() } as unknown as ReturnType<typeof useRouter>);
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.clearAllMocks();
+  });
+
+  /** Loads Lena's detail panel and clicks Import, landing on the open review modal. */
+  async function openLenaReview(): Promise<void> {
+    global.fetch = jest
+      .fn<typeof fetch>()
+      .mockResolvedValue(makeJsonResponse(200, LENA_DETAIL)) as unknown as typeof fetch;
+
+    render(
+      <>
+        <PersonaCatalogClient
+          initialIndex={{ entries: [EVERYONE_ENTRY], fetchedAt: "2026-07-26T00:00:00Z", unreachable: false }}
+        />
+        <Toaster />
+      </>
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Late Night Lena/ }));
+    const importButton = await screen.findByRole("button", { name: "Import" });
+    fireEvent.click(importButton);
+    await screen.findByRole("dialog");
+  }
+
+  describe("Scenario: cancel imports nothing (AC1)", () => {
+    it("closes the review without ever calling the import endpoint", async () => {
+      await openLenaReview();
+
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      const calls = (global.fetch as jest.MockedFunction<typeof fetch>).mock.calls;
+      expect(calls.some(([url]) => String(url).includes("/import"))).toBe(false);
+    });
+  });
+
+  describe("Scenario: confirm imports and lands on Personas (AC2, F90.5)", () => {
+    it("threads the entry's card text + own slug into the review, POSTs with catalogSlug, and navigates to /personas", async () => {
+      const push = jest.fn();
+      mockedUseRouter.mockReturnValue({ push } as unknown as ReturnType<typeof useRouter>);
+
+      await openLenaReview();
+
+      const dialog = within(screen.getByRole("dialog"));
+      // The catalog entry's own card text, plus its meta samples already shown in the detail
+      // panel, both reach the review unchanged.
+      expect(dialog.getByText("Late Night Lena")).toBeInTheDocument();
+      expect(dialog.getByText("Line one.")).toBeInTheDocument();
+
+      global.fetch = jest
+        .fn<typeof fetch>()
+        .mockResolvedValue(makeJsonResponse(201, { name: "Late Night Lena", warnings: [] })) as unknown as typeof fetch;
+
+      await act(async () => {
+        fireEvent.click(dialog.getByRole("button", { name: "Confirm import" }));
+        await Promise.resolve();
+      });
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+      const [url, init] = (global.fetch as jest.MockedFunction<typeof fetch>).mock.calls[0] as [
+        string,
+        RequestInit,
+      ];
+      expect(url).toBe("/api/personas/late-night-lena/import?catalogSlug=late-night-lena");
+      expect(init.body).toBe(LENA_CARD_JSON);
+
+      await waitFor(() => expect(push).toHaveBeenCalledWith("/personas"));
+      expect(await screen.findByText('"Late Night Lena" imported.')).toBeInTheDocument();
     });
   });
 });

@@ -1,12 +1,14 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tooltip } from "@/components/ui/tooltip";
+import { toast } from "@/components/ui/toast";
 import { readErrorMessage } from "@/lib/problem-details";
 import { cn } from "@/lib/utils";
+import { PersonaCardReviewModal, type PersonaCardReviewImportResult } from "../_components/PersonaCardReviewModal";
 import { prettifySlug } from "./format-slug";
 import type { CatalogEntryDetailDto, CatalogIndexResponseDto, CatalogShelfEntryDto } from "./types";
 
@@ -27,11 +29,14 @@ type DetailState =
  * with a click-through detail panel that loads author/description/sample patter per entry via
  * `GET /api/catalog/entries/{slug}` — one fetch per click, hash-verified and cached server-side
  * (the index route deliberately never eagerly fetches every entry's meta.json just to build the
- * grid, F90.2). The Import action is visibly present but disabled (T103 wires it) — this page
- * never issues an import request.
+ * grid, F90.2). Import (SPEC F90.5/F90.6, STORY-235, PLAN T103) opens `PersonaCardReviewModal`
+ * with the entry's already-fetched raw card text — no second fetch, no import request until the
+ * operator confirms inside that modal (the trust ruling's gate lives there, not here).
  */
 export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps): ReactNode {
+  const router = useRouter();
   const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
+  const [reviewing, setReviewing] = useState(false);
 
   // Request token (T102 review, HIGH): loadDetail's fetch is not the only thing that can change
   // `detail` between when a request starts and when it resolves — the operator can also collapse
@@ -102,6 +107,21 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
     void loadDetail(slug);
   }
 
+  /** SPEC F90.5's success path: land on Personas with the imported persona visible — `router.push`
+   * (not `router.refresh`, this page has nothing to refresh) triggers a fresh server render of
+   * `/personas`, which reads `GET /api/personas` itself (that page is already `force-dynamic`), so
+   * the just-imported row is there without this component threading any persona state across the
+   * navigation. Warnings surface as toasts — the same danger styling
+   * `PersonaImportPanel`'s inline warning list uses — because they'd otherwise be stranded the
+   * instant this page unmounts; the shared `Toaster` lives in the authed layout, so a toast queued
+   * here outlives the navigation. */
+  function handleImported(result: PersonaCardReviewImportResult): void {
+    setReviewing(false);
+    toast.success(`"${result.name}" ${result.created ? "imported" : "updated"}.`);
+    for (const warning of result.warnings) toast.error(warning);
+    router.push("/personas");
+  }
+
   const selectedSlug = detail.kind !== "idle" ? detail.slug : null;
 
   return (
@@ -127,8 +147,24 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
             </div>
           )}
           {detail.kind === "error" && <p className="text-[0.85rem] text-danger">{detail.message}</p>}
-          {detail.kind === "loaded" && <DetailPanel slug={detail.slug} detail={detail.detail} />}
+          {detail.kind === "loaded" && (
+            <DetailPanel slug={detail.slug} detail={detail.detail} onImportClick={() => setReviewing(true)} />
+          )}
         </section>
+      )}
+
+      {/* `detail.detail.card` is `string | null`, `null` exactly when `unreachable` is `true`
+          (types.ts) — and `unreachable: true` never reaches `detail.kind === "loaded"` at all
+          (loadDetail routes it to the "error" branch instead), so this guard is a type-level
+          formality, not a real runtime path. */}
+      {reviewing && detail.kind === "loaded" && detail.detail.card !== null && (
+        <PersonaCardReviewModal
+          cardText={detail.detail.card}
+          catalogSlug={detail.slug}
+          samples={detail.detail.samplePatter ?? []}
+          onCancel={() => setReviewing(false)}
+          onImported={handleImported}
+        />
       )}
     </div>
   );
@@ -164,7 +200,15 @@ function ShelfCard({
   );
 }
 
-function DetailPanel({ slug, detail }: { slug: string; detail: CatalogEntryDetailDto }): ReactNode {
+function DetailPanel({
+  slug,
+  detail,
+  onImportClick,
+}: {
+  slug: string;
+  detail: CatalogEntryDetailDto;
+  onImportClick: () => void;
+}): ReactNode {
   const samplePatter = detail.samplePatter ?? [];
 
   return (
@@ -175,15 +219,12 @@ function DetailPanel({ slug, detail }: { slug: string; detail: CatalogEntryDetai
           {detail.audience === "mature" && <MatureBadge />}
         </div>
 
-        {/* Disabled via aria-disabled, NOT the native `disabled` attribute (SPEC F62.2's own
-            "triggerable by keyboard focus as well as hover" tooltip rule) — a genuinely disabled
-            <button> drops out of the tab order entirely, so keyboard users could never reach this
-            tooltip. Wired to no action at all (T103 wires the real import call). */}
-        <Tooltip label="Import is coming in the next update">
-          <Button type="button" variant="primary" aria-disabled="true" className="cursor-not-allowed opacity-50">
-            Import
-          </Button>
-        </Tooltip>
+        {/* Opens the full-card review modal (SPEC F90.5/F90.6, STORY-235, PLAN T103) — this click
+            itself issues no request; the modal reads the card text this panel already has in
+            hand from the entry fetch above. */}
+        <Button type="button" variant="primary" onClick={onImportClick}>
+          Import
+        </Button>
       </div>
 
       <BestForChips items={detail.bestFor ?? []} />

@@ -20,9 +20,11 @@ export interface CatalogIndexResponseDto {
 }
 
 /** Wire shape of `GET /api/catalog/entries/{slug}` (SPEC F90.2, F90.3, F90.4a) — see Host's
- * `CatalogEntryResponse`. `card`/`meta` carry the raw hash-verified JSON text (unused by this
- * page — the detail panel reads the already-projected fields below instead); every field but
- * `unreachable` is `null` exactly when `unreachable` is `true`. */
+ * `CatalogEntryResponse`. `card` carries the raw hash-verified JSON text — the detail panel itself
+ * reads the already-projected fields below, but `card` is exactly what `PersonaCardReviewModal`
+ * (SPEC F90.5/F90.6, PLAN T103) both renders in full and POSTs byte-for-byte on confirm; `meta`
+ * stays unused by this page. Every field but `unreachable` is `null` exactly when `unreachable` is
+ * `true`. */
 export interface CatalogEntryDetailDto {
   card: string | null;
   meta: string | null;

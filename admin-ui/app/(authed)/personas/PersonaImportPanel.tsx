@@ -3,6 +3,7 @@
 import { useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
+import { describeStationDefault, type PersonaImportSuccessBody } from "@/lib/persona-import-api";
 import { readErrorMessage } from "@/lib/problem-details";
 import { parsePersonaCardPreview, type PersonaCardPreview } from "./persona-card";
 import { personaSlug } from "./persona-slug";
@@ -17,12 +18,6 @@ export interface PersonaImportPanelProps {
 /** Mirrors `PersonaController.MaxImportBytes` (SPEC F79.6). Advisory only — the server enforces
  * its own cap regardless of what this client-side check lets through. */
 const MAX_IMPORT_BYTES = 256 * 1024;
-
-/** Response shape of a successful `POST /api/personas/{slug}/import` (`PersonaImportResponse`). */
-interface ImportSuccessBody {
-  name: string;
-  warnings: string[];
-}
 
 type ImportStatus =
   | { kind: "idle" }
@@ -43,10 +38,6 @@ function importSlug(fileName: string, preview: PersonaCardPreview | null): strin
   if (preview !== null) return personaSlug(preview.name);
   const stem = fileName.replace(/\.persona\.json$/i, "").replace(/\.json$/i, "");
   return personaSlug(stem);
-}
-
-function describeVoice(voiceId: string): string {
-  return voiceId === "" ? "Station default" : voiceId;
 }
 
 /** `FileReader` rather than `Blob.prototype.text()` — broadly supported in every real browser
@@ -110,7 +101,7 @@ export function PersonaImportPanel({ onImported }: PersonaImportPanelProps): Rea
       });
 
       if (resp.status === 201 || resp.status === 200) {
-        const body = (await resp.json()) as ImportSuccessBody;
+        const body = (await resp.json()) as PersonaImportSuccessBody;
         const created = resp.status === 201;
         setStatus({ kind: "done", name: body.name, created, warnings: body.warnings });
         toast.success(`"${body.name}" ${created ? "imported" : "updated"}.`);
@@ -172,7 +163,7 @@ export function PersonaImportPanel({ onImported }: PersonaImportPanelProps): Rea
               <dt className="text-mute">Tagline</dt>
               <dd>{status.preview.tagline === "" ? "—" : status.preview.tagline}</dd>
               <dt className="text-mute">Voice</dt>
-              <dd>{describeVoice(status.preview.voiceId)}</dd>
+              <dd>{describeStationDefault(status.preview.voiceId)}</dd>
               <dt className="text-mute">Quirks</dt>
               <dd>{status.preview.quirkCount}</dd>
               <dt className="text-mute">Lore</dt>
