@@ -55,7 +55,7 @@ Seven services start: `db`, `icecast`, `engine`, `api`, `kokoro` (TTS synthesize
 - **API:** `http://localhost:8080` — anonymous hot path (`GET /media/random`, `GET /media/{id}`, `GET /health`) plus the cookie-auth admin surface under `/api/*`
 - **Spectator page:** `http://localhost:8081` — the station's read-only public face (now playing, history, stats, an optional anonymous song-request line). Off by default: flip the live `Station:SpectatorMode` setting to enable it; [DEPLOYMENT.md](DEPLOYMENT.md) covers the four operating modes and the public topology. Metadata-aware players also get **per-track album art** via ICY `StreamUrl` once `Station:PublicBaseUrl` is set.
 
-On first boot the library scans `MEDIA_DIR`, enriches each file (loudness + cue + energy + BPM + tags, plus a high-confidence MusicBrainz release-year lookup when the tags carry none — disable-able live via `Library:YearLookup:Enabled`), and the feeder begins pulling ready tracks. Until the first tracks are ready, the engine plays the safe-rotation source — a curated library scope (`Station:SafeScope:LibraryIds`) pulled via `GET /internal/safe-track`. On a fresh deploy, a one-shot boot seed creates a `safe` library, renders a branded TTS announcement ("Please Stand By"), and points SafeScope at it — so drains air the announcement, not a random track; an operator-set SafeScope is never overwritten. If the scope resolves empty, `mksafe` emits silence as a logged degraded mode. The Orchestrator interleaves TTS patter (station IDs, lead-ins, back-announces, time checks) with music once Kokoro is up. When an `Llm:Endpoint` is configured (Settings page — live, no restart), lead-ins and back-announces become LLM-authored copy, optionally in an operator-authored DJ persona's voice (Personas page); with no LLM configured the template patter airs unchanged. Station identity (`STATION_NAME`, voice, scope) defaults to `GWAV 108.8` / `af_heart` / library 1 — override via env if needed.
+On first boot the library scans `MEDIA_DIR`, enriches each file (loudness + cue + energy + BPM + tags, plus a high-confidence MusicBrainz release-year lookup when the tags carry none — disable-able live via `Library:YearLookup:Enabled`), and the feeder begins pulling ready tracks. Until the first tracks are ready, the engine plays the safe-rotation source — a curated library scope (`Station:SafeScope:LibraryIds`) pulled via `GET /internal/safe-track`. On a fresh deploy, a one-shot boot seed creates a `safe` library, renders a branded TTS announcement ("Please Stand By"), and points SafeScope at it — so drains air the announcement, not a random track; an operator-set SafeScope is never overwritten. If the scope resolves empty, `mksafe` emits silence as a logged degraded mode. The Orchestrator interleaves TTS patter (station IDs, lead-ins, back-announces, time checks) with music once Kokoro is up. When an `Llm:Endpoint` is configured (Settings page — live, no restart), lead-ins and back-announces become LLM-authored copy, optionally in an operator-authored DJ persona's voice (Personas page) — or hire a ready-made DJ from the community [Persona Catalog](https://github.com/GenWave-Org/genwave-catalog) (CC0 persona cards, browsed and adopted one-click from the Admin UI after a full-card review); with no LLM configured the template patter airs unchanged. Station identity (`STATION_NAME`, voice, scope) defaults to `GWAV 108.8` / `af_heart` / library 1 — override via env if needed.
 
 ### Resilience & operator tools
 
@@ -160,12 +160,11 @@ If level checks fail by a consistent offset, the `replay_gain` annotation format
 
 ## Shipped phases
 
-GenWave's epic-by-epic history — from v1 broadcast playout through Listener Requests &
-On-Air Artwork — lives in [CHANGELOG.md](CHANGELOG.md).
+GenWave's epic-by-epic history — from v1 broadcast playout through the Persona
+Catalog — lives in [CHANGELOG.md](CHANGELOG.md).
 
 ## Roadmap
 
-- **Persona Catalog** — community-shared DJ personas: a curated, CC0 catalog you browse and one-click import from the Admin UI (full-card review before anything is adopted). Designed; building next.
 - **Deferred** — authored-file GC ([gh-#3](https://github.com/GenWave-Org/genwave/issues/3)), origin-side Access JWT validation ([gh-#75](https://github.com/GenWave-Org/genwave/issues/75)), migration-runner adoption ([gh-#12](https://github.com/GenWave-Org/genwave/issues/12)).
 - **Beat-matching + set-level sequencing** — BPM/beat-aware transitions and energy-curve scheduling beyond per-pair crossfade duration. Deferred as YAGNI.
 
