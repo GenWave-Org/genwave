@@ -12,7 +12,7 @@ No hand-built audio engine. A C# / .NET 10 control plane orchestrates [Liquidsoa
 
 This is **GenWave Home**, the AGPL edition — see [License](#license).
 
-🎧 **Hear it live:** [demo.genwaveradio.com](https://demo.genwaveradio.com/) — the public demo station, running the [reference appliance topology](DEPLOYMENT.md): watch what's on the air and tune in!
+🎧 **Hear it live:** [demo.genwaveradio.com](https://demo.genwaveradio.com/) — the public demo station, running the [reference appliance topology](DEPLOYMENT.md): watch what's on the air, tune in, and ask the station for a song!
 
 
 ## Why GenWave
@@ -23,7 +23,7 @@ It was great, until it wasn't. The problem with playlists is that they're dumb: 
 
 The itch never went away. Over the years I built a home version of FLAP Radio. Still, honestly, a playlist randomizer, and I was never truly happy with it. Then, a couple of years ago, LLMs and TTS started making a serious splash, and the itch came back in earnest: the technology had finally caught up with the idea. This time GenWave was born for real: a station that never goes silent, knows what it's playing, and has a DJ who tells you about it.
 
-Scratch itched. 📻
+Itch scratched. 📻
 
 
 ## Quickstart
@@ -53,12 +53,13 @@ Seven services start: `db`, `icecast`, `engine`, `api`, `kokoro` (TTS synthesize
 - **Stream:** `http://localhost:8000/stream` — open it in any audio player
 - **Admin UI:** `http://localhost:3000` — log in with the password set in `ADMIN_PASSWORD`
 - **API:** `http://localhost:8080` — anonymous hot path (`GET /media/random`, `GET /media/{id}`, `GET /health`) plus the cookie-auth admin surface under `/api/*`
+- **Spectator page:** `http://localhost:8081` — the station's read-only public face (now playing, history, stats, an optional anonymous song-request line). Off by default: flip the live `Station:SpectatorMode` setting to enable it; [DEPLOYMENT.md](DEPLOYMENT.md) covers the four operating modes and the public topology. Metadata-aware players also get **per-track album art** via ICY `StreamUrl` once `Station:PublicBaseUrl` is set.
 
 On first boot the library scans `MEDIA_DIR`, enriches each file (loudness + cue + energy + BPM + tags, plus a high-confidence MusicBrainz release-year lookup when the tags carry none — disable-able live via `Library:YearLookup:Enabled`), and the feeder begins pulling ready tracks. Until the first tracks are ready, the engine plays the safe-rotation source — a curated library scope (`Station:SafeScope:LibraryIds`) pulled via `GET /internal/safe-track`. On a fresh deploy, a one-shot boot seed creates a `safe` library, renders a branded TTS announcement ("Please Stand By"), and points SafeScope at it — so drains air the announcement, not a random track; an operator-set SafeScope is never overwritten. If the scope resolves empty, `mksafe` emits silence as a logged degraded mode. The Orchestrator interleaves TTS patter (station IDs, lead-ins, back-announces, time checks) with music once Kokoro is up. When an `Llm:Endpoint` is configured (Settings page — live, no restart), lead-ins and back-announces become LLM-authored copy, optionally in an operator-authored DJ persona's voice (Personas page); with no LLM configured the template patter airs unchanged. Station identity (`STATION_NAME`, voice, scope) defaults to `GWAV 108.8` / `af_heart` / library 1 — override via env if needed.
 
 ### Resilience & operator tools
 
-The broadcast never depends on a sick dependency. **LLM failure is a mode, not an error**: consecutive failures walk the station Normal → Soft (one real LLM attempt per cooldown window, template copy otherwise) → Hard (zero LLM calls); background health probes plus a cooldown walk it back up, and an operator can pin any mode live (`Llm:DegradationPin`). **TTS failure is inaudible**: if Kokoro is down or a render throws, the segment re-renders on the Piper fallback engine through the same loudness pipeline — kill the Kokoro container mid-broadcast and the next patter still airs. Every spoken line passes one normalization chokepoint (reasoning-block scrub, markdown strip, operator **pronunciation corrections** — editable with live preview under Settings → TTS, e.g. `MacLeod → Muh-cloud`). The **Booth log** page answers "what did the DJ do and say at 9:14" as a persistent narrative feed (track starts, patter, mode changes, 14-day retention), with an **LLM call inspector** tab showing the last ~50 calls (prompt, response, timing, mode — in-memory, never persisted). MusicBrainz lookups are throttled to 1 req/s with a version-stamped User-Agent, and misses are stamped so they're never re-asked.
+The broadcast never depends on a sick dependency. **LLM failure is a mode, not an error**: consecutive failures walk the station Normal → Soft (one real LLM attempt per cooldown window, template copy otherwise) → Hard (zero LLM calls); background health probes plus a cooldown walk it back up, and an operator can pin any mode live (`Llm:DegradationPin`). **TTS failure is inaudible**: if Kokoro is down or a render throws, the segment re-renders on the Piper fallback engine through the same loudness pipeline — kill the Kokoro container mid-broadcast and the next patter still airs. Every spoken line passes one normalization chokepoint (reasoning-block scrub, markdown strip, operator **pronunciation corrections** — editable with live preview under Settings → TTS, e.g. `MacLeod → Muh-cloud`). The **Booth log** page answers "what did the DJ do and say at 9:14" as a persistent narrative feed (track starts, patter, mode changes, 14-day retention), with an **LLM call inspector** tab showing the last ~50 calls (prompt, response, timing, mode — in-memory, never persisted). Dependency health probes **debounce** — a verdict flips unhealthy only after consecutive probe failures (a slow TTS render is not an outage), with interval, timeout, and threshold all live-editable settings. MusicBrainz lookups are throttled to 1 req/s with a version-stamped User-Agent, and misses are stamped so they're never re-asked.
 
 ## Repository layout
 
@@ -71,7 +72,7 @@ The broadcast never depends on a sick dependency. **LLM failure is a mode, not a
 │  └─ genwave.liq          # Liquidsoap playout script
 ├─ db/
 │  ├─ 01-library.sh        # library schema + library_svc role (canonical fresh install)
-│  └─ 02..22-*-migration.sh # idempotent in-place upgrades, one per shipped feature —
+│  └─ 02..24-*-migration.sh # idempotent in-place upgrades, one per shipped feature —
 │                          #   each header says what it adds; ./migrate.sh applies them all
 ├─ icecast/
 │  ├─ Dockerfile           # self-owned Icecast2 image
@@ -159,12 +160,12 @@ If level checks fail by a consistent offset, the `replay_gain` annotation format
 
 ## Shipped phases
 
-GenWave's epic-by-epic history — v1 broadcast playout through Ranking & robustness — lives in
-[CHANGELOG.md](CHANGELOG.md).
+GenWave's epic-by-epic history — from v1 broadcast playout through Listener Requests &
+On-Air Artwork — lives in [CHANGELOG.md](CHANGELOG.md).
 
 ## Roadmap
 
-- **Per-track album art in players** (ICY `StreamUrl`) — spike complete, viable ([gh-#105](https://github.com/GenWave-Org/genwave/issues/105)); gated on an Icecast ≥ 2.5.0 image bump (2.4.4 drops the metadata field, and EOLs 2026-12-31).
+- **Persona Catalog** — community-shared DJ personas: a curated, CC0 catalog you browse and one-click import from the Admin UI (full-card review before anything is adopted). Designed; building next.
 - **Deferred** — authored-file GC ([gh-#3](https://github.com/GenWave-Org/genwave/issues/3)), origin-side Access JWT validation ([gh-#75](https://github.com/GenWave-Org/genwave/issues/75)), migration-runner adoption ([gh-#12](https://github.com/GenWave-Org/genwave/issues/12)).
 - **Beat-matching + set-level sequencing** — BPM/beat-aware transitions and energy-curve scheduling beyond per-pair crossfade duration. Deferred as YAGNI.
 
