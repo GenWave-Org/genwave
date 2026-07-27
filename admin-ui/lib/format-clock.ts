@@ -52,6 +52,28 @@ export function formatUpSince(iso: string, options: ClockFormatOptions = {}): st
 }
 
 /**
+ * Formats an ISO timestamp as a bare calendar date, `Mon D, YYYY` — no time-of-day, no internal
+ * separator of its own — in the given zone or the browser's local zone by default. Distinct from
+ * `formatUpSince` (which renders `HH:MM · Mon D`, no year, for the "API up since" tile): a caller
+ * that wants a single clean date FIELD — not a time-plus-month-day pair — needs a formatter that
+ * doesn't fold its own ` · ` into the result. Used by the Personas provenance badge (SPEC F90.7,
+ * T105) so "Imported · &lt;source&gt; · &lt;date&gt;" stays a genuine three-segment string instead
+ * of five.
+ */
+export function formatDateStamp(iso: string, options: ClockFormatOptions = {}): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return "unknown";
+  }
+  return new Intl.DateTimeFormat(options.locale, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: options.timeZone,
+  }).format(date);
+}
+
+/**
  * Formats a duration in milliseconds as `M:SS` (or `H:MM:SS` past an hour,
  * hours omitted otherwise) — the single m:ss formatter for both the
  * now-playing card's elapsed/total readout and the history surfaces' plain
