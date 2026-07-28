@@ -71,13 +71,17 @@ function displayVoice(voice: string): string {
   return voice.trim() === "" ? "Station default" : voice;
 }
 
-/** Provenance badge (SPEC F90.7, T105): "Imported · &lt;source&gt; · &lt;date&gt;" for an imported
- * persona, nothing for one authored in place. `importedFrom` renders VERBATIM — `"file"` or a raw
- * catalog slug — this is provenance, not decoration, so it is never prettified (ruled). The date
- * uses `formatDateStamp` — `lib/format-clock.ts`'s bare-calendar-date formatter — NOT
- * `formatUpSince` (that one folds its own `HH:MM · Mon D` pair, no year, into the string, which
- * would both break the badge's literal three-field shape and silently collide two imports a year
- * apart). `timeZone` is a plain pass-through from the page prop, the house test-injection idiom. */
+/** Provenance badge (SPEC F90.7/F94.4, T105/T130): "Hired · &lt;source&gt; · &lt;date&gt;" for an
+ * imported persona, nothing for one authored in place. Reads "Hired" for EVERY provenance — a
+ * file upload's `importedFrom: "file"` row included — SPEC F94.4 draws no split here: the file
+ * path keeps "Import" for its own ACTION copy (the button/modal/success text over on
+ * `PersonaImportPanel`), but this one shared badge component speaks a single wording regardless of
+ * origin. `importedFrom` renders VERBATIM — `"file"` or a raw catalog slug — this is provenance,
+ * not decoration, so it is never prettified (ruled). The date uses `formatDateStamp` —
+ * `lib/format-clock.ts`'s bare-calendar-date formatter — NOT `formatUpSince` (that one folds its
+ * own `HH:MM · Mon D` pair, no year, into the string, which would both break the badge's literal
+ * three-field shape and silently collide two imports a year apart). `timeZone` is a plain
+ * pass-through from the page prop, the house test-injection idiom. */
 function ProvenanceBadge({
   importedFrom,
   importedAt,
@@ -89,7 +93,7 @@ function ProvenanceBadge({
 }): ReactNode {
   return (
     <span className="ml-2 inline-flex items-center rounded-[3px] border border-line px-1.5 py-0.5 text-[0.68rem] text-mute">
-      {`Imported · ${importedFrom} · ${formatDateStamp(importedAt, { timeZone })}`}
+      {`Hired · ${importedFrom} · ${formatDateStamp(importedAt, { timeZone })}`}
     </span>
   );
 }

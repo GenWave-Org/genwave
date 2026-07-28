@@ -319,23 +319,23 @@ describe("Feature: Author personas from the console", () => {
     });
   });
 
-  describe("Scenario: provenance badge (SPEC F90.7, T105)", () => {
+  describe("Scenario: provenance badge (SPEC F90.7/F94.4, T105/T130)", () => {
     it("shows nothing for an authored-in-place persona (importedFrom/importedAt null)", () => {
       makeDispatchFetchMock({});
       renderClient({ initialPersonas: [REX, NOVA], timeZone: "UTC" });
 
-      expect(within(rowFor("Radio Rex")).queryByText(/^Imported/)).not.toBeInTheDocument();
+      expect(within(rowFor("Radio Rex")).queryByText(/^Hired/)).not.toBeInTheDocument();
     });
 
-    it('badges a file import as the literal three-field "Imported · file · Jul 20, 2026" (timeZone="UTC" pinned for determinism, the StatusTiles/BoothLogFeed/LlmCallsFeed/PlayHistoryTable house idiom)', () => {
+    it('badges a file import as the literal three-field "Hired · file · Jul 20, 2026" (timeZone="UTC" pinned for determinism, the StatusTiles/BoothLogFeed/LlmCallsFeed/PlayHistoryTable house idiom; "Hired" wording per SPEC F94.4 — no split by origin)', () => {
       const fileImported: PersonaDto = { ...REX, importedFrom: "file", importedAt: FILE_IMPORTED_AT };
       makeDispatchFetchMock({});
       renderClient({ initialPersonas: [fileImported, NOVA], timeZone: "UTC" });
 
-      expect(within(rowFor("Radio Rex")).getByText("Imported · file · Jul 20, 2026")).toBeInTheDocument();
+      expect(within(rowFor("Radio Rex")).getByText("Hired · file · Jul 20, 2026")).toBeInTheDocument();
     });
 
-    it('badges a catalog import with the raw slug verbatim, not prettified — literal "Imported · late-night-jazz-host · Jul 21, 2026"', () => {
+    it('badges a catalog import with the raw slug verbatim, not prettified — literal "Hired · late-night-jazz-host · Jul 21, 2026"', () => {
       const catalogImported: PersonaDto = {
         ...NOVA,
         importedFrom: "late-night-jazz-host",
@@ -345,7 +345,7 @@ describe("Feature: Author personas from the console", () => {
       renderClient({ initialPersonas: [REX, catalogImported], timeZone: "UTC" });
 
       expect(
-        within(rowFor("Nova")).getByText("Imported · late-night-jazz-host · Jul 21, 2026")
+        within(rowFor("Nova")).getByText("Hired · late-night-jazz-host · Jul 21, 2026")
       ).toBeInTheDocument();
     });
   });

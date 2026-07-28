@@ -207,7 +207,7 @@ describe("Feature: Browsing the shelf", () => {
       expect(global.fetch).toHaveBeenCalledWith("/api/catalog/entries/late-night-lena");
     });
 
-    it("shows a live, enabled Import button once an entry is selected (STORY-235, PLAN T103)", async () => {
+    it("shows a live, enabled Hire button once an entry is selected (STORY-235, PLAN T103; renamed Hire by SPEC F94.4/PLAN T130)", async () => {
       global.fetch = jest
         .fn<typeof fetch>()
         .mockResolvedValue(makeJsonResponse(200, LENA_DETAIL)) as unknown as typeof fetch;
@@ -215,9 +215,9 @@ describe("Feature: Browsing the shelf", () => {
       render(<PersonaCatalogClient initialIndex={{ entries: [EVERYONE_ENTRY], fetchedAt: "2026-07-26T00:00:00Z", unreachable: false }} />);
       fireEvent.click(screen.getByRole("button", { name: /Late Night Lena/ }));
 
-      const importButton = await screen.findByRole("button", { name: "Import" });
-      expect(importButton).not.toHaveAttribute("aria-disabled");
-      expect(importButton).toBeEnabled();
+      const hireButton = await screen.findByRole("button", { name: "Hire" });
+      expect(hireButton).not.toHaveAttribute("aria-disabled");
+      expect(hireButton).toBeEnabled();
     });
   });
 
@@ -358,7 +358,8 @@ describe("Feature: Catalog import", () => {
     jest.clearAllMocks();
   });
 
-  /** Loads Lena's detail panel and clicks Import, landing on the open review modal. */
+  /** Loads Lena's detail panel and clicks Hire (SPEC F94.4's catalog verb, PLAN T130), landing on
+   * the open review modal. */
   async function openLenaReview(): Promise<void> {
     global.fetch = jest
       .fn<typeof fetch>()
@@ -373,8 +374,8 @@ describe("Feature: Catalog import", () => {
       </>
     );
     fireEvent.click(screen.getByRole("button", { name: /Late Night Lena/ }));
-    const importButton = await screen.findByRole("button", { name: "Import" });
-    fireEvent.click(importButton);
+    const hireButton = await screen.findByRole("button", { name: "Hire" });
+    fireEvent.click(hireButton);
     await screen.findByRole("dialog");
   }
 
@@ -408,7 +409,7 @@ describe("Feature: Catalog import", () => {
         .mockResolvedValue(makeJsonResponse(201, { name: "Late Night Lena", warnings: [] })) as unknown as typeof fetch;
 
       await act(async () => {
-        fireEvent.click(dialog.getByRole("button", { name: "Confirm import" }));
+        fireEvent.click(dialog.getByRole("button", { name: "Confirm hire" }));
         await Promise.resolve();
       });
 
@@ -421,7 +422,7 @@ describe("Feature: Catalog import", () => {
       expect(init.body).toBe(LENA_CARD_JSON);
 
       await waitFor(() => expect(push).toHaveBeenCalledWith("/personas"));
-      expect(await screen.findByText('"Late Night Lena" imported.')).toBeInTheDocument();
+      expect(await screen.findByText('"Late Night Lena" hired.')).toBeInTheDocument();
     });
   });
 });
