@@ -21,7 +21,12 @@ const CLOCK_TICK_MS = 1000;
 // older rows simply fall off as new tracks air (operator request, 2026-07-19).
 const MAX_HISTORY_ROWS = 6;
 
-/** @type {{kind: "standby"} | {kind: "track"|"patter", title?: string, artist?: string, startedAt: Date, durationMs: number|null}} */
+// The station's own art (also the artwork endpoint's no-oracle fallback, SPEC F88.3) — the
+// "loading" state for a track's real cover art and the terminal state for everything else
+// (DJ break, a track with no embedded art, standby).
+const STATION_ICON_PATH = "/spectator/favicon.ico";
+
+/** @type {{kind: "standby"} | {kind: "track"|"patter", title?: string, artist?: string, startedAt: Date, durationMs: number|null, dj?: string|null, upNext?: {startsAt: string, dj: string|null}|null, artworkUrl?: string|null}} */
 let nowPlaying = { kind: "standby" };
 let stationName = "GenWave";
 
@@ -51,6 +56,7 @@ function formatTimeOfDay(iso) {
 async function pollNowPlaying() {
   try {
     const payload = await fetchJson("/spectator/api/now-playing");
+    const previousArtworkUrl = nowPlaying.kind === "standby" ? null : nowPlaying.artworkUrl ?? null;
     nowPlaying =
       payload.state === "onAir"
         ? {
@@ -59,8 +65,18 @@ async function pollNowPlaying() {
             artist: payload.artist,
             startedAt: new Date(payload.startedAt),
             durationMs: payload.durationMs ?? null,
+            // dj/upNext/artworkUrl (SPEC F93.1–F93.3) — optional-chained/defaulted since an
+            // OutputCache entry from before PLAN T125 shipped may still be in rotation and
+            // simply lack these properties.
+            dj: payload.dj ?? null,
+            upNext: payload.upNext ?? null,
+            artworkUrl: payload.artworkUrl ?? null,
           }
         : { kind: "standby" };
+    // A changed artwork URL means a new track (or a transition to/from standby) — the previous
+    // failure, if any, no longer applies, so give the new URL a fresh attempt.
+    const nextArtworkUrl = nowPlaying.kind === "standby" ? null : nowPlaying.artworkUrl ?? null;
+    if (nextArtworkUrl !== previousArtworkUrl) failedArtworkUrl = null;
     renderListenerCount(payload.listeners ?? null);
   } catch (error) {
     console.error(error);
@@ -81,24 +97,31 @@ function renderListenerCount(listeners) {
 
 function renderNowPlaying() {
   const dot = document.getElementById("now-playing-dot");
+  const art = document.getElementById("now-playing-art");
   const kicker = document.getElementById("now-playing-kicker");
   const title = document.getElementById("now-playing-title");
   const artist = document.getElementById("now-playing-artist");
+  const dj = document.getElementById("now-playing-dj");
   const meta = document.getElementById("now-playing-meta");
   const progress = document.getElementById("progress");
   const fill = document.getElementById("progress-fill");
   const clock = document.getElementById("now-playing-clock");
+  const upNext = document.getElementById("now-playing-upnext");
 
   if (nowPlaying.kind === "standby") {
     dot.classList.remove("now-playing__dot--live");
+    art.hidden = true;
     kicker.textContent = "Stand by";
     title.textContent = stationName;
     artist.textContent = "";
+    renderDjLine(dj, null);
     meta.hidden = true;
+    renderUpNextLine(upNext, null);
     return;
   }
 
   dot.classList.add("now-playing__dot--live");
+  art.hidden = false;
 
   if (nowPlaying.kind === "patter") {
     kicker.textContent = "DJ break";
@@ -109,6 +132,9 @@ function renderNowPlaying() {
     title.textContent = nowPlaying.title || "Untitled";
     artist.textContent = nowPlaying.artist || "";
   }
+
+  renderDjLine(dj, nowPlaying.dj ?? null);
+  renderArt(art, nowPlaying.artworkUrl ?? null);
 
   meta.hidden = false;
 
@@ -123,6 +149,63 @@ function renderNowPlaying() {
     fill.style.width = `${(clamped / nowPlaying.durationMs) * 100}%`;
     clock.textContent = `${formatClock(clamped)} / ${formatClock(nowPlaying.durationMs)}`;
   }
+
+  renderUpNextLine(upNext, nowPlaying.upNext ?? null);
+}
+
+/** @param {string|null} dj — the on-air persona's display name, or null for a music-only segment. */
+function renderDjLine(element, dj) {
+  element.hidden = !dj;
+  element.textContent = dj ? `with ${dj}` : "";
+}
+
+/** @param {{startsAt: string, dj: string|null}|null} upNext */
+function renderUpNextLine(element, upNext) {
+  if (!upNext) {
+    element.hidden = true;
+    element.textContent = "";
+    return;
+  }
+  element.hidden = false;
+  const label = upNext.dj || "Nonstop music";
+  element.textContent = `Up next: ${label} · ${formatTimeOfDay(upNext.startsAt)}`;
+}
+
+// Sticky failure memory for the current artwork URL (SPEC F93.3): once a URL has failed to load,
+// renderArt keeps serving the station icon for it on every subsequent 1s clock tick instead of
+// re-arming the same known-bad URL. Cleared by pollNowPlaying whenever the artwork URL actually
+// changes (new track = fresh attempt).
+let failedArtworkUrl = null;
+
+/**
+ * Renders the now-playing thumbnail (SPEC F93.3). Called on every 1s clock tick, so it must be
+ * idempotent and must never re-attempt a URL that has already failed:
+ *   - success path: the real artwork URL loads once; later ticks reassign the identical target,
+ *     which is a no-op guarded below, so there is no repeat fetch.
+ *   - failure path: initArtworkFallback records the failing URL in failedArtworkUrl before
+ *     swapping the element to the station icon; every later tick sees artworkUrl === failedArtworkUrl
+ *     and renders the icon directly — one failed request per URL, not one per tick.
+ *   - a new track (artworkUrl changes) resets failedArtworkUrl in pollNowPlaying, so the new URL
+ *     always gets a fresh attempt.
+ * @param {string|null} artworkUrl
+ */
+function renderArt(element, artworkUrl) {
+  const target = artworkUrl && artworkUrl !== failedArtworkUrl ? artworkUrl : STATION_ICON_PATH;
+  if (element.getAttribute("src") !== target) element.setAttribute("src", target);
+}
+
+/** Wires the fallback for a real artwork URL that fails to load (SPEC F93.3): records the failing
+ * URL as failedArtworkUrl (so renderArt stops re-arming it) before swapping the element to the
+ * station icon. Guarded against looping back on itself if the station icon somehow ever 404s. */
+function initArtworkFallback() {
+  const art = document.getElementById("now-playing-art");
+  art.addEventListener("error", () => {
+    const failing = art.getAttribute("src");
+    if (failing !== STATION_ICON_PATH) {
+      failedArtworkUrl = failing;
+      art.setAttribute("src", STATION_ICON_PATH);
+    }
+  });
 }
 
 // ── Play history ─────────────────────────────────────────────────────────────
@@ -296,6 +379,7 @@ function initRequestForm() {
 
 function init() {
   loadAbout();
+  initArtworkFallback();
   pollNowPlaying();
   pollHistory();
   pollStats();
