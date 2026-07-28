@@ -8,6 +8,12 @@
 interface NowPlayingTrackWire {
   stationId: string;
   mediaId: string;
+  /**
+   * "patter" for a `tts:*` DJ break, "track" otherwise — stamped by LiveController (gh-#187).
+   * Optional on the wire for one deploy of backward tolerance; fetchNowPlaying falls back to the
+   * `tts:` mediaId prefix (the same cross-layer convention LiveView's rating gate already uses).
+   */
+  kind?: "track" | "patter";
   title?: string;
   artist?: string;
   gainDb: number;
@@ -23,9 +29,15 @@ interface NowPlayingDrainWire {
 
 type NowPlayingWire = NowPlayingTrackWire | NowPlayingDrainWire;
 
-/** The now-playing card's three renderable states (F16.5's track / drain / 503 trio). */
+/**
+ * The now-playing card's renderable states (F16.5's track / drain / 503 trio, plus gh-#187's
+ * patter split). A patter carries the same wire fields as a track — but its `title` is literally
+ * the station name (TtsSegmentSource), which is exactly why it renders differently: `artist` holds
+ * the persona name and is the only field worth displaying.
+ */
 export type NowPlayingState =
-  | ({ kind: "track" } & NowPlayingTrackWire)
+  | ({ kind: "track" } & Omit<NowPlayingTrackWire, "kind">)
+  | ({ kind: "patter" } & Omit<NowPlayingTrackWire, "kind">)
   | { kind: "drain"; stationId: string }
   | { kind: "warming" };
 
@@ -283,7 +295,8 @@ export async function fetchNowPlaying(): Promise<NowPlayingState> {
   if (isDrainWire(body)) {
     return { kind: "drain", stationId: body.stationId };
   }
-  return { kind: "track", ...body };
+  const isPatter = body.kind === "patter" || body.mediaId.startsWith("tts:");
+  return { ...body, kind: isPatter ? "patter" : "track" };
 }
 
 export async function fetchStatus(): Promise<StatusResponse> {
