@@ -24,6 +24,10 @@ public sealed class TtsSegmentSource(
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
     // Fresh-per-airing (LLM-authored) blurb audio lands here instead of the station's forever-cache
     // root, so it can be swept without touching templated kinds' stable (text,voice) cache (F34.6).
+    // SignOff/SignOn (F92.4, F92.5) never reach this far on a template-fallback miss at all — see the
+    // WARN+null guard right after copyWriter.WriteAsync below, which drops that render before a cache
+    // path is even chosen — so by the time isBlurb is computed, copy.FreshPerAiring is the single
+    // correct test for every kind reaching this point, handoff kinds included.
     const string BlurbsDirName = "blurbs";
 
     readonly ConcurrentDictionary<string, CuePoints?> cueCache = new();
@@ -38,6 +42,30 @@ public sealed class TtsSegmentSource(
             // instead of a frozen snapshot changes nothing observable for them.
             var cfg = options.CurrentValue;
             var copy = await copyWriter.WriteAsync(request, ct);
+
+            // Design ruling, spec-cited (T123 review finding): a handoff piece must NEVER air
+            // non-LLM-authored copy. F92.4's ladder is "two-piece -> whichever piece rendered ->
+            // clean cut" — there is no "templated piece" rung — and F92.5 states handoff pieces ARE
+            // LLM-authored blurbs, full stop. copy.FreshPerAiring false on a SignOff/SignOn render
+            // means every writer in the chain missed: LlmCopyWriter's own three degrade paths
+            // (disabled endpoint, timeout/non-2xx/connect, empty-or-over-length after cleanup) AND
+            // DegradationGatedCopyWriter routing straight to TemplateCopyWriter — unconditionally in
+            // Hard mode, or off an unclaimed Soft cadence slot — bypassing LlmCopyWriter entirely.
+            // Every one of those returns template copy rather than throwing (ISegmentCopyWriter's own
+            // never-throws contract), which is exactly why PatterTemplateRenderer still needs correct
+            // SignOff/SignOn arms — they just must never reach air. One WARN, then null:
+            // ITtsSegmentSource already allows null-never-throws, and T124's boundary producer treats
+            // a null piece exactly like F92.4's "whichever piece rendered airs (else clean cut)".
+            if (request.Kind is SegmentKind.SignOff or SegmentKind.SignOn && !copy.FreshPerAiring)
+            {
+                logger.LogWarning(
+                    "Handoff copy for {Kind} on station {StationId} was not LLM-authored (writer " +
+                    "degraded to template) — dropping this piece rather than airing non-LLM-authored " +
+                    "handoff copy (SPEC F92.4, F92.5)",
+                    request.Kind, request.StationId);
+                return null;
+            }
+
             // corrections.ContentHash (station rules) AND personaCorrections.ContentHash (the
             // active persona card's rules, SPEC F71.7) both fold into the cache key (SPEC F68.5) so
             // EITHER a corrections rebuild (PUT /api/settings), a card edit, or a
@@ -87,7 +115,12 @@ public sealed class TtsSegmentSource(
             var hash = ComputeHash(
                 copy.Text, request.Voice, request.StationId, corrections.ContentHash, personaCorrections.ContentHash);
             var stationDir = Path.Combine(cfg.CacheRoot, request.StationId);
-            var targetDir = copy.FreshPerAiring ? Path.Combine(stationDir, BlurbsDirName) : stationDir;
+            // Plain FreshPerAiring is the whole test again (F34.6): the guard above already sent a
+            // non-fresh SignOff/SignOn render home before this line, so nothing reaching here needs a
+            // second, kind-based override to land in blurbs/ — a genuinely LLM-authored render of ANY
+            // kind still does, an evergreen template render of any kind still doesn't.
+            var isBlurb = copy.FreshPerAiring;
+            var targetDir = isBlurb ? Path.Combine(stationDir, BlurbsDirName) : stationDir;
             var path = Path.Combine(targetDir, $"{hash}.{cfg.Format}");
 
             var fileExists = File.Exists(path);
@@ -122,10 +155,11 @@ public sealed class TtsSegmentSource(
                 ? (int?)Math.Round(cuePoints.CueOutSec * 1000.0, MidpointRounding.AwayFromZero)
                 : null;
 
-            // Opportunistic GC (F34.6): only after a successful fresh-copy render, and only inside
-            // blurbs/ — templated kinds' forever-cache is never touched. Best-effort; a sweep failure
+            // Opportunistic GC (F34.6): only after a render that actually landed in blurbs/ (fresh
+            // copy — the only route left, now that a non-fresh handoff render never reaches this far
+            // at all) — templated kinds' forever-cache is never touched. Best-effort; a sweep failure
             // must never fail a render that already succeeded.
-            if (copy.FreshPerAiring)
+            if (isBlurb)
                 SweepBlurbs(targetDir, request.StationId);
 
             // Display title is the station name, NOT the spoken text (issue gitea-#154) — players would

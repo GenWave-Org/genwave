@@ -24,9 +24,9 @@ public interface IPersonaPreviewWriter
     ///
     /// <see cref="SegmentKind.StationId"/>/<see cref="SegmentKind.TimeDate"/> requests route
     /// straight to the template rung (mirrors production's own kind-based routing — those kinds
-    /// never call the LLM on-air either, so this is not a fallback). LeadIn/BackAnnounce requests
-    /// call the LLM and never degrade: any failure (disabled endpoint, timeout, non-2xx,
-    /// empty/over-length copy) yields <see cref="PersonaPreviewResult.Failed"/> instead of
+    /// never call the LLM on-air either, so this is not a fallback). LeadIn/BackAnnounce/SignOff/
+    /// SignOn requests call the LLM and never degrade: any failure (disabled endpoint, timeout,
+    /// non-2xx, empty/over-length copy) yields <see cref="PersonaPreviewResult.Failed"/> instead of
     /// substituting template text.
     /// </summary>
     Task<PersonaPreviewResult> WritePreviewAsync(

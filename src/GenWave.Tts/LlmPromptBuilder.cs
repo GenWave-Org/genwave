@@ -193,10 +193,69 @@ static class LlmPromptBuilder
         "repeat any listener wording - you were never shown any.";
 
     /// <summary>
-    /// Composes the user-content half of the prompt (SPEC F34.3, F71.8, F83.1-F83.3, F87.7): station/
-    /// time/clock/segment framing, then whatever the track itself carries (title/artist/album/genre/
-    /// year — unchanged since before F71), then an OPTIONAL request-color line (SPEC F87.7, PLAN T91 —
-    /// see <see cref="RequestLineAcknowledgmentLine"/>) for a fulfilled track's own lead-in only, then,
+    /// SPEC F92.2/F92.5 (STORY-243, PLAN T123) — the handoff-color instruction line for a sign-off or
+    /// sign-on. <paramref name="counterpartName"/> is the display name of the OTHER DJ at this
+    /// boundary (<see cref="SegmentRequest.CounterpartName"/>) — the ONLY fact about the counterpart
+    /// this prompt is given, so "invent nothing" is enforced structurally the same way
+    /// <see cref="RequestLineAcknowledgmentLine"/> enforces it for the request line: no show name,
+    /// time, or event exists anywhere in <see cref="SegmentRequest"/> for the model to draw on, only a
+    /// name. A null/empty name (F92.3 — the music-only half of a handoff) yields the music-only
+    /// variant instead, matching what the template fallback (<c>PatterTemplateRenderer</c>) would say
+    /// for the same case. Truncated to <see cref="MaxSoulChars"/> (T123 review finding) — an
+    /// operator-editable display name flows straight into this prompt with no length constraint of
+    /// its own, exactly like <see cref="BuildLegacySoul"/>'s Backstory/Style fields, so it gets the
+    /// same house cap rather than a new one.
+    /// </summary>
+    static string BuildHandoffLine(SegmentKind kind, string? counterpartName)
+    {
+        var name = counterpartName is { Length: > 0 } n ? Truncate(n, MaxSoulChars) : null;
+
+        return kind switch
+        {
+            SegmentKind.SignOff => name is not null
+                ? $"Handoff note: {name} is up next - you may name them as you sign off (e.g. " +
+                  $"\"stick around, {name} is coming up\"). Only use the name given here; never " +
+                  "invent a show name, time, or event for them."
+                : "Handoff note: no successor DJ is queued after you - if you gesture at what's next, keep " +
+                  "it music-only (e.g. \"the music keeps rolling\"); never invent a name, show, or time for " +
+                  "a successor that doesn't exist.",
+            SegmentKind.SignOn => name is not null
+                ? $"Handoff note: {name} had the chair before you - you may thank or name them as " +
+                  $"you open your shift (e.g. \"thanks to {name} for that set\"). Only use the " +
+                  "name given here; never invent a show name, time, or event for them."
+                : "Handoff note: you're coming out of a stretch of nonstop music, not a named predecessor - " +
+                  "never invent a DJ, show, or time that didn't happen.",
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, message: null),
+        };
+    }
+
+    /// <summary>
+    /// The segment-framing line (SPEC F34.3, F92.2): states which of the four LLM-eligible kinds this
+    /// break is so the model never has to guess its own role. Only ever called with a kind
+    /// <see cref="LlmCopyWriter.IsLlmAuthored"/> reports true for — the single source of truth for
+    /// "which kinds"; the remaining two kinds (<see cref="SegmentKind.StationId"/>,
+    /// <see cref="SegmentKind.TimeDate"/>) never reach the LLM and so never reach this method either.
+    /// Exhaustive switch below: a new LLM-eligible <see cref="SegmentKind"/> needs a matching arm
+    /// added HERE as well as in <see cref="LlmCopyWriter.IsLlmAuthored"/> for it to actually take
+    /// effect end to end — the compiler's own exhaustiveness check on this switch is the guard
+    /// against silently forgetting this one.
+    /// </summary>
+    static string BuildSegmentLine(SegmentKind kind) => kind switch
+    {
+        SegmentKind.LeadIn => "Segment: lead-in for the upcoming track.",
+        SegmentKind.BackAnnounce => "Segment: back-announce for the track that just played.",
+        SegmentKind.SignOff => "Segment: sign-off as you close out your shift on air.",
+        SegmentKind.SignOn => "Segment: sign-on as you open your shift on air.",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, message: null),
+    };
+
+    /// <summary>
+    /// Composes the user-content half of the prompt (SPEC F34.3, F71.8, F83.1-F83.3, F87.7, F92.2):
+    /// station/time/clock/segment framing, then — for a sign-off/sign-on only — the handoff-color
+    /// line (see <see cref="BuildHandoffLine"/>), then whatever the track itself carries (title/
+    /// artist/album/genre/year — unchanged since before F71; null for a handoff, which is not
+    /// track-anchored), then an OPTIONAL request-color line (SPEC F87.7, PLAN T91 — see
+    /// <see cref="RequestLineAcknowledgmentLine"/>) for a fulfilled track's own lead-in only, then,
     /// last, an OPTIONAL persona-taste line (see <see cref="BuildTasteLine"/>) so each reads as one
     /// more piece of color about THIS track rather than a separate directive.
     /// <paramref name="previouslyVoicedTasteNotes"/> is the immediately preceding ON-AIR break's
@@ -211,10 +270,11 @@ static class LlmPromptBuilder
             $"Station: {request.StationName}",
             $"Local time: {request.LocalNow.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}",
             stationClockLine,
-            request.Kind == SegmentKind.LeadIn
-                ? "Segment: lead-in for the upcoming track."
-                : "Segment: back-announce for the track that just played.",
+            BuildSegmentLine(request.Kind),
         };
+
+        if (request.Kind is SegmentKind.SignOff or SegmentKind.SignOn)
+            lines.Add(BuildHandoffLine(request.Kind, request.CounterpartName));
 
         if (request.Track is { } track)
         {

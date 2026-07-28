@@ -1,10 +1,16 @@
 // STORY-243 — DJs hand off audibly (SPEC F92, PLAN T123/T124)
 //
-// BDD specification — xUnit, pending. T123 facts cover the copywriter kinds (pure
-// GenWave.Tts seams: prompts receive both display names, template fallbacks, blurb-dir
-// routing). T124 facts are wire: a real playout run across a near-term seeded boundary
-// through the production unit loop and F74 queue — ceremony airs at track seams, never
-// mid-track (F74.1 stands throughout).
+// BDD specification — xUnit, pending. T123's facts are pure GenWave.Tts seams (prompts
+// receive both display names, template fallbacks, blurb-dir routing, the F92.4/F92.5
+// null-render ruling for non-LLM-authored handoff copy) — this project has no
+// ProjectReference to GenWave.Tts, so they live in
+// GenWave.Tts.Tests/Specs/Story243_DjsHandOffAudibly.cs instead: see
+// FeatureDjsHandOffAudibly.ScenarioRightVoicesRightNames (prompt content, including the
+// golden-string pin), .ScenarioBlurbCachePosture.GenuineLlmAuthoredSignOffLandsInBlurbs,
+// and .ScenarioNonLlmAuthoredCopyNeverAirs (the null-render facts) — all green there
+// already. The remaining facts below are wire: a real playout run across a near-term
+// seeded boundary through the production unit loop and F74 queue — ceremony airs at
+// track seams, never mid-track (F74.1 stands throughout) — and stay pending for T124.
 
 namespace GenWave.Orchestration.Tests.Specs;
 
@@ -38,8 +44,8 @@ public static class FeatureDjsHandOffAudibly
         [Fact(Skip = "Pending (T124)")]
         public void SignOnUsesIncomingVoiceAndCard() { }
 
-        [Fact(Skip = "Pending (T123)")]
-        public void EachPromptReceivesTheCounterpartDisplayName() { }
+        // Prompt-content facts (each piece receives the counterpart's display name) live in
+        // GenWave.Tts.Tests' ScenarioRightVoicesRightNames instead (see file header).
 
         [Fact(Skip = "Pending (T124)")]
         public void StationIdentsRemainStationVoiced() { }
@@ -71,8 +77,8 @@ public static class FeatureDjsHandOffAudibly
     {
         // Given rendered ceremony pieces (F92.5).
 
-        [Fact(Skip = "Pending (T123)")]
-        public void PiecesLandInTheSweepableBlurbDir() { }
+        // Blurb-cache-posture and null-render facts live in GenWave.Tts.Tests'
+        // ScenarioBlurbCachePosture and ScenarioNonLlmAuthoredCopyNeverAirs instead (see file header).
 
         [Fact(Skip = "Pending (T124)")]
         public void RendersRideThePerUnitBudget() { }
