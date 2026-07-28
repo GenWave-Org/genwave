@@ -39,6 +39,24 @@
   --danger: #a63325; /* deeper rust-red, distinct from accent */
   --danger-ink: #fdf8ee; /* text/icons on --danger */
   --success: #5c7a3f; /* olive green */
+
+  /* Format-clock schedule editor (PLAN T129, SPEC F94.3): a small deterministic 6-hue palette a
+     painted persona block cycles through (`personaSwatchClassName`, schedule-grid-model.ts) — no
+     per-persona color system existed before this. Muted/pastel on purpose, NOT vivid like --accent:
+     each swatch sits under the SAME --ink body text the rest of the app uses, so no separate
+     per-swatch "ink" token is needed the way --accent/--danger require one. All six are warm-family
+     (review ruling, gh-#169: the Wireless palette is warm-only, no cool grays/blues/teals anywhere)
+     — terracotta, ochre, sage, umber and brick cover the warm wheel's red/orange/yellow/brown range,
+     plum leans warm-pink rather than true violet. Every value clears the light/dark-theme --ink
+     contrast the swatch it replaced already met (umber 8.63/8.93, brick 8.30/8.57 vs. the retired
+     slate-teal's 8.32/8.58 and denim's 8.22/8.47 — light/dark, recomputed with this file's own
+     `contrastRatio` formula per __specs__/design-system-foundation.spec.ts). */
+  --sched-1: #e3b7a0; /* terracotta */
+  --sched-2: #e8d190; /* ochre */
+  --sched-3: #c3cba0; /* sage */
+  --sched-4: #d9c1a6; /* umber (was slate-teal — cool, retired) */
+  --sched-5: #cbb0c7; /* plum */
+  --sched-6: #e1b7be; /* brick (was denim — cool, retired) */
 }
 
 :root[data-theme="dark"] {
@@ -57,6 +75,15 @@
   --danger: #e06a55;
   --danger-ink: #2a211b; /* text/icons on --danger */
   --success: #8fae6a;
+
+  /* Same 6 hues, darkened to "walnut & brass" swatches — dark enough that --ink's light dark-theme
+     body text (#f0e7d8) still reads on top, matching --surface/--surface-2's own lightness range. */
+  --sched-1: #5a3226;
+  --sched-2: #5c4e22;
+  --sched-3: #3c4630;
+  --sched-4: #4c3924; /* umber (was slate-teal — cool, retired) */
+  --sched-5: #453142;
+  --sched-6: #692b35; /* brick (was denim — cool, retired) */
 }
 
 /* System default: nobody has made an explicit choice (no genwave-theme cookie,
@@ -79,6 +106,12 @@
     --danger: #e06a55;
     --danger-ink: #2a211b;
     --success: #8fae6a;
+    --sched-1: #5a3226;
+    --sched-2: #5c4e22;
+    --sched-3: #3c4630;
+    --sched-4: #4c3924;
+    --sched-5: #453142;
+    --sched-6: #692b35;
   }
 }
 
@@ -99,6 +132,12 @@
   --color-danger: var(--danger);
   --color-danger-ink: var(--danger-ink);
   --color-success: var(--success);
+  --color-sched-1: var(--sched-1);
+  --color-sched-2: var(--sched-2);
+  --color-sched-3: var(--sched-3);
+  --color-sched-4: var(--sched-4);
+  --color-sched-5: var(--sched-5);
+  --color-sched-6: var(--sched-6);
 
   --font-display: var(--font-display);
   --font-sans: var(--font-sans);
