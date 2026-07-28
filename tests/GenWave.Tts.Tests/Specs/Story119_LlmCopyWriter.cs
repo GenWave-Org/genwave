@@ -245,6 +245,46 @@ public static class FeatureLlmCopyWriter
             // "*chuckles* **Next up**…" loses the asterisk artifacts (F34.5, AC4).
             Assert.Equal("Next up, we've got a treat.", result.Text);
         }
+
+        [Fact]
+        public async Task AChatPreambleBeforeTheQuotedBodyIsDropped()
+        {
+            // gh-#186 — observed live: the DJ read "Here's your lead-in copy:" on air. The
+            // preamble ends in a colon, carries a meta word, and the quoted body runs to the end —
+            // all three gates hold, so only the body survives (and its quotes unwrap as usual).
+            mock.ReplyContent = "Here's your lead-in copy:\n\n\"Not my usual cup of tea, but here we go.\"";
+            var (writer, _, _) = BuildWriter(mock.BaseUri.ToString());
+
+            var result = await writer.WriteAsync(LeadInRequest(), CancellationToken.None);
+
+            Assert.Equal("Not my usual cup of tea, but here we go.", result.Text);
+        }
+
+        [Fact]
+        public async Task AnnouncerCopyWithAColonButNoMetaWordIsKeptIntact()
+        {
+            // gh-#186 guard 1 — "Up next:" is ordinary announcer phrasing, no meta word: nothing
+            // is dropped even though a colon precedes a quote.
+            mock.ReplyContent = "Up next: \"Blue Monday\" by New Order, right here on GenWave.";
+            var (writer, _, _) = BuildWriter(mock.BaseUri.ToString());
+
+            var result = await writer.WriteAsync(LeadInRequest(), CancellationToken.None);
+
+            Assert.Equal("Up next: \"Blue Monday\" by New Order, right here on GenWave.", result.Text);
+        }
+
+        [Fact]
+        public async Task AMetaWordWhoseQuoteDoesNotRunToTheEndIsKeptIntact()
+        {
+            // gh-#186 guard 2 — a mid-copy quotation with trailing text is not a preamble+body
+            // shape, even when a meta word sits before the colon.
+            mock.ReplyContent = "Sure: \"Great tune\" - and plenty more where that came from.";
+            var (writer, _, _) = BuildWriter(mock.BaseUri.ToString());
+
+            var result = await writer.WriteAsync(LeadInRequest(), CancellationToken.None);
+
+            Assert.Equal("Sure: \"Great tune\" - and plenty more where that came from.", result.Text);
+        }
     }
 
     public sealed class ScenarioDisabledMeansTemplateOnly
