@@ -248,38 +248,86 @@ public static class FeatureCachedDependencyHealthProbes
 
     public static class ScenarioLiveCadence
     {
+        // Virtual-time constants: values are arbitrary (nothing sleeps for them), chosen
+        // human-readable. The probe hangs, so every cycle ends via PerProbeTimeout.
+        static readonly TimeSpan Interval = TimeSpan.FromSeconds(1);
+        static readonly TimeSpan PerProbeTimeout = TimeSpan.FromSeconds(2);
+
+        // Real-time bound on waiting for the loop's thread-pool continuations to settle after an
+        // Advance. Generous on purpose: it only caps the pathological case — the normal path
+        // completes in milliseconds, and a starved runner can only be SLOW here, never elapse
+        // extra cycles (virtual time moves solely via Advance).
+        static readonly TimeSpan SettleBudget = TimeSpan.FromSeconds(10);
+
         [Fact]
         public static async Task Each_cycle_re_reads_the_cadence_so_an_edit_needs_no_restart()
         {
             // Given a running prober whose cadence delegate is backed by a mutable value — the
             // IOptionsMonitor stand-in (gh-#125: the knobs are allowlisted and Live, so a settings
-            // PUT must reach the very next probe with no api restart)
+            // PUT must reach the very next probe with no api restart). The loop runs on a
+            // FakeTimeProvider (gh-#171): the old shape raced a wall-clock Task.Delay against the
+            // real 20ms loop, and on a starved runner the delay overslept, extra timeout cycles
+            // fit inside it, and threshold 5 flipped before the assert read it. Here cycles elapse
+            // ONLY on Advance, so the failure count is bounded by the advances we make.
             var probe = new FakeDependencyProbe("dep", healthy: true, hang: true);
             var store = new DependencyHealthStore();
-            var prober = new DependencyHealthProber([probe], store, NullLogger<DependencyHealthProber>.Instance);
+            var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+            var prober = new DependencyHealthProber(
+                [probe], store, NullLogger<DependencyHealthProber>.Instance, time);
 
-            var threshold = 5;
+            var threshold = 100;
             DependencyProbeCadence Current() =>
-                new(TimeSpan.FromMilliseconds(20), TimeSpan.FromMilliseconds(40),
-                    Volatile.Read(ref threshold));
+                new(Interval, PerProbeTimeout, Volatile.Read(ref threshold));
 
             using var cts = new CancellationTokenSource();
             var runTask = prober.RunAsync(Current, cts.Token);
 
-            // When the threshold is lowered underneath the running loop — the probe has been
-            // failing all along, but under threshold 5 it never flipped
-            await Task.Delay(TimeSpan.FromMilliseconds(150));
-            Assert.True(store.GetVerdict("dep")?.Healthy, "threshold 5 should not have flipped yet");
+            // When a handful of cycles fail under the high threshold — at most a few dozen
+            // advances can ever happen here, so the count stays far below 100 by construction
+            // and the debounced verdict cannot have flipped, deterministically
+            var accrued = await AdvanceUntil(time,
+                () => (store.GetVerdict("dep")?.ConsecutiveFailureCount ?? 0) >= 3);
+            Assert.True(accrued, "expected the hanging probe to accrue timeout failures");
+            Assert.True(store.GetVerdict("dep")?.Healthy,
+                "threshold 100 must debounce every failure accrued so far");
+
+            // When the threshold is lowered underneath the running loop. The cycle already in
+            // flight may have captured the old cadence at its start; the one after it must see 1.
             Volatile.Write(ref threshold, 1);
 
-            // Then the very next cycle applies the new value and flips the verdict — no restart
-            var flipped = await WaitUntil(() => store.GetVerdict("dep")?.Healthy == false,
-                TimeSpan.FromSeconds(2));
+            // Then a following cycle applies the new value and flips the verdict — no restart.
+            // Under threshold 100 the flip can ONLY come from a cycle that re-read the cadence.
+            var flipped = await AdvanceUntil(time,
+                () => store.GetVerdict("dep")?.Healthy == false);
 
             await cts.CancelAsync();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runTask);
 
             Assert.True(flipped, "expected the lowered threshold to apply without restarting the loop");
+        }
+
+        /// <summary>
+        /// Advances virtual time in <see cref="PerProbeTimeout"/> steps until
+        /// <paramref name="condition"/> holds, giving the loop's continuations a short real-time
+        /// window to settle between steps. Each step is enough virtual time to complete at least
+        /// one full cycle (per-probe timeout + interval tick), and the step count is bounded, so
+        /// a spec using this can never elapse an unbounded number of cycles.
+        /// </summary>
+        static async Task<bool> AdvanceUntil(
+            Microsoft.Extensions.Time.Testing.FakeTimeProvider time, Func<bool> condition)
+        {
+            const int MaxSteps = 12;
+            for (var step = 0; step < MaxSteps; step++)
+            {
+                if (await WaitUntil(condition, TimeSpan.FromMilliseconds(200)))
+                {
+                    return true;
+                }
+
+                time.Advance(PerProbeTimeout);
+            }
+
+            return await WaitUntil(condition, SettleBudget);
         }
 
         static async Task<bool> WaitUntil(Func<bool> condition, TimeSpan budget)

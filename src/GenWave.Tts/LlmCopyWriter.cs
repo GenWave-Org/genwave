@@ -137,6 +137,14 @@ public sealed class LlmCopyWriter(
     static readonly Regex MarkdownEmphasisPattern = new(@"[*_]+", RegexOptions.Compiled);
     static readonly Regex RepeatedWhitespacePattern = new(@"\s{2,}", RegexOptions.Compiled);
 
+    // gh-#186: the meta words a model uses when talking ABOUT the copy instead of speaking it
+    // ("Here's your lead-in copy:", "Sure, here you go:"). Deliberately NOT matched against
+    // ordinary announcer phrasing — see StripChatPreamble's three-part gate; a preamble is only
+    // dropped when one of these appears in it.
+    static readonly Regex PreambleMetaWordPattern = new(
+        @"(?i)\b(here[’']?s?|copy|response|sure|certainly|okay|lead[- ]in|back[- ]announce|announcement)\b",
+        RegexOptions.Compiled);
+
     /// <summary>
     /// Single source of truth for exactly which <see cref="SegmentKind"/> values this writer calls
     /// the LLM for (SPEC F34.2, F92.2, F92.5): the two track-anchored kinds (LeadIn, BackAnnounce)
@@ -494,7 +502,8 @@ public sealed class LlmCopyWriter(
     /// </summary>
     static string? CleanCopy(string raw, int maxChars)
     {
-        var text = StripWrappingQuotes(raw.Trim());
+        var text = StripChatPreamble(raw.Trim());   // gh-#186 — must run BEFORE quote unwrapping
+        text = StripWrappingQuotes(text);
         text = NewlinePattern.Replace(text, " ");
         text = BracketStageDirectionPattern.Replace(text, string.Empty);
         text = AsteriskStageDirectionPattern.Replace(text, string.Empty);
@@ -507,13 +516,47 @@ public sealed class LlmCopyWriter(
         return text.Length > maxChars ? null : text;
     }
 
+    /// <summary>
+    /// gh-#186: drops a chat preamble in front of the copy ("Here's your lead-in copy:" followed
+    /// by the quoted body) — observed live rendering the preamble to air, because
+    /// <see cref="StripWrappingQuotes"/> only fires when the text STARTS with a quote. Three
+    /// conditions must all hold before anything is dropped, so legitimate announcer copy that
+    /// merely contains a colon survives: the first colon comes early (≤80 chars) with no quote or
+    /// line break before it; the preamble contains a meta word (<see cref="PreambleMetaWordPattern"/> —
+    /// a model talking ABOUT the copy, e.g. "Up next:" has none and is kept); and everything after
+    /// the colon is one quoted block running to the very end (a mid-copy quotation like
+    /// <c>Up next: "Blue Monday" by New Order</c> has trailing text and is kept). Returns the
+    /// quoted body still wrapped — <see cref="StripWrappingQuotes"/> unwraps it next.
+    /// </summary>
+    static string StripChatPreamble(string text)
+    {
+        var colon = text.IndexOf(':');
+        if (colon <= 0 || colon > 80)
+            return text;
+
+        var preamble = text[..colon];
+        if (preamble.AsSpan().IndexOfAny('"', '“', '\n') >= 0)
+            return text;
+        if (!PreambleMetaWordPattern.IsMatch(preamble))
+            return text;
+
+        var body = text[(colon + 1)..].Trim();
+        if (body.Length < 2)
+            return text;
+
+        var opensQuoted = body[0] is '"' or '“';
+        var closesQuoted = body[^1] is '"' or '”';
+        return opensQuoted && closesQuoted ? body : text;
+    }
+
     static string StripWrappingQuotes(string text)
     {
         if (text.Length >= 2)
         {
             var first = text[0];
             var last = text[^1];
-            if ((first == '"' && last == '"') || (first == '\'' && last == '\''))
+            if ((first == '"' && last == '"') || (first == '\'' && last == '\'')
+                || (first == '“' && last == '”'))
                 return text[1..^1].Trim();
         }
 
