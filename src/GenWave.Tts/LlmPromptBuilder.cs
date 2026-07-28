@@ -26,6 +26,15 @@ static class LlmPromptBuilder
     const int MaxSampledQuirks = 3;
 
     /// <summary>
+    /// gh-#188 — appended directly under the Quirks line (and only then): tells the model a
+    /// quirk's inline example ("item four-seven-one-two") demonstrates the bit's SHAPE, not a
+    /// value to read on air. Public so a spec pins the exact wording next to where it is emitted.
+    /// </summary>
+    public const string QuirkExampleGuidance =
+        "Any example inside a quirk illustrates its style - invent fresh specifics of your own " +
+        "each break, and never reuse an example's literal values on air.";
+
+    /// <summary>
     /// Baked house scaffold for the system prompt (SPEC F34.3): personality-neutral radio DJ, 1-2
     /// spoken sentences, no stage directions. <paramref name="personaSection"/> (SPEC F35.2, F35.3,
     /// F71.3) appends an active persona's soul + sampled quirks beneath the scaffold; null/empty
@@ -34,11 +43,17 @@ static class LlmPromptBuilder
     /// </summary>
     public static string BuildSystemPrompt(string? personaSection)
     {
+        // gh-#188: the old closing line ("You may embellish with genuine knowledge of the track,
+        // artist, or era.") was a license a small local model cannot safely hold — observed live
+        // renaming an artist on air (LaBarcaDeSua spoken as "Barcarola") and inventing origins
+        // ("rural Cuba"). Era/genre color stays welcome; specific unprovided facts do not.
         const string Scaffold =
             "You are a personality-neutral radio DJ writing live station patter. Write exactly one " +
             "or two sentences of spoken copy to be read aloud on air. Plain spoken words only - no " +
-            "stage directions, no emoji, no markdown formatting, no sound-effect cues. You may " +
-            "embellish with genuine knowledge of the track, artist, or era.";
+            "stage directions, no emoji, no markdown formatting, no sound-effect cues. You may add " +
+            "color about the era or genre, but never state specific facts about the artist or track " +
+            "that you were not given, and never alter the artist's name or the track's title - when " +
+            "unsure, stay with what the prompt provides.";
 
         return string.IsNullOrEmpty(personaSection) ? Scaffold : $"{Scaffold}\n\n{personaSection}";
     }
@@ -62,7 +77,15 @@ static class LlmPromptBuilder
         {
             var sampled = SampleQuirks(card.Quirks);
             if (sampled.Count > 0)
+            {
                 lines.Add($"Quirks: {string.Join("; ", sampled)}");
+
+                // gh-#188: quirk examples exert gravitational pull — The Archivist's "invented
+                // catalog number: 'item four-seven-one-two'" aired that literal number break
+                // after break. Only emitted when quirks are shown: a quirk-less prompt stays
+                // byte-identical to its pre-gh-#188 shape.
+                lines.Add(QuirkExampleGuidance);
+            }
         }
 
         return lines.Count == 0 ? null : string.Join('\n', lines);
