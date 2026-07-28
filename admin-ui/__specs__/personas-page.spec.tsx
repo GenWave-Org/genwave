@@ -22,6 +22,11 @@
 // to roster-page.spec.tsx (Scheduled/Bench sections, the On The Air badge, the "no activation
 // control anywhere" sweep) rather than living here. This file keeps only the CRUD/preview/
 // provenance/voice-picker coverage STORY-126 always owned.
+//
+// PLAN T128 (STORY-247, SPEC F94.2) retires the generic-confirm "Delete" button this file used to
+// cover here: delete is now a BENCH-ONLY "Fire" affordance behind the export-first `FireModal`, a
+// Scheduled/Bench-section concern — that coverage (including the 409/RACE case) moved to
+// fire-modal.spec.tsx, mirroring how T127 moved the switch's own coverage out of this file.
 
 jest.mock("next/headers", () => ({
   cookies: jest.fn().mockResolvedValue({ toString: () => "session=test-cookie" }),
@@ -47,6 +52,7 @@ const REX: PersonaDto = {
   backstory: "A grizzled late-night jock who has seen every format come and go.",
   style: "Warm, gravelly, brief.",
   voice: "af_alloy",
+  slug: "radio-rex",
   importedFrom: null,
   importedAt: null,
 };
@@ -57,6 +63,7 @@ const NOVA: PersonaDto = {
   backstory: "An upbeat morning host.",
   style: "Bright and quick.",
   voice: "",
+  slug: "nova",
   importedFrom: null,
   importedAt: null,
 };
@@ -129,15 +136,6 @@ function rowFor(name: string): HTMLElement {
   const row = nameNode.closest("tr");
   if (row === null) throw new Error(`No <tr> ancestor for "${name}"`);
   return row;
-}
-
-/** Confirms the currently-open useConfirm() dialog (mirrors catalog-library-actions.spec.tsx). */
-async function confirmDialog(name = "Delete"): Promise<void> {
-  const dialog = await screen.findByRole("dialog");
-  await act(async () => {
-    fireEvent.click(within(dialog).getByRole("button", { name }));
-    await Promise.resolve();
-  });
 }
 
 function findCall(
@@ -255,6 +253,7 @@ describe("Feature: Author personas from the console", () => {
         backstory: "Dry wit, deep crates.",
         style: "Deadpan.",
         voice: "",
+        slug: "the-professor",
         importedFrom: null,
         importedAt: null,
       };
@@ -296,46 +295,6 @@ describe("Feature: Author personas from the console", () => {
       });
 
       expect(findCall(mockFetch, "PATCH", "/api/personas/1")).toBeDefined();
-    });
-
-    it("deletes a persona after a confirm", async () => {
-      const mockFetch = makeDispatchFetchMock({ "DELETE /api/personas/2": { status: 204 } });
-      renderClient({ initialPersonas: [REX, NOVA] });
-
-      fireEvent.click(screen.getByRole("button", { name: "Delete Nova" }));
-      await confirmDialog("Delete");
-
-      await waitFor(() => {
-        expect(screen.queryByTestId("persona-name-Nova")).not.toBeInTheDocument();
-      });
-
-      expect(findCall(mockFetch, "DELETE", "/api/personas/2")).toBeDefined();
-    });
-
-    it("toasts the server's message when delete is blocked by the schedule (409, SPEC F91.9)", async () => {
-      makeDispatchFetchMock({
-        "DELETE /api/personas/1": {
-          status: 409,
-          body: {
-            title: "Persona is scheduled.",
-            detail: "Persona 1 is still scheduled and cannot be deleted: Mon 09:00–12:00.",
-          },
-        },
-      });
-      renderClient({ initialPersonas: [REX, NOVA] });
-
-      fireEvent.click(screen.getByRole("button", { name: "Delete Radio Rex" }));
-      await confirmDialog("Delete");
-
-      await waitFor(() => {
-        expect(
-          screen.getByText("Persona 1 is still scheduled and cannot be deleted: Mon 09:00–12:00.")
-        ).toBeInTheDocument();
-      });
-
-      // The store rejected the delete — nothing was ever removed (T128 owns the richer
-      // export-first workflow for this case; this button's own job is just the honest message).
-      expect(screen.getByTestId("persona-name-Radio Rex")).toBeInTheDocument();
     });
 
     it("toasts failures naming the outcome (F31.3)", async () => {

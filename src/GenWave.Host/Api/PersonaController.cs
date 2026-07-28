@@ -611,7 +611,7 @@ public sealed partial class PersonaController(
 
     static PersonaDto ToDto(Persona persona) =>
         new(
-            persona.Id, persona.Name, persona.Backstory, persona.Style, persona.Voice,
+            persona.Id, persona.Name, persona.Backstory, persona.Style, persona.Voice, persona.Slug,
             persona.ImportedFrom, persona.ImportedAt);
 
     static IReadOnlyList<PersonaTasteRuleDto> RulesBySource(

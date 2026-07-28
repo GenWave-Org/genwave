@@ -47,7 +47,7 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
     // from the C# projection" reason.
     const string SelectColumns =
         "select id::bigint as id, name, backstory, style, voice, created_at, updated_at, " +
-        "imported_from, imported_at from station.persona";
+        "imported_from, imported_at, slug from station.persona";
 
     public async Task<IReadOnlyList<Persona>> GetAllAsync(CancellationToken ct)
     {
@@ -90,7 +90,7 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
                 insert into station.persona (name, backstory, style, voice, slug, definition, enabled)
                 values (@Name, @Backstory, @Style, @Voice, @Slug, @Definition::jsonb, true)
                 returning id::bigint as id, name, backstory, style, voice, created_at, updated_at,
-                    imported_from, imported_at
+                    imported_from, imported_at, slug
                 """,
                 new { draft.Name, draft.Backstory, draft.Style, draft.Voice, Slug = slug, Definition = definition },
                 cancellationToken: ct));
@@ -149,7 +149,7 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
                     updated_at = now()
                 where id = @Id
                 returning id::bigint as id, name, backstory, style, voice, created_at, updated_at,
-                    imported_from, imported_at
+                    imported_from, imported_at, slug
                 """,
                 new { draft.Name, draft.Backstory, draft.Style, draft.Voice, Slug = slug, Definition = definition, Id = id },
                 cancellationToken: ct));

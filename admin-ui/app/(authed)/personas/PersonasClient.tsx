@@ -2,13 +2,13 @@
 
 import { Fragment, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import { useConfirm } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "@/components/ui/toast";
 import { formatDateStamp } from "@/lib/format-clock";
 import { readErrorMessage } from "@/lib/problem-details";
 import { useVoiceList } from "@/lib/use-voice-list";
 import { VoiceControl } from "../safe-content/VoiceControl";
+import { FireModal } from "./FireModal";
 import { PersonaExportLink } from "./PersonaExportLink";
 import { PersonaImportPanel } from "./PersonaImportPanel";
 import { PersonaPreview } from "./PersonaPreview";
@@ -159,6 +159,17 @@ const HEADER_CELL = "py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[
  * retired `Station:Persona:ActiveId` write (and the Activate/Deactivate button that made it) is
  * gone outright, not merely hidden — the format clock is now the only thing that decides who's on
  * the air.
+ *
+ * PLAN T128 (STORY-247, SPEC F94.2) makes Fire a BENCH-ONLY affordance: a Scheduled row renders no
+ * delete/fire control at all (F91.9's FK guard already 409s that delete server-side, so the UI
+ * doesn't offer a button that always fails — unpainting a scheduled DJ is T129's schedule editor,
+ * not a delete). A Bench row's former generic-confirm "Delete" button becomes "Fire", which opens
+ * `FireModal` — an export-first confirm — instead of `useConfirm()`; `handleFireConfirm` below is
+ * the same fetch/toast/list-splice shape `handleSubmit`'s own mutations already use, just renamed
+ * and freed of the confirm-dialog step the modal now owns itself. The RACE case (a slot painted
+ * onto this persona between this render and the click) answers with the same 409 `detail` the
+ * PLAN T127 Delete button already surfaced honestly — `handleFireConfirm` closes the modal on
+ * EITHER outcome (success or 409) so the toast is what the operator sees next, not a stale dialog.
  */
 export function PersonasClient({
   initialPersonas,
@@ -166,7 +177,6 @@ export function PersonasClient({
   onAirPersonaName = null,
   timeZone,
 }: PersonasClientProps): ReactNode {
-  const confirm = useConfirm();
   const [personas, setPersonas] = useState<PersonaDto[]>(initialPersonas);
 
   const [mode, setMode] = useState<FormMode>({ kind: "create" });
@@ -174,7 +184,11 @@ export function PersonasClient({
   const [isSaving, setIsSaving] = useState(false);
   const nameFieldRef = useRef<HTMLInputElement | null>(null);
 
-  const [deletingId, setDeletingId] = useState<number | null>(null);
+  // Fire (SPEC F94.2, STORY-247, PLAN T128) — `firingPersona` is which bench row's `FireModal` is
+  // open (null = none), `isFiring` gates the modal's own Cancel/Delete buttons while the DELETE
+  // request from `handleFireConfirm` is in flight.
+  const [firingPersona, setFiringPersona] = useState<PersonaDto | null>(null);
+  const [isFiring, setIsFiring] = useState(false);
   const [expandedTasteIds, setExpandedTasteIds] = useState<ReadonlySet<number>>(new Set());
 
   // Scheduled/Bench split (SPEC F94.1, STORY-246) — a Set for O(1) membership, built fresh each
@@ -285,42 +299,45 @@ export function PersonasClient({
     setIsSaving(false);
   }
 
-  /** Deletes a persona after confirmation. A 409 here (SPEC F91.9) means the format-clock schedule
-   * still names this persona in ≥1 slot — the store checks BEFORE this button ever runs, so the
-   * generic non-2xx branch below already surfaces the server's own slot-naming `detail` verbatim
-   * via `readErrorMessage` (PLAN T127); T128 owns a richer pre-delete workflow for that case
-   * (export-first, schedule-aware), this button's job is only to show the message honestly. */
-  async function handleDelete(persona: PersonaDto): Promise<void> {
-    const ok = await confirm({
-      title: "Delete persona",
-      consequence: `Delete "${persona.name}"? This cannot be undone.`,
-      confirmLabel: "Delete",
-      destructive: true,
-    });
-    if (!ok) return;
+  /** Fires (deletes) the persona `FireModal` is currently open for — called once its own
+   * export-first gate is satisfied (SPEC F94.2, STORY-247 AC2/AC4, PLAN T128). A 409 here means the
+   * format-clock schedule picked up a slot naming this persona between this render and the click
+   * (the RACE case, STORY-247 AC-race) — the store's own FK guard (F91.9) rejects the delete, and
+   * this closes the modal on EITHER outcome so the toast (success or the server's own slot-naming
+   * `detail`, via `readErrorMessage`) is what the operator sees next, not a stale dialog sitting on
+   * top of it. The close itself is scoped to THIS persona's id (F4 fix) — a slow DELETE response
+   * landing after the operator has already cancelled and reopened `FireModal` for a different bench
+   * row must not blow away that unrelated modal's own state. */
+  async function handleFireConfirm(): Promise<void> {
+    const persona = firingPersona;
+    if (persona === null) return;
 
-    setDeletingId(persona.id);
+    setIsFiring(true);
     try {
       const resp = await fetch(`/api/personas/${persona.id}`, { method: "DELETE" });
       if (resp.status === 204) {
         setPersonas((prev) => prev.filter((p) => p.id !== persona.id));
         if (mode.kind === "edit" && mode.id === persona.id) cancelEdit();
-        toast.success(`"${persona.name}" deleted.`);
+        toast.success(`"${persona.name}" fired.`);
       } else {
         toast.error(await readErrorMessage(resp));
       }
     } catch {
       toast.error("Network error — check your connection");
     }
-    setDeletingId(null);
+    setIsFiring(false);
+    setFiringPersona((cur) => (cur?.id === persona.id ? null : cur));
   }
 
   const isSectionEditing = mode.kind === "edit";
 
   /** One roster row — shared by both the Scheduled and Bench tables (SPEC F94.1, STORY-246) so
    * neither section duplicates the other's markup. `onAirPersonaName` name-match is documented on
-   * `PersonasClientProps` itself, not repeated per row. */
-  function renderPersonaRow(persona: PersonaDto): ReactNode {
+   * `PersonasClientProps` itself, not repeated per row. `section` (PLAN T128, SPEC F94.2) is the
+   * ONLY thing that differs between the two: a Scheduled row renders no delete/fire control at
+   * all, a Bench row gets "Fire" (opens `FireModal`) — see this component's own class doc for why
+   * a Scheduled row never gets a button that would just 409. */
+  function renderPersonaRow(persona: PersonaDto, section: "scheduled" | "bench"): ReactNode {
     const isOnAir = onAirPersonaName !== null && persona.name === onAirPersonaName;
     const isTasteExpanded = expandedTasteIds.has(persona.id);
     return (
@@ -350,17 +367,16 @@ export function PersonasClient({
                 >
                   Edit
                 </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  aria-label={`Delete ${persona.name}`}
-                  disabled={deletingId === persona.id}
-                  onClick={() => {
-                    void handleDelete(persona);
-                  }}
-                >
-                  Delete
-                </Button>
+                {section === "bench" && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    aria-label={`Fire ${persona.name}`}
+                    onClick={() => setFiringPersona(persona)}
+                  >
+                    Fire
+                  </Button>
+                )}
                 <PersonaExportLink persona={persona} />
                 <Button
                   type="button"
@@ -390,8 +406,9 @@ export function PersonasClient({
   }
 
   /** One roster section's table — shared shell (headers, scroll container) around whichever rows
-   * (Scheduled or Bench) the caller hands it. */
-  function renderPersonaTable(rows: PersonaDto[]): ReactNode {
+   * (Scheduled or Bench) the caller hands it; `section` is threaded straight to `renderPersonaRow`
+   * (PLAN T128). */
+  function renderPersonaTable(rows: PersonaDto[], section: "scheduled" | "bench"): ReactNode {
     return (
       // AC2 (SPEC F28.13): scrolls sideways inside this container at 390px — the page body
       // itself never does.
@@ -413,7 +430,7 @@ export function PersonasClient({
               </th>
             </tr>
           </thead>
-          <tbody>{rows.map(renderPersonaRow)}</tbody>
+          <tbody>{rows.map((persona) => renderPersonaRow(persona, section))}</tbody>
         </table>
       </div>
     );
@@ -560,7 +577,7 @@ export function PersonasClient({
               {scheduledPersonas.length === 0 ? (
                 <p className="mt-2 text-[0.85rem] text-mute">No personas are scheduled yet.</p>
               ) : (
-                renderPersonaTable(scheduledPersonas)
+                renderPersonaTable(scheduledPersonas, "scheduled")
               )}
             </div>
             <div>
@@ -570,12 +587,23 @@ export function PersonasClient({
               {benchPersonas.length === 0 ? (
                 <p className="mt-2 text-[0.85rem] text-mute">Every persona is scheduled.</p>
               ) : (
-                renderPersonaTable(benchPersonas)
+                renderPersonaTable(benchPersonas, "bench")
               )}
             </div>
           </div>
         )}
       </section>
+
+      {firingPersona !== null && (
+        <FireModal
+          persona={firingPersona}
+          isFiring={isFiring}
+          onCancel={() => setFiringPersona(null)}
+          onConfirmFire={() => {
+            void handleFireConfirm();
+          }}
+        />
+      )}
     </div>
   );
 }

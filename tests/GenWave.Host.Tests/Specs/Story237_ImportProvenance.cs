@@ -34,9 +34,10 @@ namespace GenWave.Host.Tests.Specs;
 /// One scriptable double standing in for BOTH <see cref="IPersonaStore"/> and
 /// <see cref="IPersonaImportStore"/> — see the file header for why a single shared backing
 /// dictionary, not two independent fakes, is the faithful shape here. Keyed by id for
-/// <see cref="Persona"/> rows and separately by slug (a <see cref="Persona"/> itself carries no
-/// slug — that lives only in the DB row and <see cref="GetIdBySlugAsync"/>) so re-import can find
-/// the same row a first import created.
+/// <see cref="Persona"/> rows and separately by slug (this fake tracks slug-to-id only in
+/// <c>idBySlug</c>, the same seam <see cref="GetIdBySlugAsync"/> reads — it never bothers stamping
+/// the real <see cref="Persona.Slug"/> onto the rows it hands back, since none of this file's own
+/// facts read it) so re-import can find the same row a first import created.
 /// </summary>
 file sealed class FakePersonaStation : IPersonaStore, IPersonaImportStore
 {

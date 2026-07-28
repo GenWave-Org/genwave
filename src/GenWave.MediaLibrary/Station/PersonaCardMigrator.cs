@@ -72,15 +72,20 @@ public sealed class PersonaCardMigrator(
 
     async Task ReconcileLegacyRowsAsync(NpgsqlConnection conn, CancellationToken ct)
     {
-        // imported_from/imported_at (SPEC F90.7) are selected but never read below — Dapper's
-        // constructor-matching hydration of Persona (a record with a generated copy constructor
-        // alongside its primary one) needs every column its query omits to still resolve via that
-        // SAME primary constructor, so every Persona projection lists both explicitly rather than
-        // leaning on their trailing-optional defaults (mirrors PersonaRepository's own SelectColumns).
+        // imported_from/imported_at/slug (SPEC F90.7, PLAN T128 review) are selected but never read
+        // below — Dapper's constructor-matching hydration of Persona (a record with a generated copy
+        // constructor alongside its primary one) needs every column its query omits to still resolve
+        // via that SAME primary constructor, so every Persona projection lists both explicitly rather
+        // than leaning on their trailing-optional defaults (mirrors PersonaRepository's own
+        // SelectColumns). Omitting one of these three — as this query briefly did when Slug was
+        // first added — throws inside the Dapper hydration, which RunAsync's own try/catch degrades to
+        // a silent boot WARN: no exception surfaces, but EnsureDefaultPersonaAsync (called right after,
+        // same try block) never runs either, so the "default" row this migration exists to guarantee
+        // quietly never appears.
         var rows = (await conn.QueryAsync<Persona>(new CommandDefinition(
             """
             select id::bigint as id, name, backstory, style, voice, created_at, updated_at,
-                imported_from, imported_at
+                imported_from, imported_at, slug
             from station.persona
             where definition = '{}'::jsonb
             """,

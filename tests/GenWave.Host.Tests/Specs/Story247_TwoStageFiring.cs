@@ -1,9 +1,13 @@
 // STORY-247 — Two-stage firing with a parachute (SPEC F94.2, F91.9, PLAN T121/T128)
 //
-// BDD specification — xUnit. The Fire modal (export offer before Delete enables, cancel = no-op)
-// is T128 browser acceptance per the T92 precedent. These facts pin the server contracts: the FK
-// guard and benched-delete, driven through the real HTTP pipeline (WebApplicationFactory<Program>,
-// real POST /api/auth/login, real DELETE/POST/GET /api/personas routes — mirrors
+// BDD specification — xUnit. The Fire modal itself (export-first gate, cancel = no-op, the
+// 409-closes-and-toasts RACE behavior) is covered at the jsdom layer by T128's own
+// admin-ui/__specs__/fire-modal.spec.tsx; the one remaining fact — the real UI wired to a real
+// browser — is an orchestrator-run playwright smoke, per the T92/T102 precedent (see
+// ScenarioScheduledPersonasAreUndeletable's own skipped Fact below). These facts here pin the
+// server contracts: the FK guard and benched-delete, driven through the real HTTP pipeline
+// (WebApplicationFactory<Program>, real POST /api/auth/login, real DELETE/POST/GET /api/personas
+// routes — mirrors
 // Story251_ExplicitOverrideEndpoint.cs's idiom) with IPersonaStore replaced by ONE stateful fake
 // (FakeBenchStore below, mirrors Story237_ImportProvenance.cs's FakePersonaStation) so a rejected
 // or accepted delete's actual effect on the row — not just the HTTP status — is provable.
@@ -340,7 +344,7 @@ public static class FeatureTwoStageFiring
             Assert.Contains(afterList!, p => p.Id == created.Id);
         }
 
-        [Fact(Skip = "Pending (T128): browser acceptance — export offered before Delete enables; cancel is a no-op")]
+        [Fact(Skip = "T128 shipped the modal + jsdom coverage (admin-ui/__specs__/fire-modal.spec.tsx: export-first gate, cancel = no-op, 409-closes-and-toasts); closure is the orchestrator-run playwright browser smoke over the real UI, per the T92/T102 precedent — no server contract left to pin here.")]
         public void FireModalFlowIsBrowserAcceptance() { }
     }
 }
