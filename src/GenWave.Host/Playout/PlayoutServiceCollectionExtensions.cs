@@ -63,7 +63,11 @@ static class PlayoutServiceCollectionExtensions
                     sp.GetRequiredService<IRotationSettingsProvider>(),
                     loudness.TargetLufs,
                     loudness.CeilingDbtp,
-                    sp.GetRequiredService<IStationEventSink>());
+                    sp.GetRequiredService<IStationEventSink>(),
+                    // Same ArtworkUrlResolver instance the push path already resolves through — it
+                    // doubles as IArtworkUrlEchoValidator (PLAN T125 review F2) so both directions
+                    // share one PublicBaseUrl/path composition (see that type's own remarks).
+                    sp.GetRequiredService<ArtworkUrlResolver>());
             })
             .AddSingleton(sp =>
             {

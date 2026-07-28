@@ -20,10 +20,18 @@ namespace GenWave.Host.Engine;
 /// <c>Station:PublicBaseUrl</c> edit reaches the very next push with no api restart, the same
 /// shape every other Live station setting uses.
 /// </para>
+/// <para>
+/// Also the real implementation of <see cref="IArtworkUrlEchoValidator"/> (PLAN T125 review F2):
+/// <see cref="IsTrusted"/> answers the OPPOSITE direction's question — whether a url the ENGINE
+/// echoed back on an engine-initiated play's output metadata is one THIS station actually stamped,
+/// versus a hostile file tag's own <c>url</c>-shaped field. Both directions share the exact same
+/// <see cref="StationOptions.PublicBaseUrl"/> + <see cref="ArtworkPathPrefix"/> composition, so
+/// keeping them on one type is what keeps that composition a single source of truth.
+/// </para>
 /// </summary>
 public sealed class ArtworkUrlResolver(
     IOptionsMonitor<StationOptions> stationOptions,
-    IArtworkTokenStore tokenStore)
+    IArtworkTokenStore tokenStore) : IArtworkUrlEchoValidator
 {
     /// <summary>Convention shared with <see cref="LiquidsoapAnnotationBuilder"/>: TTS segment ids
     /// start with this, music ids never do.</summary>
@@ -65,5 +73,15 @@ public sealed class ArtworkUrlResolver(
 
         var token = await tokenStore.GetOrCreateTokenAsync(mediaId, ct);
         return baseUrl + ArtworkPathPrefix + token;
+    }
+
+    /// <inheritdoc/>
+    public bool IsTrusted(string url)
+    {
+        var baseUrl = stationOptions.CurrentValue.PublicBaseUrl;
+        if (string.IsNullOrEmpty(baseUrl)) return false;
+
+        var trustedPrefix = baseUrl.TrimEnd('/') + ArtworkPathPrefix;
+        return url.StartsWith(trustedPrefix, StringComparison.Ordinal);
     }
 }

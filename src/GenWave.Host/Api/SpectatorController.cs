@@ -4,10 +4,12 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
+using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Options;
 using GenWave.Host.Playout;
+using GenWave.Orchestration;
 
 namespace GenWave.Host.Api;
 
@@ -45,7 +47,9 @@ public sealed class SpectatorController(
     PlayHistoryService playHistoryService,
     IMediaCatalog catalog,
     IListenerStatsSource listenerStats,
-    IOptionsMonitor<StationOptions> stationMonitor) : ControllerBase
+    IOptionsMonitor<StationOptions> stationMonitor,
+    CachingScheduleResolver scheduleResolver,
+    IActivePersonaAccessor personaAccessor) : ControllerBase
 {
     /// <summary>Hard cap on <c>GET /spectator/api/play-history</c> entries (SPEC F62.6), independent
     /// of the operator-configurable <c>Admin:PlayHistoryCapacity</c> ring size.</summary>
@@ -86,6 +90,17 @@ public sealed class SpectatorController(
     /// always present, read fresh from <see cref="IListenerStatsSource"/>, null when Icecast's
     /// admin stats cannot be determined right now (never an error, never fabricated).
     /// </para>
+    /// <para>
+    /// Both on-air shapes also carry <c>dj</c> and <c>upNext</c> (SPEC F93.1/F93.2, STORY-244, PLAN
+    /// T125) — <b>never</b> the standby shape, which stays exactly <c>{listeners, state}</c>. Both
+    /// are assembled in-memory, off <see cref="CachingScheduleResolver.TryGetCurrent"/> (no store
+    /// round trip) and <see cref="IActivePersonaAccessor.TryGetCachedName"/> (no store round trip) —
+    /// F93.4's "no DB or engine call on the poll path" holds. <c>dj</c> is the on-air persona's
+    /// display name, or null in a music-only segment/grid gap; <c>upNext</c> is exactly one
+    /// upcoming segment, collapsing to null under the SAME-PERSONA rule (see
+    /// <see cref="SpectatorUpNext"/>'s own remarks). Track state also carries <c>artworkUrl</c>
+    /// (SPEC F93.3, STORY-245) straight off the snapshot — never a fresh per-poll lookup.
+    /// </para>
     /// </summary>
     [HttpGet("now-playing")]
     [OutputCache(PolicyName = SpectatorOutputCachePolicies.NowPlaying)]
@@ -98,11 +113,33 @@ public sealed class SpectatorController(
         if (snapshot is null || snapshot.IsDrain)
             return Ok(new SpectatorStandbyNowPlaying(listeners));
 
+        var onAir = scheduleResolver.TryGetCurrent();
+        var dj = onAir?.PersonaId is { } personaId ? personaAccessor.TryGetCachedName(personaId) : null;
+        var upNext = onAir is null ? null : ResolveUpNext(onAir);
+
         if (snapshot.MediaId is { } mediaId && mediaId.StartsWith("tts:", StringComparison.Ordinal))
-            return Ok(new SpectatorPatterNowPlaying(snapshot.StartedAt, snapshot.DurationMs, listeners));
+            return Ok(new SpectatorPatterNowPlaying(snapshot.StartedAt, snapshot.DurationMs, listeners, dj, upNext));
 
         return Ok(new SpectatorTrackNowPlaying(
-            snapshot.Title, snapshot.Artist, snapshot.StartedAt, snapshot.DurationMs, listeners));
+            snapshot.Title, snapshot.Artist, snapshot.StartedAt, snapshot.DurationMs, listeners,
+            dj, upNext, snapshot.ArtworkUrl));
+    }
+
+    /// <summary>
+    /// Projects <see cref="OnAirSnapshot.NextSegment"/>/<see cref="OnAirSnapshot.BoundaryAt"/> into
+    /// the public <see cref="SpectatorUpNext"/> shape, or null when there is nothing to announce
+    /// (SPEC F93.2) — see <see cref="SpectatorUpNext"/>'s own remarks for the full same-persona
+    /// collapse rule this single comparison implements.
+    /// </summary>
+    SpectatorUpNext? ResolveUpNext(OnAirSnapshot onAir)
+    {
+        if (onAir.BoundaryAt is not { } boundaryAt) return null;
+        if (onAir.NextSegment?.PersonaId == onAir.PersonaId) return null;
+
+        var nextDj = onAir.NextSegment?.PersonaId is { } nextPersonaId
+            ? personaAccessor.TryGetCachedName(nextPersonaId)
+            : null;
+        return new SpectatorUpNext(boundaryAt, nextDj);
     }
 
     /// <summary>

@@ -65,7 +65,7 @@ sealed class LiquidsoapControl(
     public async Task<EngineMetadata> MetadataAsync(string rid, CancellationToken ct)
         => new(await ReadOutputMetadataAsync(ct));
 
-    public async Task<string> PushAsync(MediaItem item, double gainDb, CancellationToken ct)
+    public async Task<EnginePushResult> PushAsync(MediaItem item, double gainDb, CancellationToken ct)
     {
         // Annotation construction is centralised in LiquidsoapAnnotationBuilder.Build so the
         // safe-track endpoint (K2b) produces byte-identical strings without duplicating logic.
@@ -73,6 +73,10 @@ sealed class LiquidsoapControl(
         // Station:Name settings edit is stamped onto the very next push, no api restart.
         // artworkUrl (SPEC F88.4–F88.5, STORY-223, PLAN T85) is resolved HERE — the first async
         // point on this push path — rather than inside the pure, synchronous annotation builder.
+        // Returned alongside the RID (SPEC F93.3, PLAN T125) so PlayoutFeeder can carry it into
+        // pushedMeta at push time — the value is already computed here, so handing it back costs
+        // nothing extra and keeps the feeder's poll path free of a second lookup (see
+        // EnginePushResult's own remarks).
         var artworkUrl = await artworkUrlResolver.ResolveAsync(item, ct);
         var annotation = LiquidsoapAnnotationBuilder.Build(
             item, gainDb, stationId, identityProvider.Current.Name, artworkUrl);
@@ -83,7 +87,7 @@ sealed class LiquidsoapControl(
         if (!long.TryParse(response.Trim(), out _))
             throw new InvalidOperationException(
                 $"Engine rejected push (expected numeric RID): {response}");
-        return response.Trim();
+        return new EnginePushResult(response.Trim(), artworkUrl);
     }
 
     async Task<IReadOnlyDictionary<string, string>> ReadOutputMetadataAsync(CancellationToken ct)

@@ -90,4 +90,43 @@ public static class FeatureArtworkEmission
             Assert.DoesNotContain("url=", ttsAnnotation, StringComparison.Ordinal);
         }
     }
+
+    /// <summary>
+    /// SPEC F88.5 fail-closed extension (PLAN T125 review F2) — <see cref="ArtworkUrlResolver.IsTrusted"/>,
+    /// the OTHER direction of this same type: whether a url the ENGINE echoed back on an
+    /// engine-initiated advance's output metadata is one THIS station actually stamped, versus a
+    /// hostile file tag's own <c>url</c>-shaped field.
+    /// </summary>
+    public static class ScenarioIsTrustedGatesTheEngineEcho
+    {
+        [Fact]
+        public static async Task ALegitimateTokenUrlPasses()
+        {
+            var item = new MediaItem("42", "/media/42.mp3", "Title", DefaultLoudness);
+            var resolver = Resolver(PublicBaseUrl);
+            var echoedUrl = await resolver.ResolveAsync(item, CancellationToken.None);
+
+            Assert.True(resolver.IsTrusted(echoedUrl!));
+        }
+
+        [Fact]
+        public static void AHostileFileTagUrlIsRejected()
+        {
+            // A safe-rotation play's own Vorbis URL=/ID3 W-frame tag, echoed back by genwave.liq
+            // indistinguishably from our own stamped annotation at the output-metadata layer.
+            var resolver = Resolver(PublicBaseUrl);
+
+            Assert.False(resolver.IsTrusted("https://evil.example/tracking-pixel.gif"));
+        }
+
+        [Fact]
+        public static void AnEmptyPublicBaseUrlTrustsNothing()
+        {
+            // F88.5 extended to the echo side: an empty base can never be a legitimate prefix of
+            // anything, so even a url that HAPPENS to look like our own shape is never trusted.
+            var resolver = Resolver(string.Empty);
+
+            Assert.False(resolver.IsTrusted($"{PublicBaseUrl}/spectator/api/artwork/tok42"));
+        }
+    }
 }

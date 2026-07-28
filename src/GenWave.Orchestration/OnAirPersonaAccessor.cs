@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
@@ -49,13 +50,65 @@ namespace GenWave.Orchestration;
 /// so a track airing before the schedule has ever resolved simply stamps no persona rather than
 /// faulting.
 /// </para>
+///
+/// <para>
+/// <b><see cref="TryGetCachedName"/> — the DB-free display-name memo (SPEC F93.1/F93.4, STORY-244,
+/// PLAN T125):</b> the spectator now-playing poll needs the on-air persona's display NAME, but
+/// F93.4 forbids it a DB call on the poll path, and <see cref="ActivePersonaId"/> only ever answers
+/// an id. Rather than add a dedicated poller (more moving parts, and still eventually a DB read),
+/// this type piggybacks on I/O it ALREADY performs: every successful <see cref="ResolveAsync"/> —
+/// reached, in the shipped default configuration, once per unit via <c>Orchestrator</c>'s lead-in/
+/// back-announce persona resolution, and independently via <c>RankerPersonaPickProvider.TryPickAsync</c>
+/// when the ranker is bound — stamps the resolved <see cref="Persona.Name"/> into an in-memory
+/// <c>ConcurrentDictionary</c> keyed by id. <see cref="TryGetCachedName"/> only ever reads that
+/// dictionary; it never triggers a resolve itself.
+/// <para>
+/// Staleness bound: an admin rename reaches the cache on that persona's next natural
+/// <see cref="ResolveAsync"/> (about one unit later in the shipped configuration) — the same class
+/// of one-ahead trade-off F92.6 already accepts for handoff ceremony timing, not a new risk this
+/// memo introduces. A deployment whose cadence disables BOTH lead-in and back-announce AND runs the
+/// no-op pick provider (neither the shipped default) never calls <see cref="ResolveAsync"/> at all,
+/// so the memo never populates and the spectator surface reports <c>dj: null</c> even though a
+/// persona is scheduled — an honest "unknown", never a stall or a stale guess.
+/// </para>
+/// <para>
+/// <b>The NEXT persona is warmed too (PLAN T125 review F1 — a real defect, not a docs gap):</b>
+/// without this, <c>SpectatorController.ResolveUpNext</c>'s <c>upNext.dj</c> would report
+/// <see langword="null"/> ("Nonstop music" to listeners) for ANY persona that has never yet been
+/// CURRENT since process start — the incoming DJ of a schedule boundary is, by definition, exactly
+/// that persona, every single time, until the moment they actually go on air. Worst case: a gap
+/// rolls into a staffed segment, and <see cref="ResolveAsync"/> used to short-circuit to
+/// <see langword="null"/> on a null <see cref="OnAirSnapshot.PersonaId"/> before ever looking at
+/// <see cref="OnAirSnapshot.NextSegment"/> — misreporting the incoming DJ's name for their entire
+/// first segment. <see cref="ResolveAsync"/> now ALSO resolves
+/// <see cref="OnAirSnapshot.NextSegment"/>'s own <c>PersonaId</c> off the SAME snapshot it already
+/// holds, whenever it names someone other than the current persona (a same-persona boundary already
+/// gets its name from the current-persona branch, or will on its own next natural tick — re-reading
+/// it here would just be a redundant duplicate of the SAME lookup). This is deliberately
+/// UNCONDITIONAL, not gated on "not already memoized": the incremental cost is one extra
+/// <see cref="IPersonaStore.GetByIdAsync"/> call per unit — the exact same bounded-cost class as the
+/// current-persona read right above it, paid once per <c>Orchestrator</c>/ranker resolve, never on
+/// the spectator poll path (F93.4 unaffected either way) — and reading it unconditionally also
+/// refreshes an admin rename of the NEXT persona within a single unit, rather than only after that
+/// persona's own segment starts airing.
+/// </para>
+/// </para>
 /// </summary>
 public sealed class OnAirPersonaAccessor(
     CachingScheduleResolver scheduleResolver, IPersonaStore personaStore, ILogger<OnAirPersonaAccessor> logger)
     : IActivePersonaAccessor
 {
+    readonly ConcurrentDictionary<long, string> cachedNames = new();
+
     long lastWarnedPersonaId;
     long lastWarnedCardPersonaId;
+
+    // Its own dedup key (PLAN T125 review F1) — deliberately never shared with lastWarnedPersonaId:
+    // sharing one field between the current-persona and next-persona fetches would let the OTHER
+    // one's warn overwrite this latch every unit, defeating the "one warn per stale id" contract for
+    // BOTH the moment they happen to alternate (exactly the class of interference lastWarnedCardPersonaId's
+    // own remarks already call out for ResolveCardAsync).
+    long lastWarnedNextPersonaId;
 
     // Not a WarnOnce-by-id dedup (a schedule-load fault names no persona id to key off) — a simple
     // "already warned for this outage episode" latch instead, cleared the moment a resolve succeeds
@@ -65,19 +118,65 @@ public sealed class OnAirPersonaAccessor(
     /// <inheritdoc/>
     public async Task<Persona?> ResolveAsync(CancellationToken ct)
     {
-        if (await TryResolveOnAirAsync(ct) is not { PersonaId: { } personaId })
+        var onAir = await TryResolveOnAirAsync(ct);
+        if (onAir is null)
             return null;
 
-        try
+        Persona? current = null;
+        if (onAir.PersonaId is { } personaId)
         {
-            var persona = await personaStore.GetByIdAsync(personaId, ct);
-            if (persona is null)
+            var (persona, fault) = await FetchPersonaAsync(personaId, ct);
+            current = persona;
+            if (fault is not null)
+            {
+                WarnOnce(ref lastWarnedPersonaId, personaId, () => logger.LogWarning(fault,
+                    "Failed to resolve on-air persona id={PersonaId} — degrading to persona-less", personaId));
+            }
+            else if (persona is null)
             {
                 WarnOnce(ref lastWarnedPersonaId, personaId, () => logger.LogWarning(
                     "On-air segment names persona id={PersonaId} with no matching persona row — " +
                     "degrading to persona-less", personaId));
             }
-            return persona;
+        }
+
+        // Warm the NEXT persona's display name off the SAME snapshot (PLAN T125 review F1 — see this
+        // type's own remarks for the full rationale/cost bound). Skipped when it names the SAME
+        // persona as current: that id already got its name (or WarnOnce) from the branch above.
+        if (onAir.NextSegment?.PersonaId is { } nextPersonaId && nextPersonaId != onAir.PersonaId)
+        {
+            var (_, nextFault) = await FetchPersonaAsync(nextPersonaId, ct);
+            if (nextFault is not null)
+            {
+                WarnOnce(ref lastWarnedNextPersonaId, nextPersonaId, () => logger.LogWarning(nextFault,
+                    "Failed to resolve upcoming persona id={PersonaId} — degrading to no cached name",
+                    nextPersonaId));
+            }
+            // A next-persona id with no matching row degrades SILENTLY here (no WARN, unlike the
+            // current-persona branch above): the same stale id gets its one WarnOnce from that very
+            // branch the moment it actually becomes current — logging it again here, one unit early,
+            // would just double the line for the same event.
+        }
+
+        return current;
+    }
+
+    /// <summary>
+    /// Fetches <paramref name="personaId"/> and, on success, stamps its name into the DB-free
+    /// display-name memo (SPEC F93.1/F93.4) — shared by <see cref="ResolveAsync"/>'s current- and
+    /// next-persona reads so both warm the SAME memo the SAME way. Never throws (F35.5): a
+    /// cancellation propagates, everything else comes back as <c>(null, ex)</c> for the caller's own
+    /// WarnOnce dedup (each call site keys its own warn on its OWN id, so this method never decides
+    /// which dedup field applies).
+    /// </summary>
+    async Task<(Persona? Persona, Exception? Fault)> FetchPersonaAsync(long personaId, CancellationToken ct)
+    {
+        try
+        {
+            var persona = await personaStore.GetByIdAsync(personaId, ct);
+            if (persona is not null)
+                cachedNames[personaId] = persona.Name;
+            return (persona, null);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -85,9 +184,7 @@ public sealed class OnAirPersonaAccessor(
         }
         catch (Exception ex)
         {
-            WarnOnce(ref lastWarnedPersonaId, personaId, () => logger.LogWarning(ex,
-                "Failed to resolve on-air persona id={PersonaId} — degrading to persona-less", personaId));
-            return null;
+            return (null, ex);
         }
     }
 
@@ -118,6 +215,10 @@ public sealed class OnAirPersonaAccessor(
 
     /// <inheritdoc/>
     public long? ActivePersonaId => scheduleResolver.TryGetCurrent()?.PersonaId;
+
+    /// <inheritdoc/>
+    public string? TryGetCachedName(long personaId) =>
+        cachedNames.TryGetValue(personaId, out var name) ? name : null;
 
     /// <summary>
     /// Resolves the on-air snapshot, degrading to <see langword="null"/> on any

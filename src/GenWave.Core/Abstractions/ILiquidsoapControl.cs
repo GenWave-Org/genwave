@@ -24,7 +24,8 @@ public interface ILiquidsoapControl
     /// <summary>
     /// Push a prepared track onto the engine queue with its per-track gain. The annotation stamps our
     /// media id (as <c>track_id</c>), which genwave.liq exports onto the output metadata so the on-air
-    /// read can see it.
+    /// read can see it. Returns the engine's RID alongside the artwork URL this same push stamped
+    /// (SPEC F88.4, F93.3, PLAN T125) — see <see cref="EnginePushResult"/>.
     /// </summary>
-    Task<string> PushAsync(MediaItem item, double gainDb, CancellationToken ct);
+    Task<EnginePushResult> PushAsync(MediaItem item, double gainDb, CancellationToken ct);
 }

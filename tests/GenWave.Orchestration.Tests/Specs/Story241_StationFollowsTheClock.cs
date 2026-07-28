@@ -239,6 +239,24 @@ public static class FeatureStationFollowsTheClock
         }
 
         [Fact]
+        public async Task NextPersonaNameIsCachedBeforeThatPersonaEverAirs()
+        {
+            // PLAN T125 review F1 — REAL DEFECT pin, driven through the REAL OnAirPersonaAccessor
+            // (fake IPersonaStore, real CachingScheduleResolver/ScheduleResolver), with NO hand-seeding
+            // of the name memo: TryGetCachedName only ever populates as a side effect of ResolveAsync
+            // succeeding for that SAME id (see OnAirPersonaAccessor's own remarks) — without ALSO
+            // warming the NEXT persona off the SAME snapshot, DJ Beta's name would stay uncached for
+            // the entire eleven-plus hours DJ Alpha is on air, so upNext.dj would report null
+            // ("Nonstop music" to listeners) right up until the boundary Beta actually airs at.
+            var chain = BuildProductionChain(TwoDjStore(), TwoDjSchedule(), JustBeforeNoon, new FakeMediaCatalog(null));
+
+            await chain.PersonaAccessor.ResolveAsync(CancellationToken.None); // DJ Alpha's own per-unit resolve
+
+            Assert.Equal(10L, chain.PersonaAccessor.ActivePersonaId); // sanity: Beta has NOT aired yet
+            Assert.Equal("DJ Beta", chain.PersonaAccessor.TryGetCachedName(20));
+        }
+
+        [Fact]
         public async Task RankerRungZeroObservesB()
         {
             // A real RankerPersonaPickProvider (rung 0) reads the SAME OnAirPersonaAccessor every

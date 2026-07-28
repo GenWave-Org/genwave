@@ -18,6 +18,15 @@ namespace GenWave.Core.Playout;
 /// </param>
 /// <param name="IsReal">True when the on-air item carries our stamped media id (not a drain token).</param>
 /// <param name="IsReady">False until the feeder has completed at least one tick.</param>
+/// <param name="ArtworkUrl">
+/// The F88 token artwork URL from pushed metadata, if known (SPEC F88.4, F93.3) — the same value the
+/// engine push's <c>url=</c> annotation carried, threaded through <c>pushedMeta</c> at push time
+/// (feeder-pushed) or recovered from the echoed output metadata (engine-initiated); never a fresh
+/// lookup at this layer (<see cref="PlayoutFeeder"/> stays DB-free, F16.6/F93.4). An engine-initiated
+/// echo is gated through <c>IArtworkUrlEchoValidator</c> before it ever reaches here (SPEC F88.5,
+/// PLAN T125 review F2), so a hostile file tag can never surface as this field. Null when no art, no
+/// <c>Station:PublicBaseUrl</c>, an untrusted echo, or not yet known.
+/// </param>
 public sealed record OnAirState(
     string? MediaId,
     string? Title,
@@ -26,4 +35,5 @@ public sealed record OnAirState(
     DateTimeOffset StartedAt,
     int? DurationMs,
     bool IsReal,
-    bool IsReady);
+    bool IsReady,
+    string? ArtworkUrl = null);

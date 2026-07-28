@@ -245,8 +245,8 @@ public static class FeatureArtistFidelityEngineInitiatedPlays
             return Task.FromResult(new EngineMetadata(map));
         }
 
-        public Task<string> PushAsync(MediaItem item, double gainDb, CancellationToken ct)
-            => Task.FromResult(item.MediaId);
+        public Task<EnginePushResult> PushAsync(MediaItem item, double gainDb, CancellationToken ct)
+            => Task.FromResult(new EnginePushResult(item.MediaId, ArtworkUrl: null));
     }
 
     /// <summary>
@@ -291,8 +291,8 @@ public static class FeatureArtistFidelityEngineInitiatedPlays
             return Task.FromResult(new EngineMetadata(map));
         }
 
-        public Task<string> PushAsync(MediaItem item, double gainDb, CancellationToken ct)
-            => Task.FromResult(item.MediaId);
+        public Task<EnginePushResult> PushAsync(MediaItem item, double gainDb, CancellationToken ct)
+            => Task.FromResult(new EnginePushResult(item.MediaId, ArtworkUrl: null));
     }
 
     /// <summary>Yields nothing — used when the feeder should not push any tracks.</summary>

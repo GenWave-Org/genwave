@@ -44,9 +44,19 @@ sealed class FakeScheduleStore(ScheduleWeekSnapshot? initial = null) : ISchedule
 
     public int ReplaceWeekAsyncCallCount { get; private set; }
 
+    /// <summary>Counts every <see cref="LoadWeekAsync"/> call (SPEC F93.4, STORY-244, PLAN T125) — the
+    /// structural proof that <see cref="GenWave.Orchestration.CachingScheduleResolver.TryGetCurrent"/>
+    /// never reloads: only an explicit <see cref="GenWave.Orchestration.CachingScheduleResolver.ResolveAsync"/>
+    /// call (production's per-unit warm-up, or a test's one-time equivalent) should ever advance this.</summary>
+    public int LoadWeekAsyncCallCount { get; private set; }
+
     public event Action? WeekChanged;
 
-    public Task<ScheduleWeekSnapshot> LoadWeekAsync(CancellationToken ct) => Task.FromResult(current);
+    public Task<ScheduleWeekSnapshot> LoadWeekAsync(CancellationToken ct)
+    {
+        LoadWeekAsyncCallCount++;
+        return Task.FromResult(current);
+    }
 
     public Task<ScheduleReplaceResult> ReplaceWeekAsync(IReadOnlyList<ScheduleSegment> week, CancellationToken ct)
     {

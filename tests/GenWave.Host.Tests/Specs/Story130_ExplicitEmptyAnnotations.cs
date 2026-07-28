@@ -104,7 +104,7 @@ public static class FeatureExplicitEmptyAnnotations
                 ["replay_gain"] = "0.00 dB",
             });
 
-            var (_, artist, _) = meta.ExtractAnnotations();
+            var (_, artist, _, _) = meta.ExtractAnnotations();
 
             Assert.Null(artist);
         }
