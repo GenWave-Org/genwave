@@ -90,13 +90,27 @@ function renderPanel(onImported: () => void = jest.fn()): ReturnType<typeof rend
 // ---------------------------------------------------------------------------
 
 describe("Feature: Export a persona card", () => {
-  describe("Scenario: the export link targets this persona's slug", () => {
-    it("links to GET /api/personas/{slug}/export, slugified from the name", () => {
-      const rex: PersonaDto = { id: 1, name: "Radio Rex!", backstory: "", style: "", voice: "" };
-      render(<PersonaExportLink persona={rex} />);
+  describe("Scenario: the export link targets this persona's SERVER slug (PLAN T128 review fix)", () => {
+    it("links to GET /api/personas/{slug}/export using persona.slug verbatim, not a name-derived one", () => {
+      // Real dev data shape: an imported persona's stored slug can diverge from a fresh slugify of
+      // its current name (the import route's slug and the card's own `name` field are independent
+      // — see PersonaDto.slug's own remarks). This pins that the href uses the slug the server
+      // actually stored, never `personaSlug(persona.name)` — the bug that 404'd this exact link
+      // inside the Fire modal's export-first parachute.
+      const novaQ: PersonaDto = {
+        id: 1,
+        name: "Nova Q",
+        backstory: "",
+        style: "",
+        voice: "",
+        slug: "persona-2",
+        importedFrom: null,
+        importedAt: null,
+      };
+      render(<PersonaExportLink persona={novaQ} />);
 
-      const link = screen.getByRole("link", { name: "Export Radio Rex!" });
-      expect(link).toHaveAttribute("href", "/api/personas/radio-rex/export");
+      const link = screen.getByRole("link", { name: "Export Nova Q" });
+      expect(link).toHaveAttribute("href", "/api/personas/persona-2/export");
     });
   });
 });

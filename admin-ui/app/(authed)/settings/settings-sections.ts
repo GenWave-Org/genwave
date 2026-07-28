@@ -33,24 +33,25 @@ export const SECTION_LABELS: Readonly<Record<SectionId, string>> = {
  * key list in `GenWave.Host.Configuration.StationSettingsAllowlist`:
  *   - `Loudness:*`                                             → Loudness
  *   - `Station:Cadence:*`, `Station:Rotation:*`, `GW_XFADE_*`   → Playout
- *   - `Station:Name`, `Station:Voice`, `Station:Persona:ActiveId` → Station
+ *   - `Station:Name`, `Station:Voice`                          → Station
  *   - `Station:SafeScope:*`, `GW_SAFE_GAP_SECONDS`              → Safe
  *   - `Station:Scope:*`                                         → Scope
  *   - `Library:*`                                               → Library
  * Anything else falls back to "other" so a future allowlist addition is
  * surfaced rather than silently dropped from the page.
  *
- * `station` is a minimal V7 addition (SPEC F44.1/F44.5) carrying only three exact keys below —
+ * `station` is a minimal V7 addition (SPEC F44.1/F44.5) carrying only two exact keys below —
  * NOT a `Station:` prefix rule, which would also swallow Cadence/Rotation/Scope/SafeScope.
- * V8 (SPEC F44.8) extends this section with `Station:Persona:ActiveId` (moved from `other`) and
- * adds the `library` section for every `Library:*` key. The Tts and Llm namespaces (including the
- * three V8 additions — RenderBudgetSeconds, BlurbRetentionHours, MaxCopyChars) have no obvious
- * section of their own and fall through to `other`, unchanged from before V8.
+ * V8 (SPEC F44.8) adds the `library` section for every `Library:*` key. `Station:Persona:ActiveId`
+ * (a V8 addition to this section) is retired outright (SPEC F91.5, PLAN T120/T127) — the format
+ * clock is the only thing that names an on-air persona now, and this section carries no
+ * replacement key for it. The Tts and Llm namespaces (including the three V8 additions —
+ * RenderBudgetSeconds, BlurbRetentionHours, MaxCopyChars) have no obvious section of their own and
+ * fall through to `other`, unchanged from before V8.
  */
 export function sectionForKey(key: string): SectionId {
   if (key.startsWith("Loudness:")) return "loudness";
-  if (key === "Station:Name" || key === "Station:Voice" || key === "Station:Persona:ActiveId")
-    return "station";
+  if (key === "Station:Name" || key === "Station:Voice") return "station";
   // Station:Rotation:* (SPEC F41.6) joins Station:Cadence:*/GW_XFADE_* in Playout — its prefix
   // doesn't overlap Station:Scope:*/Station:SafeScope:*, so it carries none of that pair's
   // check-order pitfall (see the SafeScope-before-Scope note below).

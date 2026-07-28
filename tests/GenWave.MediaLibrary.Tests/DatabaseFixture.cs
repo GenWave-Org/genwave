@@ -119,6 +119,20 @@ public sealed class DatabaseFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
+    /// <summary>
+    /// Truncate <c>station.segment_schedule</c> and reset its identity (SPEC F91.1, STORY-240, PLAN
+    /// T118). No FK references this table — <c>persona_id</c> points OUT to <c>station.persona</c>,
+    /// not the other way around — so no CASCADE is required, the same reasoning
+    /// <see cref="ResetRequestAsync"/>'s own remarks give.
+    /// </summary>
+    public async Task ResetScheduleAsync()
+    {
+        await using var conn = await StationDataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "truncate table station.segment_schedule restart identity";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     async Task WaitForSchemaAsync()
     {
         for (var attempt = 0; attempt < 30; attempt++)

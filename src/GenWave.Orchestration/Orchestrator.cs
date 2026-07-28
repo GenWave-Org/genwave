@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Events;
 
 /// <summary>
 /// Plans and interleaves music tracks and TTS patter segments per <see cref="CadenceConfig"/>.
@@ -105,6 +106,22 @@ using GenWave.Core.Domain;
 /// Outside that window (the common case today — see that method's remarks) this degrades to
 /// exactly the one <see cref="IMediaCatalog.GetRotationCandidateAsync"/> call this Orchestrator
 /// has always made.
+///
+/// <para>
+/// <b>Handoff ceremony producer (SPEC F92.1-F92.6, STORY-243, PLAN T124):</b>
+/// <see cref="EnqueueHandoffCeremonyAsync"/> runs every unit, AFTER the deferral drain (unlike the
+/// station-id cadence check, which enqueues BEFORE that same drain — see this method's own remarks
+/// for why the ordering differs), and arms <see cref="SpeechDeferralKind.SignOff"/>/
+/// <see cref="SpeechDeferralKind.SignOn"/> into <paramref name="deferralQueue"/> the moment
+/// <paramref name="scheduleResolver"/>'s resolved <c>OnAirSnapshot.BoundaryAt</c> enters
+/// <paramref name="boundaryBiasProvider"/>'s F74.3 lookahead window (the identical knob
+/// <see cref="SelectMusicCandidateAsync"/> already reads, so "in window" means one thing
+/// station-wide) — future-dated, drained by the very same loop on a LATER unit. A
+/// <see langword="null"/> <paramref name="scheduleResolver"/> (no format-clock schedule wired)
+/// makes this producer a permanent no-op — the pre-F91 station shape. See that method's own remarks
+/// for the F92.3 dedupe rules and the explicit <see cref="SpeechDeferralQueue.Clear"/> a boundary
+/// leaving the window triggers.
+/// </para>
 /// </summary>
 public sealed class Orchestrator(
     IStationIdentityProvider identityProvider,
@@ -121,7 +138,10 @@ public sealed class Orchestrator(
     IBoundaryBiasProvider boundaryBiasProvider,
     IEnvelopeProvider? envelopeProvider = null,
     IPersonaPickProvider? personaPickProvider = null,
-    IRequestFulfillmentSource? requestFulfillmentSource = null) : INextItemProvider
+    IRequestFulfillmentSource? requestFulfillmentSource = null,
+    CachingScheduleResolver? scheduleResolver = null,
+    IPersonaStore? personaStore = null,
+    IStationEventSink? events = null) : INextItemProvider
 {
     /// <summary>
     /// How many independent rotation-tiered samples <see cref="SelectMusicCandidateAsync"/> draws
@@ -129,13 +149,6 @@ public sealed class Orchestrator(
     /// rows in even a modest library without turning every biased pick into a database hot loop.
     /// </summary>
     const int BoundarySampleAttempts = 5;
-
-    /// <summary>
-    /// SPEC F82.6 — v1's per-pick debug line names the envelope that governed the pick. v1 ships
-    /// exactly one 24/7 station-default envelope (SPEC F81.3, no schedule grid) so this is a fixed
-    /// sentinel rather than a field on <see cref="SegmentEnvelope"/> itself, which carries no id.
-    /// </summary>
-    const string EnvelopeId = "station-default";
 
     // SPEC F81.6's degradation-step vocabulary — the per-pick debug line's sixth field. "None" covers
     // both a winning rung-0 persona pick AND a rung-1 (unrelaxed) envelope-only pick: neither gave up
@@ -146,6 +159,30 @@ public sealed class Orchestrator(
     const string DegradationStepGenres = "genres";
     const string DegradationStepTerminal = "terminal";
 
+    /// <summary>
+    /// How far ahead of the resolved boundary the SignOff half of a handoff ceremony is due (SPEC
+    /// F92.1 — "sign-off due just before the boundary, sign-on due at it"). No exact interval is
+    /// spec'd; this is a judged, smallest-honest constant just large enough to keep the two pieces'
+    /// due times distinct from one another.
+    ///
+    /// <para>
+    /// <b>What that distinctness actually buys (T124 review finding F5 — corrects an earlier version
+    /// of this comment that overstated it):</b> a track is rarely shorter than this lead time, so in
+    /// the overwhelmingly common case BOTH due times (<c>BoundaryAt - SignOffLeadTime</c> and
+    /// <c>BoundaryAt</c> itself) fall inside the SAME gap between two consecutive track boundaries —
+    /// both pieces drain together, in ONE <see cref="SpeechDeferralQueue.TryDequeueDue"/> call, at the
+    /// first unit boundary at-or-after <c>BoundaryAt - SignOffLeadTime</c>. The distinct due times do
+    /// NOT themselves guarantee sign-off airs before sign-on in that shared drain — that ordering
+    /// comes from <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s own Due-ascending, kind-tiebreak
+    /// contract (SignOff sorts before SignOn), which is what actually delivers "sign-off, then
+    /// sign-on, at track seams." This constant's only job is giving that contract two genuinely
+    /// different due times to sort in the rare case a boundary is reached exactly (both would tie on
+    /// <c>Due</c> otherwise, falling through to the SAME kind tiebreak regardless). Not a live-tunable
+    /// SPEC knob the way F74.3's own boundary-bias lookahead is — just an implementation seam.
+    /// </para>
+    /// </summary>
+    static readonly TimeSpan SignOffLeadTime = TimeSpan.FromSeconds(15);
+
     // Defaults (SPEC F81.2/F81.3): every pre-F81 test/module construction site keeps compiling and
     // behaving exactly as before — no envelope constraint, no persona layer — mirrors the
     // IStationEventSink? events = null → NoOpStationEventSink.Instance idiom used elsewhere in this
@@ -155,9 +192,28 @@ public sealed class Orchestrator(
     readonly IRequestFulfillmentSource requestFulfillmentSource =
         requestFulfillmentSource ?? NoOpRequestFulfillmentSource.Instance;
 
+    // SPEC F92.4 (PLAN T124): the SAME NoOp-default idiom as the three fields above — a dropped
+    // handoff piece still needs somewhere to publish to even when no host binds a real sink (every
+    // pre-T124 construction site keeps compiling and behaving exactly as before).
+    readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
+
     readonly Queue<MediaItem> buffer = new();
     MediaItem? previousTrack;
     int unitCount;
+
+    // SPEC F92.1/F92.3 arm-once state (T124 review finding F2): the (BoundaryAt, outgoing persona
+    // id, incoming persona id) triple EnqueueHandoffCeremonyAsync last acted on — null before the
+    // first unit, or once a boundary has left the window and was explicitly cleared. Re-evaluating
+    // this producer every unit is by design (a schedule write must be noticed promptly), but ACTING
+    // on the SAME triple twice is not: see EnqueueHandoffCeremonyAsync's own remarks for the
+    // double-sign-off bug this guards against.
+    (DateTimeOffset BoundaryAt, long? OutgoingPersonaId, long? IncomingPersonaId)? lastArmedHandoff;
+
+    // T124 review finding F7: fires at most once for the life of this Orchestrator — a null
+    // scheduleResolver makes EnqueueHandoffCeremonyAsync a permanent no-op, which would otherwise be
+    // completely silent (no format-clock schedule wired is a perfectly valid, common station shape,
+    // but an operator who DID intend to wire one deserves one loud signal that it never arrived).
+    bool scheduleResolverMissingWarned;
 
     /// <inheritdoc/>
     public async Task<MediaItem?> GetNextAsync(PlayoutContext ctx, CancellationToken ct)
@@ -382,13 +438,19 @@ public sealed class Orchestrator(
         LibraryScope scope, IReadOnlyList<string> orderedRecentIds, int artistSeparation, CancellationToken ct)
     {
         var envelope = envelopeProvider.Current;
+        // Captured alongside envelope, at the same read point (SPEC F91.7) — a resolver-backed
+        // provider's Current/EnvelopeId are two independent reads of the same underlying snapshot,
+        // mirroring IActivePersonaAccessor's own documented "two independent reads" shape; a
+        // boundary landing in the narrow window between them degrades no worse than a
+        // stale-but-consistent per-pick debug line.
+        var envelopeId = envelopeProvider.EnvelopeId;
 
         var personaPick = await TryPersonaPickAsync(scope, orderedRecentIds, artistSeparation, envelope, ct);
         if (personaPick is not null)
         {
             if (SatisfiesEnvelope(personaPick, envelope))
             {
-                LogPerPickDebugLine(personaPick, DegradationStepNone);
+                LogPerPickDebugLine(personaPick, DegradationStepNone, envelopeId);
                 return personaPick;
             }
 
@@ -401,7 +463,7 @@ public sealed class Orchestrator(
         var (candidate, degradationStep) =
             await SelectEnvelopeLadderAsync(scope, orderedRecentIds, artistSeparation, envelope, ct);
         if (candidate is not null)
-            LogPerPickDebugLine(candidate, degradationStep);
+            LogPerPickDebugLine(candidate, degradationStep, envelopeId);
         return candidate;
     }
 
@@ -602,18 +664,21 @@ public sealed class Orchestrator(
     }
 
     /// <summary>
-    /// SPEC F82.6 — the one per-pick debug line: envelope id, pool size, the winning pick's top-3
-    /// scores, which taste rules fired, the exploration flag, and which degradation rung (SPEC F81.6)
-    /// actually supplied the pick. Fires on EVERY music pick — persona-off included — so the ladder's
-    /// own degradation step is always visible, mirroring the <c>LiquidsoapControl</c> per-command
-    /// convention (a per-tick line belongs at Debug, not Information — SPEC F82.6's own "per-pick"
-    /// framing puts it in the same high-frequency bucket).
+    /// SPEC F82.6/F91.7 — the one per-pick debug line: envelope id, pool size, the winning pick's
+    /// top-3 scores, which taste rules fired, the exploration flag, and which degradation rung (SPEC
+    /// F81.6) actually supplied the pick. Fires on EVERY music pick — persona-off included — so the
+    /// ladder's own degradation step is always visible, mirroring the <c>LiquidsoapControl</c>
+    /// per-command convention (a per-tick line belongs at Debug, not Information — SPEC F82.6's own
+    /// "per-pick" framing puts it in the same high-frequency bucket).
     /// <paramref name="candidate"/>'s <see cref="RotationCandidate.PersonaPick"/> is null for every
     /// envelope-only ladder pick (including the common case where no persona is even active) — the
     /// pool/top3/firedRules/exploration fields all read as empty/false in that case, never omitted
-    /// from the line.
+    /// from the line. <paramref name="envelopeId"/> is <see cref="envelopeProvider"/>'s own
+    /// <see cref="IEnvelopeProvider.EnvelopeId"/> — <c>"segment:{id}"</c> for a live schedule segment,
+    /// the station-default sentinel for a gap (SPEC F91.7) — read once by the caller alongside the
+    /// envelope itself, never re-read here.
     /// </summary>
-    void LogPerPickDebugLine(RotationCandidate candidate, string degradationStep)
+    void LogPerPickDebugLine(RotationCandidate candidate, string degradationStep, string envelopeId)
     {
         var diagnostics = candidate.PersonaPick;
         var topScores = diagnostics is null
@@ -626,7 +691,7 @@ public sealed class Orchestrator(
         logger.LogDebug(
             "Pick — envelope={EnvelopeId} pool={PoolSize} top3=[{TopScores}] firedRules=[{FiredRules}] " +
             "exploration={IsExploration} degradation={DegradationStep}",
-            EnvelopeId, diagnostics?.PoolSize ?? 0, topScores, firedRules,
+            envelopeId, diagnostics?.PoolSize ?? 0, topScores, firedRules,
             diagnostics?.IsExploration ?? false, degradationStep);
     }
 
@@ -659,7 +724,15 @@ public sealed class Orchestrator(
         // call, returning both values from the same read (F39.1) — never resolve Voice and
         // PersonaName from two separate accessor calls, which could straddle a concurrent
         // activate/deactivate and pair a stale name with a fresh voice or vice versa.
-        var pendingRenders = new List<Task<MediaItem?>>();
+        // Kind rides alongside each render task (SPEC F92.4, PLAN T124) so the await loop below can
+        // tell a handoff-kind drop (WARN + booth row) from every other kind's ordinary silent skip —
+        // the render itself is still kicked off immediately here, nothing awaited in between.
+        var pendingRenders = new List<(SegmentKind Kind, Task<MediaItem?> Render)>();
+
+        // Starts one render and remembers its Kind alongside the Task (T124 review simplify) — every
+        // call site below used to repeat pendingRenders.Add((req.Kind, tts.RenderAsync(req, ct)))
+        // verbatim; the render itself is still kicked off immediately, nothing awaited in between.
+        void Kick(SegmentRequest request) => pendingRenders.Add((request.Kind, tts.RenderAsync(request, ct)));
 
         // 1. Back-announce for the previous track
         if (cadence.BackAnnounceAfterEachTrack && prev is not null)
@@ -673,7 +746,7 @@ public sealed class Orchestrator(
                 DateTimeOffset.UtcNow,
                 identity.Id,
                 personaName);
-            pendingRenders.Add(tts.RenderAsync(req, ct));
+            Kick(req);
         }
 
         // 2. Station ID every N units (checked BEFORE incrementing unitCount). unitCount > 0 joins
@@ -693,36 +766,72 @@ public sealed class Orchestrator(
             deferralQueue.Enqueue(SpeechDeferralKind.StationId, "cadence: Station:Cadence:StationIdEveryNUnits");
         }
 
-        // Drain every deferral due at this boundary. Today the only producer is the cadence check
-        // just above, always due "now" — but this loop is written for ANY due deferral, including
-        // one enqueued by a future producer several units ago (SPEC F74.1 — "regardless of
-        // wall-clock slip"). Reads the SAME injected clock SelectMusicCandidateAsync compares
-        // NextDue against (SPEC F74.3) — one clock for both halves of this seam, never a mix of a
-        // real and a fake one.
+        // Drain every deferral due at this boundary — BEFORE the handoff producer below runs (T124
+        // review finding). Reads the SAME injected clock SelectMusicCandidateAsync compares NextDue
+        // against (SPEC F74.3) — one clock for both halves of this seam, never a mix of a real and a
+        // fake one. Written for ANY due deferral, including one enqueued several units ago (SPEC
+        // F74.1 — "regardless of wall-clock slip").
         foreach (var deferral in deferralQueue.TryDequeueDue(timeProvider.GetUtcNow()))
         {
-            if (deferral.Kind != SpeechDeferralKind.StationId) continue; // only kind wired so far
+            switch (deferral.Kind)
+            {
+                case SpeechDeferralKind.StationId:
+                    // Station IDs are station imaging (gh-#96): ALWAYS the station's own voice and
+                    // credit, never the active persona's — real-radio convention, the ID is the brand
+                    // speaking, not the DJ. Deliberately no ResolvePersonaAsync here (LeadIn/BackAnnounce
+                    // below stay persona-voiced), and deliberately not solved by touching
+                    // Station:Persona:ActiveId — a future multi-DJ scheduler slots personas in and out,
+                    // and imaging must stay the station's voice regardless of who is in the chair.
+                    // PersonaName stays null so the airing credits the station
+                    // (TtsSegmentSource: Artist = PersonaName ?? StationName). The TTS cache key
+                    // contains the voice, so a live Station:Voice edit re-keys and re-renders the ID at
+                    // its next slot with no regen tooling.
+                    var stationIdReq = new SegmentRequest(
+                        SegmentKind.StationId,
+                        identity.Voice,
+                        identity.Name,
+                        null,
+                        DateTimeOffset.UtcNow,
+                        identity.Id,
+                        PersonaName: null);
+                    Kick(stationIdReq);
+                    break;
 
-            // Station IDs are station imaging (gh-#96): ALWAYS the station's own voice and
-            // credit, never the active persona's — real-radio convention, the ID is the brand
-            // speaking, not the DJ. Deliberately no ResolvePersonaAsync here (LeadIn/BackAnnounce
-            // below stay persona-voiced), and deliberately not solved by touching
-            // Station:Persona:ActiveId — a future multi-DJ scheduler slots personas in and out,
-            // and imaging must stay the station's voice regardless of who is in the chair.
-            // PersonaName stays null so the airing credits the station
-            // (TtsSegmentSource: Artist = PersonaName ?? StationName). The TTS cache key
-            // contains the voice, so a live Station:Voice edit re-keys and re-renders the ID at
-            // its next slot with no regen tooling.
-            var req = new SegmentRequest(
-                SegmentKind.StationId,
-                identity.Voice,
-                identity.Name,
-                null,
-                DateTimeOffset.UtcNow,
-                identity.Id,
-                PersonaName: null);
-            pendingRenders.Add(tts.RenderAsync(req, ct));
+                case SpeechDeferralKind.SignOff:
+                case SpeechDeferralKind.SignOn:
+                    // SPEC F92.2 (PLAN T124): built from the deferral's OWN captured HandoffContext —
+                    // NEVER a fresh ResolvePersonaAsync/accessor read here — see HandoffContext's own
+                    // remarks for why (a piece can drain after the wall clock has already flipped past
+                    // the boundary, when the accessor would answer with the WRONG persona). A deferral
+                    // of this kind is never enqueued without one (EnqueueHandoffCeremonyAsync always
+                    // supplies it) — the null-check below is defensive only.
+                    if (deferral.Handoff is not { } handoff) break;
+                    var handoffKind = deferral.Kind == SpeechDeferralKind.SignOff
+                        ? SegmentKind.SignOff : SegmentKind.SignOn;
+                    var handoffReq = new SegmentRequest(
+                        handoffKind,
+                        handoff.Voice,
+                        identity.Name,
+                        null,
+                        DateTimeOffset.UtcNow,
+                        identity.Id,
+                        handoff.PersonaName,
+                        handoff.CounterpartName);
+                    Kick(handoffReq);
+                    break;
+            }
         }
+
+        // 2.5. Handoff ceremony producer (SPEC F92.1-F92.6, STORY-243, PLAN T124) — runs every unit,
+        // independent of the cadence config above, AFTER the drain just above (T124 review finding):
+        // the moment the wall clock reaches an already-armed boundary, the resolver's own "current
+        // segment" flips to the INCOMING one, which makes the NEXT boundary (that new segment's own
+        // end) look far away and out of window — evaluating this producer first would clear the very
+        // SignOff/SignOn the drain above was about to fire, the instant they became due. Draining
+        // first, then arming/clearing for what comes next, means an already-due ceremony always gets
+        // its chance to air before this producer ever re-evaluates the (now different) boundary
+        // ahead. See the method's own remarks for the F92.3 dedupe rules and the window-exit clear.
+        await EnqueueHandoffCeremonyAsync(identity.Voice, ct);
 
         // 3. Lead-in for the next track
         if (cadence.LeadInBeforeEachTrack)
@@ -736,24 +845,269 @@ public sealed class Orchestrator(
                 DateTimeOffset.UtcNow,
                 identity.Id,
                 personaName);
-            pendingRenders.Add(tts.RenderAsync(req, ct));
+            Kick(req);
         }
 
-        // Await each render with the budget; skip any that time out, fault, or return null.
-        foreach (var renderTask in pendingRenders)
+        // Await each render with the budget; skip any that time out, fault, or return null. A
+        // handoff-kind (SignOff/SignOn) drop additionally logs a WARN + booth-log entry (SPEC F92.4)
+        // — every other kind's drop stays the pre-existing silent skip. Classified from the
+        // COMPLETED task's own state below, never from which race member <c>Task.WhenAny</c> named
+        // the winner (T124 review finding F6): <c>Task.WhenAny</c> completes successfully the moment
+        // EITHER task completes, fault or not — it never throws or otherwise signals "the winner
+        // faulted," so a ternary keyed on "did renderTask win the race" mislabeled every synth outage
+        // that happened to beat the budget delay as "render returned null" instead of "render
+        // faulted".
+        foreach (var (kind, renderTask) in pendingRenders)
         {
-            try
+            var winner = await Task.WhenAny(renderTask, Task.Delay(renderBudget, ct));
+
+            if (winner != renderTask)
             {
-                var winner = await Task.WhenAny(renderTask, Task.Delay(renderBudget, ct));
-                if (winner == renderTask && renderTask.IsCompletedSuccessfully && renderTask.Result is { } seg)
-                    buffer.Enqueue(seg);
-                // else: timeout or cancellation → silently skip this segment
+                if (kind is SegmentKind.SignOff or SegmentKind.SignOn)
+                    LogHandoffDrop(kind, "render budget exceeded");
+                continue; // timed out — the still-running render is left unawaited, unchanged behavior
             }
-            catch
+
+            if (renderTask.IsCompletedSuccessfully && renderTask.Result is { } seg)
             {
-                // renderTask faulted → skip silently
+                buffer.Enqueue(seg);
             }
+            else if (kind is SegmentKind.SignOff or SegmentKind.SignOn)
+            {
+                LogHandoffDrop(kind, renderTask.IsFaulted ? "render faulted" : "render returned null");
+            }
+            // else: renderTask completed with a null segment → silently skip (every non-handoff kind)
         }
+    }
+
+    /// <summary>
+    /// SPEC F92.1/F92.3 (STORY-243, PLAN T124): arms the two-piece handoff ceremony once
+    /// <paramref name="scheduleResolver"/>'s resolved <c>OnAirSnapshot.BoundaryAt</c> enters
+    /// <paramref name="boundaryBiasProvider"/>'s F74.3 lookahead window — the SAME window
+    /// <see cref="SelectMusicCandidateAsync"/> already reads, so "in window" means one thing
+    /// station-wide. A <see langword="null"/> <paramref name="scheduleResolver"/> (no format-clock
+    /// schedule wired, the pre-F91 station shape) makes this a permanent no-op — logged with ONE WARN
+    /// on the very first unit (T124 review finding F7) so that inert case is never silent, then never
+    /// again for the life of this Orchestrator.
+    ///
+    /// <para>
+    /// <b>Arm once per triple, never every unit (T124 review finding F2 — the double-sign-off bug this
+    /// fixes):</b> this producer runs on EVERY unit while a boundary sits in-window, but it only ever
+    /// ACTS the first time it sees a given <c>(BoundaryAt, outgoing persona id, incoming persona id)</c>
+    /// triple — <see cref="lastArmedHandoff"/> remembers the last one it armed or cleared for, and an
+    /// unchanged triple returns immediately, touching neither <paramref name="deferralQueue"/> nor
+    /// <paramref name="personaStore"/> again. Without this, re-running the OLD unconditional
+    /// enqueue-every-unit logic on a seam landing in <c>[BoundaryAt - SignOffLeadTime, BoundaryAt)</c>
+    /// would: drain SignOff at this unit (its due has arrived) — see it drain, then IMMEDIATELY
+    /// re-<see cref="SpeechDeferralQueue.Enqueue"/> a FRESH SignOff for the very same boundary with a
+    /// due time that is now itself already in the past (the resolver's "current" segment has not yet
+    /// flipped, so <c>BoundaryAt</c>/the persona ids still read identically) — which the NEXT unit's
+    /// drain would fire AGAIN, a second sign-off airing for one boundary. The two elapsed-due guards
+    /// below (skip arming SignOff once <c>BoundaryAt - SignOffLeadTime &lt;= now</c>; skip arming
+    /// SignOn once <c>BoundaryAt &lt;= now</c>) are the belt to this triple-check's suspenders: a
+    /// piece is never handed to <see cref="SpeechDeferralQueue.Enqueue"/> with a due time that has
+    /// already elapsed, full stop, even on the very first unit a triple is ever seen.
+    /// </para>
+    ///
+    /// <para>
+    /// A CHANGED triple — the common case is a schedule write moving the boundary, or the resolver's
+    /// own "current" segment finally flipping to the incoming one once <c>now</c> passes the old
+    /// boundary — re-arms fresh: <see cref="SpeechDeferralQueue.Enqueue"/>'s own supersede-by-kind
+    /// (SPEC F74.2) discards whatever the OLD triple left pending of the same kind, and this method's
+    /// own <c>ClearCeremony</c> local retracts anything the old triple armed that the new one has no
+    /// replacement for (window exit, gap-to-gap, self-handoff — see the dedupe list below). Nothing
+    /// here is left to expire on its own.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Why <see cref="EnqueuePatterAsync"/> calls this AFTER the deferral drain, not before (T124
+    /// review finding):</b> the resolver's <c>OnAirSnapshot</c> is defined by wall-clock "now," so the
+    /// instant "now" reaches an already-armed boundary, <c>ResolveAsync</c>'s own idea of the CURRENT
+    /// segment flips to the INCOMING one — which makes the boundary THIS method would compute next
+    /// (that new segment's own end) look far away, outside the window. Calling this before the drain
+    /// would clear the very SignOff/SignOn deferrals the drain was about to fire, in the same pass
+    /// they finally became due — a real defect this ordering fixes: drain whatever a PRIOR unit armed
+    /// first, THEN decide what (if anything) to arm or clear for what comes next. A genuine schedule
+    /// WRITE that moves a boundary away is unaffected — it is detected and cleared on some EARLIER
+    /// unit, well before the (moved) due time would ever have elapsed.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Dedupe (SPEC F92.3, the T119-review build clarification):</b> the resolver's own
+    /// <c>BoundaryAt</c>/<c>NextSegment</c> stay row-accurate even across a same-persona adjacency —
+    /// THIS method is where "no ceremony airs" for that case is decided, never the resolver. Five
+    /// shapes, by outgoing/incoming persona id:
+    /// <list type="bullet">
+    /// <item>both null (a genuine gap, or a gap followed by an explicit persona-less/music-only
+    /// scheduled segment) — gap-to-gap: nothing airs.</item>
+    /// <item>equal and non-null (the F91.6 seeded grid's own midnight roll) — self-handoff: nothing
+    /// airs.</item>
+    /// <item>outgoing non-null, incoming null — SignOff only, <see cref="HandoffContext.CounterpartName"/>
+    /// null ("the music keeps rolling").</item>
+    /// <item>outgoing null, incoming non-null — SignOn only, <see cref="HandoffContext.CounterpartName"/>
+    /// null ("no predecessor").</item>
+    /// <item>both non-null and different — both pieces, each naming the other.</item>
+    /// </list>
+    /// A persona id present on the schedule row but unresolvable through <paramref name="personaStore"/>
+    /// (deleted out of band) degrades that HALF to "no DJ" (never-throws, SPEC F12.4) — the OTHER
+    /// half still enqueues if it has one; see <see cref="ResolveHandoffPersonaAsync"/>.
+    /// </para>
+    /// </summary>
+    async Task EnqueueHandoffCeremonyAsync(string stationVoice, CancellationToken ct)
+    {
+        if (scheduleResolver is null)
+        {
+            if (!scheduleResolverMissingWarned)
+            {
+                scheduleResolverMissingWarned = true;
+                logger.LogWarning(
+                    "No CachingScheduleResolver wired — the handoff ceremony producer (SPEC F92.1) is " +
+                    "a permanent no-op for this process (no format-clock schedule in play, the pre-F91 " +
+                    "station shape). Logged once.");
+            }
+            return;
+        }
+
+        // Clears both SignOff/SignOn (SPEC F92.1 revisit) — the one action every "no ceremony airs"
+        // branch below shares, so the dedupe matrix in this method's own remarks reads as a matrix of
+        // conditions rather than five repeated two-line clear blocks (T124 review simplify).
+        void ClearCeremony()
+        {
+            deferralQueue.Clear(SpeechDeferralKind.SignOff);
+            deferralQueue.Clear(SpeechDeferralKind.SignOn);
+        }
+
+        var onAir = await scheduleResolver.ResolveAsync(ct);
+        var boundaryAt = onAir.BoundaryAt;
+        var now = timeProvider.GetUtcNow();
+        var untilBoundary = boundaryAt is { } b ? b - now : (TimeSpan?)null;
+
+        if (boundaryAt is null || untilBoundary is not { } gap || gap <= TimeSpan.Zero || gap > boundaryBiasProvider.Current)
+        {
+            if (lastArmedHandoff is not null)
+            {
+                ClearCeremony();
+                lastArmedHandoff = null;
+            }
+            return;
+        }
+
+        var outgoingId = onAir.PersonaId;
+        var incomingId = onAir.NextSegment?.PersonaId;
+        var triple = (boundaryAt.Value, outgoingId, incomingId);
+
+        // Arm-once (T124 review finding F2): this exact triple was already armed/cleared by a prior
+        // unit — nothing has changed, so touch neither the queue nor personaStore again.
+        if (lastArmedHandoff == triple) return;
+        lastArmedHandoff = triple;
+
+        if (outgoingId is null && incomingId is null)
+        {
+            ClearCeremony(); // gap-to-gap
+            return;
+        }
+
+        if (outgoingId is not null && outgoingId == incomingId)
+        {
+            // F92.3 build clarification: same persona on both sides of a row-accurate boundary airs
+            // no ceremony at all — never even attempted, so this never shows up as a "drop" either.
+            ClearCeremony(); // self-handoff
+            return;
+        }
+
+        var outgoing = await ResolveHandoffPersonaAsync(outgoingId, stationVoice, ct);
+        var incoming = await ResolveHandoffPersonaAsync(incomingId, stationVoice, ct);
+
+        // Never hand the queue a piece whose due time has already elapsed (T124 review finding F2's
+        // belt-and-suspenders guard) — a boundary can enter the window with less than SignOffLeadTime
+        // left on the clock, in which case the SignOff half is simply skipped, never armed stale.
+        var signOffDue = boundaryAt.Value - SignOffLeadTime;
+        if (outgoing is null || signOffDue <= now)
+        {
+            deferralQueue.Clear(SpeechDeferralKind.SignOff);
+        }
+        else
+        {
+            deferralQueue.Enqueue(
+                SpeechDeferralKind.SignOff,
+                "handoff: boundary entered the F74.3 window",
+                signOffDue,
+                new HandoffContext(outgoing.Value.Voice, outgoing.Value.Name, incoming?.Name));
+        }
+
+        if (incoming is null || boundaryAt.Value <= now)
+        {
+            deferralQueue.Clear(SpeechDeferralKind.SignOn);
+        }
+        else
+        {
+            deferralQueue.Enqueue(
+                SpeechDeferralKind.SignOn,
+                "handoff: boundary entered the F74.3 window",
+                boundaryAt.Value,
+                new HandoffContext(incoming.Value.Voice, incoming.Value.Name, outgoing?.Name));
+        }
+    }
+
+    /// <summary>
+    /// Resolves one half of a handoff (SPEC F92.2) from <paramref name="personaStore"/> — never
+    /// throws (F12.4): a null <paramref name="personaId"/> (no DJ on this side), an unwired
+    /// <paramref name="personaStore"/>, a missing row (deleted out of band), or any store fault all
+    /// degrade to <see langword="null"/>, which <see cref="EnqueueHandoffCeremonyAsync"/> treats as
+    /// "this half is music-only" (SPEC F92.3). Voice mirrors <see cref="ResolvePersonaAsync"/>'s own
+    /// empty-sentinel rule: the persona's own voice when set, else <paramref name="stationVoice"/>.
+    /// </summary>
+    async Task<(string Voice, string Name)?> ResolveHandoffPersonaAsync(
+        long? personaId, string stationVoice, CancellationToken ct)
+    {
+        if (personaId is null || personaStore is null) return null;
+
+        try
+        {
+            var persona = await personaStore.GetByIdAsync(personaId.Value, ct);
+            if (persona is null)
+            {
+                logger.LogWarning(
+                    "Handoff boundary names persona id={PersonaId} with no matching persona row — " +
+                    "treating that half as music-only (SPEC F92.3 degrade).",
+                    personaId);
+                return null;
+            }
+
+            return (VoiceOf(persona, stationVoice), persona.Name);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Failed to resolve handoff persona id={PersonaId} — treating that half as music-only (F12.4).",
+                personaId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// SPEC F92.4: a handoff piece that failed to render (budget exceeded, faulted, or a null result
+    /// — e.g. <c>TtsSegmentSource</c>'s own drop of non-LLM-authored handoff copy, PLAN T123)
+    /// degrades that HALF of the ceremony only. WARN here, plus a booth-log entry via
+    /// <see cref="events"/> (mirrors the <c>DegradationModeChanged</c>/<c>SegmentGenerated</c> event
+    /// idiom <c>BoothLogWriter</c> already reacts to) so an operator sees it without grepping logs.
+    /// The OTHER piece of the same boundary still airs if it rendered — this method never touches
+    /// <c>pendingRenders</c>/<c>buffer</c> itself — and the next boundary retries the full ceremony
+    /// from scratch: nothing here latches a failure.
+    /// </summary>
+    void LogHandoffDrop(SegmentKind kind, string cause)
+    {
+        logger.LogWarning(
+            "Handoff piece {Kind} dropped ({Cause}) — that half of the ceremony airs nothing; the " +
+            "other piece still airs if it rendered, and the next boundary retries the full ceremony " +
+            "(SPEC F92.4).",
+            kind, cause);
+        events.Publish(new HandoffPieceDropped(kind.ToString(), cause));
     }
 
     /// <summary>
@@ -777,10 +1131,7 @@ public sealed class Orchestrator(
         {
             var persona = await personaAccessor.ResolveAsync(ct);
             if (persona is not null)
-            {
-                var voice = string.IsNullOrEmpty(persona.Voice) ? stationVoice : persona.Voice;
-                return (voice, persona.Name);
-            }
+                return (VoiceOf(persona, stationVoice), persona.Name);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -793,4 +1144,13 @@ public sealed class Orchestrator(
 
         return (stationVoice, null);
     }
+
+    /// <summary>
+    /// The empty-sentinel voice rule <see cref="ResolvePersonaAsync"/> and
+    /// <see cref="ResolveHandoffPersonaAsync"/> both apply (SPEC F35.2/F92.2): a persona's own
+    /// <see cref="Persona.Voice"/> when set, else <paramref name="stationVoice"/> — <c>""</c> is
+    /// <see cref="Persona"/>'s own documented "use the station's default" sentinel, never "unset".
+    /// </summary>
+    static string VoiceOf(Persona persona, string stationVoice) =>
+        string.IsNullOrEmpty(persona.Voice) ? stationVoice : persona.Voice;
 }

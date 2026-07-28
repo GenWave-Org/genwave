@@ -45,12 +45,6 @@ public static class StationSettingsAllowlist
         // call without an api restart.  NumberList mirrors the long[] shape; K4 wires the PUT
         // validation and the SettingValidator entry.
         new("Station:SafeScope:LibraryIds",                   SettingApplyMode.Live,          SettingKind.NumberList, ""),
-        // Active DJ persona (SPEC F35.2, F36.2) — live so activating/deactivating a persona (or
-        // PersonaController's delete-clears-active write, F35.5) takes effect on the very next
-        // render, no api restart.  0 = none; a stale id is legal (ActivePersonaAccessor degrades
-        // with a WARN) so the validator only checks non-negativity, never row existence.
-        new("Station:Persona:ActiveId",                       SettingApplyMode.Live,          SettingKind.Number,     ""),
-
         // Rotation anti-repeat/artist-separation knobs (SPEC F41.6, closes gitea-#210/gitea-#213) — live so a
         // PUT here reaches the very next selection (Orchestrator) / ring write (PlayoutFeeder) with
         // no api restart. 0 legally disables either knob.

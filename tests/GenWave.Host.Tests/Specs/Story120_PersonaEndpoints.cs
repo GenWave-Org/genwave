@@ -1,10 +1,18 @@
-// STORY-120 — Persona CRUD + one live active persona (WIRE)
+// STORY-120 — Persona CRUD (WIRE)
 //
 // BDD specification — xUnit. Drives the deployed entry points (PersonaController routes) through
-// direct controller construction with a fake IPersonaStore/IStationSettingsStore at the boundary
-// (mirrors Story112's RatingController-spec idiom) — no live stack required; the real-Postgres
-// behavior behind IPersonaStore is Story118's job. NO If-Match anywhere — documented F18.6
-// deviation (single writer, no background contender).
+// direct controller construction with a fake IPersonaStore at the boundary (mirrors Story112's
+// RatingController-spec idiom) — no live stack required; the real-Postgres behavior behind
+// IPersonaStore is Story118's job. NO If-Match anywhere — documented F18.6 deviation (single
+// writer, no background contender).
+//
+// The "one active persona setting" scenario this file used to own (Station:Persona:ActiveId,
+// delete-clears-active) is RETIRED (SPEC F91.5/F91.9, PLAN T120) — the format-clock schedule
+// replaces it; the key's own retirement is Story242_ActiveIdKeyRetired.cs. PersonaController.Delete's
+// new F91.9 FK-guard scaffolding (a scheduled persona's delete raises a 409, T121 finishes the real
+// shape) is covered in this file's own ScenarioRejectingInvalidWrites — the SQLSTATE→PersonaWriteResult
+// mapping itself lives in PersonaRepository (T120 review F4), so this file's fake just returns
+// PersonaWriteResult.ScheduledElsewhere directly, exactly like every other IPersonaStore double here.
 //
 // The two posture negatives (401 without a cookie, 415 without JSON) drive the real HTTP pipeline
 // via WebApplicationFactory<Program> (mirrors Story112's RatingApiWebFactory) since they are
@@ -16,17 +24,14 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
-using GenWave.Host.Configuration;
 using GenWave.Host.Options;
 
 namespace GenWave.Host.Tests.Specs;
@@ -116,35 +121,6 @@ file sealed class NotUsedPersonaTasteReader : IPersonaTasteReader
 }
 
 /// <summary>
-/// Scriptable <see cref="IStationSettingsStore"/> double (mirrors Story100's
-/// <c>FakeSettingsStore</c>) that records every write so a scenario can assert the
-/// delete-clears-active overlay write (F35.5) happened — or didn't.
-/// </summary>
-file sealed class FakeStationSettingsStore : IStationSettingsStore
-{
-    readonly Dictionary<string, string> overrides = new(StringComparer.OrdinalIgnoreCase);
-
-    public List<(string Key, object Value)> WriteCalls { get; } = [];
-
-    public Task WriteAsync(string key, object value, CancellationToken cancellationToken = default)
-    {
-        if (!StationSettingsAllowlist.ByKey.ContainsKey(key))
-            throw new ArgumentException($"Key '{key}' is not allowlisted.", nameof(key));
-
-        overrides[key] = value.ToString() ?? string.Empty;
-        WriteCalls.Add((key, value));
-        return Task.CompletedTask;
-    }
-
-    public Task<IReadOnlyDictionary<string, string>> ReadAllAsync(CancellationToken cancellationToken = default)
-    {
-        IReadOnlyDictionary<string, string> result =
-            new Dictionary<string, string>(overrides, StringComparer.OrdinalIgnoreCase);
-        return Task.FromResult(result);
-    }
-}
-
-/// <summary>
 /// Minimal <see cref="IOptionsMonitor{T}"/> that returns <see cref="CurrentValue"/> on every read.
 /// File-scoped: a file-scoped type cannot cross files, so every spec file with this need defines
 /// its own copy (mirrors Story084/Story096's precedent).
@@ -202,27 +178,6 @@ file sealed class NotUsedTtsVoiceLister : ITtsVoiceLister
         throw new NotSupportedException("Not exercised by Story120's CRUD scenarios.");
 }
 
-/// <summary>
-/// Minimal <see cref="ILogger{T}"/> that collects Warning-and-above messages for assertion
-/// (mirrors GenWave.Tts.Tests' <c>CapturingLogger&lt;T&gt;</c>). Test-scope only.
-/// </summary>
-file sealed class CapturingLogger<T> : ILogger<T>
-{
-    public List<string> Warnings { get; } = [];
-
-    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-    public bool IsEnabled(LogLevel logLevel) => true;
-
-    public void Log<TState>(
-        LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-        Func<TState, Exception?, string> formatter)
-    {
-        if (logLevel >= LogLevel.Warning)
-            Warnings.Add(formatter(state, exception));
-    }
-}
-
 // ── WebApplicationFactory for auth/content-type AC tests ─────────────────────────────────────────
 
 /// <summary>
@@ -266,30 +221,25 @@ file sealed class PersonaApiWebFactory(bool withAdminPassword) : WebApplicationF
 
 public static class FeaturePersonaEndpoints
 {
-    static StationOptions BuildStationOptions(long activeId = 0) => new()
+    static StationOptions BuildStationOptions() => new()
     {
         Id = "genwave-1",
         Name = "Test Station",
         Voice = "af_heart",
         Scope = new StationScopeOptions { LibraryIds = [1] },
         SafeScope = new StationScopeOptions { LibraryIds = [1] },
-        Persona = new StationPersonaOptions { ActiveId = activeId },
     };
 
     static PersonaController BuildController(
         IPersonaStore store,
-        IStationSettingsStore settingsStore,
         IOptionsMonitor<StationOptions> stationMonitor) =>
         new(
-            store, settingsStore, stationMonitor,
+            store, stationMonitor,
             new NotUsedPersonaPreviewWriter(), new NotUsedActivePersonaAccessor(),
             new NotUsedAdminMediaLookup(), new FakeStationScopeProvider(LibraryScope.None),
             new NotUsedPersonaMemory(), new NotUsedPersonaTasteReader(),
             new NotUsedPersonaImportStore(), new NotUsedTtsVoiceLister(),
             NullLogger<PersonaController>.Instance);
-
-    static IConfiguration BuildConfig(IEnumerable<KeyValuePair<string, string?>> values) =>
-        new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 
     // ---------------------------------------------------------------------
     // HAPPY PATH — CRUD round-trips through the production routes
@@ -304,8 +254,7 @@ public static class FeaturePersonaEndpoints
             var now = DateTime.UtcNow;
             var created = new Persona(7, "Neon Nightowl", "Spins vinyl til dawn.", "moody, late-night", "af_heart", now, now);
             var store = new FakePersonaStore { CreateResult = new PersonaWriteResult.Created(created) };
-            var controller = BuildController(
-                store, new FakeStationSettingsStore(), new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
+            var controller = BuildController(store, new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
 
             var result = await controller.Create(
                 new PersonaRequest("Neon Nightowl", "Spins vinyl til dawn.", "moody, late-night", "af_heart"),
@@ -333,8 +282,7 @@ public static class FeaturePersonaEndpoints
                     new Persona(2, "Night Owl", "Spins vinyl.", "moody", "af_sky", now, now),
                 ],
             };
-            var controller = BuildController(
-                store, new FakeStationSettingsStore(), new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
+            var controller = BuildController(store, new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
 
             var result = await controller.List(CancellationToken.None);
 
@@ -352,8 +300,7 @@ public static class FeaturePersonaEndpoints
             var now = DateTime.UtcNow;
             var updated = new Persona(3, "Anchor Alice", "New backstory", "crisp", "", now, now);
             var store = new FakePersonaStore { UpdateResult = new PersonaWriteResult.Updated(updated) };
-            var controller = BuildController(
-                store, new FakeStationSettingsStore(), new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
+            var controller = BuildController(store, new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
 
             var result = await controller.Update(
                 3, new PersonaRequest("Anchor Alice", "New backstory", "crisp", null), CancellationToken.None);
@@ -368,98 +315,14 @@ public static class FeaturePersonaEndpoints
         [Fact]
         public async Task DeleteReturns204()
         {
-            // (F35.4, AC1). Deleted id (9) is NOT the active persona (0 = none) — the overlay
-            // write must stay untouched (F35.5's negative half; a regression that clears on every
-            // delete, not just the active one, must fail this fact).
+            // (F35.4, AC1).
             var store = new FakePersonaStore { DeleteResult = new PersonaWriteResult.Deleted() };
-            var settingsStore = new FakeStationSettingsStore();
-            var controller = BuildController(
-                store, settingsStore, new FakeOptionsMonitor<StationOptions>(BuildStationOptions(activeId: 0)));
+            var controller = BuildController(store, new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
 
             var result = await controller.Delete(9, CancellationToken.None);
 
             Assert.IsType<NoContentResult>(result);
             Assert.Equal(9, Assert.Single(store.DeleteCalls));
-            Assert.Empty(settingsStore.WriteCalls);
-        }
-    }
-
-    // ---------------------------------------------------------------------
-    // HAPPY PATH — the one active persona setting
-    // ---------------------------------------------------------------------
-
-    public sealed class ScenarioActivePersonaSetting
-    {
-        [Fact]
-        public async Task ActiveIdAppearsInSettingsWithLiveApplyMode()
-        {
-            // GET /api/settings carries Station:Persona:ActiveId, applyMode live (F35.2, F36.2, AC2).
-            var config = BuildConfig([new("Station:Persona:ActiveId", "0")]);
-            var settingsStore = new FakeStationSettingsStore();
-            var controller = new SettingsController(
-                config, settingsStore, new SettingValidator(config), NullLogger<SettingsController>.Instance);
-
-            var result = await controller.Get(CancellationToken.None);
-
-            var ok = Assert.IsType<OkObjectResult>(result);
-            var items = Assert.IsAssignableFrom<IEnumerable<SettingDto>>(ok.Value).ToList();
-            var activeId = items.Single(i =>
-                string.Equals(i.Key, "Station:Persona:ActiveId", StringComparison.OrdinalIgnoreCase));
-
-            Assert.Equal("live", activeId.ApplyMode);
-            Assert.Equal("number", activeId.Kind);
-            Assert.Equal("0", activeId.Value);
-        }
-
-        [Fact]
-        public async Task PutPersistsActiveIdToTheOverlay()
-        {
-            // PUT round-trip; 0 = none (F35.2, AC2).
-            var config = BuildConfig([new("Station:Persona:ActiveId", "0")]);
-            var settingsStore = new FakeStationSettingsStore();
-            var controller = new SettingsController(
-                config, settingsStore, new SettingValidator(config), NullLogger<SettingsController>.Instance);
-
-            var putResult = await controller.Put(
-                [new SettingUpdateRequest("Station:Persona:ActiveId", "5")], CancellationToken.None);
-
-            Assert.IsType<OkObjectResult>(putResult);
-            var write = Assert.Single(settingsStore.WriteCalls);
-            Assert.Equal("Station:Persona:ActiveId", write.Key);
-            Assert.Equal("5", write.Value);
-        }
-
-        [Fact]
-        public async Task DeletingTheActivePersonaClearsTheOverlayInTheSameRequest()
-        {
-            // DELETE /api/personas/{active} → 204 AND ActiveId cleared (F35.5, AC3).
-            var store = new FakePersonaStore { DeleteResult = new PersonaWriteResult.Deleted() };
-            var settingsStore = new FakeStationSettingsStore();
-            var controller = BuildController(
-                store, settingsStore, new FakeOptionsMonitor<StationOptions>(BuildStationOptions(activeId: 7)));
-
-            var result = await controller.Delete(7, CancellationToken.None);
-
-            Assert.IsType<NoContentResult>(result);
-            var write = Assert.Single(settingsStore.WriteCalls);
-            Assert.Equal(PersonaController.ActiveIdKey, write.Key);
-            Assert.Equal(0, write.Value);
-        }
-
-        [Fact]
-        public async Task AStaleActiveIdResolvesToPersonaLessWithAWarn()
-        {
-            // Accessor yields null + WARN — never a throw (F35.5, AC4).
-            var store = new FakePersonaStore { GetByIdResult = null };
-            var logger = new CapturingLogger<ActivePersonaAccessor>();
-            var accessor = new ActivePersonaAccessor(
-                new FakeOptionsMonitor<StationOptions>(BuildStationOptions(activeId: 42)), store, logger);
-
-            var persona = await accessor.ResolveAsync(CancellationToken.None);
-
-            Assert.Null(persona);
-            Assert.Single(logger.Warnings);
-            Assert.Equal(42, Assert.Single(store.GetByIdCalls));
         }
     }
 
@@ -473,9 +336,7 @@ public static class FeaturePersonaEndpoints
         public async Task BlankNameReturns400()
         {
             // (F35.4, AC5).
-            var controller = BuildController(
-                new FakePersonaStore(), new FakeStationSettingsStore(),
-                new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
+            var controller = BuildController(new FakePersonaStore(), new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
 
             var result = await controller.Create(new PersonaRequest("   ", null, null, null), CancellationToken.None);
 
@@ -488,8 +349,7 @@ public static class FeaturePersonaEndpoints
         {
             // (F35.4, AC5).
             var store = new FakePersonaStore { CreateResult = new PersonaWriteResult.NameConflict() };
-            var controller = BuildController(
-                store, new FakeStationSettingsStore(), new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
+            var controller = BuildController(store, new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
 
             var result = await controller.Create(
                 new PersonaRequest("Existing Name", null, null, null), CancellationToken.None);
@@ -501,18 +361,13 @@ public static class FeaturePersonaEndpoints
         [Fact]
         public async Task UnknownIdReturns404()
         {
-            // PATCH/DELETE on a missing id (F35.4, AC5). ActiveId is deliberately set to the SAME
-            // id being deleted (999_999) — a NotFound delete must still clear nothing (F35.5's
-            // negative half; a regression that writes the overlay outside the `is Deleted` branch
-            // must fail this fact).
+            // PATCH/DELETE on a missing id (F35.4, AC5).
             var store = new FakePersonaStore
             {
                 UpdateResult = new PersonaWriteResult.NotFound(),
                 DeleteResult = new PersonaWriteResult.NotFound(),
             };
-            var settingsStore = new FakeStationSettingsStore();
-            var controller = BuildController(
-                store, settingsStore, new FakeOptionsMonitor<StationOptions>(BuildStationOptions(activeId: 999_999)));
+            var controller = BuildController(store, new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
 
             var patchResult = await controller.Update(
                 999_999, new PersonaRequest("Anyone", null, null, null), CancellationToken.None);
@@ -520,7 +375,27 @@ public static class FeaturePersonaEndpoints
 
             var deleteResult = await controller.Delete(999_999, CancellationToken.None);
             Assert.IsType<NotFoundObjectResult>(deleteResult);
-            Assert.Empty(settingsStore.WriteCalls);
+        }
+
+        [Fact]
+        public async Task DeletingAScheduledPersonaReturns409()
+        {
+            // PLAN T120/T121 (SPEC F91.9): PersonaRepository queries station.segment_schedule and
+            // maps a non-empty result (or the FK RESTRICT race backstop, SQLSTATE 23503) to
+            // PersonaWriteResult.ScheduledElsewhere itself (T120 review F4 — the store, never this
+            // controller, turns a raw Postgres SQLSTATE into a PersonaWriteResult case). This fact
+            // just pins the shape (409, ProblemDetails) — the slot-naming 409 body itself is
+            // Story247_TwoStageFiring.cs's own coverage (ScenarioScheduledPersonasAreUndeletable).
+            var store = new FakePersonaStore
+            {
+                DeleteResult = new PersonaWriteResult.ScheduledElsewhere([new ScheduledSlot(DayOfWeek.Monday, 540, 720)]),
+            };
+            var controller = BuildController(store, new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
+
+            var result = await controller.Delete(5, CancellationToken.None);
+
+            var conflict = Assert.IsType<ConflictObjectResult>(result);
+            Assert.IsType<ProblemDetails>(conflict.Value);
         }
 
         [Fact]

@@ -56,9 +56,9 @@ export function formatUpSince(iso: string, options: ClockFormatOptions = {}): st
  * separator of its own — in the given zone or the browser's local zone by default. Distinct from
  * `formatUpSince` (which renders `HH:MM · Mon D`, no year, for the "API up since" tile): a caller
  * that wants a single clean date FIELD — not a time-plus-month-day pair — needs a formatter that
- * doesn't fold its own ` · ` into the result. Used by the Personas provenance badge (SPEC F90.7,
- * T105) so "Imported · &lt;source&gt; · &lt;date&gt;" stays a genuine three-segment string instead
- * of five.
+ * doesn't fold its own ` · ` into the result. Used by the Personas provenance badge (SPEC
+ * F90.7/F94.4, T105/T130) so "Hired · &lt;source&gt; · &lt;date&gt;" stays a genuine three-segment
+ * string instead of five.
  */
 export function formatDateStamp(iso: string, options: ClockFormatOptions = {}): string {
   const date = new Date(iso);

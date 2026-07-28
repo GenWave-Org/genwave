@@ -29,9 +29,10 @@ type DetailState =
  * with a click-through detail panel that loads author/description/sample patter per entry via
  * `GET /api/catalog/entries/{slug}` — one fetch per click, hash-verified and cached server-side
  * (the index route deliberately never eagerly fetches every entry's meta.json just to build the
- * grid, F90.2). Import (SPEC F90.5/F90.6, STORY-235, PLAN T103) opens `PersonaCardReviewModal`
- * with the entry's already-fetched raw card text — no second fetch, no import request until the
- * operator confirms inside that modal (the trust ruling's gate lives there, not here).
+ * grid, F90.2). Hire (SPEC F94.4's presentation-only catalog verb over the unchanged F90.5/F90.6
+ * import request, STORY-235, PLAN T103) opens `PersonaCardReviewModal` with the entry's
+ * already-fetched raw card text — no second fetch, no import request until the operator confirms
+ * inside that modal (the trust ruling's gate lives there, not here).
  */
 export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps): ReactNode {
   const router = useRouter();
@@ -114,10 +115,12 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
    * navigation. Warnings surface as toasts — the same danger styling
    * `PersonaImportPanel`'s inline warning list uses — because they'd otherwise be stranded the
    * instant this page unmounts; the shared `Toaster` lives in the authed layout, so a toast queued
-   * here outlives the navigation. */
+   * here outlives the navigation. Success copy speaks hiring language (SPEC F94.4, PLAN T130):
+   * "hired" for a new row, "updated" for an existing one — the same `created` split
+   * `PersonaImportPanel`'s own (unchanged, Import-speaking) success copy already uses. */
   function handleImported(result: PersonaCardReviewImportResult): void {
     setReviewing(false);
-    toast.success(`"${result.name}" ${result.created ? "imported" : "updated"}.`);
+    toast.success(`"${result.name}" ${result.created ? "hired" : "updated"}.`);
     for (const warning of result.warnings) toast.error(warning);
     router.push("/personas");
   }
@@ -162,6 +165,7 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
           cardText={detail.detail.card}
           catalogSlug={detail.slug}
           samples={detail.detail.samplePatter ?? []}
+          verb="hire"
           onCancel={() => setReviewing(false)}
           onImported={handleImported}
         />
@@ -219,11 +223,12 @@ function DetailPanel({
           {detail.audience === "mature" && <MatureBadge />}
         </div>
 
-        {/* Opens the full-card review modal (SPEC F90.5/F90.6, STORY-235, PLAN T103) — this click
-            itself issues no request; the modal reads the card text this panel already has in
-            hand from the entry fetch above. */}
+        {/* "Hire" (SPEC F94.4's catalog verb pass, gh-#169, PLAN T130) opens the full-card review
+            modal (SPEC F90.5/F90.6, STORY-235, PLAN T103) — this click itself issues no request;
+            the modal reads the card text this panel already has in hand from the entry fetch
+            above, and its own confirm button speaks the same verb via `verb="hire"` below. */}
         <Button type="button" variant="primary" onClick={onImportClick}>
-          Import
+          Hire
         </Button>
       </div>
 

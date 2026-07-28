@@ -28,13 +28,22 @@ namespace GenWave.Core.Playout;
 /// overwrote the first). Defaults to <see cref="NoOpStationEventSink"/>; the host binds the sink
 /// that pushes play history.
 /// </param>
+/// <param name="artworkUrlEchoValidator">
+/// Gates an engine-initiated advance's echoed <c>url</c> annotation (SPEC F88.5, PLAN T125 review
+/// F2) before it is ever trusted as this station's own artwork url — see
+/// <see cref="IArtworkUrlEchoValidator"/>'s own remarks for why an unconditional echo is unsafe.
+/// Defaults to <see langword="null"/>, which fails CLOSED (every echoed url is untrusted) rather
+/// than open: a deployment/test that never wires this seam gets no artwork url from an
+/// engine-initiated play, never a fabricated one.
+/// </param>
 public sealed class PlayoutFeeder(
     ILiquidsoapControl ls,
     INextItemProvider next,
     IRotationSettingsProvider rotationProvider,
     double targetLufs = -16.0,
     double ceilingDbtp = -1.0,
-    IStationEventSink? events = null)
+    IStationEventSink? events = null,
+    IArtworkUrlEchoValidator? artworkUrlEchoValidator = null)
 {
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
 
@@ -64,7 +73,18 @@ public sealed class PlayoutFeeder(
     // (SPEC F50.2) — an engine-initiated entry (populated from ExtractAnnotations below) always
     // carries null, since duration never rides the annotate line. PersonaPick (SPEC F82.6/F83.1/
     // F86.1, PLAN T73) rides the same push-time capture: an engine-initiated entry always carries
-    // null too — the feeder never pushed it, so there was never a persona pick behind it.
+    // null too — the feeder never pushed it, so there was never a persona pick behind it. ArtworkUrl
+    // (SPEC F88.4, F93.3, PLAN T125) rides the same two paths: a feeder push captures the SAME
+    // url= the annotation itself carries, straight off ILiquidsoapControl.PushAsync's own
+    // EnginePushResult — no second lookup; an engine-initiated advance recovers it from the output
+    // metadata's own echoed `url` field via EngineMetadata.ExtractAnnotations, exactly like
+    // title/artist/gainDb just above. Either way this is zero additional DB/engine calls (SPEC
+    // F16.6/F93.4) — the value was already in hand from I/O the feeder performs regardless.
+    //
+    // The engine-initiated echo is NEVER trusted as-is (PLAN T125 review F2, fail-closed): unlike
+    // title/artist/gainDb, a `url`-shaped field can just as easily be a FILE's own embedded tag
+    // (Vorbis URL=, ID3 W-frames) as our own stamped annotation — see artworkUrlEchoValidator and
+    // IArtworkUrlEchoValidator's own remarks for why the two are indistinguishable without a gate.
     //
     // Lifetime is decoupled from the anti-repeat ring (SPEC F57.1 — closes gitea-#229): an entry
     // survives while its id is (a) the current on-air id, (b) a member of the current pushed chain,
@@ -77,7 +97,7 @@ public sealed class PlayoutFeeder(
     // Bare-id eviction keyed only to a ring dequeue stays retired: an id occupying multiple ring
     // slots keeps its metadata until the LAST occurrence leaves. See pendingAirQueue below for how
     // claim (d) itself stays bounded — it is not simply cleared on the id's OWN observed advance.
-    readonly Dictionary<string, (string? Title, string? Artist, double GainDb, int? DurationMs, PersonaPickDiagnostics? PersonaPick)> pushedMeta
+    readonly Dictionary<string, (string? Title, string? Artist, double GainDb, int? DurationMs, PersonaPickDiagnostics? PersonaPick, string? ArtworkUrl)> pushedMeta
         = new(StringComparer.Ordinal);
 
     // Media ids whose pushedMeta entry is feeder-authoritative — set at PushAsync time from the
@@ -163,8 +183,15 @@ public sealed class PlayoutFeeder(
                 if (!feederOwnedIds.Contains(mediaId))
                 {
                     Remember(mediaId);
-                    var (title, artist, gainDb) = meta.ExtractAnnotations();
-                    pushedMeta[mediaId] = (title, artist, gainDb, DurationMs: null, PersonaPick: null);
+                    var (title, artist, gainDb, echoedArtworkUrl) = meta.ExtractAnnotations();
+                    // Fail-closed gate (SPEC F88.5, PLAN T125 review F2): an echoed url is trusted
+                    // ONLY when artworkUrlEchoValidator says it matches THIS station's own configured
+                    // base — never on the mere presence of the field (see this feeder's own
+                    // ArtworkUrl remarks above and IArtworkUrlEchoValidator's).
+                    var artworkUrl = echoedArtworkUrl is not null && (artworkUrlEchoValidator?.IsTrusted(echoedArtworkUrl) ?? false)
+                        ? echoedArtworkUrl
+                        : null;
+                    pushedMeta[mediaId] = (title, artist, gainDb, DurationMs: null, PersonaPick: null, ArtworkUrl: artworkUrl);
                 }
                 else
                 {
@@ -262,12 +289,14 @@ public sealed class PlayoutFeeder(
                 if (item is null) break;
 
                 var gainDb = Gain.NormGainDb(item.Loudness, targetLufs, ceilingDbtp);
-                await ls.PushAsync(item, gainDb, ct);
+                var pushResult = await ls.PushAsync(item, gainDb, ct);
                 // Stamped from the MediaItem we already hold — zero DB reads per poll (SPEC F50.2,
                 // F16.6 stands). item.DurationMs carries the tts:* segment's measured cue-derived
                 // duration (F66.1) or the catalog's stored value for music; only an engine-initiated
                 // advance (elsewhere in this method) is null, rehydrated later at the Host layer (F66.2).
-                pushedMeta[item.MediaId] = (item.Title, item.Artist, gainDb, item.DurationMs, item.PersonaPick);
+                // ArtworkUrl (SPEC F88.4, F93.3, PLAN T125) is the SAME url= this exact push already
+                // stamped, handed back on EnginePushResult — never re-resolved.
+                pushedMeta[item.MediaId] = (item.Title, item.Artist, gainDb, item.DurationMs, item.PersonaPick, pushResult.ArtworkUrl);
                 feederOwnedIds.Add(item.MediaId);
                 MarkPendingAir(item.MediaId);   // claim (d) starts here (SPEC F57.1(d), gh-#88)
                 chainIds.Add(item.MediaId);
@@ -291,7 +320,7 @@ public sealed class PlayoutFeeder(
         // Publish the updated on-air state so the Host layer can serve it without a telnet call.
         // We only reach this point when id was non-null (the early return above guards cold-start).
         string? currentMediaId = onAirIsReal ? onAirId : null;
-        (string? Title, string? Artist, double GainDb, int? DurationMs, PersonaPickDiagnostics? PersonaPick) currentMeta = currentMediaId is not null
+        (string? Title, string? Artist, double GainDb, int? DurationMs, PersonaPickDiagnostics? PersonaPick, string? ArtworkUrl) currentMeta = currentMediaId is not null
             ? pushedMeta.GetValueOrDefault(currentMediaId)
             : default;
 
@@ -303,7 +332,8 @@ public sealed class PlayoutFeeder(
             StartedAt: onAirStartedAt,
             DurationMs: currentMeta.DurationMs,
             IsReal: onAirIsReal,
-            IsReady: true);
+            IsReady: true,
+            ArtworkUrl: currentMeta.ArtworkUrl);
     }
 
     // Enqueues mediaId into the anti-repeat ring and trims to the live capacity (SPEC F41.6, read

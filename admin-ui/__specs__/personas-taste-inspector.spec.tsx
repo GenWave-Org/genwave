@@ -117,7 +117,6 @@ function makeDispatchFetchMock(routes: Record<string, RouteResponseSpec>): jest.
 function renderClient(overrides: Partial<PersonasClientProps> = {}): ReturnType<typeof render> {
   const props: PersonasClientProps = {
     initialPersonas: [REX, NOVA],
-    initialActiveId: 0,
     ...overrides,
   };
   return render(

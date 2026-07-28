@@ -19,16 +19,23 @@
 
     <section class="card now-playing" id="now-playing" aria-live="polite">
       <span class="now-playing__dot" id="now-playing-dot" aria-hidden="true"></span>
+      <!-- Decorative alongside title/artist/dj text below — alt="" is deliberate, not an
+           omission. Default src is the station icon: the "loading" appearance before the
+           first now-playing poll resolves, and the fallback renderArt() always leaves in
+           place when a track carries no artworkUrl (T126, SPEC F93.3). -->
+      <img class="now-playing__art" id="now-playing-art" src="/spectator/favicon.ico" alt="" />
       <div class="now-playing__body">
         <p class="now-playing__kicker" id="now-playing-kicker">Loading…</p>
         <h2 class="now-playing__title" id="now-playing-title"></h2>
         <p class="now-playing__artist" id="now-playing-artist"></p>
+        <p class="now-playing__dj" id="now-playing-dj" hidden></p>
         <div class="now-playing__meta" id="now-playing-meta" hidden>
           <div class="progress" id="progress" hidden>
             <div class="progress__fill" id="progress-fill"></div>
           </div>
           <p class="now-playing__clock" id="now-playing-clock"></p>
         </div>
+        <p class="now-playing__upnext" id="now-playing-upnext" hidden></p>
       </div>
     </section>
 

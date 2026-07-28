@@ -178,6 +178,16 @@ audio:focus-visible {
   }
 }
 
+.now-playing__art {
+  flex: none;
+  width: 72px;
+  height: 72px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background-color: var(--surface-2);
+  object-fit: cover;
+}
+
 .now-playing__body {
   flex: 1 1 auto;
   min-width: 0;
@@ -206,8 +216,20 @@ audio:focus-visible {
   color: var(--mute);
 }
 
+.now-playing__dj {
+  margin: 0.15rem 0 0;
+  color: var(--mute);
+}
+
 .now-playing__meta {
   margin-top: 0.75rem;
+}
+
+.now-playing__upnext {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--mute);
 }
 
 .progress {

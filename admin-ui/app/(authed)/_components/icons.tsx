@@ -223,6 +223,18 @@ export function TasteThumbDownIcon(props: IconProps): ReactNode {
   );
 }
 
+/** Schedule nav glyph (PLAN T129, SPEC F94.3) — a clock face (the "format clock"), distinct from
+ * {@link PersonaIcon}'s microphone (the roster itself) and {@link DashboardIcon}'s 2×2 grid: this
+ * page is WHEN each DJ is on, not who they are. */
+export function ScheduleIcon(props: IconProps): ReactNode {
+  return (
+    <IconBase {...props}>
+      <circle cx="8" cy="8" r="6.2" />
+      <path d="M8 4.6V8l2.6 1.5" />
+    </IconBase>
+  );
+}
+
 /** Exploration-pick glyph (SPEC F86.3, F86.5; STORY-217, PLAN T75) — a three-pip die: the
  * "rolled the dice" idea rendered as a geometric stroke icon rather than an emoji (Wireless
  * anti-pattern: no emoji as icons), reused by {@link PickChips}' exploration badge. */

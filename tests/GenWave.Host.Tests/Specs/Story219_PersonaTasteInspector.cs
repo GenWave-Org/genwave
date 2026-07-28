@@ -29,7 +29,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
-using GenWave.Host.Configuration;
 using GenWave.Host.Options;
 
 namespace GenWave.Host.Tests.Specs;
@@ -89,19 +88,8 @@ file sealed class FakePersonaTasteReader : IPersonaTasteReader
     }
 }
 
-/// <summary>Unused-by-Taste <see cref="IStationSettingsStore"/> double — the constructor dependency
+/// <summary>Unused-by-Taste <see cref="IPersonaPreviewWriter"/> double — the constructor dependency
 /// exists for the sibling CRUD actions, never called by these taste-inspector scenarios.</summary>
-file sealed class NotUsedStationSettingsStore : IStationSettingsStore
-{
-    public Task WriteAsync(string key, object value, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException("Not exercised by Story219's taste-inspector scenarios.");
-
-    public Task<IReadOnlyDictionary<string, string>> ReadAllAsync(CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException("Not exercised by Story219's taste-inspector scenarios.");
-}
-
-/// <summary>Unused-by-Taste <see cref="IPersonaPreviewWriter"/> double — same reason as
-/// <see cref="NotUsedStationSettingsStore"/> above.</summary>
 file sealed class NotUsedPersonaPreviewWriter : IPersonaPreviewWriter
 {
     public Task<PersonaPreviewResult> WritePreviewAsync(
@@ -110,7 +98,7 @@ file sealed class NotUsedPersonaPreviewWriter : IPersonaPreviewWriter
 }
 
 /// <summary>Unused-by-Taste <see cref="IAdminMediaLookup"/> double — same reason as
-/// <see cref="NotUsedStationSettingsStore"/> above.</summary>
+/// <see cref="NotUsedPersonaPreviewWriter"/> above.</summary>
 file sealed class NotUsedAdminMediaLookup : IAdminMediaLookup
 {
     public Task<(AdminMediaDto Row, long LibraryId)?> GetByIdWithLibraryAsync(long id, CancellationToken ct) =>
@@ -118,7 +106,7 @@ file sealed class NotUsedAdminMediaLookup : IAdminMediaLookup
 }
 
 /// <summary>Unused-by-Taste <see cref="IPersonaMemory"/> double — same reason as
-/// <see cref="NotUsedStationSettingsStore"/> above.</summary>
+/// <see cref="NotUsedPersonaPreviewWriter"/> above.</summary>
 file sealed class NotUsedPersonaMemory : IPersonaMemory
 {
     public Task<long> RecordAsync(long personaId, string kind, string content, PersonaMemorySource source, CancellationToken ct) =>
@@ -135,7 +123,7 @@ file sealed class NotUsedPersonaMemory : IPersonaMemory
 }
 
 /// <summary>Unused-by-Taste <see cref="IPersonaImportStore"/> double — same reason as
-/// <see cref="NotUsedStationSettingsStore"/> above.</summary>
+/// <see cref="NotUsedPersonaPreviewWriter"/> above.</summary>
 file sealed class NotUsedPersonaImportStore : IPersonaImportStore
 {
     public Task<PersonaImportOutcome> ImportAsync(PersonaImportRequest request, CancellationToken ct) =>
@@ -143,7 +131,7 @@ file sealed class NotUsedPersonaImportStore : IPersonaImportStore
 }
 
 /// <summary>Unused-by-Taste <see cref="ITtsVoiceLister"/> double — same reason as
-/// <see cref="NotUsedStationSettingsStore"/> above.</summary>
+/// <see cref="NotUsedPersonaPreviewWriter"/> above.</summary>
 file sealed class NotUsedTtsVoiceLister : ITtsVoiceLister
 {
     public Task<IReadOnlyList<string>> ListVoicesAsync(CancellationToken ct) =>
@@ -160,7 +148,6 @@ file static class PersonaTasteControllerFactory
     public static PersonaController Build(FakePersonaStore personaStore, FakePersonaTasteReader personaTaste) =>
         new(
             personaStore,
-            new NotUsedStationSettingsStore(),
             new FakeOptionsMonitor<StationOptions>(new StationOptions { Id = "test", Name = "Test Station", Voice = "af_heart" }),
             new NotUsedPersonaPreviewWriter(),
             new FakeActivePersonaAccessor(),

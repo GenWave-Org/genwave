@@ -68,9 +68,6 @@ public sealed class StationOptions
     /// </summary>
     public StationSafeOptions Safe { get; set; } = new();
 
-    /// <summary>Active DJ persona pointer (SPEC F35.2, F36.2). Bound to <c>Station:Persona</c>.</summary>
-    public StationPersonaOptions Persona { get; set; } = new();
-
     /// <summary>Rotation anti-repeat/artist-separation knobs (SPEC F41.6). Bound to <c>Station:Rotation</c>.</summary>
     public StationRotationOptions Rotation { get; set; } = new();
 

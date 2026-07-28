@@ -27,4 +27,25 @@ public interface IEnvelopeProvider
 {
     /// <summary>The station's current segment envelope, evaluated fresh on every call.</summary>
     SegmentEnvelope Current { get; }
+
+    /// <summary>
+    /// SPEC F82.6, F91.7 — identifies which envelope governed the current pick: <c>"segment:{id}"</c>
+    /// naming a live <c>GenWave.Core.Domain.ScheduleSegment</c>, or <see cref="StationDefaultSentinel"/>
+    /// for a grid gap or the v1 24/7 station-default envelope. Evaluated fresh alongside
+    /// <see cref="Current"/> — same live-reload contract, never cached.
+    ///
+    /// <para>
+    /// Default-implemented as <see cref="StationDefaultSentinel"/> so this addition to a published
+    /// contract (<c>GenWave.Core</c>) stays strictly additive: <see cref="StationDefaultEnvelopeProvider"/>
+    /// and every pre-F91.7 implementer/test double keep compiling unchanged and simply report the
+    /// station-default sentinel — exactly matching v1's own one-envelope-forever behavior, since none
+    /// of them ever named a real segment to begin with.
+    /// </para>
+    /// </summary>
+    string EnvelopeId => StationDefaultSentinel;
+
+    /// <summary>The sentinel <see cref="EnvelopeId"/> reports outside a live schedule segment (SPEC
+    /// F91.4, F91.7): a grid gap, the v1 station-default envelope, or (a resolver-backed
+    /// implementation's own boot window) no schedule resolved yet.</summary>
+    const string StationDefaultSentinel = "station-default";
 }

@@ -66,8 +66,11 @@ public static class FeatureRequestShoutOut
         // identity, never anything a listener typed. A future field named for wish text, a parsed
         // predicate, or any other listener-supplied fragment would show up here as an unexpected extra
         // member and fail this pin — F87.7's "absence by construction" made structural, not just
-        // documented.
-        static readonly string[] SegmentRequestStringMembers = ["Voice", "StationName", "StationId", "PersonaName"];
+        // documented. CounterpartName (STORY-243, PLAN T123, SPEC F92.2) joined the whitelist
+        // deliberately: it is a persona display name off the schedule/roster, the same
+        // station/persona-identity family as PersonaName, never listener-supplied text.
+        static readonly string[] SegmentRequestStringMembers =
+            ["Voice", "StationName", "StationId", "PersonaName", "CounterpartName"];
         static readonly string[] MediaItemStringMembers = ["MediaId", "Locator", "Title", "Artist", "Album", "Genre"];
 
         [Fact]

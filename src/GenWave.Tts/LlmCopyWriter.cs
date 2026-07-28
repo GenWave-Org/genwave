@@ -9,21 +9,24 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 
 /// <summary>
-/// LLM-backed <see cref="ISegmentCopyWriter"/> (SPEC F34.2-F34.5): authors <see cref="SegmentKind.LeadIn"/>
-/// and <see cref="SegmentKind.BackAnnounce"/> copy from an OpenAI-compatible chat-completions endpoint.
-/// <see cref="SegmentKind.StationId"/> and <see cref="SegmentKind.TimeDate"/> always delegate straight
-/// to <paramref name="fallback"/> with zero HTTP — brand/time copy stays fixed and forever-cached.
+/// LLM-backed <see cref="ISegmentCopyWriter"/> (SPEC F34.2-F34.5, F92.2, F92.5): authors copy for
+/// exactly the kinds <see cref="IsLlmAuthored"/> reports true for — <see cref="SegmentKind.LeadIn"/>,
+/// <see cref="SegmentKind.BackAnnounce"/>, <see cref="SegmentKind.SignOff"/>, and
+/// <see cref="SegmentKind.SignOn"/> — from an OpenAI-compatible chat-completions endpoint.
+/// <see cref="SegmentKind.StationId"/> and <see cref="SegmentKind.TimeDate"/> always delegate
+/// straight to <paramref name="fallback"/> with zero HTTP — brand/time copy stays fixed and
+/// forever-cached.
 /// Enabled-ness and every other option are read from <paramref name="optionsMonitor"/> fresh on each
 /// call (F36.2) — an empty <c>Llm:Endpoint</c> means disabled. Any failure (disabled, timeout,
 /// non-2xx, connect, empty/over-length copy) degrades to <paramref name="fallback"/>'s template copy
 /// with exactly one WARN; this writer never throws toward
 /// <see cref="GenWave.Core.Abstractions.ITtsSegmentSource"/> (F12.4 extended).
 ///
-/// <paramref name="personaAccessor"/> is resolved once per LeadIn/BackAnnounce render (SPEC F35.2,
-/// F35.3, F71.3) — never for the templated kinds or a disabled writer — both for the legacy
-/// <c>Persona</c> row AND its card counterpart, composing an appended soul + sampled-quirks section
-/// onto the baked system prompt (see <see cref="LlmPromptBuilder.BuildPersonaSection"/>). No persona
-/// active, and no soul/quirks to show, leaves the prompt exactly as it was before T6 (F35.2 —
+/// <paramref name="personaAccessor"/> is resolved once per LeadIn/BackAnnounce/SignOff/SignOn render
+/// (SPEC F35.2, F35.3, F71.3) — never for the templated kinds or a disabled writer — both for the
+/// legacy <c>Persona</c> row AND its card counterpart, composing an appended soul + sampled-quirks
+/// section onto the baked system prompt (see <see cref="LlmPromptBuilder.BuildPersonaSection"/>). No
+/// persona active, and no soul/quirks to show, leaves the prompt exactly as it was before T6 (F35.2 —
 /// blurbs work persona-less).
 ///
 /// <para>
@@ -134,11 +137,25 @@ public sealed class LlmCopyWriter(
     static readonly Regex MarkdownEmphasisPattern = new(@"[*_]+", RegexOptions.Compiled);
     static readonly Regex RepeatedWhitespacePattern = new(@"\s{2,}", RegexOptions.Compiled);
 
+    /// <summary>
+    /// Single source of truth for exactly which <see cref="SegmentKind"/> values this writer calls
+    /// the LLM for (SPEC F34.2, F92.2, F92.5): the two track-anchored kinds (LeadIn, BackAnnounce)
+    /// plus the two handoff kinds (SignOff, SignOn). Gates both <see cref="WriteAsync"/> and
+    /// <see cref="WritePreviewAsync"/> so the two can never drift apart, and is the fact
+    /// <see cref="LlmPromptBuilder.BuildSegmentLine"/>'s own exhaustiveness switch relies on staying
+    /// in sync with (see that method's remarks): <see cref="SegmentKind.StationId"/> and
+    /// <see cref="SegmentKind.TimeDate"/> are the only two kinds this reports false for, and they
+    /// never reach a prompt at all.
+    /// </summary>
+    static bool IsLlmAuthored(SegmentKind kind) =>
+        kind is SegmentKind.LeadIn or SegmentKind.BackAnnounce or SegmentKind.SignOff or SegmentKind.SignOn;
+
     public async Task<SegmentCopy> WriteAsync(SegmentRequest request, CancellationToken ct)
     {
         // StationId/TimeDate stay templated — brand/time copy must be crisp, consistent, and
-        // forever-cacheable; only the two track-anchored kinds have tags worth an LLM's while (F34.2).
-        if (request.Kind is not (SegmentKind.LeadIn or SegmentKind.BackAnnounce))
+        // forever-cacheable; the two track-anchored kinds (F34.2) and the two handoff kinds (F92.2,
+        // F92.5) are the ones worth an LLM's while (see IsLlmAuthored, the single source of truth).
+        if (!IsLlmAuthored(request.Kind))
             return await fallback.WriteAsync(request, ct);
 
         var attemptedAt = DateTimeOffset.UtcNow;
@@ -213,7 +230,7 @@ public sealed class LlmCopyWriter(
     /// <see cref="CleanCopy"/> (identical hygiene) so the previewed text is provably what the
     /// on-air <see cref="WriteAsync"/> path would have produced for the same request/persona.
     /// Deliberate differences: NOTHING here degrades to <paramref name="fallback"/> on an LLM miss
-    /// for LeadIn/BackAnnounce — that would misrepresent the persona being auditioned — this method
+    /// for LeadIn/BackAnnounce/SignOff/SignOn — that would misrepresent the persona being auditioned — this method
     /// never records to <see cref="LlmCopyStatusHolder"/> (that holder tracks on-air attempts for
     /// <c>GET /api/status</c>; preview activity never airs and must not appear there), and it always
     /// passes <c>updateTasteMemory: false</c> to <see cref="RequestCompletionAsync"/> (SPEC F83.1,
@@ -224,9 +241,9 @@ public sealed class LlmCopyWriter(
         SegmentRequest request, Persona? personaOverride, CancellationToken ct)
     {
         // StationId/TimeDate route straight to the template rung — mirrors WriteAsync's own
-        // kind-based routing (F34.2). This is not a fallback: those two kinds never call the LLM
-        // on-air either, so template text IS the correct preview for them.
-        if (request.Kind is not (SegmentKind.LeadIn or SegmentKind.BackAnnounce))
+        // kind-based routing (F34.2, IsLlmAuthored). This is not a fallback: those two kinds never
+        // call the LLM on-air either, so template text IS the correct preview for them.
+        if (!IsLlmAuthored(request.Kind))
         {
             var templated = await fallback.WriteAsync(request, ct);
             return new PersonaPreviewResult.Success(templated.Text);

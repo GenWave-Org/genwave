@@ -54,16 +54,23 @@ public static class FeatureDisclosureContractCompleteness
 
     static readonly BlessedShape[] BlessedShapes =
     [
-        // now-playing (SPEC F62.4; amended 2026-07-20 to carry listeners — STORY-179)
+        // now-playing (SPEC F62.4; amended 2026-07-20 to carry listeners — STORY-179; amended
+        // 2026-07-27 to carry dj/upNext/artworkUrl — SPEC F93.1/F93.2/F93.3/F93.5, STORY-244/245,
+        // PLAN T125). SpectatorUpNext is its own nested shape, blessed separately below.
         new(typeof(SpectatorTrackNowPlaying),
-            new SpectatorTrackNowPlaying("Night Drive", "The Waveforms", DateTimeOffset.UtcNow, 214_000, 12),
-            ["title", "artist", "startedAt", "durationMs", "listeners", "state", "kind"]),
+            new SpectatorTrackNowPlaying("Night Drive", "The Waveforms", DateTimeOffset.UtcNow, 214_000, 12,
+                "Nova", new SpectatorUpNext(DateTimeOffset.UtcNow, "Echo"), "https://example.test/artwork/abc"),
+            ["title", "artist", "startedAt", "durationMs", "listeners", "dj", "upNext", "artworkUrl", "state", "kind"]),
         new(typeof(SpectatorPatterNowPlaying),
-            new SpectatorPatterNowPlaying(DateTimeOffset.UtcNow, 9_000, 12),
-            ["startedAt", "durationMs", "listeners", "state", "kind"]),
+            new SpectatorPatterNowPlaying(DateTimeOffset.UtcNow, 9_000, 12,
+                "Nova", new SpectatorUpNext(DateTimeOffset.UtcNow, "Echo")),
+            ["startedAt", "durationMs", "listeners", "dj", "upNext", "state", "kind"]),
         new(typeof(SpectatorStandbyNowPlaying),
             new SpectatorStandbyNowPlaying(12),
             ["listeners", "state"]),
+        new(typeof(SpectatorUpNext),
+            new SpectatorUpNext(DateTimeOffset.UtcNow, "Echo"),
+            ["startsAt", "dj"]),
 
         // stats (SPEC F62.7) — Unavailable/Playable stay excluded by construction (F62.9)
         new(typeof(SpectatorStats),

@@ -19,8 +19,21 @@ namespace GenWave.Host.Api;
 /// <see cref="GenWave.Core.Abstractions.IListenerStatsSource"/>. Null when Icecast's admin stats
 /// are unconfigured or unreachable — never fabricated, never surfaced as an error.
 /// </param>
+/// <param name="Dj">
+/// The On-The-Air persona display name (SPEC F67.5-public, F93.1, STORY-244, PLAN T125), or null in
+/// a music-only segment or grid gap — never the admin persona id, backstory, or any other field.
+/// </param>
+/// <param name="UpNext">
+/// Exactly one upcoming segment (SPEC F93.2), or null when there is nothing to announce — see
+/// <see cref="SpectatorUpNext"/>'s own remarks for the same-persona collapse rule.
+/// </param>
+/// <param name="ArtworkUrl">
+/// The F88 token artwork URL for this track (SPEC F93.3, STORY-245, PLAN T125), or null when there
+/// is no art or <c>Station:PublicBaseUrl</c> is unset — the page falls back to the station icon.
+/// </param>
 public sealed record SpectatorTrackNowPlaying(
-    string? Title, string? Artist, DateTimeOffset StartedAt, int? DurationMs, int? Listeners)
+    string? Title, string? Artist, DateTimeOffset StartedAt, int? DurationMs, int? Listeners,
+    string? Dj, SpectatorUpNext? UpNext, string? ArtworkUrl)
 {
     public string State => "onAir";
     public string Kind => "track";

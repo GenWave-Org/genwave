@@ -34,7 +34,6 @@ using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
-using GenWave.Host.Configuration;
 using GenWave.Host.Options;
 using GenWave.Tts;
 
@@ -144,17 +143,6 @@ file sealed class NotUsedTtsVoiceLister : ITtsVoiceLister
         throw new NotSupportedException("Not exercised by Story123's preview scenarios.");
 }
 
-/// <summary>Unused-by-preview <see cref="IStationSettingsStore"/> double — the constructor
-/// dependency exists for the sibling CRUD actions, none of which these scenarios call.</summary>
-file sealed class NotUsedStationSettingsStore : IStationSettingsStore
-{
-    public Task WriteAsync(string key, object value, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException("Not exercised by Story123's preview scenarios.");
-
-    public Task<IReadOnlyDictionary<string, string>> ReadAllAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>());
-}
-
 /// <summary>Scriptable <see cref="IActivePersonaAccessor"/> double for the "neither personaId nor
 /// draft" default-to-active-persona case (F35.6).</summary>
 file sealed class FakeActivePersonaAccessor : IActivePersonaAccessor
@@ -221,7 +209,6 @@ file static class PreviewControllerFactory
         IStationScopeProvider? scopeProvider = null) =>
         new(
             personaStore ?? new FakePersonaStore(),
-            new NotUsedStationSettingsStore(),
             new FakeOptionsMonitor<StationOptions>(stationOptions ?? DefaultStationOptions()),
             previewWriter,
             personaAccessor,

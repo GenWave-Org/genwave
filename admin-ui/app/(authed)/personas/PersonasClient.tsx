@@ -2,13 +2,13 @@
 
 import { Fragment, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import { useConfirm } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "@/components/ui/toast";
 import { formatDateStamp } from "@/lib/format-clock";
 import { readErrorMessage } from "@/lib/problem-details";
 import { useVoiceList } from "@/lib/use-voice-list";
 import { VoiceControl } from "../safe-content/VoiceControl";
+import { FireModal } from "./FireModal";
 import { PersonaExportLink } from "./PersonaExportLink";
 import { PersonaImportPanel } from "./PersonaImportPanel";
 import { PersonaPreview } from "./PersonaPreview";
@@ -19,16 +19,22 @@ import type { PersonaDto } from "./types";
 export interface PersonasClientProps {
   /** Every persona row, from GET /api/personas (SPEC F35.4). */
   initialPersonas: PersonaDto[];
-  /** `Station:Persona:ActiveId` resolved server-side from GET /api/settings; `0` = none. */
-  initialActiveId: number;
+  /** Ids of every persona appearing in ≥1 `GET /api/schedule` segment (SPEC F94.1, STORY-246,
+   * PLAN T127) — drives the Scheduled/Bench split. Optional, defaulting to none scheduled: a
+   * schedule-less render (a failed read, or the pre-clock all-music week, F91.4) is always legal,
+   * mirroring `page.tsx`'s own degrade posture. */
+  scheduledPersonaIds?: readonly number[];
+  /** The persona currently on the air, by NAME (SPEC F91.5) — resolved server-side via
+   * `GET /api/status`'s resolver-sourced `llm.activePersona`. Matched against a row's own `name`
+   * rather than an id: `/api/status` carries no persona id, and `station.persona.name` is
+   * database-unique (`db/09-persona-migration.sh`), so a name match is exact, not a fuzzy guess.
+   * `null` when no persona is on the air right now, or the status read failed. */
+  onAirPersonaName?: string | null;
   /** Test-only injection point for the provenance badge's `formatDateStamp` call; production omits
    * this and gets the browser's local zone — the same StatusTiles/BoothLogFeed/LlmCallsFeed/
    * PlayHistoryTable idiom, not a bespoke one. */
   timeZone?: string;
 }
-
-/** The one F19 allowlist key the activate/deactivate control writes (SPEC F35.2). */
-const ACTIVE_ID_KEY = "Station:Persona:ActiveId";
 
 /** Shape of a `PersonaRequest` body accepted by POST/PATCH /api/personas (SPEC F35.4). */
 interface PersonaRequestBody {
@@ -65,13 +71,17 @@ function displayVoice(voice: string): string {
   return voice.trim() === "" ? "Station default" : voice;
 }
 
-/** Provenance badge (SPEC F90.7, T105): "Imported · &lt;source&gt; · &lt;date&gt;" for an imported
- * persona, nothing for one authored in place. `importedFrom` renders VERBATIM — `"file"` or a raw
- * catalog slug — this is provenance, not decoration, so it is never prettified (ruled). The date
- * uses `formatDateStamp` — `lib/format-clock.ts`'s bare-calendar-date formatter — NOT
- * `formatUpSince` (that one folds its own `HH:MM · Mon D` pair, no year, into the string, which
- * would both break the badge's literal three-field shape and silently collide two imports a year
- * apart). `timeZone` is a plain pass-through from the page prop, the house test-injection idiom. */
+/** Provenance badge (SPEC F90.7/F94.4, T105/T130): "Hired · &lt;source&gt; · &lt;date&gt;" for an
+ * imported persona, nothing for one authored in place. Reads "Hired" for EVERY provenance — a
+ * file upload's `importedFrom: "file"` row included — SPEC F94.4 draws no split here: the file
+ * path keeps "Import" for its own ACTION copy (the button/modal/success text over on
+ * `PersonaImportPanel`), but this one shared badge component speaks a single wording regardless of
+ * origin. `importedFrom` renders VERBATIM — `"file"` or a raw catalog slug — this is provenance,
+ * not decoration, so it is never prettified (ruled). The date uses `formatDateStamp` —
+ * `lib/format-clock.ts`'s bare-calendar-date formatter — NOT `formatUpSince` (that one folds its
+ * own `HH:MM · Mon D` pair, no year, into the string, which would both break the badge's literal
+ * three-field shape and silently collide two imports a year apart). `timeZone` is a plain
+ * pass-through from the page prop, the house test-injection idiom. */
 function ProvenanceBadge({
   importedFrom,
   importedAt,
@@ -83,7 +93,22 @@ function ProvenanceBadge({
 }): ReactNode {
   return (
     <span className="ml-2 inline-flex items-center rounded-[3px] border border-line px-1.5 py-0.5 text-[0.68rem] text-mute">
-      {`Imported · ${importedFrom} · ${formatDateStamp(importedAt, { timeZone })}`}
+      {`Hired · ${importedFrom} · ${formatDateStamp(importedAt, { timeZone })}`}
+    </span>
+  );
+}
+
+/** On The Air badge (SPEC F94.1, STORY-246, PLAN T127) — the roster's replacement for the retired
+ * activate/deactivate switch: shown on whichever persona is currently on the air (see
+ * `PersonasClientProps.onAirPersonaName`'s own remarks for the name-match rationale). Rust/
+ * `--accent` pill — the Wireless "ON AIR" token (design-aesthetic skill) — deliberately the SAME
+ * treatment the retired "Active" badge used, just renamed and re-sourced, and visually distinct
+ * from `ProvenanceBadge`'s quiet bordered-chip right next to it. No pulsing dot: that animation is
+ * reserved for the now-playing hero card, the only ambient motion this UI permits anywhere. */
+function OnAirBadge(): ReactNode {
+  return (
+    <span className="ml-2 inline-flex items-center rounded-[999px] bg-accent px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-ink">
+      On the air
     </span>
   );
 }
@@ -105,12 +130,11 @@ const HEADER_CELL = "py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[
 
 /**
  * The Personas page's client half (SPEC F35.7, STORY-126): list/create/edit/delete over
- * `/api/personas`, an activate/deactivate control that writes `Station:Persona:ActiveId` through
- * the shipped `/api/settings` surface (SPEC F35.2), and a preview action (`PersonaPreview`) both
- * per row and for the form's in-progress draft. Personas carry no `If-Match` (F35.4's documented
- * single-writer deviation — see `PersonaController`), so writes here go straight through `fetch`
- * rather than the ETag-bearing `useRowPatch` hook; failures toast per F31.3, mirroring
- * SafeContentClient/LibrariesTab's detail-first ProblemDetails reader.
+ * `/api/personas`, and a preview action (`PersonaPreview`) both per row and for the form's
+ * in-progress draft. Personas carry no `If-Match` (F35.4's documented single-writer deviation —
+ * see `PersonaController`), so writes here go straight through `fetch` rather than the ETag-bearing
+ * `useRowPatch` hook; failures toast per F31.3, mirroring SafeContentClient/LibrariesTab's
+ * detail-first ProblemDetails reader.
  *
  * PLAN T68 (STORY-209/210, SPEC F79) adds three more surfaces: `PersonaExportLink` per row
  * (a plain download anchor, F79.1); `PersonaImportPanel` (file → preview → confirm → import,
@@ -130,20 +154,53 @@ const HEADER_CELL = "py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[
  * place. The badge reads straight off the row's own `importedFrom`/`importedAt`; re-import (same
  * `PersonaImportPanel` → `refreshPersonas` round trip T68 already wired) simply refreshes the list,
  * which re-derives the badge with no bespoke handling here.
+ *
+ * PLAN T127 (STORY-246, SPEC F94.1) replaces the switch with the roster: the flat persona table
+ * splits into Scheduled/Bench sections (`scheduledPersonaIds`, derived server-side from
+ * `GET /api/schedule`) and an `OnAirBadge` replaces the retired "Active" pill (`onAirPersonaName`,
+ * resolved server-side from `GET /api/status`'s schedule-backed resolver — see that prop's own
+ * remarks for the name-match rationale). There is no more client-side "active" state at all: the
+ * retired `Station:Persona:ActiveId` write (and the Activate/Deactivate button that made it) is
+ * gone outright, not merely hidden — the format clock is now the only thing that decides who's on
+ * the air.
+ *
+ * PLAN T128 (STORY-247, SPEC F94.2) makes Fire a BENCH-ONLY affordance: a Scheduled row renders no
+ * delete/fire control at all (F91.9's FK guard already 409s that delete server-side, so the UI
+ * doesn't offer a button that always fails — unpainting a scheduled DJ is T129's schedule editor,
+ * not a delete). A Bench row's former generic-confirm "Delete" button becomes "Fire", which opens
+ * `FireModal` — an export-first confirm — instead of `useConfirm()`; `handleFireConfirm` below is
+ * the same fetch/toast/list-splice shape `handleSubmit`'s own mutations already use, just renamed
+ * and freed of the confirm-dialog step the modal now owns itself. The RACE case (a slot painted
+ * onto this persona between this render and the click) answers with the same 409 `detail` the
+ * PLAN T127 Delete button already surfaced honestly — `handleFireConfirm` closes the modal on
+ * EITHER outcome (success or 409) so the toast is what the operator sees next, not a stale dialog.
  */
-export function PersonasClient({ initialPersonas, initialActiveId, timeZone }: PersonasClientProps): ReactNode {
-  const confirm = useConfirm();
+export function PersonasClient({
+  initialPersonas,
+  scheduledPersonaIds = [],
+  onAirPersonaName = null,
+  timeZone,
+}: PersonasClientProps): ReactNode {
   const [personas, setPersonas] = useState<PersonaDto[]>(initialPersonas);
-  const [activeId, setActiveId] = useState<number>(initialActiveId);
 
   const [mode, setMode] = useState<FormMode>({ kind: "create" });
   const [form, setForm] = useState<FormValues>(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
   const nameFieldRef = useRef<HTMLInputElement | null>(null);
 
-  const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [activatingId, setActivatingId] = useState<number | null>(null);
+  // Fire (SPEC F94.2, STORY-247, PLAN T128) — `firingPersona` is which bench row's `FireModal` is
+  // open (null = none), `isFiring` gates the modal's own Cancel/Delete buttons while the DELETE
+  // request from `handleFireConfirm` is in flight.
+  const [firingPersona, setFiringPersona] = useState<PersonaDto | null>(null);
+  const [isFiring, setIsFiring] = useState(false);
   const [expandedTasteIds, setExpandedTasteIds] = useState<ReadonlySet<number>>(new Set());
+
+  // Scheduled/Bench split (SPEC F94.1, STORY-246) — a Set for O(1) membership, built fresh each
+  // render off the prop rather than mirrored into state: there is nothing here for this component
+  // to own or mutate locally, unlike `personas` itself (create/edit/delete all splice that array).
+  const scheduledIds = new Set(scheduledPersonaIds);
+  const scheduledPersonas = personas.filter((p) => scheduledIds.has(p.id));
+  const benchPersonas = personas.filter((p) => !scheduledIds.has(p.id));
 
   // F79.4/F79.5 import-warning derivation: the live voice list (shared implementation with
   // VoiceControl's own dropdown, see useVoiceList's remarks) compared against the edit-form
@@ -246,66 +303,142 @@ export function PersonasClient({ initialPersonas, initialActiveId, timeZone }: P
     setIsSaving(false);
   }
 
-  async function handleDelete(persona: PersonaDto): Promise<void> {
-    const isActive = persona.id === activeId;
-    const ok = await confirm({
-      title: "Delete persona",
-      consequence: isActive
-        ? `Delete "${persona.name}"? This deactivates the DJ — blurbs continue in the neutral house style.`
-        : `Delete "${persona.name}"? This cannot be undone.`,
-      confirmLabel: "Delete",
-      destructive: true,
-    });
-    if (!ok) return;
+  /** Fires (deletes) the persona `FireModal` is currently open for — called once its own
+   * export-first gate is satisfied (SPEC F94.2, STORY-247 AC2/AC4, PLAN T128). A 409 here means the
+   * format-clock schedule picked up a slot naming this persona between this render and the click
+   * (the RACE case, STORY-247 AC-race) — the store's own FK guard (F91.9) rejects the delete, and
+   * this closes the modal on EITHER outcome so the toast (success or the server's own slot-naming
+   * `detail`, via `readErrorMessage`) is what the operator sees next, not a stale dialog sitting on
+   * top of it. The close itself is scoped to THIS persona's id (F4 fix) — a slow DELETE response
+   * landing after the operator has already cancelled and reopened `FireModal` for a different bench
+   * row must not blow away that unrelated modal's own state. */
+  async function handleFireConfirm(): Promise<void> {
+    const persona = firingPersona;
+    if (persona === null) return;
 
-    setDeletingId(persona.id);
+    setIsFiring(true);
     try {
       const resp = await fetch(`/api/personas/${persona.id}`, { method: "DELETE" });
       if (resp.status === 204) {
         setPersonas((prev) => prev.filter((p) => p.id !== persona.id));
-        // The API clears Station:Persona:ActiveId server-side in the same request when the
-        // deleted persona was active (SPEC F35.5) — reflect that locally so the badge disappears
-        // without a round-trip refetch.
-        if (isActive) setActiveId(0);
         if (mode.kind === "edit" && mode.id === persona.id) cancelEdit();
-        toast.success(`"${persona.name}" deleted.`);
+        toast.success(`"${persona.name}" fired.`);
       } else {
         toast.error(await readErrorMessage(resp));
       }
     } catch {
       toast.error("Network error — check your connection");
     }
-    setDeletingId(null);
-  }
-
-  async function handleActivate(persona: PersonaDto): Promise<void> {
-    const nextId = activeId === persona.id ? 0 : persona.id;
-
-    setActivatingId(persona.id);
-    try {
-      const resp = await fetch("/api/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify([{ key: ACTIVE_ID_KEY, value: String(nextId) }]),
-      });
-
-      if (resp.ok) {
-        setActiveId(nextId);
-        toast.success(
-          nextId === 0
-            ? "Deactivated — blurbs continue in the neutral house style."
-            : `"${persona.name}" is now the active DJ.`
-        );
-      } else {
-        toast.error(await readErrorMessage(resp));
-      }
-    } catch {
-      toast.error("Network error — check your connection");
-    }
-    setActivatingId(null);
+    setIsFiring(false);
+    setFiringPersona((cur) => (cur?.id === persona.id ? null : cur));
   }
 
   const isSectionEditing = mode.kind === "edit";
+
+  /** One roster row — shared by both the Scheduled and Bench tables (SPEC F94.1, STORY-246) so
+   * neither section duplicates the other's markup. `onAirPersonaName` name-match is documented on
+   * `PersonasClientProps` itself, not repeated per row. `section` (PLAN T128, SPEC F94.2) is the
+   * ONLY thing that differs between the two: a Scheduled row renders no delete/fire control at
+   * all, a Bench row gets "Fire" (opens `FireModal`) — see this component's own class doc for why
+   * a Scheduled row never gets a button that would just 409. */
+  function renderPersonaRow(persona: PersonaDto, section: "scheduled" | "bench"): ReactNode {
+    const isOnAir = onAirPersonaName !== null && persona.name === onAirPersonaName;
+    const isTasteExpanded = expandedTasteIds.has(persona.id);
+    return (
+      <Fragment key={persona.id}>
+        <tr className="border-b border-line last:border-b-0">
+          <td className="py-2 pr-3 text-ink">
+            <span data-testid={`persona-name-${persona.name}`}>{persona.name}</span>
+            {isOnAir && <OnAirBadge />}
+            {persona.importedFrom !== null && persona.importedAt !== null && (
+              <ProvenanceBadge
+                importedFrom={persona.importedFrom}
+                importedAt={persona.importedAt}
+                timeZone={timeZone}
+              />
+            )}
+          </td>
+          <td className="py-2 pr-3 text-mute">{summarizeStyle(persona.style)}</td>
+          <td className="py-2 pr-3 text-mute">{displayVoice(persona.voice)}</td>
+          <td className="py-2 pr-3">
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  aria-label={`Edit ${persona.name}`}
+                  onClick={() => startEdit(persona)}
+                >
+                  Edit
+                </Button>
+                {section === "bench" && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    aria-label={`Fire ${persona.name}`}
+                    onClick={() => setFiringPersona(persona)}
+                  >
+                    Fire
+                  </Button>
+                )}
+                <PersonaExportLink persona={persona} />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  aria-expanded={isTasteExpanded}
+                  aria-label={`${isTasteExpanded ? "Hide" : "Show"} taste for ${persona.name}`}
+                  onClick={() => toggleTaste(persona.id)}
+                >
+                  {isTasteExpanded ? "Hide taste" : "Taste"}
+                </Button>
+              </div>
+              <PersonaPreview target={{ kind: "saved", personaId: persona.id, voice: persona.voice }} />
+            </div>
+          </td>
+        </tr>
+        {isTasteExpanded && (
+          <tr className="border-b border-line last:border-b-0">
+            <td colSpan={4} className="py-3">
+              <div className="rounded-[6px] border border-line bg-surface-2 p-3">
+                <PersonaTasteSection personaId={persona.id} personaName={persona.name} />
+              </div>
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    );
+  }
+
+  /** One roster section's table — shared shell (headers, scroll container) around whichever rows
+   * (Scheduled or Bench) the caller hands it; `section` is threaded straight to `renderPersonaRow`
+   * (PLAN T128). */
+  function renderPersonaTable(rows: PersonaDto[], section: "scheduled" | "bench"): ReactNode {
+    return (
+      // AC2 (SPEC F28.13): scrolls sideways inside this container at 390px — the page body
+      // itself never does.
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full border-collapse text-[0.85rem]">
+          <thead>
+            <tr className="border-b-2 border-line text-left">
+              <th scope="col" className={HEADER_CELL}>
+                Name
+              </th>
+              <th scope="col" className={HEADER_CELL}>
+                Style
+              </th>
+              <th scope="col" className={HEADER_CELL}>
+                Voice
+              </th>
+              <th scope="col" className={HEADER_CELL}>
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody>{rows.map((persona) => renderPersonaRow(persona, section))}</tbody>
+        </table>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -440,117 +573,41 @@ export function PersonasClient({ initialPersonas, initialActiveId, timeZone }: P
             cta={{ label: "Start writing", onClick: focusNameField }}
           />
         ) : (
-          // AC2 (SPEC F28.13): scrolls sideways inside this container at 390px — the page body
-          // itself never does.
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full border-collapse text-[0.85rem]">
-              <thead>
-                <tr className="border-b-2 border-line text-left">
-                  <th scope="col" className={HEADER_CELL}>
-                    Name
-                  </th>
-                  <th scope="col" className={HEADER_CELL}>
-                    Style
-                  </th>
-                  <th scope="col" className={HEADER_CELL}>
-                    Voice
-                  </th>
-                  <th scope="col" className={HEADER_CELL}>
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {personas.map((persona) => {
-                  const isActive = persona.id === activeId;
-                  const isTasteExpanded = expandedTasteIds.has(persona.id);
-                  return (
-                    <Fragment key={persona.id}>
-                      <tr className="border-b border-line last:border-b-0">
-                        <td className="py-2 pr-3 text-ink">
-                          <span data-testid={`persona-name-${persona.name}`}>{persona.name}</span>
-                          {isActive && (
-                            <span className="ml-2 inline-flex items-center rounded-[999px] bg-accent px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-ink">
-                              Active
-                            </span>
-                          )}
-                          {persona.importedFrom !== null && persona.importedAt !== null && (
-                            <ProvenanceBadge
-                              importedFrom={persona.importedFrom}
-                              importedAt={persona.importedAt}
-                              timeZone={timeZone}
-                            />
-                          )}
-                        </td>
-                        <td className="py-2 pr-3 text-mute">{summarizeStyle(persona.style)}</td>
-                        <td className="py-2 pr-3 text-mute">{displayVoice(persona.voice)}</td>
-                        <td className="py-2 pr-3">
-                          <div className="flex flex-col gap-2">
-                            <div className="flex flex-wrap gap-2">
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                aria-label={`Edit ${persona.name}`}
-                                onClick={() => startEdit(persona)}
-                              >
-                                Edit
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                aria-label={`${isActive ? "Deactivate" : "Activate"} ${persona.name}`}
-                                disabled={activatingId === persona.id}
-                                onClick={() => {
-                                  void handleActivate(persona);
-                                }}
-                              >
-                                {isActive ? "Deactivate" : "Activate"}
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                aria-label={`Delete ${persona.name}`}
-                                disabled={deletingId === persona.id}
-                                onClick={() => {
-                                  void handleDelete(persona);
-                                }}
-                              >
-                                Delete
-                              </Button>
-                              <PersonaExportLink persona={persona} />
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                aria-expanded={isTasteExpanded}
-                                aria-label={`${isTasteExpanded ? "Hide" : "Show"} taste for ${persona.name}`}
-                                onClick={() => toggleTaste(persona.id)}
-                              >
-                                {isTasteExpanded ? "Hide taste" : "Taste"}
-                              </Button>
-                            </div>
-                            <PersonaPreview
-                              target={{ kind: "saved", personaId: persona.id, voice: persona.voice }}
-                            />
-                          </div>
-                        </td>
-                      </tr>
-                      {isTasteExpanded && (
-                        <tr className="border-b border-line last:border-b-0">
-                          <td colSpan={4} className="py-3">
-                            <div className="rounded-[6px] border border-line bg-surface-2 p-3">
-                              <PersonaTasteSection personaId={persona.id} personaName={persona.name} />
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="mt-4 flex flex-col gap-6">
+            <div>
+              <h3 className="text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-accent-2">
+                Scheduled
+              </h3>
+              {scheduledPersonas.length === 0 ? (
+                <p className="mt-2 text-[0.85rem] text-mute">No personas are scheduled yet.</p>
+              ) : (
+                renderPersonaTable(scheduledPersonas, "scheduled")
+              )}
+            </div>
+            <div>
+              <h3 className="text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-accent-2">
+                Bench
+              </h3>
+              {benchPersonas.length === 0 ? (
+                <p className="mt-2 text-[0.85rem] text-mute">Every persona is scheduled.</p>
+              ) : (
+                renderPersonaTable(benchPersonas, "bench")
+              )}
+            </div>
           </div>
         )}
       </section>
+
+      {firingPersona !== null && (
+        <FireModal
+          persona={firingPersona}
+          isFiring={isFiring}
+          onCancel={() => setFiringPersona(null)}
+          onConfirmFire={() => {
+            void handleFireConfirm();
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -362,4 +362,104 @@ public static class FeaturePersonaStorage
             Assert.IsType<PersonaWriteResult.NameConflict>(outcome);
         }
     }
+
+    // ---------------------------------------------------------------------
+    // SAD PATH — F91.9's FK guard (PLAN T121): DeleteAsync queries station.segment_schedule and
+    // names the offending slots. Not the FK exception path itself — that is a genuine query-then-
+    // delete race (a slot painted between DeleteAsync's own SELECT and its DELETE), which is not
+    // independently reproducible here without a test-only hook into the repository; Story240's own
+    // ScenarioPersonaForeignKeyHasTeeth already proves the database's ON DELETE RESTRICT fires given
+    // a direct conflicting row, and PersonaRepository.DeleteAsync's own remarks document the race
+    // backstop's shape (re-query, possibly empty) in full.
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioDeleteFkGuard(DatabaseFixture db)
+    {
+        static async Task InsertSlotAsync(DatabaseFixture db, long personaId, int dayOfWeek, int startMinute, int endMinute)
+        {
+            await using var conn = await db.StationDataSource.OpenConnectionAsync();
+            await conn.ExecuteAsync(
+                """
+                insert into station.segment_schedule (day_of_week, start_minute, end_minute, persona_id)
+                values (@dayOfWeek, @startMinute, @endMinute, @personaId)
+                """,
+                new { dayOfWeek, startMinute, endMinute, personaId });
+        }
+
+        [Fact]
+        public async Task DeletingAPersonaWithOneScheduleRowReturnsItsSlot()
+        {
+            await db.ResetStationAsync();
+            await db.ResetScheduleAsync();
+            var repo = Repo(db);
+            var created = Assert.IsType<PersonaWriteResult.Created>(
+                await repo.CreateAsync(Draft("Scheduled DJ"), CancellationToken.None));
+            await InsertSlotAsync(db, created.Persona.Id, dayOfWeek: 1, startMinute: 540, endMinute: 720);
+
+            var outcome = await repo.DeleteAsync(created.Persona.Id, CancellationToken.None);
+
+            var scheduled = Assert.IsType<PersonaWriteResult.ScheduledElsewhere>(outcome);
+            var slot = Assert.Single(scheduled.Slots);
+            Assert.Equal(DayOfWeek.Monday, slot.Day);
+            Assert.Equal(540, slot.StartMinute);
+            Assert.Equal(720, slot.EndMinute);
+        }
+
+        [Fact]
+        public async Task DeletingAPersonaWithMultipleScheduleRowsReturnsAllOfThemInDayThenStartOrder()
+        {
+            await db.ResetStationAsync();
+            await db.ResetScheduleAsync();
+            var repo = Repo(db);
+            var created = Assert.IsType<PersonaWriteResult.Created>(
+                await repo.CreateAsync(Draft("Busy DJ"), CancellationToken.None));
+            // Inserted out of order — proves the query orders by day/start_minute, not insert order.
+            await InsertSlotAsync(db, created.Persona.Id, dayOfWeek: 2, startMinute: 840, endMinute: 960);
+            await InsertSlotAsync(db, created.Persona.Id, dayOfWeek: 1, startMinute: 540, endMinute: 720);
+
+            var outcome = await repo.DeleteAsync(created.Persona.Id, CancellationToken.None);
+
+            var scheduled = Assert.IsType<PersonaWriteResult.ScheduledElsewhere>(outcome);
+            Assert.Equal(2, scheduled.Slots.Count);
+            Assert.Equal(DayOfWeek.Monday, scheduled.Slots[0].Day);
+            Assert.Equal(DayOfWeek.Tuesday, scheduled.Slots[1].Day);
+        }
+
+        [Fact]
+        public async Task RejectedDeleteLeavesThePersonaRowIntact()
+        {
+            await db.ResetStationAsync();
+            await db.ResetScheduleAsync();
+            var repo = Repo(db);
+            var created = Assert.IsType<PersonaWriteResult.Created>(
+                await repo.CreateAsync(Draft("Untouchable DJ"), CancellationToken.None));
+            await InsertSlotAsync(db, created.Persona.Id, dayOfWeek: 3, startMinute: 0, endMinute: 1440);
+
+            await repo.DeleteAsync(created.Persona.Id, CancellationToken.None);
+
+            var stillThere = await repo.GetByIdAsync(created.Persona.Id, CancellationToken.None);
+            Assert.NotNull(stillThere);
+            Assert.Equal("Untouchable DJ", stillThere.Name);
+        }
+
+        [Fact]
+        public async Task ABenchedPersonaWithNoScheduleRowsStillDeletesNormally()
+        {
+            // The zero-rows path falls straight through to the plain DELETE — pinning that the guard's
+            // pre-check never blocks a persona that genuinely holds no schedule row (already implied
+            // by ScenarioCrudRoundTrip.DeleteRemovesTheRow above; explicit here alongside the guard's
+            // own sad-path facts).
+            await db.ResetStationAsync();
+            await db.ResetScheduleAsync();
+            var repo = Repo(db);
+            var created = Assert.IsType<PersonaWriteResult.Created>(
+                await repo.CreateAsync(Draft("Bench DJ"), CancellationToken.None));
+
+            var outcome = await repo.DeleteAsync(created.Persona.Id, CancellationToken.None);
+
+            Assert.IsType<PersonaWriteResult.Deleted>(outcome);
+        }
+    }
 }

@@ -20,6 +20,18 @@ public sealed class PatterTemplateRenderer
     /// same title/artist phrasing the plain variant already uses — station-known catalog metadata
     /// only, never the wish text or a parsed predicate (neither of which this type — or anything
     /// reaching this renderer — ever carries).
+    ///
+    /// <see cref="SegmentKind.SignOff"/>/<see cref="SegmentKind.SignOn"/> (SPEC F92.2, F92.5) key off
+    /// <see cref="SegmentRequest.CounterpartName"/> instead of <see cref="SegmentRequest.Track"/> —
+    /// named when a counterpart exists, music-only phrasing when it doesn't (F92.3). This is the
+    /// deterministic fallback rung only; <c>LlmCopyWriter</c> attempts these kinds the same as
+    /// LeadIn/BackAnnounce, routing a miss HERE the same way (F12.4) — but unlike LeadIn/BackAnnounce,
+    /// a handoff piece that lands on this template rung never actually airs it: <c>TtsSegmentSource</c>
+    /// drops any SignOff/SignOn render that isn't genuinely LLM-authored (SPEC F92.4/F92.5 — the ruled
+    /// ladder has no "templated piece" rung, only "whichever piece rendered, else clean cut"). This
+    /// method still needs a correct, non-throwing arm for both kinds regardless, since
+    /// <c>DegradationGatedCopyWriter</c> can route straight here (e.g. Hard mode) before that drop
+    /// ever gets a chance to apply.
     /// </summary>
     public string Expand(SegmentRequest request) => request.Kind switch
     {
@@ -41,6 +53,16 @@ public sealed class PatterTemplateRenderer
                                         null                     => "That was your last track.",
                                     },
         SegmentKind.TimeDate     => $"It's {request.LocalNow:h:mm tt} here on {request.StationName}.",
+        SegmentKind.SignOff      => request.CounterpartName switch
+                                    {
+                                        { Length: > 0 } name => $"That's me for now — coming up next, {name}.",
+                                        _                    => "That's me for now — the music keeps rolling.",
+                                    },
+        SegmentKind.SignOn       => request.CounterpartName switch
+                                    {
+                                        { Length: > 0 } name => $"Thanks, {name} — taking it from here.",
+                                        _                    => "Taking it from here after a run of nonstop music.",
+                                    },
         _                        => throw new ArgumentOutOfRangeException(
                                         nameof(request.Kind), request.Kind, message: null),
     };

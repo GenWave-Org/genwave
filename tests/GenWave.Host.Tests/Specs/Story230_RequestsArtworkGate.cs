@@ -172,6 +172,10 @@ public static class FeatureRequestsArtworkGate
         /// surface (every field of every Spectator-prefixed DTO) and pins the whole census. A new
         /// field anywhere on that surface (request-derived or otherwise) changes this list and
         /// fails here, independently of whatever Story171/183/217/221 already assert about it.
+        /// ⚠️ Amended PLAN T125 (SPEC F93.1/F93.2/F93.3/F93.5, STORY-244/245): `dj`/`upNext` join
+        /// both on-air shapes, `artworkUrl` joins the track shape, and the new nested
+        /// <c>SpectatorUpNext</c> type (discovered by this file's own by-prefix reflection) is
+        /// pinned here for the first time.
         /// </summary>
         static readonly string[] PinnedFieldCensus =
         [
@@ -181,11 +185,13 @@ public static class FeatureRequestsArtworkGate
             "SpectatorAbout.StationName",
             "SpectatorAbout.StreamUrl",
             "SpectatorAbout.Version",
+            "SpectatorPatterNowPlaying.Dj",
             "SpectatorPatterNowPlaying.DurationMs",
             "SpectatorPatterNowPlaying.Kind",
             "SpectatorPatterNowPlaying.Listeners",
             "SpectatorPatterNowPlaying.StartedAt",
             "SpectatorPatterNowPlaying.State",
+            "SpectatorPatterNowPlaying.UpNext",
             "SpectatorPlayHistoryPatterEntry.AiredAt",
             "SpectatorPlayHistoryPatterEntry.Kind",
             "SpectatorPlayHistoryResponse.Entries",
@@ -202,12 +208,17 @@ public static class FeatureRequestsArtworkGate
             "SpectatorStats.Failed",
             "SpectatorStats.Ready",
             "SpectatorTrackNowPlaying.Artist",
+            "SpectatorTrackNowPlaying.ArtworkUrl",
+            "SpectatorTrackNowPlaying.Dj",
             "SpectatorTrackNowPlaying.DurationMs",
             "SpectatorTrackNowPlaying.Kind",
             "SpectatorTrackNowPlaying.Listeners",
             "SpectatorTrackNowPlaying.StartedAt",
             "SpectatorTrackNowPlaying.State",
             "SpectatorTrackNowPlaying.Title",
+            "SpectatorTrackNowPlaying.UpNext",
+            "SpectatorUpNext.Dj",
+            "SpectatorUpNext.StartsAt",
         ];
 
         [Fact]

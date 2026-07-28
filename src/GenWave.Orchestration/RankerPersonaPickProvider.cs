@@ -22,10 +22,10 @@ using GenWave.Core.Domain;
 /// for the persona id <see cref="PersonaRanker.PickAsync"/> needs to look up taste rules, then
 /// <see cref="IActivePersonaAccessor.ResolveCardAsync"/> for <see cref="PersonaCard.EnergyDisposition"/>
 /// — no single accessor member returns both. This mirrors the accessor's own documented shape
-/// (<c>GenWave.Host.Options.ActivePersonaAccessor</c>'s remarks: "ResolveAsync and ResolveCardAsync
-/// are two independent reads of the SAME activeId"), not a novel risk this provider introduces; both
-/// reads resolve the SAME live <c>Station:Persona:ActiveId</c> barring an activate/deactivate landing
-/// in the narrow window between them, which degrades no worse than a stale-but-consistent pick.
+/// (<see cref="OnAirPersonaAccessor"/>'s remarks: "ResolveAsync and ResolveCardAsync are two
+/// independent reads of the SAME on-air snapshot"), not a novel risk this provider introduces; both
+/// reads resolve the SAME on-air persona (SPEC F91.5) barring a schedule boundary landing in the
+/// narrow window between them, which degrades no worse than a stale-but-consistent pick.
 /// </para>
 ///
 /// <para>

@@ -54,4 +54,29 @@ public interface IActivePersonaAccessor
     /// opts in with a real override.
     /// </summary>
     long? ActivePersonaId => null;
+
+    /// <summary>
+    /// Synchronous, in-memory read of a cached persona display name (SPEC F93.1, F93.4, STORY-244,
+    /// PLAN T125) — no store round trip, unlike <see cref="ResolveAsync"/>. Exists for the spectator
+    /// now-playing poll, which (SPEC F93.4) must issue no DB or engine call of its own: the poll
+    /// looks up <c>CachingScheduleResolver.TryGetCurrent()?.PersonaId</c> and passes it here rather
+    /// than calling <see cref="ResolveAsync"/> itself.
+    ///
+    /// <para>
+    /// An implementation is expected to populate this memo OPPORTUNISTICALLY, as a side effect of its
+    /// own <see cref="ResolveAsync"/> succeeding for that id — never by querying on this call. It is
+    /// therefore only as fresh as the last time that id was resolved through the ordinary
+    /// orchestration path (lead-in/back-announce persona resolution, or a bound
+    /// <c>IPersonaPickProvider</c>'s own resolve) — answers <see langword="null"/> for an id never
+    /// yet seen that way, including the process-boot window before the first such resolve.
+    /// </para>
+    ///
+    /// <para>
+    /// Default-implemented as "not cached" (null) for the same additive reason as
+    /// <see cref="ResolveCardAsync"/> and <see cref="ActivePersonaId"/>: every pre-F93 implementer (a
+    /// test double, an older SDK consumer) keeps compiling unchanged and simply reports "name not
+    /// cached" until it opts in with a real override.
+    /// </para>
+    /// </summary>
+    string? TryGetCachedName(long personaId) => null;
 }

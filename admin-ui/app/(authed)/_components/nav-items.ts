@@ -7,6 +7,7 @@ import {
   PersonaCatalogIcon,
   PersonaIcon,
   SafeContentIcon,
+  ScheduleIcon,
   SettingsIcon,
   type IconProps,
 } from "./icons";
@@ -37,6 +38,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/catalog", label: "Catalog", Icon: CatalogIcon },
   { href: "/safe-content", label: "Safe content", Icon: SafeContentIcon },
   { href: "/personas", label: "Personas", Icon: PersonaIcon },
+  { href: "/schedule", label: "Schedule", Icon: ScheduleIcon },
   { href: "/persona-catalog", label: "Persona Catalog", Icon: PersonaCatalogIcon, requiresCatalog: true },
   { href: "/booth-log", label: "Booth log", Icon: BoothLogIcon },
   { href: "/settings", label: "Settings", Icon: SettingsIcon },

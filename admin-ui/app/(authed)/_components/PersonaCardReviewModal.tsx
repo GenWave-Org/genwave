@@ -23,6 +23,11 @@ export interface PersonaCardReviewImportResult {
   warnings: string[];
 }
 
+/** The confirm button's presentation-only verb (SPEC F94.4, gh-#169, PLAN T130) — never threaded
+ * into the wire request itself; see `PersonaCardReviewModalProps.verb` and `handleConfirm` below,
+ * whose POST target is exactly the same `.../import` endpoint regardless of which verb is showing. */
+export type PersonaCardReviewVerb = "import" | "hire";
+
 export interface PersonaCardReviewModalProps {
   /** Raw card JSON text — exactly as fetched from the catalog or read from an uploaded file (SPEC
    * F90.5, F90.6). POSTed byte-for-byte on confirm; never the parsed projection below, which
@@ -37,6 +42,12 @@ export interface PersonaCardReviewModalProps {
    * requirement, shown alongside the card's own sections. A file-upload origin carries no sidecar
    * at all, so this is simply omitted there. */
   samples?: string[];
+  /** Which verb the confirm button speaks (SPEC F94.4's catalog "Hire" pass) — presentation only,
+   * the wire stays "import" either way (`handleConfirm`'s URL is untouched by this prop). The
+   * catalog origin (`PersonaCatalogClient`) passes `"hire"`; the file-upload origin
+   * (`PersonaImportPanel`) omits this prop entirely and keeps the default `"import"` wording,
+   * unchanged (the issue's own lean: file uploads stay "Import"). */
+  verb?: PersonaCardReviewVerb;
   onCancel: () => void;
   onImported: (result: PersonaCardReviewImportResult) => void;
 }
@@ -47,6 +58,14 @@ const SECTION_LABEL_CLASSES = "text-[0.68rem] font-semibold uppercase tracking-[
 const SECTION_BODY_CLASSES = "mt-1.5 text-[0.85rem] text-ink";
 const LIST_CLASSES = "m-0 mt-1.5 flex list-none flex-col gap-1.5 p-0";
 const LIST_ITEM_CLASSES = "rounded-[6px] border border-line bg-surface-2 px-3 py-2 text-[0.85rem] text-ink";
+
+/** Confirm button copy per verb (SPEC F94.4) — a `Record` over `PersonaCardReviewVerb` so adding a
+ * third verb someday is a compile error here until it's given both an idle and busy label, rather
+ * than a silently-blank button. */
+const CONFIRM_LABEL: Record<PersonaCardReviewVerb, { idle: string; busy: string }> = {
+  import: { idle: "Confirm import", busy: "Importing…" },
+  hire: { idle: "Confirm hire", busy: "Hiring…" },
+};
 
 function TextSection({ label, value }: { label: string; value: string }): ReactNode {
   return (
@@ -191,7 +210,8 @@ function ReviewBody({ review, samples }: { review: PersonaCardReview; samples: s
  * `fetch`. Deliberately generic over its origin (`cardText` + the optional `catalogSlug`/`samples`
  * "source descriptor") so this same component is the one T104 (STORY-236) reuses for the
  * file-upload door — the only door this ruling recognizes is "reviewed", never "which button
- * started it".
+ * started it". `verb` (SPEC F94.4, PLAN T130) is the one PRESENTATION-only fork this shared
+ * component carries: the confirm button's label, never `handleConfirm`'s request.
  *
  * House modal conventions: Radix `Dialog` for the focus trap and Escape/backdrop dismissal
  * (`confirm-dialog.tsx`, `MobileNav.tsx` — FocusScope + DismissableLayer are Radix's job, never
@@ -218,6 +238,7 @@ export function PersonaCardReviewModal({
   cardText,
   catalogSlug,
   samples = [],
+  verb = "import",
   onCancel,
   onImported,
 }: PersonaCardReviewModalProps): ReactNode {
@@ -315,7 +336,7 @@ export function PersonaCardReviewModal({
               }}
               disabled={review === null || status.kind === "importing"}
             >
-              {status.kind === "importing" ? "Importing…" : "Confirm import"}
+              {status.kind === "importing" ? CONFIRM_LABEL[verb].busy : CONFIRM_LABEL[verb].idle}
             </Button>
           </div>
         </Dialog.Content>

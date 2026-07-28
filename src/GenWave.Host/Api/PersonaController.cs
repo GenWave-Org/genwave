@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -6,7 +7,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
-using GenWave.Host.Configuration;
 using GenWave.Host.Options;
 
 namespace GenWave.Host.Api;
@@ -33,7 +33,6 @@ namespace GenWave.Host.Api;
 [Authorize(Policy = AuthorizationPolicies.Settings)]
 public sealed partial class PersonaController(
     IPersonaStore personaStore,
-    IStationSettingsStore settingsStore,
     IOptionsMonitor<StationOptions> stationMonitor,
     IPersonaPreviewWriter previewWriter,
     IActivePersonaAccessor personaAccessor,
@@ -45,9 +44,6 @@ public sealed partial class PersonaController(
     ITtsVoiceLister voiceLister,
     ILogger<PersonaController> logger) : ControllerBase
 {
-    // The F19 allowlist key this controller's delete-clears-active write targets (F35.5).
-    internal const string ActiveIdKey = "Station:Persona:ActiveId";
-
     // SPEC F79.6 — enforced BEFORE deserialization, see Import's own remarks.
     const int MaxImportBytes = 256 * 1024;
 
@@ -118,11 +114,21 @@ public sealed partial class PersonaController(
     }
 
     /// <summary>
-    /// DELETE /api/personas/{id} — remove a persona. 204 on success; 404 for an unknown id.
-    /// Deleting the currently active persona clears <c>Station:Persona:ActiveId</c> back to
-    /// <c>0</c> IN THE SAME REQUEST (F35.5) — a stale id reached any other way still degrades
-    /// safely via <see cref="IActivePersonaAccessor"/>, but this is the one path that can prevent
-    /// the staleness outright.
+    /// DELETE /api/personas/{id} — remove a persona. 204 on success; 404 for an unknown id; 409,
+    /// naming every offending day/time slot, when the persona still appears in the format-clock
+    /// schedule (SPEC F91.9 — supersedes F35.5's retired delete-clears-active write:
+    /// <c>Station:Persona:ActiveId</c> no longer exists for a delete to clear).
+    ///
+    /// <para>
+    /// PLAN T121: <see cref="IPersonaStore.DeleteAsync"/> queries <c>station.segment_schedule</c>
+    /// BEFORE attempting the delete, so <see cref="PersonaWriteResult.ScheduledElsewhere"/> arrives
+    /// here already carrying its <see cref="PersonaWriteResult.ScheduledElsewhere.Slots"/> — the FK
+    /// RESTRICT is only the store's race backstop now, never the primary signal (house precedent: the
+    /// store, never this controller, is where a raw Postgres SQLSTATE becomes a
+    /// <see cref="PersonaWriteResult"/> case; mirrors <see cref="PersonaWriteResult.NameConflict"/>'s
+    /// own unique_violation mapping). This action's only job for that case is formatting those slots
+    /// into the 409 <c>Detail</c> an operator can read at a glance.
+    /// </para>
     /// </summary>
     [HttpDelete("{id:long}")]
     public async Task<IActionResult> Delete(long id, CancellationToken ct)
@@ -130,24 +136,16 @@ public sealed partial class PersonaController(
         var result = await personaStore.DeleteAsync(id, ct);
 
         if (result is PersonaWriteResult.Deleted)
-        {
             logger.LogInformation("Persona deleted id={PersonaId}", id);
-
-            if (stationMonitor.CurrentValue.Persona.ActiveId == id)
-            {
-                // WriteAsync raises the overlay reload token — the very next
-                // IOptionsMonitor<StationOptions> read (including this request's own, were it to
-                // read again) sees ActiveId=0.
-                await settingsStore.WriteAsync(ActiveIdKey, 0, ct);
-                logger.LogInformation(
-                    "Cleared {Key} after deleting the active persona id={PersonaId}", ActiveIdKey, id);
-            }
-        }
+        else if (result is PersonaWriteResult.ScheduledElsewhere scheduled)
+            logger.LogWarning(
+                "Persona delete blocked: id={PersonaId} slotCount={SlotCount}", id, scheduled.Slots.Count);
 
         return result switch
         {
             PersonaWriteResult.Deleted => NoContent(),
             PersonaWriteResult.NotFound => NotFound(NotFoundProblem(id)),
+            PersonaWriteResult.ScheduledElsewhere scheduled => Conflict(ScheduledPersonaProblem(id, scheduled.Slots)),
             _ => StatusCode(StatusCodes.Status500InternalServerError),
         };
     }
@@ -613,7 +611,7 @@ public sealed partial class PersonaController(
 
     static PersonaDto ToDto(Persona persona) =>
         new(
-            persona.Id, persona.Name, persona.Backstory, persona.Style, persona.Voice,
+            persona.Id, persona.Name, persona.Backstory, persona.Style, persona.Voice, persona.Slug,
             persona.ImportedFrom, persona.ImportedAt);
 
     static IReadOnlyList<PersonaTasteRuleDto> RulesBySource(
@@ -670,6 +668,35 @@ public sealed partial class PersonaController(
         Title  = "Not found.",
         Detail = $"No persona with id {id} exists.",
     };
+
+    /// <summary>
+    /// SPEC F91.9 (PLAN T121) — names every slot blocking the delete, formatted for an operator to
+    /// read at a glance: <c>"Mon 09:00–12:00, Tue 14:00–16:00"</c>. <paramref name="slots"/> is empty
+    /// only on the store's race-backstop path (a slot re-queried after the FK fired, but no longer
+    /// found) — the detail falls back to the T120 scaffolding's generic wording for that one case,
+    /// since there is nothing left to name.
+    /// </summary>
+    static ProblemDetails ScheduledPersonaProblem(long id, IReadOnlyList<ScheduledSlot> slots) => new()
+    {
+        Status = StatusCodes.Status409Conflict,
+        Title  = "Persona is scheduled.",
+        Detail = slots.Count > 0
+            ? $"Persona {id} is still scheduled and cannot be deleted: {string.Join(", ", slots.Select(FormatSlot))}."
+            : $"Persona {id} still appears in the format-clock schedule and cannot be deleted while scheduled.",
+    };
+
+    // Invariant-culture abbreviated day name ("Mon", "Tue", ...) — never a station-configurable
+    // locale; this is an operator-facing admin message, not station-facing broadcast copy.
+    static string FormatSlot(ScheduledSlot slot) =>
+        $"{CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedDayName(slot.Day)} " +
+        $"{FormatMinutes(slot.StartMinute)}–{FormatMinutes(slot.EndMinute)}";
+
+    // Minutes-since-midnight as HH:mm — plain arithmetic, not TimeSpan's "hh" format specifier: a
+    // 1440-minute end (midnight, the grid's own maximum) rolls into TimeSpan's Days component, which
+    // "hh" ignores entirely, silently printing "00:00" for what is actually the end of the day.
+    static string FormatMinutes(int minutesSinceMidnight) =>
+        $"{(minutesSinceMidnight / 60).ToString("D2", CultureInfo.InvariantCulture)}:" +
+        $"{(minutesSinceMidnight % 60).ToString("D2", CultureInfo.InvariantCulture)}";
 
     static ProblemDetails UnknownSlugProblem(string slug) => new()
     {

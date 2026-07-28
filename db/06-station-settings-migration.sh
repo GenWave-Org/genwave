@@ -42,6 +42,15 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	-- Schema owned by the service role; subsequent DDL runs as station_svc so it owns everything.
 	CREATE SCHEMA IF NOT EXISTS station AUTHORIZATION station_svc;
 
+	-- btree_gist (SPEC F91.1, STORY-240, PLAN T118): station.segment_schedule's EXCLUDE constraint
+	-- below needs a GiST opclass for plain integer equality (day_of_week) — int4range's own overlap
+	-- opclass is already built into core Postgres, but bare-integer equality is not, without this
+	-- extension. Installed once per database while still connected as the bootstrap superuser (this
+	-- session has not dropped to station_svc yet) — the default opclass Postgres picks up for the
+	-- EXCLUDE constraint is resolved by type+access-method, not by search_path, so which schema the
+	-- extension's objects land in does not matter here.
+	CREATE EXTENSION IF NOT EXISTS btree_gist;
+
 	-- Switch to the service role so it owns every object it creates (real isolation).
 	SET ROLE station_svc;
 	SET search_path = station;
@@ -219,4 +228,40 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	-- order/compare against expires_at.
 	CREATE INDEX IF NOT EXISTS request_pending
 	  ON station.request (status, expires_at);
+
+	-- The weekly format-clock grid (SPEC F91.1, F91.2; STORY-240, STORY-242; PLAN T118) that replaces
+	-- the single owner-toggled Station:Persona:ActiveId. day_of_week is System.DayOfWeek's own 0-6
+	-- numbering (0 = Sunday) — no translation ever happens between this column and the C# side.
+	-- start_minute/end_minute are wall-clock minutes since local midnight on 30-minute boundaries
+	-- (container TZ, TimeProvider.LocalTimeZone) — DST is free by construction (a spring-forward
+	-- segment simply airs an hour short, fall-back an hour long; see ARCHITECTURE.md's own remarks).
+	-- persona_id NULL means music-only (a deliberate nullable-FK override); ON DELETE RESTRICT means a
+	-- persona holding any slot can never be deleted out from under the schedule (SPEC F91.9) — only a
+	-- fully benched persona (zero rows here) is deletable. genres/energy_min/energy_max NULL means "use
+	-- the station-default envelope" (F91.4); each is independently nullable, so a segment may override
+	-- only one of the three. energy_min/energy_max are double precision, not real: a float4 column
+	-- round-trips 0.3 as 0.30000001 (single-precision rounding), which would surface verbatim in the
+	-- T129 editor — double precision carries every value the C# double envelope bounds already are
+	-- without that loss. The EXCLUDE constraint makes two overlapping rows on the same day IMPOSSIBLE
+	-- at the store — the same day + an overlapping [start_minute, end_minute) range can never both
+	-- exist, regardless of what any application-side check does or fails to do; a midnight-spanning
+	-- show is two rows (one per day) rather than a single wraparound range. See
+	-- db/27-segment-schedule-migration.sh for the in-place upgrade path this table also ships as,
+	-- including the F91.6 seed-and-delete data migration that only concerns an existing installation
+	-- upgrading through this release — a fresh install has no legacy Station:Persona:ActiveId key to
+	-- migrate, so nothing here seeds a row.
+	CREATE TABLE IF NOT EXISTS station.segment_schedule (
+	  id           serial      PRIMARY KEY,
+	  day_of_week  int         NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
+	  start_minute int         NOT NULL CHECK (start_minute % 30 = 0 AND start_minute BETWEEN 0 AND 1410),
+	  end_minute   int         NOT NULL CHECK (end_minute   % 30 = 0 AND end_minute   BETWEEN 30 AND 1440),
+	  persona_id   int         REFERENCES station.persona (id) ON DELETE RESTRICT,
+	  genres       text[],
+	  energy_min   double precision,
+	  energy_max   double precision,
+	  created_at   timestamptz NOT NULL DEFAULT now(),
+	  updated_at   timestamptz NOT NULL DEFAULT now(),
+	  CHECK (end_minute > start_minute),
+	  EXCLUDE USING gist (day_of_week WITH =, int4range(start_minute, end_minute) WITH &&)
+	);
 	SQL

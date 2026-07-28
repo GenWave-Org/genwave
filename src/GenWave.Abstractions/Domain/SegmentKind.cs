@@ -16,4 +16,10 @@ public enum SegmentKind
 
     /// <summary>Announces the current local time and date.</summary>
     TimeDate,
+
+    /// <summary>Outgoing DJ closes out their shift at a roster boundary (SPEC F92.2).</summary>
+    SignOff,
+
+    /// <summary>Incoming DJ opens their shift at a roster boundary (SPEC F92.2).</summary>
+    SignOn,
 }

@@ -22,6 +22,23 @@ sealed class FakeTtsSegmentSource : ITtsSegmentSource
     /// <summary>When non-null, each RenderAsync waits this long before returning.</summary>
     public TimeSpan? RenderDelay { get; set; }
 
+    /// <summary>
+    /// Per-request null override (STORY-243, PLAN T124) — narrower than <see cref="AlwaysReturnNull"/>'s
+    /// blanket switch: lets a spec fail just ONE segment kind (e.g. a SignOff render, mirroring
+    /// <c>TtsSegmentSource</c>'s own real F92.4 drop of non-LLM-authored handoff copy) while every
+    /// other request still renders normally. <see langword="null"/> (the default) never overrides
+    /// anything.
+    /// </summary>
+    public Func<SegmentRequest, bool>? ShouldReturnNull { get; set; }
+
+    /// <summary>
+    /// Per-request fault override (T124 review finding F6) — simulates a genuine synth outage
+    /// (distinct from <see cref="ShouldReturnNull"/>'s "completed with null" shape) so a spec can pin
+    /// <c>Orchestrator</c>'s drop-cause classification: a faulted render must log "render faulted",
+    /// never "render returned null". <see langword="null"/> (the default) never overrides anything.
+    /// </summary>
+    public Func<SegmentRequest, bool>? ShouldThrow { get; set; }
+
     public async Task<MediaItem?> RenderAsync(SegmentRequest request, CancellationToken ct)
     {
         RenderCallCount++;
@@ -31,7 +48,10 @@ sealed class FakeTtsSegmentSource : ITtsSegmentSource
         if (RenderDelay is { } delay)
             await Task.Delay(delay, ct);
 
-        if (AlwaysReturnNull) return null;
+        if (ShouldThrow?.Invoke(request) ?? false)
+            throw new InvalidOperationException("Simulated TTS render fault (test double).");
+
+        if (AlwaysReturnNull || (ShouldReturnNull?.Invoke(request) ?? false)) return null;
 
         var mediaId = $"tts:{request.Kind.ToString().ToLowerInvariant()}-{RenderCallCount}";
         var item = new MediaItem(

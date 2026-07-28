@@ -242,8 +242,8 @@ public static class FeatureNowPlayingEngineInitiatedFidelity
             return Task.FromResult(new EngineMetadata(map));
         }
 
-        public Task<string> PushAsync(MediaItem item, double gainDb, CancellationToken ct)
-            => Task.FromResult(item.MediaId);
+        public Task<EnginePushResult> PushAsync(MediaItem item, double gainDb, CancellationToken ct)
+            => Task.FromResult(new EnginePushResult(item.MediaId, ArtworkUrl: null));
     }
 
     /// <summary>

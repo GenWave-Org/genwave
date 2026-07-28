@@ -122,7 +122,8 @@ sealed class PlayoutFeederService : IHostedService
             GainDb: onAir.GainDb,
             StartedAt: onAir.StartedAt,
             DurationMs: onAir.DurationMs,
-            IsDrain: !onAir.IsReal);
+            IsDrain: !onAir.IsReal,
+            ArtworkUrl: onAir.ArtworkUrl);
 
         nowPlaying.Update(stationId, snapshot);
     }

@@ -24,6 +24,14 @@ namespace GenWave.Core.Domain;
 /// the same persona. <c>TtsSegmentSource</c> stamps the produced <see cref="MediaItem.Artist"/> as
 /// <c>PersonaName ?? StationName</c> (F39.2); this field carries no meaning outside that seam.
 /// </param>
+/// <param name="CounterpartName">
+/// Display name of the OTHER DJ in a handoff (SPEC F92.2): for <see cref="SegmentKind.SignOff"/>,
+/// the incoming DJ taking over; for <see cref="SegmentKind.SignOn"/>, the outgoing DJ just
+/// relieved. <see langword="null"/> means no counterpart exists for this boundary (a music-only
+/// half of the handoff, F92.3) — every other kind leaves this unset. Additive and optional
+/// (default <see langword="null"/>) so every existing caller is diff-free; the F74 queue producer
+/// (PLAN T124) is the only writer.
+/// </param>
 public sealed record SegmentRequest(
     SegmentKind    Kind,
     string         Voice,
@@ -31,4 +39,5 @@ public sealed record SegmentRequest(
     MediaItem?     Track,
     DateTimeOffset LocalNow,
     string         StationId,
-    string?        PersonaName = null);
+    string?        PersonaName = null,
+    string?        CounterpartName = null);
