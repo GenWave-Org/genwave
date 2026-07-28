@@ -27,6 +27,13 @@ namespace GenWave.Core.Domain;
 /// assigned; <c>null</c> for a row the mood tagger hasn't reached (or missed) yet — never an
 /// empty array standing in for "untagged", so the UI can tell "no moods yet" apart from "tagged,
 /// zero survivors" if that distinction ever matters.
+///
+/// <c>Explicit</c>/<c>ExplicitSource</c> (SPEC F95.2, STORY-251) surface the per-track
+/// explicit/advisory classification: <c>Explicit</c> is <see langword="null"/> until classified
+/// (never a sentinel false), and <c>ExplicitSource</c> names who classified it —
+/// <c>tag</c>/<c>llm</c>/<c>operator</c> — once it has been. db/26 ships the columns and this
+/// projection only; no classification pipeline writes them yet (T110), and nothing enforces or
+/// filters on them here — <c>Explicit</c> is orthogonal to the F95.5 never-play verdict.
 /// </summary>
 public sealed record AdminMediaDto(
     string MediaId,
@@ -51,4 +58,6 @@ public sealed record AdminMediaDto(
     double? Bpm = null,
     double? TrackEnergy = null,
     IReadOnlyList<string>? Moods = null,
-    bool Rateable = true);
+    bool Rateable = true,
+    bool? Explicit = null,
+    string? ExplicitSource = null);

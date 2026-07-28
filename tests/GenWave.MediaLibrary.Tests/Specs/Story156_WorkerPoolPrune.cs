@@ -31,7 +31,8 @@ public static class FeatureWorkerPoolPrune
             new NpgsqlDataSourceBuilder("Host=127.0.0.1;Port=1;Database=unused;Username=unused;Password=unused").Build(),
             NullLogger<MediaRepository>.Instance,
             enrichQueue,
-            new Fakes.FakeSafeScopeProvider());
+            new Fakes.FakeSafeScopeProvider(),
+            new Fakes.FakeAudiencePostureProvider());
 
     static EnrichmentService NewService(Channel<long> queue, FakeOptionsMonitor<LibraryOptions> options) =>
         new(

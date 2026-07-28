@@ -198,7 +198,7 @@ public static class FeatureSafeContentRatingRepository
             var (safeLib, safeMedia, musicMedia) = await SeedAsync(db, "list");
             var repo = new MediaRepository(
                 db.DataSource, NullLogger<MediaRepository>.Instance, Channel.CreateUnbounded<long>(),
-                new FakeSafeScopeProvider(safeLib));
+                new FakeSafeScopeProvider(safeLib), new FakeAudiencePostureProvider());
 
             var page = await repo.ListAdminAsync(
                 new LibraryScope([1, safeLib]), new MediaQuery(), CancellationToken.None);

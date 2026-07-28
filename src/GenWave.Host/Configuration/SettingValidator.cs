@@ -282,6 +282,11 @@ public sealed class SettingValidator(IConfiguration configuration)
             // switch (catalog endpoints 404, admin UI hides the shelf), mirroring Llm:Endpoint/
             // Tts:Fallback:Endpoint's own "empty legal, else absolute http/https" shape.
             ["Community:CatalogIndexUrl"] = v => string.IsNullOrEmpty(v) || IsAbsoluteHttpUri(v),
+
+            // Audience posture (SPEC F95.1, STORY-250, PLAN T111) — exactly the two values T114's
+            // pool predicate will recognize; case-insensitive, mirroring Llm:DegradationPin's own
+            // guard just above. No cross-field checks; no consumer reads this yet.
+            ["Station:Audience"] = IsValidAudiencePosture,
         };
 
     // ── Per-key validation ─────────────────────────────────────────────────────────────────────
@@ -396,6 +401,11 @@ public sealed class SettingValidator(IConfiguration configuration)
     // Llm:DegradationPin (SPEC F69.3) — "auto" (leaves the mode automatic) or a pinned mode name.
     static bool IsValidDegradationPin(string v) =>
         v.Trim().ToLowerInvariant() is "auto" or "normal" or "soft" or "hard";
+
+    // Station:Audience (SPEC F95.1, STORY-250) — exactly "everyone" (default, fail-closed) or
+    // "mature"; case-insensitive, the same shape as IsValidDegradationPin just above.
+    static bool IsValidAudiencePosture(string v) =>
+        v.Trim().ToLowerInvariant() is "everyone" or "mature";
 
     /// <summary>
     /// An absolute, well-formed http/https URL (used for <c>Tts:Endpoint</c>/<c>Llm:Endpoint</c>,
@@ -716,6 +726,8 @@ public sealed class SettingValidator(IConfiguration configuration)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {RequestsWindowMinutesMin} and {RequestsWindowMinutesMax} (minutes).",
         var k when k.Equals("Community:CatalogIndexUrl", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable the Persona Catalog entirely.",
+        var k when k.Equals("Station:Audience", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be one of: everyone, mature.",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }

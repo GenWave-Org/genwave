@@ -66,6 +66,7 @@ public class CatalogTests(DatabaseFixture fixture)
         await repo.WriteEnrichmentAsync(id, new EnrichmentResult(
             DurationMs: 180_000, SampleRate: 44_100, Channels: 2, BitrateKbps: 1000,
             Title: "T", Artist: "A", Album: "Al", AlbumArtist: "AA", Genre: "G", TrackNo: 5, Year: 2019,
+            Explicit: null,
             IntegratedLufs: -14.2, TruePeakDbtp: -1.3, Measurable: true,
             CueInSec: null, CueOutSec: null, CueAnalyzedAt: DateTime.UtcNow,
             IntroEnergy: null, OutroEnergy: null, EnergyAnalyzedAt: DateTime.UtcNow,

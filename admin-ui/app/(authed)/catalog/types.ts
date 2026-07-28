@@ -1,3 +1,5 @@
+import type { ExplicitSource } from "@/lib/broadcast-api";
+
 /** Shape of a GET /api/media row rendered in the catalog table. */
 export interface AdminMediaDto {
   mediaId: string;
@@ -39,6 +41,13 @@ export interface AdminMediaDto {
    * never-play control at all, not a disabled one (the write endpoint refuses it regardless).
    * Optional so pre-#99 object literals keep compiling; absent means rateable. */
   rateable?: boolean;
+  /** Explicit/advisory classification (SPEC F95.2, STORY-251) — `null`/absent means unclassified,
+   * never a sentinel `false`. Optional so pre-T116 `AdminMediaDto` object literals across the test
+   * suite keep compiling unchanged, mirroring the `moods`/`rateable` precedent above. */
+  explicit?: boolean | null;
+  /** Who stamped {@link explicit} (SPEC F95.2/F95.3) — an {@link ExplicitSource} once classified,
+   * else `null`/absent. Companion to `explicit` — see that member's remarks. */
+  explicitSource?: ExplicitSource | null;
 }
 
 /** Parsed `X-Pagination: total=…,pages=…,page=…,limit=…` header. */

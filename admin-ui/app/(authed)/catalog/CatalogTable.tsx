@@ -9,6 +9,7 @@ import { usePersistedState } from "@/lib/use-persisted-state";
 import type { LibraryDto } from "@/lib/library";
 import { CatalogToolbar } from "./CatalogToolbar";
 import { ColumnsToggle } from "./ColumnsToggle";
+import { ExplicitOverrideControl, type ExplicitOverrideChange } from "./ExplicitOverrideControl";
 import { NeverPlayControl } from "./NeverPlayControl";
 import {
   CATALOG_COLUMN_VISIBILITY_STORAGE_KEY,
@@ -75,6 +76,40 @@ function NeverPlayBadge(): ReactNode {
   );
 }
 
+/**
+ * Explicit classification badge (SPEC F95.2, STORY-251) — `true` gets a clear, legible brass chip
+ * (the shipped source-tag chip style, mirroring {@link NeverPlayBadge}'s "flagged" treatment);
+ * `false` gets a subtle muted-text affordance rather than a chip, so an operator's eye isn't drawn
+ * to every clean row the way it is to a flagged one; `null`/absent (unclassified) renders nothing
+ * — there is nothing yet to report.
+ */
+function ExplicitBadge({
+  explicit,
+  explicitSource,
+}: {
+  explicit: boolean | null | undefined;
+  explicitSource: string | null | undefined;
+}): ReactNode {
+  if (explicit === null || explicit === undefined) return null;
+  const sourceSuffix =
+    explicitSource !== null && explicitSource !== undefined ? ` · ${explicitSource}` : "";
+  if (explicit) {
+    return (
+      <span
+        data-testid="explicit-badge"
+        className="inline-flex w-fit items-center rounded-[3px] border border-accent-2 px-1.5 py-0.5 text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-accent-2"
+      >
+        Explicit{sourceSuffix}
+      </span>
+    );
+  }
+  return (
+    <span data-testid="explicit-badge" className="text-[0.78rem] text-mute">
+      Clean{sourceSuffix}
+    </span>
+  );
+}
+
 /** Moods cell (SPEC F86.8) — one bordered chip per mood tag, the shipped source-tag chip style
  * (design-aesthetic: "3px-radius bordered chip for source tags"), same visual language as
  * NeverPlayBadge and the filter chips above. Renders nothing (an empty cell, not an em-dash) for
@@ -134,6 +169,11 @@ export function CatalogTable({
   // network round trip started below. Reset whenever a fresh `media` array lands — a new
   // filter/page fetch (or this same toggle's own `router.refresh()`) already carries server truth.
   const [neverPlayOverrides, setNeverPlayOverrides] = useState<Map<string, boolean>>(new Map());
+  // Optimistic explicit-override overrides (SPEC F95.3, STORY-251) — same "fold the PUT response
+  // in immediately, reset on a fresh `media` array" posture as `neverPlayOverrides` above.
+  const [explicitOverrides, setExplicitOverrides] = useState<Map<string, ExplicitOverrideChange>>(
+    new Map()
+  );
 
   // Year/BPM/Energy/Moods column visibility (SPEC F49.3, F86.8) — persisted in localStorage,
   // default hidden (empty array). Existing columns are not toggleable this phase.
@@ -158,6 +198,7 @@ export function CatalogTable({
   useEffect(() => {
     setSelected((prev) => new Set([...prev].filter((id) => media.some((m) => m.mediaId === id))));
     setNeverPlayOverrides(new Map());
+    setExplicitOverrides(new Map());
   }, [media]);
 
   if (media.length === 0) {
@@ -203,6 +244,14 @@ export function CatalogTable({
    * `?never-play=true` filtered view drops a just-restored row (SPEC F33.10, F33.12 AC3). */
   function handleNeverPlayChange(mediaId: string, neverPlay: boolean): void {
     setNeverPlayOverrides((prev) => new Map(prev).set(mediaId, neverPlay));
+    router.refresh();
+  }
+
+  /** Folds a successful explicit-override PUT into local state, then refreshes so the rest of
+   * the row's server-rendered data stays current (SPEC F95.3, STORY-251 — mirrors
+   * {@link handleNeverPlayChange}'s posture). */
+  function handleExplicitChange(mediaId: string, change: ExplicitOverrideChange): void {
+    setExplicitOverrides((prev) => new Map(prev).set(mediaId, change));
     router.refresh();
   }
 
@@ -256,6 +305,9 @@ export function CatalogTable({
               <th scope="col" className={HEADER_CELL}>
                 Eligible
               </th>
+              <th scope="col" className={HEADER_CELL}>
+                Explicit
+              </th>
               <th scope="col" className={HEADER_CELL_RIGHT}>
                 Score
               </th>
@@ -293,6 +345,11 @@ export function CatalogTable({
             {media.map((item) => {
               const isSelected = selected.has(item.mediaId);
               const neverPlay = neverPlayOverrides.get(item.mediaId) ?? item.neverPlay;
+              const { explicit: explicitValue, explicitSource: explicitSourceValue } =
+                explicitOverrides.get(item.mediaId) ?? {
+                  explicit: item.explicit ?? null,
+                  explicitSource: item.explicitSource ?? null,
+                };
               return (
                 <tr
                   key={item.mediaId}
@@ -319,6 +376,17 @@ export function CatalogTable({
                   <td className="py-2 pr-3 text-mute">{item.state}</td>
                   <td className="py-2 pr-3">
                     <span aria-label={item.eligible ? "eligible" : "ineligible"}>{item.eligible ? "Yes" : "No"}</span>
+                  </td>
+                  <td className="py-2 pr-3">
+                    <div className="flex items-center gap-2">
+                      <ExplicitBadge explicit={explicitValue} explicitSource={explicitSourceValue} />
+                      <ExplicitOverrideControl
+                        mediaId={item.mediaId}
+                        rowLabel={item.title ?? item.mediaId}
+                        explicit={explicitValue}
+                        onChange={(next) => handleExplicitChange(item.mediaId, next)}
+                      />
+                    </div>
                   </td>
                   <td className="py-2 pr-3 text-right tabular-nums text-ink">{item.score}</td>
                   <td className="py-2 pr-3">

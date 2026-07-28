@@ -45,7 +45,8 @@ namespace GenWave.MediaLibrary.Catalog;
 /// </para>
 /// </summary>
 sealed class RequestCatalogProbeRepository(
-    NpgsqlDataSource dataSource, ISafeScopeProvider safeScope, ILogger<RequestCatalogProbeRepository> logger)
+    NpgsqlDataSource dataSource, ISafeScopeProvider safeScope, IAudiencePostureProvider audiencePosture,
+    ILogger<RequestCatalogProbeRepository> logger)
     : IRequestCatalogProbe
 {
     public async Task<long?> FindBestAsync(string? artist, string? title, CancellationToken ct)
@@ -60,6 +61,11 @@ sealed class RequestCatalogProbeRepository(
             "m.eligible",
             "not coalesce(r.never_play, false)",
         };
+        // SPEC F95.4, STORY-250, PLAN T114 — the SAME audience-posture exclusion the rotation/envelope
+        // queries apply, threaded here the same way never-play is: an extra WHERE fragment, present
+        // only on AudiencePosture.Everyone (mature admits everything, unmasked).
+        if (audiencePosture.Current != AudiencePosture.Mature)
+            whereParts.Add("not coalesce(m.explicit, false)");
         var exactParts = new List<string>();
         var parameters = new DynamicParameters();
 
@@ -156,9 +162,9 @@ sealed class RequestCatalogProbeRepository(
 
     /// <summary>
     /// The law + safe-scope WHERE fragment shared by both T90 probe methods above (canonical
-    /// selectability — ready/measurable/eligible/not-never-play — plus the gh-#99 exclusion).
-    /// <see cref="FindBestAsync"/> keeps its own inline copy: its exact-vs-substring match scoring
-    /// shape doesn't fit this helper's callers, and it predates this extraction.
+    /// selectability — ready/measurable/eligible/not-never-play/not-explicit-on-Everyone — plus the
+    /// gh-#99 exclusion). <see cref="FindBestAsync"/> keeps its own inline copy: its exact-vs-substring
+    /// match scoring shape doesn't fit this helper's callers, and it predates this extraction.
     /// </summary>
     List<string> LawAndSafeScopeWhereParts(DynamicParameters parameters)
     {
@@ -169,6 +175,12 @@ sealed class RequestCatalogProbeRepository(
             "m.eligible",
             "not coalesce(r.never_play, false)",
         };
+
+        // SPEC F95.4, STORY-250, PLAN T114 — re-applied here for T90 parity with FindBestAsync's own
+        // match-time check: a request matched before an operator/sweep later stamps the row explicit
+        // must not slip through the fulfillment rung's re-check either.
+        if (audiencePosture.Current != AudiencePosture.Mature)
+            whereParts.Add("not coalesce(m.explicit, false)");
 
         var scope = safeScope.Current;
         if (!scope.IsEmpty)

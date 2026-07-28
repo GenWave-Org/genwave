@@ -27,6 +27,12 @@ namespace GenWave.MediaLibrary.Enrich;
 /// identically to cue/energy — caught, logged at WARN, <c>bpm</c> persists NULL, but the row still
 /// reaches <c>ready</c> provided loudness succeeded. <c>bpm_analyzed_at</c> is always written, whether
 /// the analyzer throws or simply returns <c>null</c> (indeterminate tempo) — attempted-none-found.
+///
+/// Advisory/explicit tag (SPEC F95.3, STORY-251, PLAN T112): read alongside the other normalized
+/// tags via the same TagLib open — never a second file open. Honors the real-world ITUNESADVISORY
+/// convention: an ID3v2 TXXX user-text frame (MP3) or a Vorbis comment field (FLAC/Ogg), value "1"
+/// = explicit, "2" = clean (a positive clean rating is itself information the tag pass stamps),
+/// "0"/absent/unparseable = a miss (stays <see langword="null"/>, never stamped).
 /// </summary>
 sealed class Enricher(
     ILoudnessAnalyzer loudness,
@@ -115,6 +121,7 @@ sealed class Enricher(
             Genre:            NullIfBlank(tag.JoinedGenres),
             TrackNo:          tag.Track > 0 ? (int)tag.Track : null,
             Year:             tag.Year > 0 ? (int)tag.Year : null,
+            Explicit:         TryReadAdvisoryTag(file),
             IntegratedLufs:   loudnessMeasurement.IntegratedLufs,
             TruePeakDbtp:     loudnessMeasurement.TruePeakDbtp,
             Measurable:       loudnessMeasurement.Measurable,
@@ -129,4 +136,49 @@ sealed class Enricher(
     }
 
     static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
+    // The real-world advisory-flag convention (SPEC F95.3): iTunes/Picard/beets all key it
+    // "ITUNESADVISORY", carried as an ID3v2 TXXX user-text frame or a Vorbis comment field.
+    const string AdvisoryTagKey = "ITUNESADVISORY";
+
+    /// <summary>
+    /// Reads the ITUNESADVISORY advisory flag from whichever tag container the file actually has —
+    /// ID3v2 (MP3) checked first, then Xiph/Vorbis comment (FLAC/Ogg). Matched case-insensitively:
+    /// ffmpeg's ID3v2 writer round-trips a TXXX description's casing verbatim (taggers in the wild
+    /// disagree on it), while TagLib's own Xiph writer always upper-cases field names regardless of
+    /// how they were set. Returns <see langword="null"/> when neither container carries the tag, or
+    /// when it holds neither "1" nor "2" — a miss the caller must never stamp.
+    /// </summary>
+    static bool? TryReadAdvisoryTag(TagLib.File file)
+    {
+        if (file.GetTag(TagLib.TagTypes.Id3v2, false) is TagLib.Id3v2.Tag id3v2)
+        {
+            foreach (var frame in id3v2.GetFrames<TagLib.Id3v2.UserTextInformationFrame>())
+            {
+                if (string.Equals(frame.Description, AdvisoryTagKey, StringComparison.OrdinalIgnoreCase))
+                    return ParseAdvisoryValue(frame.Text.FirstOrDefault());
+            }
+        }
+
+        if (file.GetTag(TagLib.TagTypes.Xiph, false) is TagLib.Ogg.XiphComment xiph)
+        {
+            var values = xiph.GetField(AdvisoryTagKey);
+            if (values.Length > 0)
+                return ParseAdvisoryValue(values[0]);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// "1" = explicit, "2" = clean (F95.3 — a positive clean rating is information too, not a
+    /// miss). "0", blank, absent, or anything else unparseable is a miss: stays
+    /// <see langword="null"/>, never stamped.
+    /// </summary>
+    static bool? ParseAdvisoryValue(string? raw) => raw?.Trim() switch
+    {
+        "1" => true,
+        "2" => false,
+        _   => null,
+    };
 }

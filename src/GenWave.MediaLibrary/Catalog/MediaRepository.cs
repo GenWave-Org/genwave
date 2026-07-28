@@ -21,9 +21,10 @@ sealed class MediaRepository(
     ILogger<MediaRepository> logger,
     Channel<long> enrichQueue,
     ISafeScopeProvider safeScope,
+    IAudiencePostureProvider audiencePosture,
     IStationEventSink? events = null)
     : IMediaCatalog, IAdminMediaLookup, IAdminMediaQuery, IAdminMediaWrite, IAdminMediaReenrichment,
-      IAuthoredCatalogWriter
+      IAuthoredCatalogWriter, IMediaExplicitOverride
 {
     // MediaMutated publish seam for the admin writes (gitea-#246); no-op unless the host binds a real sink.
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
@@ -43,7 +44,8 @@ sealed class MediaRepository(
         "select id, library_id, path, format, state, title, duration_ms, sample_rate, channels, bitrate_kbps, " +
         "artist, album, genre, year, integrated_lufs, true_peak_dbtp, measurable, " +
         "cue_in_sec, cue_out_sec, intro_energy, outro_energy, bpm, track_energy, eligible, m.xmin::text as xmin, " +
-        "coalesce(r.score, 50) as score, coalesce(r.never_play, false) as never_play, m.moods " +
+        "coalesce(r.score, 50) as score, coalesce(r.never_play, false) as never_play, m.moods, " +
+        "m.explicit, m.explicit_source " +
         "from library.media m left join library.media_rating r on r.media_id = m.id";
 
     public async Task<MediaReference?> GetByIdAsync(LibraryScope scope, string mediaId, CancellationToken ct)
@@ -91,6 +93,11 @@ sealed class MediaRepository(
         // the never_play flag (default false via COALESCE for an unrated row) so an operator's "X" on
         // this row removes it from rotation immediately (F33.6) — this predicate is the ONE place
         // never_play is enforced for main rotation; score is intentionally never referenced (F33.8).
+        //
+        // No ExplicitPredicate() here: this backs /internal/safe-track, the operator-curated safe scope
+        // (gh-#99) — a separate universe from main rotation — and the never-silence floor must not trade
+        // a curation mistake for dead air. F95.4 enumerates exactly three paths; this is deliberately not
+        // a fourth.
         var exclude = new List<long>(excludeIds.Count);
         foreach (var s in excludeIds)
             if (long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v))
@@ -121,6 +128,17 @@ sealed class MediaRepository(
     /// </list>
     /// Both tier outcomes are selected alongside the row so the caller gets its relaxation flags in the
     /// same round trip. Null is returned only when the scope is empty or the playable pool is (F41.2).
+    ///
+    /// SPEC F95.4, STORY-250, PLAN T114 — the audience-posture exclusion threads through the SAME
+    /// "byte-identical playable predicate" convention this method's own remarks describe for
+    /// never-play: <see cref="audiencePosture"/> (read fresh, never cached — the F95.6 live-apply
+    /// guarantee) decides whether the fragment exists in the WHERE clause at all. On
+    /// <see cref="AudiencePosture.Mature"/> the fragment is omitted entirely — mirroring the empty-genre-list
+    /// idiom on <see cref="GetEnvelopeCandidateAsync"/> — so "mature plays everything, unmasked" is
+    /// literally "no predicate", not a predicate that always evaluates true. On
+    /// <see cref="AudiencePosture.Everyone"/> the fragment excludes <c>explicit = true</c> rows only;
+    /// <c>coalesce(m.explicit, false)</c> treats <c>NULL</c> (unclassified) as non-explicit, so an
+    /// unclassified track still plays (unknown-is-explicit was declined at /explore).
     /// </summary>
     public async Task<RotationCandidate?> GetRotationCandidateAsync(
         LibraryScope scope, IReadOnlyList<string> orderedRecentIds, int artistSeparation, CancellationToken ct)
@@ -142,8 +160,10 @@ sealed class MediaRepository(
         // Tier 3 is the single most-recent entry — the last element of the ordered list.
         long? mostRecentId = recentIds.Count > 0 ? recentIds[^1] : null;
 
+        var explicitPredicate = ExplicitPredicate();
+
         await using var conn = await dataSource.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleOrDefaultAsync<RotationCandidateRow>(new CommandDefinition("""
+        var row = await conn.QuerySingleOrDefaultAsync<RotationCandidateRow>(new CommandDefinition($"""
             select
               m.id, m.path, m.format, m.state, m.title, m.duration_ms, m.sample_rate, m.channels,
               m.bitrate_kbps, m.artist, m.album, m.genre, m.year, m.integrated_lufs, m.true_peak_dbtp,
@@ -162,6 +182,7 @@ sealed class MediaRepository(
             left join library.media_rating r on r.media_id = m.id
             where m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)
               and m.library_id = any(@libraryIds)
+              {explicitPredicate}
             order by
               repeated_recent asc,
               repeated_artist asc,
@@ -174,6 +195,19 @@ sealed class MediaRepository(
 
         return row?.ToCandidate(logger);
     }
+
+    /// <summary>
+    /// SPEC F95.4, STORY-250, PLAN T114 — the ONE audience-posture WHERE fragment shared by every
+    /// pool-predicate query this repository builds (<see cref="GetRotationCandidateAsync"/>,
+    /// <see cref="GetEnvelopeCandidateAsync"/>, <see cref="GetEnvelopeCandidatePoolAsync"/>): empty
+    /// (no constraint) on <see cref="AudiencePosture.Mature"/>, or <c>and not coalesce(m.explicit, false)</c>
+    /// on <see cref="AudiencePosture.Everyone"/> — mirrors <see cref="GetEnvelopeCandidateAsync"/>'s own
+    /// "omitted entirely, not merely always-true" genre-predicate idiom. <see cref="GetRandomReadyAsync"/>
+    /// is the deliberate fourth selection path over <c>library.media</c> that does NOT call this helper —
+    /// see the comment there for why F95.4 stops at three paths.
+    /// </summary>
+    string ExplicitPredicate() =>
+        audiencePosture.Current == AudiencePosture.Mature ? "" : "and not coalesce(m.explicit, false)";
 
     /// <summary>Shared recent-id parse for the tiered rotation queries (F41.1): oldest-first list of
     /// opaque string ids, any entry that fails to parse as our bigint id is silently dropped.</summary>
@@ -214,6 +248,10 @@ sealed class MediaRepository(
     /// envelope-and-rotation-constrained pool is (mirrors <see cref="GetRotationCandidateAsync"/>'s
     /// own never-drains contract) — the SPEC F81.6 relax-then-degrade ladder for a genuinely empty
     /// pool is the provider's job (a later task), not this query's.
+    ///
+    /// SPEC F95.4, STORY-250, PLAN T114 — <see cref="ExplicitPredicate"/> ANDs in the SAME
+    /// audience-posture fragment <see cref="GetRotationCandidateAsync"/> does, by the same
+    /// omitted-entirely-on-Mature construction.
     /// </summary>
     public async Task<RotationCandidate?> GetEnvelopeCandidateAsync(
         LibraryScope scope,
@@ -240,6 +278,7 @@ sealed class MediaRepository(
             ? envelope.Genres.Select(g => g.ToLowerInvariant()).ToArray()
             : null;
         var genrePredicate = genresLower is not null ? "and lower(m.genre) = any(@genresLower)" : "";
+        var explicitPredicate = ExplicitPredicate();
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<RotationCandidateRow>(new CommandDefinition($"""
@@ -263,6 +302,7 @@ sealed class MediaRepository(
               and m.library_id = any(@libraryIds)
               and (m.energy is null or (m.energy >= @energyMin and m.energy <= @energyMax))
               {genrePredicate}
+              {explicitPredicate}
             order by
               repeated_recent asc,
               repeated_artist asc,
@@ -296,6 +336,11 @@ sealed class MediaRepository(
     /// enforces, so a misconfigured <c>PersonaRanker:TopK</c> can never turn one pick into an
     /// unbounded fetch. Empty <paramref name="scope"/> short-circuits to an empty pool (default-deny),
     /// no SQL issued.
+    ///
+    /// SPEC F95.4, STORY-250, PLAN T114 — <see cref="ExplicitPredicate"/> ANDs in the SAME
+    /// audience-posture fragment <see cref="GetRotationCandidateAsync"/>/<see cref="GetEnvelopeCandidateAsync"/>
+    /// do, so the ranker's own candidate pool never sees an excluded row either — boundary bias
+    /// resamples this SAME query (never a separate one), so it inherits the exclusion for free.
     /// </summary>
     public async Task<IReadOnlyList<EnvelopeCandidateRow>> GetEnvelopeCandidatePoolAsync(
         LibraryScope scope,
@@ -320,6 +365,7 @@ sealed class MediaRepository(
             ? envelope.Genres.Select(g => g.ToLowerInvariant()).ToArray()
             : null;
         var genrePredicate = genresLower is not null ? "and lower(m.genre) = any(@genresLower)" : "";
+        var explicitPredicate = ExplicitPredicate();
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var rows = await conn.QueryAsync<EnvelopeCandidatePoolRow>(new CommandDefinition($"""
@@ -344,6 +390,7 @@ sealed class MediaRepository(
               and m.library_id = any(@libraryIds)
               and (m.energy is null or (m.energy >= @energyMin and m.energy <= @energyMax))
               {genrePredicate}
+              {explicitPredicate}
             order by
               repeated_recent asc,
               repeated_artist asc,
@@ -548,7 +595,7 @@ sealed class MediaRepository(
                    cue_in_sec, cue_out_sec, intro_energy, outro_energy, bpm, track_energy,
                    eligible, m.xmin::text as xmin,
                    coalesce(r.score, 50) as score, coalesce(r.never_play, false) as never_play,
-                   m.moods,
+                   m.moods, m.explicit, m.explicit_source,
                    not (m.library_id = any(@safeLibraryIds)) as rateable,
                    count(*) over() as total_count
             from library.media m
@@ -1250,6 +1297,32 @@ sealed class MediaRepository(
     /// <c>tags_edited_at IS NULL</c> — i.e. the operator has not yet manually edited the row (W3
     /// sentinel). Loudness, cue, energy, and BPM columns are always (re)written; they are disjoint
     /// from the tag columns and operator edits never touch them.
+    ///
+    /// <c>explicit</c>/<c>explicit_source</c> (SPEC F95.2/F95.3, STORY-251, PLAN T112) are the tag
+    /// pass's own — deliberately separate — write rule, gated on <c>explicit_source</c> rather than
+    /// <c>tags_edited_at</c> (that sentinel is title/artist/genre's; the explicit flag's operator-wins
+    /// contract lives entirely in its own source column). This doc comment is the ONE canonical
+    /// statement of F95.3's classification precedence (operator &gt; tag &gt; llm) — the sweep's own
+    /// write path (<see cref="WriteExplicitClassificationResultAsync"/>) enforces the SAME rule over
+    /// its own, necessarily different, SQL CASE (a shared fragment would force one artificial
+    /// signature onto two genuinely different UPDATE statements) and points back here rather than
+    /// re-deriving it:
+    /// <list type="bullet">
+    /// <item><paramref name="r"/>'s <see cref="EnrichmentResult.Explicit"/> is <see langword="null"/>
+    /// (this pass found no advisory tag, or an unparseable one) → BOTH columns are left completely
+    /// untouched. This is the one case that is NOT a plain "always overwrite": a miss must never
+    /// blank out a value a prior tag/LLM/operator pass already stamped.</item>
+    /// <item><c>explicit_source</c> is currently <c>'operator'</c> → also untouched, regardless of
+    /// what this pass read — F95.3's operator-always-wins rule, enforced here at the one place tag
+    /// values land, not just at the (future, T115) override endpoint.</item>
+    /// <item>Otherwise (a real tag value, and the row isn't operator-owned) — the tag's evidence
+    /// wins: <c>explicit</c> is (re)set to the tag's value and <c>explicit_source</c> to
+    /// <c>'tag'</c>, whether the prior source was <c>NULL</c>, <c>'tag'</c> (a re-scan after the
+    /// file's tag changed on disk), or <c>'llm'</c> (a file tag is stronger evidence than the offline
+    /// sweep's guess, so it supersedes it on the next scan/enrich pass — this method is the ONLY
+    /// place that pass runs, so "re-scan stamps existing rows" falls out of the normal
+    /// discovered→enrich flow with no separate backfill job).</item>
+    /// </list>
     /// </summary>
     public async Task WriteEnrichmentAsync(long id, EnrichmentResult r, CancellationToken ct)
     {
@@ -1270,6 +1343,18 @@ sealed class MediaRepository(
               genre        = case when tags_edited_at is null then @Genre        else genre        end,
               track_no     = case when tags_edited_at is null then @TrackNo      else track_no     end,
               year         = case when tags_edited_at is null then @Year         else year         end,
+              -- Advisory/explicit flag (SPEC F95.3): a miss (@Explicit is null) or an operator-owned
+              -- row leaves BOTH columns untouched; otherwise the tag's value wins and stamps 'tag'.
+              explicit = case
+                when @Explicit is null then explicit
+                when explicit_source = 'operator' then explicit
+                else @Explicit
+              end,
+              explicit_source = case
+                when @Explicit is null then explicit_source
+                when explicit_source = 'operator' then explicit_source
+                else 'tag'
+              end,
               -- Loudness / cue / energy / bpm: always unconditional — enricher-owned, never operator-edited.
               integrated_lufs    = @IntegratedLufs,
               true_peak_dbtp     = @TruePeakDbtp,
@@ -1298,12 +1383,125 @@ sealed class MediaRepository(
                 id,
                 r.DurationMs, r.SampleRate, r.Channels, r.BitrateKbps,
                 r.Title, r.Artist, r.Album, r.AlbumArtist, r.Genre, r.TrackNo, r.Year,
+                r.Explicit,
                 r.IntegratedLufs, r.TruePeakDbtp, r.Measurable,
                 r.CueInSec, r.CueOutSec, r.CueAnalyzedAt,
                 r.IntroEnergy, r.OutroEnergy, r.EnergyAnalyzedAt,
                 r.Bpm, r.BpmAnalyzedAt,
             },
             cancellationToken: ct));
+    }
+
+    // ── Explicit classification sweep (SPEC F95.3, STORY-251, T113) ─────────────────────────────────
+
+    /// <summary>
+    /// Rows eligible for the explicit-classification LLM sweep: <c>state='ready'</c>,
+    /// <c>explicit IS NULL</c>, <c>explicit_llm_missed_at IS NULL</c>, and both artist and title are
+    /// non-blank — mirrors <see cref="ListMoodTagClaimsAsync"/>'s exact F76 shape, one column pair
+    /// later.
+    ///
+    /// <c>explicit IS NULL</c> is doing double duty here, and deliberately so: every write path that
+    /// ever sets <c>explicit_source</c> (tag, llm, operator) also sets <c>explicit</c> to a real value
+    /// in the SAME statement, so a row is NEVER "sourced but still null". This one predicate is
+    /// therefore ALSO the entire enforcement of "already-classified rows are not re-asked" and "the
+    /// operator's value is never overwritten" (SPEC F95.3's precedence, canonically stated at
+    /// <see cref="WriteEnrichmentAsync"/>) — no separate <c>explicit_source</c> check is needed at
+    /// the claim step.
+    /// </summary>
+    public async Task<IReadOnlyList<ExplicitClassificationClaimRow>> ListExplicitClassificationClaimsAsync(int limit, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<ExplicitClassificationClaimRow>(new CommandDefinition(
+            "select id, artist, title from library.media " +
+            "where state = 'ready' and explicit is null and explicit_llm_missed_at is null " +
+            "and coalesce(trim(artist), '') <> '' and coalesce(trim(title), '') <> '' " +
+            "limit @limit",
+            new { limit }, cancellationToken: ct));
+        return rows.AsList();
+    }
+
+    /// <summary>
+    /// Writes the outcome of one explicit-classification sweep attempt (SPEC F95.3, STORY-251, T113)
+    /// — atomically, never a partial write:
+    /// <list type="bullet">
+    /// <item>A confident yes/no (<paramref name="verdict"/> not null) sets <c>explicit</c> +
+    /// <c>explicit_source = 'llm'</c> in the SAME statement — but ONLY when the column is CURRENTLY
+    /// <c>NULL</c> at the moment this UPDATE runs (a <c>CASE</c> guard reading the live row, not a
+    /// pre-read — mirrors <see cref="WriteYearLookupResultAsync"/>'s own SPEC F48.4 race guard), so a
+    /// concurrent tag pass or operator override landing between the claim and this write can never be
+    /// clobbered by a stale sweep result. No missed-at stamp is needed for a written verdict — moving
+    /// <c>explicit</c> off <c>NULL</c> already excludes the row from
+    /// <see cref="ListExplicitClassificationClaimsAsync"/> going forward, mirroring how a written mood
+    /// set needs no miss stamp of its own.</item>
+    /// <item>A genuine "unknown" (<paramref name="verdict"/> null — a completed round trip that
+    /// simply couldn't tell) stamps ONLY <c>explicit_llm_missed_at</c>;
+    /// <c>explicit</c>/<c>explicit_source</c> stay <c>NULL</c>/<c>NULL</c> — a real miss the sweep
+    /// must never re-ask.</item>
+    /// </list>
+    /// A failed round trip is never passed here at all (the F76 etiquette pattern: failed != missed)
+    /// — <see cref="Enrich.EnrichmentService.BackfillExplicitClassificationAsync"/>'s own loop skips
+    /// this call entirely on that outcome, leaving the row eligible and retried on the very next tick.
+    /// </summary>
+    public async Task WriteExplicitClassificationResultAsync(long id, bool? verdict, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await conn.ExecuteAsync(new CommandDefinition(
+            "update library.media set " +
+            "explicit = case when explicit is null and @verdict is not null then @verdict else explicit end, " +
+            "explicit_source = case when explicit is null and @verdict is not null then 'llm' else explicit_source end, " +
+            "explicit_llm_missed_at = " +
+            "  case when @verdict is null then now() else explicit_llm_missed_at end " +
+            "where id = @id",
+            new { id, verdict }, cancellationToken: ct));
+    }
+
+    // ── Operator override (IMediaExplicitOverride — SPEC F95.3, F95.5, STORY-251, PLAN T115) ───────
+
+    /// <summary>
+    /// Sets or clears the operator's explicit-classification override — one UPDATE, every touched
+    /// column written atomically:
+    /// <list type="bullet">
+    /// <item><paramref name="explicitValue"/> is <see langword="null"/> (CLEAR) — wipes
+    /// <c>explicit</c>, <c>explicit_source</c>, AND <c>explicit_llm_missed_at</c> back to
+    /// <see langword="null"/> in the same statement. This releases the row: the tag pass
+    /// (<see cref="WriteEnrichmentAsync"/>) may reclassify it on its next scan/enrich, and
+    /// <see cref="ListExplicitClassificationClaimsAsync"/>'s <c>explicit_llm_missed_at is null</c>
+    /// arm lets the LLM sweep re-ask it too — a clear is not merely "forget the verdict", it is
+    /// "let every other source have another turn".</item>
+    /// <item>Otherwise — stamps <c>explicit = @explicitValue</c>, <c>explicit_source = 'operator'</c>
+    /// UNCONDITIONALLY. No CASE guard reading the row's current source is needed here (unlike
+    /// <see cref="WriteEnrichmentAsync"/> and <see cref="WriteExplicitClassificationResultAsync"/>,
+    /// which both defer to an existing 'operator' row before writing): this write IS the top of
+    /// F95.3's precedence (operator &gt; tag &gt; llm) — it beats everything by definition, so there
+    /// is nothing to defer to. <c>explicit_llm_missed_at</c> is left untouched on this branch: the
+    /// row already leaves <see cref="ListExplicitClassificationClaimsAsync"/>'s claim query the
+    /// moment <c>explicit</c> moves off <c>NULL</c>, exactly like a written LLM verdict.</item>
+    /// </list>
+    /// Unknown id → <see cref="ExplicitOverrideResult.NotFound"/>, nothing written (IDOR-safe — an
+    /// unknown id is the only outcome a caller can observe; no row state ever leaks). F95.5's
+    /// never-play orthogonality needs no guard here: <c>never_play</c> lives in the separate
+    /// <c>library.media_rating</c> table, which this statement never touches.
+    /// </summary>
+    public async Task<ExplicitOverrideOutcome> SetExplicitOverrideAsync(long mediaId, bool? explicitValue, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<(bool? Explicit, string? ExplicitSource)?>(new CommandDefinition(
+            """
+            update library.media set
+              explicit = @explicitValue,
+              explicit_source = case when @explicitValue is null then null else 'operator' end,
+              explicit_llm_missed_at =
+                case when @explicitValue is null then null else explicit_llm_missed_at end
+            where id = @mediaId
+            returning explicit, explicit_source
+            """,
+            new { mediaId, explicitValue }, cancellationToken: ct));
+
+        if (row is null)
+            return new ExplicitOverrideOutcome(ExplicitOverrideResult.NotFound, null, null);
+
+        events.Publish(new MediaMutated("explicit-override", mediaId, 1));
+        return new ExplicitOverrideOutcome(ExplicitOverrideResult.Updated, row.Value.Explicit, row.Value.ExplicitSource);
     }
 
     /// <summary>A per-file enrichment failure: isolated, never crashes the worker (PRD §5.2).</summary>

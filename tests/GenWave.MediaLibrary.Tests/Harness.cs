@@ -8,6 +8,7 @@ using GenWave.Core.Domain;
 using GenWave.Loudness;
 using GenWave.MediaLibrary.Catalog;
 using GenWave.MediaLibrary.Enrich;
+using GenWave.MediaLibrary.ExplicitClassification;
 using GenWave.MediaLibrary.Mood;
 using GenWave.MediaLibrary.Options;
 using GenWave.MediaLibrary.Scan;
@@ -22,9 +23,10 @@ static class Harness
 {
     public static readonly DateTime Mtime = new(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-    public static MediaRepository Repo(DatabaseFixture f, Channel<long>? enrichQueue = null) =>
+    public static MediaRepository Repo(
+        DatabaseFixture f, Channel<long>? enrichQueue = null, IAudiencePostureProvider? audiencePosture = null) =>
         new(f.DataSource, NullLogger<MediaRepository>.Instance, enrichQueue ?? Channel.CreateUnbounded<long>(),
-            new Fakes.FakeSafeScopeProvider());
+            new Fakes.FakeSafeScopeProvider(), audiencePosture ?? new Fakes.FakeAudiencePostureProvider());
 
     /// <summary>
     /// Builds a <see cref="ScanService"/> against a real repository/media root. <paramref name="missThreshold"/>
@@ -290,6 +292,40 @@ static class Harness
                     new MoodTaggerOptions { Endpoint = "http://fake-llm", Model = "test-model" })),
             gate ?? new FakeLlmBatchGate());
 
+    /// <summary>
+    /// Builds an EnrichmentService wired for explicit-classification backfill tests (SPEC F95.3,
+    /// STORY-251, T113): a REAL <see cref="OllamaExplicitClassifier"/> backed by <paramref name="handler"/>
+    /// (the Story187 fake-<see cref="HttpMessageHandler"/> idiom — no test reaches the network) so the
+    /// constrained-output parse runs against genuine HTTP response bodies, not a pre-parsed in-memory
+    /// double. Mirrors <see cref="BackfillMoodTagWith"/> exactly, one column pair later.
+    /// <paramref name="gate"/> defaults to allowed (<see cref="FakeLlmBatchGate"/>'s own default) so a
+    /// fact not about the F95.3 degradation skip doesn't need to think about it; <paramref name="logger"/>
+    /// defaults to a no-op logger, swapped for a <see cref="CapturingLogger{T}"/> by the degradation
+    /// skip-log fact. Loudness/cue/energy/bpm/year-lookup/mood-tag are all no-ops — this backfill pass
+    /// is not under test.
+    /// </summary>
+    public static EnrichmentService BackfillExplicitClassificationWith(
+        MediaRepository repo, HttpMessageHandler handler,
+        ILlmBatchGate? gate = null, ILogger<EnrichmentService>? logger = null) =>
+        new(repo,
+            new Enricher(new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FakeEnergyAnalyzer(), new FakeBpmAnalyzer(), NullLogger<Enricher>.Instance),
+            Channel.CreateUnbounded<long>(),
+            new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
+            logger ?? NullLogger<EnrichmentService>.Instance,
+            new FakeCueAnalyzer(),
+            Microsoft.Extensions.Options.Options.Create(new CueDetectionOptions()),
+            new FakeEnergyAnalyzer(),
+            new FakeBpmAnalyzer(),
+            new FakeYearLookup(),
+            DefaultYearLookupOptions(),
+            moodTagger: null,
+            llmBatchGate: gate ?? new FakeLlmBatchGate(),
+            events: null,
+            explicitClassifier: new OllamaExplicitClassifier(
+                new HttpClient(handler),
+                new FakeOptionsMonitor<ExplicitClassifierOptions>(
+                    new ExplicitClassifierOptions { Endpoint = "http://fake-llm", Model = "test-model" })));
+
     public static List<long> DrainIds(Channel<long> queue)
     {
         var ids = new List<long>();
@@ -372,6 +408,7 @@ static class Harness
     public static EnrichmentResult ReadyResult(bool measurable) =>
         new(DurationMs: 180_000, SampleRate: 44_100, Channels: 2, BitrateKbps: 1000,
             Title: "t", Artist: "a", Album: "al", AlbumArtist: "aa", Genre: "g", TrackNo: 1, Year: 2020,
+            Explicit: null,
             IntegratedLufs: -14.0, TruePeakDbtp: -1.0, Measurable: measurable,
             CueInSec: null, CueOutSec: null, CueAnalyzedAt: DateTime.UtcNow,
             IntroEnergy: null, OutroEnergy: null, EnergyAnalyzedAt: DateTime.UtcNow,
@@ -389,6 +426,7 @@ static class Harness
         new(DurationMs: 180_000, SampleRate: 44_100, Channels: 2, BitrateKbps: 1000,
             Title: title ?? "t", Artist: artist ?? "a", Album: "al", AlbumArtist: "aa",
             Genre: genre ?? "g", TrackNo: 1, Year: year,
+            Explicit: null,
             IntegratedLufs: -14.0, TruePeakDbtp: -1.0, Measurable: true,
             CueInSec: null, CueOutSec: null, CueAnalyzedAt: DateTime.UtcNow,
             IntroEnergy: null, OutroEnergy: null, EnergyAnalyzedAt: DateTime.UtcNow,

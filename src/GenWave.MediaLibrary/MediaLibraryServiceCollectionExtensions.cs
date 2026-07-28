@@ -8,6 +8,7 @@ using GenWave.Core.Events;
 using GenWave.Loudness;
 using GenWave.MediaLibrary.Catalog;
 using GenWave.MediaLibrary.Enrich;
+using GenWave.MediaLibrary.ExplicitClassification;
 using GenWave.MediaLibrary.Mood;
 using GenWave.MediaLibrary.Options;
 using GenWave.MediaLibrary.Scan;
@@ -64,6 +65,10 @@ public static class MediaLibraryServiceCollectionExtensions
         // Authored-insert seam: lands a generated safe-segment artifact ready, no enricher round-trip
         // (F27.1/F27.2/F27.8, STORY-076). No consumer yet — P5 wires SafeSegmentAuthor onto this.
         services.AddSingleton<IAuthoredCatalogWriter>(sp => sp.GetRequiredService<MediaRepository>());
+        // Operator explicit-classification override (SPEC F95.3, STORY-251, PLAN T115): its own
+        // seam, kept off IAdminMediaWrite so this one method costs zero blast radius on that
+        // interface's existing test doubles. First consumer: ExplicitOverrideController.
+        services.AddSingleton<IMediaExplicitOverride>(sp => sp.GetRequiredService<MediaRepository>());
 
         // Rating: the operator taste signal on any catalog row (SPEC F33), standalone from
         // curation (F33.7) — no LibraryScope gating anywhere in this seam (F33.5). Same
@@ -139,6 +144,21 @@ public static class MediaLibraryServiceCollectionExtensions
             client.MaxResponseContentBufferSize = OllamaMoodTagger.MaxResponseContentBytes;
         });
         services.AddSingleton<IMoodTagger>(sp => sp.GetRequiredService<OllamaMoodTagger>());
+
+        // Explicit classification sweep (SPEC F95.3, STORY-251, T113) — the exact same shape as the
+        // mood tagger immediately above, one column pair later: its own options class bound to the
+        // SAME "Llm" section (ExplicitClassifierOptions' own remarks explain why), no boot-frozen
+        // BaseAddress, MaxResponseContentBufferSize bounded the same way. Inert until GenWave.Host
+        // also registers ILlmBatchGate (already required by the mood tagger above, so a host wiring
+        // one wires both) — EnrichmentService's explicit-classification backfill treats either
+        // dependency being absent as a no-op, so the DI graph resolves regardless and Host boot is
+        // unaffected either way.
+        services.Configure<ExplicitClassifierOptions>(configuration.GetSection(ExplicitClassifierOptions.Section));
+        services.AddHttpClient<OllamaExplicitClassifier>(client =>
+        {
+            client.MaxResponseContentBufferSize = OllamaExplicitClassifier.MaxResponseContentBytes;
+        });
+        services.AddSingleton<IExplicitClassifier>(sp => sp.GetRequiredService<OllamaExplicitClassifier>());
 
         // Scan availability grace (SPEC F58, closes gitea-#223) — Library:Scan:MissThreshold read fresh
         // per tick via IOptionsMonitor<ScanOptions>, the same F44.2 shape as Library:ScanIntervalSeconds

@@ -35,6 +35,7 @@ public static class FeatureEnvelopeCandidateQuery
         await repo.WriteEnrichmentAsync(id, new EnrichmentResult(
             DurationMs: 180_000, SampleRate: 44_100, Channels: 2, BitrateKbps: 1000,
             Title: "t", Artist: "a", Album: "al", AlbumArtist: "aa", Genre: genre, TrackNo: 1, Year: 2020,
+            Explicit: null,
             IntegratedLufs: lufs, TruePeakDbtp: -1.0, Measurable: true,
             CueInSec: null, CueOutSec: null, CueAnalyzedAt: DateTime.UtcNow,
             IntroEnergy: null, OutroEnergy: null, EnergyAnalyzedAt: DateTime.UtcNow,

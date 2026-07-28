@@ -8,7 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 /// <see cref="Api.SpectatorRequestsController"/> (producer — a fresh row's id) and
 /// <see cref="RequestParserService"/> (consumer), the two <see cref="IWishParser"/> implementations,
 /// and the hosted service itself. MUST run after <c>AddGenWaveTts</c> (needs
-/// <c>IDegradationModeReader</c>/<c>LlmOptions</c>) — mirrors <c>AddGenWaveMoodTaggingGate</c>'s own
+/// <c>IDegradationModeReader</c>/<c>LlmOptions</c>) — mirrors <c>AddGenWaveLlmBatchGate</c>'s own
 /// ordering note.
 ///
 /// <para>

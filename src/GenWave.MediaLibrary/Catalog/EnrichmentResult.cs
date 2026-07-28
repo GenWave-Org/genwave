@@ -6,6 +6,11 @@ namespace GenWave.MediaLibrary.Catalog;
 /// (STORY-033), and BPM (SPEC F46.3). Written atomically to the catalog row, which then becomes
 /// <c>ready</c>. Lives in Catalog (the write payload) so the dependency runs Enrich → Catalog,
 /// never the reverse.
+///
+/// <see cref="Explicit"/> (SPEC F95.2/F95.3, STORY-251, PLAN T112) is the advisory/explicit flag
+/// read from the file's own tags — <see langword="null"/> is a miss (no advisory tag present, or
+/// present but unparseable), never a stamp; <see cref="MediaRepository.WriteEnrichmentAsync"/>
+/// applies the source-'tag' write rule for it exactly once, per that method's own remarks.
 /// </summary>
 sealed record EnrichmentResult(
     int?      DurationMs,
@@ -19,6 +24,7 @@ sealed record EnrichmentResult(
     string?   Genre,
     int?      TrackNo,
     int?      Year,
+    bool?     Explicit,
     double    IntegratedLufs,
     double    TruePeakDbtp,
     bool      Measurable,

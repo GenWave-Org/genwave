@@ -65,6 +65,7 @@ export const SETTINGS_HELP_KEYS = [
   "DependencyHealth:UnhealthyThreshold",
   "Llm:DegradationPin",
   "Community:CatalogIndexUrl",
+  "Station:Audience",
 ] as const;
 
 export type SettingsHelpKey = (typeof SETTINGS_HELP_KEYS)[number];

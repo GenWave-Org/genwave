@@ -70,6 +70,20 @@ class MediaRow
     public string[]? Moods { get; set; }
 
     /// <summary>
+    /// Explicit/advisory classification (SPEC F95.2) — <c>library.media.explicit</c>. Null =
+    /// unknown/unclassified, never a sentinel false; only populated by projections that select it
+    /// (the admin queries), mirroring <see cref="Moods"/>'s pattern. No enforcement yet (T110).
+    /// </summary>
+    public bool? Explicit { get; set; }
+
+    /// <summary>
+    /// Who stamped <see cref="Explicit"/> (SPEC F95.2/F95.3) — <c>library.media.explicit_source</c>,
+    /// one of <c>tag</c>/<c>llm</c>/<c>operator</c> once classified, else null. Companion to
+    /// <see cref="Explicit"/> — see that member's remarks.
+    /// </summary>
+    public string? ExplicitSource { get; set; }
+
+    /// <summary>
     /// Postgres system column <c>xmin</c> — the transaction id that last wrote this row.
     /// Exposed as a string for use as an optimistic-concurrency token (ETag) on the admin write path.
     /// Dapper maps this because <c>MatchNamesWithUnderscores</c> is enabled globally and the column is
@@ -161,5 +175,7 @@ class MediaRow
         Bpm: Bpm,
         TrackEnergy: TrackEnergy,
         Moods: Moods,
-        Rateable: Rateable);
+        Rateable: Rateable,
+        Explicit: Explicit,
+        ExplicitSource: ExplicitSource);
 }
