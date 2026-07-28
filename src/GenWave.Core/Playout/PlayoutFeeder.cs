@@ -133,27 +133,57 @@ public sealed class PlayoutFeeder(
     int prepared;
     DateTimeOffset onAirStartedAt;  // wall-clock instant the current on-air item was first detected
 
+    // The id that just stopped being on-air, when the last observe phase saw an advance —
+    // re-checked for liveness (F57.1) in RefillAsync, once that tick's chain/ring writes have
+    // settled, so an id that just lost its last liveness claim (on-air) is released there rather
+    // than leaking forever. A field (not a TickAsync local, pre-gh-#184) because the two phases
+    // are now separately callable.
+    string? pendingDepartedOnAirId;
+
     /// <summary>
-    /// The feeder's current on-air state, updated at the end of each completed tick.
-    /// Null until the feeder has completed its first successful tick (cold-start).
+    /// The feeder's current on-air state, published at the end of each observe phase — BEFORE any
+    /// refill work, so it never waits behind a render (gh-#184).
+    /// Null until the feeder has completed its first successful observation (cold-start).
     /// Read by the Host layer (<c>PlayoutFeederService</c>) without issuing engine telnet calls.
     /// </summary>
     public OnAirState? CurrentOnAir { get; private set; }
 
+    /// <summary>
+    /// One full reconciliation pass: <see cref="ObserveAsync"/> then <see cref="RefillAsync"/>.
+    /// Kept as the single-call composition for callers (and specs) that don't need the seam
+    /// between the phases; the Host's <c>PlayoutFeederService</c> calls the phases itself so it
+    /// can publish the fresh on-air snapshot before the refill blocks on renders (gh-#184).
+    /// </summary>
     public async Task TickAsync(CancellationToken ct)
     {
-        var id = await ls.OnAirNewestAsync(ct);     // stamped media id, drain token, or null
-        if (id is null) return;                       // nothing resolved yet (cold start)
+        if (!await ObserveAsync(ct)) return;
+        await RefillAsync(ct);
+    }
 
-        // The id that just stopped being on-air, when this tick observed an advance — re-checked for
-        // liveness (F57.1) once this tick's chain/ring writes have settled, so an id that just lost
-        // its last liveness claim (on-air) is released here rather than leaking forever.
-        string? departedOnAirId = null;
+    /// <summary>
+    /// The tick's observe phase: reads the engine's on-air truth, reconciles advance/drain state,
+    /// and publishes <see cref="CurrentOnAir"/>. Never awaits the selection seam, so it completes
+    /// in engine-socket time — the entire point of the phase split (gh-#184: the refill lawfully
+    /// blocks for an LLM+TTS render window, and the on-air snapshot must not wait behind it;
+    /// measured 38-40s of stale "DJ break" at every track start on the demo box).
+    /// Returns false on cold start (engine returned no resolvable id yet): nothing to refill
+    /// against, and <see cref="CurrentOnAir"/> is left untouched.
+    /// </summary>
+    public async Task<bool> ObserveAsync(CancellationToken ct)
+    {
+        var id = await ls.OnAirNewestAsync(ct);     // stamped media id, drain token, or null
+        if (id is null) return false;                 // nothing resolved yet (cold start)
 
         if (id != onAirId)                            // boot, a real advance, or a drain transition
         {
             var advancedAt = DateTimeOffset.UtcNow;
-            departedOnAirId = onAirId;
+
+            // Defensive release of a leftover departure first: a caller that ran ObserveAsync
+            // without its paired RefillAsync left the previous one unreleased. ReleaseIfDead is
+            // claims-gated (F57.1), so releasing it a full poll later is safe — anything still
+            // claimed simply stays.
+            if (pendingDepartedOnAirId is not null) ReleaseIfDead(pendingDepartedOnAirId);
+            pendingDepartedOnAirId = onAirId;
             onAirId = id;
             onAirStartedAt = advancedAt;
             var meta = await ls.MetadataAsync(id, ct);
@@ -255,6 +285,20 @@ public sealed class PlayoutFeeder(
             prepared = 0;
         }
 
+        PublishOnAirState();
+        return true;
+    }
+
+    /// <summary>
+    /// The tick's refill phase — the half that may lawfully block for a long time: pulling
+    /// through the selection seam awaits patter LLM+TTS renders (30s budget per segment,
+    /// serialized LLM calls). Runs AFTER <see cref="ObserveAsync"/> has already published the
+    /// fresh on-air state, so nothing user-facing ever waits on a render (gh-#184). Also performs
+    /// the departed-id liveness re-check, which must come after this tick's chain/ring writes
+    /// have settled.
+    /// </summary>
+    public async Task RefillAsync(CancellationToken ct)
+    {
         if (prepared == 0)                            // (re)fill the one-ahead chain
         {
             // The chain about to be discarded held its members "queued" (F57.1(b)); once cleared,
@@ -315,10 +359,17 @@ public sealed class PlayoutFeeder(
             }
         }
 
-        if (departedOnAirId is not null) ReleaseIfDead(departedOnAirId);
+        if (pendingDepartedOnAirId is not null)
+        {
+            ReleaseIfDead(pendingDepartedOnAirId);
+            pendingDepartedOnAirId = null;
+        }
+    }
 
-        // Publish the updated on-air state so the Host layer can serve it without a telnet call.
-        // We only reach this point when id was non-null (the early return above guards cold-start).
+    // Publish the updated on-air state so the Host layer can serve it without a telnet call —
+    // the end of the observe phase, deliberately BEFORE any refill work (gh-#184).
+    void PublishOnAirState()
+    {
         string? currentMediaId = onAirIsReal ? onAirId : null;
         (string? Title, string? Artist, double GainDb, int? DurationMs, PersonaPickDiagnostics? PersonaPick, string? ArtworkUrl) currentMeta = currentMediaId is not null
             ? pushedMeta.GetValueOrDefault(currentMediaId)

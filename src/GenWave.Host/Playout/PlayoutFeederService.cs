@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Playout;
@@ -16,6 +17,13 @@ namespace GenWave.Host.Playout;
 sealed class PlayoutFeederService : IHostedService
 {
     static readonly TimeSpan Interval = TimeSpan.FromSeconds(3);   // PRD §10 feed poll interval
+
+    /// <summary>
+    /// A refill that held its tick longer than this gets a log line (gh-#184): the render window
+    /// used to be invisible — no timing existed anywhere in the tick — which is how a 40s stall
+    /// hid in plain sight. 5s clears every socket-only refill and flags any render-bound one.
+    /// </summary>
+    static readonly TimeSpan SlowRefillLogThreshold = TimeSpan.FromSeconds(5);
 
     readonly PlayoutFeeder feeder;
     readonly IStationIdentityProvider identityProvider;
@@ -91,8 +99,27 @@ sealed class PlayoutFeederService : IHostedService
         {
             try
             {
-                await feeder.TickAsync(ct);
+                var observed = await feeder.ObserveAsync(ct);
+
+                // gh-#184: publish BEFORE the refill. The refill lawfully blocks for a whole
+                // LLM+TTS render window (30s budget per patter segment, serialized LLM calls),
+                // and publishing after it held the fresh snapshot hostage — the UI kept serving
+                // an already-finished patter for 30-60s at every track start (measured on demo).
                 PublishSnapshot();
+
+                if (observed)
+                {
+                    var refillStarted = Stopwatch.GetTimestamp();
+                    await feeder.RefillAsync(ct);
+                    var refillElapsed = Stopwatch.GetElapsedTime(refillStarted);
+                    if (refillElapsed >= SlowRefillLogThreshold)
+                    {
+                        log.LogInformation(
+                            "Feeder refill held the tick for {RefillSeconds:F1}s for station {StationId} "
+                            + "({StationName}) — LLM+TTS render window; on-air snapshot was already published",
+                            refillElapsed.TotalSeconds, stationId, identityProvider.Current.Name);
+                    }
+                }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
