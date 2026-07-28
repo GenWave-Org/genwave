@@ -112,8 +112,10 @@ function makeTrack(overrides: TrackFixture = {}) {
   return {
     stationId: "1",
     // Non-numeric on purpose — sidesteps the F33 rating machinery entirely (irrelevant to taste
-    // thumbs, which key off the booth log's own row, never the now-playing mediaId).
-    mediaId: "tts:announcer-1",
+    // thumbs, which key off the booth log's own row, never the now-playing mediaId). NOT tts:-
+    // prefixed: since gh-#187 a tts:* id maps to kind "patter", whose card treatment carries no
+    // taste thumbs at all — this fixture models a TRACK airing.
+    mediaId: "live:announcer-1",
     title: "Astral Plane",
     artist: "Valerie June",
     gainDb: -2.3,

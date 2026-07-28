@@ -72,10 +72,14 @@ export function NowPlayingCard({
   tasteThumbControls,
   pickChips,
 }: NowPlayingCardProps): ReactNode {
-  const startedAt = state?.kind === "track" ? state.startedAt : null;
+  // Track and patter share the whole on-air treatment (pill, elapsed/progress, slots) —
+  // they differ only in the headline block (gh-#187): a patter's `title` is literally the
+  // station name (TtsSegmentSource), so the break renders a DJ-break chip + persona name
+  // (`artist`) instead of masquerading as a track.
+  const onAir = state?.kind === "track" || state?.kind === "patter" ? state : null;
+  const startedAt = onAir?.startedAt ?? null;
   const elapsedSeconds = useElapsedSeconds(startedAt);
-  const trackProgress =
-    state?.kind === "track" ? computeTrackProgress(elapsedSeconds, state.durationMs ?? null) : null;
+  const trackProgress = onAir ? computeTrackProgress(elapsedSeconds, onAir.durationMs ?? null) : null;
 
   return (
     <section
@@ -103,18 +107,36 @@ export function NowPlayingCard({
         <p className="mt-3 text-[0.95rem] text-ink">Safe rotation — drain state.</p>
       )}
 
-      {state?.kind === "track" && (
+      {onAir && (
         <div className="mt-3">
           <span className="inline-flex items-center gap-1.5 rounded-[999px] bg-accent px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-ink">
             <span aria-hidden="true" className="onair-dot h-1.5 w-1.5 rounded-full bg-accent-ink" />
             On air
           </span>
 
-          <h2 className="mt-3 font-display text-[1.6rem] italic text-ink">
-            {state.title ?? "Unknown track"}
-          </h2>
-          <p className="text-[0.9rem] text-mute">{state.artist ?? "Unknown artist"}</p>
-          <p className="mt-1 text-[0.82rem] tabular-nums text-mute">{state.gainDb.toFixed(2)} dB</p>
+          {onAir.kind === "patter" ? (
+            <>
+              {/* A DJ break, not a track (gh-#187): source chip in the TTS treatment
+                  (3px radius, accent border+text), persona name as the headline —
+                  UPRIGHT Fraunces, italics stay reserved for track titles. */}
+              <p className="mt-3">
+                <span className="rounded-[3px] border border-accent px-1.5 py-0.5 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent">
+                  DJ break
+                </span>
+              </p>
+              <h2 className="mt-2 font-display text-[1.6rem] text-ink">
+                {onAir.artist ?? "Station voice"}
+              </h2>
+            </>
+          ) : (
+            <>
+              <h2 className="mt-3 font-display text-[1.6rem] italic text-ink">
+                {onAir.title ?? "Unknown track"}
+              </h2>
+              <p className="text-[0.9rem] text-mute">{onAir.artist ?? "Unknown artist"}</p>
+            </>
+          )}
+          <p className="mt-1 text-[0.82rem] tabular-nums text-mute">{onAir.gainDb.toFixed(2)} dB</p>
 
           {pickChips}
 

@@ -20,9 +20,13 @@ public sealed class LiveController(
     /// GET /api/now-playing — what is currently on-air.
     ///   503 ProblemDetails — feeder has not completed its first tick yet (cold-start)
     ///   200 { stationId, drain: true } — safe-rotation / drain token is on-air
-    ///   200 { stationId, mediaId, title, artist, gainDb, startedAt, durationMs? } — real track on-air
+    ///   200 { stationId, mediaId, kind, title, artist, gainDb, startedAt, durationMs? } — real item on-air
     /// durationMs carries tts:* patter's measured duration (SPEC F66.1); an engine-initiated play
     /// starts null and fills in once the Host's duration rehydrator recovers it (SPEC F66.2).
+    /// kind (gh-#187) is "patter" for a tts:* break and "track" otherwise — the SAME tts:-prefix
+    /// discrimination <see cref="SpectatorController"/> applies, surfaced here so the Admin UI can
+    /// give a break its own card treatment instead of rendering title = Station:Name like a track
+    /// (a patter MediaItem's Title is literally the station name — see TtsSegmentSource).
     /// </summary>
     [HttpGet("now-playing")]
     public IActionResult GetNowPlaying()
@@ -41,10 +45,14 @@ public sealed class LiveController(
         if (snapshot.IsDrain)
             return Ok(new { stationId, drain = true });
 
+        var isPatter = snapshot.MediaId is { } mediaId
+            && mediaId.StartsWith("tts:", StringComparison.Ordinal);
+
         return Ok(new
         {
             stationId,
             mediaId = snapshot.MediaId,
+            kind = isPatter ? "patter" : "track",
             title = snapshot.Title,
             artist = snapshot.Artist,
             gainDb = snapshot.GainDb,
