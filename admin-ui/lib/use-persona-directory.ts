@@ -30,9 +30,8 @@ function isPersonaDirectoryEntryList(raw: unknown): raw is PersonaDirectoryEntry
 /**
  * Resolves persona id -> name for surfaces that only carry a bare `personaId` on the wire — the
  * booth log's stamped-attribution column (SPEC F84.6) and the now-playing taste thumb that shares
- * its resolution path. One fetch per mount, no polling/retry: the same call `PersonaSettingControl`
- * already makes for the same reason (a persona roster changes rarely enough that a poll would be
- * ceremony, not correctness).
+ * its resolution path. One fetch per mount, no polling/retry — a persona roster changes rarely
+ * enough that a poll would be ceremony, not correctness.
  */
 export function usePersonaDirectory(): PersonaDirectoryState {
   const [state, setState] = useState<PersonaDirectoryState>({ kind: "loading" });

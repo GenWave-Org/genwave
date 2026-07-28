@@ -19,7 +19,6 @@ function makeSettings(): SettingDto[] {
   return [
     { key: "Station:Name", value: "GenWave", source: "default", applyMode: "live", kind: "string", unit: "" },
     { key: "Station:Voice", value: "af_heart", source: "default", applyMode: "live", kind: "string", unit: "" },
-    { key: "Station:Persona:ActiveId", value: "0", source: "default", applyMode: "live", kind: "number", unit: "" },
     {
       key: "Station:Cadence:StationIdEveryNUnits",
       value: "4",
@@ -107,7 +106,7 @@ describe("Feature: The settings page groups every tunable honestly", () => {
   });
 
   describe("Scenario: the new sections exist", () => {
-    it("renders a station section holding Station:Name, Station:Voice, and Station:Persona:ActiveId (F44.8)", () => {
+    it("renders a station section holding Station:Name and Station:Voice (F44.8)", () => {
       renderWithProviders(<SettingsForm settings={makeSettings()} />);
 
       const station = screen.getByRole("heading", { name: "Station" });
@@ -115,7 +114,6 @@ describe("Feature: The settings page groups every tunable honestly", () => {
 
       expect(stationSection.getByLabelText(/Station:Name/)).toBeInTheDocument();
       expect(stationSection.getByLabelText(/Station:Voice/)).toBeInTheDocument();
-      expect(stationSection.getByLabelText(/Station:Persona:ActiveId/)).toBeInTheDocument();
     });
 
     it("renders a library section holding the Library:* keys (F44.8)", () => {

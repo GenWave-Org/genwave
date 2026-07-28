@@ -92,7 +92,6 @@ function makeDispatchFetchMock(
 function renderClient(overrides: Partial<PersonasClientProps> = {}): ReturnType<typeof render> {
   const props: PersonasClientProps = {
     initialPersonas: [NOVA],
-    initialActiveId: 0,
     ...overrides,
   };
   return render(

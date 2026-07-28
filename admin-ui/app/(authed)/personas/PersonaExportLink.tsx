@@ -13,7 +13,7 @@ interface PersonaExportLinkProps {
  * navigation handles the `Content-Disposition: attachment` download and carries the session
  * cookie same-origin (`next.config.ts`'s `/api/*` rewrite already proxies this to the backend),
  * exactly like any other download link. `buttonVariants` styles it as a secondary action button
- * so it reads consistently alongside Edit/Activate/Delete rather than as a bare text link.
+ * so it reads consistently alongside Edit/Delete rather than as a bare text link.
  */
 export function PersonaExportLink({ persona }: PersonaExportLinkProps): ReactNode {
   return (

@@ -7,7 +7,7 @@ const EVERYONE_VALUE = "everyone";
 const MATURE_VALUE = "mature";
 
 /** Matches SettingField's shipped single-line control styling (text/number inputs, the
- * `PersonaSettingControl` precedent). */
+ * `VoiceSettingControl` precedent). */
 const CONTROL_CLASSES =
   "h-9 w-full max-w-md rounded-[6px] border border-line bg-surface px-2 text-[0.85rem] text-ink disabled:opacity-50";
 

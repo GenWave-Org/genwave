@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils";
 import type { LibraryDto } from "@/lib/library";
 import { AudienceSettingControl } from "./AudienceSettingControl";
 import { CorrectionsSettingControl } from "./CorrectionsSettingControl";
-import { PersonaSettingControl } from "./PersonaSettingControl";
 import { SafeScopeAvailabilityBadge } from "./SafeScopeAvailabilityBadge";
 import type { SettingsHelpKey } from "./settings-help-keys";
 import { groupSettingsBySection } from "./settings-sections";
@@ -299,7 +298,6 @@ function helpTextFor(key: string): string | undefined {
  */
 const SETTING_CONTROL_REGISTRY: Record<string, ComponentType<SettingControlProps>> = {
   "Station:Voice": VoiceSettingControl,
-  "Station:Persona:ActiveId": PersonaSettingControl,
   "Tts:Corrections": CorrectionsSettingControl,
   "Station:Audience": AudienceSettingControl,
 };

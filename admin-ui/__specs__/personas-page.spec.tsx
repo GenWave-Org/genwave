@@ -4,9 +4,9 @@
 // Drives PersonasClient via @testing-library/react with a fetch mock dispatched BY URL+METHOD
 // (mirrors the CatalogTable/CatalogToolbar harness in catalog-selection-toolbar.spec.tsx) rather
 // than a call-order sequence — this page's single render can trigger GET /api/voices (the reused
-// R3 VoiceControl's mount fetch), POST/PATCH/DELETE /api/personas, PUT /api/settings, and both
-// preview endpoints, in whatever order a given interaction drives them. useConfirm()/toast need
-// their providers, so every render wraps in ConfirmDialogProvider and mounts Toaster (mirrors
+// R3 VoiceControl's mount fetch), POST/PATCH/DELETE /api/personas, and both preview endpoints, in
+// whatever order a given interaction drives them. useConfirm()/toast need their providers, so
+// every render wraps in ConfirmDialogProvider and mounts Toaster (mirrors
 // feedback-primitives.spec.tsx's harness pattern).
 //
 // Deviations from the STORY-126 it.todo wording (documented per PLAN.md T10):
@@ -17,6 +17,11 @@
 //   - "shows the generated copy text for a chosen track (F35.6)" drops "for a chosen track" — this
 //     page never surfaces a track/kind picker (SPEC F35.6 legally allows a null-track, LeadIn-kind
 //     preview, which is all this page ever sends); the scenario instead previews a saved persona.
+//
+// PLAN T127 (STORY-246) retired the activate/deactivate switch outright — its own coverage moved
+// to roster-page.spec.tsx (Scheduled/Bench sections, the On The Air badge, the "no activation
+// control anywhere" sweep) rather than living here. This file keeps only the CRUD/preview/
+// provenance/voice-picker coverage STORY-126 always owned.
 
 jest.mock("next/headers", () => ({
   cookies: jest.fn().mockResolvedValue({ toString: () => "session=test-cookie" }),
@@ -79,7 +84,7 @@ function routeKey(method: string, url: string): string {
 }
 
 /** GET /api/voices defaults to an empty list (renders "Station default" only) unless a test
- * overrides it — most CRUD/activate/delete/preview scenarios don't care about the voice list. */
+ * overrides it — most CRUD/delete/preview scenarios don't care about the voice list. */
 const DEFAULT_ROUTES: Record<string, RouteResponseSpec> = {
   "GET /api/voices": { status: 200, body: [] },
 };
@@ -107,7 +112,6 @@ function makeDispatchFetchMock(
 function renderClient(overrides: Partial<PersonasClientProps> = {}): ReturnType<typeof render> {
   const props: PersonasClientProps = {
     initialPersonas: [REX, NOVA],
-    initialActiveId: 0,
     ...overrides,
   };
   return render(
@@ -170,7 +174,10 @@ describe("Feature: Author personas from the console", () => {
     it("lists personas from GET /api/personas", async () => {
       // GET /api/personas happens server-side (page.tsx), mirroring SafeContentPage/SettingsPage
       // — verify the server component reaches the endpoint and hands PersonasClient exactly the
-      // rows it returned, then verify PersonasClient renders whatever rows it's given.
+      // rows it returned, then verify PersonasClient renders whatever rows it's given. page.tsx
+      // also reads GET /api/schedule (the Scheduled/Bench split, PLAN T127) and GET /api/status
+      // (the On The Air badge) alongside /api/personas — realistic empty-week/no-DJ bodies here,
+      // since this test's own concern is the /api/personas prop-threading, not those two.
       const mockFetch = jest.fn<typeof fetch>().mockImplementation(async (input) => {
         const url = String(input);
         if (url.includes("/api/personas")) {
@@ -178,6 +185,22 @@ describe("Feature: Author personas from the console", () => {
             ok: true,
             status: 200,
             json: jest.fn<() => Promise<unknown>>().mockResolvedValue([REX, NOVA]),
+            headers: new Headers(),
+          } as unknown as Response;
+        }
+        if (url.includes("/api/schedule")) {
+          return {
+            ok: true,
+            status: 200,
+            json: jest.fn<() => Promise<unknown>>().mockResolvedValue({ segments: [] }),
+            headers: new Headers(),
+          } as unknown as Response;
+        }
+        if (url.includes("/api/status")) {
+          return {
+            ok: true,
+            status: 200,
+            json: jest.fn<() => Promise<unknown>>().mockResolvedValue({ llm: { activePersona: null } }),
             headers: new Headers(),
           } as unknown as Response;
         }
@@ -255,7 +278,7 @@ describe("Feature: Author personas from the console", () => {
     it("edits a persona in place", async () => {
       const updated: PersonaDto = { ...REX, style: "Now smoother." };
       const mockFetch = makeDispatchFetchMock({ "PATCH /api/personas/1": { status: 200, body: updated } });
-      renderClient({ initialPersonas: [REX, NOVA], initialActiveId: 0 });
+      renderClient({ initialPersonas: [REX, NOVA] });
 
       fireEvent.click(screen.getByRole("button", { name: "Edit Radio Rex" }));
 
@@ -277,7 +300,7 @@ describe("Feature: Author personas from the console", () => {
 
     it("deletes a persona after a confirm", async () => {
       const mockFetch = makeDispatchFetchMock({ "DELETE /api/personas/2": { status: 204 } });
-      renderClient({ initialPersonas: [REX, NOVA], initialActiveId: 1 });
+      renderClient({ initialPersonas: [REX, NOVA] });
 
       fireEvent.click(screen.getByRole("button", { name: "Delete Nova" }));
       await confirmDialog("Delete");
@@ -289,15 +312,30 @@ describe("Feature: Author personas from the console", () => {
       expect(findCall(mockFetch, "DELETE", "/api/personas/2")).toBeDefined();
     });
 
-    it("confirms before deleting the ACTIVE persona (it silences the persona, not the blurbs)", async () => {
-      makeDispatchFetchMock({});
-      renderClient({ initialPersonas: [REX, NOVA], initialActiveId: REX.id });
+    it("toasts the server's message when delete is blocked by the schedule (409, SPEC F91.9)", async () => {
+      makeDispatchFetchMock({
+        "DELETE /api/personas/1": {
+          status: 409,
+          body: {
+            title: "Persona is scheduled.",
+            detail: "Persona 1 is still scheduled and cannot be deleted: Mon 09:00–12:00.",
+          },
+        },
+      });
+      renderClient({ initialPersonas: [REX, NOVA] });
 
       fireEvent.click(screen.getByRole("button", { name: "Delete Radio Rex" }));
+      await confirmDialog("Delete");
 
-      const dialog = await screen.findByRole("dialog");
-      expect(within(dialog).getByText(/deactivates the DJ/i)).toBeInTheDocument();
-      expect(within(dialog).getByText(/neutral house style/i)).toBeInTheDocument();
+      await waitFor(() => {
+        expect(
+          screen.getByText("Persona 1 is still scheduled and cannot be deleted: Mon 09:00–12:00.")
+        ).toBeInTheDocument();
+      });
+
+      // The store rejected the delete — nothing was ever removed (T128 owns the richer
+      // export-first workflow for this case; this button's own job is just the honest message).
+      expect(screen.getByTestId("persona-name-Radio Rex")).toBeInTheDocument();
     });
 
     it("toasts failures naming the outcome (F31.3)", async () => {
@@ -407,70 +445,12 @@ describe("Feature: Author personas from the console", () => {
     });
   });
 
-  describe("Scenario: activate control", () => {
-    it("writes Station:Persona:ActiveId via the settings surface on activate (F35.2)", async () => {
-      const mockFetch = makeDispatchFetchMock({ "PUT /api/settings": { status: 200, body: [] } });
-      renderClient({ initialPersonas: [REX, NOVA], initialActiveId: 0 });
-
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Activate Nova" }));
-        await Promise.resolve();
-      });
-
-      const call = await waitFor(() => {
-        const found = findCall(mockFetch, "PUT", "/api/settings");
-        expect(found).toBeDefined();
-        return found as [string, RequestInit];
-      });
-
-      const [, init] = call;
-      const body = JSON.parse(init.body as string) as Array<{ key: string; value: string }>;
-      expect(body).toEqual([{ key: "Station:Persona:ActiveId", value: "2" }]);
-    });
-
-    it("moves the active badge to the newly activated persona", async () => {
-      makeDispatchFetchMock({ "PUT /api/settings": { status: 200, body: [] } });
-      renderClient({ initialPersonas: [REX, NOVA], initialActiveId: REX.id });
-
-      expect(within(rowFor("Radio Rex")).getByText("Active")).toBeInTheDocument();
-      expect(within(rowFor("Nova")).queryByText("Active")).not.toBeInTheDocument();
-
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Activate Nova" }));
-        await Promise.resolve();
-      });
-
-      await waitFor(() => {
-        expect(within(rowFor("Nova")).getByText("Active")).toBeInTheDocument();
-      });
-      expect(within(rowFor("Radio Rex")).queryByText("Active")).not.toBeInTheDocument();
-    });
-
-    it("supports deactivating to none (ActiveId 0)", async () => {
-      const mockFetch = makeDispatchFetchMock({ "PUT /api/settings": { status: 200, body: [] } });
-      renderClient({ initialPersonas: [REX, NOVA], initialActiveId: REX.id });
-
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "Deactivate Radio Rex" }));
-        await Promise.resolve();
-      });
-
-      await waitFor(() => {
-        expect(screen.queryByText("Active")).not.toBeInTheDocument();
-      });
-
-      const call = findCall(mockFetch, "PUT", "/api/settings") as [string, RequestInit];
-      const body = JSON.parse(call[1].body as string) as Array<{ key: string; value: string }>;
-      expect(body).toEqual([{ key: "Station:Persona:ActiveId", value: "0" }]);
-    });
-  });
-
   describe("Scenario: preview", () => {
     it("shows the generated copy text for a saved persona (F35.6)", async () => {
       makeDispatchFetchMock({
         "POST /api/personas/preview": { status: 200, body: { text: "Coming up next on GenWave…" } },
       });
-      renderClient({ initialPersonas: [REX, NOVA], initialActiveId: 0 });
+      renderClient({ initialPersonas: [REX, NOVA] });
 
       const row = rowFor("Radio Rex");
       await act(async () => {
@@ -488,7 +468,7 @@ describe("Feature: Author personas from the console", () => {
         "POST /api/personas/preview": { status: 200, body: { text: "Coming up next…" } },
         "POST /api/tts/preview": { status: 200, blob: new Blob(["wav-bytes"], { type: "audio/wav" }) },
       });
-      renderClient({ initialPersonas: [REX, NOVA], initialActiveId: 0 });
+      renderClient({ initialPersonas: [REX, NOVA] });
 
       const row = rowFor("Radio Rex");
       await act(async () => {
@@ -554,7 +534,7 @@ describe("Feature: Author personas from the console", () => {
           body: { title: "Persona preview failed.", detail: "The LLM endpoint is unreachable." },
         },
       });
-      renderClient({ initialPersonas: [REX, NOVA], initialActiveId: 0 });
+      renderClient({ initialPersonas: [REX, NOVA] });
 
       const row = rowFor("Radio Rex");
       await act(async () => {
