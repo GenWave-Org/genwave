@@ -10,4 +10,12 @@ namespace GenWave.Orchestration;
 /// <param name="Kind">Which scheduled speech this is.</param>
 /// <param name="Due">The instant this deferral becomes eligible to air (SPEC F74.1).</param>
 /// <param name="Reason">A short, human-readable note for logs/diagnostics — never parsed.</param>
-public sealed record SpeechDeferral(SpeechDeferralKind Kind, DateTimeOffset Due, string Reason);
+/// <param name="Handoff">
+/// Additive, optional (SPEC F92.1/F92.2, STORY-243, PLAN T124): the captured voice/name/counterpart
+/// a <see cref="SpeechDeferralKind.SignOff"/>/<see cref="SpeechDeferralKind.SignOn"/> deferral needs
+/// to build its <c>SegmentRequest</c> at drain time — see <see cref="HandoffContext"/>'s own remarks
+/// for why this is captured at enqueue time rather than re-resolved at drain time.
+/// <see langword="null"/> for every other kind (<see cref="SpeechDeferralKind.StationId"/> today).
+/// </param>
+public sealed record SpeechDeferral(
+    SpeechDeferralKind Kind, DateTimeOffset Due, string Reason, HandoffContext? Handoff = null);

@@ -24,8 +24,14 @@ public sealed class PatterTemplateRenderer
     /// <see cref="SegmentKind.SignOff"/>/<see cref="SegmentKind.SignOn"/> (SPEC F92.2, F92.5) key off
     /// <see cref="SegmentRequest.CounterpartName"/> instead of <see cref="SegmentRequest.Track"/> —
     /// named when a counterpart exists, music-only phrasing when it doesn't (F92.3). This is the
-    /// deterministic fallback rung only; <c>LlmCopyWriter</c> authors the on-air copy for these kinds
-    /// same as LeadIn/BackAnnounce, degrading here on any miss (F12.4).
+    /// deterministic fallback rung only; <c>LlmCopyWriter</c> attempts these kinds the same as
+    /// LeadIn/BackAnnounce, routing a miss HERE the same way (F12.4) — but unlike LeadIn/BackAnnounce,
+    /// a handoff piece that lands on this template rung never actually airs it: <c>TtsSegmentSource</c>
+    /// drops any SignOff/SignOn render that isn't genuinely LLM-authored (SPEC F92.4/F92.5 — the ruled
+    /// ladder has no "templated piece" rung, only "whichever piece rendered, else clean cut"). This
+    /// method still needs a correct, non-throwing arm for both kinds regardless, since
+    /// <c>DegradationGatedCopyWriter</c> can route straight here (e.g. Hard mode) before that drop
+    /// ever gets a chance to apply.
     /// </summary>
     public string Expand(SegmentRequest request) => request.Kind switch
     {

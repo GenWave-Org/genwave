@@ -85,7 +85,12 @@ public static class FeatureRotationRelaxationDiagnostics
             var item = await orchestrator.GetNextAsync(ctx, CancellationToken.None);
 
             Assert.NotNull(item);
-            Assert.Empty(logger.Warnings);
+            // Scoped to relaxation specifically (rather than the whole Warnings collection) since a
+            // scheduleResolver-less Orchestrator (this fixture's own shape, and the pre-F91 station
+            // default) also logs its own unrelated one-time "no CachingScheduleResolver wired" WARN
+            // (SPEC F92.1, T124 review finding F7) — this fact's own concern is untouched by that.
+            Assert.DoesNotContain(
+                logger.Warnings, w => w.Contains("relaxed", StringComparison.OrdinalIgnoreCase));
         }
 
         [Fact]

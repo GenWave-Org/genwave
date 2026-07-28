@@ -11,9 +11,10 @@ namespace GenWave.MediaLibrary.Station;
 /// named narrative kinds — track starts (<see cref="TrackAired"/>), patter airs
 /// (<see cref="SegmentGenerated"/>), degradation mode changes (<see cref="DegradationModeChanged"/>,
 /// T32/STORY-188), listener-request intake (<see cref="RequestReceived"/>/
-/// <see cref="RequestEvicted"/>, SPEC F87.8, STORY-224, PLAN T87), and the fulfillment rung's own two
+/// <see cref="RequestEvicted"/>, SPEC F87.8, STORY-224, PLAN T87), the fulfillment rung's own two
 /// outcomes (<see cref="RequestExpired"/>/<see cref="RequestFulfilled"/>, SPEC F87.6/F87.8, STORY-227,
-/// PLAN T90) — into an operator-readable (kind, summary) pair and enqueues it for
+/// PLAN T90), and a dropped handoff ceremony piece (<see cref="HandoffPieceDropped"/>, SPEC F92.4,
+/// STORY-243, PLAN T124) — into an operator-readable (kind, summary) pair and enqueues it for
 /// <see cref="BoothLogDrainService"/> to persist. Every
 /// other event type (library mutations, settings writes, enrichment completion, …) is ignored — it
 /// carries no booth-log narrative.
@@ -57,6 +58,7 @@ sealed class BoothLogWriter(
                 ParseMediaId(t.MediaId)),
             SegmentGenerated s => new BoothLogEntryRequest("patter-aired", Summarize(s), PersonaId: null),
             DegradationModeChanged d => new BoothLogEntryRequest("mode-changed", Summarize(d), PersonaId: null),
+            HandoffPieceDropped h => new BoothLogEntryRequest("handoff-dropped", Summarize(h), PersonaId: null),
             RequestReceived => new BoothLogEntryRequest("request-received", "Request received", PersonaId: null),
             RequestEvicted => new BoothLogEntryRequest("request-evicted", "Request evicted (pending cap)", PersonaId: null),
             RequestExpired => new BoothLogEntryRequest("request-expired", "Request expired", PersonaId: null),
@@ -100,4 +102,6 @@ sealed class BoothLogWriter(
 
     static string Summarize(DegradationModeChanged d) =>
         $"LLM degradation: {d.Previous} → {d.New} ({d.Cause})";
+
+    static string Summarize(HandoffPieceDropped h) => $"Handoff {h.Kind} dropped ({h.Cause})";
 }

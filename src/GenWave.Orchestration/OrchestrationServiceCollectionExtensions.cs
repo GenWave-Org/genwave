@@ -18,6 +18,19 @@ public static class OrchestrationServiceCollectionExtensions
     /// boundary-bias/envelope providers, <c>IMediaCatalog</c>, <c>ITtsSegmentSource</c>,
     /// <c>IActivePersonaAccessor</c>, and the <see cref="SpeechDeferralQueue"/>/<see cref="TimeProvider"/>/
     /// <see cref="IPersonaPickProvider"/> this method also registers.
+    ///
+    /// <para>
+    /// <b>Handoff ceremony seams (SPEC F92.1, STORY-243, PLAN T124) — deliberately NOT registered
+    /// here:</b> <see cref="Orchestrator"/>'s optional <c>CachingScheduleResolver</c>/<c>IPersonaStore</c>
+    /// constructor parameters come from whatever the HOST wired for the format-clock feature —
+    /// <c>StationSettingsHostingExtensions.AddGenWaveStationSettings</c> (GenWave.Host) registers the
+    /// singleton <c>CachingScheduleResolver</c>; <c>PersonaServiceCollectionExtensions.AddPersonaStore</c>
+    /// (GenWave.MediaLibrary) registers <c>IPersonaStore</c>. This method owns neither registration —
+    /// a host that never calls <c>AddGenWaveStationSettings</c> (no format-clock schedule) simply
+    /// leaves both parameters at their constructor default (<see langword="null"/>) rather than
+    /// failing composition; <see cref="Orchestrator"/>'s handoff producer then logs ONE WARN on its
+    /// first unit and stays a permanent, silent-after-that no-op (the pre-F91 station shape).
+    /// </para>
     /// </summary>
     public static IServiceCollection AddGenWaveOrchestration(this IServiceCollection services)
     {

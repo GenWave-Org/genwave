@@ -66,9 +66,15 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     /// <param name="due">
     /// The instant this deferral becomes eligible to air; <see langword="null"/> means "now".
     /// </param>
-    public void Enqueue(SpeechDeferralKind kind, string reason, DateTimeOffset? due = null)
+    /// <param name="handoff">
+    /// SPEC F92.1/F92.2 (STORY-243, PLAN T124) additive payload for
+    /// <see cref="SpeechDeferralKind.SignOff"/>/<see cref="SpeechDeferralKind.SignOn"/> — see
+    /// <see cref="HandoffContext"/>. <see langword="null"/> for every other kind.
+    /// </param>
+    public void Enqueue(
+        SpeechDeferralKind kind, string reason, DateTimeOffset? due = null, HandoffContext? handoff = null)
     {
-        var deferral = new SpeechDeferral(kind, due ?? timeProvider.GetUtcNow(), reason);
+        var deferral = new SpeechDeferral(kind, due ?? timeProvider.GetUtcNow(), reason, handoff);
         lock (gate)
         {
             pending[kind] = deferral;
@@ -76,9 +82,37 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     }
 
     /// <summary>
-    /// Removes and returns every deferral due at or before <paramref name="now"/>. Call this only
-    /// from a genuine boundary decision (SPEC F74.1) — the caller, not this queue, is what
-    /// guarantees "never mid-track".
+    /// Removes any pending deferral of <paramref name="kind"/>, regardless of its due time — the
+    /// explicit "the boundary this was armed for is no longer coming" retraction (SPEC F92.1
+    /// revisit, PLAN T124) that <see cref="Enqueue"/>'s own supersede-by-kind cannot express:
+    /// supersede only ever REPLACES a pending entry of the same kind with a newer one, it has no way
+    /// to say "nothing of this kind should be pending any more." A schedule write that moves a
+    /// boundary OUT of the F74.3 lookahead window (or removes it) needs exactly that — the
+    /// handoff-ceremony producer calls this once the current snapshot no longer names an in-window
+    /// boundary, so a ceremony armed for the OLD boundary can never air stale. A no-op when nothing
+    /// of that kind is pending.
+    /// </summary>
+    public void Clear(SpeechDeferralKind kind)
+    {
+        lock (gate)
+        {
+            pending.Remove(kind);
+        }
+    }
+
+    /// <summary>
+    /// Removes and returns every deferral due at or before <paramref name="now"/>, ordered by
+    /// <see cref="SpeechDeferral.Due"/> ascending with <see cref="SpeechDeferralKind"/>'s own
+    /// declaration order (<see cref="SpeechDeferralKind.SignOff"/> before
+    /// <see cref="SpeechDeferralKind.SignOn"/>) as the tiebreak for two deferrals due at the exact
+    /// same instant (T124 review finding F1) — this is this queue's own contract, load-bearing for
+    /// any caller (a handoff ceremony) whose two pieces must always air in a fixed relative order
+    /// regardless of which one happens to be due first. Deliberately NOT <c>pending.Values</c>'
+    /// raw enumeration order: <see cref="Dictionary{TKey,TValue}"/> reuses a freed slot LIFO on the
+    /// next insert, so after one drain-then-re-enqueue cycle its enumeration order silently stops
+    /// matching insertion order — the exact bug this ordering closes (reproduced: sign-off/sign-on
+    /// airing backwards from the second boundary onward). Call this only from a genuine boundary
+    /// decision (SPEC F74.1) — the caller, not this queue, is what guarantees "never mid-track".
     /// </summary>
     public IReadOnlyList<SpeechDeferral> TryDequeueDue(DateTimeOffset now)
     {
@@ -86,7 +120,11 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
         {
             if (pending.Count == 0) return [];
 
-            var due = pending.Values.Where(deferral => deferral.Due <= now).ToList();
+            var due = pending.Values
+                .Where(deferral => deferral.Due <= now)
+                .OrderBy(deferral => deferral.Due)
+                .ThenBy(deferral => deferral.Kind)
+                .ToList();
             foreach (var deferral in due) pending.Remove(deferral.Kind);
             return due;
         }

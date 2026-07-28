@@ -93,6 +93,44 @@ public static class FeatureSpeechBoundaryDeferral
         }
     }
 
+    public static class ScenarioOrderedDrain
+    {
+        // T124 review finding F1: TryDequeueDue used to return Dictionary.Values' raw enumeration
+        // order, which silently stops matching insertion order once a slot is freed (by a prior
+        // Remove) and reused by a later Enqueue — .NET's dictionary reuses freed slots LIFO. Two
+        // deferrals of two fixed kinds (SignOff/SignOn), drained-then-re-enqueued across two
+        // consecutive boundaries, is exactly the cycle that flips the SECOND boundary's order — this
+        // fact pins that the queue's own Due-ascending, kind-tiebreak contract holds at BOTH, not
+        // just the first (which happened to still match insertion order by accident).
+
+        [Fact]
+        public static void SignOffPrecedesSignOnAtEachOfTwoConsecutiveBoundaries()
+        {
+            var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-07-20T00:00:00Z"));
+            var queue = new SpeechDeferralQueue(clock);
+
+            // Boundary 1 — both due, sign-off first.
+            queue.Enqueue(SpeechDeferralKind.SignOff, "boundary 1 sign-off", clock.GetUtcNow().AddSeconds(15));
+            queue.Enqueue(SpeechDeferralKind.SignOn, "boundary 1 sign-on", clock.GetUtcNow().AddSeconds(30));
+            clock.Advance(TimeSpan.FromSeconds(30));
+            var firstBoundary = queue.TryDequeueDue(clock.GetUtcNow());
+
+            Assert.Equal(2, firstBoundary.Count);
+            Assert.Equal(SpeechDeferralKind.SignOff, firstBoundary[0].Kind);
+            Assert.Equal(SpeechDeferralKind.SignOn, firstBoundary[1].Kind);
+
+            // Boundary 2 — the SAME two kinds enqueued again, reusing the slots boundary 1 just freed.
+            queue.Enqueue(SpeechDeferralKind.SignOff, "boundary 2 sign-off", clock.GetUtcNow().AddSeconds(15));
+            queue.Enqueue(SpeechDeferralKind.SignOn, "boundary 2 sign-on", clock.GetUtcNow().AddSeconds(30));
+            clock.Advance(TimeSpan.FromSeconds(30));
+            var secondBoundary = queue.TryDequeueDue(clock.GetUtcNow());
+
+            Assert.Equal(2, secondBoundary.Count);
+            Assert.Equal(SpeechDeferralKind.SignOff, secondBoundary[0].Kind);
+            Assert.Equal(SpeechDeferralKind.SignOn, secondBoundary[1].Kind);
+        }
+    }
+
     public static class ScenarioSupersede
     {
         [Fact]
