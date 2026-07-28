@@ -20,8 +20,15 @@ using Microsoft.Extensions.Logging;
 public sealed class DependencyHealthProber(
     IEnumerable<IDependencyProbe> probes,
     DependencyHealthStore store,
-    ILogger<DependencyHealthProber> logger)
+    ILogger<DependencyHealthProber> logger,
+    TimeProvider? timeProvider = null)
 {
+    // Nullable-with-System-default rather than required: the host injects the container's
+    // TimeProvider (AddGenWaveTts TryAdds TimeProvider.System), while a spec passes a
+    // FakeTimeProvider to drive the loop cycle-by-cycle instead of racing wall-clock sleeps
+    // against it (gh-#171, the gh-#106 class).
+    readonly TimeProvider time = timeProvider ?? TimeProvider.System;
+
     /// <summary>
     /// Reason recorded when <see cref="IDependencyProbe.ProbeAsync"/> returns false — "disabled by
     /// design" (e.g. empty <c>Llm:Endpoint</c>, SPEC F34.2), never an actual probe failure. Shared
@@ -44,7 +51,7 @@ public sealed class DependencyHealthProber(
     /// </summary>
     public async Task RunAsync(Func<DependencyProbeCadence> cadence, CancellationToken ct)
     {
-        using var timer = new PeriodicTimer(cadence().Interval);
+        using var timer = new PeriodicTimer(cadence().Interval, time);
         do
         {
             await RunCycleAsync(cadence(), ct);
@@ -69,12 +76,15 @@ public sealed class DependencyHealthProber(
     async Task ProbeOneAsync(IDependencyProbe probe, DependencyProbeCadence cadence, CancellationToken ct)
     {
         var timeout = cadence.PerProbeTimeout;
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(timeout);
+        // The timeout gets its own CTS on the injected TimeProvider (CancelAfter has no
+        // TimeProvider overload), linked with the caller's token — same semantics as the old
+        // linked-source-plus-CancelAfter shape, but a FakeTimeProvider can now fire it (gh-#171).
+        using var timeoutCts = new CancellationTokenSource(timeout, time);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
 
         try
         {
-            var healthy = await probe.ProbeAsync(timeoutCts.Token);
+            var healthy = await probe.ProbeAsync(linkedCts.Token);
 
             // Deliberately NOT debounced (threshold 1). A false here is "disabled by design"
             // (NotConfiguredReason — e.g. an empty Llm:Endpoint, SPEC F34.2), which is a
@@ -92,7 +102,7 @@ public sealed class DependencyHealthProber(
         }
         catch (OperationCanceledException)
         {
-            // Only our own CancelAfter could have fired at this point (ct itself is NOT
+            // Only our own timeout CTS could have fired at this point (ct itself is NOT
             // cancelled) — a genuine probe timeout (SPEC F70.2 AC3).
             RecordFailure(probe, cadence, $"probe timed out after {timeout.TotalSeconds:F0}s", ex: null);
         }
