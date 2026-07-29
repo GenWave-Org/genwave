@@ -6,6 +6,7 @@ import type { LibraryDto } from "@/lib/library";
 import { CatalogTabs, type CatalogTab } from "./CatalogTabs";
 import { CatalogTable } from "./CatalogTable";
 import { LibrariesTab } from "./LibrariesTab";
+import { PurgeUnavailableAction } from "./PurgeUnavailableAction";
 import { YearFilterControl } from "./YearFilterControl";
 import { FacetFilterControl } from "./FacetFilterControl";
 import { MoodFilterControl } from "./MoodFilterControl";
@@ -593,14 +594,21 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps): P
       </p>
 
       {/* gh-#113 — unavailable rows are hidden by default; name the count and offer the reveal.
-          Plain anchors, no client JS — the toggle is just this page with include-unavailable=true. */}
-      {showingUnavailable ? (
-        <p className="mt-1 text-[0.82rem] text-mute">
-          Showing unavailable tracks.{" "}
-          <Link href={buildHideUnavailableUrl(sp)} className="text-accent hover:underline">
-            Hide unavailable
-          </Link>
-        </p>
+          Plain anchors, no client JS — the toggle is just this page with include-unavailable=true.
+          The revealed view (and an explicit state=unavailable browse) also carries the explicit
+          operator purge, the only destructive path for these rows. */}
+      {showingUnavailable || sp.state === "unavailable" ? (
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          {showingUnavailable && (
+            <p className="text-[0.82rem] text-mute">
+              Showing unavailable tracks.{" "}
+              <Link href={buildHideUnavailableUrl(sp)} className="text-accent hover:underline">
+                Hide unavailable
+              </Link>
+            </p>
+          )}
+          <PurgeUnavailableAction />
+        </div>
       ) : unavailableHidden > 0 ? (
         <p className="mt-1 text-[0.82rem] text-mute">
           {unavailableHidden} unavailable track{unavailableHidden === 1 ? "" : "s"} hidden.{" "}

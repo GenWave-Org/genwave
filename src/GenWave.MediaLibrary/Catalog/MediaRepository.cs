@@ -24,7 +24,7 @@ sealed class MediaRepository(
     IAudiencePostureProvider audiencePosture,
     IStationEventSink? events = null)
     : IMediaCatalog, IAdminMediaLookup, IAdminMediaQuery, IAdminMediaWrite, IAdminMediaReenrichment,
-      IAuthoredCatalogWriter, IMediaExplicitOverride
+      IAuthoredCatalogWriter, IMediaExplicitOverride, IMediaPurge
 {
     // MediaMutated publish seam for the admin writes (gitea-#246); no-op unless the host binds a real sink.
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
@@ -655,6 +655,62 @@ sealed class MediaRepository(
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         return await conn.ExecuteScalarAsync<int>(new CommandDefinition(sql, filterParams, cancellationToken: ct));
+    }
+
+    // ── Explicit operator purge (IMediaPurge — gh-#113) ─────────────────────────────────────────────
+
+    /// <summary>
+    /// gh-#113 — see <see cref="IMediaPurge.PurgeUnavailableAsync"/> for the contract. One SQL
+    /// statement holds the whole decision: the candidate set (unavailable longer than the window,
+    /// per a non-NULL <c>unavailable_since</c>), the library total, the tripwire comparison, and
+    /// the conditionally-withheld DELETE all read the same snapshot, so a concurrent scan flip can
+    /// never wedge itself between "counted" and "deleted". Postgres data-modifying CTEs run
+    /// exactly once regardless of whether the primary query references them — the DELETE's own
+    /// WHERE (not C#) is what withholds it on a dry run or a tripped tripwire.
+    ///
+    /// Deliberately unscoped, like <see cref="GetStatusCountsAsync"/>'s state counts: purging dead
+    /// rows is library management, not rotation curation — and the tripwire's denominator must be
+    /// the WHOLE library for the mount-outage math to mean anything.
+    ///
+    /// <c>library.media_rating</c> rows follow via their <c>ON DELETE CASCADE</c> FK; every other
+    /// consumer of a media id (booth log, requests) holds it as an opaque value across the schema
+    /// boundary with no FK, exactly so a library-side delete never blocks (PRD §9).
+    /// </summary>
+    public async Task<MediaPurgeOutcome> PurgeUnavailableAsync(int olderThanDays, bool dryRun, CancellationToken ct)
+    {
+        // Fail-fast (csharp-best-practices): the endpoint 400s below 1 before calling; reaching
+        // here with less is a programming error, never an operator input.
+        ArgumentOutOfRangeException.ThrowIfLessThan(olderThanDays, 1);
+
+        const string sql = """
+            with candidates as (
+              select id from library.media
+              where state = 'unavailable'
+                and unavailable_since is not null
+                and unavailable_since <= now() - make_interval(days => @olderThanDays)
+            ),
+            total as (select count(*)::int as n from library.media),
+            counted as (select count(*)::int as n from candidates),
+            deleted as (
+              delete from library.media m
+              where @dryRun = false
+                and m.id in (select id from candidates)
+                and (select n from counted) * 2 <= (select n from total)
+              returning m.id
+            )
+            select (select n from counted)              as candidates,
+                   (select n from total)                as library_total,
+                   (select count(*)::int from deleted)  as deleted
+            """;
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var (candidates, libraryTotal, deleted) = await conn.QuerySingleAsync<(int, int, int)>(
+            new CommandDefinition(sql, new { olderThanDays, dryRun }, cancellationToken: ct));
+
+        if (deleted > 0)
+            events.Publish(new MediaMutated("purge-unavailable", null, deleted));
+
+        return new MediaPurgeOutcome(candidates, libraryTotal, deleted);
     }
 
     // ── Shared admin WHERE builder ───────────────────────────────────────────────────────────────────
