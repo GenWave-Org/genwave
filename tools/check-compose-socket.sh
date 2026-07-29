@@ -5,9 +5,9 @@
 # every other container (and, transitively, the host). Exactly two services may ever bind-mount
 # it, both read-only: the `alloy` metrics/log collector (PLAN T49) and the `dockerproxy`
 # allowlisting socket proxy behind the Health page's container stats (gh-#148). This guard pins
-# that invariant shut across every render this repo produces: base (compose.yaml) and base+demo
-# (compose.yaml+compose.demo.yaml), under every profile combination (none, admin, tunnel,
-# logging, admin+tunnel+logging).
+# that invariant shut across every render this repo produces: base (compose.yaml), base+demo
+# (compose.yaml+compose.demo.yaml), and both with the compose.piper-only.yaml overlay (gh-#242),
+# under every profile combination (none, admin, tunnel, logging, admin+tunnel+logging).
 #
 # The socket is matched by basename pattern (any source/target path ending in `docker.sock`),
 # not an exact `/var/run/docker.sock` string — `/var/run` is a symlink to `/run` on modern
@@ -160,11 +160,15 @@ else
   export POSTGRES_PASSWORD LIBRARY_DB_PASSWORD STATION_DB_PASSWORD ICECAST_SOURCE_PASSWORD \
          ICECAST_ADMIN_PASSWORD ADMIN_PASSWORD MEDIA_DIR PUBLIC_HOST
 
-  # Every file-set this repo actually deploys: the base stack on its own, and base+demo (the
-  # public-station overlay). Add a new overlay here the day one ships.
+  # Every file-set this repo actually deploys: the base stack on its own, base+demo (the
+  # public-station overlay), and the piper-only low-memory overlay on both (gh-#242 —
+  # always merged last, matching launch.sh --piper-only). Add a new overlay here the day
+  # one ships.
   FILE_SETS=(
     "base:compose.yaml"
     "base+demo:compose.yaml compose.demo.yaml"
+    "base+piper-only:compose.yaml compose.piper-only.yaml"
+    "base+demo+piper-only:compose.yaml compose.demo.yaml compose.piper-only.yaml"
   )
 
   # Every profile combination that changes which services exist. "admin" gates admin_ui,
