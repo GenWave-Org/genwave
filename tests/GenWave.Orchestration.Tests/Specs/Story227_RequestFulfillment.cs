@@ -309,7 +309,7 @@ public static class FeatureRequestFulfillmentProvider
             store.AddPending(Now.AddMinutes(10), moods: ["dreamy"]);
             var probe = new FakeRequestCatalogProbe
             {
-                OnFindVibe = (moods, _) => moods.Contains("dreamy") ? vibeMedia : null,
+                OnFindVibe = (moods, _, _) => moods.Contains("dreamy") ? vibeMedia : null,
             };
             var provider = BuildProvider(store, probe, overrideEnvelope: true);
 

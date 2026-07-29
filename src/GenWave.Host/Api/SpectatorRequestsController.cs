@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
 using GenWave.Core.Events;
 using GenWave.Host.Options;
 
@@ -49,6 +50,7 @@ namespace GenWave.Host.Api;
 [EnableRateLimiting(RateLimiterPolicies.Requests)]
 public sealed class SpectatorRequestsController(
     IRequestStore requestStore,
+    IRequestCatalogProbe catalogProbe,
     IOptionsMonitor<StationOptions> stationMonitor,
     IOptions<RequestsOptions> requestsOptions,
     IStationEventSink events,
@@ -56,15 +58,20 @@ public sealed class SpectatorRequestsController(
     ILogger<SpectatorRequestsController> logger) : ControllerBase
 {
     /// <summary>
-    /// POST /spectator/api/requests — SPEC F87.1-F87.3, F87.8. Flow: a null/blank/over-length wish
-    /// is 400, nothing written; otherwise the pending row count is checked against
-    /// <c>Requests:PendingCap</c> and the oldest pending row is evicted first if the station is
-    /// already at capacity (F87.3); the wish is then inserted with
-    /// <c>expires_at = now + Station:Requests:WindowMinutes</c> and a <see cref="RequestReceived"/>
-    /// narrative event is published. The kill-switch 404 and the cooldown/daily-cap 429 both happen
-    /// upstream of this action (<see cref="RequestsSurfaceAttribute"/> in
-    /// <see cref="SurfaceGateMiddleware"/>, <see cref="RateLimiterPolicies.Requests"/> in the
-    /// pipeline) — this method only ever runs for an enabled, not-yet-throttled caller.
+    /// POST /spectator/api/requests — SPEC F87.1-F87.3, F87.8; gh-#131 pickers. Flow: at least one
+    /// of wish/genre/mood must survive a trim (all absent ⇒ 400, nothing written); an over-length
+    /// wish is 400; a picker value outside the CURRENT published list is 400 fail-closed — the
+    /// submitted value is never stored, logged, or echoed back (the ProblemDetails bodies below are
+    /// fixed strings by construction). Both picker validations are deterministic membership checks —
+    /// NO LLM is ever in this path; a member genre is canonicalized to the catalog list's own casing
+    /// before storage. Then the pending row count is checked against <c>Requests:PendingCap</c> and
+    /// the oldest pending row is evicted first if the station is already at capacity (F87.3); the
+    /// request is inserted with <c>expires_at = now + Station:Requests:WindowMinutes</c> and a
+    /// <see cref="RequestReceived"/> narrative event is published. The kill-switch 404 and the
+    /// cooldown/daily-cap 429 both happen upstream of this action
+    /// (<see cref="RequestsSurfaceAttribute"/> in <see cref="SurfaceGateMiddleware"/>,
+    /// <see cref="RateLimiterPolicies.Requests"/> in the pipeline) — this method only ever runs for
+    /// an enabled, not-yet-throttled caller.
     /// </summary>
     [HttpPost("requests")]
     [Consumes("application/json")]
@@ -73,16 +80,59 @@ public sealed class SpectatorRequestsController(
     [RequestSizeLimit(8192)]
     public async Task<IActionResult> PostRequest([FromBody] SpectatorRequestSubmission submission, CancellationToken ct)
     {
-        var wish = submission.Wish?.Trim();
+        var wish = NormalizeField(submission.Wish);
+        var genre = NormalizeField(submission.Genre);
+        var mood = NormalizeField(submission.Mood);
+
+        if (wish is null && genre is null && mood is null)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Invalid request.",
+                Detail = "at least one of wish, genre, or mood is required.",
+            });
+        }
+
         var maxLength = requestsOptions.Value.WishMaxLength;
-        if (string.IsNullOrEmpty(wish) || wish.Length > maxLength)
+        if (wish is not null && wish.Length > maxLength)
         {
             return BadRequest(new ProblemDetails
             {
                 Status = StatusCodes.Status400BadRequest,
                 Title = "Invalid wish.",
-                Detail = $"wish is required and must be at most {maxLength} characters.",
+                Detail = $"wish must be at most {maxLength} characters.",
             });
+        }
+
+        // gh-#131 fail-closed membership checks — CURRENT lists, deterministic, no LLM. The 400
+        // bodies are fixed strings: the rejected value is never echoed (nor stored, nor logged).
+        if (mood is not null && !MoodVocabulary.Contains(mood))
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Invalid mood.",
+                Detail = "mood must be one of the published mood options.",
+            });
+        }
+
+        if (genre is not null)
+        {
+            var genres = await catalogProbe.ListRequestableGenresAsync(ct);
+            var canonical = genres.FirstOrDefault(
+                option => string.Equals(option, genre, StringComparison.OrdinalIgnoreCase));
+            if (canonical is null)
+            {
+                return BadRequest(new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title = "Invalid genre.",
+                    Detail = "genre must be one of the published genre options.",
+                });
+            }
+
+            genre = canonical;
         }
 
         if (await requestStore.CountPendingAsync(ct) >= requestsOptions.Value.PendingCap)
@@ -92,7 +142,7 @@ public sealed class SpectatorRequestsController(
         }
 
         var windowMinutes = stationMonitor.CurrentValue.Requests.WindowMinutes;
-        var id = await requestStore.InsertAsync(wish, DateTimeOffset.UtcNow.AddMinutes(windowMinutes), ct);
+        var id = await requestStore.InsertAsync(wish, genre, mood, DateTimeOffset.UtcNow.AddMinutes(windowMinutes), ct);
         events.Publish(new RequestReceived());
 
         // Prompt-parse nudge (SPEC F87.4, STORY-225, PLAN T88) — see this class's own remarks.
@@ -100,5 +150,13 @@ public sealed class SpectatorRequestsController(
             logger.LogDebug("Wish-parse queue full — request {Id} will be picked up by the next recovery sweep", id);
 
         return Accepted(new SpectatorRequestAccepted());
+    }
+
+    /// <summary>Trim-to-null (gh-#131): null, empty, and whitespace-only all collapse to
+    /// <see langword="null"/> so every downstream check sees one shape of "absent".</summary>
+    static string? NormalizeField(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrEmpty(trimmed) ? null : trimmed;
     }
 }

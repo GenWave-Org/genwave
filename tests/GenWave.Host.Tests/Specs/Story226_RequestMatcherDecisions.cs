@@ -32,7 +32,7 @@ public static class FeatureRequestMatcherDecisions
             var store = new FakeRequestStore();
             var matcher = BuildMatcher(probe, store);
 
-            await matcher.MatchAsync(1, "Led Zeppelin", null, [], CancellationToken.None);
+            await matcher.MatchAsync(1, "Led Zeppelin", null, null, [], CancellationToken.None);
 
             var call = Assert.Single(store.MarkMatchedCalls);
             Assert.Equal((1L, 42L), call);
@@ -53,7 +53,7 @@ public static class FeatureRequestMatcherDecisions
             var store = new FakeRequestStore();
             var matcher = BuildMatcher(probe, store);
 
-            await matcher.MatchAsync(1, "A Band That Does Not Exist", null, ["dreamy"], CancellationToken.None);
+            await matcher.MatchAsync(1, "A Band That Does Not Exist", null, null, ["dreamy"], CancellationToken.None);
 
             // Neither write happens — the row stays exactly as MarkParsedAsync already left it
             // (pending, moods already stored), ready for T90's mood-filter pick.
@@ -75,7 +75,7 @@ public static class FeatureRequestMatcherDecisions
             var store = new FakeRequestStore();
             var matcher = BuildMatcher(probe, store);
 
-            await matcher.MatchAsync(1, "A Band That Does Not Exist", null, [], CancellationToken.None);
+            await matcher.MatchAsync(1, "A Band That Does Not Exist", null, null, [], CancellationToken.None);
 
             var id = Assert.Single(store.MarkUnmatchedCalls);
             Assert.Equal(1, id);

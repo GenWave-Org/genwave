@@ -73,15 +73,17 @@ public sealed class RequestFulfillmentProvider(
             wasVibe = false;
             media = await probe.GetSelectableByIdAsync(mediaId, effectiveEnvelope, ct);
         }
-        else if (request.Moods.Count > 0)
+        else if (request.Moods.Count > 0 || request.Genre is not null)
         {
+            // gh-#131 — a genre predicate resolves through the same vibe machinery as moods; when
+            // both are present they AND inside the probe's own WHERE clause (predicates merge).
             wasVibe = true;
-            media = await probe.FindVibeAsync(request.Moods, effectiveEnvelope, ct);
+            media = await probe.FindVibeAsync(request.Moods, request.Genre, effectiveEnvelope, ct);
         }
         else
         {
             // Defensive only — IRequestStore.GetOldestLiveAsync's own contract never returns a row
-            // with neither a match nor a mood predicate (see that member's remarks).
+            // with neither a match nor a vibe (genre/mood) predicate (see that member's remarks).
             return null;
         }
 

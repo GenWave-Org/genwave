@@ -203,18 +203,24 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	-- Listener requests (SPEC F87, STORY-224, PLAN T86, gh-#105-era epoch): the first public WRITE.
 	-- wish is nulled by an insert-time sweep once received_at is older than Requests:WishRetentionHours
 	-- (default 24h) — the SAME "eviction runs inside the insert's own transaction" discipline
-	-- booth_log's own retention sweep established above; artist/title/moods (the PARSED predicates)
-	-- and the row's outcome (status/matched_media_id/fulfilled_at) are never swept and stay
-	-- indefinitely. matched_media_id deliberately carries NO foreign key: library.media lives on the
-	-- other side of the schema-role boundary (station_svc has no grant there) — the exact
-	-- booth_log.media_id precedent just above. See db/24-request-migration.sh for the in-place
-	-- upgrade path this table also ships as, and its own remarks for the fuller rationale.
+	-- booth_log's own retention sweep established above; artist/title/genre/moods (the PARSED
+	-- predicates), the picked_* dropdown values (gh-#131 — server-validated list members, never free
+	-- text), and the row's outcome (status/matched_media_id/fulfilled_at) are never swept and stay
+	-- indefinitely. wish is nullable AND optional (gh-#131): a picker-only request carries no free
+	-- text at all, only picked_genre/picked_mood. matched_media_id deliberately carries NO foreign
+	-- key: library.media lives on the other side of the schema-role boundary (station_svc has no
+	-- grant there) — the exact booth_log.media_id precedent just above. See
+	-- db/24-request-migration.sh + db/29-request-genre-migration.sh for the in-place upgrade path
+	-- this table also ships as, and their own remarks for the fuller rationale.
 	CREATE TABLE IF NOT EXISTS station.request (
 	  id               bigserial   PRIMARY KEY,
 	  received_at      timestamptz NOT NULL DEFAULT now(),
 	  wish             text,
+	  picked_genre     text,
+	  picked_mood      text,
 	  artist           text,
 	  title            text,
+	  genre            text,
 	  moods            text[],
 	  status           text        NOT NULL DEFAULT 'pending'
 	                     CHECK (status IN ('pending', 'fulfilled', 'expired', 'unmatched')),

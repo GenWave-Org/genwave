@@ -49,7 +49,7 @@ sealed class RequestCatalogProbeRepository(
     ILogger<RequestCatalogProbeRepository> logger)
     : IRequestCatalogProbe
 {
-    public async Task<long?> FindBestAsync(string? artist, string? title, CancellationToken ct)
+    public async Task<long?> FindBestAsync(string? artist, string? title, string? genre, CancellationToken ct)
     {
         if (artist is null && title is null)
             return null;
@@ -83,6 +83,14 @@ sealed class RequestCatalogProbeRepository(
             exactParts.Add("lower(m.title) = lower(@title)");
             parameters.Add("titlePattern", $"%{EscapeLikeWildcards(title)}%");
             parameters.Add("title", title);
+        }
+
+        // gh-#131 — the genre predicate ANDs in (predicates merge, never compete): case-insensitive
+        // EXACT match, not ILIKE-contains — "rock" must never admit a "Post-Rock" row by substring.
+        if (genre is not null)
+        {
+            whereParts.Add("lower(m.genre) = lower(@genre)");
+            parameters.Add("genre", genre);
         }
 
         var scope = safeScope.Current;
@@ -132,15 +140,29 @@ sealed class RequestCatalogProbeRepository(
         return row?.ToReference(logger);
     }
 
-    /// <summary>SPEC F87.6, STORY-227, PLAN T90 — see <see cref="IRequestCatalogProbe"/>'s own remarks.</summary>
-    public async Task<MediaReference?> FindVibeAsync(IReadOnlyList<string> moods, SegmentEnvelope? envelope, CancellationToken ct)
+    /// <summary>SPEC F87.6, STORY-227, PLAN T90; genre leg gh-#131 — see
+    /// <see cref="IRequestCatalogProbe"/>'s own remarks.</summary>
+    public async Task<MediaReference?> FindVibeAsync(
+        IReadOnlyList<string> moods, string? genre, SegmentEnvelope? envelope, CancellationToken ct)
     {
-        if (moods.Count == 0) return null;
+        if (moods.Count == 0 && genre is null) return null;
 
         var parameters = new DynamicParameters();
-        parameters.Add("moods", moods.ToArray());
         var whereParts = LawAndSafeScopeWhereParts(parameters);
-        whereParts.Add("m.moods && @moods");
+        if (moods.Count > 0)
+        {
+            whereParts.Add("m.moods && @moods");
+            parameters.Add("moods", moods.ToArray());
+        }
+
+        // gh-#131 — same exact-match genre leg FindBestAsync applies; a genre+mood request must
+        // satisfy BOTH (predicates merge as AND).
+        if (genre is not null)
+        {
+            whereParts.Add("lower(m.genre) = lower(@genre)");
+            parameters.Add("genre", genre);
+        }
+
         AddEnvelopeWhereParts(whereParts, parameters, envelope);
 
         var sql = $"""
@@ -158,6 +180,55 @@ sealed class RequestCatalogProbeRepository(
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<MediaRow>(new CommandDefinition(sql, parameters, cancellationToken: ct));
         return row?.ToReference(logger);
+    }
+
+    /// <summary>gh-#131 — the matcher's "does the station actually stock this genre" gate; see
+    /// <see cref="IRequestCatalogProbe.HasRequestableGenreAsync"/> for the contract. Same law +
+    /// safe-scope scoping as every sibling member, so a genre carried only by vetoed or safe-scope
+    /// rows answers <see langword="false"/>.</summary>
+    public async Task<bool> HasRequestableGenreAsync(string genre, CancellationToken ct)
+    {
+        var parameters = new DynamicParameters();
+        parameters.Add("genre", genre);
+        var whereParts = LawAndSafeScopeWhereParts(parameters);
+        whereParts.Add("lower(m.genre) = lower(@genre)");
+
+        var sql = $"""
+            select exists (
+              select 1
+              from library.media m
+              left join library.media_rating r on r.media_id = m.id
+              where {string.Join(" and ", whereParts)}
+            )
+            """;
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        return await conn.ExecuteScalarAsync<bool>(new CommandDefinition(sql, parameters, cancellationToken: ct));
+    }
+
+    /// <summary>gh-#131 — the public genre-options projection; see
+    /// <see cref="IRequestCatalogProbe.ListRequestableGenresAsync"/> for the contract.
+    /// <c>min(m.genre)</c> per <c>lower(m.genre)</c> group picks one deterministic representative
+    /// casing per case-insensitively distinct genre; null/blank genres never appear.</summary>
+    public async Task<IReadOnlyList<string>> ListRequestableGenresAsync(CancellationToken ct)
+    {
+        var parameters = new DynamicParameters();
+        var whereParts = LawAndSafeScopeWhereParts(parameters);
+        whereParts.Add("m.genre is not null");
+        whereParts.Add("btrim(m.genre) <> ''");
+
+        var sql = $"""
+            select min(m.genre)
+            from library.media m
+            left join library.media_rating r on r.media_id = m.id
+            where {string.Join(" and ", whereParts)}
+            group by lower(m.genre)
+            order by lower(m.genre)
+            """;
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var genres = await conn.QueryAsync<string>(new CommandDefinition(sql, parameters, cancellationToken: ct));
+        return genres.AsList();
     }
 
     /// <summary>

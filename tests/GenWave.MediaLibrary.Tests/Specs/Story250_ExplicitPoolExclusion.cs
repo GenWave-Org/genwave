@@ -98,7 +98,7 @@ public static class FeatureExplicitPoolExclusion
                     artist: "Explicit Artist", title: "Explicit Title");
 
                 var found = await Probe(db, AudiencePosture.Everyone)
-                    .FindBestAsync("Explicit Artist", null, CancellationToken.None);
+                    .FindBestAsync("Explicit Artist", null, null, CancellationToken.None);
 
                 Assert.Null(found);
             }

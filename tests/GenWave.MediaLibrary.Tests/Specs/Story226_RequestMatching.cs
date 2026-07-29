@@ -97,7 +97,7 @@ public static class FeatureRequestMatching
             await InsertSelectableTrackAsync(db, "/req/match-artist-other.flac", "Some Other Band", "Some Other Song");
 
             // Act: probe for the artist alone (title null — a request may name only one).
-            var found = await Probe(db).FindBestAsync("Led Zeppelin", null, CancellationToken.None);
+            var found = await Probe(db).FindBestAsync("Led Zeppelin", null, null, CancellationToken.None);
 
             // Assert: exactly the matching row's id comes back (F87.5).
             Assert.Equal(wantedId, found);
@@ -111,7 +111,7 @@ public static class FeatureRequestMatching
             await InsertSelectableTrackAsync(db, "/req/match-artist-nohit.flac", "Some Other Band", "Some Other Song");
 
             // Act: probe for an artist nothing in the catalog resembles.
-            var found = await Probe(db).FindBestAsync("A Band That Does Not Exist", null, CancellationToken.None);
+            var found = await Probe(db).FindBestAsync("A Band That Does Not Exist", null, null, CancellationToken.None);
 
             // Assert: null — nothing to match (F87.5's "no match either way").
             Assert.Null(found);
@@ -135,7 +135,7 @@ public static class FeatureRequestMatching
             await RatingRepo(db).SetNeverPlayAsync(id.ToString(), true, CancellationToken.None);
 
             // Act: probe for that exact artist.
-            var found = await Probe(db).FindBestAsync("Led Zeppelin", null, CancellationToken.None);
+            var found = await Probe(db).FindBestAsync("Led Zeppelin", null, null, CancellationToken.None);
 
             // Assert: null — the flag suppresses the row from the probe entirely, same as main rotation.
             Assert.Null(found);
@@ -151,7 +151,7 @@ public static class FeatureRequestMatching
                 await conn.ExecuteAsync("update library.media set eligible = false where id = @id", new { id });
 
             // Act: probe for that exact artist.
-            var found = await Probe(db).FindBestAsync("Led Zeppelin", null, CancellationToken.None);
+            var found = await Probe(db).FindBestAsync("Led Zeppelin", null, null, CancellationToken.None);
 
             // Assert: null — an operator's curation exclusion is honored exactly like never_play.
             Assert.Null(found);
@@ -166,7 +166,7 @@ public static class FeatureRequestMatching
             await InsertUnmeasurableTrackAsync(db, "/req/match-unmeasurable.flac", "Led Zeppelin", "Kashmir");
 
             // Act: probe for that exact artist.
-            var found = await Probe(db).FindBestAsync("Led Zeppelin", null, CancellationToken.None);
+            var found = await Probe(db).FindBestAsync("Led Zeppelin", null, null, CancellationToken.None);
 
             // Assert: null — an unmeasurable row isn't selectable; matching it would only idle the
             // request to expiry for nothing.
@@ -192,7 +192,7 @@ public static class FeatureRequestMatching
             await InsertSelectableTrackAsync(db, "/req/wildcard-percent-decoy.flac", "100 Degrees", "Track Two");
 
             // Act: probe for the literal "100%" substring.
-            var found = await Probe(db).FindBestAsync("100%", null, CancellationToken.None);
+            var found = await Probe(db).FindBestAsync("100%", null, null, CancellationToken.None);
 
             // Assert: only the row actually containing "100%" comes back — "100%" never behaves as
             // "100" followed by anything.
@@ -209,7 +209,7 @@ public static class FeatureRequestMatching
             await InsertSelectableTrackAsync(db, "/req/wildcard-underscore-decoy.flac", "aXb Collective", "Track Two");
 
             // Act: probe for the literal "a_b" substring.
-            var found = await Probe(db).FindBestAsync("a_b", null, CancellationToken.None);
+            var found = await Probe(db).FindBestAsync("a_b", null, null, CancellationToken.None);
 
             // Assert: only the row actually containing "a_b" comes back — "_" never matches "X".
             Assert.Equal(literalId, found);
@@ -240,7 +240,7 @@ public static class FeatureRequestMatching
             var found = await new RequestCatalogProbeRepository(
                     db.DataSource, new FakeSafeScopeProvider(safeLibraryId), new FakeAudiencePostureProvider(),
                     NullLogger<RequestCatalogProbeRepository>.Instance)
-                .FindBestAsync(null, "please stand by", CancellationToken.None);
+                .FindBestAsync(null, "please stand by", null, CancellationToken.None);
 
             // Assert: null — a listener request must not be able to reach content the operator has
             // no recourse to never-play.
@@ -262,7 +262,7 @@ public static class FeatureRequestMatching
             var found = await new RequestCatalogProbeRepository(
                     db.DataSource, new FakeSafeScopeProvider(), new FakeAudiencePostureProvider(),
                     NullLogger<RequestCatalogProbeRepository>.Instance)
-                .FindBestAsync(null, "please stand by", CancellationToken.None);
+                .FindBestAsync(null, "please stand by", null, CancellationToken.None);
 
             // Assert: the row matches — proving the safe scope, not something else about the row,
             // was doing the excluding above.
@@ -378,7 +378,7 @@ public static class FeatureRequestMatching
             await Harness.Repo(db).WriteMoodsAsync(id, ["dreamy"], CancellationToken.None);
 
             // Act: the OverrideEnvelope=true bypass path.
-            var found = await Probe(db).FindVibeAsync(["dreamy"], envelope: null, CancellationToken.None);
+            var found = await Probe(db).FindVibeAsync(["dreamy"], genre: null, envelope: null, CancellationToken.None);
 
             // Assert: the tagged row comes back.
             Assert.Equal(id.ToString(), found?.MediaId);
@@ -393,7 +393,7 @@ public static class FeatureRequestMatching
             await Harness.Repo(db).WriteMoodsAsync(id, ["triumphant"], CancellationToken.None);
 
             // Act.
-            var found = await Probe(db).FindVibeAsync(["dreamy"], envelope: null, CancellationToken.None);
+            var found = await Probe(db).FindVibeAsync(["dreamy"], genre: null, envelope: null, CancellationToken.None);
 
             // Assert: null — no mood overlap.
             Assert.Null(found);
@@ -409,7 +409,7 @@ public static class FeatureRequestMatching
             await RatingRepo(db).SetNeverPlayAsync(id.ToString(), true, CancellationToken.None);
 
             // Act.
-            var found = await Probe(db).FindVibeAsync(["dreamy"], envelope: null, CancellationToken.None);
+            var found = await Probe(db).FindVibeAsync(["dreamy"], genre: null, envelope: null, CancellationToken.None);
 
             // Assert: null — the veto is law regardless of OverrideEnvelope.
             Assert.Null(found);
@@ -429,7 +429,7 @@ public static class FeatureRequestMatching
             var found = await new RequestCatalogProbeRepository(
                     db.DataSource, new FakeSafeScopeProvider(safeLibraryId), new FakeAudiencePostureProvider(),
                     NullLogger<RequestCatalogProbeRepository>.Instance)
-                .FindVibeAsync(["dreamy"], envelope: null, CancellationToken.None);
+                .FindVibeAsync(["dreamy"], genre: null, envelope: null, CancellationToken.None);
 
             // Assert: null — safe content is never requestable.
             Assert.Null(found);

@@ -13,7 +13,7 @@ using GenWave.Core.Domain;
 ///
 /// <para>
 /// Conservative by design, mirroring F87.4's own "unparseable ⇒ empty predicates" contract: a
-/// predicate this scan cannot confidently spot is left null/empty rather than guessed. Three
+/// predicate this scan cannot confidently spot is left null/empty rather than guessed. Four
 /// independent scans, each free to miss on its own:
 /// </para>
 /// <list type="bullet">
@@ -21,6 +21,12 @@ using GenWave.Core.Domain;
 /// <item>the tail after the LAST standalone <c>by</c> becomes the artist candidate (a listener
 /// naturally phrases "play some jazz by Miles Davis" — taking the tail, not the first match, means a
 /// wish with an earlier incidental "by" still reads the artist correctly);</item>
+/// <item>the earliest whole-word, case-insensitive occurrence of a CURRENT genre option (gh-#131 —
+/// the caller-supplied live requestable-genre list) becomes the genre predicate, emitted in the
+/// option's own canonical casing. A genre word the station does not stock is simply not recognized —
+/// and deliberately NEVER coerced into a mood (gh-#131's whole point): the mood scan below only ever
+/// admits literal <see cref="MoodVocabulary"/> members, so "anything metal" on a metal-less station
+/// parses to empty predicates, not a vibe;</item>
 /// <item>every case-insensitive token that is a literal, exact <see cref="MoodVocabulary"/> word is
 /// collected, deduplicated, and capped at <see cref="MoodVocabulary.MaxMoodsPerTrack"/> — the exact
 /// filtering discipline <c>GenWave.MediaLibrary.Mood.MoodTagParser</c> already established for the
@@ -38,18 +44,20 @@ sealed class DeterministicWishParser : IWishParser
     static readonly Regex ByArtistPattern = new(@"\bby\s+(.+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     static readonly Regex WordPattern = new("[a-z]+", RegexOptions.Compiled);
 
-    public Task<ParsedWish> ParseAsync(string wish, CancellationToken ct) => Task.FromResult(Parse(wish));
+    public Task<ParsedWish> ParseAsync(string wish, IReadOnlyList<string> genreOptions, CancellationToken ct) =>
+        Task.FromResult(Parse(wish, genreOptions));
 
-    /// <summary>The pure parse — see the class remarks for the three independent scans.</summary>
-    public static ParsedWish Parse(string wish)
+    /// <summary>The pure parse — see the class remarks for the four independent scans.</summary>
+    public static ParsedWish Parse(string wish, IReadOnlyList<string> genreOptions)
     {
         if (string.IsNullOrWhiteSpace(wish)) return ParsedWish.Empty;
 
         var title = ExtractTitle(wish);
         var artist = ExtractArtist(wish);
+        var genre = ExtractGenre(wish, genreOptions);
         var moods = ExtractMoods(wish);
 
-        return new ParsedWish(artist, title, moods);
+        return new ParsedWish(artist, title, genre, moods);
     }
 
     static string? ExtractTitle(string wish)
@@ -72,6 +80,36 @@ sealed class DeterministicWishParser : IWishParser
             .Trim()
             .TrimEnd('.', '!', '?', ',');
         return candidate.Length == 0 ? null : candidate;
+    }
+
+    /// <summary>
+    /// gh-#131 — "recognized = member of the current genre options list", nothing looser: each
+    /// option is sought as a whole word (case-insensitive, literal — <see cref="Regex.Escape"/>d, so
+    /// an option like "R&amp;B" never behaves as a pattern); the option matching EARLIEST in the wish
+    /// wins, tie broken toward the longer option ("Rock and Roll" beats "Rock" at the same offset).
+    /// The canonical option string is returned, never the wish's own casing.
+    /// </summary>
+    static string? ExtractGenre(string wish, IReadOnlyList<string> genreOptions)
+    {
+        string? best = null;
+        var bestIndex = int.MaxValue;
+        foreach (var option in genreOptions)
+        {
+            if (string.IsNullOrWhiteSpace(option)) continue;
+
+            var match = Regex.Match(wish, $@"\b{Regex.Escape(option)}\b", RegexOptions.IgnoreCase);
+            if (!match.Success) continue;
+
+            var wins = match.Index < bestIndex
+                || (match.Index == bestIndex && best is not null && option.Length > best.Length);
+            if (wins)
+            {
+                best = option;
+                bestIndex = match.Index;
+            }
+        }
+
+        return best;
     }
 
     static IReadOnlyList<string> ExtractMoods(string wish)

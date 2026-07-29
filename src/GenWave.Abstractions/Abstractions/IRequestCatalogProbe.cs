@@ -28,10 +28,30 @@ public interface IRequestCatalogProbe
     /// <summary>
     /// Returns the best-matching media id for <paramref name="artist"/>/<paramref name="title"/>
     /// among rows that are <c>ready</c>, <c>eligible</c>, and not flagged <c>never_play</c> — operator
-    /// vetoes are law (SPEC F87.5). <see langword="null"/> when neither predicate is given, or no row
-    /// clears the WHERE clause at all.
+    /// vetoes are law (SPEC F87.5). <paramref name="genre"/> (gh-#131) ANDs a case-insensitive exact
+    /// match against the catalog's <c>genre</c> column into the same WHERE clause when supplied —
+    /// predicates merge, never compete. <see langword="null"/> when neither artist nor title is given
+    /// (a genre alone is a vibe predicate, resolved via <see cref="FindVibeAsync"/>, never a
+    /// best-match query), or no row clears the WHERE clause at all.
     /// </summary>
-    Task<long?> FindBestAsync(string? artist, string? title, CancellationToken ct);
+    Task<long?> FindBestAsync(string? artist, string? title, string? genre, CancellationToken ct);
+
+    /// <summary>
+    /// gh-#131 — whether at least one request-eligible row (the same law + safe-scope predicate every
+    /// member of this seam applies) carries <paramref name="genre"/>, case-insensitively. The
+    /// matcher's "station has no metal ⇒ unmatched, never a mood coercion" gate: a genre predicate
+    /// only survives a match miss when this answers <see langword="true"/>.
+    /// </summary>
+    Task<bool> HasRequestableGenreAsync(string genre, CancellationToken ct);
+
+    /// <summary>
+    /// gh-#131 — the distinct genres of request-eligible catalog rows (law + safe-scope applied, so
+    /// safe content's genres never leak), one representative casing per case-insensitively distinct
+    /// value, ordered case-insensitively. Feeds the public request-options endpoint (genre-granularity
+    /// disclosure only — never track/artist), the intake endpoint's picker validation, and the
+    /// deterministic parser's genre-word recognition. Empty when no eligible row carries a genre.
+    /// </summary>
+    Task<IReadOnlyList<string>> ListRequestableGenresAsync(CancellationToken ct);
 
     /// <summary>
     /// SPEC F87.6, STORY-227, PLAN T90 — the fulfillment rung's law re-check for a T89-matched
@@ -55,16 +75,20 @@ public interface IRequestCatalogProbe
 
     /// <summary>
     /// SPEC F87.6, STORY-227, PLAN T90 — resolves a vibe request (a T89 miss that kept a non-empty
-    /// mood predicate, F87.5) through the existing mood-filter machinery (F86.8 semantics: array
-    /// overlap against <c>library.media.moods</c>) rather than a specific known id. Applies the SAME
+    /// vibe predicate, F87.5) through the existing mood-filter machinery (F86.8 semantics: array
+    /// overlap against <c>library.media.moods</c>) rather than a specific known id.
+    /// <paramref name="genre"/> (gh-#131) ANDs a case-insensitive exact match against the catalog's
+    /// <c>genre</c> column into the same predicate when supplied — a genre-only request is legal
+    /// (empty <paramref name="moods"/>), a genre+mood request must satisfy both. Applies the SAME
     /// law predicate and safe-scope exclusion <see cref="GetSelectableByIdAsync"/> does (gh-#99's
     /// lesson applies here too — a vibe match was never vetted against never-play/safe-scope at parse
     /// time the way a T89 catalog match was), plus the SAME <paramref name="envelope"/> switch
     /// (<see langword="null"/> = bypass genre/energy). Orders by rating score (descending, nulls
     /// last) then randomly among ties — the same "score only breaks ties, never governs odds beyond
     /// that" posture <see cref="FindBestAsync"/>'s own exact-match tie-break establishes. Returns at
-    /// most one row; <see langword="null"/> when <paramref name="moods"/> is empty or nothing in scope
-    /// clears every predicate.
+    /// most one row; <see langword="null"/> when <paramref name="moods"/> is empty and
+    /// <paramref name="genre"/> is <see langword="null"/>, or nothing in scope clears every predicate.
     /// </summary>
-    Task<MediaReference?> FindVibeAsync(IReadOnlyList<string> moods, SegmentEnvelope? envelope, CancellationToken ct);
+    Task<MediaReference?> FindVibeAsync(
+        IReadOnlyList<string> moods, string? genre, SegmentEnvelope? envelope, CancellationToken ct);
 }

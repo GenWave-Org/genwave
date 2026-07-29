@@ -103,7 +103,7 @@ public static class FeatureRequestStore
             var repo = Repo(db);
 
             // When one wish is inserted...
-            var id = await repo.InsertAsync("something dreamier by Zeppelin", expiresAt, CancellationToken.None);
+            var id = await repo.InsertAsync("something dreamier by Zeppelin", null, null, expiresAt, CancellationToken.None);
 
             // Then it lands pending, holding the wish text and the caller's expiry.
             var row = await ReadRowAsync(db, id);
@@ -133,7 +133,7 @@ public static class FeatureRequestStore
             var repo = Repo(db, wishRetentionHours: 24);
 
             // When a new wish is inserted (the sweep runs inside that SAME insert's transaction)...
-            await repo.InsertAsync("a new wish", DateTimeOffset.UtcNow.AddMinutes(15), CancellationToken.None);
+            await repo.InsertAsync("a new wish", null, null, DateTimeOffset.UtcNow.AddMinutes(15), CancellationToken.None);
 
             // Then the old row's wish text is gone, but its parsed predicates and outcome survive.
             var oldRow = await ReadRowAsync(db, oldId);
@@ -155,7 +155,7 @@ public static class FeatureRequestStore
             var repo = Repo(db, wishRetentionHours: 24);
 
             // When a new wish is inserted (the sweep runs, but has nothing old to touch)...
-            await repo.InsertAsync("a new wish", DateTimeOffset.UtcNow.AddMinutes(15), CancellationToken.None);
+            await repo.InsertAsync("a new wish", null, null, DateTimeOffset.UtcNow.AddMinutes(15), CancellationToken.None);
 
             // Then the recent row's wish text is untouched.
             var recentRow = await ReadRowAsync(db, recentId);
@@ -357,7 +357,7 @@ public static class FeatureRequestStore
             var repo = Repo(db);
 
             // When the parser writes back a non-empty predicate set...
-            await repo.MarkParsedAsync(id, "Led Zeppelin", null, ["dreamy"], unmatched: false, CancellationToken.None);
+            await repo.MarkParsedAsync(id, "Led Zeppelin", null, null, ["dreamy"], unmatched: false, CancellationToken.None);
 
             // Then the predicates land and status is untouched — still pending, ready for T89's matcher.
             var row = await ReadRowAsync(db, id);
@@ -377,7 +377,7 @@ public static class FeatureRequestStore
             var repo = Repo(db);
 
             // When the parser writes back an empty predicate set with unmatched: true...
-            await repo.MarkParsedAsync(id, null, null, [], unmatched: true, CancellationToken.None);
+            await repo.MarkParsedAsync(id, null, null, null, [], unmatched: true, CancellationToken.None);
 
             // Then status flips to unmatched (F87.4) and the row now falls outside the "unparsed" set.
             var row = await ReadRowAsync(db, id);

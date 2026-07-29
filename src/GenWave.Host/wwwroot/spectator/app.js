@@ -432,15 +432,55 @@ function initPlayerRecovery() {
 const REQUEST_THANK_YOU = "Thanks — your request is in the queue.";
 const REQUEST_BUSY = "The request line is busy — try again in a few minutes.";
 
+let requestOptionsLoaded = false;
+
 function renderRequestVisibility(enabled) {
   document.getElementById("request-section").hidden = !enabled;
+  // Pickers (gh-#131) load once, and only when the form is actually shown — a station with
+  // requests off never spends the fetch.
+  if (enabled) loadRequestOptions();
 }
 
-async function submitRequest(wish) {
+// ── Pickers (gh-#131) ────────────────────────────────────────────────────────
+//
+// One fetch of /spectator/api/request-options fills both dropdowns; a failed fetch leaves them
+// holding only their blank "Any …" option, so the free-text line keeps working exactly as before —
+// the pickers are strictly additive. Submitted values are only ever values the server itself
+// published; the server still re-validates fail-closed either way.
+
+async function loadRequestOptions() {
+  if (requestOptionsLoaded) return;
+  requestOptionsLoaded = true;
+  try {
+    const options = await fetchJson("/spectator/api/request-options");
+    populatePicker("request-genre", "Any genre", options.genres);
+    populatePicker("request-mood", "Any mood", options.moods);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+/** @param {string[]|undefined} values */
+function populatePicker(elementId, blankLabel, values) {
+  const select = document.getElementById(elementId);
+  select.textContent = "";
+  const blank = document.createElement("option");
+  blank.value = "";
+  blank.textContent = blankLabel;
+  select.appendChild(blank);
+  for (const value of values || []) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    select.appendChild(option);
+  }
+}
+
+async function submitRequest(wish, genre, mood) {
   const response = await fetch("/spectator/api/requests", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ wish }),
+    body: JSON.stringify({ wish: wish || null, genre: genre || null, mood: mood || null }),
   });
   return response.ok;
 }
@@ -448,22 +488,30 @@ async function submitRequest(wish) {
 function initRequestForm() {
   const form = document.getElementById("request-form");
   const input = document.getElementById("request-wish");
+  const genreSelect = document.getElementById("request-genre");
+  const moodSelect = document.getElementById("request-mood");
   const message = document.getElementById("request-message");
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const wish = input.value.trim();
-    if (!wish) return;
+    const genre = genreSelect.value;
+    const mood = moodSelect.value;
+    if (!wish && !genre && !mood) return; // at least one of text/genre/mood (gh-#131)
 
     let accepted = false;
     try {
-      accepted = await submitRequest(wish);
+      accepted = await submitRequest(wish, genre, mood);
     } catch (error) {
       console.error(error);
     }
 
     message.textContent = accepted ? REQUEST_THANK_YOU : REQUEST_BUSY;
-    if (accepted) input.value = "";
+    if (accepted) {
+      input.value = "";
+      genreSelect.value = "";
+      moodSelect.value = "";
+    }
   });
 }
 
