@@ -32,19 +32,24 @@ static class SpectatorPageEndpoints
     const string FontContentType = "font/woff2";
     const string IconContentType = "image/x-icon";
 
+    // gh-#160: HEAD rides every route GET is mapped on (RFC 9110 §9.3.2 — same status/headers,
+    // body suppressed by the server), through the SAME surface gate and authorization, so a
+    // preflighting client reads the truth instead of a routing 404.
+    static readonly string[] GetAndHead = ["GET", "HEAD"];
+
     public static void MapSpectatorPage(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/spectator", ServeIndex)
+        app.MapMethods("/spectator", GetAndHead, ServeIndex)
             .WithMetadata(new SpectatorSurfaceAttribute())
             .RequireAuthorization(AuthorizationPolicies.Spectator);
 
-        app.MapGet("/spectator/{asset}", ServeAsset)
+        app.MapMethods("/spectator/{asset}", GetAndHead, ServeAsset)
             .WithMetadata(new SpectatorSurfaceAttribute())
             .RequireAuthorization(AuthorizationPolicies.Spectator);
 
         // Vendored woff2 fonts (design-aesthetic skill: never a font CDN request) — a separate
         // route because they live one segment deeper, under wwwroot/spectator/fonts.
-        app.MapGet("/spectator/fonts/{asset}", ServeFont)
+        app.MapMethods("/spectator/fonts/{asset}", GetAndHead, ServeFont)
             .WithMetadata(new SpectatorSurfaceAttribute())
             .RequireAuthorization(AuthorizationPolicies.Spectator);
     }
