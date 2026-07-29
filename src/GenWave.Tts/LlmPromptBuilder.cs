@@ -263,10 +263,17 @@ static class LlmPromptBuilder
     /// effect end to end — the compiler's own exhaustiveness check on this switch is the guard
     /// against silently forgetting this one.
     /// </summary>
+    // gh-#195: the segment line is the ONLY thing separating a lead-in prompt from a back-announce
+    // prompt for the same track, and the old one-clause phrasing lost to a wall of identical track
+    // facts — observed live: a back-announce airing AFTER the song announced it as "just dropped!".
+    // Each line now states the tense/direction contract outright instead of implying it.
     static string BuildSegmentLine(SegmentKind kind) => kind switch
     {
-        SegmentKind.LeadIn => "Segment: lead-in for the upcoming track.",
-        SegmentKind.BackAnnounce => "Segment: back-announce for the track that just played.",
+        SegmentKind.LeadIn =>
+            "Segment: lead-in - the track below is about to play next. Announce it as upcoming.",
+        SegmentKind.BackAnnounce =>
+            "Segment: back-announce - the track below JUST FINISHED playing. Speak about it in past "
+            + "tense (e.g. \"that was...\"); never announce it as upcoming or say it is next.",
         SegmentKind.SignOff => "Segment: sign-off as you close out your shift on air.",
         SegmentKind.SignOn => "Segment: sign-on as you open your shift on air.",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, message: null),
