@@ -78,13 +78,25 @@ static class LlmPromptBuilder
     }
 
     /// <summary>
+    /// gh-#150 — how often a persona-voiced break is asked to work the DJ's own name in. Real
+    /// radio DJs occasionally say their own name; roughly one break in seven keeps it a habit,
+    /// not a tic. The roll itself is taken at the call site (<see cref="LlmCopyWriter"/>) and
+    /// arrives here as <c>mentionOwnName</c> — every member of this builder stays a pure function
+    /// of its arguments, so specs drive both outcomes deterministically.
+    /// </summary>
+    public const double SelfNameMentionProbability = 0.15;
+
+    /// <summary>
     /// Composes the persona section (SPEC F35.2, F35.3, F71.3): a soul line/block (see
     /// <see cref="BuildSoul"/>) plus, when the card carries any, a line of 2-3 SAMPLED quirks (see
     /// <see cref="SampleQuirks"/>) — never the full set (F71.3). A persona that yields neither
     /// (no soul text, no quirks) returns null (falls back to the neutral scaffold — the "neutral
     /// otherwise" half of F35.2, not just the no-persona case).
+    /// <paramref name="mentionOwnName"/> (gh-#150) appends the say-your-own-name line (see
+    /// <see cref="BuildSelfNameMentionLine"/>) — a rolled-true break's request, honored only when
+    /// there is an actual persona section for it to ride on.
     /// </summary>
-    public static string? BuildPersonaSection(Persona? persona, PersonaCard? card)
+    public static string? BuildPersonaSection(Persona? persona, PersonaCard? card, bool mentionOwnName = false)
     {
         var lines = new List<string>();
 
@@ -107,7 +119,43 @@ static class LlmPromptBuilder
             }
         }
 
+        // gh-#150: the name line is a rider on an actual persona section, never a section by
+        // itself — a persona with no soul and no quirks stays on the neutral scaffold (the
+        // "neutral otherwise" half of F35.2 above) even on a rolled-true break.
+        if (mentionOwnName && lines.Count > 0 && ResolveName(persona, card) is { } name)
+            lines.Add(BuildSelfNameMentionLine(name));
+
         return lines.Count == 0 ? null : string.Join('\n', lines);
+    }
+
+    /// <summary>
+    /// The persona's on-air name for <see cref="BuildSelfNameMentionLine"/>, card-first with the
+    /// legacy row as fallback — the same read-path precedence <see cref="BuildSoul"/> established
+    /// (for an admin-managed persona the two are kept in lockstep anyway; see BuildSoul's remarks).
+    /// Null when neither carries one — no name, no line.
+    /// </summary>
+    static string? ResolveName(Persona? persona, PersonaCard? card)
+    {
+        if (card is { Name.Length: > 0 })
+            return card.Name;
+
+        return persona is { Name.Length: > 0 } ? persona.Name : null;
+    }
+
+    /// <summary>
+    /// gh-#150 — the say-your-own-name line: real DJs occasionally drop their own name, and the
+    /// persona section doesn't otherwise state it, so the model can't be asked to "work your name
+    /// in" without being told what it is. Phrased as this break's ask ("once is plenty") — the
+    /// occasionally lives in <see cref="SelfNameMentionProbability"/>'s roll, never in the model's
+    /// own discretion. <paramref name="name"/> is operator-entered and flows straight into the
+    /// prompt, so it gets the house cap exactly like <see cref="BuildHandoffLine"/>'s
+    /// counterpart name (T123 review finding).
+    /// </summary>
+    static string BuildSelfNameMentionLine(string name)
+    {
+        var djName = Truncate(name, MaxSoulChars);
+        return $"Name note: your on-air name is {djName} - briefly work your own name into this " +
+            $"break where it lands naturally (e.g. \"you're with {djName}\"); once is plenty.";
     }
 
     /// <summary>

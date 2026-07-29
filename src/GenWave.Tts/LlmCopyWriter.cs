@@ -391,7 +391,16 @@ public sealed class LlmCopyWriter(
             // Built before the request goes out (moved ahead of EndpointUri.Combine, T41 review
             // finding) so systemPrompt/userPrompt are available to the ring for every failure this
             // method can raise, not just the ones after prompt assembly.
-            systemPrompt = LlmPromptBuilder.BuildSystemPrompt(LlmPromptBuilder.BuildPersonaSection(persona, card));
+            //
+            // gh-#150: real DJs occasionally say their own name. The roll is taken HERE, outside
+            // the pure builder (the same posture BuildStationClockLine takes with timeProvider —
+            // nondeterminism stays injectable at the seam, the builder stays a pure function), from
+            // Random.Shared — the source the builder's own SampleQuirks and Orchestration's
+            // SystemRandomSource already standardize on. The builder enforces the persona gate
+            // itself: with no persona section there is no line, however the roll lands.
+            var mentionOwnName = Random.Shared.NextDouble() < LlmPromptBuilder.SelfNameMentionProbability;
+            systemPrompt = LlmPromptBuilder.BuildSystemPrompt(
+                LlmPromptBuilder.BuildPersonaSection(persona, card, mentionOwnName));
 
             // Read HERE — after WaitAsync above, i.e. already inside the single-flight critical
             // section — not by the caller before this method was ever invoked (SPEC F83.1, T65
