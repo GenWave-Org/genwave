@@ -211,6 +211,11 @@ describe("Feature: persona taste inspector", () => {
         name: "Accrued taste rules against the cap",
       });
       expect([meter.getAttribute("aria-valuenow"), meter.getAttribute("aria-valuemax")]).toEqual(["12", "40"]);
+
+      // gh-#143: the raw "12 / 40" reading now carries one quiet line naming WHAT accrues.
+      expect(
+        within(section).getByText(/learned from your taste thumbs, counted against its cap/)
+      ).toBeInTheDocument();
     });
   });
 

@@ -99,3 +99,19 @@ export function formatDuration(durationMs: number): string {
 export function formatDurationCell(durationMs: number | null | undefined): string {
   return durationMs != null ? formatDuration(durationMs) : "";
 }
+
+/**
+ * Humanizes a measured elapsed time (gh-#141 — the LLM call inspector's ELAPSED column):
+ * sub-second stays in raw milliseconds ("340 ms" — the precision is the information there),
+ * everything from one second up reads in seconds with one decimal ("5.0 s", "12.3 s"), and the
+ * pathological minute-plus case reads "2 m 05 s". Distinct from {@link formatDuration}'s "mm:ss"
+ * on purpose: that shape reads as a playback clock, which a call latency is not.
+ */
+export function formatElapsedMs(elapsedMs: number): string {
+  const ms = Math.max(0, elapsedMs);
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return `${minutes} m ${String(seconds).padStart(2, "0")} s`;
+}

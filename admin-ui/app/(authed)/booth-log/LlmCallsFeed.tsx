@@ -3,7 +3,7 @@
 import { Fragment, useState, type ReactNode } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatUpSince } from "@/lib/format-clock";
+import { formatElapsedMs, formatUpSince } from "@/lib/format-clock";
 import type { LlmCallEntry } from "@/lib/llm-calls-api";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +16,15 @@ interface LlmCallsFeedProps {
 
 const STATUS_LABELS: Record<string, string> = { ok: "Ok", failed: "Failed", timeout: "Timeout" };
 const MODE_LABELS: Record<string, string> = { normal: "Normal", soft: "Soft", hard: "Hard" };
+
+/** gh-#142: the MODE column is the F69/F70 degradation ladder, which nothing on the page said —
+ * a native-title flyover per chip explains the rung without spending any screen real estate.
+ * Wording tracks DegradationMode's own docs. */
+const MODE_TITLES: Record<string, string> = {
+  normal: "Normal — full LLM path: every lead-in and back-announce attempts the LLM.",
+  soft: "Soft — degraded after repeated failures: template copy for most segments, one real LLM attempt per cooldown window.",
+  hard: "Hard — fully degraded: zero LLM calls, template copy only (also shown while the LLM is unconfigured).",
+};
 
 /** Border+text tone for a state chip — reuses only already-established tokens (SPEC F73.1): no
  * new solid-fill pill treatment invented for this feature, since design-aesthetic's own "3px chip"
@@ -62,7 +71,11 @@ function StatusChip({ status }: { status: string }): ReactNode {
 }
 
 function ModeChip({ mode }: { mode: string }): ReactNode {
-  return <Chip tone={modeTone(mode)}>{MODE_LABELS[mode] ?? mode}</Chip>;
+  return (
+    <span title={MODE_TITLES[mode]}>
+      <Chip tone={modeTone(mode)}>{MODE_LABELS[mode] ?? mode}</Chip>
+    </span>
+  );
 }
 
 /** One labeled block inside an expanded row's detail panel — "—" when the field is absent (a call
@@ -154,7 +167,7 @@ export function LlmCallsFeed({ entries, error, timeZone }: LlmCallsFeedProps): R
                       <td className="py-2 pr-3">
                         <ModeChip mode={entry.mode} />
                       </td>
-                      <td className="py-2 pr-3 text-right tabular-nums text-mute">{entry.elapsedMs} ms</td>
+                      <td className="py-2 pr-3 text-right tabular-nums text-mute">{formatElapsedMs(entry.elapsedMs)}</td>
                       <td className="max-w-xs truncate py-2 pr-3 text-ink">
                         {entry.response ?? entry.statusDetail ?? "—"}
                       </td>
