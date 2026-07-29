@@ -250,7 +250,7 @@ public static class FeatureTasteBecomesAudible
                 "Station: GenWave\n" +
                 "Local time: 2026-07-20 09:41\n" +
                 "Current date/time (station-local): Monday, July 20, 2026, 9:41 AM\n" +
-                "Segment: lead-in for the upcoming track.\n" +
+                "Segment: lead-in - the track below is about to play next. Announce it as upcoming.\n" +
                 "Title: Astral Plane\n" +
                 "Artist: Valerie June\n" +
                 "Album: The Order of Time\n" +
