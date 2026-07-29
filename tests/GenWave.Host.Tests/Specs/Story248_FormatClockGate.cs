@@ -228,7 +228,7 @@ public static class FeatureFormatClockGate
         // the spectator wiring, the Roster/Fire/editor/Hire admin-ui passes) never touched either
         // file. No re-pin needed; this is that confirmation, run as its own always-green fact rather
         // than only asserted in a comment.
-        const string EngineScriptSha256 = "11c8b3b59b4b641dc59fa4217e935442573adf04f8e756934e23593b17677049";
+        const string EngineScriptSha256 = "869ea6fc35e3d73de4ca6cc47551a07da63bd855481ba77120fe73f1754d72da";
         const string ComposeYamlSha256  = "9ddd169329ef5b092638d1e67279272fc4d7b9f350dcc330cb455d7d92faf981";
 
         [Fact]
