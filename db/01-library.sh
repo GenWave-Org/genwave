@@ -198,6 +198,14 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	    check (explicit_source is null or explicit_source in ('tag', 'llm', 'operator')),
 	  add column explicit_llm_missed_at timestamptz;
 
+	-- unavailable_since (gh-#113): when the row last transitioned available→unavailable, stamped
+	-- by the scan's MarkUnavailableAsync write and cleared again on resurrection
+	-- (MarkDiscoveredAsync / InsertDiscoveredAsync's on-conflict re-discovery, the gh-#112 path).
+	-- NULL for any row that is not unavailable. The explicit operator purge's "unavailable longer
+	-- than N days" age filter reads this column; a NULL stamp is never purgeable.
+	alter table library.media
+	  add column unavailable_since timestamptz;
+
 	-- artwork_token (gh-#105, SPEC F88.2, STORY-222): random 128-bit value (32 lowercase hex
 	-- chars), generated lazily by ArtworkTokenRepository.GetOrCreateTokenAsync on a row's first
 	-- need. NULL for every row until then -- never backfilled, since a token is only ever minted

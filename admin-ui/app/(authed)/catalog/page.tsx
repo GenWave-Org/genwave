@@ -6,6 +6,7 @@ import type { LibraryDto } from "@/lib/library";
 import { CatalogTabs, type CatalogTab } from "./CatalogTabs";
 import { CatalogTable } from "./CatalogTable";
 import { LibrariesTab } from "./LibrariesTab";
+import { PurgeUnavailableAction } from "./PurgeUnavailableAction";
 import { YearFilterControl } from "./YearFilterControl";
 import { FacetFilterControl } from "./FacetFilterControl";
 import { MoodFilterControl } from "./MoodFilterControl";
@@ -37,6 +38,9 @@ interface MediaSearchParams {
   /** SPEC F86.8 mood-exact filter, fed by the mood picker (fixed `MoodVocabulary`, no facet
    * fetch). Repeatable like `genre-exact`; {@link moodExactValues} normalizes both shapes. */
   "mood-exact"?: string | string[];
+  /** gh-#113 — "true" reveals unavailable rows the default view hides (mapped straight onto the
+   * API's `include-unavailable` param). Any other value (or absent) keeps the default view. */
+  "include-unavailable"?: string;
 }
 
 interface CatalogPageProps {
@@ -51,6 +55,18 @@ interface CatalogPageProps {
  */
 function readOutOfScopeHeader(resp: Response): boolean {
   return resp.headers.get("X-Out-Of-Scope") === "true";
+}
+
+/**
+ * The `X-Unavailable-Hidden` count (gh-#113) — set by the API only when the default view hid
+ * unavailable rows: how many the browse's other filters matched but the page excluded. Absent
+ * (or malformed) reads as 0, which also covers the revealed view and explicit state filters.
+ */
+function readUnavailableHiddenHeader(resp: Response): number {
+  const raw = resp.headers.get("X-Unavailable-Hidden");
+  if (raw === null) return 0;
+  const parsed = parseInt(raw, 10);
+  return isNaN(parsed) || parsed < 0 ? 0 : parsed;
 }
 
 function parsePaginationHeader(header: string): Pagination {
@@ -118,7 +134,8 @@ type FilterField =
   | "artist-exact"
   | "album-exact"
   | "genre-exact"
-  | "mood-exact";
+  | "mood-exact"
+  | "include-unavailable";
 
 interface AppendFilterParamsOptions {
   /** Filter fields to leave out entirely — the active-filter chips' "clear this one" links. */
@@ -162,6 +179,29 @@ function appendFilterParams(query: URLSearchParams, sp: MediaSearchParams, optio
       if (value !== options.omitMoodExactValue) query.append("mood-exact", value);
     }
   }
+  // gh-#113 — only the literal "true" is meaningful (absent/false both mean the default view),
+  // so nothing else is ever propagated onto pagination or chip-clear URLs.
+  if (!omit.has("include-unavailable") && sp["include-unavailable"] === "true") {
+    query.set("include-unavailable", "true");
+  }
+}
+
+/** The catalog URL with unavailable rows revealed (gh-#113), every active filter kept and the
+ * page reset to 1 — revealing rows changes the row set, so a deep page number is meaningless. */
+function buildShowUnavailableUrl(sp: MediaSearchParams): string {
+  const query = new URLSearchParams();
+  appendFilterParams(query, sp);
+  query.set("include-unavailable", "true");
+  return `/catalog?${query.toString()}`;
+}
+
+/** The catalog URL back to the default (hidden) view (gh-#113) — {@link buildShowUnavailableUrl}'s
+ * inverse, with the same page-1 reset. */
+function buildHideUnavailableUrl(sp: MediaSearchParams): string {
+  const query = new URLSearchParams();
+  appendFilterParams(query, sp, { omit: new Set<FilterField>(["include-unavailable"]) });
+  const qs = query.toString();
+  return `/catalog${qs ? `?${qs}` : ""}`;
 }
 
 function buildMediaUrl(sp: MediaSearchParams): string {
@@ -375,6 +415,10 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps): P
   const outOfScope = readOutOfScopeHeader(resp);
   const filterActive = isFilterActive(sp);
   const filterChips = resolveFilterChips(sp);
+  // gh-#113 — the two halves of the hidden-unavailable line: how many rows the default view hid
+  // (API-counted, 0 whenever hiding was off), and whether this browse has them revealed.
+  const unavailableHidden = readUnavailableHiddenHeader(resp);
+  const showingUnavailable = sp["include-unavailable"] === "true";
 
   const bulkFilter: BulkFilter = {
     // Every string field is run through normalizeFilterValue — the catalog filter form submits
@@ -548,6 +592,31 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps): P
         {pagination.total} track{pagination.total === 1 ? "" : "s"} found
         {pagination.pages > 1 ? ` — page ${currentPage} of ${pagination.pages}` : ""}
       </p>
+
+      {/* gh-#113 — unavailable rows are hidden by default; name the count and offer the reveal.
+          Plain anchors, no client JS — the toggle is just this page with include-unavailable=true.
+          The revealed view (and an explicit state=unavailable browse) also carries the explicit
+          operator purge, the only destructive path for these rows. */}
+      {showingUnavailable || sp.state === "unavailable" ? (
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          {showingUnavailable && (
+            <p className="text-[0.82rem] text-mute">
+              Showing unavailable tracks.{" "}
+              <Link href={buildHideUnavailableUrl(sp)} className="text-accent hover:underline">
+                Hide unavailable
+              </Link>
+            </p>
+          )}
+          <PurgeUnavailableAction />
+        </div>
+      ) : unavailableHidden > 0 ? (
+        <p className="mt-1 text-[0.82rem] text-mute">
+          {unavailableHidden} unavailable track{unavailableHidden === 1 ? "" : "s"} hidden.{" "}
+          <Link href={buildShowUnavailableUrl(sp)} className="text-accent hover:underline">
+            Show unavailable
+          </Link>
+        </p>
+      ) : null}
 
       <CatalogTable
         media={media}
