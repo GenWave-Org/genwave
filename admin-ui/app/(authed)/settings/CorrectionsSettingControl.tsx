@@ -81,19 +81,27 @@ const HEADER_CELL =
  * Save persists it through the unmodified PUT /api/settings batch (F54.4, AC1) — this control never
  * talks to the network for CRUD, only for its two read-only extras below.
  *
+ * Staging is deliberate (gh-#139): every rule change — add, edit, delete — stages until the
+ * page-wide Save settings, exactly like every other control on this page. What makes it
+ * unmistakable is the `isDirty` prop (SettingsForm's own save-diff verdict, re-baselined after
+ * each successful save per gh-#140): while dirty, an "Unsaved changes" badge renders over the
+ * table and the Preview note turns prominent, since preview runs against the SAVED rules.
+ *
  * Two supplementary, best-effort reads — both degrade silently, since this is an editor, not a
  * feature that a missing endpoint should ever block:
  *   - Per-rule fired counts from `GET /api/tts/corrections-stats` (SPEC F68.7, AC3), shown next to
  *     each row.
  *   - A "preview spoken form" action against `POST /api/tts/normalize-preview` (SPEC F68.6, AC2) —
  *     that endpoint runs the REAL SpeechText.Normalize against the CURRENTLY SAVED corrections
- *     snapshot, not this control's unsaved draft edits, so the copy under the button says so.
+ *     snapshot, not this control's staged edits, so the note under the button says which rules
+ *     it used whenever the two could differ.
  */
 export function CorrectionsSettingControl({
   controlId,
   value,
   onChange,
   disabled,
+  isDirty = false,
 }: SettingControlProps): ReactNode {
   const rows = parseCorrections(value);
 
@@ -184,6 +192,20 @@ export function CorrectionsSettingControl({
 
   return (
     <div id={controlId} className="flex flex-col gap-4">
+      {isDirty && (
+        <p
+          data-testid="corrections-dirty-notice"
+          role="status"
+          aria-live="polite"
+          className="flex flex-wrap items-center gap-2 text-[0.78rem] text-accent-2"
+        >
+          <span className="inline-flex items-center rounded-[999px] border border-accent-2 bg-transparent px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">
+            Unsaved changes
+          </span>
+          Rule changes are staged — Save settings to apply them.
+        </p>
+      )}
+
       <div className="overflow-x-auto rounded-[6px] border border-line">
         <table className="w-full border-collapse text-[0.85rem]">
           <thead>
@@ -316,9 +338,20 @@ export function CorrectionsSettingControl({
             {previewStatus.kind === "loading" ? "Previewing…" : "Preview"}
           </Button>
         </div>
-        <p className="text-[0.78rem] text-mute">
-          Uses the currently saved rules — save changes above first to preview them.
-        </p>
+        {isDirty ? (
+          <p
+            data-testid="corrections-preview-note"
+            role="status"
+            className="text-[0.78rem] font-semibold text-accent-2"
+          >
+            Previews with the last-saved rules — the staged changes above are not included until
+            you Save settings.
+          </p>
+        ) : (
+          <p data-testid="corrections-preview-note" className="text-[0.78rem] text-mute">
+            Previews with your saved rules.
+          </p>
+        )}
         {previewStatus.kind === "loaded" && (
           <p data-testid="corrections-preview-output" className="text-[0.85rem] text-ink">
             {previewStatus.spoken}
