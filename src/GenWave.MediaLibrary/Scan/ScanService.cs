@@ -111,9 +111,17 @@ sealed class ScanService(
                     await enrichQueue.Writer.WriteAsync(id, ct);
                     discovered++;
                 }
-                else if (existing.SizeBytes != file.SizeBytes || existing.Mtime != file.Mtime)
+                else if (existing.SizeBytes != file.SizeBytes || existing.Mtime != file.Mtime
+                    || existing.State == "unavailable")
                 {
-                    // Changed → reset to discovered, enqueue for re-enrichment.
+                    // Changed → reset to discovered, enqueue for re-enrichment. An `unavailable`
+                    // row whose path is sighted again takes this branch REGARDLESS of fingerprint
+                    // (gh-#112): a file restored at its old path with size+mtime preserved
+                    // (rsync -a, tar, mv back from a backup) is otherwise classified unchanged and
+                    // skipped — stuck unavailable forever, resurrectable only by touch(1).
+                    // Re-enrich rather than flip straight to ready: the fingerprint matching is
+                    // strong evidence but not proof the AUDIO is identical, and one enrichment
+                    // pass per resurrection is cheap (measurement children run niced, gh-#38).
                     await repo.MarkDiscoveredAsync(existing.Id, file.SizeBytes, file.Mtime, ct);
                     await enrichQueue.Writer.WriteAsync(existing.Id, ct);
                     changed++;
