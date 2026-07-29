@@ -119,7 +119,10 @@ describe("Feature: The settings page groups every tunable honestly", () => {
     it("renders a library section holding the Library:* keys (F44.8)", () => {
       renderWithProviders(<SettingsForm settings={makeSettings()} />);
 
-      const library = screen.getByRole("heading", { name: "Library" });
+      // gh-#144 — Library:* keys render on the Library area tab, whose panel stays mounted but
+      // `hidden` while the default Station tab is active; `hidden: true` reaches it. The
+      // containment assertions below are unchanged.
+      const library = screen.getByRole("heading", { name: "Library", hidden: true });
       const librarySection = within(library.closest("section")!);
 
       expect(librarySection.getByLabelText(/Library:ScanIntervalSeconds/)).toBeInTheDocument();

@@ -5,8 +5,9 @@ namespace GenWave.Host.Options;
 
 /// <summary>
 /// The Host-side half of the <see cref="IStationClockProvider"/> seam (gh-#117): wraps
-/// <see cref="IOptionsMonitor{TOptions}"/> so every "station-local now" read on the LLM/patter
-/// path — the prompt's clock line, <c>SegmentRequest.LocalNow</c> stamping, the persona preview —
+/// <see cref="IOptionsMonitor{TOptions}"/> so every "station-local now" read — the prompt's clock
+/// line, <c>SegmentRequest.LocalNow</c> stamping, the persona preview, and (gh-#224) the schedule
+/// grid's slot resolution and the taste day/hour gates —
 /// resolves the SAME live <c>Station:Timezone</c> value, through the SAME idiom
 /// <see cref="OptionsMonitorAudiencePostureProvider"/> established for the audience posture.
 ///
@@ -25,6 +26,8 @@ sealed class OptionsMonitorStationClockProvider(
 {
     public DateTimeOffset LocalNow =>
         TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), ResolveTimeZone());
+
+    public TimeZoneInfo Zone => ResolveTimeZone();
 
     TimeZoneInfo ResolveTimeZone()
     {

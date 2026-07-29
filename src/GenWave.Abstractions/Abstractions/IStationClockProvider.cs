@@ -1,8 +1,9 @@
 namespace GenWave.Core.Abstractions;
 
 /// <summary>
-/// gh-#117 — the station's wall clock: the ONE seam every "what time is it at the station" read on
-/// the LLM/patter path goes through, so the DJ's spoken date/time follows <c>Station:Timezone</c>
+/// gh-#117 — the station's wall clock: the ONE seam every "what time is it at the station" read
+/// goes through — the LLM/patter clocks (gh-#117) and, since gh-#224, the format-clock schedule
+/// grid and taste day/hour gating too — so all of them follow <c>Station:Timezone</c>
 /// rather than whatever timezone the container happens to run in. The thin accessor shape mirrors
 /// <see cref="IStationIdentityProvider"/>/<see cref="IAudiencePostureProvider"/>: Orchestration and
 /// Tts reference only <c>GenWave.Core</c> and cannot see the Host's
@@ -21,4 +22,13 @@ public interface IStationClockProvider
 {
     /// <summary>Station-local now, resolved fresh on every call.</summary>
     DateTimeOffset LocalNow { get; }
+
+    /// <summary>
+    /// The station's timezone itself, resolved fresh on every call (gh-#224) — for the consumer
+    /// that must do wall-clock ARITHMETIC in the station's zone rather than merely read "now":
+    /// the schedule grid's DST-aware boundary resolution needs the full <see cref="TimeZoneInfo"/>
+    /// (spring-forward gaps, fall-back overlaps), which no single <see cref="LocalNow"/> offset
+    /// can reconstruct.
+    /// </summary>
+    TimeZoneInfo Zone { get; }
 }
