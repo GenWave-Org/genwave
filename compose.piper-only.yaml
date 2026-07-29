@@ -1,0 +1,83 @@
+# =============================================================================
+# compose.piper-only.yaml — the low-memory / no-kokoro overlay (gh-#242, from the
+# gh-#213 Raspberry Pi spike).
+#
+#   docker compose -f compose.yaml -f compose.piper-only.yaml up -d
+#   ./launch.sh --piper-only              # dev flow
+#   ./launch.sh --pinned --piper-only     # appliance flow (this file merged LAST)
+#
+# What it does on top of compose.yaml (and, when stacked, compose.demo.yaml):
+#   * removes the kokoro service — its ~1.2GiB fresh baseline is the single biggest
+#     resident in the stack, and a 4GB box (Raspberry Pi 4, small VPS) can't afford it
+#   * drops api's hard `depends_on: kokoro: service_healthy` (keeps db/engine), so the
+#     api boots without any kokoro container existing at all
+#   * seeds `Tts:EngineByKind` mapping ALL SIX SegmentKinds -> "piper", so every on-air
+#     render routes straight to the piper sidecar and never touches the absent primary
+#
+# The default experience is untouched: this file is opt-in via -f (never auto-loaded),
+# and kokoro deliberately does NOT sit behind a profile in compose.yaml — profiles
+# default off, which would silently flip every existing box to no-kokoro on upgrade.
+#
+# Why `profiles:` here instead of removing the service outright: the Compose
+# Specification's merge docs define `!reset`/`!override` for ATTRIBUTES only — removing
+# a whole service via `kokoro: !reset null` renders correctly on current Compose
+# (verified v5.0.2, 2026-07-29) but is documented nowhere, so it can't be trusted at
+# this repo's v2.24+ floor (DEPLOYMENT.md/HARDWARE.md). Assigning a profile that
+# nothing ever activates uses plain, documented profile semantics instead: the service
+# is absent from `docker compose config`, `up`, and `pull` on every profile set this
+# repo runs (admin/tunnel/logging — verified: `config --services` lists no kokoro).
+# Never add "disabled-by-piper-only" to COMPOSE_PROFILES — activating it while this
+# overlay's depends_on reset is in force would run kokoro with nothing routing to it.
+#
+# Requires Docker Compose v2.24+ (the `!override` merge tag) — same floor as
+# compose.demo.yaml.
+# =============================================================================
+
+services:
+  kokoro:
+    # See the header for why this is a profile assignment, not a service removal. The
+    # profile name is deliberately self-describing and activated by nothing in this repo.
+    profiles: ["disabled-by-piper-only"]
+
+  api:
+    # `!override`, not a plain mapping merge: compose merges `depends_on` by KEY across
+    # -f files, so a plain block here would keep the base kokoro condition right
+    # alongside these — and a depends_on naming a profile-disabled service fails the
+    # whole render ("service \"api\" depends on undefined service \"kokoro\": invalid
+    # compose project", verified 2026-07-29). The kokoro block above and this reset
+    # must always travel together.
+    depends_on: !override
+      db:
+        condition: service_healthy              # schema must exist before first query
+      engine:
+        condition: service_healthy              # convenience; the feeder retries regardless
+    environment:
+      # All six SegmentKinds pinned to the piper engine (SPEC F70.3, STORY-191) — the
+      # allowlist's expected shape: a JSON object mapping SegmentKind names to
+      # "kokoro"/"piper". With this map, every on-air render (TtsSegmentSource carries
+      # the kind) goes straight to Piper; kokoro is never contacted. If a seventh kind
+      # is ever added to SegmentKind, add it here too — the gh-#242 spec pins this map
+      # against the enum, so the build fails loudly rather than silently routing the
+      # new kind at a kokoro that doesn't exist.
+      Tts__EngineByKind: '{"StationId":"piper","LeadIn":"piper","BackAnnounce":"piper","TimeDate":"piper","SignOff":"piper","SignOn":"piper"}'
+      # ⚠️ Same seeding shape as compose.demo.yaml's Station__* overrides: an env
+      # default (GET /api/settings reports source="default") that a row saved in the
+      # settings DB OVERRIDES — the DEPLOYMENT.md Station:SpectatorMode gotcha, same
+      # class. If renders still chase kokoro despite this overlay, check
+      # GET /api/settings for a stale Tts:EngineByKind (or Tts:Fallback:Endpoint) DB
+      # row and clear it through PUT /api/settings.
+      #
+      # Tts__Endpoint deliberately STAYS pointed at the absent kokoro host (the base
+      # compose value). It cannot point at piper — KokoroTtsSynthesizer speaks
+      # kokoro-fastapi's `POST /v1/audio/speech`, piper's http server speaks
+      # `POST text/plain -> /` — and TtsOptions.Endpoint is [Required], so it cannot be
+      # emptied either. That dead hostname is safe: the few kind-less renders (safe-loop
+      # authoring, admin preview) take F70.1's health-based path, where the first
+      # attempt fails FAST on Docker's embedded-DNS NXDOMAIN (no retry handler on the
+      # typed client) and falls to Piper; within two probe cycles (F70.2 default:
+      # 30s interval x threshold 2) the cached kokoro verdict flips unhealthy and those
+      # renders route straight to Piper with no attempt at all. Tts__Fallback__Endpoint
+      # (http://piper:5000, base compose) must stay non-empty — an empty fallback
+      # endpoint turns FallbackTtsSynthesizer into a kokoro-only pass-through and moots
+      # the map above. GET /api/voices degrades to 502 ProblemDetails (no kokoro voice
+      # list); the broadcast never depends on it.
