@@ -151,6 +151,11 @@ function AccruedCapMeter({ count, cap }: { count: number; cap: number }): ReactN
       >
         <div className="h-full rounded-full bg-accent-2" style={{ width: `${percent}%` }} />
       </div>
+      {/* gh-#143: the meter's count/cap read raw ("12 / 50") with nothing saying what accrues —
+          one quiet line names it. */}
+      <p className="mt-1 text-[0.72rem] text-mute">
+        Taste rules this persona has learned from your taste thumbs, counted against its cap.
+      </p>
     </div>
   );
 }

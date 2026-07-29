@@ -128,7 +128,16 @@ describe("Feature: LLM call inspector", () => {
       expect(screen.getByText("Normal")).toBeInTheDocument();
       expect(screen.getByText("Soft")).toBeInTheDocument();
       expect(screen.getByText("Hard")).toBeInTheDocument();
+      // gh-#141: sub-second elapsed keeps raw milliseconds; a second-plus call humanizes to
+      // one-decimal seconds instead of math homework ("5002 ms").
       expect(screen.getByText("340 ms")).toBeInTheDocument();
+      expect(screen.getByText("5.0 s")).toBeInTheDocument();
+
+      // gh-#142: each mode chip carries a flyover explaining its degradation-ladder rung.
+      expect(screen.getByText("Soft").closest("span[title]")).toHaveAttribute(
+        "title",
+        expect.stringContaining("cooldown window")
+      );
 
       // Wire order is preserved exactly (newest-first, SPEC F73.1) — no client-side re-sort.
       const rowTexts = rows.slice(1).map((row) => row.textContent ?? "");
