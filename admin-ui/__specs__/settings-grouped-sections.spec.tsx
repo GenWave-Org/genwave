@@ -124,7 +124,10 @@ describe("Feature: Settings grouped sections", () => {
         <SettingsForm settings={makeGroupedSettings()} libraries={makeLibraries()} />
       );
 
-      const loudness = screen.getByRole("heading", { name: "Loudness" });
+      // gh-#144 — the Loudness section now lives on the Loudness area tab, whose panel stays
+      // mounted but `hidden` while the default Station tab is active; `hidden: true` reaches it.
+      // The grouping assertions below are unchanged.
+      const loudness = screen.getByRole("heading", { name: "Loudness", hidden: true });
       const playout = screen.getByRole("heading", { name: "Playout" });
       const scope = screen.getByRole("heading", { name: "Scope" });
       const safe = screen.getByRole("heading", { name: "Station Imaging" });

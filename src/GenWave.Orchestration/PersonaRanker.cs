@@ -25,10 +25,13 @@ namespace GenWave.Orchestration;
 /// <para>
 /// <see cref="randomSource"/> makes every draw this ranker takes (the exploration roll and the
 /// softmax sample) seedable, so distribution facts can run thousands of in-memory picks
-/// deterministically. <see cref="timeProvider"/> resolves the station-local day/hour a
-/// <see cref="TasteContext"/> gates against (SPEC F82.1) — the same
+/// deterministically. The station-local day/hour a <see cref="TasteContext"/> gates against
+/// (SPEC F82.1) resolves through the live <see cref="IStationClockProvider"/> seam
+/// (<c>Station:Timezone</c>, gh-#224) when the composition supplies one — the same optional-seam
+/// posture <c>Orchestrator</c>/<c>LlmCopyWriter</c> adopted for gh-#117, so every pre-seam rig
+/// keeps compiling — otherwise <see cref="timeProvider"/>'s own
 /// <c>TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), timeProvider.LocalTimeZone)</c> idiom
-/// <c>GenWave.Tts.LlmPromptBuilder.BuildStationClockLine</c> already uses for "station-local now".
+/// (the container's clock, pre-gh-#224 behavior unchanged).
 /// </para>
 /// </summary>
 public sealed class PersonaRanker(
@@ -36,7 +39,8 @@ public sealed class PersonaRanker(
     IRandomSource randomSource,
     TimeProvider timeProvider,
     PersonaRankerOptions options,
-    ILogger<PersonaRanker> logger)
+    ILogger<PersonaRanker> logger,
+    IStationClockProvider? stationClock = null)
 {
     /// <summary>
     /// SPEC F82.4 — the hard exploration floor: an operator setting of 0 (or anything below this)
@@ -85,7 +89,8 @@ public sealed class PersonaRanker(
 
     (DayOfWeek Day, int Hour) StationLocalNow()
     {
-        var now = TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), timeProvider.LocalTimeZone);
+        var now = stationClock?.LocalNow
+            ?? TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), timeProvider.LocalTimeZone);
         return (now.DayOfWeek, now.Hour);
     }
 

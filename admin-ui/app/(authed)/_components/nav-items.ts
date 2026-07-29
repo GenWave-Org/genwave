@@ -3,6 +3,7 @@ import {
   BoothLogIcon,
   CatalogIcon,
   DashboardIcon,
+  HealthIcon,
   LiveIcon,
   PersonaCatalogIcon,
   PersonaIcon,
@@ -41,6 +42,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/schedule", label: "Schedule", Icon: ScheduleIcon },
   { href: "/persona-catalog", label: "Persona Catalog", Icon: PersonaCatalogIcon, requiresCatalog: true },
   { href: "/booth-log", label: "Booth log", Icon: BoothLogIcon },
+  { href: "/health", label: "Health", Icon: HealthIcon },
   { href: "/settings", label: "Settings", Icon: SettingsIcon },
 ];
 

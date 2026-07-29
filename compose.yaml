@@ -7,6 +7,9 @@
 #           cloudflared (profile "tunnel", off by default) also lives here so it can reach
 #           api:8080/api:8081/admin_ui:3000 as tunnel ingress targets.
 #   data  : api <-> db only (Postgres is invisible to engine/icecast/kokoro)
+#   stats : api <-> dockerproxy only (gh-#148) — the Docker-socket proxy is invisible to every
+#           other service, including everything on the public path (caddy/cloudflared/admin_ui);
+#           same isolation idiom as `data` above.
 #
 # Security-critical rule: the engine's Liquidsoap control port (1234) is UNAUTHENTICATED.
 # It is reachable inside the container network but is NEVER given a `ports:` mapping — Docker's
@@ -20,6 +23,7 @@ name: genwave
 networks:
   core: {}
   data: {}
+  stats: {}
 
 volumes:
   pgdata: {}
@@ -113,7 +117,7 @@ services:
     build:
       context: .
       dockerfile: src/GenWave.Host/Dockerfile
-    networks: [core, data]                      # core -> engine, data -> db
+    networks: [core, data, stats]               # core -> engine, data -> db, stats -> dockerproxy
     ports:
       - "8080:8080"                             # control-plane API, direct on localhost
       - "8081:8081"                             # public spectator listener (SPEC F64.1/F64.2, STORY-172) —
@@ -169,6 +173,12 @@ services:
       # (F19.3), never readable or writable through the settings API.
       Icecast__StatsUrl: http://icecast:8000
       Icecast__AdminPassword: ${ICECAST_ADMIN_PASSWORD:?}
+      # Container stats for the Health page (gh-#148): the socket-proxy sidecar's base URL on the
+      # `stats` network. Env/compose-only, deliberately absent from StationSettingsAllowlist —
+      # deployment topology, never a live PUT. No depends_on: dockerproxy — when the sidecar is
+      # down GET /api/health/containers degrades (degraded: true + empty list), never 500s, so a
+      # missing proxy can never hold the broadcast hostage at startup.
+      DockerStats__BaseUrl: "http://dockerproxy:2375"
     volumes:
       - ${MEDIA_DIR:?}:/media:ro                # READ-ONLY: the library scans + analyses, never writes
       - tts:/tts                                # READ-WRITE: api writes TTS clips here for engine to play
@@ -310,9 +320,10 @@ services:
     image: grafana/alloy:v1.18.0   # PIN — `docker manifest inspect` + `docker pull` verified 2026-07-21
     profiles: ["logging"]
     networks: [core]
-    # Read-only docker.sock carve-out (SPEC F78.2) — the ONLY service in this file that may
-    # mount it, and only read-only. tools/check-compose-socket.sh pins this shut across every
-    # profile combination this repo renders; see that script's header for the full rationale.
+    # Read-only docker.sock carve-out #1 (SPEC F78.2) — one of exactly two services in this file
+    # that may mount it (the other is dockerproxy below, gh-#148), and only read-only.
+    # tools/check-compose-socket.sh pins both shut across every profile combination this repo
+    # renders; see that script's header for the full rationale.
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
@@ -376,4 +387,41 @@ services:
       retries: 6
       start_period: 10s
     mem_limit: 256m   # generous headroom for a single-daemon log-tailing sidecar; same backstop idiom as above
+    restart: unless-stopped
+
+  dockerproxy:
+    # Container stats for the admin Health page (gh-#148): tecnativa's HAProxy-based socket proxy
+    # in front of /var/run/docker.sock, allowlisted down to container reads. The api never touches
+    # the socket itself — it asks this proxy over the `stats` network for GET /containers/json +
+    # GET /containers/{id}/stats?stream=false (+ inspect for health/restart count), and HAProxy
+    # 403s every path the env grants below don't name. This is read-only carve-out #2 for
+    # docker.sock (after alloy's above) — tools/check-compose-socket.sh pins both shut.
+    image: tecnativa/docker-socket-proxy:v0.4.2   # PIN — pulled + allowlist probed live 2026-07-29.
+                                                   # v0.5.0 was pushed 2 days before this pin; not
+                                                   # soaked — re-verify and bump deliberately.
+    networks: [stats]                              # api <-> dockerproxy ONLY. Not on core: nothing
+                                                   # on the public path (caddy/cloudflared/admin_ui)
+                                                   # has a route to it — same posture as db on `data`.
+    environment:
+      # The ONLY grant: the /containers section (list, inspect, one-shot stats). Everything else
+      # stays HAProxy's default-deny, and POST defaults to 0 so even the granted section is
+      # read-only — no start/stop/create through this proxy, ever. Verified live against this
+      # pinned tag 2026-07-29: /containers/json 200; /images/json, /info, POST /containers/create,
+      # POST /containers/{id}/stop all 403. (EVENTS/PING/VERSION are the image's default-on
+      # read-only trio; PING serves the healthcheck below.)
+      CONTAINERS: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro   # READ-ONLY — the whole point of the sidecar
+    # No `ports:` — never host-published; the admin UI reads stats through the api
+    # (GET /api/health/containers, AdminOnly), never this proxy directly.
+    healthcheck:
+      # /_ping is HAProxy answering from the default-on PING section — proves the proxy is up and
+      # routing, no grant needed. busybox wget ships in this image (verified against this pinned
+      # tag 2026-07-29; no curl, no bash); 127.0.0.1 not localhost, same rule as admin_ui above.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:2375/_ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+    mem_limit: 64m   # one HAProxy process; same backstop idiom as cloudflared/alloy above
     restart: unless-stopped

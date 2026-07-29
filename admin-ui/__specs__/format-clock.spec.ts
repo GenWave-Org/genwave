@@ -5,7 +5,7 @@
 // Runner: Jest (node) — pure formatting logic, no DOM needed.
 
 import { describe, it, expect } from "@jest/globals";
-import { formatClockTime, formatDuration, formatDurationCell } from "../lib/format-clock";
+import { formatClockTime, formatDuration, formatDurationCell, formatElapsedMs } from "../lib/format-clock";
 
 describe("Feature: Clock formatting", () => {
   describe("Scenario: 24-hour formatting never renders the midnight-as-24:00 artifact", () => {
@@ -35,6 +35,45 @@ describe("Feature: Clock formatting", () => {
 
     it("formats zero milliseconds as 00:00", () => {
       expect(formatDuration(0)).toBe("00:00");
+    });
+  });
+
+  // gh-#210 — the LLM call inspector's ELAPSED humanizer: raw milliseconds under a second,
+  // one-decimal seconds under a minute, "Nm SSs" from a minute up. Never formatDuration's
+  // "mm:ss" — that shape reads as a playback clock, which a call latency is not.
+  describe("Scenario: measured elapsed times humanize by magnitude", () => {
+    it("keeps a sub-second measurement in raw milliseconds", () => {
+      expect(formatElapsedMs(842)).toBe("842ms");
+    });
+
+    it("renders zero as 0ms", () => {
+      expect(formatElapsedMs(0)).toBe("0ms");
+    });
+
+    it("renders a second-plus measurement as one-decimal seconds", () => {
+      expect(formatElapsedMs(1400)).toBe("1.4s");
+    });
+
+    it("keeps one-decimal seconds right up to the minute threshold", () => {
+      expect(formatElapsedMs(59_940)).toBe("59.9s");
+    });
+
+    it("renders a minute-plus measurement as m ss with zero-padded seconds", () => {
+      expect(formatElapsedMs(123_000)).toBe("2m 03s");
+    });
+  });
+
+  describe("Scenario (sad path): elapsed rounding never fabricates an impossible reading", () => {
+    it("clamps a negative measurement to 0ms rather than rendering nonsense", () => {
+      expect(formatElapsedMs(-50)).toBe("0ms");
+    });
+
+    it("rounds 59 950ms up into the minute shape — 1m 00s, never 60.0s", () => {
+      expect(formatElapsedMs(59_950)).toBe("1m 00s");
+    });
+
+    it("rounds 119 800ms to 2m 00s — never 1m 60s", () => {
+      expect(formatElapsedMs(119_800)).toBe("2m 00s");
     });
   });
 
