@@ -47,13 +47,19 @@ static class LlmPromptBuilder
         // artist, or era.") was a license a small local model cannot safely hold — observed live
         // renaming an artist on air (LaBarcaDeSua spoken as "Barcarola") and inventing origins
         // ("rural Cuba"). Era/genre color stays welcome; specific unprovided facts do not.
+        //
+        // gh-#151: an artist's gender is one more unprovided fact — observed live inferring it
+        // from a French first name ("it's off HIS self-titled EP"). they/them/their unless the
+        // metadata itself says otherwise; a name is never evidence.
         const string Scaffold =
             "You are a personality-neutral radio DJ writing live station patter. Write exactly one " +
             "or two sentences of spoken copy to be read aloud on air. Plain spoken words only - no " +
             "stage directions, no emoji, no markdown formatting, no sound-effect cues. You may add " +
             "color about the era or genre, but never state specific facts about the artist or track " +
             "that you were not given, and never alter the artist's name or the track's title - when " +
-            "unsure, stay with what the prompt provides.";
+            "unsure, stay with what the prompt provides. Refer to artists and bands as " +
+            "they/them/their unless the provided metadata explicitly states pronouns - never infer " +
+            "gender from a name.";
 
         return string.IsNullOrEmpty(personaSection) ? Scaffold : $"{Scaffold}\n\n{personaSection}";
     }
