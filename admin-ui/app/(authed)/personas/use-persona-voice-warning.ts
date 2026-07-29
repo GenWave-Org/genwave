@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import type { VoiceListState } from "@/lib/use-voice-list";
 import { parsePersonaCardPreview } from "./persona-card";
-import { personaSlug } from "./persona-slug";
 import type { PersonaDto } from "./types";
 
 export interface PersonaVoiceWarning {
@@ -17,7 +16,10 @@ export interface PersonaVoiceWarning {
  * (T67 review: no new schema needed) — by re-fetching the candidate persona's own export card
  * (`GET /api/personas/{slug}/export`, the SAME endpoint the Export button downloads, just
  * consumed as JSON text instead of navigated to) and comparing its authored `voice.voiceId`
- * against the live engine voice list.
+ * against the live engine voice list. The fetch uses the candidate's STORED `slug` — never
+ * `personaSlug(name)` — because an imported persona's slug can diverge from a fresh slugify of
+ * its name (legacy `persona-N` defaults, import-route slugs), and imported personas are exactly
+ * the population this hook exists to warn about (gh-#179's silent 404 → false negative).
  *
  * A persona only ever reaches this state via import: the ordinary create/edit form always keeps
  * `persona.voice` and the card's `voice.voiceId` in sync (`PersonaController.ToDraft` round-trips
@@ -43,12 +45,12 @@ export function usePersonaVoiceWarning(
     }
 
     let cancelled = false;
-    const { id, name } = candidate;
+    const { id, slug } = candidate;
     const voices = voiceList.voices;
 
     async function check(): Promise<void> {
       try {
-        const resp = await fetch(`/api/personas/${personaSlug(name)}/export`);
+        const resp = await fetch(`/api/personas/${slug}/export`);
         if (!resp.ok) {
           if (!cancelled) setWarning(null);
           return;
