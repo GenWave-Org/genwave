@@ -209,6 +209,14 @@ app.UseRouting();
 // UseAuthentication (a disabled surface 404s instead of 401ing) — see SurfaceGateMiddleware.
 app.UseMiddleware<SurfaceGateMiddleware>();
 
+// Spectator security headers (gh-#180): CSP + framing/referrer/sniffing guards on every response
+// whose endpoint carries SpectatorSurfaceAttribute — the public page, its assets, and
+// /spectator/api/*. After the surface gate (a disabled surface's bare 404 must stay
+// header-identical to an unmapped route, F61.2) and before the rate limiter (a spectator 429
+// carries the same headers as a 200). The CSP's img-src/media-src pins are read live per request
+// from Station:PublicBaseUrl/Station:PublicStreamUrl — see SpectatorSecurityHeadersMiddleware.
+app.UseMiddleware<SpectatorSecurityHeadersMiddleware>();
+
 // SPEC F61.5: rate limiting runs after the surface gate (a killed admin plane 404s before the
 // limiter is ever consulted, STORY-166) and before authentication (an unauthenticated brute-force
 // burst is throttled before it reaches identity checks).
