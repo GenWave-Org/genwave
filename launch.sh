@@ -15,6 +15,11 @@
 #                             DEPLOYMENT.md's "Applying migrations".
 #   ./launch.sh --with a,b   merge a,b into COMPOSE_PROFILES (env var, else .env's value)
 #                             for this launch's compose invocations.
+#   ./launch.sh --piper-only low-memory/no-kokoro topology (gh-#242): merge
+#                             compose.piper-only.yaml — always LAST, so its kokoro
+#                             removal + depends_on reset win — into whichever file set
+#                             the flow uses (dev, or --pinned's demo pair). kokoro never
+#                             runs; every TTS render routes to the piper sidecar.
 #   ./launch.sh --dry-run    print the exact command plan (one per line, "plan> "-prefixed)
 #                             plus the effective profile set ("plan-profiles> "), then exit
 #                             0. Touches nothing — no docker/compose call is made at all.
@@ -36,6 +41,7 @@ usage() {
 }
 
 PINNED=0
+PIPER_ONLY=0
 DRY_RUN=0
 WITH=""
 
@@ -43,6 +49,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --pinned)
       PINNED=1
+      shift
+      ;;
+    --piper-only)
+      PIPER_ONLY=1
       shift
       ;;
     --with)
@@ -83,6 +93,17 @@ MIGRATE_ARGS=()
 if [ "$PINNED" = "1" ]; then
   COMPOSE_ARGS=(-f compose.yaml -f compose.demo.yaml)
   MIGRATE_ARGS=(-f compose.yaml -f compose.demo.yaml)
+fi
+# --piper-only (gh-#242): the no-kokoro overlay merges LAST so its kokoro removal +
+# depends_on reset win whatever came before. `-f` disables compose's auto-discovery, so
+# the dev flow's implicit compose.yaml has to be named explicitly here.
+if [ "$PIPER_ONLY" = "1" ]; then
+  if [ "${#COMPOSE_ARGS[@]}" -eq 0 ]; then
+    COMPOSE_ARGS=(-f compose.yaml)
+    MIGRATE_ARGS=(-f compose.yaml)
+  fi
+  COMPOSE_ARGS+=(-f compose.piper-only.yaml)
+  MIGRATE_ARGS+=(-f compose.piper-only.yaml)
 fi
 
 compose() {
@@ -175,7 +196,13 @@ if [ "$DRY_RUN" = "1" ]; then
   plan_line "$(compose_display) up ${UP_ARGS[*]} db"
   plan_line "$(compose_display) ps -q db"
   plan_line "docker inspect <db container> --format {{.State.Health.Status}} (poll until healthy, up to 30x2s)"
-  plan_line "./migrate.sh --keep-going"
+  # Same no-dangling-space discipline as compose_display: MIGRATE_ARGS is empty on the
+  # plain dev flow, populated under --piper-only.
+  if [ "${#MIGRATE_ARGS[@]}" -eq 0 ]; then
+    plan_line "./migrate.sh --keep-going"
+  else
+    plan_line "./migrate.sh --keep-going ${MIGRATE_ARGS[*]}"
+  fi
   plan_line "$(compose_display) up ${UP_ARGS[*]}"
   plan_line "$(compose_display) ps"
   plan_profiles
@@ -231,8 +258,10 @@ fi
 # The migration loop itself now lives in ./migrate.sh (also usable standalone against a
 # running stack that isn't being launched — see its header). --keep-going preserves this
 # script's historical behaviour exactly: a failing migration is reported but never stops
-# the launch, so `|| true` keeps that true here too.
-./migrate.sh --keep-going || true
+# the launch, so `|| true` keeps that true here too. MIGRATE_ARGS is empty on the plain
+# dev flow (compose project auto-detection, byte-identical behaviour) and carries the
+# overlay file selection under --piper-only.
+./migrate.sh --keep-going "${MIGRATE_ARGS[@]}" || true
 
 echo "==> bringing the rest of the stack up"
 if ! compose up "${UP_ARGS[@]}"; then
