@@ -44,7 +44,7 @@ export function SafeScopeAvailabilityBadge({ effectivelyEmpty }: SafeScopeAvaila
 
   return (
     <span className="inline-flex w-fit items-center gap-1.5 rounded-[3px] border border-danger px-2 py-0.5 text-[0.72rem] font-semibold text-danger">
-      Safe scope has no playable tracks — drains will be silent
+      Station Imaging scope has no playable tracks — drains will be silent
     </span>
   );
 }

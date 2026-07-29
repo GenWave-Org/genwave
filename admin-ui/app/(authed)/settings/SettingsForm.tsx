@@ -43,9 +43,10 @@ const RECENT_WINDOW_KEY = "Station:Rotation:RecentWindow";
 const ARTIST_SEPARATION_KEY = "Station:Rotation:ArtistSeparation";
 const EMPTY_MAIN_SCOPE_ERROR =
   "Main rotation scope cannot be empty — the station would go silent.";
-const SAFE_SCOPE_EMPTY_CONFIRM_TITLE = "Save empty Safe scope";
+const SAFE_SCOPE_EMPTY_CONFIRM_TITLE = "Save empty Station Imaging scope";
 const SAFE_SCOPE_EMPTY_CONFIRM_CONSEQUENCE =
-  "Saving an empty SafeScope silences the stream on drain — mksafe emits silence until re-pointed.";
+  "Saving an empty Station Imaging scope (Station:SafeScope:LibraryIds) silences the stream on " +
+  "drain — mksafe emits silence until re-pointed.";
 
 /**
  * Empty-selection behavior for a `number-list` field, keyed by setting key.
@@ -115,8 +116,9 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "The libraries the main rotation picks tracks from — must name at least one library, or the " +
     "station has nothing to play.",
   "Station:SafeScope:LibraryIds":
-    "The libraries used for safe filler content when the main rotation drains — an empty list is " +
-    "legal and falls back to silence (mksafe).",
+    "The libraries holding Station Imaging — the always-airable station segments (IDs, jingles, " +
+    "sweepers, liners) played when the main rotation drains. An empty list is legal and falls " +
+    "back to silence (mksafe).",
   // ── Rotation resilience + artist separation (SPEC F41.6, F53.1, F56.1, closes gitea-#210/gitea-#213/gitea-#227) ─
   "Station:Rotation:RecentWindow":
     "How many recently-played tracks the rotation avoids repeating. 0 disables anti-repeat " +
@@ -235,8 +237,8 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "The longest crossfade duration the engine uses between tracks, in seconds. Must be " +
     "greater than 0, at most 30.",
   "GW_SAFE_GAP_SECONDS":
-    "The silence gap the engine inserts between consecutive safe-rotation tracks, in seconds. " +
-    "0 disables the gap. Accepted range: 0–600.",
+    "The silence gap the engine inserts between consecutive Station Imaging (safe-rotation) " +
+    "tracks, in seconds. 0 disables the gap. Accepted range: 0–600.",
 
   // ── Enrichment-mode knobs (F44.3) ──────────────────────────────────────────────────────────
   "Library:CueDetection:MinSilenceDurationSec":

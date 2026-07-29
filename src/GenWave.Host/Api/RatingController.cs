@@ -102,8 +102,8 @@ public sealed class RatingController(IMediaRating rating) : ControllerBase
         new ProblemDetails
         {
             Status = StatusCodes.Status403Forbidden,
-            Title  = "Safe content is not rateable.",
-            Detail = "This row is safe-loop/station-ID content (Station:SafeScope:LibraryIds) — votes and never-play do not apply (gh-#99).",
+            Title  = "Station Imaging is not rateable.",
+            Detail = "This row is Station Imaging — always-airable station content (safe loop, station IDs; Station:SafeScope:LibraryIds) — votes and never-play do not apply (gh-#99).",
         });
 
     /// <summary>

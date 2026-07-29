@@ -104,7 +104,7 @@ export function NowPlayingCard({
       )}
 
       {state?.kind === "drain" && (
-        <p className="mt-3 text-[0.95rem] text-ink">Safe rotation — drain state.</p>
+        <p className="mt-3 text-[0.95rem] text-ink">Station Imaging rotation — drain state.</p>
       )}
 
       {onAir && (

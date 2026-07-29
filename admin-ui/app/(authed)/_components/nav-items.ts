@@ -36,7 +36,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", Icon: DashboardIcon },
   { href: "/live", label: "Live", Icon: LiveIcon },
   { href: "/catalog", label: "Catalog", Icon: CatalogIcon },
-  { href: "/safe-content", label: "Safe content", Icon: SafeContentIcon },
+  { href: "/safe-content", label: "Station Imaging", Icon: SafeContentIcon },
   { href: "/personas", label: "Personas", Icon: PersonaIcon },
   { href: "/schedule", label: "Schedule", Icon: ScheduleIcon },
   { href: "/persona-catalog", label: "Persona Catalog", Icon: PersonaCatalogIcon, requiresCatalog: true },

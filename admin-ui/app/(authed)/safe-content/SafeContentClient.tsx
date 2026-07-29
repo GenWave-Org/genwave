@@ -80,7 +80,9 @@ const FIELD_INPUT_CLASSES =
 const HEADER_CELL = "py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2";
 
 /**
- * Client half of the "Safe content" page (SPEC F27.9/F28.9–F28.10, STORY-081/STORY-092). Owns
+ * Client half of the "Station Imaging" page (formerly "Safe content", gh-#149 — display rename
+ * only: the /safe-content route, /api/safe-segments endpoint, and type names are stable keys).
+ * (SPEC F27.9/F28.9–F28.10, STORY-081/STORY-092). Owns
  * the Generate form (text, title, voice, optional bed, target library) and the target library's
  * segment list with an inline eligibility toggle. Consumes only the shipped endpoints: POST
  * /api/safe-segments (F27.3), GET /api/media (F15.4/F23.2), and PATCH /api/media/{id} (F18) — no
@@ -206,7 +208,7 @@ export function SafeContentClient({
   return (
     <div className="flex flex-col gap-6">
       <section
-        aria-label="Generate safe segment"
+        aria-label="Generate imaging segment"
         className="rounded-[6px] border border-line bg-surface p-5"
       >
         <h2 className="font-display text-[1.1rem] text-ink">Generate</h2>
@@ -278,7 +280,7 @@ export function SafeContentClient({
         </form>
       </section>
 
-      <section aria-label="Safe segments">
+      <section aria-label="Imaging segments">
         <h2 className="font-display text-[1.1rem] text-ink">Segments</h2>
 
         {outOfScope && (
@@ -294,7 +296,7 @@ export function SafeContentClient({
         {segments.length === 0 ? (
           <EmptyState
             className="mt-4"
-            title="Nothing in the safe library yet"
+            title="No imaging segments yet"
             reason="Generate the first announcement using the form above."
             cta={{ label: "Start writing", onClick: focusGenerateForm }}
           />

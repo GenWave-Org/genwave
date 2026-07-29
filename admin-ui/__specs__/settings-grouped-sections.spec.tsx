@@ -23,7 +23,8 @@ import type { LibraryDto } from "../lib/library";
 const SAFE_SCOPE_KEY = "Station:SafeScope:LibraryIds";
 const SCOPE_KEY = "Station:Scope:LibraryIds";
 const SAFE_SCOPE_EMPTY_CONSEQUENCE =
-  "Saving an empty SafeScope silences the stream on drain — mksafe emits silence until re-pointed.";
+  "Saving an empty Station Imaging scope (Station:SafeScope:LibraryIds) silences the stream on " +
+  "drain — mksafe emits silence until re-pointed.";
 
 /** One setting per canonical section (Loudness/Playout/Scope/Safe) — covers STORY-091's grouping. */
 function makeGroupedSettings(): SettingDto[] {
@@ -118,7 +119,7 @@ describe("Feature: Settings grouped sections", () => {
 
   // -------------------------------------------------------------------------
   describe("Scenario: grouped rendering", () => {
-    it("renders fields under Loudness / Playout / Scope / Safe headings", async () => {
+    it("renders fields under Loudness / Playout / Scope / Station Imaging headings", async () => {
       renderWithProviders(
         <SettingsForm settings={makeGroupedSettings()} libraries={makeLibraries()} />
       );
@@ -126,7 +127,7 @@ describe("Feature: Settings grouped sections", () => {
       const loudness = screen.getByRole("heading", { name: "Loudness" });
       const playout = screen.getByRole("heading", { name: "Playout" });
       const scope = screen.getByRole("heading", { name: "Scope" });
-      const safe = screen.getByRole("heading", { name: "Safe" });
+      const safe = screen.getByRole("heading", { name: "Station Imaging" });
 
       // Each heading's section contains the fields the authoritative allowlist maps to it.
       expect(within(loudness.closest("section")!).getByLabelText(/Loudness:TargetLufs/)).toBeInTheDocument();
@@ -195,7 +196,7 @@ describe("Feature: Settings grouped sections", () => {
         <SettingsForm settings={settings} libraries={makeLibraries()} />
       );
 
-      const safe = screen.getByRole("heading", { name: "Safe" });
+      const safe = screen.getByRole("heading", { name: "Station Imaging" });
       const safeSection = within(safe.closest("section")!);
 
       expect(safeSection.getByLabelText(/GW_SAFE_GAP_SECONDS/)).toBeInTheDocument();

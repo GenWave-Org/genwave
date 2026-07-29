@@ -74,7 +74,7 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
           )}
         </Tile>
 
-        <Tile label="Safe scope" variant={status !== null && isSafeScopeDepleted(status) ? "warning" : "neutral"}>
+        <Tile label="Station Imaging scope" variant={status !== null && isSafeScopeDepleted(status) ? "warning" : "neutral"}>
           {loading && <TileSkeleton />}
           {neverLoaded && <TileUnavailable />}
           {status !== null && (
@@ -83,7 +83,7 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
               <p className="mt-1 text-[0.8rem] text-mute">{safeScopeSubLine(status.safeScope.libraryIds)}</p>
               {isSafeScopeDepleted(status) && (
                 <p className="mt-1 text-[0.75rem] font-semibold text-danger">
-                  Safe scope has no playable tracks — drains will be silent
+                  Station Imaging scope has no playable tracks — drains will be silent
                 </p>
               )}
             </>

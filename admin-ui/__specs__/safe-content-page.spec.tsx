@@ -1,5 +1,5 @@
 // @jest-environment jsdom
-// STORY-081 — Admin UI: Safe content page
+// STORY-081 — Admin UI: Station Imaging page (named "Safe content" until gh-#149)
 //
 // BDD specification — jest. SPEC F27.9. Generate form (text pre-filled from
 // the Station:Safe:SeedMessage default, title pre-filled "Please Stand By",
@@ -102,10 +102,10 @@ function makeNeverResolvingFetchMock(): jest.MockedFunction<typeof fetch> {
 }
 
 // ---------------------------------------------------------------------------
-// Feature: Safe content page
+// Feature: Station Imaging page
 // ---------------------------------------------------------------------------
 
-describe("Feature: Safe content page", () => {
+describe("Feature: Station Imaging page", () => {
   let originalFetch: typeof fetch;
 
   beforeEach(() => {

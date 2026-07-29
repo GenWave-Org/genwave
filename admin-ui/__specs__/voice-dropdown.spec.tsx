@@ -1,7 +1,7 @@
 // @jest-environment jsdom
 // STORY-098 — Voice dropdown with graceful fallback (Epic R / SPEC F29.5, gitea-#183)
 //
-// The Safe content Voice control becomes a select fed by GET /api/voices with "Station
+// The Station Imaging Voice control becomes a select fed by GET /api/voices with "Station
 // default" first/selected (submits NO `voice` field — the shipped omit-if-blank wire contract
 // is unchanged); on listing failure it falls back to the shipped free-text input with a visible
 // notice, and generation stays possible either way. Drives SafeContentClient (which composes

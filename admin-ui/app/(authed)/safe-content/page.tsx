@@ -36,7 +36,7 @@ export default async function SafeContentPage(): Promise<ReactNode> {
   if (!librariesResp.ok) {
     return (
       <main>
-        <h1 className="font-display text-[1.35rem] font-semibold text-ink">Safe content</h1>
+        <h1 className="font-display text-[1.35rem] font-semibold text-ink">Station Imaging</h1>
         <p className="mt-4 text-[0.85rem] text-danger">Unable to load libraries.</p>
       </main>
     );
@@ -62,7 +62,13 @@ export default async function SafeContentPage(): Promise<ReactNode> {
 
   return (
     <main>
-      <h1 className="font-display text-[1.35rem] font-semibold text-ink">Safe content</h1>
+      <h1 className="font-display text-[1.35rem] font-semibold text-ink">Station Imaging</h1>
+      {/* gh-#149 — "always airable" moved out of the old "Safe content" name into this one help
+          sentence: the never-dead-air guarantee, stated where the rename dropped it. */}
+      <p className="mt-1 text-[0.85rem] text-mute">
+        Station IDs, jingles, sweepers, liners — always airable: when the music rotation drains,
+        these segments keep the station on air.
+      </p>
       <div className="mt-4">
         <SafeContentClient
           libraries={libraries}
