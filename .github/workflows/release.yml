@@ -3,11 +3,11 @@ name: Release
 # Tag-triggered release (SPEC F65.2, STORY-176): push a `v*` tag -> build+test, publish images
 # stamped with the tag as GW_VERSION, then create the GitHub Release. Mirrors ci.yml's `images`
 # job (same registry, same `home-*` tag prefix -- the Business edition gets its own prefix
-# elsewhere) but stamps the pushed tag instead of the commit sha. Publishes api + icecast +
-# every image compose can run pinned: api, icecast, admin_ui, and engine (gh-#93: a --pinned
-# demo box ran a stale locally-built admin_ui for two releases because it was never published;
-# engine had the same exposure). Note genwave.liq is a bind mount, not baked into the engine
-# image -- the image carries only the Liquidsoap version pin + entrypoint.sh.
+# elsewhere) but stamps the pushed tag instead of the commit sha. Publishes every image compose
+# can run pinned: api, icecast, admin_ui, engine (gh-#93: a --pinned demo box ran a stale
+# locally-built admin_ui for two releases because it was never published; engine had the same
+# exposure), and piper (gh-#241: repo-owned fallback TTS). Note genwave.liq is a bind mount, not
+# baked into the engine image -- the image carries only the Liquidsoap version pin + entrypoint.sh.
 #
 # Multi-arch (gh-#240): every image publishes linux/amd64 + linux/arm64. Canonical
 # distributed-build pattern (docker docs "multi-platform image with GitHub Actions"): a per-arch
@@ -62,7 +62,7 @@ jobs:
       # whole still fails (and merge-manifests never runs) if ANY leg fails.
       fail-fast: false
       matrix:
-        image: [api, icecast, admin-ui, engine]
+        image: [api, icecast, admin-ui, engine, piper]
         platform: [linux/amd64, linux/arm64]
         include:
           - platform: linux/amd64
@@ -104,6 +104,15 @@ jobs:
             context: ./engine
             dockerfile: ./engine/Dockerfile
             description: GenWave Home Liquidsoap engine
+            build_args: ''
+          # gh-#241: repo-owned fallback-TTS image (the artibex/piper-http digest compose used to
+          # pin is amd64-only) — same wire shape, published per release so the demo overlay can
+          # pin it like every other repo-built image (gh-#93 posture).
+          - image: piper
+            registry_image: ghcr.io/genwave-org/genwave-piper
+            context: ./piper
+            dockerfile: ./piper/Dockerfile
+            description: GenWave Home Piper fallback TTS
             build_args: ''
     runs-on: ${{ matrix.runner }}
     steps:
@@ -176,6 +185,9 @@ jobs:
           - image: engine
             registry_image: ghcr.io/genwave-org/genwave-engine
             description: GenWave Home Liquidsoap engine
+          - image: piper
+            registry_image: ghcr.io/genwave-org/genwave-piper
+            description: GenWave Home Piper fallback TTS
     steps:
       - name: Download digests
         uses: actions/download-artifact@v8
