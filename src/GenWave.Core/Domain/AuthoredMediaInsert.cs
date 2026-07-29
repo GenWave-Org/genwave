@@ -36,6 +36,11 @@ namespace GenWave.Core.Domain;
 /// <param name="SampleRate">Sample rate in Hz, when the caller has it.</param>
 /// <param name="Channels">Channel count, when the caller has it.</param>
 /// <param name="BitrateKbps">Bitrate in kbps, when the caller has it.</param>
+/// <param name="Kind">
+/// The Station Imaging content kind stored on <c>library.media.imaging_kind</c> (gh-#149).
+/// Metadata-only for now — playout/safe-loop behavior is unchanged by it. Defaults to
+/// <see cref="ImagingKind.Liner"/> so pre-kind call sites keep compiling with today's behavior.
+/// </param>
 public sealed record AuthoredMediaInsert(
     string Path,
     string Format,
@@ -49,4 +54,5 @@ public sealed record AuthoredMediaInsert(
     int? DurationMs,
     int? SampleRate,
     short? Channels,
-    int? BitrateKbps);
+    int? BitrateKbps,
+    ImagingKind Kind = ImagingKind.Liner);

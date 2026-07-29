@@ -213,6 +213,17 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	alter table library.media
 	  add column artwork_token text;
 
+	-- imaging_kind (gh-#149): the Station Imaging content kind of an AUTHORED segment, stamped by
+	-- MediaRepository.InsertAuthoredAsync on every authored insert ('liner' by default). NULL for
+	-- every scanned row -- the scan/enrichment paths never write it -- and for authored rows that
+	-- predate the column (no backfill: nothing distinguishes an old authored row from a scanned one
+	-- after the fact, and displays default a NULL kind to Liner anyway). METADATA-ONLY for now:
+	-- playout and the /internal/safe-track predicate never read it; a future issue wires
+	-- kind-aware rotation.
+	alter table library.media
+	  add column imaging_kind text
+	    check (imaging_kind is null or imaging_kind in ('liner', 'station_id', 'jingle', 'promo'));
+
 	-- Composite partial index: scope-filtered random-ready pick (replaces scalar media_ready).
 	create index media_scope_ready on library.media (library_id, state) where state = 'ready';
 	create index media_artist      on library.media (artist);                       -- ready for criteria queries

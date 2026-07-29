@@ -9,6 +9,12 @@ import { useRowPatch } from "@/lib/use-row-patch";
 import { BedPicker } from "./BedPicker";
 import type { BedCandidate } from "./BedPicker";
 import { VoiceControl } from "./VoiceControl";
+import {
+  DEFAULT_IMAGING_KIND,
+  IMAGING_KINDS,
+  imagingKindLabel,
+  type ImagingKindToken,
+} from "./imaging-kinds";
 
 /** Shape of a GET /api/media row — the fields this page renders + the PATCH If-Match token. */
 export interface SafeSegmentDto {
@@ -20,6 +26,10 @@ export interface SafeSegmentDto {
   eligible: boolean;
   /** Row version (Postgres xmin) — the If-Match token for the eligibility PATCH (F18, W2). */
   version: string;
+  /** gh-#149 — Station Imaging content kind token (`liner`/`station_id`/`jingle`/`promo`);
+   * null for rows authored before kinds existed. Optional so pre-#149 object literals keep
+   * compiling (the catalog `rateable` precedent); absent displays as the Liner default. */
+  imagingKind?: string | null;
 }
 
 export interface SafeContentClientProps {
@@ -110,6 +120,10 @@ export function SafeContentClient({
   const [title, setTitle] = useState(defaultTitle);
   const [voice, setVoice] = useState("");
   const [bed, setBed] = useState<BedCandidate | null>(null);
+  // gh-#149 — the authored segment's Station Imaging kind; metadata-only (playout unchanged).
+  const [segmentKind, setSegmentKind] = useState<ImagingKindToken>(DEFAULT_IMAGING_KIND);
+  // gh-#149 — list filter; "all" shows every segment in the target library.
+  const [kindFilter, setKindFilter] = useState<string>("all");
   const [status, setStatus] = useState<GenerateStatus>({ kind: "idle" });
   const textFieldRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -132,6 +146,13 @@ export function SafeContentClient({
   });
 
   const isPending = status.kind === "pending";
+
+  /** gh-#149 — the rows the table renders: kind-filtered client-side. A row with no stored kind
+   * (pre-#149 authored segments) counts as the Liner default, matching its displayed chip. */
+  const visibleSegments =
+    kindFilter === "all"
+      ? segments
+      : segments.filter((s) => (s.imagingKind ?? DEFAULT_IMAGING_KIND) === kindFilter);
 
   /** EmptyState CTA target (SPEC F28.10: Safe content empty → Generate) — the form is already
    * on this page, so "go generate" means focus its first field rather than navigate away. */
@@ -156,7 +177,7 @@ export function SafeContentClient({
 
     setStatus({ kind: "pending" });
 
-    const body: Record<string, unknown> = { text, libraryId };
+    const body: Record<string, unknown> = { text, libraryId, kind: segmentKind };
     if (title.trim() !== "") body["title"] = title;
     if (voice.trim() !== "") body["voice"] = voice;
     if (bed !== null) body["bedMediaId"] = bed.mediaId;
@@ -247,6 +268,26 @@ export function SafeContentClient({
             />
           </div>
 
+          {/* gh-#149 — imaging kind picker. Metadata-only: the kind labels the segment's role
+              (liner/station ID/jingle/promo); playout treats every kind identically for now. */}
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="safe-kind" className={FIELD_LABEL_CLASSES}>Kind</label>
+            <select
+              id="safe-kind"
+              name="kind"
+              value={segmentKind}
+              onChange={(e) => setSegmentKind(e.currentTarget.value as ImagingKindToken)}
+              disabled={isPending}
+              className={`${FIELD_INPUT_CLASSES} w-fit`}
+            >
+              {IMAGING_KINDS.map((kind) => (
+                <option key={kind.token} value={kind.token}>
+                  {kind.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <VoiceControl value={voice} onChange={setVoice} disabled={isPending} />
 
           <div className="flex flex-col gap-1.5">
@@ -281,7 +322,25 @@ export function SafeContentClient({
       </section>
 
       <section aria-label="Imaging segments">
-        <h2 className="font-display text-[1.1rem] text-ink">Segments</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-display text-[1.1rem] text-ink">Segments</h2>
+          {/* gh-#149 — client-side kind filter over the fetched list; "all" is the default. */}
+          {segments.length > 0 && (
+            <select
+              aria-label="Filter by kind"
+              value={kindFilter}
+              onChange={(e) => setKindFilter(e.currentTarget.value)}
+              className="h-9 rounded-[6px] border border-line bg-surface px-2 text-[0.82rem] text-ink"
+            >
+              <option value="all">All kinds</option>
+              {IMAGING_KINDS.map((kind) => (
+                <option key={kind.token} value={kind.token}>
+                  {kind.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
 
         {outOfScope && (
           <p role="status" className="mt-2 text-[0.82rem] text-mute">
@@ -300,6 +359,11 @@ export function SafeContentClient({
             reason="Generate the first announcement using the form above."
             cta={{ label: "Start writing", onClick: focusGenerateForm }}
           />
+        ) : visibleSegments.length === 0 ? (
+          // The filter (not the library) is what's empty — say so instead of the generate CTA.
+          <p role="status" className="mt-4 text-[0.85rem] text-mute">
+            No segments of this kind — showing {imagingKindLabel(kindFilter)} only.
+          </p>
         ) : (
           // AC2 (SPEC F28.13): scrolls sideways inside this container at
           // 390px — the page body itself never does.
@@ -308,14 +372,22 @@ export function SafeContentClient({
               <thead>
                 <tr className="border-b-2 border-line text-left">
                   <th scope="col" className={HEADER_CELL}>Title</th>
+                  <th scope="col" className={HEADER_CELL}>Kind</th>
                   <th scope="col" className={HEADER_CELL}>State</th>
                   <th scope="col" className={HEADER_CELL}>Eligible</th>
                 </tr>
               </thead>
               <tbody>
-                {segments.map((segment) => (
+                {visibleSegments.map((segment) => (
                   <tr key={segment.mediaId} className="border-b border-line last:border-b-0">
                     <td className="py-2 pr-3 text-ink">{segment.title}</td>
+                    <td className="py-2 pr-3">
+                      {/* gh-#149 — kind chip (brass, quiet emphasis); a NULL stored kind reads
+                          as the Liner default, matching the API's absent-means-liner rule. */}
+                      <span className="inline-flex items-center rounded-[3px] border border-accent-2 px-1.5 py-0.5 text-[0.72rem] font-semibold text-accent-2">
+                        {imagingKindLabel(segment.imagingKind)}
+                      </span>
+                    </td>
                     <td className="py-2 pr-3 text-mute">{segment.state}</td>
                     <td className="py-2 pr-3">
                       <label className="inline-flex min-h-10 items-center gap-1.5">

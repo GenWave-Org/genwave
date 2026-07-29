@@ -47,6 +47,12 @@ using GenWave.Core.Domain;
 /// operator-supplied <c>bedMediaId</c> to a catalog row and builds this — <see cref="SafeSegmentAuthor"/>
 /// takes no DB read dependency beyond the authored-insert write seam.
 /// </param>
+/// <param name="Kind">
+/// The Station Imaging content kind the authored row is stamped with (gh-#149). Metadata-only —
+/// it changes nothing about how the segment renders or plays. Defaults to
+/// <see cref="ImagingKind.Liner"/> (today's behavior) so pre-kind callers, including the boot
+/// seed, are unchanged.
+/// </param>
 public sealed record SafeSegmentRequest(
     string Text,
     long LibraryId,
@@ -57,4 +63,5 @@ public sealed record SafeSegmentRequest(
     double BedPadSeconds,
     string? Title = null,
     string? Voice = null,
-    BedSpec? Bed = null);
+    BedSpec? Bed = null,
+    ImagingKind Kind = ImagingKind.Liner);

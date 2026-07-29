@@ -86,6 +86,19 @@ public sealed class SafeSegmentsController(
             });
         }
 
+        // gh-#149 — the Station Imaging content kind. Absent defaults to liner (pre-kind
+        // behavior); an unknown token is a 400 with nothing rendered (F27.3's validate-first
+        // discipline). Metadata-only: the kind changes nothing about the render below.
+        if (!ImagingKindTokens.TryParse(request.Kind, out var kind))
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title  = "Invalid kind.",
+                Detail = "kind must be one of: liner, station_id, jingle, promo.",
+            });
+        }
+
         var (bed, bedError) = await ResolveBedAsync(request.BedMediaId, ct);
         if (bedError is not null)
             return bedError;
@@ -103,7 +116,8 @@ public sealed class SafeSegmentsController(
             BedPadSeconds: safe.BedPadSeconds,
             Title: request.Title,
             Voice: request.Voice,
-            Bed: bed);
+            Bed: bed,
+            Kind: kind);
 
         var budget = TimeSpan.FromSeconds(ttsMonitor.CurrentValue.RenderBudgetSeconds);
         using var boundedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
