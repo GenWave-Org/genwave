@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, type ComponentType, type FormEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useState,
+  type ComponentType,
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { toast } from "@/components/ui/toast";
@@ -13,6 +20,7 @@ import { SafeScopeAvailabilityBadge } from "./SafeScopeAvailabilityBadge";
 import { SettingHelpFlyover } from "./SettingHelpFlyover";
 import type { SettingsHelpKey } from "./settings-help-keys";
 import { groupSettingsBySection } from "./settings-sections";
+import { groupSettingsByTab, type SettingsAreaTab } from "./settings-tabs";
 import type { SettingControlProps, SettingDto } from "./settings-types";
 import { VoiceSettingControl } from "./VoiceSettingControl";
 
@@ -393,6 +401,16 @@ function parseRotationCount(raw: string | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/** Element id of an area tab's button — `aria-labelledby` target for its panel (gh-#144). */
+function settingsTabButtonId(tabId: string): string {
+  return `settings-tab-${tabId}`;
+}
+
+/** Element id of an area tab's panel — `aria-controls` target for its tab button (gh-#144). */
+function settingsTabPanelId(tabId: string): string {
+  return `settings-tabpanel-${tabId}`;
+}
+
 export function SettingsForm({ settings, libraries = [] }: SettingsFormProps): ReactNode {
   const confirm = useConfirm();
   /**
@@ -413,6 +431,82 @@ export function SettingsForm({ settings, libraries = [] }: SettingsFormProps): R
    * a page-wide banner).
    */
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+
+  /**
+   * gh-#144 — the page is one tab strip per settings AREA (key prefix), with the shipped
+   * section cards nested under each tab. Every panel stays MOUNTED and merely `hidden` while
+   * inactive (the SettingHelpFlyover precedent): the save model stays page-wide — one form,
+   * one `values` map, one changed-keys PUT across every tab — and the help-coverage parity
+   * gate keeps addressing every key's testid without caring which tab is showing.
+   */
+  const tabs = groupSettingsByTab(settings);
+  /** `null` = no explicit choice yet — the first tab renders active until the URL or a click says otherwise. */
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const effectiveTabId = activeTabId ?? tabs[0]?.id ?? "";
+
+  /**
+   * Deep-link (gh-#144): the initial URL's `?tab=` picks the landing tab, once, on mount —
+   * unknown or absent values keep the first tab. Read post-mount (never in the initializer) so
+   * server and hydration renders agree; later tab churn is state-driven (explicit activation
+   * writes the URL, the 400 auto-switch deliberately does not), so this must not re-run and
+   * snap the operator back to the URL's tab.
+   */
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (requested !== null && tabs.some((tab) => tab.id === requested)) {
+      setActiveTabId(requested);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only by design (see above)
+  }, []);
+
+  /** Explicit tab activation (click / arrow keys) — the only path that writes `?tab=` back to the URL. */
+  function selectTab(tabId: string): void {
+    setActiveTabId(tabId);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", tabId);
+    window.history.replaceState(null, "", url);
+  }
+
+  /**
+   * Roving-tabindex arrow navigation per the WAI-ARIA tabs pattern: Left/Right step (wrapping),
+   * Home/End jump, selection follows focus. Vertical keys are left alone — the strip is
+   * horizontal.
+   */
+  function handleTabKeyDown(index: number): (e: KeyboardEvent<HTMLButtonElement>) => void {
+    return (e) => {
+      let nextIndex: number;
+      switch (e.key) {
+        case "ArrowRight":
+          nextIndex = (index + 1) % tabs.length;
+          break;
+        case "ArrowLeft":
+          nextIndex = (index - 1 + tabs.length) % tabs.length;
+          break;
+        case "Home":
+          nextIndex = 0;
+          break;
+        case "End":
+          nextIndex = tabs.length - 1;
+          break;
+        default:
+          return;
+      }
+      e.preventDefault();
+      const next = tabs[nextIndex];
+      if (next === undefined) return;
+      selectTab(next.id);
+      document.getElementById(settingsTabButtonId(next.id))?.focus();
+    };
+  }
+
+  /**
+   * First tab (in strip order) carrying any of the given keys — where a save rejection lands
+   * the operator. `undefined` only if none of the keys render on this page at all.
+   */
+  function firstTabWithAnyKey(keys: readonly string[]): string | undefined {
+    const keySet = new Set(keys);
+    return tabs.find((tab) => tab.settings.some((s) => keySet.has(s.key)))?.id;
+  }
 
   function handleTextChange(key: string): (e: React.ChangeEvent<HTMLInputElement>) => void {
     return (e) => {
@@ -496,6 +590,12 @@ export function SettingsForm({ settings, libraries = [] }: SettingsFormProps): R
         ...prev,
         [blockingChange.key]: [policy?.kind === "block" ? policy.message : ""],
       }));
+      // gh-#144 — Save is page-wide, so the blocked field may sit on a hidden tab. An inline
+      // error nobody can see is a silent failure; land the operator on the offending tab.
+      const blockedTabId = firstTabWithAnyKey([blockingChange.key]);
+      if (blockedTabId !== undefined) {
+        setActiveTabId(blockedTabId);
+      }
       setStatus({ kind: "idle" });
       return;
     }
@@ -567,6 +667,13 @@ export function SettingsForm({ settings, libraries = [] }: SettingsFormProps): R
         // operator correct the value and retry (the K5 stuck-Saving regression class).
         setStatus({ kind: "idle" });
         setFieldErrors(Object.fromEntries(changed.map((c) => [c.key, messages])));
+        // gh-#144 — the rejected batch may span tabs the operator isn't looking at. Auto-switch
+        // to the first offending tab (strip order) so the inline error is on screen; the other
+        // implicated tabs stay flagged by their danger dot in the strip.
+        const offendingTabId = firstTabWithAnyKey(changed.map((c) => c.key));
+        if (offendingTabId !== undefined) {
+          setActiveTabId(offendingTabId);
+        }
         return;
       }
 
@@ -605,7 +712,12 @@ export function SettingsForm({ settings, libraries = [] }: SettingsFormProps): R
       <RotationCouplingNotice recentWindow={recentWindowValue} />
     ) : null;
 
-  const sections = groupSettingsBySection(settings);
+  /**
+   * gh-#144 — the same string diff Save submits, reduced to a key set so each tab can flag
+   * staged-but-unsaved work. Because it reads `changedEntries(original, values)` verbatim, a
+   * tab's dirty dot can never disagree with what "Save settings" will actually send.
+   */
+  const dirtyKeySet = new Set(changedEntries(original, values).map((entry) => entry.key));
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="flex flex-col gap-6">
@@ -615,33 +727,127 @@ export function SettingsForm({ settings, libraries = [] }: SettingsFormProps): R
         </p>
       )}
 
-      {sections.map((section) => (
-        <SectionCard key={section.id} title={section.label}>
-          {section.settings.map((setting) => (
-            <SettingField
-              key={setting.key}
-              setting={setting}
-              value={values[setting.key] ?? ""}
-              savedValue={original[setting.key] ?? ""}
-              errors={fieldErrors[setting.key] ?? []}
-              isPending={isPending}
-              libraries={libraries}
-              isSafeScopeField={setting.key === SAFE_SCOPE_KEY}
-              safeScopeEffectivelyEmpty={safeScopeEffectivelyEmpty}
-              rotationCouplingNotice={setting.key === ARTIST_SEPARATION_KEY ? rotationCouplingNotice : null}
-              onTextChange={handleTextChange(setting.key)}
-              onCheckboxChange={handleCheckboxChange(setting.key)}
-              onMultiSelectChange={handleMultiSelectChange(setting.key)}
-              onSemanticChange={handleSemanticChange(setting.key)}
+      {tabs.length > 0 && (
+        <div role="tablist" aria-label="Settings areas" className="flex flex-wrap gap-x-1 border-b-2 border-line">
+          {tabs.map((tab, index) => (
+            <SettingsAreaTabButton
+              key={tab.id}
+              tab={tab}
+              isActive={tab.id === effectiveTabId}
+              isDirty={tab.settings.some((s) => dirtyKeySet.has(s.key))}
+              hasErrors={tab.settings.some((s) => (fieldErrors[s.key] ?? []).length > 0)}
+              onSelect={() => selectTab(tab.id)}
+              onKeyDown={handleTabKeyDown(index)}
             />
           ))}
-        </SectionCard>
+        </div>
+      )}
+
+      {tabs.map((tab) => (
+        <div
+          key={tab.id}
+          id={settingsTabPanelId(tab.id)}
+          role="tabpanel"
+          aria-labelledby={settingsTabButtonId(tab.id)}
+          hidden={tab.id !== effectiveTabId}
+          tabIndex={0}
+          className="flex flex-col gap-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
+          {groupSettingsBySection(tab.settings).map((section) => (
+            <SectionCard key={section.id} title={section.label}>
+              {section.settings.map((setting) => (
+                <SettingField
+                  key={setting.key}
+                  setting={setting}
+                  value={values[setting.key] ?? ""}
+                  savedValue={original[setting.key] ?? ""}
+                  errors={fieldErrors[setting.key] ?? []}
+                  isPending={isPending}
+                  libraries={libraries}
+                  isSafeScopeField={setting.key === SAFE_SCOPE_KEY}
+                  safeScopeEffectivelyEmpty={safeScopeEffectivelyEmpty}
+                  rotationCouplingNotice={setting.key === ARTIST_SEPARATION_KEY ? rotationCouplingNotice : null}
+                  onTextChange={handleTextChange(setting.key)}
+                  onCheckboxChange={handleCheckboxChange(setting.key)}
+                  onMultiSelectChange={handleMultiSelectChange(setting.key)}
+                  onSemanticChange={handleSemanticChange(setting.key)}
+                />
+              ))}
+            </SectionCard>
+          ))}
+        </div>
       ))}
 
+      {/* One Save for the whole page (gh-#144): outside every tabpanel, so it renders whichever
+          tab is active, and the diff above it spans every tab's staged values. */}
       <Button type="submit" disabled={isPending} className="self-start">
         {isPending ? "Saving…" : "Save settings"}
       </Button>
     </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Area tab strip (gh-#144, .claude/skills/design-aesthetic)
+// ---------------------------------------------------------------------------
+
+interface SettingsAreaTabButtonProps {
+  tab: SettingsAreaTab;
+  isActive: boolean;
+  /** Any of this tab's keys staged ≠ last-saved — surfaces as the rust dot + sr-only text. */
+  isDirty: boolean;
+  /** Any of this tab's keys carrying an inline validation error — danger dot outranks the dirty rust. */
+  hasErrors: boolean;
+  onSelect: () => void;
+  onKeyDown: (e: KeyboardEvent<HTMLButtonElement>) => void;
+}
+
+/**
+ * One preset button on the area strip — brass uppercase micro-label (the quiet-structure
+ * treatment), with the active tab carried by a 2px rust underline riding the strip's own
+ * `--line` rule, like a receiver's band selector. The unsaved-changes dot is rust (it is the
+ * thing on this screen that matters); a validation error escalates it to `--danger`. Both
+ * states also speak: sr-only copy joins the accessible name so the flag survives without
+ * color vision.
+ */
+function SettingsAreaTabButton({
+  tab,
+  isActive,
+  isDirty,
+  hasErrors,
+  onSelect,
+  onKeyDown,
+}: SettingsAreaTabButtonProps): ReactNode {
+  return (
+    <button
+      id={settingsTabButtonId(tab.id)}
+      type="button"
+      role="tab"
+      aria-selected={isActive}
+      aria-controls={settingsTabPanelId(tab.id)}
+      tabIndex={isActive ? 0 : -1}
+      onClick={onSelect}
+      onKeyDown={onKeyDown}
+      className={cn(
+        "-mb-[2px] inline-flex min-h-10 items-center border-b-2 px-3 text-[0.7rem] font-semibold uppercase tracking-[0.12em] transition-colors duration-[120ms] ease-out focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent",
+        isActive ? "border-accent text-accent" : "border-transparent text-accent-2 hover:text-ink"
+      )}
+    >
+      {tab.label}
+      {(isDirty || hasErrors) && (
+        <>
+          <span
+            aria-hidden="true"
+            data-testid={`settings-tab-flag-${tab.id}`}
+            className={cn(
+              "ml-1.5 inline-block h-1.5 w-1.5 rounded-[999px]",
+              hasErrors ? "bg-danger" : "bg-accent"
+            )}
+          />
+          <span className="sr-only">{hasErrors ? "(validation error)" : "(unsaved changes)"}</span>
+        </>
+      )}
+    </button>
   );
 }
 
