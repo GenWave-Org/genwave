@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import type { LibraryDto } from "@/lib/library";
 import { AudienceSettingControl } from "./AudienceSettingControl";
 import { CorrectionsSettingControl } from "./CorrectionsSettingControl";
+import { EngineByKindSettingControl } from "./EngineByKindSettingControl";
 import { SafeScopeAvailabilityBadge } from "./SafeScopeAvailabilityBadge";
 import { SettingHelpFlyover } from "./SettingHelpFlyover";
 import type { SettingsHelpKey } from "./settings-help-keys";
@@ -175,10 +176,10 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "The Piper voice model the fallback service is expected to be running — informational " +
     "only; it is not sent with each render and does not change which voice Piper speaks with.",
   "Tts:EngineByKind":
-    "Pins specific speech kinds to a specific engine, e.g. {\"StationId\":\"piper\"} so a short " +
-    "ident always uses the cheap voice. A JSON object mapping StationId/LeadIn/BackAnnounce/" +
-    "TimeDate to \"kokoro\" or \"piper\"; empty means every kind uses the normal Kokoro-first, " +
-    "Piper-fallback routing.",
+    "Pins specific speech kinds to a specific engine, e.g. StationId to Piper so a short ident " +
+    "always uses the cheap voice. Add one override row per kind (StationId, LeadIn, " +
+    "BackAnnounce, TimeDate, SignOff, SignOn); kinds without an override use the normal " +
+    "Kokoro-first, Piper-fallback routing.",
   "Llm:Endpoint":
     "The LLM completion service base URL used to author patter copy — leave empty to disable " +
     "LLM-authored copy and fall back to templated copy.",
@@ -302,6 +303,7 @@ function helpTextFor(key: string): string | undefined {
 const SETTING_CONTROL_REGISTRY: Record<string, ComponentType<SettingControlProps>> = {
   "Station:Voice": VoiceSettingControl,
   "Tts:Corrections": CorrectionsSettingControl,
+  "Tts:EngineByKind": EngineByKindSettingControl,
   "Station:Audience": AudienceSettingControl,
 };
 
