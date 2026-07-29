@@ -76,16 +76,16 @@ Registry-manifest audits and published third-party benchmarks, collected 2026-07
 per this file's rules.
 
 **Bottom line:** 🟡 a **Pi 5 8GB is a real target today for a piper-only station**
-(source-build only); the full Kokoro+LLM demo shape fits on **no** Pi.
+(`--pinned` images since v2.8.8 — no source build needed); the full Kokoro+LLM demo shape
+fits on **no** Pi.
 
-### 🚧 Image architecture — the two blockers
+### 🚧 Image architecture — blockers resolved at v2.8.8
 
 | Piece | arm64 today? | Confidence | Notes |
 |---|:---:|:---:|---|
 | Upstream bases (postgres, liquidsoap, dotnet, node, debian) | ✅ | 🟡 | Multi-arch manifests exist; we've never run one on ARM |
 | ollama / cloudflared / alloy / dockerproxy / caddy | ✅ | 🟡 | Multi-arch manifests exist |
-| GenWave GHCR images (api, admin_ui, engine, icecast) | ❌ | 🔴 | Built `amd64`-only (plain `docker build`, no buildx/ARM runners) — the `--pinned` flow cannot run on a Pi at all; source-build only. **Blocked on gh-#240** (multi-arch CI) |
-| `piper` (artibex/piper-http) | ❌ | 🔴 | amd64-only (digest *and* `latest`); no maintained arm64 image anywhere speaks our wire shape (`POST text/plain → /`). **Blocked on gh-#241** |
+| GenWave GHCR images (api, admin_ui, engine, icecast, piper) | ✅ | 🟡 | **Multi-arch (amd64+arm64) since `home-v2.8.8`** — gh-#240 shipped native-ARM release builds and gh-#241 replaced the amd64-only artibex piper with the repo-owned `piper/` image (same wire shape). Both platforms verified on GHCR at the v2.8.8 cut; never yet *run* on ARM, hence 🟡 |
 | `kokoro` (kokoro-fastapi-cpu) | ⚠️ | 🔴 | An arm64 manifest exists, but upstream #279 reports a warmup crash on Pi 4 aarch64 (open); zero Pi 5 data |
 
 ### 🔢 Compute (cited third-party numbers, not ours)
@@ -114,18 +114,19 @@ per this file's rules.
 
 | | Topology | Confidence | Shape |
 |:---:|---|:---:|---|
-| a | **Pi 5 8GB all-in-one "quiet DJ" — RECOMMENDED** | 🟡 | Playout + piper-only, no LLM (templated patter, by design). The shipped shape: `compose.piper-only.yaml` / `./launch.sh --piper-only` (gh-#242). Everything in it is ARM-proven except the piper image (gh-#241) |
+| a | **Pi 5 8GB all-in-one "quiet DJ" — RECOMMENDED** | 🟡 | Playout + piper-only, no LLM (templated patter, by design). The shipped shape: `./launch.sh --pinned --piper-only` (gh-#242) on the v2.8.8+ multi-arch images. Every component is ARM-proven upstream; ours have never run on ARM |
 | b | **Pi 5 playout + off-box brain — best sound** | 🟡 | Kokoro + ollama live on any x86 box; `Tts:Endpoint`, `Tts:Fallback:Endpoint`, and `Llm:Endpoint`/`Llm:Model` are all live-settable — verified pointable today |
 | c | **Pi 5 all-in-one + LLM — experimental** | 🔴 | ollama fenced ~4.5–5 GB, piper-only, active cooler + 27 W PSU mandatory; the degradation ladder is the net |
-| d | **Pi 4 4GB headless minimal** | 🔴 | Works in principle; source builds + enrichment are the pain |
+| d | **Pi 4 4GB headless minimal** | 🔴 | Works in principle; enrichment time is the pain |
 
 ### 🧪 Hands-on test plan (measurable outcomes)
 
 The gh-#213 plan, condensed to what each step must produce before anything above turns 🟢:
 
-1. **Arch pull check** — every `docker compose config --images` image pulls on arm64 except
-   piper (expected: exactly one failure, gh-#241).
-2. **Source-build on Pi 5** — wall time per image, recorded.
+1. **Arch pull check** — every `docker compose config --images` image pulls clean on arm64
+   (v2.8.8+ pins; a failure here is a regression, file it).
+2. **Pinned boot on Pi 5** — `./launch.sh --pinned --piper-only`; record pull + first-boot
+   wall time. (Source-build timing is optional bonus data now, not the path.)
 3. **Minimal playout boot** (the piper-only shape) — `/health` 200 and a gapless stream.
 4. **Piper render timing** — RTF ~0.1–0.2 on Pi 5 (render seconds ÷ clip seconds).
 5. **Enrichment burst on a real library** — tracks/hour, `vcgencmd measure_temp`, zero
