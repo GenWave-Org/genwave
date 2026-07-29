@@ -35,28 +35,56 @@ static class LlmPromptBuilder
         "each break, and never reuse an example's literal values on air.";
 
     /// <summary>
-    /// Baked house scaffold for the system prompt (SPEC F34.3): personality-neutral radio DJ, 1-2
-    /// spoken sentences, no stage directions. <paramref name="personaSection"/> (SPEC F35.2, F35.3,
-    /// F71.3) appends an active persona's soul + sampled quirks beneath the scaffold; null/empty
-    /// (no active persona, or one with nothing to show) leaves the neutral scaffold untouched —
-    /// blurbs work persona-less exactly as before T6.
+    /// Baked house scaffold for the system prompt (SPEC F34.3): 1-2 spoken sentences, no stage
+    /// directions. <paramref name="personaSection"/> (SPEC F35.2, F35.3, F71.3) appends an active
+    /// persona's soul + sampled quirks beneath the scaffold AND swaps the opening line to a
+    /// write-in-this-voice directive (gh-#152); null/empty (no active persona, or one with nothing
+    /// to show) keeps the personality-neutral opening — blurbs work persona-less exactly as
+    /// before T6.
     /// </summary>
     public static string BuildSystemPrompt(string? personaSection)
     {
+        // gh-#152: "personality-neutral" and a persona section's "Style: bubbly, energetic,
+        // expressive" cancelled each other inside the SAME prompt. The neutral framing now applies
+        // ONLY when there is no persona section; with one, the opening line points the model at
+        // the persona's voice instead. The shared body below is identical either way.
+        const string NeutralOpening =
+            "You are a personality-neutral radio DJ writing live station patter.";
+        const string PersonaOpening =
+            "You are a radio DJ writing live station patter - write every word in the voice of the " +
+            "persona described below.";
+
         // gh-#188: the old closing line ("You may embellish with genuine knowledge of the track,
         // artist, or era.") was a license a small local model cannot safely hold — observed live
         // renaming an artist on air (LaBarcaDeSua spoken as "Barcarola") and inventing origins
         // ("rural Cuba"). Era/genre color stays welcome; specific unprovided facts do not.
-        const string Scaffold =
-            "You are a personality-neutral radio DJ writing live station patter. Write exactly one " +
-            "or two sentences of spoken copy to be read aloud on air. Plain spoken words only - no " +
+        //
+        // gh-#151: an artist's gender is one more unprovided fact — observed live inferring it
+        // from a French first name ("it's off HIS self-titled EP"). they/them/their unless the
+        // metadata itself says otherwise; a name is never evidence.
+        const string ScaffoldBody =
+            "Write exactly one or two sentences of spoken copy to be read aloud on air. " +
+            "Plain spoken words only - no " +
             "stage directions, no emoji, no markdown formatting, no sound-effect cues. You may add " +
             "color about the era or genre, but never state specific facts about the artist or track " +
             "that you were not given, and never alter the artist's name or the track's title - when " +
-            "unsure, stay with what the prompt provides.";
+            "unsure, stay with what the prompt provides. Refer to artists and bands as " +
+            "they/them/their unless the provided metadata explicitly states pronouns - never infer " +
+            "gender from a name.";
 
-        return string.IsNullOrEmpty(personaSection) ? Scaffold : $"{Scaffold}\n\n{personaSection}";
+        return string.IsNullOrEmpty(personaSection)
+            ? $"{NeutralOpening} {ScaffoldBody}"
+            : $"{PersonaOpening} {ScaffoldBody}\n\n{personaSection}";
     }
+
+    /// <summary>
+    /// gh-#150 — how often a persona-voiced break is asked to work the DJ's own name in. Real
+    /// radio DJs occasionally say their own name; roughly one break in seven keeps it a habit,
+    /// not a tic. The roll itself is taken at the call site (<see cref="LlmCopyWriter"/>) and
+    /// arrives here as <c>mentionOwnName</c> — every member of this builder stays a pure function
+    /// of its arguments, so specs drive both outcomes deterministically.
+    /// </summary>
+    public const double SelfNameMentionProbability = 0.15;
 
     /// <summary>
     /// Composes the persona section (SPEC F35.2, F35.3, F71.3): a soul line/block (see
@@ -64,8 +92,11 @@ static class LlmPromptBuilder
     /// <see cref="SampleQuirks"/>) — never the full set (F71.3). A persona that yields neither
     /// (no soul text, no quirks) returns null (falls back to the neutral scaffold — the "neutral
     /// otherwise" half of F35.2, not just the no-persona case).
+    /// <paramref name="mentionOwnName"/> (gh-#150) appends the say-your-own-name line (see
+    /// <see cref="BuildSelfNameMentionLine"/>) — a rolled-true break's request, honored only when
+    /// there is an actual persona section for it to ride on.
     /// </summary>
-    public static string? BuildPersonaSection(Persona? persona, PersonaCard? card)
+    public static string? BuildPersonaSection(Persona? persona, PersonaCard? card, bool mentionOwnName = false)
     {
         var lines = new List<string>();
 
@@ -88,7 +119,43 @@ static class LlmPromptBuilder
             }
         }
 
+        // gh-#150: the name line is a rider on an actual persona section, never a section by
+        // itself — a persona with no soul and no quirks stays on the neutral scaffold (the
+        // "neutral otherwise" half of F35.2 above) even on a rolled-true break.
+        if (mentionOwnName && lines.Count > 0 && ResolveName(persona, card) is { } name)
+            lines.Add(BuildSelfNameMentionLine(name));
+
         return lines.Count == 0 ? null : string.Join('\n', lines);
+    }
+
+    /// <summary>
+    /// The persona's on-air name for <see cref="BuildSelfNameMentionLine"/>, card-first with the
+    /// legacy row as fallback — the same read-path precedence <see cref="BuildSoul"/> established
+    /// (for an admin-managed persona the two are kept in lockstep anyway; see BuildSoul's remarks).
+    /// Null when neither carries one — no name, no line.
+    /// </summary>
+    static string? ResolveName(Persona? persona, PersonaCard? card)
+    {
+        if (card is { Name.Length: > 0 })
+            return card.Name;
+
+        return persona is { Name.Length: > 0 } ? persona.Name : null;
+    }
+
+    /// <summary>
+    /// gh-#150 — the say-your-own-name line: real DJs occasionally drop their own name, and the
+    /// persona section doesn't otherwise state it, so the model can't be asked to "work your name
+    /// in" without being told what it is. Phrased as this break's ask ("once is plenty") — the
+    /// occasionally lives in <see cref="SelfNameMentionProbability"/>'s roll, never in the model's
+    /// own discretion. <paramref name="name"/> is operator-entered and flows straight into the
+    /// prompt, so it gets the house cap exactly like <see cref="BuildHandoffLine"/>'s
+    /// counterpart name (T123 review finding).
+    /// </summary>
+    static string BuildSelfNameMentionLine(string name)
+    {
+        var djName = Truncate(name, MaxSoulChars);
+        return $"Name note: your on-air name is {djName} - briefly work your own name into this " +
+            $"break where it lands naturally (e.g. \"you're with {djName}\"); once is plenty.";
     }
 
     /// <summary>
