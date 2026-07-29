@@ -36,15 +36,21 @@
   <fileserve>0</fileserve>                <!-- do not serve arbitrary files off disk -->
 
   <paths>
-    <logdir>/var/log/icecast2</logdir>
+    <logdir>/var/log/icecast2</logdir>    <!-- unused while both logs stream to stderr below -->
     <webroot>/usr/share/icecast2/web</webroot>
     <adminroot>/usr/share/icecast2/admin</adminroot>
     <alias source="/" destination="/status.xsl"/>
   </paths>
 
+  <!-- `-` streams both logs to stderr (supported for accesslog AND errorlog in the pinned 2.5.0:
+       src/main.c opens each on stderr when the name is `-`), so the Docker log driver — and the
+       fleet's alloy docker tailer feeding Loki — sees listener connects/disconnects and mount
+       source events instead of just startup warnings (gh-#115). Rotation never applies to `-`
+       logs (logsize/logarchive are file-branch only) and the HUP reload path skips reopening
+       them, so nothing accumulates under <logdir>. -->
   <logging>
-    <accesslog>access.log</accesslog>
-    <errorlog>error.log</errorlog>
+    <accesslog>-</accesslog>
+    <errorlog>-</errorlog>
     <loglevel>3</loglevel>                <!-- 3=info; drop to 2 (warn) in production -->
   </logging>
 
