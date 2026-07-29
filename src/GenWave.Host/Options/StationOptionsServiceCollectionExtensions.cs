@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Orchestration;
@@ -27,6 +28,11 @@ static class StationOptionsServiceCollectionExtensions
                 opts => opts.Scope.LibraryIds.Count > 0,
                 "Station:Scope:LibraryIds must be non-empty (empty scope = silent station)")
             .ValidateOnStart();
+
+        // OptionsMonitorStationClockProvider (gh-#117, below) needs a TimeProvider — TryAdd so a
+        // host or test that already registers its own wins (the same TryAdd
+        // AddGenWaveTts/AddGenWaveOrchestration each carry), and this method composes standalone.
+        services.TryAddSingleton(TimeProvider.System);
 
         services
             .Configure<LiquidsoapOptions>(configuration.GetSection(LiquidsoapOptions.Section))
@@ -93,7 +99,16 @@ static class StationOptionsServiceCollectionExtensions
             // so a live PUT /api/settings edit reaches the very next candidate-pool query with no api
             // restart — the rotation/envelope queries and the request-catalog probe all resolve this
             // SAME binding (MediaLibraryServiceCollectionExtensions never registers a default).
-            .AddSingleton<IAudiencePostureProvider, OptionsMonitorAudiencePostureProvider>();
+            .AddSingleton<IAudiencePostureProvider, OptionsMonitorAudiencePostureProvider>()
+            // Live station-clock seam (gh-#117): Station:Timezone is advertised Live in the
+            // settings allowlist. Wraps IOptionsMonitor<StationOptions> and re-resolves the
+            // timezone on every call, so a live PUT /api/settings edit reaches the very next LLM
+            // prompt / SegmentRequest.LocalNow stamp with no api restart. Consumed by the
+            // Orchestrator (LocalNow stamping), LlmCopyWriter (the prompt's clock line), and
+            // PersonaController (preview requests) — the SAME instance, so the DJ's clock never
+            // disagrees with itself. TimeProvider resolves to the TimeProvider.System TryAdd in
+            // AddGenWaveTts/AddGenWaveOrchestration (or a test's own registration).
+            .AddSingleton<IStationClockProvider, OptionsMonitorStationClockProvider>();
 
         return services;
     }

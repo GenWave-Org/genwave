@@ -239,6 +239,7 @@ public static class FeaturePersonaEndpoints
             new NotUsedAdminMediaLookup(), new FakeStationScopeProvider(LibraryScope.None),
             new NotUsedPersonaMemory(), new NotUsedPersonaTasteReader(),
             new NotUsedPersonaImportStore(), new NotUsedTtsVoiceLister(),
+            new FakeStationClockProvider(DateTimeOffset.UtcNow),
             NullLogger<PersonaController>.Instance);
 
     // ---------------------------------------------------------------------

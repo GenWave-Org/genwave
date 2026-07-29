@@ -141,7 +141,8 @@ public sealed class Orchestrator(
     IRequestFulfillmentSource? requestFulfillmentSource = null,
     CachingScheduleResolver? scheduleResolver = null,
     IPersonaStore? personaStore = null,
-    IStationEventSink? events = null) : INextItemProvider
+    IStationEventSink? events = null,
+    IStationClockProvider? stationClock = null) : INextItemProvider
 {
     /// <summary>
     /// How many independent rotation-tiered samples <see cref="SelectMusicCandidateAsync"/> draws
@@ -158,6 +159,16 @@ public sealed class Orchestrator(
     const string DegradationStepEnergy = "energy";
     const string DegradationStepGenres = "genres";
     const string DegradationStepTerminal = "terminal";
+
+    /// <summary>
+    /// gh-#117 — the ONE stamp every <see cref="SegmentRequest.LocalNow"/> this Orchestrator builds
+    /// goes through: station-local now via the live <see cref="IStationClockProvider"/> seam
+    /// (<c>Station:Timezone</c>, read fresh per call) when the composition supplies one, otherwise
+    /// <paramref name="timeProvider"/>'s UTC now — the pre-gh-#117 behavior (the old raw
+    /// <c>DateTimeOffset.UtcNow</c>), unchanged for every rig that never registers the seam, and
+    /// what the templated time/date patter and the LLM's "Local time" line both render from.
+    /// </summary>
+    DateTimeOffset StationLocalNow() => stationClock?.LocalNow ?? timeProvider.GetUtcNow();
 
     /// <summary>
     /// How far ahead of the resolved boundary the SignOff half of a handoff ceremony is due (SPEC
@@ -743,7 +754,7 @@ public sealed class Orchestrator(
                 voice,
                 identity.Name,
                 prev,
-                DateTimeOffset.UtcNow,
+                StationLocalNow(),
                 identity.Id,
                 personaName);
             Kick(req);
@@ -791,7 +802,7 @@ public sealed class Orchestrator(
                         identity.Voice,
                         identity.Name,
                         null,
-                        DateTimeOffset.UtcNow,
+                        StationLocalNow(),
                         identity.Id,
                         PersonaName: null);
                     Kick(stationIdReq);
@@ -813,7 +824,7 @@ public sealed class Orchestrator(
                         handoff.Voice,
                         identity.Name,
                         null,
-                        DateTimeOffset.UtcNow,
+                        StationLocalNow(),
                         identity.Id,
                         handoff.PersonaName,
                         handoff.CounterpartName);
@@ -842,7 +853,7 @@ public sealed class Orchestrator(
                 voice,
                 identity.Name,
                 next,
-                DateTimeOffset.UtcNow,
+                StationLocalNow(),
                 identity.Id,
                 personaName);
             Kick(req);

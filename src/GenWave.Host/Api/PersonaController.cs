@@ -43,6 +43,7 @@ public sealed partial class PersonaController(
     IPersonaTasteReader personaTaste,
     IPersonaImportStore personaImportStore,
     ITtsVoiceLister voiceLister,
+    IStationClockProvider stationClock,
     ILogger<PersonaController> logger) : ControllerBase
 {
     // SPEC F79.6 — enforced BEFORE deserialization, see Import's own remarks.
@@ -199,8 +200,10 @@ public sealed partial class PersonaController(
             return trackError;
 
         var station = stationMonitor.CurrentValue;
+        // gh-#117 — a preview prompt's LocalNow rides the same station clock the on-air
+        // Orchestrator stamps, so auditioning a persona shows the DJ's real wall clock.
         var segmentRequest = new SegmentRequest(
-            kind, ResolvePreviewVoice(persona, station.Voice), station.Name, track, DateTimeOffset.UtcNow, station.Id);
+            kind, ResolvePreviewVoice(persona, station.Voice), station.Name, track, stationClock.LocalNow, station.Id);
 
         var result = await previewWriter.WritePreviewAsync(segmentRequest, persona, ct);
 

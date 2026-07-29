@@ -235,11 +235,11 @@ static class LlmPromptBuilder
     /// <summary>
     /// The DJ's clock (SPEC F71.8, gh-#13): every LLM prompt this writer builds — persona active or
     /// not — states the current date, weekday, and time in station-local terms, so the model
-    /// answers from the injected clock rather than inventing one. "Station-local" is
-    /// <paramref name="timeProvider"/>'s own <see cref="TimeProvider.LocalTimeZone"/> — in
-    /// production this is <see cref="TimeProvider.System"/>, i.e. the container's own TZ (no
-    /// dedicated <c>Station:Timezone</c> setting exists; the container's configured timezone IS
-    /// "station-local" today).
+    /// answers from the injected clock rather than inventing one. <paramref name="stationLocalNow"/>
+    /// is resolved by the caller (<see cref="LlmCopyWriter"/>) through
+    /// <c>GenWave.Core.Abstractions.IStationClockProvider</c> (gh-#117) — <c>Station:Timezone</c>
+    /// when configured, the container's own TZ otherwise — keeping this builder a pure function of
+    /// its arguments, exactly the posture every other member here holds.
     ///
     /// Formatted with <see cref="CultureInfo.InvariantCulture"/> (review finding, T37): this line is
     /// LLM-facing wire content, not UI display text — a host running under a non-English
@@ -248,12 +248,8 @@ static class LlmPromptBuilder
     /// of which the prompt's English scaffold (<see cref="BuildSystemPrompt"/>) or the model's
     /// English house style expects.
     /// </summary>
-    public static string BuildStationClockLine(TimeProvider timeProvider)
-    {
-        var stationLocalNow = TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), timeProvider.LocalTimeZone);
-        return
-            $"Current date/time (station-local): {stationLocalNow.ToString("dddd, MMMM d, yyyy, h:mm tt", CultureInfo.InvariantCulture)}";
-    }
+    public static string BuildStationClockLine(DateTimeOffset stationLocalNow) =>
+        $"Current date/time (station-local): {stationLocalNow.ToString("dddd, MMMM d, yyyy, h:mm tt", CultureInfo.InvariantCulture)}";
 
     /// <summary>
     /// SPEC F83.2 — the exploration lampshade: the pick came from the bias-blind exploration slice

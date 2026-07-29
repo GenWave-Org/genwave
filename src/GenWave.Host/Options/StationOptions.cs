@@ -90,4 +90,16 @@ public sealed class StationOptions
     /// (rotation, request matcher, boundary bias) this drives (SPEC F95.4).
     /// </summary>
     public string Audience { get; set; } = "everyone";
+
+    /// <summary>
+    /// The station's IANA timezone id (gh-#117), e.g. <c>America/Edmonton</c> — drives every
+    /// "station-local now" the LLM prompt path sees (the clock line, <c>SegmentRequest.LocalNow</c>)
+    /// via <see cref="GenWave.Core.Abstractions.IStationClockProvider"/>. Not required — defaults to
+    /// empty, which is the honest "use the container's own clock" state (pre-gh-#117 behavior,
+    /// byte-identical). Read live, per call, through
+    /// <see cref="OptionsMonitorStationClockProvider"/>; an unresolvable value that arrives via the
+    /// environment (the settings API rejects one — <c>SettingValidator</c>) also falls back to the
+    /// container's clock rather than faulting the patter path.
+    /// </summary>
+    public string Timezone { get; set; } = string.Empty;
 }

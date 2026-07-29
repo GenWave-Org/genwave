@@ -277,6 +277,11 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "\"everyone\" (default) keeps every track stamped explicit out of the pool entirely — it " +
     "never plays, displays, or reaches the DJ's mouth. \"mature\" plays everything, unmasked. " +
     "Changes apply live.",
+
+  // ── Station timezone (gh-#117) ─────────────────────────────────────────────────────────────
+  "Station:Timezone":
+    "The IANA timezone the DJ's spoken date/time follows (e.g. America/Edmonton). Empty uses " +
+    "the container's own clock. Changes apply live.",
 };
 
 /**
