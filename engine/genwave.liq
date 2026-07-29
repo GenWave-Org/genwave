@@ -10,6 +10,20 @@ settings.server.telnet := true
 settings.server.telnet.bind_addr := "0.0.0.0"
 settings.server.telnet.port := 1234
 
+# --- Clock source-count warning threshold (gh-#185). Liquidsoap 2.4's cross() mints ~a dozen
+#     short-lived helper sources per transition (cross.before/after_* buffers/metadata, plus the
+#     source.dynamic wrappers fade.in/fade.out build inside gw_transition below); the clock holds
+#     them WEAKLY (passive_sources is a WeakQueue) and the OCaml GC reclaims them a few
+#     transitions late, so the steady-state count hovers at ~50 (observed 50-57 over 24h of
+#     fleet logs, flat) — exactly the default warning threshold of 50, tripping a false
+#     "possible source leak!" every patter cycle. Not a leak: the population is bounded
+#     (~3 pending transition generations × ~11 transients + ~15 static graph sources), old
+#     instances ARE collected, and the true-leak tell ("Unbalanced activations!") never appears
+#     — the genuine cross/source.dynamic leaks in this area were fixed upstream in 2.4.2
+#     (savonet/liquidsoap#4835; saga in #4670/#4796). 150 = 3× observed steady state: a real
+#     runaway (upstream repros hit 500+ within hours) still trips the warning fast. ---
+settings.clock.leak_warning := 150
+
 # --- Station identity for listeners (issue gitea-#148). STATION_NAME is compose-injected from the same
 #     value as the API's Station__Name so the two can't drift. It must ride the in-band ICY
 #     StreamTitle: radios that negotiate icy-metaint display StreamTitle and ignore the icy-name

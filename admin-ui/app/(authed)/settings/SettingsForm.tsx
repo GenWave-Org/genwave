@@ -384,7 +384,14 @@ function parseRotationCount(raw: string | undefined): number | null {
 
 export function SettingsForm({ settings, libraries = [] }: SettingsFormProps): ReactNode {
   const confirm = useConfirm();
-  const [original] = useState<Record<string, string>>(() => initialValuesFrom(settings));
+  /**
+   * The last-SAVED value per key — the baseline `changedEntries` diffs against. Seeded from the
+   * GET response and re-baselined after every successful PUT (gh-#140): a mount-frozen baseline
+   * made any second save in the same pageview that landed back on a page-load value invisible to
+   * the diff — "No changes to save." while the server still held the earlier save. Silent data
+   * loss, reproduced live on the demo box.
+   */
+  const [original, setOriginal] = useState<Record<string, string>>(() => initialValuesFrom(settings));
   const [values, setValues] = useState<Record<string, string>>(() => initialValuesFrom(settings));
   const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
   /**
@@ -514,6 +521,13 @@ export function SettingsForm({ settings, libraries = [] }: SettingsFormProps): R
       });
 
       if (resp.ok) {
+        // Re-baseline the diff to what was just written (gh-#140) — the saved state, not the
+        // page-load state, is what the NEXT save must diff against. Merging only the submitted
+        // batch keeps keys the operator kept editing during the request untouched.
+        setOriginal((prev) => ({
+          ...prev,
+          ...Object.fromEntries(changed.map((c) => [c.key, c.value])),
+        }));
         setStatus({ kind: "idle" });
         toast.success("Settings saved.");
         return;
@@ -597,6 +611,7 @@ export function SettingsForm({ settings, libraries = [] }: SettingsFormProps): R
               key={setting.key}
               setting={setting}
               value={values[setting.key] ?? ""}
+              savedValue={original[setting.key] ?? ""}
               errors={fieldErrors[setting.key] ?? []}
               isPending={isPending}
               libraries={libraries}
@@ -640,6 +655,12 @@ function SectionCard({ title, children }: SectionCardProps): ReactNode {
 interface SettingFieldProps {
   setting: SettingDto;
   value: string;
+  /**
+   * The last-saved value for this key (SettingsForm's re-baselined `original`) — compared
+   * against `value` with the SAME string equality `changedEntries` uses, so a control's dirty
+   * indicator can never disagree with what Save will actually submit.
+   */
+  savedValue: string;
   errors: string[];
   isPending: boolean;
   libraries: LibraryDto[];
@@ -663,6 +684,7 @@ interface SettingFieldProps {
 function SettingField({
   setting,
   value,
+  savedValue,
   errors,
   isPending,
   libraries,
@@ -701,6 +723,7 @@ function SettingField({
           value={value}
           onChange={onSemanticChange}
           disabled={isPending}
+          isDirty={value !== savedValue}
         />
       ) : setting.kind === "boolean" ? (
         <span className="flex min-h-10 items-center self-start">

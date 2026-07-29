@@ -71,7 +71,7 @@ public static class FeatureIcecastTwoFive
         // never carried "url", so the annotation was filtered out before icy_song/icy_metadata saw
         // it and StreamUrl never reached listeners (Story230 gate's live-run finding). Re-pinned
         // to the one-line export-list fix.
-        const string EngineScriptSha256 = "11c8b3b59b4b641dc59fa4217e935442573adf04f8e756934e23593b17677049";
+        const string EngineScriptSha256 = "869ea6fc35e3d73de4ca6cc47551a07da63bd855481ba77120fe73f1754d72da";
 
         [Fact]
         public static void StreamTitleBuilderInputsRemainPinned()

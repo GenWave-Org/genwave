@@ -21,6 +21,13 @@ const CLOCK_TICK_MS = 1000;
 // older rows simply fall off as new tracks air (operator request, 2026-07-19).
 const MAX_HISTORY_ROWS = 6;
 
+// Live-player recovery cadence (gh-#114) — see the "Live player recovery" section. A stall must
+// survive STALL_CONFIRM_MS without timeupdate progress before the src is torn down; attempts back
+// off exponentially from the base delay up to the cap while the mount stays down.
+const RECOVERY_BASE_DELAY_MS = 1000;
+const RECOVERY_MAX_DELAY_MS = 30000;
+const STALL_CONFIRM_MS = 2000;
+
 // The station's own art (also the artwork endpoint's no-oracle fallback, SPEC F88.3) — the
 // "loading" state for a track's real cover art and the terminal state for everything else
 // (DJ break, a track with no embedded art, standby).
@@ -316,6 +323,7 @@ async function loadAbout() {
     const player = document.getElementById("player");
     const hint = document.getElementById("player-hint");
     if (about.streamUrl) {
+      streamUrl = about.streamUrl;
       player.src = about.streamUrl;
       player.hidden = false;
       hint.hidden = true;
@@ -326,6 +334,90 @@ async function loadAbout() {
   } catch (error) {
     console.error(error);
   }
+}
+
+// ── Live player recovery (gh-#114) ───────────────────────────────────────────
+//
+// When the icecast mount drops (engine restart), Chrome tries to resume the live stream with
+// `Range: bytes=N-`; icecast answers 200 + fresh live data instead of 206, so Chrome aborts and
+// retries — an audible cut-in/cut-out loop until the tab is refreshed. Recovery sidesteps the
+// native resume entirely: tear down the src and reattach the stream URL with a changing query
+// param, so Chrome fetches the reconnect as a brand-new resource (no Range header to flail with).
+//   - only when playback is user-intended: armed by the play event, disarmed by a user pause —
+//     a stopped player is never auto-started, and a NotAllowedError from play() disarms rather
+//     than fighting the browser's autoplay policy.
+//   - one recovery per burst: stalled/error/ended arriving together share the single pending
+//     timer, and a transient stall that self-heals (timeupdate progressed while the timer was
+//     pending, no element error) cancels itself without an audible reconnect.
+//   - backoff: the delay doubles per attempt from RECOVERY_BASE_DELAY_MS up to
+//     RECOVERY_MAX_DELAY_MS while the mount stays down, and resets to the base once the playing
+//     event confirms real playback resumed.
+
+/** @type {string|null} — the live stream URL from the one-shot about fetch; null = no stream. */
+let streamUrl = null;
+let playIntended = false;
+let lastProgressAt = 0;
+let recoveryDelayMs = RECOVERY_BASE_DELAY_MS;
+/** @type {number|null} */
+let recoveryTimer = null;
+
+/** Schedules one recovery attempt after delayMs, unless one is already pending (a stalled+error
+ * burst collapses into a single attempt). At fire time the attempt is skipped if the user has
+ * paused meanwhile, or if the stall self-healed — playback progressed after scheduling and the
+ * element carries no error (stalled fires transiently on live streams; error/ended never see a
+ * later timeupdate, so they always proceed). */
+function schedulePlayerRecovery(player, delayMs) {
+  if (!streamUrl || !playIntended || recoveryTimer !== null) return;
+  const scheduledAt = Date.now();
+  recoveryTimer = setTimeout(() => {
+    recoveryTimer = null;
+    if (!playIntended) return;
+    if (player.error === null && !player.ended && lastProgressAt > scheduledAt) return;
+    recoveryDelayMs = Math.min(recoveryDelayMs * 2, RECOVERY_MAX_DELAY_MS);
+    recoverPlayer(player);
+  }, delayMs);
+}
+
+/** Tears down the src and reattaches the stream URL with a cache-buster param — the fresh URL is
+ * what breaks Chrome's Range-resume behavior. An AbortError from play() (user paused, or a newer
+ * load superseded this one) is deliberately swallowed; a NotAllowedError means the browser revoked
+ * autoplay credit, so the player disarms and waits for a real press of play. */
+function recoverPlayer(player) {
+  player.src = `${streamUrl}${streamUrl.includes("?") ? "&" : "?"}reconnect=${Date.now()}`;
+  player.load();
+  player.play().catch((error) => {
+    if (error.name === "NotAllowedError") playIntended = false;
+  });
+}
+
+function initPlayerRecovery() {
+  const player = document.getElementById("player");
+  player.addEventListener("play", () => {
+    playIntended = true;
+  });
+  player.addEventListener("playing", () => {
+    recoveryDelayMs = RECOVERY_BASE_DELAY_MS;
+  });
+  player.addEventListener("timeupdate", () => {
+    lastProgressAt = Date.now();
+  });
+  player.addEventListener("pause", () => {
+    // End-of-stream fires pause before ended (player.ended is already true here) — that is the
+    // mount dropping, not the user stopping, so the ended handler below still gets to recover.
+    if (player.ended) return;
+    playIntended = false;
+    if (recoveryTimer !== null) {
+      clearTimeout(recoveryTimer);
+      recoveryTimer = null;
+    }
+  });
+  // stalled waits out the longer confirm window before the no-progress check above; error/ended
+  // are definitively stuck and only need the backoff delay.
+  player.addEventListener("stalled", () =>
+    schedulePlayerRecovery(player, Math.max(recoveryDelayMs, STALL_CONFIRM_MS)),
+  );
+  player.addEventListener("error", () => schedulePlayerRecovery(player, recoveryDelayMs));
+  player.addEventListener("ended", () => schedulePlayerRecovery(player, recoveryDelayMs));
 }
 
 // ── Request form (SPEC F87.11, STORY-229) ────────────────────────────────────
@@ -380,6 +472,7 @@ function initRequestForm() {
 function init() {
   loadAbout();
   initArtworkFallback();
+  initPlayerRecovery();
   pollNowPlaying();
   pollHistory();
   pollStats();
