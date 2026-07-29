@@ -54,6 +54,7 @@ public sealed class SpectatorArtworkController(
     const string StationIconContentType = "image/x-icon";
 
     [HttpGet("artwork/{token}")]
+    [HttpHead("artwork/{token}")]   // gh-#160: HEAD answers with GET's exact status/headers, body suppressed by the server
     public async Task<IActionResult> GetArtwork(string token, CancellationToken ct)
     {
         var resolution = await tokenStore.ResolveAsync(token, ct);

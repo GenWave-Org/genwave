@@ -540,7 +540,11 @@ public static class FeaturePersonaCardImport
             // — record equality on that interface-typed member is reference equality, and the round
             // trip through JSON deserialization (List<DayOfWeek>) never reference-equals a
             // hand-built array literal even when both are empty. Equivalent compares structurally.
-            Assert.Equivalent(new[] { newRule }, authoredTaste.Select(r => r.Rule).ToArray());
+            // strict: true (gh-#167) — the default is superset-blind on collection members: an
+            // expected [] DaysOfWeek would match ANY actual day gate, so a widening to
+            // [Sunday, Saturday] passed silently. Strict sees both widening and replacement
+            // (probe-verified on Story231's golden-card parity, same record shape).
+            Assert.Equivalent(new[] { newRule }, authoredTaste.Select(r => r.Rule).ToArray(), strict: true);
         }
 
         [Fact]
