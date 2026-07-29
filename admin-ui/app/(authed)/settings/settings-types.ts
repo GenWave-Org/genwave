@@ -20,4 +20,11 @@ export interface SettingControlProps {
   value: string;
   onChange: (value: string) => void;
   disabled: boolean;
+  /**
+   * True when the staged `value` differs from the last-SAVED value (gh-#139) — computed by
+   * SettingField with the exact string comparison the Save diff uses, so a control's "unsaved"
+   * indicator can never contradict what Save settings will submit. Optional so controls that
+   * don't surface staging (Voice, Audience) ignore it without ceremony.
+   */
+  isDirty?: boolean;
 }
