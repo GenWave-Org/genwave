@@ -151,8 +151,8 @@ public sealed class BulkRatingController(
         new ProblemDetails
         {
             Status = StatusCodes.Status403Forbidden,
-            Title  = "Safe content is not rateable.",
-            Detail = "The named library is safe-loop/station-ID content (Station:SafeScope:LibraryIds) — bulk votes and never-play do not apply (gh-#99).",
+            Title  = "Station Imaging is not rateable.",
+            Detail = "The named library is Station Imaging — always-airable station content (safe loop, station IDs; Station:SafeScope:LibraryIds) — bulk votes and never-play do not apply (gh-#99).",
         });
 
     /// <summary>

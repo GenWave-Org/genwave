@@ -1,7 +1,7 @@
 // @jest-environment jsdom
 // STORY-098 — Voice dropdown with graceful fallback (Epic R / SPEC F29.5, gitea-#183)
 //
-// The Safe content Voice control becomes a select fed by GET /api/voices with "Station
+// The Station Imaging Voice control becomes a select fed by GET /api/voices with "Station
 // default" first/selected (submits NO `voice` field — the shipped omit-if-blank wire contract
 // is unchanged); on listing failure it falls back to the shipped free-text input with a visible
 // notice, and generation stays possible either way. Drives SafeContentClient (which composes
@@ -215,11 +215,13 @@ describe("Feature: Voice dropdown with graceful fallback", () => {
       expect(headers["Content-Type"]).toBe("application/json");
 
       const body = JSON.parse(generateInit.body as string) as Record<string, unknown>;
-      expect(Object.keys(body).sort()).toEqual(["libraryId", "text", "title", "voice"].sort());
+      // gh-#149 grew the contract by exactly one optional field: `kind` (default "liner").
+      expect(Object.keys(body).sort()).toEqual(["kind", "libraryId", "text", "title", "voice"].sort());
       expect(body["text"]).toBe(SEED_MESSAGE);
       expect(body["title"]).toBe(DEFAULT_TITLE);
       expect(body["libraryId"]).toBe(7);
       expect(body["voice"]).toBe("af_aoede");
+      expect(body["kind"]).toBe("liner");
       expect(body["bedMediaId"]).toBeUndefined();
     });
   });

@@ -138,13 +138,13 @@ afterEach(() => {
 
 describe("Feature: App shell", () => {
   describe("Scenario: shell wraps every authed route", () => {
-    it("renders the sidebar with Dashboard, Live, Catalog, Safe content, Settings (and NOT Libraries)", async () => {
+    it("renders the sidebar with Dashboard, Live, Catalog, Station Imaging, Settings (and NOT Libraries)", async () => {
       mockedUsePathname.mockReturnValue("/dashboard");
       const { Sidebar } = await import("../app/(authed)/_components/Sidebar");
 
       render(<Sidebar />);
 
-      for (const label of ["Dashboard", "Live", "Catalog", "Safe content", "Settings"]) {
+      for (const label of ["Dashboard", "Live", "Catalog", "Station Imaging", "Settings"]) {
         expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
       }
       // Libraries stays routable but unlisted until Q7.

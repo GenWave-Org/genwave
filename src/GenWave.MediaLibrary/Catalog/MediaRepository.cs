@@ -45,7 +45,7 @@ sealed class MediaRepository(
         "artist, album, genre, year, integrated_lufs, true_peak_dbtp, measurable, " +
         "cue_in_sec, cue_out_sec, intro_energy, outro_energy, bpm, track_energy, eligible, m.xmin::text as xmin, " +
         "coalesce(r.score, 50) as score, coalesce(r.never_play, false) as never_play, m.moods, " +
-        "m.explicit, m.explicit_source " +
+        "m.explicit, m.explicit_source, m.imaging_kind " +
         "from library.media m left join library.media_rating r on r.media_id = m.id";
 
     public async Task<MediaReference?> GetByIdAsync(LibraryScope scope, string mediaId, CancellationToken ct)
@@ -604,7 +604,7 @@ sealed class MediaRepository(
                    cue_in_sec, cue_out_sec, intro_energy, outro_energy, bpm, track_energy,
                    eligible, m.xmin::text as xmin,
                    coalesce(r.score, 50) as score, coalesce(r.never_play, false) as never_play,
-                   m.moods, m.explicit, m.explicit_source,
+                   m.moods, m.explicit, m.explicit_source, m.imaging_kind,
                    not (m.library_id = any(@safeLibraryIds)) as rateable,
                    count(*) over() as total_count
             from library.media m
@@ -1656,7 +1656,8 @@ sealed class MediaRepository(
               bpm_analyzed_at,
               year_lookup_at,
               year_lookup_missed_at,
-              enriched_at
+              enriched_at,
+              imaging_kind
             ) values (
               @path, @format, @sizeBytes, @mtime, 'ready', @libraryId,
               @durationMs, @sampleRate, @channels, @bitrateKbps,
@@ -1667,7 +1668,8 @@ sealed class MediaRepository(
               now(),
               now(),
               now(),
-              now()
+              now(),
+              @imagingKind
             )
             returning id
             """,
@@ -1691,6 +1693,9 @@ sealed class MediaRepository(
                 cueOutSec = insert.Cue?.CueOutSec,
                 introEnergy = insert.Energy?.IntroEnergy,
                 outroEnergy = insert.Energy?.OutroEnergy,
+                // gh-#149 — the Station Imaging content kind, always stamped for authored rows
+                // (scanned rows stay NULL). Metadata-only: nothing selects by it yet.
+                imagingKind = ImagingKindTokens.ToToken(insert.Kind),
             },
             cancellationToken: ct));
     }

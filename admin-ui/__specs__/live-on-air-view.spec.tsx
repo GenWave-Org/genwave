@@ -216,7 +216,7 @@ describe("Feature: Live on-air view", () => {
       render(<LiveView timeZone="UTC" />);
       await flush();
 
-      expect(screen.getByText(/Safe rotation — drain state/)).toBeInTheDocument();
+      expect(screen.getByText(/Station Imaging rotation — drain state/)).toBeInTheDocument();
     });
 
     it("shows the warming-up state before the feeder's first tick", async () => {

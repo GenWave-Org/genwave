@@ -1,5 +1,6 @@
 // @jest-environment jsdom
-// STORY-092 — Safe content page in the new identity (Epic Q / SPEC F28.9–F28.10)
+// STORY-092 — Station Imaging page (named "Safe content" until gh-#149) in the new identity
+// (Epic Q / SPEC F28.9–F28.10)
 //
 // Runner: Jest (jsdom) + @testing-library/react + mocked fetch. Mirrors
 // track-detail-redesign.spec.tsx's harness pattern: toast() needs its viewport, so every render
@@ -112,10 +113,10 @@ async function clickGenerate(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Feature: Safe content redesign
+// Feature: Station Imaging redesign
 // ---------------------------------------------------------------------------
 
-describe("Feature: Safe content redesign", () => {
+describe("Feature: Station Imaging redesign", () => {
   let originalFetch: typeof fetch;
 
   beforeEach(() => {

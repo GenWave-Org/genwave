@@ -84,6 +84,15 @@ class MediaRow
     public string? ExplicitSource { get; set; }
 
     /// <summary>
+    /// Station Imaging content kind (gh-#149) — <c>library.media.imaging_kind</c>, one of
+    /// <c>liner</c>/<c>station_id</c>/<c>jingle</c>/<c>promo</c> for an authored row; null for
+    /// scanned rows and authored rows that predate the column. Only populated by projections that
+    /// select it (the admin queries), mirroring <see cref="Moods"/>'s pattern. Metadata-only:
+    /// playout never reads it.
+    /// </summary>
+    public string? ImagingKind { get; set; }
+
+    /// <summary>
     /// Postgres system column <c>xmin</c> — the transaction id that last wrote this row.
     /// Exposed as a string for use as an optimistic-concurrency token (ETag) on the admin write path.
     /// Dapper maps this because <c>MatchNamesWithUnderscores</c> is enabled globally and the column is
@@ -177,5 +186,6 @@ class MediaRow
         Moods: Moods,
         Rateable: Rateable,
         Explicit: Explicit,
-        ExplicitSource: ExplicitSource);
+        ExplicitSource: ExplicitSource,
+        ImagingKind: ImagingKind);
 }

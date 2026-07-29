@@ -4,7 +4,7 @@
 //
 // Runner: Jest (jsdom) + @testing-library/react. Authored PENDING at /plan time (2026-07-14,
 // house rule since Epic S) as it.todo entries — V5 implements against the catalog detail page
-// and the Safe content page.
+// and the Station Imaging page.
 //
 // The catalog detail page's scenarios dynamically import `page.tsx` (mirrors
 // catalog-pages.spec.ts's tree-walker suite, but rendered here via @testing-library/react instead
@@ -155,7 +155,7 @@ async function renderDetailPage(spec: DetailFetchSpec): Promise<ReturnType<typeo
 }
 
 // ---------------------------------------------------------------------------
-// Helpers — Safe content page
+// Helpers — Station Imaging page
 // ---------------------------------------------------------------------------
 
 const SEED_MESSAGE = "You're listening to {StationName}. We'll be right back — stay tuned.";

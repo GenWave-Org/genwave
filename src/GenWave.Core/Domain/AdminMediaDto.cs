@@ -34,6 +34,11 @@ namespace GenWave.Core.Domain;
 /// <c>tag</c>/<c>llm</c>/<c>operator</c> — once it has been. db/26 ships the columns and this
 /// projection only; no classification pipeline writes them yet (T110), and nothing enforces or
 /// filters on them here — <c>Explicit</c> is orthogonal to the F95.5 never-play verdict.
+///
+/// <c>ImagingKind</c> (gh-#149) surfaces the Station Imaging content kind of an authored segment
+/// as its storage token — <c>liner</c>/<c>station_id</c>/<c>jingle</c>/<c>promo</c> — and is
+/// <see langword="null"/> for scanned rows and for authored rows that predate db/30. Metadata-only:
+/// playout and the safe loop ignore it entirely (a future issue wires kind-aware rotation).
 /// </summary>
 public sealed record AdminMediaDto(
     string MediaId,
@@ -60,4 +65,5 @@ public sealed record AdminMediaDto(
     IReadOnlyList<string>? Moods = null,
     bool Rateable = true,
     bool? Explicit = null,
-    string? ExplicitSource = null);
+    string? ExplicitSource = null,
+    string? ImagingKind = null);
