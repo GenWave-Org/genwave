@@ -212,17 +212,21 @@ services:
     restart: unless-stopped
 
   piper:
-    # PIN — artibex/piper-http publishes exactly one tag (`latest`); no versioned tag exists to
-    # pin against instead (checked via `docker manifest inspect`/Docker Hub's tags API at wiring
-    # time). Pinned by the DIGEST that tag resolved to, so this is immutable regardless of what
-    # `latest` becomes upstream — re-verify (`docker manifest inspect artibex/piper-http:latest`)
-    # and bump the digest at each deliberate upgrade.
-    image: artibex/piper-http@sha256:87cc63665fda1a6dfecb139408552b1d2d8a440ed3f6ef3cdabe10661c184a28
+    # Repo-built (gh-#241): the artibex/piper-http digest this service used to pin is amd64-only
+    # (single-arch manifest, re-verified 2026-07-29) and wraps an UNPINNED git clone of the
+    # now-archived rhasspy/piper. piper/ owns the image instead — pinned piper-tts (the maintained
+    # piper1-gpl line) behind a stdlib HTTP wrapper that preserves the artibex wire shape exactly:
+    # POST text/plain -> / -> WAV bytes (PiperTtsSynthesizer), OPTIONS answered quietly (gh-#64,
+    # PiperHealthProbe), same MODEL_DOWNLOAD_LINK/SPEAKER env contract, same port 5000. Published
+    # multi-arch per release as ghcr.io/genwave-org/genwave-piper (gh-#240 matrix); the demo
+    # overlay pins that image like every other repo-built service (gh-#93 posture).
+    build:
+      context: ./piper
     networks: [core]                                    # internal only; no host ports
     environment:
-      # Wraps upstream `piper.http_server`: downloads this ONNX voice model to MODEL_TARGET_FOLDER
-      # on first boot (persisted in the piper_models volume below) and serves it for the container's
-      # lifetime — matches the api's Tts__Fallback__Voice above (en_US-lessac-medium).
+      # Downloads this ONNX voice model (+ its .onnx.json config) to /app/models on first boot
+      # (persisted in the piper_models volume below) and serves it for the container's lifetime —
+      # matches the api's Tts__Fallback__Voice above (en_US-lessac-medium).
       MODEL_DOWNLOAD_LINK: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx?download=true"
       SPEAKER: "0"
     volumes:
@@ -232,9 +236,9 @@ services:
     # to Piper's much smaller footprint.
     mem_limit: 768m
     healthcheck:
-      # Plain TCP-connect check, same idiom as icecast/engine above — piper.http_server's
-      # one route (`/`) 500s on every request without a `?text=` query, even when perfectly
-      # healthy, so an HTTP-level healthcheck would misreport a healthy server as down.
+      # Plain TCP-connect check, same idiom as icecast/engine above. The repo-built server only
+      # opens port 5000 AFTER the voice model is downloaded and loaded (piper/server.py), so a
+      # connect success here means "ready to render", not merely "process exists".
       test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/5000'"]
       interval: 5s
       timeout: 3s

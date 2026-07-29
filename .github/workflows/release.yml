@@ -3,11 +3,21 @@ name: Release
 # Tag-triggered release (SPEC F65.2, STORY-176): push a `v*` tag -> build+test, publish images
 # stamped with the tag as GW_VERSION, then create the GitHub Release. Mirrors ci.yml's `images`
 # job (same registry, same `home-*` tag prefix -- the Business edition gets its own prefix
-# elsewhere) but stamps the pushed tag instead of the commit sha. Publishes api + icecast +
-# every image compose can run pinned: api, icecast, admin_ui, and engine (gh-#93: a --pinned
-# demo box ran a stale locally-built admin_ui for two releases because it was never published;
-# engine had the same exposure). Note genwave.liq is a bind mount, not baked into the engine
-# image -- the image carries only the Liquidsoap version pin + entrypoint.sh.
+# elsewhere) but stamps the pushed tag instead of the commit sha. Publishes every image compose
+# can run pinned: api, icecast, admin_ui, engine (gh-#93: a --pinned demo box ran a stale
+# locally-built admin_ui for two releases because it was never published; engine had the same
+# exposure), and piper (gh-#241: repo-owned fallback TTS). Note genwave.liq is a bind mount, not
+# baked into the engine image -- the image carries only the Liquidsoap version pin + entrypoint.sh.
+#
+# Multi-arch (gh-#240): every image publishes linux/amd64 + linux/arm64. Canonical
+# distributed-build pattern (docker docs "multi-platform image with GitHub Actions"): a per-arch
+# matrix builds and pushes each platform BY DIGEST on a native runner -- amd64 on ubuntu-latest,
+# arm64 on ubuntu-24.04-arm (GitHub's arm64 hosted runners, free for public repos since the
+# 2025-08 GA; QEMU is painfully slow for `dotnet publish`/`next build`) -- then a merge job
+# stitches the digests into one manifest list per image with `docker buildx imagetools create`.
+# The release FAILS if either arch fails: merge-manifests `needs` the whole build matrix, the
+# merge script demands exactly two digests, and the inspect step asserts both platforms are in
+# the pushed index. `home-latest` and the Release object only move after every merge succeeds.
 #
 # Pushing the tag is the ONLY manual act: this workflow never commits or pushes back to the repo.
 
@@ -39,92 +49,204 @@ jobs:
       - name: Test
         run: dotnet test GenWave.sln --no-build --configuration Release --filter "Category!=Integration"
 
-  release:
+  # One job per (image, platform): each arch builds natively and pushes an UNTAGGED image by
+  # digest; merge-manifests below is the only place tags are written, so a half-released tag
+  # (one arch pushed, the other failed) can never exist.
+  build-images:
     needs: build-test
-    runs-on: ubuntu-latest
     permissions:
-      contents: write   # gh release create
-      packages: write   # ghcr.io push
+      contents: read
+      packages: write   # ghcr.io push (by digest)
+    strategy:
+      # Let the sibling arch finish so one failed run reports both arches' results; the job as a
+      # whole still fails (and merge-manifests never runs) if ANY leg fails.
+      fail-fast: false
+      matrix:
+        image: [api, icecast, admin-ui, engine, piper]
+        platform: [linux/amd64, linux/arm64]
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+          # GW_TAG note (script injection): tag values only ever reach shell scripts via `env:`
+          # bindings, never inline expansion. `${{ github.ref_name }}` inside `with:`/matrix
+          # values below is action input DATA, not script text, and git ref syntax forbids the
+          # control characters a build-arg or tag-list injection would need.
+          - image: api
+            registry_image: ghcr.io/genwave-org/genwave
+            context: .
+            dockerfile: src/GenWave.Host/Dockerfile
+            description: GenWave Home control-plane API
+            # GW_VERSION feeds the API's InformationalVersion stamp.
+            build_args: GW_VERSION=${{ github.ref_name }}
+          - image: icecast
+            registry_image: ghcr.io/genwave-org/genwave-icecast
+            context: ./icecast
+            dockerfile: ./icecast/Dockerfile
+            description: GenWave Home Icecast fan-out
+            build_args: ''
+          # BACKEND_URL is baked at build time (next.config.ts rewrites) and defaults to
+          # http://api:8080 in admin-ui/Dockerfile -- correct for every compose topology, so that
+          # one needs no build-arg here. GW_VERSION feeds the footer's version stamp (gh-#7), the
+          # same tag value the API image bakes into InformationalVersion.
+          - image: admin-ui
+            registry_image: ghcr.io/genwave-org/genwave-admin-ui
+            context: ./admin-ui
+            dockerfile: ./admin-ui/Dockerfile
+            description: GenWave Home admin UI
+            build_args: GW_VERSION=${{ github.ref_name }}
+          # genwave.liq is NOT in this image (bind-mounted from the checkout at run time) -- this
+          # publishes the Liquidsoap version pin + entrypoint.sh, the two parts a --pinned box
+          # could otherwise never receive after first deploy.
+          - image: engine
+            registry_image: ghcr.io/genwave-org/genwave-engine
+            context: ./engine
+            dockerfile: ./engine/Dockerfile
+            description: GenWave Home Liquidsoap engine
+            build_args: ''
+          # gh-#241: repo-owned fallback-TTS image (the artibex/piper-http digest compose used to
+          # pin is amd64-only) — same wire shape, published per release so the demo overlay can
+          # pin it like every other repo-built image (gh-#93 posture).
+          - image: piper
+            registry_image: ghcr.io/genwave-org/genwave-piper
+            context: ./piper
+            dockerfile: ./piper/Dockerfile
+            description: GenWave Home Piper fallback TTS
+            build_args: ''
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
+      - name: Prepare platform pair (linux/arm64 -> linux-arm64 for artifact names)
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> "$GITHUB_ENV"
       - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v4
+      - name: Build + push by digest (${{ matrix.image }} ${{ matrix.platform }})
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          build-args: ${{ matrix.build_args }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/GenWave-Org/genwave
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.licenses=AGPL-3.0-only
+            org.opencontainers.image.version=${{ github.ref_name }}
+          tags: ${{ matrix.registry_image }}
+          # provenance:false keeps each pushed digest a plain single-arch image manifest, as the
+          # pre-multi-arch `docker build` pipeline produced -- buildx's default provenance
+          # attestation would wrap every digest in its own index and surface phantom
+          # `unknown/unknown` entries on GHCR after the merge.
+          provenance: false
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+      - name: Export digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          touch "${{ runner.temp }}/digests/${DIGEST#sha256:}"
+      - name: Upload digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: digests-${{ matrix.image }}-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
 
-      # GW_TAG is bound once via env and referenced as "$GW_TAG" (quoted) below -- never expanded
-      # directly into script text -- so a malicious tag (e.g. `v1;curl...|sh`) can't inject
-      # commands into this packages:write runner. See GitHub's script-injection mitigation.
-      - name: Build + push API image (GW_VERSION=${{ github.ref_name }})
+  # One manifest list per image: stitch the two per-arch digests into
+  # `home-<tag>` + `home-latest`. Runs only when EVERY build-images leg succeeded.
+  merge-manifests:
+    needs: build-images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # ghcr.io manifest push
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: api
+            registry_image: ghcr.io/genwave-org/genwave
+            description: GenWave Home control-plane API
+          - image: icecast
+            registry_image: ghcr.io/genwave-org/genwave-icecast
+            description: GenWave Home Icecast fan-out
+          - image: admin-ui
+            registry_image: ghcr.io/genwave-org/genwave-admin-ui
+            description: GenWave Home admin UI
+          - image: engine
+            registry_image: ghcr.io/genwave-org/genwave-engine
+            description: GenWave Home Liquidsoap engine
+          - image: piper
+            registry_image: ghcr.io/genwave-org/genwave-piper
+            description: GenWave Home Piper fallback TTS
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-${{ matrix.image }}-*
+          merge-multiple: true
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v4
+      # GW_TAG is bound via env and referenced as "$GW_TAG" (quoted) -- never expanded directly
+      # into script text -- so a malicious tag (e.g. `v1;curl...|sh`) can't inject commands into
+      # this packages:write runner. See GitHub's script-injection mitigation. The index
+      # annotations mirror the per-arch image labels so GHCR reads source/description off the
+      # manifest list itself.
+      - name: Create + push multi-arch manifest (${{ matrix.image }})
+        working-directory: ${{ runner.temp }}/digests
         env:
           GW_TAG: ${{ github.ref_name }}
+          REGISTRY_IMAGE: ${{ matrix.registry_image }}
+          DESCRIPTION: ${{ matrix.description }}
         run: |
-          docker build -f src/GenWave.Host/Dockerfile \
-            --build-arg "GW_VERSION=$GW_TAG" \
-            --label org.opencontainers.image.source=https://github.com/GenWave-Org/genwave \
-            --label org.opencontainers.image.description="GenWave Home control-plane API" \
-            --label org.opencontainers.image.licenses=AGPL-3.0-only \
-            --label "org.opencontainers.image.version=$GW_TAG" \
-            -t "ghcr.io/genwave-org/genwave:home-$GW_TAG" \
-            -t ghcr.io/genwave-org/genwave:home-latest \
-            .
-          docker push "ghcr.io/genwave-org/genwave:home-$GW_TAG"
-          docker push ghcr.io/genwave-org/genwave:home-latest
-
-      - name: Build + push Icecast image
+          digests=()
+          for digest_file in *; do
+            digests+=("$REGISTRY_IMAGE@sha256:$digest_file")
+          done
+          # Exactly one digest per arch or this is not a release: fail before any tag moves.
+          if [ "${#digests[@]}" -ne 2 ]; then
+            echo "::error::expected exactly 2 per-arch digests for $REGISTRY_IMAGE, found ${#digests[@]}"
+            exit 1
+          fi
+          docker buildx imagetools create \
+            --annotation "index:org.opencontainers.image.source=https://github.com/GenWave-Org/genwave" \
+            --annotation "index:org.opencontainers.image.description=$DESCRIPTION" \
+            --annotation "index:org.opencontainers.image.licenses=AGPL-3.0-only" \
+            --annotation "index:org.opencontainers.image.version=$GW_TAG" \
+            -t "$REGISTRY_IMAGE:home-$GW_TAG" \
+            -t "$REGISTRY_IMAGE:home-latest" \
+            "${digests[@]}"
+      - name: Verify both architectures shipped
         env:
           GW_TAG: ${{ github.ref_name }}
+          REGISTRY_IMAGE: ${{ matrix.registry_image }}
         run: |
-          docker build \
-            --label org.opencontainers.image.source=https://github.com/GenWave-Org/genwave \
-            --label org.opencontainers.image.description="GenWave Home Icecast fan-out" \
-            --label org.opencontainers.image.licenses=AGPL-3.0-only \
-            --label "org.opencontainers.image.version=$GW_TAG" \
-            -t "ghcr.io/genwave-org/genwave-icecast:home-$GW_TAG" \
-            -t ghcr.io/genwave-org/genwave-icecast:home-latest \
-            ./icecast
-          docker push "ghcr.io/genwave-org/genwave-icecast:home-$GW_TAG"
-          docker push ghcr.io/genwave-org/genwave-icecast:home-latest
+          inspect_output="$(docker buildx imagetools inspect "$REGISTRY_IMAGE:home-$GW_TAG")"
+          echo "$inspect_output"
+          echo "$inspect_output" | grep -q 'linux/amd64'
+          echo "$inspect_output" | grep -q 'linux/arm64'
 
-      # BACKEND_URL is baked at build time (next.config.ts rewrites) and defaults to
-      # http://api:8080 in admin-ui/Dockerfile -- correct for every compose topology, so that
-      # one needs no build-arg here. GW_VERSION feeds the footer's version stamp (gh-#7), the
-      # same tag value the API image bakes into InformationalVersion.
-      - name: Build + push Admin UI image (GW_VERSION=${{ github.ref_name }})
-        env:
-          GW_TAG: ${{ github.ref_name }}
-        run: |
-          docker build \
-            --build-arg "GW_VERSION=$GW_TAG" \
-            --label org.opencontainers.image.source=https://github.com/GenWave-Org/genwave \
-            --label org.opencontainers.image.description="GenWave Home admin UI" \
-            --label org.opencontainers.image.licenses=AGPL-3.0-only \
-            --label "org.opencontainers.image.version=$GW_TAG" \
-            -t "ghcr.io/genwave-org/genwave-admin-ui:home-$GW_TAG" \
-            -t ghcr.io/genwave-org/genwave-admin-ui:home-latest \
-            ./admin-ui
-          docker push "ghcr.io/genwave-org/genwave-admin-ui:home-$GW_TAG"
-          docker push ghcr.io/genwave-org/genwave-admin-ui:home-latest
-
-      # genwave.liq is NOT in this image (bind-mounted from the checkout at run time) -- this
-      # publishes the Liquidsoap version pin + entrypoint.sh, the two parts a --pinned box
-      # could otherwise never receive after first deploy.
-      - name: Build + push Engine image
-        env:
-          GW_TAG: ${{ github.ref_name }}
-        run: |
-          docker build \
-            --label org.opencontainers.image.source=https://github.com/GenWave-Org/genwave \
-            --label org.opencontainers.image.description="GenWave Home Liquidsoap engine" \
-            --label org.opencontainers.image.licenses=AGPL-3.0-only \
-            --label "org.opencontainers.image.version=$GW_TAG" \
-            -t "ghcr.io/genwave-org/genwave-engine:home-$GW_TAG" \
-            -t ghcr.io/genwave-org/genwave-engine:home-latest \
-            ./engine
-          docker push "ghcr.io/genwave-org/genwave-engine:home-$GW_TAG"
-          docker push ghcr.io/genwave-org/genwave-engine:home-latest
-
+  create-release:
+    needs: merge-manifests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # gh release create
+    steps:
+      - uses: actions/checkout@v7
       # gh CLI over a third-party action -- it's preinstalled on the runner and needs only the
       # default token. No repo write beyond the Release object itself (not a commit, not a push).
       # Idempotent: a release created through the GitHub UI ("Draft a new release") creates the

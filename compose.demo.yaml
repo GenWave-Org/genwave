@@ -68,6 +68,17 @@ services:
     # the Liquidsoap version pin + entrypoint.sh; liq script changes arrive via git pull.
     build: !reset null
 
+  piper:
+    # gh-#241: piper is now a repo-built image (base compose builds ./piper), so a demo box pins
+    # the published one, same posture as admin_ui/engine (gh-#93): pull or fail loudly — never
+    # silently source-build and freeze. NOTE the first genwave-piper publish happens at the FIRST
+    # TAG CUT AFTER gh-#240/#241 — until that release's pin bump this tag does not exist and the
+    # pull fails loudly by design. Bump with the other four pins per release.
+    image: ghcr.io/genwave-org/genwave-piper:home-v2.8.7     # bump per release
+    pull_policy: always
+    # Same !reset rationale as admin_ui above (gh-#93).
+    build: !reset null
+
   ollama:
     image: ollama/ollama:0.9.6            # PIN — tested; `latest` drifts
     networks: [core]                      # api reaches it at http://ollama:11434

@@ -262,8 +262,15 @@ public static class FeatureRequestsArtworkGate
             // constant file) matches the established idiom — every existing gate owns its own
             // copy, so no single file is a point of failure for the whole suite's zero-diff
             // convention.
+            //
+            // ComposeYamlSha256 re-pinned 2026-07-29 (gh-#241): the piper service moves off the
+            // amd64-only artibex/piper-http digest onto the repo-built ./piper build context
+            // (published multi-arch per release via the gh-#240 matrix). Same wire shape, env,
+            // volume, and healthcheck contract — a piper-service-only edit, another intentional
+            // edit from a LATER epic, not a regression of this epic's zero-diff promise.
+            // EngineScriptSha256 unchanged — gh-#241 does not touch engine/genwave.liq.
             const string EngineScriptSha256 = "869ea6fc35e3d73de4ca6cc47551a07da63bd855481ba77120fe73f1754d72da";
-            const string ComposeYamlSha256  = "51e394e654f1ab1049503eb1c99d7d43c286b69069b9b88f4b78ce37a7f3438c";
+            const string ComposeYamlSha256  = "60f2f6753613e43af841bc7efb414d85a08ee8cb22fe2848fb0c564d75d7bf28";
 
             Assert.Equal(EngineScriptSha256, Sha256Hex(Path.Combine("engine", "genwave.liq")));
             Assert.Equal(ComposeYamlSha256, Sha256Hex("compose.yaml"));
