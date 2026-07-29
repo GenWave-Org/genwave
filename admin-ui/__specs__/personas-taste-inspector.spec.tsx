@@ -211,11 +211,40 @@ describe("Feature: persona taste inspector", () => {
         name: "Accrued taste rules against the cap",
       });
       expect([meter.getAttribute("aria-valuenow"), meter.getAttribute("aria-valuemax")]).toEqual(["12", "40"]);
+    });
+  });
 
-      // gh-#143: the raw "12 / 40" reading now carries one quiet line naming WHAT accrues.
-      expect(
-        within(section).getByText(/learned from your taste thumbs, counted against its cap/)
-      ).toBeInTheDocument();
+  // gh-#209 (supersedes gh-#143's always-on one-liner): ACCRUED is explained by the house `?`
+  // flyover (the settings page's gh-#145 pattern) — mounted-but-hidden panel, click pins it open.
+  describe("Scenario: the Accrued heading explains what accrued taste is (gh-#209)", () => {
+    it("renders a ? help trigger on the Accrued heading, collapsed, with the copy mounted but hidden", async () => {
+      makeDispatchFetchMock({ "GET /api/personas/1/taste": { status: 200, body: RULE_ALL_SOURCES } });
+      renderClient();
+
+      const section = await expandTaste("Radio Rex");
+
+      const trigger = await within(section).findByRole("button", { name: "Help: Accrued taste" });
+      expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+      const panel = within(section).getByTestId("accrued-taste-help");
+      expect(panel).toBeInTheDocument();
+      expect(panel).not.toBeVisible();
+    });
+
+    it("pins the explanation open on click, in operator terms — thumbs, artist opinions, picks, cap", async () => {
+      makeDispatchFetchMock({ "GET /api/personas/1/taste": { status: 200, body: RULE_ALL_SOURCES } });
+      renderClient();
+
+      const section = await expandTaste("Radio Rex");
+      fireEvent.click(await within(section).findByRole("button", { name: "Help: Accrued taste" }));
+
+      const panel = within(section).getByTestId("accrued-taste-help");
+      expect(panel).toBeVisible();
+      expect(panel.textContent ?? "").toMatch(/learned from your taste thumbs/);
+      // ’ — the copy renders a typographic apostrophe (&rsquo;), not ASCII '.
+      expect(panel.textContent ?? "").toMatch(/nudges its opinion of that track’s artist/);
+      expect(panel.textContent ?? "").toMatch(/steer which tracks it favors/);
+      expect(panel.textContent ?? "").toMatch(/the weakest opinion is dropped/);
     });
   });
 
@@ -267,7 +296,12 @@ describe("Feature: persona taste inspector", () => {
         expect(within(section).getByRole("heading", { name: "Authored" })).toBeInTheDocument();
       });
 
-      expect(within(section).queryAllByRole("button")).toHaveLength(0);
+      // gh-#209: the Accrued heading's `?` help trigger is the ONE permitted button — it reveals
+      // copy, mutates nothing. Anything not named `Help: …` is still a read-only violation.
+      const buttons = within(section)
+        .queryAllByRole("button")
+        .filter((button) => !(button.getAttribute("aria-label") ?? "").startsWith("Help:"));
+      expect(buttons).toHaveLength(0);
     });
   });
 });
