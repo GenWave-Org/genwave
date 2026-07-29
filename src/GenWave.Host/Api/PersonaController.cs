@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Logging;
 using GenWave.Host.Options;
 
 namespace GenWave.Host.Api;
@@ -75,7 +76,8 @@ public sealed partial class PersonaController(
 
         if (result is PersonaWriteResult.Created created)
             logger.LogInformation(
-                "Persona created id={PersonaId} name={PersonaName}", created.Persona.Id, created.Persona.Name);
+                "Persona created id={PersonaId} name={PersonaName}",
+                created.Persona.Id, LogSanitize.Strip(created.Persona.Name));
 
         return result switch
         {
@@ -102,7 +104,8 @@ public sealed partial class PersonaController(
 
         if (result is PersonaWriteResult.Updated updated)
             logger.LogInformation(
-                "Persona updated id={PersonaId} name={PersonaName}", updated.Persona.Id, updated.Persona.Name);
+                "Persona updated id={PersonaId} name={PersonaName}",
+                updated.Persona.Id, LogSanitize.Strip(updated.Persona.Name));
 
         return result switch
         {

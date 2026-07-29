@@ -13,6 +13,18 @@
 // ONE flywheel run via an xUnit collection fixture (RequestsArtworkFlywheelFixture) — mirroring
 // KokoroFixture's shared-container idiom — because POSTing the wish twice would trip
 // Requests:PerIpCooldownMinutes (default 5) on the second fact.
+//
+// Amended gh-#181 (2026-07-29): a stack merely ANSWERING on :8080 no longer runs the flywheel.
+// On a busy dev box the request is picked promptly (fulfilled=True) but the feeder's look-ahead
+// queue drains to it with heavy latency drift — ~50% of runs missed the old 600s window outright
+// (two observed 10-minute misses against the 3m45s–5m09s calibration baseline), or the LeadIn
+// correlation missed. That is an environment condition of a loaded dev stack, not a code defect,
+// so the flywheel now follows Story013's GENWAVE_LIVE_LUFS_GATE opt-in convention exactly: set
+// GENWAVE_LIVE_REQUEST_GATE=1 to exercise it; absent that, both facts write a SKIPPED-AT-RUNTIME
+// line and return before ANY network traffic (no wish is POSTed, no cooldown is burned) — a
+// visible skip, never a silent pass. The window itself also widened to 900s; see PollTimeout's
+// own remarks. The underlying queue-drain drift is a separate investigation (gh-#181's scope
+// note) — this amendment only makes the suite honest about it.
 
 using System.Globalization;
 using System.Net;
@@ -264,9 +276,10 @@ public static class FeatureRequestsArtworkGate
 /// stream and fetches the StreamUrl it reports.
 /// <para>
 /// <see cref="SkipReason"/> is set (never an exception) for every condition that means "this
-/// environment cannot exercise the gate right now" — unreachable stack, no ADMIN_PASSWORD,
-/// requests disabled, no PublicBaseUrl, empty catalog, or a 429 from a previous run's cooldown
-/// (SPEC F87.3). Once past every precondition, a genuine failure (the poll timing out, the ICY
+/// environment cannot exercise the gate right now" — the GENWAVE_LIVE_REQUEST_GATE=1 opt-in
+/// absent (gh-#181, checked FIRST, before any network traffic), unreachable stack, no
+/// ADMIN_PASSWORD, requests disabled, no PublicBaseUrl, empty catalog, or a 429 from a previous
+/// run's cooldown (SPEC F87.3). Once past every precondition, a genuine failure (the poll timing out, the ICY
 /// handshake never yielding a StreamUrl) is left unset — a real assertion failure, not a skip.
 /// </para>
 /// </summary>
@@ -282,21 +295,27 @@ public sealed class RequestsArtworkFlywheelFixture : IAsyncLifetime
     static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// Bounded well under the real 15-minute Station:Requests:WindowMinutes default (SPEC F87.6) —
-    /// "poll for fulfilled within a shortened window", not the request's own expiry. 600s (10
-    /// minutes) is empirically calibrated, not a guess: three live runs against Dean's dev stack
-    /// (2026-07-24, this task) measured request-received-to-actual-airing latency of ~3m45s, ~5m06s,
-    /// and ~5m09s — the fulfillment PICK happens promptly, but the fulfilled item then has to drain
-    /// whatever the feeder's own look-ahead queue was already holding (one run had a 220s track
-    /// queued ahead of it) before it actually reaches on-air. 300s undershot the 5m06s run by 6
-    /// seconds. Overridable for a slower/busier dev box.
+    /// 900s (15 minutes) — widened from 600s at gh-#181 (2026-07-29) to honor observed latency
+    /// drift on a busy dev box. The original 600s was empirically calibrated, not a guess: three
+    /// live runs against Dean's dev stack (2026-07-24, PLAN T93) measured
+    /// request-received-to-actual-airing latency of ~3m45s, ~5m06s, and ~5m09s — the fulfillment
+    /// PICK happens promptly, but the fulfilled item then has to drain whatever the feeder's own
+    /// look-ahead queue was already holding (one run had a 220s track queued ahead of it) before
+    /// it actually reaches on-air. Under load that drain drifts: two later runs missed even the
+    /// full 600s (~50% flake across runs), so 600s now undershoots the same way 300s once
+    /// undershot the 5m06s run by 6 seconds. 900s is the natural next ceiling — it is the
+    /// 15-minute Station:Requests:WindowMinutes default (SPEC F87.6) that this comment always
+    /// bounded itself against: a wish's fulfillment pick can only legitimately happen inside that
+    /// window, so polling past it would no longer be measuring the flywheel promise at all.
+    /// Overridable for a slower/busier dev box. (The drain drift itself is a separate
+    /// investigation — see gh-#181.)
     /// </summary>
     static TimeSpan PollTimeout => TimeSpan.FromSeconds(
         int.TryParse(
             Environment.GetEnvironmentVariable("GENWAVE_LIVE_REQUEST_GATE_TIMEOUT_SECONDS"),
             NumberStyles.Integer, CultureInfo.InvariantCulture, out var seconds)
             ? seconds
-            : 600);
+            : 900);
 
     public string? SkipReason { get; private set; }
     public string? RequestedArtist { get; private set; }
@@ -308,6 +327,19 @@ public sealed class RequestsArtworkFlywheelFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
+        // Opt-in guard FIRST, before any network traffic (gh-#181, Story013's
+        // GENWAVE_LIVE_LUFS_GATE idiom): a compose stack answering on :8080 is no longer enough
+        // to run the flywheel — its queue-drain latency drifts with dev-box load (~50% flake
+        // against the 600s-era window), so exercising it is an explicit choice, not a side
+        // effect of having the stack up. Skipping here also never burns the per-IP request
+        // cooldown (SPEC F87.3) on a run that was never meant to assert anything.
+        if (Environment.GetEnvironmentVariable("GENWAVE_LIVE_REQUEST_GATE") != "1")
+        {
+            SkipReason = "GENWAVE_LIVE_REQUEST_GATE!=1 — live flywheel gate is opt-in " +
+                "(dev-box queue-drain latency drift; see gh-#181)";
+            return;
+        }
+
         using var admin = new HttpClient(new HttpClientHandler { CookieContainer = new CookieContainer() })
         {
             BaseAddress = new Uri(ApiBaseUrl),

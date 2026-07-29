@@ -32,6 +32,9 @@ const NOVA: PersonaDto = {
   backstory: "An upbeat morning host.",
   style: "Bright and quick.",
   voice: "",
+  slug: "nova",
+  importedFrom: null,
+  importedAt: null,
 };
 
 /** A card naming a voice this station doesn't have — what `GET /api/personas/nova/export` would
@@ -196,6 +199,27 @@ describe("Feature: Persona voice picker", () => {
       const link = await screen.findByRole("link", { name: /pick a voice/i });
       expect(link).toHaveAttribute("href", "#persona-voice");
       expect(screen.getByLabelText("Voice")).toHaveAttribute("id", "persona-voice");
+    });
+
+    // gh-#179: an imported persona's stored slug can diverge from a fresh slugify of its name
+    // (legacy `persona-N` defaults, import-route slugs) — and imported personas are exactly the
+    // population this warning exists for. The export fetch must use the STORED slug; a
+    // name-derived one 404s and silently swallows the warning (false negative).
+    it("fetches the export card by the STORED slug when it diverges from the name-derived one", async () => {
+      const legacySlugged: PersonaDto = { ...NOVA, slug: "persona-2", importedFrom: "file", importedAt: "2026-07-20T00:00:00.000Z" };
+      const mockFetch = makeDispatchFetchMock({
+        "GET /api/voices": { status: 200, body: VOICE_IDS },
+        "GET /api/personas/persona-2/export": { status: 200, text: unresolvedVoiceCardJson() },
+      });
+      renderClient({ initialPersonas: [legacySlugged] });
+
+      fireEvent.click(screen.getByRole("button", { name: "Edit Nova" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("alert")).toHaveTextContent(/af_unknown/i);
+      });
+      expect(findCall(mockFetch, "GET", "/api/personas/persona-2/export")).toBeDefined();
+      expect(findCall(mockFetch, "GET", "/api/personas/nova/export")).toBeUndefined();
     });
   });
 
