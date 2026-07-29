@@ -135,6 +135,11 @@ public static class FeatureComposeEnvDriftGuard
         // Admin__Password/ConnectionStrings:* above.
         "Icecast__StatsUrl",
         "Icecast__AdminPassword",
+        // Health-page container stats (gh-#148). DockerStats__BaseUrl is infra wiring (the
+        // dockerproxy sidecar's container-network address), not an operator-editable setting —
+        // same shape as Icecast__StatsUrl above; DockerStatsOptions's doc comment names the same
+        // StationSettingsAllowlist exclusion.
+        "DockerStats__BaseUrl",
     };
 
     /// <summary>

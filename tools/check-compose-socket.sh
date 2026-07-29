@@ -2,11 +2,12 @@
 # check-compose-socket.sh — SPEC F78.2 / STORY-203 guard.
 #
 # /var/run/docker.sock is the keys to the host: any container that can read it can control
-# every other container (and, transitively, the host). The only reason this repo will ever
-# bind-mount it is the `alloy` metrics/log collector (PLAN T49) reading container stats — and
-# even then it must be read-only. This guard pins that invariant shut across every render this
-# repo produces: base (compose.yaml) and base+demo (compose.yaml+compose.demo.yaml), under
-# every profile combination (none, admin, tunnel, logging, admin+tunnel+logging).
+# every other container (and, transitively, the host). Exactly two services may ever bind-mount
+# it, both read-only: the `alloy` metrics/log collector (PLAN T49) and the `dockerproxy`
+# allowlisting socket proxy behind the Health page's container stats (gh-#148). This guard pins
+# that invariant shut across every render this repo produces: base (compose.yaml) and base+demo
+# (compose.yaml+compose.demo.yaml), under every profile combination (none, admin, tunnel,
+# logging, admin+tunnel+logging).
 #
 # The socket is matched by basename pattern (any source/target path ending in `docker.sock`),
 # not an exact `/var/run/docker.sock` string — `/var/run` is a symlink to `/run` on modern
@@ -32,7 +33,7 @@
 #     <path> instead of invoking docker. Lets callers (tests, CI on a docker-less runner) drive
 #     fixtures without the docker CLI (STORY-203 AC).
 #
-# Exit: 0 — every render checked: only `alloy` mounts docker.sock, and only read-only.
+# Exit: 0 — every render checked: only `alloy`/`dockerproxy` mount docker.sock, and only read-only.
 #       1 — at least one offending service:render is named on stdout.
 #       2 — usage/environment error (bad args, jq missing, file not found).
 
@@ -44,7 +45,15 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # /run/docker.sock (the /var/run symlink target on modern Linux), or any other path ending in
 # it. Anchored with `$`: "docker.sock" must be the final path segment.
 SOCKET_PATTERN='docker\.sock$'
-ALLOWED_SERVICE="alloy"
+ALLOWED_SERVICES=("alloy" "dockerproxy")
+
+is_allowed_service() {
+  local candidate="$1" allowed
+  for allowed in "${ALLOWED_SERVICES[@]}"; do
+    [ "$candidate" = "$allowed" ] && return 0
+  done
+  return 1
+}
 
 CONFIG_FILE=""
 
@@ -111,14 +120,14 @@ check_render() {
     [ -n "$service" ] || continue
     [[ "$source" =~ $SOCKET_PATTERN ]] || [[ "$target" =~ $SOCKET_PATTERN ]] || continue
 
-    if [ "$service" = "$ALLOWED_SERVICE" ]; then
+    if is_allowed_service "$service"; then
       if [ "$read_only" = "true" ]; then
         allowed_report+=("$label:$service")
       else
         offenders+=("$label: $service mounts docker.sock read-write (must be read_only: true)")
       fi
     else
-      offenders+=("$label: $service mounts docker.sock (only $ALLOWED_SERVICE may)")
+      offenders+=("$label: $service mounts docker.sock (only ${ALLOWED_SERVICES[*]} may)")
     fi
   done <<<"$rows"
 }
@@ -194,7 +203,7 @@ else
 fi
 
 if [ "${#offenders[@]}" -gt 0 ]; then
-  echo "check-compose-socket: FAIL — docker.sock mounted outside the $ALLOWED_SERVICE read-only carve-out:"
+  echo "check-compose-socket: FAIL — docker.sock mounted outside the ${ALLOWED_SERVICES[*]} read-only carve-outs:"
   for offender in "${offenders[@]}"; do
     echo "  $offender"
   done

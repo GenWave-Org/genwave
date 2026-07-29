@@ -70,6 +70,15 @@ export function SafeContentIcon(props: IconProps): ReactNode {
   );
 }
 
+/** Health nav glyph (gh-#148) — a pulse trace: the container-stats vital-signs read. */
+export function HealthIcon(props: IconProps): ReactNode {
+  return (
+    <IconBase {...props}>
+      <path d="M1.5 8h3l1.5-3.5 3 7 1.5-3.5h4" />
+    </IconBase>
+  );
+}
+
 /** DJ persona nav glyph (SPEC F35.7) — a microphone: capsule head, pickup arc, stand. */
 export function PersonaIcon(props: IconProps): ReactNode {
   return (

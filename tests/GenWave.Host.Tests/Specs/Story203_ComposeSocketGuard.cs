@@ -5,8 +5,9 @@
 // carry Category=Integration; hand-built --config-file fixtures run in the ordinary suite.
 //
 // Invariant under guard: across base and base+demo renders, any profile combination,
-// /var/run/docker.sock is bind-mounted read-only into `alloy` and into nothing else.
-// The guard lands (T48) BEFORE the carve-out exists (T49) — it first passes proving the
+// /var/run/docker.sock is bind-mounted read-only into `alloy` and `dockerproxy` (the second
+// carve-out, gh-#148 — its own pins live in Gh148_ComposeStatsSidecar.cs) and into nothing
+// else. The guard lands (T48) BEFORE the carve-out exists (T49) — it first passes proving the
 // trivial no-socket case.
 
 using System.Diagnostics;

@@ -100,6 +100,17 @@ builder.Services.Configure<IcecastOptions>(cfg.GetSection(IcecastOptions.Section
 builder.Services.AddHttpClient<IcecastListenerStatsSource>(client => client.Timeout = TimeSpan.FromSeconds(2));
 builder.Services.AddSingleton<IListenerStatsSource>(sp => sp.GetRequiredService<IcecastListenerStatsSource>());
 
+// Container-level stack view for the admin Health page (gh-#148): DockerStats:BaseUrl points at
+// the allowlisted docker-socket-proxy sidecar (compose service `dockerproxy` on the `stats`
+// network). Env/compose-only, deliberately absent from StationSettingsAllowlist — deployment
+// topology, same exclusion shape as IcecastOptions above. The 5s timeout bounds each proxy call:
+// a one-shot /stats read blocks ~1s by design (the daemon takes the two cpu samples the
+// percentage needs), so 5s is generous without letting a wedged sidecar pin a Health-page poll.
+// DockerContainerStatsSource degrades to a well-formed `degraded: true` report on any failure —
+// GET /api/health/containers never 500s over a missing sidecar.
+builder.Services.Configure<DockerStatsOptions>(cfg.GetSection(DockerStatsOptions.SectionName));
+builder.Services.AddHttpClient<DockerContainerStatsSource>(client => client.Timeout = TimeSpan.FromSeconds(5));
+
 // gh-#10 (plugin-readiness P1.4): the listener-count time series — one sample every
 // ListenerStats:PollSeconds published through the station event sink for a future analytics
 // consumer. Rides the SAME IListenerStatsSource the spectator surface reads live.
