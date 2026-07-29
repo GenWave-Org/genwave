@@ -8,9 +8,11 @@ namespace GenWave.Host.Tests;
 /// simulate a live <c>Station:Timezone</c> change without standing up a real options stack in a
 /// unit test.
 /// </summary>
-sealed class FakeStationClockProvider(DateTimeOffset now) : IStationClockProvider
+sealed class FakeStationClockProvider(DateTimeOffset now, TimeZoneInfo? zone = null) : IStationClockProvider
 {
     public DateTimeOffset Now { get; set; } = now;
 
     public DateTimeOffset LocalNow => Now;
+
+    public TimeZoneInfo Zone { get; set; } = zone ?? TimeZoneInfo.Utc;
 }

@@ -278,10 +278,11 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "never plays, displays, or reaches the DJ's mouth. \"mature\" plays everything, unmasked. " +
     "Changes apply live.",
 
-  // ── Station timezone (gh-#117) ─────────────────────────────────────────────────────────────
+  // ── Station timezone (gh-#117, gh-#224) ────────────────────────────────────────────────────
   "Station:Timezone":
     "The IANA timezone the DJ's spoken date/time follows (e.g. America/Edmonton). Empty uses " +
-    "the container's own clock. Changes apply live.",
+    "the container's own clock. Changes apply live. The schedule grid and persona taste gates " +
+    "follow it too, so changing it immediately shifts which slot is on the air.",
 };
 
 /**
