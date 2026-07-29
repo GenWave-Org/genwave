@@ -218,6 +218,7 @@ file static class PreviewControllerFactory
             new NotUsedPersonaTasteReader(),
             new NotUsedPersonaImportStore(),
             new NotUsedTtsVoiceLister(),
+            new FakeStationClockProvider(DateTimeOffset.UtcNow),
             NullLogger<PersonaController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

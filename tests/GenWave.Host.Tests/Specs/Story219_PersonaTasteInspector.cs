@@ -157,6 +157,7 @@ file static class PersonaTasteControllerFactory
             personaTaste,
             new NotUsedPersonaImportStore(),
             new NotUsedTtsVoiceLister(),
+            new FakeStationClockProvider(DateTimeOffset.UtcNow),
             NullLogger<PersonaController>.Instance);
 }
 

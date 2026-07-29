@@ -238,6 +238,13 @@ public static class StationSettingsAllowlist
         // F95.4). No consumers yet: this task only adds the allowlist entry, the StationOptions
         // property, and the SettingValidator guard.
         new("Station:Audience",                               SettingApplyMode.Live,          SettingKind.String,     ""),
+
+        // Station timezone (gh-#117) — an IANA id (e.g. America/Edmonton) the LLM/patter path's
+        // "station-local now" reads resolve through IStationClockProvider; empty (the default) is
+        // the honest "container's own clock" state, pre-gh-#117 behavior unchanged. Live so a PUT
+        // here reaches the very next prompt build / SegmentRequest stamp with no api restart —
+        // OptionsMonitorStationClockProvider re-resolves IOptionsMonitor<StationOptions> per call.
+        new("Station:Timezone",                               SettingApplyMode.Live,          SettingKind.String,     ""),
     };
 
     /// <summary>All operator-editable settings, keyed by configuration key.</summary>

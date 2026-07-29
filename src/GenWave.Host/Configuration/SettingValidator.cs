@@ -281,6 +281,12 @@ public sealed class SettingValidator(IConfiguration configuration)
             // pool predicate will recognize; case-insensitive, mirroring Llm:DegradationPin's own
             // guard just above. No cross-field checks; no consumer reads this yet.
             ["Station:Audience"] = IsValidAudiencePosture,
+
+            // Station timezone (gh-#117) — empty is the legal "container's own clock" state; any
+            // non-empty value must resolve through TimeZoneInfo.FindSystemTimeZoneById (net10 on
+            // Linux accepts IANA ids directly), so a typo is a 400 here rather than a silent
+            // fall-back at prompt time.
+            ["Station:Timezone"] = IsValidStationTimezone,
         };
 
     // ── Per-key validation ─────────────────────────────────────────────────────────────────────
@@ -400,6 +406,29 @@ public sealed class SettingValidator(IConfiguration configuration)
     // "mature"; case-insensitive, the same shape as IsValidDegradationPin just above.
     static bool IsValidAudiencePosture(string v) =>
         v.Trim().ToLowerInvariant() is "everyone" or "mature";
+
+    // Station:Timezone (gh-#117) — empty (container's own clock) or an id the host's timezone
+    // database resolves. FindSystemTimeZoneById is the lookup's documented contract: it throws
+    // TimeZoneNotFoundException for an unknown id and InvalidTimeZoneException for a corrupt one,
+    // so the try/catch here IS the boolean answer, not exceptions as control flow beyond it.
+    static bool IsValidStationTimezone(string v)
+    {
+        if (string.IsNullOrEmpty(v)) return true;
+
+        try
+        {
+            _ = TimeZoneInfo.FindSystemTimeZoneById(v);
+            return true;
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return false;
+        }
+        catch (InvalidTimeZoneException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>
     /// An absolute, well-formed http/https URL (used for <c>Tts:Endpoint</c>/<c>Llm:Endpoint</c>,
@@ -715,6 +744,9 @@ public sealed class SettingValidator(IConfiguration configuration)
             => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable the Persona Catalog entirely.",
         var k when k.Equals("Station:Audience", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be one of: everyone, mature.",
+        var k when k.Equals("Station:Timezone", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an IANA timezone id this host " +
+               "recognizes (e.g. America/Edmonton), or empty to use the container's own clock.",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }

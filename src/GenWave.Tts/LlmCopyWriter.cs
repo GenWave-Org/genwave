@@ -30,10 +30,14 @@ using GenWave.Core.Domain;
 /// blurbs work persona-less).
 ///
 /// <para>
-/// The DJ's clock (SPEC F71.8, gh-#13, STORY-193): <paramref name="timeProvider"/> stamps every
-/// prompt this writer builds — persona active or not — with the current date/weekday/time in
-/// station-local terms (see <see cref="LlmPromptBuilder.BuildStationClockLine"/>), so the model
-/// answers from the injected clock rather than inventing one.
+/// The DJ's clock (SPEC F71.8, gh-#13, STORY-193): every prompt this writer builds — persona
+/// active or not — carries the current date/weekday/time in station-local terms (see
+/// <see cref="LlmPromptBuilder.BuildStationClockLine"/>), so the model answers from the injected
+/// clock rather than inventing one. "Station-local" resolves through
+/// <paramref name="stationClock"/> (gh-#117 — <c>Station:Timezone</c> when configured, read live
+/// per render); a composition that supplies none (tests, pre-gh-#117 rigs) falls back to
+/// <paramref name="timeProvider"/>'s own <see cref="TimeProvider.LocalTimeZone"/> — the
+/// container's clock, byte-identical to the prior behavior.
 /// </para>
 ///
 /// <para>
@@ -87,7 +91,8 @@ public sealed class LlmCopyWriter(
     ILogger<LlmCopyWriter> logger,
     TimeProvider timeProvider,
     LlmCallRing callRing,
-    IDegradationModeReader degradationMode) : ISegmentCopyWriter, IPersonaPreviewWriter
+    IDegradationModeReader degradationMode,
+    IStationClockProvider? stationClock = null) : ISegmentCopyWriter, IPersonaPreviewWriter
 {
     /// <summary>Name of the <see cref="IHttpClientFactory"/> client this writer resolves (registered in Program.cs).</summary>
     public const string HttpClientName = "Llm";
@@ -393,7 +398,7 @@ public sealed class LlmCopyWriter(
             // method can raise, not just the ones after prompt assembly.
             //
             // gh-#150: real DJs occasionally say their own name. The roll is taken HERE, outside
-            // the pure builder (the same posture BuildStationClockLine takes with timeProvider —
+            // the pure builder (the same posture BuildStationClockLine takes with StationLocalNow —
             // nondeterminism stays injectable at the seam, the builder stays a pure function), from
             // Random.Shared — the source the builder's own SampleQuirks and Orchestration's
             // SystemRandomSource already standardize on. The builder enforces the persona gate
@@ -410,7 +415,7 @@ public sealed class LlmCopyWriter(
             // (updateTasteMemory) reads the real field; a preview always compares against empty.
             IReadOnlyList<string> previouslyVoicedTasteNotes = updateTasteMemory ? previousBreakTasteNotes : [];
             userPrompt = LlmPromptBuilder.BuildUserContent(
-                request, LlmPromptBuilder.BuildStationClockLine(timeProvider), previouslyVoicedTasteNotes);
+                request, LlmPromptBuilder.BuildStationClockLine(StationLocalNow()), previouslyVoicedTasteNotes);
 
             // No boot-frozen BaseAddress (F36.2) — the endpoint is read from CurrentValue above and an
             // absolute URI is built per call (EndpointUri preserves a subpath in Llm:Endpoint, e.g.
@@ -485,6 +490,13 @@ public sealed class LlmCopyWriter(
     }
 
     long ElapsedMs(DateTimeOffset startedAt) => (long)(timeProvider.GetUtcNow() - startedAt).TotalMilliseconds;
+
+    // gh-#117 — the ONE place this writer resolves "station-local now" for the prompt's clock
+    // line: Station:Timezone via the live IStationClockProvider seam when the composition supplies
+    // one, otherwise the container's own clock (timeProvider.LocalTimeZone) — byte-identical to
+    // the pre-gh-#117 behavior for every rig that never registers the seam.
+    DateTimeOffset StationLocalNow() =>
+        stationClock?.LocalNow ?? TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), timeProvider.LocalTimeZone);
 
     /// <summary>
     /// Classifies a completion fault for <see cref="LlmCallRing"/> (SPEC F73.1): the ONE other

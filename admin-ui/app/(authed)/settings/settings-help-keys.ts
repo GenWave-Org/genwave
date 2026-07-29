@@ -65,6 +65,7 @@ export const SETTINGS_HELP_KEYS = [
   "Llm:DegradationPin",
   "Community:CatalogIndexUrl",
   "Station:Audience",
+  "Station:Timezone",
 ] as const;
 
 export type SettingsHelpKey = (typeof SETTINGS_HELP_KEYS)[number];

@@ -117,7 +117,10 @@ public static class FeatureSeededDefaults
     /// pin one. Station:PublicBaseUrl (SPEC F88.4–F88.5, STORY-223, PLAN T85) joins on
     /// PublicStreamUrl's own identical rationale: empty is the honest default, and F88.5's whole
     /// contract IS that blank — no artwork URL is ever sent to a listening client until an
-    /// operator sets one. Every other allowlisted key's C# default is non-empty.
+    /// operator sets one. Station:Timezone (gh-#117) joins on the same rationale: empty is its
+    /// spec'd default — "use the container's own clock", the pre-gh-#117 behavior byte-identical —
+    /// and seeding a concrete zone would silently repoint every fresh deploy's DJ clock. Every
+    /// other allowlisted key's C# default is non-empty.
     /// </summary>
     static readonly IReadOnlySet<string> HonestlyBlankKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -128,6 +131,7 @@ public static class FeatureSeededDefaults
         "Tts:Corrections",
         "Tts:EngineByKind",
         "Station:Envelope:Genres",
+        "Station:Timezone",
     };
 
     /// <summary>

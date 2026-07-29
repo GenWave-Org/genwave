@@ -50,7 +50,11 @@ public static class FeaturePersonaPromptAssemblyAndClock
             Lore: [],
             Corrections: corrections ?? []);
 
-    static LlmCopyWriter BuildWriter(string endpoint, FakeActivePersonaAccessor accessor, TimeProvider? timeProvider = null) =>
+    static LlmCopyWriter BuildWriter(
+        string endpoint,
+        FakeActivePersonaAccessor accessor,
+        TimeProvider? timeProvider = null,
+        FakeStationClockProvider? stationClock = null) =>
         new(
             new TemplateCopyWriter(new PatterTemplateRenderer()),
             new FakeHttpClientFactory(),
@@ -66,7 +70,8 @@ public static class FeaturePersonaPromptAssemblyAndClock
             new CapturingLogger<LlmCopyWriter>(),
             timeProvider ?? TimeProvider.System,
             new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
-            new FakeDegradationModeReader());
+            new FakeDegradationModeReader(),
+            stationClock);
 
     static string ExtractMessageContent(string body, string role)
     {
@@ -139,7 +144,9 @@ public static class FeaturePersonaPromptAssemblyAndClock
         [Fact]
         public async Task PromptCarriesTheInjectedStationLocalDateWeekdayAndTime()
         {
-            // Given an injected station-local clock (2026-07-20 09:41 — a Monday, UTC station-local)
+            // Given an injected station-local clock (2026-07-20 09:41 — a Monday, UTC station-local).
+            // No IStationClockProvider is wired (the pre-gh-#117 rig shape) — "station-local" is
+            // the container's own clock, the timeProvider's LocalTimeZone, unchanged.
             var clock = new FakeTimeProvider(new DateTimeOffset(2026, 7, 20, 9, 41, 0, TimeSpan.Zero));
             var writer = BuildWriter(mock.BaseUri.ToString(), new FakeActivePersonaAccessor(), clock);
 
@@ -152,6 +159,30 @@ public static class FeaturePersonaPromptAssemblyAndClock
             Assert.Contains("Monday", userContent);
             Assert.Contains("July 20, 2026", userContent);
             Assert.Contains("9:41 AM", userContent);
+        }
+
+        [Fact]
+        public async Task AWiredStationClockPutsTheStationsZoneOnTheClockLineNotTheContainers()
+        {
+            // gh-#117 — the same 2026-07-20 09:41 UTC instant, but the station clock seam hands
+            // back Edmonton wall time (MDT, UTC-6): 03:41. The container clock (the timeProvider,
+            // still UTC) must lose to the station clock on the clock line.
+            var container = new FakeTimeProvider(new DateTimeOffset(2026, 7, 20, 9, 41, 0, TimeSpan.Zero));
+            var stationClock = new FakeStationClockProvider(
+                new DateTimeOffset(2026, 7, 20, 3, 41, 0, TimeSpan.FromHours(-6)));
+            var writer = BuildWriter(
+                mock.BaseUri.ToString(), new FakeActivePersonaAccessor(), container, stationClock);
+
+            // When any copywriter prompt is assembled
+            await writer.WriteAsync(LeadInRequest(), CancellationToken.None);
+
+            var userContent = ExtractMessageContent(mock.Requests[0].Body, "user");
+
+            // Then the clock line speaks the station's wall time, not the container's
+            Assert.Contains("Monday", userContent);
+            Assert.Contains("July 20, 2026", userContent);
+            Assert.Contains("3:41 AM", userContent);
+            Assert.DoesNotContain("9:41 AM", userContent);
         }
     }
 
