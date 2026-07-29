@@ -9,6 +9,7 @@ import type { LibraryDto } from "@/lib/library";
 import { AudienceSettingControl } from "./AudienceSettingControl";
 import { CorrectionsSettingControl } from "./CorrectionsSettingControl";
 import { SafeScopeAvailabilityBadge } from "./SafeScopeAvailabilityBadge";
+import { SettingHelpFlyover } from "./SettingHelpFlyover";
 import type { SettingsHelpKey } from "./settings-help-keys";
 import { groupSettingsBySection } from "./settings-sections";
 import type { SettingControlProps, SettingDto } from "./settings-types";
@@ -68,9 +69,11 @@ const EMPTY_LIST_POLICIES: Record<string, EmptyListPolicy> = {
 };
 
 /**
- * Per-field helper copy keyed by setting key, rendered under the input alongside the unit/badges
- * (SPEC F42.2, STORY-136). A small additive lookup — same shape as {@link EMPTY_LIST_POLICIES}
- * above — rather than a new metadata layer.
+ * Per-field helper copy keyed by setting key, rendered in the title's `?` flyover
+ * ({@link SettingHelpFlyover}, gh-#145 — previously an always-on paragraph under the input;
+ * inline space below the control is now reserved for warnings) (SPEC F42.2, STORY-136). A small
+ * additive lookup — same shape as {@link EMPTY_LIST_POLICIES} above — rather than a new
+ * metadata layer.
  *
  * SPEC F55.3 (closes gitea-#230, gitea-#231) grows this map from 3 entries to full allowlist coverage — every
  * key in {@link SETTINGS_HELP_KEYS} (mirroring `StationSettingsAllowlist.All`) has one
@@ -699,18 +702,30 @@ function SettingField({
   const controlId = `setting-${setting.key}`;
   const RegisteredControl = SETTING_CONTROL_REGISTRY[setting.key];
   const helpText = helpTextFor(setting.key);
+  /**
+   * gh-#145 — help copy lives in the title's `?` flyover, not under the control. The panel keeps
+   * a stable id so the field's input can point `aria-describedby` at it whether or not the
+   * flyover is open (SettingHelpFlyover keeps the panel mounted, merely `hidden`).
+   */
+  const helpId = `${controlId}-help`;
+  const describedBy = helpText !== undefined ? helpId : undefined;
 
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <label htmlFor={controlId} className="text-[0.85rem] font-semibold text-ink">
-          {setting.key}
-          {setting.unit !== "" && (
-            <span aria-label={`Unit: ${setting.unit}`} className="ml-1 font-normal text-mute">
-              ({setting.unit})
-            </span>
+        <div className="flex items-center gap-1.5">
+          <label htmlFor={controlId} className="text-[0.85rem] font-semibold text-ink">
+            {setting.key}
+            {setting.unit !== "" && (
+              <span aria-label={`Unit: ${setting.unit}`} className="ml-1 font-normal text-mute">
+                ({setting.unit})
+              </span>
+            )}
+          </label>
+          {helpText !== undefined && (
+            <SettingHelpFlyover settingKey={setting.key} helpId={helpId} helpText={helpText} />
           )}
-        </label>
+        </div>
         <div className="flex items-center gap-1.5">
           <ApplyModeBadge mode={setting.applyMode} />
           <SourceChip source={setting.source} />
@@ -734,6 +749,7 @@ function SettingField({
             checked={isCheckedBooleanValue(value)}
             onChange={onCheckboxChange}
             disabled={isPending}
+            aria-describedby={describedBy}
             className="h-4 w-4 disabled:opacity-50"
           />
         </span>
@@ -745,6 +761,7 @@ function SettingField({
           value={parseLibraryIds(value).map(String)}
           onChange={onMultiSelectChange}
           disabled={isPending}
+          aria-describedby={describedBy}
           className="min-h-24 w-full max-w-md rounded-[6px] border border-line bg-surface px-2 py-1 text-[0.85rem] text-ink disabled:opacity-50"
         >
           {libraries.map((lib) => (
@@ -761,6 +778,7 @@ function SettingField({
           value={value}
           onChange={onTextChange}
           disabled={isPending}
+          aria-describedby={describedBy}
           className="h-9 w-full max-w-md rounded-[6px] border border-line bg-surface px-2 text-[0.85rem] text-ink disabled:opacity-50"
         />
       ) : (
@@ -771,18 +789,13 @@ function SettingField({
           value={value}
           onChange={onTextChange}
           disabled={isPending}
+          aria-describedby={describedBy}
           className="h-9 max-w-xs rounded-[6px] border border-line bg-surface px-2 text-[0.85rem] text-ink tabular-nums disabled:opacity-50"
         />
       )}
 
       {isSafeScopeField && (
         <SafeScopeAvailabilityBadge effectivelyEmpty={safeScopeEffectivelyEmpty} />
-      )}
-
-      {helpText !== undefined && (
-        <p data-testid={`setting-help-${setting.key}`} className="text-[0.78rem] text-mute">
-          {helpText}
-        </p>
       )}
 
       {rotationCouplingNotice}
