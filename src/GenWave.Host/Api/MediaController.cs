@@ -56,6 +56,11 @@ public sealed class MediaController(
     ///                  is not an error — it simply matches nothing, since the vocabulary lives in
     ///                  the client-side <c>MoodVocabulary</c> constant (F86.8), not a server-side
     ///                  validator here.
+    ///   include-unavailable — true reveals unavailable rows in the browse (gh-#113); absent or
+    ///                  false keeps the default view, which hides them. Hiding is also disabled by
+    ///                  any explicit <c>state</c> filter (<c>state=unavailable</c> must match its
+    ///                  rows, not be cancelled out). Browse-only — the bulk endpoints' filters
+    ///                  never carry this field, so sweeps still reach unavailable rows.
     ///   page         — 1-based page number (default 1)
     ///   limit        — items per page, clamped to [1, 200] (default 50)
     ///
@@ -70,6 +75,9 @@ public sealed class MediaController(
     ///
     /// Response headers:
     ///   X-Pagination: total={n},pages={n},page={n},limit={n}
+    ///   X-Unavailable-Hidden: {n} — only when the default view hid unavailable rows (gh-#113):
+    ///     how many rows the browse's other filters matched but the page excluded. Absent whenever
+    ///     hiding was disabled (include-unavailable=true or an explicit state filter).
     /// </summary>
     [HttpGet("media")]
     public async Task<IActionResult> List(
@@ -87,6 +95,7 @@ public sealed class MediaController(
         [FromQuery(Name = "album-exact")] string? albumExact = null,
         [FromQuery(Name = "genre-exact")] string[]? genreExact = null,
         [FromQuery(Name = "mood-exact")] string[]? moodExact = null,
+        [FromQuery(Name = "include-unavailable")] bool? includeUnavailable = null,
         [FromQuery] int page = 1,
         [FromQuery] int limit = 50,
         CancellationToken ct = default)
@@ -154,11 +163,22 @@ public sealed class MediaController(
 
         var query = new MediaQuery(
             state, artist, genre, libraryId, q, page, limit, eligible, neverPlay,
-            year, decade, yearMissing, artistExact, albumExact, genreExact, moodExact);
+            year, decade, yearMissing, artistExact, albumExact, genreExact, moodExact,
+            includeUnavailable);
         var result = await adminQuery.ListAdminAsync(effectiveScope, query, ct);
 
         Response.Headers["X-Pagination"] =
             $"total={result.Total},pages={result.Pages},page={page},limit={limit}";
+
+        // gh-#113 — when the default view hid unavailable rows, tell the UI how many, so it can
+        // surface "N unavailable tracks hidden" with a reveal toggle. Same MediaQuery.HidesUnavailable
+        // rule the repository's browse predicate reads, so header and page can never disagree.
+        if (query.HidesUnavailable)
+        {
+            var hidden = await adminQuery.CountUnavailableAsync(effectiveScope, query, ct);
+            Response.Headers["X-Unavailable-Hidden"] =
+                hidden.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
 
         return Ok(result.Items);
     }

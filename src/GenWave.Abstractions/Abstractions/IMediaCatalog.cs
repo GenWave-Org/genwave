@@ -57,6 +57,17 @@ namespace GenWave.Core.Abstractions;
 /// row never matches once the filter is active — there is nothing to compare against. Folded into
 /// the same shared WHERE-builder as the other exact filters, so it ANDs with them for free.
 /// </para>
+/// <para>
+/// <c>IncludeUnavailable</c> (gh-#113) opts a BROWSE back into <c>unavailable</c> rows: the default
+/// catalog view hides them (a shrunk media mount must not bury the live library under hundreds of
+/// dead rows), and only <c>true</c> reveals them again. An explicit <c>State</c> filter also
+/// disables the hiding — <c>state=unavailable</c> would otherwise always match nothing — which
+/// <see cref="HidesUnavailable"/> encodes as the single shared rule. Browse-only, exactly like
+/// <c>NeverPlay</c>: <see cref="IAdminMediaQuery.ListAdminAsync"/> is the sole consumer — the bulk
+/// write paths that share this record's WHERE-builder never read this field, so a filtered sweep
+/// still reaches unavailable rows the way it always has (the browse/bulk asymmetry is documented
+/// on <see cref="IAdminMediaQuery"/>).
+/// </para>
 /// </summary>
 public sealed record MediaQuery(
     string? State = null,
@@ -74,7 +85,18 @@ public sealed record MediaQuery(
     string? ArtistExact = null,
     string? AlbumExact = null,
     IReadOnlyList<string>? GenresExact = null,
-    IReadOnlyList<string>? MoodsExact = null);
+    IReadOnlyList<string>? MoodsExact = null,
+    bool? IncludeUnavailable = null)
+{
+    /// <summary>
+    /// True when a browse for this query hides <c>unavailable</c> rows (gh-#113): no explicit
+    /// <see cref="State"/> filter is named and <see cref="IncludeUnavailable"/> is not
+    /// <c>true</c>. The one shared implementation of the rule — the repository uses it to apply
+    /// the <c>state &lt;&gt; 'unavailable'</c> browse predicate and the endpoint uses it to decide
+    /// whether a hidden-row count accompanies the page.
+    /// </summary>
+    public bool HidesUnavailable => State is null && IncludeUnavailable is not true;
+}
 
 /// <summary>A paged result set with total count and page count (T041).</summary>
 public sealed record PagedResult<T>(
