@@ -20,11 +20,16 @@ namespace GenWave.Orchestration;
 /// </para>
 ///
 /// <para>
-/// Resolves station-local "now" via
-/// <c>TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), timeProvider.LocalTimeZone)</c> — the exact
-/// idiom <see cref="PersonaRanker"/>'s own <c>StationLocalNow</c> and
-/// <c>GenWave.Tts.LlmPromptBuilder.BuildStationClockLine</c> already use for "station-local now", so a
+/// Resolves station-local "now" through the live <see cref="IStationClockProvider"/> seam
+/// (<c>Station:Timezone</c>, gh-#224) when the composition supplies one — the seam's
+/// <see cref="IStationClockProvider.Zone"/> also drives the DST boundary math below, so "which slot
+/// is now" and "when does it end" are computed in the SAME zone — otherwise via
+/// <c>TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), timeProvider.LocalTimeZone)</c> (the
+/// container's clock, pre-gh-#224 behavior unchanged). Same optional-seam posture as
+/// <see cref="PersonaRanker"/>'s own <c>StationLocalNow</c> and
+/// <c>GenWave.Tts.LlmPromptBuilder.BuildStationClockLine</c>, so a
 /// gh-#13 DJ prompt, a <c>TasteContext</c> gate, and the on-air grid all agree on what time it is.
+/// A live <c>Station:Timezone</c> edit therefore instantly shifts which slot is "now" — by design.
 /// </para>
 ///
 /// <para>
@@ -37,7 +42,10 @@ namespace GenWave.Orchestration;
 /// (PLAN T119 review F2). See <see cref="ResolveWallClockInstant"/>.
 /// </para>
 /// </summary>
-public sealed class ScheduleResolver(TimeProvider timeProvider, IStationDefaultEnvelopeSource defaultEnvelopeSource)
+public sealed class ScheduleResolver(
+    TimeProvider timeProvider,
+    IStationDefaultEnvelopeSource defaultEnvelopeSource,
+    IStationClockProvider? stationClock = null)
 {
     const int MinutesPerDay = 1440;
     const int MinutesPerWeek = MinutesPerDay * 7;
@@ -45,8 +53,8 @@ public sealed class ScheduleResolver(TimeProvider timeProvider, IStationDefaultE
     /// <summary>Resolves <paramref name="snapshot"/> against station-local "now" (SPEC F91.2, F91.3).</summary>
     public OnAirSnapshot Resolve(ScheduleWeekSnapshot snapshot)
     {
-        var zone = timeProvider.LocalTimeZone;
-        var localNow = TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), zone);
+        var zone = stationClock?.Zone ?? timeProvider.LocalTimeZone;
+        var localNow = stationClock?.LocalNow ?? TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), zone);
         var today = localNow.DayOfWeek;
         var nowMinute = localNow.Hour * 60 + localNow.Minute;
         var todayDate = localNow.Date;

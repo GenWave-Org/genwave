@@ -128,10 +128,10 @@ describe("Feature: LLM call inspector", () => {
       expect(screen.getByText("Normal")).toBeInTheDocument();
       expect(screen.getByText("Soft")).toBeInTheDocument();
       expect(screen.getByText("Hard")).toBeInTheDocument();
-      // gh-#141: sub-second elapsed keeps raw milliseconds; a second-plus call humanizes to
-      // one-decimal seconds instead of math homework ("5002 ms").
-      expect(screen.getByText("340 ms")).toBeInTheDocument();
-      expect(screen.getByText("5.0 s")).toBeInTheDocument();
+      // gh-#141 (formats tightened by gh-#210): sub-second elapsed keeps raw milliseconds; a
+      // second-plus call humanizes to one-decimal seconds instead of math homework ("5002 ms").
+      expect(screen.getByText("340ms")).toBeInTheDocument();
+      expect(screen.getByText("5.0s")).toBeInTheDocument();
 
       // gh-#142: each mode chip carries a flyover explaining its degradation-ladder rung.
       expect(screen.getByText("Soft").closest("span[title]")).toHaveAttribute(
@@ -152,6 +152,42 @@ describe("Feature: LLM call inspector", () => {
       await flush();
 
       expect(screen.getByText("HTTP 500")).toBeInTheDocument();
+    });
+  });
+
+  // gh-#210: the per-chip native titles (gh-#142) are invisible on touch and undiscoverable by
+  // anyone not already hovering — the Mode HEADER now carries the house `?` flyover (gh-#145
+  // pattern), naming the ladder and all three rungs in one place.
+  describe("Scenario: the Mode column header explains the degradation ladder", () => {
+    it("renders a collapsed ? help trigger on the Mode header with the copy mounted but hidden", async () => {
+      installFetchMock(ok([makeEntry()]));
+
+      render(<LlmCallsView timeZone="UTC" />);
+      await flush();
+
+      const trigger = screen.getByRole("button", { name: "Help: Mode" });
+      expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+      const panel = screen.getByTestId("llm-mode-help");
+      expect(panel).toBeInTheDocument();
+      expect(panel).not.toBeVisible();
+    });
+
+    it("pins the explanation open on click, naming the ladder and all three rungs", async () => {
+      installFetchMock(ok([makeEntry()]));
+
+      render(<LlmCallsView timeZone="UTC" />);
+      await flush();
+
+      fireEvent.click(screen.getByRole("button", { name: "Help: Mode" }));
+
+      const panel = screen.getByTestId("llm-mode-help");
+      expect(panel).toBeVisible();
+      const copy = panel.textContent ?? "";
+      expect(copy).toMatch(/LLM fallback ladder/);
+      expect(copy).toMatch(/Normal — full LLM path/);
+      expect(copy).toMatch(/Soft — degraded after repeated failures/);
+      expect(copy).toMatch(/Hard — fully degraded: zero LLM calls/);
     });
   });
 
