@@ -2,6 +2,7 @@
 
 import { Fragment, useState, type ReactNode } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
+import { HelpFlyover } from "@/components/ui/help-flyover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatElapsedMs, formatUpSince } from "@/lib/format-clock";
 import type { LlmCallEntry } from "@/lib/llm-calls-api";
@@ -19,12 +20,18 @@ const MODE_LABELS: Record<string, string> = { normal: "Normal", soft: "Soft", ha
 
 /** gh-#142: the MODE column is the F69/F70 degradation ladder, which nothing on the page said —
  * a native-title flyover per chip explains the rung without spending any screen real estate.
- * Wording tracks DegradationMode's own docs. */
+ * Wording tracks DegradationMode's own docs. gh-#210: these same three lines also feed the Mode
+ * HEADER's `?` flyover below (native titles are invisible on touch and undiscoverable by anyone
+ * not already hovering), so the two explanations can never drift apart. */
 const MODE_TITLES: Record<string, string> = {
   normal: "Normal — full LLM path: every lead-in and back-announce attempts the LLM.",
   soft: "Soft — degraded after repeated failures: template copy for most segments, one real LLM attempt per cooldown window.",
   hard: "Hard — fully degraded: zero LLM calls, template copy only (also shown while the LLM is unconfigured).",
 };
+
+/** Rendering order for the header flyover's rung lines — the ladder top-down, matching how the
+ * station degrades (SPEC F69.1). */
+const MODE_LADDER: readonly string[] = ["normal", "soft", "hard"];
 
 /** Border+text tone for a state chip — reuses only already-established tokens (SPEC F73.1): no
  * new solid-fill pill treatment invented for this feature, since design-aesthetic's own "3px chip"
@@ -144,7 +151,26 @@ export function LlmCallsFeed({ entries, error, timeZone }: LlmCallsFeedProps): R
               <tr className="border-b-2 border-line text-left">
                 <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Time</th>
                 <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Status</th>
-                <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Mode</th>
+                <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">
+                  {/* gh-#210: the header carries the house `?` flyover (gh-#145 pattern) — the
+                      per-chip native titles above survive for hover users, but touch and anyone
+                      not hovering had no way to learn what MODE even is. */}
+                  <span className="inline-flex items-center gap-1.5">
+                    Mode
+                    <HelpFlyover label="Help: Mode" testId="llm-mode-help">
+                      <span className="block">
+                        The station&rsquo;s LLM fallback ladder as it stood when each call was
+                        made — it steps down after repeated failures and climbs back up as the
+                        LLM recovers:
+                      </span>
+                      {MODE_LADDER.map((mode) => (
+                        <span key={mode} className="mt-1.5 block">
+                          {MODE_TITLES[mode]}
+                        </span>
+                      ))}
+                    </HelpFlyover>
+                  </span>
+                </th>
                 <th scope="col" className="py-2 pr-3 text-right text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Elapsed</th>
                 <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Response</th>
                 <th scope="col" className="py-2 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">
