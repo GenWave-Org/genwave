@@ -60,6 +60,10 @@ spectator surface and the stream:
   api:8080 (admin API) ── 127.0.0.1 only (ports: !override), SSH tunnel to reach it
   api:8081             ── NO host publish at all; Caddy reaches it over the `core` network
   admin_ui:3000        ── 127.0.0.1 only, and only runs when COMPOSE_PROFILES=admin
+  dockerproxy:2375     ── NO host publish; dedicated `stats` network (api ↔ dockerproxy
+                          only — caddy/cloudflared/admin_ui have no route). docker.sock
+                          mounted read-only behind a CONTAINERS-only allowlist (gh-#148):
+                          the api can enumerate containers and read stats, nothing else.
 ```
 
 `api:8081` is the *only* public spectator listener — admin, `/media/*`, `/internal/*`
@@ -95,8 +99,9 @@ isn't publicly routed at all), but it stops being low-stakes the moment anyone f
 the *admin* plane with TLS. Documented gap: enable `XForwardedProto` in the same
 `ForwardedHeadersOptions` block before doing that.
 
-**Both halves of the chain must trust their hop (gh-#129).** The reference topology is
-two proxies deep (cloudflared → Caddy), and each layer defaults to distrust: Caddy
+**Both halves of the chain must trust their hop (gh-#129).** The chain is up to two
+proxies deep (cloudflared → Caddy when the optional tunnel fronts the public hostname;
+Caddy alone when DNS points straight at the box), and each layer defaults to distrust: Caddy
 v2.5+ *strips* inbound `X-Forwarded-For` unless the `Caddyfile` declares
 `trusted_proxies` (the shipped one does), and the api's forwarded-headers walk stops
 after ONE hop unless `Proxy:TrustedNetworks` is set (which also lifts the hop limit —
@@ -142,6 +147,14 @@ Two independent layers, both load-bearing:
 
 Either layer alone would be a real boundary; both together is why a single Caddy typo is
 not an incident.
+
+On top of both, the spectator surface itself ships hardened (gh-#180): every spectator
+page/asset/API response carries a strict Content-Security-Policy (`default-src 'none'`,
+no inline anything; `img-src`/`media-src` follow `Station:PublicBaseUrl` /
+`Station:PublicStreamUrl` live, collapsing to `'self'` on empty or invalid config),
+plus `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, and
+`nosniff`. Non-spectator surfaces are untouched, and a gated surface's bare 404 stays
+header-identical to an unmapped route.
 
 ---
 
