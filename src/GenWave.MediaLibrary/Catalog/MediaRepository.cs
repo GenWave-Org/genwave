@@ -24,7 +24,7 @@ sealed class MediaRepository(
     IAudiencePostureProvider audiencePosture,
     IStationEventSink? events = null)
     : IMediaCatalog, IAdminMediaLookup, IAdminMediaQuery, IAdminMediaWrite, IAdminMediaReenrichment,
-      IAuthoredCatalogWriter, IMediaExplicitOverride
+      IAuthoredCatalogWriter, IMediaExplicitOverride, IMediaPurge
 {
     // MediaMutated publish seam for the admin writes (gitea-#246); no-op unless the host binds a real sink.
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
@@ -582,6 +582,15 @@ sealed class MediaRepository(
         if (query.NeverPlay is true)
             where += " and coalesce(r.never_play, false)";
 
+        // gh-#113 — the default browse hides unavailable rows (a shrunk media mount must not bury
+        // the live library under dead rows). Browse-only for the same reason as NeverPlay above:
+        // the bulk write paths sharing BuildAdminWhere must keep reaching unavailable rows. An
+        // explicit state filter or IncludeUnavailable=true disables the hiding — the shared rule
+        // lives on MediaQuery.HidesUnavailable so this predicate and the endpoint's hidden-count
+        // header can never disagree.
+        if (query.HidesUnavailable)
+            where += " and state <> 'unavailable'";
+
         filterParams.Add("offset", offset);
         filterParams.Add("limit", limit);
 
@@ -616,6 +625,92 @@ sealed class MediaRepository(
         var pages = (int)Math.Ceiling((double)total / limit);
         var items = list.Select(r => r.ToAdminDto()).ToList();
         return new PagedResult<AdminMediaDto>(items, total, pages);
+    }
+
+    /// <summary>
+    /// gh-#113 — the "N unavailable tracks hidden" count for a browse whose page excluded them
+    /// (<see cref="MediaQuery.HidesUnavailable"/>). Uses <see cref="BuildAdminWhere"/> plus the
+    /// same never-play join/predicate as <see cref="ListAdminAsync"/>, so the count answers "how
+    /// many MORE rows would this exact browse show with unavailable revealed" — never a
+    /// differently-filtered figure. The caller only asks when no state filter is named, but a
+    /// state-filtered query degrades honestly here anyway (two state predicates, zero rows).
+    /// </summary>
+    public async Task<int> CountUnavailableAsync(LibraryScope scope, MediaQuery query, CancellationToken ct)
+    {
+        // Default-deny: no scope means no access, no SQL issued.
+        if (scope.IsEmpty)
+            return 0;
+
+        var (where, filterParams) = BuildAdminWhere(query, scope);
+
+        if (query.NeverPlay is true)
+            where += " and coalesce(r.never_play, false)";
+
+        var sql = $"""
+            select count(*)::int
+            from library.media m
+            left join library.media_rating r on r.media_id = m.id
+            where {where} and state = 'unavailable'
+            """;
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        return await conn.ExecuteScalarAsync<int>(new CommandDefinition(sql, filterParams, cancellationToken: ct));
+    }
+
+    // ── Explicit operator purge (IMediaPurge — gh-#113) ─────────────────────────────────────────────
+
+    /// <summary>
+    /// gh-#113 — see <see cref="IMediaPurge.PurgeUnavailableAsync"/> for the contract. One SQL
+    /// statement holds the whole decision: the candidate set (unavailable longer than the window,
+    /// per a non-NULL <c>unavailable_since</c>), the library total, the tripwire comparison, and
+    /// the conditionally-withheld DELETE all read the same snapshot, so a concurrent scan flip can
+    /// never wedge itself between "counted" and "deleted". Postgres data-modifying CTEs run
+    /// exactly once regardless of whether the primary query references them — the DELETE's own
+    /// WHERE (not C#) is what withholds it on a dry run or a tripped tripwire.
+    ///
+    /// Deliberately unscoped, like <see cref="GetStatusCountsAsync"/>'s state counts: purging dead
+    /// rows is library management, not rotation curation — and the tripwire's denominator must be
+    /// the WHOLE library for the mount-outage math to mean anything.
+    ///
+    /// <c>library.media_rating</c> rows follow via their <c>ON DELETE CASCADE</c> FK; every other
+    /// consumer of a media id (booth log, requests) holds it as an opaque value across the schema
+    /// boundary with no FK, exactly so a library-side delete never blocks (PRD §9).
+    /// </summary>
+    public async Task<MediaPurgeOutcome> PurgeUnavailableAsync(int olderThanDays, bool dryRun, CancellationToken ct)
+    {
+        // Fail-fast (csharp-best-practices): the endpoint 400s below 1 before calling; reaching
+        // here with less is a programming error, never an operator input.
+        ArgumentOutOfRangeException.ThrowIfLessThan(olderThanDays, 1);
+
+        const string sql = """
+            with candidates as (
+              select id from library.media
+              where state = 'unavailable'
+                and unavailable_since is not null
+                and unavailable_since <= now() - make_interval(days => @olderThanDays)
+            ),
+            total as (select count(*)::int as n from library.media),
+            counted as (select count(*)::int as n from candidates),
+            deleted as (
+              delete from library.media m
+              where @dryRun = false
+                and m.id in (select id from candidates)
+                and (select n from counted) * 2 <= (select n from total)
+              returning m.id
+            )
+            select (select n from counted)              as candidates,
+                   (select n from total)                as library_total,
+                   (select count(*)::int from deleted)  as deleted
+            """;
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var (candidates, libraryTotal, deleted) = await conn.QuerySingleAsync<(int, int, int)>(
+            new CommandDefinition(sql, new { olderThanDays, dryRun }, cancellationToken: ct));
+
+        if (deleted > 0)
+            events.Publish(new MediaMutated("purge-unavailable", null, deleted));
+
+        return new MediaPurgeOutcome(candidates, libraryTotal, deleted);
     }
 
     // ── Shared admin WHERE builder ───────────────────────────────────────────────────────────────────
@@ -972,7 +1067,8 @@ sealed class MediaRepository(
     }
 
     /// <summary>Insert a newly discovered file (idempotent on path), returning its id. State defaults
-    /// to <c>discovered</c>; a re-discovery of a known path resets it so it is re-enriched.</summary>
+    /// to <c>discovered</c>; a re-discovery of a known path resets it so it is re-enriched — which is
+    /// a resurrection when the row was <c>unavailable</c>, so the gh-#113 stamp clears here too.</summary>
     public async Task<long> InsertDiscoveredAsync(string path, string format, long sizeBytes, DateTime mtime, CancellationToken ct)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
@@ -981,28 +1077,33 @@ sealed class MediaRepository(
             values (@path, @format, @sizeBytes, @mtime)
             on conflict (path) do update set
               format = excluded.format, size_bytes = excluded.size_bytes,
-              mtime = excluded.mtime, state = 'discovered'
+              mtime = excluded.mtime, state = 'discovered', unavailable_since = null
             returning id
             """, new { path, format, sizeBytes, mtime }, cancellationToken: ct));
     }
 
-    /// <summary>A changed file (size/mtime differs): reset to <c>discovered</c> for re-enrichment.</summary>
+    /// <summary>A changed file (size/mtime differs): reset to <c>discovered</c> for re-enrichment.
+    /// Also the gh-#112 resurrection write, so the gh-#113 <c>unavailable_since</c> stamp clears
+    /// here — a revived row must never look purge-eligible to the age filter.</summary>
     public async Task MarkDiscoveredAsync(long id, long sizeBytes, DateTime mtime, CancellationToken ct)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await conn.ExecuteAsync(new CommandDefinition(
-            "update library.media set size_bytes = @sizeBytes, mtime = @mtime, state = 'discovered' where id = @id",
+            "update library.media set size_bytes = @sizeBytes, mtime = @mtime, state = 'discovered', unavailable_since = null where id = @id",
             new { id, sizeBytes, mtime }, cancellationToken: ct));
     }
 
     /// <summary>Files gone from disk: mark unavailable — never hard-delete (could be a transient mount
-    /// issue); reconcile/purge on a later policy (PRD §5.1).</summary>
+    /// issue); reconcile via the explicit operator purge (gh-#113), never automatically (PRD §5.1).
+    /// <c>unavailable_since</c> stamps the transition (gh-#113) for that purge's age filter;
+    /// COALESCE keeps the EARLIEST stamp if a caller ever re-marks an already-unavailable row —
+    /// "unavailable since" must never creep forward while a row stays gone.</summary>
     public async Task MarkUnavailableAsync(IReadOnlyCollection<long> ids, CancellationToken ct)
     {
         if (ids.Count == 0) return;
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await conn.ExecuteAsync(new CommandDefinition(
-            "update library.media set state = 'unavailable' where id = any(@ids)",
+            "update library.media set state = 'unavailable', unavailable_since = coalesce(unavailable_since, now()) where id = any(@ids)",
             new { ids = ids.ToArray() }, cancellationToken: ct));
     }
 

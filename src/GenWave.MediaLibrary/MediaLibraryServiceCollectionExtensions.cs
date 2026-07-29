@@ -69,6 +69,10 @@ public static class MediaLibraryServiceCollectionExtensions
         // seam, kept off IAdminMediaWrite so this one method costs zero blast radius on that
         // interface's existing test doubles. First consumer: ExplicitOverrideController.
         services.AddSingleton<IMediaExplicitOverride>(sp => sp.GetRequiredService<MediaRepository>());
+        // Explicit operator purge for long-unavailable rows (gh-#113): its own seam, kept off
+        // IAdminMediaWrite for the same zero-blast-radius reason as IMediaExplicitOverride above.
+        // First consumer: MediaPurgeController.
+        services.AddSingleton<IMediaPurge>(sp => sp.GetRequiredService<MediaRepository>());
 
         // Rating: the operator taste signal on any catalog row (SPEC F33), standalone from
         // curation (F33.7) — no LibraryScope gating anywhere in this seam (F33.5). Same
