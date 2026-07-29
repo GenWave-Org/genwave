@@ -97,13 +97,21 @@ public static class FeatureDisclosureContractCompleteness
 
         // requests (SPEC F87.1, STORY-224, PLAN T87) — the 202 body is fixed/constant regardless
         // of wish content (no oracle); the submission DTO is blessed too so a future field bound
-        // onto it (mass assignment) fails here first.
+        // onto it (mass assignment) fails here first. genre/mood added by gh-#131 (the form
+        // pickers) — both membership-validated fail-closed server-side, never echoed.
         new(typeof(SpectatorRequestAccepted),
             new SpectatorRequestAccepted(),
             ["status", "note"]),
         new(typeof(SpectatorRequestSubmission),
-            new SpectatorRequestSubmission("more jazz please"),
-            ["wish"]),
+            new SpectatorRequestSubmission("more jazz please", "Metal", "dreamy"),
+            ["wish", "genre", "mood"]),
+
+        // request-options (gh-#131) — the form pickers' two lists, and nothing else: genres are
+        // genre-granularity disclosure ONLY (request-eligible rows, safe-scope excluded), moods are
+        // MoodVocabulary.Terms verbatim.
+        new(typeof(SpectatorRequestOptions),
+            new SpectatorRequestOptions(["Metal", "Rock"], ["dreamy", "driving"]),
+            ["genres", "moods"]),
     ];
 
     /// <summary>

@@ -49,7 +49,8 @@ public sealed class SpectatorController(
     IListenerStatsSource listenerStats,
     IOptionsMonitor<StationOptions> stationMonitor,
     CachingScheduleResolver scheduleResolver,
-    IActivePersonaAccessor personaAccessor) : ControllerBase
+    IActivePersonaAccessor personaAccessor,
+    IRequestCatalogProbe requestCatalogProbe) : ControllerBase
 {
     /// <summary>Hard cap on <c>GET /spectator/api/play-history</c> entries (SPEC F62.6), independent
     /// of the operator-configurable <c>Admin:PlayHistoryCapacity</c> ring size.</summary>
@@ -209,6 +210,28 @@ public sealed class SpectatorController(
         var options = stationMonitor.CurrentValue;
         return Ok(new SpectatorAbout(
             options.Name, HostVersion, License, ProjectUrl, options.PublicStreamUrl, options.Requests.Enabled));
+    }
+
+    /// <summary>
+    /// GET /spectator/api/request-options — the request form's pick lists (gh-#131): the distinct
+    /// genres of request-eligible catalog rows (law + safe-scope applied inside
+    /// <see cref="IRequestCatalogProbe.ListRequestableGenresAsync"/> — safe content's genres never
+    /// leak) and <see cref="MoodVocabulary.Terms"/> verbatim. Genre-granularity disclosure only —
+    /// see <see cref="SpectatorRequestOptions"/>'s own remarks. Lives on this read-only controller
+    /// (not <see cref="SpectatorRequestsController"/>) so it carries exactly the sibling GETs'
+    /// posture: <see cref="RateLimiterPolicies.Spectator"/> class-wide, OutputCache + public
+    /// Cache-Control at the stats/play-history 30s tier (the list only moves on catalog changes),
+    /// and NO <see cref="RequestsSurfaceAttribute"/> — like <c>about</c>'s <c>requestsEnabled</c>
+    /// flag, it stays reachable while the write endpoint's kill switch is off.
+    /// </summary>
+    [HttpGet("request-options")]
+    [HttpHead("request-options")]   // gh-#160: HEAD answers with GET's exact status/headers, body suppressed by the server
+    [OutputCache(PolicyName = SpectatorOutputCachePolicies.RequestOptions)]
+    [SpectatorCacheControl(30)]
+    public async Task<IActionResult> GetRequestOptions(CancellationToken ct)
+    {
+        var genres = await requestCatalogProbe.ListRequestableGenresAsync(ct);
+        return Ok(new SpectatorRequestOptions(genres, MoodVocabulary.Terms));
     }
 
     static object ToPublicEntry(PlayHistoryEntry entry) =>

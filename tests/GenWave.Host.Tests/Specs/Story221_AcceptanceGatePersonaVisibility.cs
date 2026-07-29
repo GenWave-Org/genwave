@@ -140,9 +140,18 @@ public static class FeatureAcceptanceGatePersonaVisibility
             // exploration vocabulary (Story217's own forbidden list) PLUS taste (F86.6) and mood
             // (F86.8) — both new this epic, neither previously swept...
             var forbidden = new[] { "pick", "firedrules", "isexploration", "exploration", "taste", "mood" };
+
+            // gh-#131 exception, blessed by name: the request form's mood picker made the
+            // MoodVocabulary WORD LIST itself deliberately public — SpectatorRequestOptions.Moods
+            // offers the fixed vocabulary, SpectatorRequestSubmission.Mood accepts one member back
+            // (membership-validated fail-closed, never echoed). That is vocabulary disclosure, not
+            // the per-track mood-tag/pick-diagnostic disclosure F86.9 actually forbids — so exactly
+            // these two members pass; any OTHER mood-adjacent member still fails here.
+            var blessed = new[] { "SpectatorRequestOptions.Moods", "SpectatorRequestSubmission.Mood" };
             var offendingMembers = spectatorTypes
                 .SelectMany(type => type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
                     .Select(property => $"{type.Name}.{property.Name}"))
+                .Where(name => !blessed.Contains(name, StringComparer.Ordinal))
                 .Where(name => forbidden.Any(term => name.Contains(term, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
 

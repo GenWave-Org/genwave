@@ -14,7 +14,8 @@ sealed record FulfillableRequestRow
 {
     public long Id { get; init; }
     public long? MatchedMediaId { get; init; }
+    public string? Genre { get; init; }
     public string[]? Moods { get; init; }
 
-    public FulfillableRequest ToFulfillableRequest() => new(Id, MatchedMediaId, Moods ?? []);
+    public FulfillableRequest ToFulfillableRequest() => new(Id, MatchedMediaId, Genre, Moods ?? []);
 }

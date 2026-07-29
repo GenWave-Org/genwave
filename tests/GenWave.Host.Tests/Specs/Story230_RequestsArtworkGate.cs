@@ -213,6 +213,13 @@ public static class FeatureRequestsArtworkGate
             "SpectatorPlayHistoryTrackEntry.Title",
             "SpectatorRequestAccepted.Note",
             "SpectatorRequestAccepted.Status",
+            // gh-#131 (genre predicate + form pickers): the request-options pick lists and the two
+            // optional picker fields on the submission — genre-granularity disclosure only, blessed
+            // in Story183's contract table alongside this census.
+            "SpectatorRequestOptions.Genres",
+            "SpectatorRequestOptions.Moods",
+            "SpectatorRequestSubmission.Genre",
+            "SpectatorRequestSubmission.Mood",
             "SpectatorRequestSubmission.Wish",
             "SpectatorStandbyNowPlaying.Listeners",
             "SpectatorStandbyNowPlaying.State",

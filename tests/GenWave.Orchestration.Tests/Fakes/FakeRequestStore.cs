@@ -20,6 +20,7 @@ sealed class FakeRequestStore : IRequestStore
         public required DateTimeOffset ReceivedAt { get; init; }
         public required DateTimeOffset ExpiresAt { get; init; }
         public long? MatchedMediaId { get; init; }
+        public string? Genre { get; init; }
         public IReadOnlyList<string> Moods { get; init; } = [];
         public string Status { get; set; } = "pending";
     }
@@ -32,6 +33,7 @@ sealed class FakeRequestStore : IRequestStore
         DateTimeOffset expiresAt,
         long? matchedMediaId = null,
         IReadOnlyList<string>? moods = null,
+        string? genre = null,
         DateTimeOffset? receivedAt = null)
     {
         var id = nextId++;
@@ -41,6 +43,7 @@ sealed class FakeRequestStore : IRequestStore
             ReceivedAt = receivedAt ?? DateTimeOffset.UtcNow,
             ExpiresAt = expiresAt,
             MatchedMediaId = matchedMediaId,
+            Genre = genre,
             Moods = moods ?? [],
         });
         return id;
@@ -52,11 +55,13 @@ sealed class FakeRequestStore : IRequestStore
     public Task<FulfillableRequest?> GetOldestLiveAsync(DateTimeOffset now, CancellationToken ct)
     {
         var row = rows
-            .Where(r => r.Status == "pending" && r.ExpiresAt >= now && (r.MatchedMediaId is not null || r.Moods.Count > 0))
+            .Where(r => r.Status == "pending" && r.ExpiresAt >= now
+                && (r.MatchedMediaId is not null || r.Moods.Count > 0 || r.Genre is not null))
             .OrderBy(r => r.ReceivedAt)
             .ThenBy(r => r.Id)
             .FirstOrDefault();
-        return Task.FromResult(row is null ? null : new FulfillableRequest(row.Id, row.MatchedMediaId, row.Moods));
+        return Task.FromResult(
+            row is null ? null : new FulfillableRequest(row.Id, row.MatchedMediaId, row.Genre, row.Moods));
     }
 
     public Task<int> ExpireStaleAsync(DateTimeOffset now, CancellationToken ct)
@@ -77,7 +82,8 @@ sealed class FakeRequestStore : IRequestStore
     }
 
     // Not exercised by STORY-227 specs — this fake's whole purpose is the fulfillment rung above.
-    public Task<long> InsertAsync(string wish, DateTimeOffset expiresAt, CancellationToken ct) =>
+    public Task<long> InsertAsync(
+        string? wish, string? pickedGenre, string? pickedMood, DateTimeOffset expiresAt, CancellationToken ct) =>
         throw new NotSupportedException("Not exercised by this fake's own STORY-227 specs.");
 
     public Task<int> CountPendingAsync(CancellationToken ct) =>
@@ -93,7 +99,8 @@ sealed class FakeRequestStore : IRequestStore
         throw new NotSupportedException("Not exercised by this fake's own STORY-227 specs.");
 
     public Task MarkParsedAsync(
-        long id, string? artist, string? title, IReadOnlyList<string> moods, bool unmatched, CancellationToken ct) =>
+        long id, string? artist, string? title, string? genre, IReadOnlyList<string> moods, bool unmatched,
+        CancellationToken ct) =>
         throw new NotSupportedException("Not exercised by this fake's own STORY-227 specs.");
 
     public Task MarkMatchedAsync(long id, long mediaId, CancellationToken ct) =>

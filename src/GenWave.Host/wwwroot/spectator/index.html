@@ -55,18 +55,35 @@
         <label class="request-label" for="request-wish">What do you want to hear?</label>
         <div class="request-row">
           <!-- maxlength mirrors Requests:WishMaxLength's default (140) — a client-side courtesy
-               only; the server enforces the real, operator-configurable cap. -->
+               only; the server enforces the real, operator-configurable cap. No `required`: a
+               picker-only request (gh-#131) is legal — the submit handler enforces "at least one
+               of text/genre/mood" instead. -->
           <input
             type="text"
             id="request-wish"
             name="wish"
             class="request-input"
             maxlength="140"
-            required
             autocomplete="off"
             placeholder="Artist or song title"
           />
           <button type="submit" class="request-submit">Send</button>
+        </div>
+        <!-- Optional pickers (gh-#131), populated from /spectator/api/request-options — blank
+             default; the blank option submits nothing for that predicate. -->
+        <div class="request-pickers">
+          <label class="request-picker">
+            <span class="request-picker__label">Genre</span>
+            <select id="request-genre" name="genre" class="request-input request-select">
+              <option value="">Any genre</option>
+            </select>
+          </label>
+          <label class="request-picker">
+            <span class="request-picker__label">Mood</span>
+            <select id="request-mood" name="mood" class="request-input request-select">
+              <option value="">Any mood</option>
+            </select>
+          </label>
         </div>
       </form>
       <p class="request-message" id="request-message" aria-live="polite" role="status"></p>

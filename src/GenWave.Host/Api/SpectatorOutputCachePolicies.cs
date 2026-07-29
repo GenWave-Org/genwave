@@ -32,6 +32,11 @@ static class SpectatorOutputCachePolicies
     /// seconds.</summary>
     public const string About = "spectator-about";
 
+    /// <summary>gh-#131: request-options only moves on catalog changes (a new genre enriching in,
+    /// a safe-scope/eligibility edit) — the same "changes far less often than now-playing" tier as
+    /// play-history/stats, 30 seconds.</summary>
+    public const string RequestOptions = "spectator-request-options";
+
     /// <summary>
     /// Registers the named output-cache policies. Call once from <c>Program.cs</c> alongside
     /// <c>AddOutputCache</c>'s other consumers (there are none yet — the spectator surface is the
@@ -49,6 +54,7 @@ static class SpectatorOutputCachePolicies
             options.AddPolicy(PlayHistory, builder => builder.Expire(TimeSpan.FromSeconds(30)).SetVaryByQuery([]));
             options.AddPolicy(Stats, builder => builder.Expire(TimeSpan.FromSeconds(30)).SetVaryByQuery([]));
             options.AddPolicy(About, builder => builder.Expire(TimeSpan.FromSeconds(300)).SetVaryByQuery([]));
+            options.AddPolicy(RequestOptions, builder => builder.Expire(TimeSpan.FromSeconds(30)).SetVaryByQuery([]));
         });
 
         return services;

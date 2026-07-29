@@ -15,5 +15,13 @@ namespace GenWave.Host.Requests;
 /// </summary>
 interface IWishParser
 {
-    Task<ParsedWish> ParseAsync(string wish, CancellationToken ct);
+    /// <summary>
+    /// <paramref name="genreOptions"/> (gh-#131) is the live requestable-genre list
+    /// (<c>IRequestCatalogProbe.ListRequestableGenresAsync</c>), fetched fresh per wish by
+    /// <see cref="RequestParserService"/> — <see cref="DeterministicWishParser"/> recognizes a genre
+    /// word only when it is a member (case-insensitive), and <see cref="LlmWishParser"/> forwards the
+    /// same list to its own deterministic fallback. A wish parse never sees a stale list, and a
+    /// picker-only request never triggers the fetch at all.
+    /// </summary>
+    Task<ParsedWish> ParseAsync(string wish, IReadOnlyList<string> genreOptions, CancellationToken ct);
 }

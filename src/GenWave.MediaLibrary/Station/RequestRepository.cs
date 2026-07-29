@@ -30,18 +30,19 @@ sealed class RequestRepository(Lazy<NpgsqlDataSource> dataSource, int wishRetent
     /// <c>wish</c> is still non-null are touched — a rescan of already-swept rows on every future
     /// insert would be pure waste.
     /// </summary>
-    public async Task<long> InsertAsync(string wish, DateTimeOffset expiresAt, CancellationToken ct)
+    public async Task<long> InsertAsync(
+        string? wish, string? pickedGenre, string? pickedMood, DateTimeOffset expiresAt, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
 
         var id = await conn.QuerySingleAsync<long>(new CommandDefinition(
             """
-            insert into station.request (wish, expires_at)
-            values (@Wish, @ExpiresAt)
+            insert into station.request (wish, picked_genre, picked_mood, expires_at)
+            values (@Wish, @PickedGenre, @PickedMood, @ExpiresAt)
             returning id::bigint
             """,
-            new { Wish = wish, ExpiresAt = expiresAt },
+            new { Wish = wish, PickedGenre = pickedGenre, PickedMood = pickedMood, ExpiresAt = expiresAt },
             transaction: tx,
             cancellationToken: ct));
 
@@ -92,10 +93,11 @@ sealed class RequestRepository(Lazy<NpgsqlDataSource> dataSource, int wishRetent
 
     /// <summary>
     /// The "unparsed" discriminator (see <see cref="IRequestStore"/>'s own remarks) applied as a
-    /// single-row WHERE clause: <c>wish is not null</c> guards against the (practically unreachable —
-    /// the 24h retention window is far longer than any realistic <c>WindowMinutes</c> fulfillment
-    /// window) case of a row whose text was already swept while still somehow pending and unparsed —
-    /// nothing for a parser to read in that case either way.
+    /// single-row WHERE clause. The trailing OR-leg admits a gh-#131 picker-only row (null wish,
+    /// picked values present) while still excluding the (practically unreachable — the 24h retention
+    /// window is far longer than any realistic <c>WindowMinutes</c> fulfillment window) case of a
+    /// wish-only row whose text was already swept while still somehow pending and unparsed — nothing
+    /// for a parser to read in that case either way.
     /// </summary>
     public async Task<UnparsedRequest?> GetForParseAsync(long id, CancellationToken ct)
     {
@@ -106,14 +108,16 @@ sealed class RequestRepository(Lazy<NpgsqlDataSource> dataSource, int wishRetent
             // fallback) matches column name to parameter name directly and does NOT apply
             // DefaultTypeMap.MatchNamesWithUnderscores' snake_case->PascalCase translation.
             """
-            select id::bigint as "Id", wish as "Wish", expires_at as "ExpiresAt"
+            select id::bigint as "Id", wish as "Wish", picked_genre as "PickedGenre",
+                   picked_mood as "PickedMood", expires_at as "ExpiresAt"
             from station.request
             where id = @Id
               and status = 'pending'
-              and wish is not null
               and artist is null
               and title is null
+              and genre is null
               and moods is null
+              and (wish is not null or picked_genre is not null or picked_mood is not null)
             """,
             new { Id = id },
             cancellationToken: ct));
@@ -129,10 +133,11 @@ sealed class RequestRepository(Lazy<NpgsqlDataSource> dataSource, int wishRetent
             select id::bigint
             from station.request
             where status = 'pending'
-              and wish is not null
               and artist is null
               and title is null
+              and genre is null
               and moods is null
+              and (wish is not null or picked_genre is not null or picked_mood is not null)
             order by received_at asc, id asc
             """,
             cancellationToken: ct));
@@ -140,7 +145,8 @@ sealed class RequestRepository(Lazy<NpgsqlDataSource> dataSource, int wishRetent
     }
 
     public async Task MarkParsedAsync(
-        long id, string? artist, string? title, IReadOnlyList<string> moods, bool unmatched, CancellationToken ct)
+        long id, string? artist, string? title, string? genre, IReadOnlyList<string> moods, bool unmatched,
+        CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
         await conn.ExecuteAsync(new CommandDefinition(
@@ -148,11 +154,12 @@ sealed class RequestRepository(Lazy<NpgsqlDataSource> dataSource, int wishRetent
             update station.request
             set artist = @Artist,
                 title = @Title,
+                genre = @Genre,
                 moods = @Moods,
                 status = case when @Unmatched then 'unmatched' else status end
             where id = @Id
             """,
-            new { Id = id, Artist = artist, Title = title, Moods = moods.ToArray(), Unmatched = unmatched },
+            new { Id = id, Artist = artist, Title = title, Genre = genre, Moods = moods.ToArray(), Unmatched = unmatched },
             cancellationToken: ct));
     }
 
@@ -178,21 +185,21 @@ sealed class RequestRepository(Lazy<NpgsqlDataSource> dataSource, int wishRetent
 
     /// <summary>
     /// SPEC F87.6, STORY-227, PLAN T90 — oldest-first (see <see cref="IRequestStore"/>'s own remarks
-    /// for the tie-break convention), admitting only a row with a T89 match OR a non-empty mood
-    /// predicate: <c>cardinality(moods)</c> returns <see langword="null"/> for a <see langword="null"/>
-    /// array and <c>0</c> for an empty one, so <c>&gt; 0</c> alone (no separate "moods is not null"
-    /// guard) correctly excludes both.
+    /// for the tie-break convention), admitting only a row with a T89 match OR a vibe predicate — a
+    /// non-empty mood array or a genre (gh-#131): <c>cardinality(moods)</c> returns
+    /// <see langword="null"/> for a <see langword="null"/> array and <c>0</c> for an empty one, so
+    /// <c>&gt; 0</c> alone (no separate "moods is not null" guard) correctly excludes both.
     /// </summary>
     public async Task<FulfillableRequest?> GetOldestLiveAsync(DateTimeOffset now, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<FulfillableRequestRow?>(new CommandDefinition(
             """
-            select id::bigint as "Id", matched_media_id as "MatchedMediaId", moods as "Moods"
+            select id::bigint as "Id", matched_media_id as "MatchedMediaId", genre as "Genre", moods as "Moods"
             from station.request
             where status = 'pending'
               and expires_at >= @Now
-              and (matched_media_id is not null or cardinality(moods) > 0)
+              and (matched_media_id is not null or cardinality(moods) > 0 or genre is not null)
             order by received_at asc, id asc
             limit 1
             """,

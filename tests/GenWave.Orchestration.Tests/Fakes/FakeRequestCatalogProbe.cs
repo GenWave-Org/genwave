@@ -15,15 +15,23 @@ namespace GenWave.Orchestration.Tests.Fakes;
 sealed class FakeRequestCatalogProbe : IRequestCatalogProbe
 {
     public Func<long, SegmentEnvelope?, MediaReference?> OnGetSelectableById { get; set; } = (_, _) => null;
-    public Func<IReadOnlyList<string>, SegmentEnvelope?, MediaReference?> OnFindVibe { get; set; } = (_, _) => null;
+    public Func<IReadOnlyList<string>, string?, SegmentEnvelope?, MediaReference?> OnFindVibe { get; set; } = (_, _, _) => null;
 
     public Task<MediaReference?> GetSelectableByIdAsync(long mediaId, SegmentEnvelope? envelope, CancellationToken ct) =>
         Task.FromResult(OnGetSelectableById(mediaId, envelope));
 
-    public Task<MediaReference?> FindVibeAsync(IReadOnlyList<string> moods, SegmentEnvelope? envelope, CancellationToken ct) =>
-        Task.FromResult(OnFindVibe(moods, envelope));
+    public Task<MediaReference?> FindVibeAsync(
+        IReadOnlyList<string> moods, string? genre, SegmentEnvelope? envelope, CancellationToken ct) =>
+        Task.FromResult(OnFindVibe(moods, genre, envelope));
 
-    // Not exercised by STORY-227 specs — T90's fulfillment rung never calls the T89 match query.
-    public Task<long?> FindBestAsync(string? artist, string? title, CancellationToken ct) =>
+    // Not exercised by STORY-227 specs — T90's fulfillment rung never calls the T89 match query, nor
+    // gh-#131's parse/options-side genre members.
+    public Task<long?> FindBestAsync(string? artist, string? title, string? genre, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by this fake's own STORY-227 specs.");
+
+    public Task<bool> HasRequestableGenreAsync(string genre, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by this fake's own STORY-227 specs.");
+
+    public Task<IReadOnlyList<string>> ListRequestableGenresAsync(CancellationToken ct) =>
         throw new NotSupportedException("Not exercised by this fake's own STORY-227 specs.");
 }

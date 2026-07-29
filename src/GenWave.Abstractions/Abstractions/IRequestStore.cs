@@ -10,26 +10,36 @@ using GenWave.Core.Domain;
 /// T89 (STORY-226) adds exactly what the catalog matcher needs — <see cref="MarkMatchedAsync"/>,
 /// <see cref="MarkUnmatchedAsync"/>. T90 (STORY-227, SPEC F87.6) adds exactly what the fulfillment
 /// rung needs — <see cref="GetOldestLiveAsync"/>, <see cref="ExpireStaleAsync"/>,
-/// <see cref="TryMarkFulfilledAsync"/>.
+/// <see cref="TryMarkFulfilledAsync"/>. gh-#131 widens the same seam for the genre predicate and the
+/// form pickers: <see cref="InsertAsync"/> carries the server-validated picked genre/mood alongside a
+/// now-optional wish, and <see cref="MarkParsedAsync"/> stores the merged genre predicate.
 ///
 /// <para>
-/// "Unparsed" discriminator (used by both new read members): <c>status = 'pending' AND artist IS
-/// NULL AND title IS NULL AND moods IS NULL</c>. This holds because <see cref="MarkParsedAsync"/> is
-/// the ONLY writer of those three columns after <see cref="IRequestStore.InsertAsync"/>'s insert
-/// (which always leaves them null), and it never leaves all three null while also leaving
-/// <c>status</c> at <c>'pending'</c>: an empty-everything parse (SPEC F87.4's "unparseable ⇒ empty
-/// predicates") is exactly the case <c>unmatched: true</c> covers, which flips <c>status</c> to
-/// <c>'unmatched'</c> in the SAME write — so a row can only be pending-with-all-null-predicates
-/// before its first successful <see cref="MarkParsedAsync"/> call, never after.
+/// "Unparsed" discriminator (used by both parse-side read members): <c>status = 'pending' AND artist
+/// IS NULL AND title IS NULL AND genre IS NULL AND moods IS NULL AND (wish IS NOT NULL OR
+/// picked_genre IS NOT NULL OR picked_mood IS NOT NULL)</c>. This holds because
+/// <see cref="MarkParsedAsync"/> is the ONLY writer of those predicate columns after
+/// <see cref="IRequestStore.InsertAsync"/>'s insert (which always leaves them null), and it never
+/// leaves all of them null while also leaving <c>status</c> at <c>'pending'</c>: an empty-everything
+/// parse (SPEC F87.4's "unparseable ⇒ empty predicates") is exactly the case <c>unmatched: true</c>
+/// covers, which flips <c>status</c> to <c>'unmatched'</c> in the SAME write — so a row can only be
+/// pending-with-all-null-predicates before its first successful <see cref="MarkParsedAsync"/> call,
+/// never after. The trailing OR-leg exists for gh-#131's picker-only rows: a row whose wish was
+/// already retention-swept AND that carries no picked value has nothing for a parser to do.
 /// </para>
 /// </summary>
 public interface IRequestStore
 {
     /// <summary>
-    /// Inserts one pending wish, stamped <c>received_at = now()</c> and
+    /// Inserts one pending request, stamped <c>received_at = now()</c> and
     /// <c>expires_at = </c><paramref name="expiresAt"/>, returning the new row's id.
     /// <paramref name="wish"/> is the listener's raw text; never voiced, quoted, or echoed
     /// downstream (SPEC F87.7) — this seam only ever stores it, and only briefly.
+    /// <see langword="null"/> for a picker-only request (gh-#131), which must then carry at least
+    /// one of <paramref name="pickedGenre"/>/<paramref name="pickedMood"/> — the intake endpoint's
+    /// own 400 guard, never re-checked here. Both picked values arrive already validated against
+    /// the current published lists (genre canonicalized to catalog casing, mood a
+    /// <c>MoodVocabulary</c> member) — this seam stores them verbatim.
     ///
     /// <para>
     /// Also runs the insert-time wish-retention sweep (SPEC F87.8) in the SAME
@@ -42,7 +52,8 @@ public interface IRequestStore
     /// stay indefinitely.
     /// </para>
     /// </summary>
-    Task<long> InsertAsync(string wish, DateTimeOffset expiresAt, CancellationToken ct);
+    Task<long> InsertAsync(
+        string? wish, string? pickedGenre, string? pickedMood, DateTimeOffset expiresAt, CancellationToken ct);
 
     /// <summary>
     /// Counts rows currently <c>status = 'pending'</c> — the station-wide pending cap (SPEC F87.3,
@@ -80,16 +91,18 @@ public interface IRequestStore
 
     /// <summary>
     /// Writes one wish's parse outcome (SPEC F87.4): <paramref name="artist"/>/<paramref name="title"/>/
-    /// <paramref name="moods"/> are stored verbatim (the parser has already done all filtering —
-    /// MoodVocabulary membership, trim-to-non-empty passthrough — this seam never re-validates them).
-    /// <paramref name="unmatched"/> is <see langword="true"/> exactly when every predicate came back
-    /// empty (F87.4's "unparseable ⇒ empty predicates ⇒ status=unmatched") and flips <c>status</c> to
-    /// <c>'unmatched'</c> in the same write; otherwise <c>status</c> is left untouched (still
-    /// <c>'pending'</c>, ready for T89's matcher). Deliberately carries no <c>wish</c> parameter at
-    /// all — this seam cannot resurrect raw text into a row even by accident (SPEC F87.7/F87.8).
+    /// <paramref name="genre"/>/<paramref name="moods"/> are stored verbatim (the parser has already
+    /// done all filtering — MoodVocabulary membership, trim-to-non-empty passthrough, the gh-#131
+    /// picker merge — this seam never re-validates them). <paramref name="unmatched"/> is
+    /// <see langword="true"/> exactly when every predicate came back empty (F87.4's "unparseable ⇒
+    /// empty predicates ⇒ status=unmatched") and flips <c>status</c> to <c>'unmatched'</c> in the same
+    /// write; otherwise <c>status</c> is left untouched (still <c>'pending'</c>, ready for T89's
+    /// matcher). Deliberately carries no <c>wish</c> parameter at all — this seam cannot resurrect raw
+    /// text into a row even by accident (SPEC F87.7/F87.8).
     /// </summary>
     Task MarkParsedAsync(
-        long id, string? artist, string? title, IReadOnlyList<string> moods, bool unmatched, CancellationToken ct);
+        long id, string? artist, string? title, string? genre, IReadOnlyList<string> moods, bool unmatched,
+        CancellationToken ct);
 
     /// <summary>
     /// Records a successful catalog match (SPEC F87.5, STORY-226, PLAN T89): stamps
@@ -101,20 +114,23 @@ public interface IRequestStore
     Task MarkMatchedAsync(long id, long mediaId, CancellationToken ct);
 
     /// <summary>
-    /// Flips a row to <c>unmatched</c> (SPEC F87.5) when its artist/title predicate found no catalog
-    /// row AND it carries no mood predicate either — nothing left to try. A row with a mood predicate
-    /// on a match miss stays <c>pending</c> instead (a vibe request, resolved later at pick time via
-    /// the F86.8 mood-filter machinery) — this member is never called for that case.
+    /// Flips a row to <c>unmatched</c> (SPEC F87.5) when nothing about it can ever fulfill: its
+    /// artist/title predicate found no catalog row and no vibe predicate survives — no mood, and no
+    /// genre the station actually stocks (gh-#131: a genre the catalog lacks poisons the whole
+    /// AND-merged predicate set, so the row flips here rather than idling to expiry). A row with a
+    /// surviving vibe predicate on a match miss stays <c>pending</c> instead, resolved later at pick
+    /// time via the F86.8 mood-filter machinery — this member is never called for that case.
     /// </summary>
     Task MarkUnmatchedAsync(long id, CancellationToken ct);
 
     /// <summary>
     /// The oldest still-live pending row with something for the fulfillment rung to try (SPEC F87.6,
     /// STORY-227, PLAN T90): <c>status = 'pending'</c>, not yet past <paramref name="now"/>'s
-    /// <c>expires_at</c>, and carrying EITHER a T89 catalog match (<c>matched_media_id</c>) OR at
-    /// least one parsed mood (a vibe request) — never neither, and never both meaningfully (a matched
-    /// row's moods are irrelevant once matched_media_id exists; the fulfillment rung always prefers
-    /// the match). Oldest by <c>received_at</c> first, same tie-break as every other "oldest pending"
+    /// <c>expires_at</c>, and carrying EITHER a T89 catalog match (<c>matched_media_id</c>) OR a vibe
+    /// predicate — at least one parsed mood, or a genre (gh-#131) — never none of the three, and
+    /// never several meaningfully (a matched row's genre/moods are irrelevant once matched_media_id
+    /// exists; the fulfillment rung always prefers the match). Oldest by <c>received_at</c> first,
+    /// same tie-break as every other "oldest pending"
     /// read in this interface. <see langword="null"/> when nothing qualifies — the ordinary "no live
     /// request to fulfill" outcome, not an error.
     /// </summary>

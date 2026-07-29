@@ -57,6 +57,7 @@ sealed class RequestParserService(
     IDegradationModeReader degradationMode,
     IOptionsMonitor<LlmOptions> llmOptions,
     RequestMatcher matcher,
+    IRequestCatalogProbe catalogProbe,
     ILogger<RequestParserService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -107,22 +108,45 @@ sealed class RequestParserService(
             var request = await store.GetForParseAsync(id, ct);
             if (request is null) return; // already parsed, expired, evicted, or gone since it was queued
 
-            var mode = degradationMode.CurrentMode;
-            var useLlm = mode == DegradationMode.Normal && !string.IsNullOrEmpty(llmOptions.CurrentValue.Endpoint);
-            IWishParser parser = useLlm ? llmParser : deterministicParser;
+            ParsedWish parsed;
+            string parserLabel;
+            if (request.Wish is null)
+            {
+                // gh-#131 — a picker-only request: there is no free text, so NO parser runs at all.
+                // The server-validated picked values merged below ARE the whole predicate set, which
+                // is exactly why a picker-only request behaves identically in Degraded mode (F69) —
+                // the LLM-vs-deterministic routing beneath this branch is never even consulted.
+                parsed = ParsedWish.Empty;
+                parserLabel = "picker-only";
+            }
+            else
+            {
+                var mode = degradationMode.CurrentMode;
+                var useLlm = mode == DegradationMode.Normal && !string.IsNullOrEmpty(llmOptions.CurrentValue.Endpoint);
+                IWishParser parser = useLlm ? llmParser : deterministicParser;
 
-            var parsed = await parser.ParseAsync(request.Wish, ct);
-            await store.MarkParsedAsync(id, parsed.Artist, parsed.Title, parsed.Moods, unmatched: parsed.IsEmpty, ct);
+                // The live requestable-genre list (gh-#131), fetched fresh per wish — the
+                // deterministic parser's "recognized = member" rule always sees the current catalog.
+                var genreOptions = await catalogProbe.ListRequestableGenresAsync(ct);
+                parsed = await parser.ParseAsync(request.Wish, genreOptions, ct);
+                parserLabel = useLlm ? "LLM" : "deterministic";
+            }
+
+            // gh-#131 — the picker predicates merge in (AND) after the free-text parse, before the
+            // single MarkParsedAsync write: one write, one merged predicate set, no partial states.
+            var merged = parsed.MergePicked(request.PickedGenre, request.PickedMood);
+            await store.MarkParsedAsync(
+                id, merged.Artist, merged.Title, merged.Genre, merged.Moods, unmatched: merged.IsEmpty, ct);
 
             // Matching (SPEC F87.5, PLAN T89) continues the SAME pipeline right here — an empty parse
             // is already unmatched (the write above), so RequestMatcher is only ever reached with a
             // predicate actually worth probing the catalog for.
-            if (!parsed.IsEmpty)
-                await matcher.MatchAsync(id, parsed.Artist, parsed.Title, parsed.Moods, ct);
+            if (!merged.IsEmpty)
+                await matcher.MatchAsync(id, merged.Artist, merged.Title, merged.Genre, merged.Moods, ct);
 
             logger.LogInformation(
                 "Parsed request {Id} via {Parser}: {Outcome}",
-                id, useLlm ? "LLM" : "deterministic", parsed.IsEmpty ? "no predicates" : "predicates found");
+                id, parserLabel, merged.IsEmpty ? "no predicates" : "predicates found");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
