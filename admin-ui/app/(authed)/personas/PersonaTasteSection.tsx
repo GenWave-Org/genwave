@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
+import { HelpFlyover } from "@/components/ui/help-flyover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toast";
 import { formatUpSince } from "@/lib/format-clock";
@@ -132,13 +133,29 @@ function TasteGroup({ label, rules }: { label: string; rules: PersonaTasteRule[]
 /** The accrued cap meter (SPEC F86.7) — count/cap read straight from the response, nothing
  * hardcoded. Rendered whenever the section has any taste at all, even when the accrued group
  * itself is currently empty (0/cap is still an honest, informative reading). Styling mirrors
- * NowPlayingCard's own dial-marking progress bar (thin bg-line track, rounded fill). */
+ * NowPlayingCard's own dial-marking progress bar (thin bg-line track, rounded fill).
+ *
+ * gh-#209 (supersedes gh-#143's always-on one-liner): ACCRUED gets the house `?` flyover instead
+ * — the settings page's gh-#145 pattern — because one quiet line wasn't room enough to say what
+ * accrues, what the thumbs actually teach, or what happens at the cap, and always-on inline prose
+ * is exactly what that pattern exists to avoid. Copy is grounded in the server's own semantics
+ * (IPersonaTasteAccrualStore: thumb → nudge the artist rule, clamp, cap-with-weakest-evicted;
+ * PersonaRanker: accrued rules bias that persona's picks). */
 function AccruedCapMeter({ count, cap }: { count: number; cap: number }): ReactNode {
   const percent = cap > 0 ? Math.min(100, (count / cap) * 100) : 0;
   return (
     <div>
-      <div className="flex items-baseline justify-between">
-        <h3 className={GROUP_HEADING_CLASSES}>Accrued</h3>
+      <div className="flex items-center justify-between">
+        <span className="inline-flex items-center gap-1.5">
+          <h3 className={GROUP_HEADING_CLASSES}>Accrued</h3>
+          <HelpFlyover label="Help: Accrued taste" testId="accrued-taste-help">
+            Accrued taste is what this persona has learned from your taste thumbs: each thumb up
+            or down on an aired track nudges its opinion of that track&rsquo;s artist, and those
+            learned opinions steer which tracks it favors when picking music. The count is how
+            many learned opinions it holds against the cap — at the cap, the weakest opinion is
+            dropped to make room for the next.
+          </HelpFlyover>
+        </span>
         <span className="text-[0.72rem] tabular-nums text-mute">{`${count} / ${cap}`}</span>
       </div>
       <div
@@ -151,11 +168,6 @@ function AccruedCapMeter({ count, cap }: { count: number; cap: number }): ReactN
       >
         <div className="h-full rounded-full bg-accent-2" style={{ width: `${percent}%` }} />
       </div>
-      {/* gh-#143: the meter's count/cap read raw ("12 / 50") with nothing saying what accrues —
-          one quiet line names it. */}
-      <p className="mt-1 text-[0.72rem] text-mute">
-        Taste rules this persona has learned from your taste thumbs, counted against its cap.
-      </p>
     </div>
   );
 }
