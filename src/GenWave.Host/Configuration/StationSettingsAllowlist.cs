@@ -239,8 +239,9 @@ public static class StationSettingsAllowlist
         // property, and the SettingValidator guard.
         new("Station:Audience",                               SettingApplyMode.Live,          SettingKind.String,     ""),
 
-        // Station timezone (gh-#117) — an IANA id (e.g. America/Edmonton) the LLM/patter path's
-        // "station-local now" reads resolve through IStationClockProvider; empty (the default) is
+        // Station timezone (gh-#117; extended gh-#224) — an IANA id (e.g. America/Edmonton) every
+        // "station-local now" read (LLM/patter clocks, the schedule grid's slot resolution, taste
+        // day/hour gating) resolves through IStationClockProvider; empty (the default) is
         // the honest "container's own clock" state, pre-gh-#117 behavior unchanged. Live so a PUT
         // here reaches the very next prompt build / SegmentRequest stamp with no api restart —
         // OptionsMonitorStationClockProvider re-resolves IOptionsMonitor<StationOptions> per call.
