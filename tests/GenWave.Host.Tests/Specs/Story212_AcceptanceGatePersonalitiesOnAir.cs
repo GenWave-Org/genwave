@@ -32,7 +32,7 @@ public static class FeatureAcceptanceGatePersonalitiesOnAir
         // so the C# feeder's url= annotation actually reaches the ICY StreamUrl (see the
         // Story230 gate's live-run finding).
         const string EngineScriptSha256 = "869ea6fc35e3d73de4ca6cc47551a07da63bd855481ba77120fe73f1754d72da";
-        const string ComposeYamlSha256  = "9ddd169329ef5b092638d1e67279272fc4d7b9f350dcc330cb455d7d92faf981";
+        const string ComposeYamlSha256  = "51e394e654f1ab1049503eb1c99d7d43c286b69069b9b88f4b78ce37a7f3438c";
 
         [Fact]
         public static void EngineScriptByteMatchesMain()
