@@ -26,6 +26,7 @@ public sealed partial class FfmpegLoudnessAnalyzer : ILoudnessAnalyzer
             ArgumentList = { "-nostats", "-hide_banner", "-i", path,
                              "-filter_complex", "ebur128=peak=true", "-f", "null", "-" }
         }) ?? throw new InvalidOperationException("Failed to start ffmpeg.");
+        AnalyzerProcessPriority.TryLower(p);
 
         var err = await p.StandardError.ReadToEndAsync(ct);
         await p.WaitForExitAsync(ct);

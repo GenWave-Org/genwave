@@ -43,6 +43,7 @@ public sealed partial class FfmpegCueAnalyzer : ICueAnalyzer
             UseShellExecute = false,
             ArgumentList = { "-nostdin", "-i", path, "-af", filterArg, "-f", "null", "-" }
         }) ?? throw new InvalidOperationException("Failed to start ffmpeg.");
+        AnalyzerProcessPriority.TryLower(p);
 
         var stderr = await p.StandardError.ReadToEndAsync(ct);
         await p.WaitForExitAsync(ct);

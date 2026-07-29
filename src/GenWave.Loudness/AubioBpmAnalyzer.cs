@@ -64,6 +64,7 @@ public sealed class AubioBpmAnalyzer : IBpmAnalyzer
             psi.ArgumentList.Add(arg);
 
         using var p = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start ffmpeg.");
+        AnalyzerProcessPriority.TryLower(p);
 
         await p.StandardError.ReadToEndAsync(ct);
         await p.WaitForExitAsync(ct);
@@ -79,6 +80,7 @@ public sealed class AubioBpmAnalyzer : IBpmAnalyzer
             UseShellExecute = false,
             ArgumentList = { "tempo", wavPath }
         }) ?? throw new InvalidOperationException("Failed to start aubio.");
+        AnalyzerProcessPriority.TryLower(p);
 
         var stdout = await p.StandardOutput.ReadToEndAsync(ct);
         await p.WaitForExitAsync(ct);
