@@ -103,6 +103,7 @@ public sealed class SpectatorController(
     /// </para>
     /// </summary>
     [HttpGet("now-playing")]
+    [HttpHead("now-playing")]   // gh-#160: HEAD answers with GET's exact status/headers, body suppressed by the server
     [OutputCache(PolicyName = SpectatorOutputCachePolicies.NowPlaying)]
     [SpectatorCacheControl(5)]
     public async Task<IActionResult> GetNowPlaying(CancellationToken ct)
@@ -153,6 +154,7 @@ public sealed class SpectatorController(
     /// construction, not by filtering.
     /// </summary>
     [HttpGet("play-history")]
+    [HttpHead("play-history")]   // gh-#160: HEAD answers with GET's exact status/headers, body suppressed by the server
     [OutputCache(PolicyName = SpectatorOutputCachePolicies.PlayHistory)]
     [SpectatorCacheControl(30)]
     public IActionResult GetPlayHistory()
@@ -180,6 +182,7 @@ public sealed class SpectatorController(
     /// </para>
     /// </summary>
     [HttpGet("stats")]
+    [HttpHead("stats")]   // gh-#160: HEAD answers with GET's exact status/headers, body suppressed by the server
     [OutputCache(PolicyName = SpectatorOutputCachePolicies.Stats)]
     [SpectatorCacheControl(30)]
     public async Task<IActionResult> GetStats(CancellationToken ct)
@@ -198,6 +201,7 @@ public sealed class SpectatorController(
     /// at runtime.
     /// </summary>
     [HttpGet("about")]
+    [HttpHead("about")]   // gh-#160: HEAD answers with GET's exact status/headers, body suppressed by the server
     [OutputCache(PolicyName = SpectatorOutputCachePolicies.About)]
     [SpectatorCacheControl(300)]
     public IActionResult GetAbout()
