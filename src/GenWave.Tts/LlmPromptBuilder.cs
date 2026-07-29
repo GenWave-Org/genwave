@@ -35,14 +35,25 @@ static class LlmPromptBuilder
         "each break, and never reuse an example's literal values on air.";
 
     /// <summary>
-    /// Baked house scaffold for the system prompt (SPEC F34.3): personality-neutral radio DJ, 1-2
-    /// spoken sentences, no stage directions. <paramref name="personaSection"/> (SPEC F35.2, F35.3,
-    /// F71.3) appends an active persona's soul + sampled quirks beneath the scaffold; null/empty
-    /// (no active persona, or one with nothing to show) leaves the neutral scaffold untouched —
-    /// blurbs work persona-less exactly as before T6.
+    /// Baked house scaffold for the system prompt (SPEC F34.3): 1-2 spoken sentences, no stage
+    /// directions. <paramref name="personaSection"/> (SPEC F35.2, F35.3, F71.3) appends an active
+    /// persona's soul + sampled quirks beneath the scaffold AND swaps the opening line to a
+    /// write-in-this-voice directive (gh-#152); null/empty (no active persona, or one with nothing
+    /// to show) keeps the personality-neutral opening — blurbs work persona-less exactly as
+    /// before T6.
     /// </summary>
     public static string BuildSystemPrompt(string? personaSection)
     {
+        // gh-#152: "personality-neutral" and a persona section's "Style: bubbly, energetic,
+        // expressive" cancelled each other inside the SAME prompt. The neutral framing now applies
+        // ONLY when there is no persona section; with one, the opening line points the model at
+        // the persona's voice instead. The shared body below is identical either way.
+        const string NeutralOpening =
+            "You are a personality-neutral radio DJ writing live station patter.";
+        const string PersonaOpening =
+            "You are a radio DJ writing live station patter - write every word in the voice of the " +
+            "persona described below.";
+
         // gh-#188: the old closing line ("You may embellish with genuine knowledge of the track,
         // artist, or era.") was a license a small local model cannot safely hold — observed live
         // renaming an artist on air (LaBarcaDeSua spoken as "Barcarola") and inventing origins
@@ -51,9 +62,9 @@ static class LlmPromptBuilder
         // gh-#151: an artist's gender is one more unprovided fact — observed live inferring it
         // from a French first name ("it's off HIS self-titled EP"). they/them/their unless the
         // metadata itself says otherwise; a name is never evidence.
-        const string Scaffold =
-            "You are a personality-neutral radio DJ writing live station patter. Write exactly one " +
-            "or two sentences of spoken copy to be read aloud on air. Plain spoken words only - no " +
+        const string ScaffoldBody =
+            "Write exactly one or two sentences of spoken copy to be read aloud on air. " +
+            "Plain spoken words only - no " +
             "stage directions, no emoji, no markdown formatting, no sound-effect cues. You may add " +
             "color about the era or genre, but never state specific facts about the artist or track " +
             "that you were not given, and never alter the artist's name or the track's title - when " +
@@ -61,7 +72,9 @@ static class LlmPromptBuilder
             "they/them/their unless the provided metadata explicitly states pronouns - never infer " +
             "gender from a name.";
 
-        return string.IsNullOrEmpty(personaSection) ? Scaffold : $"{Scaffold}\n\n{personaSection}";
+        return string.IsNullOrEmpty(personaSection)
+            ? $"{NeutralOpening} {ScaffoldBody}"
+            : $"{PersonaOpening} {ScaffoldBody}\n\n{personaSection}";
     }
 
     /// <summary>
