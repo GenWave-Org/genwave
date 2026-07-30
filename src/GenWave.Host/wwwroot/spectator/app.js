@@ -355,9 +355,11 @@ async function loadAbout() {
 //   - backoff: the delay doubles per attempt from RECOVERY_BASE_DELAY_MS up to
 //     RECOVERY_MAX_DELAY_MS while the mount stays down, and resets to the base once the playing
 //     event confirms real playback resumed.
-//   - live pause semantics (gh-#298): a user pause also detaches the src (honest stop — kills
-//     Chrome's paused-stream background download and its banked buffer); the next play
-//     reattaches fresh through recoverPlayer, rejoining the live head instead of the bank.
+//   - live pause semantics (gh-#298): a user pause detaches the src (honest stop — kills
+//     Chrome's paused-stream background download and its banked buffer), then immediately
+//     re-arms a fresh cache-busted src by bare assignment (no load/play — preload="none"
+//     fetches nothing) so the native play button stays alive; the next play fetches the armed
+//     URL, rejoining the live head instead of the bank.
 
 /** @type {string|null} — the live stream URL from the one-shot about fetch; null = no stream. */
 let streamUrl = null;
@@ -384,12 +386,19 @@ function schedulePlayerRecovery(player, delayMs) {
   }, delayMs);
 }
 
-/** Tears down the src and reattaches the stream URL with a cache-buster param — the fresh URL is
- * what breaks Chrome's Range-resume behavior. An AbortError from play() (user paused, or a newer
- * load superseded this one) is deliberately swallowed; a NotAllowedError means the browser revoked
- * autoplay credit, so the player disarms and waits for a real press of play. */
+/** Composes the stream URL with a unique cache-buster — the fresh URL is what breaks Chrome's
+ * Range-resume behavior (gh-#114) and marks every (re)attach as a brand-new resource. The single
+ * composition point: recovery and the honest-stop re-arm (gh-#298) both go through here. */
+function freshStreamSrc() {
+  return `${streamUrl}${streamUrl.includes("?") ? "&" : "?"}reconnect=${Date.now()}`;
+}
+
+/** Tears down the src and reattaches a fresh cache-busted stream URL. An AbortError from play()
+ * (user paused, or a newer load superseded this one) is deliberately swallowed; a NotAllowedError
+ * means the browser revoked autoplay credit, so the player disarms and waits for a real press of
+ * play. */
 function recoverPlayer(player) {
-  player.src = `${streamUrl}${streamUrl.includes("?") ? "&" : "?"}reconnect=${Date.now()}`;
+  player.src = freshStreamSrc();
   player.load();
   player.play().catch((error) => {
     if (error.name === "NotAllowedError") playIntended = false;
@@ -400,10 +409,12 @@ function initPlayerRecovery() {
   const player = document.getElementById("player");
   player.addEventListener("play", () => {
     playIntended = true;
-    // Rejoin live (gh-#298): play with no source attached — the honest-stop pause below
-    // detached it — reattaches through the same cache-busted path recovery uses, so resume
-    // always lands on the live head, never a paused buffer. recoverPlayer's own play() makes
-    // this handler re-enter, but by then the src attribute is set, so the guard ends the loop.
+    // Belt for the truly src-less edge (gh-#298): the honest-stop pause below normally re-arms
+    // a fresh src, so this guard stays quiet — it only catches a play reaching an element with
+    // no source attached (a pause taken before the about fetch resolved streamUrl, or any other
+    // path that left the attribute absent) and rejoins live through the same cache-busted path
+    // recovery uses. recoverPlayer's own play() makes this handler re-enter, but by then the
+    // src attribute is set, so the guard ends the loop.
     if (streamUrl && !player.getAttribute("src")) recoverPlayer(player);
   });
   player.addEventListener("playing", () => {
@@ -425,10 +436,17 @@ function initPlayerRecovery() {
     // Honest stop (gh-#298): detach the source entirely. A paused progressive stream keeps
     // downloading into Chrome's media cache and resume replays that bank — field-measured two
     // songs behind the live head. Detaching kills the ongoing background download AND the
-    // banked buffer; the play handler above rejoins live with a fresh cache-busted attach.
-    // load() with no src fires no error/ended, so nothing here re-arms recovery.
+    // banked buffer. Then RE-ARM with a fresh cache-busted src — assignment only, no load(),
+    // no play(): with preload="none" the bare assignment fetches zero bytes (loadstart fires,
+    // then the network idles), but it keeps the native controls' play button alive — Chromium
+    // refuses a trusted play on a src-less element (verified via Playwright), so a bare detach
+    // would dead-end the on-page resume. The pause-time cache-buster stays unique however long
+    // the pause lasts; the next play fetches the armed URL fresh, at the live head. Neither
+    // step can re-arm recovery: loadstart is not a recovery-scheduled event, playIntended is
+    // already false here, and the pending timer (if any) was just cleared.
     player.removeAttribute("src");
     player.load();
+    if (streamUrl) player.src = freshStreamSrc();
   });
   // stalled waits out the longer confirm window before the no-progress check above; error/ended
   // are definitively stuck and only need the backoff delay.

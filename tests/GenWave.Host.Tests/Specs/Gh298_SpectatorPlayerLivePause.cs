@@ -7,9 +7,13 @@
 // trips) and no HTTP header marks a progressive stream "live". The fix teaches OUR player live
 // semantics on top of the gh-#114 recovery machinery:
 //   - user pause = honest stop: detach the src (removeAttribute + load()), killing both the
-//     ongoing background download and the banked buffer;
-//   - play with no source attached = rejoin live: reattach through recoverPlayer's existing
-//     cache-busted path (one cache-buster in the file, never duplicated);
+//     ongoing background download and the banked buffer — then RE-ARM a fresh cache-busted src
+//     by bare assignment (no load/play): Chromium refuses a trusted play on a src-less element
+//     (verified via Playwright), and with preload="none" the assignment fetches zero bytes
+//     while keeping the native play button alive;
+//   - the next play fetches the armed URL at the live head; a play reaching a truly src-less
+//     element (pre-about edge) still rejoins through recoverPlayer's cache-busted path — one
+//     cache-buster composition in the file (freshStreamSrc), never duplicated;
 //   - the end-of-stream subtlety stays: ended fires pause first with player.ended already true,
 //     and that early return must now also skip the detach so the ended handler can recover;
 //   - MediaSession garnish, fully feature-detected: station metadata + infinite duration so OS
@@ -107,6 +111,41 @@ public static class FeatureSpectatorPlayerLivePause
             Assert.Contains("playIntended = false", pauseHandler, StringComparison.Ordinal);
             Assert.Contains("clearTimeout(recoveryTimer)", pauseHandler, StringComparison.Ordinal);
         }
+
+        [Fact]
+        public async Task ThePauseHandlerReArmsAFreshSrcAfterTheDetach()
+        {
+            // Chromium refuses a trusted play on a src-less element (verified via Playwright),
+            // so the detach alone would dead-end the on-page resume. The re-arm is a bare
+            // assignment of the cache-busted URL: with preload="none" it fetches zero bytes,
+            // but the native play button stays alive and the next play lands on the live head.
+            var js = await ServedAppJsAsync();
+
+            var pauseHandler = HandlerBlock(js, "pause", "stalled");
+            var detachAt = pauseHandler.IndexOf("player.removeAttribute(\"src\")", StringComparison.Ordinal);
+            var reArmAt = pauseHandler.IndexOf("player.src = freshStreamSrc()", StringComparison.Ordinal);
+
+            Assert.True(reArmAt >= 0, "the pause handler does not re-arm a fresh src");
+            Assert.True(detachAt >= 0 && detachAt < reArmAt,
+                "the re-arm must follow the detach — assigning before detaching would leave the old buffer's teardown incomplete");
+        }
+
+        [Fact]
+        public async Task TheReArmNeverLoadsOrPlays()
+        {
+            // Assignment only: a load() or play() after the re-arm would start fetching the
+            // stream during the pause — exactly the background download this issue kills.
+            var js = await ServedAppJsAsync();
+
+            var pauseHandler = HandlerBlock(js, "pause", "stalled");
+            const string reArm = "player.src = freshStreamSrc()";
+            var reArmAt = pauseHandler.IndexOf(reArm, StringComparison.Ordinal);
+            Assert.True(reArmAt >= 0, "the pause handler does not re-arm a fresh src");
+
+            var afterReArm = pauseHandler[(reArmAt + reArm.Length)..];
+            Assert.DoesNotContain("player.load()", afterReArm, StringComparison.Ordinal);
+            Assert.DoesNotContain("player.play(", afterReArm, StringComparison.Ordinal);
+        }
     }
 
     // ── HAPPY PATH — play rejoins the live head ──────────────────────────
@@ -120,8 +159,9 @@ public static class FeatureSpectatorPlayerLivePause
 
             var playHandler = HandlerBlock(js, "play", "playing");
 
-            // Guarded on the src attribute being absent (only the honest-stop pause leaves the
-            // element that way) and routed through recoverPlayer — the cache-busted reattach.
+            // Belt for the truly src-less edge (the honest-stop pause normally re-arms, so this
+            // only catches e.g. a pause taken before the about fetch resolved streamUrl):
+            // guarded on the src attribute being absent, routed through recoverPlayer.
             Assert.Contains("!player.getAttribute(\"src\")", playHandler, StringComparison.Ordinal);
             Assert.Contains("recoverPlayer(player)", playHandler, StringComparison.Ordinal);
         }
@@ -129,10 +169,12 @@ public static class FeatureSpectatorPlayerLivePause
         [Fact]
         public async Task TheCacheBusterLivesInExactlyOnePlace()
         {
-            // The rejoin reuses recoverPlayer rather than composing its own URL — one
-            // cache-buster expression in the whole file, so the two paths can never drift.
+            // Recovery, the pause-path re-arm, and the belt rejoin all compose their URL through
+            // freshStreamSrc — one cache-buster expression in the whole file, so no path can
+            // ever drift from the others.
             var js = await ServedAppJsAsync();
 
+            Assert.Contains("function freshStreamSrc()", js, StringComparison.Ordinal);
             Assert.Equal(1, Occurrences(js, "reconnect=${Date.now()}"));
         }
 
