@@ -195,11 +195,15 @@ services:
   kokoro:
     image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.6.0   # PIN — do not use latest
     networks: [core]                                    # internal only; control port 8880 NEVER published
-    # kokoro-fastapi leaks RSS under load (upstream #453 — root cause fixed after v0.2.x; #262
-    # still open). Fresh baseline is ~1.2GiB; this cap is the fail-closed backstop: leak past it
-    # and the kernel OOM-kills the container, `restart: unless-stopped` brings it back clean in
-    # seconds. Blast radius is one failed TTS render — the broadcast keeps playing music.
-    mem_limit: 3g
+    # kokoro-fastapi leaks RSS under load (upstream #453 fixed in v0.3.0; #262 still open as of
+    # v0.6.0). Fresh baseline is ~1.2GiB, the leaked baseline creeps toward the cap, and one
+    # long render can spike ~+0.5GiB on top (live-observed on demo 2026-07-28..30: MEMCG kills
+    # 30h apart at light load, 88min apart in a heavy render window — gh-#276). The cap stays
+    # as the fail-closed backstop: kernel OOM-kills the container, `restart: unless-stopped`
+    # brings it back clean in seconds, music never stops. But since personas the failed render
+    # retries via Piper and airs in the WRONG VOICE, so the cap sets how often that happens —
+    # 4g = spike headroom above the leaked baseline instead of a daily ceiling bump.
+    mem_limit: 4g
     healthcheck:
       # HTTP-level check against kokoro-fastapi's dedicated /health route (upstream v0.6.0+, the
       # pin above; curl ships in the image). The old TCP-connect idiom wrote a bare newline into
