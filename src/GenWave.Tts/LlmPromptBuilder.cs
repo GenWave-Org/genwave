@@ -252,15 +252,19 @@ static class LlmPromptBuilder
         $"Current date/time (station-local): {stationLocalNow.ToString("dddd, MMMM d, yyyy, h:mm tt", CultureInfo.InvariantCulture)}";
 
     /// <summary>
-    /// SPEC F83.2 — the exploration lampshade: the pick came from the bias-blind exploration slice
+    /// SPEC F83.2 — the exploration taste note: the pick came from the bias-blind exploration slice
     /// (<c>PersonaRanker.PickAsync</c>'s own contract guarantees <see cref="PersonaPickDiagnostics.FiredRules"/>
     /// is empty in this case — bias-blind by construction, never a post-hoc zeroing), so there is
-    /// nothing to attribute it to. States plainly that the pick sits outside the persona's usual
-    /// taste and invites an OPTIONAL lampshade ("not my usual...") — never a fired rule.
+    /// nothing to attribute it to. Reworded for gh-#270: the old negative framing ("not my usual
+    /// pick, but...") was parroted verbatim on air by llama3.2:3b (23% of aired disclaimers) — the
+    /// note now frames the pick as the DJ's OWN adventurous choice, never a complaint, and still
+    /// never a fired rule.
     /// </summary>
     const string ExplorationLampshadeLine =
-        "Taste note: this pick sits outside the persona's usual taste (an exploration pick) - you " +
-        "may lampshade that on air (e.g. \"not my usual pick, but...\"); never credit it to a taste rule.";
+        "Taste note: this pick is a change of pace for this persona (an exploration pick) - if " +
+        "mentioned at all, frame it as your own adventurous choice (e.g. \"Time for something a " +
+        "little different\"), never as a track you wouldn't have picked or a complaint about the " +
+        "playlist; never credit it to a taste rule.";
 
     /// <summary>
     /// SPEC F87.7 (STORY-228, PLAN T91) — the request-color instruction line for a lead-in whose
@@ -383,9 +387,17 @@ static class LlmPromptBuilder
             if (request.Kind == SegmentKind.LeadIn && track.RequestFulfilled)
                 lines.Add(RequestLineAcknowledgmentLine);
 
-            var tasteLine = BuildTasteLine(track.PersonaPick, previouslyVoicedTasteNotes);
-            if (tasteLine is not null)
+            // gh-#270: the exploration taste note rides a pick's OWN lead-in only — mirroring the
+            // RequestFulfilled Kind gate above — so a back-announce (or sign-off/sign-on) of the
+            // same exploration pick never double-disclaims on air. Fired-rule taste lines keep
+            // their pre-existing reach: any track-bearing segment.
+            var suppressExplorationNote =
+                request.Kind != SegmentKind.LeadIn && track.PersonaPick is { IsExploration: true };
+            if (!suppressExplorationNote
+                && BuildTasteLine(track.PersonaPick, previouslyVoicedTasteNotes) is { } tasteLine)
+            {
                 lines.Add(tasteLine);
+            }
         }
 
         return string.Join('\n', lines);
@@ -408,7 +420,8 @@ static class LlmPromptBuilder
     /// <see cref="PersonaPickDiagnostics.IsExploration"/> (F83.2) returns
     /// <see cref="ExplorationLampshadeLine"/> — <see cref="PersonaPickDiagnostics.FiredRules"/> is
     /// empty by construction for an exploration pick, so this branch never has a rule to attribute
-    /// the pick to either way.
+    /// the pick to either way. Lead-in-only: the Kind gate lives at the
+    /// <see cref="BuildUserContent"/> call site (gh-#270), mirroring the request-line gate.
     /// </item>
     /// <item>
     /// One or more <see cref="PersonaPickDiagnostics.FiredRules"/> (F83.1) — phrased as OPTIONAL

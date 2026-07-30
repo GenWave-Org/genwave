@@ -47,7 +47,7 @@ services:
     restart: unless-stopped
 
   admin_ui:
-    image: ghcr.io/genwave-org/genwave-admin-ui:home-v2.8.9  # bump per release
+    image: ghcr.io/genwave-org/genwave-admin-ui:home-v2.8.10  # bump per release
     pull_policy: always
     # `!reset` drops the base `build:` context entirely: a demo box must pull this image or
     # fail loudly — never silently fall back to building (and then forever running) local
@@ -61,7 +61,7 @@ services:
       - "127.0.0.1:3000:3000"
 
   engine:
-    image: ghcr.io/genwave-org/genwave-engine:home-v2.8.9    # bump per release
+    image: ghcr.io/genwave-org/genwave-engine:home-v2.8.10    # bump per release
     pull_policy: always
     # Same !reset rationale as admin_ui above (gh-#93). Note genwave.liq is a bind mount
     # from the checkout (see compose.yaml), NOT baked into this image — the image carries
@@ -74,7 +74,7 @@ services:
     # silently source-build and freeze. NOTE the first genwave-piper publish happens at the FIRST
     # TAG CUT AFTER gh-#240/#241 — until that release's pin bump this tag does not exist and the
     # pull fails loudly by design. Bump with the other four pins per release.
-    image: ghcr.io/genwave-org/genwave-piper:home-v2.8.9     # bump per release
+    image: ghcr.io/genwave-org/genwave-piper:home-v2.8.10     # bump per release
     pull_policy: always
     # Same !reset rationale as admin_ui above (gh-#93).
     build: !reset null
@@ -123,7 +123,7 @@ services:
     restart: "no"
 
   icecast:
-    image: ghcr.io/genwave-org/genwave-icecast:home-v2.8.9   # bump per release
+    image: ghcr.io/genwave-org/genwave-icecast:home-v2.8.10   # bump per release
     pull_policy: always
     # Base compose publishes 8000:8000 on 0.0.0.0 — right for LAN listening in
     # Operator/Standard, wrong on a public box: Icecast serves status.xsl (listener
@@ -134,7 +134,7 @@ services:
     ports: !override []
 
   api:
-    image: ghcr.io/genwave-org/genwave:home-v2.8.9           # bump per release
+    image: ghcr.io/genwave-org/genwave:home-v2.8.10           # bump per release
     pull_policy: always
     # compose.yaml's base `ports:` publishes BOTH 8080 and 8081 on 0.0.0.0 — fine for
     # Operator/Standard (LAN reachability is the point there), wrong for a public box.
@@ -158,11 +158,30 @@ services:
       Admin__Enabled: "false"
       Station__SpectatorMode: "true"
       Station__PublicStreamUrl: "/stream"
-      # Demo pronunciation correction (SPEC F68.8, STORY-185) — settings DATA, not a code default:
-      # this station's DJ persona says "MacLeod" a lot, and Kokoro mangles it. Same seeding shape as
-      # the Station__* overrides above (env default, GET /api/settings reports source="default");
-      # an operator can still override it live via PUT /api/settings.
-      Tts__Corrections: '[{"from":"MacLeod","to":"Muh-cloud"}]'
+      # Demo pronunciation corrections (SPEC F68.8, STORY-185; heteronym context rules gh-#161) —
+      # settings DATA, not a code default: this station's DJ persona says "MacLeod" a lot, and
+      # Kokoro mangles it. Same seeding shape as the Station__* overrides above (env default,
+      # GET /api/settings reports source="default"); an operator can still override it live via
+      # PUT /api/settings.
+      #
+      # The context-conditioned rows (whenFollowedBy/whenPrecededBy, gh-#161) seed the issue's
+      # named heteronym offenders with TIGHT collocations only, so each fires exclusively in its
+      # patter-plausible sense ("wind down", never "a strong wind"). Respellings are operator
+      # starting points, tunable via tools/test-pronunciation.sh.
+      #
+      # VERSION GATE: images older than the release carrying gh-#161 parse but IGNORE the context
+      # fields (STJ drops unknown properties), degrading each row to a blanket replacement — the
+      # exact bug gh-#161 fixes. Do not point a pre-gh-#161 pin at this seed; adopt it with the
+      # pin bump that picks the feature up.
+      Tts__Corrections: >-
+        [{"from":"MacLeod","to":"Muh-cloud"},
+        {"from":"wind","to":"wynd","whenFollowedBy":"down|up"},
+        {"from":"read","to":"red","whenPrecededBy":"have|has|had|just"},
+        {"from":"live","to":"lyve","whenFollowedBy":"album|set|session|show|recording|version"},
+        {"from":"bass","to":"base","whenFollowedBy":"line|lines|drop|guitar|player|solo"},
+        {"from":"tear","to":"tair","whenFollowedBy":"through|it up"},
+        {"from":"close","to":"clohss","whenFollowedBy":"call|second|friend|look"},
+        {"from":"record","to":"wreckerd","whenPrecededBy":"a|the|that|this|new|debut|classic"}]
 
 volumes:
   caddy_data: {}

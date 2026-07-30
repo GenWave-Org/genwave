@@ -139,6 +139,27 @@ public static class FeatureSpectatorStationLogo
 
             Assert.Equal(logo, fallback);
         }
+
+        [Fact]
+        public async Task TheFallbackIsCacheableButNeverImmutable()
+        {
+            // The v2.8.10 field regression: the fallback used to ride the cover jpegs' year-long
+            // `immutable` policy, so browsers that cached the pre-gh-#258 fuzzy favicon bytes under
+            // a token URL kept rendering them after the server was fixed — safe-loop cards stayed
+            // fuzzy while DJ-break cards (the never-cached /spectator/logo.png path) went sharp.
+            // The station icon is a mutable asset: one day, no immutable. Story222 still pins the
+            // real-cover response as year-long immutable — that contract is unchanged.
+            await using var factory = new StationLogoWebFactory();
+            var client = factory.CreateClient();
+
+            var response = await client.GetAsync("/spectator/api/artwork/not-a-token");
+
+            var cache = response.Headers.CacheControl;
+            Assert.NotNull(cache);
+            Assert.True(cache!.Public);
+            Assert.Equal(TimeSpan.FromDays(1), cache.MaxAge);
+            Assert.DoesNotContain(cache.Extensions, ext => ext.Name == "immutable");
+        }
     }
 
     // ── SAD PATH ──────────────────────────────────────────────────────────
