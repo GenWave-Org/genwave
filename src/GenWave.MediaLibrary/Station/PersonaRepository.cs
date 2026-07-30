@@ -79,8 +79,10 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
     public async Task<PersonaWriteResult> CreateAsync(PersonaDraft draft, CancellationToken ct)
     {
         var slug = LegacyPersonaCardMapper.Slugify(draft.Name);
-        var definition = PersonaCardSerializer.Serialize(
-            LegacyPersonaCardMapper.BuildCard(draft.Name, draft.Backstory, draft.Style, draft.Voice));
+        var card = LegacyPersonaCardMapper.BuildCard(draft.Name, draft.Backstory, draft.Style, draft.Voice);
+        if (draft.Soul is not null)
+            card = card with { Soul = draft.Soul };
+        var definition = PersonaCardSerializer.Serialize(card);
 
         try
         {
@@ -103,24 +105,24 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
     }
 
     /// <summary>
-    /// Single-statement update; <c>updated_at</c> advances in SQL (<c>now()</c>), never in C#, so the
-    /// timestamp is always the server's write time. A missing row and a name collision are
-    /// distinguished the same way as <see cref="CreateAsync"/>: the UPDATE either returns a row
-    /// (found) or nothing (not found), and a unique violation is caught rather than pre-checked.
+    /// Read-merge-write update inside one transaction; <c>updated_at</c> advances in SQL
+    /// (<c>now()</c>), never in C#, so the timestamp is always the server's write time. A missing row
+    /// and a name collision are distinguished the same way as <see cref="CreateAsync"/>: the UPDATE
+    /// either returns a row (found) or nothing (not found), and a unique violation is caught rather
+    /// than pre-checked.
     ///
-    /// Edit-wipe guard (review follow-up, T37): <paramref name="draft"/> only ever carries the
-    /// legacy Backstory/Style/Voice fields, so <see cref="LegacyPersonaCardMapper.BuildCard"/>
-    /// rebuilds <c>definition.soul</c> from THOSE two fields alone on every admin edit — fine for an
-    /// ordinary persona, where they are its only source of soul text, but wrong for
-    /// <c>PersonaCardMigrator</c>'s <c>"default"</c> bootstrap row: that row's own INSERT never sets
-    /// its legacy backstory/style columns (they stay at their empty defaults), while its
-    /// <c>definition.soul</c> holds a one-time snapshot the migrator captured from whichever persona
-    /// was active at boot. Rebuilding unconditionally from the (empty) legacy columns would silently
-    /// overwrite that snapshot with an empty soul the instant an operator edits the default
-    /// persona's name or voice — so the <c>case</c> below keeps the EXISTING row's
-    /// <c>definition.soul</c> whenever the freshly rebuilt one would be empty AND the existing one
-    /// is not; every other field of the rebuilt definition (name, tagline, quirks, voice, ...) still
-    /// overwrites normally.
+    /// Edit-wipe guard (gh-#256, superseding the T37 soul-only SQL <c>case</c>): the legacy draft
+    /// carries only Name/Backstory/Style/Voice — rebuilding the ENTIRE definition from it (the old
+    /// behavior) silently reset every card field the admin editor doesn't render: a catalog-hired
+    /// persona's quirks, lore, tagline, corrections, energy disposition, and its VoiceSpec
+    /// engine/pace/language all went to empty/defaults on ANY admin edit (even a voice change). The
+    /// merge below reads the row's EXISTING definition first (<c>for update</c>, same transaction)
+    /// and only overwrites what the draft actually carries: <c>name</c>, the VoiceSpec's
+    /// <c>voiceId</c>, and the soul — <paramref name="draft"/>.Soul verbatim when provided (the
+    /// editor's direct card-soul edit), else the legacy Backstory/Style rebuild, else (both empty)
+    /// the existing soul survives exactly as the old <c>case</c> guaranteed for the migrator's
+    /// bootstrap row. A row with no reconciled definition yet falls back to a full
+    /// <see cref="LegacyPersonaCardMapper.BuildCard"/>, same as <see cref="CreateAsync"/>.
     ///
     /// Like <see cref="CreateAsync"/>, this UPDATE never names <c>imported_from</c>/<c>imported_at</c>
     /// (SPEC F90.7) — an admin edit to an imported persona leaves its provenance stamp exactly as the
@@ -129,38 +131,68 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
     public async Task<PersonaWriteResult> UpdateAsync(long id, PersonaDraft draft, CancellationToken ct)
     {
         var slug = LegacyPersonaCardMapper.Slugify(draft.Name);
-        var definition = PersonaCardSerializer.Serialize(
-            LegacyPersonaCardMapper.BuildCard(draft.Name, draft.Backstory, draft.Style, draft.Voice));
 
         try
         {
             await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+            await using var tx = await conn.BeginTransactionAsync(ct);
+
+            var existingJson = await conn.ExecuteScalarAsync<string?>(new CommandDefinition(
+                "select definition::text from station.persona where id = @Id for update",
+                new { Id = id },
+                transaction: tx,
+                cancellationToken: ct));
+            if (existingJson is null)
+                return new PersonaWriteResult.NotFound();
+
+            var existing = string.IsNullOrEmpty(existingJson) || existingJson == "{}"
+                ? null
+                : PersonaCardSerializer.Deserialize(existingJson);
+            var definition = PersonaCardSerializer.Serialize(MergeCard(existing, draft));
+
             var persona = await conn.QuerySingleOrDefaultAsync<Persona>(new CommandDefinition(
                 """
                 update station.persona
                 set name = @Name, backstory = @Backstory, style = @Style, voice = @Voice,
-                    slug = @Slug,
-                    definition = case
-                        when coalesce(@Definition::jsonb ->> 'soul', '') = ''
-                             and coalesce(definition ->> 'soul', '') <> ''
-                        then jsonb_set(@Definition::jsonb, '{soul}', definition -> 'soul')
-                        else @Definition::jsonb
-                    end,
-                    updated_at = now()
+                    slug = @Slug, definition = @Definition::jsonb, updated_at = now()
                 where id = @Id
                 returning id::bigint as id, name, backstory, style, voice, created_at, updated_at,
                     imported_from, imported_at, slug
                 """,
                 new { draft.Name, draft.Backstory, draft.Style, draft.Voice, Slug = slug, Definition = definition, Id = id },
+                transaction: tx,
                 cancellationToken: ct));
-            return persona is null
-                ? new PersonaWriteResult.NotFound()
-                : new PersonaWriteResult.Updated(persona);
+            if (persona is null)
+                return new PersonaWriteResult.NotFound();
+
+            await tx.CommitAsync(ct);
+            return new PersonaWriteResult.Updated(persona);
         }
         catch (PostgresException ex) when (ex.SqlState == UniqueViolation)
         {
             return new PersonaWriteResult.NameConflict();
         }
+    }
+
+    /// <summary>The gh-#256 merge itself — see <see cref="UpdateAsync"/>'s remarks. Pure so the
+    /// integration specs can pin each field's survival rule without a database in the arrange.</summary>
+    internal static PersonaCard MergeCard(PersonaCard? existing, PersonaDraft draft)
+    {
+        if (existing is null)
+        {
+            var built = LegacyPersonaCardMapper.BuildCard(draft.Name, draft.Backstory, draft.Style, draft.Voice);
+            return draft.Soul is null ? built : built with { Soul = draft.Soul };
+        }
+
+        var rebuiltSoul = LegacyPersonaCardMapper.BuildSoul(draft.Backstory, draft.Style);
+        var soul = draft.Soul ?? (rebuiltSoul.Length > 0 ? rebuiltSoul : existing.Soul);
+
+        return existing with
+        {
+            Name = draft.Name,
+            Soul = soul,
+            Voice = existing.Voice with { VoiceId = draft.Voice },
+        };
     }
 
     /// <summary>
@@ -261,6 +293,28 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
             cancellationToken: ct));
 
         return string.IsNullOrEmpty(json) || json == "{}" ? null : PersonaCardSerializer.Deserialize(json);
+    }
+
+    /// <summary>
+    /// Batch card read (gh-#256) — one query for every row's <c>definition</c>, keyed by id, feeding
+    /// <c>GET /api/personas</c>'s soul/quirks/lore projection. Same <c>::text</c> idiom and the same
+    /// <c>'{}'</c>-sentinel-degrades-to-absent posture as <see cref="GetCardByIdAsync"/>, batched.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<long, PersonaCard>> GetCardsAsync(CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<(long Id, string Definition)>(new CommandDefinition(
+            "select id::bigint as id, definition::text as definition from station.persona",
+            cancellationToken: ct));
+
+        var cards = new Dictionary<long, PersonaCard>();
+        foreach (var (id, json) in rows)
+        {
+            if (string.IsNullOrEmpty(json) || json == "{}") continue;
+            if (PersonaCardSerializer.Deserialize(json) is { } card) cards[id] = card;
+        }
+
+        return cards;
     }
 
     /// <summary>

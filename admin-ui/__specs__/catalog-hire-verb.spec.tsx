@@ -190,6 +190,9 @@ describe("Feature: Hire, not import", () => {
         slug: "late-night-lena",
         importedFrom: "late-night-lena",
         importedAt: "2026-07-21T09:05:00Z",
+        soul: "",
+        quirks: [],
+        lore: [],
       };
       global.fetch = jest.fn<typeof fetch>().mockResolvedValue(makeJsonResponse(200, [])) as unknown as typeof fetch;
 

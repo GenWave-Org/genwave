@@ -21,7 +21,17 @@ namespace GenWave.Host.Api;
 ///
 /// Admin-plane only: the spectator surface never projects persona/DJ identity beyond a display
 /// name, so it never gains any of these fields (disclosure law, F62.9).
+///
+/// <para>
+/// <c>Soul</c>/<c>Quirks</c>/<c>Lore</c> (gh-#256) surface the F71.1 persona-card fields a
+/// catalog-hired DJ's narrative actually lives in — its legacy backstory/style columns are
+/// deliberately blank (<c>PersonaImportRepository</c>), which left the editor showing an empty
+/// Backstory and no Style for every hired persona. All three are always serialized: <c>""</c>/empty
+/// lists for a persona whose card carries none (or whose row still holds the migration sentinel),
+/// never an absent key.
+/// </para>
 /// </summary>
 public sealed record PersonaDto(
     long Id, string Name, string Backstory, string Style, string Voice, string Slug,
-    string? ImportedFrom, DateTime? ImportedAt);
+    string? ImportedFrom, DateTime? ImportedAt,
+    string Soul, IReadOnlyList<string> Quirks, IReadOnlyList<string> Lore);

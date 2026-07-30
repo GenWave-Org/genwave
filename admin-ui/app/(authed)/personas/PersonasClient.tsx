@@ -36,26 +36,52 @@ export interface PersonasClientProps {
   timeZone?: string;
 }
 
-/** Shape of a `PersonaRequest` body accepted by POST/PATCH /api/personas (SPEC F35.4). */
+/** Shape of a `PersonaRequest` body accepted by POST/PATCH /api/personas (SPEC F35.4). `soul`
+ * (gh-#256) is only ever sent when editing a card-narrative persona — see `requestBodyFrom`. */
 interface PersonaRequestBody {
   name: string;
   backstory: string;
   style: string;
   voice?: string;
+  soul?: string;
 }
 
-type FormMode = { kind: "create" } | { kind: "edit"; id: number };
+/** `edit` carries the card facts frozen at `startEdit` time (gh-#256): whether this persona's
+ * narrative lives in its F71.1 card (`cardNarrative` — the catalog-hire shape: blank legacy
+ * backstory/style, non-empty soul), plus the read-only quirks/lore the form displays. Frozen here
+ * rather than re-derived per render so a background list refresh can't flip the form's shape mid
+ * edit. */
+type FormMode =
+  | { kind: "create" }
+  | { kind: "edit"; id: number; cardNarrative: boolean; quirks: string[]; lore: string[] };
 
 interface FormValues {
   name: string;
   backstory: string;
   style: string;
   voice: string;
+  /** The card's soul text, verbatim (gh-#256) — only the card-narrative edit form binds it. */
+  soul: string;
 }
 
-const EMPTY_FORM: FormValues = { name: "", backstory: "", style: "", voice: "" };
+const EMPTY_FORM: FormValues = { name: "", backstory: "", style: "", voice: "", soul: "" };
 
 const STYLE_SUMMARY_MAX = 60;
+
+/** True when this persona's narrative lives in its card, not the legacy columns (gh-#256) — the
+ * shape every catalog hire produces (`PersonaImportRepository` blanks backstory/style on purpose).
+ * An authored persona always carries its narrative in the legacy columns, so it never matches. */
+function isCardNarrative(persona: PersonaDto): boolean {
+  return persona.backstory.trim() === "" && persona.style.trim() === "" && persona.soul.trim() !== "";
+}
+
+/** The `Style:` line embedded in a card soul (gh-#256) — catalog cards fold style into the soul
+ * text rather than the legacy column, so the roster's Style column parses it back out for display.
+ * Display-only: nothing ever writes this parse back anywhere. */
+function styleFromSoul(soul: string): string {
+  const match = /^Style:\s*(.+)$/m.exec(soul);
+  return match?.[1]?.trim() ?? "";
+}
 
 /** Truncates the style field for the list column — "" reads as "No style set" rather than a
  * blank cell, so an unstyled persona doesn't look like a loading glitch. */
@@ -113,13 +139,17 @@ function OnAirBadge(): ReactNode {
   );
 }
 
-function requestBodyFrom(form: FormValues): PersonaRequestBody {
+/** gh-#256: a card-narrative edit submits the soul VERBATIM and leaves backstory/style at the
+ * blank values the hire flow stored — never copies soul text into the legacy fields, which would
+ * relabel it through the server's legacy soul rebuild and break the round trip. */
+function requestBodyFrom(form: FormValues, cardNarrative: boolean): PersonaRequestBody {
   const body: PersonaRequestBody = {
     name: form.name.trim(),
     backstory: form.backstory,
     style: form.style,
   };
   if (form.voice.trim() !== "") body.voice = form.voice;
+  if (cardNarrative) body.soul = form.soul;
   return body;
 }
 
@@ -241,12 +271,19 @@ export function PersonasClient({
   }
 
   function startEdit(persona: PersonaDto): void {
-    setMode({ kind: "edit", id: persona.id });
+    setMode({
+      kind: "edit",
+      id: persona.id,
+      cardNarrative: isCardNarrative(persona),
+      quirks: persona.quirks,
+      lore: persona.lore,
+    });
     setForm({
       name: persona.name,
       backstory: persona.backstory,
       style: persona.style,
       voice: persona.voice,
+      soul: persona.soul,
     });
   }
 
@@ -264,7 +301,7 @@ export function PersonasClient({
     if (isNameBlank) return;
 
     setIsSaving(true);
-    const body = requestBodyFrom(form);
+    const body = requestBodyFrom(form, mode.kind === "edit" && mode.cardNarrative);
 
     try {
       const resp =
@@ -358,7 +395,11 @@ export function PersonasClient({
               />
             )}
           </td>
-          <td className="py-2 pr-3 text-mute">{summarizeStyle(persona.style)}</td>
+          {/* gh-#256: a catalog-hired persona's style lives as a "Style:" line inside its card
+              soul — parse it out for the column instead of showing "No style set" on every hire. */}
+          <td className="py-2 pr-3 text-mute">
+            {summarizeStyle(persona.style.trim() !== "" ? persona.style : styleFromSoul(persona.soul))}
+          </td>
           <td className="py-2 pr-3 text-mute">{displayVoice(persona.voice)}</td>
           <td className="py-2 pr-3">
             <div className="flex flex-col gap-2">
@@ -474,39 +515,89 @@ export function PersonasClient({
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="persona-backstory" className={FIELD_LABEL_CLASSES}>
-              Backstory
-            </label>
-            <textarea
-              id="persona-backstory"
-              rows={3}
-              value={form.backstory}
-              onChange={(e) => {
-                const backstory = e.currentTarget.value;
-                setForm((prev) => ({ ...prev, backstory }));
-              }}
-              disabled={isSaving}
-              className={`${FIELD_INPUT_CLASSES} resize-y py-2`}
-            />
-          </div>
+          {mode.kind === "edit" && mode.cardNarrative ? (
+            // gh-#256: a catalog-hired persona's narrative lives in its card soul (with the
+            // "Style:" line embedded), not the legacy Backstory/Style columns — which are blank on
+            // purpose. Edit the soul directly; quirks/lore render read-only below (they're card
+            // content this form doesn't author — re-hiring/importing the card is what changes them).
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="persona-soul" className={FIELD_LABEL_CLASSES}>
+                Soul (backstory &amp; style — from the hired card)
+              </label>
+              <textarea
+                id="persona-soul"
+                rows={6}
+                value={form.soul}
+                onChange={(e) => {
+                  const soul = e.currentTarget.value;
+                  setForm((prev) => ({ ...prev, soul }));
+                }}
+                disabled={isSaving}
+                className={`${FIELD_INPUT_CLASSES} resize-y py-2`}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="persona-backstory" className={FIELD_LABEL_CLASSES}>
+                  Backstory
+                </label>
+                <textarea
+                  id="persona-backstory"
+                  rows={3}
+                  value={form.backstory}
+                  onChange={(e) => {
+                    const backstory = e.currentTarget.value;
+                    setForm((prev) => ({ ...prev, backstory }));
+                  }}
+                  disabled={isSaving}
+                  className={`${FIELD_INPUT_CLASSES} resize-y py-2`}
+                />
+              </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="persona-style" className={FIELD_LABEL_CLASSES}>
-              Style
-            </label>
-            <textarea
-              id="persona-style"
-              rows={3}
-              value={form.style}
-              onChange={(e) => {
-                const style = e.currentTarget.value;
-                setForm((prev) => ({ ...prev, style }));
-              }}
-              disabled={isSaving}
-              className={`${FIELD_INPUT_CLASSES} resize-y py-2`}
-            />
-          </div>
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="persona-style" className={FIELD_LABEL_CLASSES}>
+                  Style
+                </label>
+                <textarea
+                  id="persona-style"
+                  rows={3}
+                  value={form.style}
+                  onChange={(e) => {
+                    const style = e.currentTarget.value;
+                    setForm((prev) => ({ ...prev, style }));
+                  }}
+                  disabled={isSaving}
+                  className={`${FIELD_INPUT_CLASSES} resize-y py-2`}
+                />
+              </div>
+            </>
+          )}
+
+          {mode.kind === "edit" && mode.cardNarrative && (mode.quirks.length > 0 || mode.lore.length > 0) && (
+            <div className="flex flex-col gap-3 rounded-[6px] border border-line bg-surface-2 p-3">
+              {mode.quirks.length > 0 && (
+                <div>
+                  <p className={FIELD_LABEL_CLASSES}>Quirks (from the card — edit via re-hire)</p>
+                  <ul className="mt-1.5 list-disc pl-5 text-[0.82rem] text-ink">
+                    {mode.quirks.map((quirk) => (
+                      <li key={quirk}>{quirk}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {mode.lore.length > 0 && (
+                <div>
+                  <p className={FIELD_LABEL_CLASSES}>Lore (from the card — edit via re-hire)</p>
+                  <ul className="mt-1.5 list-disc pl-5 text-[0.82rem] text-ink">
+                    {mode.lore.map((entry) => (
+                      <li key={entry}>{entry}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
 
           {voiceWarning !== null && (
             <p role="alert" className="text-[0.82rem] text-danger">
@@ -543,7 +634,10 @@ export function PersonasClient({
             target={{
               kind: "draft",
               name: form.name,
-              backstory: form.backstory,
+              // gh-#256: a card-narrative persona's story is its soul — previewing the legacy
+              // (blank) backstory would render a personality-free draft. Display/preview-only
+              // mapping; the PATCH body never copies soul into backstory.
+              backstory: mode.kind === "edit" && mode.cardNarrative ? form.soul : form.backstory,
               style: form.style,
               voice: form.voice,
             }}

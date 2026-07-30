@@ -7,5 +7,12 @@ namespace GenWave.Host.Api;
 /// omitted (<c>""</c> voice is the station-default sentinel — <see cref="Core.Domain.Persona.Voice"/>).
 /// All fields are nullable here so the controller produces a typed 400 for a blank/missing name
 /// instead of a model-binder 400.
+///
+/// <para>
+/// <see cref="Soul"/> (gh-#256): optional direct edit of the persona card's soul text — what the
+/// Admin UI submits when editing a catalog-hired DJ, whose narrative (with its embedded
+/// <c>Style:</c> line) lives in the card rather than the legacy backstory/style columns. Omitted or
+/// blank means "not editing the soul" — see <see cref="Core.Domain.PersonaDraft.Soul"/>.
+/// </para>
 /// </summary>
-public sealed record PersonaRequest(string? Name, string? Backstory, string? Style, string? Voice);
+public sealed record PersonaRequest(string? Name, string? Backstory, string? Style, string? Voice, string? Soul = null);

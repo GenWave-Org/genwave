@@ -53,12 +53,15 @@ public sealed partial class PersonaController(
     // SlugFormat's regex, see Import's own remarks.
     const int MaxCatalogSlugLength = 64;
 
-    /// <summary>GET /api/personas — every persona row, ordered by name (F35.4).</summary>
+    /// <summary>GET /api/personas — every persona row, ordered by name (F35.4). Each row is joined
+    /// with its F71.1 card (one batch query, gh-#256) so the Admin UI can show a catalog-hired DJ's
+    /// soul/quirks/lore — the fields its blank legacy backstory/style columns can't carry.</summary>
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
     {
         var personas = await personaStore.GetAllAsync(ct);
-        return Ok(personas.Select(ToDto).ToArray());
+        var cards = await personaStore.GetCardsAsync(ct);
+        return Ok(personas.Select(p => ToDto(p, cards.GetValueOrDefault(p.Id))).ToArray());
     }
 
     /// <summary>
@@ -82,7 +85,8 @@ public sealed partial class PersonaController(
 
         return result switch
         {
-            PersonaWriteResult.Created c => StatusCode(StatusCodes.Status201Created, ToDto(c.Persona)),
+            PersonaWriteResult.Created c => StatusCode(
+                StatusCodes.Status201Created, ToDto(c.Persona, await personaStore.GetCardByIdAsync(c.Persona.Id, ct))),
             PersonaWriteResult.NameConflict => Conflict(NameConflictProblem(draft.Name)),
             _ => StatusCode(StatusCodes.Status500InternalServerError),
         };
@@ -110,7 +114,7 @@ public sealed partial class PersonaController(
 
         return result switch
         {
-            PersonaWriteResult.Updated u => Ok(ToDto(u.Persona)),
+            PersonaWriteResult.Updated u => Ok(ToDto(u.Persona, await personaStore.GetCardByIdAsync(u.Persona.Id, ct))),
             PersonaWriteResult.NotFound => NotFound(NotFoundProblem(id)),
             PersonaWriteResult.NameConflict => Conflict(NameConflictProblem(draft.Name)),
             _ => StatusCode(StatusCodes.Status500InternalServerError),
@@ -615,10 +619,14 @@ public sealed partial class PersonaController(
         Detail = $"No media row with id {id} exists.",
     };
 
-    static PersonaDto ToDto(Persona persona) =>
+    // gh-#256: the card half of the DTO — a catalog-hired persona's narrative lives in the F71.1
+    // card (soul with its embedded "Style:" line, quirks, lore), never the legacy columns. A row
+    // with no reconciled card (null) serializes the three as ""/empty, never absent keys.
+    static PersonaDto ToDto(Persona persona, PersonaCard? card) =>
         new(
             persona.Id, persona.Name, persona.Backstory, persona.Style, persona.Voice, persona.Slug,
-            persona.ImportedFrom, persona.ImportedAt);
+            persona.ImportedFrom, persona.ImportedAt,
+            card?.Soul ?? "", card?.Quirks ?? [], card?.Lore ?? []);
 
     static IReadOnlyList<PersonaTasteRuleDto> RulesBySource(
         IReadOnlyList<PersonaTasteEntry> rules, PersonaTasteSource source) =>
@@ -646,13 +654,16 @@ public sealed partial class PersonaController(
         predicate.LabelOr("any track");
 
     // Trims the name and defaults the optional fields to "" — mirrors Persona.Voice's "" = station
-    // default sentinel for all three optional fields, not just voice.
+    // default sentinel for all three optional fields, not just voice. Soul (gh-#256) stays nullable:
+    // null/blank means "not editing the soul" (PersonaDraft.Soul's own contract), so a legacy client
+    // that never sends the field behaves exactly as before.
     static PersonaDraft ToDraft(PersonaRequest request) =>
         new(
             request.Name?.Trim() ?? string.Empty,
             request.Backstory ?? string.Empty,
             request.Style ?? string.Empty,
-            request.Voice ?? string.Empty);
+            request.Voice ?? string.Empty,
+            string.IsNullOrWhiteSpace(request.Soul) ? null : request.Soul);
 
     static ProblemDetails BlankNameProblem() => new()
     {

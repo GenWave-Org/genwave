@@ -35,6 +35,9 @@ const NOVA: PersonaDto = {
   slug: "nova",
   importedFrom: null,
   importedAt: null,
+  soul: "",
+  quirks: [],
+  lore: [],
 };
 
 /** A card naming a voice this station doesn't have — what `GET /api/personas/nova/export` would

@@ -55,6 +55,9 @@ const REX: PersonaDto = {
   slug: "radio-rex",
   importedFrom: null,
   importedAt: null,
+  soul: "",
+  quirks: [],
+  lore: [],
 };
 
 const NOVA: PersonaDto = {
@@ -66,6 +69,9 @@ const NOVA: PersonaDto = {
   slug: "nova",
   importedFrom: null,
   importedAt: null,
+  soul: "",
+  quirks: [],
+  lore: [],
 };
 
 const VOICE_IDS = ["af_alloy", "af_aoede"];
@@ -256,6 +262,9 @@ describe("Feature: Author personas from the console", () => {
         slug: "the-professor",
         importedFrom: null,
         importedAt: null,
+        soul: "",
+        quirks: [],
+        lore: [],
       };
       makeDispatchFetchMock({ "POST /api/personas": { status: 201, body: created } });
       renderClient({ initialPersonas: [] });
@@ -340,6 +349,9 @@ describe("Feature: Author personas from the console", () => {
         ...NOVA,
         importedFrom: "late-night-jazz-host",
         importedAt: CATALOG_IMPORTED_AT,
+        soul: "",
+        quirks: [],
+        lore: [],
       };
       makeDispatchFetchMock({});
       renderClient({ initialPersonas: [REX, catalogImported], timeZone: "UTC" });

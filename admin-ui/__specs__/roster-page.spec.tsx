@@ -31,6 +31,9 @@ const REX: PersonaDto = {
   voice: "af_alloy",
   importedFrom: null,
   importedAt: null,
+  soul: "",
+  quirks: [],
+  lore: [],
 };
 
 const NOVA: PersonaDto = {
@@ -41,6 +44,9 @@ const NOVA: PersonaDto = {
   voice: "",
   importedFrom: null,
   importedAt: null,
+  soul: "",
+  quirks: [],
+  lore: [],
 };
 
 const PROFESSOR: PersonaDto = {
@@ -51,6 +57,9 @@ const PROFESSOR: PersonaDto = {
   voice: "",
   importedFrom: null,
   importedAt: null,
+  soul: "",
+  quirks: [],
+  lore: [],
 };
 
 // ---------------------------------------------------------------------------
