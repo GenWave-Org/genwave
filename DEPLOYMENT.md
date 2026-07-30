@@ -171,10 +171,11 @@ Appliance boot (`compose.demo.yaml` defaults):
   plays at `/stream`, and `/api/status`, `/api/auth/login`, `/internal/engine-config`,
   `/media/random` all return **404**.
 
-**Applying migrations** (upgrading an already-running demo box — new images/compose
-files pulled, schema didn't come along automatically): use `launch.sh`'s `--pinned`
-preset (STORY-201), which is exactly this topology's sanctioned launch/upgrade path —
-`launch.sh` bare assumes the source-build dev stack, `--pinned` doesn't:
+**Applying migrations** (first boot of a fresh box, or upgrading an already-running
+demo box — new images/compose files pulled, schema didn't come along automatically):
+use `launch.sh`'s `--pinned` preset (STORY-201), which is exactly this topology's
+sanctioned launch/upgrade path — `launch.sh` bare assumes the source-build dev stack,
+`--pinned` doesn't:
 
 ```bash
 ./launch.sh --pinned
@@ -185,9 +186,16 @@ builds:
 
 ```bash
 docker compose -f compose.yaml -f compose.demo.yaml pull
+docker compose -f compose.yaml -f compose.demo.yaml up -d --no-recreate db   # + health wait
 ./migrate.sh -f compose.yaml -f compose.demo.yaml
 docker compose -f compose.yaml -f compose.demo.yaml up -d
 ```
+
+The `up -d --no-recreate db` step (gh-#305) is what makes a **first** boot work — before
+it, `migrate.sh` (which never starts anything by design) had no db to talk to on a fresh
+box and the launch deadlocked. On an upgrade it changes nothing: `--no-recreate` leaves a
+running db completely untouched, so nothing restarts onto the new images before
+migrations pass.
 
 Every `db/*-migration.sh` is an idempotent in-place upgrade (`ADD COLUMN IF NOT EXISTS`
 and the like), so running it with nothing new to apply is a safe no-op. `--dry-run`

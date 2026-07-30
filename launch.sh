@@ -9,9 +9,13 @@
 # Presets (STORY-201 / SPEC F78.10):
 #   ./launch.sh              dev flow (default, unchanged): teardown, db-first up, wait for
 #                             db healthy, ./migrate.sh --keep-going, full up, status.
-#   ./launch.sh --pinned     demo/appliance flow: pull -> migrate.sh -> up -d against
-#                             compose.yaml + compose.demo.yaml. NEVER builds — it's meant
-#                             for a box that only ever runs published GHCR images. See
+#   ./launch.sh --pinned     demo/appliance flow: pull -> db up (--no-recreate) + health
+#                             wait -> migrate.sh -> up -d against compose.yaml +
+#                             compose.demo.yaml. NEVER builds — it's meant for a box that
+#                             only ever runs published GHCR images. Works on a fresh box
+#                             (gh-#305) AND as the upgrade path: --no-recreate starts an
+#                             absent/stopped db but never touches a running one, so an
+#                             upgrade still restarts nothing before migrations pass. See
 #                             DEPLOYMENT.md's "Applying migrations".
 #   ./launch.sh --with a,b   merge a,b into COMPOSE_PROFILES (env var, else .env's value)
 #                             for this launch's compose invocations.
@@ -144,10 +148,36 @@ UP_ARGS=(-d)
 plan_line() { printf 'plan> %s\n' "$*"; }
 plan_profiles() { printf 'plan-profiles> %s\n' "$EFFECTIVE_PROFILES"; }
 
+# Poll the db container's healthcheck until healthy (up to 30x2s = 60s). Returns non-zero
+# on a missing container or timeout; the caller decides what failure means (dev flow rolls
+# the stack back down, pinned flow reports and leaves everything as-is).
+wait_db_healthy() {
+  local db_cid
+  db_cid="$(compose ps -q db)"
+  [ -n "$db_cid" ] || return 1
+  for _ in $(seq 1 30); do
+    if [ "$(docker inspect "$db_cid" --format '{{.State.Health.Status}}' 2>/dev/null)" = "healthy" ]; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
 if [ "$PINNED" = "1" ]; then
-  # --- pinned/demo flow: pull -> migrate.sh -> up -d, never builds -----------------------
+  # --- pinned/demo flow: pull -> db up -> migrate.sh -> up -d, never builds --------------
+  # Re-run hint carrying the flags this launch was actually given — the bare "--pinned"
+  # hint used to drop --piper-only/--with, steering the user into a different topology
+  # (gh-#305: kokoro included, on the 4GB box that opted out of it).
+  RELAUNCH="./launch.sh --pinned"
+  [ "$PIPER_ONLY" = "1" ] && RELAUNCH="$RELAUNCH --piper-only"
+  [ -n "$WITH" ] && RELAUNCH="$RELAUNCH --with $WITH"
+
   if [ "$DRY_RUN" = "1" ]; then
     plan_line "$(compose_display) pull"
+    plan_line "$(compose_display) up -d --no-recreate db"
+    plan_line "$(compose_display) ps -q db"
+    plan_line "docker inspect <db container> --format {{.State.Health.Status}} (poll until healthy, up to 30x2s)"
     plan_line "./migrate.sh ${MIGRATE_ARGS[*]}"
     plan_line "$(compose_display) up -d"
     plan_line "$(compose_display) ps"
@@ -163,15 +193,33 @@ if [ "$PINNED" = "1" ]; then
   echo "==> pulling published images"
   if ! compose pull; then
     preflight_fail "Image pull failed — the running stack was NOT touched." \
-      "Check network/GHCR reachability, then re-run: ./launch.sh --pinned" \
+      "Check network/GHCR reachability, then re-run: $RELAUNCH" \
       "The previous images are still local; the stack keeps running as-is."
+  fi
+
+  # gh-#305: migrate.sh only ever talks to an already-running db, but on a fresh box
+  # (first appliance boot — nothing has ever started) there isn't one, and the launch
+  # deadlocked here forever. --no-recreate starts an absent/stopped db and leaves a
+  # running one completely untouched — an upgrade still restarts nothing onto the new
+  # images before migrations pass; a first boot finally gets a db to migrate.
+  echo "==> ensuring the database is up (a running db is never recreated here)"
+  if ! compose up -d --no-recreate db; then
+    preflight_fail "The database service failed to start — nothing else was touched." \
+      "Inspect it: $(compose_display) logs db" \
+      "Fix the cause and re-run: $RELAUNCH"
+  fi
+  if ! wait_db_healthy; then
+    preflight_fail "The database did not become healthy within 60s — the stack was NOT restarted onto the new images." \
+      "Inspect it: $(compose_display) logs db" \
+      "A corrupt pgdata volume or bad POSTGRES_PASSWORD are the usual causes." \
+      "Fix the cause and re-run: $RELAUNCH"
   fi
 
   echo "==> applying schema migrations against the running db"
   if ! ./migrate.sh "${MIGRATE_ARGS[@]}"; then
     preflight_fail "Schema migration failed — the stack was NOT restarted onto the new images." \
       "Inspect the db: $(compose_display) logs db" \
-      "Migrations are idempotent — fix the cause and re-run: ./launch.sh --pinned"
+      "Migrations are idempotent — fix the cause and re-run: $RELAUNCH"
   fi
 
   echo "==> bringing the stack up"
@@ -182,7 +230,7 @@ if [ "$PINNED" = "1" ]; then
     compose ps || true
     preflight_fail "Bringing the stack up failed part-way (status above)." \
       "Inspect the failing service: $(compose_display) logs <service>" \
-      "Re-run when fixed: ./launch.sh --pinned (up is idempotent — it converges the rest)."
+      "Re-run when fixed: $RELAUNCH (up is idempotent — it converges the rest)."
   fi
 
   echo "==> stack status"
@@ -241,15 +289,9 @@ fi
 # in-place upgrades (ADD COLUMN IF NOT EXISTS), so applying them on every launch is safe and
 # keeps the schema converged BEFORE the api (which queries the new columns) starts — otherwise
 # the api crash-loops on a missing column and the stream falls back to the safe loop.
-db_cid="$(compose ps -q db)"
-db_healthy=0
-for _ in $(seq 1 30); do
-  if [ "$(docker inspect "$db_cid" --format '{{.State.Health.Status}}' 2>/dev/null)" = "healthy" ]; then db_healthy=1; break; fi
-  sleep 2
-done
 # gh-#19: falling through silently used to let migrate fail (or the api crash-loop on a
 # missing column) with no advice — an unhealthy db after 60s is now a hard, explained stop.
-if [ "$db_healthy" != "1" ]; then
+if ! wait_db_healthy; then
   fail_and_rollback "The database did not become healthy within 60s." \
     "Inspect it: $(compose_display) logs db" \
     "A corrupt pgdata volume or bad POSTGRES_PASSWORD are the usual causes." \
