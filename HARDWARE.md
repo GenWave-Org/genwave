@@ -48,7 +48,7 @@ notes recorded alongside them.
 
 | Service | Configured limit | Real footprint | Confidence | Notes |
 |---|:---:|---|:---:|---|
-| `kokoro` (TTS) | 3 GB cap | ~1.2 GiB fresh baseline | 🟢 footprint / 🟡 cap | Cap is a fail-closed backstop, not a requirement |
+| `kokoro` (TTS) | 4 GB cap | ~1.2 GiB fresh baseline; leaks toward the cap under render load (upstream `#262`), long renders spike ~+0.5 GiB | 🟢 | Cap is a fail-closed backstop. Live-observed: 3 GB cap = OOM-bounce every ~24–30 h on the demo box, down to ~90 min in heavy render windows (gh-#276); 4 GB buys spike headroom over the leaked baseline |
 | `ollama` (DJ brain, demo profile) | **1 CPU / 6GB fence** | needs > 3 GB with `llama3.2:3b` resident (`KEEP_ALIVE=-1`) | 🟢 | Live-observed: 3 GB fence = constant OOM kills. Cold model load ~25 s+; a full persona prompt on one fenced core takes ~25–30 s even warm — set `Llm:TimeoutSeconds: 60`. Size the model to the fence |
 | `piper` (fallback TTS) | 768 MB cap | well under 1 GiB with a "medium" voice | 🟢 footprint / 🟡 cap | ONNX runtime + `en_US-lessac-medium`, downloaded on first boot |
 | `cloudflared` (tunnel profile) | 128 MB cap | ~20–30 MiB idle | 🟢 | |

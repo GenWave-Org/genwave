@@ -69,9 +69,12 @@ public static class FeatureRequestShoutOut
         // documented. CounterpartName (STORY-243, PLAN T123, SPEC F92.2) joined the whitelist
         // deliberately: it is a persona display name off the schedule/roster, the same
         // station/persona-identity family as PersonaName, never listener-supplied text.
+        // DjName (gh-#259) joined the MediaItem whitelist deliberately: it is a persona display
+        // name stamped at plan time for Now Playing attribution — the same station/persona-identity
+        // family as PersonaName/CounterpartName, never listener-supplied text.
         static readonly string[] SegmentRequestStringMembers =
             ["Voice", "StationName", "StationId", "PersonaName", "CounterpartName"];
-        static readonly string[] MediaItemStringMembers = ["MediaId", "Locator", "Title", "Artist", "Album", "Genre"];
+        static readonly string[] MediaItemStringMembers = ["MediaId", "Locator", "Title", "Artist", "Album", "Genre", "DjName"];
 
         [Fact]
         public static void PromptAssemblyHasNoParameterThatCouldCarryListenerText()

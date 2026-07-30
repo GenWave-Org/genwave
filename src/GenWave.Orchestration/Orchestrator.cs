@@ -284,7 +284,16 @@ public sealed class Orchestrator(
         if (candidate.RequestFulfilled)
             track = track with { RequestFulfilled = true };
 
-        await EnqueuePatterAsync(previousTrack, track, ct);
+        // gh-#259: stamp Now Playing attribution at PLAN time, onto the item itself — one accessor
+        // read per unit (the same negligible-at-cadence-scale class as the per-segment reads in
+        // EnqueuePatterAsync; it also warms the F93.1 display-name memo every unit, cadence config
+        // regardless). The spectator surface reads this off the AIRING item, so after a schedule
+        // boundary the displayed DJ keeps naming whoever's queued items are still draining and flips
+        // only when the new show's items actually reach air — never the schedule's live answer.
+        var unitDjName = await ResolveUnitDjNameAsync(ct);
+        track = track with { DjName = unitDjName };
+
+        await EnqueuePatterAsync(previousTrack, track, unitDjName, ct);
         buffer.Enqueue(track);
 
         previousTrack = track;
@@ -710,7 +719,7 @@ public sealed class Orchestrator(
     static string FormatFiredRule(TasteRule rule) =>
         $"{rule.Predicate.LabelOr("any")}:{rule.Weight.ToString("F2", CultureInfo.InvariantCulture)}";
 
-    async Task EnqueuePatterAsync(MediaItem? prev, MediaItem next, CancellationToken ct)
+    async Task EnqueuePatterAsync(MediaItem? prev, MediaItem next, string? unitDjName, CancellationToken ct)
     {
         // Read cadence ONCE per unit, up front (gitea-#211) — so this unit's back-announce/station-id/
         // lead-in decisions all see the same snapshot even if a live PUT /api/settings edit lands
@@ -881,6 +890,13 @@ public sealed class Orchestrator(
 
             if (renderTask.IsCompletedSuccessfully && renderTask.Result is { } seg)
             {
+                // gh-#259: a station ID keeps the station's CREDIT (Artist, gh-#96 untouched) but
+                // still airs inside the unit's show — stamp the unit persona so Now Playing
+                // attribution never flickers to "no DJ" for a few seconds of imaging mid-show.
+                // Every other kind already carries its own speaker's name from TtsSegmentSource
+                // (SegmentRequest.PersonaName — the handoff kinds' outgoing/incoming included).
+                if (kind == SegmentKind.StationId)
+                    seg = seg with { DjName = unitDjName };
                 buffer.Enqueue(seg);
             }
             else if (kind is SegmentKind.SignOff or SegmentKind.SignOn)
@@ -1119,6 +1135,30 @@ public sealed class Orchestrator(
             "(SPEC F92.4).",
             kind, cause);
         events.Publish(new HandoffPieceDropped(kind.ToString(), cause));
+    }
+
+    /// <summary>
+    /// gh-#259 — resolves the display name the whole UNIT's items are attributed to (the music
+    /// track's <see cref="MediaItem.DjName"/> stamp, and the StationId segment's), from ONE
+    /// <paramref name="personaAccessor"/> read per unit. Deliberately separate from
+    /// <see cref="ResolvePersonaAsync"/>'s per-segment voice+name reads (SPEC F35.3/F39.1 —
+    /// unchanged): this read never influences a voice, only the attribution stamp. Same F12.4
+    /// never-fault posture: any accessor fault degrades to "no DJ", never a lost slot.
+    /// </summary>
+    async Task<string?> ResolveUnitDjNameAsync(CancellationToken ct)
+    {
+        try
+        {
+            return (await personaAccessor.ResolveAsync(ct))?.Name;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     /// <summary>
