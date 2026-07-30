@@ -142,7 +142,8 @@ public sealed class Orchestrator(
     CachingScheduleResolver? scheduleResolver = null,
     IPersonaStore? personaStore = null,
     IStationEventSink? events = null,
-    IStationClockProvider? stationClock = null) : INextItemProvider
+    IStationClockProvider? stationClock = null,
+    IPatterDurationEstimator? patterEstimator = null) : INextItemProvider
 {
     /// <summary>
     /// How many independent rotation-tiered samples <see cref="SelectMusicCandidateAsync"/> draws
@@ -207,6 +208,12 @@ public sealed class Orchestrator(
     // handoff piece still needs somewhere to publish to even when no host binds a real sink (every
     // pre-T124 construction site keeps compiling and behaving exactly as before).
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
+
+    // gh-#253: the patter-duration estimation seam — same default idiom as the fields above, but a
+    // fresh per-Orchestrator instance rather than a shared NoOp: the default estimator carries
+    // rolling state, and sharing one static instance across constructions would bleed one test's
+    // (or one hypothetical second station's) observed history into another's estimates.
+    readonly IPatterDurationEstimator patterEstimator = patterEstimator ?? new RollingPatterDurationEstimator();
 
     readonly Queue<MediaItem> buffer = new();
     MediaItem? previousTrack;
@@ -744,15 +751,17 @@ public sealed class Orchestrator(
         // call, returning both values from the same read (F39.1) — never resolve Voice and
         // PersonaName from two separate accessor calls, which could straddle a concurrent
         // activate/deactivate and pair a stale name with a fresh voice or vice versa.
-        // Kind rides alongside each render task (SPEC F92.4, PLAN T124) so the await loop below can
-        // tell a handoff-kind drop (WARN + booth row) from every other kind's ordinary silent skip —
-        // the render itself is still kicked off immediately here, nothing awaited in between.
-        var pendingRenders = new List<(SegmentKind Kind, Task<MediaItem?> Render)>();
+        // The full request rides alongside each render task — Kind for the F92.4 drop
+        // classification (SPEC F92.4, PLAN T124: the await loop below tells a handoff-kind drop,
+        // WARN + booth row, from every other kind's ordinary silent skip), and Voice/PersonaName for
+        // the gh-#253 measured-duration observation a successful render feeds the estimator — the
+        // render itself is still kicked off immediately here, nothing awaited in between.
+        var pendingRenders = new List<(SegmentRequest Request, Task<MediaItem?> Render)>();
 
-        // Starts one render and remembers its Kind alongside the Task (T124 review simplify) — every
-        // call site below used to repeat pendingRenders.Add((req.Kind, tts.RenderAsync(req, ct)))
-        // verbatim; the render itself is still kicked off immediately, nothing awaited in between.
-        void Kick(SegmentRequest request) => pendingRenders.Add((request.Kind, tts.RenderAsync(request, ct)));
+        // Starts one render and remembers the request alongside the Task (T124 review simplify) —
+        // every call site below used to repeat the Add call verbatim; the render itself is still
+        // kicked off immediately, nothing awaited in between.
+        void Kick(SegmentRequest request) => pendingRenders.Add((request, tts.RenderAsync(request, ct)));
 
         // 1. Back-announce for the previous track
         if (cadence.BackAnnounceAfterEachTrack && prev is not null)
@@ -877,8 +886,9 @@ public sealed class Orchestrator(
         // faulted," so a ternary keyed on "did renderTask win the race" mislabeled every synth outage
         // that happened to beat the budget delay as "render returned null" instead of "render
         // faulted".
-        foreach (var (kind, renderTask) in pendingRenders)
+        foreach (var (request, renderTask) in pendingRenders)
         {
+            var kind = request.Kind;
             var winner = await Task.WhenAny(renderTask, Task.Delay(renderBudget, ct));
 
             if (winner != renderTask)
@@ -890,6 +900,14 @@ public sealed class Orchestrator(
 
             if (renderTask.IsCompletedSuccessfully && renderTask.Result is { } seg)
             {
+                // gh-#253: feed the MEASURED duration (F66.1's cue-derived stamp — null when cue
+                // analysis failed, in which case nothing is observed: never fabricated) back into
+                // the estimation seam, keyed by the request's own kind/persona/voice, so the
+                // historical tier self-improves with every segment that actually rendered.
+                if (seg.DurationMs is int measuredMs)
+                    patterEstimator.ObserveRendered(
+                        kind, request.PersonaName, request.Voice, TimeSpan.FromMilliseconds(measuredMs));
+
                 // gh-#259: a station ID keeps the station's CREDIT (Artist, gh-#96 untouched) but
                 // still airs inside the unit's show — stamp the unit persona so Now Playing
                 // attribution never flickers to "no DJ" for a few seconds of imaging mid-show.

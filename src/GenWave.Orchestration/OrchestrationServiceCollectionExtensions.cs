@@ -56,6 +56,14 @@ public static class OrchestrationServiceCollectionExtensions
         // default — until then no pending request ever short-circuits a pick.
         services.TryAddSingleton<IRequestFulfillmentSource, NoOpRequestFulfillmentSource>();
 
+        // gh-#253: the patter-duration estimation seam — one process-wide instance so the render
+        // loop's observations and the boundary-fit consumer (gh-#254) read the SAME rolling history.
+        // ICopyBoundsProvider is optional by design (GetService, not GetRequiredService): a host
+        // that never wires AddGenWaveTts falls back to the estimator's own built-in default bound.
+        // TryAdd so a module that binds a different estimator wins.
+        services.TryAddSingleton<IPatterDurationEstimator>(sp =>
+            new RollingPatterDurationEstimator(sp.GetService<ICopyBoundsProvider>()));
+
         return services.AddSingleton<INextItemProvider, Orchestrator>();
     }
 }

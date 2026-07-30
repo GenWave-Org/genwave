@@ -23,6 +23,14 @@ sealed class FakeTtsSegmentSource : ITtsSegmentSource
     public TimeSpan? RenderDelay { get; set; }
 
     /// <summary>
+    /// When non-null, every rendered segment carries this measured <see cref="MediaItem.DurationMs"/>
+    /// (gh-#253) — stands in for the real <c>TtsSegmentSource</c>'s cue-derived F66.1 stamp so specs
+    /// can drive the Orchestrator's ObserveRendered feed. The default (<see langword="null"/>)
+    /// mirrors a failed cue analysis: no duration, nothing observed.
+    /// </summary>
+    public int? DurationMs { get; set; }
+
+    /// <summary>
     /// Per-request null override (STORY-243, PLAN T124) — narrower than <see cref="AlwaysReturnNull"/>'s
     /// blanket switch: lets a spec fail just ONE segment kind (e.g. a SignOff render, mirroring
     /// <c>TtsSegmentSource</c>'s own real F92.4 drop of non-LLM-authored handoff copy) while every
@@ -58,7 +66,8 @@ sealed class FakeTtsSegmentSource : ITtsSegmentSource
             mediaId,
             $"/tts/{mediaId}.wav",
             $"[{request.Kind}]",
-            new Loudness(-23.0, -1.0, true));
+            new Loudness(-23.0, -1.0, true),
+            DurationMs: DurationMs);
 
         return item;
     }
