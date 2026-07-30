@@ -58,7 +58,8 @@ sealed class FakeScheduleStore(ScheduleWeekSnapshot? initial = null) : ISchedule
         return Task.FromResult(current);
     }
 
-    public Task<ScheduleReplaceResult> ReplaceWeekAsync(IReadOnlyList<ScheduleSegment> week, CancellationToken ct)
+    public Task<ScheduleReplaceResult> ReplaceWeekAsync(
+        IReadOnlyList<ScheduleSegment> week, string? expectedVersion, CancellationToken ct)
     {
         ReplaceWeekAsyncCallCount++;
 
@@ -66,6 +67,18 @@ sealed class FakeScheduleStore(ScheduleWeekSnapshot? initial = null) : ISchedule
         {
             NextThrow = null;
             throw toThrow;
+        }
+
+        // Mirrors ScheduleRepository's gh-#255 staleness guard: a non-null expectedVersion that no
+        // longer matches the stored week's content fingerprint rejects the replace and changes
+        // nothing — proven against the real repository in Story240_ScheduleStore; this double only
+        // has to reproduce the contract for the controller's wire specs.
+        if (expectedVersion is not null)
+        {
+            var storedVersion = ScheduleWeekVersion.Compute(current.Segments);
+            if (storedVersion != expectedVersion)
+                return Task.FromResult<ScheduleReplaceResult>(
+                    new ScheduleReplaceResult.VersionConflict(storedVersion));
         }
 
         if (NextReplaceResult is { } scripted)

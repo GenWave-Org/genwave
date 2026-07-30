@@ -384,7 +384,11 @@ describe("Feature: Paint the week", () => {
 
       expect(cell(1, 0)).toHaveAttribute("title", CELL_ERROR_MESSAGE);
       expect(cell(1, 1)).toHaveAttribute("title", CELL_ERROR_MESSAGE);
-      expect(await screen.findByText(REJECT_BODY.detail)).toBeInTheDocument();
+      // gh-#255: the rejection surfaces TWICE by design — the transient toast plus the persistent
+      // `role="alert"` banner (a toast alone fades while the painted grid still looks right, which
+      // is exactly how a rejected save once read as "saved fine" on the demo box).
+      expect(await screen.findAllByText(REJECT_BODY.detail)).not.toHaveLength(0);
+      expect(screen.getByRole("alert")).toHaveTextContent(REJECT_BODY.detail);
     });
 
     it("a rejected save never silently drops the edit", async () => {
@@ -398,6 +402,152 @@ describe("Feature: Paint the week", () => {
       expect(cell(1, 0)).toHaveAttribute("aria-label", expect.stringContaining("Radio Rex"));
       expect(cell(1, 1)).toHaveAttribute("aria-label", expect.stringContaining("Radio Rex"));
       expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // gh-#255 — whole-week spans save and round-trip; stale editors can't wipe.
+  // -------------------------------------------------------------------------
+
+  describe("Scenario: a block spanning every day of the week saves and round-trips (gh-#255)", () => {
+    /** Echo mock faithful to the real 200 path: same segments back, ids assigned, fresh version. */
+    function makeEchoFetchMock(version = "v-after"): jest.MockedFunction<typeof fetch> {
+      const fn = jest.fn<typeof fetch>().mockImplementation(async (_input, init) => {
+        const body = JSON.parse(String(init?.body)) as ScheduleWeekDto;
+        const echoed: ScheduleWeekDto = {
+          segments: body.segments.map((s, i) => ({ ...s, id: i + 1 })),
+          version,
+        };
+        return {
+          ok: true,
+          status: 200,
+          json: jest.fn<() => Promise<unknown>>().mockResolvedValue(echoed),
+          headers: new Headers(),
+        } as unknown as Response;
+      });
+      global.fetch = fn as unknown as typeof fetch;
+      return fn;
+    }
+
+    function paintBandAcross(days: readonly number[]): void {
+      selectBrush("Radio Rex");
+      for (const day of days) {
+        drag([day, 20], [[day, 23]]);
+      }
+    }
+
+    it.each([
+      ["6 days", [1, 2, 3, 4, 5, 6]],
+      ["all 7 days", [0, 1, 2, 3, 4, 5, 6]],
+    ])("a 2h band across %s PUTs one segment per day and the grid keeps every day after the 200", async (_label, days) => {
+      const mockFetch = makeEchoFetchMock();
+      renderEditor();
+
+      paintBandAcross(days);
+      await clickSave();
+
+      const body = lastPutBody(mockFetch);
+      expect(body.segments).toHaveLength(days.length);
+      for (const day of days) {
+        expect(body.segments).toContainEqual(
+          expect.objectContaining({ day, startMinute: 600, endMinute: 720, personaId: REX.id })
+        );
+        // Round trip: the grid re-derived from the response still shows every painted day.
+        expect(cell(day, 20)).toHaveAttribute("aria-label", expect.stringContaining("Radio Rex"));
+        expect(cell(day, 23)).toHaveAttribute("aria-label", expect.stringContaining("Radio Rex"));
+      }
+      expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
+    });
+
+    it("a block wrapping the week boundary (Sat 23:00 → Sun 01:00) saves as two segments and survives", async () => {
+      const mockFetch = makeEchoFetchMock();
+      renderEditor();
+
+      selectBrush("Radio Rex");
+      drag([6, 46], [[6, 47]]);
+      drag([0, 0], [[0, 1]]);
+      await clickSave();
+
+      const body = lastPutBody(mockFetch);
+      expect(body.segments).toEqual([
+        expect.objectContaining({ day: 0, startMinute: 0, endMinute: 60, personaId: REX.id }),
+        expect.objectContaining({ day: 6, startMinute: 1380, endMinute: 1440, personaId: REX.id }),
+      ]);
+      expect(cell(6, 47)).toHaveAttribute("aria-label", expect.stringContaining("Radio Rex"));
+      expect(cell(0, 0)).toHaveAttribute("aria-label", expect.stringContaining("Radio Rex"));
+    });
+  });
+
+  describe("Scenario: optimistic concurrency — a stale editor cannot silently wipe (gh-#255)", () => {
+    const STALE_PROBLEM = {
+      detail:
+        "Another tab or session saved a different week after this page loaded. Reload to see the latest schedule before saving — saving now would overwrite it.",
+      conflict: "staleWeek",
+    };
+
+    it("the PUT carries the version the editor loaded, as baseVersion", async () => {
+      const mockFetch = makePutFetchMock({ status: 200, body: { segments: [], version: "v-2" } });
+      renderEditor({ initialWeek: { segments: [], version: "v-1" } });
+
+      selectBrush("Radio Rex");
+      drag([2, 10], [[2, 11]]);
+      await clickSave();
+
+      const body = lastPutBody(mockFetch);
+      expect(body.baseVersion).toBe("v-1");
+    });
+
+    it("after a 200, the NEXT save carries the response's fresh version", async () => {
+      const mockFetch = makePutFetchMock({ status: 200, body: { segments: [], version: "v-2" } });
+      renderEditor({ initialWeek: { segments: [], version: "v-1" } });
+
+      selectBrush("Radio Rex");
+      drag([2, 10], [[2, 11]]);
+      await clickSave();
+      drag([3, 10], [[3, 11]]);
+      await clickSave();
+
+      const body = lastPutBody(mockFetch);
+      expect(body.baseVersion).toBe("v-2");
+    });
+
+    it("a 409 staleWeek keeps the paint on screen and shows a persistent alert, not just a toast", async () => {
+      makePutFetchMock({ status: 409, body: STALE_PROBLEM });
+      renderEditor({ initialWeek: { segments: [], version: "v-1" } });
+
+      selectBrush("Radio Rex");
+      drag([4, 8], [[4, 9]]);
+      await clickSave();
+
+      // The operator's unsaved paint survives (AC5 posture), still marked dirty…
+      expect(cell(4, 8)).toHaveAttribute("aria-label", expect.stringContaining("Radio Rex"));
+      expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+      // …and the rejection stays visible in a role="alert" banner (a fading toast alone is how a
+      // failed save once read as "saved fine" on the demo box).
+      const alerts = screen.getAllByRole("alert").map((el) => el.textContent ?? "");
+      expect(alerts.some((text) => text.includes("Reload to see the latest"))).toBe(true);
+    });
+
+    it("a 200 whose body isn't the week document surfaces a persistent error instead of failing silently", async () => {
+      const fn = jest.fn<typeof fetch>().mockImplementation(async () => {
+        return {
+          ok: true,
+          status: 200,
+          json: jest.fn<() => Promise<unknown>>().mockRejectedValue(new SyntaxError("not JSON")),
+          headers: new Headers(),
+        } as unknown as Response;
+      });
+      global.fetch = fn as unknown as typeof fetch;
+      renderEditor();
+
+      selectBrush("Radio Rex");
+      drag([5, 8], [[5, 9]]);
+      await clickSave();
+
+      expect(cell(5, 8)).toHaveAttribute("aria-label", expect.stringContaining("Radio Rex"));
+      expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+      const alerts = screen.getAllByRole("alert").map((el) => el.textContent ?? "");
+      expect(alerts.some((text) => text.includes("NOT saved"))).toBe(true);
     });
   });
 });

@@ -18,4 +18,13 @@ export interface PersonaDto {
   slug: string;
   importedFrom: string | null;
   importedAt: string | null;
+  /** The F71.1 persona-card narrative (gh-#256) — where a catalog-hired DJ's story actually lives
+   * (with its `Style:` line embedded), since the hire flow deliberately blanks the legacy
+   * `backstory`/`style` columns. `""` for a persona whose card carries none. Always serialized by
+   * the backend, same required-not-optional posture as every other key here. */
+  soul: string;
+  /** Card quirks (gh-#256) — read-only in the editor; authored by the card, not this form. */
+  quirks: string[];
+  /** Card lore (gh-#256) — read-only in the editor; authored by the card, not this form. */
+  lore: string[];
 }

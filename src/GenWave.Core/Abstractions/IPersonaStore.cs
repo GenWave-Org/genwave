@@ -60,4 +60,16 @@ public interface IPersonaStore
     /// slug. Null when no persona holds that slug.
     /// </summary>
     Task<long?> GetIdBySlugAsync(string slug, CancellationToken ct);
+
+    /// <summary>
+    /// Batch companion to <see cref="GetCardByIdAsync"/> (gh-#256): every persona's card definition
+    /// in ONE query, keyed by id, so <c>GET /api/personas</c> can surface a catalog-hired DJ's
+    /// soul/quirks/lore alongside the legacy backstory/style columns without an N+1 read. Rows still
+    /// carrying the <c>'{}'</c> migration sentinel (or no definition at all) are simply absent from
+    /// the dictionary — same "a real card or nothing" posture as <see cref="GetCardByIdAsync"/>.
+    /// Default implementation returns an empty map — read-side display enrichment only, so a test
+    /// double that doesn't exercise it never has to implement it.
+    /// </summary>
+    Task<IReadOnlyDictionary<long, PersonaCard>> GetCardsAsync(CancellationToken ct) =>
+        Task.FromResult<IReadOnlyDictionary<long, PersonaCard>>(new Dictionary<long, PersonaCard>());
 }

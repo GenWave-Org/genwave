@@ -32,6 +32,9 @@ const REX: PersonaDto = {
   slug: "radio-rex",
   importedFrom: null,
   importedAt: null,
+  soul: "",
+  quirks: [],
+  lore: [],
 };
 
 const NOVA: PersonaDto = {
@@ -43,6 +46,9 @@ const NOVA: PersonaDto = {
   slug: "nova",
   importedFrom: null,
   importedAt: null,
+  soul: "",
+  quirks: [],
+  lore: [],
 };
 
 // ---------------------------------------------------------------------------

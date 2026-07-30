@@ -41,7 +41,8 @@ sealed class FakeScheduleStore(ScheduleWeekSnapshot snapshot) : IScheduleStore
         return pendingLoad?.Task ?? Task.FromResult(current);
     }
 
-    public Task<ScheduleReplaceResult> ReplaceWeekAsync(IReadOnlyList<ScheduleSegment> week, CancellationToken ct) =>
+    public Task<ScheduleReplaceResult> ReplaceWeekAsync(
+        IReadOnlyList<ScheduleSegment> week, string? expectedVersion, CancellationToken ct) =>
         throw new NotSupportedException("FakeScheduleStore is a read-only double for T119 specs.");
 
     public void RaiseWeekChanged() => WeekChanged?.Invoke();

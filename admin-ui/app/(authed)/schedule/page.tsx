@@ -10,16 +10,10 @@ import type { RosterPersonaDto, ScheduleWeekDto } from "./types";
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 
-const EMPTY_WEEK: ScheduleWeekDto = { segments: [] };
-
 export default async function SchedulePage(): Promise<ReactNode> {
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
 
-  // Promise.allSettled, not Promise.all: an unreadable schedule is a LEGAL state (SPEC F91.4, the
-  // pre-clock/all-music week) — a network reject on it must never take the whole page down with
-  // it. The persona roster is the one read this page can't degrade around (there's nothing to
-  // paint with), so it alone gets the hard failure branch below.
   const [personasResult, scheduleResult] = await Promise.allSettled([
     apiGet("/api/personas", { cookies: cookieHeader }),
     apiGet("/api/schedule", { cookies: cookieHeader }),
@@ -34,11 +28,25 @@ export default async function SchedulePage(): Promise<ReactNode> {
     );
   }
 
+  // A failed schedule read used to silently degrade to an EMPTY editor — but an unreadable week is
+  // NOT the legal all-music empty week (SPEC F91.4): letting the operator paint over a grid that
+  // only LOOKS empty and then save would full-replace (wipe) whatever the store actually holds
+  // (gh-#255's silent save-loss). Fail loudly instead; a 200 with zero segments still renders the
+  // editor normally.
+  if (scheduleResult.status === "rejected" || !scheduleResult.value.ok) {
+    return (
+      <main>
+        <h1 className="font-display text-[1.35rem] font-semibold text-ink">Schedule</h1>
+        <p className="mt-4 text-[0.85rem] text-danger" role="alert">
+          Unable to load the schedule. Reload to try again — editing is disabled so a save can&apos;t
+          overwrite the stored week with an empty one.
+        </p>
+      </main>
+    );
+  }
+
   const personas = (await personasResult.value.json()) as RosterPersonaDto[];
-  const week =
-    scheduleResult.status === "fulfilled" && scheduleResult.value.ok
-      ? ((await scheduleResult.value.json()) as ScheduleWeekDto)
-      : EMPTY_WEEK;
+  const week = (await scheduleResult.value.json()) as ScheduleWeekDto;
 
   return (
     <main>
