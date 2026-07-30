@@ -49,6 +49,12 @@ public static class FeatureComposeHostPublishGuard
         startInfo.ArgumentList.Add(ScriptPath);
         foreach (var arg in args) startInfo.ArgumentList.Add(arg);
 
+        // gh-#249: the guard's default mode renders compose itself with no --profile flags,
+        // inheriting this process's environment — pin the profile set empty so ambient
+        // COMPOSE_PROFILES / a dev box's .env (e.g. admin -> admin_ui 3000:3000 on the base
+        // file) can never leak extra services into the render it checks.
+        startInfo.Environment["COMPOSE_PROFILES"] = "";
+
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("failed to start check-compose-publish.sh");
 
@@ -134,6 +140,9 @@ public static class FeatureComposeHostPublishGuard
             startInfo.Environment["ADMIN_PASSWORD"] = "story181-dummy";
             startInfo.Environment["MEDIA_DIR"] = Path.GetTempPath();
             startInfo.Environment["PUBLIC_HOST"] = "story181-tunnel-profile.invalid";
+            // gh-#249: pin the profile set empty — shadows ambient COMPOSE_PROFILES and a
+            // dev box's .env; the --profile tunnel flag above still wins (flag precedence).
+            startInfo.Environment["COMPOSE_PROFILES"] = "";
             // cloudflared's TUNNEL_TOKEN is deliberately `${TUNNEL_TOKEN:-}` (compose.yaml) —
             // config renders fine whether or not this is set, so it's left to the ambient
             // environment / unset.

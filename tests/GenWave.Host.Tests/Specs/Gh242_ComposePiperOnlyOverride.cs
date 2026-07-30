@@ -60,6 +60,11 @@ public static class FeatureComposePiperOnlyOverride
             ["ADMIN_PASSWORD"] = "gh242-dummy",
             ["MEDIA_DIR"] = Path.GetTempPath(),
             ["PUBLIC_HOST"] = "gh242.invalid",
+            // gh-#249: explicit-but-empty shadows BOTH ambient COMPOSE_PROFILES and a dev
+            // box's repo-root .env value, so the render sees the same profile set (none)
+            // CI does. Overlay/flag-selected profiles are unaffected — a --profile flag
+            // takes precedence over this variable entirely (verified empirically).
+            ["COMPOSE_PROFILES"] = "",
         })
         {
             startInfo.Environment[key] = value;

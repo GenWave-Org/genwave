@@ -57,6 +57,11 @@ public static class FeatureAlloyLoggingProfile
             ["MEDIA_DIR"] = Path.GetTempPath(),
             ["PUBLIC_HOST"] = "story202.invalid",
             // Deliberately NO LOKI_* here — F78.4: rendering must succeed with them unset.
+            // gh-#249: pin the profile set empty — shadows ambient COMPOSE_PROFILES and a
+            // dev box's .env (COMPOSE_PROFILES=logging there would fail Alloy_is_absent_
+            // without_the_profile). The --profile logging flag above is unaffected: a
+            // --profile flag takes precedence over this variable entirely (verified).
+            ["COMPOSE_PROFILES"] = "",
         })
         {
             startInfo.Environment[key] = value;
@@ -242,6 +247,8 @@ public static class FeatureAlloyLoggingProfile
             startInfo.Environment["ADMIN_PASSWORD"] = "story202-dummy";
             startInfo.Environment["MEDIA_DIR"] = Path.GetTempPath();
             startInfo.Environment["LOKI_PUSH_URL"] = "";
+            // gh-#249: same ambient-profile pin as RenderConfig; --profile logging still wins.
+            startInfo.Environment["COMPOSE_PROFILES"] = "";
 
             using var process = Process.Start(startInfo)!;
             var completed = process.WaitForExit(TimeSpan.FromSeconds(60));
