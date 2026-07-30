@@ -89,13 +89,17 @@ public static class FeaturePersonaAttributionRequestShape
         public async Task TheAccessorIsReadExactlyOncePerSegmentRequest()
         {
             // F39.1 — one SegmentRequest build must cost exactly one IActivePersonaAccessor.ResolveAsync
-            // call, never a separate call for Voice and another for PersonaName.
+            // call, never a separate call for Voice and another for PersonaName. Since gh-#259 the
+            // unit ALSO costs exactly one additional read — the plan-time DJ attribution stamp for
+            // the music item (Orchestrator.ResolveUnitDjNameAsync), independent of any segment's
+            // voice+name pairing. Lead-in-only cadence = 1 segment, so the total is 1 + 1; a
+            // regression to two-reads-per-segment would show up here as 3.
             var accessor = new CountingActivePersonaAccessor(BuildPersona("DJ Nova", "am_onyx"));
             var (orchestrator, _) = BuildOrchestrator(accessor);
 
             await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
 
-            Assert.Equal(1, accessor.CallCount);
+            Assert.Equal(2, accessor.CallCount);
         }
     }
 

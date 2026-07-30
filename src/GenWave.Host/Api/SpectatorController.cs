@@ -93,14 +93,19 @@ public sealed class SpectatorController(
     /// </para>
     /// <para>
     /// Both on-air shapes also carry <c>dj</c> and <c>upNext</c> (SPEC F93.1/F93.2, STORY-244, PLAN
-    /// T125) — <b>never</b> the standby shape, which stays exactly <c>{listeners, state}</c>. Both
-    /// are assembled in-memory, off <see cref="CachingScheduleResolver.TryGetCurrent"/> (no store
-    /// round trip) and <see cref="IActivePersonaAccessor.TryGetCachedName"/> (no store round trip) —
-    /// F93.4's "no DB or engine call on the poll path" holds. <c>dj</c> is the on-air persona's
-    /// display name, or null in a music-only segment/grid gap; <c>upNext</c> is exactly one
-    /// upcoming segment, collapsing to null under the SAME-PERSONA rule (see
-    /// <see cref="SpectatorUpNext"/>'s own remarks). Track state also carries <c>artworkUrl</c>
-    /// (SPEC F93.3, STORY-245) straight off the snapshot — never a fresh per-poll lookup.
+    /// T125) — <b>never</b> the standby shape, which stays exactly <c>{listeners, state}</c>.
+    /// <c>dj</c> is read off the AIRING item's own snapshot (<see cref="NowPlayingSnapshot.DjName"/>,
+    /// gh-#259) — never the schedule's live answer, which flips at a boundary while the engine queue
+    /// can still be draining the previous show's rendered patters: the displayed DJ must name the
+    /// voice/show actually on air, so it follows the item and flips only when the new schedule's
+    /// items reach air. Null when the airing item was planned with no DJ on shift, or was never
+    /// feeder-planned at all (safe rotation, engine-initiated). <c>upNext</c> stays schedule-truth —
+    /// exactly one upcoming segment off <see cref="CachingScheduleResolver.TryGetCurrent"/> (no
+    /// store round trip) and <see cref="IActivePersonaAccessor.TryGetCachedName"/> (no store round
+    /// trip), collapsing to null under the SAME-PERSONA rule (see <see cref="SpectatorUpNext"/>'s
+    /// own remarks) — F93.4's "no DB or engine call on the poll path" holds for both fields. Track
+    /// state also carries <c>artworkUrl</c> (SPEC F93.3, STORY-245) straight off the snapshot —
+    /// never a fresh per-poll lookup.
     /// </para>
     /// </summary>
     [HttpGet("now-playing")]
@@ -115,8 +120,8 @@ public sealed class SpectatorController(
         if (snapshot is null || snapshot.IsDrain)
             return Ok(new SpectatorStandbyNowPlaying(listeners));
 
+        var dj = snapshot.DjName;
         var onAir = scheduleResolver.TryGetCurrent();
-        var dj = onAir?.PersonaId is { } personaId ? personaAccessor.TryGetCachedName(personaId) : null;
         var upNext = onAir is null ? null : ResolveUpNext(onAir);
 
         if (snapshot.MediaId is { } mediaId && mediaId.StartsWith("tts:", StringComparison.Ordinal))

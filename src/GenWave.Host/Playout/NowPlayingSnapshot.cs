@@ -32,6 +32,14 @@ namespace GenWave.Host.Playout;
 /// Defaults to null so every pre-F93 call site that constructs this record positionally keeps
 /// compiling unchanged.
 /// </param>
+/// <param name="DjName">
+/// gh-#259 — the airing item's own plan-time DJ attribution, carried straight through from
+/// <see cref="GenWave.Core.Playout.OnAirState.DjName"/>; the spectator <c>dj</c> field reads THIS,
+/// never the schedule's live answer, so the displayed DJ tracks the voice/show actually on air even
+/// while a prior schedule's queued items drain after a boundary. Null for a drain, an
+/// engine-initiated play, or an item planned with no DJ on shift. Defaults to null so every
+/// pre-gh-#259 positional construction site keeps compiling unchanged.
+/// </param>
 public sealed record NowPlayingSnapshot(
     string? MediaId,
     string? Title,
@@ -40,4 +48,5 @@ public sealed record NowPlayingSnapshot(
     DateTimeOffset StartedAt,
     int? DurationMs,
     bool IsDrain,
-    string? ArtworkUrl = null);
+    string? ArtworkUrl = null,
+    string? DjName = null);

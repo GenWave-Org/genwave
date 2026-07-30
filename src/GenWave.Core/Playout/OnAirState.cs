@@ -27,6 +27,13 @@ namespace GenWave.Core.Playout;
 /// PLAN T125 review F2), so a hostile file tag can never surface as this field. Null when no art, no
 /// <c>Station:PublicBaseUrl</c>, an untrusted echo, or not yet known.
 /// </param>
+/// <param name="DjName">
+/// gh-#259 — the airing item's own plan-time DJ attribution (<see cref="GenWave.Core.Domain.MediaItem.DjName"/>),
+/// from pushed metadata. Null for a drain, an engine-initiated play (the feeder never planned it),
+/// or an item planned with no DJ on shift. Never a live schedule read at this layer — the whole
+/// point is that this value belongs to the ITEM, so the displayed DJ flips only when the new
+/// schedule's items actually reach air.
+/// </param>
 public sealed record OnAirState(
     string? MediaId,
     string? Title,
@@ -36,4 +43,5 @@ public sealed record OnAirState(
     int? DurationMs,
     bool IsReal,
     bool IsReady,
-    string? ArtworkUrl = null);
+    string? ArtworkUrl = null,
+    string? DjName = null);
