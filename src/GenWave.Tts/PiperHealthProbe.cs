@@ -16,15 +16,18 @@ using Microsoft.Extensions.Options;
 /// exception this method lets through, same contract as every other
 /// <see cref="IDependencyProbe"/>) means Piper is actually down.
 /// <para>
-/// An empty <c>Tts:Fallback:Endpoint</c> is the disabled-by-design state (F70.1) — mirrors
-/// <see cref="OllamaHealthProbe"/>'s empty-<c>Llm:Endpoint</c> handling: returns false
+/// Probes the FIRST piper-kind hop of the effective fallback chain
+/// (<see cref="TtsFallbackChain.Resolve"/>, gh-#147) — under the legacy flat keys that is exactly
+/// the old <c>Tts:Fallback:Endpoint</c>, unchanged. No piper hop configured at all (empty chain,
+/// or an operator-built chain with no piper in it) is the disabled-by-design state (F70.1) —
+/// mirrors <see cref="OllamaHealthProbe"/>'s empty-<c>Llm:Endpoint</c> handling: returns false
 /// (not-configured) without ever calling out.
 /// </para>
 /// <para>
 /// No boot-frozen <see cref="HttpClient.BaseAddress"/>, same discipline as
-/// <see cref="KokoroHealthProbe"/>/<see cref="OllamaHealthProbe"/> (SPEC F36.1-F36.2):
-/// <c>Tts:Fallback:Endpoint</c> is read from <see cref="IOptionsMonitor{TOptions}.CurrentValue"/>
-/// per probe, so a live repoint applies to the very next cycle.
+/// <see cref="KokoroHealthProbe"/>/<see cref="OllamaHealthProbe"/> (SPEC F36.1-F36.2): the chain
+/// is resolved from <see cref="IOptionsMonitor{TOptions}.CurrentValue"/> per probe, so a live
+/// repoint applies to the very next cycle.
 /// </para>
 /// </summary>
 public sealed class PiperHealthProbe(HttpClient http, IOptionsMonitor<TtsFallbackOptions> optionsMonitor) : IDependencyProbe
@@ -33,11 +36,12 @@ public sealed class PiperHealthProbe(HttpClient http, IOptionsMonitor<TtsFallbac
 
     public async Task<bool> ProbeAsync(CancellationToken ct)
     {
-        var endpoint = optionsMonitor.CurrentValue.Endpoint;
-        if (string.IsNullOrEmpty(endpoint))
-            return false;   // disabled by design (F70.1) — not a probe failure
+        var chain = TtsFallbackChain.Resolve(optionsMonitor.CurrentValue);
+        var piperIndex = chain.IndexOfFirstEngine(DependencyNames.Piper);
+        if (piperIndex < 0)
+            return false;   // no piper hop configured — disabled by design (F70.1), not a probe failure
 
-        var requestUri = EndpointUri.Combine(endpoint, "/");
+        var requestUri = EndpointUri.Combine(chain.Hops[piperIndex].Endpoint, "/");
         // OPTIONS, not GET: Flask answers it without running the route handler, so the probe stays
         // out of piper's error log (gh-#64) — see class remarks.
         using var request = new HttpRequestMessage(HttpMethod.Options, requestUri);
