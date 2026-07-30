@@ -183,12 +183,15 @@ public sealed class SettingValidator(IConfiguration configuration)
             // {from, to} string pairs; empty ("[]" or blank) means no corrections and is legal.
             ["Tts:Corrections"] = IsValidCorrectionsArray,
 
-            // Piper local-fallback engine (SPEC F70.1, STORY-190) — Endpoint mirrors Llm:Endpoint's
-            // own shape: empty is the legal disabled state (Piper not deployed, F70.1), any
-            // non-empty value must be an absolute http/https URL. Voice is free text, same
-            // "no shape to police" story as Llm:Model — it is never sent on the wire
-            // (TtsFallbackOptions' own remarks), only compared by an operator against what the
-            // compose `piper` sidecar was actually started with.
+            // Piper local-fallback engine, legacy single-hop keys (SPEC F70.1, STORY-190, gh-#147:
+            // ignored when a Tts:Fallback:Profiles chain is deployed; that shape is env-only and
+            // startup-validated by GenWave.Tts.TtsFallbackOptionsValidator, never PUT through
+            // here) — Endpoint mirrors Llm:Endpoint's own shape: empty is the legal disabled
+            // state (Piper not deployed, F70.1), any non-empty value must be an absolute
+            // http/https URL. Voice is free text, same "no shape to police" story as Llm:Model —
+            // it is never sent on the wire for the piper engine (TtsFallbackProfile.Voice's
+            // schema remarks), only compared by an operator against what the compose `piper`
+            // sidecar was actually started with.
             ["Tts:Fallback:Endpoint"] = v => string.IsNullOrEmpty(v) || IsAbsoluteHttpUri(v),
             ["Tts:Fallback:Voice"] = AlwaysValid,
 
