@@ -28,9 +28,10 @@ using GenWave.Core.Events;
 ///
 /// Cadence is read the same way, through <paramref name="cadenceProvider"/> (gitea-#211 — F30.1's
 /// precedent applied to cadence): read exactly ONCE per unit, into a local, at the top of
-/// <see cref="EnqueuePatterAsync"/> — not once per cadence check within that unit — so one unit is
-/// planned under one consistent cadence snapshot rather than three racing live reads that could
-/// straddle a concurrent settings write mid-unit.
+/// <see cref="GetNextAsync"/> (hoisted from <see cref="EnqueuePatterAsync"/> by gh-#254 so the
+/// boundary fit's patter estimates share the same snapshot) — not once per cadence check within
+/// that unit — so one unit is planned under one consistent cadence snapshot rather than racing
+/// live reads that could straddle a concurrent settings write mid-unit.
 ///
 /// Music selection calls <see cref="IMediaCatalog.GetRotationCandidateAsync"/> (SPEC F41.1, closes
 /// gitea-#210/gitea-#213) instead of the strict-exclude <c>GetRandomReadyAsync</c> — a tiered preference query
@@ -83,10 +84,10 @@ using GenWave.Core.Events;
 ///
 /// Station identity (<see cref="StationIdentity.Id"/>/<see cref="StationIdentity.Name"/>/
 /// <see cref="StationIdentity.Voice"/>) is read through <paramref name="identityProvider"/> once per
-/// unit, at the top of <see cref="EnqueuePatterAsync"/> (SPEC F44.1, gitea-#196, the same discipline
-/// <paramref name="cadenceProvider"/> follows one line below) — never cached in a field — so a live
-/// <c>Station:Name</c>/<c>Station:Voice</c> edit reaches the very next unit's segments with no
-/// process restart.
+/// unit, at the top of <see cref="GetNextAsync"/> (SPEC F44.1, gitea-#196, the same discipline —
+/// and the same gh-#254 hoist — <paramref name="cadenceProvider"/> follows one line above) — never
+/// cached in a field — so a live <c>Station:Name</c>/<c>Station:Voice</c> edit reaches the very
+/// next unit's segments with no process restart.
 ///
 /// The station-id cadence check (below) never builds its <see cref="SegmentRequest"/> directly
 /// (SPEC F74.1/F74.2, STORY-197): it enqueues a deferral into <paramref name="deferralQueue"/>,
@@ -97,15 +98,17 @@ using GenWave.Core.Events;
 /// producer (e.g. a wall-clock-scheduled handoff) shares: enqueue whenever its own trigger fires,
 /// drain only at a boundary.
 ///
-/// Music selection is boundary-aware (SPEC F74.3, STORY-198): <see cref="SelectMusicCandidateAsync"/>
-/// checks <paramref name="deferralQueue"/>'s <see cref="SpeechDeferralQueue.NextDue"/> before every
-/// pick and, only when something is due strictly in the future within
-/// <paramref name="boundaryBiasProvider"/>'s lookahead window, softly biases the pick toward
-/// whichever sampled candidate's end lands closest to that due time — never a hard filter, and
-/// subordinate to rotation (F41.1/F41.3 tiering still governs which candidates even get sampled).
-/// Outside that window (the common case today — see that method's remarks) this degrades to
-/// exactly the one <see cref="IMediaCatalog.GetRotationCandidateAsync"/> call this Orchestrator
-/// has always made.
+/// Music selection is boundary-aware (SPEC F74.3, STORY-198) and, as of gh-#254, a genuine duration
+/// FIT: <see cref="SelectMusicCandidateAsync"/> peeks <paramref name="deferralQueue"/>'s
+/// earliest pending deferral before every pick and, only when it is due strictly in the future
+/// within <paramref name="boundaryBiasProvider"/>'s lookahead window, softly biases the pick toward
+/// whichever sampled candidate's effective end — after queued-ahead drift, this unit's own patter,
+/// crossfade trim, and the break's expected patter (the gh-#253 estimator) — lands closest to the
+/// boundary, with a first-within-tolerance win rule guarding against degenerate closest-fit
+/// repetition (see that method's remarks). Never a hard filter, and subordinate to rotation
+/// (F41.1/F41.3 tiering still governs which candidates even get sampled). Outside that window (the
+/// no-imminent-boundary common case) this degrades to exactly the one
+/// <see cref="IMediaCatalog.GetRotationCandidateAsync"/> call this Orchestrator has always made.
 ///
 /// <para>
 /// <b>Handoff ceremony producer (SPEC F92.1-F92.6, STORY-243, PLAN T124):</b>
@@ -151,6 +154,23 @@ public sealed class Orchestrator(
     /// rows in even a modest library without turning every biased pick into a database hot loop.
     /// </summary>
     const int BoundarySampleAttempts = 5;
+
+    /// <summary>
+    /// gh-#254 — the expected crossfade overlap a track's tail loses into whatever follows it:
+    /// the engine's energy-aware crossfade runs GW_XFADE_MIN..GW_XFADE_MAX (2..8s shipped
+    /// defaults), decided per-seam inside genwave.liq where this control plane cannot see it, so
+    /// the midpoint is the honest single number. A judged constant, not a live knob: its ±3s
+    /// worst-case error is well inside even the tightest fit tolerance below.
+    /// </summary>
+    static readonly TimeSpan ExpectedCrossfadeTrim = TimeSpan.FromSeconds(5);
+
+    // gh-#254 — how far from the boundary a candidate may land and still count as a WIN ("±30s of
+    // the boundary is a win"), widened as the gh-#253 estimate's confidence tier drops: the fit's
+    // patter terms are only as good as their worst contributing estimate, and pretending exact-tier
+    // precision over a chars-per-second guess would over-optimize the pick for false accuracy.
+    static readonly TimeSpan FitToleranceExact = TimeSpan.FromSeconds(30);
+    static readonly TimeSpan FitToleranceHistorical = TimeSpan.FromSeconds(45);
+    static readonly TimeSpan FitToleranceHeuristic = TimeSpan.FromSeconds(60);
 
     // SPEC F81.6's degradation-step vocabulary — the per-pick debug line's sixth field. "None" covers
     // both a winning rung-0 persona pick AND a rung-1 (unrelaxed) envelope-only pick: neither gave up
@@ -238,6 +258,19 @@ public sealed class Orchestrator(
     {
         if (buffer.Count > 0) return buffer.Dequeue();
 
+        // Read cadence and station identity ONCE per unit, up front — the gitea-#211/F44.1
+        // disciplines, hoisted here from EnqueuePatterAsync (gh-#254) so the boundary fit's patter
+        // estimates and this unit's actual patter planning read the SAME snapshot: still exactly one
+        // read of each per unit, just taken before selection instead of after it. Never read
+        // cadenceProvider.Current or identityProvider.Current again below this line.
+        var cadence = cadenceProvider.Current;
+        var identity = identityProvider.Current;
+
+        // gh-#259's one-accessor-read-per-unit attribution stamp, resolved BEFORE selection as of
+        // gh-#254 (same single read, just earlier): the boundary fit keys its persona-owned patter
+        // estimates by the unit's show persona.
+        var unitDjName = await ResolveUnitDjNameAsync(ct);
+
         // Strip tts:* from the recent-ids list (F12.6 discipline) so the ordered-recent list
         // GetRotationCandidateAsync tiers against stays music-only. ctx.RecentMediaIds is already
         // the feeder's ring oldest-first, most-recent LAST (SPEC F41.1) — Where preserves that order.
@@ -250,7 +283,8 @@ public sealed class Orchestrator(
         // very next pull with no process restart.
         var artistSeparation = rotationProvider.Current.ArtistSeparation;
         var candidate = await SelectMusicCandidateAsync(
-            scopeProvider.Current, orderedRecentIds, artistSeparation, ct);
+            scopeProvider.Current, orderedRecentIds, artistSeparation,
+            cadence, identity, unitDjName, ctx.QueuedAheadMs, ct);
         if (candidate is null)
         {
             // F41.2: null now means a GENUINE drain — zero playable rows in scope, never merely
@@ -291,16 +325,15 @@ public sealed class Orchestrator(
         if (candidate.RequestFulfilled)
             track = track with { RequestFulfilled = true };
 
-        // gh-#259: stamp Now Playing attribution at PLAN time, onto the item itself — one accessor
-        // read per unit (the same negligible-at-cadence-scale class as the per-segment reads in
-        // EnqueuePatterAsync; it also warms the F93.1 display-name memo every unit, cadence config
-        // regardless). The spectator surface reads this off the AIRING item, so after a schedule
-        // boundary the displayed DJ keeps naming whoever's queued items are still draining and flips
-        // only when the new show's items actually reach air — never the schedule's live answer.
-        var unitDjName = await ResolveUnitDjNameAsync(ct);
+        // gh-#259: stamp Now Playing attribution at PLAN time, onto the item itself — the single
+        // per-unit accessor read resolved above (it also warms the F93.1 display-name memo every
+        // unit, cadence config regardless). The spectator surface reads this off the AIRING item,
+        // so after a schedule boundary the displayed DJ keeps naming whoever's queued items are
+        // still draining and flips only when the new show's items actually reach air — never the
+        // schedule's live answer.
         track = track with { DjName = unitDjName };
 
-        await EnqueuePatterAsync(previousTrack, track, unitDjName, ct);
+        await EnqueuePatterAsync(previousTrack, track, unitDjName, cadence, identity, ct);
         buffer.Enqueue(track);
 
         previousTrack = track;
@@ -312,9 +345,25 @@ public sealed class Orchestrator(
     /// <summary>
     /// Picks the next music candidate — SPEC F41.1/F41.3 tiering is unchanged and still governs
     /// which candidates are even eligible — and, when a pending deferral
-    /// (<see cref="SpeechDeferralQueue.NextDue"/>) is due strictly in the future within
+    /// (<see cref="SpeechDeferralQueue.PeekNextDue"/>) is due strictly in the future within
     /// <see cref="boundaryBiasProvider"/>'s lookahead window (SPEC F74.3, STORY-198), softly biases
-    /// that pick toward whichever sampled candidate's end lands closest to the due time.
+    /// that pick toward whichever sampled candidate's end lands closest to the boundary — a full
+    /// duration FIT as of gh-#254, no longer a raw duration-vs-due comparison. See
+    /// <see cref="BuildBoundaryFit"/> for the accounting (queued-ahead drift, this unit's own
+    /// pre-music patter, crossfade trim, and the break's expected patter via the gh-#253 estimator)
+    /// and for how tolerance widens with the estimator's confidence tier.
+    ///
+    /// <para>
+    /// <b>Degenerate-pick guard (gh-#254):</b> landing within the fit's tolerance is a WIN, not a
+    /// leaderboard — the FIRST rotation-tiered random sample inside the window is returned as-is
+    /// (sampling stops early), so approaches with plenty of well-fitting tracks keep their natural
+    /// variety instead of converging on whichever single track scores 0.0s every hour. Min-diff
+    /// engages only when NO sample lands inside the tolerance; and because it ranks only the up-to-
+    /// <see cref="BoundarySampleAttempts"/> random, rotation/envelope/posture-constrained samples of
+    /// THIS pick (never a widened or re-predicated pool query), even an inevitable-overshoot
+    /// approach picks the least-late of a rotating random handful — bounded repetition by
+    /// construction, with the anti-repeat window still applying on top.
+    /// </para>
     ///
     /// <para>
     /// <b>Rung -1 sits HERE, above the sampler (SPEC F87.6, PLAN T90 review carry-over):</b>
@@ -361,7 +410,14 @@ public sealed class Orchestrator(
     /// </para>
     /// </summary>
     async Task<RotationCandidate?> SelectMusicCandidateAsync(
-        LibraryScope scope, IReadOnlyList<string> orderedRecentIds, int artistSeparation, CancellationToken ct)
+        LibraryScope scope,
+        IReadOnlyList<string> orderedRecentIds,
+        int artistSeparation,
+        CadenceConfig cadence,
+        StationIdentity identity,
+        string? unitDjName,
+        int? queuedAheadMs,
+        CancellationToken ct)
     {
         // Rung -1, once per pick (SPEC F87.6, PLAN T90 review) — see this method's own remarks for
         // why this sits above the due/bias branch rather than inside the sampler it guards.
@@ -369,11 +425,13 @@ public sealed class Orchestrator(
         if (await TryFulfillPendingRequestAsync(envelope, ct) is { } fulfilledCandidate)
             return fulfilledCandidate;
 
-        var due = deferralQueue.NextDue;
-        var untilDue = due is null ? default : due.Value - timeProvider.GetUtcNow();
+        var pending = deferralQueue.PeekNextDue();
+        var untilDue = pending is null ? default : pending.Due - timeProvider.GetUtcNow();
 
-        if (due is null || untilDue <= TimeSpan.Zero || untilDue > boundaryBiasProvider.Current)
+        if (pending is null || untilDue <= TimeSpan.Zero || untilDue > boundaryBiasProvider.Current)
             return await SelectEnvelopeAwareCandidateAsync(scope, orderedRecentIds, artistSeparation, ct);
+
+        var fit = BuildBoundaryFit(pending, untilDue, cadence, identity, unitDjName, queuedAheadMs);
 
         RotationCandidate? best = null;
         TimeSpan? bestDiff = null;
@@ -391,7 +449,16 @@ public sealed class Orchestrator(
 
             if (sample.Media.DurationMs is int durationMs)
             {
-                var diff = (TimeSpan.FromMilliseconds(durationMs) - untilDue).Duration();
+                // Effective on-air length: the measured duration minus the expected crossfade
+                // overlap into whatever follows (gh-#254 — "minus crossfade trim").
+                var effective = TimeSpan.FromMilliseconds(durationMs) - ExpectedCrossfadeTrim;
+                var diff = (effective - fit.DesiredEffectiveLength).Duration();
+
+                // Within tolerance is a WIN (gh-#254, ±30s widened by confidence) — keep THIS
+                // rotation-tiered random sample and stop sampling: see this method's remarks for
+                // why first-inside-the-window, not closest-fit, is the degenerate-pick guard.
+                if (diff <= fit.Tolerance) return sample;
+
                 if (bestDiff is null || diff < bestDiff)
                 {
                     best = sample;
@@ -405,6 +472,86 @@ public sealed class Orchestrator(
         }
 
         return best ?? firstUnscored;
+    }
+
+    /// <summary>
+    /// gh-#254 — turns "a deferral is due in <paramref name="untilDue"/>" into the effective track
+    /// length the sampler above should aim for, plus the tolerance a landing counts as a win at.
+    /// All in relative time from the injected clock's "now"; every patter term is a gh-#253
+    /// estimate, with the WORST contributing confidence tier setting the tolerance.
+    ///
+    /// <para>
+    /// The accounting, in air order:
+    /// <list type="bullet">
+    /// <item><b>queued-ahead drift</b> (<paramref name="queuedAheadMs"/>, the feeder's own
+    /// measurement — <see langword="null"/> = unknown = zero): the candidate does not start at
+    /// "now", it starts after everything already committed ahead of this planning pass — the exact
+    /// drift gh-#254's live repro named.</item>
+    /// <item><b>this unit's own pre-music patter</b>: the segments EnqueuePatterAsync will plan
+    /// between now and the candidate's first note — back-announce (when cadence says so and a
+    /// previous track exists), a station ID (this unit's own cadence trigger, evaluated with the
+    /// same guard the real check below uses), and the lead-in.</item>
+    /// <item><b>the candidate itself</b>: scored by the caller as measured duration minus
+    /// <see cref="ExpectedCrossfadeTrim"/>.</item>
+    /// <item><b>the break's pre-boundary patter</b>: the back-announce that will open the NEXT
+    /// unit, plus — when the pending deferral is a <see cref="SpeechDeferralKind.SignOff"/> — the
+    /// sign-off piece itself (estimated for the OUTGOING persona from the deferral's own captured
+    /// <see cref="HandoffContext"/>, the F92.2 source of truth). A sign-on (and the lead-in that
+    /// follows it) airs on the far side of the boundary and deliberately never counts.</item>
+    /// </list>
+    /// For a SignOff-headed fit the boundary instant is recovered as <c>Due + SignOffLeadTime</c>
+    /// (the exact inverse of how EnqueueHandoffCeremonyAsync armed it); every other kind's due IS
+    /// its boundary. The result can go negative when the approach has already overshot — the
+    /// caller's min-diff then simply prefers the least-late sample, which is the correct radio move
+    /// (the observed 5–6-minute-late handover is the failure mode, not a slightly-early break).
+    /// </para>
+    /// </summary>
+    BoundaryFitPlan BuildBoundaryFit(
+        SpeechDeferral pending,
+        TimeSpan untilDue,
+        CadenceConfig cadence,
+        StationIdentity identity,
+        string? unitDjName,
+        int? queuedAheadMs)
+    {
+        var worstConfidence = PatterEstimateConfidence.Exact;
+
+        TimeSpan Estimate(SegmentKind kind, string? personaName, string voice)
+        {
+            var estimate = patterEstimator.Estimate(kind, personaName, voice);
+            if (estimate.Confidence > worstConfidence) worstConfidence = estimate.Confidence;
+            return estimate.Duration;
+        }
+
+        var untilBoundary = pending.Kind == SpeechDeferralKind.SignOff
+            ? untilDue + SignOffLeadTime
+            : untilDue;
+
+        var breakPatter = TimeSpan.Zero;
+        if (cadence.BackAnnounceAfterEachTrack)
+            breakPatter += Estimate(SegmentKind.BackAnnounce, unitDjName, identity.Voice);
+        if (pending.Kind == SpeechDeferralKind.SignOff && pending.Handoff is { } handoff)
+            breakPatter += Estimate(SegmentKind.SignOff, handoff.PersonaName, handoff.Voice);
+
+        var preMusicPatter = TimeSpan.Zero;
+        if (cadence.BackAnnounceAfterEachTrack && previousTrack is not null)
+            preMusicPatter += Estimate(SegmentKind.BackAnnounce, unitDjName, identity.Voice);
+        if (cadence.StationIdEveryNUnits > 0 && unitCount > 0 && unitCount % cadence.StationIdEveryNUnits == 0)
+            preMusicPatter += Estimate(SegmentKind.StationId, personaName: null, identity.Voice);
+        if (cadence.LeadInBeforeEachTrack)
+            preMusicPatter += Estimate(SegmentKind.LeadIn, unitDjName, identity.Voice);
+
+        var queuedAhead = TimeSpan.FromMilliseconds(queuedAheadMs ?? 0);
+        var desired = untilBoundary - breakPatter - queuedAhead - preMusicPatter;
+
+        var tolerance = worstConfidence switch
+        {
+            PatterEstimateConfidence.Exact => FitToleranceExact,
+            PatterEstimateConfidence.Historical => FitToleranceHistorical,
+            _ => FitToleranceHeuristic,
+        };
+
+        return new BoundaryFitPlan(desired, tolerance);
     }
 
     /// <summary>
@@ -726,19 +873,23 @@ public sealed class Orchestrator(
     static string FormatFiredRule(TasteRule rule) =>
         $"{rule.Predicate.LabelOr("any")}:{rule.Weight.ToString("F2", CultureInfo.InvariantCulture)}";
 
-    async Task EnqueuePatterAsync(MediaItem? prev, MediaItem next, string? unitDjName, CancellationToken ct)
+    /// <param name="cadence">
+    /// The unit's ONE cadence snapshot (gitea-#211) — read by <see cref="GetNextAsync"/> at the top
+    /// of the unit (hoisted there by gh-#254 so the boundary fit shares it) and handed in, so this
+    /// unit's back-announce/station-id/lead-in decisions all see the same snapshot even if a live
+    /// PUT /api/settings edit lands mid-unit. Never read <see cref="cadenceProvider"/> in here.
+    /// </param>
+    /// <param name="identity">
+    /// The unit's ONE station-identity snapshot (SPEC F44.1, gitea-#196) — same discipline, same
+    /// gh-#254 hoist as <paramref name="cadence"/>: a live Station:Name/Station:Voice edit must not
+    /// straddle a single unit's segment builds. Never read <see cref="identityProvider"/> in here.
+    /// </param>
+    async Task EnqueuePatterAsync(
+        MediaItem? prev, MediaItem next, string? unitDjName, CadenceConfig cadence, StationIdentity identity,
+        CancellationToken ct)
     {
-        // Read cadence ONCE per unit, up front (gitea-#211) — so this unit's back-announce/station-id/
-        // lead-in decisions all see the same snapshot even if a live PUT /api/settings edit lands
-        // mid-unit. Never read cadenceProvider.Current again below this line.
-        var cadence = cadenceProvider.Current;
-
-        // Read station identity ONCE per unit too (SPEC F44.1, gitea-#196) — same discipline, same
-        // reason: a live Station:Name/Station:Voice edit must not straddle a single unit's three
-        // segment builds. Never read identityProvider.Current again below this line.
-        var identity = identityProvider.Current;
-
-        // Read the render budget ONCE per unit too (SPEC F44.2, gitea-#197) — same discipline again: a
+        // Read the render budget ONCE per unit, up front (SPEC F44.2, gitea-#197) — the same
+        // per-unit-snapshot discipline cadence/identity arrive under (see the params above): a
         // live Tts:RenderBudgetSeconds edit must not straddle a single unit's renders. Never read
         // renderBudgetProvider.Current again below this line.
         var renderBudget = renderBudgetProvider.Current;

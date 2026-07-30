@@ -328,11 +328,16 @@ public sealed class PlayoutFeeder(
             if (!onAirIsReal) ReleasePriorChainPendingAir(staleChain);
             foreach (var staleId in staleChain) ReleaseIfDead(staleId);
 
+            // gh-#254: computed ONCE per refill, BEFORE anything is pulled — the items this very
+            // loop pushes are the unit being planned, so they must never count into their own
+            // planning offset. See EstimateQueuedAheadMs for exactly what is summed.
+            var queuedAheadMs = EstimateQueuedAheadMs();
+
             for (var i = 0; i < MaxChainLength; i++)
             {
                 // Tolerant pull: null is non-fatal — retry next tick; the safe rotation covers the
                 // gap (PRD §4.1). The inter-service call is never on the hard-real-time path.
-                var item = await next.GetNextAsync(new PlayoutContext(Snapshot()), ct);
+                var item = await next.GetNextAsync(new PlayoutContext(Snapshot(), queuedAheadMs), ct);
                 if (item is null) break;
 
                 var gainDb = Gain.NormGainDb(item.Loudness, targetLufs, ceilingDbtp);
@@ -476,6 +481,39 @@ public sealed class PlayoutFeeder(
         var survivors = pendingAirQueue.Where(id => !stale.Contains(id)).ToArray();
         pendingAirQueue.Clear();
         foreach (var survivor in survivors) pendingAirQueue.Enqueue(survivor);
+    }
+
+    // gh-#254: best-effort milliseconds of runtime already committed ahead of anything the current
+    // refill plans — the drift the boundary-fit selector corrects for. Two terms, both served from
+    // state this feeder already holds (zero engine/DB calls, F16.6 discipline):
+    //   (1) the current on-air item's REMAINING time (pushedMeta duration minus wall-clock elapsed
+    //       since its observed advance) — feeder-pushed items only; a foreign/engine-initiated
+    //       airing carries a null DurationMs and honestly contributes nothing;
+    //   (2) every id still on claim (d)'s pending-air queue (pushed, airing not yet proven) — at a
+    //       normal chain-end refill this is empty (DrainPendingAirUpTo just cleared the chain), but
+    //       a gh-#88-style backlog is EXACTLY the drift case this exists to expose.
+    // Uses the same raw wall clock ObserveAsync stamps onAirStartedAt with — never a mixed pair.
+    // Undercounts (unknown durations, safe-rotation gaps) are accepted: an honest floor beats a
+    // fabricated total, and the consumer treats the value as advisory (soft fit, SPEC F74.3).
+    int EstimateQueuedAheadMs()
+    {
+        var totalMs = 0;
+
+        if (onAirIsReal && onAirId is { } airingId
+            && pushedMeta.TryGetValue(airingId, out var airing) && airing.DurationMs is int airingMs)
+        {
+            var elapsedMs = (DateTimeOffset.UtcNow - onAirStartedAt).TotalMilliseconds;
+            var boundedElapsedMs = (int)Math.Clamp(elapsedMs, 0, airingMs);
+            totalMs += airingMs - boundedElapsedMs;
+        }
+
+        foreach (var pendingId in pendingAirQueue)
+        {
+            if (pushedMeta.TryGetValue(pendingId, out var queued) && queued.DurationMs is int queuedMs)
+                totalMs += queuedMs;
+        }
+
+        return totalMs;
     }
 
     // SPEC F57.1's liveness rule: mediaId's cached metadata is retained while it is (a) the current
