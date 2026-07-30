@@ -26,14 +26,17 @@ public static class FeaturePerKindEngineOverride
             new TestOptionsMonitor<TtsEngineByKindOptions>(new TtsEngineByKindOptions { EngineByKind = json }),
             NullLogger<TtsEngineByKindProvider>.Instance);
 
+    // The fallback double is a FakeProfileRenderer registered as the "piper" engine (gh-#147) —
+    // with ConfiguredFallbackOptions' legacy flat keys it is the implicit single-hop chain, so a
+    // "piper" pin resolves to it exactly as the pre-chain router resolved its fixed Piper client.
     static FallbackTtsSynthesizer BuildRouter(
         FakeTtsSynthesizer primary,
-        FakeTtsSynthesizer fallback,
+        FakeProfileRenderer fallback,
         FakeDependencyHealth health,
         TtsEngineByKindProvider? engineOverrides = null,
         TestOptionsMonitor<TtsFallbackOptions>? fallbackOptions = null,
         CapturingLogger<FallbackTtsSynthesizer>? logger = null) =>
-        new(primary, fallback, health, fallbackOptions ?? ConfiguredFallbackOptions(),
+        new(primary, [fallback], health, fallbackOptions ?? ConfiguredFallbackOptions(),
             logger ?? new CapturingLogger<FallbackTtsSynthesizer>(), engineOverrides);
 
     static TtsRenderContext StationIdContext() =>
@@ -54,7 +57,7 @@ public static class FeaturePerKindEngineOverride
             // Given a map entry StationId → Piper, and a HEALTHY Kokoro verdict — without the
             // override, StationId would render on Kokoro
             var primary = new FakeTtsSynthesizer();
-            var fallback = new FakeTtsSynthesizer();
+            var fallback = new FakeProfileRenderer(DependencyNames.Piper);
             var health = new FakeDependencyHealth();
             var overrides = BuildOverrides("""{"StationId":"piper"}""");
             var router = BuildRouter(primary, fallback, health, overrides);
@@ -77,7 +80,7 @@ public static class FeaturePerKindEngineOverride
         {
             // Given a map with an entry for a DIFFERENT kind — StationId itself is not mapped
             var primary = new FakeTtsSynthesizer();
-            var fallback = new FakeTtsSynthesizer();
+            var fallback = new FakeProfileRenderer(DependencyNames.Piper);
             var health = new FakeDependencyHealth();
             var overrides = BuildOverrides("""{"LeadIn":"piper"}""");
             var router = BuildRouter(primary, fallback, health, overrides);
@@ -102,7 +105,7 @@ public static class FeaturePerKindEngineOverride
             // Given no override map configured at all (null provider — the DI default when
             // Tts:EngineByKind is unset) and a healthy Kokoro verdict
             var primary = new FakeTtsSynthesizer();
-            var fallback = new FakeTtsSynthesizer();
+            var fallback = new FakeProfileRenderer(DependencyNames.Piper);
             var health = new FakeDependencyHealth();
             var router = BuildRouter(primary, fallback, health, engineOverrides: null);
 
@@ -122,7 +125,7 @@ public static class FeaturePerKindEngineOverride
             // The other half of "identical to pre-feature routing" (F70.1's own unhealthy-verdict
             // path, STORY-190 AC1) — an empty override map must not interfere with it either.
             var primary = new FakeTtsSynthesizer();
-            var fallback = new FakeTtsSynthesizer();
+            var fallback = new FakeProfileRenderer(DependencyNames.Piper);
             var health = new FakeDependencyHealth();
             health.Set(UnhealthyKokoroVerdict());
             var router = BuildRouter(primary, fallback, health, engineOverrides: null);
@@ -146,7 +149,7 @@ public static class FeaturePerKindEngineOverride
         {
             // Given StationId mapped to Piper, but Piper throws on render
             var primary = new FakeTtsSynthesizer();
-            var fallback = new FakeTtsSynthesizer { ThrowOnNextCall = new IOException("piper down") };
+            var fallback = new FakeProfileRenderer(DependencyNames.Piper) { ThrowOnNextCall = new IOException("piper down") };
             var health = new FakeDependencyHealth();
             var overrides = BuildOverrides("""{"StationId":"piper"}""");
             var router = BuildRouter(primary, fallback, health, overrides);
@@ -174,7 +177,7 @@ public static class FeaturePerKindEngineOverride
             // at both singleton construction and the OnChange live-reload callback (review
             // finding, HIGH).
             var primary = new FakeTtsSynthesizer();
-            var fallback = new FakeTtsSynthesizer();
+            var fallback = new FakeProfileRenderer(DependencyNames.Piper);
             var health = new FakeDependencyHealth();
             var overrides = BuildOverrides("""{"StationId":null,"LeadIn":"piper"}""");
             var router = BuildRouter(primary, fallback, health, overrides);
@@ -210,7 +213,7 @@ public static class FeaturePerKindEngineOverride
             // int value) rather than its name — Enum.TryParse<SegmentKind> alone accepts this,
             // contradicting SettingValidator's own rejection-message contract (review finding, LOW).
             var primary = new FakeTtsSynthesizer();
-            var fallback = new FakeTtsSynthesizer();
+            var fallback = new FakeProfileRenderer(DependencyNames.Piper);
             var health = new FakeDependencyHealth();
             var overrides = BuildOverrides("""{"0":"piper"}""");
             var router = BuildRouter(primary, fallback, health, overrides);
