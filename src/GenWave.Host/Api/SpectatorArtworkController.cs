@@ -46,6 +46,17 @@ public sealed class SpectatorArtworkController(
     /// <c>immutable</c> directive, matching the endpoint's own disk-cache-once contract.</summary>
     const int ImmutableMaxAgeSeconds = 31536000;
 
+    /// <summary>The fallback's own budget: one day, and deliberately NOT <c>immutable</c>. The
+    /// per-token cover jpegs above genuinely are immutable (extracted once, content lives and dies
+    /// with the token), but the station icon is a mutable station asset served under those same
+    /// token URLs — gh-#258 itself changed it, and every browser that had cached the old fuzzy
+    /// favicon bytes under a year-long <c>immutable</c> kept rendering them long after the server
+    /// was fixed (v2.8.10 field report: safe-loop cards stayed fuzzy while DJ-break cards, on the
+    /// never-before-cached /spectator/logo.png path, went sharp). One day bounds that staleness
+    /// without touching the F88.3 no-oracle discipline: all four fallback reasons still serve the
+    /// exact same bytes and headers as each other.</summary>
+    const int FallbackMaxAgeSeconds = 86400;
+
     const string JpegContentType = "image/jpeg";
 
     /// <summary>The bytes every fallback path serves (SPEC F88.3) — the same card-sized station
@@ -74,7 +85,12 @@ public sealed class SpectatorArtworkController(
     IActionResult ServeStationIcon()
     {
         var iconPath = Path.Combine(env.ContentRootPath, "wwwroot", "spectator", "logo.png");
-        return ServeImmutable(iconPath, StationIconContentType);
+        Response.GetTypedHeaders().CacheControl = new CacheControlHeaderValue
+        {
+            Public = true,
+            MaxAge = TimeSpan.FromSeconds(FallbackMaxAgeSeconds),
+        };
+        return PhysicalFile(iconPath, StationIconContentType);
     }
 
     IActionResult ServeImmutable(string path, string contentType)
