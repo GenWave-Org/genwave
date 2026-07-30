@@ -56,6 +56,25 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     }
 
     /// <summary>
+    /// The full deferral behind <see cref="NextDue"/> (gh-#254): the earliest-due pending entry,
+    /// ordered by <see cref="SpeechDeferral.Due"/> ascending with the SAME kind tiebreak
+    /// <see cref="TryDequeueDue"/> contracts (declaration order — SignOff before SignOn), or
+    /// <see langword="null"/> when nothing is pending. Read-only — never consumes. Exposed so
+    /// boundary-fit selection can see WHAT is coming (kind + handoff context feed the patter
+    /// estimates), not merely when; <see cref="NextDue"/> stays for callers that only need the
+    /// instant.
+    /// </summary>
+    public SpeechDeferral? PeekNextDue()
+    {
+        lock (gate)
+        {
+            return pending.Count == 0
+                ? null
+                : pending.Values.OrderBy(deferral => deferral.Due).ThenBy(deferral => deferral.Kind).First();
+        }
+    }
+
+    /// <summary>
     /// Enqueues a deferral of <paramref name="kind"/>, due at <paramref name="due"/> (defaults to
     /// now — "due immediately, air at the very next boundary"). A pending deferral of the same
     /// <paramref name="kind"/> is replaced (SPEC F74.2): the superseded one is discarded and never

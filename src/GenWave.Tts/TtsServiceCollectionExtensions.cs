@@ -65,6 +65,11 @@ public static class TtsServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // gh-#253: the live Llm:MaxCopyChars seam the patter-duration estimator's cold tier reads
+        // (ICopyBoundsProvider lives in GenWave.Abstractions; LlmOptions lives HERE, so this project
+        // owns the adapter). TryAdd so a host or test that binds its own bounds source wins.
+        services.TryAddSingleton<ICopyBoundsProvider, OptionsMonitorCopyBoundsProvider>();
+
         // Degradation thresholds (SPEC F69.2, STORY-188) — deployment-tunable, not allowlisted
         // (see DegradationOptions' own remarks for why). ValidateOnStart mirrors every other
         // options class in this method.
