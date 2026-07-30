@@ -36,7 +36,12 @@ public sealed class KokoroFallbackRenderer(
     {
         var cfg = ttsOptions.CurrentValue;
         var voice = string.IsNullOrEmpty(profile.Voice) ? requestVoice : profile.Voice;
-        var body = new { input = text, voice, response_format = cfg.Format };
+
+        // Engine-aware sentence pauses (gh-#116): a kokoro-KIND hop honors [pause:Ns] markup
+        // exactly like the primary, so both Kokoro request paths tag identically — Piper hops
+        // (PiperTtsSynthesizer) never do. Same Tts:SentencePauseSeconds knob as the primary.
+        var speech = KokoroPauseMarkup.InsertSentencePauses(text, cfg.SentencePauseSeconds);
+        var body = new { input = speech, voice, response_format = cfg.Format };
         using var content = new StringContent(
             JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 
@@ -45,7 +50,10 @@ public sealed class KokoroFallbackRenderer(
         response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx
 
         var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-        var path = GetCachePath(text, voice, profile.Endpoint, cfg);
+        // Tagged speech in the hash, mirroring KokoroTtsSynthesizer: what was rendered is what
+        // names the transient file (see that class's remark; the file is moved or deleted by the
+        // caller either way).
+        var path = GetCachePath(speech, voice, profile.Endpoint, cfg);
 
         // Path.GetDirectoryName always returns a non-null string when the path is produced
         // by Path.Combine with a non-empty CacheRoot; the guard below satisfies the compiler
