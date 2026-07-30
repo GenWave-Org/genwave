@@ -97,9 +97,10 @@ sealed class LiquidsoapControl(
     /// Parse the output metadata reply, which is a history of recent tracks as numbered frames
     /// (<c>--- N ---</c>) of <c>key="value"</c> lines. Frame <c>--- 1 ---</c> is the current/newest
     /// track, so only its fields are returned. Falls back to parsing all lines if no frame markers
-    /// are present (older/edge output formats).
+    /// are present (older/edge output formats). Internal (like <see cref="DrainToken"/>) so the
+    /// gh-#257 round-trip spec can drive the exact production parse against a literal reply frame.
     /// </summary>
-    static IReadOnlyDictionary<string, string> ParseCurrentFrame(string reply)
+    internal static IReadOnlyDictionary<string, string> ParseCurrentFrame(string reply)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var sawFrame = false;

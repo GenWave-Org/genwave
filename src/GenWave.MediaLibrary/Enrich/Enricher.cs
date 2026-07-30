@@ -11,7 +11,11 @@ namespace GenWave.MediaLibrary.Enrich;
 /// silence analysis, energy analysis over the cue-trimmed windows (STORY-033), BPM analysis over the
 /// same cue-trimmed window (SPEC F46.3), plus the technical audio properties and the normalized tags
 /// via TagLibSharp (which reads both in one managed call and normalizes across MP3/ID3 and
-/// FLAC/Vorbis, so genre/artist are consistent for future criteria queries). Pure of any DB concern —
+/// FLAC/Vorbis, so genre/artist are consistent for future criteria queries). Text tags pass through
+/// <see cref="TagText.Normalize"/> — the single entity-decode seam (gh-#257): entity-encoded tags
+/// some export pipelines write (<c>Paul &amp;amp; Manuel</c>) are decoded exactly once HERE, so every
+/// downstream consumer (annotate, now-playing, play-history, both UIs) stays a pass-through.
+/// Pure of any DB concern —
 /// it returns an <see cref="EnrichmentResult"/> the repository writes atomically. Idempotent:
 /// re-enriching a file yields the same result.
 ///
@@ -114,11 +118,11 @@ sealed class Enricher(
             SampleRate:       sampleRate,
             Channels:         channels,
             BitrateKbps:      bitrateKbps,
-            Title:            NullIfBlank(tag.Title),
-            Artist:           NullIfBlank(tag.JoinedPerformers),
-            Album:            NullIfBlank(tag.Album),
-            AlbumArtist:      NullIfBlank(tag.JoinedAlbumArtists),
-            Genre:            NullIfBlank(tag.JoinedGenres),
+            Title:            TagText.Normalize(tag.Title),
+            Artist:           TagText.Normalize(tag.JoinedPerformers),
+            Album:            TagText.Normalize(tag.Album),
+            AlbumArtist:      TagText.Normalize(tag.JoinedAlbumArtists),
+            Genre:            TagText.Normalize(tag.JoinedGenres),
             TrackNo:          tag.Track > 0 ? (int)tag.Track : null,
             Year:             tag.Year > 0 ? (int)tag.Year : null,
             Explicit:         TryReadAdvisoryTag(file),
@@ -134,8 +138,6 @@ sealed class Enricher(
             Bpm:              bpm,
             BpmAnalyzedAt:    DateTime.UtcNow);
     }
-
-    static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
 
     // The real-world advisory-flag convention (SPEC F95.3): iTunes/Picard/beets all key it
     // "ITUNESADVISORY", carried as an ID3v2 TXXX user-text frame or a Vorbis comment field.
