@@ -64,7 +64,7 @@ public sealed class ActivePersonaCorrectionsCache(IActivePersonaAccessor persona
 
     /// <summary>
     /// Deterministic content fingerprint of the CURRENT card-corrections snapshot (SPEC F71.7), via
-    /// <see cref="CorrectionsFingerprint.Compute"/> over the canonical, ordered (From, To) pairs
+    /// <see cref="CorrectionsFingerprint.Compute"/> over the canonical, ordered rules
     /// actually compiled from <see cref="Current"/> (after the null/blank-From filtering <see
     /// cref="SpeechCorrectionSet.Create"/> applies) — the same canonicalization idiom as <see
     /// cref="SpeechCorrectionProvider.ContentHash"/>, with its own stable empty sentinel (see <see
@@ -113,7 +113,7 @@ public sealed class ActivePersonaCorrectionsCache(IActivePersonaAccessor persona
     }
 
     static string ComputeContentHash(IReadOnlyList<SpeechCorrection> corrections) =>
-        CorrectionsFingerprint.Compute(SpeechCorrectionSet.Create(corrections).RulePairs, EmptyContentHash);
+        CorrectionsFingerprint.Compute(SpeechCorrectionSet.Create(corrections).Rules, EmptyContentHash);
 
     sealed record Snapshot(IReadOnlyList<SpeechCorrection> Corrections, string ContentHash);
 }

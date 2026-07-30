@@ -245,6 +245,16 @@ describe("Feature: Tts:Corrections staging is unmistakable", () => {
     });
   });
 
+  describe("Scenario: editing a context condition stages like any other edit (gh-#161)", () => {
+    it("marks the form dirty", () => {
+      renderWithProviders(<SettingsForm settings={[makeCorrectionsSetting()]} />);
+      fireEvent.change(screen.getByLabelText("Followed-by context for rule 1"), {
+        target: { value: "down|up" },
+      });
+      expect(dirtyNotice()).toHaveTextContent(/unsaved changes/i);
+    });
+  });
+
   describe("Scenario: the Preview note names which rules preview uses", () => {
     it("reads as a quiet saved-rules note while clean, and never shows the old save-first apology", () => {
       renderWithProviders(<SettingsForm settings={[makeCorrectionsSetting()]} />);
@@ -264,6 +274,155 @@ describe("Feature: Tts:Corrections staging is unmistakable", () => {
       const note = screen.getByTestId("corrections-preview-note");
       expect(note).toHaveTextContent(/last-saved rules/i);
       expect(note).toHaveTextContent(/not included until you Save settings/i);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature: heteronym context conditions (gh-#161)
+// ---------------------------------------------------------------------------
+
+describe("Feature: heteronym context conditions (gh-#161)", () => {
+  const SAVED_CONTEXT_RULES = JSON.stringify([
+    { from: "MacLeod", to: "Muh-cloud" },
+    { from: "wind", to: "wynd", whenFollowedBy: "down|up" },
+  ]);
+
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.clearAllMocks();
+  });
+
+  describe("Scenario: a pre-gh-#161 rule set renders and round-trips untouched", () => {
+    it("shows blank context fields for context-free rules and never invents context keys on save", async () => {
+      const mockFetch = makeSequencedFetchMock([
+        { status: 200, body: [] }, // GET /api/tts/corrections-stats
+        { status: 200 }, // PUT /api/settings
+      ]);
+      renderWithProviders(<SettingsForm settings={[makeCorrectionsSetting()]} />);
+
+      const precededBy = screen.getByLabelText("Preceded-by context for rule 1") as HTMLInputElement;
+      const followedBy = screen.getByLabelText("Followed-by context for rule 1") as HTMLInputElement;
+      expect(precededBy.value).toBe("");
+      expect(followedBy.value).toBe("");
+
+      // Edit only the To — the PUT payload keeps the exact pre-gh-#161 {from, to} wire shape.
+      await editAndSave(
+        screen.getByLabelText("To text for rule 1") as HTMLInputElement,
+        "Mick-loud"
+      );
+      const puts = putCalls(mockFetch);
+      expect(puts).toHaveLength(1);
+      expect(putBody(puts[0]!)).toEqual([
+        {
+          key: "Tts:Corrections",
+          value: JSON.stringify([
+            { from: "MacLeod", to: "Mick-loud" },
+            { from: "GenWave", to: "Jen Wave" },
+          ]),
+        },
+      ]);
+    });
+  });
+
+  describe("Scenario: a saved context rule is editable in place", () => {
+    it("renders the stored condition and stages an edit to it", async () => {
+      const mockFetch = makeSequencedFetchMock([
+        { status: 200, body: [] }, // GET /api/tts/corrections-stats
+        { status: 200 }, // PUT /api/settings
+      ]);
+      renderWithProviders(
+        <SettingsForm settings={[makeCorrectionsSetting({ value: SAVED_CONTEXT_RULES })]} />
+      );
+
+      const followedBy = screen.getByLabelText("Followed-by context for rule 2") as HTMLInputElement;
+      expect(followedBy.value).toBe("down|up");
+
+      await editAndSave(followedBy, "down|up|through");
+      const puts = putCalls(mockFetch);
+      expect(putBody(puts[0]!)).toEqual([
+        {
+          key: "Tts:Corrections",
+          value: JSON.stringify([
+            { from: "MacLeod", to: "Muh-cloud" },
+            { from: "wind", to: "wynd", whenFollowedBy: "down|up|through" },
+          ]),
+        },
+      ]);
+    });
+
+    it("clearing a condition back to blank drops the key from the saved shape", async () => {
+      const mockFetch = makeSequencedFetchMock([
+        { status: 200, body: [] }, // GET /api/tts/corrections-stats
+        { status: 200 }, // PUT /api/settings
+      ]);
+      renderWithProviders(
+        <SettingsForm settings={[makeCorrectionsSetting({ value: SAVED_CONTEXT_RULES })]} />
+      );
+
+      await editAndSave(
+        screen.getByLabelText("Followed-by context for rule 2") as HTMLInputElement,
+        ""
+      );
+      const puts = putCalls(mockFetch);
+      expect(putBody(puts[0]!)).toEqual([
+        {
+          key: "Tts:Corrections",
+          value: JSON.stringify([
+            { from: "MacLeod", to: "Muh-cloud" },
+            { from: "wind", to: "wynd" },
+          ]),
+        },
+      ]);
+    });
+  });
+
+  describe("Scenario: adding a rule with a context condition", () => {
+    it("the staged PUT payload carries the condition", async () => {
+      const mockFetch = makeSequencedFetchMock([
+        { status: 200, body: [] }, // GET /api/tts/corrections-stats
+        { status: 200 }, // PUT /api/settings
+      ]);
+      renderWithProviders(<SettingsForm settings={[makeCorrectionsSetting({ value: "[]" })]} />);
+
+      fireEvent.change(screen.getByLabelText("From", { selector: "input" }), {
+        target: { value: "wind" },
+      });
+      fireEvent.change(screen.getByLabelText("To", { selector: "input" }), {
+        target: { value: "wynd" },
+      });
+      fireEvent.change(screen.getByLabelText("Followed by", { selector: "input" }), {
+        target: { value: "down|up" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /save settings/i }));
+        await Promise.resolve();
+      });
+
+      const puts = putCalls(mockFetch);
+      expect(putBody(puts[0]!)).toEqual([
+        {
+          key: "Tts:Corrections",
+          value: JSON.stringify([{ from: "wind", to: "wynd", whenFollowedBy: "down|up" }]),
+        },
+      ]);
+    });
+  });
+
+  describe("Scenario: the context columns explain themselves", () => {
+    it("a hint names the pipe syntax and the blank-means-always rule", () => {
+      makeSequencedFetchMock([{ status: 200, body: [] }]);
+      renderWithProviders(<SettingsForm settings={[makeCorrectionsSetting()]} />);
+      const hint = screen.getByTestId("corrections-context-hint");
+      expect(hint).toHaveTextContent(/pipe-separated words/i);
+      expect(hint).toHaveTextContent(/blank means always/i);
     });
   });
 });
