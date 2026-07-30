@@ -112,6 +112,7 @@ public static class FeatureSpectatorSecurityHeaders
             "/spectator/app.js",
             "/spectator/styles.css",
             "/spectator/favicon.ico",
+            "/spectator/logo.png",
             "/spectator/fonts/Fraunces-Variable-latin.woff2",
             "/spectator/api/now-playing",
             "/spectator/api/play-history",

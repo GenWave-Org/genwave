@@ -31,6 +31,7 @@ static class SpectatorPageEndpoints
     const string StylesheetContentType = "text/css; charset=utf-8";
     const string FontContentType = "font/woff2";
     const string IconContentType = "image/x-icon";
+    const string PngContentType = "image/png";
 
     // gh-#160: HEAD rides every route GET is mapped on (RFC 9110 §9.3.2 — same status/headers,
     // body suppressed by the server), through the SAME surface gate and authorization, so a
@@ -63,6 +64,11 @@ static class SpectatorPageEndpoints
             "app.js" => ServeFile(context, env, "app.js", JavaScriptContentType, AssetMaxAgeSeconds),
             "styles.css" => ServeFile(context, env, "styles.css", StylesheetContentType, AssetMaxAgeSeconds),
             "favicon.ico" => ServeFile(context, env, "favicon.ico", IconContentType, AssetMaxAgeSeconds),
+            // The card-sized station mark (gh-#258): a 256px PNG derived from the operator's
+            // GenWave-logo.png (byte-identical to admin-ui/app/icon.png, exactly the favicon's own
+            // provenance discipline). The favicon.ico above is a 16/32px tab icon — upscaling it to
+            // the 72px now-playing art slot is what looked fuzzy; art slots must use this instead.
+            "logo.png" => ServeFile(context, env, "logo.png", PngContentType, AssetMaxAgeSeconds),
             _ => Results.NotFound(),
         };
 

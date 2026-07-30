@@ -20,10 +20,11 @@
     <section class="card now-playing" id="now-playing" aria-live="polite">
       <span class="now-playing__dot" id="now-playing-dot" aria-hidden="true"></span>
       <!-- Decorative alongside title/artist/dj text below — alt="" is deliberate, not an
-           omission. Default src is the station icon: the "loading" appearance before the
-           first now-playing poll resolves, and the fallback renderArt() always leaves in
-           place when a track carries no artworkUrl (T126, SPEC F93.3). -->
-      <img class="now-playing__art" id="now-playing-art" src="/spectator/favicon.ico" alt="" />
+           omission. Default src is the station mark (the card-sized logo.png, not the 32px
+           favicon — gh-#258): the "loading" appearance before the first now-playing poll
+           resolves, and the fallback renderArt() always leaves in place when a track carries
+           no artworkUrl (T126, SPEC F93.3). -->
+      <img class="now-playing__art" id="now-playing-art" src="/spectator/logo.png" alt="" />
       <div class="now-playing__body">
         <p class="now-playing__kicker" id="now-playing-kicker">Loading…</p>
         <h2 class="now-playing__title" id="now-playing-title"></h2>
