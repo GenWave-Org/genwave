@@ -120,7 +120,10 @@ public static class FeatureAcceptanceGateRankingRobustness
         // edit from a LATER epic, not a regression of this epic's zero-diff promise.
         // EngineScriptSha256 unchanged — gh-#241 does not touch engine/genwave.liq.
         const string EngineScriptSha256 = "869ea6fc35e3d73de4ca6cc47551a07da63bd855481ba77120fe73f1754d72da";
-        const string ComposeYamlSha256  = "60f2f6753613e43af841bc7efb414d85a08ee8cb22fe2848fb0c564d75d7bf28";
+        // ComposeYamlSha256 re-pinned 2026-07-30 (gh-#276): kokoro mem_limit 3g->4g + comment
+        // refresh — ops-only edit, no service/wire/volume change. Another intentional edit from
+        // a later epic, not a regression of this epic's zero-diff promise.
+        const string ComposeYamlSha256  = "3730d07683fde5b8482c4059c6304587ad2ee4e062a219dbbf29ae4953796ea0";
 
         [Fact]
         public void EngineScriptByteMatchesMain()
