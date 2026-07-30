@@ -168,7 +168,8 @@ public static class FeatureTasteBecomesAudible
     }
 
     // ---------------------------------------------------------------------
-    // F83.2 — exploration picks are lampshade-eligible, never rule-attributed
+    // F83.2 — exploration picks: adventurous-choice framing (gh-#270), lead-in
+    // only, never rule-attributed
     // ---------------------------------------------------------------------
 
     public sealed class ScenarioExplorationLampshade : IAsyncLifetime
@@ -184,7 +185,7 @@ public static class FeatureTasteBecomesAudible
         public async Task DisposeAsync() => await mock.DisposeAsync();
 
         [Fact]
-        public async Task ThePromptMarksThePickOutsideThePersonasTaste()
+        public async Task ThePromptFramesThePickAsAChangeOfPace()
         {
             var writer = BuildWriter(mock.BaseUri.ToString());
 
@@ -192,8 +193,55 @@ public static class FeatureTasteBecomesAudible
 
             var userContent = ExtractMessageContent(mock.Requests[0].Body, "user");
 
-            // lampshade-eligible: "not my usual…" (F83.2)
-            Assert.Contains("outside the persona's usual taste", userContent);
+            // gh-#270: positive your-own-adventurous-choice framing (F83.2)
+            Assert.Contains("change of pace for this persona", userContent);
+        }
+
+        [Fact]
+        public async Task ThePromptCarriesTheExactExamplePhrase()
+        {
+            var writer = BuildWriter(mock.BaseUri.ToString());
+
+            await writer.WriteAsync(LeadInRequest(ExplorationPick()), CancellationToken.None);
+
+            var userContent = ExtractMessageContent(mock.Requests[0].Body, "user");
+
+            // gh-#270: Dean's chosen example phrase, pinned exactly — small local models parrot
+            // the example, so the example must be one we'd be happy to hear on air.
+            Assert.Contains("Time for something a little different", userContent);
+        }
+
+        [Fact]
+        public async Task ThePromptNeverCarriesTheOldNegativeExample()
+        {
+            var writer = BuildWriter(mock.BaseUri.ToString());
+
+            await writer.WriteAsync(LeadInRequest(ExplorationPick()), CancellationToken.None);
+
+            var userContent = ExtractMessageContent(mock.Requests[0].Body, "user");
+
+            // gh-#270 regression pin: llama3.2:3b aired the old example verbatim (23% of
+            // exploration disclaimers) — the negative framing must never reappear in the prompt.
+            Assert.DoesNotContain("not my usual", userContent);
+        }
+
+        [Fact]
+        public async Task TheExplorationNoteRidesTheLeadInOnly()
+        {
+            // gh-#270: the same exploration pick used to carry the note on BOTH its lead-in and
+            // its back-announce (same-track double-disclaim on air). The Kind gate in
+            // BuildUserContent mirrors the RequestFulfilled one: lead-in yes, back-announce no.
+            var writer = BuildWriter(mock.BaseUri.ToString());
+            var samePick = ExplorationPick();
+
+            await writer.WriteAsync(BackAnnounceRequest(samePick), CancellationToken.None);
+            await writer.WriteAsync(LeadInRequest(samePick), CancellationToken.None);
+
+            var backAnnounceContent = ExtractMessageContent(mock.Requests[0].Body, "user");
+            var leadInContent = ExtractMessageContent(mock.Requests[1].Body, "user");
+
+            Assert.DoesNotContain("Taste note", backAnnounceContent);
+            Assert.Contains("Taste note", leadInContent);
         }
 
         [Fact]
