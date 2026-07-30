@@ -4,10 +4,17 @@ import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import type { SettingControlProps } from "./settings-types";
 
-/** One `Tts:Corrections` rule row — mirrors GenWave.Tts.SpeechCorrection's wire shape. */
+/**
+ * One `Tts:Corrections` rule row — mirrors GenWave.Tts.SpeechCorrection's wire shape. The two
+ * optional context conditions (gh-#161) make a rule heteronym-safe: pipe-separated literal words;
+ * the rule fires only where the matched text sits next to one of them. Absent/blank (every
+ * pre-gh-#161 rule) means unconditional.
+ */
 interface CorrectionRow {
   from: string;
   to: string;
+  whenPrecededBy?: string;
+  whenFollowedBy?: string;
 }
 
 /** One row of `GET /api/tts/corrections-stats` (SPEC F68.7). */
@@ -27,10 +34,25 @@ type PreviewStatus =
   | { kind: "loaded"; spoken: string }
   | { kind: "error"; message: string };
 
+function isOptionalContextField(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || typeof value === "string";
+}
+
 function isCorrectionRow(raw: unknown): raw is CorrectionRow {
   if (typeof raw !== "object" || raw === null) return false;
   const obj = raw as Record<string, unknown>;
-  return typeof obj["from"] === "string" && typeof obj["to"] === "string";
+  return (
+    typeof obj["from"] === "string" &&
+    typeof obj["to"] === "string" &&
+    isOptionalContextField(obj["whenPrecededBy"]) &&
+    isOptionalContextField(obj["whenFollowedBy"])
+  );
+}
+
+/** Normalizes a stored context field for editing: absent/null/blank all read as "". */
+function contextFieldOf(raw: unknown, field: "whenPrecededBy" | "whenFollowedBy"): string {
+  const value = (raw as Record<string, unknown>)[field];
+  return typeof value === "string" ? value : "";
 }
 
 function isCorrectionStatList(raw: unknown): raw is CorrectionStat[] {
@@ -59,14 +81,32 @@ function parseCorrections(value: string): CorrectionRow[] {
   if (value.trim() === "") return [];
   try {
     const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.filter(isCorrectionRow) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isCorrectionRow).map((row) => ({
+      from: row.from,
+      to: row.to,
+      whenPrecededBy: contextFieldOf(row, "whenPrecededBy"),
+      whenFollowedBy: contextFieldOf(row, "whenFollowedBy"),
+    }));
   } catch {
     return [];
   }
 }
 
+/**
+ * Serializes rows back to the stored JSON-array-string. Context fields are emitted only when
+ * non-blank, so a rule that never uses them round-trips in the exact pre-gh-#161 `{from, to}`
+ * wire shape — no phantom keys, no false dirty-diffs against older saved values.
+ */
 function serializeCorrections(rows: CorrectionRow[]): string {
-  return JSON.stringify(rows.map((row) => ({ from: row.from, to: row.to })));
+  return JSON.stringify(
+    rows.map((row) => ({
+      from: row.from,
+      to: row.to,
+      ...(row.whenPrecededBy?.trim() ? { whenPrecededBy: row.whenPrecededBy } : {}),
+      ...(row.whenFollowedBy?.trim() ? { whenFollowedBy: row.whenFollowedBy } : {}),
+    }))
+  );
 }
 
 const CELL_INPUT_CLASSES =
@@ -107,6 +147,8 @@ export function CorrectionsSettingControl({
 
   const [draftFrom, setDraftFrom] = useState("");
   const [draftTo, setDraftTo] = useState("");
+  const [draftPrecededBy, setDraftPrecededBy] = useState("");
+  const [draftFollowedBy, setDraftFollowedBy] = useState("");
   const [statsStatus, setStatsStatus] = useState<StatsStatus>({ kind: "loading" });
   const [previewText, setPreviewText] = useState("");
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>({ kind: "idle" });
@@ -159,9 +201,21 @@ export function CorrectionsSettingControl({
   function addRow(): void {
     const from = draftFrom.trim();
     if (from === "") return;
-    onChange(serializeCorrections([...rows, { from, to: draftTo }]));
+    onChange(
+      serializeCorrections([
+        ...rows,
+        {
+          from,
+          to: draftTo,
+          whenPrecededBy: draftPrecededBy.trim(),
+          whenFollowedBy: draftFollowedBy.trim(),
+        },
+      ])
+    );
     setDraftFrom("");
     setDraftTo("");
+    setDraftPrecededBy("");
+    setDraftFollowedBy("");
   }
 
   async function runPreview(): Promise<void> {
@@ -216,6 +270,12 @@ export function CorrectionsSettingControl({
               <th scope="col" className={HEADER_CELL}>
                 To
               </th>
+              <th scope="col" className={HEADER_CELL}>
+                Preceded by
+              </th>
+              <th scope="col" className={HEADER_CELL}>
+                Followed by
+              </th>
               <th scope="col" className={`${HEADER_CELL} text-right tabular-nums`}>
                 Fired
               </th>
@@ -227,7 +287,7 @@ export function CorrectionsSettingControl({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-3 py-3 text-mute">
+                <td colSpan={6} className="px-3 py-3 text-mute">
                   No corrections yet — add one below.
                 </td>
               </tr>
@@ -255,6 +315,32 @@ export function CorrectionsSettingControl({
                         value={row.to}
                         onChange={(e: ChangeEvent<HTMLInputElement>) =>
                           updateRow(index, { to: e.currentTarget.value })
+                        }
+                        disabled={disabled}
+                        className={CELL_INPUT_CLASSES}
+                      />
+                    </td>
+                    <td className="py-1.5 pr-2">
+                      <input
+                        type="text"
+                        aria-label={`Preceded-by context for rule ${index + 1}`}
+                        placeholder="always"
+                        value={row.whenPrecededBy ?? ""}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                          updateRow(index, { whenPrecededBy: e.currentTarget.value })
+                        }
+                        disabled={disabled}
+                        className={CELL_INPUT_CLASSES}
+                      />
+                    </td>
+                    <td className="py-1.5 pr-2">
+                      <input
+                        type="text"
+                        aria-label={`Followed-by context for rule ${index + 1}`}
+                        placeholder="always"
+                        value={row.whenFollowedBy ?? ""}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                          updateRow(index, { whenFollowedBy: e.currentTarget.value })
                         }
                         disabled={disabled}
                         className={CELL_INPUT_CLASSES}
@@ -309,10 +395,50 @@ export function CorrectionsSettingControl({
             className={CELL_INPUT_CLASSES}
           />
         </div>
+        <div className="flex flex-col gap-1">
+          <label
+            htmlFor={`${controlId}-add-preceded-by`}
+            className="text-[0.78rem] font-semibold text-mute"
+          >
+            Preceded by
+          </label>
+          <input
+            id={`${controlId}-add-preceded-by`}
+            type="text"
+            placeholder="optional"
+            value={draftPrecededBy}
+            onChange={(e) => setDraftPrecededBy(e.currentTarget.value)}
+            disabled={disabled}
+            className={CELL_INPUT_CLASSES}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label
+            htmlFor={`${controlId}-add-followed-by`}
+            className="text-[0.78rem] font-semibold text-mute"
+          >
+            Followed by
+          </label>
+          <input
+            id={`${controlId}-add-followed-by`}
+            type="text"
+            placeholder="down|up"
+            value={draftFollowedBy}
+            onChange={(e) => setDraftFollowedBy(e.currentTarget.value)}
+            disabled={disabled}
+            className={CELL_INPUT_CLASSES}
+          />
+        </div>
         <Button type="button" variant="secondary" disabled={!canAddRow} onClick={addRow}>
           Add rule
         </Button>
       </div>
+
+      <p data-testid="corrections-context-hint" className="text-[0.78rem] text-mute">
+        Context columns are optional: pipe-separated words (down|up); the rule fires only next to
+        one of them — &ldquo;wind&rdquo; followed by &ldquo;down|up&rdquo; respells &ldquo;wind
+        down&rdquo; and leaves &ldquo;a strong wind&rdquo; alone. Blank means always.
+      </p>
 
       <div className="flex flex-col gap-2 border-t border-line pt-3">
         <label htmlFor={`${controlId}-preview-text`} className="text-[0.78rem] font-semibold text-mute">
@@ -322,7 +448,7 @@ export function CorrectionsSettingControl({
           <input
             id={`${controlId}-preview-text`}
             type="text"
-            placeholder="Coming up, a deep cut from MacLeod."
+            placeholder="Time to wind down with a record from MacLeod."
             value={previewText}
             onChange={(e) => setPreviewText(e.currentTarget.value)}
             className={`${CELL_INPUT_CLASSES} max-w-md`}

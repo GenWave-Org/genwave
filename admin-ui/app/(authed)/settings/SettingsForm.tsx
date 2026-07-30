@@ -176,9 +176,10 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "The Kokoro TTS service base URL used to render all spoken patter — must be a non-empty " +
     "absolute http/https URL; there is no \"disabled TTS\" state.",
   "Tts:Corrections":
-    "Operator pronunciation corrections applied to every spoken line before it reaches Kokoro " +
-    "(e.g. \"MacLeod\" → \"Muh-cloud\"). A JSON array of {from, to} pairs; empty means no " +
-    "corrections.",
+    "Operator pronunciation corrections applied to every spoken line before it reaches the TTS " +
+    "engine (e.g. \"MacLeod\" → \"Muh-cloud\"). Each rule can carry optional context conditions " +
+    "for heteronyms — \"wind\" → \"wynd\" only when followed by \"down|up\" — so the other sense " +
+    "(\"a strong wind\") stays untouched. Empty means no corrections.",
   "Tts:Fallback:Endpoint":
     "The Piper local fallback TTS service base URL — used automatically when Kokoro is " +
     "unhealthy or a render fails. Leave empty to disable the fallback engine entirely.",
