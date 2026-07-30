@@ -38,6 +38,12 @@ public static class FeatureComposeSocketGuard
         startInfo.ArgumentList.Add(Path.Combine(RepoRoot(), "tools", "check-compose-socket.sh"));
         foreach (var arg in args) startInfo.ArgumentList.Add(arg);
 
+        // gh-#249: the guard's "none:" profile combo renders with no --profile flags and
+        // inherits this process's environment — pin the profile set empty so ambient
+        // COMPOSE_PROFILES / a dev box's .env can't leak services into that render. The
+        // explicit --profile combos are unaffected (flag precedence).
+        startInfo.Environment["COMPOSE_PROFILES"] = "";
+
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("failed to start check-compose-socket.sh");
         var stdOut = process.StandardOutput.ReadToEnd();

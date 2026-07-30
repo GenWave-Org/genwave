@@ -53,6 +53,9 @@ public static class FeatureComposeStatsSidecar
             ["ADMIN_PASSWORD"] = "gh148-dummy",
             ["MEDIA_DIR"] = Path.GetTempPath(),
             ["PUBLIC_HOST"] = "gh148.invalid",
+            // gh-#249: pin the profile set empty — shadows ambient COMPOSE_PROFILES and a
+            // dev box's .env, so the render matches CI's profile-less default.
+            ["COMPOSE_PROFILES"] = "",
         })
         {
             startInfo.Environment[key] = value;
