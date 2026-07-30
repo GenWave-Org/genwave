@@ -75,7 +75,7 @@ public sealed class SpeechCorrectionProvider : IDisposable
 
     /// <summary>
     /// Deterministic content fingerprint of the current correction rules (SPEC F68.5), via <see
-    /// cref="CorrectionsFingerprint.Compute"/> over the canonical, ordered (From, To) pairs <see
+    /// cref="CorrectionsFingerprint.Compute"/> over the canonical, ordered rules <see
     /// cref="Current"/> actually compiled; a rule set with no rules at all yields the stable
     /// constant <c>"no-corrections"</c> rather than a hash of empty input. Same rules always fold to
     /// the same fingerprint, in this process or the next one — unlike a process-local counter, it
@@ -124,7 +124,7 @@ public sealed class SpeechCorrectionProvider : IDisposable
     }
 
     static string ComputeContentHash(SpeechCorrectionSet set) =>
-        CorrectionsFingerprint.Compute(set.RulePairs, EmptyContentHash);
+        CorrectionsFingerprint.Compute(set.Rules, EmptyContentHash);
 
     public void Dispose() => subscription?.Dispose();
 

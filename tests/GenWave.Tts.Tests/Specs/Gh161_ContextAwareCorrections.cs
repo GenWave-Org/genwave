@@ -1,0 +1,299 @@
+// gh-#161 — Context-aware pronunciation corrections for heteronyms
+//
+// BDD specification — xUnit (SPEC F68.5 extension). A blanket wind→wynd rule fixes "time to wind
+// down" and breaks "a strong wind"; these specs pin the context-conditioned rule shape that makes
+// a correction heteronym-safe: optional whenFollowedBy / whenPrecededBy word conditions compiled
+// into the SAME escaped, boundary-anchored, case-insensitive, timeout-guarded chokepoint pattern
+// every context-free rule already uses. Back-compat is the headline contract: a rule that carries
+// no context parses, matches, merges, and fingerprints exactly as it did before this feature.
+
+using System.Text.Json;
+using Xunit;
+
+namespace GenWave.Tts.Tests.Specs;
+
+public static class FeatureContextAwareCorrections
+{
+    public sealed class ScenarioFollowedByCondition
+    {
+        // The issue's own motivating pair, in one sentence: verb sense fires, noun sense survives.
+        readonly SpeechCorrectionSet rules = SpeechCorrectionSet.Create(
+            [new SpeechCorrection("wind", "wynd") { WhenFollowedBy = "down|up" }]);
+
+        [Fact]
+        public void FiresOnlyWhereTheContextHolds()
+        {
+            var result = SpeechText.Normalize("Time to wind down after a strong wind tonight.", rules);
+            Assert.Equal("Time to wynd down after a strong wind tonight.", result);
+        }
+
+        [Fact]
+        public void EveryAlternativeCounts()
+        {
+            var result = SpeechText.Normalize("We wind up the show soon.", rules);
+            Assert.Equal("We wynd up the show soon.", result);
+        }
+
+        [Fact]
+        public void DoesNotFireWithoutTheContext()
+        {
+            var result = SpeechText.Normalize("The wind was howling.", rules);
+            Assert.Equal("The wind was howling.", result);
+        }
+
+        [Fact]
+        public void ContextWordIsWordBoundaryAware()
+        {
+            // "downtown" must not satisfy "followed by down" — same \b discipline as From itself.
+            var result = SpeechText.Normalize("They wind downtown streets.", rules);
+            Assert.Equal("They wind downtown streets.", result);
+        }
+
+        [Fact]
+        public void MatchAndContextAreCaseInsensitive()
+        {
+            var result = SpeechText.Normalize("WIND DOWN with us.", rules);
+            Assert.Equal("wynd DOWN with us.", result);
+        }
+
+        [Fact]
+        public void PunctuationBetweenMatchAndContextIsAllowed()
+        {
+            var result = SpeechText.Normalize("Your wind-down mix starts now.", rules);
+            Assert.Equal("Your wynd-down mix starts now.", result);
+        }
+
+        [Fact]
+        public void ASentenceEndBreaksTheContext()
+        {
+            // "followed by down" must not reach across a full stop into the next sentence.
+            var result = SpeechText.Normalize("Feel that wind. Down the coast it is worse.", rules);
+            Assert.Equal("Feel that wind. Down the coast it is worse.", result);
+        }
+    }
+
+    public sealed class ScenarioPrecededByCondition
+    {
+        readonly SpeechCorrectionSet rules = SpeechCorrectionSet.Create(
+            [new SpeechCorrection("record", "wreckerd") { WhenPrecededBy = "a|the|that|new" }]);
+
+        [Fact]
+        public void FiresOnlyWhereTheContextHolds()
+        {
+            var result = SpeechText.Normalize("Spin that record while we record the show.", rules);
+            Assert.Equal("Spin that wreckerd while we record the show.", result);
+        }
+
+        [Fact]
+        public void DoesNotFireAtTextStartWithoutTheContext()
+        {
+            var result = SpeechText.Normalize("Record this moment.", rules);
+            Assert.Equal("Record this moment.", result);
+        }
+
+        [Fact]
+        public void ContextWordIsWordBoundaryAware()
+        {
+            // "data" must not satisfy "preceded by a".
+            var result = SpeechText.Normalize("Their data record shows it.", rules);
+            Assert.Equal("Their data record shows it.", result);
+        }
+    }
+
+    public sealed class ScenarioBothConditionsMustHold
+    {
+        readonly SpeechCorrectionSet rules = SpeechCorrectionSet.Create(
+            [new SpeechCorrection("tear", "tair") { WhenPrecededBy = "to", WhenFollowedBy = "through" }]);
+
+        [Fact]
+        public void FiresWhenBothHold()
+        {
+            var result = SpeechText.Normalize("Ready to tear through the setlist.", rules);
+            Assert.Equal("Ready to tair through the setlist.", result);
+        }
+
+        [Theory]
+        [InlineData("Ready to tear it up.")]        // followed-by fails
+        [InlineData("A single tear through it all.")] // preceded-by fails
+        public void DoesNotFireWhenEitherFails(string input)
+        {
+            Assert.Equal(input, SpeechText.Normalize(input, rules));
+        }
+    }
+
+    public sealed class ScenarioMultiWordContextAlternative
+    {
+        [Fact]
+        public void AnAlternativeMayBeAPhrase()
+        {
+            var rules = SpeechCorrectionSet.Create(
+                [new SpeechCorrection("tear", "tair") { WhenFollowedBy = "it up|through" }]);
+
+            var result = SpeechText.Normalize("We tear it up tonight; no tear was shed.", rules);
+            Assert.Equal("We tair it up tonight; no tear was shed.", result);
+        }
+    }
+
+    public sealed class ScenarioOverlappingSpecificAndGeneralRules
+    {
+        [Fact]
+        public void SpecificFirstThenGeneralComposesInOperatorOrder()
+        {
+            // Rules apply in order: the context rule rewrites its occurrences, the later blanket
+            // rule catches whatever is left — the operator-authorable "specific first" idiom.
+            var rules = SpeechCorrectionSet.Create(
+            [
+                new SpeechCorrection("wind", "wynd") { WhenFollowedBy = "down|up" },
+                new SpeechCorrection("wind", "winnd"),
+            ]);
+
+            var result = SpeechText.Normalize("Let's wind down before the wind picks up.", rules);
+            Assert.Equal("Let's wynd down before the winnd picks up.", result);
+        }
+    }
+
+    public sealed class ScenarioBackwardCompatibility
+    {
+        [Fact]
+        public void AContextFreeRuleBehavesExactlyAsBefore()
+        {
+            var rules = SpeechCorrectionSet.Create([new SpeechCorrection("MacLeod", "Muh-cloud")]);
+            var result = SpeechText.Normalize("A deep cut from MacLeod.", rules);
+            Assert.Equal("A deep cut from Muh-cloud.", result);
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("   ")]
+        [InlineData("|")]
+        [InlineData(" | | ")]
+        public void ABlankContextMeansUnconditional(string? blankContext)
+        {
+            // Blank (or all-separator) conditions parse to no words at all — treated as absent,
+            // never as "matches nothing" (which would silently disable the rule).
+            var rules = SpeechCorrectionSet.Create(
+                [new SpeechCorrection("wind", "wynd") { WhenFollowedBy = blankContext, WhenPrecededBy = blankContext }]);
+
+            var result = SpeechText.Normalize("A strong wind tonight.", rules);
+            Assert.Equal("A strong wynd tonight.", result);
+        }
+
+        [Fact]
+        public void StoredJsonWithoutContextFieldsStillParses()
+        {
+            // The exact pre-gh-#161 wire shape, via the same STJ options SpeechCorrectionProvider uses.
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var rules = JsonSerializer.Deserialize<List<SpeechCorrection>>(
+                """[{"from":"MacLeod","to":"Muh-cloud"}]""", options);
+
+            Assert.NotNull(rules);
+            var rule = Assert.Single(rules);
+            Assert.Null(rule.WhenPrecededBy);
+            Assert.Null(rule.WhenFollowedBy);
+        }
+
+        [Fact]
+        public void StoredJsonWithContextFieldsParses()
+        {
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var rules = JsonSerializer.Deserialize<List<SpeechCorrection>>(
+                """[{"from":"wind","to":"wynd","whenFollowedBy":"down|up","whenPrecededBy":"to"}]""", options);
+
+            Assert.NotNull(rules);
+            var rule = Assert.Single(rules);
+            Assert.Equal("down|up", rule.WhenFollowedBy);
+            Assert.Equal("to", rule.WhenPrecededBy);
+        }
+    }
+
+    public sealed class ScenarioStationOverCardMerge
+    {
+        [Fact]
+        public void StationStillWinsOnAnIdenticalContextFreeFrom()
+        {
+            // The pre-gh-#161 merge contract, unchanged: same From, both context-free → card dropped.
+            var station = SpeechCorrectionSet.Create([new SpeechCorrection("wind", "station")]);
+            var card = SpeechCorrectionSet.Create([new SpeechCorrection("WIND", "card")]);
+
+            var result = SpeechText.Normalize("The wind.", SpeechCorrectionSet.Merge(station, card));
+            Assert.Equal("The station.", result);
+        }
+
+        [Fact]
+        public void StationWinsOnAnIdenticalContextRule()
+        {
+            // Same From AND same (whitespace/case-normalized) context → same rule identity.
+            var station = SpeechCorrectionSet.Create(
+                [new SpeechCorrection("wind", "station") { WhenFollowedBy = "down|up" }]);
+            var card = SpeechCorrectionSet.Create(
+                [new SpeechCorrection("wind", "card") { WhenFollowedBy = " Down | UP " }]);
+
+            var result = SpeechText.Normalize("We wind down.", SpeechCorrectionSet.Merge(station, card));
+            Assert.Equal("We station down.", result);
+        }
+
+        [Fact]
+        public void ACardRuleWithADifferentContextIsADifferentRuleAndSurvives()
+        {
+            var station = SpeechCorrectionSet.Create(
+                [new SpeechCorrection("wind", "wynd") { WhenFollowedBy = "down|up" }]);
+            var card = SpeechCorrectionSet.Create([new SpeechCorrection("wind", "winnd")]);
+
+            // Station's context rule runs first and wins where its context holds; the card's
+            // blanket rule still covers the occurrences station never claimed.
+            var result = SpeechText.Normalize(
+                "We wind down as the wind howls.", SpeechCorrectionSet.Merge(station, card));
+            Assert.Equal("We wynd down as the winnd howls.", result);
+        }
+    }
+
+    public sealed class ScenarioContentFingerprint
+    {
+        const string Sentinel = "no-rules-sentinel";
+
+        static string FingerprintOf(params SpeechCorrection[] corrections) =>
+            CorrectionsFingerprint.Compute(SpeechCorrectionSet.Create(corrections).Rules, Sentinel);
+
+        [Fact]
+        public void AContextFreeRuleSetKeepsItsPreFeatureFingerprint()
+        {
+            // The canonical encoding for context-free rules is byte-identical to the pre-gh-#161
+            // one (From␟To joined by ␞) — pinned here against the algorithm itself so an operator
+            // who never touches the new fields sees zero TtsSegmentSource cache churn on upgrade.
+            var expected = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes("MacLeod\x1FMuh-cloud\x1EGenWave\x1FJen Wave")))[..16];
+
+            Assert.Equal(expected, FingerprintOf(
+                new SpeechCorrection("MacLeod", "Muh-cloud"), new SpeechCorrection("GenWave", "Jen Wave")));
+        }
+
+        [Fact]
+        public void AddingAContextChangesTheFingerprint()
+        {
+            var without = FingerprintOf(new SpeechCorrection("wind", "wynd"));
+            var with = FingerprintOf(new SpeechCorrection("wind", "wynd") { WhenFollowedBy = "down|up" });
+
+            Assert.NotEqual(without, with);
+        }
+
+        [Fact]
+        public void EditingOnlyTheContextChangesTheFingerprint()
+        {
+            var followedByDown = FingerprintOf(new SpeechCorrection("wind", "wynd") { WhenFollowedBy = "down" });
+            var followedByUp = FingerprintOf(new SpeechCorrection("wind", "wynd") { WhenFollowedBy = "up" });
+
+            Assert.NotEqual(followedByDown, followedByUp);
+        }
+
+        [Fact]
+        public void SameRulesAlwaysFoldToTheSameFingerprint()
+        {
+            var first = FingerprintOf(new SpeechCorrection("wind", "wynd") { WhenFollowedBy = "down|up" });
+            var second = FingerprintOf(new SpeechCorrection("wind", "wynd") { WhenFollowedBy = "down|up" });
+
+            Assert.Equal(first, second);
+        }
+    }
+}
