@@ -17,7 +17,13 @@ public sealed class KokoroTtsSynthesizer(HttpClient http, IOptionsMonitor<TtsOpt
     public async Task<string> SynthesizeAsync(string text, string voice, CancellationToken ct)
     {
         var cfg = optionsMonitor.CurrentValue;
-        var body = new { input = text, voice, response_format = cfg.Format };
+
+        // Engine-aware sentence pauses (gh-#116): applied HERE, at Kokoro request build — below
+        // the NormalizingTtsSynthesizer chokepoint, so normalized text and every upstream cache
+        // key stay byte-identical — and never on the Piper path, which would speak the tag aloud.
+        // See KokoroPauseMarkup for the full contract.
+        var speech = KokoroPauseMarkup.InsertSentencePauses(text, cfg.SentencePauseSeconds);
+        var body = new { input = speech, voice, response_format = cfg.Format };
         using var content = new StringContent(
             JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 
@@ -26,7 +32,12 @@ public sealed class KokoroTtsSynthesizer(HttpClient http, IOptionsMonitor<TtsOpt
         response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx
 
         var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-        var path = GetCachePath(text, voice, cfg);
+        // Hashing the TAGGED speech (what was actually rendered), not the caller's text: two
+        // renders under different pause settings are different audio and must never collide on a
+        // transient file. Transient either way — TtsSegmentSource moves this file into its own
+        // final cache slot (keyed on pre-synthesis copy text, tag-free), and TtsPreviewController
+        // deletes it after streaming the bytes.
+        var path = GetCachePath(speech, voice, cfg);
 
         // Path.GetDirectoryName always returns a non-null string when the path is produced
         // by Path.Combine with a non-empty CacheRoot; the guard below satisfies the compiler
