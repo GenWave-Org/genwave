@@ -183,12 +183,15 @@ public sealed class SettingValidator(IConfiguration configuration)
             // {from, to} string pairs; empty ("[]" or blank) means no corrections and is legal.
             ["Tts:Corrections"] = IsValidCorrectionsArray,
 
-            // Piper local-fallback engine (SPEC F70.1, STORY-190) — Endpoint mirrors Llm:Endpoint's
-            // own shape: empty is the legal disabled state (Piper not deployed, F70.1), any
-            // non-empty value must be an absolute http/https URL. Voice is free text, same
-            // "no shape to police" story as Llm:Model — it is never sent on the wire
-            // (TtsFallbackOptions' own remarks), only compared by an operator against what the
-            // compose `piper` sidecar was actually started with.
+            // Piper local-fallback engine, legacy single-hop keys (SPEC F70.1, STORY-190, gh-#147:
+            // ignored when a Tts:Fallback:Profiles chain is deployed; that shape is env-only and
+            // startup-validated by GenWave.Tts.TtsFallbackOptionsValidator, never PUT through
+            // here) — Endpoint mirrors Llm:Endpoint's own shape: empty is the legal disabled
+            // state (Piper not deployed, F70.1), any non-empty value must be an absolute
+            // http/https URL. Voice is free text, same "no shape to police" story as Llm:Model —
+            // it is never sent on the wire for the piper engine (TtsFallbackProfile.Voice's
+            // schema remarks), only compared by an operator against what the compose `piper`
+            // sidecar was actually started with.
             ["Tts:Fallback:Endpoint"] = v => string.IsNullOrEmpty(v) || IsAbsoluteHttpUri(v),
             ["Tts:Fallback:Voice"] = AlwaysValid,
 
@@ -536,11 +539,14 @@ public sealed class SettingValidator(IConfiguration configuration)
     /// <summary>
     /// Validates <c>Tts:Corrections</c> (SPEC F68.5): a JSON array where every element is an object
     /// carrying string <c>from</c>/<c>to</c> properties (case-insensitive property names, mirroring
-    /// <c>SpeechCorrection</c>'s own JSON binding in <c>GenWave.Tts.SpeechCorrectionProvider</c>). An
-    /// empty array, or a blank value, is legal — "no corrections configured". A blank/whitespace
-    /// <c>from</c> on an individual rule is NOT rejected here: <c>SpeechCorrectionSet.Create</c>
-    /// already treats it as a no-op rule by design, so this validator only guards JSON shape, not
-    /// rule usefulness.
+    /// <c>SpeechCorrection</c>'s own JSON binding in <c>GenWave.Tts.SpeechCorrectionProvider</c>),
+    /// plus optional string <c>whenPrecededBy</c>/<c>whenFollowedBy</c> context conditions
+    /// (gh-#161) — absent or JSON null means unconditional, any other non-string value is a shape
+    /// error worth rejecting here rather than letting the provider silently degrade the whole rule
+    /// set. An empty array, or a blank value, is legal — "no corrections configured". A
+    /// blank/whitespace <c>from</c> (or a blank context) on an individual rule is NOT rejected
+    /// here: <c>SpeechCorrectionSet</c> already treats those as no-ops by design, so this validator
+    /// only guards JSON shape, not rule usefulness.
     /// </summary>
     static bool IsValidCorrectionsArray(string v)
     {
@@ -557,6 +563,8 @@ public sealed class SettingValidator(IConfiguration configuration)
                 if (element.ValueKind != JsonValueKind.Object) return false;
                 if (!HasStringProperty(element, "from")) return false;
                 if (!HasStringProperty(element, "to")) return false;
+                if (!OptionalPropertyIsString(element, "whenPrecededBy")) return false;
+                if (!OptionalPropertyIsString(element, "whenFollowedBy")) return false;
             }
 
             return true;
@@ -653,6 +661,20 @@ public sealed class SettingValidator(IConfiguration configuration)
         }
 
         return false;
+    }
+
+    // Optional string field (gh-#161 context conditions): absent or JSON null is legal
+    // ("unconditional"); when present it must be a string — same case-insensitive property-name
+    // matching as HasStringProperty, mirroring SpeechCorrectionProvider's own JSON binding.
+    static bool OptionalPropertyIsString(JsonElement element, string propertyName)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                return property.Value.ValueKind is JsonValueKind.String or JsonValueKind.Null;
+        }
+
+        return true;
     }
 
     static string BuildRangeError(string key, string value) => key switch

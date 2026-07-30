@@ -176,15 +176,21 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "The Kokoro TTS service base URL used to render all spoken patter — must be a non-empty " +
     "absolute http/https URL; there is no \"disabled TTS\" state.",
   "Tts:Corrections":
-    "Operator pronunciation corrections applied to every spoken line before it reaches Kokoro " +
-    "(e.g. \"MacLeod\" → \"Muh-cloud\"). A JSON array of {from, to} pairs; empty means no " +
-    "corrections.",
+    "Operator pronunciation corrections applied to every spoken line before it reaches the TTS " +
+    "engine (e.g. \"MacLeod\" → \"Muh-cloud\"). Each rule can carry optional context conditions " +
+    "for heteronyms — \"wind\" → \"wynd\" only when followed by \"down|up\" — so the other sense " +
+    "(\"a strong wind\") stays untouched. Empty means no corrections.",
   "Tts:Fallback:Endpoint":
-    "The Piper local fallback TTS service base URL — used automatically when Kokoro is " +
-    "unhealthy or a render fails. Leave empty to disable the fallback engine entirely.",
+    "The Piper local fallback TTS service base URL — hop 1 of the fallback chain, used " +
+    "automatically when Kokoro is unhealthy or a render fails. Leave empty to disable the " +
+    "fallback engine entirely. Ignored when the deployment configures a Tts:Fallback:Profiles " +
+    "chain, which replaces this single hop with an operator-built list of fallback engines.",
   "Tts:Fallback:Voice":
-    "The Piper voice model the fallback service is expected to be running — informational " +
-    "only; it is not sent with each render and does not change which voice Piper speaks with.",
+    "The Piper voice model the fallback service is expected to be running — display-only: " +
+    "Piper bakes one voice into the sidecar and has no per-request selector, so this is never " +
+    "sent with a render; it only documents what compose deployed. In a Tts:Fallback:Profiles " +
+    "chain each hop carries its own voice instead — honored on the wire for Kokoro-kind hops, " +
+    "display-only for Piper hops.",
   "Tts:EngineByKind":
     "Pins specific speech kinds to a specific engine, e.g. StationId to Piper so a short ident " +
     "always uses the cheap voice. Add one override row per kind (StationId, LeadIn, " +

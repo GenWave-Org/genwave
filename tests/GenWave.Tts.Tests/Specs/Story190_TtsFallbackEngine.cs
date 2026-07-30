@@ -23,13 +23,16 @@ public static class FeatureTtsFallbackEngine
     static DependencyHealthVerdict UnhealthyKokoroVerdict() =>
         new(DependencyNames.Kokoro, Healthy: false, DateTimeOffset.UtcNow, "connect failure", ConsecutiveFailureCount: 3);
 
+    // The fallback double is a FakeProfileRenderer registered as the "piper" engine (gh-#147) —
+    // with ConfiguredFallbackOptions' legacy flat keys it is the implicit single-hop chain, so
+    // every scenario below still exercises exactly the original Kokoro→Piper shape.
     static FallbackTtsSynthesizer BuildRouter(
         FakeTtsSynthesizer primary,
-        FakeTtsSynthesizer fallback,
+        FakeProfileRenderer fallback,
         FakeDependencyHealth health,
         TestOptionsMonitor<TtsFallbackOptions>? fallbackOptions = null,
         CapturingLogger<FallbackTtsSynthesizer>? logger = null) =>
-        new(primary, fallback, health, fallbackOptions ?? ConfiguredFallbackOptions(),
+        new(primary, [fallback], health, fallbackOptions ?? ConfiguredFallbackOptions(),
             logger ?? new CapturingLogger<FallbackTtsSynthesizer>());
 
     static SegmentRequest StationIdRequest() =>
@@ -62,7 +65,7 @@ public static class FeatureTtsFallbackEngine
         {
             // Given a cached unhealthy verdict for the primary engine
             var primary = new FakeTtsSynthesizer();
-            var fallback = new FakeTtsSynthesizer();
+            var fallback = new FakeProfileRenderer(DependencyNames.Piper);
             var health = new FakeDependencyHealth();
             health.Set(UnhealthyKokoroVerdict());
             var router = BuildRouter(primary, fallback, health);
@@ -86,7 +89,7 @@ public static class FeatureTtsFallbackEngine
             // Given a healthy verdict (none recorded yet — the F70.2 "unknown" case reads the same
             // as healthy: try the primary) but a render call that throws
             var primary = new FakeTtsSynthesizer { ThrowOnNextCall = new IOException("kokoro down") };
-            var fallback = new FakeTtsSynthesizer();
+            var fallback = new FakeProfileRenderer(DependencyNames.Piper);
             var health = new FakeDependencyHealth();
             var router = BuildRouter(primary, fallback, health);
 
@@ -106,7 +109,7 @@ public static class FeatureTtsFallbackEngine
         {
             // Given no Piper endpoint configured — zero behavior change vs today (F70.1)
             var primary = new FakeTtsSynthesizer();
-            var fallback = new FakeTtsSynthesizer();
+            var fallback = new FakeProfileRenderer(DependencyNames.Piper);
             var health = new FakeDependencyHealth();
             health.Set(UnhealthyKokoroVerdict());   // even an unhealthy verdict changes nothing here
             var router = BuildRouter(primary, fallback, health,
@@ -133,7 +136,7 @@ public static class FeatureTtsFallbackEngine
             try
             {
                 var primary = new FakeTtsSynthesizer();
-                var fallback = new FakeTtsSynthesizer();
+                var fallback = new FakeProfileRenderer(DependencyNames.Piper);
                 var health = new FakeDependencyHealth();
                 health.Set(UnhealthyKokoroVerdict());
                 var router = BuildRouter(primary, fallback, health);
@@ -177,7 +180,7 @@ public static class FeatureTtsFallbackEngine
             try
             {
                 var primary = new FakeTtsSynthesizer { ThrowOnNextCall = new IOException("kokoro down") };
-                var fallback = new FakeTtsSynthesizer { ThrowOnNextCall = new IOException("piper down") };
+                var fallback = new FakeProfileRenderer(DependencyNames.Piper) { ThrowOnNextCall = new IOException("piper down") };
                 var health = new FakeDependencyHealth();
                 var router = BuildRouter(primary, fallback, health);
 

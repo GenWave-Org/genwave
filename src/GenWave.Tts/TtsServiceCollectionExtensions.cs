@@ -30,16 +30,20 @@ public static class TtsServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        // Piper fallback options (SPEC F70.1, STORY-190) — registered unconditionally, mirroring
-        // LlmOptions below: an empty Tts:Fallback:Endpoint just means FallbackTtsSynthesizer stays
-        // a pass-through to Kokoro. IOptionsMonitor<TtsFallbackOptions> (not IOptions) is what both
-        // FallbackTtsSynthesizer and PiperTtsSynthesizer/PiperHealthProbe read per call, so a live
-        // edit to Tts:Fallback:Endpoint/Voice applies without a restart.
+        // Fallback chain options (SPEC F70.1, STORY-190, gh-#147) — registered unconditionally,
+        // mirroring LlmOptions below: an empty chain (no Tts:Fallback:Profiles, no legacy
+        // Tts:Fallback:Endpoint) just means FallbackTtsSynthesizer stays a pass-through to Kokoro.
+        // IOptionsMonitor<TtsFallbackOptions> (not IOptions) is what FallbackTtsSynthesizer and
+        // PiperHealthProbe read per call, so a live edit to the legacy Endpoint/Voice keys applies
+        // without a restart. TtsFallbackOptionsValidator + ValidateOnStart is the gh-#147
+        // fail-loudly gate: an unknown engine kind or a bad endpoint in Tts:Fallback:Profiles
+        // kills the boot with a keyed message instead of skipping hops silently on air.
         services
             .AddOptions<TtsFallbackOptions>()
             .Bind(configuration.GetSection(TtsFallbackOptions.Section))
             .ValidateDataAnnotations()
             .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<TtsFallbackOptions>, TtsFallbackOptionsValidator>();
 
         // Per-kind engine override map (SPEC F70.3, STORY-191) — a raw JSON leaf, not
         // DataAnnotations-validated: malformed JSON (or an unknown kind/engine entry) degrades to
@@ -175,9 +179,14 @@ public static class TtsServiceCollectionExtensions
         // every keystroke.
         services.AddHttpClient<KokoroVoiceLister>();
 
-        // Piper fallback client (SPEC F70.1, STORY-190) — same no-BaseAddress discipline,
-        // Tts:Fallback:Endpoint read fresh per call inside PiperTtsSynthesizer.
+        // Fallback-chain hop renderers (SPEC F70.1, STORY-190, gh-#147) — one per engine kind,
+        // exposed under IFallbackProfileRenderer for FallbackTtsSynthesizer's by-kind lookup (the
+        // same AddHttpClient-then-AddSingleton shape as the probes above). Same no-BaseAddress
+        // discipline: each hop's endpoint arrives per call from its TtsFallbackProfile.
         services.AddHttpClient<PiperTtsSynthesizer>();
+        services.AddSingleton<IFallbackProfileRenderer>(sp => sp.GetRequiredService<PiperTtsSynthesizer>());
+        services.AddHttpClient<KokoroFallbackRenderer>();
+        services.AddSingleton<IFallbackProfileRenderer>(sp => sp.GetRequiredService<KokoroFallbackRenderer>());
 
         // LlmCopyWriter's HTTP client (SPEC F34.3, F36.2): deliberately no BaseAddress here — the
         // endpoint comes from IOptionsMonitor<LlmOptions>.CurrentValue per render, so a live PUT
@@ -198,14 +207,14 @@ public static class TtsServiceCollectionExtensions
                     sp.GetRequiredService<KokoroVoiceLister>(),
                     sp.GetRequiredService<IOptionsMonitor<TtsOptions>>(),
                     TimeSpan.FromMinutes(5)))
-            // FallbackTtsSynthesizer (SPEC F70.1, F70.4, STORY-190) sits BELOW
-            // NormalizingTtsSynthesizer, routing each render to Kokoro (primary) or Piper
-            // (fallback) — see its own remarks for the routing rule. Registered concretely once;
-            // nothing else in this project resolves it directly.
+            // FallbackTtsSynthesizer (SPEC F70.1, F70.4, STORY-190, gh-#147) sits BELOW
+            // NormalizingTtsSynthesizer, executing the ordered fallback chain — Kokoro (primary)
+            // first, then each configured hop — see its own remarks for the routing rule.
+            // Registered concretely once; nothing else in this project resolves it directly.
             .AddSingleton<FallbackTtsSynthesizer>(sp =>
                 new FallbackTtsSynthesizer(
                     sp.GetRequiredService<KokoroTtsSynthesizer>(),
-                    sp.GetRequiredService<PiperTtsSynthesizer>(),
+                    sp.GetServices<IFallbackProfileRenderer>(),
                     sp.GetRequiredService<IDependencyHealth>(),
                     sp.GetRequiredService<IOptionsMonitor<TtsFallbackOptions>>(),
                     sp.GetRequiredService<ILogger<FallbackTtsSynthesizer>>(),
