@@ -307,6 +307,7 @@ async function loadAbout() {
 
     document.title = `${stationName} — Spectator`;
     document.getElementById("station-name").textContent = stationName;
+    updateMediaSessionMetadata();
     if (nowPlaying.kind === "standby") renderNowPlaying();
     renderRequestVisibility(about.requestsEnabled === true);
 
@@ -354,6 +355,11 @@ async function loadAbout() {
 //   - backoff: the delay doubles per attempt from RECOVERY_BASE_DELAY_MS up to
 //     RECOVERY_MAX_DELAY_MS while the mount stays down, and resets to the base once the playing
 //     event confirms real playback resumed.
+//   - live pause semantics (gh-#298): a user pause detaches the src (honest stop — kills
+//     Chrome's paused-stream background download and its banked buffer), then immediately
+//     re-arms a fresh cache-busted src by bare assignment (no load/play — preload="none"
+//     fetches nothing) so the native play button stays alive; the next play fetches the armed
+//     URL, rejoining the live head instead of the bank.
 
 /** @type {string|null} — the live stream URL from the one-shot about fetch; null = no stream. */
 let streamUrl = null;
@@ -380,12 +386,19 @@ function schedulePlayerRecovery(player, delayMs) {
   }, delayMs);
 }
 
-/** Tears down the src and reattaches the stream URL with a cache-buster param — the fresh URL is
- * what breaks Chrome's Range-resume behavior. An AbortError from play() (user paused, or a newer
- * load superseded this one) is deliberately swallowed; a NotAllowedError means the browser revoked
- * autoplay credit, so the player disarms and waits for a real press of play. */
+/** Composes the stream URL with a unique cache-buster — the fresh URL is what breaks Chrome's
+ * Range-resume behavior (gh-#114) and marks every (re)attach as a brand-new resource. The single
+ * composition point: recovery and the honest-stop re-arm (gh-#298) both go through here. */
+function freshStreamSrc() {
+  return `${streamUrl}${streamUrl.includes("?") ? "&" : "?"}reconnect=${Date.now()}`;
+}
+
+/** Tears down the src and reattaches a fresh cache-busted stream URL. An AbortError from play()
+ * (user paused, or a newer load superseded this one) is deliberately swallowed; a NotAllowedError
+ * means the browser revoked autoplay credit, so the player disarms and waits for a real press of
+ * play. */
 function recoverPlayer(player) {
-  player.src = `${streamUrl}${streamUrl.includes("?") ? "&" : "?"}reconnect=${Date.now()}`;
+  player.src = freshStreamSrc();
   player.load();
   player.play().catch((error) => {
     if (error.name === "NotAllowedError") playIntended = false;
@@ -396,6 +409,13 @@ function initPlayerRecovery() {
   const player = document.getElementById("player");
   player.addEventListener("play", () => {
     playIntended = true;
+    // Belt for the truly src-less edge (gh-#298): the honest-stop pause below normally re-arms
+    // a fresh src, so this guard stays quiet — it only catches a play reaching an element with
+    // no source attached (a pause taken before the about fetch resolved streamUrl, or any other
+    // path that left the attribute absent) and rejoins live through the same cache-busted path
+    // recovery uses. recoverPlayer's own play() makes this handler re-enter, but by then the
+    // src attribute is set, so the guard ends the loop.
+    if (streamUrl && !player.getAttribute("src")) recoverPlayer(player);
   });
   player.addEventListener("playing", () => {
     recoveryDelayMs = RECOVERY_BASE_DELAY_MS;
@@ -405,13 +425,28 @@ function initPlayerRecovery() {
   });
   player.addEventListener("pause", () => {
     // End-of-stream fires pause before ended (player.ended is already true here) — that is the
-    // mount dropping, not the user stopping, so the ended handler below still gets to recover.
+    // mount dropping, not the user stopping, so the ended handler below still gets to recover
+    // (and the src must stay attached for it: the early return skips the detach too).
     if (player.ended) return;
     playIntended = false;
     if (recoveryTimer !== null) {
       clearTimeout(recoveryTimer);
       recoveryTimer = null;
     }
+    // Honest stop (gh-#298): detach the source entirely. A paused progressive stream keeps
+    // downloading into Chrome's media cache and resume replays that bank — field-measured two
+    // songs behind the live head. Detaching kills the ongoing background download AND the
+    // banked buffer. Then RE-ARM with a fresh cache-busted src — assignment only, no load(),
+    // no play(): with preload="none" the bare assignment fetches zero bytes (loadstart fires,
+    // then the network idles), but it keeps the native controls' play button alive — Chromium
+    // refuses a trusted play on a src-less element (verified via Playwright), so a bare detach
+    // would dead-end the on-page resume. The pause-time cache-buster stays unique however long
+    // the pause lasts; the next play fetches the armed URL fresh, at the live head. Neither
+    // step can re-arm recovery: loadstart is not a recovery-scheduled event, playIntended is
+    // already false here, and the pending timer (if any) was just cleared.
+    player.removeAttribute("src");
+    player.load();
+    if (streamUrl) player.src = freshStreamSrc();
   });
   // stalled waits out the longer confirm window before the no-progress check above; error/ended
   // are definitively stuck and only need the backoff delay.
@@ -420,6 +455,50 @@ function initPlayerRecovery() {
   );
   player.addEventListener("error", () => schedulePlayerRecovery(player, recoveryDelayMs));
   player.addEventListener("ended", () => schedulePlayerRecovery(player, recoveryDelayMs));
+}
+
+// ── MediaSession (gh-#298) ───────────────────────────────────────────────────
+//
+// OS media controls (lock screen, media keys, earbuds) present the stream as live radio: the
+// station name plus the sharp station mark as artwork, an infinite duration so no scrubber is
+// offered, and play/pause actions routed through the <audio> element so they inherit the
+// honest-stop / rejoin-live semantics above. Everything is feature-detected — a browser
+// without any piece of the API just skips the garnish, never throws.
+
+/** Sets (or refreshes) the MediaSession label — called once at init with the default station
+ * name and again from loadAbout when the real one arrives. */
+function updateMediaSessionMetadata() {
+  if (!("mediaSession" in navigator) || typeof MediaMetadata !== "function") return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: stationName,
+    artwork: [{ src: STATION_ICON_PATH, sizes: "256x256", type: "image/png" }],
+  });
+}
+
+function initMediaSession() {
+  if (!("mediaSession" in navigator)) return;
+  const player = document.getElementById("player");
+  updateMediaSessionMetadata();
+  // Live media has no seekable timeline: an infinite duration tells the OS controls to drop
+  // the scrubber. Optional-chained AND try/caught — engines without setPositionState skip it,
+  // and an engine that rejects an infinite duration still gets the metadata label above.
+  try {
+    navigator.mediaSession.setPositionState?.({ duration: Infinity });
+  } catch {
+    // Garnish only — nothing to recover.
+  }
+  try {
+    navigator.mediaSession.setActionHandler("play", () => {
+      // Same catch discipline as recoverPlayer: AbortError (our own rejoin load() superseding
+      // this play()) is swallowed; NotAllowedError disarms rather than fighting the browser.
+      player.play().catch((error) => {
+        if (error.name === "NotAllowedError") playIntended = false;
+      });
+    });
+    navigator.mediaSession.setActionHandler("pause", () => player.pause());
+  } catch {
+    // setActionHandler throws for unrecognized actions on some engines; garnish only.
+  }
 }
 
 // ── Request form (SPEC F87.11, STORY-229) ────────────────────────────────────
@@ -523,6 +602,7 @@ function init() {
   loadAbout();
   initArtworkFallback();
   initPlayerRecovery();
+  initMediaSession();
   pollNowPlaying();
   pollHistory();
   pollStats();
