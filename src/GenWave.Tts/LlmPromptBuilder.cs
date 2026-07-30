@@ -424,12 +424,14 @@ static class LlmPromptBuilder
     /// <see cref="BuildUserContent"/> call site (gh-#270), mirroring the request-line gate.
     /// </item>
     /// <item>
-    /// One or more <see cref="PersonaPickDiagnostics.FiredRules"/> (F83.1) — phrased as OPTIONAL
-    /// color ("may mention"), never a mandate: the persona's own taste rules are a hint the copy MAY
-    /// use, not a script it has to read. When this break's fired-rule descriptions overlap
-    /// <paramref name="previouslyVoicedTasteNotes"/> at all, an extra sentence asks for different
-    /// phrasing (or silence) — the anti-repetition posture — rather than let the same color line
-    /// repeat break after break.
+    /// One or more LIKE (positive-weight) <see cref="PersonaPickDiagnostics.FiredRules"/> (F83.1) —
+    /// phrased as OPTIONAL color ("may mention"), never a mandate: the persona's own taste rules are
+    /// a hint the copy MAY use, not a script it has to read. Fired DISLIKE rules never reach this
+    /// line (gh-#291 — see <see cref="DescribeFiredRules"/>); a pick whose only fired rules are
+    /// dislikes gets no taste line at all, exactly like an empty <c>FiredRules</c>. When this
+    /// break's fired-rule descriptions overlap <paramref name="previouslyVoicedTasteNotes"/> at all,
+    /// an extra sentence asks for different phrasing (or silence) — the anti-repetition posture —
+    /// rather than let the same color line repeat break after break.
     /// </item>
     /// </list>
     /// </summary>
@@ -441,10 +443,13 @@ static class LlmPromptBuilder
         if (personaPick.IsExploration)
             return ExplorationLampshadeLine;
 
-        if (personaPick.FiredRules.Count == 0)
+        // gh-#291: notes, not FiredRules, decides whether there is anything to say — a pick whose
+        // every fired rule is a dislike must fall through to null (no taste line), not describe a
+        // vote-against as "matches the persona's taste".
+        var notes = DescribeFiredRules(personaPick.FiredRules);
+        if (notes.Count == 0)
             return null;
 
-        var notes = DescribeFiredRules(personaPick.FiredRules);
         var summary = string.Join("; ", notes);
         var recentlyVoiced = notes.Any(previouslyVoicedTasteNotes.Contains);
 
@@ -458,16 +463,29 @@ static class LlmPromptBuilder
     }
 
     /// <summary>
-    /// One short, spoken-friendly phrase per fired <see cref="TasteRule"/> (artist over genre over
-    /// tag — mirrors <c>Orchestrator.FormatFiredRule</c>'s own precedence for its debug line, worded
-    /// here for a human ear rather than a log grep). Exposed (not <see langword="private"/>) so
-    /// <see cref="LlmCopyWriter"/> can compute the SAME descriptions for the break it just rendered
-    /// and remember them as next break's <c>previouslyVoicedTasteNotes</c> — one description function,
-    /// used on both the "what did we just say" and "what are we about to say" sides of the
-    /// anti-repetition comparison.
+    /// One short, spoken-friendly phrase per fired LIKE <see cref="TasteRule"/> (artist over genre
+    /// over tag — mirrors <c>Orchestrator.FormatFiredRule</c>'s own precedence for its debug line,
+    /// worded here for a human ear rather than a log grep). Exposed (not <see langword="private"/>)
+    /// so <see cref="LlmCopyWriter"/> can compute the SAME descriptions for the break it just
+    /// rendered and remember them as next break's <c>previouslyVoicedTasteNotes</c> — one
+    /// description function, used on both the "what did we just say" and "what are we about to say"
+    /// sides of the anti-repetition comparison.
+    ///
+    /// gh-#291 — dislikes are filtered HERE, at the prompt seam, not at the ranker:
+    /// <c>PersonaRanker</c> deliberately keeps every matched rule in
+    /// <see cref="PersonaPickDiagnostics.FiredRules"/> regardless of sign, because the booth-log
+    /// pick stamp persists each fired rule's SIGNED weight (SPEC F86.1,
+    /// <c>BoothLogFiredRuleSummary</c>) and the admin UI chips render that sign — a fired dislike
+    /// is honest, consumed diagnostic data. But spoken color must never credit a rule that voted
+    /// AGAINST the track ("matches the persona's taste for {dislike}" — the inverted color this
+    /// issue fixes), and the honest alternative ("despite not being their usual X") is the exact
+    /// complaint-class line family gh-#270 just eliminated — a 3B model overuses it. So negative
+    /// (and zero — no vote, no credit) weights are simply excluded, never rephrased: no new prompt
+    /// line. Living in THIS shared function also keeps the taste memory consistent — a description
+    /// that was never offered to the prompt can never ride <c>previouslyVoicedTasteNotes</c>.
     /// </summary>
     public static IReadOnlyList<string> DescribeFiredRules(IReadOnlyList<TasteRule> firedRules) =>
-        firedRules.Select(DescribeFiredRule).ToList();
+        firedRules.Where(rule => rule.Weight > 0).Select(DescribeFiredRule).ToList();
 
     static string DescribeFiredRule(TasteRule rule) =>
         rule.Predicate.LabelOr("this pick");

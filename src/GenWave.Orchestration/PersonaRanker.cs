@@ -97,7 +97,12 @@ public sealed class PersonaRanker(
     /// <summary>
     /// SPEC F82.2 — <c>rotationScore + Σ matched-taste·biasGain − |energy − target|·energyPull</c>.
     /// A negative-weight rule still adds to the sum (it is just negative — dislikes rank down, they
-    /// are never filtered from the pool here or anywhere upstream of it, SPEC F82.1).
+    /// are never filtered from the pool here or anywhere upstream of it, SPEC F82.1). A matched
+    /// dislike also rides <c>FiredRules</c> DELIBERATELY (gh-#291): the booth-log pick stamp
+    /// persists each fired rule's signed weight (SPEC F86.1) and the admin UI renders that sign —
+    /// honest diagnostics stay complete here; the prompt seam
+    /// (<c>GenWave.Tts.LlmPromptBuilder.DescribeFiredRules</c>) is what keeps dislikes out of the
+    /// DJ's spoken taste color.
     ///
     /// A rule whose evaluation throws (gh-#87 — e.g. an off-schema context that survived every write
     /// seam) is WARNed once per pick via <paramref name="faultedRules"/> and skipped for every
