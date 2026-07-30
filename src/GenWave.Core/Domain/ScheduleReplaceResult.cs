@@ -17,4 +17,10 @@ public abstract record ScheduleReplaceResult
     /// <summary>At least one submitted row failed application-side validation — nothing was written;
     /// <see cref="Errors"/> holds one <see cref="ScheduleCellError"/> per offending row.</summary>
     public sealed record ValidationFailed(IReadOnlyList<ScheduleCellError> Errors) : ScheduleReplaceResult;
+
+    /// <summary>The caller's <c>expectedVersion</c> no longer matches the stored week — someone else
+    /// (another tab, another session) replaced it since the caller loaded — so nothing was written
+    /// (gh-#255's stale-editor silent-wipe guard). <see cref="CurrentVersion"/> is the stored week's
+    /// live <see cref="ScheduleWeekVersion"/> fingerprint at rejection time.</summary>
+    public sealed record VersionConflict(string CurrentVersion) : ScheduleReplaceResult;
 }

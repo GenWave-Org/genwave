@@ -67,7 +67,7 @@ public static class FeatureScheduleStore
             await db.ResetScheduleAsync();
             var repo = Repo(db);
 
-            var result = await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Monday, 0, 1440)], CancellationToken.None);
+            var result = await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Monday, 0, 1440)], expectedVersion: null, CancellationToken.None);
 
             var replaced = Assert.IsType<ScheduleReplaceResult.Replaced>(result);
             var stored = Assert.Single(replaced.Snapshot.Segments);
@@ -81,7 +81,7 @@ public static class FeatureScheduleStore
             await db.ResetScheduleAsync();
             var repo = Repo(db);
 
-            await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Tuesday, 0, 1440)], CancellationToken.None);
+            await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Tuesday, 0, 1440)], expectedVersion: null, CancellationToken.None);
 
             var snapshot = await repo.LoadWeekAsync(CancellationToken.None);
             Assert.Null(Assert.Single(snapshot.Segments).PersonaId);
@@ -109,7 +109,7 @@ public static class FeatureScheduleStore
             var repo = Repo(db);
 
             await repo.ReplaceWeekAsync(
-                [WithEnvelope(DayOfWeek.Monday, 0, 600, ["jazz", "funk"], 0.3, 0.8)], CancellationToken.None);
+                [WithEnvelope(DayOfWeek.Monday, 0, 600, ["jazz", "funk"], 0.3, 0.8)], expectedVersion: null, CancellationToken.None);
 
             var stored = Assert.Single((await repo.LoadWeekAsync(CancellationToken.None)).Segments);
             Assert.Equal(["jazz", "funk"], stored.Genres);
@@ -128,7 +128,7 @@ public static class FeatureScheduleStore
                     WithEnvelope(DayOfWeek.Monday, 0, 600, ["jazz", "funk"], 0.3, 0.8),
                     WithEnvelope(DayOfWeek.Tuesday, 0, 600, genres: null, energyMin: null, energyMax: null),
                 ],
-                CancellationToken.None);
+                expectedVersion: null, CancellationToken.None);
 
             var segments = (await repo.LoadWeekAsync(CancellationToken.None)).Segments;
             var monday = segments.Single(s => s.Day == DayOfWeek.Monday);
@@ -157,9 +157,9 @@ public static class FeatureScheduleStore
             await db.ResetScheduleAsync();
             var repo = Repo(db);
             await repo.ReplaceWeekAsync(
-                [MusicOnly(DayOfWeek.Sunday, 0, 1440), MusicOnly(DayOfWeek.Monday, 0, 1440)], CancellationToken.None);
+                [MusicOnly(DayOfWeek.Sunday, 0, 1440), MusicOnly(DayOfWeek.Monday, 0, 1440)], expectedVersion: null, CancellationToken.None);
 
-            var result = await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Saturday, 600, 660)], CancellationToken.None);
+            var result = await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Saturday, 600, 660)], expectedVersion: null, CancellationToken.None);
 
             var replaced = Assert.IsType<ScheduleReplaceResult.Replaced>(result);
             var only = Assert.Single(replaced.Snapshot.Segments);
@@ -189,7 +189,7 @@ public static class FeatureScheduleStore
             var fired = 0;
             repo.WeekChanged += () => fired++;
 
-            await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Thursday, 0, 1440)], CancellationToken.None);
+            await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Thursday, 0, 1440)], expectedVersion: null, CancellationToken.None);
 
             Assert.Equal(1, fired);
         }
@@ -203,7 +203,7 @@ public static class FeatureScheduleStore
             repo.WeekChanged += () => fired++;
 
             // start_minute 15 is off the 30-minute grid — rejected before any statement runs.
-            await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Friday, 15, 1440)], CancellationToken.None);
+            await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Friday, 15, 1440)], expectedVersion: null, CancellationToken.None);
 
             Assert.Equal(0, fired);
         }
@@ -226,7 +226,7 @@ public static class FeatureScheduleStore
             // (DayOfWeek)9 is off System.Text.Json's back: numeric enums deserialize any in-range
             // integer without validating it against the defined members (T122's own wire contract), so
             // this is a real value ValidateAsync must catch, not merely a C#-side impossibility.
-            var result = await repo.ReplaceWeekAsync([MusicOnly((DayOfWeek)9, 0, 600)], CancellationToken.None);
+            var result = await repo.ReplaceWeekAsync([MusicOnly((DayOfWeek)9, 0, 600)], expectedVersion: null, CancellationToken.None);
 
             var failed = Assert.IsType<ScheduleReplaceResult.ValidationFailed>(result);
             Assert.Contains(failed.Errors, e => e.Kind == ScheduleCellErrorKind.InvalidDay);
@@ -238,7 +238,7 @@ public static class FeatureScheduleStore
             await db.ResetScheduleAsync();
             var repo = Repo(db);
 
-            var result = await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Monday, 15, 1440)], CancellationToken.None);
+            var result = await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Monday, 15, 1440)], expectedVersion: null, CancellationToken.None);
 
             var failed = Assert.IsType<ScheduleReplaceResult.ValidationFailed>(result);
             Assert.Contains(failed.Errors, e => e.Kind == ScheduleCellErrorKind.InvalidMinuteRange);
@@ -250,7 +250,7 @@ public static class FeatureScheduleStore
             await db.ResetScheduleAsync();
             var repo = Repo(db);
 
-            var result = await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Monday, 600, 600)], CancellationToken.None);
+            var result = await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Monday, 600, 600)], expectedVersion: null, CancellationToken.None);
 
             var failed = Assert.IsType<ScheduleReplaceResult.ValidationFailed>(result);
             Assert.Contains(failed.Errors, e => e.Kind == ScheduleCellErrorKind.InvalidMinuteRange);
@@ -263,7 +263,7 @@ public static class FeatureScheduleStore
             var repo = Repo(db);
 
             var result = await repo.ReplaceWeekAsync(
-                [MusicOnly(DayOfWeek.Monday, 0, 600), MusicOnly(DayOfWeek.Monday, 300, 900)], CancellationToken.None);
+                [MusicOnly(DayOfWeek.Monday, 0, 600), MusicOnly(DayOfWeek.Monday, 300, 900)], expectedVersion: null, CancellationToken.None);
 
             var failed = Assert.IsType<ScheduleReplaceResult.ValidationFailed>(result);
             Assert.Contains(failed.Errors, e => e.Kind == ScheduleCellErrorKind.Overlap);
@@ -286,7 +286,7 @@ public static class FeatureScheduleStore
                     MusicOnly(DayOfWeek.Monday, 30, 60),
                     MusicOnly(DayOfWeek.Monday, 70, 80),
                 ],
-                CancellationToken.None);
+                expectedVersion: null, CancellationToken.None);
 
             var failed = Assert.IsType<ScheduleReplaceResult.ValidationFailed>(result);
             Assert.Contains(failed.Errors, e => e.Kind == ScheduleCellErrorKind.Overlap && e.StartMinute == 70);
@@ -298,7 +298,7 @@ public static class FeatureScheduleStore
             await db.ResetScheduleAsync();
             var repo = Repo(db);
 
-            var result = await repo.ReplaceWeekAsync([Staffed(DayOfWeek.Monday, 0, 1440, 999_999)], CancellationToken.None);
+            var result = await repo.ReplaceWeekAsync([Staffed(DayOfWeek.Monday, 0, 1440, 999_999)], expectedVersion: null, CancellationToken.None);
 
             var failed = Assert.IsType<ScheduleReplaceResult.ValidationFailed>(result);
             Assert.Contains(failed.Errors, e => e.Kind == ScheduleCellErrorKind.UnknownPersona);
@@ -309,10 +309,10 @@ public static class FeatureScheduleStore
         {
             await db.ResetScheduleAsync();
             var repo = Repo(db);
-            await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Monday, 0, 1440)], CancellationToken.None);
+            await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Monday, 0, 1440)], expectedVersion: null, CancellationToken.None);
 
             // Off-grid start minute — rejected before anything is written.
-            await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Tuesday, 15, 1440)], CancellationToken.None);
+            await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Tuesday, 15, 1440)], expectedVersion: null, CancellationToken.None);
 
             var snapshot = await repo.LoadWeekAsync(CancellationToken.None);
             Assert.Equal(DayOfWeek.Monday, Assert.Single(snapshot.Segments).Day);

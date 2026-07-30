@@ -33,8 +33,19 @@ public interface IScheduleStore
     /// returning <see cref="ScheduleReplaceResult.ValidationFailed"/>. Callers (T122's
     /// <c>PUT /api/schedule</c> handler) must treat that as an unexpected-error response and never echo
     /// the raw Postgres message to the client.
+    ///
+    /// <para>
+    /// <paramref name="expectedVersion"/> (gh-#255): the <see cref="ScheduleWeekVersion"/> fingerprint
+    /// of the week the caller believes it is replacing, or <see langword="null"/> to skip the check
+    /// (legacy callers). Non-null and no longer matching the stored week — someone else replaced it
+    /// since the caller loaded — returns <see cref="ScheduleReplaceResult.VersionConflict"/> and
+    /// writes nothing: a full-replace built from stale state is exactly the silent operator-work
+    /// wipe this guard exists to stop. The comparison runs inside the same transaction as the
+    /// delete-then-insert.
+    /// </para>
     /// </summary>
-    Task<ScheduleReplaceResult> ReplaceWeekAsync(IReadOnlyList<ScheduleSegment> week, CancellationToken ct);
+    Task<ScheduleReplaceResult> ReplaceWeekAsync(
+        IReadOnlyList<ScheduleSegment> week, string? expectedVersion, CancellationToken ct);
 
     /// <summary>
     /// Raised synchronously right after a successful <see cref="ReplaceWeekAsync"/> commit — the

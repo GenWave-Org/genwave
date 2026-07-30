@@ -34,6 +34,9 @@ export interface ScheduleEditorProps {
 interface SavedProblemBody {
   detail?: string;
   cellErrors?: ScheduleCellErrorDto[];
+  /** `"staleWeek"` on the gh-#255 optimistic-concurrency 409 — distinguishes it from the
+   * persona-race 409, which IS worth a plain retry. */
+  conflict?: string;
 }
 
 /** Today's day/half-hour, computed once at mount — a static "now" marker on the grid (SPEC F94.3:
@@ -94,6 +97,15 @@ export function ScheduleEditor({ initialWeek, personas }: ScheduleEditorProps): 
   const [cellErrors, setCellErrors] = useState<readonly ScheduleCellErrorDto[]>([]);
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  // gh-#255: a failed save must stay visible — a toast alone fades in seconds while the painted
+  // grid still LOOKS right, which is exactly how a rejected save read as "saved fine" on the demo
+  // box. Set on every non-200 outcome (and the network catch); cleared by the next successful save
+  // or the next attempt starting.
+  const [saveProblem, setSaveProblem] = useState<string | null>(null);
+  // gh-#255: the `version` fingerprint of the week this editor last loaded (mount or PUT 200
+  // response) — sent back as `baseVersion` on every save so the server can 409 a full-replace built
+  // from stale state instead of silently wiping a week another tab/session saved meanwhile.
+  const [weekVersion, setWeekVersion] = useState<string | null>(initialWeek.version ?? null);
   const [nowMarker] = useState<NowMarker>(computeNowMarker);
   const confirm = useConfirm();
 
@@ -182,13 +194,19 @@ export function ScheduleEditor({ initialWeek, personas }: ScheduleEditorProps): 
 
   async function handleSave(): Promise<void> {
     setIsSaving(true);
-    const body = serializeWeek(cells, overrides);
+    setSaveProblem(null);
+    // `baseVersion` + `keepalive` (gh-#255): the version pins which stored week this full-replace
+    // may overwrite (a stale editor gets a 409 instead of silently destroying newer saves), and
+    // keepalive lets an in-flight save finish even if the operator immediately navigates/reloads to
+    // verify it — an aborted PUT was one more way a "saved" week never actually reached the server.
+    const body: ScheduleWeekDto = { ...serializeWeek(cells, overrides), baseVersion: weekVersion };
 
     try {
       const resp = await fetch("/api/schedule", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        keepalive: true,
       });
 
       if (resp.status === 200) {
@@ -199,6 +217,7 @@ export function ScheduleEditor({ initialWeek, personas }: ScheduleEditorProps): 
         setCellErrors([]);
         setOpenBlockAnchor(null);
         setIsDirty(false);
+        setWeekVersion(week.version ?? null);
         toast.success("Schedule saved.");
         return;
       }
@@ -207,13 +226,31 @@ export function ScheduleEditor({ initialWeek, personas }: ScheduleEditorProps): 
         const problem = (await resp.json().catch(() => ({}))) as SavedProblemBody;
         const errors = problem.cellErrors ?? [];
         setCellErrors(errors);
-        toast.error(problem.detail ?? `${errors.length} segment(s) rejected — see the highlighted cells.`);
+        const message = problem.detail ?? `${errors.length} segment(s) rejected — see the highlighted cells.`;
+        setSaveProblem(message);
+        toast.error(message);
         // cells/overrides are deliberately left untouched — the rejected edit survives (AC5).
         return;
       }
 
-      toast.error(await readErrorMessage(resp));
+      if (resp.status === 409) {
+        const problem = (await resp.json().catch(() => ({}))) as SavedProblemBody;
+        const message =
+          problem.conflict === "staleWeek"
+            ? problem.detail ??
+              "The schedule changed since this page loaded (another tab or session saved). Reload to see the latest — your unsaved painting stays here until you do."
+            : problem.detail ?? "The schedule conflicted with a concurrent change. Reload and try again.";
+        setSaveProblem(message);
+        toast.error(message);
+        // Same AC5 posture as the 400 branch: the operator's paint survives on screen.
+        return;
+      }
+
+      const message = await readErrorMessage(resp);
+      setSaveProblem(message);
+      toast.error(message);
     } catch {
+      setSaveProblem("Network error — the schedule was NOT saved. Check your connection and save again.");
       toast.error("Network error — check your connection");
     } finally {
       setIsSaving(false);
@@ -241,6 +278,15 @@ export function ScheduleEditor({ initialWeek, personas }: ScheduleEditorProps): 
           </Button>
         </div>
       </div>
+
+      {saveProblem !== null && (
+        <div
+          role="alert"
+          className="rounded-[6px] border border-danger bg-danger/10 px-3 py-2 text-[0.85rem] text-danger"
+        >
+          {saveProblem}
+        </div>
+      )}
 
       <div className="flex flex-col items-start gap-4 sm:flex-row">
         <div className="min-w-0 flex-1">

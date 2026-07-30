@@ -41,11 +41,11 @@ public static class FeatureTwoStageFiringBenchTransition
             var personaRepo = new PersonaRepository(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
             await scheduleRepo.ReplaceWeekAsync(
                 [new ScheduleSegment(null, DayOfWeek.Monday, 0, 600, personaId, Genres: null, EnergyMin: null, EnergyMax: null)],
-                CancellationToken.None);
+                expectedVersion: null, CancellationToken.None);
             var before = await personaRepo.GetByIdAsync(personaId, CancellationToken.None);
 
             // When: the week is replaced again, this time with no slot naming this persona at all.
-            await scheduleRepo.ReplaceWeekAsync([], CancellationToken.None);
+            await scheduleRepo.ReplaceWeekAsync([], expectedVersion: null, CancellationToken.None);
 
             var after = await personaRepo.GetByIdAsync(personaId, CancellationToken.None);
             Assert.NotNull(before);
@@ -63,10 +63,10 @@ public static class FeatureTwoStageFiringBenchTransition
             var scheduleRepo = new ScheduleRepository(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
             await scheduleRepo.ReplaceWeekAsync(
                 [new ScheduleSegment(null, DayOfWeek.Monday, 0, 600, personaId, Genres: null, EnergyMin: null, EnergyMax: null)],
-                CancellationToken.None);
+                expectedVersion: null, CancellationToken.None);
 
             // When: unpainted — replaced with a week that never names this persona.
-            await scheduleRepo.ReplaceWeekAsync([], CancellationToken.None);
+            await scheduleRepo.ReplaceWeekAsync([], expectedVersion: null, CancellationToken.None);
 
             await using var conn = await db.StationDataSource.OpenConnectionAsync();
             var count = await conn.ExecuteScalarAsync<int>(

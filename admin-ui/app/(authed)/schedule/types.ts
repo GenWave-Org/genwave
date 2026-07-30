@@ -18,9 +18,19 @@ export interface ScheduleSegmentDto {
 
 /** The whole-week document body shared by GET and PUT `/api/schedule` — mirrors
  * `GenWave.Host.Api.ScheduleWeekDto`. Zero `segments` is legal (the pre-clock, all-music week,
- * SPEC F91.4). */
+ * SPEC F91.4).
+ *
+ * Optimistic-concurrency pair (gh-#255): `version` is the stored week's content fingerprint —
+ * present on every document the SERVER sends (GET and a PUT's 200 body); `baseVersion` travels the
+ * other way — a PUT carries the `version` this editor loaded, and the server 409s the full-replace
+ * when the stored week no longer matches, so a stale editor (second tab, long-lived session) can
+ * never silently wipe a week saved after it loaded. Both optional so a fixture (or an older server)
+ * without them still type-checks — absent `version` simply means the PUT sends no `baseVersion` and
+ * the save behaves as before the guard existed. */
 export interface ScheduleWeekDto {
   segments: ScheduleSegmentDto[];
+  version?: string | null;
+  baseVersion?: string | null;
 }
 
 /** One entry of a `PUT /api/schedule` 400's `cellErrors` extension — mirrors

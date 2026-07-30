@@ -7,7 +7,17 @@
 // Runner: Jest (node) — pure functions, no DOM needed.
 
 import { describe, it, expect } from "@jest/globals";
-import { pruneOverrides, runKey, type ScheduleRun, type StoredOverride } from "../app/(authed)/schedule/schedule-grid-model";
+import {
+  createEmptyCells,
+  deriveGridFromWeek,
+  pruneOverrides,
+  runKey,
+  serializeWeek,
+  type CellValue,
+  type ScheduleRun,
+  type StoredOverride,
+} from "../app/(authed)/schedule/schedule-grid-model";
+import type { ScheduleWeekDto } from "../app/(authed)/schedule/types";
 
 const GENRES_A = { genres: ["rock"], energyMin: null, energyMax: null };
 const GENRES_B = { genres: ["pop"], energyMin: null, energyMax: null };
@@ -23,6 +33,117 @@ function overridesOf(entries: ReadonlyArray<readonly [ScheduleRun, StoredOverrid
   }
   return map;
 }
+
+// ---------------------------------------------------------------------------
+// gh-#255 — multi-day / whole-week spans through the serialize ⇄ derive pair.
+// The demo repro ladder ("2h across 2 days saves, across 6 days saves, across
+// all 7 fails") pinned here at the model level: every span shape must survive
+// serializeWeek → (server echo) → deriveGridFromWeek byte-for-byte.
+// ---------------------------------------------------------------------------
+
+/** Paints `value` onto `days` × `[startHalfHour, endHalfHour)` on a fresh grid. */
+function paintBand(
+  cells: CellValue[][],
+  days: readonly number[],
+  startHalfHour: number,
+  endHalfHour: number,
+  value: CellValue
+): CellValue[][] {
+  for (const day of days) {
+    for (let h = startHalfHour; h < endHalfHour; h++) {
+      const row = cells[day];
+      if (row !== undefined) row[h] = value;
+    }
+  }
+  return cells;
+}
+
+/** The server's 200 echo: same segments, ids assigned — what `ScheduleController` really does. */
+function echo(week: ScheduleWeekDto): ScheduleWeekDto {
+  return { segments: week.segments.map((s, i) => ({ ...s, id: i + 1 })) };
+}
+
+describe("Feature: multi-day spans serialize and round-trip (gh-#255)", () => {
+  const PERSONA = 7;
+
+  it.each([
+    ["a 2h band across 2 days", [1, 2]],
+    ["a 2h band across 6 days", [1, 2, 3, 4, 5, 6]],
+    ["a 2h band across all 7 days", [0, 1, 2, 3, 4, 5, 6]],
+  ])("%s serializes one segment per day and round-trips", (_label, days) => {
+    const cells = paintBand(createEmptyCells(), days, 20, 24, PERSONA);
+
+    const body = serializeWeek(cells, new Map());
+
+    expect(body.segments).toHaveLength(days.length);
+    for (const day of days) {
+      expect(body.segments).toContainEqual({
+        id: null,
+        day,
+        startMinute: 600,
+        endMinute: 720,
+        personaId: PERSONA,
+        genres: null,
+        energyMin: null,
+        energyMax: null,
+      });
+    }
+
+    const derived = deriveGridFromWeek(echo(body));
+    expect(derived.cells).toEqual(cells);
+  });
+
+  it("a whole-week block (all 336 cells, one DJ) serializes as 7 full-day segments and round-trips", () => {
+    const cells = paintBand(createEmptyCells(), [0, 1, 2, 3, 4, 5, 6], 0, 48, PERSONA);
+
+    const body = serializeWeek(cells, new Map());
+
+    expect(body.segments).toHaveLength(7);
+    for (let day = 0; day < 7; day++) {
+      expect(body.segments).toContainEqual(
+        expect.objectContaining({ day, startMinute: 0, endMinute: 1440, personaId: PERSONA })
+      );
+    }
+
+    const derived = deriveGridFromWeek(echo(body));
+    expect(derived.cells).toEqual(cells);
+  });
+
+  it("a block wrapping the week boundary (Sat 23:00 → Sun 01:00) round-trips as two segments", () => {
+    let cells = paintBand(createEmptyCells(), [6], 46, 48, PERSONA);
+    cells = paintBand(cells, [0], 0, 2, PERSONA);
+
+    const body = serializeWeek(cells, new Map());
+
+    // Exclusive-end at midnight stays 1440 on Saturday — never collapsed to a zero-length wrap.
+    expect(body.segments).toEqual([
+      expect.objectContaining({ day: 0, startMinute: 0, endMinute: 60, personaId: PERSONA }),
+      expect.objectContaining({ day: 6, startMinute: 1380, endMinute: 1440, personaId: PERSONA }),
+    ]);
+
+    const derived = deriveGridFromWeek(echo(body));
+    expect(derived.cells).toEqual(cells);
+  });
+
+  it("a full-week span keeps a block's envelope override through the round trip", () => {
+    const cells = paintBand(createEmptyCells(), [0, 1, 2, 3, 4, 5, 6], 20, 24, PERSONA);
+    const overrides = new Map([
+      [runKey(3, 20, PERSONA), { end: 24, overrides: { genres: ["jazz"], energyMin: 0.2, energyMax: 0.9 } }],
+    ]);
+
+    const body = serializeWeek(cells, overrides);
+
+    expect(body.segments).toContainEqual(
+      expect.objectContaining({ day: 3, startMinute: 600, endMinute: 720, genres: ["jazz"], energyMin: 0.2, energyMax: 0.9 })
+    );
+
+    const derived = deriveGridFromWeek(echo(body));
+    expect(derived.overrides.get(runKey(3, 20, PERSONA))).toEqual({
+      end: 24,
+      overrides: { genres: ["jazz"], energyMin: 0.2, energyMax: 0.9 },
+    });
+  });
+});
 
 describe("Feature: pruneOverrides reconciles the overrides map against the live run set", () => {
   describe("Scenario: extending a run forward into an empty gap keeps its override", () => {

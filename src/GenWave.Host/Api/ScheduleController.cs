@@ -70,7 +70,7 @@ public sealed class ScheduleController(IScheduleStore scheduleStore, ILogger<Sch
         ScheduleReplaceResult result;
         try
         {
-            result = await scheduleStore.ReplaceWeekAsync(week, ct);
+            result = await scheduleStore.ReplaceWeekAsync(week, request.BaseVersion, ct);
         }
         catch (PostgresException ex) when (ex.SqlState == ForeignKeyViolation)
         {
@@ -92,6 +92,7 @@ public sealed class ScheduleController(IScheduleStore scheduleStore, ILogger<Sch
         {
             ScheduleReplaceResult.Replaced r => Ok(ToDto(r.Snapshot)),
             ScheduleReplaceResult.ValidationFailed failed => BadRequest(ValidationProblem(failed.Errors)),
+            ScheduleReplaceResult.VersionConflict => Conflict(StaleWeekProblem()),
             _ => StatusCode(StatusCodes.Status500InternalServerError),
         };
     }
@@ -99,7 +100,7 @@ public sealed class ScheduleController(IScheduleStore scheduleStore, ILogger<Sch
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     static ScheduleWeekDto ToDto(ScheduleWeekSnapshot week) =>
-        new(week.Segments.Select(ToDto).ToArray());
+        new(week.Segments.Select(ToDto).ToArray(), ScheduleWeekVersion.Compute(week.Segments));
 
     static ScheduleSegmentDto ToDto(ScheduleSegment segment) => new(
         segment.Id, (int)segment.Day, segment.StartMinute, segment.EndMinute,
@@ -152,4 +153,20 @@ public sealed class ScheduleController(IScheduleStore scheduleStore, ILogger<Sch
         Title  = "Schedule replace conflicted with a concurrent change.",
         Detail = "A persona referenced by this submission changed while it was being saved. Reload the schedule and try again.",
     };
+
+    // gh-#255 — the stale-editor guard's own 409, distinguishable from the persona-race 409 above by
+    // the "conflict" extension: the client keeps the operator's unsaved paint on screen and tells
+    // them to reload, rather than retrying a submission that would wipe someone else's saved week.
+    static ProblemDetails StaleWeekProblem()
+    {
+        var problem = new ProblemDetails
+        {
+            Status = StatusCodes.Status409Conflict,
+            Title  = "The schedule changed since this editor loaded it.",
+            Detail = "Another tab or session saved a different week after this page loaded. "
+                   + "Reload to see the latest schedule before saving — saving now would overwrite it.",
+        };
+        problem.Extensions["conflict"] = "staleWeek";
+        return problem;
+    }
 }

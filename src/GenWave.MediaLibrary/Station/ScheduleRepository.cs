@@ -56,7 +56,8 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSt
         return new ScheduleWeekSnapshot(segments);
     }
 
-    public async Task<ScheduleReplaceResult> ReplaceWeekAsync(IReadOnlyList<ScheduleSegment> week, CancellationToken ct)
+    public async Task<ScheduleReplaceResult> ReplaceWeekAsync(
+        IReadOnlyList<ScheduleSegment> week, string? expectedVersion, CancellationToken ct)
     {
         var errors = await ValidateAsync(week, ct);
         if (errors.Count > 0)
@@ -64,6 +65,21 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSt
 
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
+
+        // Staleness guard (gh-#255): compare the stored week's content fingerprint against what the
+        // caller loaded, INSIDE this same transaction — a mismatch means another writer replaced the
+        // week since then, and honoring this full-replace would silently destroy that writer's work
+        // (observed live: demo Loki 2026-07-28, segmentCount 54 → 48 with no error anywhere). Read
+        // committed leaves a narrow same-instant race two concurrent replaces can still thread; the
+        // guard exists for the real-world case — a stale tab/session minutes-to-hours old — not as a
+        // serializable-isolation substitute.
+        if (expectedVersion is not null)
+        {
+            var stored = await LoadSegmentsAsync(conn, tx, ct);
+            var storedVersion = ScheduleWeekVersion.Compute(stored);
+            if (storedVersion != expectedVersion)
+                return new ScheduleReplaceResult.VersionConflict(storedVersion);
+        }
 
         await conn.ExecuteAsync(new CommandDefinition(
             "delete from station.segment_schedule", transaction: tx, cancellationToken: ct));
