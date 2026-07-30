@@ -61,6 +61,9 @@ jobs:
   # Images publish only from main pushes; PRs prove they still build via the jobs above plus
   # the docker build here being cheap to re-verify locally. Tagged `home-*` per the runbook —
   # the Business edition's images will carry their own prefix elsewhere.
+  # gh-#274: `home-latest` belongs to release.yml alone — it must always be the multi-arch
+  # index a release publishes. This job pushes only `home-<sha>`, an amd64-only dev artifact;
+  # tagging home-latest here would clobber the index back to single-arch on every merge.
   images:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [build-test, admin-ui]
@@ -82,10 +85,8 @@ jobs:
             --label org.opencontainers.image.description="GenWave Home control-plane API" \
             --label org.opencontainers.image.licenses=AGPL-3.0-only \
             -t ghcr.io/genwave-org/genwave:home-${{ github.sha }} \
-            -t ghcr.io/genwave-org/genwave:home-latest \
             .
           docker push ghcr.io/genwave-org/genwave:home-${{ github.sha }}
-          docker push ghcr.io/genwave-org/genwave:home-latest
       - name: Build + push Icecast image
         run: |
           docker build \
@@ -93,10 +94,8 @@ jobs:
             --label org.opencontainers.image.description="GenWave Home Icecast fan-out" \
             --label org.opencontainers.image.licenses=AGPL-3.0-only \
             -t ghcr.io/genwave-org/genwave-icecast:home-${{ github.sha }} \
-            -t ghcr.io/genwave-org/genwave-icecast:home-latest \
             ./icecast
           docker push ghcr.io/genwave-org/genwave-icecast:home-${{ github.sha }}
-          docker push ghcr.io/genwave-org/genwave-icecast:home-latest
       # gh-#93: the admin UI image must publish alongside api/icecast or a --pinned demo box
       # silently runs whatever it built at first deploy. The admin-ui job (a `needs` of this one)
       # has already type-checked/tested the same tree; this build bakes the default
@@ -108,10 +107,8 @@ jobs:
             --label org.opencontainers.image.description="GenWave Home admin UI" \
             --label org.opencontainers.image.licenses=AGPL-3.0-only \
             -t ghcr.io/genwave-org/genwave-admin-ui:home-${{ github.sha }} \
-            -t ghcr.io/genwave-org/genwave-admin-ui:home-latest \
             ./admin-ui
           docker push ghcr.io/genwave-org/genwave-admin-ui:home-${{ github.sha }}
-          docker push ghcr.io/genwave-org/genwave-admin-ui:home-latest
       # genwave.liq is bind-mounted at run time, not baked in — this image is the Liquidsoap
       # version pin + entrypoint.sh (see release.yml's matching step).
       - name: Build + push Engine image
@@ -121,7 +118,5 @@ jobs:
             --label org.opencontainers.image.description="GenWave Home Liquidsoap engine" \
             --label org.opencontainers.image.licenses=AGPL-3.0-only \
             -t ghcr.io/genwave-org/genwave-engine:home-${{ github.sha }} \
-            -t ghcr.io/genwave-org/genwave-engine:home-latest \
             ./engine
           docker push ghcr.io/genwave-org/genwave-engine:home-${{ github.sha }}
-          docker push ghcr.io/genwave-org/genwave-engine:home-latest
