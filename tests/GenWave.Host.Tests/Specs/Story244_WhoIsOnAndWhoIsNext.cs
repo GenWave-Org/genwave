@@ -67,13 +67,15 @@ public static class FeatureWhoIsOnAndWhoIsNext
 
     static readonly DateTimeOffset TrackStartedAt = Now.AddMinutes(-5);
 
-    static NowPlayingSnapshot TrackSnapshot() =>
+    // DjName (gh-#259) is the airing item's own plan-time attribution stamp — the source of the
+    // public dj field since attribution moved off the schedule's live answer onto the item itself.
+    static NowPlayingSnapshot TrackSnapshot(string? djName = null) =>
         new(MediaId: "42", Title: "Night Drive", Artist: "The Waveforms", GainDb: -2.5,
-            StartedAt: TrackStartedAt, DurationMs: 214_000, IsDrain: false);
+            StartedAt: TrackStartedAt, DurationMs: 214_000, IsDrain: false, DjName: djName);
 
-    static NowPlayingSnapshot PatterSnapshot() =>
+    static NowPlayingSnapshot PatterSnapshot(string? djName = null) =>
         new(MediaId: "tts:abc123", Title: "Generated patter text — operator content", Artist: null,
-            GainDb: 0, StartedAt: TrackStartedAt, DurationMs: 12_345, IsDrain: false);
+            GainDb: 0, StartedAt: TrackStartedAt, DurationMs: 12_345, IsDrain: false, DjName: djName);
 
     static WebApplicationFactory<Program> BuildFactory(
         IReadOnlyList<ScheduleSegment> segments, out FakeScheduleStore store, out FakeActivePersonaAccessor accessor,
@@ -119,10 +121,12 @@ public static class FeatureWhoIsOnAndWhoIsNext
         [Fact]
         public async Task TrackStateCarriesTheOnAirDisplayName()
         {
+            // gh-#259: the name comes from the airing item's own stamp, not the schedule row —
+            // the staffed grid is still seeded to prove it isn't what supplies the value.
             await using var factory = BuildFactory([StaffedAllDay(1)], out _, out var accessor);
             accessor.Names[1] = "Nova";
 
-            var body = await FetchNowPlayingAsync(factory, TrackSnapshot());
+            var body = await FetchNowPlayingAsync(factory, TrackSnapshot(djName: "Nova"));
 
             Assert.Equal("Nova", body.GetProperty("dj").GetString());
         }
@@ -133,9 +137,51 @@ public static class FeatureWhoIsOnAndWhoIsNext
             await using var factory = BuildFactory([StaffedAllDay(1)], out _, out var accessor);
             accessor.Names[1] = "Nova";
 
-            var body = await FetchNowPlayingAsync(factory, PatterSnapshot());
+            var body = await FetchNowPlayingAsync(factory, PatterSnapshot(djName: "Nova"));
 
             Assert.Equal("Nova", body.GetProperty("dj").GetString());
+        }
+    }
+
+    public sealed class ScenarioAttributionFollowsTheAiringItem
+    {
+        // gh-#259 — the drain window: the schedule has already flipped to the incoming persona, but
+        // the engine queue is still draining the PREVIOUS show's rendered items. The displayed dj
+        // must name the voice actually on air (the item's stamp), flipping only when the new
+        // schedule's items themselves reach air.
+
+        static ScheduleSegment[] EchoOnShiftNow() =>
+        [
+            new(Id: 1, Day: DayOfWeek.Wednesday, StartMinute: 0, EndMinute: 600,
+                PersonaId: 1, Genres: null, EnergyMin: null, EnergyMax: null), // 00:00–10:00 Nova — just ended
+            new(Id: 2, Day: DayOfWeek.Wednesday, StartMinute: 600, EndMinute: Midnight,
+                PersonaId: 2, Genres: null, EnergyMin: null, EnergyMax: null), // 10:00–24:00 Echo — on the grid NOW
+        ];
+
+        [Fact]
+        public async Task AQueuedPatterOfThePreviousShowKeepsItsOwnDjWhileDraining()
+        {
+            await using var factory = BuildFactory(EchoOnShiftNow(), out _, out var accessor);
+            accessor.Names[1] = "Nova";
+            accessor.Names[2] = "Echo";
+
+            // Nova's patter — planned before the boundary — is what is actually airing.
+            var body = await FetchNowPlayingAsync(factory, PatterSnapshot(djName: "Nova"));
+
+            Assert.Equal("Nova", body.GetProperty("dj").GetString());
+        }
+
+        [Fact]
+        public async Task AnItemStampedWithNoDjReportsNullEvenOnAStaffedGrid()
+        {
+            // An engine-initiated play (safe rotation) or a pre-schedule leftover carries no stamp:
+            // dj stays an honest null rather than borrowing the schedule's answer.
+            await using var factory = BuildFactory(EchoOnShiftNow(), out _, out var accessor);
+            accessor.Names[2] = "Echo";
+
+            var body = await FetchNowPlayingAsync(factory, TrackSnapshot(djName: null));
+
+            Assert.Equal(JsonValueKind.Null, body.GetProperty("dj").ValueKind);
         }
     }
 
