@@ -30,8 +30,10 @@ const STALL_CONFIRM_MS = 2000;
 
 // The station's own art (also the artwork endpoint's no-oracle fallback, SPEC F88.3) — the
 // "loading" state for a track's real cover art and the terminal state for everything else
-// (DJ break, a track with no embedded art, standby).
-const STATION_ICON_PATH = "/spectator/favicon.ico";
+// (DJ break, a track with no embedded art, standby). The card-sized 256px PNG, NOT
+// /spectator/favicon.ico: the favicon's largest frame is 32px, and upscaling it to the 72px
+// art slot is exactly the fuzzy DJ-break art of gh-#258.
+const STATION_ICON_PATH = "/spectator/logo.png";
 
 /** @type {{kind: "standby"} | {kind: "track"|"patter", title?: string, artist?: string, startedAt: Date, durationMs: number|null, dj?: string|null, upNext?: {startsAt: string, dj: string|null}|null, artworkUrl?: string|null}} */
 let nowPlaying = { kind: "standby" };
