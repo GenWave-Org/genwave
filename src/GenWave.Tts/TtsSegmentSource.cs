@@ -177,9 +177,15 @@ public sealed class TtsSegmentSource(
             // Render succeeded (cache hit or fresh synthesis) — publish before returning (gitea-#246).
             events.Publish(new SegmentGenerated($"tts:{hash}", request.Kind.ToString(), request.Voice));
 
+            // DjName (gh-#259) carries the SPEAKER's persona name for Now Playing attribution —
+            // request.PersonaName verbatim, no StationName fallback (unlike the Artist credit line
+            // above): a station-voiced segment has no DJ of its own, and the Orchestrator stamps the
+            // unit's show persona onto StationId segments itself. Per-airing state, same as Artist —
+            // never part of the cache key.
             return new MediaItem(
                 $"tts:{hash}", path, request.StationName, loudness,
-                Artist: request.PersonaName ?? request.StationName, Cue: cuePoints, DurationMs: durationMs);
+                Artist: request.PersonaName ?? request.StationName, Cue: cuePoints, DurationMs: durationMs,
+                DjName: request.PersonaName);
         }
         catch (OperationCanceledException)
         {

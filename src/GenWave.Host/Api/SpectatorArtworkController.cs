@@ -48,10 +48,13 @@ public sealed class SpectatorArtworkController(
 
     const string JpegContentType = "image/jpeg";
 
-    /// <summary>The bytes every fallback path serves (SPEC F88.3) — the same file
-    /// <see cref="SpectatorPageEndpoints"/> already serves at <c>/spectator/favicon.ico</c>, so
-    /// the station's one visual identity is reused rather than duplicated.</summary>
-    const string StationIconContentType = "image/x-icon";
+    /// <summary>The bytes every fallback path serves (SPEC F88.3) — the same card-sized station
+    /// mark <see cref="SpectatorPageEndpoints"/> already serves at <c>/spectator/logo.png</c>, so
+    /// the station's one visual identity is reused rather than duplicated. logo.png (256px, from
+    /// the operator's GenWave-logo.png), NOT the 32px favicon.ico this fallback served before
+    /// gh-#258 — art slots render at 72px CSS (2-3x that in device pixels), where the upscaled
+    /// favicon was visibly fuzzy next to real ≤500px cover extractions.</summary>
+    const string StationIconContentType = "image/png";
 
     [HttpGet("artwork/{token}")]
     [HttpHead("artwork/{token}")]   // gh-#160: HEAD answers with GET's exact status/headers, body suppressed by the server
@@ -70,7 +73,7 @@ public sealed class SpectatorArtworkController(
 
     IActionResult ServeStationIcon()
     {
-        var iconPath = Path.Combine(env.ContentRootPath, "wwwroot", "spectator", "favicon.ico");
+        var iconPath = Path.Combine(env.ContentRootPath, "wwwroot", "spectator", "logo.png");
         return ServeImmutable(iconPath, StationIconContentType);
     }
 

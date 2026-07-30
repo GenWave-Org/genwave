@@ -39,4 +39,15 @@ namespace GenWave.Core.Domain;
 /// copywriter consumer (T91) can color the lead-in with a generic "got this one in from the request
 /// line" acknowledgment — never the wish text or parsed predicates (F87.7's disclosure law).
 /// </param>
-public sealed record MediaItem(string MediaId, string Locator, string Title, Loudness Loudness, string? Artist = null, CuePoints? Cue = null, double? IntroEnergy = null, double? OutroEnergy = null, string? Album = null, string? Genre = null, int? Year = null, int? DurationMs = null, PersonaPickDiagnostics? PersonaPick = null, bool RequestFulfilled = false);
+/// <param name="DjName">
+/// gh-#259 — the display name of the DJ persona this item airs UNDER, stamped at plan/render time
+/// and carried with the item through the engine queue, so Now Playing attribution follows the item
+/// actually on air rather than the schedule's live answer (which flips at the boundary while
+/// already-queued items are still draining). For a TTS segment this is the persona whose voice
+/// reads it (<c>SegmentRequest.PersonaName</c> — the outgoing/incoming persona for a handoff
+/// piece); for a music track, the persona whose show it was planned in; for a station ID, the
+/// unit's show persona (the credit stays the station's — <see cref="Artist"/> is a separate field,
+/// gh-#96 untouched). <see langword="null"/> = no DJ (gap/music-only segment, or a pre-gh-#259
+/// caller that never stamps it).
+/// </param>
+public sealed record MediaItem(string MediaId, string Locator, string Title, Loudness Loudness, string? Artist = null, CuePoints? Cue = null, double? IntroEnergy = null, double? OutroEnergy = null, string? Album = null, string? Genre = null, int? Year = null, int? DurationMs = null, PersonaPickDiagnostics? PersonaPick = null, bool RequestFulfilled = false, string? DjName = null);

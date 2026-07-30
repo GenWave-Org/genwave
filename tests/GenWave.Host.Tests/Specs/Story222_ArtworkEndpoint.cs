@@ -164,8 +164,10 @@ public static class FeatureArtworkEndpoint
     const string ArtlessToken = "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5";
     const string UnknownToken = "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6";
 
+    // The station mark every no-oracle fallback serves — /spectator/logo.png since gh-#258 (the
+    // card-sized 256px PNG; the 32px favicon.ico it replaced upscaled fuzzily in the art slot).
     static async Task<byte[]> StationIconBytesAsync(HttpClient client) =>
-        await client.GetByteArrayAsync("/spectator/favicon.ico");
+        await client.GetByteArrayAsync("/spectator/logo.png");
 
     // ── HAPPY PATH ────────────────────────────────────────────────────────
 

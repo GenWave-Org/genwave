@@ -150,7 +150,8 @@ sealed class PlayoutFeederService : IHostedService
             StartedAt: onAir.StartedAt,
             DurationMs: onAir.DurationMs,
             IsDrain: !onAir.IsReal,
-            ArtworkUrl: onAir.ArtworkUrl);
+            ArtworkUrl: onAir.ArtworkUrl,
+            DjName: onAir.DjName);
 
         nowPlaying.Update(stationId, snapshot);
     }
