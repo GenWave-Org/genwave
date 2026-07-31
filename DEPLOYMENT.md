@@ -213,6 +213,47 @@ Combine with `--with` to also activate compose profiles (e.g. `logging`, `tunnel
 same launch: `./launch.sh --pinned --with logging,tunnel` merges them into whatever
 `COMPOSE_PROFILES` is already set (env or `.env`).
 
+### After a launch, bare `docker compose` matches it (gh-#309)
+
+`--pinned` runs against `compose.yaml` **+** `compose.demo.yaml`, but a bare
+`docker compose down` in this directory loads only `compose.yaml` — so every service that
+exists solely in an overlay (`caddy`, `ollama`, `ollama-init`) was invisible to it,
+survived the teardown, and was left running.
+
+`launch.sh` now records the file stack it used as `COMPOSE_FILE` in `.env` after a
+successful `up`. Compose reads that from the project directory automatically, so
+`down`/`ps`/`logs` all target what was actually launched, with no flags to remember:
+
+```bash
+./launch.sh --pinned          # writes e.g. COMPOSE_FILE=compose.yaml:compose.demo.yaml
+docker compose down           # now tears down caddy + ollama too
+```
+
+Explicit `-f` flags still outrank the variable, so the fully-spelled commands elsewhere in
+this doc behave exactly as written.
+
+⚠️ **Profiles are a separate axis.** `COMPOSE_PROFILES` is deliberately *not* persisted —
+`--with` is per-launch by design — so a bare `down` can still leave profile-gated
+containers (`admin_ui`, `cloudflared`, `alloy`) behind. Use `--remove-orphans`, or set a
+standing `COMPOSE_PROFILES` in `.env` (which `launch.sh` already reads as the base for
+`--with`).
+
+### Low-memory topology: `--piper-only` (gh-#242, gh-#310)
+
+For a 4GB-class box (Raspberry Pi, small VPS), `--piper-only` merges
+`compose.piper-only.yaml` last onto whichever file set the flow uses:
+
+```bash
+./launch.sh --pinned --piper-only
+```
+
+It removes **kokoro** (its ~1.2GiB resident baseline is the single biggest tenant) and,
+as of gh-#310, the **`ollama` + `ollama-init` pair** as well — the demo overlay held
+`llama3.2:3b` permanently resident behind a fence larger than a 4GB box's entire RAM.
+Every TTS render routes to the piper sidecar; the LLM path degrades to templated patter,
+which is exactly what [HARDWARE.md](HARDWARE.md)'s topology (a) describes. See that file
+for the ranked hardware topologies.
+
 **Temporary admin access** (settings, personas, catalog curation on the public box):
 
 1. Edit `compose.demo.yaml`'s `api` env: `Admin__Enabled: "true"`.

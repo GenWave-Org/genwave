@@ -50,6 +50,8 @@ that fails part-way rolls the stack back down rather than leaving half of it run
 
 Eight services start: `db`, `icecast`, `engine`, `api`, `kokoro` (TTS synthesizer), `piper` (CPU-only fallback TTS), `admin_ui` (operator console), and `dockerproxy` (a read-only, allowlisted docker-stats sidecar feeding the admin Health page — internal network only, no ports). Two optional services ride compose profiles: a Cloudflare tunnel with health/metrics observability (`tunnel`) and a Grafana Alloy log shipper (`logging`) — `./launch.sh --with logging,tunnel` activates them; see [DEPLOYMENT.md](DEPLOYMENT.md) and [`observability/`](observability/).
 
+`launch.sh` has three other presets worth knowing: `--pinned` (run published GHCR images instead of building — the appliance/upgrade path), `--piper-only` (drop `kokoro` *and* the `ollama` pair for a 4GB-class box, routing all speech to the piper sidecar), and `--dry-run` (print the exact command plan, touch nothing). After a successful launch the file stack is recorded as `COMPOSE_FILE` in `.env`, so a plain `docker compose down`/`ps`/`logs` targets the same stack you launched.
+
 - **Stream:** `http://localhost:8000/stream` — open it in any audio player
 - **Admin UI:** `http://localhost:3000` — log in with the password set in `ADMIN_PASSWORD`
 - **API:** `http://localhost:8080` — anonymous hot path (`GET /media/random`, `GET /media/{id}`, `GET /health`) plus the cookie-auth admin surface under `/api/*`
