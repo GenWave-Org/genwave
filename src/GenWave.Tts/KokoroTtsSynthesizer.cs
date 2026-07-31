@@ -18,11 +18,14 @@ public sealed class KokoroTtsSynthesizer(HttpClient http, IOptionsMonitor<TtsOpt
     {
         var cfg = optionsMonitor.CurrentValue;
 
-        // Engine-aware sentence pauses (gh-#116): applied HERE, at Kokoro request build — below
-        // the NormalizingTtsSynthesizer chokepoint, so normalized text and every upstream cache
-        // key stay byte-identical — and never on the Piper path, which would speak the tag aloud.
-        // See KokoroPauseMarkup for the full contract.
-        var speech = KokoroPauseMarkup.InsertSentencePauses(text, cfg.SentencePauseSeconds);
+        // Engine-aware speech markup (gh-#116 pauses + SPEC F97 pronunciation, composed by
+        // KokoroSpeechMarkup): applied HERE, at Kokoro request build — below the
+        // NormalizingTtsSynthesizer chokepoint, so normalized text and every upstream cache key
+        // stay byte-identical — and never on the Piper path, which would speak either markup form
+        // aloud. No caller can supply a resolved PronunciationRuleSet yet — that wiring is T137
+        // (resolving the rule set where the persona is known) — so Empty is passed here, which
+        // keeps this path byte-identical to the pre-T133 pause-only behaviour until T137 lands.
+        var speech = KokoroSpeechMarkup.Render(text, PronunciationRuleSet.Empty, cfg.SentencePauseSeconds);
         var body = new { input = speech, voice, response_format = cfg.Format };
         using var content = new StringContent(
             JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");

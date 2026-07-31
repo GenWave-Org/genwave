@@ -7,9 +7,10 @@ namespace GenWave.Tts;
 /// rule's <see cref="SpeechCorrection.From"/> is <see cref="Regex.Escape"/>d before compilation —
 /// operator text becomes a literal match, never an arbitrary pattern — with word-boundary anchors
 /// added only where the boundary falls on a word-character edge (so a <c>From</c> that starts or
-/// ends with a non-word character is not force-anchored there). Matching is case-insensitive and
-/// every compiled rule carries a 250ms match timeout so a pathological rule cannot hang the render
-/// path; a rule that times out is skipped rather than allowed to fault the whole chokepoint.
+/// ends with a non-word character is not force-anchored there), via the shared
+/// <see cref="LiteralRegexPosture"/> helper. Matching is case-insensitive and every compiled rule
+/// carries a bounded match timeout so a pathological rule cannot hang the render path; a rule that
+/// times out is skipped rather than allowed to fault the whole chokepoint.
 ///
 /// <para>
 /// Context conditions (gh-#161): a rule carrying <see cref="SpeechCorrection.WhenPrecededBy"/> /
@@ -29,8 +30,6 @@ namespace GenWave.Tts;
 /// </summary>
 public sealed class SpeechCorrectionSet
 {
-    private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(250);
-
     // Gap allowed between a context word and the match: whitespace/punctuation, but never a
     // sentence terminator — "followed by down" must not reach across "wind. Down the road".
     private const string ContextGap = @"[^\w.!?]+";
@@ -108,7 +107,7 @@ public sealed class SpeechCorrectionSet
     /// </summary>
     internal static SpeechCorrectionSet FromRawPattern(string pattern, string replacement)
     {
-        var regex = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, MatchTimeout);
+        var regex = LiteralRegexPosture.Compile(pattern);
         return new SpeechCorrectionSet([(regex, new SpeechCorrection(pattern, replacement))]);
     }
 
@@ -146,13 +145,13 @@ public sealed class SpeechCorrectionSet
     private static Regex CompilePattern(SpeechCorrection correction)
     {
         var escaped = Regex.Escape(correction.From);
-        var leadingBoundary = StartsWithWordChar(correction.From) ? @"\b" : string.Empty;
-        var trailingBoundary = EndsWithWordChar(correction.From) ? @"\b" : string.Empty;
+        var leadingBoundary = LiteralRegexPosture.StartsWithWordChar(correction.From) ? @"\b" : string.Empty;
+        var trailingBoundary = LiteralRegexPosture.EndsWithWordChar(correction.From) ? @"\b" : string.Empty;
         var lookbehind = BuildContextAssertion(correction.WhenPrecededBy, isLookbehind: true);
         var lookahead = BuildContextAssertion(correction.WhenFollowedBy, isLookbehind: false);
         var pattern = $"{lookbehind}{leadingBoundary}{escaped}{trailingBoundary}{lookahead}";
 
-        return new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, MatchTimeout);
+        return LiteralRegexPosture.Compile(pattern);
     }
 
     /// <summary>
@@ -175,8 +174,8 @@ public sealed class SpeechCorrectionSet
 
     private static string CompileContextWord(string word)
     {
-        var leadingBoundary = StartsWithWordChar(word) ? @"\b" : string.Empty;
-        var trailingBoundary = EndsWithWordChar(word) ? @"\b" : string.Empty;
+        var leadingBoundary = LiteralRegexPosture.StartsWithWordChar(word) ? @"\b" : string.Empty;
+        var trailingBoundary = LiteralRegexPosture.EndsWithWordChar(word) ? @"\b" : string.Empty;
         return $"{leadingBoundary}{Regex.Escape(word)}{trailingBoundary}";
     }
 
@@ -200,10 +199,4 @@ public sealed class SpeechCorrectionSet
 
     private static string CanonicalContext(string? contextWords) =>
         string.Join('|', ParseContextAlternatives(contextWords));
-
-    private static bool StartsWithWordChar(string value) => value.Length > 0 && IsWordChar(value[0]);
-
-    private static bool EndsWithWordChar(string value) => value.Length > 0 && IsWordChar(value[^1]);
-
-    private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
 }
