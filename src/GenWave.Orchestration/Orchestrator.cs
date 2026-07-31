@@ -234,6 +234,18 @@ public sealed class Orchestrator(
     /// live knob: gh-#300's own fit logging is what makes promoting it to one an argument from
     /// field data rather than taste, and that data does not exist yet.
     /// </para>
+    ///
+    /// <para>
+    /// <b>Interim, and known to be.</b> This floor is the bottom rung of three, and it only ever
+    /// gets reached because an EARLIER unit overshot — it limits the damage rather than repairing
+    /// it. The rung above (gh-#320, the straddle handoff) is the real answer for the band where
+    /// room is positive but no track fits: sign off into a track that crosses the hour and sign on
+    /// after it, which is what a live DJ does when the rotation traps them. Until that exists, this
+    /// floor holds the middle band at "up to 90s early" instead of "up to ~2 minutes late", and the
+    /// trade above 90s is still lateness — the honest bound, not a fix. Once gh-#320 lands, the
+    /// straddle owns that band and this floor should collapse toward zero: bare-ceremony is right
+    /// only once the boundary is genuinely unreachable.
+    /// </para>
     /// </summary>
     static readonly TimeSpan MusicUnitFloor = TimeSpan.FromSeconds(90);
 
