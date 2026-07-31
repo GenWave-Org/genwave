@@ -38,37 +38,151 @@ public static class FeatureHeteronymsSaidRight
 
     public static class ScenarioThePatternWordSplitDisambiguates
     {
-        [Fact(Skip = "Pending T135 — see docs/PLAN.md")]
+        // Two rules, same word, different phonemes — the heteronym case (F97.2). The markup
+        // renderer (KokoroSpeechMarkup.Render) doesn't exist yet — T133 — so these specs assert
+        // the equivalent fact one layer down, at the matcher: it locates the right occurrence of
+        // "wind" with the right phonemes, which is exactly what T133's renderer will wrap in
+        // [word](/ipa/).
+        const string VerbIpa = "/wˈaɪnd/";
+        const string NounIpa = "/wˈɪnd/";
+        static readonly PronunciationRule WindDownRule = new("wind down", "wind", VerbIpa);
+        static readonly PronunciationRule TheWindRule = new("the wind", "wind", NounIpa);
+        static readonly PronunciationRuleSet BothWindRules =
+            PronunciationRuleSet.Create([WindDownRule, TheWindRule]);
+        const string Text = "Wind down and feel the wind.";
+
+        [Fact]
         public static void A_single_word_pattern_defaults_its_word_to_itself()
         {
-            // var rule = PronunciationRule.Parse(pattern: "MacLeod", word: null, ipa: "/məˈklaʊd/");
-            // Assert.Equal("MacLeod", rule.Word);
-            Assert.Fail("pending T135");
+            var rule = PronunciationRule.Parse(pattern: "MacLeod", word: null, ipa: "/məˈklaʊd/");
+
+            Assert.Equal("MacLeod", rule.Word);
         }
 
-        [Fact(Skip = "Pending T135 — see docs/PLAN.md")]
+        [Fact]
         public static void The_verb_reading_is_marked_in_its_own_context()
         {
-            // Two rules, same word, different phonemes — the heteronym case (F97.2).
-            // var speech = KokoroSpeechMarkup.Render("Wind down and feel the wind.", BothWindRules, 0);
-            // Assert.Contains("[Wind](/wˈaɪnd/) down", speech, StringComparison.Ordinal);
-            Assert.Fail("pending T135");
+            var matches = BothWindRules.Match(Text);
+
+            Assert.Contains(
+                matches, m => Text.Substring(m.Index, m.Length) == "Wind" && m.Rule.Ipa == VerbIpa);
         }
 
-        [Fact(Skip = "Pending T135 — see docs/PLAN.md")]
+        [Fact]
         public static void The_noun_reading_is_marked_in_its_own_context()
         {
-            // Assert.Contains("the [wind](/wˈɪnd/)", speech, StringComparison.Ordinal);
-            Assert.Fail("pending T135");
+            var matches = BothWindRules.Match(Text);
+
+            Assert.Contains(
+                matches, m => Text.Substring(m.Index, m.Length) == "wind" && m.Rule.Ipa == NounIpa);
         }
 
-        [Fact(Skip = "Pending T135 — see docs/PLAN.md")]
-        public static void No_part_of_speech_inference_happens_anywhere()
+        [Fact]
+        public static void An_unruled_reading_of_a_ruled_word_is_never_guessed_at()
         {
-            // An unruled occurrence is never guessed at — matching is purely by pattern.
-            // var speech = KokoroSpeechMarkup.Render("The wind blew.", rules: [], pauseSeconds: 0);
-            // Assert.DoesNotContain("[", speech, StringComparison.Ordinal);
-            Assert.Fail("pending T135");
+            // Matching is purely by pattern (F97.2): a set carrying only the noun-context rule
+            // must never infer the verb reading for the "Wind down" occurrence just because the
+            // word is spelled the same — GenWave never infers part of speech. Using
+            // PronunciationRuleSet.Empty here would prove nothing (an empty set finds nothing "by
+            // construction", per its own doc) — this asserts the real behaviour of a non-empty
+            // set against text holding both readings.
+            var matches = PronunciationRuleSet.Create([TheWindRule]).Match(Text);
+
+            var match = Assert.Single(matches);
+            Assert.Equal("wind", Text.Substring(match.Index, match.Length));
+        }
+    }
+
+    public static class ScenarioOverlappingRulesResolveByPrecedence
+    {
+        // Overlapping rules on the same span (F97.3): "wind down"/VERB is authored before the
+        // general "wind"/GENERAL fallback. The earlier rule wins the whole overlapping span
+        // outright — the later rule's overlapping occurrence never survives to be emitted
+        // alongside it. Emitting both is the one option that cannot work: T133's renderer would
+        // have to double-annotate one span. This mirrors SpeechCorrectionSet's compose-by-order
+        // behaviour even though this type never rewrites text.
+        const string VerbIpa = "/wˈaɪnd/";
+        const string GeneralIpa = "/wˈɪnd/";
+        static readonly PronunciationRule WindDownRule = new("wind down", "wind", VerbIpa);
+        static readonly PronunciationRule GeneralWindRule = new("wind", "wind", GeneralIpa);
+        static readonly PronunciationRuleSet Rules =
+            PronunciationRuleSet.Create([WindDownRule, GeneralWindRule]);
+        const string Text = "Wind down and feel the wind.";
+
+        [Fact]
+        public static void The_earlier_specific_rule_wins_the_overlapping_span()
+        {
+            var matches = Rules.Match(Text);
+
+            var atWindDown = Assert.Single(matches, m => m.Index == 0);
+            Assert.Equal(VerbIpa, atWindDown.Rule.Ipa);
+        }
+
+        [Fact]
+        public static void The_later_general_rule_does_not_also_claim_that_same_span()
+        {
+            var matches = Rules.Match(Text);
+
+            Assert.DoesNotContain(matches, m => m.Index == 0 && m.Rule.Ipa == GeneralIpa);
+        }
+
+        [Fact]
+        public static void The_general_rule_still_fires_where_no_earlier_rule_claimed_the_span()
+        {
+            var matches = Rules.Match(Text);
+
+            Assert.Contains(
+                matches, m => Text.Substring(m.Index, m.Length) == "wind" && m.Rule.Ipa == GeneralIpa);
+        }
+
+        [Fact]
+        public static void Matches_come_back_ordered_left_to_right_regardless_of_rule_order()
+        {
+            var matches = Rules.Match(Text);
+
+            Assert.Equal([0, Text.LastIndexOf("wind", StringComparison.OrdinalIgnoreCase)],
+                matches.Select(m => m.Index));
+        }
+    }
+
+    public static class ScenarioCreateCompilesWhatItCan
+    {
+        [Fact]
+        public static void A_word_omitted_from_deserialized_data_still_defaults_to_the_pattern()
+        {
+            // Create is the real ingest path (Parse's only caller today is a test); a rule
+            // shaped like deserialized {"Pattern":"MacLeod","Ipa":"..."} with no Word must not be
+            // silently dropped — F97.1's whole point is that MacLeod needs no surrounding context.
+            var rule = new PronunciationRule(Pattern: "MacLeod", Word: null!, Ipa: "/məˈklaʊd/");
+
+            var matches = PronunciationRuleSet.Create([rule]).Match("Here is MacLeod.");
+
+            var match = Assert.Single(matches);
+            Assert.Equal("MacLeod", "Here is MacLeod.".Substring(match.Index, match.Length));
+        }
+
+        [Fact]
+        public static void A_word_not_inside_its_own_pattern_is_dropped_from_matching()
+        {
+            var malformed = new PronunciationRule("wind down", "gust", "/xxx/");
+
+            var matches = PronunciationRuleSet.Create([malformed]).Match("Wind down now.");
+
+            Assert.Empty(matches);
+        }
+
+        [Fact]
+        public static void A_dropped_rule_is_still_visible_via_what_compiled()
+        {
+            // This set stays pure — no logging here (F68.6) — but a caller answering "did my
+            // rule compile?" (T142's rule-hit counters, T144's rules API) needs to see the gap
+            // rather than have it vanish with no observability at all (F97.5).
+            var good = new PronunciationRule("wind down", "wind", "/wˈaɪnd/");
+            var malformed = new PronunciationRule("wind down", "gust", "/xxx/");
+
+            var compiled = PronunciationRuleSet.Create([good, malformed]);
+
+            Assert.Equal([good], compiled.Rules);
         }
     }
 
@@ -132,12 +246,17 @@ public static class FeatureHeteronymsSaidRight
             Assert.Fail("pending T133");
         }
 
-        [Fact(Skip = "Pending T135 — see docs/PLAN.md")]
+        [Fact]
         public static void A_rule_matching_nothing_leaves_the_text_byte_identical()
         {
-            // var text = "Nothing here matches.";
-            // Assert.Equal(text, KokoroSpeechMarkup.Render(text, [WindRule], pauseSeconds: 0));
-            Assert.Fail("pending T135");
+            // KokoroSpeechMarkup.Render doesn't exist yet (T133); assert the matcher-level
+            // equivalent — a rule whose pattern isn't present reports no matches, so a renderer
+            // built on top of this has nothing to annotate and the text passes through untouched.
+            var rules = PronunciationRuleSet.Create([new PronunciationRule("wind", "wind", "/wˈɪnd/")]);
+
+            var matches = rules.Match("Nothing here matches.");
+
+            Assert.Empty(matches);
         }
     }
 }
