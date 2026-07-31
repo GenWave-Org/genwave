@@ -215,6 +215,28 @@ public sealed class Orchestrator(
     /// </summary>
     static readonly TimeSpan SignOffLeadTime = TimeSpan.FromSeconds(15);
 
+    /// <summary>
+    /// gh-#300 — below this much room left in front of a handoff boundary, no music unit is planned
+    /// at all: the ceremony itself becomes the unit.
+    ///
+    /// <para>
+    /// <b>Where the number comes from.</b> Planning a track of length L into D of remaining room
+    /// lands the ceremony <c>L - D</c> LATE; declining lands it <c>D</c> EARLY. Declining is
+    /// therefore the better trade exactly while <c>D &lt; L / 2</c>. With a typical unit around
+    /// three minutes that break-even sits at ninety seconds, and this is that number. Above it the
+    /// gh-#254 fit keeps its existing least-late behavior, which is still the right answer there.
+    /// </para>
+    ///
+    /// <para>
+    /// The 2:05 incident sat far below this line — the queued audio already ran PAST the boundary,
+    /// so <c>desired</c> was deeply negative and every candidate was hopeless. A judged constant in
+    /// the spirit of <see cref="ExpectedCrossfadeTrim"/> and <see cref="SignOffLeadTime"/>, not a
+    /// live knob: gh-#300's own fit logging is what makes promoting it to one an argument from
+    /// field data rather than taste, and that data does not exist yet.
+    /// </para>
+    /// </summary>
+    static readonly TimeSpan MusicUnitFloor = TimeSpan.FromSeconds(90);
+
     // Defaults (SPEC F81.2/F81.3): every pre-F81 test/module construction site keeps compiling and
     // behaving exactly as before — no envelope constraint, no persona layer — mirrors the
     // IStationEventSink? events = null → NoOpStationEventSink.Instance idiom used elsewhere in this
@@ -282,9 +304,34 @@ public sealed class Orchestrator(
         // either — so a live scope edit (SPEC F30) or rotation edit (F41.6) takes effect on the
         // very next pull with no process restart.
         var artistSeparation = rotationProvider.Current.ArtistSeparation;
+
+        // gh-#254's fit, built ONCE per unit and read twice: first by the gh-#300 decline check
+        // immediately below, then by the sampler it was originally written for. Null whenever no
+        // deferral sits strictly-future inside the F74.3 lookahead window — the common case, in
+        // which both readers degrade to exactly their pre-boundary-awareness behavior.
+        var pending = deferralQueue.PeekNextDue();
+        var untilDue = pending is null ? default : pending.Due - timeProvider.GetUtcNow();
+        var fit = pending is not null && untilDue > TimeSpan.Zero && untilDue <= boundaryBiasProvider.Current
+            ? BuildBoundaryFit(pending, untilDue, cadence, identity, unitDjName, ctx.QueuedAheadMs)
+            : null;
+
+        // gh-#300 — the last unit before a due ceremony IS the ceremony. When no music unit can fit
+        // in front of the boundary, plan the ceremony instead of a full track nobody has room for;
+        // a returned segment ends this pull with no music planned at all.
+        //
+        // This sits ABOVE rung -1 (SPEC F87.6's request fulfillment, consulted inside
+        // SelectMusicCandidateAsync), which is deliberate and safe: a declined unit plays no music,
+        // so there is no slot for a requested track either. Rung -1's "exactly once per pick"
+        // contract is about never CAS-stamping twice — a pick that never happens stamps nothing, so
+        // the pending request simply waits for the next unit with its row untouched.
+        if (fit is not null && ShouldDeclineFinalUnit(fit)
+            && await TryServeCeremonyOnlyUnitAsync(fit, unitDjName, cadence, identity, ct) is { } ceremony)
+        {
+            return ceremony;
+        }
+
         var candidate = await SelectMusicCandidateAsync(
-            scopeProvider.Current, orderedRecentIds, artistSeparation,
-            cadence, identity, unitDjName, ctx.QueuedAheadMs, ct);
+            scopeProvider.Current, orderedRecentIds, artistSeparation, fit, ct);
         if (candidate is null)
         {
             // F41.2: null now means a GENUINE drain — zero playable rows in scope, never merely
@@ -344,14 +391,22 @@ public sealed class Orchestrator(
 
     /// <summary>
     /// Picks the next music candidate — SPEC F41.1/F41.3 tiering is unchanged and still governs
-    /// which candidates are even eligible — and, when a pending deferral
-    /// (<see cref="SpeechDeferralQueue.PeekNextDue"/>) is due strictly in the future within
-    /// <see cref="boundaryBiasProvider"/>'s lookahead window (SPEC F74.3, STORY-198), softly biases
-    /// that pick toward whichever sampled candidate's end lands closest to the boundary — a full
-    /// duration FIT as of gh-#254, no longer a raw duration-vs-due comparison. See
-    /// <see cref="BuildBoundaryFit"/> for the accounting (queued-ahead drift, this unit's own
-    /// pre-music patter, crossfade trim, and the break's expected patter via the gh-#253 estimator)
-    /// and for how tolerance widens with the estimator's confidence tier.
+    /// which candidates are even eligible — and, when <paramref name="fit"/> is non-null (a pending
+    /// deferral is due strictly in the future within <see cref="boundaryBiasProvider"/>'s lookahead
+    /// window — SPEC F74.3, STORY-198), softly biases that pick toward whichever sampled candidate's
+    /// end lands closest to the boundary — a full duration FIT as of gh-#254, no longer a raw
+    /// duration-vs-due comparison. See <see cref="BuildBoundaryFit"/> for the accounting
+    /// (queued-ahead drift, this unit's own pre-music patter, crossfade trim, and the break's
+    /// expected patter via the gh-#253 estimator) and for how tolerance widens with the estimator's
+    /// confidence tier.
+    ///
+    /// <para>
+    /// The peek and the fit build itself moved UP to <see cref="GetNextAsync"/> in gh-#300, which
+    /// needs the very same fit one decision earlier — to ask whether a music unit belongs in front
+    /// of the boundary at all (<see cref="ShouldDeclineFinalUnit"/>). One fit per unit, built once,
+    /// read twice; this method's four ex-parameters (cadence, identity, unit DJ name, queued-ahead)
+    /// existed only to feed that build and went with it.
+    /// </para>
     ///
     /// <para>
     /// <b>Degenerate-pick guard (gh-#254):</b> landing within the fit's tolerance is a WIN, not a
@@ -413,29 +468,25 @@ public sealed class Orchestrator(
         LibraryScope scope,
         IReadOnlyList<string> orderedRecentIds,
         int artistSeparation,
-        CadenceConfig cadence,
-        StationIdentity identity,
-        string? unitDjName,
-        int? queuedAheadMs,
+        BoundaryFitPlan? fit,
         CancellationToken ct)
     {
         // Rung -1, once per pick (SPEC F87.6, PLAN T90 review) — see this method's own remarks for
-        // why this sits above the due/bias branch rather than inside the sampler it guards.
+        // why this sits above the bias branch rather than inside the sampler it guards.
         var envelope = envelopeProvider.Current;
         if (await TryFulfillPendingRequestAsync(envelope, ct) is { } fulfilledCandidate)
             return fulfilledCandidate;
 
-        var pending = deferralQueue.PeekNextDue();
-        var untilDue = pending is null ? default : pending.Due - timeProvider.GetUtcNow();
-
-        if (pending is null || untilDue <= TimeSpan.Zero || untilDue > boundaryBiasProvider.Current)
+        // No in-window deferral to aim at (gh-#300 hoisted the peek and the fit build up to
+        // GetNextAsync, which needs the same fit to decide whether a music unit belongs here at
+        // all) — the no-imminent-boundary common case, exactly one catalog call as always.
+        if (fit is null)
             return await SelectEnvelopeAwareCandidateAsync(scope, orderedRecentIds, artistSeparation, ct);
-
-        var fit = BuildBoundaryFit(pending, untilDue, cadence, identity, unitDjName, queuedAheadMs);
 
         RotationCandidate? best = null;
         TimeSpan? bestDiff = null;
         RotationCandidate? firstUnscored = null;
+        var sampled = new List<TimeSpan>(BoundarySampleAttempts);
 
         for (var attempt = 0; attempt < BoundarySampleAttempts; attempt++)
         {
@@ -443,7 +494,12 @@ public sealed class Orchestrator(
             if (sample is null)
             {
                 // Nothing sampled yet at all — a genuine drain (F41.2), not a bias artifact.
-                if (best is null && firstUnscored is null) return null;
+                if (best is null && firstUnscored is null)
+                {
+                    LogBoundaryFit(fit, "drained", sampled, chosenDiff: null);
+                    return null;
+                }
+
                 break; // the pool emptied mid-sample; keep whatever was already sampled.
             }
 
@@ -453,11 +509,16 @@ public sealed class Orchestrator(
                 // overlap into whatever follows (gh-#254 — "minus crossfade trim").
                 var effective = TimeSpan.FromMilliseconds(durationMs) - ExpectedCrossfadeTrim;
                 var diff = (effective - fit.DesiredEffectiveLength).Duration();
+                sampled.Add(effective);
 
                 // Within tolerance is a WIN (gh-#254, ±30s widened by confidence) — keep THIS
                 // rotation-tiered random sample and stop sampling: see this method's remarks for
                 // why first-inside-the-window, not closest-fit, is the degenerate-pick guard.
-                if (diff <= fit.Tolerance) return sample;
+                if (diff <= fit.Tolerance)
+                {
+                    LogBoundaryFit(fit, "win", sampled, diff);
+                    return sample;
+                }
 
                 if (bestDiff is null || diff < bestDiff)
                 {
@@ -471,6 +532,10 @@ public sealed class Orchestrator(
             }
         }
 
+        // No sample landed inside the tolerance. "least-late" is the min-diff pick; "unscored" is
+        // the last-resort duration-less candidate that carried no score at all (F74.3 keeps it
+        // eligible — an un-enriched row is never penalized for enrichment lag).
+        LogBoundaryFit(fit, best is not null ? "least-late" : "unscored", sampled, bestDiff);
         return best ?? firstUnscored;
     }
 
@@ -551,7 +616,105 @@ public sealed class Orchestrator(
             _ => FitToleranceHeuristic,
         };
 
-        return new BoundaryFitPlan(desired, tolerance);
+        return new BoundaryFitPlan(
+            desired, tolerance, pending.Kind, untilBoundary, queuedAhead, preMusicPatter, breakPatter,
+            worstConfidence);
+    }
+
+    /// <summary>
+    /// gh-#300 — "the last unit before a due ceremony IS the ceremony". True when the room left in
+    /// front of the boundary is under <see cref="MusicUnitFloor"/>, in which case planning one more
+    /// full track is strictly worse than planning none (see that constant for the arithmetic).
+    ///
+    /// <para>
+    /// <b>Handoff kinds only.</b> A show boundary is an appointment the audience can hear being
+    /// missed — the incoming DJ announcing "it's Thursday two o'clock" at 2:05 is the whole issue.
+    /// A station ID is not: it is imaging that can ride the next seam quite happily, and skipping a
+    /// whole track for one would trade a small blemish for a large one. Today's ident producer only
+    /// ever enqueues due-NOW deferrals, so such a fit is never even built (a due-now deferral takes
+    /// the plain unbiased path) — this guard is what keeps that true if a future producer ever
+    /// future-dates one.
+    /// </para>
+    /// </summary>
+    bool ShouldDeclineFinalUnit(BoundaryFitPlan fit) =>
+        fit.Kind is SpeechDeferralKind.SignOff or SpeechDeferralKind.SignOn
+        && fit.DesiredEffectiveLength < MusicUnitFloor;
+
+    /// <summary>
+    /// gh-#300 — plans the ceremony as a unit of its own: back-announce (the fit already reserved
+    /// it) plus whatever the drain yields, and no music.
+    ///
+    /// <para>
+    /// <b>The drain runs as-of the BOUNDARY, not "now".</b> A SignOff comes due at
+    /// <c>boundary - SignOffLeadTime</c>, so at the moment this decision is taken it is still a few
+    /// seconds in the future and an as-of-now drain would return nothing — which is precisely the
+    /// bug: the ceremony then waited for a pull that a freshly-planned three-and-a-half-minute track
+    /// had just pushed past the hour. Draining as-of the boundary also keeps both halves together in
+    /// ONE <see cref="SpeechDeferralQueue.TryDequeueDue"/> call, the shape
+    /// <see cref="SignOffLeadTime"/>'s own remarks describe as the overwhelmingly common case.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Planning early is not airing early.</b> The ceremony is appended behind
+    /// <c>QueuedAheadMs</c> of audio that is still draining, so it reaches air roughly when that
+    /// audio runs out — at the boundary. Never-silent (F6.3) is untouched either way: this method
+    /// only ever ADDS segments, and a unit that renders nothing at all returns
+    /// <see langword="null"/> so the caller plans an ordinary music unit instead, exactly as if the
+    /// decline had never fired.
+    /// </para>
+    ///
+    /// <para>
+    /// <see cref="previousTrack"/> and <see cref="unitCount"/> are deliberately NOT advanced — no
+    /// music played, so the next unit's back-announce still refers to the track that really did,
+    /// and the station-ID cadence still counts music units rather than being nudged by a ceremony.
+    /// </para>
+    /// </summary>
+    async Task<MediaItem?> TryServeCeremonyOnlyUnitAsync(
+        BoundaryFitPlan fit, string? unitDjName, CadenceConfig cadence, StationIdentity identity,
+        CancellationToken ct)
+    {
+        // ONE line, not two: the fit line already carries every term (desired, queuedAhead, the
+        // lot), so a second human-readable "declining because…" would restate it. The floor is the
+        // only fact the fit itself does not know, so it rides the outcome.
+        LogBoundaryFit(
+            fit,
+            $"declined (floor={MusicUnitFloor.TotalSeconds.ToString("F0", CultureInfo.InvariantCulture)}s)",
+            sampled: [],
+            chosenDiff: null);
+
+        var boundary = timeProvider.GetUtcNow() + fit.UntilBoundary;
+        await EnqueuePatterAsync(previousTrack, next: null, unitDjName, cadence, identity, ct, boundary);
+
+        return buffer.Count > 0 ? buffer.Dequeue() : null;
+    }
+
+    /// <summary>
+    /// gh-#300 — the one line that makes a boundary fit arguable after the fact. The 2:05 handoff
+    /// was reconstructible only from kokoro's own render timestamps because this method did not
+    /// exist; every term the fit reasoned from is now on the record, alongside what the sampler did
+    /// with it.
+    ///
+    /// <para>
+    /// <b>INFORMATION, deliberately.</b> The sibling per-pick "Pick —" line is Debug, and the demo
+    /// fleet ships Information and above — a fact confirmed by querying it: zero <c>dbug:</c> lines
+    /// exist in Loki. A Debug fit line would satisfy the issue's letter and none of its purpose.
+    /// The volume is affordable because this fires only while a deferral sits inside the F74.3
+    /// lookahead window — a handful of lines per boundary, not one per pick.
+    /// </para>
+    /// </summary>
+    void LogBoundaryFit(BoundaryFitPlan fit, string outcome, IReadOnlyList<TimeSpan> sampled, TimeSpan? chosenDiff)
+    {
+        static string Secs(TimeSpan value) => value.TotalSeconds.ToString("F1", CultureInfo.InvariantCulture);
+
+        logger.LogInformation(
+            "Boundary fit ({Kind}) — untilBoundary={UntilBoundary}s queuedAhead={QueuedAhead}s " +
+            "preMusicPatter={PreMusicPatter}s breakPatter={BreakPatter}s desired={Desired}s " +
+            "tolerance=±{Tolerance}s confidence={Confidence} sampled=[{Sampled}] " +
+            "chosenDiff={ChosenDiff} outcome={Outcome}",
+            fit.Kind, Secs(fit.UntilBoundary), Secs(fit.QueuedAhead), Secs(fit.PreMusicPatter),
+            Secs(fit.BreakPatter), Secs(fit.DesiredEffectiveLength), Secs(fit.Tolerance),
+            fit.Confidence, string.Join(", ", sampled.Select(Secs)),
+            chosenDiff is { } diff ? Secs(diff) + "s" : "n/a", outcome);
     }
 
     /// <summary>
@@ -884,9 +1047,24 @@ public sealed class Orchestrator(
     /// gh-#254 hoist as <paramref name="cadence"/>: a live Station:Name/Station:Voice edit must not
     /// straddle a single unit's segment builds. Never read <see cref="identityProvider"/> in here.
     /// </param>
+    /// <param name="next">
+    /// The music this unit is planning patter around — <see langword="null"/> on gh-#300's
+    /// ceremony-only unit, where there is no music to lead into. Null suppresses exactly two things:
+    /// the lead-in (nothing to introduce) and the station-ID cadence check (a ceremony is not a
+    /// music unit, and firing that check here would both wedge an ident into the handoff and, since
+    /// <see cref="unitCount"/> deliberately does not advance, fire it again on the very next unit).
+    /// The back-announce still runs: the track that just played deserves its outro, and
+    /// <see cref="BuildBoundaryFit"/> has already reserved the time for it.
+    /// </param>
+    /// <param name="drainAsOf">
+    /// The instant the deferral drain is evaluated against — <see langword="null"/> means "now",
+    /// every pre-gh-#300 caller's behavior. The ceremony-only unit passes the BOUNDARY instead; see
+    /// <see cref="TryServeCeremonyOnlyUnitAsync"/> for why an as-of-now drain is the exact shape of
+    /// the bug.
+    /// </param>
     async Task EnqueuePatterAsync(
-        MediaItem? prev, MediaItem next, string? unitDjName, CadenceConfig cadence, StationIdentity identity,
-        CancellationToken ct)
+        MediaItem? prev, MediaItem? next, string? unitDjName, CadenceConfig cadence, StationIdentity identity,
+        CancellationToken ct, DateTimeOffset? drainAsOf = null)
     {
         // Read the render budget ONCE per unit, up front (SPEC F44.2, gitea-#197) — the same
         // per-unit-snapshot discipline cadence/identity arrive under (see the params above): a
@@ -939,7 +1117,10 @@ public sealed class Orchestrator(
         // pass (see class remarks for why that is still "never mid-track"). Supersede (F74.2) is
         // the queue's job, not this check's — a second same-kind enqueue before the next drain
         // would simply replace this one.
-        if (cadence.StationIdEveryNUnits > 0
+        // next is null on gh-#300's ceremony-only unit — see this method's own param remarks for why
+        // an ident must not be triggered by a unit that plans no music.
+        if (next is not null
+            && cadence.StationIdEveryNUnits > 0
             && unitCount > 0
             && unitCount % cadence.StationIdEveryNUnits == 0)
         {
@@ -951,7 +1132,7 @@ public sealed class Orchestrator(
         // against (SPEC F74.3) — one clock for both halves of this seam, never a mix of a real and a
         // fake one. Written for ANY due deferral, including one enqueued several units ago (SPEC
         // F74.1 — "regardless of wall-clock slip").
-        foreach (var deferral in deferralQueue.TryDequeueDue(timeProvider.GetUtcNow()))
+        foreach (var deferral in deferralQueue.TryDequeueDue(drainAsOf ?? timeProvider.GetUtcNow()))
         {
             switch (deferral.Kind)
             {
@@ -1013,8 +1194,9 @@ public sealed class Orchestrator(
         // ahead. See the method's own remarks for the F92.3 dedupe rules and the window-exit clear.
         await EnqueueHandoffCeremonyAsync(identity.Voice, ct);
 
-        // 3. Lead-in for the next track
-        if (cadence.LeadInBeforeEachTrack)
+        // 3. Lead-in for the next track — skipped entirely on a ceremony-only unit (gh-#300): there
+        // is no next track to introduce, and the sign-on's own copy is the handoff's lead-in.
+        if (next is not null && cadence.LeadInBeforeEachTrack)
         {
             var (voice, personaName) = await ResolvePersonaAsync(identity.Voice, ct);
             var req = new SegmentRequest(
