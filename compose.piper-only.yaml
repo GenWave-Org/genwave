@@ -39,6 +39,37 @@ services:
     # profile name is deliberately self-describing and activated by nothing in this repo.
     profiles: ["disabled-by-piper-only"]
 
+  # gh-#310 — the LLM pair, disabled by the same mechanism. HARDWARE.md topology (a)
+  # (the RECOMMENDED Pi shape) says "playout + piper-only, NO LLM (templated patter, by
+  # design)" and prescribes this overlay, but until now the demo overlay's ollama rode
+  # along underneath it: llama3.2:3b held permanently resident (OLLAMA_KEEP_ALIVE: -1,
+  # right for the 16GB demo box, ~2-2.5GiB of RSS forever on a Pi), behind a 6144M fence
+  # LARGER than a 4GB box's entire RAM, with ollama-init pulling ~2GB of weights on first
+  # boot. This file's own header explains the overlay exists because a 4GB box cannot
+  # afford kokoro's ~1.2GiB — while shipping an always-resident model twice that size.
+  #
+  # The two MUST travel together: ollama-init's `depends_on: ollama` would name a
+  # profile-disabled service and fail the whole render, the same trap the api/kokoro
+  # comment below describes. Nothing else depends on either (gh-#242 pinned api's
+  # depends_on to db+engine), so no reset is needed beyond this pair.
+  #
+  # Declaring a service that exists only in compose.demo.yaml is safe in the dev flow
+  # (compose.yaml + this file, no demo layer): an inactive profile excludes the block
+  # before Compose ever asks it for an image — verified against v5.0.2, and pinned by a
+  # gh-#310 spec that renders BOTH stacks.
+  #
+  # The api's own LLM path needs no change: Llm:Endpoint defaults to "" (LlmOptions'
+  # documented disabled state, F34.2), which short-circuits to the template writer with
+  # no HTTP attempt at all. A box that HAS saved an Llm:Endpoint settings row keeps it —
+  # a DB row overrides an env default, the same DEPLOYMENT.md gotcha the EngineByKind
+  # note below carries — and degrades through Docker-DNS NXDOMAIN to templated patter,
+  # exactly as HARDWARE.md topology (a) describes.
+  ollama:
+    profiles: ["disabled-by-piper-only"]
+
+  ollama-init:
+    profiles: ["disabled-by-piper-only"]
+
   api:
     # `!override`, not a plain mapping merge: compose merges `depends_on` by KEY across
     # -f files, so a plain block here would keep the base kokoro condition right

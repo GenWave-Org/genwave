@@ -116,7 +116,7 @@ fits on **no** Pi.
 |:---:|---|:---:|---|
 | a | **Pi 5 8GB all-in-one "quiet DJ" — RECOMMENDED** | 🟡 | Playout + piper-only, no LLM (templated patter, by design). The shipped shape: `./launch.sh --pinned --piper-only` (gh-#242) on the v2.8.8+ multi-arch images. Every component is ARM-proven upstream; ours have never run on ARM |
 | b | **Pi 5 playout + off-box brain — best sound** | 🟡 | Kokoro + ollama live on any x86 box; `Tts:Endpoint`, `Tts:Fallback:Endpoint`, and `Llm:Endpoint`/`Llm:Model` are all live-settable — verified pointable today |
-| c | **Pi 5 all-in-one + LLM — experimental** | 🔴 | ollama fenced ~4.5–5 GB, piper-only, active cooler + 27 W PSU mandatory; the degradation ladder is the net |
+| c | **Pi 5 all-in-one + LLM — experimental** | 🔴 | ollama fenced ~4.5–5 GB, piper-only, active cooler + 27 W PSU mandatory; the degradation ladder is the net. ⚠️ **Not expressible with the shipped flags as of gh-#310**: `--piper-only` now drops `ollama`/`ollama-init` along with kokoro (topology (a) was booting a resident model it could not hold). This shape needs its own overlay — an explicit opt-in, deliberately not a side effect of the low-memory one |
 | d | **Pi 4 4GB headless minimal** | 🔴 | Works in principle; enrichment time is the pain |
 
 ### 🧪 Hands-on test plan (measurable outcomes)

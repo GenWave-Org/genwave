@@ -195,11 +195,16 @@ public static class FeatureComposePiperOnlyOverride
         [Trait("Category", "Integration")]
         public static void The_demo_topology_itself_is_untouched()
         {
-            // caddy + ollama still exist and the engine-by-kind seed merged into the demo api env
+            // caddy still exists and the engine-by-kind seed merged into the demo api env
             // alongside (mapping-key merge) rather than replacing it.
+            //
+            // ollama used to be asserted present HERE, as part of "untouched". gh-#310 is exactly
+            // the finding that it should never have been: this overlay's whole reason for existing
+            // is that a 4GB box cannot afford kokoro's ~1.2GiB, and it was shipping an
+            // always-resident llama3.2:3b twice that size underneath. The LLM pair's absence is
+            // now pinned by FeatureComposePiperOnlyDropsTheLlm (gh-#310).
             var services = DemoPiperOnly.Value.RootElement.GetProperty("services");
             Assert.True(services.TryGetProperty("caddy", out _));
-            Assert.True(services.TryGetProperty("ollama", out _));
             var env = services.GetProperty("api").GetProperty("environment");
             Assert.True(env.TryGetProperty("Tts__EngineByKind", out _));
             Assert.Equal("false", env.GetProperty("Admin__Enabled").GetString());

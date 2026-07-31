@@ -124,6 +124,57 @@ compose_display() {
   fi
 }
 
+# --- gh-#309: make bare `docker compose` in this directory agree with this launch --------
+# The file stack this launch ran against, in COMPOSE_FILE's own ':'-separated form (the
+# default COMPOSE_PATH_SEPARATOR on Linux). The dev flow names compose.yaml explicitly
+# rather than leaving it empty: a previous --pinned run's value must be REPLACED, not
+# inherited, or a plain ./launch.sh would leave the box pointing at the demo pair.
+compose_file_value() {
+  if [ "${#COMPOSE_ARGS[@]}" -eq 0 ]; then
+    echo "compose.yaml"
+  else
+    printf '%s\n' "${COMPOSE_ARGS[@]}" | grep -v '^-f$' | paste -sd:
+  fi
+}
+
+# `./launch.sh --pinned` runs against compose.yaml + compose.demo.yaml, but a bare
+# `docker compose down` here loads only compose.yaml — so every service that exists ONLY
+# in an overlay (caddy, ollama, ollama-init) is invisible to it, survives the teardown and
+# is left running (gh-#309's repro exactly). Recording the stack in .env — COMPOSE_FILE is
+# read from the project directory automatically — makes bare down/ps/logs target what was
+# actually launched, with no flags to remember.
+#
+# Written only AFTER a successful up: a stack that never came up is not this box's state.
+# launch.sh's own calls always pass explicit -f, which outranks this variable, so the value
+# can never feed back into this script.
+#
+# Profile-gated services (admin/tunnel/logging) are a SEPARATE axis and deliberately not
+# handled here: COMPOSE_PROFILES is documented as per-launch under --with, and persisting
+# it would silently change that flag's meaning. A box wanting a standing set puts it in
+# .env itself — which this script already reads as the base for --with. Until then a bare
+# `down` still leaves profile-gated containers behind; `--remove-orphans` clears them.
+persist_compose_file() {
+  local value tmp
+  value="$(compose_file_value)"
+
+  [ -f .env ] || touch .env
+  if grep -qE '^COMPOSE_FILE=' .env; then
+    # In place, preserving every other line and their order.
+    tmp="$(mktemp)"
+    awk -v v="COMPOSE_FILE=$value" '/^COMPOSE_FILE=/ {print v; next} {print}' .env > "$tmp"
+    cat "$tmp" > .env   # cat, not mv: keeps the operator's own file mode and ownership
+    rm -f "$tmp"
+  else
+    # A .env whose last line has no newline would otherwise get this appended to it.
+    if [ -s .env ] && [ "$(tail -c1 .env | wc -l)" -eq 0 ]; then
+      printf '\n' >> .env
+    fi
+    printf 'COMPOSE_FILE=%s\n' "$value" >> .env
+  fi
+
+  echo "==> recorded COMPOSE_FILE=$value in .env — bare 'docker compose down' now matches this launch (gh-#309)"
+}
+
 # --- profile merge (--with): existing COMPOSE_PROFILES (env, else .env) + the given list -
 base_profiles="${COMPOSE_PROFILES:-}"
 if [ -z "$base_profiles" ] && [ -f .env ]; then
@@ -180,6 +231,7 @@ if [ "$PINNED" = "1" ]; then
     plan_line "docker inspect <db container> --format {{.State.Health.Status}} (poll until healthy, up to 30x2s)"
     plan_line "./migrate.sh ${MIGRATE_ARGS[*]}"
     plan_line "$(compose_display) up -d"
+    plan_line "record COMPOSE_FILE=$(compose_file_value) in .env (gh-#309)"
     plan_line "$(compose_display) ps"
     plan_profiles
     exit 0
@@ -233,6 +285,8 @@ if [ "$PINNED" = "1" ]; then
       "Re-run when fixed: $RELAUNCH (up is idempotent — it converges the rest)."
   fi
 
+  persist_compose_file
+
   echo "==> stack status"
   compose ps
   exit 0
@@ -252,6 +306,7 @@ if [ "$DRY_RUN" = "1" ]; then
     plan_line "./migrate.sh --keep-going ${MIGRATE_ARGS[*]}"
   fi
   plan_line "$(compose_display) up ${UP_ARGS[*]}"
+  plan_line "record COMPOSE_FILE=$(compose_file_value) in .env (gh-#309)"
   plan_line "$(compose_display) ps"
   plan_profiles
   exit 0
@@ -311,6 +366,8 @@ if ! compose up "${UP_ARGS[@]}"; then
     "Inspect the failing service: $(compose_display) logs <service>" \
     "The stack is fully down — fix the cause and re-run: ./launch.sh"
 fi
+
+persist_compose_file
 
 echo "==> stack status"
 compose ps
