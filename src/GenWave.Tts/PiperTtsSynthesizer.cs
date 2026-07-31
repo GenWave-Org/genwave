@@ -46,6 +46,29 @@ public sealed class PiperTtsSynthesizer(
         // LLM-copy filter ever saw. See PiperSpeechMarkup for the full contract.
         var speech = PiperSpeechMarkup.Strip(text);
 
+        // CodeQL cs/web/xss reports HIGH here (alert #25, first raised on PR #325). It is a
+        // MISCLASSIFIED SINK, not a false flow — the distinction matters, so the evidence is
+        // recorded rather than re-derived next time:
+        //
+        //   * The flow is REAL. All four traced paths start at an operator's HTTP request body
+        //     (SafeSegmentsController.Text, TtsPreviewController.Text) and end at this line.
+        //     That is not a defect — it is what a TTS engine IS. Text arrives, text gets spoken.
+        //   * The SINK is wrong. cs/web/xss means "written to a web page". This is an OUTBOUND
+        //     request body: text/plain, to a fixed configured endpoint on the internal `core`
+        //     network. No HTTP response, no rendering, no browser. RenderAsync returns a file
+        //     path; the text becomes WAV bytes and is never echoed to any client.
+        //   * Both sources are [AdminSurface] + [Authorize(Policy = Operator)], and the appliance
+        //     topology gives the admin plane no public route at all (DEPLOYMENT.md).
+        //
+        // Why it appeared when it did: nothing about the data path changed. gh-#161's markup work
+        // routed Strip through the shared SpeechText.CollapseWhitespace, and THAT call is the
+        // dataflow edge CodeQL needed to connect controller to sink (confirmed in the analysis
+        // SARIF — every one of the four flows passes through PiperSpeechMarkup's call to it).
+        //
+        // Not suppressed inline: CodeQL suppression comments are not honoured by code scanning's
+        // default setup (github/codeql#9298), so a `// codeql[...]` marker here would be a comment
+        // that silently does nothing. The alert is dismissed in the Security tab; this note exists
+        // so the reasoning lives in git next to the code rather than only in that UI state.
         using var content = new StringContent(speech, Encoding.UTF8, "text/plain");
         var requestUri = EndpointUri.Combine(profile.Endpoint, "/");
         var response = await http.PostAsync(requestUri, content, ct);
