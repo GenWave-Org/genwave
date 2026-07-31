@@ -62,8 +62,21 @@ static class LlmPromptBuilder
         // gh-#151: an artist's gender is one more unprovided fact — observed live inferring it
         // from a French first name ("it's off HIS self-titled EP"). they/them/their unless the
         // metadata itself says otherwise; a name is never evidence.
+        //
+        // gh-#303: commas were the single biggest source of unnatural prosody on air — a small
+        // model writes grammatically correct clause-heavy copy, and both engines honor every one
+        // of those commas with a stumble the ear reads as hesitation (gh-#292's "hats, folks"
+        // vocative is the same fault at its most audible). The rule is stated WITHOUT commas on
+        // purpose: prompt text is style the model imitates, so a rule against commas that itself
+        // leans on them argues both ways. Note the two escape hatches are deliberately different
+        // — a real clause break becomes a SENTENCE (which gh-#116 then renders as true 0.6s
+        // silence on the Kokoro path), while a run-together phrase just loses the comma. Turning
+        // every comma into a sentence would trade a 0.2s stumble for a 0.6s gap and read worse.
         const string ScaffoldBody =
             "Write exactly one or two sentences of spoken copy to be read aloud on air. " +
+            "Keep each sentence short. Do not use commas. A comma makes the voice stumble " +
+            "mid-line. When two ideas need separating end the sentence and start a new one. " +
+            "When the words should run together leave the comma out entirely. " +
             "Plain spoken words only - no " +
             "stage directions, no emoji, no markdown formatting, no sound-effect cues. You may add " +
             "color about the era or genre, but never state specific facts about the artist or track " +
