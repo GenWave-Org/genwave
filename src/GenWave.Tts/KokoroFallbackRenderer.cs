@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using GenWave.Core.Domain;
 
 /// <summary>
 /// Kokoro-engine hop renderer for the gh-#147 fallback chain — the same
@@ -25,6 +26,13 @@ using Microsoft.Extensions.Options;
 /// No boot-frozen <see cref="HttpClient.BaseAddress"/>, same discipline as every other engine
 /// client (SPEC F36.1–F36.2): the endpoint comes from the profile per call, itself resolved from
 /// <see cref="IOptionsMonitor{TOptions}.CurrentValue"/> upstream.
+///
+/// <see cref="TtsRenderContext"/> (T134) now carries a resolved rule set and pace, but neither
+/// reaches THIS render — <see cref="IFallbackProfileRenderer.RenderAsync"/>'s contract is
+/// <c>(profile, text, requestVoice, ct)</c>, with no context parameter at all, so this hop keeps
+/// passing <see cref="PronunciationRuleSet.Empty"/> and sending no <c>speed</c> field, byte-identical
+/// to its pre-T134 behaviour. Widening that contract so a fallback hop can read either fact is
+/// later work, not this task's.
 /// </summary>
 public sealed class KokoroFallbackRenderer(
     HttpClient http,
@@ -40,10 +48,11 @@ public sealed class KokoroFallbackRenderer(
         // Engine-aware sentence pauses AND pronunciation markup (gh-#116, F97): a kokoro-KIND hop
         // shares the same composed KokoroSpeechMarkup.Render seam as the primary
         // (KokoroTtsSynthesizer), so both Kokoro request paths tag identically — Piper hops
-        // (PiperTtsSynthesizer) never do. T137, which resolves a real PronunciationRuleSet from
-        // the active persona, changes only where `rules` comes from, here and at the primary; the
-        // compiler enforces both call sites take the same parameter.
+        // (PiperTtsSynthesizer) never do. Empty here, unlike the primary's now-context-aware
+        // overload (T134): this hop has no TtsRenderContext to read a resolved rule set from (see
+        // the class remarks), not merely an un-populated one.
         var speech = KokoroSpeechMarkup.Render(text, PronunciationRuleSet.Empty, cfg.SentencePauseSeconds);
+        // No `speed` field either, for the same reason — this hop never sees TtsRenderContext.Pace.
         var body = new { input = speech, voice, response_format = cfg.Format };
         using var content = new StringContent(
             JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
@@ -71,6 +80,10 @@ public sealed class KokoroFallbackRenderer(
         return path;
     }
 
+    // No pace term: this hop never resolves a real pace value to fold in (see the class remarks)
+    // — every render here is the same "engine default" constant, so adding it would be a no-op
+    // key change, not a correctness fix. T140 is where that stops being true on the PRIMARY path;
+    // this one needs IFallbackProfileRenderer widened first (docs/PLAN.md T140 precondition).
     static string GetCachePath(string text, string voice, string endpoint, TtsOptions cfg)
     {
         var hash = Convert.ToHexString(
