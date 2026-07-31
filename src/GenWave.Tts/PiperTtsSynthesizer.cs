@@ -10,7 +10,8 @@ using Microsoft.Extensions.Options;
 /// resolves for piper-kind hops (including the implicit legacy single-hop chain the flat
 /// <c>Tts:Fallback:Endpoint</c>/<c>Voice</c> keys form). Targets the upstream
 /// <c>piper.http_server</c> HTTP wrapper the compose <c>piper</c> service runs: a single POST of
-/// the already-normalized text to the hop endpoint's root path returns raw WAV bytes.
+/// the already-normalized, <see cref="PiperSpeechMarkup"/>-stripped text (SPEC F96.3) to the hop
+/// endpoint's root path returns raw WAV bytes.
 ///
 /// Content-Type MUST be something other than a form-encoded type: <c>piper.http_server</c> reads
 /// the request body verbatim as the text to speak, but only when Flask hasn't already consumed it
@@ -39,13 +40,19 @@ public sealed class PiperTtsSynthesizer(
     {
         var ttsCfg = ttsOptions.CurrentValue;
 
-        using var content = new StringContent(text, Encoding.UTF8, "text/plain");
+        // Defense-in-depth strip guard (F96.3): piper-tts speaks any [...]-shaped token aloud
+        // (a pause tag, a pronunciation override, or any other bracket-shaped form), and an
+        // operator's correction replacement or an authored segment can carry brackets no
+        // LLM-copy filter ever saw. See PiperSpeechMarkup for the full contract.
+        var speech = PiperSpeechMarkup.Strip(text);
+
+        using var content = new StringContent(speech, Encoding.UTF8, "text/plain");
         var requestUri = EndpointUri.Combine(profile.Endpoint, "/");
         var response = await http.PostAsync(requestUri, content, ct);
         response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx
 
         var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-        var path = GetCachePath(text, requestVoice, ttsCfg);
+        var path = GetCachePath(speech, requestVoice, ttsCfg);
 
         // Path.GetDirectoryName always returns a non-null string when the path is produced
         // by Path.Combine with a non-empty CacheRoot; the guard below satisfies the compiler
@@ -66,10 +73,12 @@ public sealed class PiperTtsSynthesizer(
     /// subfolder — the ONLY thing that keeps a Piper-rendered temp file from ever colliding with a
     /// concurrent Kokoro one for the exact same (text, voice) pair. The caller's request voice
     /// (not the profile's display-only voice) feeds the hash — unchanged from the pre-gh-#147
-    /// formula, so upgrade never orphans or double-renders a cached temp file. Both files are
-    /// transient either way — <see cref="TtsSegmentSource"/> moves this path to its own final
-    /// cache location (SPEC F70.4: the identical downstream measure/cue/cache pipeline), and
-    /// <see cref="SafeSegmentAuthor"/> deletes it once the mixed artifact exists.
+    /// formula, so upgrade never orphans or double-renders a cached temp file. <paramref
+    /// name="text"/> is the FINAL (post-<see cref="PiperSpeechMarkup.Strip"/>) text — what was
+    /// actually sent — mirroring <see cref="KokoroTtsSynthesizer"/>'s own tagged-speech hash.
+    /// Both files are transient either way — <see cref="TtsSegmentSource"/> moves this path to
+    /// its own final cache location (SPEC F70.4: the identical downstream measure/cue/cache
+    /// pipeline), and <see cref="SafeSegmentAuthor"/> deletes it once the mixed artifact exists.
     /// </summary>
     static string GetCachePath(string text, string voice, TtsOptions cfg)
     {

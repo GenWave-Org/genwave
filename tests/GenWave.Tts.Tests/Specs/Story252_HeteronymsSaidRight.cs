@@ -18,21 +18,101 @@ public static class FeatureHeteronymsSaidRight
 {
     public static class ScenarioKokoroReceivesBothMarkupForms
     {
-        [Fact(Skip = "Pending T133 — see docs/PLAN.md")]
+        [Fact]
         public static void Sentence_pauses_still_ride_the_text()
         {
-            // var speech = KokoroSpeechMarkup.Render("One. Two.", rules: [], pauseSeconds: 0.6);
-            // Assert.Contains("[pause:0.6s]", speech, StringComparison.Ordinal);
-            Assert.Fail("pending T133");
+            var speech = KokoroSpeechMarkup.Render("One. Two.", PronunciationRuleSet.Empty, pauseSeconds: 0.6);
+
+            Assert.Contains("[pause:0.6s]", speech, StringComparison.Ordinal);
         }
 
-        [Fact(Skip = "Pending T133 — see docs/PLAN.md")]
+        [Fact]
         public static void A_matched_word_carries_its_phonemes()
         {
-            // var rule = new PronunciationRule("MacLeod", "MacLeod", "/məˈklaʊd/");
-            // var speech = KokoroSpeechMarkup.Render("Here is MacLeod.", [rule], pauseSeconds: 0);
-            // Assert.Contains("[MacLeod](/məˈklaʊd/)", speech, StringComparison.Ordinal);
-            Assert.Fail("pending T133");
+            var rule = new PronunciationRule("MacLeod", "MacLeod", "/məˈklaʊd/");
+            var speech = KokoroSpeechMarkup.Render(
+                "Here is MacLeod.", PronunciationRuleSet.Create([rule]), pauseSeconds: 0);
+
+            Assert.Contains("[MacLeod](/məˈklaʊd/)", speech, StringComparison.Ordinal);
+        }
+    }
+
+    // Composition-ordering guard (T133 review, F3): pronunciation matches and pause insertion
+    // points are computed independently against the ORIGINAL text, so neither the pause pass's
+    // sentence-boundary regex nor its abbreviation guard ever runs over already-annotated text.
+    public static class ScenarioPauseCompositionProtectsAnnotations
+    {
+        [Fact]
+        public static void An_internal_period_inside_ipa_notation_never_gets_a_pause_spliced_into_it()
+        {
+            // The IPA carries its own syllable-separator ".", and an unrelated real sentence
+            // boundary follows later in the text — the annotation must stay intact and the real
+            // pause must still land in its own, correct place.
+            var rule = new PronunciationRule("MacLeod", "MacLeod", "/ˈmæk. laʊd/");
+            var speech = KokoroSpeechMarkup.Render(
+                "MacLeod is here. Wind is next.", PronunciationRuleSet.Create([rule]), pauseSeconds: 0.6);
+
+            Assert.Equal("[MacLeod](/ˈmæk. laʊd/) is here. [pause:0.6s] Wind is next.", speech);
+        }
+
+        [Fact]
+        public static void A_pause_that_would_land_inside_an_annotated_word_lands_right_after_it_instead()
+        {
+            // The rule's own word ("live.") carries the sentence-ending period — gh-#116's pause
+            // for that boundary must survive the annotation, not be lost or spliced mid-token.
+            var rule = new PronunciationRule("live.", "live.", "/laɪv/");
+            var speech = KokoroSpeechMarkup.Render(
+                "We are live. Thanks for listening.", PronunciationRuleSet.Create([rule]), pauseSeconds: 0.6);
+
+            Assert.Equal("We are [live.](/laɪv/) [pause:0.6s] Thanks for listening.", speech);
+        }
+
+        [Fact]
+        public static void Annotating_inside_a_dotted_abbreviation_never_defeats_its_pause_guard()
+        {
+            // Wrapping the "m" of "9 a.m." must not shift the abbreviation guard's lookback and
+            // wrongly add a pause mid-abbreviation; the real pause after "tonight." must still land.
+            var rule = new PronunciationRule("a.m", "m", "/ɛm/");
+            var speech = KokoroSpeechMarkup.Render(
+                "Doors at 9 a.m. tonight. Bring water", PronunciationRuleSet.Create([rule]), pauseSeconds: 0.6);
+
+            Assert.Equal("Doors at 9 a.[m](/ɛm/). tonight. [pause:0.6s] Bring water", speech);
+        }
+
+        [Fact]
+        public static void A_pause_tag_already_present_in_the_source_text_is_never_corrupted_or_duplicated()
+        {
+            // gh-#116 regression (T133 round-3 review, F6/F7): the SOURCE text can already carry a
+            // literal "[pause:Ns]" substring — an operator correction's replacement, verbatim,
+            // reaching the renderer untouched. Recovering insertion points by diffing
+            // InsertSentencePauses' output against its input cannot tell that literal substring
+            // apart from a real insertion, corrupting the tag around it; taking the offsets
+            // directly (KokoroPauseMarkup.SentencePauseOffsets) finds only the one real sentence
+            // boundary — after "there." — and leaves the pre-existing literal tag untouched.
+            var speech = KokoroSpeechMarkup.Render(
+                "Hi [pause:0.6s] there. More text here.", PronunciationRuleSet.Empty, pauseSeconds: 0.6);
+
+            Assert.Equal("Hi [pause:0.6s] there. [pause:0.6s] More text here.", speech);
+        }
+
+        [Fact]
+        public static void Two_sentence_boundaries_inside_one_annotated_span_collapse_to_one_pause()
+        {
+            // F8 REVERSED (T133 round-4 review): a rule matching "one. two." verbatim spans TWO
+            // natural sentence boundaries; SnapOutsideAnnotations relocates both to the same
+            // position right after the annotation. A [pause:Ns] tag is audible digital silence on
+            // the kokoro-fastapi wire — two tags back to back at the SAME seam SUM rather than
+            // coexist, so emitting both would double the source's 0.6s gap into 1.2s of dead air
+            // at a seam that only ever had one. Coincident relocated offsets collapse to ONE tag,
+            // the same "one boundary, one tag" rule KokoroPauseMarkup itself applies to a maximal
+            // [.!?…]+ run — an operator who fuses "one. two." into a single annotation has
+            // deliberately removed the interior boundary between them. The pause after "three." —
+            // a distinct, unrelated seam — still survives untouched.
+            var rule = new PronunciationRule("one. two.", "one. two.", "/X/");
+            var speech = KokoroSpeechMarkup.Render(
+                "Say one. two. three. done.", PronunciationRuleSet.Create([rule]), pauseSeconds: 0.6);
+
+            Assert.Equal("Say [one. two.](/X/) [pause:0.6s] three. [pause:0.6s] done.", speech);
         }
     }
 
@@ -188,28 +268,157 @@ public static class FeatureHeteronymsSaidRight
 
     public static class ScenarioPiperNeverSeesMarkup
     {
-        [Fact(Skip = "Pending T133 — see docs/PLAN.md")]
+        [Fact]
         public static void Pause_markup_is_stripped_before_the_piper_wire()
         {
-            // var sent = PiperSpeechMarkup.Strip("Hello. [pause:0.6s] World.");
-            // Assert.DoesNotContain("[pause:", sent, StringComparison.Ordinal);
-            Assert.Fail("pending T133");
+            var sent = PiperSpeechMarkup.Strip("Hello. [pause:0.6s] World.");
+
+            Assert.DoesNotContain("[pause:", sent, StringComparison.Ordinal);
         }
 
-        [Fact(Skip = "Pending T133 — see docs/PLAN.md")]
+        [Fact]
         public static void Pronunciation_markup_is_stripped_too()
         {
-            // Assert.DoesNotContain("](/", PiperSpeechMarkup.Strip("[MacLeod](/məˈklaʊd/)"),
-            //     StringComparison.Ordinal);
-            Assert.Fail("pending T133");
+            Assert.DoesNotContain("](/", PiperSpeechMarkup.Strip("[MacLeod](/məˈklaʊd/)"),
+                StringComparison.Ordinal);
         }
 
-        [Fact(Skip = "Pending T133 — see docs/PLAN.md")]
+        [Fact]
         public static void The_spoken_words_themselves_survive_the_strip()
         {
             // Stripping removes the annotation, never the word it annotated.
-            // Assert.Equal("MacLeod", PiperSpeechMarkup.Strip("[MacLeod](/məˈklaʊd/)"));
-            Assert.Fail("pending T133");
+            Assert.Equal("MacLeod", PiperSpeechMarkup.Strip("[MacLeod](/məˈklaʊd/)"));
+        }
+    }
+
+    // T133 review (F1/F2): a nested paren inside the annotation, or a nested/malformed bracket
+    // shape, must never demote a real [word](annotation) token to "delete the word, leave the
+    // annotation" — and nothing bracket-shaped may survive to the Piper wire regardless of nesting.
+    public static class ScenarioPiperGuardHandlesNestingAndSpacing
+    {
+        [Fact]
+        public static void A_nested_paren_inside_the_annotation_never_orphans_the_word()
+        {
+            var sent = PiperSpeechMarkup.Strip("Now playing [Blue Monday](New Order (1983)) next.");
+
+            Assert.Equal("Now playing Blue Monday next.", sent);
+        }
+
+        [Fact]
+        public static void Parenthesized_ipa_notation_survives_as_the_bare_word()
+        {
+            Assert.Equal("MacLeod", PiperSpeechMarkup.Strip("[MacLeod](/mə(k)laʊd/)"));
+        }
+
+        [Fact]
+        public static void A_nested_bracket_pair_leaves_no_open_bracket_on_the_wire()
+        {
+            // A single non-recursive pass would leave "[ac]" behind (F2) — the fixpoint loop
+            // resolves it fully; no [...]-shaped remnant may survive (F96.3).
+            var sent = PiperSpeechMarkup.Strip("[a[b]c]");
+
+            Assert.DoesNotContain('[', sent);
+        }
+
+        [Fact]
+        public static void A_nested_bracket_pair_leaves_no_close_bracket_on_the_wire()
+        {
+            var sent = PiperSpeechMarkup.Strip("[a[b]c]");
+
+            Assert.DoesNotContain(']', sent);
+        }
+
+        [Fact]
+        public static void A_doubly_bracketed_token_leaves_no_open_bracket_on_the_wire()
+        {
+            var sent = PiperSpeechMarkup.Strip("[[MacLeod]](/x/)");
+
+            Assert.DoesNotContain('[', sent);
+        }
+
+        [Fact]
+        public static void A_doubly_bracketed_token_leaves_no_close_bracket_on_the_wire()
+        {
+            var sent = PiperSpeechMarkup.Strip("[[MacLeod]](/x/)");
+
+            Assert.DoesNotContain(']', sent);
+        }
+
+        [Fact]
+        public static void A_space_before_the_annotation_still_composes_as_one_token()
+        {
+            // A space between the closing bracket and the annotation must not orphan the
+            // annotation, which would otherwise be spoken verbatim as raw notation text.
+            Assert.Equal("MacLeod", PiperSpeechMarkup.Strip("[MacLeod] (/x/)"));
+        }
+    }
+
+    // T133 review round 3 (F5/F9): whitespace tolerance in the annotation match must never let an
+    // unrelated parenthetical resurrect a [pause:Ns] directive as spoken content, and a malformed
+    // (unbalanced) annotation attempt must never cost the word it was attempting to annotate.
+    public static class ScenarioPiperGuardNeverMisclassifiesAToken
+    {
+        [Fact]
+        public static void A_pause_directive_is_never_spoken_just_because_a_parenthetical_follows_it()
+        {
+            // Before the fix, MarkupTokenRx's whitespace-tolerant annotation group swallowed the
+            // trailing "(a classic)" as this token's annotation, which promoted the directive
+            // itself — "pause:0.6s" — to a KEPT word: Piper would have spoken it aloud.
+            var sent = PiperSpeechMarkup.Strip("Up next [pause:0.6s] (a classic) from 1983.");
+
+            Assert.DoesNotContain("pause:0.6s", sent, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public static void An_annotation_across_a_newline_is_never_treated_as_belonging_to_the_token()
+        {
+            // A newline is not the "at most one non-newline space" the annotation group tolerates
+            // — the parenthetical on the next line was never part of this bracket token.
+            var sent = PiperSpeechMarkup.Strip("[MacLeod]\n(unrelated)");
+
+            Assert.Contains("(unrelated)", sent, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public static void An_unbalanced_annotation_still_keeps_the_word_it_was_annotating()
+        {
+            // "(/x/" never closes — the annotation group cannot match it — but the attempt (a "("
+            // immediately after "]") still proves this was authored as a word, not a bare
+            // directive: the word must survive even though the broken annotation can't be stripped.
+            var sent = PiperSpeechMarkup.Strip("[MacLeod](/x/");
+
+            Assert.StartsWith("MacLeod", sent, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public static void An_unbalanced_annotation_across_a_space_still_keeps_the_word()
+        {
+            var sent = PiperSpeechMarkup.Strip("[MacLeod] (/x/");
+
+            Assert.StartsWith("MacLeod", sent, StringComparison.Ordinal);
+        }
+    }
+
+    // T133 round-4 review: MarkupTokenRx's balancing group is the one recursive regex in this
+    // assembly with no bound of its own — repeated unclosed annotations force pathological
+    // backtracking well past the 250ms every other literal-regex rule set in this project is
+    // held to, and Strip loops it up to 64 times on the 24/7 feeder path (gh-#184's exact failure
+    // mode: a multi-second stall in production).
+    public static class ScenarioPiperGuardNeverStallsOnAdversarialInput
+    {
+        [Fact]
+        public static void A_pathological_run_of_unclosed_annotations_never_hangs_or_throws()
+        {
+            // Repeated "[a](x" with no closing paren anywhere forces MarkupTokenRx's balancing
+            // group into exactly the backtracking blowup the 250ms match timeout exists to bound
+            // (mirrors LiteralRegexPosture's own timeout elsewhere in this assembly). F96.4:
+            // markup removal is never a render failure, so a timed-out pass must fall through
+            // rather than fault the whole render.
+            var input = string.Concat(Enumerable.Repeat("[a](x", 4000));
+
+            var exception = Record.Exception(() => PiperSpeechMarkup.Strip(input));
+
+            Assert.Null(exception);
         }
     }
 
@@ -239,24 +448,33 @@ public static class FeatureHeteronymsSaidRight
     // -------------------------------------------------------------------------------------
     public static class ScenarioUnsupportedOrUnmatchedMarkup
     {
-        [Fact(Skip = "Pending T133 — see docs/PLAN.md")]
+        [Fact]
         public static void An_unsupported_form_is_removed_rather_than_failing_the_render()
         {
             // F96.4 — the words still air; a markup form an engine cannot honour is never fatal.
-            Assert.Fail("pending T133");
+            // piper-tts understands NEITHER pause tags NOR IPA overrides, so any arbitrary
+            // bracket-shaped form reaching PiperSpeechMarkup.Strip is unsupported by construction —
+            // it is removed, not thrown on, and the surrounding words survive. Removing a token
+            // from mid-sentence leaves a doubled space behind ("Hello" + "" + " World." before
+            // collapsing) — Strip runs after SpeechText's own whitespace-collapse pass, so it
+            // collapses that back down to one space itself rather than pinning the artifact.
+            var sent = PiperSpeechMarkup.Strip("Hello [emphasis:strong] World.");
+
+            Assert.Equal("Hello World.", sent);
         }
 
         [Fact]
         public static void A_rule_matching_nothing_leaves_the_text_byte_identical()
         {
-            // KokoroSpeechMarkup.Render doesn't exist yet (T133); assert the matcher-level
-            // equivalent — a rule whose pattern isn't present reports no matches, so a renderer
-            // built on top of this has nothing to annotate and the text passes through untouched.
+            // T133 is here now — assert at the render level, the fact this spec's name promises: a
+            // rule whose pattern isn't present in the text has nothing to annotate, so the composed
+            // Kokoro renderer returns the text byte-identical (no pause markup requested either).
             var rules = PronunciationRuleSet.Create([new PronunciationRule("wind", "wind", "/wˈɪnd/")]);
+            const string Text = "Nothing here matches.";
 
-            var matches = rules.Match("Nothing here matches.");
+            var speech = KokoroSpeechMarkup.Render(Text, rules, pauseSeconds: 0);
 
-            Assert.Empty(matches);
+            Assert.Equal(Text, speech);
         }
     }
 }

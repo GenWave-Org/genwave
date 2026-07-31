@@ -1,6 +1,7 @@
 namespace GenWave.Tts;
 
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 
 /// <summary>
@@ -54,12 +55,59 @@ public static partial class KokoroPauseMarkup
         if (pauseSeconds <= 0)
             return text;
 
-        // Invariant formatting: the wire contract is exactly [pause:Ns]/[pause:N.Ns] — a
-        // comma-decimal host locale must never put "[pause:0,6s]" on the wire.
-        var tag = " [pause:" + pauseSeconds.ToString("0.###", CultureInfo.InvariantCulture) + "s]";
-        return SentenceEndRunRx().Replace(text, match =>
-            IsDottedAbbreviationDot(text, match) ? match.Value : match.Value + tag);
+        return Splice(text, SentencePauseOffsets(text), pauseSeconds);
     }
+
+    /// <summary>
+    /// Every original-text offset <see cref="InsertSentencePauses"/> would splice a tag at — the
+    /// same sentence-boundary regex and abbreviation guard, exposed as data instead of being spent
+    /// immediately on a splice. Internal (same-assembly) so <see cref="KokoroSpeechMarkup"/> can ask
+    /// directly WHERE a pause belongs instead of inferring it after the fact from
+    /// <see cref="InsertSentencePauses"/>'s output, which is exact for every input including one
+    /// that already contains a <c>[pause:Ns]</c>-shaped substring (an operator correction's
+    /// replacement, verbatim) — a case where diffing output against input is NOT exact, because the
+    /// tag text can no longer be told apart from a substring the source itself already carried.
+    /// </summary>
+    internal static IReadOnlyList<int> SentencePauseOffsets(string text) =>
+        [.. SentenceEndRunRx().Matches(text)
+            .Where(m => !IsDottedAbbreviationDot(text, m))
+            .Select(m => m.Index + m.Length)];
+
+    /// <summary>
+    /// Splices the <see cref="FormatTag"/> pause tag into <paramref name="text"/> at every position
+    /// in <paramref name="offsets"/> (ascending, in <paramref name="text"/>'s own coordinates — see
+    /// <see cref="SentencePauseOffsets"/>). Internal so <see cref="KokoroSpeechMarkup"/> can finish
+    /// composing its merged render without ever formatting a pause tag itself — this stays the only
+    /// place that knows what a pause tag looks like.
+    /// </summary>
+    internal static string Splice(string text, IReadOnlyList<int> offsets, double pauseSeconds)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(offsets);
+        if (offsets.Count == 0)
+            return text;
+
+        var tag = FormatTag(pauseSeconds);
+        var builder = new StringBuilder(text.Length + offsets.Count * tag.Length);
+        var cursor = 0;
+        foreach (var offset in offsets)
+        {
+            builder.Append(text, cursor, offset - cursor).Append(tag);
+            cursor = offset;
+        }
+
+        builder.Append(text, cursor, text.Length - cursor);
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// The exact <c>" [pause:Ns]"</c>/<c>" [pause:N.Ns]"</c> tag text <see cref="Splice"/> inserts —
+    /// invariant-formatted so a comma-decimal host locale never puts "[pause:0,6s]" on the wire.
+    /// Private: <see cref="Splice"/> is the only caller, in or out of this assembly — nothing else
+    /// needs to know the tag's shape.
+    /// </summary>
+    private static string FormatTag(double pauseSeconds) =>
+        " [pause:" + pauseSeconds.ToString("0.###", CultureInfo.InvariantCulture) + "s]";
 
     /// <summary>
     /// True when the match is a lone <c>.</c> that closes a dotted single-letter abbreviation —

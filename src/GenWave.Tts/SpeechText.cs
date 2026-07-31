@@ -69,24 +69,15 @@ public static partial class SpeechText
     {
         // ThinkBlockRx only ever matches an innermost pair (its content is guaranteed free of a
         // further nested "<think>"), so a single Replace resolves one level of nesting at a time.
-        // Looping to a fixpoint peels nested blocks from the inside out until none remain — this
-        // is what keeps a doubly-nested block from leaking its outer layer's text (F68.3).
+        // TextFixpoint peels nested blocks from the inside out until none remain — this is what
+        // keeps a doubly-nested block from leaking its outer layer's text (F68.3).
         //
         // Capped at MaxThinkNestingDepth passes (T28 review carry-forward, wired live in T29): far
         // deeper nesting than any real LLM output produces, so this only ever bites a pathological
         // input. On cap-hit the loop falls through to the unclosed/orphan strips below rather than
         // spinning — the same "never stall the render path" discipline as SpeechCorrectionSet's own
         // 250ms per-rule match timeout.
-        var stripped = text;
-        string beforePass;
-        var pass = 0;
-        do
-        {
-            beforePass = stripped;
-            stripped = ThinkBlockRx().Replace(stripped, string.Empty);
-            pass++;
-        }
-        while (stripped != beforePass && pass < MaxThinkNestingDepth);
+        var stripped = TextFixpoint.Apply(text, MaxThinkNestingDepth, current => ThinkBlockRx().Replace(current, string.Empty));
 
         // An unclosed <think> at end (no closing tag reached) is stripped conservatively to the
         // end of the string — nothing downstream should ever see partial reasoning text (F68.3).
@@ -121,7 +112,15 @@ public static partial class SpeechText
         return PercentRx().Replace(withDegrees, " percent");
     }
 
-    private static string CollapseWhitespace(string text) => WhitespaceRx().Replace(text, " ").Trim();
+    /// <summary>
+    /// Collapses every run of whitespace to one space and trims the ends — the exact rule every
+    /// caller in this assembly that needs whitespace tidied after a strip pass must use, so it
+    /// never has to be re-asserted or re-implemented elsewhere (<see cref="PiperSpeechMarkup.Strip"/>
+    /// is the other caller). Internal (same-assembly) rather than a public utility: this is a
+    /// normalization-pipeline detail, not a general-purpose string helper this assembly wants to
+    /// advertise outward.
+    /// </summary>
+    internal static string CollapseWhitespace(string text) => WhitespaceRx().Replace(text, " ").Trim();
 
     // Innermost <think>...</think> pair only: the negative lookahead bars the content from
     // containing a further "<think>", so a nested block's outer opening tag is never consumed
