@@ -121,7 +121,7 @@ jobs:
         env:
           PLATFORM: ${{ matrix.platform }}
         run: echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> "$GITHUB_ENV"
-      - uses: docker/login-action@v4
+      - uses: docker/login-action@v4.5.2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -195,7 +195,7 @@ jobs:
           path: ${{ runner.temp }}/digests
           pattern: digests-${{ matrix.image }}-*
           merge-multiple: true
-      - uses: docker/login-action@v4
+      - uses: docker/login-action@v4.5.2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
