@@ -14,6 +14,18 @@
 
 namespace GenWave.Tts.Tests.Specs;
 
+using System.Net;
+using System.Text.Json;
+using GenWave.Tts.Tests.Fakes;
+// GenWave.Tts.PronunciationRule (this file's ambient, unqualified `PronunciationRule` throughout)
+// and GenWave.Core.Domain.PronunciationRule are two distinct mirrored types — see the mirror's own
+// remarks — so a blanket `using GenWave.Core.Domain;` would silently rebind every existing
+// unqualified `PronunciationRule` reference below to the wrong one. Aliasing only the three names
+// this new scenario needs keeps the rest of the file's resolution untouched.
+using TtsRenderContext = GenWave.Core.Domain.TtsRenderContext;
+using SegmentKind = GenWave.Core.Domain.SegmentKind;
+using ContextPronunciationRule = GenWave.Core.Domain.PronunciationRule;
+
 public static class FeatureHeteronymsSaidRight
 {
     public static class ScenarioKokoroReceivesBothMarkupForms
@@ -34,6 +46,49 @@ public static class FeatureHeteronymsSaidRight
                 "Here is MacLeod.", PronunciationRuleSet.Create([rule]), pauseSeconds: 0);
 
             Assert.Contains("[MacLeod](/məˈklaʊd/)", speech, StringComparison.Ordinal);
+        }
+    }
+
+    // T134 (docs/PLAN.md): TtsRenderContext now carries Rules, and KokoroTtsSynthesizer's
+    // context-aware overload reads them — proven here one layer below
+    // ScenarioKokoroReceivesBothMarkupForms above, which only exercises KokoroSpeechMarkup.Render
+    // directly. This drives the REAL adapter (a capturing HttpMessageHandler standing in for
+    // Kokoro) so the assertion is on what actually reaches the wire, not on the C# property
+    // accessor a `with` expression exercises. No caller resolves a REAL rule set onto a context
+    // yet (T137's job) — this test builds the context by hand, the way T137 eventually will.
+    public static class ScenarioARuleOnTheContextReachesTheAdapter
+    {
+        [Fact]
+        public static async Task A_rule_on_the_render_context_reaches_the_kokoro_wire()
+        {
+            var cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            try
+            {
+                var requests = new List<string>();
+                var handler = new FakeHttpMessageHandler(async (request, ct) =>
+                {
+                    requests.Add(request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct));
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new ByteArrayContent([1, 2, 3, 4]),
+                    };
+                });
+                var synth = new KokoroTtsSynthesizer(
+                    new HttpClient(handler),
+                    new TestOptionsMonitor<TtsOptions>(
+                        new TtsOptions { CacheRoot = cacheRoot, Format = "wav", SentencePauseSeconds = 0 }));
+                var context = new TtsRenderContext("Here is MacLeod.", "af_heart", SegmentKind.LeadIn)
+                    with { Rules = [new ContextPronunciationRule("MacLeod", "MacLeod", "/məˈklaʊd/")] };
+
+                await synth.SynthesizeAsync(context, CancellationToken.None);
+
+                var input = JsonDocument.Parse(Assert.Single(requests)).RootElement.GetProperty("input").GetString();
+                Assert.Contains("[MacLeod](/məˈklaʊd/)", input ?? "", StringComparison.Ordinal);
+            }
+            finally
+            {
+                if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            }
         }
     }
 

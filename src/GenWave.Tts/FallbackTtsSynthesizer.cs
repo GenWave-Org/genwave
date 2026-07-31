@@ -77,8 +77,11 @@ public sealed class FallbackTtsSynthesizer(
         if (chain.IsEmpty)
         {
             // No fallback configured — identical to pre-T34 behavior (F70.1). The per-kind map is
-            // moot when there is no chain to route to.
-            return await primary.SynthesizeAsync(context.Text, context.Voice, ct);
+            // moot when there is no chain to route to. The FULL context (not just text/voice)
+            // reaches the primary (T134) so its resolved pace/rules — once a later task populates
+            // them — ride all the way to the engine; an un-populated context still renders
+            // byte-identically (TtsRenderContext's own defaults).
+            return await primary.SynthesizeAsync(context, ct);
         }
 
         var mappedEngine = context.Kind is { } kind
@@ -149,7 +152,9 @@ public sealed class FallbackTtsSynthesizer(
         {
             try
             {
-                return await primary.SynthesizeAsync(context.Text, context.Voice, ct);
+                // Full context, not just text/voice (T134) — see the IsEmpty short-circuit above
+                // for why.
+                return await primary.SynthesizeAsync(context, ct);
             }
             catch (OperationCanceledException)
             {
