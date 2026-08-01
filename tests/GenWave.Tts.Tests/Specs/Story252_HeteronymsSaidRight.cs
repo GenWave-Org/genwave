@@ -319,6 +319,133 @@ public static class FeatureHeteronymsSaidRight
 
             Assert.Equal([good], compiled.Rules);
         }
+
+        [Fact]
+        public static void A_rule_with_no_ipa_is_dropped_rather_than_reaching_the_matcher()
+        {
+            // T133/T137 review finding (P1): deserialized operator/card JSON that simply omits
+            // "ipa" ({"Pattern":"MacLeod","Word":"MacLeod"}) binds a literal null here at runtime
+            // despite Ipa's non-nullable declaration — System.Text.Json does not enforce that at
+            // bind time. Left uncompiled, this can never reach KokoroSpeechMarkup and dereference it.
+            var rule = new PronunciationRule(Pattern: "MacLeod", Word: "MacLeod", Ipa: null!);
+
+            var matches = PronunciationRuleSet.Create([rule]).Match("Here is MacLeod.");
+
+            Assert.Empty(matches);
+        }
+
+        [Fact]
+        public static void A_rule_with_no_ipa_never_crashes_a_paused_render()
+        {
+            // The adversarial shape from the T137 review, proven at the render seam. The text
+            // carries an INTERIOR sentence boundary ("MacLeod. And now...", not just a trailing one)
+            // — without it, KokoroPauseMarkup.SentencePauseOffsets never reports an offset at all
+            // (the trailing-sentender rule never tags the LAST boundary in the text), so
+            // KokoroSpeechMarkup.ShiftForAnnotations' shift loop short-circuits on an empty offset
+            // list and the crashing line is never reached, at ANY pauseSeconds — a spec built on a
+            // trailing-only boundary passes on both the fixed AND the unfixed code and pins nothing.
+            // With a real interior boundary: at pauseSeconds 0 the malformed rule never gets this far
+            // (Compose's pauseOffsets short-circuits to [] before any offset is computed, so the
+            // unfixed code renders "[MacLeod]()" happily); at the SHIPPED DEFAULT (0.6) the unfixed
+            // code throws a NullReferenceException dereferencing the dropped rule's null Ipa inside
+            // KokoroSpeechMarkup.ShiftForAnnotations the moment a real sentence pause needs to be
+            // positioned relative to the annotation. PronunciationRuleSet.Create's ipa guard is what
+            // stops the rule from ever reaching Match in the first place, so the fixed code never
+            // reaches that line at all. Verified by mutation: reverting Create's blank/malformed-ipa
+            // guards makes this spec fail with the expected NullReferenceException; restoring them
+            // makes it pass again.
+            var rule = new PronunciationRule(Pattern: "MacLeod", Word: "MacLeod", Ipa: null!);
+            var rules = PronunciationRuleSet.Create([rule]);
+
+            var exception = Record.Exception(() => KokoroSpeechMarkup.Render(
+                "Here is MacLeod. And now the news.", rules, pauseSeconds: 0.6));
+
+            Assert.Null(exception);
+        }
+
+        [Fact]
+        public static void A_rule_whose_ipa_contains_a_close_paren_is_dropped_rather_than_reaching_the_matcher()
+        {
+            // T133/T137 review finding (P2): kokoro-fastapi's own [word](ipa) markup parser closes
+            // the annotation at the FIRST ")" it sees — an ipa carrying one (parenthesized
+            // optional-segment notation is legitimate IPA, e.g. an operator importing a card that
+            // marks an optional phoneme) would truncate the token early and leak the remainder as
+            // spoken text on the wire. Left uncompiled, this rule can never reach the composer.
+            var rule = new PronunciationRule("MacLeod", "MacLeod", "/m(ə)ˈklaʊd/");
+
+            var matches = PronunciationRuleSet.Create([rule]).Match("Here is MacLeod.");
+
+            Assert.Empty(matches);
+        }
+
+        [Fact]
+        public static void A_rule_whose_ipa_contains_a_close_paren_never_corrupts_the_markup_token()
+        {
+            var rule = new PronunciationRule("MacLeod", "MacLeod", "/m(ə)ˈklaʊd/");
+            var rules = PronunciationRuleSet.Create([rule]);
+
+            var speech = KokoroSpeechMarkup.Render("Here is MacLeod.", rules, pauseSeconds: 0);
+
+            // The rule never compiled, so the text renders unannotated — never a truncated
+            // "[MacLeod](/m(ə)" token with "ˈklaʊd/)" spilling out as spoken text after it.
+            Assert.Equal("Here is MacLeod.", speech);
+        }
+
+        [Fact]
+        public static void A_rule_whose_ipa_contains_an_open_bracket_is_dropped_rather_than_reaching_the_matcher()
+        {
+            // T137 review finding (P1): kokoro-fastapi's own [pause:Ns] markup (gh-#116) is honored
+            // anywhere it appears in the request text, not only outside a pronunciation annotation's
+            // parens — an ipa carrying a "[" (e.g. the "[" half of an imported card's
+            // "/mə[pause:600s]klaʊd/") risks splicing a literal digital-silence directive onto the
+            // wire the moment this rule's annotation renders. Left uncompiled, this rule can never
+            // reach the composer.
+            var rule = new PronunciationRule("MacLeod", "MacLeod", "/mə[klaʊd/");
+
+            var matches = PronunciationRuleSet.Create([rule]).Match("Here is MacLeod.");
+
+            Assert.Empty(matches);
+        }
+
+        [Fact]
+        public static void A_rule_whose_ipa_contains_an_open_bracket_never_corrupts_the_markup_token()
+        {
+            var rule = new PronunciationRule("MacLeod", "MacLeod", "/mə[klaʊd/");
+            var rules = PronunciationRuleSet.Create([rule]);
+
+            var speech = KokoroSpeechMarkup.Render("Here is MacLeod.", rules, pauseSeconds: 0);
+
+            // The rule never compiled, so the text renders unannotated — never a
+            // "[MacLeod](/mə[klaʊd/)" token that could seed a literal [pause:Ns] directive on the wire.
+            Assert.Equal("Here is MacLeod.", speech);
+        }
+
+        [Fact]
+        public static void A_rule_whose_ipa_contains_a_close_bracket_is_dropped_rather_than_reaching_the_matcher()
+        {
+            // T137 review finding (P1), the "]" half of the same risk: an ipa carrying a "]" (e.g.
+            // the close of an imported card's "/mə[pause:600s]klaʊd/") is just as capable of closing
+            // out a [pause:Ns] directive once spliced onto the wire. Left uncompiled, this rule can
+            // never reach the composer.
+            var rule = new PronunciationRule("MacLeod", "MacLeod", "/məklaʊd]/");
+
+            var matches = PronunciationRuleSet.Create([rule]).Match("Here is MacLeod.");
+
+            Assert.Empty(matches);
+        }
+
+        [Fact]
+        public static void A_rule_whose_ipa_contains_a_close_bracket_never_corrupts_the_markup_token()
+        {
+            var rule = new PronunciationRule("MacLeod", "MacLeod", "/məklaʊd]/");
+            var rules = PronunciationRuleSet.Create([rule]);
+
+            var speech = KokoroSpeechMarkup.Render("Here is MacLeod.", rules, pauseSeconds: 0);
+
+            // The rule never compiled, so the text renders unannotated — never a
+            // "[MacLeod](/məklaʊd]/)" token that could seed a literal [pause:Ns] directive on the wire.
+            Assert.Equal("Here is MacLeod.", speech);
+        }
     }
 
     public static class ScenarioPiperNeverSeesMarkup

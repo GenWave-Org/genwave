@@ -237,13 +237,13 @@ public sealed class FallbackTtsSynthesizer(
         }
 
         if (hop.TimeoutSeconds is not { } budgetSeconds)
-            return await renderer.RenderAsync(hop, context.Text, context.Voice, ct);
+            return await renderer.RenderAsync(hop, context, ct);
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(budgetSeconds));
         try
         {
-            return await renderer.RenderAsync(hop, context.Text, context.Voice, cts.Token);
+            return await renderer.RenderAsync(hop, context, cts.Token);
         }
         catch (OperationCanceledException oce) when (!ct.IsCancellationRequested)
         {

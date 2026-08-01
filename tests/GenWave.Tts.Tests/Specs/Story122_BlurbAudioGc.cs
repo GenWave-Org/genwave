@@ -38,6 +38,8 @@ public static class FeatureBlurbAudioGc
             new FakeCueAnalyzer(),
             NoCorrections.Provider(),
             NoCorrections.PersonaCache(),
+            NoCorrections.PronunciationProvider(),
+            NoCorrections.PersonaPronunciationCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions
             {
                 CacheRoot = cacheRoot,

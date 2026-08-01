@@ -28,6 +28,12 @@ namespace GenWave.Core.Domain;
 /// than always written as <c>[]</c>: every card built before this field existed omits it entirely,
 /// so a pre-F79 byte-stable pin round-trips unchanged (a caller that wants an explicit "no taste
 /// rules yet" writes <c>[]</c> itself, which serializes just like the sibling collections).
+///
+/// <see cref="Pronunciations"/> (SPEC F97.1, F97.3; ARCHITECTURE.md "Make the DJs sound human") is
+/// the card half of the pronunciation-rule merge — station settings (<c>Tts:Pronunciations</c>)
+/// supply the other half, with the card winning on conflict (F97.4). Additive and
+/// forward-compatible the same way <see cref="Taste"/> is: nullable, omitted from JSON when null, so
+/// every pre-F97 card and every reader that predates this field is unaffected.
 /// </summary>
 public sealed record PersonaCard(
     int SchemaVersion,
@@ -39,7 +45,8 @@ public sealed record PersonaCard(
     double EnergyDisposition,
     IReadOnlyList<string> Lore,
     IReadOnlyList<PersonaCorrection> Corrections,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TasteRule>? Taste = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TasteRule>? Taste = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<PronunciationRule>? Pronunciations = null)
 {
     /// <summary>
     /// The only <see cref="SchemaVersion"/> major this codebase writes or, on import, accepts (SPEC

@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using ContextPronunciationRule = GenWave.Core.Domain.PronunciationRule;
 
 namespace GenWave.Tts;
 
@@ -65,7 +66,32 @@ public sealed class PronunciationRuleSet
     /// <see cref="PronunciationRule.Pattern"/> at all — an unlocatable word can never be annotated,
     /// so compiling it would either match nothing or (worse) silently anchor on the wrong span;
     /// skipping degrades that one rule rather than the whole set, mirroring
-    /// <see cref="SpeechCorrectionSet.Create"/>'s blank-<c>From</c> posture. When
+    /// <see cref="SpeechCorrectionSet.Create"/>'s blank-<c>From</c> posture.
+    ///
+    /// <para>
+    /// <b>Two more skip conditions, both feeder-path safety (T133/T137 review findings):</b> a rule
+    /// whose <see cref="PronunciationRule.Ipa"/> is null, empty, or whitespace-only is skipped —
+    /// <see cref="PronunciationRule.Ipa"/> is declared non-nullable, but System.Text.Json does not
+    /// enforce that at deserialization time, so operator/card JSON that simply omits <c>ipa</c>
+    /// (<c>{"Pattern":"MacLeod","Word":"MacLeod"}</c>, entirely plausible hand-authored data) binds a
+    /// literal <see langword="null"/> here; left uncompiled, <see cref="KokoroSpeechMarkup"/> would
+    /// later dereference it and crash the render the first time a pause tag needs to be positioned
+    /// relative to the annotation. And a rule whose <see cref="PronunciationRule.Ipa"/> contains a
+    /// <c>)</c> is skipped too: <see cref="KokoroSpeechMarkup"/> composes the wire token as literal
+    /// <c>[word](ipa)</c> text with no escaping mechanism of its own, and the pinned kokoro-fastapi
+    /// markup parser closes the annotation at the FIRST <c>)</c> it sees — so an ipa carrying one
+    /// (parenthesized optional-segment notation is legitimate IPA) would truncate the annotation
+    /// early and let the remainder of the ipa spill out as spoken text on the wire. An ipa containing
+    /// <c>[</c> or <c>]</c> is skipped for a related reason: kokoro-fastapi's own <c>[pause:Ns]</c>
+    /// markup (gh-#116) is honored anywhere it appears in the request text, not only outside a
+    /// pronunciation annotation's parens — an ipa carrying a <c>[pause:Ns]</c>-shaped substring (e.g.
+    /// an imported card's <c>/mə[pause:600s]klaʊd/</c>) would splice a literal digital-silence
+    /// directive onto the wire the moment that rule's annotation renders. This is a pre-existing
+    /// class of risk (a card correction's replacement text can carry the same shape), not something
+    /// new to pronunciation rules — but it costs one character class to close here too. All three
+    /// failures are invisible in this set's own unit tests because nothing here renders a token; they
+    /// surface only downstream, which is exactly why the guard belongs at the one place every rule —
+    /// station or card — must pass through to ever reach a compiled match. When
     /// <see cref="PronunciationRule.Word"/> occurs more than once inside
     /// <see cref="PronunciationRule.Pattern"/>, the FIRST occurrence binds (ordinary
     /// <see cref="string.IndexOf(string, StringComparison)"/> semantics) and later occurrences are
@@ -85,12 +111,33 @@ public sealed class PronunciationRuleSet
             .Select(rule => PronunciationRule.Parse(rule.Pattern, rule.Word, rule.Ipa))
             .Where(rule => !string.IsNullOrWhiteSpace(rule.Pattern)
                 && !string.IsNullOrWhiteSpace(rule.Word)
+                && !string.IsNullOrWhiteSpace(rule.Ipa)
+                && !rule.Ipa.Contains(')')
+                && !rule.Ipa.Contains('[')
+                && !rule.Ipa.Contains(']')
                 && rule.Pattern.Contains(rule.Word, StringComparison.OrdinalIgnoreCase))
             .Select(rule => (Pattern: CompilePattern(rule), Rule: rule))
             .ToList();
 
         return new PronunciationRuleSet(compiled);
     }
+
+    /// <summary>
+    /// Builds a compiled rule set directly from the resolved <see cref="ContextPronunciationRule"/>
+    /// shape <c>TtsRenderContext.Rules</c> carries (SPEC F97.6) — the mirrored, dependency-free
+    /// contract type <c>GenWave.Core.Domain</c> carries because that project cannot reference
+    /// <c>GenWave.Tts</c>, where this compiled matcher lives (see <see cref="ContextPronunciationRule"/>'s
+    /// own remarks). The ONE seam every Kokoro-kind renderer (<see cref="KokoroTtsSynthesizer"/>,
+    /// <see cref="KokoroFallbackRenderer"/>) now resolves a context's rules through, replacing what
+    /// used to be an identical private conversion duplicated in each renderer (T137 review finding) —
+    /// a future field added to the mirrored pair only ever needs updating here. An empty list maps
+    /// straight to <see cref="Empty"/> rather than paying for <see cref="Create"/>'s own (equivalent)
+    /// empty compile, so the overwhelmingly common "no rules" case allocates nothing new.
+    /// </summary>
+    public static PronunciationRuleSet FromContext(IReadOnlyList<ContextPronunciationRule> rules) =>
+        rules.Count == 0
+            ? Empty
+            : Create(rules.Select(rule => new PronunciationRule(rule.Pattern, rule.Word, rule.Ipa)));
 
     /// <summary>
     /// Merges two rule sets: every <paramref name="card"/> rule is ordered AHEAD of every

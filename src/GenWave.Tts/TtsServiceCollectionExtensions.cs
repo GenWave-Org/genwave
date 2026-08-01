@@ -98,6 +98,18 @@ public static class TtsServiceCollectionExtensions
         // a TTL, not an OnChange subscription, is the honest mechanism at this layer.
         services.AddSingleton<ActivePersonaCorrectionsCache>();
 
+        // Station pronunciation rules (SPEC F97.3, STORY-253) — a raw JSON leaf, mirroring
+        // Tts:Corrections above exactly: malformed JSON degrades to no rules with a WARN
+        // (PronunciationRuleProvider) rather than failing boot.
+        services
+            .AddOptions<TtsPronunciationsOptions>()
+            .Bind(configuration.GetSection(TtsPronunciationsOptions.Section));
+        services.AddSingleton<PronunciationRuleProvider>();
+
+        // Card-pronunciations half of the F97.3/F97.4 merge seam — the pronunciation-rule sibling
+        // of ActivePersonaCorrectionsCache just above, same TTL mechanism, same accessor seam.
+        services.AddSingleton<ActivePersonaPronunciationRulesCache>();
+
         // Fired-rule observability (SPEC F68.7, STORY-186 AC3) — one counter set for the process
         // lifetime, incremented by NormalizingTtsSynthesizer and read by GET /api/tts/corrections-stats.
         services.AddSingleton<CorrectionsFiredStats>();

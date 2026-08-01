@@ -14,6 +14,7 @@ using System.Net;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using GenWave.Core.Domain;
 using GenWave.Tts.Tests.Fakes;
 
 public static class FeatureFallbackResiliencyChain
@@ -408,7 +409,9 @@ public static class FeatureFallbackResiliencyChain
 
                 // When it renders with a caller voice that differs from the profile voice
                 await renderer.RenderAsync(
-                    KokoroHop(voice: "am_michael"), "Coming up next", "af_heart", CancellationToken.None);
+                    KokoroHop(voice: "am_michael"),
+                    new TtsRenderContext("Coming up next", "af_heart", Kind: null),
+                    CancellationToken.None);
 
                 // Then the PROFILE voice is what went on the wire, at the hop's own endpoint
                 var body = Assert.Single(bodies);
@@ -432,7 +435,8 @@ public static class FeatureFallbackResiliencyChain
                 var renderer = new KokoroFallbackRenderer(http, CacheOptions(cacheRoot));
 
                 // When it renders
-                await renderer.RenderAsync(KokoroHop(), "Coming up next", "af_heart", CancellationToken.None);
+                await renderer.RenderAsync(
+                    KokoroHop(), new TtsRenderContext("Coming up next", "af_heart", Kind: null), CancellationToken.None);
 
                 // Then the caller's per-request voice goes on the wire unchanged
                 Assert.Contains("\"voice\":\"af_heart\"", Assert.Single(bodies));
@@ -456,7 +460,8 @@ public static class FeatureFallbackResiliencyChain
                 var renderer = new PiperTtsSynthesizer(http, CacheOptions(cacheRoot));
 
                 // When it renders
-                await renderer.RenderAsync(PiperHop(), "Coming up next", "af_heart", CancellationToken.None);
+                await renderer.RenderAsync(
+                    PiperHop(), new TtsRenderContext("Coming up next", "af_heart", Kind: null), CancellationToken.None);
 
                 // Then the body is exactly the text (text/plain — never form-encoded, which Flask
                 // would consume): no profile voice, no request voice, anywhere on the wire

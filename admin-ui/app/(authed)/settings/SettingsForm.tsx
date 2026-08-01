@@ -180,6 +180,12 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "engine (e.g. \"MacLeod\" → \"Muh-cloud\"). Each rule can carry optional context conditions " +
     "for heteronyms — \"wind\" → \"wynd\" only when followed by \"down|up\" — so the other sense " +
     "(\"a strong wind\") stays untouched. Empty means no corrections.",
+  "Tts:Pronunciations":
+    "Station pronunciation rules the Kokoro voice engine honors directly (IPA phoneme overrides, " +
+    "e.g. pattern \"Reykjavík\" → ipa \"/ˈreɪkjaviːk/\") rather than text substitutions. A rule's " +
+    "optional word narrows which occurrence of a longer pattern gets the override, disambiguating " +
+    "heteronyms like \"wind\". The active persona's own rules win when both name the same " +
+    "pattern/word. Empty means no station pronunciation rules.",
   "Tts:Fallback:Endpoint":
     "The Piper local fallback TTS service base URL — hop 1 of the fallback chain, used " +
     "automatically when Kokoro is unhealthy or a render fails. Leave empty to disable the " +

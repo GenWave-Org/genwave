@@ -107,6 +107,14 @@ public static class StationSettingsAllowlist
         // compiled SpeechCorrectionSet on every change — a PUT here reaches the very next render
         // with no api restart.
         new("Tts:Corrections",                                SettingApplyMode.Live,          SettingKind.String,     ""),
+        // Station pronunciation rules (SPEC F97.1, F97.3, STORY-253) — a JSON-encoded array of
+        // {pattern, word, ipa} rules stored as ONE opaque string-kind value, the identical
+        // "overlay can't expand an array of objects" idiom as Tts:Corrections just above.
+        // PronunciationRuleProvider (GenWave.Tts) reads it via IOptionsMonitor<TtsPronunciationsOptions>
+        // and rebuilds the compiled PronunciationRuleSet on every change — a PUT here reaches the
+        // very next render with no api restart. Merged with the active persona card's own rules,
+        // card winning on conflict (F97.4) — see PersonaOverStationMerge.
+        new("Tts:Pronunciations",                             SettingApplyMode.Live,          SettingKind.String,     ""),
         // Piper local-fallback engine, LEGACY single-hop shape (SPEC F70.1, STORY-190, gh-#147):
         // FallbackTtsSynthesizer (GenWave.Tts) reads both via IOptionsMonitor<TtsFallbackOptions>
         // per render, so a PUT here reaches the very next render with no api restart. These two

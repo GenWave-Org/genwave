@@ -38,6 +38,7 @@ export const SETTINGS_HELP_KEYS = [
   "Station:Requests:WindowMinutes",
   "Tts:Endpoint",
   "Tts:Corrections",
+  "Tts:Pronunciations",
   "Tts:Fallback:Endpoint",
   "Tts:Fallback:Voice",
   "Tts:EngineByKind",

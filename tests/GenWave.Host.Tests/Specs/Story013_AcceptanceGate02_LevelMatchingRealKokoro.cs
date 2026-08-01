@@ -90,6 +90,11 @@ public static class FeatureAcceptanceGate02LevelMatchingRealKokoro
             NullLogger<SpeechCorrectionProvider>.Instance);
         var personaCorrectionsCache = new ActivePersonaCorrectionsCache(
             new FakeActivePersonaAccessor(), TimeProvider.System);
+        var pronunciationProvider = new PronunciationRuleProvider(
+            new FakeOptionsMonitor<TtsPronunciationsOptions>(new TtsPronunciationsOptions()),
+            NullLogger<PronunciationRuleProvider>.Instance);
+        var personaPronunciationCache = new ActivePersonaPronunciationRulesCache(
+            new FakeActivePersonaAccessor(), TimeProvider.System);
 
         var source = new TtsSegmentSource(
             new TemplateCopyWriter(new PatterTemplateRenderer()),
@@ -98,6 +103,8 @@ public static class FeatureAcceptanceGate02LevelMatchingRealKokoro
             new FakeCueAnalyzer(),
             correctionsProvider,
             personaCorrectionsCache,
+            pronunciationProvider,
+            personaPronunciationCache,
             ttsOptsMonitor,
             NullLogger<TtsSegmentSource>.Instance);
 

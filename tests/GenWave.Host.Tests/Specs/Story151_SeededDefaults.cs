@@ -110,7 +110,9 @@ public static class FeatureSeededDefaults
     /// compose.demo.yaml, never a C# default), not a bug the F55.1 seeding contract covers.
     /// Tts:EngineByKind (SPEC F70.3, STORY-191) joins this set on the identical rationale: empty is
     /// its spec'd default (F70.3, "Default: empty map") — every kind falls through to the existing
-    /// F70.1 health-based routing, and no compose topology needs to pin one.
+    /// F70.1 health-based routing, and no compose topology needs to pin one. Tts:Pronunciations
+    /// (SPEC F97.1, F97.3, STORY-253) joins on Tts:Corrections' own identical rationale: empty means
+    /// no station pronunciation rules are configured, not a bug this contract covers.
     /// Station:Envelope:Genres (SPEC F81.1, STORY-212) joins on the same rationale: empty is its
     /// spec'd default ("empty Genres = all genres") — a fresh install's single station-default
     /// envelope constrains no genre until an operator narrows it, and no compose topology needs to
@@ -129,6 +131,7 @@ public static class FeatureSeededDefaults
         "Station:PublicStreamUrl",
         "Station:PublicBaseUrl",
         "Tts:Corrections",
+        "Tts:Pronunciations",
         "Tts:EngineByKind",
         "Station:Envelope:Genres",
         "Station:Timezone",

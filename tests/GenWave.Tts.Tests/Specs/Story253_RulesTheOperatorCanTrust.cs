@@ -20,6 +20,24 @@
 
 namespace GenWave.Tts.Tests.Specs;
 
+using System.Net;
+using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
+using GenWave.Core.Abstractions;
+using GenWave.Tts.Tests.Fakes;
+// GenWave.Tts.PronunciationRule (this file's ambient, unqualified `PronunciationRule` throughout)
+// and GenWave.Core.Domain.PronunciationRule are two distinct mirrored types (see Story252's own
+// remarks on the same collision) — a blanket `using GenWave.Core.Domain;` would silently rebind
+// every existing unqualified `PronunciationRule` reference above to the wrong one. Aliasing only
+// the names this scenario needs keeps the rest of the file's resolution untouched.
+using TtsRenderContext = GenWave.Core.Domain.TtsRenderContext;
+using SegmentRequest = GenWave.Core.Domain.SegmentRequest;
+using SegmentKind = GenWave.Core.Domain.SegmentKind;
+using Persona = GenWave.Core.Domain.Persona;
+using PersonaCard = GenWave.Core.Domain.PersonaCard;
+using VoiceSpec = GenWave.Core.Domain.VoiceSpec;
+using ContextPronunciationRule = GenWave.Core.Domain.PronunciationRule;
+
 public static class FeatureRulesTheOperatorCanTrust
 {
     public static class ScenarioTwoSourcesMerge
@@ -184,20 +202,105 @@ public static class FeatureRulesTheOperatorCanTrust
 
     public static class ScenarioRulesRideWithTheRequest
     {
-        [Fact(Skip = "Pending T137 — see docs/PLAN.md")]
-        public static void A_boundary_crossing_render_uses_the_authoring_personas_rules()
+        static PersonaCard CardWithPronunciation(ContextPronunciationRule rule) =>
+            new(
+                PersonaCard.CurrentSchemaVersion, "Test Persona", "", "", [],
+                new VoiceSpec("kokoro", "af_heart", 1.0, "en"), EnergyDisposition: 0, [], [],
+                Pronunciations: [rule]);
+
+        static string InputOf(string requestBody) =>
+            JsonDocument.Parse(requestBody).RootElement.GetProperty("input").GetString() ?? "";
+
+        /// <summary>
+        /// Answers <c>cardA</c> on its first call, then <c>cardB</c> on every call after —
+        /// simulating an active-persona flip landing DURING a render, exactly the window
+        /// <see cref="ActivePersonaPronunciationRulesCache.RefreshIfStaleAsync"/> reads through once
+        /// per render (SPEC F97.6, F92.2's HandoffContext lesson applied to TTS rules).
+        /// </summary>
+        sealed class OneShotThenFlipsPersonaAccessor(PersonaCard cardA, PersonaCard cardB) : IActivePersonaAccessor
         {
-            // Arrange: segment authored for persona A; ambient accessor already answers B.
-            // Assert the markup reflects A's rules — the HandoffContext lesson (F92.2).
-            Assert.Fail("pending T137");
+            int calls;
+
+            public Task<Persona?> ResolveAsync(CancellationToken ct) => Task.FromResult<Persona?>(null);
+
+            public Task<PersonaCard?> ResolveCardAsync(CancellationToken ct) =>
+                Task.FromResult<PersonaCard?>(Interlocked.Increment(ref calls) == 1 ? cardA : cardB);
         }
 
-        [Fact(Skip = "Pending T137 — see docs/PLAN.md")]
-        public static void The_adapter_never_reads_an_ambient_persona_accessor()
+        [Fact]
+        public static async Task A_boundary_crossing_render_uses_the_authoring_personas_rules()
         {
-            // A throwing/never-configured accessor must not affect a render whose rules
-            // were already resolved upstream.
-            Assert.Fail("pending T137");
+            // Given persona A's card is the one and only answer this render's own resolve reads —
+            // any LATER read (which nothing downstream should ever make, but this accessor is
+            // scripted to prove it if it did) would already answer persona B instead.
+            var ruleA = new ContextPronunciationRule("MacLeod", "MacLeod", "/personaA/");
+            var ruleB = new ContextPronunciationRule("MacLeod", "MacLeod", "/personaB/");
+            var accessor = new OneShotThenFlipsPersonaAccessor(CardWithPronunciation(ruleA), CardWithPronunciation(ruleB));
+            var requests = new List<string>();
+            var handler = new FakeHttpMessageHandler(async (request, ct) =>
+            {
+                requests.Add(request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct));
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) };
+            });
+            var cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            try
+            {
+                var source = new TtsSegmentSource(
+                    new FakeSegmentCopyWriter("Say MacLeod now."),
+                    new KokoroTtsSynthesizer(new HttpClient(handler), new TestOptionsMonitor<TtsOptions>(
+                        new TtsOptions { CacheRoot = cacheRoot, Format = "wav" })),
+                    new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(),
+                    NoCorrections.Provider(), NoCorrections.PersonaCache(),
+                    NoCorrections.PronunciationProvider(), new ActivePersonaPronunciationRulesCache(accessor, TimeProvider.System),
+                    new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
+                    NullLogger<TtsSegmentSource>.Instance);
+                var request = new SegmentRequest(
+                    SegmentKind.StationId, "af_heart", "GenWave", null, DateTimeOffset.UtcNow, "test-station");
+
+                await source.RenderAsync(request, CancellationToken.None);
+
+                // Then the markup carries persona A's phonemes — the one resolve this render made —
+                // never persona B's, even though the accessor would already answer B by now.
+                Assert.Contains("/personaA/", InputOf(Assert.Single(requests)));
+            }
+            finally
+            {
+                if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            }
+        }
+
+        [Fact]
+        public static async Task The_adapter_never_reads_an_ambient_persona_accessor()
+        {
+            // KokoroFallbackRenderer's constructor (unlike TtsSegmentSource's) carries no
+            // IActivePersonaAccessor, no PronunciationRuleProvider, no rules-provider of any kind —
+            // there is nothing here for it to read even if it wanted to. A render whose context
+            // already carries resolved rules (SPEC F97.6, "resolved upstream, at TtsSegmentSource")
+            // is therefore structurally unaffected by whatever the ambient world does next.
+            var context = new TtsRenderContext("Say MacLeod now.", "af_heart", Kind: null)
+                with { Rules = [new ContextPronunciationRule("MacLeod", "MacLeod", "/resolvedUpstream/")] };
+            var requests = new List<string>();
+            var handler = new FakeHttpMessageHandler(async (request, ct) =>
+            {
+                requests.Add(request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct));
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) };
+            });
+            var cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            try
+            {
+                var renderer = new KokoroFallbackRenderer(
+                    new HttpClient(handler),
+                    new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }));
+                var profile = new TtsFallbackProfile { Engine = DependencyNames.Kokoro, Endpoint = "http://backup-kokoro:8880", Voice = "" };
+
+                await renderer.RenderAsync(profile, context, CancellationToken.None);
+
+                Assert.Contains("/resolvedUpstream/", InputOf(Assert.Single(requests)));
+            }
+            finally
+            {
+                if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            }
         }
     }
 

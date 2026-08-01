@@ -29,6 +29,8 @@ public static class FeatureTtsSegmentSourceCueAnalysis
             cueAnalyzer,
             NoCorrections.Provider(),
             NoCorrections.PersonaCache(),
+            NoCorrections.PronunciationProvider(),
+            NoCorrections.PersonaPronunciationCache(),
             opts,
             NullLogger<TtsSegmentSource>.Instance);
     }

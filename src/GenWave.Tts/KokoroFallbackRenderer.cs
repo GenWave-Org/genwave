@@ -27,12 +27,14 @@ using GenWave.Core.Domain;
 /// client (SPEC F36.1–F36.2): the endpoint comes from the profile per call, itself resolved from
 /// <see cref="IOptionsMonitor{TOptions}.CurrentValue"/> upstream.
 ///
-/// <see cref="TtsRenderContext"/> (T134) now carries a resolved rule set and pace, but neither
-/// reaches THIS render — <see cref="IFallbackProfileRenderer.RenderAsync"/>'s contract is
-/// <c>(profile, text, requestVoice, ct)</c>, with no context parameter at all, so this hop keeps
-/// passing <see cref="PronunciationRuleSet.Empty"/> and sending no <c>speed</c> field, byte-identical
-/// to its pre-T134 behaviour. Widening that contract so a fallback hop can read either fact is
-/// later work, not this task's.
+/// <see cref="TtsRenderContext"/> (T134) now reaches this render (T137 widened
+/// <see cref="IFallbackProfileRenderer.RenderAsync"/> to carry it instead of a bare
+/// <c>(text, requestVoice)</c> pair): a kokoro-kind hop reads <see cref="TtsRenderContext.Rules"/>
+/// the identical way <see cref="KokoroTtsSynthesizer"/>'s own context-aware overload does (SPEC
+/// F97.6), so the same DJ line carries the same pronunciation whichever Kokoro-kind renderer
+/// actually renders it — primary or fallback hop. This hop still never reads
+/// <see cref="TtsRenderContext.Pace"/>: that field's consumption is T140's job, not this one's — see
+/// <c>docs/PLAN.md</c> T140.
 /// </summary>
 public sealed class KokoroFallbackRenderer(
     HttpClient http,
@@ -40,19 +42,19 @@ public sealed class KokoroFallbackRenderer(
 {
     public string Engine => DependencyNames.Kokoro;
 
-    public async Task<string> RenderAsync(TtsFallbackProfile profile, string text, string requestVoice, CancellationToken ct)
+    public async Task<string> RenderAsync(TtsFallbackProfile profile, TtsRenderContext context, CancellationToken ct)
     {
         var cfg = ttsOptions.CurrentValue;
-        var voice = string.IsNullOrEmpty(profile.Voice) ? requestVoice : profile.Voice;
+        var voice = string.IsNullOrEmpty(profile.Voice) ? context.Voice : profile.Voice;
 
         // Engine-aware sentence pauses AND pronunciation markup (gh-#116, F97): a kokoro-KIND hop
         // shares the same composed KokoroSpeechMarkup.Render seam as the primary
         // (KokoroTtsSynthesizer), so both Kokoro request paths tag identically — Piper hops
-        // (PiperTtsSynthesizer) never do. Empty here, unlike the primary's now-context-aware
-        // overload (T134): this hop has no TtsRenderContext to read a resolved rule set from (see
-        // the class remarks), not merely an un-populated one.
-        var speech = KokoroSpeechMarkup.Render(text, PronunciationRuleSet.Empty, cfg.SentencePauseSeconds);
-        // No `speed` field either, for the same reason — this hop never sees TtsRenderContext.Pace.
+        // (PiperTtsSynthesizer) never do. context.Rules rides in from TtsSegmentSource (SPEC
+        // F97.6) exactly like the primary's own context-aware overload reads it — this hop never
+        // resolves a rule set of its own from any provider or ambient accessor.
+        var speech = KokoroSpeechMarkup.Render(context.Text, PronunciationRuleSet.FromContext(context.Rules), cfg.SentencePauseSeconds);
+        // No `speed` field: this hop never reads TtsRenderContext.Pace (T140's job).
         var body = new { input = speech, voice, response_format = cfg.Format };
         using var content = new StringContent(
             JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
@@ -82,8 +84,7 @@ public sealed class KokoroFallbackRenderer(
 
     // No pace term: this hop never resolves a real pace value to fold in (see the class remarks)
     // — every render here is the same "engine default" constant, so adding it would be a no-op
-    // key change, not a correctness fix. T140 is where that stops being true on the PRIMARY path;
-    // this one needs IFallbackProfileRenderer widened first (docs/PLAN.md T140 precondition).
+    // key change, not a correctness fix. T140 is where that stops being true on the PRIMARY path.
     static string GetCachePath(string text, string voice, string endpoint, TtsOptions cfg)
     {
         var hash = Convert.ToHexString(

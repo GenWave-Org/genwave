@@ -3,6 +3,7 @@ namespace GenWave.Tts;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Options;
+using GenWave.Core.Domain;
 
 /// <summary>
 /// Piper-engine hop renderer (SPEC F70.1, STORY-190, gh-#147) — the <c>"piper"</c>
@@ -36,15 +37,18 @@ public sealed class PiperTtsSynthesizer(
 {
     public string Engine => DependencyNames.Piper;
 
-    public async Task<string> RenderAsync(TtsFallbackProfile profile, string text, string requestVoice, CancellationToken ct)
+    public async Task<string> RenderAsync(TtsFallbackProfile profile, TtsRenderContext context, CancellationToken ct)
     {
         var ttsCfg = ttsOptions.CurrentValue;
+        var requestVoice = context.Voice;
 
         // Defense-in-depth strip guard (F96.3): piper-tts speaks any [...]-shaped token aloud
         // (a pause tag, a pronunciation override, or any other bracket-shaped form), and an
         // operator's correction replacement or an authored segment can carry brackets no
-        // LLM-copy filter ever saw. See PiperSpeechMarkup for the full contract.
-        var speech = PiperSpeechMarkup.Strip(text);
+        // LLM-copy filter ever saw. See PiperSpeechMarkup for the full contract. Piper has no
+        // markup mechanism of its own, so context.Rules (T137, SPEC F97.6) never reaches this
+        // engine either — mirrors the pre-T137 shape exactly, mechanical widening only.
+        var speech = PiperSpeechMarkup.Strip(context.Text);
 
         // CodeQL cs/web/xss reports HIGH here (alert #25, first raised on PR #325). It is a
         // MISCLASSIFIED SINK, not a false flow — the distinction matters, so the evidence is

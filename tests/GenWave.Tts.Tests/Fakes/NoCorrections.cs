@@ -28,4 +28,27 @@ public static class NoCorrections
     /// </summary>
     public static ActivePersonaCorrectionsCache PersonaCache() =>
         new(new FakeActivePersonaAccessor(), TimeProvider.System);
+
+    /// <summary>
+    /// Sibling of <see cref="Provider"/> on the station side of the F97.3 pronunciation-rule merge:
+    /// a real <see cref="PronunciationRuleProvider"/> configured with no station rules — what every
+    /// render/cache spec that isn't itself exercising pronunciation rules needs just to satisfy
+    /// <see cref="TtsSegmentSource"/>'s constructor (its cache key also folds in
+    /// <see cref="PronunciationRuleProvider.ContentHash"/>).
+    /// </summary>
+    public static PronunciationRuleProvider PronunciationProvider() =>
+        new(
+            new TestOptionsMonitor<TtsPronunciationsOptions>(new TtsPronunciationsOptions()),
+            NullLogger<PronunciationRuleProvider>.Instance);
+
+    /// <summary>
+    /// Sibling of <see cref="PersonaCache"/> on the card side of the F97.3/F97.4 pronunciation-rule
+    /// merge: a real <see cref="ActivePersonaPronunciationRulesCache"/> over an accessor with no
+    /// active persona at all — what every render/cache spec that isn't itself exercising the
+    /// persona-card pronunciation cache needs just to satisfy <see cref="TtsSegmentSource"/>'s
+    /// constructor (its cache key also folds in
+    /// <see cref="ActivePersonaPronunciationRulesCache.ContentHash"/>).
+    /// </summary>
+    public static ActivePersonaPronunciationRulesCache PersonaPronunciationCache() =>
+        new(new FakeActivePersonaAccessor(), TimeProvider.System);
 }

@@ -23,9 +23,9 @@ namespace GenWave.Core.Domain;
 /// express a conditional correction a station rule can — lossy today, silently, because nothing
 /// forced the mirror to track the field addition it was modeled on. This type must not repeat that:
 /// any future field added to <c>GenWave.Tts.PronunciationRule</c> needs the same field added here in
-/// the SAME change, or the Kokoro adapters' conversion (<c>KokoroTtsSynthesizer.ToRuleSet</c>) will
-/// silently drop it for every persona-card-authored rule exactly as <c>ActivePersonaCorrectionsCache</c>
-/// does today for corrections.
+/// the SAME change, or the ONE conversion seam every Kokoro-kind renderer shares
+/// (<c>PronunciationRuleSet.FromContext</c>) will silently drop it for every persona-card-authored
+/// rule exactly as <c>ActivePersonaCorrectionsCache</c> does today for corrections.
 /// </para>
 /// </summary>
 public sealed record PronunciationRule(string Pattern, string Word, string Ipa);

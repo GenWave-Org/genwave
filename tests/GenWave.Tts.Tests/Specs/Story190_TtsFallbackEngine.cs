@@ -51,6 +51,8 @@ public static class FeatureTtsFallbackEngine
             cueAnalyzer,
             NoCorrections.Provider(),
             NoCorrections.PersonaCache(),
+            NoCorrections.PronunciationProvider(),
+            NoCorrections.PersonaPronunciationCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
             logger ?? NullLogger<TtsSegmentSource>.Instance);
 
