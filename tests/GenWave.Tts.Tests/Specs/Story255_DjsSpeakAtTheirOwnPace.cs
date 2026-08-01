@@ -18,6 +18,8 @@
 
 namespace GenWave.Tts.Tests.Specs;
 
+using GenWave.Core.Domain;
+
 public static class FeatureDjsSpeakAtTheirOwnPace
 {
     public static class ScenarioPaceReachesTheEngine
@@ -36,12 +38,15 @@ public static class FeatureDjsSpeakAtTheirOwnPace
             Assert.Fail("pending T140");
         }
 
-        [Fact(Skip = "Pending T134 — see docs/PLAN.md")]
+        [Fact]
         public static void The_render_context_carries_pace_from_the_persona()
         {
             // TtsRenderContext widened per F70.3's precedent — a default interface member, so
             // every existing engine client and test fake compiles and behaves unchanged.
-            Assert.Fail("pending T134");
+            var context = new TtsRenderContext("Coming up next", "af_heart", SegmentKind.LeadIn)
+                with { Pace = 0.85 };
+
+            Assert.Equal(0.85, context.Pace);
         }
     }
 
