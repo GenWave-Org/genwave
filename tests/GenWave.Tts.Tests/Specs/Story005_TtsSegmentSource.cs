@@ -2,6 +2,8 @@
 
 namespace GenWave.Tts.Tests.Specs;
 
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Tts.Tests.Fakes;
@@ -374,10 +376,56 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
         }
     }
 
+    // Round-4 fix (T136 review, BLOCKING #1): the F97.4 merge-policy flip changes rendered audio
+    // WITHOUT changing either correction-content fingerprint — the merge ALGORITHM changed, not
+    // the rule content, and neither corrections.ContentHash nor personaCorrections.ContentHash can
+    // detect that. TtsSegmentSource.MergePolicyVersion is the term that closes the gap; this spec
+    // pins it as an explicit, present term in the hash formula (computed the exact same way
+    // TtsSegmentSource does) so a future edit that REMOVES it is caught here rather than silently
+    // re-shipping a stale cache key.
+    //
+    // Deliberately NOT claimed: this does not catch a BUMP. The expected hash is recomputed from
+    // TtsSegmentSource.MergePolicyVersion itself, so both sides move together and the spec stays
+    // green (verified by mutation — bumping to "f99.9" passes). That direction is conservative
+    // anyway: a bump over-invalidates the cache, which costs re-renders, never stale audio.
+    public sealed class ScenarioMergePolicyVersionIsPartOfTheCacheKey : IDisposable
+    {
+        readonly string cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        readonly FakeTtsSynthesizer synth = new();
+        readonly FakeLoudnessAnalyzer analyzer = new();
+
+        [Fact]
+        public async Task MediaIdIsTheHashOfEveryFieldIncludingTheMergePolicyVersion()
+        {
+            const string text = "Coming up, a deep cut from MacLeod.";
+            var corrections = NoCorrections.Provider();
+            var personaCache = NoCorrections.PersonaCache();
+            var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
+            var source = new TtsSegmentSource(
+                new FakeSegmentCopyWriter(text), synth, analyzer, new FakeCueAnalyzer(),
+                corrections, personaCache, opts, NullLogger<TtsSegmentSource>.Instance);
+            var request = StationIdRequest();
+
+            var item = await source.RenderAsync(request, CancellationToken.None);
+
+            var expectedHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+                text + "|" + request.Voice + "|" + request.StationId + "|" + corrections.ContentHash + "|" +
+                personaCache.ContentHash + "|" + TtsSegmentSource.MergePolicyVersion)));
+
+            Assert.Equal($"tts:{expectedHash}", item!.MediaId);
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            if (Directory.Exists(synth.OutputDirectory)) Directory.Delete(synth.OutputDirectory, recursive: true);
+        }
+    }
+
     // Folds the ACTIVE persona-card corrections fingerprint into the cache key (companion fix to
     // ScenarioCorrectionsRebuildReKeysTheCache above, this time on the CARD side of the F71.7
-    // merge): NormalizingTtsSynthesizer applies the MERGED station-over-card set, not the station
-    // set alone, so a card correction change must re-key an evergreen cached clip exactly as a
+    // merge): NormalizingTtsSynthesizer applies the MERGED persona-over-station set (F97.4), not
+    // the station set alone, so a card correction change must re-key an evergreen cached clip exactly as a
     // station corrections rebuild does — otherwise the corrected pronunciation never reaches an
     // already-cached StationId/LeadIn/BackAnnounce clip.
     public sealed class ScenarioCardCorrectionsChangeReKeysTheCache : IDisposable

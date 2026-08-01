@@ -28,11 +28,12 @@ using GenWave.Core.Domain;
 /// itself stays pure (it only reports which rules fired via an out parameter); this decorator is
 /// where that report becomes a log line and a counter.
 ///
-/// <see cref="personaCorrections"/> supplies the card half of the F71.7 merge (STORY-193): every
-/// real render refreshes it (bounded by its own staleness window — see its class remarks) before
-/// <see cref="SpeechCorrectionProvider.BuildMerged"/> builds the snapshot <see cref="RunNormalize"/>
-/// actually matches against, so station rules win over an identical card rule at the one place the
-/// merged set is built.
+/// <see cref="personaCorrections"/> supplies the card half of the F97.4 merge (STORY-193, amending
+/// F71.7): every real render refreshes it (bounded by its own staleness window — see its class
+/// remarks) before <see cref="SpeechCorrectionProvider.BuildMerged"/> builds the snapshot <see
+/// cref="RunNormalize"/> actually matches against — the one place the merged set is built. Card
+/// rules sort ahead of station rules there; for exactly what that does and does NOT guarantee, see
+/// <see cref="PersonaOverStationMerge"/>, which states the invariant once so it cannot drift.
 /// </summary>
 public sealed class NormalizingTtsSynthesizer(
     ITtsSynthesizer inner,

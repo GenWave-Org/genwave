@@ -67,26 +67,40 @@ public sealed class SpeechCorrectionSet
     }
 
     /// <summary>
-    /// Merges two correction sets: <paramref name="station"/> rules win when a
-    /// <paramref name="card"/> rule targets the same rule identity — <see
-    /// cref="SpeechCorrection.From"/> plus its canonicalized context conditions, all
-    /// case-insensitive — the station-over-card precedence a later persona-card merge needs. A
-    /// context-free rule's identity degenerates to its <c>From</c> alone, so pre-gh-#161 sets
-    /// merge exactly as they always have. A card rule sharing a station rule's <c>From</c> but
-    /// carrying a DIFFERENT context is a different rule and survives the merge — it runs after
-    /// every station rule, so a station rule that already consumed an occurrence still wins there.
+    /// Merges two correction sets: every <paramref name="card"/> rule is ordered AHEAD of every
+    /// <paramref name="station"/> rule (SPEC F97.4, amending the shipped station-over-card
+    /// precedence F71.7 established) — the shared invariant <see cref="PersonaOverStationMerge"/>
+    /// documents in full, realized here through <see cref="Apply"/>'s own in-order,
+    /// sequential-rewrite semantics: rules run in order, and each rewrite works over the text the
+    /// rules before it already produced, so a card rule for a sub-phrase
+    /// (<c>"MacLeod Duncan"</c>) or any other non-identical overlap still gets first crack at the
+    /// text, not only a rule whose <see cref="SpeechCorrection.From"/> plus canonicalized context
+    /// conditions is byte-identical (case-insensitive) to a station rule's.
+    ///
+    /// <para>
+    /// That guarantee is scoped to the input text, not to every downstream effect of applying the
+    /// rules — <see cref="Apply"/> still runs every station rule strictly AFTER every surviving
+    /// card rule, so it does NOT hold that the persona's own output is untouchable, nor that a
+    /// card rule can keep benefiting from running after a station rule the way it could pre-flip:
+    /// a station rule can still match and rewrite text that a card rule's own replacement
+    /// introduced (the persona's output gets clobbered from under it), and a card rule can no
+    /// longer post-process a station rule's replacement output, because the card rule already had
+    /// its one turn before the station rule ever produced that text.
+    /// </para>
+    /// A station rule whose identity IS identical to a card rule's is still dropped rather than
+    /// appended after it — applying both back-to-back is pure waste once the card rule already
+    /// rewrote the text, and leaving it in would let a stale rule reappear in <see cref="Rules"/>.
+    /// Identity and ordering do two different jobs: identity dedupes an exact duplicate, ordering
+    /// decides every other overlap. Delegates to <see cref="PersonaOverStationMerge.MergeByIdentity{T}"/>,
+    /// the seam <see cref="PronunciationRuleSet.Merge"/> shares so the two can't drift apart again.
     /// </summary>
     public static SpeechCorrectionSet Merge(SpeechCorrectionSet station, SpeechCorrectionSet card)
     {
         ArgumentNullException.ThrowIfNull(station);
         ArgumentNullException.ThrowIfNull(card);
 
-        var stationKeys = new HashSet<string>(
-            station.rules.Select(rule => IdentityKey(rule.Rule)), StringComparer.OrdinalIgnoreCase);
-        var merged = new List<(Regex Pattern, SpeechCorrection Rule)>(station.rules);
-        merged.AddRange(card.rules.Where(rule => !stationKeys.Contains(IdentityKey(rule.Rule))));
-
-        return new SpeechCorrectionSet(merged);
+        return new SpeechCorrectionSet(
+            PersonaOverStationMerge.MergeByIdentity(station.rules, card.rules, item => IdentityKey(item.Rule)));
     }
 
     /// <summary>
@@ -188,14 +202,17 @@ public sealed class SpeechCorrectionSet
 
     /// <summary>
     /// A rule's merge identity (see <see cref="Merge"/>): From plus both canonicalized context
-    /// conditions, field-separated with a control char no operator text plausibly contains (the
-    /// same delimiter discipline as <see cref="CorrectionsFingerprint"/>). Contexts canonicalize
-    /// through <see cref="ParseContextAlternatives"/> so <c>" down |up"</c> and <c>"down|up"</c>
-    /// are the same condition; a context-free rule folds to <c>From</c> + two empty fields —
-    /// exactly the From-only identity pre-gh-#161 merges used.
+    /// conditions, field-separated with <see cref="PersonaOverStationMerge.IdentityFieldSeparator"/>
+    /// — the same delimiter <see cref="PronunciationRuleSet"/>'s own identity key and <see
+    /// cref="CorrectionsFingerprint"/> share, so all three can't drift onto different delimiters
+    /// for the same field-separation problem. Contexts canonicalize through
+    /// <see cref="ParseContextAlternatives"/> so <c>" down |up"</c> and <c>"down|up"</c> are the
+    /// same condition; a context-free rule folds to <c>From</c> + two empty fields — exactly the
+    /// From-only identity pre-gh-#161 merges used.
     /// </summary>
     private static string IdentityKey(SpeechCorrection rule) =>
-        $"{rule.From}\x1F{CanonicalContext(rule.WhenPrecededBy)}\x1F{CanonicalContext(rule.WhenFollowedBy)}";
+        $"{rule.From}{PersonaOverStationMerge.IdentityFieldSeparator}{CanonicalContext(rule.WhenPrecededBy)}" +
+        $"{PersonaOverStationMerge.IdentityFieldSeparator}{CanonicalContext(rule.WhenFollowedBy)}";
 
     private static string CanonicalContext(string? contextWords) =>
         string.Join('|', ParseContextAlternatives(contextWords));

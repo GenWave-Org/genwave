@@ -187,13 +187,13 @@ public static class FeaturePersonaPromptAssemblyAndClock
     }
 
     // ---------------------------------------------------------------------
-    // AC3 — correction precedence seam (F71.7)
+    // AC3 — correction precedence seam (F71.7, precedence flipped by F97.4)
     // ---------------------------------------------------------------------
 
-    public sealed class ScenarioStationOverCardCorrectionPrecedence
+    public sealed class ScenarioCardOverStationCorrectionPrecedence
     {
         [Fact]
-        public void StationRuleWinsOverAnIdenticalCaseInsensitiveCardFrom()
+        public void CardRuleWinsOverAnIdenticalCaseInsensitiveStationFrom()
         {
             // Given a station correction and a card correction with the same From
             var station = SpeechCorrectionSet.Create([new SpeechCorrection("Kokoro", "koh-KOH-roh")]);
@@ -203,9 +203,10 @@ public static class FeaturePersonaPromptAssemblyAndClock
             var merged = SpeechCorrectionProvider.BuildMerged(station, cardCorrections);
             var result = merged.Apply("Kokoro is live.", out var firedFroms);
 
-            // Then the station rule wins (F71.7, AC3)
-            Assert.Equal("koh-KOH-roh is live.", result);
-            Assert.Contains("Kokoro", firedFroms);
+            // Then the card rule wins (F71.7 amended by F97.4, AC3) — firedFroms carries the
+            // surviving CARD rule's own From, not the shadowed station rule's
+            Assert.Equal("kaw-KOR-oh is live.", result);
+            Assert.Contains("KOKORO", firedFroms);
         }
     }
 }

@@ -13,11 +13,19 @@ using System.Text;
 /// </summary>
 static class CorrectionsFingerprint
 {
-    // ASCII Unit Separator / Record Separator (hex escapes below) — delimits a pair's two fields,
-    // and each pair from the next, with control characters no operator-authored From/To text will
-    // plausibly contain. Two distinct rule sets can then never fold to the same canonical string
-    // through field-boundary ambiguity (e.g. From="A", To="BC" vs From="AB", To="C" would otherwise
-    // both canonicalize to the same "ABC" with a plain concatenation).
+    // ASCII Unit Separator / Record Separator — delimits a pair's two fields, and each pair from
+    // the next, with control characters no operator-authored From/To text will plausibly contain.
+    // Two distinct rule sets can then never fold to the same canonical string through
+    // field-boundary ambiguity (e.g. From="A", To="BC" vs From="AB", To="C" would otherwise both
+    // canonicalize to the same "ABC" with a plain concatenation). FieldSeparator happens to share
+    // its VALUE with PersonaOverStationMerge.IdentityFieldSeparator (same control character, same
+    // field-separation problem) but is pinned HERE independently rather than derived from that
+    // type: this constant feeds a persisted, fleet-visible cache-key term (SPEC F68.5) that must
+    // stay stable across a deploy, while PersonaOverStationMerge.IdentityFieldSeparator feeds an
+    // in-memory merge-policy identity key (SPEC F97.4) that is free to change with the merge
+    // algorithm. Coupling this constant to that type would mean an in-memory-only concern could
+    // silently re-key every cached TTS clip across the fleet on a future edit neither author
+    // intended to be cache-affecting.
     const char FieldSeparator = '\x1F';
     const char PairSeparator = '\x1E';
 

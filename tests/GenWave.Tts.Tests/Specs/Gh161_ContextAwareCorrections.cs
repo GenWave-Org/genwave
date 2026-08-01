@@ -207,30 +207,32 @@ public static class FeatureContextAwareCorrections
         }
     }
 
-    public sealed class ScenarioStationOverCardMerge
+    public sealed class ScenarioCardOverStationMerge
     {
         [Fact]
-        public void StationStillWinsOnAnIdenticalContextFreeFrom()
+        public void CardWinsOnAnIdenticalContextFreeFrom()
         {
-            // The pre-gh-#161 merge contract, unchanged: same From, both context-free → card dropped.
+            // F97.4 amends F71.7: same From, both context-free → the card wins, station dropped
+            // (reverses the shipped station-wins contract this scenario used to pin).
             var station = SpeechCorrectionSet.Create([new SpeechCorrection("wind", "station")]);
             var card = SpeechCorrectionSet.Create([new SpeechCorrection("WIND", "card")]);
 
             var result = SpeechText.Normalize("The wind.", SpeechCorrectionSet.Merge(station, card));
-            Assert.Equal("The station.", result);
+            Assert.Equal("The card.", result);
         }
 
         [Fact]
-        public void StationWinsOnAnIdenticalContextRule()
+        public void CardWinsOnAnIdenticalContextRule()
         {
-            // Same From AND same (whitespace/case-normalized) context → same rule identity.
+            // Same From AND same (whitespace/case-normalized) context → same rule identity; F97.4
+            // flips the winner to the card side.
             var station = SpeechCorrectionSet.Create(
                 [new SpeechCorrection("wind", "station") { WhenFollowedBy = "down|up" }]);
             var card = SpeechCorrectionSet.Create(
                 [new SpeechCorrection("wind", "card") { WhenFollowedBy = " Down | UP " }]);
 
             var result = SpeechText.Normalize("We wind down.", SpeechCorrectionSet.Merge(station, card));
-            Assert.Equal("We station down.", result);
+            Assert.Equal("We card down.", result);
         }
 
         [Fact]
@@ -239,12 +241,66 @@ public static class FeatureContextAwareCorrections
             var station = SpeechCorrectionSet.Create(
                 [new SpeechCorrection("wind", "wynd") { WhenFollowedBy = "down|up" }]);
             var card = SpeechCorrectionSet.Create([new SpeechCorrection("wind", "winnd")]);
+            var merged = SpeechCorrectionSet.Merge(station, card);
 
-            // Station's context rule runs first and wins where its context holds; the card's
-            // blanket rule still covers the occurrences station never claimed.
+            // Different context => different identity => neither rule is dropped by the merge —
+            // that part of the claim still holds, even though (below) the station rule can no
+            // longer be observed firing.
+            Assert.Equal(2, merged.Rules.Count());
+
+            // Card rules are now ordered ahead of station rules (F97.4/orchestrator ruling): the
+            // card's blanket rule rewrites every occurrence of "wind" — including the one
+            // station's context rule would have claimed — before the station rule ever runs, so
+            // the more specific station rule never fires here. No station rule ever pre-empts a
+            // card rule: every card rule gets its turn on the text before any station rule runs,
+            // even on a non-identical overlap like this one, not only on an identical identity.
+            var result = SpeechText.Normalize("We wind down as the wind howls.", merged);
+            Assert.Equal("We winnd down as the winnd howls.", result);
+        }
+
+        [Fact]
+        public void ACardSubPhraseRuleWinsOverAStationWordRule()
+        {
+            // Executed case from review: a card rule for a SUB-PHRASE ("MacLeod Duncan") has a
+            // different identity than the station's rule for just "MacLeod" — under the old
+            // identity-only merge the station rule ran first and won "MacLeod Duncan.", leaving
+            // "station-way Duncan." The orchestrator ruling is that no station rule ever pre-empts
+            // a card rule — every card rule gets its turn on the text before any station rule
+            // runs, not only when its identity is identical — ordering the card rule first
+            // delivers that even for a non-identical, non-overlapping-identity pair.
+            var station = SpeechCorrectionSet.Create([new SpeechCorrection("MacLeod", "station-way")]);
+            var card = SpeechCorrectionSet.Create([new SpeechCorrection("MacLeod Duncan", "card-way")]);
+
             var result = SpeechText.Normalize(
-                "We wind down as the wind howls.", SpeechCorrectionSet.Merge(station, card));
-            Assert.Equal("We wynd down as the winnd howls.", result);
+                "Here comes MacLeod Duncan.", SpeechCorrectionSet.Merge(station, card));
+            Assert.Equal("Here comes card-way.", result);
+        }
+
+        [Fact]
+        public void AShadowedCardRuleDoesNotRelocateToTheEndOfTheList()
+        {
+            // Latent bug the reviewer found in the identity-only merge: this card rule
+            // ("MacLeod"->CARDFIRED) does NOT collide by identity with the station's
+            // ("MacLeod Duncan"->stn-full) — they are different identities, so the old merge kept
+            // both. But the old merge always put every station rule ahead of every non-colliding
+            // card rule (station rules first, surviving card rules appended at the END), so the
+            // station's more specific "MacLeod Duncan" rule ran FIRST by position and consumed
+            // the whole span before the card rule ever got a look: "MacLeod Duncan speaks." came
+            // out "stn-full speaks.", the card firing nowhere at all (re-verified against the
+            // pre-flip algorithm). Ordering card rules ahead of every station rule fixes this: the
+            // card rule now runs first regardless of which station rule it does or doesn't share
+            // identity with.
+            //
+            // The card's replacement is deliberately a token that does not itself contain
+            // "macleod" — Apply rewrites sequentially (SPEC F68.7), so a replacement that DID
+            // contain it would hand the still-surviving "MacLeod Duncan" station rule a brand
+            // new occurrence to latch onto, muddying what this spec is pinning.
+            var station = SpeechCorrectionSet.Create([new SpeechCorrection("MacLeod Duncan", "stn-full")]);
+            var card = SpeechCorrectionSet.Create([new SpeechCorrection("MacLeod", "CARDFIRED")]);
+
+            var result = SpeechText.Normalize(
+                "MacLeod Duncan speaks.", SpeechCorrectionSet.Merge(station, card));
+            Assert.Equal("CARDFIRED Duncan speaks.", result);
         }
     }
 

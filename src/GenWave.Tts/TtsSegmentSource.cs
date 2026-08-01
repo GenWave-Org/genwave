@@ -32,6 +32,21 @@ public sealed class TtsSegmentSource(
 
     readonly ConcurrentDictionary<string, CuePoints?> cueCache = new();
 
+    // Bumped whenever the persona/station MERGE ALGORITHM changes — never on a rule-CONTENT change,
+    // which corrections.ContentHash / personaCorrections.ContentHash below already cover. The T136
+    // precedence flip (F97.4, station-wins -> card-wins) is exactly this case: for an UNCHANGED
+    // (station rules, card rules) pair the two content fingerprints are byte-identical before and
+    // after the flip, yet the rendered audio is not — SpeechCorrectionProvider.BuildMerged now
+    // resolves the very same overlap differently. Without a term that reacts to the ALGORITHM, not
+    // just the rules, an evergreen (FreshPerAiring:false) StationId/LeadIn/BackAnnounce clip already
+    // sitting in the named-volume cache would keep airing the pre-flip pronunciation forever, since
+    // RenderAsync's file-exists short-circuit below never reaches the synthesizer (and so never
+    // reaches SpeechCorrectionProvider.BuildMerged) again for that key. Bump this string on any
+    // future merge-policy change (see PersonaOverStationMerge). Internal, not private: the
+    // ScenarioMergePolicyVersionIsPartOfTheCacheKey spec (Story005) reads it to pin the hash
+    // FORMULA — not this value — rather than duplicating it as a literal that could drift.
+    internal const string MergePolicyVersion = "f97.4";
+
     public async Task<MediaItem?> RenderAsync(SegmentRequest request, CancellationToken ct)
     {
         try
@@ -73,9 +88,12 @@ public sealed class TtsSegmentSource(
             // render of the same (text, voice, station) misses, falls through to
             // synthesizer.SynthesizeAsync below (NormalizingTtsSynthesizer — the only place either
             // set of corrections actually applies, via SpeechCorrectionProvider.BuildMerged's
-            // station-over-card merge), and lands under a new hash. This class never reads a
+            // persona-over-station merge, F97.4), and lands under a new hash. This class never reads a
             // correction rule itself, only the two fingerprints saying "these are the rules in
-            // effect on each side of the merge".
+            // effect on each side of the merge". MergePolicyVersion (see its own remarks above)
+            // folds in alongside them for the third, orthogonal reason a render can change without
+            // either fingerprint moving: the ALGORITHM that resolves an overlap between the two
+            // rule sets changed, not the rules themselves.
             //
             // Ordering matters: RefreshIfStaleAsync is awaited BEFORE computing the hash below —
             // NOT left for NormalizingTtsSynthesizer's own call inside SynthesizeAsync to discover
@@ -113,7 +131,8 @@ public sealed class TtsSegmentSource(
             // never varies for a station running with no persona feature in play.
             await personaCorrections.RefreshIfStaleAsync(ct);
             var hash = ComputeHash(
-                copy.Text, request.Voice, request.StationId, corrections.ContentHash, personaCorrections.ContentHash);
+                copy.Text, request.Voice, request.StationId, corrections.ContentHash, personaCorrections.ContentHash,
+                MergePolicyVersion);
             var stationDir = Path.Combine(cfg.CacheRoot, request.StationId);
             // Plain FreshPerAiring is the whole test again (F34.6): the guard above already sent a
             // non-fresh SignOff/SignOn render home before this line, so nothing reaching here needs a
@@ -250,8 +269,10 @@ public sealed class TtsSegmentSource(
     }
 
     static string ComputeHash(
-        string text, string voice, string stationId, string correctionsContentHash, string personaCorrectionsContentHash) =>
+        string text, string voice, string stationId, string correctionsContentHash, string personaCorrectionsContentHash,
+        string mergePolicyVersion) =>
         Convert.ToHexString(SHA256.HashData(
             Encoding.UTF8.GetBytes(
-                text + "|" + voice + "|" + stationId + "|" + correctionsContentHash + "|" + personaCorrectionsContentHash)));
+                text + "|" + voice + "|" + stationId + "|" + correctionsContentHash + "|" + personaCorrectionsContentHash +
+                "|" + mergePolicyVersion)));
 }

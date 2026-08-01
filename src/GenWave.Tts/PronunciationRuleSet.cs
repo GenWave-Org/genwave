@@ -22,6 +22,14 @@ namespace GenWave.Tts;
 /// (F97.2). No markup rendering happens here; this type is pure and reads nothing but its own
 /// compiled rules.
 /// </para>
+///
+/// <para>
+/// Rules come from two sources — station settings and the active persona's card — merged by
+/// <see cref="Merge"/> with every card rule ordered ahead of every station rule (SPEC F97.3,
+/// F97.4) — the shared invariant <see cref="PersonaOverStationMerge"/> documents and <see
+/// cref="SpeechCorrectionSet.Merge"/> also realizes: no station rule ever pre-empts a card rule,
+/// not only one whose <c>(Pattern, Word)</c> is identical to a station rule's.
+/// </para>
 /// </summary>
 public sealed class PronunciationRuleSet
 {
@@ -83,6 +91,60 @@ public sealed class PronunciationRuleSet
 
         return new PronunciationRuleSet(compiled);
     }
+
+    /// <summary>
+    /// Merges two rule sets: every <paramref name="card"/> rule is ordered AHEAD of every
+    /// <paramref name="station"/> rule (SPEC F97.4, amending the shipped station-over-card
+    /// precedence F71.7 established) — the shared invariant <see cref="PersonaOverStationMerge"/>
+    /// documents in full, realized here through <see cref="Match"/>'s own first-rule-claims-the-span
+    /// overlap policy: the earlier rule in set order claims the whole overlapping span and the
+    /// later rule's occurrence there is dropped, not merely left "unaffected" — the two rules
+    /// genuinely contend for that text, and the earlier one wins it. Ordering every card rule
+    /// first therefore means no station rule ever pre-empts a card rule's occurrence (SPEC
+    /// F97.3), not only one identical <c>(Pattern, Word)</c> match — but a card rule can still
+    /// lose an overlapping span to ANOTHER card rule that precedes it in <paramref name="card"/>'s
+    /// own order, the same as any other two contending rules in <see cref="Match"/>'s overlap
+    /// policy. A station rule whose identity IS identical (case-insensitive) to a card rule's is
+    /// still dropped rather than appended after it, so it can never reappear in <see
+    /// cref="Rules"/> or be matched twice. Delegates to
+    /// <see cref="PersonaOverStationMerge.MergeByIdentity{T}"/>, the seam <see
+    /// cref="SpeechCorrectionSet.Merge"/> shares so the two can't drift apart again. An operator
+    /// who needs to override a bad imported card rule edits the card, which import already made a
+    /// local copy of (F90) — there is no station-side override mechanism.
+    /// </summary>
+    public static PronunciationRuleSet Merge(PronunciationRuleSet station, PronunciationRuleSet card)
+    {
+        ArgumentNullException.ThrowIfNull(station);
+        ArgumentNullException.ThrowIfNull(card);
+
+        return new PronunciationRuleSet(
+            PersonaOverStationMerge.MergeByIdentity(station.rules, card.rules, item => IdentityKey(item.Rule)));
+    }
+
+    /// <summary>
+    /// Test-only seam: compiles a single rule from a raw regular expression pattern that must
+    /// already carry its own <c>(?&lt;word&gt;...)</c> capture, bypassing the <see
+    /// cref="Regex.Escape"/> step <see cref="Create"/> always applies to operator/card text.
+    /// Exists to exercise <see cref="Match"/>'s per-rule match timeout deterministically — a
+    /// pathological pattern cannot be produced through the escaped, public path. Mirrors <see
+    /// cref="SpeechCorrectionSet.FromRawPattern"/>. Production code must always go through <see
+    /// cref="Create"/>.
+    /// </summary>
+    internal static PronunciationRuleSet FromRawPattern(string rawPattern, string ipa)
+    {
+        var regex = LiteralRegexPosture.Compile($"(?<word>{rawPattern})");
+        return new PronunciationRuleSet([(regex, new PronunciationRule(rawPattern, rawPattern, ipa))]);
+    }
+
+    /// <summary>
+    /// A rule's merge identity (see <see cref="Merge"/>): <see cref="PronunciationRule.Pattern"/>
+    /// plus <see cref="PronunciationRule.Word"/>, field-separated with <see
+    /// cref="PersonaOverStationMerge.IdentityFieldSeparator"/> — the same delimiter <see
+    /// cref="SpeechCorrectionSet"/>'s own identity key and <see cref="CorrectionsFingerprint"/>
+    /// share.
+    /// </summary>
+    private static string IdentityKey(PronunciationRule rule) =>
+        $"{rule.Pattern}{PersonaOverStationMerge.IdentityFieldSeparator}{rule.Word}";
 
     /// <summary>
     /// Locates every occurrence of every rule's <see cref="PronunciationRule.Pattern"/> in
