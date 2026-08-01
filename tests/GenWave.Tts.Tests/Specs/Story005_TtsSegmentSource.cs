@@ -2,9 +2,20 @@
 
 namespace GenWave.Tts.Tests.Specs;
 
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Tts.Tests.Fakes;
+// GenWave.Tts.PronunciationRule (this file's ambient, unqualified `PronunciationRule` — never used
+// directly below) and GenWave.Core.Domain.PronunciationRule are two distinct mirrored types (see
+// Story252's own remarks on the same collision). Nothing in this file references the bare,
+// unqualified name, so the `using GenWave.Core.Domain;` above is safe as written; this alias just
+// gives the new pronunciation-cache-rekeying scenarios below an explicit name for the CARD shape
+// rather than leaning on that fact staying true forever.
+using ContextPronunciationRule = GenWave.Core.Domain.PronunciationRule;
 
 public static class FeatureTtsSegmentSourceRenderMeasureCache
 {
@@ -27,6 +38,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             cueAnalyzer,
             NoCorrections.Provider(),
             personaCache ?? NoCorrections.PersonaCache(),
+            NoCorrections.PronunciationProvider(),
+            NoCorrections.PersonaPronunciationCache(),
             opts,
             NullLogger<TtsSegmentSource>.Instance);
     }
@@ -49,6 +62,30 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             EnergyDisposition: 0,
             Lore: [],
             Corrections: corrections);
+
+    /// <summary>
+    /// Sibling of <see cref="CardWithCorrections"/> for the pronunciation-rule cache-key specs
+    /// below (SPEC F97.3, F97.6): a minimal, valid <see cref="PersonaCard"/> carrying only the one
+    /// pronunciation rule under test.
+    /// </summary>
+    static PersonaCard CardWithPronunciation(ContextPronunciationRule rule) =>
+        new(
+            SchemaVersion: 1,
+            Name: "Test Persona",
+            Tagline: "Test tagline",
+            Soul: "Test soul",
+            Quirks: [],
+            Voice: new VoiceSpec(Engine: "", VoiceId: "af_heart", Pace: 1.0, Language: "en"),
+            EnergyDisposition: 0,
+            Lore: [],
+            Corrections: [],
+            Pronunciations: [rule]);
+
+    /// <summary>Pulls the spoken "input" field back out of a captured Kokoro request body — the
+    /// pronunciation-cache-rekeying specs assert on what actually reached the wire, not on a proxy
+    /// for it, mirroring Story253_RulesTheOperatorCanTrust's own helper of the same name.</summary>
+    static string InputOf(string requestBody) =>
+        JsonDocument.Parse(requestBody).RootElement.GetProperty("input").GetString() ?? "";
 
     // ------------------------------------------------------------------
     // HAPPY PATH
@@ -241,7 +278,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Coming up, a deep cut from MacLeod."),
-                normalizingSynth, analyzer, new FakeCueAnalyzer(), corrections, personaCache, opts,
+                normalizingSynth, analyzer, new FakeCueAnalyzer(), corrections, personaCache,
+                NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(), opts,
                 NullLogger<TtsSegmentSource>.Instance);
             var request = StationIdRequest();
 
@@ -313,7 +351,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter(CorrectedText),
-                normalizingSynth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), provider, personaCache, opts,
+                normalizingSynth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), provider, personaCache,
+                NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(), opts,
                 NullLogger<TtsSegmentSource>.Instance);
 
             return (source, innerSynth);
@@ -374,10 +413,60 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
         }
     }
 
+    // Round-4 fix (T136 review, BLOCKING #1): the F97.4 merge-policy flip changes rendered audio
+    // WITHOUT changing either correction-content fingerprint — the merge ALGORITHM changed, not
+    // the rule content, and neither corrections.ContentHash nor personaCorrections.ContentHash can
+    // detect that. TtsSegmentSource.MergePolicyVersion is the term that closes the gap; this spec
+    // pins it as an explicit, present term in the hash formula (computed the exact same way
+    // TtsSegmentSource does) so a future edit that REMOVES it is caught here rather than silently
+    // re-shipping a stale cache key.
+    //
+    // Deliberately NOT claimed: this does not catch a BUMP. The expected hash is recomputed from
+    // TtsSegmentSource.MergePolicyVersion itself, so both sides move together and the spec stays
+    // green (verified by mutation — bumping to "f99.9" passes). That direction is conservative
+    // anyway: a bump over-invalidates the cache, which costs re-renders, never stale audio.
+    public sealed class ScenarioMergePolicyVersionIsPartOfTheCacheKey : IDisposable
+    {
+        readonly string cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        readonly FakeTtsSynthesizer synth = new();
+        readonly FakeLoudnessAnalyzer analyzer = new();
+
+        [Fact]
+        public async Task MediaIdIsTheHashOfEveryFieldIncludingTheMergePolicyVersion()
+        {
+            const string text = "Coming up, a deep cut from MacLeod.";
+            var corrections = NoCorrections.Provider();
+            var personaCache = NoCorrections.PersonaCache();
+            var pronunciations = NoCorrections.PronunciationProvider();
+            var personaPronunciationCache = NoCorrections.PersonaPronunciationCache();
+            var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
+            var source = new TtsSegmentSource(
+                new FakeSegmentCopyWriter(text), synth, analyzer, new FakeCueAnalyzer(),
+                corrections, personaCache, pronunciations, personaPronunciationCache, opts,
+                NullLogger<TtsSegmentSource>.Instance);
+            var request = StationIdRequest();
+
+            var item = await source.RenderAsync(request, CancellationToken.None);
+
+            var expectedHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+                text + "|" + request.Voice + "|" + request.StationId + "|" + corrections.ContentHash + "|" +
+                personaCache.ContentHash + "|" + pronunciations.ContentHash + "|" +
+                personaPronunciationCache.ContentHash + "|" + TtsSegmentSource.MergePolicyVersion)));
+
+            Assert.Equal($"tts:{expectedHash}", item!.MediaId);
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            if (Directory.Exists(synth.OutputDirectory)) Directory.Delete(synth.OutputDirectory, recursive: true);
+        }
+    }
+
     // Folds the ACTIVE persona-card corrections fingerprint into the cache key (companion fix to
     // ScenarioCorrectionsRebuildReKeysTheCache above, this time on the CARD side of the F71.7
-    // merge): NormalizingTtsSynthesizer applies the MERGED station-over-card set, not the station
-    // set alone, so a card correction change must re-key an evergreen cached clip exactly as a
+    // merge): NormalizingTtsSynthesizer applies the MERGED persona-over-station set (F97.4), not
+    // the station set alone, so a card correction change must re-key an evergreen cached clip exactly as a
     // station corrections rebuild does — otherwise the corrected pronunciation never reaches an
     // already-cached StationId/LeadIn/BackAnnounce clip.
     public sealed class ScenarioCardCorrectionsChangeReKeysTheCache : IDisposable
@@ -401,7 +490,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Coming up, a deep cut from MacLeod."),
-                normalizingSynth, analyzer, new FakeCueAnalyzer(), NoCorrections.Provider(), personaCache, opts,
+                normalizingSynth, analyzer, new FakeCueAnalyzer(), NoCorrections.Provider(), personaCache,
+                NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(), opts,
                 NullLogger<TtsSegmentSource>.Instance);
             var request = StationIdRequest();
 
@@ -453,7 +543,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Coming up, a deep cut from MacLeod."),
-                normalizingSynth, analyzer, new FakeCueAnalyzer(), NoCorrections.Provider(), personaCache, opts,
+                normalizingSynth, analyzer, new FakeCueAnalyzer(), NoCorrections.Provider(), personaCache,
+                NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(), opts,
                 NullLogger<TtsSegmentSource>.Instance);
             var request = StationIdRequest();
 
@@ -477,6 +568,185 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
         {
             if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
             if (Directory.Exists(innerSynth.OutputDirectory)) Directory.Delete(innerSynth.OutputDirectory, recursive: true);
+        }
+    }
+
+    // T137 review finding (Medium): the corrections-side re-keying trio above
+    // (ScenarioCorrectionsRebuildReKeysTheCache, ScenarioCardCorrectionsChangeReKeysTheCache,
+    // ScenarioPersonaSwitchReKeysTheCache) has no pronunciation-side analogue, so nothing pins that
+    // an edited pronunciation rule re-keys the cache — the exact "evergreen clip airs the old
+    // pronunciation forever" regression T136 round 3 caught, on the OTHER rule family. Pronunciation
+    // markup applies inside KokoroSpeechMarkup at Kokoro request build (SPEC F97.6), never inside
+    // NormalizingTtsSynthesizer, so — unlike the corrections trio above — these specs drive the REAL
+    // KokoroTtsSynthesizer behind a capturing HTTP handler and assert on what actually reached the
+    // wire, mirroring Story253_RulesTheOperatorCanTrust.ScenarioRulesRideWithTheRequest.
+    //
+    // Mutation-verified (freezing both PronunciationRuleProvider.ContentHash and
+    // ActivePersonaPronunciationRulesCache.ContentHash at their empty sentinels, the exact review
+    // finding): all three specs below fail — the second render becomes a cache HIT (the frozen
+    // sentinel never changes the key), the synthesizer is never called a second time, and the STALE
+    // phoneme string is the only one ever proven to reach the wire.
+    public sealed class ScenarioPronunciationRebuildReKeysTheCache : IDisposable
+    {
+        readonly string cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+
+        [Fact]
+        public async Task PronunciationRebuildForcesResynthesisWithTheNewRuleApplied()
+        {
+            // Given a station-ID clip rendered once through the REAL KokoroTtsSynthesizer (the one
+            // production path pronunciation markup actually applies through) with no station
+            // pronunciation rules configured yet...
+            var pronunciationsMonitor = new ChangeableOptionsMonitor<TtsPronunciationsOptions>(new TtsPronunciationsOptions());
+            var pronunciations = new PronunciationRuleProvider(pronunciationsMonitor, NullLogger<PronunciationRuleProvider>.Instance);
+            var requests = new List<string>();
+            var handler = new FakeHttpMessageHandler(async (request, ct) =>
+            {
+                requests.Add(request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct));
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) };
+            });
+            var synth = new KokoroTtsSynthesizer(
+                new HttpClient(handler),
+                new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav", SentencePauseSeconds = 0 }));
+            var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav", SentencePauseSeconds = 0 });
+            var source = new TtsSegmentSource(
+                new FakeSegmentCopyWriter("Say MacLeod now."),
+                synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), NoCorrections.Provider(), NoCorrections.PersonaCache(),
+                pronunciations, NoCorrections.PersonaPronunciationCache(), opts, NullLogger<TtsSegmentSource>.Instance);
+            var request = StationIdRequest();
+
+            var first = await source.RenderAsync(request, CancellationToken.None);
+            Assert.Single(requests);
+            Assert.DoesNotContain("/məˈklaʊd/", InputOf(requests[0]), StringComparison.Ordinal);
+
+            // When an operator saves a station pronunciation rule — the same live-rebuild OnChange
+            // path PronunciationRuleProvider subscribes to in production...
+            pronunciationsMonitor.Change(new TtsPronunciationsOptions
+            {
+                Pronunciations = """[{"pattern":"MacLeod","word":"MacLeod","ipa":"/məˈklaʊd/"}]""",
+            });
+
+            // Then the very next render of the SAME text re-keys the cache, invokes the synthesizer
+            // again (never silently reuses the stale cached audio), and the new pronunciation
+            // reaches the wire.
+            var second = await source.RenderAsync(request, CancellationToken.None);
+            Assert.Equal(2, requests.Count);
+            Assert.Contains("/məˈklaʊd/", InputOf(requests[1]), StringComparison.Ordinal);
+            Assert.NotEqual(first!.MediaId, second!.MediaId);
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+        }
+    }
+
+    // Companion fix on the CARD side of the F97.3/F97.4 pronunciation merge: an operator edit to
+    // the active persona's card pronunciation rule must re-key an evergreen cached clip exactly as
+    // a station rule rebuild does, or the corrected pronunciation never reaches an already-cached
+    // StationId/LeadIn/BackAnnounce clip.
+    public sealed class ScenarioCardPronunciationChangeReKeysTheCache : IDisposable
+    {
+        readonly string cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        readonly FakeActivePersonaAccessor personaAccessor = new();
+        readonly FakeTimeProvider clock = new(DateTimeOffset.UtcNow);
+
+        [Fact]
+        public async Task CardPronunciationChangeForcesResynthesisWithTheNewRuleApplied()
+        {
+            // Given a station-ID clip rendered once with the active persona's card carrying a
+            // pronunciation rule for "MacLeod"...
+            personaAccessor.Card = CardWithPronunciation(new ContextPronunciationRule("MacLeod", "MacLeod", "/personaOne/"));
+            var personaPronunciationCache = new ActivePersonaPronunciationRulesCache(personaAccessor, clock);
+            var requests = new List<string>();
+            var handler = new FakeHttpMessageHandler(async (request, ct) =>
+            {
+                requests.Add(request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct));
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) };
+            });
+            var synth = new KokoroTtsSynthesizer(
+                new HttpClient(handler),
+                new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav", SentencePauseSeconds = 0 }));
+            var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav", SentencePauseSeconds = 0 });
+            var source = new TtsSegmentSource(
+                new FakeSegmentCopyWriter("Say MacLeod now."),
+                synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), NoCorrections.Provider(), NoCorrections.PersonaCache(),
+                NoCorrections.PronunciationProvider(), personaPronunciationCache, opts, NullLogger<TtsSegmentSource>.Instance);
+            var request = StationIdRequest();
+
+            var first = await source.RenderAsync(request, CancellationToken.None);
+            Assert.Single(requests);
+            Assert.Contains("/personaOne/", InputOf(requests[0]), StringComparison.Ordinal);
+
+            // When an operator edits the card's pronunciation rule, and the cache's bounded
+            // staleness window has elapsed (the same TTL RefreshIfStaleAsync always applies)...
+            personaAccessor.Card = CardWithPronunciation(new ContextPronunciationRule("MacLeod", "MacLeod", "/personaTwo/"));
+            clock.Advance(ActivePersonaPronunciationRulesCache.StalenessBound);
+
+            // Then the very next render of the SAME text re-keys the cache, invokes the synthesizer
+            // again, and the corrected pronunciation reaches it.
+            var second = await source.RenderAsync(request, CancellationToken.None);
+            Assert.Equal(2, requests.Count);
+            Assert.Contains("/personaTwo/", InputOf(requests[1]), StringComparison.Ordinal);
+            Assert.NotEqual(first!.MediaId, second!.MediaId);
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+        }
+    }
+
+    // A Station:Persona:ActiveId switch — a DIFFERENT card becoming active, not an edit to the same
+    // one — must re-key the pronunciation cache the same way an edit does: the merged rule set the
+    // synthesizer applies changed, so the cache key must change with it.
+    public sealed class ScenarioPersonaSwitchReKeysThePronunciationCache : IDisposable
+    {
+        readonly string cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        readonly FakeActivePersonaAccessor personaAccessor = new();
+        readonly FakeTimeProvider clock = new(DateTimeOffset.UtcNow);
+
+        [Fact]
+        public async Task SwitchingTheActivePersonaCardForcesResynthesisWithTheNewCardsRuleApplied()
+        {
+            // Given a station-ID clip rendered once while persona A (whose card pronounces
+            // "MacLeod" as /personaA/) is active...
+            personaAccessor.Card = CardWithPronunciation(new ContextPronunciationRule("MacLeod", "MacLeod", "/personaA/"));
+            var personaPronunciationCache = new ActivePersonaPronunciationRulesCache(personaAccessor, clock);
+            var requests = new List<string>();
+            var handler = new FakeHttpMessageHandler(async (request, ct) =>
+            {
+                requests.Add(request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct));
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) };
+            });
+            var synth = new KokoroTtsSynthesizer(
+                new HttpClient(handler),
+                new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav", SentencePauseSeconds = 0 }));
+            var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav", SentencePauseSeconds = 0 });
+            var source = new TtsSegmentSource(
+                new FakeSegmentCopyWriter("Say MacLeod now."),
+                synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), NoCorrections.Provider(), NoCorrections.PersonaCache(),
+                NoCorrections.PronunciationProvider(), personaPronunciationCache, opts, NullLogger<TtsSegmentSource>.Instance);
+            var request = StationIdRequest();
+
+            var first = await source.RenderAsync(request, CancellationToken.None);
+            Assert.Contains("/personaA/", InputOf(Assert.Single(requests)), StringComparison.Ordinal);
+
+            // When the operator activates a DIFFERENT persona whose OWN card pronounces "MacLeod"
+            // differently, and the cache's TTL has elapsed...
+            personaAccessor.Card = CardWithPronunciation(new ContextPronunciationRule("MacLeod", "MacLeod", "/personaB/"));
+            clock.Advance(ActivePersonaPronunciationRulesCache.StalenessBound);
+
+            // Then the very next render of the SAME text re-keys the cache and picks up the newly
+            // active persona's rule, never the previous persona's stale audio.
+            var second = await source.RenderAsync(request, CancellationToken.None);
+            Assert.Equal(2, requests.Count);
+            Assert.Contains("/personaB/", InputOf(requests[1]), StringComparison.Ordinal);
+            Assert.NotEqual(first!.MediaId, second!.MediaId);
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
         }
     }
 

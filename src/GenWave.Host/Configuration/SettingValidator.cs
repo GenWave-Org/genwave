@@ -183,6 +183,10 @@ public sealed class SettingValidator(IConfiguration configuration)
             // {from, to} string pairs; empty ("[]" or blank) means no corrections and is legal.
             ["Tts:Corrections"] = IsValidCorrectionsArray,
 
+            // Station pronunciation rules (SPEC F97.1, F97.3, STORY-253) — a JSON array of
+            // {pattern, word, ipa} objects; empty ("[]" or blank) means no rules and is legal.
+            ["Tts:Pronunciations"] = IsValidPronunciationsArray,
+
             // Piper local-fallback engine, legacy single-hop keys (SPEC F70.1, STORY-190, gh-#147:
             // ignored when a Tts:Fallback:Profiles chain is deployed; that shape is env-only and
             // startup-validated by GenWave.Tts.TtsFallbackOptionsValidator, never PUT through
@@ -576,6 +580,43 @@ public sealed class SettingValidator(IConfiguration configuration)
     }
 
     /// <summary>
+    /// Validates <c>Tts:Pronunciations</c> (SPEC F97.1, F97.3): a JSON array where every element is
+    /// an object carrying a string <c>pattern</c> (required, mirroring <c>PronunciationRule</c>'s
+    /// JSON binding in <c>GenWave.Tts.PronunciationRuleProvider</c>), plus optional string
+    /// <c>word</c>/<c>ipa</c> — absent or JSON null is legal shape here, exactly like
+    /// <c>Tts:Corrections</c>' optional context fields just above; a blank/missing <c>word</c> or
+    /// <c>ipa</c> is NOT rejected here, <c>PronunciationRuleSet.Create</c> already degrades those
+    /// (and a stray <c>)</c> in <c>ipa</c>) to a skipped rule by design, so this validator only
+    /// guards JSON shape, not rule usefulness. An empty array, or a blank value, is legal — "no
+    /// station pronunciation rules configured".
+    /// </summary>
+    static bool IsValidPronunciationsArray(string v)
+    {
+        if (string.IsNullOrWhiteSpace(v)) return true;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(v);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Array) return false;
+
+            foreach (var element in root.EnumerateArray())
+            {
+                if (element.ValueKind != JsonValueKind.Object) return false;
+                if (!HasStringProperty(element, "pattern")) return false;
+                if (!OptionalPropertyIsString(element, "word")) return false;
+                if (!OptionalPropertyIsString(element, "ipa")) return false;
+            }
+
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Validates <c>Station:Envelope:Genres</c> (SPEC F81.1, STORY-212): a JSON array where every
     /// element is a non-blank string. An empty array, or a blank value, is legal — "no genre
     /// constraint" (F81.1's empty-Genres-means-all-genres contract). Case is not normalized here —
@@ -706,6 +747,8 @@ public sealed class SettingValidator(IConfiguration configuration)
             => $"Value '{value}' is not valid for '{key}'. Must be a non-empty absolute http/https URL.",
         var k when k.Equals("Tts:Corrections", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a JSON array of {{\"from\":\"...\",\"to\":\"...\"}} objects, e.g. [] or [{{\"from\":\"MacLeod\",\"to\":\"Muh-cloud\"}}].",
+        var k when k.Equals("Tts:Pronunciations", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be a JSON array of {{\"pattern\":\"...\",\"word\":\"...\",\"ipa\":\"...\"}} objects, e.g. [] or [{{\"pattern\":\"MacLeod\",\"ipa\":\"/m\\u0259\\u02c8kla\\u028ad/\"}}].",
         var k when k.Equals("Tts:Fallback:Endpoint", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable the Piper fallback engine.",
         var k when k.Equals("Tts:EngineByKind", StringComparison.OrdinalIgnoreCase)

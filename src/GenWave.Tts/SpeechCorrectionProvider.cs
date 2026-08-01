@@ -60,14 +60,17 @@ public sealed class SpeechCorrectionProvider : IDisposable
     public SpeechCorrectionSet Current => snapshot.Set;
 
     /// <summary>
-    /// The station-over-card merge seam (SPEC F71.7, STORY-193): compiles <paramref
-    /// name="cardCorrections"/> the same way <see cref="Current"/>'s own station rules are compiled
-    /// (<see cref="SpeechCorrectionSet.Create"/>) and merges them beneath <paramref
-    /// name="stationSet"/> via <see cref="SpeechCorrectionSet.Merge"/> — station wins on an
-    /// identical <see cref="SpeechCorrection.From"/> (case-insensitive). A free function rather
-    /// than an instance method: it needs no state of its own beyond the two sets handed to it, so
-    /// callers (<see cref="NormalizingTtsSynthesizer"/>) can build the merged snapshot at their own
-    /// render-time cadence without this provider knowing anything about the card side at all.
+    /// The persona-over-station merge seam (SPEC F71.7, STORY-193; precedence flipped by F97.4):
+    /// compiles <paramref name="cardCorrections"/> the same way <see cref="Current"/>'s own
+    /// station rules are compiled (<see cref="SpeechCorrectionSet.Create"/>) and merges them over
+    /// <paramref name="stationSet"/> via <see cref="SpeechCorrectionSet.Merge"/> — every card rule
+    /// is ordered ahead of every station rule, reversing the station-wins precedence F71.7 shipped.
+    /// The precise guarantee is stated ONCE, in <see cref="PersonaOverStationMerge"/>; it is
+    /// deliberately not restated here, because this claim has already been written down wrong
+    /// several times in stronger forms than the code delivers. A free function rather than an instance method: it needs no state
+    /// of its own beyond the two sets handed to it, so callers (<see
+    /// cref="NormalizingTtsSynthesizer"/>) can build the merged snapshot at their own render-time
+    /// cadence without this provider knowing anything about the card side at all.
     /// </summary>
     public static SpeechCorrectionSet BuildMerged(
         SpeechCorrectionSet stationSet, IReadOnlyList<SpeechCorrection> cardCorrections) =>

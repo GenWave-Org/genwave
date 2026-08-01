@@ -148,6 +148,11 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
             NullLogger<SpeechCorrectionProvider>.Instance);
         var personaCorrectionsCache = new ActivePersonaCorrectionsCache(
             new NoOpActivePersonaAccessor(), TimeProvider.System);
+        var pronunciationProvider = new PronunciationRuleProvider(
+            new FakeOptionsMonitor<TtsPronunciationsOptions>(new TtsPronunciationsOptions()),
+            NullLogger<PronunciationRuleProvider>.Instance);
+        var personaPronunciationCache = new ActivePersonaPronunciationRulesCache(
+            new NoOpActivePersonaAccessor(), TimeProvider.System);
 
         var segmentSource = new TtsSegmentSource(
             new TemplateCopyWriter(new PatterTemplateRenderer()),
@@ -156,6 +161,8 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
             new FakeCueAnalyzer(),
             correctionsProvider,
             personaCorrectionsCache,
+            pronunciationProvider,
+            personaPronunciationCache,
             ttsOptsMonitor,
             NullLogger<TtsSegmentSource>.Instance);
 

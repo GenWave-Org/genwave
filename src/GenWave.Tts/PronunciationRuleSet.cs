@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using ContextPronunciationRule = GenWave.Core.Domain.PronunciationRule;
 
 namespace GenWave.Tts;
 
@@ -21,6 +22,14 @@ namespace GenWave.Tts;
 /// pattern/word split that makes heteronyms expressible without any part-of-speech inference
 /// (F97.2). No markup rendering happens here; this type is pure and reads nothing but its own
 /// compiled rules.
+/// </para>
+///
+/// <para>
+/// Rules come from two sources — station settings and the active persona's card — merged by
+/// <see cref="Merge"/> with every card rule ordered ahead of every station rule (SPEC F97.3,
+/// F97.4) — the shared invariant <see cref="PersonaOverStationMerge"/> documents and <see
+/// cref="SpeechCorrectionSet.Merge"/> also realizes: no station rule ever pre-empts a card rule,
+/// not only one whose <c>(Pattern, Word)</c> is identical to a station rule's.
 /// </para>
 /// </summary>
 public sealed class PronunciationRuleSet
@@ -57,7 +66,32 @@ public sealed class PronunciationRuleSet
     /// <see cref="PronunciationRule.Pattern"/> at all — an unlocatable word can never be annotated,
     /// so compiling it would either match nothing or (worse) silently anchor on the wrong span;
     /// skipping degrades that one rule rather than the whole set, mirroring
-    /// <see cref="SpeechCorrectionSet.Create"/>'s blank-<c>From</c> posture. When
+    /// <see cref="SpeechCorrectionSet.Create"/>'s blank-<c>From</c> posture.
+    ///
+    /// <para>
+    /// <b>Two more skip conditions, both feeder-path safety (T133/T137 review findings):</b> a rule
+    /// whose <see cref="PronunciationRule.Ipa"/> is null, empty, or whitespace-only is skipped —
+    /// <see cref="PronunciationRule.Ipa"/> is declared non-nullable, but System.Text.Json does not
+    /// enforce that at deserialization time, so operator/card JSON that simply omits <c>ipa</c>
+    /// (<c>{"Pattern":"MacLeod","Word":"MacLeod"}</c>, entirely plausible hand-authored data) binds a
+    /// literal <see langword="null"/> here; left uncompiled, <see cref="KokoroSpeechMarkup"/> would
+    /// later dereference it and crash the render the first time a pause tag needs to be positioned
+    /// relative to the annotation. And a rule whose <see cref="PronunciationRule.Ipa"/> contains a
+    /// <c>)</c> is skipped too: <see cref="KokoroSpeechMarkup"/> composes the wire token as literal
+    /// <c>[word](ipa)</c> text with no escaping mechanism of its own, and the pinned kokoro-fastapi
+    /// markup parser closes the annotation at the FIRST <c>)</c> it sees — so an ipa carrying one
+    /// (parenthesized optional-segment notation is legitimate IPA) would truncate the annotation
+    /// early and let the remainder of the ipa spill out as spoken text on the wire. An ipa containing
+    /// <c>[</c> or <c>]</c> is skipped for a related reason: kokoro-fastapi's own <c>[pause:Ns]</c>
+    /// markup (gh-#116) is honored anywhere it appears in the request text, not only outside a
+    /// pronunciation annotation's parens — an ipa carrying a <c>[pause:Ns]</c>-shaped substring (e.g.
+    /// an imported card's <c>/mə[pause:600s]klaʊd/</c>) would splice a literal digital-silence
+    /// directive onto the wire the moment that rule's annotation renders. This is a pre-existing
+    /// class of risk (a card correction's replacement text can carry the same shape), not something
+    /// new to pronunciation rules — but it costs one character class to close here too. All three
+    /// failures are invisible in this set's own unit tests because nothing here renders a token; they
+    /// surface only downstream, which is exactly why the guard belongs at the one place every rule —
+    /// station or card — must pass through to ever reach a compiled match. When
     /// <see cref="PronunciationRule.Word"/> occurs more than once inside
     /// <see cref="PronunciationRule.Pattern"/>, the FIRST occurrence binds (ordinary
     /// <see cref="string.IndexOf(string, StringComparison)"/> semantics) and later occurrences are
@@ -77,12 +111,87 @@ public sealed class PronunciationRuleSet
             .Select(rule => PronunciationRule.Parse(rule.Pattern, rule.Word, rule.Ipa))
             .Where(rule => !string.IsNullOrWhiteSpace(rule.Pattern)
                 && !string.IsNullOrWhiteSpace(rule.Word)
+                && !string.IsNullOrWhiteSpace(rule.Ipa)
+                && !rule.Ipa.Contains(')')
+                && !rule.Ipa.Contains('[')
+                && !rule.Ipa.Contains(']')
                 && rule.Pattern.Contains(rule.Word, StringComparison.OrdinalIgnoreCase))
             .Select(rule => (Pattern: CompilePattern(rule), Rule: rule))
             .ToList();
 
         return new PronunciationRuleSet(compiled);
     }
+
+    /// <summary>
+    /// Builds a compiled rule set directly from the resolved <see cref="ContextPronunciationRule"/>
+    /// shape <c>TtsRenderContext.Rules</c> carries (SPEC F97.6) — the mirrored, dependency-free
+    /// contract type <c>GenWave.Core.Domain</c> carries because that project cannot reference
+    /// <c>GenWave.Tts</c>, where this compiled matcher lives (see <see cref="ContextPronunciationRule"/>'s
+    /// own remarks). The ONE seam every Kokoro-kind renderer (<see cref="KokoroTtsSynthesizer"/>,
+    /// <see cref="KokoroFallbackRenderer"/>) now resolves a context's rules through, replacing what
+    /// used to be an identical private conversion duplicated in each renderer (T137 review finding) —
+    /// a future field added to the mirrored pair only ever needs updating here. An empty list maps
+    /// straight to <see cref="Empty"/> rather than paying for <see cref="Create"/>'s own (equivalent)
+    /// empty compile, so the overwhelmingly common "no rules" case allocates nothing new.
+    /// </summary>
+    public static PronunciationRuleSet FromContext(IReadOnlyList<ContextPronunciationRule> rules) =>
+        rules.Count == 0
+            ? Empty
+            : Create(rules.Select(rule => new PronunciationRule(rule.Pattern, rule.Word, rule.Ipa)));
+
+    /// <summary>
+    /// Merges two rule sets: every <paramref name="card"/> rule is ordered AHEAD of every
+    /// <paramref name="station"/> rule (SPEC F97.4, amending the shipped station-over-card
+    /// precedence F71.7 established) — the shared invariant <see cref="PersonaOverStationMerge"/>
+    /// documents in full, realized here through <see cref="Match"/>'s own first-rule-claims-the-span
+    /// overlap policy: the earlier rule in set order claims the whole overlapping span and the
+    /// later rule's occurrence there is dropped, not merely left "unaffected" — the two rules
+    /// genuinely contend for that text, and the earlier one wins it. Ordering every card rule
+    /// first therefore means no station rule ever pre-empts a card rule's occurrence (SPEC
+    /// F97.3), not only one identical <c>(Pattern, Word)</c> match — but a card rule can still
+    /// lose an overlapping span to ANOTHER card rule that precedes it in <paramref name="card"/>'s
+    /// own order, the same as any other two contending rules in <see cref="Match"/>'s overlap
+    /// policy. A station rule whose identity IS identical (case-insensitive) to a card rule's is
+    /// still dropped rather than appended after it, so it can never reappear in <see
+    /// cref="Rules"/> or be matched twice. Delegates to
+    /// <see cref="PersonaOverStationMerge.MergeByIdentity{T}"/>, the seam <see
+    /// cref="SpeechCorrectionSet.Merge"/> shares so the two can't drift apart again. An operator
+    /// who needs to override a bad imported card rule edits the card, which import already made a
+    /// local copy of (F90) — there is no station-side override mechanism.
+    /// </summary>
+    public static PronunciationRuleSet Merge(PronunciationRuleSet station, PronunciationRuleSet card)
+    {
+        ArgumentNullException.ThrowIfNull(station);
+        ArgumentNullException.ThrowIfNull(card);
+
+        return new PronunciationRuleSet(
+            PersonaOverStationMerge.MergeByIdentity(station.rules, card.rules, item => IdentityKey(item.Rule)));
+    }
+
+    /// <summary>
+    /// Test-only seam: compiles a single rule from a raw regular expression pattern that must
+    /// already carry its own <c>(?&lt;word&gt;...)</c> capture, bypassing the <see
+    /// cref="Regex.Escape"/> step <see cref="Create"/> always applies to operator/card text.
+    /// Exists to exercise <see cref="Match"/>'s per-rule match timeout deterministically — a
+    /// pathological pattern cannot be produced through the escaped, public path. Mirrors <see
+    /// cref="SpeechCorrectionSet.FromRawPattern"/>. Production code must always go through <see
+    /// cref="Create"/>.
+    /// </summary>
+    internal static PronunciationRuleSet FromRawPattern(string rawPattern, string ipa)
+    {
+        var regex = LiteralRegexPosture.Compile($"(?<word>{rawPattern})");
+        return new PronunciationRuleSet([(regex, new PronunciationRule(rawPattern, rawPattern, ipa))]);
+    }
+
+    /// <summary>
+    /// A rule's merge identity (see <see cref="Merge"/>): <see cref="PronunciationRule.Pattern"/>
+    /// plus <see cref="PronunciationRule.Word"/>, field-separated with <see
+    /// cref="PersonaOverStationMerge.IdentityFieldSeparator"/> — the same delimiter <see
+    /// cref="SpeechCorrectionSet"/>'s own identity key and <see cref="CorrectionsFingerprint"/>
+    /// share.
+    /// </summary>
+    private static string IdentityKey(PronunciationRule rule) =>
+        $"{rule.Pattern}{PersonaOverStationMerge.IdentityFieldSeparator}{rule.Word}";
 
     /// <summary>
     /// Locates every occurrence of every rule's <see cref="PronunciationRule.Pattern"/> in

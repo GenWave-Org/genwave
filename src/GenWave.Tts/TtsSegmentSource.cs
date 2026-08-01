@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Events;
+using ContextPronunciationRule = GenWave.Core.Domain.PronunciationRule;
 
 public sealed class TtsSegmentSource(
     ISegmentCopyWriter copyWriter,
@@ -16,6 +17,8 @@ public sealed class TtsSegmentSource(
     ICueAnalyzer cueAnalyzer,
     SpeechCorrectionProvider corrections,
     ActivePersonaCorrectionsCache personaCorrections,
+    PronunciationRuleProvider pronunciations,
+    ActivePersonaPronunciationRulesCache personaPronunciations,
     IOptionsMonitor<TtsOptions> options,
     ILogger<TtsSegmentSource> logger,
     IStationEventSink? events = null) : ITtsSegmentSource
@@ -31,6 +34,23 @@ public sealed class TtsSegmentSource(
     const string BlurbsDirName = "blurbs";
 
     readonly ConcurrentDictionary<string, CuePoints?> cueCache = new();
+
+    // Bumped whenever the persona/station MERGE ALGORITHM changes — never on a rule-CONTENT change,
+    // which corrections.ContentHash / personaCorrections.ContentHash / pronunciations.ContentHash /
+    // personaPronunciations.ContentHash below already cover. The T136 precedence flip (F97.4,
+    // station-wins -> card-wins) is exactly this case: for an UNCHANGED (station rules, card rules)
+    // pair the two content fingerprints are byte-identical before and after the flip, yet the
+    // rendered audio is not — SpeechCorrectionProvider.BuildMerged/PronunciationRuleProvider.BuildMerged
+    // now resolve the very same overlap differently (both delegate to the shared
+    // PersonaOverStationMerge, so one version term covers both rule families — see its own remarks).
+    // Without a term that reacts to the ALGORITHM, not just the rules, an evergreen
+    // (FreshPerAiring:false) StationId/LeadIn/BackAnnounce clip already sitting in the named-volume
+    // cache would keep airing the pre-flip pronunciation forever, since RenderAsync's file-exists
+    // short-circuit below never reaches the synthesizer (and so never reaches either BuildMerged)
+    // again for that key. Bump this string on any future merge-policy change. Internal, not private:
+    // the ScenarioMergePolicyVersionIsPartOfTheCacheKey spec (Story005) reads it to pin the hash
+    // FORMULA — not this value — rather than duplicating it as a literal that could drift.
+    internal const string MergePolicyVersion = "f97.4";
 
     public async Task<MediaItem?> RenderAsync(SegmentRequest request, CancellationToken ct)
     {
@@ -73,9 +93,12 @@ public sealed class TtsSegmentSource(
             // render of the same (text, voice, station) misses, falls through to
             // synthesizer.SynthesizeAsync below (NormalizingTtsSynthesizer — the only place either
             // set of corrections actually applies, via SpeechCorrectionProvider.BuildMerged's
-            // station-over-card merge), and lands under a new hash. This class never reads a
+            // persona-over-station merge, F97.4), and lands under a new hash. This class never reads a
             // correction rule itself, only the two fingerprints saying "these are the rules in
-            // effect on each side of the merge".
+            // effect on each side of the merge". MergePolicyVersion (see its own remarks above)
+            // folds in alongside them for the third, orthogonal reason a render can change without
+            // either fingerprint moving: the ALGORITHM that resolves an overlap between the two
+            // rule sets changed, not the rules themselves.
             //
             // Ordering matters: RefreshIfStaleAsync is awaited BEFORE computing the hash below —
             // NOT left for NormalizingTtsSynthesizer's own call inside SynthesizeAsync to discover
@@ -112,8 +135,27 @@ public sealed class TtsSegmentSource(
             // always folds to its own stable "no card corrections" sentinel there, so this term
             // never varies for a station running with no persona feature in play.
             await personaCorrections.RefreshIfStaleAsync(ct);
+
+            // Pronunciation rules (SPEC F97.3, F97.6): resolved HERE, at the segment source, via ONE
+            // ambient-persona read (personaPronunciations.Current, refreshed just above) — never
+            // re-read from an ambient accessor deeper in the pipeline (ARCHITECTURE.md "Carrying
+            // persona facts to the engine"; see PronunciationRuleSet/TtsRenderContext.Rules).
+            // SegmentRequest carries no persona identity of its own, so this is not "the persona this
+            // request was authored for" resolved by name — it is the SAME posture
+            // ActivePersonaCorrectionsCache already ships for corrections: whichever persona is
+            // active at the moment of this one read is who this render carries forward, immutably,
+            // on TtsRenderContext.Rules to both Kokoro request builders, so a slow render can never
+            // observe a LATER persona flip mid-flight. pronunciations.ContentHash
+            // (station) and personaPronunciations.ContentHash (card) fold into the cache key exactly
+            // like the corrections pair above and for the identical reason: an edited rule must
+            // re-key an evergreen cached clip rather than let it keep airing the old pronunciation.
+            await personaPronunciations.RefreshIfStaleAsync(ct);
+            var mergedRules = PronunciationRuleProvider.BuildMerged(pronunciations.Current, personaPronunciations.Current);
+            var contextRules = ToContextRules(mergedRules);
+
             var hash = ComputeHash(
-                copy.Text, request.Voice, request.StationId, corrections.ContentHash, personaCorrections.ContentHash);
+                copy.Text, request.Voice, request.StationId, corrections.ContentHash, personaCorrections.ContentHash,
+                pronunciations.ContentHash, personaPronunciations.ContentHash, MergePolicyVersion);
             var stationDir = Path.Combine(cfg.CacheRoot, request.StationId);
             // Plain FreshPerAiring is the whole test again (F34.6): the guard above already sent a
             // non-fresh SignOff/SignOn render home before this line, so nothing reaching here needs a
@@ -129,8 +171,10 @@ public sealed class TtsSegmentSource(
                 Directory.CreateDirectory(targetDir);
                 // Kind-aware overload (SPEC F70.3, STORY-191): this is the one caller that knows a
                 // real SegmentKind — FallbackTtsSynthesizer reads it to consult Tts:EngineByKind.
+                // Rules carries the merged pronunciation set resolved above (SPEC F97.6) — Pace
+                // stays the TtsRenderContext default (carried-but-unconsumed until T140).
                 var synthPath = await synthesizer.SynthesizeAsync(
-                    new TtsRenderContext(copy.Text, request.Voice, request.Kind), ct);
+                    new TtsRenderContext(copy.Text, request.Voice, request.Kind) { Rules = contextRules }, ct);
                 File.Move(synthPath, path, overwrite: true);
             }
 
@@ -249,9 +293,19 @@ public sealed class TtsSegmentSource(
         }
     }
 
+    // The resolved-rule shape riding on TtsRenderContext.Rules (GenWave.Core.Domain.PronunciationRule)
+    // is not the same type PronunciationRuleSet compiles — see that mirror type's own remarks for
+    // why GenWave.Core.Domain (the zero-dependency contract project) cannot share it with
+    // GenWave.Tts. The opposite direction is PronunciationRuleSet.FromContext, the single seam
+    // both Kokoro request builders share (T137 consolidated two duplicate copies into it).
+    static IReadOnlyList<ContextPronunciationRule> ToContextRules(PronunciationRuleSet rules) =>
+        [.. rules.Rules.Select(rule => new ContextPronunciationRule(rule.Pattern, rule.Word, rule.Ipa))];
+
     static string ComputeHash(
-        string text, string voice, string stationId, string correctionsContentHash, string personaCorrectionsContentHash) =>
+        string text, string voice, string stationId, string correctionsContentHash, string personaCorrectionsContentHash,
+        string pronunciationsContentHash, string personaPronunciationsContentHash, string mergePolicyVersion) =>
         Convert.ToHexString(SHA256.HashData(
             Encoding.UTF8.GetBytes(
-                text + "|" + voice + "|" + stationId + "|" + correctionsContentHash + "|" + personaCorrectionsContentHash)));
+                text + "|" + voice + "|" + stationId + "|" + correctionsContentHash + "|" + personaCorrectionsContentHash +
+                "|" + pronunciationsContentHash + "|" + personaPronunciationsContentHash + "|" + mergePolicyVersion)));
 }

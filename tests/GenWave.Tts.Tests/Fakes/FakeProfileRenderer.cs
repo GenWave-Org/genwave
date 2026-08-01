@@ -1,5 +1,6 @@
 namespace GenWave.Tts.Tests.Fakes;
 
+using GenWave.Core.Domain;
 using GenWave.Tts;
 
 /// <summary>
@@ -41,7 +42,7 @@ public sealed class FakeProfileRenderer(string engine) : IFallbackProfileRendere
         set => Inner.ThrowOnNextCall = value;
     }
 
-    public async Task<string> RenderAsync(TtsFallbackProfile profile, string text, string requestVoice, CancellationToken ct)
+    public async Task<string> RenderAsync(TtsFallbackProfile profile, TtsRenderContext context, CancellationToken ct)
     {
         Profiles.Add(profile);
         CallJournal?.Add($"{Engine}@{profile.Endpoint}");
@@ -49,6 +50,6 @@ public sealed class FakeProfileRenderer(string engine) : IFallbackProfileRendere
         if (DelayBeforeRender is { } delay)
             await Task.Delay(delay, ct);
 
-        return await Inner.SynthesizeAsync(text, requestVoice, ct);
+        return await Inner.SynthesizeAsync(context.Text, context.Voice, ct);
     }
 }

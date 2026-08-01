@@ -211,9 +211,39 @@ public static class FeatureKokoroSentencePauses
                 var (http, bodies) = WireCapture();
                 var renderer = new KokoroFallbackRenderer(http, Options(cacheRoot));
 
-                await renderer.RenderAsync(KokoroHop(), Copy, "af_heart", CancellationToken.None);
+                await renderer.RenderAsync(
+                    KokoroHop(), new TtsRenderContext(Copy, "af_heart", Kind: null), CancellationToken.None);
 
                 Assert.Equal(TaggedCopy, InputOf(Assert.Single(bodies)));
+            }
+            finally
+            {
+                if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            }
+        }
+
+        [Fact]
+        public static async Task A_kokoro_kind_fallback_hop_carries_the_same_pronunciation_rules()
+        {
+            // T137 review finding (P3): T134 made KokoroTtsSynthesizer read Rules from the context
+            // while KokoroFallbackRenderer structurally could not — IFallbackProfileRenderer carried
+            // no TtsRenderContext at all — so a kokoro-kind fallback hop rendered a DJ's own
+            // catchphrase mispronounced. Proven at the T134 review: primary
+            // "Say [MacLeod](m@'klaUd) now." vs the pre-fix fallback "Say MacLeod now." — the pinned
+            // A_kokoro_kind_fallback_hop_carries_the_same_pause_tags fact above never caught it
+            // (pauses still matched). T137 widened the interface to carry the full context down to
+            // every hop; this pins RULES parity specifically.
+            var cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            try
+            {
+                var (http, bodies) = WireCapture();
+                var renderer = new KokoroFallbackRenderer(http, Options(cacheRoot));
+                var context = new TtsRenderContext("Say MacLeod now.", "af_heart", Kind: null)
+                    with { Rules = [new PronunciationRule("MacLeod", "MacLeod", "/m@'klaUd/")] };
+
+                await renderer.RenderAsync(KokoroHop(), context, CancellationToken.None);
+
+                Assert.Equal("Say [MacLeod](/m@'klaUd/) now.", InputOf(Assert.Single(bodies)));
             }
             finally
             {
@@ -231,7 +261,8 @@ public static class FeatureKokoroSentencePauses
                 var (http, bodies) = WireCapture();
                 var renderer = new PiperTtsSynthesizer(http, Options(cacheRoot));
 
-                await renderer.RenderAsync(PiperHop(), Copy, "af_heart", CancellationToken.None);
+                await renderer.RenderAsync(
+                    PiperHop(), new TtsRenderContext(Copy, "af_heart", Kind: null), CancellationToken.None);
 
                 var body = Assert.Single(bodies);
                 Assert.Equal(Copy, body);
@@ -327,6 +358,8 @@ public static class FeatureKokoroSentencePauses
                     new FakeCueAnalyzer(),
                     NoCorrections.Provider(),
                     NoCorrections.PersonaCache(),
+                    NoCorrections.PronunciationProvider(),
+                    NoCorrections.PersonaPronunciationCache(),
                     Options(cacheRoot),
                     NullLogger<TtsSegmentSource>.Instance);
                 var request = new SegmentRequest(

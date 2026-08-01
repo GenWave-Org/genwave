@@ -6,7 +6,6 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
-using ContextPronunciationRule = GenWave.Core.Domain.PronunciationRule;
 
 /// <summary>
 /// No boot-frozen <see cref="HttpClient.BaseAddress"/> (SPEC F36.1–F36.2) — <c>Tts:Endpoint</c> is
@@ -25,8 +24,9 @@ public sealed class KokoroTtsSynthesizer(HttpClient http, IOptionsMonitor<TtsOpt
     /// plain overload above always used. A caller that constructs a context without setting Rules
     /// gets that exact same default (<see cref="TtsRenderContext.Rules"/>'s own default), so this
     /// override renders byte-identically to before this widening for every caller that has not
-    /// opted in. No caller resolves a REAL rule set onto the context yet — that wiring is a later
-    /// task's job (STORY-253); this override only reads whatever the context already carries.
+    /// opted in. As of T137 (STORY-253, SPEC F97.6) <see cref="TtsSegmentSource"/> DOES resolve a
+    /// real merged station+persona set onto the context, so this path is live — it is no longer
+    /// the dormant seam an earlier revision of this comment described.
     ///
     /// <see cref="TtsRenderContext.Pace"/> also rides the context (T134) but is deliberately NOT
     /// read here: folding it into the Kokoro <c>speed</c> field and both cache keys (the engine
@@ -34,7 +34,7 @@ public sealed class KokoroTtsSynthesizer(HttpClient http, IOptionsMonitor<TtsOpt
     /// this override's — see <c>docs/PLAN.md</c> T140.
     /// </summary>
     public Task<string> SynthesizeAsync(TtsRenderContext context, CancellationToken ct) =>
-        RenderAsync(context.Text, context.Voice, ToRuleSet(context.Rules), ct);
+        RenderAsync(context.Text, context.Voice, PronunciationRuleSet.FromContext(context.Rules), ct);
 
     async Task<string> RenderAsync(
         string text, string voice, PronunciationRuleSet rules, CancellationToken ct)
@@ -75,17 +75,6 @@ public sealed class KokoroTtsSynthesizer(HttpClient http, IOptionsMonitor<TtsOpt
         await File.WriteAllBytesAsync(path, bytes, ct);
         return path;
     }
-
-    // The resolved-rule shape riding on TtsRenderContext (GenWave.Core.Domain.PronunciationRule)
-    // cannot be the same type PronunciationRuleSet.Create compiles (GenWave.Core.Domain lives in
-    // the zero-dependency MIT contract project, which cannot reference GenWave.Tts) — see
-    // ContextPronunciationRule's own remarks. An empty list maps straight to
-    // PronunciationRuleSet.Empty rather than paying for Create's own (equivalent) empty compile, so
-    // the overwhelmingly common "no rules" case allocates nothing new.
-    static PronunciationRuleSet ToRuleSet(IReadOnlyList<ContextPronunciationRule> rules) =>
-        rules.Count == 0
-            ? PronunciationRuleSet.Empty
-            : PronunciationRuleSet.Create(rules.Select(rule => new PronunciationRule(rule.Pattern, rule.Word, rule.Ipa)));
 
     static string GetCachePath(string text, string voice, TtsOptions cfg)
     {
