@@ -24,3 +24,8 @@ smoke-candidates.json
 .vs/
 TestResults/
 .DS_Store
+
+# Agent worktrees (Claude Code `isolation: worktree`) — full repo checkouts, one per
+# subagent run. 3.6 GB on this machine as of 2026-07-31, and a plain `git add -A`
+# will happily try to stage every one of them.
+.claude/worktrees/
