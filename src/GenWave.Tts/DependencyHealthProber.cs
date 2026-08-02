@@ -1,5 +1,6 @@
 namespace GenWave.Tts;
 
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
@@ -28,6 +29,28 @@ public sealed class DependencyHealthProber(
     // FakeTimeProvider to drive the loop cycle-by-cycle instead of racing wall-clock sleeps
     // against it (gh-#171, the gh-#106 class).
     readonly TimeProvider time = timeProvider ?? TimeProvider.System;
+
+    /// <summary>
+    /// Per-dependency record of the reason this prober has already WARNED about, keyed by
+    /// dependency name and present only while that dependency's cached verdict is unhealthy
+    /// (gh-#338).
+    /// <para>
+    /// This exists so the warning fires on the EDGE — the probe that actually flips the verdict —
+    /// and not on every probe thereafter. It has to key on "have we warned since the verdict last
+    /// changed" rather than on "is the verdict unhealthy", or a dependency that drops, recovers and
+    /// drops again would go silent on the second drop. Deriving the edge from
+    /// <see cref="DependencyHealthVerdict.ConsecutiveFailureCount"/> against the threshold instead
+    /// would look simpler and be wrong: the threshold is re-read live every cycle, so lowering it
+    /// mid-outage flips the verdict at a count that is already past it, and the flip would log at
+    /// Debug.
+    /// </para>
+    /// <para>
+    /// A ConcurrentDictionary, not a plain one: <see cref="RunCycleAsync"/> is public and a caller
+    /// with its own cadence may drive cycles from more than one thread. <c>TryAdd</c>/<c>TryRemove</c>
+    /// are the atomic edge tests — the add succeeds exactly once per outage.
+    /// </para>
+    /// </summary>
+    readonly ConcurrentDictionary<string, string> warnedUnhealthyReasons = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Reason recorded when <see cref="IDependencyProbe.ProbeAsync"/> returns false — "disabled by
@@ -93,6 +116,18 @@ public sealed class DependencyHealthProber(
             // DegradationController's probe-driven drop (F69.2) briefly reading an unconfigured
             // dependency as healthy. AC5's threshold exists for transient FAILURES only.
             store.Record(probe.DependencyName, healthy, healthy ? null : NotConfiguredReason);
+
+            // The recovering edge (gh-#338). Only fires if this prober actually warned about the
+            // outage, so the "not configured" path above — which records unhealthy but deliberately
+            // logs nothing, being a declaration rather than a fault — never produces a lone
+            // "recovered" line for an outage nobody was told about.
+            if (healthy && warnedUnhealthyReasons.TryRemove(probe.DependencyName, out var wasFailing))
+            {
+                logger.LogInformation(
+                    "{Dependency} health probe recovered — cached verdict is healthy again "
+                    + "(was failing: {Reason})",
+                    probe.DependencyName, wasFailing);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -124,6 +159,14 @@ public sealed class DependencyHealthProber(
     /// This is what keeps a busy-but-alive dependency off the warning stream entirely: gh-#125's
     /// Kokoro blocks its own event loop for the length of a render, so it misses isolated probes
     /// forever, and paging on that is noise.
+    /// <para>
+    /// "Only the failure that actually flips the verdict is a warning" was always the intent; until
+    /// gh-#338 the code did not honour it. The warn branch fired on every failure once the verdict
+    /// was unhealthy — re-announcing a transition that may have happened hours earlier, with an
+    /// identical stack trace each time. It is now genuinely edge-triggered via
+    /// <see cref="warnedUnhealthyReasons"/>: one warning per outage on the way down, one
+    /// Information line on the way back up, Debug for everything in between.
+    /// </para>
     /// </summary>
     void RecordFailure(IDependencyProbe probe, DependencyProbeCadence cadence, string reason, Exception? ex)
     {
@@ -138,9 +181,29 @@ public sealed class DependencyHealthProber(
             return;
         }
 
-        logger.LogWarning(ex,
-            "{Dependency} health probe failed ({Reason}) — {Failures} consecutive failures, cached "
-            + "verdict is now unhealthy",
+        // The failing edge: warn once, with the exception, on the probe that actually flipped the
+        // verdict. TryAdd succeeds exactly once per outage — it is the edge test, and it is atomic.
+        if (warnedUnhealthyReasons.TryAdd(probe.DependencyName, reason))
+        {
+            logger.LogWarning(ex,
+                "{Dependency} health probe failed ({Reason}) — {Failures} consecutive failures, cached "
+                + "verdict is now unhealthy",
+                probe.DependencyName, reason, verdict.ConsecutiveFailureCount);
+            return;
+        }
+
+        // Already warned, verdict unchanged: Debug, and WITHOUT the exception (gh-#338). The old
+        // code re-fired the warning above every cycle, wording it "is now unhealthy" each time — on
+        // a piper-only box, where kokoro is absent by construction and the verdict can never
+        // change, that was ~2,880 warnings a day carrying an identical stack trace, for a condition
+        // already reported once. The reason string carries the cause; the first occurrence carries
+        // the trace.
+        //
+        // A reason that CHANGES mid-outage stays at Debug too, deliberately: re-warning on it would
+        // reopen exactly this hole for any dependency whose failure mode oscillates.
+        logger.LogDebug(
+            "{Dependency} health probe still failing ({Reason}) — {Failures} consecutive failures, "
+            + "cached verdict unchanged since it flipped unhealthy",
             probe.DependencyName, reason, verdict.ConsecutiveFailureCount);
     }
 }
