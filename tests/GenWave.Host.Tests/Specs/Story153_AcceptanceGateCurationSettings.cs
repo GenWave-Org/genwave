@@ -119,7 +119,13 @@ public static class FeatureAcceptanceGateCurationSettings
         // ComposeYamlSha256 re-pinned 2026-07-30 (gh-#276): kokoro mem_limit 3g->4g + comment
         // refresh — ops-only edit, no service/wire/volume change. Another intentional edit from
         // a later epic, not a regression of this epic's zero-diff promise.
-        const string ComposeYamlSha256  = "3730d07683fde5b8482c4059c6304587ad2ee4e062a219dbbf29ae4953796ea0";
+        // ComposeYamlSha256 re-pinned 2026-08-02 (gh-#334): Library__EnrichmentConcurrency becomes
+        // ${LIBRARY_ENRICHMENT_CONCURRENCY:-4} — same default on every existing box, now overridable.
+        // A pinned appliance box sets Admin__Enabled=false, closing PUT /api/settings, so the hardcoded
+        // value left the operator no lever at all while enrichment pinned all four cores of a Pi 5.
+        // Config-indirection only — no service, wire, volume or healthcheck change. Another intentional
+        // edit from a later epic, not a regression of this epic's zero-diff promise.
+        const string ComposeYamlSha256  = "553b3a676b81dde8e9ac8be97a3965b850f7b8bb294f3344164281eb718ce2a7";
 
         [Fact]
         public void EngineScriptByteMatchesMain()
