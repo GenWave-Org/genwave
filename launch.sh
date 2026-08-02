@@ -279,9 +279,15 @@ if [ "$PINNED" = "1" ]; then
   # whatever is still broadcasting keeps broadcasting (never-silent outranks tidiness).
   # Report precisely and say how to proceed instead.
   if ! compose up -d; then
-    compose ps || true
-    preflight_fail "Bringing the stack up failed part-way (status above)." \
+    # `ps -a`, not `ps`: plain `ps` lists RUNNING containers only — so it omitted exactly the
+    # one service this message tells the operator to go inspect. A container the daemon
+    # refused to START (stale network id after an unclean host power cut, a port already
+    # bound, a bad mount) never reaches Up, so the "status above" read all-green under a
+    # "failed part-way" verdict with no failing service anywhere in it.
+    compose ps -a || true
+    preflight_fail "Bringing the stack up failed part-way (status above — look for a service NOT in an Up state)." \
       "Inspect the failing service: $(compose_display) logs <service>" \
+      "A container that never started has no logs — read the daemon's reason instead: docker inspect <container> --format '{{.State.Error}}'" \
       "Re-run when fixed: $RELAUNCH (up is idempotent — it converges the rest)."
   fi
 
