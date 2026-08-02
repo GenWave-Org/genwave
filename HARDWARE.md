@@ -4,6 +4,19 @@ What GenWave actually runs on, what each service needs, and the confidence level
 This file is the source of truth for hardware guidance (gh-#20) — **contribute your own box via
 PR**: add a row to the deployments table with your specs and what worked (or didn't).
 
+**Looking for a quick answer?** Everything scannable is up top. The narrative — Pi setup, compute
+notes, test status — is below it.
+
+| 📊 The data | 📖 The detail |
+|---|---|
+| [Confidence legend](#-confidence-legend) | [Raspberry Pi setup](#-raspberry-pi-setup) |
+| [Known deployments](#-known-deployments) | [Compute notes](#-compute-notes-raspberry-pi) |
+| [Sizing at a glance](#-sizing-at-a-glance) | [Design target](#-design-target) |
+| [What each service needs](#-what-each-service-needs) | [Hands-on test plan](#-hands-on-test-plan) |
+| [Software requirements](#-software-requirements) | [Contributing an entry](#-contributing-an-entry) |
+| [Raspberry Pi topologies](#-raspberry-pi-topologies) | |
+| [Raspberry Pi arm64 image support](#-raspberry-pi-arm64-image-support) | |
+
 ## 🎨 Confidence legend
 
 | Mark | Meaning |
@@ -19,6 +32,7 @@ PR**: add a row to the deployments table with your specs and what worked (or did
 |---|---|:---:|:---:|:---:|---|:---:|---|---|
 | `demo.genwaveradio.com` appliance (CCX23) | x86-64 | 4 | 16GB | 80GB | Public demo station, full stack + admin + LLM + tunnel + logging | 🟢 | Runs the pinned release 24/7 (health-probed by CI). Source of the one live-observed sizing fact: ollama at a 3 GB fence OOM-killed constantly; stable at **1 CPU / 6GB** (observed 2026-07-21, v2.2.0 rollout) | GenWave |
 | Development machine | x86-64 | 112 | 512GB | 4TB | `./launch.sh` dev flow, full stack from source | 🟢 | Ubuntu 25.04 + Docker on Dell Precision 7920 Tower| GenWave |
+| Raspberry Pi 5 Model B Rev 1.0 | **arm64** | 4 | **4GB** | 256GB NVMe via M.2 HAT+, no SD card | Piper-only playout appliance, `./launch.sh --pinned --piper-only` | 🟢 | **First ARM deployment** (2026-08-02, `home-v2.9.0`). 25 min continuous gapless stream, no stutters or gaps; 69.2 °C flat under a full enrichment burst; `vcgencmd get_throttled` = `0x0`. Debian 13 trixie, kernel 6.12 (16k pages), media over NFS. Three hard prerequisites — see [Raspberry Pi setup](#-raspberry-pi-setup): stock CPU clock, `cgroup_enable=memory`, official 27 W PSU | GenWave |
 
 ### Internet Radios
 | Make | Model | Status | Notes | Verifier |
@@ -27,118 +41,40 @@ PR**: add a row to the deployments table with your specs and what worked (or did
 
 *Have GenWave running somewhere else — a NUC, an old laptop, a VPS? Add it here!*
 
-## 🎯 Design target
+## 📐 Sizing at a glance
 
-GenWave's stated hardware goal ([docs/PROJECT.md](docs/PROJECT.md)):
+| Shape | RAM | Status | Notes |
+|---|:---:|:---:|---|
+| **Playout + piper TTS** — no kokoro, no LLM | **4 GB** | 🟢 | Measured, not derived: a 4 GB Pi 5 runs this with the whole stack resident and room to spare. Enrichment is the peak and stays under ~500 MiB |
+| **+ kokoro**, no LLM | 8 GB | 🟡 | kokoro's ~1.2 GiB baseline (leaking toward a 4 GB cap) is the biggest single resident. 4 GB is too tight |
+| **+ LLM resident** — the demo shape | 8 GB min, 16 GB comfortable | 🟡 | The 6 GB ollama fence plus kokoro's baseline already crowds an 8 GB box |
 
-> **A modest CPU-only box runs the whole station; features that require a GPU don't ship in year one (hopefully never).**
-
-- 🟢 **CPU-only by design** — TTS uses the CPU builds (`kokoro-fastapi-cpu`, Piper ONNX); the demo
-  LLM (`llama3.2:3b` via ollama) runs CPU inference on one fenced core. No GPU is used anywhere.
-- 🟡 **x86-64 only in practice** — the published GHCR images are built `amd64`-only. Nothing in the
-  stack is *known* to be arch-specific, but:
-- 🔴 **ARM64 / Raspberry Pi: untested** — no ARM images are published and no ARM run has ever been
-  recorded. Building locally on ARM64 may work; nobody has claimed it does. See the
-  **Raspberry Pi** section below for the gh-#213 spike's full audit.
+- 🟢 **CPU** — four cores is enough for playout plus piper TTS. **Enrichment is the constraint, not
+  playout**: the ffmpeg analyzers use every core you give them (`Library:EnrichmentConcurrency`,
+  default 4, and 2 under the piper-only overlay). More cores mainly make the first-boot catalog
+  build finish sooner.
+- 🟢 **Disk** — your music library (bind-mounted **read-only**) plus modest named volumes
+  (Postgres data, rendered TTS segments, Piper models). Size to the library.
 
 ## 🧩 What each service needs
 
 Configured limits come from `compose.yaml` / `compose.demo.yaml`; "real footprint" values are the
 notes recorded alongside them.
 
+> ⚠️ **On Raspberry Pi kernels these limits do nothing until you enable the memory cgroup**
+> (gh-#307). Pi kernels ship with it off, and Docker discards every `mem_limit` **silently** — no
+> warning, no error, the fence simply is not there. See [Raspberry Pi setup](#-raspberry-pi-setup)
+> step 2.
+
 | Service | Configured limit | Real footprint | Confidence | Notes |
 |---|:---:|---|:---:|---|
 | `kokoro` (TTS) | 4 GB cap | ~1.2 GiB fresh baseline; leaks toward the cap under render load (upstream `#262`), long renders spike ~+0.5 GiB | 🟢 | Cap is a fail-closed backstop. Live-observed: 3 GB cap = OOM-bounce every ~24–30 h on the demo box, down to ~90 min in heavy render windows (gh-#276); 4 GB buys spike headroom over the leaked baseline |
 | `ollama` (DJ brain, demo profile) | **1 CPU / 6GB fence** | needs > 3 GB with `llama3.2:3b` resident (`KEEP_ALIVE=-1`) | 🟢 | Live-observed: 3 GB fence = constant OOM kills. Cold model load ~25 s+; a full persona prompt on one fenced core takes ~25–30 s even warm — set `Llm:TimeoutSeconds: 60`. Size the model to the fence |
-| `piper` (fallback TTS) | 768 MB cap | well under 1 GiB with a "medium" voice | 🟢 footprint / 🟡 cap | ONNX runtime + `en_US-lessac-medium`, downloaded on first boot |
+| `piper` (fallback TTS) | 768 MB cap | ~165–220 MiB with a "medium" voice | 🟢 | ONNX runtime + `en_US-lessac-medium`, downloaded on first boot. Footprint measured on both x86-64 and arm64 (Pi 5, 2026-08-02) |
+| `api` (incl. enrichment) | *(uncapped)* | ~60 MiB idle; **400–500 MiB during an enrichment burst**, sawtoothing under GC | 🟢 | Measured on the Pi 5 run. RSS stays flat while analyzed bytes climb — transient peaks near 1 GiB are pre-collection, not a floor. Enrichment is by far the heaviest sustained load GenWave produces |
 | `cloudflared` (tunnel profile) | 128 MB cap | ~20–30 MiB idle | 🟢 | |
 | `alloy` (logging profile) | 256 MB cap | — | 🟡 | Single-daemon log-tailing sidecar |
-| `db` / `icecast` / `engine` / `api` / `admin_ui` | *(uncapped)* | modest (observed range: 10-130MB) | 🟡 | No limits configured; none has ever been the memory pressure point |
-
-## 📐 Sizing guidance (derived, not measured)
-
-These totals are **derived** from the numbers above — nobody has bisected a real minimum:
-
-- 🟡 **Without the LLM** (music + TTS patter, no DJ brain): ~**4 GB** RAM should be comfortable —
-  kokoro's ~1.2 GiB baseline is the biggest resident, everything else is small.
-- 🟡 **With the LLM resident** (the demo shape): **8 GB minimum, 16 GB comfortable** — the 6 GB
-  ollama fence plus kokoro's baseline already crowds an 8 GB box.
-- 🟡 **CPU**: the demo fences ollama to a single core and still renders patter within a 120 s
-  budget; any modern multi-core x86-64 CPU should do. More cores mainly help enrichment
-  (ffmpeg analysis of your library) finish sooner.
-- 🟢 **Disk**: your music library (bind-mounted **read-only**) plus modest named volumes
-  (Postgres data, rendered TTS segments, Piper models). Size to the library.
-
-## 🍓 Raspberry Pi (gh-#213 spike — desk research, no Pi run yet)
-
-Registry-manifest audits and published third-party benchmarks, collected 2026-07-29.
-**No GenWave has ever run on a Pi** — everything below stays 🟡/🔴 until the hands-on runs land,
-per this file's rules.
-
-**Bottom line:** 🟡 a **Pi 5 8GB is a real target today for a piper-only station**
-(`--pinned` images since v2.8.8 — no source build needed); the full Kokoro+LLM demo shape
-fits on **no** Pi.
-
-### 🚧 Image architecture — blockers resolved at v2.8.8
-
-| Piece | arm64 today? | Confidence | Notes |
-|---|:---:|:---:|---|
-| Upstream bases (postgres, liquidsoap, dotnet, node, debian) | ✅ | 🟡 | Multi-arch manifests exist; we've never run one on ARM |
-| ollama / cloudflared / alloy / dockerproxy / caddy | ✅ | 🟡 | Multi-arch manifests exist |
-| GenWave GHCR images (api, admin_ui, engine, icecast, piper) | ✅ | 🟡 | **Multi-arch (amd64+arm64) since `home-v2.8.8`** — gh-#240 shipped native-ARM release builds and gh-#241 replaced the amd64-only artibex piper with the repo-owned `piper/` image (same wire shape). Both platforms verified on GHCR at the v2.8.8 cut; never yet *run* on ARM, hence 🟡 |
-| `kokoro` (kokoro-fastapi-cpu) | ⚠️ | 🔴 | An arm64 manifest exists, but upstream #279 reports a warmup crash on Pi 4 aarch64 (open); zero Pi 5 data |
-
-### 🔢 Compute (cited third-party numbers, not ours)
-
-- 🟡 **Piper** — the proven ARM path: RTF **0.10–0.12** measured on RK3588 (same A76 cores as
-  the Pi 5); Home Assistant's own "2 s of audio in 1 s" on a Pi 4 (RTF ~0.5).
-- 🔴 **Kokoro** — Pi 4 measured RTF **3.19** (sherpa-onnx): no-go. Pi 5: **no published data**;
-  the A72→A76 extrapolation lands ~RTF 1.0–1.5 — survivable inside a 120 s render budget but
-  unproven, and shadowed by the warmup-crash report above.
-- 🟡 **ollama `llama3.2:3b` on a Pi 5 8GB** — consensus **4–6 tok/s** across four independent
-  benches → ~30–90 s per blurb, comparable to the demo box's fenced x86 core. Needs
-  `Llm:TimeoutSeconds` 90–120, render budget 120, and an **active cooler** (thermal throttle
-  halves tok/s within ~90 s without one). 🔴 Pi 4: the model won't even load in 4 GB.
-- 🟡 **Enrichment burst** (first boot only): estimated **1–2 h per 1,000 tracks on a Pi 5**
-  (4–8 h on a Pi 4) — set `Library:EnrichmentConcurrency: 2` and put the library on USB-SSD.
-
-### 🧮 Memory budget
-
-- 🟡 **Pi 5 8GB**: pick **at most one** of {kokoro, ollama}. Playout core + piper ≈ 1.2–1.8 GB
-  (huge headroom); + kokoro fits; + ollama at the demo's 6 GB fence does NOT fit alongside
-  kokoro — piper-only plus a ~4.5–5 GB fence is the untested middle (the live-observed OOM
-  floor was 3 GB).
-- 🟡 **Pi 4 4GB**: playout + piper only, no LLM.
-
-### 🏆 Ranked topologies
-
-| | Topology | Confidence | Shape |
-|:---:|---|:---:|---|
-| a | **Pi 5 8GB all-in-one "quiet DJ" — RECOMMENDED** | 🟡 | Playout + piper-only, no LLM (templated patter, by design). The shipped shape: `./launch.sh --pinned --piper-only` (gh-#242) on the v2.8.8+ multi-arch images. Every component is ARM-proven upstream; ours have never run on ARM |
-| b | **Pi 5 playout + off-box brain — best sound** | 🟡 | Kokoro + ollama live on any x86 box; `Tts:Endpoint`, `Tts:Fallback:Endpoint`, and `Llm:Endpoint`/`Llm:Model` are all live-settable — verified pointable today |
-| c | **Pi 5 all-in-one + LLM — experimental** | 🔴 | ollama fenced ~4.5–5 GB, piper-only, active cooler + 27 W PSU mandatory; the degradation ladder is the net. ⚠️ **Not expressible with the shipped flags as of gh-#310**: `--piper-only` now drops `ollama`/`ollama-init` along with kokoro (topology (a) was booting a resident model it could not hold). This shape needs its own overlay — an explicit opt-in, deliberately not a side effect of the low-memory one |
-| d | **Pi 4 4GB headless minimal** | 🔴 | Works in principle; enrichment time is the pain |
-
-### 🧪 Hands-on test plan (measurable outcomes)
-
-The gh-#213 plan, condensed to what each step must produce before anything above turns 🟢:
-
-1. **Arch pull check** — every `docker compose config --images` image pulls clean on arm64
-   (v2.8.8+ pins; a failure here is a regression, file it).
-2. **Pinned boot on Pi 5** — `./launch.sh --pinned --piper-only`; record pull + first-boot
-   wall time. (Source-build timing is optional bonus data now, not the path.)
-3. **Minimal playout boot** (the piper-only shape) — `/health` 200 and a gapless stream.
-4. **Piper render timing** — RTF ~0.1–0.2 on Pi 5 (render seconds ÷ clip seconds).
-5. **Enrichment burst on a real library** — tracks/hour, `vcgencmd measure_temp`, zero
-   safe-branch engagements.
-6. **The open Kokoro question** — does the arm64 image survive warmup on a Pi 5? If yes:
-   RTF + RSS; if no: report upstream #279.
-7. **ollama tok/s** — prompt/eval rates on a real DJ prompt; abort below 3 tok/s.
-8. **24 h piper-only soak** — 0 safe-library engagements, 0 restarts, flat memory, temps,
-   render-seconds vs budget.
-9. **Pi 4 pass** — steps 1–5 only.
-
-Results land as 🟢 rows in **Known deployments** above — problems are as valuable as successes.
+| `db` / `icecast` / `engine` / `admin_ui` | *(uncapped)* | modest (observed range: 5–130 MB) | 🟡 | No limits configured; none has ever been the memory pressure point |
 
 ## ✅ Software requirements
 
@@ -146,7 +82,211 @@ Results land as 🟢 rows in **Known deployments** above — problems are as val
 |---|---|:---:|
 | OS | Linux with Docker Engine (the only deployment shape ever run) | 🟢 |
 | Docker Compose | **v2.24+** (the demo overlay uses the `!override` merge tag) | 🟢 |
+| Architecture | x86-64 or arm64 (multi-arch images since `home-v2.8.8`) | 🟢 |
+| Raspberry Pi kernel | `cgroup_enable=memory cgroup_memory=1` in `cmdline.txt`, or every `mem_limit` is silently discarded (gh-#307) | 🟢 |
 | GPU | none — not used anywhere | 🟢 |
+
+## 🏆 Raspberry Pi topologies
+
+**Bottom line:** 🟢 a **Pi 5 with 4 GB runs a piper-only station** — proven, not projected:
+`./launch.sh --pinned --piper-only` on the `home-v2.8.8+` multi-arch images, 25 minutes of
+continuous gapless broadcast at 69 °C with clean power (2026-08-02). The full Kokoro+LLM demo
+shape fits on **no** Pi.
+
+| | Topology | Confidence | Shape |
+|:---:|---|:---:|---|
+| a | **Pi 5 all-in-one "quiet DJ" — RECOMMENDED** | 🟢 | Playout + piper-only, no LLM. **Verified on 4 GB**, 2026-08-02. The shipped shape: `./launch.sh --pinned --piper-only` (gh-#242) on the v2.8.8+ multi-arch images. ⚠️ "No LLM" costs more than patter — see below |
+| b | **Pi 5 playout + off-box brain — best sound** | 🟡 | Kokoro + ollama live on any x86 box; `Tts:Endpoint`, `Tts:Fallback:Endpoint`, and `Llm:Endpoint`/`Llm:Model` are all live-settable — verified pointable, but never run in this split |
+| c | **Pi 5 all-in-one + LLM — experimental** | 🔴 | ollama fenced ~4.5–5 GB, piper-only, active cooler + 27 W PSU mandatory; the degradation ladder is the net. ⚠️ **Not expressible with the shipped flags as of gh-#310**: `--piper-only` now drops `ollama`/`ollama-init` along with kokoro (topology (a) was booting a resident model it could not hold). This shape needs its own overlay — an explicit opt-in, deliberately not a side effect of the low-memory one. Restores mood tagging and explicit classification |
+| d | **Pi 4 4GB headless minimal** | 🔴 | Works in principle; enrichment time is the pain. Never run |
+
+### ⚠️ What "no LLM" actually costs (gh-#336)
+
+Topologies (a), (b) and (d) run with `Llm:Endpoint` empty — the documented disabled state
+(F34.2). That is by design and the station broadcasts perfectly well, but it disables **three**
+things, not one:
+
+| | Consequence |
+|---|---|
+| **Patter** | Falls back to the template writer. A quality tradeoff, chosen deliberately |
+| **Mood tagging** | Never populated — anything selecting on mood has less to work with |
+| **Explicit classification** | Never populated. ⚠️ Unclassified tracks currently **stay in rotation** (`coalesce(m.explicit, false)`) — tracked as gh-#337 |
+
+If your library depends on automatic explicit classification, topology (c) or an off-box LLM
+(topology b) is the shape you want.
+
+## 🚧 Raspberry Pi arm64 image support
+
+| Piece | arm64 today? | Confidence | Notes |
+|---|:---:|:---:|---|
+| Upstream bases (postgres, liquidsoap, dotnet, node, debian) | ✅ | 🟢 | All five ran on the Pi 5, 2026-08-02 |
+| GenWave GHCR images (api, admin_ui, engine, icecast, piper) | ✅ | 🟢 | **Multi-arch (amd64+arm64) since `home-v2.8.8`** — gh-#240 shipped native-ARM release builds, gh-#241 replaced the amd64-only artibex piper with the repo-owned `piper/` image (same wire shape). All five pulled and ran on arm64 |
+| caddy / dockerproxy | ✅ | 🟢 | Both ran on the Pi 5 |
+| ollama / cloudflared / alloy | ✅ | 🟡 | Multi-arch manifests exist; not exercised on ARM (piper-only topology, no tunnel or logging profile) |
+| `kokoro` (kokoro-fastapi-cpu) | ⚠️ | 🔴 | An arm64 manifest exists, but upstream #279 reports a warmup crash on Pi 4 aarch64 (open); still zero Pi 5 data — the piper-only topology never starts it |
+
+---
+
+## 🍓 Raspberry Pi setup
+
+Field-verified 2026-08-02 on a Pi 5 4GB (gh-#213 spike → gh-#307/#308 hardening). The 4 GB result
+matters: the entry price for topology (a) is lower than this file previously claimed (it said 8 GB).
+
+### 🔧 Prep — do these before anything else
+
+Every one of these was learned the hard way. Steps 1–3 each caused a failure that looked like a
+GenWave bug and was not.
+
+**1. 🚨 Stock CPU clock — check this before trusting any measurement (gh-#308).**
+
+```bash
+grep -E "arm_freq|over_voltage|force_turbo" /boot/firmware/config.txt   # want NO output
+```
+
+An overclock is the single most destructive thing you can do to a Pi running this stack. A test
+box at `arm_freq=2900` (stock is 2400) undervolted roughly once every two minutes under
+enrichment, ran at 83.4 °C, and had already been clock-capped back to 2.70 GHz by the 80 °C soft
+limit — paying full overclock current and heat **for clocks it never got**. Removing it took the
+same box to 69.2 °C and zero undervoltage events under identical load.
+
+A brownout reset mid-enrichment is how this ends, and it corrupts whatever was mid-write.
+
+**2. 🧠 Enable the memory cgroup (gh-#307).** Pi kernels ship with it disabled, and Docker
+discards every `mem_limit` **silently** — the piper 768 MB fence and the kokoro 4 GB backstop
+simply do not exist until you fix this. Append to `/boot/firmware/cmdline.txt` (one line, no
+newlines) and reboot:
+
+```
+cgroup_enable=memory cgroup_memory=1
+```
+
+Verify — the limit column must show the fence, not total RAM:
+
+```bash
+docker stats --no-stream    # piper should read e.g. 220MiB / 768MiB, not / 3.953GiB
+```
+
+**3. 🔌 Official Raspberry Pi 27 W (5 V/5 A) PSU.** Not "a 27 W supply" — the official unit.
+A branded third-party kit PSU on the test box negotiated 5 A correctly and *still* sagged under
+load transients, logging 12+ undervoltage events in the first hour and eventually hard
+power-cutting the box mid-enrichment. **With an NVMe HAT this is a hard requirement, not a
+recommendation** — the drive adds 2–4 W steady with higher write spikes, and enrichment stacks a
+multi-core CPU burst against a Postgres WAL write burst on that same drive.
+
+```bash
+od -An -tu4 --endian=big /proc/device-tree/chosen/power/max_current   # 5000 = 5V/5A negotiated
+```
+
+⚠️ That file is **big-endian**. `hexdump -e '1/4 "%d\n"'` and a bare `od -tu4` read native and
+silently return `-2012020736` instead of `5000`. The `--endian=big` is load-bearing.
+
+**4. ❄️ Active cooler.** Not optional. The Pi 5 soft-limits at 80 °C and hard-limits at 85 °C,
+and enrichment will hold every core busy for the length of the first catalog build. A correctly
+clocked box with an active cooler plateaus around 69 °C under that load.
+
+**5. 💾 Storage.** NVMe via the M.2 HAT+ is the tested path (also verified: media over NFS). An
+SD card works but makes the power-cut corruption story much worse — ext4 journal plus Postgres
+WAL on NVMe recover far more reliably.
+
+### ✅ Proving the box before you trust any numbers
+
+Run a real load burst (start the stack and let enrichment run), then:
+
+```bash
+vcgencmd get_throttled     # want 0x0 — this is the gate
+vcgencmd measure_temp      # want well under 80'C
+vcgencmd measure_clock arm # want ~2.4GHz, i.e. not being capped
+dmesg | grep -c Undervoltage
+```
+
+`get_throttled` = `0x0` **after a load burst** is the criterion — not the absence of dmesg lines
+at idle. The sticky bits reset at boot, so the reading is only meaningful against a known boot
+and a known load.
+
+⚠️ The kernel string is `Undervoltage detected!`. Grepping for `Undervolted` returns `0` on a box
+that is actively undervolting — and `0` is exactly the result you are hoping for, so the typo
+reads as a pass.
+
+Decoding `get_throttled`:
+
+| bit | meaning | | bit | meaning |
+|:---:|---|---|:---:|---|
+| 0 | under-voltage **now** | | 16 | under-voltage **has occurred** |
+| 1 | Arm freq capped **now** | | 17 | freq capping **has occurred** |
+| 2 | throttled **now** | | 18 | throttling **has occurred** |
+| 3 | soft temp limit **now** | | 19 | soft temp limit **has occurred** |
+
+### 🌐 Reaching the stream on a LAN (no public hostname)
+
+The pinned/demo topology is fail-closed by design: icecast has no host port at all
+(`ports: !override []`), the api is loopback-only, and Caddy answers **only** for `${PUBLIC_HOST}`.
+A test box left on the `.env.example` placeholder is unreachable from every other machine on the
+network.
+
+```bash
+# .env on the Pi — the http:// prefix makes Caddy serve plain HTTP on :80 with no ACME attempt
+PUBLIC_HOST=http://192.168.2.127
+```
+
+Then `http://<pi-ip>/stream` (Caddy → icecast), `http://<pi-ip>/` (spectator surface),
+`http://<pi-ip>/health`. 🟢 Verified 2026-08-02 with a LAN VLC client; Caddy's own log confirms
+the no-ACME path (`server is listening only on the HTTP port, so no automatic HTTPS will be
+applied`). This is also the *right* way to run the gapless check — real listeners go through
+Caddy, so the test should too.
+
+Caddy answers only the literal `PUBLIC_HOST` value: connect by that exact IP, or comma-separate
+multiple hosts in the variable.
+
+## 🔢 Compute notes (Raspberry Pi)
+
+- 🟡 **Piper** — the proven ARM path *upstream*, but **GenWave has not measured RTF on a Pi yet**.
+  Third-party: RTF **0.10–0.12** on RK3588 (same A76 cores as the Pi 5); Home Assistant's "2 s of
+  audio in 1 s" on a Pi 4 (RTF ~0.5). Field note: piper kept up with a live broadcast on a Pi 5
+  without ever engaging the safe branch, but the ratio itself was not recorded.
+- 🔴 **Kokoro** — Pi 4 measured RTF **3.19** (sherpa-onnx): no-go. Pi 5: **no published data**;
+  the A72→A76 extrapolation lands ~RTF 1.0–1.5 — survivable inside a 120 s render budget but
+  unproven, and shadowed by the warmup-crash report above.
+- 🟡 **ollama `llama3.2:3b` on a Pi 5 8GB** — consensus **4–6 tok/s** across four independent
+  benches → ~30–90 s per blurb, comparable to the demo box's fenced x86 core. Needs
+  `Llm:TimeoutSeconds` 90–120, render budget 120, and an **active cooler** (thermal throttle
+  halves tok/s within ~90 s without one). 🔴 Pi 4: the model won't even load in 4 GB.
+- 🟢 **Enrichment saturates every core it is given.** Observed on the Pi 5: the api held 310–378%
+  of 400% for the whole burst at `EnrichmentConcurrency: 4`. The **piper-only overlay now defaults
+  this to 2** (gh-#334) — set `LIBRARY_ENRICHMENT_CONCURRENCY` to override on either stack.
+  Wall-clock throughput (tracks/hour) has **not** been measured; the desk estimate was 1–2 h per
+  1,000 tracks on a Pi 5.
+
+## 🎯 Design target
+
+GenWave's stated hardware goal:
+
+> **A modest CPU-only box runs the whole station; features that require a GPU don't ship in year one (hopefully never).**
+
+- 🟢 **CPU-only by design** — TTS uses the CPU builds (`kokoro-fastapi-cpu`, Piper ONNX); the demo
+  LLM (`llama3.2:3b` via ollama) runs CPU inference on one fenced core. No GPU is used anywhere.
+- 🟢 **x86-64 and ARM64 both run** — the GHCR images are multi-arch since `home-v2.8.8`
+  (gh-#240 native-ARM release builds, gh-#241 the repo-owned piper image), and ARM64 was
+  field-verified on a Raspberry Pi 5 on 2026-08-02.
+
+## 🧪 Hands-on test plan
+
+The gh-#213 plan and where it stands after the 2026-08-02 field run:
+
+| | Step | Status |
+|:---:|---|:---:|
+| 1 | **Arch pull check** — every `docker compose config --images` image pulls clean on arm64 | 🟢 all five GHCR images + upstreams pulled clean |
+| 2 | **Pinned boot on Pi 5** — `./launch.sh --pinned --piper-only` | 🟢 booted; pull + first-boot wall time not recorded |
+| 3 | **Minimal playout boot** — `/health` 200 and a gapless stream | 🟢 25 min continuous, no stutters or gaps |
+| 4 | **Piper render timing** — RTF ~0.1–0.2 on Pi 5 (render seconds ÷ clip seconds) | 🔴 not measured |
+| 5 | **Enrichment burst on a real library** — tracks/hour, `vcgencmd measure_temp`, zero safe-branch engagements | 🟡 partial: 69.2 °C flat, no safe-branch engagements observed; **tracks/hour not recorded** |
+| 6 | **The open Kokoro question** — does the arm64 image survive warmup on a Pi 5? | 🔴 not attempted |
+| 7 | **ollama tok/s** — prompt/eval rates on a real DJ prompt; abort below 3 tok/s | 🔴 not attempted |
+| 8 | **24 h piper-only soak** — 0 safe-library engagements, 0 restarts, flat memory, temps, render-seconds vs budget | 🔴 not run |
+| 9 | **Pi 4 pass** — steps 1–5 only | 🔴 not run |
+
+Steps 4 and 5 are cheap to finish on the existing box and would complete topology (a)'s record.
+
+Results land as 🟢 rows in **Known deployments** above — problems are as valuable as successes.
 
 ## 🤝 Contributing an entry
 
