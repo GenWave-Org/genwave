@@ -32,7 +32,7 @@ notes, test status — is below it.
 |---|---|:---:|:---:|:---:|---|:---:|---|---|
 | `demo.genwaveradio.com` appliance (CCX23) | x86-64 | 4 | 16GB | 80GB | Public demo station, full stack + admin + LLM + tunnel + logging | 🟢 | Runs the pinned release 24/7 (health-probed by CI). Source of the one live-observed sizing fact: ollama at a 3 GB fence OOM-killed constantly; stable at **1 CPU / 6GB** (observed 2026-07-21, v2.2.0 rollout) | GenWave |
 | Development machine | x86-64 | 112 | 512GB | 4TB | `./launch.sh` dev flow, full stack from source | 🟢 | Ubuntu 25.04 + Docker on Dell Precision 7920 Tower| GenWave |
-| Raspberry Pi 5 Model B Rev 1.0 | **arm64** | 4 | **4GB** | 256GB NVMe via M.2 HAT+, no SD card | Piper-only playout appliance, `./launch.sh --pinned --piper-only` | 🟢 | **First ARM deployment** (2026-08-02, `home-v2.9.0`). 25 min continuous gapless stream, no stutters or gaps; 69.2 °C flat under a full enrichment burst; `vcgencmd get_throttled` = `0x0`. Debian 13 trixie, kernel 6.12 (16k pages), media over NFS. Three hard prerequisites — see [Raspberry Pi setup](#-raspberry-pi-setup): stock CPU clock, `cgroup_enable=memory`, official 27 W PSU | GenWave |
+| Raspberry Pi 5 Model B Rev 1.0 | **arm64** | 4 | **4GB** | 256GB NVMe via M.2 HAT+, no SD card | Piper-only playout appliance, `./launch.sh --pinned --piper-only` | 🟢 | **First ARM deployment** (2026-08-02, `home-v2.9.0`). Gapless stream with no stutters; 66–69 °C flat under a full enrichment burst; `vcgencmd get_throttled` = `0x0` at 2.4 GHz uncapped. **Measured under 4-core enrichment load**: piper **RTF 0.252**, enrichment **~800 tracks/h**, and **zero mid-broadcast safe-branch engagements** across 1 h 40 m. 9,094-track library over NFS. Debian 13 trixie, kernel 6.12 (16k pages). Three hard prerequisites — see [Raspberry Pi setup](#-raspberry-pi-setup): stock CPU clock, `cgroup_enable=memory`, official 27 W PSU | GenWave |
 
 ### Internet Radios
 | Make | Model | Status | Notes | Verifier |
@@ -55,6 +55,11 @@ notes, test status — is below it.
   build finish sooner.
 - 🟢 **Disk** — your music library (bind-mounted **read-only**) plus modest named volumes
   (Postgres data, rendered TTS segments, Piper models). Size to the library.
+- 🟢 **First-boot catalog build** — budget for it. Enrichment analyses every track once, and on a
+  Pi 5 that runs at **~800 tracks/hour** (measured, concurrency 4): roughly **11 hours for a
+  9,000-track library**. It runs in the background and the station broadcasts throughout — it is a
+  planning number, not a blocker. Faster hardware, or a higher
+  `LIBRARY_ENRICHMENT_CONCURRENCY`, shortens it.
 
 ## 🧩 What each service needs
 
@@ -89,9 +94,10 @@ notes recorded alongside them.
 ## 🏆 Raspberry Pi topologies
 
 **Bottom line:** 🟢 a **Pi 5 with 4 GB runs a piper-only station** — proven, not projected:
-`./launch.sh --pinned --piper-only` on the `home-v2.8.8+` multi-arch images, 25 minutes of
-continuous gapless broadcast at 69 °C with clean power (2026-08-02). The full Kokoro+LLM demo
-shape fits on **no** Pi.
+`./launch.sh --pinned --piper-only` on the `home-v2.8.8+` multi-arch images. Measured 2026-08-02
+over 1 h 40 m: gapless broadcast at 66–69 °C with clean power, piper rendering **4× faster than
+real time** and enrichment chewing through **~800 tracks/hour** — *simultaneously*, on four cores.
+The safe branch never engaged after boot. The full Kokoro+LLM demo shape fits on **no** Pi.
 
 | | Topology | Confidence | Shape |
 |:---:|---|:---:|---|
@@ -239,10 +245,13 @@ multiple hosts in the variable.
 
 ## 🔢 Compute notes (Raspberry Pi)
 
-- 🟡 **Piper** — the proven ARM path *upstream*, but **GenWave has not measured RTF on a Pi yet**.
-  Third-party: RTF **0.10–0.12** on RK3588 (same A76 cores as the Pi 5); Home Assistant's "2 s of
-  audio in 1 s" on a Pi 4 (RTF ~0.5). Field note: piper kept up with a live broadcast on a Pi 5
-  without ever engaging the safe branch, but the ratio itself was not recorded.
+- 🟢 **Piper — measured RTF 0.252 on a Pi 5** (2026-08-02, `en_US-lessac-medium`, six renders of
+  4-second DJ lines, spread 0.246–0.265). **That number is under load**: taken with enrichment
+  saturating all four cores (api at 381%, load average 8.8). It is above the 0.10–0.12 that
+  third-party RK3588 benches predicted — those were unloaded boxes, and this is the realistic
+  first-boot condition. At RTF 0.25 piper still renders **4× faster than real time**, which is why
+  the safe branch never engaged mid-broadcast. The uncontended figure was not measured and would
+  be better.
 - 🔴 **Kokoro** — Pi 4 measured RTF **3.19** (sherpa-onnx): no-go. Pi 5: **no published data**;
   the A72→A76 extrapolation lands ~RTF 1.0–1.5 — survivable inside a 120 s render budget but
   unproven, and shadowed by the warmup-crash report above.
@@ -250,11 +259,20 @@ multiple hosts in the variable.
   benches → ~30–90 s per blurb, comparable to the demo box's fenced x86 core. Needs
   `Llm:TimeoutSeconds` 90–120, render budget 120, and an **active cooler** (thermal throttle
   halves tok/s within ~90 s without one). 🔴 Pi 4: the model won't even load in 4 GB.
-- 🟢 **Enrichment saturates every core it is given.** Observed on the Pi 5: the api held 310–378%
-  of 400% for the whole burst at `EnrichmentConcurrency: 4`. The **piper-only overlay now defaults
-  this to 2** (gh-#334) — set `LIBRARY_ENRICHMENT_CONCURRENCY` to override on either stack.
-  Wall-clock throughput (tracks/hour) has **not** been measured; the desk estimate was 1–2 h per
-  1,000 tracks on a Pi 5.
+- 🟢 **Enrichment — measured ~800 tracks/hour on a Pi 5** at `EnrichmentConcurrency: 4`
+  (2026-08-02): 802 tracks/h across a 158-minute burst, 773 tracks/h over the last hour of it,
+  3–20 tracks per minute. **This validates the desk estimate** — 1–2 h per 1,000 tracks predicted
+  500–1,000/h, and the measurement lands squarely inside it.
+- 🟢 **Enrichment saturates every core it is given.** The api held 310–381% of 400% for the whole
+  burst. The **piper-only overlay defaults this to 2** (gh-#334), which trades roughly half the
+  throughput for two free cores and lower thermals — set `LIBRARY_ENRICHMENT_CONCURRENCY` to
+  override on either stack. The numbers above were taken at 4; expect proportionally slower at 2.
+- 🟢 **The safe branch never engaged mid-broadcast.** Across 1 h 40 m the engine's complete switch
+  history is five lines, all inside the first **nine seconds** of boot: `mksafe → safe_blank`
+  (silence while the feeder warms), one `safe_lib` prefetch resolution, ~3 s on the safe branch,
+  then `switch.1 → metadata_deduplicate` and the main queue holds forever. That cold-start ladder
+  is the designed never-silent behaviour, not a failure. `safe_lib` resolved exactly one track,
+  ever.
 
 ## 🎯 Design target
 
@@ -276,15 +294,16 @@ The gh-#213 plan and where it stands after the 2026-08-02 field run:
 |:---:|---|:---:|
 | 1 | **Arch pull check** — every `docker compose config --images` image pulls clean on arm64 | 🟢 all five GHCR images + upstreams pulled clean |
 | 2 | **Pinned boot on Pi 5** — `./launch.sh --pinned --piper-only` | 🟢 booted; pull + first-boot wall time not recorded |
-| 3 | **Minimal playout boot** — `/health` 200 and a gapless stream | 🟢 25 min continuous, no stutters or gaps |
-| 4 | **Piper render timing** — RTF ~0.1–0.2 on Pi 5 (render seconds ÷ clip seconds) | 🔴 not measured |
-| 5 | **Enrichment burst on a real library** — tracks/hour, `vcgencmd measure_temp`, zero safe-branch engagements | 🟡 partial: 69.2 °C flat, no safe-branch engagements observed; **tracks/hour not recorded** |
+| 3 | **Minimal playout boot** — `/health` 200 and a gapless stream | 🟢 **1 h 40 m+ continuous**, no stutters or gaps, throughout an enrichment burst |
+| 4 | **Piper render timing** — RTF ~0.1–0.2 on Pi 5 (render seconds ÷ clip seconds) | 🟢 **RTF 0.252** — measured under 4-core enrichment load, so above the projected band; still 4× faster than real time. Uncontended not measured |
+| 5 | **Enrichment burst on a real library** — tracks/hour, `vcgencmd measure_temp`, zero safe-branch engagements | 🟢 **~800 tracks/h** at concurrency 4; 66–69 °C flat; **zero mid-broadcast safe-branch engagements** over 1 h 40 m |
 | 6 | **The open Kokoro question** — does the arm64 image survive warmup on a Pi 5? | 🔴 not attempted |
 | 7 | **ollama tok/s** — prompt/eval rates on a real DJ prompt; abort below 3 tok/s | 🔴 not attempted |
 | 8 | **24 h piper-only soak** — 0 safe-library engagements, 0 restarts, flat memory, temps, render-seconds vs budget | 🔴 not run |
 | 9 | **Pi 4 pass** — steps 1–5 only | 🔴 not run |
 
-Steps 4 and 5 are cheap to finish on the existing box and would complete topology (a)'s record.
+Steps 6–9 remain. Steps 6 and 7 are only interesting for topology (c); step 8 (the 24 h soak) is
+the one that would move topology (a) from "proven working" to "proven to stay working".
 
 Results land as 🟢 rows in **Known deployments** above — problems are as valuable as successes.
 
