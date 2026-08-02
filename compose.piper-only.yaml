@@ -91,6 +91,19 @@ services:
       # against the enum, so the build fails loudly rather than silently routing the
       # new kind at a kokoro that doesn't exist.
       Tts__EngineByKind: '{"StationId":"piper","LeadIn":"piper","BackAnnounce":"piper","TimeDate":"piper","SignOff":"piper","SignOn":"piper"}'
+      # gh-#334 — enrichment halved, by the same reasoning as the kokoro and LLM removals above.
+      # This overlay exists because a 4GB/4-core box cannot afford the default topology, and the
+      # ffmpeg analyzers are the heaviest sustained load GenWave produces: base compose's 4 pins
+      # every core of a Pi 5 (measured: api at 378% of 400%, SoC at 83.4°C — past the 80°C soft
+      # limit — and the 5V rail dipping into undervoltage every ~2 min, one dip per analyzed file).
+      # HARDWARE.md already prescribes 2 for Pi boxes; nothing enforced it, and on a pinned box
+      # nothing could — compose.demo.yaml turns Admin:Enabled off, so PUT /api/settings (the live
+      # STORY-139 path) is unreachable there.
+      #
+      # Same variable as base compose, lower default: an operator who sets
+      # LIBRARY_ENRICHMENT_CONCURRENCY still wins, on either stack. Enrichment is a backfill, not a
+      # broadcast dependency — halving it slows first-boot catalog build and never touches playout.
+      Library__EnrichmentConcurrency: ${LIBRARY_ENRICHMENT_CONCURRENCY:-2}
       # ⚠️ Same seeding shape as compose.demo.yaml's Station__* overrides: an env
       # default (GET /api/settings reports source="default") that a row saved in the
       # settings DB OVERRIDES — the DEPLOYMENT.md Station:SpectatorMode gotcha, same

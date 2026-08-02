@@ -152,7 +152,12 @@ services:
       Loudness__CeilingDbtp: "-1"
       Library__MediaRoot: "/media"
       Library__ScanIntervalSeconds: "60"
-      Library__EnrichmentConcurrency: "4"
+      # How many files the ffmpeg analyzers enrich at once. The default is unchanged, but it is
+      # now a variable (gh-#334): on a pinned appliance box compose.demo.yaml turns the admin
+      # surface off, so PUT /api/settings — the live path this setting was built for (STORY-139)
+      # — is unreachable, and a hardcoded value left an operator with no lever at all. The
+      # piper-only overlay lowers the default; see its own note.
+      Library__EnrichmentConcurrency: ${LIBRARY_ENRICHMENT_CONCURRENCY:-4}
       # Station identity (StationOptions — validated at startup)
       Station__Id: "genwave-1"
       Station__Name: ${STATION_NAME:-GWAV 108.8}  # shared with engine's STATION_NAME
