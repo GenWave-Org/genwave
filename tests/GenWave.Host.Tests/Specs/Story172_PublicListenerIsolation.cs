@@ -73,6 +73,10 @@ public static class FeaturePublicListenerIsolation
         [InlineData("/spectator/api/play-history")]
         [InlineData("/spectator/api/stats")]
         [InlineData("/spectator/api/about")]
+        // PLAN T160: SpectatorSurfaceAttribute-tagged like every other route above — the composed
+        // theme stylesheet the spectator page will link, so it must be reachable on the public
+        // port the same way.
+        [InlineData("/spectator/theme.css")]
         [InlineData("/health")]
         // PLAN T173: /fonts/* is a path-based carve-out (not SpectatorSurfaceAttribute-tagged) —
         // the spectator page fetches its own fonts same-origin, so this must land on the public
@@ -129,6 +133,12 @@ public static class FeaturePublicListenerIsolation
         [InlineData("/api/status")]
         [InlineData("/api/auth/login")]
         [InlineData("/api/settings")]
+        // PLAN T161: the admin surface's composed theme stylesheet. AdminSurface-tagged (not
+        // SpectatorSurface), and AllowAnonymous — but anonymous is an authorization decision,
+        // not a surface-gate one: the public-listener check below admits only
+        // SpectatorSurface-tagged endpoints (plus /health and /fonts/*), so this 404s here
+        // regardless of its authorization, same as every other admin route above.
+        [InlineData("/api/theme.css")]
         [InlineData("/media/1")]
         [InlineData("/media/random")]
         [InlineData("/internal/engine-config")]

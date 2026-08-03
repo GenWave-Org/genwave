@@ -19,6 +19,16 @@ using System.Reflection;
 /// </summary>
 public sealed class ThemeCatalog
 {
+    /// <summary>ARCHITECTURE "Theme system": "shipped default <c>cats-whisker</c>" (SPEC F102.5).
+    /// Lives here — not on either serving surface — because both the spectator route (T160) and the
+    /// admin route (T161) need the exact same slug: two surfaces reading one constant off the
+    /// catalog that owns the manifests, rather than one surface restating the other's literal or
+    /// depending on its type. <see cref="TryGetBySlug"/> only guarantees a slug that IS in the
+    /// catalog resolves — not that this particular one is among them — so callers that rely on this
+    /// being present (both endpoint modules today) assert it once at boot rather than discovering a
+    /// gap per-request; see <c>Program.cs</c>'s own startup assertion.</summary>
+    public const string ShippedDefaultSlug = "cats-whisker";
+
     /// <summary>Every embedded resource this assembly ships under this segment, ending in
     /// <c>.json</c>, is treated as a shipped theme manifest (ARCHITECTURE "Theme system":
     /// <c>themes/*.json</c>, embedded resources in GenWave.Host).</summary>
