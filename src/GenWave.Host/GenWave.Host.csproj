@@ -17,6 +17,18 @@
     <PackageReference Include="Npgsql" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Shipped theme manifests (ARCHITECTURE "Theme system"): plain data files, not app code, so
+         they're embedded rather than published as loose Content. This is a Microsoft.NET.Sdk.Web
+         project, so the SDK's default glob puts **/*.json in Content (not None) — removing it from
+         Content (not None) is what stops `dotnet publish` from ALSO emitting a loose copy under
+         out/Theming/themes/*.json alongside the embedded one. No files live under Theming/themes/
+         yet — that's PLAN T157 — so this glob matches nothing today and becomes live the moment the
+         default manifest lands. -->
+    <Content Remove="Theming/themes/*.json" />
+    <EmbeddedResource Include="Theming/themes/*.json" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
