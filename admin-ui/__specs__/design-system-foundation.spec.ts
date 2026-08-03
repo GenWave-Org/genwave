@@ -6,6 +6,7 @@
 import { describe, it, expect } from "@jest/globals";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import { AA_NORMAL_TEXT_MIN_CONTRAST, contrastRatio } from "./contrast-ratio";
 
 const ROOT = path.resolve(__dirname, "..");
 
@@ -67,36 +68,6 @@ const globalsCss = readFileSync(globalsCssPath, "utf-8");
 
 const STOCK_PALETTE_PATTERN = /\b(?:bg-orange-|text-gray-|bg-gray-)\S*/g;
 
-// ---------------------------------------------------------------------------
-// WCAG relative-luminance / contrast-ratio helper (for AA spot-checks below)
-// ---------------------------------------------------------------------------
-
-/** Parses `#rrggbb` into 0-255 channel values. */
-function hexToRgb(hex: string): [number, number, number] {
-  const match = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/.exec(hex);
-  if (!match) {
-    throw new Error(`not a 6-digit hex color: ${hex}`);
-  }
-  return [parseInt(match[1], 16), parseInt(match[2], 16), parseInt(match[3], 16)];
-}
-
-/** WCAG 2.x relative luminance of an sRGB channel value (0-255). */
-function relativeLuminance([r, g, b]: [number, number, number]): number {
-  const linear = (c: number): number => {
-    const s = c / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
-}
-
-/** WCAG contrast ratio (1:1 to 21:1) between two `#rrggbb` colors. */
-function contrastRatio(hexA: string, hexB: string): number {
-  const lA = relativeLuminance(hexToRgb(hexA));
-  const lB = relativeLuminance(hexToRgb(hexB));
-  const [lighter, darker] = lA >= lB ? [lA, lB] : [lB, lA];
-  return (lighter + 0.05) / (darker + 0.05);
-}
-
 /** Reads a `--token: #rrggbb` value out of an already-extracted CSS block. */
 function tokenValue(block: string, token: string): string {
   const value = block.match(new RegExp(`${token}\\s*:\\s*(#[0-9a-fA-F]{6})`))?.[1];
@@ -105,8 +76,6 @@ function tokenValue(block: string, token: string): string {
   }
   return value;
 }
-
-const AA_NORMAL_TEXT_MIN_CONTRAST = 4.5;
 
 describe("Feature: Design-system foundation", () => {
   describe("Scenario: token sets exist for both themes", () => {
