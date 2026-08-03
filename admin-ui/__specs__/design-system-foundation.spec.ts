@@ -190,36 +190,52 @@ describe("Feature: Design-system foundation", () => {
     });
   });
 
-  describe("Scenario: fonts are vendored and local", () => {
-    const fontsDir = path.join(ROOT, "app", "fonts");
+  // PLAN T173 (SPEC F102, ARCHITECTURE.md "Theme system" decision table): the three .woff2
+  // binaries are no longer duplicated into admin-ui at all — GenWave.Host/wwwroot/fonts is their
+  // one home, served at the canonical GET /fonts/{file} both surfaces read from (admin via
+  // next.config.ts's rewrite). next/font/local is gone: a content-hashed .next/static/media/* URL
+  // can never be named in a theme manifest (T156's FontSrcPattern), so --font-display/--font-sans
+  // are now plain @font-face-backed custom properties in globals.css, matching spectator's own
+  // styles.css exactly.
+  describe("Scenario: fonts are vendored on the backend and served through one canonical route", () => {
+    const fontsDir = path.resolve(ROOT, "..", "src", "GenWave.Host", "wwwroot", "fonts");
     const fontFiles = existsSync(fontsDir) ? readdirSync(fontsDir) : [];
 
-    it("ships Fraunces 400/600/italic woff2 files inside admin-ui", () => {
-      const frauncesFiles = fontFiles.filter((f) => /^Fraunces.*\.woff2$/i.test(f));
-      const normal = frauncesFiles.filter((f) => !/italic/i.test(f));
-      const italic = frauncesFiles.filter((f) => /italic/i.test(f));
-
-      expect(normal.length).toBeGreaterThan(0);
-      expect(italic.length).toBeGreaterThan(0);
-      for (const f of frauncesFiles) {
+    it("ships the Fraunces normal + italic woff2 faces on the backend, lowercase-hyphenated", () => {
+      expect(fontFiles).toContain("fraunces-variable-latin.woff2");
+      expect(fontFiles).toContain("fraunces-italic-variable-latin.woff2");
+      for (const f of ["fraunces-variable-latin.woff2", "fraunces-italic-variable-latin.woff2"]) {
         expect(statSync(path.join(fontsDir, f)).size).toBeGreaterThan(0);
       }
     });
 
-    it("ships Source Sans 3 400/600 woff2 files inside admin-ui", () => {
-      const sourceSansFiles = fontFiles.filter((f) => /^SourceSans3.*\.woff2$/i.test(f));
-      expect(sourceSansFiles.length).toBeGreaterThan(0);
-      for (const f of sourceSansFiles) {
-        expect(statSync(path.join(fontsDir, f)).size).toBeGreaterThan(0);
-      }
+    it("ships the Source Sans 3 woff2 face on the backend, lowercase-hyphenated", () => {
+      expect(fontFiles).toContain("source-sans-3-variable-latin.woff2");
+      expect(statSync(path.join(fontsDir, "source-sans-3-variable-latin.woff2")).size).toBeGreaterThan(0);
     });
 
-    it("loads both families via next/font/local", () => {
+    it("no .woff2 binary is duplicated into admin-ui itself", () => {
+      const adminFontsDir = path.join(ROOT, "app", "fonts");
+      expect(existsSync(adminFontsDir)).toBe(false);
+    });
+
+    it("declares @font-face rules in globals.css pointing at the canonical /fonts route, not next/font/local", () => {
       const layoutSrc = readFileSync(path.join(ROOT, "app", "layout.tsx"), "utf-8");
-      expect(layoutSrc).toMatch(/from ["']next\/font\/local["']/);
-      expect(layoutSrc).toMatch(/--font-display/);
-      expect(layoutSrc).toMatch(/--font-sans/);
-      expect(layoutSrc).not.toMatch(/next\/font\/google/);
+      expect(layoutSrc).not.toMatch(/from\s+["']next\/font/);
+
+      expect(globalsCss).toMatch(/@font-face/);
+      expect(globalsCss).toMatch(/"Fraunces"/);
+      expect(globalsCss).toMatch(/"Source Sans 3"/);
+      expect(globalsCss).toMatch(/url\(["']\/fonts\/fraunces-variable-latin\.woff2["']\)/);
+      expect(globalsCss).toMatch(/url\(["']\/fonts\/fraunces-italic-variable-latin\.woff2["']\)/);
+      expect(globalsCss).toMatch(/url\(["']\/fonts\/source-sans-3-variable-latin\.woff2["']\)/);
+      expect(globalsCss).toMatch(/--font-display:\s*"Fraunces"/);
+      expect(globalsCss).toMatch(/--font-sans:\s*"Source Sans 3"/);
+    });
+
+    it("rewrites /fonts/:path* to the backend, alongside the existing /api/:path* rewrite", () => {
+      const nextConfigSrc = readFileSync(path.join(ROOT, "next.config.ts"), "utf-8");
+      expect(nextConfigSrc).toMatch(/source:\s*["']\/fonts\/:path\*["']/);
     });
 
     it("emits no external font URL in the build output or source", () => {

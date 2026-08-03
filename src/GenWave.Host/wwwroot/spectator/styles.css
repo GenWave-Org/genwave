@@ -7,7 +7,7 @@
 
 @font-face {
   font-family: "Fraunces";
-  src: url("/spectator/fonts/Fraunces-Variable-latin.woff2") format("woff2");
+  src: url("/fonts/fraunces-variable-latin.woff2") format("woff2");
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;
@@ -18,7 +18,7 @@
      combine italic with the 600 weight, so no face requests weight 600 italic and the
      browser never falls back to faux-bold synthesis). */
   font-family: "Fraunces";
-  src: url("/spectator/fonts/Fraunces-Italic-Variable-latin.woff2") format("woff2");
+  src: url("/fonts/fraunces-italic-variable-latin.woff2") format("woff2");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -26,7 +26,7 @@
 
 @font-face {
   font-family: "Source Sans 3";
-  src: url("/spectator/fonts/SourceSans3-Variable-latin.woff2") format("woff2");
+  src: url("/fonts/source-sans-3-variable-latin.woff2") format("woff2");
   font-weight: 400 600;
   font-style: normal;
   font-display: swap;

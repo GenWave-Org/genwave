@@ -262,6 +262,12 @@ app.MapGet("/", () => Results.Redirect("/spectator"))
 // public-listener isolation check.
 app.MapSpectatorPage();
 
+// The canonical vendored-font route (SPEC F102, PLAN T173): shared by both surfaces, so it is
+// unattributed by AdminSurface/SpectatorSurface (neither kill switch may strand the other's
+// fonts) — see FontEndpoints and SurfaceGateMiddleware's own remarks for the matching public-port
+// carve-out this needs instead.
+app.MapFontEndpoints();
+
 // Liveness probe — anonymous so the (conditional) deny-by-default policy never 401s it.
 app.MapHealthChecks("/health").AllowAnonymous();
 

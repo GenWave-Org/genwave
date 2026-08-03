@@ -7,10 +7,15 @@ namespace GenWave.Host.Api;
 /// Stamps the browser security headers (gh-#180) — <c>Content-Security-Policy</c>,
 /// <c>X-Frame-Options</c>, <c>Referrer-Policy</c>, <c>X-Content-Type-Options</c> — on every
 /// response whose matched endpoint carries <see cref="SpectatorSurfaceAttribute"/>: the public
-/// page, its static assets/fonts, and <c>/spectator/api/*</c> (headers on API JSON are harmless
+/// page, its static assets, and <c>/spectator/api/*</c> (headers on API JSON are harmless
 /// and keep the surface uniform). Keyed on endpoint metadata, never on path shape, so a future
 /// spectator route is covered by construction and the admin plane, <c>/media/*</c>, and
-/// <c>/internal/*</c> are never touched.
+/// <c>/internal/*</c> are never touched. The vendored fonts (PLAN T173, <c>GET /fonts/{file}</c>)
+/// are deliberately NOT among these routes — they are shared with admin and unattributed by
+/// design (see <c>FontEndpoints</c>'/<c>SurfaceGateMiddleware</c>'s own remarks) — but that costs
+/// nothing here: CSP is a document-level policy the BROWSER enforces against the page that
+/// declared it, not a per-response header a sub-resource fetch needs of its own, so an unheadered
+/// same-origin font response is still governed by the page's own <c>font-src 'self'</c>.
 ///
 /// <para>
 /// Pipeline position (see <c>Program.cs</c>): after <c>UseRouting</c> (needs the matched
@@ -84,8 +89,9 @@ sealed class SpectatorSecurityHeadersMiddleware(
     /// &lt;style&gt; or style= attributes anywhere. app.js drives the progress bar through the
     /// CSSOM (<c>element.style.width</c>), which style-src does not govern — so no
     /// 'unsafe-inline' is needed and none is granted.</item>
-    /// <item><c>font-src 'self'</c> — vendored woff2 under /spectator/fonts (design-aesthetic
-    /// rule: never a font CDN).</item>
+    /// <item><c>font-src 'self'</c> — vendored woff2 under /fonts (design-aesthetic rule: never a
+    /// font CDN; PLAN T173 moved these from /spectator/fonts to the canonical shared route, the
+    /// same-origin 'self' match is unaffected).</item>
     /// <item><c>img-src 'self' + PublicBaseUrl origin</c> — the favicon/station icon are
     /// same-origin, but per-track artwork (SPEC F93.3, since v2.8.0) is
     /// <c>{PublicBaseUrl}/spectator/api/artwork/{token}</c>, cross-origin whenever

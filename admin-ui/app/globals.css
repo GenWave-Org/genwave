@@ -12,6 +12,37 @@
    this is the selector contract Q3 targets. */
 @custom-variant dark (&:is([data-theme="dark"] *));
 
+/* Vendored woff2 fonts (PLAN T173, SPEC F102): served same-origin from GET /fonts/{file}
+   (GenWave.Host), reached here through next.config.ts's /fonts/:path* rewrite — never a font
+   CDN, never next/font/local (a theme manifest needs a stable URL to name; next/font's
+   content-hashed .next/static/media/* paths cannot be named ahead of a build). Byte-identical to
+   spectator/styles.css's own @font-face blocks — one canonical source, two surfaces. */
+@font-face {
+  font-family: "Fraunces";
+  src: url("/fonts/fraunces-variable-latin.woff2") format("woff2");
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  /* Regular weight only — the wordmark/page titles never combine italic with the 600 weight, so
+     no face requests weight 600 italic and the browser never falls back to faux-bold synthesis. */
+  font-family: "Fraunces";
+  src: url("/fonts/fraunces-italic-variable-latin.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Source Sans 3";
+  src: url("/fonts/source-sans-3-variable-latin.woff2") format("woff2");
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ---------------------------------------------------------------------------
  * Wireless design tokens (SPEC F28.1/F28.2, .claude/skills/design-aesthetic).
  * Semantic custom properties only — components consume these, never raw hex
@@ -57,6 +88,11 @@
   --sched-4: #d9c1a6; /* umber (was slate-teal — cool, retired) */
   --sched-5: #cbb0c7; /* plum */
   --sched-6: #e1b7be; /* brick (was denim — cool, retired) */
+
+  /* Font stacks (PLAN T173) — matches spectator/styles.css exactly; not theme-dependent, so
+     declared once here rather than repeated under the dark/system-dark blocks below. */
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "Source Sans 3", system-ui, sans-serif;
 }
 
 :root[data-theme="dark"] {
@@ -115,10 +151,10 @@
   }
 }
 
-/* Map the semantic tokens (and vendored font variables) into Tailwind
+/* Map the semantic tokens (and vendored font stacks) into Tailwind
    utilities: bg-surface, text-ink, border-line, text-accent, font-display,
    etc. `inline` because these reference runtime CSS custom properties
-   (theme selection, next/font scoping), not static build-time values. */
+   (theme selection via data-theme), not static build-time values. */
 @theme inline {
   --color-bg: var(--bg);
   --color-surface: var(--surface);
