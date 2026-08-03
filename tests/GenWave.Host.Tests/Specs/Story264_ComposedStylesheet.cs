@@ -28,7 +28,9 @@
 // sheet overrides the static one cleanly rather than losing to it or tying its specificity.
 
 using System.Net;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -40,9 +42,31 @@ using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
 
+/// <summary>Short-circuits <c>/spectator/theme.css</c> with a 503 before routing ever sees it —
+/// simulates the composed sheet being unavailable (slow, failed, or absent) for AC8, the same
+/// technique Story172_PublicListenerIsolation's own <c>SimulatedPortStartupFilter</c> uses to
+/// inject a probe ahead of the production pipeline rather than reasoning about the failure mode
+/// in the abstract.</summary>
+file sealed class UnavailableThemeCssStartupFilter : IStartupFilter
+{
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+    {
+        app.Use(async (context, nextMiddleware) =>
+        {
+            if (context.Request.Path == "/spectator/theme.css")
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                return;
+            }
+            await nextMiddleware(context);
+        });
+        next(app);
+    };
+}
+
 /// <summary>Mirrors Story173's own <c>SpectatorPageWebFactory</c> — the standard anonymous,
 /// spectator-mode-on host boot used across the spectator surface's specs.</summary>
-file sealed class ThemeCssWebFactory : WebApplicationFactory<Program>
+file sealed class ThemeCssWebFactory(bool simulateThemeCssUnavailable = false) : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -57,14 +81,14 @@ file sealed class ThemeCssWebFactory : WebApplicationFactory<Program>
             services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
+            if (simulateThemeCssUnavailable)
+                services.AddSingleton<IStartupFilter>(new UnavailableThemeCssStartupFilter());
         });
     }
 }
 
 public static class FeatureComposedStylesheet
 {
-    const string PendingWire = "Pending T162 — see docs/PLAN.md";
-
     // ── HAPPY PATH ────────────────────────────────────────────────────────
 
     public sealed class ScenarioTheSpectatorSurfaceServesComposedCss
@@ -132,6 +156,35 @@ public static class FeatureComposedStylesheet
 
             // Assert: content-type is text/css (AC2).
             Assert.Equal("text/css", response.Content.Headers.ContentType?.MediaType);
+        }
+    }
+
+    public sealed class ScenarioTheSpectatorPageLinksTheComposedSheetAfterTheStaticOne
+    {
+        [Fact]
+        public async Task TheComposedSheetIsLinkedAfterTheStaticSheet()
+        {
+            // Arrange: PLAN T162's HARD PRECONDITION — the composed :root is (0,1,0) and TIES
+            //          the static :root's specificity exactly, so "composed wins" holds ONLY
+            //          because /spectator/theme.css is linked AFTER /spectator/styles.css. Both
+            //          dark blocks win on specificity regardless of order; the light block does
+            //          not — a reversed link order would silently strip theming in light mode
+            //          only, the majority case and the one least likely to be noticed in a
+            //          dark-themed dev session.
+            await using var factory = new ThemeCssWebFactory();
+            var client = factory.CreateClient();
+
+            // Act: fetch the page exactly as a browser would.
+            var html = await client.GetStringAsync("/spectator");
+
+            // Assert: styles.css appears strictly before theme.css in document order. Reversing
+            //         the two <link> elements in wwwroot/spectator/index.html makes this red.
+            var staticIndex = html.IndexOf("href=\"/spectator/styles.css\"", StringComparison.Ordinal);
+            var composedIndex = html.IndexOf("href=\"/spectator/theme.css\"", StringComparison.Ordinal);
+            Assert.True(staticIndex >= 0, "static stylesheet link not found in /spectator");
+            Assert.True(composedIndex >= 0, "composed stylesheet link not found in /spectator");
+            Assert.True(staticIndex < composedIndex,
+                "the composed sheet must be linked AFTER the static sheet — PLAN T162 hard precondition");
         }
     }
 
@@ -387,14 +440,36 @@ public static class FeatureComposedStylesheet
 
     public sealed class ScenarioAMissingComposedSheetDegradesRatherThanStrips
     {
-        [Fact(Skip = PendingWire)]
-        public void PageRendersInDefaultWirelessRatherThanUnstyled()
+        [Fact]
+        public async Task PageRendersInDefaultWirelessRatherThanUnstyled()
         {
-            // Arrange: the theme endpoint is unavailable (slow, failed, or absent).
-            // Act:     serve and render the page.
-            // Assert:  it renders in default Wireless rather than unstyled (AC8) — verifiable
-            //          by serving the page with the theme endpoint disabled.
-            Assert.Fail("pending T162 — degraded-paint wire acceptance");
+            // Arrange: the theme endpoint made unavailable via UnavailableThemeCssStartupFilter
+            //          — a real 503 short-circuit ahead of the production pipeline, not a
+            //          reasoned-about hypothetical.
+            await using var factory = new ThemeCssWebFactory(simulateThemeCssUnavailable: true);
+            var client = factory.CreateClient();
+
+            // Act: confirm the composed sheet really is unavailable...
+            var themeResponse = await client.GetAsync("/spectator/theme.css");
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, themeResponse.StatusCode);
+
+            // ...then serve and render the page exactly as a browser would.
+            var pageResponse = await client.GetAsync("/spectator");
+            var html = await pageResponse.Content.ReadAsStringAsync();
+
+            // Assert: the page itself is unaffected — a failing <link> does not take the
+            //         document down with it — and still links the static sheet.
+            Assert.Equal(HttpStatusCode.OK, pageResponse.StatusCode);
+            Assert.Contains("href=\"/spectator/styles.css\"", html, StringComparison.Ordinal);
+
+            // Assert (AC8): the static sheet alone — independent of theme.css's fate — still
+            //         carries the shipped default's full token set, so the page degrades to
+            //         default Wireless rather than rendering unstyled.
+            var staticCssResponse = await client.GetAsync("/spectator/styles.css");
+            var staticCss = await staticCssResponse.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.OK, staticCssResponse.StatusCode);
+            Assert.Contains(":root", staticCss, StringComparison.Ordinal);
+            Assert.Contains("--bg: #f6efe3;", staticCss, StringComparison.Ordinal);
         }
     }
 }

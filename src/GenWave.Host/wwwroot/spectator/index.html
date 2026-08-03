@@ -9,6 +9,14 @@
        path segment is replaced, not treated as a directory) and 404. -->
   <link rel="icon" href="/spectator/favicon.ico" />
   <link rel="stylesheet" href="/spectator/styles.css" />
+  <!-- Composed active-theme sheet (STORY-264, SPEC F102.3, PLAN T160/T162). Linked AFTER
+       styles.css deliberately, not incidentally: a composed :root is (0,1,0) and TIES the
+       static :root above on specificity, so "composed wins" holds only via this load order
+       (PLAN T162's hard precondition — the dark blocks win on specificity regardless of
+       order, but the light block does not). If this sheet is slow, fails, or 404s, the
+       static sheet above already carries the shipped default's full token set, so the page
+       degrades to default Wireless rather than going unstyled (SPEC F102.7). -->
+  <link rel="stylesheet" href="/spectator/theme.css" />
 </head>
 <body>
   <div class="shell">

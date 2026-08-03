@@ -36,6 +36,25 @@ export default async function RootLayout({
   return (
     <html lang="en" data-theme={theme ?? undefined}>
       <body>
+        {/*
+          Composed active-theme sheet (STORY-264, SPEC F102.3, PLAN T161/T162). Reached
+          through next.config.ts's `/api/:path*` rewrite, so it is same-origin — no CORS,
+          `style-src 'self'` unchanged. Root layout wraps `/login` too (no login/layout.tsx),
+          which is exactly why AdminThemeEndpoints serves this anonymously — see that type's
+          own remarks.
+
+          `precedence` (React 19's stylesheet-Resource prop, not JSX position) is what fixes
+          load order here, not where this tag sits in the tree: Next.js injects globals.css
+          as its own precedence-managed stylesheet resource before this component's JSX is
+          ever walked, and React appends a NEWLY-seen precedence value as a LATER group in
+          <head> — so giving this link its own precedence value places it after globals.css
+          regardless of where in the tree it is rendered. Reversing PLAN T162's hard
+          precondition here means dropping `precedence` (making this a plain, unordered
+          <link> — real order then stops being guaranteed) rather than moving the tag: a
+          static HTML file's "linked after" has no direct analogue when one of the two
+          sheets is a framework-managed bundle rather than another literal <link>.
+        */}
+        <link rel="stylesheet" href="/api/theme.css" precedence="theme" />
         {children}
         {/* gh-#7: version/edition stamp on every page — root layout wraps authed + login alike */}
         <VersionFooter />
