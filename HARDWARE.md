@@ -55,11 +55,12 @@ notes, test status — is below it.
   build finish sooner.
 - 🟢 **Disk** — your music library (bind-mounted **read-only**) plus modest named volumes
   (Postgres data, rendered TTS segments, Piper models). Size to the library.
-- 🟢 **First-boot catalog build** — budget for it. Enrichment analyses every track once, and on a
-  Pi 5 that runs at **~800 tracks/hour** (measured, concurrency 4): roughly **11 hours for a
-  9,000-track library**. It runs in the background and the station broadcasts throughout — it is a
-  planning number, not a blocker. Faster hardware, or a higher
-  `LIBRARY_ENRICHMENT_CONCURRENCY`, shortens it.
+- 🟢 **First-boot catalog build** — budget for it. Enrichment analyses every track once. Measured
+  on a 4 GB Pi 5: **~800 tracks/hour at concurrency 4** and **~700 at 2** — roughly **11 h** and
+  **13 h** respectively for a 9,000-track library. ⚠️ Pi boxes run `--piper-only`, which
+  **defaults to 2**, so 13 h is the number most Pi operators should plan against. It runs in the
+  background and the station broadcasts throughout — a planning number, not a blocker. Faster
+  hardware, or a higher `LIBRARY_ENRICHMENT_CONCURRENCY`, shortens it.
 
 ## 🧩 What each service needs
 
@@ -264,9 +265,15 @@ multiple hosts in the variable.
   3–20 tracks per minute. **This validates the desk estimate** — 1–2 h per 1,000 tracks predicted
   500–1,000/h, and the measurement lands squarely inside it.
 - 🟢 **Enrichment saturates every core it is given.** The api held 310–381% of 400% for the whole
-  burst. The **piper-only overlay defaults this to 2** (gh-#334), which trades roughly half the
-  throughput for two free cores and lower thermals — set `LIBRARY_ENRICHMENT_CONCURRENCY` to
-  override on either stack. The numbers above were taken at 4; expect proportionally slower at 2.
+  burst. The **piper-only overlay defaults this to 2** (gh-#334), buying two free cores and lower
+  thermals — set `LIBRARY_ENRICHMENT_CONCURRENCY` to override on either stack.
+- 🟢 **Concurrency 2 costs far less than half — measured ~700 tracks/hour** on the same 4 GB Pi 5
+  (2026-08-03): 6,303 tracks over a 9-hour sustained run, flat at 654–766/h per hour with no gaps,
+  api at ~234% of 400%. So **9,000 tracks is ~13 h at 2, not the ~22 h a linear model predicts**
+  — halving the workers does not halve throughput, because the analyzers are not purely CPU-bound
+  (NFS media reads, catalog writes). ⚠️ This corrects an earlier "expect proportionally slower at
+  2" note here and a matching ~22 h estimate in DEPLOYMENT.md; `tools/check-doc-drift.sh` cannot
+  catch this class, since measured figures have no compose file to diff against.
 - 🟢 **The safe branch never engaged mid-broadcast.** Across 1 h 40 m the engine's complete switch
   history is five lines, all inside the first **nine seconds** of boot: `mksafe → safe_blank`
   (silence while the feeder warms), one `safe_lib` prefetch resolution, ~3 s on the safe branch,

@@ -254,6 +254,18 @@ Every TTS render routes to the piper sidecar; the LLM path degrades to templated
 which is exactly what [HARDWARE.md](HARDWARE.md)'s topology (a) describes. See that file
 for the ranked hardware topologies.
 
+> ⚠️ **Expected on every piper-only box — not a broken install.** The api logs
+> `kokoro health probe failed (Name or service not known (kokoro:8880)) — 2 consecutive
+> failures, cached verdict is now unhealthy`, with a stack trace, and then goes quiet
+> (gh-#338 made the warning edge-triggered). `Tts:Endpoint` **deliberately** stays pointed
+> at the absent kokoro host: it cannot point at piper (kokoro-fastapi speaks
+> `POST /v1/audio/speech`, piper's server speaks `POST text/plain → /`) and it cannot be
+> emptied (`TtsOptions.Endpoint` is `[Required]`). The dead hostname is the mechanism, not
+> the fault — the few kind-less renders (safe-loop authoring, admin preview) fail fast on
+> Docker's NXDOMAIN and fall to piper, and once the cached verdict flips they stop trying
+> at all. `GET /api/voices` returns a 502 for the same reason. The broadcast never depends
+> on any of it. Full rationale lives in `compose.piper-only.yaml`.
+
 As of gh-#334 it also halves **`Library:EnrichmentConcurrency` to 2**. Enrichment is the
 heaviest sustained load GenWave produces — the ffmpeg analyzers use every core they are
 given — and the base default of 4 pins all four cores of a small box for the whole
@@ -263,8 +275,13 @@ first-boot catalog build. Override on either stack with the env var:
 LIBRARY_ENRICHMENT_CONCURRENCY=1   # in .env — lower still, or raise to reclaim throughput
 ```
 
-Roughly proportional: a Pi 5 measured **~800 tracks/hour at 4**, so a 9,000-track library
-is ~11h at 4 and ~22h at 2. Enrichment is a backfill, not a broadcast dependency — the
+**Not proportional** — both rates measured on the same 4GB Pi 5: **~800 tracks/hour at 4**
+and **~700 at 2**. A 9,000-track library is therefore ~11h at 4 and **~13h at 2 — not the
+~22h a linear model predicts**. Halving concurrency costs far less throughput than it
+looks like it should; the analyzers are not purely CPU-bound (NFS media reads, catalog
+writes), so two workers still keep the box busy. The concurrency-2 figure is a 9-hour
+sustained run, 2026-08-03: 6,303 tracks at a flat ~700/hour with no gaps.
+Enrichment is a backfill, not a broadcast dependency — the
 station is on air throughout, so this trades catalog-build time for headroom, nothing more.
 
 > ⚠️ **On a pinned appliance box the env var is the only lever.** `compose.demo.yaml` sets
