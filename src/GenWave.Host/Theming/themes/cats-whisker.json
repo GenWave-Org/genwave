@@ -1,6 +1,6 @@
 {
-  "slug": "cream-enamel",
-  "name": "Cream Enamel",
+  "slug": "cats-whisker",
+  "name": "Cat's Whisker",
   "author": "GenWave",
   "fonts": {
     "display": {
@@ -24,7 +24,7 @@
       "surface-2": "#efe5d2",
       "line": "#ddd0b8",
       "ink": "#2b2320",
-      "mute": "#77685c",
+      "mute": "#706256",
       "accent": "#b94f29",
       "accent-ink": "#fdf8ee",
       "accent-2": "#6f632f",

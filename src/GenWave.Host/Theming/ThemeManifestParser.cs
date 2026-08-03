@@ -158,7 +158,7 @@ internal static partial class ThemeManifestParser
         // here; T156's task scope enumerates exactly the three checks in this method, and vocabulary
         // reaches into T158's data-driven AA gate. That gap has a real, silent failure mode: a
         // manifest omitting "accent-ink" from BOTH modes loads clean (parity holds — neither side has
-        // it), and the static-stylesheet fallback then silently paints cream-enamel's accent-ink over
+        // it), and the static-stylesheet fallback then silently paints cats-whisker's accent-ink over
         // this theme's own accent. It renders fine, so nobody sees it — exactly the "3.9:1 pair in
         // theme #5" failure SPEC F102.8 exists to catch. T158 is being updated to require vocabulary
         // validation against the 19-name canon.

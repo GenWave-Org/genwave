@@ -7,13 +7,14 @@
 //
 // T156 landed ThemeManifest + ThemeCatalog and unskipped every spec below except
 // ScenarioTodaysPalettesAreOneTheme, which needed the real converted default manifest. T157 lands
-// that manifest (src/GenWave.Host/Theming/themes/cream-enamel.json) and unskips it. Most specs in
-// this file still drive ThemeCatalog.Load directly (an in-memory set of raw manifest documents)
-// rather than LoadShipped's embedded resources — Load is the seam both LoadShipped and the future
-// Layer B editor loader share.
+// that manifest (src/GenWave.Host/Theming/themes/cats-whisker.json, renamed from cream-enamel.json
+// by T174 — slug and display name only, the T167a naming ruling; palette values unchanged) and
+// unskips it. Most specs in this file still drive ThemeCatalog.Load directly (an in-memory set of
+// raw manifest documents) rather than LoadShipped's embedded resources — Load is the seam both
+// LoadShipped and the future Layer B editor loader share.
 //
 // Two scenarios deliberately exercise LoadShipped() itself, against the real embedded
-// cream-enamel.json: ScenarioTodaysPalettesAreOneTheme (AC3, the converted palette values) and
+// cats-whisker.json: ScenarioTodaysPalettesAreOneTheme (AC3, the converted palette values) and
 // ScenarioLoadingTheShippedDefaultManifest (proving the embedded-resource path loads end-to-end at
 // all — the thing T162 will depend on). Before T157, LoadShipped() had zero embedded manifests to
 // find, so this file used to pin the OPPOSITE invariant here (booting with zero shipped manifests
@@ -39,7 +40,7 @@ public static class FeatureThemesBecomeData
         public void ThemeIsRetrievableByItsSlug()
         {
             // Arrange: a shipped theme manifest carrying a stable slug.
-            var source = new ThemeManifestSource("cream-enamel.json", ThemeFixtures.ValidManifestJson("cream-enamel"));
+            var source = new ThemeManifestSource("sample-theme.json", ThemeFixtures.ValidManifestJson("sample-theme"));
 
             // Act: ThemeCatalog loads the shipped themes.
             var catalog = ThemeCatalog.Load([source]);
@@ -47,7 +48,7 @@ public static class FeatureThemesBecomeData
             // Assert: the theme is retrievable by that slug (AC1). Which slug it's retrievable
             //          BY isn't asserted again here — the catalog is keyed by theme.Slug, so that
             //          would be tautological (it cannot fail independently of TryGetBySlug itself).
-            Assert.True(catalog.TryGetBySlug("cream-enamel", out _));
+            Assert.True(catalog.TryGetBySlug("sample-theme", out _));
         }
     }
 
@@ -88,19 +89,20 @@ public static class FeatureThemesBecomeData
 
         public ScenarioTodaysPalettesAreOneTheme()
         {
-            // Arrange: the shipped default theme (the real embedded cream-enamel.json, not a
+            // Arrange: the shipped default theme (the real embedded cats-whisker.json, not a
             //          fixture — LoadShipped, not Load), its modes read once.
             var catalog = ThemeCatalog.LoadShipped();
-            Assert.True(catalog.TryGetBySlug("cream-enamel", out var theme));
+            Assert.True(catalog.TryGetBySlug("cats-whisker", out var theme));
             modes = theme.Modes;
         }
 
         [Fact]
-        public void CreamEnamelIsTheDefaultThemesLightMode()
+        public void CatsWhiskerIsTheDefaultThemesLightMode()
         {
-            // Assert: light mode carries today's "cream enamel" token values (AC3) — transcribed
+            // Assert: light mode carries today's light-palette token values (AC3) — transcribed
             //          from spectator/styles.css's :root block and admin-ui/globals.css's
             //          --sched-* light block, independently verified byte-for-byte against both.
+            //          --mute darkened #77685c→#706256 (T174, T158 AA gate — see globals.css).
             Assert.Equivalent(new Dictionary<string, string>
             {
                 ["bg"] = "#f6efe3",
@@ -108,7 +110,7 @@ public static class FeatureThemesBecomeData
                 ["surface-2"] = "#efe5d2",
                 ["line"] = "#ddd0b8",
                 ["ink"] = "#2b2320",
-                ["mute"] = "#77685c",
+                ["mute"] = "#706256",
                 ["accent"] = "#b94f29",
                 ["accent-ink"] = "#fdf8ee",
                 ["accent-2"] = "#6f632f",
@@ -405,9 +407,9 @@ public static class FeatureThemesBecomeData
             //          like every other scenario in this file. Never exercised end-to-end before
             //          T157 landed the first real embedded manifest; T162 depends on this path.
 
-            // Assert: the shipped default (T157's cream-enamel.json) loads and is retrievable by
-            //          its slug through that real path.
-            Assert.True(ThemeCatalog.LoadShipped().TryGetBySlug("cream-enamel", out _));
+            // Assert: the shipped default (T157's cats-whisker.json, renamed by T174) loads and is
+            //          retrievable by its slug through that real path.
+            Assert.True(ThemeCatalog.LoadShipped().TryGetBySlug("cats-whisker", out _));
         }
     }
 }

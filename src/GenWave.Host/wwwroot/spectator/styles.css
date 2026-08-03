@@ -33,13 +33,14 @@
 }
 
 :root {
-  /* light — "cream enamel" (default) */
+  /* light — "Cat's Whisker" (default) */
   --bg: #f6efe3;
   --surface: #fdf8ee;
   --surface-2: #efe5d2;
   --line: #ddd0b8;
   --ink: #2b2320;
-  --mute: #77685c;
+  /* darkened from #77685c — see admin-ui/app/globals.css for the AA rationale (T158/T174) */
+  --mute: #706256;
   --accent: #b94f29;
   --accent-ink: #fdf8ee;
   --accent-2: #6f632f;

@@ -19,7 +19,7 @@
 // token the other lacks), but a manifest omitting e.g. `accent-ink` from BOTH modes passes
 // parity clean. That absence then hits the one decision that hides it: the shipped
 // default's tokens stay in the static stylesheets with `theme.css` layered on top, so the
-// missing token silently resolves to cream-enamel's `accent-ink` painted onto the new
+// missing token silently resolves to cats-whisker's `accent-ink` painted onto the new
 // theme's `accent`. It renders fine, so nobody sees it — a gate that iterated present keys
 // would SKIP that pair rather than fail it. Naming the token forces a lookup that throws
 // the moment it is absent, in either mode, regardless of what other keys the manifest
@@ -160,7 +160,7 @@ function requireToken(manifest: ThemeManifestFixture, mode: Mode, token: TokenNa
     throw new Error(
       `theme '${manifest.slug}' mode '${mode}' is missing required token '${token}' out of the ` +
         `18-name vocabulary — a token absent from BOTH modes must fail this gate, not fall through ` +
-        `to the static stylesheet's cream-enamel default (SPEC F102.8 precondition)`
+        `to the static stylesheet's cats-whisker default (SPEC F102.8 precondition)`
     );
   }
   return value;
@@ -195,10 +195,36 @@ function assertPairMeetsAA(
   }
 }
 
+/** Runs every check and, if any throw, fails once naming ALL of them — instead of stopping at
+ * the first (T174b, review finding). `assertPairMeetsAA`/`assertModeHasFullVocabulary` each
+ * throw on their OWN first failure by design (the direct-call sad-path specs below need that
+ * single-call throw contract), but an `it()` iterating the whole shelf through either one used
+ * to stop dead at theme #1's first bad pair — every theme after it went unmeasured in that run.
+ * Proven at review: a probe theme with a 1.00:1 `mute` went completely undetected until
+ * cats-whisker's own value was temporarily lifted above AA. Wrapping each shelf iteration's
+ * checks here means a run always reports the FULL set of failing (theme, mode, pair) triples,
+ * not just the first. */
+function collectFailures(checks: readonly (() => void)[]): void {
+  const failures: string[] = [];
+  for (const check of checks) {
+    try {
+      check();
+    } catch (err) {
+      failures.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      `${failures.length} failure(s) across the theme shelf:\n` +
+        failures.map((message, index) => `  ${index + 1}. ${message}`).join("\n")
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Synthetic fixtures for the gate's OWN sad-path/generality specs (AC8, AC9) — deliberately
 // not the real shipped manifests, so these prove the gate's mechanism rather than restate
-// the happy-path checks against cream-enamel.
+// the happy-path checks against cats-whisker.
 // ---------------------------------------------------------------------------
 
 /** A compile-time-complete token map — assigning an object literal to `Record<TokenName,
@@ -273,41 +299,41 @@ describe("Feature: the theme shelf and its contrast gate", () => {
 
   describe("Scenario: every theme is complete", () => {
     it("defines a complete light token set for every shipped theme (T158, AC2)", () => {
-      for (const manifest of loadThemeManifests()) {
-        assertModeHasFullVocabulary(manifest, "light");
-      }
+      collectFailures(
+        loadThemeManifests().map((manifest) => () => assertModeHasFullVocabulary(manifest, "light"))
+      );
     });
 
     it("defines a complete dark token set for every shipped theme (T158, AC2)", () => {
-      for (const manifest of loadThemeManifests()) {
-        assertModeHasFullVocabulary(manifest, "dark");
-      }
+      collectFailures(
+        loadThemeManifests().map((manifest) => () => assertModeHasFullVocabulary(manifest, "dark"))
+      );
     });
   });
 
   describe("Scenario: body text clears AA on every ground", () => {
     it("ink meets 4.5:1 against bg in every theme and mode (T158, AC3)", () => {
-      for (const manifest of loadThemeManifests()) {
-        for (const mode of MODES) {
-          assertPairMeetsAA(manifest, mode, "ink", "bg");
-        }
-      }
+      collectFailures(
+        loadThemeManifests().flatMap((manifest) =>
+          MODES.map((mode) => () => assertPairMeetsAA(manifest, mode, "ink", "bg"))
+        )
+      );
     });
 
     it("ink meets 4.5:1 against surface in every theme and mode (T158, AC3)", () => {
-      for (const manifest of loadThemeManifests()) {
-        for (const mode of MODES) {
-          assertPairMeetsAA(manifest, mode, "ink", "surface");
-        }
-      }
+      collectFailures(
+        loadThemeManifests().flatMap((manifest) =>
+          MODES.map((mode) => () => assertPairMeetsAA(manifest, mode, "ink", "surface"))
+        )
+      );
     });
 
     it("ink meets 4.5:1 against surface-2 in every theme and mode (T158, AC3)", () => {
-      for (const manifest of loadThemeManifests()) {
-        for (const mode of MODES) {
-          assertPairMeetsAA(manifest, mode, "ink", "surface-2");
-        }
-      }
+      collectFailures(
+        loadThemeManifests().flatMap((manifest) =>
+          MODES.map((mode) => () => assertPairMeetsAA(manifest, mode, "ink", "surface-2"))
+        )
+      );
     });
   });
 
@@ -315,44 +341,44 @@ describe("Feature: the theme shelf and its contrast gate", () => {
     // The pair that forced dark to invert --accent-ink to deep walnut: cream on the lifted
     // dark --accent reaches only ~2.8:1.
     it("accent-ink meets 4.5:1 against accent in every theme and mode (T158, AC4)", () => {
-      for (const manifest of loadThemeManifests()) {
-        for (const mode of MODES) {
-          assertPairMeetsAA(manifest, mode, "accent-ink", "accent");
-        }
-      }
+      collectFailures(
+        loadThemeManifests().flatMap((manifest) =>
+          MODES.map((mode) => () => assertPairMeetsAA(manifest, mode, "accent-ink", "accent"))
+        )
+      );
     });
   });
 
   describe("Scenario: on-danger text clears AA", () => {
     it("danger-ink meets 4.5:1 against danger in every theme and mode (T158, AC5)", () => {
-      for (const manifest of loadThemeManifests()) {
-        for (const mode of MODES) {
-          assertPairMeetsAA(manifest, mode, "danger-ink", "danger");
-        }
-      }
+      collectFailures(
+        loadThemeManifests().flatMap((manifest) =>
+          MODES.map((mode) => () => assertPairMeetsAA(manifest, mode, "danger-ink", "danger"))
+        )
+      );
     });
   });
 
   describe("Scenario: secondary text clears AA", () => {
     // --accent-2 is the token this check already caught once, at #8a7b3f.
     it("mute meets 4.5:1 against every ground it renders on, in every theme and mode (T158, AC6)", () => {
-      for (const manifest of loadThemeManifests()) {
-        for (const mode of MODES) {
-          for (const ground of GROUNDS) {
-            assertPairMeetsAA(manifest, mode, "mute", ground);
-          }
-        }
-      }
+      collectFailures(
+        loadThemeManifests().flatMap((manifest) =>
+          MODES.flatMap((mode) =>
+            GROUNDS.map((ground) => () => assertPairMeetsAA(manifest, mode, "mute", ground))
+          )
+        )
+      );
     });
 
     it("accent-2 meets 4.5:1 against every ground it renders on, in every theme and mode (T158, AC6)", () => {
-      for (const manifest of loadThemeManifests()) {
-        for (const mode of MODES) {
-          for (const ground of GROUNDS) {
-            assertPairMeetsAA(manifest, mode, "accent-2", ground);
-          }
-        }
-      }
+      collectFailures(
+        loadThemeManifests().flatMap((manifest) =>
+          MODES.flatMap((mode) =>
+            GROUNDS.map((ground) => () => assertPairMeetsAA(manifest, mode, "accent-2", ground))
+          )
+        )
+      );
     });
   });
 
@@ -380,7 +406,7 @@ describe("Feature: the theme shelf and its contrast gate", () => {
   // ── SAD PATH ────────────────────────────────────────────────────────────
 
   describe("Scenario: rejecting a theme that fails contrast", () => {
-    // A synthetic theme, not a shipped one — cream-enamel passes today, so proving the
+    // A synthetic theme, not a shipped one — cats-whisker passes today, so proving the
     // gate FAILS needs a fixture built to fail. `mute` is set equal to `bg` (1:1).
     const failingManifest = passingSyntheticManifest("gate-test-failing-mute");
     const failingLight = {
