@@ -5,17 +5,24 @@
 // are the SAME shape — nothing in the format distinguishes them. That single rule is what
 // keeps the Layer B editor (gh-#206) from being a bolt-on.
 //
-// T156 lands ThemeManifest + ThemeCatalog and unskips every spec below EXCEPT
-// ScenarioTodaysPalettesAreOneTheme, which needs the real converted default manifest (T157) and
-// stays pending. These specs drive ThemeCatalog.Load directly (an in-memory set of raw manifest
-// documents) rather than ThemeCatalog.LoadShipped's embedded resources — no shipped content exists
-// yet (T157), and Load is the seam both LoadShipped and the future Layer B editor loader share.
+// T156 landed ThemeManifest + ThemeCatalog and unskipped every spec below except
+// ScenarioTodaysPalettesAreOneTheme, which needed the real converted default manifest. T157 lands
+// that manifest (src/GenWave.Host/Theming/themes/cream-enamel.json) and unskips it. Most specs in
+// this file still drive ThemeCatalog.Load directly (an in-memory set of raw manifest documents)
+// rather than LoadShipped's embedded resources — Load is the seam both LoadShipped and the future
+// Layer B editor loader share.
 //
-// One deliberate exception: ScenarioLoadingWithNoShippedManifests below exercises LoadShipped()
-// directly. It pins the invariant that booting with ZERO embedded manifests must fail loudly rather
-// than silently serving an empty catalog (review finding, T156) — that is only reliably true BEFORE
-// T157 embeds real manifest files, which is exactly today's state, so T157 will need to replace it
-// with a happy-path LoadShipped assertion once shipped content exists.
+// Two scenarios deliberately exercise LoadShipped() itself, against the real embedded
+// cream-enamel.json: ScenarioTodaysPalettesAreOneTheme (AC3, the converted palette values) and
+// ScenarioLoadingTheShippedDefaultManifest (proving the embedded-resource path loads end-to-end at
+// all — the thing T162 will depend on). Before T157, LoadShipped() had zero embedded manifests to
+// find, so this file used to pin the OPPOSITE invariant here (booting with zero shipped manifests
+// must fail loudly, review finding T156) under the name ScenarioLoadingWithNoShippedManifests; that
+// scenario's premise went false the moment a real manifest embedded, so T157 replaced it with this
+// happy-path assertion. The zero-manifest failure mode itself is still real production behaviour
+// (see ThemeCatalog.LoadShipped's own remarks) — it just has no manifest-free assembly left to
+// exercise it against without faking assembly resource enumeration, which is more machinery than
+// the invariant is worth once a real shipped default exists.
 
 using GenWave.Host.Theming;
 using Xunit;
@@ -24,8 +31,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureThemesBecomeData
 {
-    const string PendingDefault = "Pending T157 — see docs/PLAN.md";
-
     // ── HAPPY PATH ────────────────────────────────────────────────────────
 
     public sealed class ScenarioAShippedManifestLoads
@@ -79,23 +84,73 @@ public static class FeatureThemesBecomeData
 
     public sealed class ScenarioTodaysPalettesAreOneTheme
     {
-        [Fact(Skip = PendingDefault)]
-        public void CreamEnamelIsTheDefaultThemesLightMode()
+        readonly ThemeModes modes;
+
+        public ScenarioTodaysPalettesAreOneTheme()
         {
-            // Arrange: the shipped default theme.
-            // Act:     read its light mode.
-            // Assert:  it carries today's "cream enamel" token values (AC3).
-            Assert.Fail("pending T157 — default manifest");
+            // Arrange: the shipped default theme (the real embedded cream-enamel.json, not a
+            //          fixture — LoadShipped, not Load), its modes read once.
+            var catalog = ThemeCatalog.LoadShipped();
+            Assert.True(catalog.TryGetBySlug("cream-enamel", out var theme));
+            modes = theme.Modes;
         }
 
-        [Fact(Skip = PendingDefault)]
+        [Fact]
+        public void CreamEnamelIsTheDefaultThemesLightMode()
+        {
+            // Assert: light mode carries today's "cream enamel" token values (AC3) — transcribed
+            //          from spectator/styles.css's :root block and admin-ui/globals.css's
+            //          --sched-* light block, independently verified byte-for-byte against both.
+            Assert.Equivalent(new Dictionary<string, string>
+            {
+                ["bg"] = "#f6efe3",
+                ["surface"] = "#fdf8ee",
+                ["surface-2"] = "#efe5d2",
+                ["line"] = "#ddd0b8",
+                ["ink"] = "#2b2320",
+                ["mute"] = "#77685c",
+                ["accent"] = "#b94f29",
+                ["accent-ink"] = "#fdf8ee",
+                ["accent-2"] = "#6f632f",
+                ["danger"] = "#a63325",
+                ["danger-ink"] = "#fdf8ee",
+                ["success"] = "#5c7a3f",
+                ["sched-1"] = "#e3b7a0",
+                ["sched-2"] = "#e8d190",
+                ["sched-3"] = "#c3cba0",
+                ["sched-4"] = "#d9c1a6",
+                ["sched-5"] = "#cbb0c7",
+                ["sched-6"] = "#e1b7be",
+            }, modes.Light, strict: true);
+        }
+
+        [Fact]
         public void WalnutAndBrassIsTheDefaultThemesDarkMode()
         {
-            // Arrange: the shipped default theme.
-            // Act:     read its dark mode.
-            // Assert:  it carries today's "walnut & brass" values (AC3). ONE theme with two
-            //          modes — not two themes.
-            Assert.Fail("pending T157 — default manifest");
+            // Assert: dark mode carries today's "walnut & brass" values (AC3) — the other half of
+            //          the same claim; light and dark can fail this independently of one another.
+            //          ONE theme with two modes — not two themes.
+            Assert.Equivalent(new Dictionary<string, string>
+            {
+                ["bg"] = "#1e1713",
+                ["surface"] = "#2a211b",
+                ["surface-2"] = "#241c16",
+                ["line"] = "#3f342a",
+                ["ink"] = "#f0e7d8",
+                ["mute"] = "#a89a88",
+                ["accent"] = "#d96a3d",
+                ["accent-ink"] = "#1e1713",
+                ["accent-2"] = "#b3a25e",
+                ["danger"] = "#e06a55",
+                ["danger-ink"] = "#2a211b",
+                ["success"] = "#8fae6a",
+                ["sched-1"] = "#5a3226",
+                ["sched-2"] = "#5c4e22",
+                ["sched-3"] = "#3c4630",
+                ["sched-4"] = "#4c3924",
+                ["sched-5"] = "#453142",
+                ["sched-6"] = "#692b35",
+            }, modes.Dark, strict: true);
         }
     }
 
@@ -339,18 +394,20 @@ public static class FeatureThemesBecomeData
         }
     }
 
-    public sealed class ScenarioLoadingWithNoShippedManifests
+    public sealed class ScenarioLoadingTheShippedDefaultManifest
     {
         [Fact]
-        public void ThrowsRatherThanBootingAnEmptyCatalog()
+        public void TheEmbeddedDefaultManifestLoadsAndIsRetrievableBySlug()
         {
-            // Arrange: today — before T157 lands the converted default manifest — GenWave.Host
-            //          embeds ZERO theme resources. That is exactly the condition this guards.
+            // Arrange/Act: LoadShipped reads GenWave.Host's real embedded resources — the
+            //          production boot path (ARCHITECTURE "Theme system": themes/*.json, embedded
+            //          resources in GenWave.Host) — rather than an in-memory ThemeManifestSource
+            //          like every other scenario in this file. Never exercised end-to-end before
+            //          T157 landed the first real embedded manifest; T162 depends on this path.
 
-            // Act/Assert: LoadShipped fails loudly rather than returning an empty catalog that
-            //          would only break later, once T164's "fall back to the shipped default"
-            //          fallback asks it for a theme it doesn't have (review finding, T156).
-            Assert.Throws<ThemeManifestException>(() => ThemeCatalog.LoadShipped());
+            // Assert: the shipped default (T157's cream-enamel.json) loads and is retrievable by
+            //          its slug through that real path.
+            Assert.True(ThemeCatalog.LoadShipped().TryGetBySlug("cream-enamel", out _));
         }
     }
 }
