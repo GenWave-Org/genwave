@@ -11,6 +11,7 @@ using GenWave.Host.Playout;
 using GenWave.Host.Requests;
 using GenWave.Host.Seeding;
 using GenWave.Host.Stats;
+using GenWave.Host.Theming;
 using GenWave.MediaLibrary;
 using GenWave.Orchestration;
 using GenWave.Tts;
@@ -170,6 +171,24 @@ builder.Services
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddSingleton<CatalogProxyService>();
 
+// Theme system (SPEC F102, ARCHITECTURE "Theme system", PLAN T160): the shipped manifests are
+// loaded and validated ONCE here, at boot — not lazily on first request. ThemeCatalog.LoadShipped's
+// own remarks say a malformed manifest is a build-time authoring bug, not a request-time condition
+// to route around, so it throws; doing that here means a bad manifest stops the process before it
+// ever accepts a request, rather than surfacing as a 500 to whichever visitor happens to be first.
+// The extra assertion below covers a narrower case LoadShipped itself does not: both serving
+// surfaces (spectator today, admin at T161) resolve to ThemeCatalog.ShippedDefaultSlug as their
+// shipped default (T164 has not landed real resolution yet) — if that slug were ever renamed or
+// dropped from the shipped set, this converts what would otherwise be a per-request failure into
+// the same boot-time failure as every other catalog defect.
+var themeCatalog = ThemeCatalog.LoadShipped();
+if (!themeCatalog.TryGetBySlug(ThemeCatalog.ShippedDefaultSlug, out _))
+{
+    throw new InvalidOperationException(
+        $"shipped theme catalog is missing its own default slug '{ThemeCatalog.ShippedDefaultSlug}'");
+}
+builder.Services.AddSingleton(themeCatalog);
+
 builder.Services.AddControllers();
 
 // Liveness endpoint for the compose healthcheck. No checks registered = 200 Healthy when up.
@@ -261,6 +280,12 @@ app.MapGet("/", () => Results.Redirect("/spectator"))
 // SpectatorPageEndpoints for why static-file middleware would dodge both the surface gate and the
 // public-listener isolation check.
 app.MapSpectatorPage();
+
+// The composed active-theme stylesheet the spectator page will link (SPEC F102.3, STORY-264,
+// PLAN T160): SpectatorSurface-tagged like the page itself, so it is gated and public-port-safe
+// the same way — see SpectatorThemeEndpoints' own remarks for why this needs no carve-out the way
+// /fonts did, and for the caching contract (deliberately not fonts' long max-age).
+app.MapSpectatorThemeEndpoint();
 
 // The canonical vendored-font route (SPEC F102, PLAN T173): shared by both surfaces, so it is
 // unattributed by AdminSurface/SpectatorSurface (neither kill switch may strand the other's

@@ -27,13 +27,42 @@
 // :root:not([data-theme]) }`), matching those selectors exactly so a later-loading composed
 // sheet overrides the static one cleanly rather than losing to it or tying its specificity.
 
+using System.Net;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using GenWave.Core.Abstractions;
 using GenWave.Host.Theming;
+using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
 
+/// <summary>Mirrors Story173's own <c>SpectatorPageWebFactory</c> — the standard anonymous,
+/// spectator-mode-on host boot used across the spectator surface's specs.</summary>
+file sealed class ThemeCssWebFactory : WebApplicationFactory<Program>
+{
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development");
+        builder.UseSetting("Station:SpectatorMode", "true");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", "test-password-x7z");
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IHostedService>();
+            services.RemoveAll<IMediaCatalog>();
+            services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
+            services.RemoveAll<IActivePersonaAccessor>();
+            services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
+        });
+    }
+}
+
 public static class FeatureComposedStylesheet
 {
-    const string PendingSpectatorRoute = "Pending T160 — see docs/PLAN.md";
     const string PendingAdminRoute = "Pending T161 — see docs/PLAN.md";
     const string PendingWire = "Pending T162 — see docs/PLAN.md";
 
@@ -41,23 +70,33 @@ public static class FeatureComposedStylesheet
 
     public sealed class ScenarioTheSpectatorSurfaceServesComposedCss
     {
-        [Fact(Skip = PendingSpectatorRoute)]
-        public void RespondsOk()
+        [Fact]
+        public async Task RespondsOk()
         {
             // Arrange: a running station with an active theme.
-            // Act:     anonymous GET /spectator/theme.css.
-            // Assert:  200 (AC1). Anonymous because the spectator surface takes no
-            //          credentials — F63.1's "renders in a private window" property.
-            Assert.Fail("pending T160 — /spectator/theme.css");
+            await using var factory = new ThemeCssWebFactory();
+            var client = factory.CreateClient();
+
+            // Act: anonymous GET /spectator/theme.css.
+            var response = await client.GetAsync("/spectator/theme.css");
+
+            // Assert: 200 (AC1). Anonymous because the spectator surface takes no
+            //         credentials — F63.1's "renders in a private window" property.
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         }
 
-        [Fact(Skip = PendingSpectatorRoute)]
-        public void RespondsWithCssContentType()
+        [Fact]
+        public async Task RespondsWithCssContentType()
         {
             // Arrange: as above.
-            // Act:     anonymous GET /spectator/theme.css.
-            // Assert:  content-type is text/css (AC1).
-            Assert.Fail("pending T160 — content type");
+            await using var factory = new ThemeCssWebFactory();
+            var client = factory.CreateClient();
+
+            // Act: anonymous GET /spectator/theme.css.
+            var response = await client.GetAsync("/spectator/theme.css");
+
+            // Assert: content-type is text/css (AC1).
+            Assert.Equal("text/css", response.Content.Headers.ContentType?.MediaType);
         }
     }
 
