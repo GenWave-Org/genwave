@@ -287,6 +287,12 @@ app.MapSpectatorPage();
 // /fonts did, and for the caching contract (deliberately not fonts' long max-age).
 app.MapSpectatorThemeEndpoint();
 
+// The admin surface's own copy of the composed active-theme stylesheet (SPEC F102.3, STORY-264,
+// PLAN T161): AdminSurface-tagged (not Spectator) and anonymous — see AdminThemeEndpoints' own
+// remarks for why the admin login page's pre-auth theming rules out gating this behind a cookie,
+// and for why AdminSurface tagging alone (no Spectator tag) is what keeps it off the public port.
+app.MapAdminThemeEndpoint();
+
 // The canonical vendored-font route (SPEC F102, PLAN T173): shared by both surfaces, so it is
 // unattributed by AdminSurface/SpectatorSurface (neither kill switch may strand the other's
 // fonts) — see FontEndpoints and SurfaceGateMiddleware's own remarks for the matching public-port

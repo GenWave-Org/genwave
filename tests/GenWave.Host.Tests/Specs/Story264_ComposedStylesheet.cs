@@ -63,7 +63,6 @@ file sealed class ThemeCssWebFactory : WebApplicationFactory<Program>
 
 public static class FeatureComposedStylesheet
 {
-    const string PendingAdminRoute = "Pending T161 — see docs/PLAN.md";
     const string PendingWire = "Pending T162 — see docs/PLAN.md";
 
     // ── HAPPY PATH ────────────────────────────────────────────────────────
@@ -102,24 +101,37 @@ public static class FeatureComposedStylesheet
 
     public sealed class ScenarioTheAdminSurfaceServesComposedCss
     {
-        [Fact(Skip = PendingAdminRoute)]
-        public void RespondsOk()
+        [Fact]
+        public async Task RespondsOk()
         {
             // Arrange: a running station with an active theme.
-            // Act:     GET /api/theme.css.
-            // Assert:  200 (AC2). admin_ui reaches this through its existing
-            //          next.config.ts `/api/:path*` rewrite, so it is same-origin in the
-            //          browser — no CORS, and `style-src 'self'` holds there too.
-            Assert.Fail("pending T161 — /api/theme.css");
+            await using var factory = new ThemeCssWebFactory();
+            var client = factory.CreateClient();
+
+            // Act: GET /api/theme.css — admin_ui reaches this through its existing
+            //      next.config.ts `/api/:path*` rewrite, so it is same-origin in the browser —
+            //      no CORS, and `style-src 'self'` holds there too. Requested WITHOUT a session
+            //      cookie: the admin login page itself renders pre-authentication and is themed
+            //      the same as everywhere else, so this route must not demand one (see
+            //      AdminThemeEndpoints' own remarks).
+            var response = await client.GetAsync("/api/theme.css");
+
+            // Assert: 200 (AC2).
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         }
 
-        [Fact(Skip = PendingAdminRoute)]
-        public void RespondsWithCssContentType()
+        [Fact]
+        public async Task RespondsWithCssContentType()
         {
             // Arrange: as above.
-            // Act:     GET /api/theme.css.
-            // Assert:  content-type is text/css (AC2).
-            Assert.Fail("pending T161 — content type");
+            await using var factory = new ThemeCssWebFactory();
+            var client = factory.CreateClient();
+
+            // Act: anonymous GET /api/theme.css.
+            var response = await client.GetAsync("/api/theme.css");
+
+            // Assert: content-type is text/css (AC2).
+            Assert.Equal("text/css", response.Content.Headers.ContentType?.MediaType);
         }
     }
 

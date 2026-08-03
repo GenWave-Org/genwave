@@ -133,6 +133,12 @@ public static class FeaturePublicListenerIsolation
         [InlineData("/api/status")]
         [InlineData("/api/auth/login")]
         [InlineData("/api/settings")]
+        // PLAN T161: the admin surface's composed theme stylesheet. AdminSurface-tagged (not
+        // SpectatorSurface), and AllowAnonymous — but anonymous is an authorization decision,
+        // not a surface-gate one: the public-listener check below admits only
+        // SpectatorSurface-tagged endpoints (plus /health and /fonts/*), so this 404s here
+        // regardless of its authorization, same as every other admin route above.
+        [InlineData("/api/theme.css")]
         [InlineData("/media/1")]
         [InlineData("/media/random")]
         [InlineData("/internal/engine-config")]
