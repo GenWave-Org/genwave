@@ -254,6 +254,24 @@ Every TTS render routes to the piper sidecar; the LLM path degrades to templated
 which is exactly what [HARDWARE.md](HARDWARE.md)'s topology (a) describes. See that file
 for the ranked hardware topologies.
 
+As of gh-#334 it also halves **`Library:EnrichmentConcurrency` to 2**. Enrichment is the
+heaviest sustained load GenWave produces — the ffmpeg analyzers use every core they are
+given — and the base default of 4 pins all four cores of a small box for the whole
+first-boot catalog build. Override on either stack with the env var:
+
+```bash
+LIBRARY_ENRICHMENT_CONCURRENCY=1   # in .env — lower still, or raise to reclaim throughput
+```
+
+Roughly proportional: a Pi 5 measured **~800 tracks/hour at 4**, so a 9,000-track library
+is ~11h at 4 and ~22h at 2. Enrichment is a backfill, not a broadcast dependency — the
+station is on air throughout, so this trades catalog-build time for headroom, nothing more.
+
+> ⚠️ **On a pinned appliance box the env var is the only lever.** `compose.demo.yaml` sets
+> `Admin__Enabled: "false"`, which closes `PUT /api/settings` — so the live settings path
+> this knob otherwise supports (it is an allowlisted live setting, no restart needed) is
+> unreachable there. Set it in `.env` and re-`up` the api.
+
 **Temporary admin access** (settings, personas, catalog curation on the public box):
 
 1. Edit `compose.demo.yaml`'s `api` env: `Admin__Enabled: "true"`.
