@@ -15,14 +15,19 @@ using System.Text.RegularExpressions;
 /// known, otherwise its origin label) and, where the failure is mode- or token-scoped, the mode and
 /// the token too — "invalid theme" alone never reaches a caller.
 ///
-/// Beyond presence, every font descriptor and token VALUE is also checked against a conservative
-/// CSS-safe shape (review finding, T156): <c>ThemeCssComposer</c> (T159) interpolates all of these
-/// straight into CSS served same-origin to both admin and spectator, so an unshaped value is a
-/// same-origin CSS-injection primitive — low severity today (Layer A ships only first-party embedded
-/// manifests, no write path) but high once Layer B (gh-#206) accepts manifests from a community
-/// catalog, since the format is deliberately identical either way. Token-set MEMBERSHIP against a
-/// fixed vocabulary is a separate, explicitly out-of-scope concern — see the remark in
-/// <see cref="ParseModes"/>.
+/// Beyond presence, every font descriptor and token VALUE — and, as of a T159 review fix, every
+/// token NAME too — is checked against a conservative CSS-safe shape: <c>ThemeCssComposer</c>
+/// (T159) interpolates all of these straight into CSS served same-origin to both admin and
+/// spectator, so an unshaped value OR name is a same-origin CSS-injection primitive — low
+/// severity today (Layer A ships only first-party embedded manifests, no write path) but high
+/// once Layer B (gh-#206) accepts manifests from a community catalog, since the format is
+/// deliberately identical either way. The name check belongs HERE, at load, rather than only in
+/// the composer that happens to interpolate it: a malformed manifest must never become a
+/// normally-loadable theme that only fails once something composes it (<see cref="ThemeCatalog"/>'s
+/// own remarks: "not a request-time condition to route around"). Token-set MEMBERSHIP against a
+/// fixed vocabulary — whether the names present are actually the format's fixed canon, as opposed
+/// to merely shaped like a safe identifier — is a separate, explicitly out-of-scope concern; see
+/// the remark in <see cref="ParseModes"/>.
 ///
 /// <para>
 /// The nested <c>*Json</c> records are an ephemeral, all-nullable projection of the untrusted
@@ -68,6 +73,17 @@ internal static partial class ThemeManifestParser
     // deliberately not accepted; widen this only against a concrete manifest that needs one.
     [GeneratedRegex(@"\A#[0-9a-fA-F]{3,8}\z")]
     private static partial Regex TokenValuePattern();
+
+    // Token NAMES become the identifier half of a CSS custom-property declaration
+    // ThemeCssComposer emits verbatim (`--{name}: {value};`) — the same CSS-injection concern as
+    // TokenValuePattern above, but for the key rather than the value (review finding, T159 round
+    // 2: this must be caught HERE, at load, not only if/when a caller composes the theme — see
+    // this type's own remarks). Lowercase letters, digits and hyphens, starting with a letter —
+    // enough for every token this format's fixed vocabulary actually uses ("bg", "accent-ink",
+    // "sched-1", …), nothing that can close a CSS declaration early. ThemeCssComposer enforces
+    // this exact same shape a second time as belt-and-braces, not as a substitute for this check.
+    [GeneratedRegex(@"\A[a-z][a-z0-9-]*\z")]
+    private static partial Regex TokenNamePattern();
 
     public static ThemeManifest Parse(ThemeManifestSource source)
     {
@@ -151,11 +167,15 @@ internal static partial class ThemeManifestParser
 
         ValidateTokenValues(slug, "light", light);
         ValidateTokenValues(slug, "dark", dark);
+        ValidateTokenNames(slug, "light", light);
+        ValidateTokenNames(slug, "dark", dark);
 
         // Membership PARITY between the two modes is checked below (AC8: neither mode may define a
         // token the other lacks). Token-set VOCABULARY — whether the names present ("bg", "ink",
         // "accent", …) are actually the format's fixed 19-name canon — is deliberately NOT checked
-        // here; T156's task scope enumerates exactly the three checks in this method, and vocabulary
+        // here (that's distinct from the CHARACTER-SET shape ValidateTokenNames above just
+        // enforced: a name can be a well-formed identifier and still not belong to the canon);
+        // T156's task scope enumerates exactly the three checks in this method, and vocabulary
         // reaches into T158's data-driven AA gate. That gap has a real, silent failure mode: a
         // manifest omitting "accent-ink" from BOTH modes loads clean (parity holds — neither side has
         // it), and the static-stylesheet fallback then silently paints cats-whisker's accent-ink over
@@ -186,6 +206,16 @@ internal static partial class ThemeManifestParser
             if (string.IsNullOrEmpty(value) || !TokenValuePattern().IsMatch(value))
                 throw new ThemeManifestException(
                     $"theme '{slug}' mode '{mode}' token '{token}' has an invalid value '{value}'");
+        }
+    }
+
+    static void ValidateTokenNames(string slug, string mode, IReadOnlyDictionary<string, string> tokens)
+    {
+        foreach (var name in tokens.Keys)
+        {
+            if (!TokenNamePattern().IsMatch(name))
+                throw new ThemeManifestException(
+                    $"theme '{slug}' mode '{mode}' has a token name '{name}' outside the safe custom-property shape");
         }
     }
 
