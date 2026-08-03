@@ -30,13 +30,19 @@ palette classes. A theme is a token set stamped via `data-theme` on `<html>`
 (SPEC F28.1); light/dark ship first, more themes later are one token file each.
 
 ```css
-/* light — "cream enamel" (default) */
+/* light — "cream enamel" palette (Cat's Whisker light mode) */
 --bg:        #F6EFE3;   /* page ground */
 --surface:   #FDF8EE;   /* cards, panels, table bodies */
 --surface-2: #EFE5D2;   /* sidebar, inset wells */
 --line:      #DDD0B8;   /* borders, dividers */
 --ink:       #2B2320;   /* body text */
---mute:      #77685C;   /* secondary text */
+--mute:      #706256;   /* secondary text */
+                        /* darkened from #77685C (PLAN T174, 2026-08-03): the
+                           original measured 4.29:1 on --surface-2, below AA —
+                           it shipped invisibly because no test checked that
+                           pair until SPEC F102.8's data-driven gate. This value
+                           clears all three light grounds (bg 5.15, surface
+                           5.56, surface-2 4.71). Dark --mute is unaffected */
 --accent:    #B94F29;   /* rust — primary action, active nav, ON AIR */
 --accent-ink: #FDF8EE;  /* text/icons on --accent: cream reaches AA on the rust */
 --accent-2:  #6F632F;   /* brass — labels, table headers, quiet emphasis */
@@ -47,7 +53,7 @@ palette classes. A theme is a token set stamped via `data-theme` on `<html>`
 --danger-ink: #FDF8EE;  /* text/icons on --danger */
 --success:   #5C7A3F;   /* olive green */
 
-/* dark — "walnut & brass" */
+/* dark — "walnut & brass" palette (Cat's Whisker dark mode) */
 --bg:        #1E1713;
 --surface:   #2A211B;
 --surface-2: #241C16;

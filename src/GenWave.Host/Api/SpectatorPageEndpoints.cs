@@ -12,7 +12,10 @@ namespace GenWave.Host.Api;
 /// F64.2) could never recognise it as spectator-surface traffic either — both would be silently
 /// wrong (T03/T15 review finding). Every route here carries the same
 /// <see cref="SpectatorSurfaceAttribute"/> + <see cref="AuthorizationPolicies.Spectator"/> pair
-/// <see cref="SpectatorController"/>'s API routes carry, so the page is gated identically.
+/// <see cref="SpectatorController"/>'s API routes carry, so the page is gated identically. The
+/// vendored <c>.woff2</c> faces the page's own <c>styles.css</c> references are NOT among these
+/// routes as of PLAN T173 — they moved to the canonical, surface-shared <c>GET /fonts/{file}</c>
+/// (<see cref="FontEndpoints"/>).
 /// <para>
 /// Every asset route matches exactly one path segment and switches on a literal, known
 /// filename — the request-supplied segment is only ever compared for equality, never
@@ -29,7 +32,6 @@ static class SpectatorPageEndpoints
 
     const string JavaScriptContentType = "text/javascript; charset=utf-8";
     const string StylesheetContentType = "text/css; charset=utf-8";
-    const string FontContentType = "font/woff2";
     const string IconContentType = "image/x-icon";
     const string PngContentType = "image/png";
 
@@ -45,12 +47,6 @@ static class SpectatorPageEndpoints
             .RequireAuthorization(AuthorizationPolicies.Spectator);
 
         app.MapMethods("/spectator/{asset}", GetAndHead, ServeAsset)
-            .WithMetadata(new SpectatorSurfaceAttribute())
-            .RequireAuthorization(AuthorizationPolicies.Spectator);
-
-        // Vendored woff2 fonts (design-aesthetic skill: never a font CDN request) — a separate
-        // route because they live one segment deeper, under wwwroot/spectator/fonts.
-        app.MapMethods("/spectator/fonts/{asset}", GetAndHead, ServeFont)
             .WithMetadata(new SpectatorSurfaceAttribute())
             .RequireAuthorization(AuthorizationPolicies.Spectator);
     }
@@ -69,18 +65,6 @@ static class SpectatorPageEndpoints
             // provenance discipline). The favicon.ico above is a 16/32px tab icon — upscaling it to
             // the 72px now-playing art slot is what looked fuzzy; art slots must use this instead.
             "logo.png" => ServeFile(context, env, "logo.png", PngContentType, AssetMaxAgeSeconds),
-            _ => Results.NotFound(),
-        };
-
-    static IResult ServeFont(string asset, HttpContext context, IWebHostEnvironment env) =>
-        asset switch
-        {
-            "Fraunces-Variable-latin.woff2" =>
-                ServeFile(context, env, "fonts/Fraunces-Variable-latin.woff2", FontContentType, AssetMaxAgeSeconds),
-            "Fraunces-Italic-Variable-latin.woff2" =>
-                ServeFile(context, env, "fonts/Fraunces-Italic-Variable-latin.woff2", FontContentType, AssetMaxAgeSeconds),
-            "SourceSans3-Variable-latin.woff2" =>
-                ServeFile(context, env, "fonts/SourceSans3-Variable-latin.woff2", FontContentType, AssetMaxAgeSeconds),
             _ => Results.NotFound(),
         };
 

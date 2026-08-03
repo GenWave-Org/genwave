@@ -105,15 +105,17 @@ public static class FeatureSpectatorSecurityHeaders
 
     public sealed class ScenarioHeadersOnEverySpectatorRoute
     {
-        /// <summary>The whole surface: page, assets, fonts, and the API — one uniform header
-        /// set (headers on API JSON are harmless and keep the surface consistent).</summary>
+        /// <summary>The whole surface: page, assets, and the API — one uniform header set
+        /// (headers on API JSON are harmless and keep the surface consistent). The vendored fonts
+        /// are deliberately absent here (PLAN T173): they moved to the shared, surface-unattributed
+        /// <c>GET /fonts/{file}</c> route, which carries no CSP header of its own — see
+        /// SpectatorSecurityHeadersMiddleware's own remarks for why that is still correct.</summary>
         public static TheoryData<string> SpectatorPaths => new(
             "/spectator",
             "/spectator/app.js",
             "/spectator/styles.css",
             "/spectator/favicon.ico",
             "/spectator/logo.png",
-            "/spectator/fonts/Fraunces-Variable-latin.woff2",
             "/spectator/api/now-playing",
             "/spectator/api/play-history",
             "/spectator/api/stats",

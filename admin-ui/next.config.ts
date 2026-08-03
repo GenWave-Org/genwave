@@ -11,6 +11,13 @@ const nextConfig: NextConfig = {
         source: "/api/:path*",
         destination: `${backendUrl}/api/:path*`,
       },
+      // The canonical vendored-font route (PLAN T173, SPEC F102): globals.css's @font-face rules
+      // reference /fonts/{file} same-origin; this rewrite is what makes that same-origin path
+      // resolve to GenWave.Host's GET /fonts/{file} instead of 404ing inside admin-ui itself.
+      {
+        source: "/fonts/:path*",
+        destination: `${backendUrl}/fonts/:path*`,
+      },
     ];
   },
 };
