@@ -30,7 +30,7 @@ palette classes. A theme is a token set stamped via `data-theme` on `<html>`
 (SPEC F28.1); light/dark ship first, more themes later are one token file each.
 
 ```css
-/* light — "cream enamel" (default) */
+/* light — "cream enamel" palette (Cat's Whisker light mode) */
 --bg:        #F6EFE3;   /* page ground */
 --surface:   #FDF8EE;   /* cards, panels, table bodies */
 --surface-2: #EFE5D2;   /* sidebar, inset wells */
@@ -53,7 +53,7 @@ palette classes. A theme is a token set stamped via `data-theme` on `<html>`
 --danger-ink: #FDF8EE;  /* text/icons on --danger */
 --success:   #5C7A3F;   /* olive green */
 
-/* dark — "walnut & brass" */
+/* dark — "walnut & brass" palette (Cat's Whisker dark mode) */
 --bg:        #1E1713;
 --surface:   #2A211B;
 --surface-2: #241C16;
