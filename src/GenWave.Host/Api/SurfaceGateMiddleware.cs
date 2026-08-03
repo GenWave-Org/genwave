@@ -53,18 +53,31 @@ public sealed class SurfaceGateMiddleware(
 
         // Public listener isolation (SPEC F64.1/F64.2, STORY-172): when the operator has bound a
         // dedicated public port (Spectator:PublicPort > 0) and THIS request arrived on it, only
-        // the spectator surface and /health may respond — admin, /media/*, /internal/* 404 here,
-        // regardless of Admin:Enabled/Station:SpectatorMode, so a fronting-proxy misroute onto the
-        // public port is structurally harmless. A request on any OTHER local port (the internal
-        // port, or no public port configured at all) is entirely unaffected by this check.
+        // the spectator surface, /health, and /fonts/* may respond — admin, /media/*, /internal/*
+        // 404 here, regardless of Admin:Enabled/Station:SpectatorMode, so a fronting-proxy misroute
+        // onto the public port is structurally harmless. A request on any OTHER local port (the
+        // internal port, or no public port configured at all) is entirely unaffected by this check.
+        //
+        // /fonts/* (PLAN T173) is path-matched here rather than SpectatorSurfaceAttribute-tagged,
+        // deliberately: the spectator page fetches its own fonts same-origin, so this carve-out is
+        // what lets those requests land when they arrive on the public port — but the vendored
+        // faces are shared with admin too, and admin must keep reading them over the INTERNAL port
+        // regardless of Station:SpectatorMode (default false), which the attribute-based checks
+        // above gate on. Tagging the route SpectatorSurface instead would satisfy this carve-out
+        // but reopen that: admin's own font requests never cross the public port at all (they ride
+        // BACKEND_URL, the internal port), so a path check here costs nothing on that side while
+        // keeping the two concerns — "does this surface exist" vs. "is this port public-safe" —
+        // independent, the same separation /health already models.
         var publicPort = spectatorOptions.CurrentValue.PublicPort;
         if (publicPort > 0 && context.Connection.LocalPort == publicPort)
         {
             var isHealthCheck = context.Request.Path.StartsWithSegments(
                 "/health", StringComparison.OrdinalIgnoreCase);
+            var isFontAsset = context.Request.Path.StartsWithSegments(
+                "/fonts", StringComparison.OrdinalIgnoreCase);
             var isSpectatorSurface = endpoint?.Metadata.GetMetadata<SpectatorSurfaceAttribute>() is not null;
 
-            if (!isHealthCheck && !isSpectatorSurface)
+            if (!isHealthCheck && !isFontAsset && !isSpectatorSurface)
             {
                 context.Response.StatusCode = StatusCodes.Status404NotFound;
                 return;

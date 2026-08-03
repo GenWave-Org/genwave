@@ -1,0 +1,62 @@
+{
+  "slug": "cats-whisker",
+  "name": "Cat's Whisker",
+  "author": "GenWave",
+  "fonts": {
+    "display": {
+      "family": "Fraunces",
+      "assets": [
+        { "src": "/fonts/fraunces-variable-latin.woff2", "weight": "400 600", "style": "normal" },
+        { "src": "/fonts/fraunces-italic-variable-latin.woff2", "weight": "400", "style": "italic" }
+      ]
+    },
+    "sans": {
+      "family": "Source Sans 3",
+      "assets": [
+        { "src": "/fonts/source-sans-3-variable-latin.woff2", "weight": "400 600", "style": "normal" }
+      ]
+    }
+  },
+  "modes": {
+    "light": {
+      "bg": "#f6efe3",
+      "surface": "#fdf8ee",
+      "surface-2": "#efe5d2",
+      "line": "#ddd0b8",
+      "ink": "#2b2320",
+      "mute": "#706256",
+      "accent": "#b94f29",
+      "accent-ink": "#fdf8ee",
+      "accent-2": "#6f632f",
+      "danger": "#a63325",
+      "danger-ink": "#fdf8ee",
+      "success": "#5c7a3f",
+      "sched-1": "#e3b7a0",
+      "sched-2": "#e8d190",
+      "sched-3": "#c3cba0",
+      "sched-4": "#d9c1a6",
+      "sched-5": "#cbb0c7",
+      "sched-6": "#e1b7be"
+    },
+    "dark": {
+      "bg": "#1e1713",
+      "surface": "#2a211b",
+      "surface-2": "#241c16",
+      "line": "#3f342a",
+      "ink": "#f0e7d8",
+      "mute": "#a89a88",
+      "accent": "#d96a3d",
+      "accent-ink": "#1e1713",
+      "accent-2": "#b3a25e",
+      "danger": "#e06a55",
+      "danger-ink": "#2a211b",
+      "success": "#8fae6a",
+      "sched-1": "#5a3226",
+      "sched-2": "#5c4e22",
+      "sched-3": "#3c4630",
+      "sched-4": "#4c3924",
+      "sched-5": "#453142",
+      "sched-6": "#692b35"
+    }
+  }
+}

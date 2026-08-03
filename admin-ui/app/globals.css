@@ -12,23 +12,62 @@
    this is the selector contract Q3 targets. */
 @custom-variant dark (&:is([data-theme="dark"] *));
 
+/* Vendored woff2 fonts (PLAN T173, SPEC F102): served same-origin from GET /fonts/{file}
+   (GenWave.Host), reached here through next.config.ts's /fonts/:path* rewrite — never a font
+   CDN, never next/font/local (a theme manifest needs a stable URL to name; next/font's
+   content-hashed .next/static/media/* paths cannot be named ahead of a build). Byte-identical to
+   spectator/styles.css's own @font-face blocks — one canonical source, two surfaces. */
+@font-face {
+  font-family: "Fraunces";
+  src: url("/fonts/fraunces-variable-latin.woff2") format("woff2");
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  /* Regular weight only — the wordmark/page titles never combine italic with the 600 weight, so
+     no face requests weight 600 italic and the browser never falls back to faux-bold synthesis. */
+  font-family: "Fraunces";
+  src: url("/fonts/fraunces-italic-variable-latin.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Source Sans 3";
+  src: url("/fonts/source-sans-3-variable-latin.woff2") format("woff2");
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ---------------------------------------------------------------------------
  * Wireless design tokens (SPEC F28.1/F28.2, .claude/skills/design-aesthetic).
  * Semantic custom properties only — components consume these, never raw hex
  * or Tailwind stock palette classes. A theme is a token set selected by
- * `data-theme` on <html>; light "cream enamel" is the default, dark
- * "walnut & brass" ships alongside it. Adding a theme later is one token
- * block here, not a component rewrite.
+ * `data-theme` on <html>; the shipped default theme is "Cat's Whisker" — its
+ * light mode ships as the default, its dark mode ("walnut & brass") ships
+ * alongside it. Adding a theme later is one token block here, not a
+ * component rewrite. Theme names never describe their colours (ruling
+ * gh-#169/T167a) — "walnut & brass" below is internal shorthand for the
+ * dark mode's look, not a user-facing name.
  * ------------------------------------------------------------------------ */
 
 :root {
-  /* light — "cream enamel" (default) */
+  /* light — "Cat's Whisker" (default) */
   --bg: #f6efe3; /* page ground */
   --surface: #fdf8ee; /* cards, panels, table bodies */
   --surface-2: #efe5d2; /* sidebar, inset wells */
   --line: #ddd0b8; /* borders, dividers */
   --ink: #2b2320; /* body text */
-  --mute: #77685c; /* secondary text */
+  /* secondary text. Darkened from #77685c (T158 AA gate, gh-#206): the original fell
+     below AA (4.5:1) as small text against surface-2 (4.29) — this value clears all
+     three light grounds (bg 4.69→5.15, surface 5.06→5.56, surface-2 4.29→4.71).
+     Proportional darkening, warm hue preserved (review ruling, gh-#169: the Wireless
+     palette is warm-only). Same treatment as --accent-2 below. */
+  --mute: #706256;
   --accent: #b94f29; /* rust — primary action, active nav, ON AIR */
   --accent-ink: #fdf8ee; /* text/icons on --accent: cream reaches AA on the rust */
   /* brass — labels, table headers, quiet emphasis. Darkened from #8a7b3f
@@ -57,6 +96,11 @@
   --sched-4: #d9c1a6; /* umber (was slate-teal — cool, retired) */
   --sched-5: #cbb0c7; /* plum */
   --sched-6: #e1b7be; /* brick (was denim — cool, retired) */
+
+  /* Font stacks (PLAN T173) — matches spectator/styles.css exactly; not theme-dependent, so
+     declared once here rather than repeated under the dark/system-dark blocks below. */
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "Source Sans 3", system-ui, sans-serif;
 }
 
 :root[data-theme="dark"] {
@@ -115,10 +159,10 @@
   }
 }
 
-/* Map the semantic tokens (and vendored font variables) into Tailwind
+/* Map the semantic tokens (and vendored font stacks) into Tailwind
    utilities: bg-surface, text-ink, border-line, text-accent, font-display,
    etc. `inline` because these reference runtime CSS custom properties
-   (theme selection, next/font scoping), not static build-time values. */
+   (theme selection via data-theme), not static build-time values. */
 @theme inline {
   --color-bg: var(--bg);
   --color-surface: var(--surface);

@@ -74,6 +74,11 @@ public static class FeaturePublicListenerIsolation
         [InlineData("/spectator/api/stats")]
         [InlineData("/spectator/api/about")]
         [InlineData("/health")]
+        // PLAN T173: /fonts/* is a path-based carve-out (not SpectatorSurfaceAttribute-tagged) —
+        // the spectator page fetches its own fonts same-origin, so this must land on the public
+        // port too. See SurfaceGateMiddleware's own remarks for why it is path-matched rather than
+        // attribute-tagged.
+        [InlineData("/fonts/fraunces-variable-latin.woff2")]
         public async Task RouteExistsOnThePublicListener(string route)
         {
             await using var factory = new PublicListenerWebFactory(PublicListenerWebFactory.PublicPort);
@@ -128,6 +133,12 @@ public static class FeaturePublicListenerIsolation
         [InlineData("/media/random")]
         [InlineData("/internal/engine-config")]
         [InlineData("/internal/safe-track")]
+        // Pins the /fonts/* carve-out (SurfaceGateMiddleware) as segment-bounded
+        // (StartsWithSegments, not StartsWith): nothing is mapped here today so these 404
+        // regardless, but they catch a future refactor that widens the match to any path merely
+        // prefixed by "/fonts".
+        [InlineData("/fontsomething")]
+        [InlineData("/fonts-secret/x")]
         public async Task PrivateRouteReturns404OnThePublicListener(string route)
         {
             await using var factory = new PublicListenerWebFactory(PublicListenerWebFactory.PublicPort);
