@@ -20,10 +20,18 @@ namespace GenWave.Host.Configuration;
 public static class StationSettingsAllowlist
 {
     /// <summary>
-    /// Every shipped theme's slug (STORY-263), in <see cref="ThemeCatalog.All"/>'s load order —
-    /// the <c>Station:Theme</c> entry's <see cref="AllowedSetting.Choices"/> below, and therefore
-    /// the ONLY source of truth <see cref="SettingValidator"/> checks a proposed value against
-    /// (SPEC F102.14, STORY-265).
+    /// Every shipped theme, as a slug/display-name <see cref="SettingChoice"/> pair (STORY-263),
+    /// in <see cref="ThemeCatalog.All"/>'s load order — the <c>Station:Theme</c> entry's
+    /// <see cref="AllowedSetting.Choices"/> below, and therefore the ONLY source of truth
+    /// <see cref="SettingValidator"/> checks a proposed value's <see cref="SettingChoice.Value"/>
+    /// against (SPEC F102.14, STORY-265). <see cref="SettingChoice.Label"/> is
+    /// <see cref="ThemeManifest.Name"/> (T175) — the admin UI's <c>&lt;select&gt;</c> shows the
+    /// theme's real name instead of its kebab-case slug, without inventing its own copy. Exactly
+    /// one entry — <see cref="ThemeCatalog.ShippedDefaultSlug"/>'s own — carries
+    /// <see cref="SettingChoice.IsDefault"/> = <see langword="true"/> (T175 follow-up), sourced by
+    /// an explicit slug match rather than list position, so it stays correct regardless of
+    /// <see cref="ThemeCatalog.All"/>'s embedded-resource load order (a future multi-theme catalog
+    /// does not silently point the admin UI's "unset" label at the wrong theme).
     ///
     /// This is a static table with no DI container, so it cannot ask for the
     /// <see cref="ThemeCatalog"/> singleton <c>Program.cs</c> builds and registers for request
@@ -39,8 +47,10 @@ public static class StationSettingsAllowlist
     /// that point is a real, deliberately deferred design cost — surfaced here rather than solved
     /// early for a Layer B that does not exist yet (YAGNI).
     /// </summary>
-    static readonly IReadOnlyList<string> ShippedThemeSlugs =
-        ThemeCatalog.LoadShipped().All.Select(theme => theme.Slug).ToList();
+    static readonly IReadOnlyList<SettingChoice> ShippedThemeChoices =
+        ThemeCatalog.LoadShipped().All
+            .Select(theme => new SettingChoice(theme.Slug, theme.Name, theme.Slug == ThemeCatalog.ShippedDefaultSlug))
+            .ToList();
 
     /// <summary>All operator-editable settings as an ordered list.</summary>
     public static readonly IReadOnlyList<AllowedSetting> All = new AllowedSetting[]
@@ -287,7 +297,7 @@ public static class StationSettingsAllowlist
         // Theme selection (SPEC F102.14, F102.15, STORY-265, PLAN T163) — closed CHOICE, not free
         // text: a typo in a String value would silently fail to resolve (F102.6's fallback would
         // mask it rather than reject it), so this is the first SettingKind.Choice entry.
-        // ShippedThemeSlugs (above) is the ONLY place either this metadata or SettingValidator's
+        // ShippedThemeChoices (above) is the ONLY place either this metadata or SettingValidator's
         // guard names a valid slug — add a theme, and both follow with no second edit. Live: the
         // eventual resolution provider (T164) reads it via IOptionsMonitor per request, same shape
         // as Station:PublicStreamUrl/Station:SpectatorMode. Nothing reads this key's VALUE yet —
@@ -300,7 +310,7 @@ public static class StationSettingsAllowlist
         // case so that branch of T164's resolution logic never actually fires against a real
         // deployment. A fresh deploy with no key present resolves to the shipped default exactly
         // because the chain has a floor, not because appsettings.json states one.
-        new("Station:Theme",                                  SettingApplyMode.Live,          SettingKind.Choice,     "", ShippedThemeSlugs),
+        new("Station:Theme",                                  SettingApplyMode.Live,          SettingKind.Choice,     "", ShippedThemeChoices),
     };
 
     /// <summary>All operator-editable settings, keyed by configuration key.</summary>

@@ -296,10 +296,11 @@ public sealed class SettingValidator(IConfiguration configuration)
             ["Station:Timezone"] = IsValidStationTimezone,
 
             // Theme selection (SPEC F102.14, STORY-265, PLAN T163) — the first SettingKind.Choice
-            // key: membership in ShippedThemeSlugs, not a shape/parseability check like every
-            // other entry above. This is what makes the kind's own promise real — a value outside
-            // the shipped set is rejected HERE, at write time, rather than silently falling back
-            // to the default at read time the way an unresolvable String value would (F102.6).
+            // key: membership in ShippedThemeChoices' VALUES (slugs, never labels — T175), not a
+            // shape/parseability check like every other entry above. This is what makes the
+            // kind's own promise real — a value outside the shipped set is rejected HERE, at
+            // write time, rather than silently falling back to the default at read time the way
+            // an unresolvable String value would (F102.6).
             ["Station:Theme"] = IsValidThemeSlug,
         };
 
@@ -445,12 +446,14 @@ public sealed class SettingValidator(IConfiguration configuration)
     }
 
     // Station:Theme (SPEC F102.14, STORY-265) — membership in the shipped slug set, sourced from
-    // StationSettingsAllowlist.ShippedThemeSlugs (in turn sourced from ThemeCatalog — see that
-    // field's own remarks on why the allowlist, not this validator, owns loading it). Ordinal
+    // StationSettingsAllowlist.ShippedThemeChoices (in turn sourced from ThemeCatalog — see that
+    // field's own remarks on why the allowlist, not this validator, owns loading it). Checks
+    // SettingChoice.Value ONLY (T175) — a proposed value is a slug, never a display label; Ordinal
     // comparison mirrors ThemeCatalog's own slug-lookup dictionary (case-sensitive by design —
     // slugs are kebab-case identifiers, not display text).
     static bool IsValidThemeSlug(string v) =>
-        StationSettingsAllowlist.ByKey["Station:Theme"].Choices?.Contains(v, StringComparer.Ordinal) == true;
+        StationSettingsAllowlist.ByKey["Station:Theme"].Choices
+            ?.Any(choice => choice.Value.Equals(v, StringComparison.Ordinal)) == true;
 
     /// <summary>
     /// An absolute, well-formed http/https URL (used for <c>Tts:Endpoint</c>/<c>Llm:Endpoint</c>,
@@ -828,8 +831,10 @@ public sealed class SettingValidator(IConfiguration configuration)
             => $"Value '{value}' is not valid for '{key}'. Must be an IANA timezone id this host " +
                "recognizes (e.g. America/Edmonton), or empty to use the container's own clock.",
         var k when k.Equals("Station:Theme", StringComparison.OrdinalIgnoreCase)
+            // Names SLUGS, not labels (T175) — a label is never a settable value, so listing one
+            // here would be actively misleading about what the operator can actually type/PUT.
             => $"Value '{value}' is not valid for '{key}'. Must be one of the shipped theme " +
-               $"slugs: {string.Join(", ", StationSettingsAllowlist.ByKey[key].Choices ?? Array.Empty<string>())}.",
+               $"slugs: {string.Join(", ", (StationSettingsAllowlist.ByKey[key].Choices ?? Array.Empty<SettingChoice>()).Select(c => c.Value))}.",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }
