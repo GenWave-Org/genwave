@@ -58,6 +58,9 @@ static class SpectatorPageEndpoints
         asset switch
         {
             "app.js" => ServeFile(context, env, "app.js", JavaScriptContentType, AssetMaxAgeSeconds),
+            // The theme switcher's own script (SPEC F102.9/F102.10, STORY-266, PLAN T166) — it
+            // fetches GET /spectator/api/themes itself; nothing here templates the catalog into it.
+            "switcher.js" => ServeFile(context, env, "switcher.js", JavaScriptContentType, AssetMaxAgeSeconds),
             "styles.css" => ServeFile(context, env, "styles.css", StylesheetContentType, AssetMaxAgeSeconds),
             "favicon.ico" => ServeFile(context, env, "favicon.ico", IconContentType, AssetMaxAgeSeconds),
             // The card-sized station mark (gh-#258): a 256px PNG derived from the operator's

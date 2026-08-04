@@ -301,6 +301,12 @@ app.MapSpectatorPage();
 // /fonts did, and for the caching contract (deliberately not fonts' long max-age).
 app.MapSpectatorThemeEndpoint();
 
+// The switcher's theme-list read (SPEC F102.10a, STORY-266, PLAN T166): same SpectatorSurface
+// gating/caching contract as the stylesheet route above, plus the class-wide rate limit
+// SpectatorController's actions carry (applied explicitly here since this is minimal-API, not a
+// controller action) — see SpectatorThemesEndpoint's own remarks.
+app.MapSpectatorThemesEndpoint();
+
 // The admin surface's own copy of the composed active-theme stylesheet (SPEC F102.3, STORY-264,
 // PLAN T161): AdminSurface-tagged (not Spectator) and anonymous — see AdminThemeEndpoints' own
 // remarks for why the admin login page's pre-auth theming rules out gating this behind a cookie,
