@@ -29,6 +29,16 @@ public sealed class ThemeCatalog
     /// gap per-request; see <c>Program.cs</c>'s own startup assertion.</summary>
     public const string ShippedDefaultSlug = "cats-whisker";
 
+    /// <summary>
+    /// The visitor cookie theme resolution reads (SPEC F102.5, PLAN T164). Names the THEME
+    /// (palette) slug — the independent sibling of admin-ui's <c>genwave-mode</c> cookie, which
+    /// names the light/dark MODE within whichever theme is active (PLAN T164 ruling, 2026-08-03:
+    /// two axes, two cookies, deliberately never conflated). Nothing in <see cref="Resolve"/> ever
+    /// WRITES this cookie — the switcher that does (PLAN T166) reads this same constant so the two
+    /// surfaces can never drift on the name.
+    /// </summary>
+    public const string CookieName = "genwave-theme";
+
     /// <summary>Every embedded resource this assembly ships under this segment, ending in
     /// <c>.json</c>, is treated as a shipped theme manifest (ARCHITECTURE "Theme system":
     /// <c>themes/*.json</c>, embedded resources in GenWave.Host).</summary>
@@ -54,6 +64,70 @@ public sealed class ThemeCatalog
     /// the shipped default (SPEC F102.6) is theme RESOLUTION's job (T164), not this lookup's.</summary>
     public bool TryGetBySlug(string slug, [NotNullWhen(true)] out ThemeManifest? theme) =>
         themesBySlug.TryGetValue(slug, out theme);
+
+    /// <summary>
+    /// Resolves the active theme for a request (SPEC F102.5/F102.6, STORY-265, PLAN T164). The ONE
+    /// seam both <c>GET /spectator/theme.css</c> and <c>GET /api/theme.css</c> call — T160/T161 each
+    /// carried their own private copy of this cascade until this task unified it here.
+    ///
+    /// <para>
+    /// Precedence, highest first: <paramref name="cookieSlug"/> → <paramref name="stationSlug"/> →
+    /// <see cref="ShippedDefaultSlug"/>. Note what is NOT a rung of this cascade: "settings row" vs
+    /// "env default" — that precedence is already decided by the time <paramref name="stationSlug"/>
+    /// reaches this method, because the DB-backed settings overlay is registered AFTER env/appsettings
+    /// in the configuration pipeline (see <c>StationSettingsHostingExtensions</c>), so a single
+    /// <c>IOptionsMonitor&lt;StationOptions&gt;.CurrentValue.Theme</c> read already reflects whichever
+    /// one currently wins. This method only ever has ONE station-level value to consider.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>An unresolvable slug falls back at EVERY level rather than erroring (SPEC F102.6) — this
+    /// method never throws for any input.</b> A cookie naming a slug this catalog doesn't recognise
+    /// falls to <paramref name="stationSlug"/>, not straight to the shipped default — a stale cookie
+    /// from a theme the operator has since removed must not strand a visitor away from what the
+    /// station actually chose (STORY-265 AC10). A <paramref name="stationSlug"/> this catalog doesn't
+    /// recognise falls to <see cref="ShippedDefaultSlug"/> (AC9). Both parameters are untrusted,
+    /// externally-supplied strings — a request cookie header and an operator-editable setting — and
+    /// are used ONLY as a dictionary lookup key here; an arbitrary value can influence which theme is
+    /// chosen and nothing else.
+    /// </para>
+    /// </summary>
+    /// <param name="cookieSlug">
+    /// The visitor's <see cref="CookieName"/> cookie value, or <see langword="null"/>/empty if absent.
+    /// </param>
+    /// <param name="stationSlug">
+    /// The station's currently effective <c>Station:Theme</c> value, or <see langword="null"/>/empty
+    /// if nothing is configured anywhere (settings row, env, or appsettings).
+    /// </param>
+    public ThemeManifest Resolve(string? cookieSlug, string? stationSlug)
+    {
+        if (TryResolvePresentSlug(cookieSlug, out var cookieTheme))
+            return cookieTheme;
+
+        if (TryResolvePresentSlug(stationSlug, out var stationTheme))
+            return stationTheme;
+
+        return TryGetBySlug(ShippedDefaultSlug, out var shipped)
+            ? shipped
+            : throw new InvalidOperationException(
+                $"shipped theme catalog is missing its own default slug '{ShippedDefaultSlug}' — " +
+                "this is a boot-time authoring bug (see Program.cs's own startup assertion, which " +
+                "should have stopped the process before any request could reach here)");
+    }
+
+    /// <summary>A present-but-unresolvable slug and an absent one both mean "try the next rung" —
+    /// this is the one place that distinction collapses, so <see cref="Resolve"/>'s cascade reads as
+    /// a flat chain of these calls.</summary>
+    bool TryResolvePresentSlug(string? slug, [NotNullWhen(true)] out ThemeManifest? theme)
+    {
+        if (string.IsNullOrEmpty(slug))
+        {
+            theme = null;
+            return false;
+        }
+
+        return TryGetBySlug(slug, out theme);
+    }
 
     /// <summary>
     /// Parses and validates a set of raw manifest documents, throwing <see cref="ThemeManifestException"/>

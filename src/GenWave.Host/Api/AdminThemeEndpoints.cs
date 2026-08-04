@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
+using GenWave.Host.Options;
 using GenWave.Host.Theming;
 
 namespace GenWave.Host.Api;
@@ -14,13 +16,13 @@ namespace GenWave.Host.Api;
 /// for the admin surface is re-argued here.
 ///
 /// <para>
-/// <b>Resolution seam.</b> Same shape as the spectator route, deliberately duplicated rather than
-/// shared: full precedence (visitor cookie → <c>Station:Theme</c> settings row → env default →
-/// shipped default, SPEC F102.5) is T164's job and does not exist yet. This route reads no cookie
-/// and no setting — it always serves the shipped default
-/// (<see cref="ThemeCatalog.ShippedDefaultSlug"/>). <see cref="ResolveTheme"/> is the one line T164
-/// replaces, on BOTH surfaces (PLAN T164(c): "Unify <c>ResolveTheme</c> across both surfaces" —
-/// today each carries its own copy by necessity).
+/// <b>Resolution seam.</b> Same shape as the spectator route — both now call the SAME
+/// <see cref="ThemeCatalog.Resolve"/> (PLAN T164(c): each carried its own private copy of the
+/// precedence cascade before this task unified it on <see cref="ThemeCatalog"/>, its natural home).
+/// Full precedence: visitor cookie → <c>Station:Theme</c> settings row → env default → shipped
+/// default (SPEC F102.5). Because the response now genuinely varies by the request's <c>Cookie</c>
+/// header, this route emits <c>Vary: Cookie</c> too (PLAN T164 precondition (b)) — identical
+/// reasoning to the spectator route's own remarks.
 /// </para>
 ///
 /// <para>
@@ -58,16 +60,18 @@ namespace GenWave.Host.Api;
 ///
 /// <para>
 /// <b>This premise expires.</b> "Nothing here an authenticated session would protect" is true only
-/// because, today, every theme reachable by <see cref="ResolveTheme"/> is first-party and ships
-/// inside the public Docker image — anonymity is sound because the body is already public by
+/// because, today, every theme reachable by <see cref="ThemeCatalog.Resolve"/> is first-party and
+/// ships inside the public Docker image — anonymity is sound because the body is already public by
 /// another route (byte-identical to <see cref="SpectatorThemeEndpoints"/>'s own response; verified
-/// by <c>cmp</c> against both live routes at T161 review, not merely asserted). <b>Trigger:</b> the
-/// moment gh-#206 (Layer B) lets a theme be private or owner-only — a catalog-fetched theme with
-/// restricted visibility, or an owner row in <c>station.theme</c> not meant for anonymous eyes —
-/// this route stops being "the same shipped resource anyone can already read" and starts being a
-/// disclosure vector: an anonymous caller reading a theme's tokens through this endpoint that they
-/// could not read any other way. Whoever adds that capability to <see cref="ThemeCatalog"/> or
-/// <see cref="ResolveTheme"/> must re-examine <c>.AllowAnonymous()</c> on this route (and on
+/// by <c>cmp</c> against both live routes at T161 review, not merely asserted). This holds just as
+/// well now that resolution reads a request cookie (T164): the cookie only ever SELECTS among
+/// already-public shipped themes, it never reveals anything about the visitor beyond that choice.
+/// <b>Trigger:</b> the moment gh-#206 (Layer B) lets a theme be private or owner-only — a
+/// catalog-fetched theme with restricted visibility, or an owner row in <c>station.theme</c> not
+/// meant for anonymous eyes — this route stops being "the same shipped resource anyone can already
+/// read" and starts being a disclosure vector: an anonymous caller reading a theme's tokens through
+/// this endpoint that they could not read any other way. Whoever adds that capability to
+/// <see cref="ThemeCatalog"/> must re-examine <c>.AllowAnonymous()</c> on this route (and on
 /// <see cref="SpectatorThemeEndpoints"/>'s) before shipping it — this paragraph is that tripwire.
 /// </para>
 ///
@@ -76,9 +80,10 @@ namespace GenWave.Host.Api;
 /// setting (SPEC F102.14): a <c>PUT</c> must reach the very next request with no api restart, which
 /// rules out a long <c>max-age</c> the way it does for <see cref="SpectatorThemeEndpoints"/>.
 /// <c>Cache-Control: no-cache</c> plus a content-hash <c>ETag</c> forces revalidation on every
-/// cache while still avoiding a re-sent body for an unchanged sheet, via 304. Deliberately the SAME
-/// contract as the spectator route so T164's eventual cookie/setting-driven content needs no
-/// caching-shape change on either surface — only <see cref="ResolveTheme"/> does.
+/// cache while still avoiding a re-sent body for an unchanged sheet, via 304 — and, now that content
+/// genuinely varies per visitor (T164), <c>Vary: Cookie</c> tells any cache in front of this route
+/// it must key on the request's <c>Cookie</c> header rather than reuse one entry for everyone.
+/// Deliberately the SAME contract as the spectator route on every axis.
 /// </para>
 /// </summary>
 static class AdminThemeEndpoints
@@ -96,11 +101,17 @@ static class AdminThemeEndpoints
             .AllowAnonymous();
     }
 
-    static IResult ServeThemeCss(HttpContext context, ThemeCatalog catalog)
+    static IResult ServeThemeCss(HttpContext context, ThemeCatalog catalog, IOptionsMonitor<StationOptions> stationOptions)
     {
-        var theme = ResolveTheme(catalog);
+        var theme = catalog.Resolve(
+            cookieSlug: context.Request.Cookies[ThemeCatalog.CookieName],
+            stationSlug: stationOptions.CurrentValue.Theme);
         var css = ThemeCssComposer.Compose(theme);
         var etag = new EntityTagHeaderValue($"\"{ComputeContentHash(css)}\"");
+
+        // The response body now depends on the request's Cookie header (T164 precondition (b)) — a
+        // shared cache must revalidate per visitor, not serve one visitor's theme to another.
+        context.Response.Headers[HeaderNames.Vary] = "Cookie";
 
         // Stamped on BOTH the 200 and the 304 path below (RFC 7232 §4.1: a 304 must repeat the
         // validators a client would otherwise use to keep trusting its cached copy).
@@ -116,19 +127,6 @@ static class AdminThemeEndpoints
 
         return Results.Text(css, CssContentType);
     }
-
-    /// <summary>T164's seam (SPEC F102.5/F102.6), same shape as
-    /// <see cref="SpectatorThemeEndpoints"/>'s own copy. Today this always returns the shipped
-    /// default — no cookie, no <c>Station:Theme</c> setting, no env default are read here; that
-    /// whole precedence chain does not exist yet. T164 replaces this method's body (on both
-    /// surfaces) with it; every other line in this file is unaffected by that change.</summary>
-    static ThemeManifest ResolveTheme(ThemeCatalog catalog) =>
-        catalog.TryGetBySlug(ThemeCatalog.ShippedDefaultSlug, out var theme)
-            ? theme
-            : throw new InvalidOperationException(
-                $"shipped theme catalog is missing its own default slug '{ThemeCatalog.ShippedDefaultSlug}' — " +
-                "this is a boot-time authoring bug (see Program.cs's own startup assertion, which " +
-                "should have stopped the process before any request could reach here)");
 
     static string ComputeContentHash(string css) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(css)));

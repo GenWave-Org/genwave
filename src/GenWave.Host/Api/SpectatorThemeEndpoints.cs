@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
+using GenWave.Host.Options;
 using GenWave.Host.Theming;
 
 namespace GenWave.Host.Api;
@@ -13,11 +15,15 @@ namespace GenWave.Host.Api;
 ///
 /// <para>
 /// <b>Resolution seam.</b> Full precedence — visitor cookie → <c>Station:Theme</c> settings row →
-/// <c>Station:Theme</c> env default → shipped default (SPEC F102.5) — is T164's job; it does not
-/// exist yet. This route deliberately reads no cookie and no setting: it always serves the shipped
-/// default (<see cref="ThemeCatalog.ShippedDefaultSlug"/>, ARCHITECTURE "Theme system": "shipped
-/// default <c>cats-whisker</c>"). <see cref="ResolveTheme"/> is the one line T164 replaces; nothing else
-/// here should need to change when it does.
+/// <c>Station:Theme</c> env default → shipped default (SPEC F102.5) — is <see cref="ThemeCatalog.Resolve"/>,
+/// unified across both theme endpoints at PLAN T164 (each carried its own copy before that). The
+/// cookie is read straight off the request under <see cref="ThemeCatalog.CookieName"/>; the station
+/// value comes from <see cref="StationOptions.Theme"/> via <c>IOptionsMonitor</c>, read fresh per
+/// request so a live <c>PUT /api/settings</c> reaches the very next request with no api restart.
+/// Because the response now genuinely varies by the request's <c>Cookie</c> header, this route emits
+/// <c>Vary: Cookie</c> (PLAN T164 precondition (b)) — without it, a shared cache holding one entry
+/// per URL would thrash between visitors carrying different theme cookies, and every request would
+/// degrade to a full 200, defeating the <c>ETag</c> below entirely.
 /// </para>
 ///
 /// <para>
@@ -44,9 +50,8 @@ namespace GenWave.Host.Api;
 /// <c>Cache-Control: no-cache</c> plus a content-hash <c>ETag</c>. <c>no-cache</c> forces every
 /// cache — browser or CDN — to revalidate with the origin before reusing a stored response, so
 /// staleness can never outlive a single round trip; the <c>ETag</c> means an unchanged sheet still
-/// avoids re-sending the body, via 304. This is deliberately the SAME contract T164's
-/// cookie/setting-driven content will need — <see cref="ResolveTheme"/> is the only thing that
-/// changes; the revalidation shape below already does not assume the response is constant.
+/// avoids re-sending the body, via 304 — now paired with <c>Vary: Cookie</c> above, since T164 made
+/// the body genuinely visitor-dependent and a cache must key on that, not just revalidate it.
 /// </para>
 /// </summary>
 static class SpectatorThemeEndpoints
@@ -64,11 +69,17 @@ static class SpectatorThemeEndpoints
             .RequireAuthorization(AuthorizationPolicies.Spectator);
     }
 
-    static IResult ServeThemeCss(HttpContext context, ThemeCatalog catalog)
+    static IResult ServeThemeCss(HttpContext context, ThemeCatalog catalog, IOptionsMonitor<StationOptions> stationOptions)
     {
-        var theme = ResolveTheme(catalog);
+        var theme = catalog.Resolve(
+            cookieSlug: context.Request.Cookies[ThemeCatalog.CookieName],
+            stationSlug: stationOptions.CurrentValue.Theme);
         var css = ThemeCssComposer.Compose(theme);
         var etag = new EntityTagHeaderValue($"\"{ComputeContentHash(css)}\"");
+
+        // The response body now depends on the request's Cookie header (T164 precondition (b)) — a
+        // shared cache must revalidate per visitor, not serve one visitor's theme to another.
+        context.Response.Headers[HeaderNames.Vary] = "Cookie";
 
         // Stamped on BOTH the 200 and the 304 path below (RFC 7232 §4.1: a 304 must repeat the
         // validators a client would otherwise use to keep trusting its cached copy).
@@ -84,18 +95,6 @@ static class SpectatorThemeEndpoints
 
         return Results.Text(css, CssContentType);
     }
-
-    /// <summary>T164's seam (SPEC F102.5/F102.6). Today this always returns the shipped default —
-    /// no cookie, no <c>Station:Theme</c> setting, no env default are read here; that whole
-    /// precedence chain does not exist yet. T164 replaces this method's body with it; every other
-    /// line in this file is unaffected by that change.</summary>
-    static ThemeManifest ResolveTheme(ThemeCatalog catalog) =>
-        catalog.TryGetBySlug(ThemeCatalog.ShippedDefaultSlug, out var theme)
-            ? theme
-            : throw new InvalidOperationException(
-                $"shipped theme catalog is missing its own default slug '{ThemeCatalog.ShippedDefaultSlug}' — " +
-                "this is a boot-time authoring bug (see Program.cs's own startup assertion, which " +
-                "should have stopped the process before any request could reach here)");
 
     static string ComputeContentHash(string css) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(css)));

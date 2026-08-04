@@ -1,3 +1,5 @@
+using GenWave.Host.Theming;
+
 namespace GenWave.Host.Configuration;
 
 /// <summary>
@@ -17,6 +19,29 @@ namespace GenWave.Host.Configuration;
 /// </summary>
 public static class StationSettingsAllowlist
 {
+    /// <summary>
+    /// Every shipped theme's slug (STORY-263), in <see cref="ThemeCatalog.All"/>'s load order —
+    /// the <c>Station:Theme</c> entry's <see cref="AllowedSetting.Choices"/> below, and therefore
+    /// the ONLY source of truth <see cref="SettingValidator"/> checks a proposed value against
+    /// (SPEC F102.14, STORY-265).
+    ///
+    /// This is a static table with no DI container, so it cannot ask for the
+    /// <see cref="ThemeCatalog"/> singleton <c>Program.cs</c> builds and registers for request
+    /// handling — it loads its OWN copy the same way <c>Program.cs</c> does, via
+    /// <see cref="ThemeCatalog.LoadShipped"/>, which reads embedded resources baked into this
+    /// assembly at build time and needs no runtime service to do it. The two loads are cheap,
+    /// deterministic, and always agree (same assembly, same resources) — a duplicate parse, not a
+    /// duplicate source of truth. That equivalence holds only for TODAY's shipped-only catalog
+    /// (Layer A); a future Layer B (an owner-authored/uploaded manifest — see
+    /// <see cref="ThemeCatalog"/>'s own remarks) would make the catalog mutable at runtime, and a
+    /// value baked into this static field at first-touch would then go stale until process
+    /// restart. Re-sourcing Choices from the DI-registered <see cref="ThemeCatalog"/> instance at
+    /// that point is a real, deliberately deferred design cost — surfaced here rather than solved
+    /// early for a Layer B that does not exist yet (YAGNI).
+    /// </summary>
+    static readonly IReadOnlyList<string> ShippedThemeSlugs =
+        ThemeCatalog.LoadShipped().All.Select(theme => theme.Slug).ToList();
+
     /// <summary>All operator-editable settings as an ordered list.</summary>
     public static readonly IReadOnlyList<AllowedSetting> All = new AllowedSetting[]
     {
@@ -258,6 +283,24 @@ public static class StationSettingsAllowlist
         // here reaches the very next prompt build / SegmentRequest stamp with no api restart —
         // OptionsMonitorStationClockProvider re-resolves IOptionsMonitor<StationOptions> per call.
         new("Station:Timezone",                               SettingApplyMode.Live,          SettingKind.String,     ""),
+
+        // Theme selection (SPEC F102.14, F102.15, STORY-265, PLAN T163) — closed CHOICE, not free
+        // text: a typo in a String value would silently fail to resolve (F102.6's fallback would
+        // mask it rather than reject it), so this is the first SettingKind.Choice entry.
+        // ShippedThemeSlugs (above) is the ONLY place either this metadata or SettingValidator's
+        // guard names a valid slug — add a theme, and both follow with no second edit. Live: the
+        // eventual resolution provider (T164) reads it via IOptionsMonitor per request, same shape
+        // as Station:PublicStreamUrl/Station:SpectatorMode. Nothing reads this key's VALUE yet —
+        // T164 is what wires resolution; T165 is what proves it live on a running stack. Declaring
+        // it now, unread, is deliberate (T163's own scope). Deliberately UNSEEDED in
+        // appsettings.json — the precedence chain (visitor cookie → settings row → env default →
+        // shipped default, F102.5) already terminates at ThemeCatalog.ShippedDefaultSlug without a
+        // config entry here; seeding this key would duplicate that floor as a literal nothing
+        // enforces against ThemeCatalog's own const, and would shadow F102.5's "no value anywhere"
+        // case so that branch of T164's resolution logic never actually fires against a real
+        // deployment. A fresh deploy with no key present resolves to the shipped default exactly
+        // because the chain has a floor, not because appsettings.json states one.
+        new("Station:Theme",                                  SettingApplyMode.Live,          SettingKind.Choice,     "", ShippedThemeSlugs),
     };
 
     /// <summary>All operator-editable settings, keyed by configuration key.</summary>

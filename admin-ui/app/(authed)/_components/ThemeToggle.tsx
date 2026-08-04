@@ -2,12 +2,12 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Tooltip } from "@/components/ui/tooltip";
-import { THEME_COOKIE_MAX_AGE_SECONDS, THEME_COOKIE_NAME, type Theme } from "@/lib/theme";
+import { MODE_COOKIE_MAX_AGE_SECONDS, MODE_COOKIE_NAME, type Mode } from "@/lib/theme";
 import { MoonIcon, SunIcon } from "./icons";
 
-/** Reads the theme currently in effect: the explicit data-theme attribute if
+/** Reads the mode currently in effect: the explicit data-theme attribute if
  *  set, otherwise the resolved prefers-color-scheme default. */
-function resolveCurrentTheme(): Theme {
+function resolveCurrentMode(): Mode {
   const attr = document.documentElement.getAttribute("data-theme");
   if (attr === "light" || attr === "dark") {
     return attr;
@@ -16,8 +16,8 @@ function resolveCurrentTheme(): Theme {
 }
 
 /**
- * Client-only theme toggle: cycles light/dark, applies data-theme to <html>
- * immediately (no reload) and persists the choice in the genwave-theme
+ * Client-only mode toggle: cycles light/dark, applies data-theme to <html>
+ * immediately (no reload) and persists the choice in the genwave-mode
  * cookie so the next server render picks it up (SPEC F28.4). Starts at
  * `null` and resolves the real value in an effect so the first client render
  * matches the server's markup — no hydration mismatch. Icon-only, so it
@@ -25,20 +25,20 @@ function resolveCurrentTheme(): Theme {
  * (SPEC F62.1–F62.2).
  */
 export function ThemeToggle(): ReactNode {
-  const [theme, setTheme] = useState<Theme | null>(null);
+  const [mode, setMode] = useState<Mode | null>(null);
 
   useEffect(() => {
-    setTheme(resolveCurrentTheme());
+    setMode(resolveCurrentMode());
   }, []);
 
   function handleToggle(): void {
-    const next: Theme = theme === "dark" ? "light" : "dark";
+    const next: Mode = mode === "dark" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", next);
-    document.cookie = `${THEME_COOKIE_NAME}=${next}; path=/; max-age=${THEME_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax`;
-    setTheme(next);
+    document.cookie = `${MODE_COOKIE_NAME}=${next}; path=/; max-age=${MODE_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax`;
+    setMode(next);
   }
 
-  const isDark = theme === "dark";
+  const isDark = mode === "dark";
   const label = isDark ? "Switch to light theme" : "Switch to dark theme";
 
   return (

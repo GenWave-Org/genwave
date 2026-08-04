@@ -1,11 +1,20 @@
-/** Wire shape of one row from `GET /api/settings` (unchanged by the Q9 regroup — SPEC F28.12). */
+/**
+ * Wire shape of one row from `GET /api/settings` (unchanged by the Q9 regroup — SPEC F28.12).
+ * `"choice"` is a T163 addition (SPEC F102.14, STORY-265): a value restricted to `choices`, the
+ * shipped theme slugs for `Station:Theme` today. `SettingsForm`'s kind-based dispatch does not
+ * yet render it as its own control — it falls through to the plain text branch (no worse than
+ * the pre-T163 shape) pending a dedicated closed-choice control, deliberately left to a
+ * follow-up task rather than half-built here (see that dispatch's own comment).
+ */
 export interface SettingDto {
   key: string;
   value: string;
   source: "default" | "override";
   applyMode: "live" | "engine-restart" | "enrichment";
-  kind: "boolean" | "number" | "number-list" | "string";
+  kind: "boolean" | "number" | "number-list" | "string" | "choice";
   unit: string;
+  /** The closed set of valid values — present only when `kind` is `"choice"`. */
+  choices?: readonly string[];
 }
 
 /**

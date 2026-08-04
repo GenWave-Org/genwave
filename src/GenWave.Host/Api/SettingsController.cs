@@ -50,8 +50,8 @@ public sealed class SettingsController(
                 : configuration[allowed.Key] ?? string.Empty;
             var source    = overrideKeys.ContainsKey(allowed.Key) ? "override" : "default";
             var applyMode = ApplyModeWireValue(allowed.ApplyMode);
-            var kind      = allowed.Kind switch { SettingKind.Boolean => "boolean", SettingKind.NumberList => "number-list", SettingKind.String => "string", _ => "number" };
-            return new SettingDto(allowed.Key, rawValue, source, applyMode, kind, allowed.Unit);
+            var kind      = KindWireValue(allowed.Kind);
+            return new SettingDto(allowed.Key, rawValue, source, applyMode, kind, allowed.Unit, allowed.Choices);
         }).ToList();
 
         return Ok(items);
@@ -165,8 +165,8 @@ public sealed class SettingsController(
                 : configuration[u.Key] ?? u.Value;
             var source    = overrideKeys.ContainsKey(u.Key) ? "override" : "default";
             var applyMode = ApplyModeWireValue(allowed.ApplyMode);
-            var kind      = allowed.Kind switch { SettingKind.Boolean => "boolean", SettingKind.NumberList => "number-list", SettingKind.String => "string", _ => "number" };
-            return new SettingDto(u.Key, rawValue, source, applyMode, kind, allowed.Unit);
+            var kind      = KindWireValue(allowed.Kind);
+            return new SettingDto(u.Key, rawValue, source, applyMode, kind, allowed.Unit, allowed.Choices);
         }).ToList();
 
         return Ok(result);
@@ -184,6 +184,19 @@ public sealed class SettingsController(
         SettingApplyMode.Live => "live",
         SettingApplyMode.Enrichment => "enrichment",
         _ => "engine-restart",
+    };
+
+    /// <summary>
+    /// Maps <see cref="SettingKind"/> to the wire string the admin UI dispatches its input
+    /// control on. Shared by GET and PUT so the two response shapes can never drift apart.
+    /// </summary>
+    static string KindWireValue(SettingKind kind) => kind switch
+    {
+        SettingKind.Boolean => "boolean",
+        SettingKind.NumberList => "number-list",
+        SettingKind.String => "string",
+        SettingKind.Choice => "choice",
+        _ => "number",
     };
 
     /// <summary>

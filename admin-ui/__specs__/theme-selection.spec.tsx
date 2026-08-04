@@ -1,6 +1,6 @@
 // STORY-267 — Admin UI theme selection (SPEC F102.12, F102.13, F102.16)
 //
-// Runner: Jest. The Admin UI already owns a real theme mechanism — a `genwave-theme`
+// Runner: Jest. The Admin UI already owns a real theme mechanism — a `genwave-mode`
 // cookie driving `:root[data-theme="dark"]`, with `:root:not([data-theme])` as the
 // system-dark fallback. This story widens that from a binary light/dark toggle to theme
 // selection, keeping the two axes separate: the THEME is chosen, the MODE within it still

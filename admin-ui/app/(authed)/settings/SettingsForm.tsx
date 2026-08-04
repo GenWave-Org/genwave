@@ -305,6 +305,12 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "The IANA timezone the DJ's spoken date/time follows (e.g. America/Edmonton). Empty uses " +
     "the container's own clock. Changes apply live. The schedule grid and persona taste gates " +
     "follow it too, so changing it immediately shifts which slot is on the air.",
+
+  // ── Theme selection (SPEC F102.14, F102.15, STORY-265, PLAN T163) ─────────────────────────
+  "Station:Theme":
+    "The station's active theme, by slug (e.g. cats-whisker) — must name one of the shipped " +
+    "themes; an unrecognized slug is rejected outright rather than silently failing to " +
+    "resolve. Changes apply live.",
 };
 
 /**
@@ -998,7 +1004,12 @@ function SettingField({
             </option>
           ))}
         </select>
-      ) : setting.kind === "string" ? (
+      ) : setting.kind === "string" || setting.kind === "choice" ? (
+        // "choice" (T163, SPEC F102.14) has no dedicated control yet — a text input is the
+        // closest existing branch (strictly no worse than pre-T163: it is what String rendered)
+        // rather than falling through to the number branch below, which would be actively wrong
+        // for a slug. A real closed-choice control (informed by `setting.choices`) is a
+        // follow-up, not built here — see SettingDto.kind's own remarks in settings-types.ts.
         <input
           id={controlId}
           name={setting.key}
