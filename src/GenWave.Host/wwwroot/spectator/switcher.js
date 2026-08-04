@@ -31,6 +31,31 @@ const THEME_COOKIE_NAME = "genwave-theme";
 const MODE_COOKIE_NAME = "genwave-mode";
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365; // one year — an explicit choice shouldn't expire
 
+// ── Composed-sheet observability (SPEC F102.7, PLAN T168) ───────────────────
+//
+// A failed load of the composed /spectator/theme.css is EXPECTED behaviour, not an error to
+// hide — this file's own :root block (styles.css) already carries the shipped default's tokens
+// as the never-unstyled fallback (F102.7), so a visitor never sees a broken page. What must not
+// happen is that degraded path going silent, so a failure is console.warn'd here.
+//
+// Attached SYNCHRONOUSLY, at parse time, to the SAME <link id="theme-stylesheet"> index.html
+// declares immediately before this script (undeferred, in <head> — see that file's own
+// remarks): a <link>'s `error`/`load` events are always dispatched as a later task even for an
+// already-cached response, so registering the listener here — before this script yields at
+// all — cannot miss the event regardless of how fast or slow the request settles.
+function logThemeStylesheetFailure() {
+  console.warn(
+    "[genwave] composed /spectator/theme.css failed to load — falling back to the shipped default styles.css tokens (SPEC F102.7)"
+  );
+}
+
+function watchThemeStylesheetForFailure(link) {
+  if (!link) return;
+  link.addEventListener("error", logThemeStylesheetFailure);
+}
+
+watchThemeStylesheetForFailure(document.getElementById("theme-stylesheet"));
+
 function readCookie(name) {
   const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
   return match ? decodeURIComponent(match[1]) : null;
@@ -92,7 +117,11 @@ async function fetchThemeCatalog() {
 function reloadThemeStylesheet() {
   const current = document.getElementById("theme-stylesheet");
   if (!current) return;
-  current.replaceWith(current.cloneNode(false));
+  // cloneNode(false) copies attributes only, never listeners — re-attach the same failure
+  // watcher so a theme change triggered by this visitor is covered too, not only first load.
+  const replacement = current.cloneNode(false);
+  watchThemeStylesheetForFailure(replacement);
+  current.replaceWith(replacement);
 }
 
 function populateThemeSelect(select, catalog) {

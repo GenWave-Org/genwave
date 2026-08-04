@@ -1,11 +1,24 @@
 /* GenWave spectator page — "Wireless" design tokens (.claude/skills/design-aesthetic).
    Hand-written, no build step: vendored woff2 fonts (never a font CDN), semantic
    custom-property tokens (never raw hex in rules below the :root block), warm
-   neutrals only. Mirrors admin-ui/app/globals.css's token values 1:1 so the two
-   surfaces read as one system. The theme switcher (STORY-266, PLAN T166) overturns
-   F63's original "no interactive chrome" ruling — dark still ships via
-   prefers-color-scheme by default, but an explicit choice (the theme-switcher
-   section below) now overrides it via [data-theme] on <html>. */
+   neutrals only.
+
+   These are the F102.7 never-unstyled FALLBACK, not a live mirror: GET
+   /spectator/theme.css (the runtime composer, rendered from the theme manifest) is
+   the single LIVE source, and it loads AFTER this sheet in index.html — overriding
+   it — so the two surfaces read as one system via the composer, not via this
+   hand-authored block being kept in lockstep with admin-ui/app/globals.css. This
+   block is reached only while that composed sheet is slow, failed or absent (a
+   failure is console.warn'd by switcher.js so the degraded path is observable, not
+   silent). It is hand-kept equal to globals.css's own fallback tokens for their
+   shared semantic set (T168, SPEC F102.16) — a cross-surface parity guard in
+   admin-ui/__specs__/theme-selection.spec.tsx covers exactly that pair, never the
+   live render.
+
+   The theme switcher (STORY-266, PLAN T166) overturns F63's original "no
+   interactive chrome" ruling — dark still ships via prefers-color-scheme by
+   default, but an explicit choice (the theme-switcher section below) now
+   overrides it via [data-theme] on <html>. */
 
 @font-face {
   font-family: "Fraunces";
