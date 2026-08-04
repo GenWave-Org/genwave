@@ -270,4 +270,29 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  CHECK (end_minute > start_minute),
 	  EXCLUDE USING gist (day_of_week WITH =, int4range(start_minute, end_minute) WITH &&)
 	);
+
+	-- Owner-imported themes (SPEC F103.7, F103.8; STORY-271, PLAN T181): the Community Catalog v2
+	-- theme kind's storage. definition holds the byte-stable ThemeManifest (GenWave.Host.Theming) —
+	-- no runtime-only fields, no cached CSS — the same byte-stable-manifest discipline
+	-- ThemeManifestSerializer/ThemeManifestParser already enforce for the two embedded defaults; a
+	-- caller (ThemeCatalog, T182) reconstitutes a ThemeManifest from this column at its own edge
+	-- rather than this table (or GenWave.Core, IThemeStore's own home) knowing that type at all.
+	-- imported_from/imported_at mirror station.persona's own db/25 provenance columns exactly: the
+	-- catalog entry's slug for a catalog import, 'file' for a direct upload, NULL for an
+	-- authored-in-place theme (no writer for that path exists yet, so every row today would carry a
+	-- non-null stamp — the NULL case exists for symmetry with persona's and a future Layer B editor,
+	-- gh-#206). slug is UNIQUE across every owner theme; F103.8's stronger rule — an import may not
+	-- also collide with an EMBEDDED default's slug — needs the shipped catalog to check against and
+	-- is enforced by ThemeCatalog/the import route (T182/T184), not this table. NO CONSUMER YET
+	-- (T181): ThemeCatalog does not read this table until T182 wires it, and no route writes to it
+	-- until T184. See db/31-theme-store-migration.sh for the in-place upgrade path this table also
+	-- ships as.
+	CREATE TABLE IF NOT EXISTS station.theme (
+	  id            serial      PRIMARY KEY,
+	  slug          text        NOT NULL UNIQUE,
+	  definition    jsonb       NOT NULL,
+	  imported_from text,
+	  imported_at   timestamptz,
+	  created_at    timestamptz NOT NULL DEFAULT now()
+	);
 	SQL

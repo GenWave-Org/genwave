@@ -8,7 +8,18 @@
 // PENDING T181 (db/31 + IThemeStore) / T182 (ThemeCatalog shipped∪owner, wire) / T183 (Station:Theme
 // choice widens). At least one Scenario drives the real load/resolve path (T182 is a wire task).
 // One assertion per Fact; sad path (a shipped slug cannot be shadowed) is its own block.
+//
+// AC1 (T181) is proven against FakeThemeStore (Fakes/FakeThemeStore.cs) rather than the real
+// GenWave.MediaLibrary.Station.ThemeRepository: this project carries no Postgres fixture at all
+// (mirrors FakeScheduleStore's own remarks and Story225_WishParsing.cs's own "GenWave.Host.Tests has
+// no DatabaseFixture" precedent) — a real-Postgres proof of ThemeRepository's own SQL belongs to
+// GenWave.MediaLibrary.Tests, the same split Story209_PersonaImportRepository.cs draws for
+// PersonaImportRepository. T181 has no consumer yet (PLAN T181: "no consumer yet"), so there is no
+// wire-layer route to drive this fact through either, unlike Story237_ImportProvenance.cs's
+// WebApplicationFactory idiom — this fact calls IThemeStore directly instead.
 
+using GenWave.Core.Abstractions;
+using GenWave.Host.Tests.Fakes;
 using Xunit;
 
 namespace GenWave.Host.Tests.Specs;
@@ -22,13 +33,27 @@ public static class FeatureOwnerThemeStorageAndResolution
 
     public sealed class ScenarioAnOwnerThemePersists
     {
-        [Fact(Skip = PendingStore)]
-        public void ARowHoldsTheDefinitionAndProvenance()
+        [Fact]
+        public async Task ARowHoldsTheDefinitionAndProvenance()
         {
-            // Given a valid theme manifest,
+            // Given a valid theme manifest (its serialized definition, standing in for what
+            // ThemeManifestSerializer.Serialize would produce — T181's IThemeStore deals in the raw
+            // jsonb text, never GenWave.Host.Theming.ThemeManifest itself; see IThemeStore's remarks),
+            IThemeStore store = new FakeThemeStore();
+            const string slug = "midnight-drive";
+            const string definition = """{"slug":"midnight-drive","name":"Midnight Drive"}""";
+            const string importedFrom = "midnight-drive-catalog-entry";
+
             // When it is stored,
-            // Then a station.theme row holds its definition jsonb plus imported_from/imported_at (AC1).
-            Assert.Fail(PendingStore);
+            await store.UpsertAsync(slug, definition, importedFrom, CancellationToken.None);
+            var theme = await store.GetBySlugAsync(slug, CancellationToken.None);
+
+            // Then a station.theme row holds its definition jsonb plus imported_from/imported_at
+            // (AC1) — one assertion bundling the whole composite claim, mirroring this codebase's
+            // tuple-equality idiom for a single Specification checking several related fields at once.
+            Assert.Equal(
+                (definition, importedFrom, ImportedAtStamped: true),
+                (theme?.Definition, theme?.ImportedFrom, ImportedAtStamped: theme?.ImportedAt is not null));
         }
     }
 
