@@ -267,6 +267,17 @@ multiple hosts in the variable.
 - 🟢 **Enrichment saturates every core it is given.** The api held 310–381% of 400% for the whole
   burst. The **piper-only overlay defaults this to 2** (gh-#334), buying two free cores and lower
   thermals — set `LIBRARY_ENRICHMENT_CONCURRENCY` to override on either stack.
+- 🟡 **Memory over a 25 h soak: api falls, engine climbs — unresolved, being measured.** Between
+  the 9 h and 25 h marks of the 2026-08-03 soak, `api` went **708 → 378 MiB** (the healthy
+  direction: enrichment finished and the GC reclaimed), while `engine` went **169 → 289 MiB**,
+  `piper` 289 → 305 MiB, and free memory 2,840 → 2,776 MiB. Sampled over 60 s at the 25 h mark the
+  engine was **flat** (288.9 / 289.0 / 289.0 MiB), which argues a plateau rather than a leak —
+  **but two readings 16 h apart cannot distinguish a plateau from slow linear growth**, and the
+  two were not like-for-like (the 9 h reading was taken under enrichment load, the 25 h one idle).
+  If the growth were linear (~7.5 MiB/h ≈ 180 MiB/day) a 4 GB box would have roughly **15 days** of
+  headroom. ⚠️ `engine` has **no `mem_limit` configured**, unlike `kokoro` and `piper`. A
+  multi-day sampling run is under way to settle it; this note will be replaced by the verdict, not
+  quietly dropped.
 - 🟢 **Concurrency 2 costs far less than half — measured ~700 tracks/hour** on the same 4 GB Pi 5
   (2026-08-03): 6,303 tracks over a 9-hour sustained run, flat at 654–766/h per hour with no gaps,
   api at ~234% of 400%. So **9,000 tracks is ~13 h at 2, not the ~22 h a linear model predicts**
@@ -306,7 +317,7 @@ The gh-#213 plan and where it stands after the 2026-08-02 field run:
 | 5 | **Enrichment burst on a real library** — tracks/hour, `vcgencmd measure_temp`, zero safe-branch engagements | 🟢 **~800 tracks/h** at concurrency 4; 66–69 °C flat; **zero mid-broadcast safe-branch engagements** over 1 h 40 m |
 | 6 | **The open Kokoro question** — does the arm64 image survive warmup on a Pi 5? | 🔴 not attempted |
 | 7 | **ollama tok/s** — prompt/eval rates on a real DJ prompt; abort below 3 tok/s | 🔴 not attempted |
-| 8 | **24 h piper-only soak** — 0 safe-library engagements, 0 restarts, flat memory, temps, render-seconds vs budget | 🔴 not run |
+| 8 | **24 h piper-only soak** — 0 safe-library engagements, 0 restarts, flat memory, temps, render-seconds vs budget | 🟢 **PASSED — 25 h 36 m**, 2026-08-03T00:04Z → 2026-08-04T01:40Z on `home-v2.9.1`. **0 restarts** on all 8 containers; **0 mid-broadcast safe-branch engagements** — the engine's entire switch history is still the 5 boot-ladder lines from 00:04; `vcgencmd get_throttled` = `0x0` at **51.0 °C**; enrichment 9,094/9,094 intact. **5 real error lines across the final 16 h** (4× cosmetic `mjpeg: error decoding EXIF data` from malformed album art, 1× icecast metadata `ECONNRESET`). ⚠️ Memory is not uniformly flat — see [Compute notes](#-compute-notes-raspberry-pi) |
 | 9 | **Pi 4 pass** — steps 1–5 only | 🔴 not run |
 
 Steps 6–9 remain. Steps 6 and 7 are only interesting for topology (c); step 8 (the 24 h soak) is
