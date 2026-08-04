@@ -1,0 +1,62 @@
+{
+  "slug": "wow-and-flutter",
+  "name": "Wow & Flutter",
+  "author": "GenWave",
+  "fonts": {
+    "display": {
+      "family": "Fraunces",
+      "assets": [
+        { "src": "/fonts/fraunces-variable-latin.woff2", "weight": "400 600", "style": "normal" },
+        { "src": "/fonts/fraunces-italic-variable-latin.woff2", "weight": "400", "style": "italic" }
+      ]
+    },
+    "sans": {
+      "family": "Source Sans 3",
+      "assets": [
+        { "src": "/fonts/source-sans-3-variable-latin.woff2", "weight": "400 600", "style": "normal" }
+      ]
+    }
+  },
+  "modes": {
+    "light": {
+      "bg": "#f3e4d5",
+      "surface": "#fcf4eb",
+      "surface-2": "#ebd8c6",
+      "line": "#d8c1ac",
+      "ink": "#2b211d",
+      "mute": "#6d5d50",
+      "accent": "#9b6411",
+      "accent-ink": "#fcf4eb",
+      "accent-2": "#44692b",
+      "danger": "#ce382a",
+      "danger-ink": "#fcf4eb",
+      "success": "#567740",
+      "sched-1": "#e7cfac",
+      "sched-2": "#bbd4ab",
+      "sched-3": "#e3c5bf",
+      "sched-4": "#a8c2c7",
+      "sched-5": "#d2bcd2",
+      "sched-6": "#e3ddb5"
+    },
+    "dark": {
+      "bg": "#1f1712",
+      "surface": "#2b211a",
+      "surface-2": "#251b16",
+      "line": "#403129",
+      "ink": "#f0e8db",
+      "mute": "#9a8873",
+      "accent": "#b47414",
+      "accent-ink": "#1f1712",
+      "accent-2": "#669844",
+      "danger": "#e16256",
+      "danger-ink": "#2b211a",
+      "success": "#86ac6c",
+      "sched-1": "#6d532c",
+      "sched-2": "#3e562e",
+      "sched-3": "#60372f",
+      "sched-4": "#314549",
+      "sched-5": "#543b54",
+      "sched-6": "#615a2e"
+    }
+  }
+}

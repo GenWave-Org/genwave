@@ -291,10 +291,10 @@ describe("Feature: the theme shelf and its contrast gate", () => {
   // ── HAPPY PATH ──────────────────────────────────────────────────────────
 
   describe("Scenario: the shelf is populated", () => {
-    // KNOWN-RED through Ship 1 by ruling — see the header note. Left pending, not weakened.
-    it.todo(
-      "ships at least six themes (T171, AC1 — expected red until Ship 2)"
-    );
+    // Ship 2 (T171) lands five new themes alongside cats-whisker — the AC1 floor is met.
+    it("ships at least six themes (T171, AC1)", () => {
+      expect(loadThemeManifests().length).toBeGreaterThanOrEqual(6);
+    });
   });
 
   describe("Scenario: every theme is complete", () => {
