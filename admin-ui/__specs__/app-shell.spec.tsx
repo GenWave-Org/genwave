@@ -1,8 +1,8 @@
 // @jest-environment jsdom
-// STORY-085 — App shell: sidebar, breadcrumbs, theme toggle (Epic Q / SPEC F28.4–F28.5)
+// STORY-085 — App shell: sidebar, breadcrumbs, theme switcher (Epic Q / SPEC F28.4–F28.5)
 //
 // Runner: Jest (jsdom). RTL drives the client shell components (Sidebar,
-// Breadcrumbs, ThemeToggle) — mirrors libraries-page.spec.tsx / live-page.spec.tsx
+// Breadcrumbs, ThemeSwitcher's mode control) — mirrors libraries-page.spec.tsx / live-page.spec.tsx
 // style. The server-rendered theme-cookie logic (root layout + login page) is
 // called directly as an async function and its returned element tree is
 // inspected, mirroring the catalog-pages.spec.ts tree-walker house pattern.
@@ -244,9 +244,9 @@ describe("Feature: App shell", () => {
 
     it("stores the toggled choice in the genwave-mode cookie and flips <html> immediately", async () => {
       mockMatchMedia(false); // system prefers light
-      const { ThemeToggle } = await import("../app/(authed)/_components/ThemeToggle");
+      const { ThemeSwitcher } = await import("../app/(authed)/_components/ThemeSwitcher");
 
-      render(<ThemeToggle />);
+      render(<ThemeSwitcher choices={[]} stationThemeSlug="" />);
       const button = await screen.findByRole("button", { name: /switch to dark theme/i });
 
       fireEvent.click(button);

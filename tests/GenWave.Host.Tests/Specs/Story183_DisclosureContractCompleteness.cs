@@ -112,6 +112,16 @@ public static class FeatureDisclosureContractCompleteness
         new(typeof(SpectatorRequestOptions),
             new SpectatorRequestOptions(["Metal", "Rock"], ["dreamy", "driving"]),
             ["genres", "moods"]),
+
+        // themes (SPEC F102.10a, STORY-266, PLAN T166) — the switcher's theme-list read: the
+        // resolved active slug plus the catalog's slug/name pairs, and nothing else (no manifest
+        // fonts/tokens — those stay theme.css's job).
+        new(typeof(SpectatorThemesResponse),
+            new SpectatorThemesResponse("cats-whisker", [new SpectatorThemeOption("cats-whisker", "Cat's Whisker")]),
+            ["active", "options"]),
+        new(typeof(SpectatorThemeOption),
+            new SpectatorThemeOption("cats-whisker", "Cat's Whisker"),
+            ["slug", "name"]),
     ];
 
     /// <summary>

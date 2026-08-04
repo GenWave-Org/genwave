@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { parseMode, MODE_COOKIE_NAME } from "@/lib/theme";
 import { VersionFooter } from "@/components/VersionFooter";
+import { ThemeStylesheetWatchdog } from "@/components/ThemeStylesheetWatchdog";
 import "./globals.css";
 
 // Fraunces (display serif) and Source Sans 3 (operational sans) are declared as plain @font-face
@@ -57,6 +58,10 @@ export default async function RootLayout({
           sheets is a framework-managed bundle rather than another literal <link>.
         */}
         <link rel="stylesheet" href="/api/theme.css" precedence="theme" />
+        {/* SPEC F102.7 observability (T168): warns once, client-side, if the link above never
+            resolves into a real stylesheet — see the component's own remarks for why a plain
+            error listener alone would miss a failure that happens before hydration. */}
+        <ThemeStylesheetWatchdog />
         {children}
         {/* gh-#7: version/edition stamp on every page — root layout wraps authed + login alike */}
         <VersionFooter />

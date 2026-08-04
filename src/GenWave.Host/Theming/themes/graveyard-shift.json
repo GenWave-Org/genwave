@@ -1,0 +1,62 @@
+{
+  "slug": "graveyard-shift",
+  "name": "Graveyard Shift",
+  "author": "GenWave",
+  "fonts": {
+    "display": {
+      "family": "Fraunces",
+      "assets": [
+        { "src": "/fonts/fraunces-variable-latin.woff2", "weight": "400 600", "style": "normal" },
+        { "src": "/fonts/fraunces-italic-variable-latin.woff2", "weight": "400", "style": "italic" }
+      ]
+    },
+    "sans": {
+      "family": "Source Sans 3",
+      "assets": [
+        { "src": "/fonts/source-sans-3-variable-latin.woff2", "weight": "400 600", "style": "normal" }
+      ]
+    }
+  },
+  "modes": {
+    "light": {
+      "bg": "#e9dcd3",
+      "surface": "#f5ede5",
+      "surface-2": "#e0cfc2",
+      "line": "#c9b5a6",
+      "ink": "#281e1b",
+      "mute": "#68564b",
+      "accent": "#745bbc",
+      "accent-ink": "#f5ede5",
+      "accent-2": "#87436b",
+      "danger": "#c6362c",
+      "danger-ink": "#f5ede5",
+      "success": "#556f3e",
+      "sched-1": "#c4bddb",
+      "sched-2": "#dabece",
+      "sched-3": "#d8c4b6",
+      "sched-4": "#dad0b4",
+      "sched-5": "#cbbbd3",
+      "sched-6": "#bcc7d2"
+    },
+    "dark": {
+      "bg": "#16100c",
+      "surface": "#201913",
+      "surface-2": "#1b140f",
+      "line": "#372a22",
+      "ink": "#efe9e1",
+      "mute": "#93806f",
+      "accent": "#866cd4",
+      "accent-ink": "#16100c",
+      "accent-2": "#be6699",
+      "danger": "#dd564c",
+      "danger-ink": "#201913",
+      "success": "#82a465",
+      "sched-1": "#3f3267",
+      "sched-2": "#633650",
+      "sched-3": "#553f30",
+      "sched-4": "#5e5331",
+      "sched-5": "#533960",
+      "sched-6": "#384757"
+    }
+  }
+}

@@ -178,6 +178,13 @@ public static class FeatureFormatClockGate
             "SpectatorStats.Enriching",
             "SpectatorStats.Failed",
             "SpectatorStats.Ready",
+            // SPEC F102.10a, STORY-266, PLAN T166: the switcher's theme-list read — resolved
+            // active slug plus the catalog's slug/name pairs, blessed in Story183's contract
+            // table alongside this census.
+            "SpectatorThemeOption.Name",
+            "SpectatorThemeOption.Slug",
+            "SpectatorThemesResponse.Active",
+            "SpectatorThemesResponse.Options",
             "SpectatorTrackNowPlaying.Artist",
             "SpectatorTrackNowPlaying.ArtworkUrl",
             "SpectatorTrackNowPlaying.Dj",

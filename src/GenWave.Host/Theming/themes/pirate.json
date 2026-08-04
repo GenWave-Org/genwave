@@ -1,0 +1,62 @@
+{
+  "slug": "pirate",
+  "name": "Pirate",
+  "author": "GenWave",
+  "fonts": {
+    "display": {
+      "family": "Fraunces",
+      "assets": [
+        { "src": "/fonts/fraunces-variable-latin.woff2", "weight": "400 600", "style": "normal" },
+        { "src": "/fonts/fraunces-italic-variable-latin.woff2", "weight": "400", "style": "italic" }
+      ]
+    },
+    "sans": {
+      "family": "Source Sans 3",
+      "assets": [
+        { "src": "/fonts/source-sans-3-variable-latin.woff2", "weight": "400 600", "style": "normal" }
+      ]
+    }
+  },
+  "modes": {
+    "light": {
+      "bg": "#e4dfd5",
+      "surface": "#f3efe8",
+      "surface-2": "#d9d2c6",
+      "line": "#c4bbab",
+      "ink": "#261c17",
+      "mute": "#64584d",
+      "accent": "#ca2f44",
+      "accent-ink": "#f3efe8",
+      "accent-2": "#70571e",
+      "danger": "#be422a",
+      "danger-ink": "#f3efe8",
+      "success": "#4d6a39",
+      "sched-1": "#debabf",
+      "sched-2": "#e2d5b6",
+      "sched-3": "#d5beae",
+      "sched-4": "#bfd2b2",
+      "sched-5": "#bccbd2",
+      "sched-6": "#cbbcd2"
+    },
+    "dark": {
+      "bg": "#16110e",
+      "surface": "#221b16",
+      "surface-2": "#1c1511",
+      "line": "#3b2e26",
+      "ink": "#eee8dd",
+      "mute": "#938270",
+      "accent": "#d94b5e",
+      "accent-ink": "#16110e",
+      "accent-2": "#a08138",
+      "danger": "#db5d43",
+      "danger-ink": "#221b16",
+      "success": "#7ea465",
+      "sched-1": "#683138",
+      "sched-2": "#6b592e",
+      "sched-3": "#563e2e",
+      "sched-4": "#445a35",
+      "sched-5": "#354750",
+      "sched-6": "#4c3956"
+    }
+  }
+}

@@ -53,6 +53,18 @@
  * component rewrite. Theme names never describe their colours (ruling
  * gh-#169/T167a) — "walnut & brass" below is internal shorthand for the
  * dark mode's look, not a user-facing name.
+ *
+ * These are the F102.7 never-unstyled FALLBACK, not a live mirror: GET
+ * /api/theme.css (the runtime composer, rendered from the theme manifest) is the
+ * single LIVE source, and app/layout.tsx's `precedence="theme"` link loads it
+ * AFTER this sheet — overriding it — so the two surfaces read as one system via
+ * the composer, not via this hand-authored block being kept in lockstep with
+ * wwwroot/spectator/styles.css. This block is reached only while that composed
+ * sheet is slow, failed or absent (ThemeStylesheetWatchdog console.warn's a
+ * failure so the degraded path is observable, not silent). It is hand-kept equal
+ * to styles.css's own fallback tokens for their shared semantic set (T168, SPEC
+ * F102.16) — a cross-surface parity guard in __specs__/theme-selection.spec.tsx
+ * covers exactly that pair, never the live render.
  * ------------------------------------------------------------------------ */
 
 :root {
