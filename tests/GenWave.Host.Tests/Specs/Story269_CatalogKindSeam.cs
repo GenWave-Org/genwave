@@ -13,19 +13,47 @@
 // T176 (this file's live facts) drives CatalogIndexValidator.TryValidate directly — the same
 // "test the seam directly, no endpoint exists yet" idiom Story234's own T99/T100 sections use —
 // since the kind discriminator lives entirely in the index-parsing seam, not behind an HTTP route.
-// PENDING T177 — ScenarioTheGoldenThemeFixtureRoundTrips flips live once the golden fixture lands.
+// T177 — ScenarioTheGoldenThemeFixtureRoundTrips is now live: Fixtures/golden.theme.json parses
+// through ThemeManifestParser and re-serializes byte-identically through ThemeManifestSerializer
+// (STORY-269 AC5).
 // One assertion per Fact where the scenario allows it; happy path first and exhaustive; the sad
 // path (unknown kind vs unknown audience) is its own block.
 
 using System.Text;
 using GenWave.Host.Catalog;
+using GenWave.Host.Theming;
 
 namespace GenWave.Host.Tests.Specs;
 
+// ── Fixture file access ───────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Locates and reads <c>Fixtures/golden.theme.json</c> from its SOURCE location (not a build output
+/// copy) — mirrors <c>Story231_GoldenCardParity.cs</c>'s own <c>GoldenFixtureFile</c> idiom (itself
+/// a <c>file</c>-scoped type, so this file needs its own copy rather than sharing that one): walk up
+/// from <see cref="AppContext.BaseDirectory"/> until the repo root (<c>GenWave.sln</c>) is found,
+/// then address the file by its fixed source-tree path.
+/// </summary>
+file static class GoldenThemeFixtureFile
+{
+    /// <summary>The exact bytes committed at <c>Fixtures/golden.theme.json</c> — read fresh on every
+    /// call, matching <c>GoldenFixtureFile</c>'s own no-shared-mutable-state idiom.</summary>
+    public static string ReadText() => File.ReadAllText(LocatePath());
+
+    static string LocatePath()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
+            dir = dir.Parent;
+        if (dir is null)
+            throw new InvalidOperationException("repo root (GenWave.sln) not found");
+
+        return Path.Combine(dir.FullName, "tests", "GenWave.Host.Tests", "Fixtures", "golden.theme.json");
+    }
+}
+
 public static class FeatureCatalogKindDiscriminator
 {
-    const string PendingGolden = "pending T177 — golden.theme.json format contract";
-
     static readonly Uri Directory = new("https://catalog.test/repo/");
 
     // CatalogIndexValidator only checks a declared sha256's SHAPE (64 lowercase hex chars) — a real
@@ -134,13 +162,18 @@ public static class FeatureCatalogKindDiscriminator
 
     public sealed class ScenarioTheGoldenThemeFixtureRoundTrips
     {
-        [Fact(Skip = PendingGolden)]
+        [Fact]
         public void ItIsByteIdenticalThroughTheManifestParser()
         {
             // Given the committed golden.theme.json exported from a real theme,
-            // When it is parsed as a ThemeManifest and re-serialized,
+            // When it is parsed as a ThemeManifest (through the real ThemeCatalog.Load path, the
+            // same one every shipped theme goes through) and re-serialized,
+            var original = GoldenThemeFixtureFile.ReadText();
+            var catalog = ThemeCatalog.Load([new ThemeManifestSource("golden.theme.json", original)]);
+            var manifest = Assert.Single(catalog.All);
+
             // Then it is byte-identical (AC5) — the concrete format contract, pinned in both repos.
-            Assert.Fail(PendingGolden);
+            Assert.Equal(original, ThemeManifestSerializer.Serialize(manifest));
         }
     }
 
