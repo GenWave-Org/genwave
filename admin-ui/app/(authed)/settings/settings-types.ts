@@ -1,10 +1,30 @@
 /**
+ * One valid value for a `kind === "choice"` setting, paired with its display label (T175 closes
+ * the ruling #3 gap: the server, not the client, owns turning a slug like `cats-whisker` into
+ * "Cat's Whisker" — see `ChoiceSettingControl`'s own remarks). `value` is the ONLY part that is
+ * ever validated, staged, or PUT back — `label` is presentation only.
+ */
+export interface SettingChoice {
+  value: string;
+  label: string;
+  /**
+   * True for the one choice (if any) this setting resolves to when its staged/stored value is the
+   * empty string — for `Station:Theme`, the shipped default (`ThemeCatalog.ShippedDefaultSlug`
+   * server-side; see `SettingChoice.IsDefault`'s own remarks in `StationSettingsAllowlist`). T175
+   * follow-up: `ChoiceSettingControl` reads this — never a hardcoded theme name — to label the
+   * "unset" state distinctly from an actual selection. Optional/falsy for any choice with no such
+   * "empty means this" semantics, including every choice on a Choice-kind setting that doesn't
+   * define one; the control degrades to a neutral label rather than assuming a default exists.
+   */
+  isDefault?: boolean;
+}
+
+/**
  * Wire shape of one row from `GET /api/settings` (unchanged by the Q9 regroup — SPEC F28.12).
  * `"choice"` is a T163 addition (SPEC F102.14, STORY-265): a value restricted to `choices`, the
- * shipped theme slugs for `Station:Theme` today. `SettingsForm`'s kind-based dispatch does not
- * yet render it as its own control — it falls through to the plain text branch (no worse than
- * the pre-T163 shape) pending a dedicated closed-choice control, deliberately left to a
- * follow-up task rather than half-built here (see that dispatch's own comment).
+ * shipped themes for `Station:Theme` today. `SettingsForm`'s per-key control registry
+ * (`SETTING_CONTROL_REGISTRY`) renders it via `ChoiceSettingControl` (T175), the generic control
+ * for this kind — kind-based dispatch never has to know about `"choice"` at all.
  */
 export interface SettingDto {
   key: string;
@@ -13,8 +33,8 @@ export interface SettingDto {
   applyMode: "live" | "engine-restart" | "enrichment";
   kind: "boolean" | "number" | "number-list" | "string" | "choice";
   unit: string;
-  /** The closed set of valid values — present only when `kind` is `"choice"`. */
-  choices?: readonly string[];
+  /** The closed set of valid `(value, label)` pairs — present only when `kind` is `"choice"`. */
+  choices?: readonly SettingChoice[];
 }
 
 /**
@@ -36,4 +56,11 @@ export interface SettingControlProps {
    * don't surface staging (Voice, Audience) ignore it without ceremony.
    */
   isDirty?: boolean;
+  /**
+   * The closed set of valid `(value, label)` pairs, straight off {@link SettingDto.choices} —
+   * present only for a `kind === "choice"` setting (T175, SPEC F102.14). Optional so every
+   * existing registered control (Voice, Corrections, EngineByKind, Audience), none of which read
+   * it, is unaffected.
+   */
+  choices?: readonly SettingChoice[];
 }

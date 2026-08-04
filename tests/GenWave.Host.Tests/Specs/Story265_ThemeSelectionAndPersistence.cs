@@ -186,13 +186,32 @@ public static class FeatureThemeSelectionAndPersistence
         [Fact]
         public async Task ItsChoicesAreExactlyTheShippedThemeSlugs()
         {
-            // Then it is a choice OVER THE SHIPPED SLUGS (AC6) — sourced from ThemeCatalog, the
-            // same catalog the theme.css endpoints resolve against, so a typo cannot produce a
-            // choice this setting will accept but no theme will ever resolve.
+            // Then it is a choice OVER THE SHIPPED SLUGS, each paired with its display label
+            // (AC6; T175) — sourced from ThemeCatalog, the same catalog the theme.css endpoints
+            // resolve against, so a typo cannot produce a choice this setting will accept but no
+            // theme will ever resolve, and the admin UI never has to invent display copy the
+            // manifest doesn't already carry. Also proves IsDefault (T175 follow-up #1) is set for
+            // EXACTLY the shipped-default slug's own entry, by record equality against a list built
+            // the same explicit-slug-match way StationSettingsAllowlist itself builds it.
             var theme = await GetStationThemeSetting();
 
-            var shippedSlugs = ThemeCatalog.LoadShipped().All.Select(t => t.Slug).ToList();
-            Assert.Equal(shippedSlugs, theme.Choices);
+            var expectedChoices = ThemeCatalog.LoadShipped().All
+                .Select(t => new SettingChoice(t.Slug, t.Name, t.Slug == ThemeCatalog.ShippedDefaultSlug))
+                .ToList();
+            Assert.Equal(expectedChoices, theme.Choices);
+        }
+
+        [Fact]
+        public async Task ExactlyOneChoiceIsFlaggedAsTheDefaultAndItIsTheShippedOne()
+        {
+            // Then exactly one choice carries IsDefault (T175 follow-up #1) — the admin UI's
+            // ChoiceSettingControl relies on this to label an empty Station:Theme value as "Station
+            // default (<name>)" instead of silently matching whatever choice sorts first.
+            var theme = await GetStationThemeSetting();
+
+            var defaultChoices = theme.Choices!.Where(c => c.IsDefault).ToList();
+            var defaultChoice = Assert.Single(defaultChoices);
+            Assert.Equal(ThemeCatalog.ShippedDefaultSlug, defaultChoice.Value);
         }
     }
 

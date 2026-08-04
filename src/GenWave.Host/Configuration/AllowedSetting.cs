@@ -21,13 +21,16 @@ namespace GenWave.Host.Configuration;
 /// Empty string for booleans that carry no numeric unit.
 /// </param>
 /// <param name="Choices">
-/// The closed set of valid values for a <see cref="SettingKind.Choice"/> entry (e.g. every shipped
-/// theme slug). <see langword="null"/> for every other <see cref="SettingKind"/> — a value outside
-/// this set is a <see cref="SettingValidator"/> rejection, never a silently-unresolvable typo.
+/// The closed set of valid <see cref="SettingChoice"/> value/label pairs for a
+/// <see cref="SettingKind.Choice"/> entry (e.g. every shipped theme, slug plus display name).
+/// <see langword="null"/> for every other <see cref="SettingKind"/> — a
+/// <see cref="SettingChoice.Value"/> outside this set is a <see cref="SettingValidator"/>
+/// rejection, never a silently-unresolvable typo; a <see cref="SettingChoice.Label"/> is never
+/// itself an acceptable input.
 /// </param>
 public sealed record AllowedSetting(
     string Key,
     SettingApplyMode ApplyMode,
     SettingKind Kind,
     string Unit,
-    IReadOnlyList<string>? Choices = null);
+    IReadOnlyList<SettingChoice>? Choices = null);

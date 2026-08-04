@@ -14,6 +14,7 @@ import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import type { LibraryDto } from "@/lib/library";
 import { AudienceSettingControl } from "./AudienceSettingControl";
+import { ChoiceSettingControl } from "./ChoiceSettingControl";
 import { CorrectionsSettingControl } from "./CorrectionsSettingControl";
 import { EngineByKindSettingControl } from "./EngineByKindSettingControl";
 import { SafeScopeAvailabilityBadge } from "./SafeScopeAvailabilityBadge";
@@ -339,6 +340,9 @@ const SETTING_CONTROL_REGISTRY: Record<string, ComponentType<SettingControlProps
   "Tts:Corrections": CorrectionsSettingControl,
   "Tts:EngineByKind": EngineByKindSettingControl,
   "Station:Audience": AudienceSettingControl,
+  // T175 (SPEC F102.14, STORY-265) — ChoiceSettingControl is generic over `setting.choices`, not
+  // Theme-specific; a future SettingKind.Choice setting registers the SAME component here.
+  "Station:Theme": ChoiceSettingControl,
 };
 
 /** applyMode badge copy (SPEC F28.12 wording verbatim; F44.3 adds the third "enrichment" mode). */
@@ -973,6 +977,7 @@ function SettingField({
           onChange={onSemanticChange}
           disabled={isPending}
           isDirty={value !== savedValue}
+          choices={setting.choices}
         />
       ) : setting.kind === "boolean" ? (
         <span className="flex min-h-10 items-center self-start">
@@ -1004,12 +1009,7 @@ function SettingField({
             </option>
           ))}
         </select>
-      ) : setting.kind === "string" || setting.kind === "choice" ? (
-        // "choice" (T163, SPEC F102.14) has no dedicated control yet — a text input is the
-        // closest existing branch (strictly no worse than pre-T163: it is what String rendered)
-        // rather than falling through to the number branch below, which would be actively wrong
-        // for a slug. A real closed-choice control (informed by `setting.choices`) is a
-        // follow-up, not built here — see SettingDto.kind's own remarks in settings-types.ts.
+      ) : setting.kind === "string" ? (
         <input
           id={controlId}
           name={setting.key}
@@ -1019,6 +1019,21 @@ function SettingField({
           disabled={isPending}
           aria-describedby={describedBy}
           className="h-9 w-full max-w-md rounded-[6px] border border-line bg-surface px-2 text-[0.85rem] text-ink disabled:opacity-50"
+        />
+      ) : setting.kind === "choice" ? (
+        // Kind-chain fallback (T175 follow-up #2): `Station:Theme` is registered above, so this
+        // never fires today, but the registry entry must stay an OPTIMIZATION, not the only thing
+        // standing between a Choice-kind setting and a validator-rejectable free-text/number input.
+        // Without this branch a second, unregistered `kind === "choice"` setting fell all the way
+        // through to the plain NUMBER input below — worse than T163's original stopgap fold into
+        // the text branch, since a number input can't even hold a slug.
+        <ChoiceSettingControl
+          controlId={controlId}
+          value={value}
+          onChange={onSemanticChange}
+          disabled={isPending}
+          isDirty={value !== savedValue}
+          choices={setting.choices}
         />
       ) : (
         <input
