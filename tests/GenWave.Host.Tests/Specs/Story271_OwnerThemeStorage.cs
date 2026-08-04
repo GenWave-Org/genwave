@@ -3,10 +3,11 @@
 // BDD specification — xUnit. Imported themes persist in a new station.theme store (db/31) and are
 // resolved/composed by ThemeCatalog exactly like shipped ones — the single Load path the Layer-A
 // design reserved ("an owner's stored manifest goes through the exact same Load path"). The
-// station's two embedded defaults remain the F102.7 offline floor when the DB is empty/unreachable.
+// station's embedded defaults remain the F102.7 offline floor when the DB is empty/unreachable.
 //
-// PENDING T181 (db/31 + IThemeStore) / T182 (ThemeCatalog shipped∪owner, wire) / T183 (Station:Theme
-// choice widens). At least one Scenario drives the real load/resolve path (T182 is a wire task).
+// T181 landed db/31 + IThemeStore (ThemeRepository, FakeThemeStore). T182 lands ThemeCatalog's
+// shipped∪owner load (CreateForStation + ReloadOwnerThemesAsync) — AC2, AC4 and AC5 below now drive
+// that real production path. T183 (Station:Theme choice widens) is still pending; AC3 stays skipped.
 // One assertion per Fact; sad path (a shipped slug cannot be shadowed) is its own block.
 //
 // AC1 (T181) is proven against FakeThemeStore (Fakes/FakeThemeStore.cs) rather than the real
@@ -14,19 +15,23 @@
 // (mirrors FakeScheduleStore's own remarks and Story225_WishParsing.cs's own "GenWave.Host.Tests has
 // no DatabaseFixture" precedent) — a real-Postgres proof of ThemeRepository's own SQL belongs to
 // GenWave.MediaLibrary.Tests, the same split Story209_PersonaImportRepository.cs draws for
-// PersonaImportRepository. T181 has no consumer yet (PLAN T181: "no consumer yet"), so there is no
-// wire-layer route to drive this fact through either, unlike Story237_ImportProvenance.cs's
-// WebApplicationFactory idiom — this fact calls IThemeStore directly instead.
+// PersonaImportRepository (its own Category=Integration ThemeRepository spec is that proof).
+// AC2/AC4/AC5 drive ThemeCatalog.CreateForStation/ReloadOwnerThemesAsync against FakeThemeStore for
+// the same reason — this project has no WebApplicationFactory route to exercise yet either (T184's
+// import route is the first), so calling the catalog's own production members directly IS "the
+// production load path" the task calls for.
 
 using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
+using GenWave.Host.Theming;
 using GenWave.Host.Tests.Fakes;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureOwnerThemeStorageAndResolution
 {
-    const string PendingStore = "pending T181/T182 — station.theme store + ThemeCatalog shipped∪owner";
     const string PendingChoice = "pending T183 — Station:Theme choice widens to imported slugs";
 
     // ── HAPPY PATH ──────────────────────────────────────────────────────────
@@ -59,13 +64,32 @@ public static class FeatureOwnerThemeStorageAndResolution
 
     public sealed class ScenarioTheCatalogLoadsShippedAndOwnerThemes
     {
-        [Fact(Skip = PendingStore)]
-        public void AllThreeResolveThroughTheOneLoadPath()
+        [Fact]
+        public async Task AllThreeResolveThroughTheOneLoadPath()
         {
-            // Given two embedded defaults and one stored owner theme,
-            // When ThemeCatalog loads (the production load path),
-            // Then all three resolve and compose through the one Load/ThemeManifestParser path (AC2).
-            Assert.Fail(PendingStore);
+            // Given the embedded set (whatever it is today — T191 later trims six to two, so this
+            // reads the count rather than hardcoding it) and one stored owner theme,
+            var shippedCount = ThemeCatalog.LoadShipped().All.Count;
+            var store = new FakeThemeStore();
+            await store.UpsertAsync(
+                "midnight-drive",
+                ThemeFixtures.ValidManifestJson("midnight-drive"),
+                "midnight-drive-catalog-entry",
+                CancellationToken.None);
+
+            // When ThemeCatalog loads through the production shipped∪owner path (CreateForStation,
+            // then the ReloadOwnerThemesAsync fold-in a boot warm-up or an import would trigger),
+            var catalog = ThemeCatalog.CreateForStation(store, NullLogger<ThemeCatalog>.Instance);
+            await catalog.ReloadOwnerThemesAsync(CancellationToken.None);
+
+            // Then the shipped default and the owner theme both resolve, and nothing else snuck in
+            // (AC2) — one assertion bundling the whole composite claim, mirroring this codebase's
+            // tuple-equality idiom for a single Specification checking several related facts at once.
+            var shippedResolves = catalog.TryGetBySlug(ThemeCatalog.ShippedDefaultSlug, out _);
+            var ownerResolves = catalog.TryGetBySlug("midnight-drive", out _);
+            Assert.Equal(
+                (ShippedResolves: true, OwnerResolves: true, TotalCount: shippedCount + 1),
+                (ShippedResolves: shippedResolves, OwnerResolves: ownerResolves, TotalCount: catalog.All.Count));
         }
     }
 
@@ -84,14 +108,33 @@ public static class FeatureOwnerThemeStorageAndResolution
 
     public sealed class ScenarioTheOfflineFloorHolds
     {
-        [Fact(Skip = PendingStore)]
-        public void TheTwoEmbeddedDefaultsStillResolveWithNoDatabase()
+        [Fact]
+        public async Task TheShippedDefaultStillResolvesWhenTheStoreIsUnreachable()
         {
-            // Given an empty or unreachable station database,
-            // When the app resolves a theme,
-            // Then the two embedded defaults still resolve and render (AC4, F102.7) — the new DB
-            //      dependency must not regress the never-unstyled offline floor.
-            Assert.Fail(PendingStore);
+            // Given a station.theme store that always throws — the "DB removed" case,
+            var catalog = ThemeCatalog.CreateForStation(new ThrowingThemeStore(), NullLogger<ThemeCatalog>.Instance);
+
+            // When the catalog attempts to fold owner themes in,
+            await catalog.ReloadOwnerThemesAsync(CancellationToken.None);
+
+            // Then the shipped default still resolves (AC4, F102.7) — the failure degraded silently
+            //      to the shipped-only set rather than escaping ReloadOwnerThemesAsync and taking the
+            //      whole catalog down with it.
+            Assert.True(catalog.TryGetBySlug(ThemeCatalog.ShippedDefaultSlug, out _));
+        }
+
+        [Fact]
+        public async Task TheShippedDefaultStillResolvesWhenTheStoreIsEmpty()
+        {
+            // Given a station.theme store with no owner themes stored yet — the never-imported case,
+            var catalog = ThemeCatalog.CreateForStation(new FakeThemeStore(), NullLogger<ThemeCatalog>.Instance);
+
+            // When the catalog attempts to fold owner themes in,
+            await catalog.ReloadOwnerThemesAsync(CancellationToken.None);
+
+            // Then the shipped default still resolves (AC4, F102.7) — an empty owner set is not a
+            //      failure, but it must never leave the catalog without its offline fallback either.
+            Assert.True(catalog.TryGetBySlug(ThemeCatalog.ShippedDefaultSlug, out _));
         }
     }
 
@@ -99,14 +142,51 @@ public static class FeatureOwnerThemeStorageAndResolution
 
     public sealed class ScenarioAShippedSlugCannotBeShadowed
     {
-        [Fact(Skip = PendingStore)]
-        public void ItIsRefusedAndTheNoDuplicateSlugInvariantHolds()
+        [Fact]
+        public async Task ItIsIgnoredAndTheShippedManifestStillResolves()
         {
-            // Given a manifest whose slug equals an embedded default's,
-            // When it is stored,
-            // Then it is refused and ThemeCatalog keeps its no-duplicate-slug invariant (AC5, F103.8)
-            //      — the offline-fallback defaults cannot be shadowed.
-            Assert.Fail(PendingStore);
+            // Given the real shipped default's own name, and an owner row claiming that same slug
+            // with a different one,
+            var shippedName = ThemeCatalog.LoadShipped().All.Single(theme => theme.Slug == ThemeCatalog.ShippedDefaultSlug).Name;
+            var store = new FakeThemeStore();
+            await store.UpsertAsync(
+                ThemeCatalog.ShippedDefaultSlug,
+                ThemeFixtures.ValidManifestJson(ThemeCatalog.ShippedDefaultSlug, name: "Imposter"),
+                "midnight-drive-catalog-entry",
+                CancellationToken.None);
+
+            // When ThemeCatalog loads through the production shipped∪owner path,
+            var catalog = ThemeCatalog.CreateForStation(store, NullLogger<ThemeCatalog>.Instance);
+            await catalog.ReloadOwnerThemesAsync(CancellationToken.None);
+
+            // Then the slug still resolves to the shipped manifest, never the owner impostor (AC5,
+            //      F103.8) — one assertion bundling both halves; the no-duplicate-slug invariant Load
+            //      enforces holds because the collision was skipped, not thrown (an import-time
+            //      refusal is T184's own concern, not this catalog's).
+            var resolves = catalog.TryGetBySlug(ThemeCatalog.ShippedDefaultSlug, out var resolved);
+            Assert.Equal(
+                (Resolves: true, Name: shippedName),
+                (Resolves: resolves, Name: resolved?.Name));
         }
     }
+}
+
+/// <summary>
+/// <see cref="IThemeStore"/> double whose <see cref="GetAllAsync"/> always throws — simulates the
+/// "station database unreachable" case (SPEC F102.7) so
+/// <see cref="FeatureOwnerThemeStorageAndResolution.ScenarioTheOfflineFloorHolds"/> can prove
+/// <see cref="ThemeCatalog.ReloadOwnerThemesAsync"/> degrades to the shipped-only set instead of
+/// propagating — mirrors <c>Story080_SafeSeedOnBoot.cs</c>'s own <c>ThrowingMarkerStore</c> idiom for
+/// the identical "simulated DB failure, boot must not depend on it" shape.
+/// </summary>
+file sealed class ThrowingThemeStore : IThemeStore
+{
+    public Task UpsertAsync(string slug, string definition, string? importedFrom, CancellationToken ct) =>
+        throw new InvalidOperationException("simulated DB failure");
+
+    public Task<IReadOnlyList<OwnerTheme>> GetAllAsync(CancellationToken ct) =>
+        throw new InvalidOperationException("simulated DB failure");
+
+    public Task<OwnerTheme?> GetBySlugAsync(string slug, CancellationToken ct) =>
+        throw new InvalidOperationException("simulated DB failure");
 }

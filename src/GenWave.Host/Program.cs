@@ -52,13 +52,18 @@ var builder = WebApplication.CreateBuilder(args);
 // (including builder.AddGenWaveStationSettings() below) has a chance to run, means nothing can ever
 // touch the allowlist first — the boot-time failure guarantee holds by construction rather than by
 // what happens not to run yet.
-var themeCatalog = ThemeCatalog.LoadShipped();
-if (!themeCatalog.TryGetBySlug(ThemeCatalog.ShippedDefaultSlug, out _))
+// This canary result is deliberately NOT what gets registered for request handling below — it is a
+// throwaway, embedded-only ThemeCatalog.LoadShipped() build that exists purely to win the ordering
+// race this block's own remarks describe. The real, DI-registered ThemeCatalog (SPEC F103.7,
+// STORY-271, PLAN T182) is built via ThemeCatalog.CreateForStation once IThemeStore exists
+// (builder.AddGenWaveStationSettings() below registers it) — CreateForStation re-parses these same
+// embedded resources, so if this canary passes, that build is guaranteed to as well.
+var shippedThemeCanary = ThemeCatalog.LoadShipped();
+if (!shippedThemeCanary.TryGetBySlug(ThemeCatalog.ShippedDefaultSlug, out _))
 {
     throw new InvalidOperationException(
         $"shipped theme catalog is missing its own default slug '{ThemeCatalog.ShippedDefaultSlug}'");
 }
-builder.Services.AddSingleton(themeCatalog);
 
 // Process boot instant, captured once here — not lazily by DI on first resolution — so
 // GET /api/status's startedAt (SPEC F28.6) reflects true process start.
@@ -67,6 +72,17 @@ builder.Services.AddSingleton(new ProcessStartTime(DateTimeOffset.UtcNow));
 // Station settings overlay + store + persona store (ConnectionStrings:Station). Mutates
 // builder.Configuration (appends the live overlay source), so it runs before anything binds options.
 builder.AddGenWaveStationSettings();
+
+// The runtime theme catalog (SPEC F103.7, STORY-271, PLAN T182): shipped ∪ owner, over the
+// IThemeStore AddGenWaveStationSettings() just registered. CreateForStation itself reads only
+// embedded resources (no DB call merely from resolving this singleton — the shipped-only canary
+// above already proved these same resources parse clean); ThemeCatalogOwnerLoadHostedService below
+// is what folds station.theme's rows in, once per boot, without blocking Kestrel from listening —
+// the SPEC F102.7 offline floor holds throughout: an unreachable/empty store leaves this catalog
+// serving the shipped-only set it started with.
+builder.Services.AddSingleton(sp =>
+    ThemeCatalog.CreateForStation(sp.GetRequiredService<IThemeStore>(), sp.GetRequiredService<ILogger<ThemeCatalog>>()));
+builder.Services.AddHostedService<ThemeCatalogOwnerLoadHostedService>();
 
 var cfg = builder.Configuration;
 
