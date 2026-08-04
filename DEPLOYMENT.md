@@ -40,6 +40,45 @@ How each flag is set:
 
 ---
 
+## 🎨 Station theme (`Station:Theme`)
+
+A *live* allowlisted setting naming the station's visual theme by **slug**. Set it through
+Settings in the Admin UI (a closed dropdown — a typo cannot produce an unresolvable slug),
+or seed it at boot via the `Station__Theme` env var.
+
+⚠️ **The env-seeded path is the only one on an appliance box.** With `Admin:Enabled=false`,
+`PUT /api/settings` is closed, so `Station__Theme` in the `api` service's `environment:` block
+is how a pinned box gets its look — exactly like `Station__SpectatorMode`.
+
+⚠️ **Same DB-overrides-env trap.** A value saved in the settings DB **outranks** the env var
+forever. A box whose theme "won't change" despite the env being set has a stale DB row, not a
+bad env — `GET /api/settings` reports `source: "override"` when a row is winning and
+`"default"` when it is not, which is how you tell the two apart.
+
+**Blank is a legitimate value, and it is the default.** There is deliberately no seed in
+`appsettings.json`: the precedence chain terminates at the shipped default structurally, so
+seeding a literal would duplicate a value nothing enforces. Resolution order, highest first:
+
+1. the visitor's own `genwave-theme` cookie (their personal choice; not yet settable — the
+   switchers are unbuilt)
+2. the `Station:Theme` settings row
+3. the `Station:Theme` env default
+4. the shipped default
+
+An unrecognised slug at **any** level falls through to the next rather than erroring, so a
+bad value degrades to the shipped default rather than an unstyled page.
+
+> ℹ️ **Today this is a one-option dropdown.** GenWave currently ships a single theme
+> (*Cat's Whisker*), and the theme switchers are not built yet — so setting this changes
+> nothing visible. It is documented now because the env-seeded appliance path and the
+> DB-overrides-env trap are already live and already bite.
+
+⚠️ Not to be confused with the **`genwave-mode`** cookie, which carries light/dark. Theme and
+mode are independent axes: a visitor who chose dark keeps dark when the station's theme
+changes under them.
+
+---
+
 ## 📡 Reference public topology
 
 One public hostname, fronted by Caddy, that can only ever reach two things — the
