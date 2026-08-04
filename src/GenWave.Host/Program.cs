@@ -34,10 +34,11 @@ var builder = WebApplication.CreateBuilder(args);
 // to route around, so it throws; doing that here means a bad manifest stops the process before it
 // ever accepts a request, rather than surfacing as a 500 to whichever visitor happens to be first.
 // The extra assertion below covers a narrower case LoadShipped itself does not: both serving
-// surfaces (spectator today, admin at T161) resolve to ThemeCatalog.ShippedDefaultSlug as their
-// shipped default (T164 has not landed real resolution yet) — if that slug were ever renamed or
-// dropped from the shipped set, this converts what would otherwise be a per-request failure into
-// the same boot-time failure as every other catalog defect.
+// surfaces' shared ThemeCatalog.Resolve (PLAN T164) falls all the way through to
+// ThemeCatalog.ShippedDefaultSlug as the floor of its precedence cascade — if that slug were ever
+// renamed or dropped from the shipped set, this converts what would otherwise be a per-request
+// failure (Resolve's own InvalidOperationException) into the same boot-time failure as every other
+// catalog defect.
 //
 // Deliberately placed as the FIRST statement after builder construction — by construction, not by
 // coincidence of ordering (T163 review hardening). StationSettingsAllowlist carries its own

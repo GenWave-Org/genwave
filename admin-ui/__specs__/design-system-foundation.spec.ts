@@ -114,7 +114,7 @@ describe("Feature: Design-system foundation", () => {
   });
 
   // Q3 review advisory, folded into Q11 (STORY-093): the system-dark fallback
-  // (nobody has an explicit genwave-theme cookie, OS prefers dark) duplicates
+  // (nobody has an explicit genwave-mode cookie, OS prefers dark) duplicates
   // :root[data-theme="dark"]'s values verbatim, since CSS custom properties
   // have no block-reuse mechanism (SPEC F28.4, see globals.css's own comment
   // there). A future dark-theme token tweak that only touches one of the two
