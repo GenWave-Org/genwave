@@ -20,8 +20,14 @@ namespace GenWave.Host.Configuration;
 /// A short unit label for display next to the input (e.g. <c>"LUFS"</c>, <c>"seconds"</c>).
 /// Empty string for booleans that carry no numeric unit.
 /// </param>
+/// <param name="Choices">
+/// The closed set of valid values for a <see cref="SettingKind.Choice"/> entry (e.g. every shipped
+/// theme slug). <see langword="null"/> for every other <see cref="SettingKind"/> — a value outside
+/// this set is a <see cref="SettingValidator"/> rejection, never a silently-unresolvable typo.
+/// </param>
 public sealed record AllowedSetting(
     string Key,
     SettingApplyMode ApplyMode,
     SettingKind Kind,
-    string Unit);
+    string Unit,
+    IReadOnlyList<string>? Choices = null);

@@ -25,4 +25,12 @@ public enum SettingKind
     /// <c>&lt;input type="text"&gt;</c> (SPEC F36.2, STORY-124).
     /// </summary>
     String,
+
+    /// <summary>
+    /// A closed set of allowed string values (e.g. a theme slug) — rendered as a
+    /// <c>&lt;select&gt;</c>, never a free-text input. <see cref="AllowedSetting.Choices"/> carries
+    /// the valid set; unlike <see cref="String"/>, a value outside it is a validation error, not a
+    /// silently-unresolvable typo (SPEC F102.14, STORY-265).
+    /// </summary>
+    Choice,
 }

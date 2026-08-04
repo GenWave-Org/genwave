@@ -121,8 +121,16 @@ public static class FeatureSeededDefaults
     /// contract IS that blank — no artwork URL is ever sent to a listening client until an
     /// operator sets one. Station:Timezone (gh-#117) joins on the same rationale: empty is its
     /// spec'd default — "use the container's own clock", the pre-gh-#117 behavior byte-identical —
-    /// and seeding a concrete zone would silently repoint every fresh deploy's DJ clock. Every
-    /// other allowlisted key's C# default is non-empty.
+    /// and seeding a concrete zone would silently repoint every fresh deploy's DJ clock.
+    /// Station:Theme (SPEC F102.5, F102.14, STORY-265, PLAN T163 review hardening) joins on the
+    /// SAME rationale, not the URL/free-text one: the visitor-cookie to settings-row to env-default
+    /// to shipped-default precedence chain already terminates at
+    /// <see cref="GenWave.Host.Theming.ThemeCatalog.ShippedDefaultSlug"/> without a config entry —
+    /// seeding this key would duplicate that structural floor as an appsettings.json literal
+    /// nothing enforces against the const it is copying, AND would permanently shadow F102.5's own
+    /// "no value anywhere" branch so it never fires against a real deployment. Blank here is the
+    /// chain having a floor, not a gap F55.1 exists to close. Every other allowlisted key's C#
+    /// default is non-empty.
     /// </summary>
     static readonly IReadOnlySet<string> HonestlyBlankKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -135,6 +143,7 @@ public static class FeatureSeededDefaults
         "Tts:EngineByKind",
         "Station:Envelope:Genres",
         "Station:Timezone",
+        "Station:Theme",
     };
 
     /// <summary>

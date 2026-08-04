@@ -102,4 +102,20 @@ public sealed class StationOptions
     /// container's clock rather than faulting the patter path.
     /// </summary>
     public string Timezone { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The station's chosen theme slug (SPEC F102.5, F102.14, STORY-265, PLAN T163/T164) — the
+    /// second-from-the-floor rung of theme resolution (visitor cookie → this → shipped default).
+    /// Not required — defaults to empty, the honest "no station value set anywhere" case
+    /// (<c>Station:Theme</c> is deliberately unseeded in <c>appsettings.json</c>; see
+    /// <c>StationSettingsAllowlist</c>'s own remarks), which resolution treats identically to an
+    /// unresolvable slug: fall through to <see cref="GenWave.Host.Theming.ThemeCatalog.ShippedDefaultSlug"/>.
+    /// Read live, per request, through <c>IOptionsMonitor&lt;StationOptions&gt;</c> by both theme
+    /// endpoints, so a <c>PUT /api/settings</c> here reaches the very next request with no api
+    /// restart — the DB overlay provider is registered after env/appsettings (see
+    /// <c>StationSettingsHostingExtensions</c>), so this single value already reflects whichever of
+    /// "saved settings row" or "env default" currently wins; resolution itself never has to choose
+    /// between the two.
+    /// </summary>
+    public string Theme { get; set; } = string.Empty;
 }

@@ -42,7 +42,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import type { cookies } from "next/headers";
 import type { usePathname } from "next/navigation";
-import { THEME_COOKIE_NAME } from "../lib/theme";
+import { MODE_COOKIE_NAME } from "../lib/theme";
 
 const ROOT = path.resolve(__dirname, "..");
 
@@ -232,8 +232,8 @@ describe("Feature: App shell", () => {
   });
 
   // ---------------------------------------------------------------------------
-  describe("Scenario: theme defaults to system and the toggle persists", () => {
-    it("follows prefers-color-scheme when no genwave-theme cookie exists (no data-theme attribute rendered)", async () => {
+  describe("Scenario: mode defaults to system and the toggle persists", () => {
+    it("follows prefers-color-scheme when no genwave-mode cookie exists (no data-theme attribute rendered)", async () => {
       mockCookieStore(noSessionCookieStore());
       const { default: RootLayout } = await import("../app/layout");
 
@@ -242,7 +242,7 @@ describe("Feature: App shell", () => {
       expect(elementProps(html)["data-theme"]).toBeUndefined();
     });
 
-    it("stores the toggled choice in the genwave-theme cookie and flips <html> immediately", async () => {
+    it("stores the toggled choice in the genwave-mode cookie and flips <html> immediately", async () => {
       mockMatchMedia(false); // system prefers light
       const { ThemeToggle } = await import("../app/(authed)/_components/ThemeToggle");
 
@@ -251,12 +251,12 @@ describe("Feature: App shell", () => {
 
       fireEvent.click(button);
 
-      expect(document.cookie).toContain(`${THEME_COOKIE_NAME}=dark`);
+      expect(document.cookie).toContain(`${MODE_COOKIE_NAME}=dark`);
       expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     });
 
-    it("stamps data-theme on <html> during the server render (no wrong-theme flash)", async () => {
-      mockCookieStore({ get: (name) => (name === THEME_COOKIE_NAME ? { value: "dark" } : undefined) });
+    it("stamps data-theme on <html> during the server render (no wrong-mode flash)", async () => {
+      mockCookieStore({ get: (name) => (name === MODE_COOKIE_NAME ? { value: "dark" } : undefined) });
       const { default: RootLayout } = await import("../app/layout");
 
       const html = await RootLayout({ children: "content" });
@@ -310,9 +310,9 @@ describe("Feature: App shell", () => {
   // SAD PATH
   // ---------------------------------------------------------------------------
 
-  describe("Scenario: rejecting a garbage theme cookie (sad path)", () => {
-    it("falls back to prefers-color-scheme when genwave-theme holds an invalid value", async () => {
-      mockCookieStore({ get: (name) => (name === THEME_COOKIE_NAME ? { value: "banana" } : undefined) });
+  describe("Scenario: rejecting a garbage mode cookie (sad path)", () => {
+    it("falls back to prefers-color-scheme when genwave-mode holds an invalid value", async () => {
+      mockCookieStore({ get: (name) => (name === MODE_COOKIE_NAME ? { value: "banana" } : undefined) });
       const { default: RootLayout } = await import("../app/layout");
 
       const html = await RootLayout({ children: "content" });
