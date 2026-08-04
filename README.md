@@ -102,7 +102,8 @@ The broadcast never depends on a sick dependency. **LLM failure is a mode, not a
    ├─ GenWave.Loudness/      #   Ffmpeg{Loudness,Cue,Energy}Analyzer + AubioBpmAnalyzer; shared by MediaLibrary + Tts
    ├─ GenWave.Tts/           #   Kokoro client, LLM copy writer (ISegmentCopyWriter), render→measure→cache
    ├─ GenWave.Orchestration/ #   Orchestrator (INextItemProvider): music + TTS patter interleave
-   └─ GenWave.Host/          #   composition root, API (controllers + minimal API), engine control, feeder
+   └─ GenWave.Host/          #   composition root, API (controllers + minimal API), engine control, feeder,
+                             #   theme composition (Theming/ — manifests → served CSS, both surfaces)
 ```
 
 ## Tests
