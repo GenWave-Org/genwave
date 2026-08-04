@@ -17,11 +17,18 @@ namespace GenWave.Host.Api;
 /// </param>
 /// <param name="Kind">
 ///   <c>"boolean"</c> for toggle settings rendered as a checkbox;
-///   <c>"number"</c> for numeric settings rendered as a number input.
+///   <c>"number"</c> for numeric settings rendered as a number input;
+///   <c>"choice"</c> for settings restricted to a closed set — see <paramref name="Choices"/>.
 /// </param>
 /// <param name="Unit">
 ///   Short unit label for display (e.g. <c>"LUFS"</c>, <c>"seconds"</c>).
 ///   Empty string for booleans.
+/// </param>
+/// <param name="Choices">
+///   The closed set of valid values, present only when <paramref name="Kind"/> is
+///   <c>"choice"</c> (e.g. every shipped theme slug for <c>Station:Theme</c>) — lets a client
+///   render a <c>&lt;select&gt;</c> instead of a text box, so a typo cannot produce an
+///   unresolvable value (SPEC F102.14). <see langword="null"/> for every other kind.
 /// </param>
 public sealed record SettingDto(
     string Key,
@@ -29,4 +36,5 @@ public sealed record SettingDto(
     string Source,
     string ApplyMode,
     string Kind,
-    string Unit);
+    string Unit,
+    IReadOnlyList<string>? Choices = null);

@@ -13,15 +13,21 @@
 // ⚠️ Selection inherits the Station:SpectatorMode trap — a saved settings row silently
 // outranks the env value forever. That is how a pinned demo box's theme "won't change".
 //
-// PENDING T163–T165.
+// T163 implements ScenarioTheSettingPresentsAsAClosedChoice (AC6): SettingKind.Choice, the
+// Station:Theme allowlist entry, and its Choices sourced from ThemeCatalog. PENDING T164–T165.
 
-using Xunit;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
+using GenWave.Host.Api;
+using GenWave.Host.Configuration;
+using GenWave.Host.Theming;
 
 namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureThemeSelectionAndPersistence
 {
-    const string PendingChoiceKind = "Pending T163 — see docs/PLAN.md";
     const string PendingResolution = "Pending T164 — see docs/PLAN.md";
     const string PendingWire = "Pending T165 — see docs/PLAN.md";
 
@@ -91,14 +97,57 @@ public static class FeatureThemeSelectionAndPersistence
 
     public sealed class ScenarioTheSettingPresentsAsAClosedChoice
     {
-        [Fact(Skip = PendingChoiceKind)]
-        public void ItsKindIsAChoiceOverTheShippedSlugs()
+        // Given the settings surface describing Station:Theme (AC6) — a real SettingsController,
+        // no live stack or DB required (same in-process pattern as Story100/Story120/Story124).
+
+        sealed class FakeSettingsStore : IStationSettingsStore
         {
-            // Arrange: the settings surface describing Station:Theme.
-            // Act:     read its kind.
-            // Assert:  it is a choice over the shipped slugs, NOT free text (AC6). Requires
-            //          SettingKind.Choice — Boolean/Number/NumberList/String are today's set.
-            Assert.Fail("pending T163 — SettingKind.Choice");
+            public Task WriteAsync(string key, object value, CancellationToken cancellationToken = default) =>
+                throw new NotSupportedException("this scenario only reads the settings surface");
+
+            public Task<IReadOnlyDictionary<string, string>> ReadAllAsync(CancellationToken cancellationToken = default) =>
+                Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>());
+        }
+
+        static async Task<SettingDto> GetStationThemeSetting()
+        {
+            var config = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Station:Theme"] = ThemeCatalog.ShippedDefaultSlug,
+                })
+                .Build();
+            var controller = new SettingsController(
+                config, new FakeSettingsStore(), new SettingValidator(config), NullLogger<SettingsController>.Instance)
+            {
+                ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
+            };
+
+            var ok = Assert.IsType<OkObjectResult>(await controller.Get(CancellationToken.None));
+            var items = Assert.IsAssignableFrom<IEnumerable<SettingDto>>(ok.Value);
+            return items.Single(i => i.Key.Equals("Station:Theme", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public async Task ItsKindIsAChoiceNotFreeText()
+        {
+            // When its kind is read, Then it is a choice, not free text (AC6). Requires
+            // SettingKind.Choice — Boolean/Number/NumberList/String are today's other kinds.
+            var theme = await GetStationThemeSetting();
+
+            Assert.Equal("choice", theme.Kind);
+        }
+
+        [Fact]
+        public async Task ItsChoicesAreExactlyTheShippedThemeSlugs()
+        {
+            // Then it is a choice OVER THE SHIPPED SLUGS (AC6) — sourced from ThemeCatalog, the
+            // same catalog the theme.css endpoints resolve against, so a typo cannot produce a
+            // choice this setting will accept but no theme will ever resolve.
+            var theme = await GetStationThemeSetting();
+
+            var shippedSlugs = ThemeCatalog.LoadShipped().All.Select(t => t.Slug).ToList();
+            Assert.Equal(shippedSlugs, theme.Choices);
         }
     }
 

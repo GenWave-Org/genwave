@@ -67,6 +67,7 @@ export const SETTINGS_HELP_KEYS = [
   "Community:CatalogIndexUrl",
   "Station:Audience",
   "Station:Timezone",
+  "Station:Theme",
 ] as const;
 
 export type SettingsHelpKey = (typeof SETTINGS_HELP_KEYS)[number];

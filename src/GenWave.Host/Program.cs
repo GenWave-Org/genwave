@@ -28,6 +28,37 @@ using GenWave.Tts;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Theme system (SPEC F102, ARCHITECTURE "Theme system", PLAN T160): the shipped manifests are
+// loaded and validated ONCE here, at boot — not lazily on first request. ThemeCatalog.LoadShipped's
+// own remarks say a malformed manifest is a build-time authoring bug, not a request-time condition
+// to route around, so it throws; doing that here means a bad manifest stops the process before it
+// ever accepts a request, rather than surfacing as a 500 to whichever visitor happens to be first.
+// The extra assertion below covers a narrower case LoadShipped itself does not: both serving
+// surfaces (spectator today, admin at T161) resolve to ThemeCatalog.ShippedDefaultSlug as their
+// shipped default (T164 has not landed real resolution yet) — if that slug were ever renamed or
+// dropped from the shipped set, this converts what would otherwise be a per-request failure into
+// the same boot-time failure as every other catalog defect.
+//
+// Deliberately placed as the FIRST statement after builder construction — by construction, not by
+// coincidence of ordering (T163 review hardening). StationSettingsAllowlist carries its own
+// independent ThemeCatalog.LoadShipped() call in a static field initializer (see that class's own
+// remarks) — a beforefieldinit type, whose CLR-mandated init point is merely "sometime before first
+// access", not "here". If any future code between builder construction and this point ever touched
+// StationSettingsAllowlist first (directly, or transitively through an extension method), a
+// corrupt shipped manifest would throw a TypeInitializationException-wrapped ThemeManifestException
+// instead of this clean, unwrapped one — the same failure, but the caller doing exception-type
+// matching (logs, monitoring) sees a different shape. Loading here, before ANY other statement
+// (including builder.AddGenWaveStationSettings() below) has a chance to run, means nothing can ever
+// touch the allowlist first — the boot-time failure guarantee holds by construction rather than by
+// what happens not to run yet.
+var themeCatalog = ThemeCatalog.LoadShipped();
+if (!themeCatalog.TryGetBySlug(ThemeCatalog.ShippedDefaultSlug, out _))
+{
+    throw new InvalidOperationException(
+        $"shipped theme catalog is missing its own default slug '{ThemeCatalog.ShippedDefaultSlug}'");
+}
+builder.Services.AddSingleton(themeCatalog);
+
 // Process boot instant, captured once here — not lazily by DI on first resolution — so
 // GET /api/status's startedAt (SPEC F28.6) reflects true process start.
 builder.Services.AddSingleton(new ProcessStartTime(DateTimeOffset.UtcNow));
@@ -170,24 +201,6 @@ builder.Services
     })
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddSingleton<CatalogProxyService>();
-
-// Theme system (SPEC F102, ARCHITECTURE "Theme system", PLAN T160): the shipped manifests are
-// loaded and validated ONCE here, at boot — not lazily on first request. ThemeCatalog.LoadShipped's
-// own remarks say a malformed manifest is a build-time authoring bug, not a request-time condition
-// to route around, so it throws; doing that here means a bad manifest stops the process before it
-// ever accepts a request, rather than surfacing as a 500 to whichever visitor happens to be first.
-// The extra assertion below covers a narrower case LoadShipped itself does not: both serving
-// surfaces (spectator today, admin at T161) resolve to ThemeCatalog.ShippedDefaultSlug as their
-// shipped default (T164 has not landed real resolution yet) — if that slug were ever renamed or
-// dropped from the shipped set, this converts what would otherwise be a per-request failure into
-// the same boot-time failure as every other catalog defect.
-var themeCatalog = ThemeCatalog.LoadShipped();
-if (!themeCatalog.TryGetBySlug(ThemeCatalog.ShippedDefaultSlug, out _))
-{
-    throw new InvalidOperationException(
-        $"shipped theme catalog is missing its own default slug '{ThemeCatalog.ShippedDefaultSlug}'");
-}
-builder.Services.AddSingleton(themeCatalog);
 
 builder.Services.AddControllers();
 

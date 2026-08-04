@@ -294,6 +294,13 @@ public sealed class SettingValidator(IConfiguration configuration)
             // Linux accepts IANA ids directly), so a typo is a 400 here rather than a silent
             // fall-back at prompt time.
             ["Station:Timezone"] = IsValidStationTimezone,
+
+            // Theme selection (SPEC F102.14, STORY-265, PLAN T163) — the first SettingKind.Choice
+            // key: membership in ShippedThemeSlugs, not a shape/parseability check like every
+            // other entry above. This is what makes the kind's own promise real — a value outside
+            // the shipped set is rejected HERE, at write time, rather than silently falling back
+            // to the default at read time the way an unresolvable String value would (F102.6).
+            ["Station:Theme"] = IsValidThemeSlug,
         };
 
     // ── Per-key validation ─────────────────────────────────────────────────────────────────────
@@ -436,6 +443,14 @@ public sealed class SettingValidator(IConfiguration configuration)
             return false;
         }
     }
+
+    // Station:Theme (SPEC F102.14, STORY-265) — membership in the shipped slug set, sourced from
+    // StationSettingsAllowlist.ShippedThemeSlugs (in turn sourced from ThemeCatalog — see that
+    // field's own remarks on why the allowlist, not this validator, owns loading it). Ordinal
+    // comparison mirrors ThemeCatalog's own slug-lookup dictionary (case-sensitive by design —
+    // slugs are kebab-case identifiers, not display text).
+    static bool IsValidThemeSlug(string v) =>
+        StationSettingsAllowlist.ByKey["Station:Theme"].Choices?.Contains(v, StringComparer.Ordinal) == true;
 
     /// <summary>
     /// An absolute, well-formed http/https URL (used for <c>Tts:Endpoint</c>/<c>Llm:Endpoint</c>,
@@ -812,6 +827,9 @@ public sealed class SettingValidator(IConfiguration configuration)
         var k when k.Equals("Station:Timezone", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an IANA timezone id this host " +
                "recognizes (e.g. America/Edmonton), or empty to use the container's own clock.",
+        var k when k.Equals("Station:Theme", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be one of the shipped theme " +
+               $"slugs: {string.Join(", ", StationSettingsAllowlist.ByKey[key].Choices ?? Array.Empty<string>())}.",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }
