@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { apiGet } from "@/lib/api";
+import type { ThemeChoice } from "@/lib/theme";
 import { BreadcrumbTitleProvider } from "./_components/BreadcrumbTitle";
 import { Breadcrumbs } from "./_components/Breadcrumbs";
 import { MobileNav } from "./_components/MobileNav";
 import { Sidebar } from "./_components/Sidebar";
-import { ThemeToggle } from "./_components/ThemeToggle";
+import { ThemeSwitcher } from "./_components/ThemeSwitcher";
 import { Toaster } from "@/components/ui/toast";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 
@@ -25,30 +26,73 @@ interface StationDto {
  * entry (SPEC F90.1) — mirrors `PersonasPage`'s own single-key read off `GET /api/settings`. */
 const CATALOG_INDEX_URL_KEY = "Community:CatalogIndexUrl";
 
-/** Shape of a `GET /api/settings` row — only the field this layout reads. */
+/** The `Station:Theme` setting key (SPEC F102.12/F102.13, PLAN T167) — its `choices` are the
+ * SAME closed set `GET /api/settings` already carries for the Settings-page's `ChoiceSettingControl`
+ * (T175); this layout reads the identical row for the header's `ThemeSwitcher` rather than adding
+ * a second endpoint (the /design ruling, 2026-08-04). */
+const THEME_SETTING_KEY = "Station:Theme";
+
+/** Shape of a `GET /api/settings` row — only the fields this layout reads. `choices` is present
+ * only for `Station:Theme` (a `kind === "choice"` row); every other row this layout scans leaves
+ * it `undefined`, which `fetchSettingsSnapshot` treats as "no theme choices on this row". */
 interface SettingRow {
   key: string;
   value: string;
+  choices?: ThemeChoice[];
 }
 
+/** Everything this layout's header/nav chrome derives from `GET /api/settings` (SPEC F90.1,
+ * F102.12/F102.13, PLAN T167). */
+interface SettingsSnapshot {
+  catalogEnabled: boolean;
+  themeChoices: readonly ThemeChoice[];
+  stationThemeSlug: string;
+}
+
+const EMPTY_SETTINGS_SNAPSHOT: SettingsSnapshot = {
+  catalogEnabled: false,
+  themeChoices: [],
+  stationThemeSlug: "",
+};
+
 /**
- * Resolves whether the Persona Catalog nav entry should be listed (SPEC F90.1, PLAN T102):
- * `Community:CatalogIndexUrl` non-empty is the SAME fail-closed signal `CommunityCatalogAccessor
- * .IsEnabled` uses server-side for the actual `/api/catalog/*` routes — read here via the settings
- * surface (a plain DB-backed read) rather than probing `/api/catalog/index` itself, which would
- * mean every navigation on every page pays for a live upstream catalog fetch just to decide
- * whether to show a sidebar link. Any failure (network error, non-200) degrades to `false` — fail
- * closed, matching F90.1's own posture, never a link into a feature this layout couldn't confirm.
+ * The ONE `GET /api/settings` read this layout needs for two otherwise-unrelated pieces of chrome
+ * — the /design ruling (SPEC F102.12, 2026-08-04): the admin theme switcher sources its list from
+ * this SAME settings response, never a second/templated endpoint, symmetric with how the
+ * spectator surface's switcher (T166) reads its own list. A future settings-derived chrome flag
+ * should extend this function's derivation, not add a second identical `/api/settings` fetch
+ * beside it.
+ *
+ * - `catalogEnabled`: `Community:CatalogIndexUrl` non-empty is the SAME fail-closed signal
+ *   `CommunityCatalogAccessor.IsEnabled` uses server-side for the actual `/api/catalog/*` routes
+ *   (SPEC F90.1, PLAN T102) — read here via the settings surface rather than probing
+ *   `/api/catalog/index` itself, which would mean every navigation on every page pays for a live
+ *   upstream catalog fetch just to decide whether to show a sidebar link.
+ * - `themeChoices`/`stationThemeSlug`: the `Station:Theme` row's closed set and current value
+ *   (`SettingDto.choices`/`.value`) — passed straight to `ThemeSwitcher`, which resolves the
+ *   visitor's actual pre-selection (cookie > station value > `isDefault` choice) client-side.
+ *
+ * Any failure (network error, non-200) degrades to {@link EMPTY_SETTINGS_SNAPSHOT} — fail closed
+ * for the catalog flag (matching F90.1's own posture); the header's ThemeSwitcher renders with no
+ * theme choices in that case (mode toggle still works — see its own remarks).
  */
-async function fetchCatalogEnabled(cookieHeader: string): Promise<boolean> {
+async function fetchSettingsSnapshot(cookieHeader: string): Promise<SettingsSnapshot> {
   try {
     const response = await apiGet("/api/settings", { cookies: cookieHeader });
-    if (!response.ok) return false;
+    if (!response.ok) return EMPTY_SETTINGS_SNAPSHOT;
     const settings = (await response.json()) as SettingRow[];
-    const row = settings.find((s) => s.key === CATALOG_INDEX_URL_KEY);
-    return row !== undefined && row.value.trim() !== "";
+
+    const catalogRow = settings.find((s) => s.key === CATALOG_INDEX_URL_KEY);
+    const catalogEnabled = catalogRow !== undefined && catalogRow.value.trim() !== "";
+
+    const themeRow = settings.find((s) => s.key === THEME_SETTING_KEY);
+    return {
+      catalogEnabled,
+      themeChoices: themeRow?.choices ?? [],
+      stationThemeSlug: themeRow?.value ?? "",
+    };
   } catch {
-    return false;
+    return EMPTY_SETTINGS_SNAPSHOT;
   }
 }
 
@@ -75,7 +119,7 @@ async function fetchStationName(cookieHeader: string): Promise<string> {
 
 // Persistent shell for every authenticated route (SPEC F28.5). Auth itself is
 // already enforced by middleware.ts on these paths — this layout only adds
-// the chrome (sidebar, breadcrumb slot, theme toggle) around whatever the
+// the chrome (sidebar, breadcrumb slot, theme switcher) around whatever the
 // route renders; it does not re-check the session. Feedback primitives
 // (SPEC F28.9/F28.14) mount here once: the toast viewport lives at the shell
 // level, and ConfirmDialogProvider wraps the routed content so any page can
@@ -94,10 +138,11 @@ async function fetchStationName(cookieHeader: string): Promise<string> {
 export default async function AuthedLayout({ children }: AuthedLayoutProps): Promise<ReactNode> {
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
-  const [stationName, catalogEnabled] = await Promise.all([
+  const [stationName, settingsSnapshot] = await Promise.all([
     fetchStationName(cookieHeader),
-    fetchCatalogEnabled(cookieHeader),
+    fetchSettingsSnapshot(cookieHeader),
   ]);
+  const { catalogEnabled, themeChoices, stationThemeSlug } = settingsSnapshot;
 
   return (
     <BreadcrumbTitleProvider>
@@ -109,7 +154,7 @@ export default async function AuthedLayout({ children }: AuthedLayoutProps): Pro
               <MobileNav stationName={stationName} catalogEnabled={catalogEnabled} />
               <Breadcrumbs />
             </div>
-            <ThemeToggle />
+            <ThemeSwitcher choices={themeChoices} stationThemeSlug={stationThemeSlug} />
           </header>
           <main className="min-w-0 flex-1 p-4 sm:p-6">
             <ConfirmDialogProvider>{children}</ConfirmDialogProvider>

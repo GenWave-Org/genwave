@@ -6,7 +6,8 @@
 // full inventory of icon-only interactive controls in the console, confirmed by grepping every
 // `Icon` usage under app/ and components/ at plan time: `RatingControls` (vote up, vote down,
 // never-play/restore — Live page rows + now-playing card), `NeverPlayControl` (never-play/restore
-// — Catalog rows), `CatalogToolbar`'s four rank actions (Z7), `ThemeToggle` (light/dark), and
+// — Catalog rows), `CatalogToolbar`'s four rank actions (Z7), `ThemeSwitcher`'s mode toggle
+// (light/dark, PLAN T167 — its theme picker `<select>` is not icon-only, out of this sweep), and
 // `MobileNav`'s hamburger + drawer close. Every nav icon (Dashboard/Live/Catalog/…) always renders
 // beside its own visible text label (Sidebar/MobileNav), so those are NOT icon-only and out of
 // scope for this sweep, same as every other Button/`<button>` in the app that carries visible text
@@ -192,9 +193,9 @@ function makeCatalogPageFetchMock(): jest.MockedFunction<typeof fetch> {
   return fn;
 }
 
-/** jsdom has no real `matchMedia` — `ThemeToggle` calls it to resolve the system default (the
- * app-shell.spec.tsx precedent). Pins it to "prefers light" so the toggle's initial render is
- * deterministic across runs. */
+/** jsdom has no real `matchMedia` — `ThemeSwitcher`'s mode control calls it to resolve the system
+ * default (the app-shell.spec.tsx precedent). Pins it to "prefers light" so the toggle's initial
+ * render is deterministic across runs. */
 function mockMatchMedia(prefersDark: boolean): void {
   Object.defineProperty(window, "matchMedia", {
     writable: true,
@@ -218,14 +219,15 @@ function mockMatchMedia(prefersDark: boolean): void {
  * covered separately (see file header comment on Radix's modal aria-hiding).
  *
  * Total icon-only buttons this surface puts on screen: 15 — RatingControls×2 renders (3 each:
- * vote up, vote down, never-play/restore) + NeverPlayControl×2 renders (1 each) + ThemeToggle (1)
+ * vote up, vote down, never-play/restore) + NeverPlayControl×2 renders (1 each) + ThemeSwitcher's
+ * mode toggle (1, rendered with no theme choices so its `<select>` — not icon-only — never mounts)
  * + MobileNav's hamburger (1) + the Catalog row's own NeverPlayControl (1) + CatalogToolbar's four
  * rank actions (4).
  */
 async function renderSweepSurface(): Promise<HTMLElement> {
   const { RatingControls } = await import("../app/(authed)/_components/RatingControls");
   const { NeverPlayControl } = await import("../app/(authed)/catalog/NeverPlayControl");
-  const { ThemeToggle } = await import("../app/(authed)/_components/ThemeToggle");
+  const { ThemeSwitcher } = await import("../app/(authed)/_components/ThemeSwitcher");
   const { MobileNav } = await import("../app/(authed)/_components/MobileNav");
   const { CatalogTable } = await import("../app/(authed)/catalog/CatalogTable");
 
@@ -236,7 +238,7 @@ async function renderSweepSurface(): Promise<HTMLElement> {
       <RatingControls mediaId="11" value={{ score: 50, neverPlay: true }} onChange={() => {}} />
       <NeverPlayControl mediaId="12" neverPlay={false} onChange={() => {}} />
       <NeverPlayControl mediaId="13" neverPlay={true} onChange={() => {}} />
-      <ThemeToggle />
+      <ThemeSwitcher choices={[]} stationThemeSlug="" />
       <MobileNav />
       <CatalogTable
         media={media}
@@ -265,7 +267,7 @@ describe("Feature: Every icon-only control explains itself", () => {
   beforeEach(() => {
     mockedUsePathname.mockReturnValue("/catalog");
     mockedUseRouter.mockReturnValue({ refresh: jest.fn() } as unknown as ReturnType<typeof useRouter>);
-    mockMatchMedia(false); // system prefers light — deterministic ThemeToggle initial render
+    mockMatchMedia(false); // system prefers light — deterministic ThemeSwitcher mode initial render
   });
 
   afterEach(() => {

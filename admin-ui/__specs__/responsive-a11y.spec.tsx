@@ -319,7 +319,7 @@ describe("Feature: Responsive and accessible console", () => {
       }
 
       // Buttons (the hamburger, unlike a tab-strip <a>) carry the same
-      // explicit focus-visible utility class Button/ThemeToggle already use,
+      // explicit focus-visible utility class Button/ThemeSwitcher's mode toggle already use,
       // matching this codebase's existing convention for icon buttons.
       const { MobileNav } = await import("../app/(authed)/_components/MobileNav");
       render(<MobileNav />);
