@@ -129,7 +129,7 @@ public sealed partial class CatalogController(
             CatalogEntryFetchResult.Ok ok => Ok(ToEntryResponse(ok)),
             CatalogEntryFetchResult.NotFound => NotFound(UnknownEntryProblem(slug)),
             CatalogEntryFetchResult.Unreachable => Ok(new CatalogEntryResponse(
-                null, null, null, Unreachable: true, null, null, null, null, null)),
+                null, null, null, Unreachable: true, null, null, null, null, null, null)),
             CatalogEntryFetchResult.HashMismatch =>
                 StatusCode(StatusCodes.Status502BadGateway, WithheldProblem("failed its integrity check")),
             CatalogEntryFetchResult.Oversize =>
@@ -141,10 +141,17 @@ public sealed partial class CatalogController(
     }
 
     static CatalogShelfEntryDto ToShelfEntryDto(CatalogEntrySummary summary) =>
-        new(summary.Slug, ToWireAudience(summary.Audience), summary.BestFor);
+        new(summary.Slug, ToWireKind(summary.Kind), ToWireAudience(summary.Audience), summary.BestFor);
 
     // Lowercase, matching genwave-catalog's own schema vocabulary verbatim — see
     // CatalogShelfEntryDto's own remarks on why this is never the enum's default PascalCase serialization.
+    static string ToWireKind(CatalogEntryKind kind) => kind switch
+    {
+        CatalogEntryKind.Persona => "persona",
+        CatalogEntryKind.Theme => "theme",
+        _ => throw new UnreachableException($"Unhandled {nameof(CatalogEntryKind)} value: {kind}."),
+    };
+
     static string ToWireAudience(CatalogAudience audience) => audience switch
     {
         CatalogAudience.Everyone => "everyone",
@@ -163,10 +170,11 @@ public sealed partial class CatalogController(
     {
         var meta = ParseMetaFields(ok.Content.MetaJson);
         return new CatalogEntryResponse(
-            ok.Content.CardJson,
+            ok.Content.ManifestJson,
             ok.Content.MetaJson,
             ok.FetchedAt,
             Unreachable: false,
+            ToWireKind(ok.Content.Kind),
             ToWireAudience(ok.Content.Audience),
             ok.Content.BestFor,
             meta.Author,

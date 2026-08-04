@@ -10,8 +10,8 @@ internal abstract record EntryFetchOutcome
 {
     private EntryFetchOutcome() { }
 
-    /// <summary>The WHOLE entry — both card and meta fetched and hash-verified.</summary>
-    public sealed record Ok(string CardJson, string MetaJson) : EntryFetchOutcome;
+    /// <summary>The WHOLE entry — both manifest and meta fetched and hash-verified.</summary>
+    public sealed record Ok(string ManifestJson, string MetaJson) : EntryFetchOutcome;
 
     /// <summary>
     /// ONE file (card or meta) fetched and hash-verified — an internal building block only

@@ -8,8 +8,9 @@ using Microsoft.Extensions.Logging;
 using GenWave.Host.Options;
 
 /// <summary>
-/// One guarded door to the Persona Catalog shelf (STORY-234; SPEC F90.2-F90.4): fetches,
-/// hash-verifies, and caches index.json plus individual entry card/meta documents from the single
+/// One guarded door to the community catalog shelf (STORY-234; SPEC F90.2-F90.4, generalised to
+/// multiple kinds by F103): fetches, hash-verifies, and caches index.json plus individual entry
+/// manifest/meta documents from the single
 /// operator-configured origin (<see cref="CommunityCatalogAccessor.IndexUrl"/>). T101 builds the two
 /// public endpoints on top of this seam; this type ships no endpoint of its own.
 ///
@@ -38,14 +39,14 @@ using GenWave.Host.Options;
 /// a graceful empty state. A content-integrity failure (hash mismatch, oversize) is never served
 /// from a stale copy either — those withhold the entry outright, regardless of what was cached
 /// before. An index refresh only invalidates the entries it actually changed (a slug whose
-/// card/meta sha256 is unchanged keeps its own cached content and stale-on-failure eligibility) —
+/// manifest/meta sha256 is unchanged keeps its own cached content and stale-on-failure eligibility) —
 /// see <see cref="PruneChangedEntries"/>.
 /// </para>
 ///
 /// <para>
 /// SINGLE GLOBAL GATE, DELIBERATELY (doc fix, review finding): <see cref="singleFlight"/> is ONE
 /// <see cref="SemaphoreSlim"/> for the WHOLE catalog surface, not one per resource — a concurrent
-/// index refresh and an unrelated entry's card/meta fetch queue behind EACH OTHER, not just behind
+/// index refresh and an unrelated entry's manifest/meta fetch queue behind EACH OTHER, not just behind
 /// their own resource's in-flight work (true head-of-line blocking, not just "two callers for the
 /// SAME resource share one fetch"). Kept anyway: this is an admin-only, low-traffic surface (the
 /// whole reason F90.4 asked for a 15-minute cache in the first place — it is not sized for
@@ -75,7 +76,12 @@ public sealed class CatalogProxyService(
     /// <summary>Size cap while reading index.json (SPEC F90.3) — enforced DURING the read, never buffered unbounded first.</summary>
     public const int MaxIndexBytes = 1024 * 1024;
 
-    /// <summary>Size cap while reading a <c>&lt;slug&gt;.persona.json</c> card (SPEC F90.3, matches F89.2's own build-time cap).</summary>
+    /// <summary>
+    /// Size cap while reading an entry's manifest document (SPEC F90.3, matches F89.2's own
+    /// build-time cap for a persona's <c>&lt;slug&gt;.persona.json</c> card) — kept as one constant
+    /// name for the transport's own history, but F103.2 generalises what it caps to ANY kind's
+    /// primary file (e.g. a theme's <c>&lt;slug&gt;.theme.json</c>); the size cap itself stays kind-agnostic.
+    /// </summary>
     public const int MaxCardBytes = 256 * 1024;
 
     /// <summary>Size cap while reading a <c>&lt;slug&gt;.meta.json</c> document (SPEC F90.3, matches F89.2's own build-time cap).</summary>
@@ -180,7 +186,7 @@ public sealed class CatalogProxyService(
         return false;
     }
 
-    /// <summary>GET one entry's hash-verified card + meta content (SPEC F90.2, F90.3). Resolves the index first — see <see cref="GetIndexAsync"/>.</summary>
+    /// <summary>GET one entry's hash-verified manifest + meta content (SPEC F90.2, F90.3). Resolves the index first — see <see cref="GetIndexAsync"/>.</summary>
     public async Task<CatalogEntryFetchResult> GetEntryAsync(string slug, CancellationToken ct)
     {
         var indexResult = await GetIndexAsync(ct);
@@ -273,10 +279,10 @@ public sealed class CatalogProxyService(
     CatalogEntryFetchResult.Ok CacheAndReturnEntry(string slug, CatalogEntrySummary summary, EntryFetchOutcome.Ok ok)
     {
         var fetchedAt = timeProvider.GetUtcNow();
-        var content = new CatalogEntryContent(summary.Slug, summary.Audience, summary.BestFor, ok.CardJson, ok.MetaJson);
+        var content = new CatalogEntryContent(summary.Slug, summary.Kind, summary.Audience, summary.BestFor, ok.ManifestJson, ok.MetaJson);
         lock (cacheGate)
         {
-            cachedEntries[slug] = new CachedEntry(content, summary.Card.Sha256, summary.Meta.Sha256, fetchedAt);
+            cachedEntries[slug] = new CachedEntry(content, summary.Manifest.Sha256, summary.Meta.Sha256, fetchedAt);
             EvictOldestIfOverCapacity();
         }
 
@@ -297,9 +303,9 @@ public sealed class CatalogProxyService(
     /// origin recovers a moment before an entry's own origin does, and every already-cached entry
     /// would wrongly go cold even though NOTHING about them actually changed. Instead, a cached
     /// slug is dropped only when the new index either no longer lists it, or lists it with a
-    /// DIFFERENT card/meta sha256 than the bytes currently cached under it (the F90.3 hash contract
-    /// this cache promised its content matches) — every other cached slug keeps its content AND its
-    /// original fetched-at, unaffected by this index refresh.
+    /// DIFFERENT manifest/meta sha256 than the bytes currently cached under it (the F90.3 hash
+    /// contract this cache promised its content matches) — every other cached slug keeps its
+    /// content AND its original fetched-at, unaffected by this index refresh.
     /// </summary>
     void PruneChangedEntries(IReadOnlyList<CatalogEntrySummary> currentEntries)
     {
@@ -307,7 +313,7 @@ public sealed class CatalogProxyService(
         foreach (var slug in cachedEntries.Keys.ToArray())
         {
             if (bySlug.TryGetValue(slug, out var current)
-                && cachedEntries[slug].CardSha256 == current.Card.Sha256
+                && cachedEntries[slug].ManifestSha256 == current.Manifest.Sha256
                 && cachedEntries[slug].MetaSha256 == current.Meta.Sha256)
                 continue;
 
@@ -374,19 +380,19 @@ public sealed class CatalogProxyService(
 
     async Task<EntryFetchOutcome> FetchAndVerifyEntryAsync(CatalogEntrySummary summary, Uri directory, CancellationToken ct)
     {
-        var card = await FetchAndVerifyFileAsync(directory, summary.Card, CatalogEntryFilePart.Card, MaxCardBytes, ct);
-        if (card is not EntryFetchOutcome.FileOk cardOk)
-            return card;
+        var manifest = await FetchAndVerifyFileAsync(directory, summary.Manifest, CatalogEntryFilePart.Manifest, MaxCardBytes, ct);
+        if (manifest is not EntryFetchOutcome.FileOk manifestOk)
+            return manifest;
 
         var meta = await FetchAndVerifyFileAsync(directory, summary.Meta, CatalogEntryFilePart.Meta, MaxMetaBytes, ct);
         if (meta is not EntryFetchOutcome.FileOk metaOk)
             return meta;
 
-        return new EntryFetchOutcome.Ok(cardOk.Text, metaOk.Text);
+        return new EntryFetchOutcome.Ok(manifestOk.Text, metaOk.Text);
     }
 
     /// <summary>
-    /// Fetches and hash-verifies ONE file (card or meta), returning either
+    /// Fetches and hash-verifies ONE file (manifest or meta), returning either
     /// <see cref="EntryFetchOutcome.FileOk"/> (consumed only by <see cref="FetchAndVerifyEntryAsync"/>,
     /// which pairs two of these into the public <see cref="EntryFetchOutcome.Ok"/>) or one of the
     /// three failure cases, already tagged with <paramref name="part"/> (review finding — folded
@@ -437,10 +443,11 @@ public sealed class CatalogProxyService(
     sealed record CachedIndex(string SourceUrl, Uri Directory, IReadOnlyList<CatalogEntrySummary> Entries, DateTimeOffset FetchedAt);
 
     /// <summary>
-    /// <see cref="CardSha256"/>/<see cref="MetaSha256"/> are the hashes THIS content was verified
-    /// against when fetched — carried alongside <see cref="Content"/> so <see cref="PruneChangedEntries"/>
-    /// can tell "the index still says this slug's bytes are exactly these" from "the index moved on
-    /// without this cache knowing" purely by comparison, with no re-fetch.
+    /// <see cref="ManifestSha256"/>/<see cref="MetaSha256"/> are the hashes THIS content was
+    /// verified against when fetched — carried alongside <see cref="Content"/> so
+    /// <see cref="PruneChangedEntries"/> can tell "the index still says this slug's bytes are
+    /// exactly these" from "the index moved on without this cache knowing" purely by comparison,
+    /// with no re-fetch.
     /// </summary>
-    sealed record CachedEntry(CatalogEntryContent Content, string CardSha256, string MetaSha256, DateTimeOffset FetchedAt);
+    sealed record CachedEntry(CatalogEntryContent Content, string ManifestSha256, string MetaSha256, DateTimeOffset FetchedAt);
 }
