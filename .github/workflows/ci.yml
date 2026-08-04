@@ -47,6 +47,12 @@ jobs:
       - run: npx tsc --noEmit
       - run: npx jest
       - run: npm run build
+      # T170 guard: the composed theme sheet must override globals.css. Jest can't reproduce Next's
+      # runtime CSS-precedence injection, so assert the real served <head> order (reuses the build
+      # above). A Next/React upgrade that reorders precedence groups would otherwise silently strip
+      # admin light-mode theming — green spec, broken page.
+      - name: Theme stylesheet link-order guard (T170)
+        run: bash scripts/check-theme-link-order.sh
 
   # DEPLOYMENT.md restates concrete compose.demo.yaml values (resource fence, model, pins) and
   # pin-bump commits touch only the compose file — this job fails the PR when they disagree
