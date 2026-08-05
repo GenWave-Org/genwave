@@ -47,8 +47,10 @@ beforeAll(async () => {
 
 const LENA_ENTRY: CatalogShelfEntryDto = {
   slug: "late-night-lena",
+  kind: "persona",
   audience: "everyone",
   bestFor: [],
+  preview: null,
 };
 
 const LENA_CARD_JSON = JSON.stringify({
@@ -86,7 +88,7 @@ function makeJsonResponse(status: number, body: unknown): Response {
 }
 
 function cardFor(name: string): HTMLElement {
-  const grid = screen.getByRole("list", { name: "Persona catalog entries" });
+  const grid = screen.getByRole("list", { name: "Community catalog entries" });
   const nameNode = within(grid).getByText(name);
   const card = nameNode.closest("button");
   if (card === null) throw new Error(`No <button> ancestor for "${name}"`);

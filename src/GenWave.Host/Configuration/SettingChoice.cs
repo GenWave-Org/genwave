@@ -32,4 +32,17 @@ namespace GenWave.Host.Configuration;
 /// the wire), never a Theme-specific one, even though <c>Station:Theme</c> is the only consumer
 /// today.
 /// </param>
-public sealed record SettingChoice(string Value, string Label, bool IsDefault = false);
+/// <param name="ImportedFrom">
+/// Provenance stamp (SPEC F103.11, PLAN T187 — mirrors <see cref="GenWave.Core.Domain.OwnerTheme.ImportedFrom"/>
+/// verbatim, the station.persona/db-25 pattern applied to the theme kind): the catalog entry's slug
+/// for a catalog-imported theme, <c>"file"</c> for a direct upload, or <see langword="null"/> for a
+/// shipped default (or any choice this setting's catalog has no owner record for). Populated for
+/// <c>Station:Theme</c> only, from each <see cref="GenWave.Host.Theming.ThemeCatalog.Entries"/>
+/// entry's own provenance — <see langword="null"/> for every other <see cref="SettingKind.Choice"/>
+/// choice, same "kind-level shape, one real consumer today" posture as <see cref="IsDefault"/> above.
+/// </param>
+/// <param name="ImportedAt">The moment <see cref="ImportedFrom"/> was last stamped; <see langword="null"/>
+/// exactly when <see cref="ImportedFrom"/> is <see langword="null"/>.</param>
+public sealed record SettingChoice(
+    string Value, string Label, bool IsDefault = false,
+    string? ImportedFrom = null, DateTime? ImportedAt = null);

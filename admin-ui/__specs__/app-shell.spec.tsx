@@ -180,7 +180,7 @@ describe("Feature: App shell", () => {
 
       render(<Sidebar />);
 
-      expect(screen.queryByRole("link", { name: "Persona Catalog" })).toBeNull();
+      expect(screen.queryByRole("link", { name: "Community Catalog" })).toBeNull();
     });
 
     it("lists the Persona Catalog link once the authed layout resolves catalogEnabled=true", async () => {
@@ -189,7 +189,7 @@ describe("Feature: App shell", () => {
 
       render(<Sidebar catalogEnabled />);
 
-      expect(screen.getByRole("link", { name: "Persona Catalog" })).toHaveAttribute(
+      expect(screen.getByRole("link", { name: "Community Catalog" })).toHaveAttribute(
         "href",
         "/persona-catalog"
       );
@@ -203,7 +203,7 @@ describe("Feature: App shell", () => {
       fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
 
       await screen.findByRole("dialog", { name: "Navigation" });
-      expect(screen.getByRole("link", { name: "Persona Catalog" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Community Catalog" })).toBeInTheDocument();
     });
   });
 

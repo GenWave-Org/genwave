@@ -55,10 +55,24 @@ public static class StationSettingsAllowlist
     /// explicit slug match against <see cref="ThemeCatalog.ShippedDefaultSlug"/>, never list/load-
     /// order position, so it stays correct regardless of how many owner themes have folded in or
     /// where they land in <see cref="ThemeCatalog.All"/>'s order.
+    ///
+    /// <para>
+    /// <b>Provenance (SPEC F103.11, PLAN T187; review F3/F4).</b> Each choice also carries
+    /// <see cref="SettingChoice.ImportedFrom"/>/<see cref="SettingChoice.ImportedAt"/>, read off
+    /// <see cref="ThemeCatalog.Entries"/> — one pass, no second per-item lookup back into the
+    /// catalog — <see langword="null"/> for a shipped default (no owner row exists), non-null for a
+    /// catalog- or file-imported one. The admin UI's Settings page lists every choice carrying this
+    /// with its own row — "&lt;label&gt; — Imported · &lt;source&gt; · &lt;date&gt;", the
+    /// <c>station.persona</c>/db-25 pattern applied to the theme kind (mirrors
+    /// <c>PersonaDto.ImportedFrom</c>/<c>ImportedAt</c> riding the same GET/PUT projection every
+    /// other persona field does).
+    /// </para>
     /// </summary>
     public static IReadOnlyList<SettingChoice> ThemeChoices(ThemeCatalog themeCatalog) =>
-        themeCatalog.All
-            .Select(theme => new SettingChoice(theme.Slug, theme.Name, theme.Slug == ThemeCatalog.ShippedDefaultSlug))
+        themeCatalog.Entries
+            .Select(entry => new SettingChoice(
+                entry.Theme.Slug, entry.Theme.Name, entry.Theme.Slug == ThemeCatalog.ShippedDefaultSlug,
+                entry.Provenance?.ImportedFrom, entry.Provenance?.ImportedAt))
             .ToList();
 
     /// <summary>All operator-editable settings as an ordered list.</summary>

@@ -17,6 +17,16 @@ export interface SettingChoice {
    * define one; the control degrades to a neutral label rather than assuming a default exists.
    */
   isDefault?: boolean;
+  /**
+   * Provenance stamp (SPEC F103.11, PLAN T187 — mirrors `PersonaDto.importedFrom` verbatim, the
+   * station.persona/db-25 pattern applied to the theme kind): the catalog entry's own slug for a
+   * catalog-imported theme, `"file"` for a direct upload, or `null` for a shipped default. Read
+   * VERBATIM by the badge that renders it — this is provenance, not decoration, so it is never
+   * prettified, same rule `PersonasClient`'s own `ProvenanceBadge` follows.
+   */
+  importedFrom?: string | null;
+  /** The moment {@link importedFrom} was last stamped; `null` exactly when `importedFrom` is. */
+  importedAt?: string | null;
 }
 
 /**

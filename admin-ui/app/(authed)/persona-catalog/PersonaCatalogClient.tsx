@@ -10,7 +10,15 @@ import { readErrorMessage } from "@/lib/problem-details";
 import { cn } from "@/lib/utils";
 import { PersonaCardReviewModal, type PersonaCardReviewImportResult } from "../_components/PersonaCardReviewModal";
 import { prettifySlug } from "./format-slug";
-import type { CatalogEntryDetailDto, CatalogIndexResponseDto, CatalogShelfEntryDto } from "./types";
+import { ThemeDetailPreview } from "./ThemeDetailPreview";
+import { ThemeInstallModal, type ThemeInstallResult } from "./ThemeInstallModal";
+import type {
+  CatalogEntryDetailDto,
+  CatalogIndexResponseDto,
+  CatalogShelfEntryDto,
+  CatalogThemePreview,
+  CatalogThemeSwatchSet,
+} from "./types";
 
 interface PersonaCatalogClientProps {
   /** The index this page's server component already fetched (SPEC F90.2, F90.4). */
@@ -33,11 +41,22 @@ type DetailState =
  * import request, STORY-235, PLAN T103) opens `PersonaCardReviewModal` with the entry's
  * already-fetched raw card text — no second fetch, no import request until the operator confirms
  * inside that modal (the trust ruling's gate lives there, not here).
+ *
+ * The shelf itself now routes each entry by `kind` (SPEC F103.1, F103.3, PLAN T185): a persona
+ * entry renders the `ShelfCard`/detail-panel/Hire flow above, unchanged; a theme entry renders
+ * `ThemeShelfCard` — swatch chips painted straight off the already-fetched index row's `preview`
+ * while browsing, no click-through of its own yet. Opening a theme card (PLAN T186, SPEC
+ * F103.5/F103.6) reuses the SAME `GET /api/catalog/entries/{slug}` detail fetch personas already
+ * use — the entry's raw manifest text rides the existing `card` wire field (SPEC F103.2's
+ * generalised `{manifest, meta}` model, still named `card` on the wire, see `CatalogEntryResponse`'s
+ * own remarks) — then routes to `ThemeDetailPreview` (a live composed mini-preview) instead of
+ * `DetailPanel`, and "Install" opens `ThemeInstallModal` instead of `PersonaCardReviewModal`.
  */
 export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps): ReactNode {
   const router = useRouter();
   const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
   const [reviewing, setReviewing] = useState(false);
+  const [installingTheme, setInstallingTheme] = useState(false);
 
   // Request token (T102 review, HIGH): loadDetail's fetch is not the only thing that can change
   // `detail` between when a request starts and when it resolves — the operator can also collapse
@@ -125,23 +144,86 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
     router.push("/personas");
   }
 
-  const selectedSlug = detail.kind !== "idle" ? detail.slug : null;
+  /** SPEC F103.6's success path: no `/themes` list page exists to land on (unlike Personas' own
+   * `router.push` above) — `Station:Theme`'s choice list widening is a server-side fact the next
+   * `GET /api/settings` read already reflects (PLAN T183/T184), nothing this component needs to
+   * fetch or thread. Closing the modal and toasting is the whole client-side job. */
+  function handleThemeInstalled(result: ThemeInstallResult): void {
+    setInstallingTheme(false);
+    toast.success(`"${result.name}" installed.`);
+  }
 
-  return (
-    <div>
-      <ul aria-label="Persona catalog entries" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {entries.map((entry) => (
+  const selectedSlug = detail.kind !== "idle" ? detail.slug : null;
+  const selectedEntry = entries.find((entry) => entry.slug === selectedSlug) ?? null;
+
+  /** Routes one shelf entry to its kind's own card (review finding, T185): an exhaustive `switch`
+   * over `kind`, not a two-way ternary — the SERVER already drops any kind it doesn't recognise
+   * (CatalogIndexValidator, F103.1/AC6), but a ternary's `else` branch would silently render an
+   * unrecognised future kind AS a persona card. The `default` here renders nothing instead, so the
+   * client never lies about an entry it can't actually route, should that server invariant ever slip. */
+  function renderShelfEntry(entry: CatalogShelfEntryDto): ReactNode {
+    switch (entry.kind) {
+      case "theme":
+        return (
+          <ThemeShelfCard
+            key={entry.slug}
+            entry={entry}
+            selected={entry.slug === selectedSlug}
+            onSelect={() => handleCardClick(entry.slug)}
+          />
+        );
+      case "persona":
+        return (
           <ShelfCard
             key={entry.slug}
             entry={entry}
             selected={entry.slug === selectedSlug}
             onSelect={() => handleCardClick(entry.slug)}
           />
-        ))}
+        );
+      default:
+        return null;
+    }
+  }
+
+  /** Routes the loaded detail's own body to its entry's kind (review finding N6): the same
+   * exhaustive `switch` discipline `renderShelfEntry` uses above, not a two-way `===`/`!==` check
+   * against `"theme"` — the `default` renders nothing, so an entry whose kind this client doesn't
+   * recognise never falls through to the persona panel by default. */
+  function renderDetailPanel(entry: CatalogShelfEntryDto, loaded: Extract<DetailState, { kind: "loaded" }>): ReactNode {
+    // `loaded.detail.card` is `string | null`, `null` exactly when `unreachable` is `true`
+    // (types.ts) — and `unreachable: true` never reaches `detail.kind === "loaded"` at all
+    // (loadDetail routes it to the "error" branch instead), so this guard is a type-level
+    // formality, not a real runtime path (mirrors the review-modal guard below).
+    if (loaded.detail.card === null) return null;
+
+    switch (entry.kind) {
+      case "theme":
+        return (
+          <ThemeDetailPanel
+            slug={loaded.slug}
+            manifestText={loaded.detail.card}
+            onInstallClick={() => setInstallingTheme(true)}
+          />
+        );
+      case "persona":
+        return <DetailPanel slug={loaded.slug} detail={loaded.detail} onImportClick={() => setReviewing(true)} />;
+      default:
+        return null;
+    }
+  }
+
+  return (
+    <div>
+      <ul aria-label="Community catalog entries" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {entries.map(renderShelfEntry)}
       </ul>
 
       {detail.kind !== "idle" && (
-        <section aria-label="Persona details" className="mt-6 rounded-[6px] border border-line bg-surface p-5">
+        <section
+          aria-label={selectedEntry?.kind === "theme" ? "Theme details" : "Persona details"}
+          className="mt-6 rounded-[6px] border border-line bg-surface p-5"
+        >
           {detail.kind === "loading" && (
             <div className="space-y-2">
               <Skeleton className="h-6 w-48" />
@@ -150,9 +232,7 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
             </div>
           )}
           {detail.kind === "error" && <p className="text-[0.85rem] text-danger">{detail.message}</p>}
-          {detail.kind === "loaded" && (
-            <DetailPanel slug={detail.slug} detail={detail.detail} onImportClick={() => setReviewing(true)} />
-          )}
+          {detail.kind === "loaded" && selectedEntry && renderDetailPanel(selectedEntry, detail)}
         </section>
       )}
 
@@ -170,6 +250,42 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
           onImported={handleImported}
         />
       )}
+
+      {/* Cancel = no-op (SPEC F103.6's own sad path): closing this modal by any path just resets
+          `installingTheme`, never touching the network — see ThemeInstallModal's own remarks. */}
+      {installingTheme && detail.kind === "loaded" && selectedEntry?.kind === "theme" && detail.detail.card !== null && (
+        <ThemeInstallModal
+          slug={detail.slug}
+          manifestText={detail.detail.card}
+          onCancel={() => setInstallingTheme(false)}
+          onInstalled={handleThemeInstalled}
+        />
+      )}
+    </div>
+  );
+}
+
+function ThemeDetailPanel({
+  slug,
+  manifestText,
+  onInstallClick,
+}: {
+  slug: string;
+  manifestText: string;
+  onInstallClick: () => void;
+}): ReactNode {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-display text-[1.1rem] text-ink">{prettifySlug(slug)}</h2>
+        {/* Install (SPEC F103.6) opens ThemeInstallModal's confirm/cancel step — this click itself
+            issues no request; the modal POSTs the SAME manifestText already reviewed here. */}
+        <Button type="button" variant="primary" onClick={onInstallClick}>
+          Install
+        </Button>
+      </div>
+
+      <ThemeDetailPreview slug={slug} manifestText={manifestText} />
     </div>
   );
 }
@@ -201,6 +317,89 @@ function ShelfCard({
         <BestForChips items={entry.bestFor} />
       </button>
     </li>
+  );
+}
+
+/**
+ * A theme entry's shelf card (SPEC F103.3, F103.4, F103.5, PLAN T185/T186) — name/slug, the 18+
+ * badge, and swatch chips painted straight off the entry's already-fetched `preview`, exactly like
+ * browsing costs nothing beyond the one index read (F103.4, unchanged by this click-through: the
+ * card itself still fetches/composes nothing while rendering). Now a `<button>`, mirroring
+ * `ShelfCard`: a click routes through the SAME `handleCardClick`/`loadDetail` machinery personas
+ * already use — one `GET /api/catalog/entries/{slug}` fetch, the manifest text riding the existing
+ * `card` field — which `PersonaCatalogClient` then routes to `ThemeDetailPanel` (a live composed
+ * mini-preview, PLAN T186) instead of `DetailPanel`.
+ */
+function ThemeShelfCard({
+  entry,
+  selected,
+  onSelect,
+}: {
+  entry: CatalogShelfEntryDto;
+  selected: boolean;
+  onSelect: () => void;
+}): ReactNode {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-expanded={selected}
+        className={cn(
+          "flex w-full flex-col items-start gap-2 rounded-[6px] border p-4 text-left transition-colors duration-[120ms] ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+          selected ? "border-accent bg-surface-2" : "border-line bg-surface hover:bg-surface-2"
+        )}
+      >
+        <div className="flex w-full items-center justify-between gap-2">
+          <span className="font-display text-[1.05rem] text-ink">{prettifySlug(entry.slug)}</span>
+          {entry.audience === "mature" && <MatureBadge />}
+        </div>
+        <ThemeSwatchChips preview={entry.preview} />
+      </button>
+    </li>
+  );
+}
+
+/** The five swatch tokens, in the catalog schema's own authored order (background through
+ * accent) — shared between the chip row below and anything else that ever needs to walk a
+ * `CatalogThemeSwatchSet` in a stable, meaningful order. */
+const SWATCH_TOKEN_ORDER: ReadonlyArray<keyof CatalogThemeSwatchSet> = ["bg", "surface", "ink", "accent", "accent-2"];
+
+/**
+ * A theme card's colour-chip row (SPEC F103.4) — five small swatches painted with the theme's OWN
+ * declared hex values via an inline `backgroundColor` style, a deliberate, narrow exception to this
+ * codebase's "semantic tokens only" rule (design-aesthetic): these colours ARE the theme being
+ * previewed, not app chrome, so there is no app token that could stand in for them. Renders only the
+ * LIGHT mode's five swatches, not both modes' ten — a shelf scan wants one quick read per card, and
+ * dark-mode fidelity belongs to the live, composed preview PLAN T186 adds at the detail view, not a
+ * doubled chip row here. Renders nothing when the entry carries no `preview` (an older index, or any
+ * shape T185's tolerant validator couldn't complete) — the card still shows its name, just no chips.
+ * The row is `aria-hidden` (review finding): five empty `<li>`s carrying only a decorative,
+ * un-labelled swatch announce as noise to a screen reader — the theme's own name (rendered above
+ * this row by `ThemeShelfCard`) already carries every bit of the card's semantics. `data-testid`
+ * (not an ARIA attribute) is how a spec locates the row instead, since it is deliberately outside
+ * the accessibility tree.
+ */
+function ThemeSwatchChips({ preview }: { preview: CatalogThemePreview | null }): ReactNode {
+  // Falsy guard (review finding), not `preview === null`: the wire type is `CatalogThemePreview |
+  // null`, but a strict `=== null` check couples this component to the api's CURRENT
+  // `DefaultIgnoreCondition = Never` serialization posture — if the api ever started omitting null
+  // properties instead, this field would arrive as `undefined`, `=== null` would be false, and
+  // indexing `preview.light` below would crash the whole shelf render. `!preview` degrades to no
+  // chips either way, without caring which of the two absent-value shapes the wire actually sends.
+  if (!preview) return null;
+
+  return (
+    <ul aria-hidden="true" data-testid="theme-preview-swatches" className="m-0 flex list-none gap-1 p-0">
+      {SWATCH_TOKEN_ORDER.map((token) => (
+        <li key={token}>
+          <span
+            className="block h-5 w-5 rounded-[3px] border border-line"
+            style={{ backgroundColor: preview.light[token] }}
+          />
+        </li>
+      ))}
+    </ul>
   );
 }
 

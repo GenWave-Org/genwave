@@ -71,7 +71,18 @@ internal static partial class ThemeManifestParser
     // is an anchored allow-list, not a denylist: a `#` sign followed by 3-8 hex digits, the only
     // shape today's shipped and fixture manifests ever use. rgb()/hsl()/oklch() forms are
     // deliberately not accepted; widen this only against a concrete manifest that needs one.
-    [GeneratedRegex(@"\A#[0-9a-fA-F]{3,8}\z")]
+    //
+    // `internal const` (review finding, T185): CatalogIndexValidator's own community-catalog
+    // shelf-preview swatches (SPEC F103.4) are the SAME data class — a theme's hex colour tokens —
+    // just arriving off an untrusted index.json instead of a manifest, and reaching the wire (and
+    // an inline `style` attribute in the Admin UI) unvalidated would let a hostile swatch string
+    // (e.g. `'red;background-image:url(https://evil/x)'`) through; that class must reject exactly
+    // what this parser rejects rather than carry a second, independently-drifting copy of the
+    // shape. `const` (not `static readonly`), like `CatalogIndexValidator.SlugSegment`, because
+    // `[GeneratedRegex]` attribute arguments must be compile-time constants.
+    internal const string TokenValueText = @"\A#[0-9a-fA-F]{3,8}\z";
+
+    [GeneratedRegex(TokenValueText)]
     private static partial Regex TokenValuePattern();
 
     // Token NAMES become the identifier half of a CSS custom-property declaration

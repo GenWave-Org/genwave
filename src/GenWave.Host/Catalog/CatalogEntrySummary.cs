@@ -16,6 +16,11 @@ namespace GenWave.Host.Catalog;
 /// <see cref="BestFor"/> is empty (never null) when index.json omits the optional field (F90.2's
 /// own "tolerate + expose bestFor[] when present" rule) — an absent bag and an empty one are the
 /// same "nothing to show" state to every consumer, so callers never need a null check.
+///
+/// <see cref="Preview"/> (SPEC F103.4, T185) is <see langword="null"/> for every persona entry and
+/// for a theme entry whose index predates the field or omits it — genuinely optional, unlike
+/// <see cref="BestFor"/>'s "absent means empty" posture, since a swatch set has no meaningful empty
+/// value: a caller either has five colours to paint chips with, or it has nothing to show at all.
 /// </summary>
 public sealed record CatalogEntrySummary(
     string Slug,
@@ -23,4 +28,5 @@ public sealed record CatalogEntrySummary(
     CatalogAudience Audience,
     IReadOnlyList<string> BestFor,
     CatalogFileRef Manifest,
-    CatalogFileRef Meta);
+    CatalogFileRef Meta,
+    CatalogThemePreview? Preview);

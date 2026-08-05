@@ -42,6 +42,18 @@ using System.Text.RegularExpressions;
 /// </summary>
 public static partial class ThemeCssComposer
 {
+    /// <summary>The live serving path's own scope — every selector below is targeted at
+    /// <c>:root</c> unless a caller asks for <see cref="ComposeScoped"/>'s preview scope instead.</summary>
+    const string RootSelector = ":root";
+
+    // Container selectors <see cref="ComposeScoped"/> accepts are a fixed, server-authored constant
+    // (ThemePreviewController.ContainerSelector today), never client input — this shape check is
+    // belt-and-braces against a future caller passing something untrusted, matching TokenNamePattern's
+    // own "fail closed even though nothing untrusted reaches here today" posture. A plain CSS class
+    // selector: a dot, then the same identifier shape TokenNamePattern already allows.
+    [GeneratedRegex(@"\A\.[a-z][a-z0-9-]*\z")]
+    private static partial Regex ContainerSelectorPattern();
+
     // Token NAMES are shape-checked at load (ThemeManifestParser.ValidateTokenNames, review
     // finding, T159 round 2) using this exact pattern, so by the time a ThemeManifest reaches this
     // composer every name is already known-safe. Kept here anyway as belt-and-braces, not as the
@@ -57,16 +69,72 @@ public static partial class ThemeCssComposer
 
     /// <summary>
     /// Renders <paramref name="theme"/>'s active <c>@font-face</c> rules plus all three token
-    /// blocks (light, explicit dark, system-default dark) as CSS text.
+    /// blocks (light, explicit dark, system-default dark) as CSS text, targeted at <c>:root</c> —
+    /// the live serving path (<c>GET /spectator/theme.css</c>, <c>GET /api/theme.css</c>). Byte-
+    /// identical to every version of this method before <see cref="ComposeScoped"/> existed: this
+    /// is <see cref="ComposeCore"/> with <see cref="RootSelector"/>, the same three private
+    /// block-appenders <see cref="ComposeScoped"/> also calls, never a forked copy.
     /// </summary>
-    public static string Compose(ThemeManifest theme)
+    public static string Compose(ThemeManifest theme) => ComposeCore(theme, RootSelector, isRootScope: true);
+
+    /// <summary>
+    /// Renders <paramref name="theme"/> exactly like <see cref="Compose"/>, except every selector is
+    /// scoped under <paramref name="containerSelector"/> instead of <c>:root</c> (SPEC F103.5) — the
+    /// theme catalog's detail live-preview
+    /// (<see cref="Api.ThemePreviewController"/>). The composed mini-preview is an honest "what
+    /// you'll get" precisely because it is the SAME code emitting the SAME tokens the live path
+    /// would — only the selector target differs, so the TOKEN blocks (light, explicit dark,
+    /// system dark) this emits are scoped and can never leak into <c>:root</c> or the admin page's
+    /// own active theme, no matter what <paramref name="theme"/> is being previewed. The
+    /// <c>@font-face</c> rules <see cref="AppendFontFace"/> emits ahead of them are the one
+    /// exception, unscoped by CSS design (a <c>@font-face</c> rule always registers document-wide,
+    /// wherever its <c>&lt;style&gt;</c> lives — there is no selector that could scope it) — bounded
+    /// instead by <see cref="ThemeManifestParser"/>'s own <c>FontSrcPattern</c>, which only ever
+    /// admits vendored <c>/fonts/…</c> paths at load time, so the worst case a previewed theme can
+    /// ever cause is a redundant same-origin font re-registration, never an arbitrary one.
+    ///
+    /// <para>
+    /// <b>Mode authority stays at the root; the scope only narrows the subject (F1 fix).</b> The
+    /// browser only ever stamps <c>data-theme</c> on <c>&lt;html&gt;</c> — never on this preview's
+    /// own container — and <c>prefers-color-scheme</c> is likewise an OS fact about the whole page,
+    /// not this container. So the two dark blocks below cannot simply glue their qualifier onto
+    /// <paramref name="containerSelector"/> the way <see cref="Compose"/> glues it onto
+    /// <c>:root</c> (<c>:root[data-theme="dark"]</c>): a compound
+    /// <c>{container}[data-theme="dark"]</c> is dead (that attribute never lands on the
+    /// container), and a bare <c>{container}:not([data-theme])</c> is a tautology (the container
+    /// never carries the attribute either way, so it always matches, regardless of the real
+    /// root/OS state) — exactly backwards from what a preview owes an OS-dark or explicit-light
+    /// reviewer. The scoped blocks instead keep the qualifier as an ANCESTOR of the container
+    /// (<c>[data-theme="dark"] {container}</c>, <c>:root:not([data-theme]) {container}</c>) — the
+    /// descendant-combinator space is load-bearing, not cosmetic: it is what makes the qualifier
+    /// resolve against the real root element the browser actually stamps, while the SUBJECT (what
+    /// the rule paints) stays the container.
+    /// </para>
+    /// </summary>
+    /// <param name="containerSelector">
+    /// A plain CSS class selector (e.g. <c>.theme-live-preview</c>) naming the preview's own
+    /// container element — never <c>:root</c> itself, which would defeat the whole point of a
+    /// scoped preview. See <see cref="ContainerSelectorPattern"/>'s own remarks on why this is
+    /// shape-checked despite being server-authored, never client input.
+    /// </param>
+    public static string ComposeScoped(ThemeManifest theme, string containerSelector)
+    {
+        if (!ContainerSelectorPattern().IsMatch(containerSelector))
+            throw new ArgumentException(
+                $"containerSelector '{containerSelector}' is outside the safe CSS class-selector shape",
+                nameof(containerSelector));
+
+        return ComposeCore(theme, containerSelector, isRootScope: false);
+    }
+
+    static string ComposeCore(ThemeManifest theme, string selector, bool isRootScope)
     {
         var css = new StringBuilder();
         AppendFontFace(css, theme.Fonts.Display);
         AppendFontFace(css, theme.Fonts.Sans);
-        AppendLightBlock(css, theme);
-        AppendExplicitDarkBlock(css, theme);
-        AppendSystemDarkBlock(css, theme);
+        AppendLightBlock(css, theme, selector);
+        AppendExplicitDarkBlock(css, theme, selector, isRootScope);
+        AppendSystemDarkBlock(css, theme, selector, isRootScope);
         return css.ToString();
     }
 
@@ -84,40 +152,55 @@ public static partial class ThemeCssComposer
         }
     }
 
-    // :root — light tokens, the default when nobody has made an explicit choice and the OS has no
-    // (or reports no) dark preference. Matches globals.css:58 exactly. Font stacks are declared
-    // here only (ARCHITECTURE "Theme system": "--font-display and --font-sans are also declared in
-    // :root today but are NOT tokens under this design") — not mode-dependent, so they'd be pure
-    // duplication in the dark blocks below, exactly as globals.css:100-103 itself argues.
-    static void AppendLightBlock(StringBuilder css, ThemeManifest theme)
+    // <selector> — light tokens, the default when nobody has made an explicit choice and the OS
+    // has no (or reports no) dark preference. For the live path (RootSelector), matches
+    // globals.css:58 exactly. Font stacks are declared here only (ARCHITECTURE "Theme system":
+    // "--font-display and --font-sans are also declared in :root today but are NOT tokens under
+    // this design") — not mode-dependent, so they'd be pure duplication in the dark blocks below,
+    // exactly as globals.css:100-103 itself argues.
+    static void AppendLightBlock(StringBuilder css, ThemeManifest theme, string selector)
     {
-        css.Append(":root {\n");
+        css.Append(selector).Append(" {\n");
         AppendTokenDeclarations(css, theme, "light", theme.Modes.Light, "  ");
         css.Append("  --font-display: \"").Append(theme.Fonts.Display.Family).Append("\", Georgia, serif;\n");
         css.Append("  --font-sans: \"").Append(theme.Fonts.Sans.Family).Append("\", system-ui, sans-serif;\n");
         css.Append("}\n\n");
     }
 
-    // :root[data-theme="dark"] — dark tokens, an explicit choice (cookie/setting). Higher
-    // specificity than the flat :root above, so it always wins regardless of source order. Matches
-    // globals.css:106 exactly.
-    static void AppendExplicitDarkBlock(StringBuilder css, ThemeManifest theme)
+    // Explicit-dark selector, dark tokens, an explicit choice (cookie/setting):
+    //   - live path (isRootScope, selector = ":root"): <selector>[data-theme="dark"] — the
+    //     attribute compounded directly onto :root (no combinator), matching globals.css:106
+    //     exactly, higher specificity than the flat light block above so it always wins
+    //     regardless of source order.
+    //   - scoped preview (!isRootScope): [data-theme="dark"] <selector> — the attribute is an
+    //     ANCESTOR qualifier, not compounded onto the container (see ComposeScoped's own remarks,
+    //     "Mode authority stays at the root" — F1 fix). A compound
+    //     <selector>[data-theme="dark"] would be dead: the browser never stamps data-theme on the
+    //     preview's own container, only on :root.
+    static void AppendExplicitDarkBlock(StringBuilder css, ThemeManifest theme, string selector, bool isRootScope)
     {
-        css.Append(":root[data-theme=\"dark\"] {\n");
+        var subject = isRootScope ? $"{selector}[data-theme=\"dark\"]" : $"[data-theme=\"dark\"] {selector}";
+        css.Append(subject).Append(" {\n");
         AppendTokenDeclarations(css, theme, "dark", theme.Modes.Dark, "  ");
         css.Append("}\n\n");
     }
 
-    // @media (prefers-color-scheme: dark) { :root:not([data-theme]) } — dark tokens again, for the
-    // OS-default case: nobody has made an explicit choice, so the browser's own media query alone
-    // selects this block (F102.13) without any request ever reaching the server for it (F102.10).
-    // Matches globals.css:139-140 exactly, values duplicated against the explicit-dark block above
-    // rather than shared (globals.css:135, SPEC F28.4 — CSS custom properties have no block-reuse
-    // mechanism).
-    static void AppendSystemDarkBlock(StringBuilder css, ThemeManifest theme)
+    // @media (prefers-color-scheme: dark) { … } — dark tokens again, for the OS-default case:
+    // nobody has made an explicit choice, so the browser's own media query alone selects this
+    // block (F102.13) without any request ever reaching the server for it (F102.10). Values
+    // duplicated against the explicit-dark block above rather than shared (globals.css:135, SPEC
+    // F28.4 — CSS custom properties have no block-reuse mechanism).
+    //   - live path (isRootScope, selector = ":root"): <selector>:not([data-theme]) — matches
+    //     globals.css:139-140 exactly.
+    //   - scoped preview (!isRootScope): :root:not([data-theme]) <selector> — the "nobody has
+    //     chosen" guard is checked against the ROOT explicitly (see ComposeScoped's own remarks —
+    //     F1 fix), never against the container itself, which never carries data-theme either way
+    //     and so a bare <selector>:not([data-theme]) would be a tautology that always matches.
+    static void AppendSystemDarkBlock(StringBuilder css, ThemeManifest theme, string selector, bool isRootScope)
     {
+        var subject = isRootScope ? $"{selector}:not([data-theme])" : $"{RootSelector}:not([data-theme]) {selector}";
         css.Append("@media (prefers-color-scheme: dark) {\n");
-        css.Append("  :root:not([data-theme]) {\n");
+        css.Append("  ").Append(subject).Append(" {\n");
         AppendTokenDeclarations(css, theme, "dark", theme.Modes.Dark, "    ");
         css.Append("  }\n");
         css.Append("}\n");

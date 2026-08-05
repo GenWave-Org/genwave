@@ -13,7 +13,7 @@ const SECTION_LABELS: Record<string, string> = {
   live: "Live",
   catalog: "Catalog",
   "safe-content": "Station Imaging",
-  "persona-catalog": "Persona Catalog",
+  "persona-catalog": "Community Catalog",
   settings: "Settings",
 };
 

@@ -22,4 +22,10 @@ namespace GenWave.Host.Api;
 /// serialization), so the Admin UI's 18+ badge (F90.4a) reads the same token the catalog itself uses.
 /// </param>
 /// <param name="BestFor">Optional genre chips (F90.4a) — empty, never null, when the entry has none.</param>
-public sealed record CatalogShelfEntryDto(string Slug, string Kind, string Audience, IReadOnlyList<string> BestFor);
+/// <param name="Preview">
+/// A theme entry's shelf-card swatch chips (SPEC F103.4, F103.3) — <see langword="null"/> for every
+/// persona entry, and for a theme entry whose index carries none. This is the ENTIRE contract a
+/// theme shelf card needs to paint chips; the Admin UI fetches nothing further to render one (T185).
+/// </param>
+public sealed record CatalogShelfEntryDto(
+    string Slug, string Kind, string Audience, IReadOnlyList<string> BestFor, CatalogShelfPreviewDto? Preview);

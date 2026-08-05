@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { toast } from "@/components/ui/toast";
+import { formatDateStamp } from "@/lib/format-clock";
 import { cn } from "@/lib/utils";
 import type { LibraryDto } from "@/lib/library";
 import { AudienceSettingControl } from "./AudienceSettingControl";
@@ -22,7 +23,7 @@ import { SettingHelpFlyover } from "./SettingHelpFlyover";
 import type { SettingsHelpKey } from "./settings-help-keys";
 import { groupSettingsBySection } from "./settings-sections";
 import { groupSettingsByTab, type SettingsAreaTab } from "./settings-tabs";
-import type { SettingControlProps, SettingDto } from "./settings-types";
+import type { SettingChoice, SettingControlProps, SettingDto } from "./settings-types";
 import { VoiceSettingControl } from "./VoiceSettingControl";
 
 export type { SettingDto } from "./settings-types";
@@ -42,6 +43,11 @@ interface SettingsFormProps {
    * Defaults to [] when not provided so existing tests and plain number settings are unaffected.
    */
   libraries?: LibraryDto[];
+  /** Test-only injection point for the theme provenance list's `formatDateStamp` call (SPEC
+   * F103.11, PLAN T187 review F2); production omits this and gets the browser's local zone — the
+   * same StatusTiles/BoothLogFeed/LlmCallsFeed/PlayHistoryTable/`PersonasClient` idiom, not a
+   * bespoke one. */
+  timeZone?: string;
 }
 
 type SaveStatus = { kind: "idle" } | { kind: "saving" } | { kind: "noChanges" };
@@ -50,6 +56,7 @@ const SAFE_SCOPE_KEY = "Station:SafeScope:LibraryIds";
 const MAIN_SCOPE_KEY = "Station:Scope:LibraryIds";
 const RECENT_WINDOW_KEY = "Station:Rotation:RecentWindow";
 const ARTIST_SEPARATION_KEY = "Station:Rotation:ArtistSeparation";
+const THEME_KEY = "Station:Theme";
 const EMPTY_MAIN_SCOPE_ERROR =
   "Main rotation scope cannot be empty — the station would go silent.";
 const SAFE_SCOPE_EMPTY_CONFIRM_TITLE = "Save empty Station Imaging scope";
@@ -435,7 +442,7 @@ function settingsTabPanelId(tabId: string): string {
   return `settings-tabpanel-${tabId}`;
 }
 
-export function SettingsForm({ settings, libraries = [] }: SettingsFormProps): ReactNode {
+export function SettingsForm({ settings, libraries = [], timeZone }: SettingsFormProps): ReactNode {
   const confirm = useConfirm();
   /**
    * The last-SAVED value per key — the baseline `changedEntries` diffs against. Seeded from the
@@ -791,6 +798,7 @@ export function SettingsForm({ settings, libraries = [] }: SettingsFormProps): R
                   isSafeScopeField={setting.key === SAFE_SCOPE_KEY}
                   safeScopeEffectivelyEmpty={safeScopeEffectivelyEmpty}
                   rotationCouplingNotice={setting.key === ARTIST_SEPARATION_KEY ? rotationCouplingNotice : null}
+                  timeZone={timeZone}
                   onTextChange={handleTextChange(setting.key)}
                   onCheckboxChange={handleCheckboxChange(setting.key)}
                   onMultiSelectChange={handleMultiSelectChange(setting.key)}
@@ -915,6 +923,9 @@ interface SettingFieldProps {
    * ArtistSeparation, and `null` there too unless the current values are actually capped.
    */
   rotationCouplingNotice: ReactNode;
+  /** Test-only injection point threaded from {@link SettingsFormProps.timeZone} for the theme
+   * provenance list's date formatting (SPEC F103.11, PLAN T187 review F2). */
+  timeZone?: string;
   onTextChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onCheckboxChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onMultiSelectChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
@@ -932,6 +943,7 @@ function SettingField({
   isSafeScopeField,
   safeScopeEffectivelyEmpty,
   rotationCouplingNotice,
+  timeZone,
   onTextChange,
   onCheckboxChange,
   onMultiSelectChange,
@@ -1048,6 +1060,10 @@ function SettingField({
         />
       )}
 
+      {setting.key === THEME_KEY && (
+        <ThemeProvenanceList choices={setting.choices} timeZone={timeZone} />
+      )}
+
       {isSafeScopeField && (
         <SafeScopeAvailabilityBadge effectivelyEmpty={safeScopeEffectivelyEmpty} />
       )}
@@ -1086,6 +1102,83 @@ function ApplyModeBadge({ mode }: { mode: SettingDto["applyMode"] }): ReactNode 
       )}
     >
       {applyModeLabel(mode)}
+    </span>
+  );
+}
+
+/**
+ * Provenance LIST for the `Station:Theme` field (SPEC F103.11, PLAN T187; review F1) — one row per
+ * choice carrying provenance, not just the currently active/saved one: T186's catalog install
+ * makes a theme SELECTABLE, not active, so the primary STORY-275 case (an owner just installed a
+ * catalog theme and wants to confirm it landed) needs a row before that theme is ever chosen as
+ * `Station:Theme`'s value. Reads straight off `choices` (SPEC F103.11/PLAN T183's already-widened
+ * `Station:Theme` choice list, `StationSettingsAllowlist.ThemeChoices`) rather than a second fetch
+ * or the field's `savedValue` — every choice already carries its own `importedFrom`/`importedAt`,
+ * `null` for a shipped default (no `station.theme` row exists for it to read one off). Renders
+ * nothing when no choice carries provenance (a shipped-only catalog, or a non-Choice-kind field
+ * where `choices` is absent — never true for `Station:Theme` in practice).
+ */
+function ThemeProvenanceList({
+  choices,
+  timeZone,
+}: {
+  choices: readonly SettingChoice[] | undefined;
+  timeZone?: string;
+}): ReactNode {
+  const imported = (choices ?? []).filter(
+    (choice): choice is SettingChoice & { importedFrom: string; importedAt: string } =>
+      choice.importedFrom != null && choice.importedAt != null
+  );
+  if (imported.length === 0) return null;
+
+  return (
+    <ul className="flex flex-col gap-1">
+      {imported.map((choice) => (
+        <li key={choice.value}>
+          <ThemeProvenanceBadge
+            label={choice.label}
+            importedFrom={choice.importedFrom}
+            importedAt={choice.importedAt}
+            timeZone={timeZone}
+          />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * One imported-theme provenance row, "&lt;label&gt; — Imported · &lt;source&gt; · &lt;date&gt;" —
+ * the exact three-plus-label copy SPEC F103.11 states verbatim, folded into ONE text node (not a
+ * plain label beside a separately-chipped badge): React Testing Library's default text matcher
+ * — and a sighted reader's own eye — never spans split text across sibling elements, so the whole
+ * row rides the SAME quiet bordered chip `PersonasClient`'s own `ProvenanceBadge` (SPEC F90.7/T105)
+ * uses, rather than only the "Imported · …" tail of it. Keeps that badge's UN-renamed "Imported"
+ * wording deliberately: F94.4's "Hired" rename is persona-only (that spec's own text), themes were
+ * never folded into that ruling. `importedFrom` renders VERBATIM — this is provenance, not
+ * decoration, so it is never prettified, same rule the persona badge follows. `timeZone` is a plain
+ * pass-through from {@link ThemeProvenanceList}, the house test-injection idiom.
+ *
+ * Kept as its own small component in this file rather than merged with `PersonasClient`'s
+ * `ProvenanceBadge` into one shared component (PLAN T187 review F1's "cheap, do it" note): the
+ * shapes differ (this one folds the label into the same chip; persona's leaves the name outside
+ * it) and a genuine merge would mean editing `PersonasClient.tsx` too, which sits outside this
+ * task's file partition — noted rather than done silently.
+ */
+function ThemeProvenanceBadge({
+  label,
+  importedFrom,
+  importedAt,
+  timeZone,
+}: {
+  label: string;
+  importedFrom: string;
+  importedAt: string;
+  timeZone?: string;
+}): ReactNode {
+  return (
+    <span className="inline-flex w-fit items-center rounded-[3px] border border-line px-1.5 py-0.5 text-[0.68rem] text-mute">
+      {`${label} — Imported · ${importedFrom} · ${formatDateStamp(importedAt, { timeZone })}`}
     </span>
   );
 }
