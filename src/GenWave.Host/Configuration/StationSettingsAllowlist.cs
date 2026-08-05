@@ -20,35 +20,44 @@ namespace GenWave.Host.Configuration;
 public static class StationSettingsAllowlist
 {
     /// <summary>
-    /// Every shipped theme, as a slug/display-name <see cref="SettingChoice"/> pair (STORY-263),
-    /// in <see cref="ThemeCatalog.All"/>'s load order — the <c>Station:Theme</c> entry's
-    /// <see cref="AllowedSetting.Choices"/> below, and therefore the ONLY source of truth
-    /// <see cref="SettingValidator"/> checks a proposed value's <see cref="SettingChoice.Value"/>
-    /// against (SPEC F102.14, STORY-265). <see cref="SettingChoice.Label"/> is
-    /// <see cref="ThemeManifest.Name"/> (T175) — the admin UI's <c>&lt;select&gt;</c> shows the
-    /// theme's real name instead of its kebab-case slug, without inventing its own copy. Exactly
-    /// one entry — <see cref="ThemeCatalog.ShippedDefaultSlug"/>'s own — carries
-    /// <see cref="SettingChoice.IsDefault"/> = <see langword="true"/> (T175 follow-up), sourced by
-    /// an explicit slug match rather than list position, so it stays correct regardless of
-    /// <see cref="ThemeCatalog.All"/>'s embedded-resource load order (a future multi-theme catalog
-    /// does not silently point the admin UI's "unset" label at the wrong theme).
+    /// Every SHIPPED theme, as a slug/display-name <see cref="SettingChoice"/> pair (STORY-263), in
+    /// <see cref="ThemeCatalog.LoadShipped"/>'s load order. Carried on the <c>Station:Theme</c>
+    /// entry's <see cref="AllowedSetting.Choices"/> below purely so that record stays non-null the
+    /// way every other <see cref="SettingKind.Choice"/> entry's contract promises — this frozen
+    /// snapshot is never what an operator actually sees or can PUT (PLAN T183 superseded it as a
+    /// live source): both call sites that decide what is selectable/acceptable
+    /// (<see cref="GenWave.Host.Api.SettingsController"/>'s GET/PUT response, <see cref="SettingValidator"/>'s
+    /// own guard) resolve the CURRENT shipped ∪ owner set from the DI-registered
+    /// <see cref="ThemeCatalog"/> singleton instead — see <see cref="ThemeChoices"/> — every
+    /// request, so an owner theme imported after boot (T184) or folded in by
+    /// <c>ThemeCatalogOwnerLoadHostedService</c>'s own boot warm-up becomes selectable with no
+    /// process restart.
     ///
-    /// This is a static table with no DI container, so it cannot ask for the
-    /// <see cref="ThemeCatalog"/> singleton <c>Program.cs</c> builds and registers for request
-    /// handling — it loads its OWN copy the same way <c>Program.cs</c> does, via
+    /// This static table has no DI container, so it cannot ask for that runtime singleton — it
+    /// loads its OWN copy the same way <c>Program.cs</c>'s own boot-time canary does, via
     /// <see cref="ThemeCatalog.LoadShipped"/>, which reads embedded resources baked into this
     /// assembly at build time and needs no runtime service to do it. The two loads are cheap,
     /// deterministic, and always agree (same assembly, same resources) — a duplicate parse, not a
-    /// duplicate source of truth. That equivalence holds only for TODAY's shipped-only catalog
-    /// (Layer A); a future Layer B (an owner-authored/uploaded manifest — see
-    /// <see cref="ThemeCatalog"/>'s own remarks) would make the catalog mutable at runtime, and a
-    /// value baked into this static field at first-touch would then go stale until process
-    /// restart. Re-sourcing Choices from the DI-registered <see cref="ThemeCatalog"/> instance at
-    /// that point is a real, deliberately deferred design cost — surfaced here rather than solved
-    /// early for a Layer B that does not exist yet (YAGNI).
+    /// duplicate source of truth; they can only ever diverge from each other in the direction the
+    /// runtime catalog growing owner rows adds on top, never in the shipped half.
     /// </summary>
     static readonly IReadOnlyList<SettingChoice> ShippedThemeChoices =
         ThemeCatalog.LoadShipped().All
+            .Select(theme => new SettingChoice(theme.Slug, theme.Name, theme.Slug == ThemeCatalog.ShippedDefaultSlug))
+            .ToList();
+
+    /// <summary>
+    /// Computes <c>Station:Theme</c>'s LIVE choices from <paramref name="themeCatalog"/> — the
+    /// DI-registered runtime instance's current shipped ∪ owner set (SPEC F103.7, STORY-271, PLAN
+    /// T183), evaluated fresh every call rather than read off the frozen
+    /// <see cref="ShippedThemeChoices"/> snapshot above. Mapping and
+    /// <see cref="SettingChoice.IsDefault"/> semantics are identical to that snapshot's own: an
+    /// explicit slug match against <see cref="ThemeCatalog.ShippedDefaultSlug"/>, never list/load-
+    /// order position, so it stays correct regardless of how many owner themes have folded in or
+    /// where they land in <see cref="ThemeCatalog.All"/>'s order.
+    /// </summary>
+    public static IReadOnlyList<SettingChoice> ThemeChoices(ThemeCatalog themeCatalog) =>
+        themeCatalog.All
             .Select(theme => new SettingChoice(theme.Slug, theme.Name, theme.Slug == ThemeCatalog.ShippedDefaultSlug))
             .ToList();
 
@@ -294,12 +303,14 @@ public static class StationSettingsAllowlist
         // OptionsMonitorStationClockProvider re-resolves IOptionsMonitor<StationOptions> per call.
         new("Station:Timezone",                               SettingApplyMode.Live,          SettingKind.String,     ""),
 
-        // Theme selection (SPEC F102.14, F102.15, STORY-265, PLAN T163) — closed CHOICE, not free
-        // text: a typo in a String value would silently fail to resolve (F102.6's fallback would
-        // mask it rather than reject it), so this is the first SettingKind.Choice entry.
-        // ShippedThemeChoices (above) is the ONLY place either this metadata or SettingValidator's
-        // guard names a valid slug — add a theme, and both follow with no second edit. Live: the
-        // eventual resolution provider (T164) reads it via IOptionsMonitor per request, same shape
+        // Theme selection (SPEC F102.14, F102.15, F103.7, STORY-265/271, PLAN T163/T183) — closed
+        // CHOICE, not free text: a typo in a String value would silently fail to resolve (F102.6's
+        // fallback would mask it rather than reject it), so this is the first SettingKind.Choice
+        // entry. The Choices carried HERE (ShippedThemeChoices, above) are a structural placeholder
+        // only — SettingsController and SettingValidator both re-source the live set from the
+        // DI-registered ThemeCatalog via ThemeChoices(ThemeCatalog) instead (PLAN T183), so an owner
+        // theme import (T184) widens what is selectable/acceptable with no restart and no second
+        // edit here. Live: the eventual resolution provider (T164) reads it via IOptionsMonitor per request, same shape
         // as Station:PublicStreamUrl/Station:SpectatorMode. Nothing reads this key's VALUE yet —
         // T164 is what wires resolution; T165 is what proves it live on a running stack. Declaring
         // it now, unread, is deliberate (T163's own scope). Deliberately UNSEEDED in

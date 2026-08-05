@@ -3,6 +3,7 @@ using System.Linq;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using GenWave.Core.Domain;
+using GenWave.Host.Theming;
 
 namespace GenWave.Host.Configuration;
 
@@ -18,10 +19,34 @@ namespace GenWave.Host.Configuration;
 /// <see cref="ValidateBatch"/>, which has visibility into the full set of proposed values and the
 /// current effective configuration.
 ///
-/// Registered as a singleton; thread-safe (stateless beyond the injected <see cref="IConfiguration"/>).
+/// Registered as a singleton; thread-safe (stateless beyond the injected
+/// <see cref="IConfiguration"/> and <see cref="ThemeCatalog"/>).
 /// </summary>
-public sealed class SettingValidator(IConfiguration configuration)
+public sealed class SettingValidator
 {
+    readonly IConfiguration configuration;
+    readonly ThemeCatalog themeCatalog;
+    readonly Dictionary<string, Func<string, bool>> validators;
+
+    /// <param name="configuration">Read by <see cref="ValidateBatch"/>'s cross-field checks.</param>
+    /// <param name="themeCatalog">
+    /// The DI-registered runtime theme catalog (shipped ∪ owner, SPEC F103.7, PLAN T182) a proposed
+    /// <c>Station:Theme</c> value's slug is checked against (PLAN T183, widening this guard from the
+    /// shipped-only set STORY-265 shipped it with). Every production instance gets the real
+    /// singleton automatically — it is registered in <c>Program.cs</c> and DI resolves it by type
+    /// regardless of constructor-parameter ordering. The default here exists ONLY so the many
+    /// existing single-argument <c>new SettingValidator(config)</c> unit tests exercising every
+    /// OTHER allowlisted key keep compiling and passing unchanged: with no catalog supplied, this
+    /// falls back to <see cref="ThemeCatalog.LoadShipped"/> — the exact shipped-only set this
+    /// validator checked <c>Station:Theme</c> against before T183.
+    /// </param>
+    public SettingValidator(IConfiguration configuration, ThemeCatalog? themeCatalog = null)
+    {
+        this.configuration = configuration;
+        this.themeCatalog = themeCatalog ?? ThemeCatalog.LoadShipped();
+        validators = BuildValidators(this.themeCatalog);
+    }
+
     // ── Range constants — kept here so SettingValidator and the [Range] annotations on the
     //    options classes reference the SAME numbers.  [Range] attributes cannot reference
     //    non-const expressions, so the options files carry their own literals; these consts
@@ -120,8 +145,10 @@ public sealed class SettingValidator(IConfiguration configuration)
     internal const int RequestsWindowMinutesMin = 1;
     internal const int RequestsWindowMinutesMax = 1440;
 
-    // Maps each allowlisted key to a per-key (range + type) validator.
-    static readonly Dictionary<string, Func<string, bool>> Validators =
+    // Maps each allowlisted key to a per-key (range + type) validator. An instance method (not a
+    // static field) purely because the Station:Theme entry below closes over the constructor's own
+    // themeCatalog — every other entry is a plain static delegate exactly as before.
+    static Dictionary<string, Func<string, bool>> BuildValidators(ThemeCatalog themeCatalog) =>
         new(StringComparer.OrdinalIgnoreCase)
         {
             // LoudnessOptions — doubles with range
@@ -295,13 +322,13 @@ public sealed class SettingValidator(IConfiguration configuration)
             // fall-back at prompt time.
             ["Station:Timezone"] = IsValidStationTimezone,
 
-            // Theme selection (SPEC F102.14, STORY-265, PLAN T163) — the first SettingKind.Choice
-            // key: membership in ShippedThemeChoices' VALUES (slugs, never labels — T175), not a
-            // shape/parseability check like every other entry above. This is what makes the
-            // kind's own promise real — a value outside the shipped set is rejected HERE, at
-            // write time, rather than silently falling back to the default at read time the way
-            // an unresolvable String value would (F102.6).
-            ["Station:Theme"] = IsValidThemeSlug,
+            // Theme selection (SPEC F102.14, F103.7, STORY-265/271, PLAN T163/T183) — the first
+            // SettingKind.Choice key: membership in themeCatalog's CURRENT shipped ∪ owner slugs
+            // (never labels — T175), not a shape/parseability check like every other entry above.
+            // This is what makes the kind's own promise real — a value outside that set is rejected
+            // HERE, at write time, rather than silently falling back to the default at read time the
+            // way an unresolvable String value would (F102.6).
+            ["Station:Theme"] = v => IsValidThemeSlug(v, themeCatalog),
         };
 
     // ── Per-key validation ─────────────────────────────────────────────────────────────────────
@@ -315,7 +342,7 @@ public sealed class SettingValidator(IConfiguration configuration)
         if (!StationSettingsAllowlist.ByKey.ContainsKey(key))
             return $"Key '{key}' is not an operator-editable setting.";
 
-        if (!Validators.TryGetValue(key, out var validate))
+        if (!validators.TryGetValue(key, out var validate))
             return $"No validator registered for key '{key}' — this is a bug.";
 
         return validate(value)
@@ -445,15 +472,14 @@ public sealed class SettingValidator(IConfiguration configuration)
         }
     }
 
-    // Station:Theme (SPEC F102.14, STORY-265) — membership in the shipped slug set, sourced from
-    // StationSettingsAllowlist.ShippedThemeChoices (in turn sourced from ThemeCatalog — see that
-    // field's own remarks on why the allowlist, not this validator, owns loading it). Checks
-    // SettingChoice.Value ONLY (T175) — a proposed value is a slug, never a display label; Ordinal
-    // comparison mirrors ThemeCatalog's own slug-lookup dictionary (case-sensitive by design —
-    // slugs are kebab-case identifiers, not display text).
-    static bool IsValidThemeSlug(string v) =>
-        StationSettingsAllowlist.ByKey["Station:Theme"].Choices
-            ?.Any(choice => choice.Value.Equals(v, StringComparison.Ordinal)) == true;
+    // Station:Theme (SPEC F102.14, F103.7, STORY-265/271, PLAN T183) — membership in
+    // themeCatalog's CURRENT shipped ∪ owner slug set. TryGetBySlug is the SAME lookup
+    // ThemeCatalog.Resolve itself uses — Ordinal, case-sensitive by design (slugs are kebab-case
+    // identifiers, not display text) — so a value this validator accepts is, by construction, a
+    // value ThemeCatalog.Resolve can actually resolve; a proposed value is always a slug, never a
+    // display label (T175).
+    static bool IsValidThemeSlug(string v, ThemeCatalog themeCatalog) =>
+        themeCatalog.TryGetBySlug(v, out _);
 
     /// <summary>
     /// An absolute, well-formed http/https URL (used for <c>Tts:Endpoint</c>/<c>Llm:Endpoint</c>,
@@ -736,7 +762,7 @@ public sealed class SettingValidator(IConfiguration configuration)
         return true;
     }
 
-    static string BuildRangeError(string key, string value) => key switch
+    string BuildRangeError(string key, string value) => key switch
     {
         var k when k.Equals("Station:Name", StringComparison.OrdinalIgnoreCase)
             => $"Value for '{key}' must not be blank.",
@@ -833,8 +859,11 @@ public sealed class SettingValidator(IConfiguration configuration)
         var k when k.Equals("Station:Theme", StringComparison.OrdinalIgnoreCase)
             // Names SLUGS, not labels (T175) — a label is never a settable value, so listing one
             // here would be actively misleading about what the operator can actually type/PUT.
-            => $"Value '{value}' is not valid for '{key}'. Must be one of the shipped theme " +
-               $"slugs: {string.Join(", ", (StationSettingsAllowlist.ByKey[key].Choices ?? Array.Empty<SettingChoice>()).Select(c => c.Value))}.",
+            // Lists the CURRENT shipped ∪ owner set (PLAN T183), not a frozen shipped-only
+            // snapshot — an owner theme imported after boot (T184) belongs in this message the
+            // moment it becomes selectable.
+            => $"Value '{value}' is not valid for '{key}'. Must be one of the available theme " +
+               $"slugs: {string.Join(", ", themeCatalog.All.Select(t => t.Slug))}.",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }

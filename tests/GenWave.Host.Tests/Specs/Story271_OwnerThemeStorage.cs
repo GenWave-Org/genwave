@@ -6,9 +6,11 @@
 // station's embedded defaults remain the F102.7 offline floor when the DB is empty/unreachable.
 //
 // T181 landed db/31 + IThemeStore (ThemeRepository, FakeThemeStore). T182 lands ThemeCatalog's
-// shipped∪owner load (CreateForStation + ReloadOwnerThemesAsync) — AC2, AC4 and AC5 below now drive
-// that real production path. T183 (Station:Theme choice widens) is still pending; AC3 stays skipped.
-// One assertion per Fact; sad path (a shipped slug cannot be shadowed) is its own block.
+// shipped∪owner load (CreateForStation + ReloadOwnerThemesAsync) — AC2, AC4 and AC5 below drive
+// that real production path. T183 lands AC3: StationSettingsAllowlist.ThemeChoices sources
+// Station:Theme's choices from ThemeCatalog.All (shipped∪owner), not the shipped-only snapshot
+// SettingsController/SettingValidator used before. One assertion per Fact; sad path (a shipped slug
+// cannot be shadowed) is its own block.
 //
 // AC1 (T181) is proven against FakeThemeStore (Fakes/FakeThemeStore.cs) rather than the real
 // GenWave.MediaLibrary.Station.ThemeRepository: this project carries no Postgres fixture at all
@@ -23,6 +25,7 @@
 
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Host.Configuration;
 using GenWave.Host.Theming;
 using GenWave.Host.Tests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -32,8 +35,6 @@ namespace GenWave.Host.Tests.Specs;
 
 public static class FeatureOwnerThemeStorageAndResolution
 {
-    const string PendingChoice = "pending T183 — Station:Theme choice widens to imported slugs";
-
     // ── HAPPY PATH ──────────────────────────────────────────────────────────
 
     public sealed class ScenarioAnOwnerThemePersists
@@ -95,14 +96,29 @@ public static class FeatureOwnerThemeStorageAndResolution
 
     public sealed class ScenarioTheChoiceWidensToImportedSlugs
     {
-        [Fact(Skip = PendingChoice)]
-        public void TheOwnerThemesSlugIsASelectableChoice()
+        [Fact]
+        public async Task TheOwnerThemesSlugIsASelectableChoice()
         {
-            // Given a stored owner theme,
-            // When the Station:Theme setting choices are read,
+            // Given a stored owner theme, folded into the runtime catalog through the exact
+            // production shipped∪owner load path ScenarioTheCatalogLoadsShippedAndOwnerThemes
+            // above already proves (FakeThemeStore, no live DB — this project carries none),
+            var store = new FakeThemeStore();
+            await store.UpsertAsync(
+                "midnight-drive",
+                ThemeFixtures.ValidManifestJson("midnight-drive"),
+                "midnight-drive-catalog-entry",
+                CancellationToken.None);
+            var catalog = ThemeCatalog.CreateForStation(store, NullLogger<ThemeCatalog>.Instance);
+            await catalog.ReloadOwnerThemesAsync(CancellationToken.None);
+
+            // When the Station:Theme setting choices are read — StationSettingsAllowlist.ThemeChoices
+            // is the exact seam SettingsController's GET/PUT response and SettingValidator's own
+            // guard both call (PLAN T183), sourced from ThemeCatalog.All, not LoadShipped,
+            var choices = StationSettingsAllowlist.ThemeChoices(catalog);
+
             // Then the owner theme's slug is a selectable choice (AC3) — the closed choice widens
-            //      from shipped-only, sourced from ThemeCatalog.All not LoadShipped.
-            Assert.Fail(PendingChoice);
+            //      from shipped-only to include imported slugs.
+            Assert.Contains(choices, choice => choice.Value == "midnight-drive");
         }
     }
 

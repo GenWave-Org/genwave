@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using GenWave.Host.Configuration;
+using GenWave.Host.Theming;
 
 namespace GenWave.Host.Api;
 
@@ -27,8 +28,21 @@ public sealed class SettingsController(
     IConfiguration configuration,
     IStationSettingsStore store,
     SettingValidator validator,
-    ILogger<SettingsController> logger) : ControllerBase
+    ILogger<SettingsController> logger,
+    ThemeCatalog? injectedThemeCatalog = null) : ControllerBase
 {
+    /// <summary>
+    /// <c>Station:Theme</c>'s choices widen to the DI-registered <see cref="ThemeCatalog"/>'s
+    /// current shipped ∪ owner set (SPEC F103.7, STORY-271, PLAN T183) — every production instance
+    /// gets the real singleton automatically (registered in <c>Program.cs</c>; DI resolves it by
+    /// type regardless of constructor-parameter ordering). The trailing optional
+    /// <c>injectedThemeCatalog</c> parameter/fallback exists ONLY so the many existing
+    /// <c>new SettingsController(...)</c> unit tests exercising every OTHER allowlisted key keep
+    /// compiling and passing unchanged, falling back to <see cref="ThemeCatalog.LoadShipped"/> —
+    /// the exact shipped-only set this controller reported for <c>Station:Theme</c> before T183.
+    /// </summary>
+    readonly ThemeCatalog themeCatalog = injectedThemeCatalog ?? ThemeCatalog.LoadShipped();
+
     /// <summary>
     /// GET /api/settings — returns one <see cref="SettingDto"/> per allowlisted key.
     ///
@@ -51,7 +65,7 @@ public sealed class SettingsController(
             var source    = overrideKeys.ContainsKey(allowed.Key) ? "override" : "default";
             var applyMode = ApplyModeWireValue(allowed.ApplyMode);
             var kind      = KindWireValue(allowed.Kind);
-            return new SettingDto(allowed.Key, rawValue, source, applyMode, kind, allowed.Unit, allowed.Choices);
+            return new SettingDto(allowed.Key, rawValue, source, applyMode, kind, allowed.Unit, ChoicesFor(allowed));
         }).ToList();
 
         return Ok(items);
@@ -166,13 +180,29 @@ public sealed class SettingsController(
             var source    = overrideKeys.ContainsKey(u.Key) ? "override" : "default";
             var applyMode = ApplyModeWireValue(allowed.ApplyMode);
             var kind      = KindWireValue(allowed.Kind);
-            return new SettingDto(u.Key, rawValue, source, applyMode, kind, allowed.Unit, allowed.Choices);
+            return new SettingDto(u.Key, rawValue, source, applyMode, kind, allowed.Unit, ChoicesFor(allowed));
         }).ToList();
 
         return Ok(result);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Choices to present for one allowlisted entry, THIS request — <c>Station:Theme</c> widens to
+    /// <see cref="themeCatalog"/>'s current shipped ∪ owner set (SPEC F103.7, STORY-271, PLAN T183)
+    /// rather than the static snapshot baked into <see cref="AllowedSetting.Choices"/> at this
+    /// process's first touch of <see cref="StationSettingsAllowlist"/>. Every other allowlisted
+    /// key's choices (today, always <see langword="null"/> — <c>Station:Theme</c> is the only
+    /// <see cref="SettingKind.Choice"/> entry) pass through unchanged; this stays a single
+    /// key-specific branch, not a generic per-key dispatch table, because there is exactly one
+    /// Choice-kind key to widen (YAGNI — a second one is free to earn its own branch, or a real
+    /// dispatcher, when it exists).
+    /// </summary>
+    IReadOnlyList<SettingChoice>? ChoicesFor(AllowedSetting allowed) =>
+        allowed.Key.Equals("Station:Theme", StringComparison.OrdinalIgnoreCase)
+            ? StationSettingsAllowlist.ThemeChoices(themeCatalog)
+            : allowed.Choices;
 
     /// <summary>
     /// Maps <see cref="SettingApplyMode"/> to the wire string the admin UI badges on (SPEC F44.3
