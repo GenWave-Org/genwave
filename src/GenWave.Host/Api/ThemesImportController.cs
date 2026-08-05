@@ -157,7 +157,7 @@ public sealed partial class ThemesImportController(
         var (json, oversized) = await BoundedImportBodyReader.ReadBoundedBodyAsync(
             Request, BoundedImportBodyReader.MaxImportBytes, ct);
         if (oversized)
-            return StatusCode(StatusCodes.Status413PayloadTooLarge, OversizedProblem());
+            return StatusCode(StatusCodes.Status413PayloadTooLarge, ImportProblems.Oversized());
 
         // See this controller's own remarks ("Two parses, by design") — the schema-version gate below
         // reads a bare JsonDocument BEFORE ThemeManifestParser.Parse ever sees the body, so a
@@ -190,7 +190,7 @@ public sealed partial class ThemesImportController(
         }
         catch (ThemeManifestException ex)
         {
-            return BadRequest(MalformedManifestProblem(ex.Message));
+            return BadRequest(ImportProblems.MalformedManifest(ex.Message));
         }
 
         var normalized = NormalizeSlug(manifest, slug);
@@ -267,20 +267,6 @@ public sealed partial class ThemesImportController(
         Status = StatusCodes.Status400BadRequest,
         Title  = "Invalid catalog slug.",
         Detail = $"catalogSlug must be at most {BoundedImportBodyReader.MaxCatalogSlugLength} characters (got {length}).",
-    };
-
-    static ProblemDetails OversizedProblem() => new()
-    {
-        Status = StatusCodes.Status413PayloadTooLarge,
-        Title  = "Payload too large.",
-        Detail = $"Theme manifests are capped at {BoundedImportBodyReader.MaxImportBytes / 1024} KB.",
-    };
-
-    static ProblemDetails MalformedManifestProblem(string detail) => new()
-    {
-        Status = StatusCodes.Status400BadRequest,
-        Title  = "Malformed theme manifest.",
-        Detail = detail,
     };
 
     static ProblemDetails NewerSchemaProblem(int manifestSchemaVersion) => new()

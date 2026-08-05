@@ -10,6 +10,8 @@ import { readErrorMessage } from "@/lib/problem-details";
 import { cn } from "@/lib/utils";
 import { PersonaCardReviewModal, type PersonaCardReviewImportResult } from "../_components/PersonaCardReviewModal";
 import { prettifySlug } from "./format-slug";
+import { ThemeDetailPreview } from "./ThemeDetailPreview";
+import { ThemeInstallModal, type ThemeInstallResult } from "./ThemeInstallModal";
 import type {
   CatalogEntryDetailDto,
   CatalogIndexResponseDto,
@@ -42,14 +44,19 @@ type DetailState =
  *
  * The shelf itself now routes each entry by `kind` (SPEC F103.1, F103.3, PLAN T185): a persona
  * entry renders the `ShelfCard`/detail-panel/Hire flow above, unchanged; a theme entry renders
- * `ThemeShelfCard` — swatch chips painted straight off the already-fetched index row's `preview`,
- * with no click-through of its own (a theme's live preview/install flow is PLAN T186's job) — so a
- * theme card costs nothing beyond the one index read, ever.
+ * `ThemeShelfCard` — swatch chips painted straight off the already-fetched index row's `preview`
+ * while browsing, no click-through of its own yet. Opening a theme card (PLAN T186, SPEC
+ * F103.5/F103.6) reuses the SAME `GET /api/catalog/entries/{slug}` detail fetch personas already
+ * use — the entry's raw manifest text rides the existing `card` wire field (SPEC F103.2's
+ * generalised `{manifest, meta}` model, still named `card` on the wire, see `CatalogEntryResponse`'s
+ * own remarks) — then routes to `ThemeDetailPreview` (a live composed mini-preview) instead of
+ * `DetailPanel`, and "Install" opens `ThemeInstallModal` instead of `PersonaCardReviewModal`.
  */
 export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps): ReactNode {
   const router = useRouter();
   const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
   const [reviewing, setReviewing] = useState(false);
+  const [installingTheme, setInstallingTheme] = useState(false);
 
   // Request token (T102 review, HIGH): loadDetail's fetch is not the only thing that can change
   // `detail` between when a request starts and when it resolves — the operator can also collapse
@@ -137,7 +144,17 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
     router.push("/personas");
   }
 
+  /** SPEC F103.6's success path: no `/themes` list page exists to land on (unlike Personas' own
+   * `router.push` above) — `Station:Theme`'s choice list widening is a server-side fact the next
+   * `GET /api/settings` read already reflects (PLAN T183/T184), nothing this component needs to
+   * fetch or thread. Closing the modal and toasting is the whole client-side job. */
+  function handleThemeInstalled(result: ThemeInstallResult): void {
+    setInstallingTheme(false);
+    toast.success(`"${result.name}" installed.`);
+  }
+
   const selectedSlug = detail.kind !== "idle" ? detail.slug : null;
+  const selectedEntry = entries.find((entry) => entry.slug === selectedSlug) ?? null;
 
   /** Routes one shelf entry to its kind's own card (review finding, T185): an exhaustive `switch`
    * over `kind`, not a two-way ternary — the SERVER already drops any kind it doesn't recognise
@@ -147,7 +164,14 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
   function renderShelfEntry(entry: CatalogShelfEntryDto): ReactNode {
     switch (entry.kind) {
       case "theme":
-        return <ThemeShelfCard key={entry.slug} entry={entry} />;
+        return (
+          <ThemeShelfCard
+            key={entry.slug}
+            entry={entry}
+            selected={entry.slug === selectedSlug}
+            onSelect={() => handleCardClick(entry.slug)}
+          />
+        );
       case "persona":
         return (
           <ShelfCard
@@ -162,6 +186,33 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
     }
   }
 
+  /** Routes the loaded detail's own body to its entry's kind (review finding N6): the same
+   * exhaustive `switch` discipline `renderShelfEntry` uses above, not a two-way `===`/`!==` check
+   * against `"theme"` — the `default` renders nothing, so an entry whose kind this client doesn't
+   * recognise never falls through to the persona panel by default. */
+  function renderDetailPanel(entry: CatalogShelfEntryDto, loaded: Extract<DetailState, { kind: "loaded" }>): ReactNode {
+    // `loaded.detail.card` is `string | null`, `null` exactly when `unreachable` is `true`
+    // (types.ts) — and `unreachable: true` never reaches `detail.kind === "loaded"` at all
+    // (loadDetail routes it to the "error" branch instead), so this guard is a type-level
+    // formality, not a real runtime path (mirrors the review-modal guard below).
+    if (loaded.detail.card === null) return null;
+
+    switch (entry.kind) {
+      case "theme":
+        return (
+          <ThemeDetailPanel
+            slug={loaded.slug}
+            manifestText={loaded.detail.card}
+            onInstallClick={() => setInstallingTheme(true)}
+          />
+        );
+      case "persona":
+        return <DetailPanel slug={loaded.slug} detail={loaded.detail} onImportClick={() => setReviewing(true)} />;
+      default:
+        return null;
+    }
+  }
+
   return (
     <div>
       <ul aria-label="Community catalog entries" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -169,7 +220,10 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
       </ul>
 
       {detail.kind !== "idle" && (
-        <section aria-label="Persona details" className="mt-6 rounded-[6px] border border-line bg-surface p-5">
+        <section
+          aria-label={selectedEntry?.kind === "theme" ? "Theme details" : "Persona details"}
+          className="mt-6 rounded-[6px] border border-line bg-surface p-5"
+        >
           {detail.kind === "loading" && (
             <div className="space-y-2">
               <Skeleton className="h-6 w-48" />
@@ -178,9 +232,7 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
             </div>
           )}
           {detail.kind === "error" && <p className="text-[0.85rem] text-danger">{detail.message}</p>}
-          {detail.kind === "loaded" && (
-            <DetailPanel slug={detail.slug} detail={detail.detail} onImportClick={() => setReviewing(true)} />
-          )}
+          {detail.kind === "loaded" && selectedEntry && renderDetailPanel(selectedEntry, detail)}
         </section>
       )}
 
@@ -198,6 +250,42 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
           onImported={handleImported}
         />
       )}
+
+      {/* Cancel = no-op (SPEC F103.6's own sad path): closing this modal by any path just resets
+          `installingTheme`, never touching the network — see ThemeInstallModal's own remarks. */}
+      {installingTheme && detail.kind === "loaded" && selectedEntry?.kind === "theme" && detail.detail.card !== null && (
+        <ThemeInstallModal
+          slug={detail.slug}
+          manifestText={detail.detail.card}
+          onCancel={() => setInstallingTheme(false)}
+          onInstalled={handleThemeInstalled}
+        />
+      )}
+    </div>
+  );
+}
+
+function ThemeDetailPanel({
+  slug,
+  manifestText,
+  onInstallClick,
+}: {
+  slug: string;
+  manifestText: string;
+  onInstallClick: () => void;
+}): ReactNode {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-display text-[1.1rem] text-ink">{prettifySlug(slug)}</h2>
+        {/* Install (SPEC F103.6) opens ThemeInstallModal's confirm/cancel step — this click itself
+            issues no request; the modal POSTs the SAME manifestText already reviewed here. */}
+        <Button type="button" variant="primary" onClick={onInstallClick}>
+          Install
+        </Button>
+      </div>
+
+      <ThemeDetailPreview slug={slug} manifestText={manifestText} />
     </div>
   );
 }
@@ -233,23 +321,41 @@ function ShelfCard({
 }
 
 /**
- * A theme entry's shelf card (SPEC F103.3, F103.4, PLAN T185) — name/slug, the 18+ badge, and
- * swatch chips painted straight off the entry's already-fetched `preview`, nothing else. Static
- * (a `<div>`, not a `<button>`): unlike a persona card, there is no click-through detail fetch to
- * open here yet — a theme's live manifest preview and install flow is PLAN T186's own task, and
- * wiring a click that fetched the manifest here would violate this task's own "no manifest fetch
- * while browsing the shelf" contract (F103.4).
+ * A theme entry's shelf card (SPEC F103.3, F103.4, F103.5, PLAN T185/T186) — name/slug, the 18+
+ * badge, and swatch chips painted straight off the entry's already-fetched `preview`, exactly like
+ * browsing costs nothing beyond the one index read (F103.4, unchanged by this click-through: the
+ * card itself still fetches/composes nothing while rendering). Now a `<button>`, mirroring
+ * `ShelfCard`: a click routes through the SAME `handleCardClick`/`loadDetail` machinery personas
+ * already use — one `GET /api/catalog/entries/{slug}` fetch, the manifest text riding the existing
+ * `card` field — which `PersonaCatalogClient` then routes to `ThemeDetailPanel` (a live composed
+ * mini-preview, PLAN T186) instead of `DetailPanel`.
  */
-function ThemeShelfCard({ entry }: { entry: CatalogShelfEntryDto }): ReactNode {
+function ThemeShelfCard({
+  entry,
+  selected,
+  onSelect,
+}: {
+  entry: CatalogShelfEntryDto;
+  selected: boolean;
+  onSelect: () => void;
+}): ReactNode {
   return (
     <li>
-      <div className="flex w-full flex-col items-start gap-2 rounded-[6px] border border-line bg-surface p-4">
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-expanded={selected}
+        className={cn(
+          "flex w-full flex-col items-start gap-2 rounded-[6px] border p-4 text-left transition-colors duration-[120ms] ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+          selected ? "border-accent bg-surface-2" : "border-line bg-surface hover:bg-surface-2"
+        )}
+      >
         <div className="flex w-full items-center justify-between gap-2">
           <span className="font-display text-[1.05rem] text-ink">{prettifySlug(entry.slug)}</span>
           {entry.audience === "mature" && <MatureBadge />}
         </div>
         <ThemeSwatchChips preview={entry.preview} />
-      </div>
+      </button>
     </li>
   );
 }
