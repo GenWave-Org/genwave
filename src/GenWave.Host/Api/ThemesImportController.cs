@@ -34,8 +34,8 @@ namespace GenWave.Host.Api;
 ///
 /// <para>
 /// <b>Two parses, by design (PLAN T184 review F5).</b> The body is parsed TWICE, not once: first as a
-/// bare <see cref="JsonDocument"/> so <see cref="ExtractSchemaVersion"/> can read the optional
-/// <c>schemaVersion</c> field cheaply, then — only once that gate has passed — handed unchanged to
+/// bare <see cref="JsonDocument"/> so <see cref="ThemeSchemaVersionGate.ExtractSchemaVersion"/> can
+/// read the optional <c>schemaVersion</c> field cheaply, then — only once that gate has passed — handed unchanged to
 /// <see cref="ThemeManifestParser.Parse"/> for the real structural validation. The order is the point:
 /// a v2-shaped manifest whose shape ALSO fails today's v1 parser (a newer major is free to look
 /// nothing like the current one) must fail with the version-naming message, never a misleading
@@ -52,14 +52,19 @@ namespace GenWave.Host.Api;
 /// would touch the byte-stable interchange contract T177/T178 pinned across this repo and
 /// <c>genwave-catalog</c> (<c>Fixtures/golden.theme.json</c>), which is out of this task's scope. AC6
 /// still needs a real gate, so this route reads an OPTIONAL <c>schemaVersion</c> integer straight off
-/// the raw request JSON (<see cref="ExtractSchemaVersion"/>) — three outcomes, not two (PLAN T184
-/// review F2): ABSENT (every manifest that exists today, shipped or fixture) ⇒ treated as version 1
-/// and passes, at zero cost to any current caller; PRESENT and over <see cref="CurrentSchemaVersion"/>
-/// ⇒ refused, naming both; PRESENT but not a readable <see cref="int"/> — a JSON string, a fractional
-/// number, an integer that overflows — ⇒ ALSO refused, rather than silently coerced to "absent". Only
-/// true absence gets <see cref="Core.Domain.PersonaCard"/>'s own forward-compat treatment ("unknown
-/// fields within the current major are silently tolerated"); a present-but-unparsable value is an
-/// operator/tooling error worth surfacing, not one to paper over as version 1.
+/// the raw request JSON (<see cref="ThemeSchemaVersionGate.ExtractSchemaVersion"/>) — three outcomes,
+/// not two (PLAN T184 review F2): ABSENT (every manifest that exists today, shipped or fixture) ⇒
+/// treated as version 1 and passes, at zero cost to any current caller; PRESENT and over
+/// <see cref="ThemeSchemaVersionGate.CurrentSchemaVersion"/> ⇒ refused, naming both; PRESENT but not a
+/// readable <see cref="int"/> — a JSON string, a fractional number, an integer that overflows — ⇒ ALSO
+/// refused, rather than silently coerced to "absent". Only true absence gets
+/// <see cref="Core.Domain.PersonaCard"/>'s own forward-compat treatment ("unknown fields within the
+/// current major are silently tolerated"); a present-but-unparsable value is an operator/tooling error
+/// worth surfacing, not one to paper over as version 1. This extraction — and the shared
+/// <c>ImportProblems</c>-shaped 400 bodies it feeds — is now a type both this route and
+/// <see cref="ThemePreviewController"/> share (<see cref="ThemeSchemaVersionGate"/>): an operator must
+/// never be sold a preview of a theme import would refuse for a version it cannot read (Dean's
+/// directive 2026-08-05, "preview refuses what import refuses").
 /// </para>
 ///
 /// <para>
@@ -135,10 +140,6 @@ public sealed partial class ThemesImportController(
     ThemeCatalog themeCatalog,
     ILogger<ThemesImportController> logger) : ControllerBase
 {
-    // See this controller's own remarks ("Schema-major reject") for why this lives here rather than
-    // on ThemeManifest itself.
-    const int CurrentSchemaVersion = 1;
-
     /// <summary>
     /// POST /api/themes/{slug}/import — see this controller's own remarks for the full gate order and
     /// the reasoning behind each one. Gate order: route slug format (400) → shipped-slug reservation
@@ -183,9 +184,9 @@ public sealed partial class ThemesImportController(
         try
         {
             using var document = JsonDocument.Parse(json);
-            var (version, unreadable) = ExtractSchemaVersion(document.RootElement);
+            var (version, unreadable) = ThemeSchemaVersionGate.ExtractSchemaVersion(document.RootElement);
             if (unreadable)
-                return BadRequest(UnreadableSchemaVersionProblem());
+                return BadRequest(ImportProblems.UnreadableSchemaVersion());
 
             schemaVersion = version;
         }
@@ -195,8 +196,8 @@ public sealed partial class ThemesImportController(
             // failure as a ThemeManifestException carrying its own well-formed message.
         }
 
-        if (schemaVersion is { } manifestSchemaVersion && manifestSchemaVersion > CurrentSchemaVersion)
-            return BadRequest(NewerSchemaProblem(manifestSchemaVersion));
+        if (schemaVersion is { } manifestSchemaVersion && manifestSchemaVersion > ThemeSchemaVersionGate.CurrentSchemaVersion)
+            return BadRequest(ImportProblems.NewerSchema(manifestSchemaVersion));
 
         ThemeManifest manifest;
         try
@@ -218,7 +219,7 @@ public sealed partial class ThemesImportController(
         }
         catch (ThemeManifestException ex)
         {
-            return BadRequest(UnvendoredFontProblem(ex.Message));
+            return BadRequest(ImportProblems.UnvendoredFont(ex.Message));
         }
 
         var normalized = NormalizeSlug(manifest, slug);
@@ -231,7 +232,13 @@ public sealed partial class ThemesImportController(
         // request's to abandon.
         await themeCatalog.ReloadOwnerThemesAsync(CancellationToken.None);
 
-        logger.LogInformation("Theme imported slug={Slug} importedFrom={ImportedFrom}", slug, importedFrom);
+        // Both values are \A..\z-anchored long before this line, so no control character can
+        // reach the template — Sanitize is the belt-and-braces LogSafeText's own rule demands
+        // ("every string in a catalog log line"), and what CodeQL's log-forging query wants pinned.
+        logger.LogInformation(
+            "Theme imported slug={Slug} importedFrom={ImportedFrom}",
+            LogSafeText.Sanitize(slug),
+            LogSafeText.Sanitize(importedFrom));
 
         return Ok(new ThemeImportResponse(normalized.Slug, normalized.Name, importedFrom));
     }
@@ -243,30 +250,6 @@ public sealed partial class ThemesImportController(
     /// key, not the manifest's own opinion") for why.</summary>
     static ThemeManifest NormalizeSlug(ThemeManifest manifest, string routeSlug) =>
         manifest with { Slug = routeSlug };
-
-    /// <summary>
-    /// Reads the optional top-level <c>schemaVersion</c> field off <paramref name="root"/> — see this
-    /// controller's own remarks ("Schema-major reject") for why this is not a
-    /// <see cref="ThemeManifest"/> field. Three outcomes, not two (PLAN T184 review F2): the field is
-    /// ABSENT ⇒ <c>(null, false)</c>, treated by <see cref="Import"/> as version
-    /// <see cref="CurrentSchemaVersion"/>; PRESENT and a readable <see cref="int"/> ⇒
-    /// <c>(version, false)</c>; PRESENT but not a readable <see cref="int"/> — a JSON string, a
-    /// fractional number, or one that overflows <see cref="int"/> — ⇒ <c>(null, true)</c>, a refusal
-    /// rather than the silent "treat as absent" this method used to fail open to. Guards
-    /// <paramref name="root"/>'s own <see cref="JsonElement.ValueKind"/> before calling
-    /// <see cref="JsonElement.TryGetProperty(string,out JsonElement)"/>, which throws for a
-    /// syntactically valid but non-object root (a bare JSON array/string/number) — that shape is
-    /// reported by <see cref="ThemeManifestParser.Parse"/> instead, never here.
-    /// </summary>
-    static (int? Version, bool Unreadable) ExtractSchemaVersion(JsonElement root)
-    {
-        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("schemaVersion", out var property))
-            return (null, false);
-
-        return property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var version)
-            ? (version, false)
-            : (null, true);
-    }
 
     // Composed from CatalogIndexValidator.SlugSegment — the catalog's own slug vocabulary — mirroring
     // CatalogController.SlugFormat's own composition (see that member's remarks for the full \A/\z
@@ -297,36 +280,10 @@ public sealed partial class ThemesImportController(
         Detail = $"catalogSlug must be at most {BoundedImportBodyReader.MaxCatalogSlugLength} characters (got {length}).",
     };
 
-    static ProblemDetails NewerSchemaProblem(int manifestSchemaVersion) => new()
-    {
-        Status = StatusCodes.Status400BadRequest,
-        Title  = "Unsupported schema version.",
-        Detail =
-            $"Theme manifest schema version {manifestSchemaVersion} is newer than this station's " +
-            $"supported version {CurrentSchemaVersion}.",
-    };
-
-    static ProblemDetails UnreadableSchemaVersionProblem() => new()
-    {
-        Status = StatusCodes.Status400BadRequest,
-        Title  = "Invalid schema version.",
-        Detail = "schemaVersion, when present, must be a whole number.",
-    };
-
     static ProblemDetails ShippedSlugReservedProblem(string slug) => new()
     {
         Status = StatusCodes.Status409Conflict,
         Title  = "Shipped theme slug is reserved.",
         Detail = $"\"{slug}\" is a shipped theme's slug and cannot be overwritten by an import (SPEC F103.8).",
-    };
-
-    /// <summary><paramref name="detail"/> carries <see cref="ThemeFontProvenanceValidator.Validate"/>'s
-    /// own <see cref="ThemeManifestException"/> message verbatim — either an unvendored-face name (and
-    /// the whole vendored set) or an over-ceiling byte total (SPEC F103.10, PLAN T188).</summary>
-    static ProblemDetails UnvendoredFontProblem(string detail) => new()
-    {
-        Status = StatusCodes.Status400BadRequest,
-        Title  = "Theme fonts rejected.",
-        Detail = detail,
     };
 }

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using GenWave.Host.Theming;
@@ -33,11 +34,23 @@ namespace GenWave.Host.Api;
 /// deserialization-IS-validation posture as <see cref="ThemesImportController.Import"/>: a
 /// <see cref="ThemeManifestException"/> from <see cref="ThemeManifestParser.Parse"/> maps to 400, never
 /// an unhandled 500 — both routes' 413/400 bodies come from the shared <see cref="ImportProblems"/>
-/// factories, not a copy each (review finding). Deliberately NOT reused: the schema-major gate
-/// (<see cref="ThemesImportController"/>'s own <c>ExtractSchemaVersion</c>/<c>CurrentSchemaVersion</c>)
-/// and the shipped-slug/route-slug machinery — nothing here is ever stored, so there is no forward
-/// compatibility contract to protect and no slug to normalize; a manifest that merely PARSES is enough
-/// to preview honestly, exactly what <see cref="ThemeCssComposer"/> needs.
+/// factories, not a copy each (review finding).
+/// </para>
+///
+/// <para>
+/// <b>Preview refuses what import refuses (Dean's directive 2026-08-05) — the schema-major and
+/// curated-font gates, PORTED here in <see cref="ThemesImportController.Import"/>'s own documented
+/// order.</b> Without this, an operator could be sold a beautiful live preview of a theme its own
+/// import route would go on to reject — a v2-major manifest, or one referencing a font outside
+/// <see cref="FontProvenanceCatalog.Default"/> — an honest-looking dead end. Both gates now run here
+/// too, identically: the schema-version extraction and its <see cref="ThemeSchemaVersionGate.CurrentSchemaVersion"/>
+/// comparison (<see cref="ThemeSchemaVersionGate"/> — the piece <see cref="ThemesImportController"/>
+/// used to own privately, now a shared type both routes call) BEFORE structural parsing, then
+/// <see cref="ThemeFontProvenanceValidator.Validate"/> AFTER it succeeds — same order, same
+/// <see cref="ImportProblems"/>-shaped 400 bodies, same refusal copy. Deliberately still NOT reused: the
+/// shipped-slug/route-slug machinery — nothing here is ever stored, so there is no upsert key to govern
+/// and no shipped-slug reservation to protect; a manifest that PARSES and clears both content gates is
+/// enough to preview honestly, exactly what <see cref="ThemeCssComposer"/> needs.
 /// </para>
 ///
 /// <para>
@@ -68,7 +81,11 @@ public sealed class ThemePreviewController : ControllerBase
     /// <summary>
     /// POST /api/themes/preview — see this controller's own remarks for the full delivery-shape
     /// reasoning. Body is the raw theme manifest JSON text (the SAME bytes the caller already fetched
-    /// and is about to review); response is the scoped preview CSS as <c>text/css</c>.
+    /// and is about to review); response is the scoped preview CSS as <c>text/css</c>. Gate order
+    /// mirrors <see cref="ThemesImportController.Import"/>'s own documented order (minus the slug
+    /// checks, which do not apply here): bounded body read (413) → schema-major (400, checked ahead of
+    /// structural parsing, same as import) → deserialize-as-validation (400) → curated-font
+    /// provenance/byte-ceiling (400) → compose (200).
     /// </summary>
     [HttpPost("preview")]
     [Consumes("application/json")]
@@ -80,6 +97,32 @@ public sealed class ThemePreviewController : ControllerBase
         if (oversized)
             return StatusCode(StatusCodes.Status413PayloadTooLarge, ImportProblems.Oversized());
 
+        // See this controller's own remarks ("Preview refuses what import refuses") — mirrors
+        // ThemesImportController.Import's own "Two parses, by design" order verbatim: a bare
+        // JsonDocument parse reads the optional schemaVersion field BEFORE ThemeManifestParser.Parse
+        // ever sees the body, so a version-mismatched manifest is refused naming both versions even
+        // when its shape would also fail structural parsing. A syntactically malformed body is
+        // deliberately NOT reported here — ThemeManifestParser.Parse below throws the one, well-formed
+        // message for that.
+        int? schemaVersion = null;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var (version, unreadable) = ThemeSchemaVersionGate.ExtractSchemaVersion(document.RootElement);
+            if (unreadable)
+                return BadRequest(ImportProblems.UnreadableSchemaVersion());
+
+            schemaVersion = version;
+        }
+        catch (JsonException)
+        {
+            // Malformed JSON — deferred to ThemeManifestParser.Parse below, which throws the same
+            // failure as a ThemeManifestException carrying its own well-formed message.
+        }
+
+        if (schemaVersion is { } manifestSchemaVersion && manifestSchemaVersion > ThemeSchemaVersionGate.CurrentSchemaVersion)
+            return BadRequest(ImportProblems.NewerSchema(manifestSchemaVersion));
+
         ThemeManifest manifest;
         try
         {
@@ -88,6 +131,19 @@ public sealed class ThemePreviewController : ControllerBase
         catch (ThemeManifestException ex)
         {
             return BadRequest(ImportProblems.MalformedManifest(ex.Message));
+        }
+
+        // SPEC F103.10, PLAN T188, ported to preview (Dean's directive 2026-08-05) — see
+        // ThemeFontProvenanceValidator's own remarks for why this is safe as an additive,
+        // non-persisting check of the same rule the import route enforces for real.
+        try
+        {
+            ThemeFontProvenanceValidator.Validate(
+                manifest, FontProvenanceCatalog.Default.BySrc, ThemeFontProvenanceValidator.PerThemeByteCeilingBytes);
+        }
+        catch (ThemeManifestException ex)
+        {
+            return BadRequest(ImportProblems.UnvendoredFont(ex.Message));
         }
 
         var css = ThemeCssComposer.ComposeScoped(manifest, ContainerSelector);

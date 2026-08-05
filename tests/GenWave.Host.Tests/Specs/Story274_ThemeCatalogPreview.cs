@@ -18,6 +18,17 @@
 // directly (no HTTP) — the DoD's "scoped output vs live output: same tokens, different selector;
 // live path byte-identical to before" — reusing Story264_ComposedStylesheet.cs's own
 // (internal-by-default, so cross-file-visible) ComposerFixtures rather than a second copy.
+//
+// GATE PARITY (Dean's directive 2026-08-05, "preview refuses what import refuses") —
+// ScenarioRejectingBadPreviewRequests now also covers the schema-major and curated-font-provenance
+// gates ThemesImportController.Import already enforced (SPEC F103.6 AC6, F103.10/PLAN T188): an
+// operator must never be sold a live preview of a theme its own import route would go on to reject.
+// Both gates run here in the SAME order import documents, through the SAME shared
+// ThemeSchemaVersionGate/ImportProblems/ThemeFontProvenanceValidator types — see
+// ThemePreviewController's own remarks for the full reasoning and PreviewGateFixtures below for the
+// fixture manifests (a local, file-scoped mirror of Story272_ThemeImport.cs's own ThemeImportFixture,
+// never shared cross-file — the house idiom every other spec-fixture type in this suite already
+// follows).
 
 using System.Net;
 using System.Net.Http.Json;
@@ -46,6 +57,60 @@ file sealed class ThemePreviewWebFactory : WebApplicationFactory<Program>
         builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
         builder.UseSetting("Admin:Password", Password);
     }
+}
+
+// ── Fixture ────────────────────────────────────────────────────────────────────────────────────────
+
+/// <summary>Manifests for the gate-parity sad-path specs (Dean's directive 2026-08-05) — a local,
+/// file-scoped mirror of <c>Story272_ThemeImport.cs</c>'s own <c>ThemeImportFixture</c>, never shared
+/// cross-file (the house idiom every <c>file</c>-scoped fixture in this suite already follows;
+/// <see cref="ComposerFixtures"/> is the one exception, deliberately NOT <c>file</c>-scoped because
+/// Story264/Story274 both need it).</summary>
+file static class PreviewGateFixtures
+{
+    /// <summary>An otherwise fully valid manifest (real vendored font srcs, both mode blocks) carrying
+    /// a top-level <c>schemaVersion</c> — <paramref name="schemaVersionLiteral"/> is inserted VERBATIM
+    /// as a raw JSON literal so callers can exercise both a readable integer (e.g. <c>"2"</c>) and an
+    /// unreadable shape (a quoted string, a fraction, an overflowing integer) with the one
+    /// method — mirrors <c>ThemeImportFixture.ValidManifestJson</c>'s own
+    /// <c>schemaVersion</c>/<c>schemaVersionRaw</c> split, collapsed to one parameter since preview's
+    /// specs need no schema-absent case here (the happy-path scenarios above already cover that).</summary>
+    public static string ValidManifestJsonWithSchemaVersion(string slug, string schemaVersionLiteral) => $$"""
+        {
+          "schemaVersion": {{schemaVersionLiteral}},
+          "slug": "{{slug}}",
+          "name": "Test Theme",
+          "author": "GenWave",
+          "fonts": {
+            "display": { "family": "Fraunces", "assets": [ { "src": "/fonts/fraunces-variable-latin.woff2", "weight": "400 600", "style": "normal" } ] },
+            "sans": { "family": "Source Sans 3", "assets": [ { "src": "/fonts/source-sans-3-variable-latin.woff2", "weight": "400", "style": "normal" } ] }
+          },
+          "modes": {
+            "light": { "bg": "#2a5c9e", "ink": "#2b2320" },
+            "dark": { "bg": "#1e1713", "ink": "#f0e7d8" }
+          }
+        }
+        """;
+
+    /// <summary>An otherwise-valid manifest whose display font names a src the URL-shape check
+    /// (<c>ThemeManifestParser.FontSrcPattern</c>) accepts but <c>FontProvenanceCatalog</c> has no
+    /// entry for — verbatim mirror of <c>ThemeImportFixture.ManifestJsonWithUnvendoredFontSrc</c>
+    /// (SPEC F103.10, PLAN T188).</summary>
+    public static string ManifestJsonWithUnvendoredFontSrc(string slug) => $$"""
+        {
+          "slug": "{{slug}}",
+          "name": "Test Theme",
+          "author": "GenWave",
+          "fonts": {
+            "display": { "family": "Fraunces", "assets": [ { "src": "/fonts/nonexistent.woff2", "weight": "400 600", "style": "normal" } ] },
+            "sans": { "family": "Source Sans 3", "assets": [ { "src": "/fonts/source-sans-3-variable-latin.woff2", "weight": "400", "style": "normal" } ] }
+          },
+          "modes": {
+            "light": { "bg": "#2a5c9e", "ink": "#2b2320" },
+            "dark": { "bg": "#1e1713", "ink": "#f0e7d8" }
+          }
+        }
+        """;
 }
 
 // ── Specs ──────────────────────────────────────────────────────────────────────────────────────────
@@ -321,6 +386,69 @@ public static class FeatureThemeCatalogPreview
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
             var body = await response.Content.ReadAsStringAsync();
             Assert.Contains("incomplete-theme", body, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task ANewerMajorManifestIsRefusedNamingBothVersions()
+        {
+            // Given an otherwise-valid manifest whose schema major exceeds the app's (Dean's directive
+            // 2026-08-05: preview refuses what import refuses — SPEC F103.6 AC6, ported here),
+            await using var factory = new ThemePreviewWebFactory();
+            var client = await LoggedInClientAsync(factory);
+
+            // When it is posted,
+            var response = await PostPreviewAsync(
+                client, PreviewGateFixtures.ValidManifestJsonWithSchemaVersion("preview-dj-future", "2"));
+            var body = await response.Content.ReadAsStringAsync();
+
+            // Then it responds 400 naming both versions — the EXACT phrase
+            // Story272_ThemeImport.cs's own ANewerMajorManifestIsRefusedNamingBothVersions asserts,
+            // proving this is the same shared ImportProblems copy, not a forked one.
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Contains(
+                "schema version 2 is newer than this station's supported version 1", body, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task APresentButUnreadableSchemaVersionIsRefusedWith400()
+        {
+            // Given an otherwise-valid manifest whose schemaVersion is present but not a readable
+            // whole number (a JSON string, mirroring Story272_ThemeImport.cs's own
+            // AnUnreadableSchemaVersionIsRefusedWith400 theory) — refused, never silently treated as
+            // absent (PLAN T184 review F2, ported here),
+            await using var factory = new ThemePreviewWebFactory();
+            var client = await LoggedInClientAsync(factory);
+
+            // When it is posted,
+            var response = await PostPreviewAsync(
+                client, PreviewGateFixtures.ValidManifestJsonWithSchemaVersion("preview-dj-unreadable", "\"2\""));
+
+            // Then it responds 400.
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task AManifestReferencingAnUnvendoredFontIsRefusedWith400()
+        {
+            // Given a manifest whose font src has the right SHAPE (ThemeManifestParser.FontSrcPattern
+            // accepts it) but names a face GenWave never vendored (SPEC F103.10, PLAN T188 — Dean's
+            // directive 2026-08-05: an operator must never be sold a live preview of a theme its own
+            // import route would go on to reject),
+            await using var factory = new ThemePreviewWebFactory();
+            var client = await LoggedInClientAsync(factory);
+
+            // When it is posted,
+            var response = await PostPreviewAsync(
+                client, PreviewGateFixtures.ManifestJsonWithUnvendoredFontSrc("preview-off-catalog-font"));
+            var body = await response.Content.ReadAsStringAsync();
+
+            // Then it responds 400 naming the missing face and the vendored set — the SAME copy
+            // Story272_ThemeImport.cs's own AManifestReferencingAnUnvendoredFontIsRefusedWith400
+            // asserts, proving this is the same shared ThemeFontProvenanceValidator/ImportProblems
+            // pair, not a forked one.
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Contains("/fonts/nonexistent.woff2", body, StringComparison.Ordinal);
+            Assert.Contains("/fonts/fraunces-variable-latin.woff2", body, StringComparison.Ordinal);
         }
     }
 

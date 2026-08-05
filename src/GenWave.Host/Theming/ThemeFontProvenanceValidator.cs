@@ -43,10 +43,12 @@ using System.Linq;
 /// away no security surface, only page-weight/UX budget the import gate already
 /// protects.</description></item>
 /// </list>
-/// The theme detail LIVE-PREVIEW route deliberately stays unvalidated by this type too — SPEC
-/// F103.5 states v1 previews "load no new fonts" (colour-only themes reference the already-loaded
-/// curated set), and nothing that route composes is ever stored or served station-wide; the import
-/// gate above is still the one enforcement point before a theme reaches an actual visitor.
+/// The theme detail LIVE-PREVIEW route (<see cref="GenWave.Host.Api.ThemePreviewController"/>) now calls this
+/// SAME validator too (Dean's directive 2026-08-05, "preview refuses what import refuses") — an
+/// operator must never be sold a live preview of a theme the import route would go on to reject.
+/// Nothing that route composes is ever stored or served station-wide, so the import gate above
+/// remains the one place that guarantees every PERSISTED row satisfies SPEC F103.10; the preview
+/// call is an additive, non-persisting check of the same rule against ephemeral input.
 /// </summary>
 public static class ThemeFontProvenanceValidator
 {
