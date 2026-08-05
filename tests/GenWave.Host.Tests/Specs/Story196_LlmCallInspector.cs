@@ -38,6 +38,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using GenWave.Host.Api;
+using GenWave.Host.Tests.Fakes;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
@@ -96,22 +97,6 @@ sealed class LlmCompletionsStub : IAsyncDisposable
     }
 
     public async ValueTask DisposeAsync() => await app.DisposeAsync();
-}
-
-/// <summary>Stamps every request's Connection.LocalPort so SurfaceGateMiddleware sees the public
-/// listener — mirrors Story172_PublicListenerIsolation's own <c>SimulatedPortStartupFilter</c>
-/// (file-scoped there too, redefined here rather than shared).</summary>
-file sealed class SimulatedPortStartupFilter(int port) : IStartupFilter
-{
-    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
-    {
-        app.Use((context, nextMiddleware) =>
-        {
-            context.Connection.LocalPort = port;
-            return nextMiddleware(context);
-        });
-        next(app);
-    };
 }
 
 // ── WebApplicationFactories ──────────────────────────────────────────────────────────────────────

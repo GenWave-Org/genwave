@@ -9,9 +9,7 @@
 // Red until PLAN T15.
 
 using System.Net;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,23 +17,10 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Playout;
+using GenWave.Host.Tests.Fakes;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
-
-/// <summary>Stamps every request's Connection.LocalPort so the SurfaceGate sees the public listener.</summary>
-file sealed class SimulatedPortStartupFilter(int port) : IStartupFilter
-{
-    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
-    {
-        app.Use((context, nextMiddleware) =>
-        {
-            context.Connection.LocalPort = port;
-            return nextMiddleware(context);
-        });
-        next(app);
-    };
-}
 
 file sealed class PublicListenerWebFactory(int? simulatedPort) : WebApplicationFactory<Program>
 {

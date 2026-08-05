@@ -26,6 +26,24 @@
       "version": null,
       "subset": "latin",
       "bytes": 28740
+    },
+    {
+      "family": "JetBrains Mono",
+      "file": "jetbrains-mono-variable-latin.woff2",
+      "sourceUrl": "https://github.com/JetBrains/JetBrainsMono",
+      "license": "OFL-1.1",
+      "version": "2.304",
+      "subset": "latin",
+      "bytes": 47392
+    },
+    {
+      "family": "Grenze Gotisch",
+      "file": "grenze-gotisch-variable-latin.woff2",
+      "sourceUrl": "https://github.com/Omnibus-Type/Grenze-Gotisch",
+      "license": "OFL-1.1",
+      "version": "1.002 (commit 7b5eac166bc3)",
+      "subset": "latin",
+      "bytes": 51992
     }
   ]
 }

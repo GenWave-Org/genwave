@@ -64,13 +64,6 @@ file sealed class GenreRequestWebFactory(bool spectatorMode = true) : WebApplica
     }
 }
 
-/// <summary>Hands every client the SAME shared handler (never disposed by the client) — mirrors
-/// Story225's own file-local twin, which a file-scoped class cannot share across files.</summary>
-file sealed class SingleHandlerHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
-{
-    public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
-}
-
 public static class FeatureGenrePredicateParsing
 {
     // ---------------------------------------------------------------------

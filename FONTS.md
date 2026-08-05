@@ -4,9 +4,12 @@ Scope: the **GenWave-vendored curated font set** the theme system (SPEC F102/F10
 `@font-face` rules at runtime and serves from the canonical `GET /fonts/{file}` route
 (`src/GenWave.Host/Api/FontEndpoints.cs`). This document is the **process** PLAN T188 exists to
 establish — it closes ARCHITECTURE.md's two "Theme system" TODOs ("Font licensing per face",
-"Page-weight ceiling") **for the curated set**. The exact face list a future theme ships is a
-separate `/plan` decision (PLAN T189); this document fixes the steps every face — today's or a
-later one — must clear before it ships, plus the mechanism that enforces it.
+"Page-weight ceiling") **for the curated set**. The face list itself is a separate decision each time the set grows
+(PLAN T189 added JetBrains Mono + Grenze Gotisch, Dean-approved 2026-08-05); this document fixes
+the steps every face — today's or a later one — must clear before it ships, plus the mechanism
+that enforces it. Known recipe limitation: the step-3 `pyftsubset` invocation drops OFL name
+records (IDs 13/14) from the output; copyright (ID 0) survives and the licence is recorded in
+the provenance file, but a future recipe revision should add `--name-IDs='*'` and re-subset.
 
 **Owner-uploaded fonts are explicitly out of scope** (SPEC F103.10, ARCHITECTURE "Theme system" §
 Community Catalog v2 → "Curated-font *process* now, faces at `/plan`; no owner uploads"). This
@@ -78,25 +81,34 @@ rejected rather than silently shipped.
 
 ## Per-theme byte ceiling
 
-**Measurement.** The three faces GenWave ships today (Fraunces variable, Fraunces italic
-variable, Source Sans 3 variable — all `latin`-subsetted, all six embedded themes reference all
-three) total:
+**Measurement.** GenWave ships five vendored faces today: the base pair — Fraunces variable,
+Fraunces italic variable, Source Sans 3 variable (both embedded themes reference all three) —
+plus PLAN T189's two Dean-approved additions, JetBrains Mono variable (a monospace role) and
+Grenze Gotisch variable (a display alternate). All five are `latin`-subsetted:
 
 | File | Bytes |
 |---|---|
 | `fraunces-variable-latin.woff2` | 67,304 |
 | `fraunces-italic-variable-latin.woff2` | 42,228 |
 | `source-sans-3-variable-latin.woff2` | 28,740 |
-| **Total** | **138,272 (≈135.0 KiB)** |
+| `jetbrains-mono-variable-latin.woff2` | 47,392 |
+| `grenze-gotisch-variable-latin.woff2` | 51,992 |
+| **Total** | **237,656 (≈232.1 KiB)** |
 
-**Chosen ceiling: 200 KiB (204,800 bytes) per theme.** Rationale: ~50% headroom over today's
-measured ~135 KiB — enough for PLAN T189's still-undecided additional face(s) (a monospace role, or
-a second weight axis, are the likeliest additions) without a rubber-stamp "just raise the ceiling"
-outcome, while still keeping a THEME SWITCH's worst-case added page weight (ARCHITECTURE "Theme
-system": only the *active* theme's faces are ever emitted) in the same order of magnitude as a
-single hero image rather than "the heaviest thing on the page" the deferred TODO warned about. The
-constant lives in code as `ThemeFontProvenanceValidator.PerThemeByteCeilingBytes` — update both
-this document and that constant together if the number ever changes.
+**Chosen ceiling: 200 KiB (204,800 bytes) per theme.** Rationale: ~50% headroom over the base
+pair's measured ~135 KiB — enough for one additional face on top of the full base pair without a
+rubber-stamp "just raise the ceiling" outcome, while still keeping a THEME SWITCH's worst-case
+added page weight (ARCHITECTURE "Theme system": only the *active* theme's faces are ever emitted)
+in the same order of magnitude as a single hero image rather than "the heaviest thing on the page"
+the deferred TODO warned about. The constant lives in code as
+`ThemeFontProvenanceValidator.PerThemeByteCeilingBytes` — update both this document and that
+constant together if the number ever changes.
+
+**Pairing constraint.** The base pair (138,272 B) plus JetBrains Mono alone (185,664 B) fits; the
+base pair plus Grenze Gotisch alone (190,264 B) fits; the base pair plus **both** new faces
+(237,656 B) exceeds the 204,800-byte ceiling. A theme may therefore add at most **one** of the two
+PLAN T189 faces on top of the full base pair — e.g. JetBrains Mono + Grenze Gotisch + Source Sans 3
+alone (no Fraunces) totals 128,124 B and also fits.
 
 ## Enforcement — the validator
 
@@ -122,6 +134,8 @@ Wired at exactly the two places a theme manifest **enters the running system** �
 
 Deliberately **not** re-checked on every `ThemeCatalog.ReloadOwnerThemesAsync` reload (owner rows
 are guaranteed to already satisfy this the moment they were imported, since the import route above
-is the only writer) and **not** wired into `ThemePreviewController` (SPEC F103.5: v1 previews are
-colour-only over the already-loaded curated set — "loads no new fonts" by construction, and nothing
-a preview composes is ever stored or served station-wide).
+is the only writer). `ThemePreviewController` **does** call the same validator (commit `d43305d`,
+Dean-approved 2026-08-05: "preview refuses what import refuses") — an operator must never be sold a
+live preview of a theme the import route would go on to reject. This is an additive, non-persisting
+check of the same rule against ephemeral preview input; the import gate above remains the one place
+that guarantees every *persisted* row satisfies SPEC F103.10.
