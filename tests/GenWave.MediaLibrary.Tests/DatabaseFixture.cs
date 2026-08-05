@@ -133,6 +133,20 @@ public sealed class DatabaseFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
+    /// <summary>
+    /// Truncate <c>station.theme</c> and reset its identity (SPEC F103.7, STORY-271, PLAN T182). No
+    /// FK references this table — <c>slug</c> is a standalone unique key, nothing points into or out
+    /// of it — so no CASCADE is required, the same reasoning <see cref="ResetScheduleAsync"/>'s own
+    /// remarks give.
+    /// </summary>
+    public async Task ResetThemeAsync()
+    {
+        await using var conn = await StationDataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "truncate table station.theme restart identity";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     async Task WaitForSchemaAsync()
     {
         for (var attempt = 0; attempt < 30; attempt++)

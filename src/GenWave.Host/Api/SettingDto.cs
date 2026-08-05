@@ -28,8 +28,8 @@ namespace GenWave.Host.Api;
 /// </param>
 /// <param name="Choices">
 ///   The closed set of valid <see cref="SettingChoice"/> value/label pairs, present only when
-///   <paramref name="Kind"/> is <c>"choice"</c> (e.g. every shipped theme, slug plus display name,
-///   for <c>Station:Theme</c>) — lets a client render a <c>&lt;select&gt;</c> instead of a text
+///   <paramref name="Kind"/> is <c>"choice"</c> (e.g. every shipped ∪ owner theme, slug plus
+///   display name, for <c>Station:Theme</c> — PLAN T183) — lets a client render a <c>&lt;select&gt;</c> instead of a text
 ///   box, with a real display label rather than a raw slug, so a typo cannot produce an
 ///   unresolvable value (SPEC F102.14). <see langword="null"/> for every other kind.
 /// </param>

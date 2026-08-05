@@ -116,6 +116,12 @@ static class StationSettingsHostingExtensions
             ?? new RequestsOptions();
         builder.Services.AddRequestStore(stationConnStr, requestsOptions.WishRetentionHours);
 
+        // Owner theme store (SPEC F103.7, STORY-271, PLAN T181) — same station_svc connection
+        // string as every registration above; station.theme lives in the same schema.
+        // ThemeRepository ships dark since T181 (AddThemeStore itself registers no consumer):
+        // ThemeCatalog (T182) and the theme import route (T184) are the first Host call sites.
+        builder.Services.AddThemeStore(stationConnStr);
+
         return builder;
     }
 }

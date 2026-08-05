@@ -22,7 +22,8 @@ namespace GenWave.Host.Configuration;
 /// </param>
 /// <param name="Choices">
 /// The closed set of valid <see cref="SettingChoice"/> value/label pairs for a
-/// <see cref="SettingKind.Choice"/> entry (e.g. every shipped theme, slug plus display name).
+/// <see cref="SettingKind.Choice"/> entry (e.g. every shipped ∪ owner theme, slug plus display
+/// name — PLAN T183).
 /// <see langword="null"/> for every other <see cref="SettingKind"/> — a
 /// <see cref="SettingChoice.Value"/> outside this set is a <see cref="SettingValidator"/>
 /// rejection, never a silently-unresolvable typo; a <see cref="SettingChoice.Label"/> is never

@@ -191,19 +191,20 @@ public static class FeatureThemeSelectionAndPersistence
         // fixture into the shipped shelf AND T158's AA gate, which this task is explicitly told not
         // to do — so this stays a live-stack, by-hand verification rather than a faked in-process one.
         const string OperatorGated =
-            "AC5 has TWO blockers, and they are NOT the same kind — do not expect to unskip this " +
-            "at T171. (a) TEMPORARY: a second theme, which Ship 1 does not carry; manufacturing " +
-            "one as a real shipped manifest would leak a T171 fixture into the shelf and T158's " +
-            "AA gate. This lifts when T171 ships the shelf. (b) PERMANENT, absent new test " +
-            "infrastructure: the real Postgres-backed settings overlay, because AC5 asserts a " +
+            "AC5 originally had TWO blockers of different kinds; PLAN T183 resolved one of them. " +
+            "(a) RESOLVED (T183): StationSettingsAllowlist/SettingValidator now source Station:Theme's " +
+            "choices/acceptance from the DI-registered ThemeCatalog at request time (not a frozen " +
+            "shipped-only snapshot), so a WebApplicationFactory test swapping the DI ThemeCatalog " +
+            "singleton for ThemeSelectionFixtures.TwoThemeCatalog() (as ApplianceModeWebFactory " +
+            "already does) can PUT the fixture's alternate slug and have it validate — no real " +
+            "second SHIPPED theme is needed to prove this half. (b) STILL PERMANENT, absent new " +
+            "test infrastructure: the real Postgres-backed settings overlay, because AC5 asserts a " +
             "settings ROW write. There is no Testcontainers/Respawn/DB fixture anywhere in tests/, " +
-            "and every workflow runs --filter \"Category!=Integration\". T171 does NOT lift this " +
-            "one. (Mirrors Story170's identical Station:PublicStreamUrl split — note Story170 uses " +
-            "Skip alone without the Integration trait, so its gated spec still shows in the " +
-            "filtered skip count where this one is excluded outright.) A third path exists: " +
-            "re-sourcing StationSettingsAllowlist.Choices from the DI-registered ThemeCatalog " +
-            "rather than its own static LoadShipped() would make (a) moot for tests — already " +
-            "flagged as a deferred Layer B cost on ShippedThemeChoices. " +
+            "and every workflow runs --filter \"Category!=Integration\" — this is why the Fact stays " +
+            "Skip'd even though (a) no longer blocks it. (Mirrors Story170's identical " +
+            "Station:PublicStreamUrl split — note Story170 uses Skip alone without the Integration " +
+            "trait, so its gated spec still shows in the filtered skip count where this one is " +
+            "excluded outright.) " +
             "Operator procedure (run against `BUILD=1 ./launch.sh`, PLAN T165): " +
             "(1) temporarily add a second embedded manifest under " +
             "src/GenWave.Host/Theming/themes/ (any valid slug/tokens, distinct --bg) — a TEST " +
