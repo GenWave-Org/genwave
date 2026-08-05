@@ -96,6 +96,18 @@ namespace GenWave.Host.Api;
 /// </para>
 ///
 /// <para>
+/// <b>Curated-font provenance/byte-ceiling (SPEC F103.10, PLAN T188) — the one place it is
+/// enforced.</b> After <see cref="ThemeManifestParser.Parse"/> succeeds, the parsed manifest is
+/// checked against <see cref="ThemeFontProvenanceValidator"/>: every font asset it references must
+/// resolve to a face in <see cref="FontProvenanceCatalog.Default"/> (the GenWave-vendored curated
+/// set), and its distinct referenced faces' summed bytes must clear FONTS.md's per-theme ceiling. A
+/// failure maps to 400, same posture as a structural manifest defect. This route is the ONLY
+/// <c>station.theme</c> write path, so passing this gate here is what guarantees every row this
+/// store ever holds already satisfies SPEC F103.10 — see <see cref="ThemeFontProvenanceValidator"/>'s
+/// own remarks for why <see cref="ThemeCatalog.ReloadOwnerThemesAsync"/> needs no second check.
+/// </para>
+///
+/// <para>
 /// <b>Rebuild after write (SPEC F103.7) — with <see cref="CancellationToken.None"/>, deliberately
 /// (PLAN T184 review F1).</b> <see cref="ThemeCatalog.ReloadOwnerThemesAsync"/> runs once more, on the
 /// SAME DI'd singleton <see cref="ThemeCatalogOwnerLoadHostedService"/> warms at boot — the only way an
@@ -132,7 +144,10 @@ public sealed partial class ThemesImportController(
     /// the reasoning behind each one. Gate order: route slug format (400) → shipped-slug reservation
     /// (409, F103.8) → <paramref name="catalogSlug"/> format (400, F90.7 precedent) → bounded body
     /// read (413) → schema-major (400, AC6, checked ahead of structural parsing — PLAN T184 review F5)
-    /// → deserialize-as-validation (400, F103.6) → upsert + catalog rebuild (F103.7).
+    /// → deserialize-as-validation (400, F103.6) → curated-font provenance/byte-ceiling (400, F103.10,
+    /// PLAN T188 — <see cref="ThemeFontProvenanceValidator"/>, the only <c>station.theme</c> write
+    /// path, so a row is never stored referencing an unvendored face or an over-budget font set) →
+    /// upsert + catalog rebuild (F103.7).
     /// </summary>
     [HttpPost("{slug}/import")]
     [Consumes("application/json")]
@@ -191,6 +206,19 @@ public sealed partial class ThemesImportController(
         catch (ThemeManifestException ex)
         {
             return BadRequest(ImportProblems.MalformedManifest(ex.Message));
+        }
+
+        // SPEC F103.10, PLAN T188 — this route is the ONLY station.theme write path, so this is the
+        // one gate that must hold for every row ever persisted; see ThemeFontProvenanceValidator's
+        // own "Placement" remarks for why ThemeCatalog.ReloadOwnerThemesAsync needs no second check.
+        try
+        {
+            ThemeFontProvenanceValidator.Validate(
+                manifest, FontProvenanceCatalog.Default.BySrc, ThemeFontProvenanceValidator.PerThemeByteCeilingBytes);
+        }
+        catch (ThemeManifestException ex)
+        {
+            return BadRequest(UnvendoredFontProblem(ex.Message));
         }
 
         var normalized = NormalizeSlug(manifest, slug);
@@ -290,5 +318,15 @@ public sealed partial class ThemesImportController(
         Status = StatusCodes.Status409Conflict,
         Title  = "Shipped theme slug is reserved.",
         Detail = $"\"{slug}\" is a shipped theme's slug and cannot be overwritten by an import (SPEC F103.8).",
+    };
+
+    /// <summary><paramref name="detail"/> carries <see cref="ThemeFontProvenanceValidator.Validate"/>'s
+    /// own <see cref="ThemeManifestException"/> message verbatim — either an unvendored-face name (and
+    /// the whole vendored set) or an over-ceiling byte total (SPEC F103.10, PLAN T188).</summary>
+    static ProblemDetails UnvendoredFontProblem(string detail) => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Theme fonts rejected.",
+        Detail = detail,
     };
 }

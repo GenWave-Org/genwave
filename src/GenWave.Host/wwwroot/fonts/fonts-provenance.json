@@ -1,0 +1,31 @@
+{
+  "faces": [
+    {
+      "family": "Fraunces",
+      "file": "fraunces-variable-latin.woff2",
+      "sourceUrl": "https://github.com/undercasetype/Fraunces",
+      "license": "OFL-1.1",
+      "version": null,
+      "subset": "latin",
+      "bytes": 67304
+    },
+    {
+      "family": "Fraunces",
+      "file": "fraunces-italic-variable-latin.woff2",
+      "sourceUrl": "https://github.com/undercasetype/Fraunces",
+      "license": "OFL-1.1",
+      "version": null,
+      "subset": "latin",
+      "bytes": 42228
+    },
+    {
+      "family": "Source Sans 3",
+      "file": "source-sans-3-variable-latin.woff2",
+      "sourceUrl": "https://github.com/adobe-fonts/source-sans",
+      "license": "OFL-1.1",
+      "version": null,
+      "subset": "latin",
+      "bytes": 28740
+    }
+  ]
+}

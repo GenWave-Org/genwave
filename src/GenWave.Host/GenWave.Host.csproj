@@ -27,6 +27,13 @@
          default manifest lands. -->
     <Content Remove="Theming/themes/*.json" />
     <EmbeddedResource Include="Theming/themes/*.json" />
+
+    <!-- Font provenance record (FONTS.md, PLAN T188): stays a loose wwwroot/fonts/ Content file too
+         (SDK default — consistent with the .woff2 binaries alongside it, and harmless: FontEndpoints'
+         closed per-file switch never serves it), but is ALSO embedded so
+         FontProvenanceCatalog can load it the same dependency-free way ThemeCatalog loads shipped
+         manifests — no IWebHostEnvironment/filesystem read needed at validation time. -->
+    <EmbeddedResource Include="wwwroot/fonts/fonts-provenance.json" />
   </ItemGroup>
 
   <PropertyGroup>

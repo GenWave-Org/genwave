@@ -125,6 +125,11 @@ file static class ThemeImportFixture
         var schemaVersionField = schemaVersionRaw is { } raw
             ? $"\"schemaVersion\": {raw},"
             : schemaVersion is { } version ? $"\"schemaVersion\": {version}," : "";
+        // The font srcs below are the REAL vendored filenames (PLAN T188, SPEC F103.10) — unlike
+        // Story263/Story271's own shared ThemeFixtures.ValidManifestJson (which drives
+        // ThemeCatalog.Load directly, never the real import route), every Fact in this file POSTs
+        // through the production POST /api/themes/{slug}/import route, and ThemesImportController
+        // now rejects a manifest referencing a font outside FontProvenanceCatalog's vendored set.
         return $$"""
             {
               {{schemaVersionField}}
@@ -132,8 +137,8 @@ file static class ThemeImportFixture
               "name": "{{name}}",
               "author": "GenWave",
               "fonts": {
-                "display": { "family": "Fraunces", "assets": [ { "src": "/fonts/fraunces.woff2", "weight": "400 600", "style": "normal" } ] },
-                "sans": { "family": "Source Sans 3", "assets": [ { "src": "/fonts/source-sans-3.woff2", "weight": "400", "style": "normal" } ] }
+                "display": { "family": "Fraunces", "assets": [ { "src": "/fonts/fraunces-variable-latin.woff2", "weight": "400 600", "style": "normal" } ] },
+                "sans": { "family": "Source Sans 3", "assets": [ { "src": "/fonts/source-sans-3-variable-latin.woff2", "weight": "400", "style": "normal" } ] }
               },
               "modes": {
                 "light": { "bg": "{{lightBg}}", "ink": "#2b2320" },
@@ -142,6 +147,26 @@ file static class ThemeImportFixture
             }
             """;
     }
+
+    /// <summary>An otherwise-valid manifest (PLAN T188, SPEC F103.10) whose display font names a
+    /// src the URL-shape check (<c>ThemeManifestParser.FontSrcPattern</c>) accepts but
+    /// <c>FontProvenanceCatalog</c> has no entry for — proves the EXISTENCE check
+    /// <see cref="ThemeFontProvenanceValidator"/> adds, distinct from the shape check.</summary>
+    public static string ManifestJsonWithUnvendoredFontSrc(string slug) => $$"""
+        {
+          "slug": "{{slug}}",
+          "name": "Test Theme",
+          "author": "GenWave",
+          "fonts": {
+            "display": { "family": "Fraunces", "assets": [ { "src": "/fonts/nonexistent.woff2", "weight": "400 600", "style": "normal" } ] },
+            "sans": { "family": "Source Sans 3", "assets": [ { "src": "/fonts/source-sans-3-variable-latin.woff2", "weight": "400", "style": "normal" } ] }
+          },
+          "modes": {
+            "light": { "bg": "#2a5c9e", "ink": "#2b2320" },
+            "dark": { "bg": "#1e1713", "ink": "#f0e7d8" }
+          }
+        }
+        """;
 }
 
 // ── Specs ──────────────────────────────────────────────────────────────────────────────────────────
@@ -361,6 +386,28 @@ public static class FeatureThemeImport
 
             // Then it responds 400 and nothing is stored (AC5) — deserialization-as-validation.
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Empty(await themeStore.GetAllAsync(CancellationToken.None));
+        }
+
+        [Fact]
+        public async Task AManifestReferencingAnUnvendoredFontIsRefusedWith400()
+        {
+            // Given a manifest whose font src has the right SHAPE (ThemeManifestParser.FontSrcPattern
+            // accepts it) but names a face GenWave never vendored (SPEC F103.10, PLAN T188),
+            var themeStore = new FakeThemeStore();
+            await using var factory = new ThemeImportWebFactory(themeStore);
+            var client = await LoggedInClientAsync(factory);
+
+            // When it is posted,
+            var response = await PostManifestAsync(
+                client, "off-catalog-font", ThemeImportFixture.ManifestJsonWithUnvendoredFontSrc("off-catalog-font"));
+            var body = await response.Content.ReadAsStringAsync();
+
+            // Then it responds 400 naming the missing face and the vendored set, and nothing is
+            // stored — the parser's own shape check alone would have let this through.
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Contains("/fonts/nonexistent.woff2", body, StringComparison.Ordinal);
+            Assert.Contains("/fonts/fraunces-variable-latin.woff2", body, StringComparison.Ordinal);
             Assert.Empty(await themeStore.GetAllAsync(CancellationToken.None));
         }
 

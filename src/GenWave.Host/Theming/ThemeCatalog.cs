@@ -215,8 +215,27 @@ public sealed class ThemeCatalog
     /// silently continue with: T164's "fall back to the shipped default" would have no default to
     /// fall back to, so this fails loudly at the same place a bad manifest already does, rather than
     /// producing an empty <see cref="ThemeCatalog"/> that only fails once something asks it for a
-    /// theme (review finding, T156).</summary>
-    public static ThemeCatalog LoadShipped() => Load(LoadShippedSources());
+    /// theme (review finding, T156).
+    ///
+    /// <para>
+    /// Also enforces SPEC F103.10's curated-font provenance/byte-ceiling rule (PLAN T188) on every
+    /// shipped manifest, via <see cref="ThemeFontProvenanceValidator"/> — one of the two places a
+    /// theme manifest enters the running system (see that type's own "Placement" remarks for why
+    /// here, and why <see cref="CreateForStation"/>'s own initial state deliberately reuses THIS
+    /// method's result rather than re-deriving it, so the check runs exactly once per shipped set).
+    /// </para>
+    /// </summary>
+    public static ThemeCatalog LoadShipped()
+    {
+        var catalog = Load(LoadShippedSources());
+        foreach (var theme in catalog.All)
+        {
+            ThemeFontProvenanceValidator.Validate(
+                theme, FontProvenanceCatalog.Default.BySrc, ThemeFontProvenanceValidator.PerThemeByteCeilingBytes);
+        }
+
+        return catalog;
+    }
 
     /// <summary>
     /// Builds the runtime, DI-registered <see cref="ThemeCatalog"/> (SPEC F103.7, STORY-271, PLAN
@@ -229,9 +248,17 @@ public sealed class ThemeCatalog
     /// moment this returns — and gains owner rows only once a caller awaits
     /// <see cref="ReloadOwnerThemesAsync"/> (<c>ThemeCatalogOwnerLoadHostedService</c> does this once
     /// per boot, without blocking host startup; PLAN T184's import route does it again after a write).
+    ///
+    /// <para>
+    /// Reuses <see cref="LoadShipped"/>'s own state (private-member access across instances of the
+    /// same type, not a second re-parse) rather than calling <see cref="BuildState"/> directly — PLAN
+    /// T188: <see cref="LoadShipped"/> is where SPEC F103.10's curated-font provenance/byte-ceiling
+    /// check runs, so building through it is what makes THIS constructor's shipped set covered by
+    /// that check too, at no added parse cost (same embedded resources, same one parse either way).
+    /// </para>
     /// </summary>
     public static ThemeCatalog CreateForStation(IThemeStore themeStore, ILogger<ThemeCatalog> logger) =>
-        new(BuildState(LoadShippedSources()), (themeStore, logger));
+        new(LoadShipped().state, (themeStore, logger));
 
     /// <summary>
     /// Rebuilds the shipped ∪ owner set (SPEC F103.7/F103.8; ARCHITECTURE "Community Catalog v2 →

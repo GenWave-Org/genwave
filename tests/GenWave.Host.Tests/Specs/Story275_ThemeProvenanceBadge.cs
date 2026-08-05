@@ -68,14 +68,16 @@ file sealed class ThemeProvenanceWebFactory(FakeThemeStore? themeStore = null) :
 
 file static class ThemeProvenanceFixture
 {
+    // Real vendored font srcs (PLAN T188, SPEC F103.10) — every Fact below POSTs through the real
+    // import route, which now rejects a manifest referencing a font outside the vendored set.
     public static string ValidManifestJson(string slug, string name = "Test Theme") => $$"""
         {
           "slug": "{{slug}}",
           "name": "{{name}}",
           "author": "GenWave",
           "fonts": {
-            "display": { "family": "Fraunces", "assets": [ { "src": "/fonts/fraunces.woff2", "weight": "400 600", "style": "normal" } ] },
-            "sans": { "family": "Source Sans 3", "assets": [ { "src": "/fonts/source-sans-3.woff2", "weight": "400", "style": "normal" } ] }
+            "display": { "family": "Fraunces", "assets": [ { "src": "/fonts/fraunces-variable-latin.woff2", "weight": "400 600", "style": "normal" } ] },
+            "sans": { "family": "Source Sans 3", "assets": [ { "src": "/fonts/source-sans-3-variable-latin.woff2", "weight": "400", "style": "normal" } ] }
           },
           "modes": {
             "light": { "bg": "#2a5c9e", "ink": "#2b2320" },
