@@ -1,6 +1,7 @@
 namespace GenWave.Host.Theming;
 
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using System.Reflection;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -87,22 +88,38 @@ public sealed class ThemeCatalog
         this.ownerLoad = ownerLoad;
     }
 
-    /// <summary>One immutable snapshot of a loaded theme set — the slug lookup plus load-order list
-    /// <see cref="Load"/> builds from a set of raw sources. A plain reference type (not a
-    /// value-tuple) so <see cref="state"/> above can be <c>volatile</c>.</summary>
-    sealed record CatalogState(Dictionary<string, ThemeManifest> BySlug, IReadOnlyList<ThemeManifest> Ordered);
+    /// <summary>One immutable snapshot of a loaded theme set — the slug lookup plus the load-order,
+    /// provenance-paired entry list <see cref="Load"/> builds from a set of raw sources (SPEC F103.11,
+    /// PLAN T187 review F3: one list, not a manifest list plus a second parallel owner-row lookup, so
+    /// the two views can never drift out of step). A plain reference type (not a value-tuple) so
+    /// <see cref="state"/> above can be <c>volatile</c>.</summary>
+    sealed record CatalogState(Dictionary<string, ThemeManifest> BySlug, IReadOnlyList<ThemeCatalogEntry> Entries);
 
-    /// <summary>Every loaded theme, in load order. Backed by a dedicated list (not
+    /// <summary>Every loaded theme, in load order. Order-preserving (not
     /// <c>Dictionary&lt;,&gt;.Values</c>, which guarantees no particular order) because T163 sources
     /// the <c>Station:Theme</c> choice list from this, and T158 iterates it for its AA gate — both
     /// need the order to actually be load order, not an implementation detail of the lookup
-    /// dictionary.</summary>
-    public IReadOnlyList<ThemeManifest> All => state.Ordered;
+    /// dictionary. Projected off <see cref="Entries"/> rather than a second, independently-maintained
+    /// list (PLAN T187 review F3) — <see cref="ThemeManifest"/> itself carries no provenance field by
+    /// design (STORY-263 AC4, "no field marks authorship"), so a provenance-free view is always this
+    /// list minus its second element.</summary>
+    public IReadOnlyList<ThemeManifest> All => state.Entries.Select(e => e.Theme).ToList();
 
     /// <summary>Looks up a theme by its slug. An unresolvable slug returns false — falling back to
     /// the shipped default (SPEC F102.6) is theme RESOLUTION's job (T164), not this lookup's.</summary>
     public bool TryGetBySlug(string slug, [NotNullWhen(true)] out ThemeManifest? theme) =>
         state.BySlug.TryGetValue(slug, out theme);
+
+    /// <summary>
+    /// Every loaded theme paired with its provenance, if any (SPEC F103.11, PLAN T187; review F3) —
+    /// the shape <see cref="Configuration.StationSettingsAllowlist.ThemeChoices"/> walks directly to
+    /// stamp each <see cref="Configuration.SettingChoice"/>'s own provenance, without a second,
+    /// per-item dictionary lookup back into this catalog for a slug <see cref="All"/> already named:
+    /// <see cref="Load"/>/<see cref="ReloadOwnerThemesAsync"/> already know, while building this list,
+    /// which owner row (if any) each slug loaded from. Not <c>public</c>: no consumer outside
+    /// <c>GenWave.Host.Configuration</c> needs per-theme provenance today.
+    /// </summary>
+    internal IReadOnlyList<ThemeCatalogEntry> Entries => state.Entries;
 
     /// <summary>
     /// Is <paramref name="slug"/> one of THIS instance's own fixed <see cref="shippedState"/> slugs
@@ -263,6 +280,7 @@ public sealed class ThemeCatalog
             }
 
             var combinedSources = new List<ThemeManifestSource>(LoadShippedSources());
+            var provenanceBySlug = new Dictionary<string, ThemeProvenance>(StringComparer.Ordinal);
             foreach (var owner in ownerThemes)
             {
                 if (IsShippedSlug(owner.Slug))
@@ -274,9 +292,15 @@ public sealed class ThemeCatalog
                 }
 
                 combinedSources.Add(new ThemeManifestSource($"station.theme:{owner.Slug}", owner.Definition));
+                // Only the two provenance scalars are kept (SPEC F103.11, PLAN T187 review F3) — not
+                // the whole OwnerTheme row, whose Definition jsonb is already captured above via
+                // combinedSources and would otherwise sit retained a second time for nothing; a
+                // ThemeManifest carries only what its OWN jsonb declares, never station.theme's
+                // imported_from/imported_at columns, so BuildState below folds this back in per entry.
+                provenanceBySlug[owner.Slug] = new ThemeProvenance(owner.ImportedFrom, owner.ImportedAt);
             }
 
-            state = BuildState(combinedSources);
+            state = BuildState(combinedSources, provenanceBySlug);
         }
         catch (Exception ex)
         {
@@ -289,21 +313,27 @@ public sealed class ThemeCatalog
     /// <summary>Parses and validates <paramref name="sources"/> into one <see cref="CatalogState"/>,
     /// enforcing the whole-set no-duplicate-slug invariant (STORY-263 AC7) — the one place <see cref="Load"/>
     /// and <see cref="ReloadOwnerThemesAsync"/> share so shipped and owner manifests are never
-    /// validated by two different code paths.</summary>
-    static CatalogState BuildState(IEnumerable<ThemeManifestSource> sources)
+    /// validated by two different code paths. <paramref name="provenanceBySlug"/> (SPEC F103.11, PLAN
+    /// T187; review F3) is <see langword="null"/> for every <see cref="Load"/>/<see cref="LoadShipped"/>
+    /// caller — a fixed, embedded-only snapshot carries no owner rows to begin with — and only ever
+    /// populated by <see cref="ReloadOwnerThemesAsync"/>, which read each entry off one.</summary>
+    static CatalogState BuildState(
+        IEnumerable<ThemeManifestSource> sources,
+        IReadOnlyDictionary<string, ThemeProvenance>? provenanceBySlug = null)
     {
         var bySlug = new Dictionary<string, ThemeManifest>(StringComparer.Ordinal);
-        var ordered = new List<ThemeManifest>();
+        var entries = new List<ThemeCatalogEntry>();
+        var provenance = provenanceBySlug ?? new Dictionary<string, ThemeProvenance>(StringComparer.Ordinal);
         foreach (var source in sources)
         {
             var theme = ThemeManifestParser.Parse(source);
             if (!bySlug.TryAdd(theme.Slug, theme))
                 throw new ThemeManifestException($"duplicate theme slug '{theme.Slug}'");
 
-            ordered.Add(theme);
+            entries.Add(new ThemeCatalogEntry(theme, provenance.TryGetValue(theme.Slug, out var p) ? p : null));
         }
 
-        return new CatalogState(bySlug, ordered);
+        return new CatalogState(bySlug, entries);
     }
 
     /// <summary>Reads every embedded theme manifest resource of this assembly into raw sources,
