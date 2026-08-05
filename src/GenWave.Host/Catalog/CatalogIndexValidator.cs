@@ -3,7 +3,9 @@ namespace GenWave.Host.Catalog;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using GenWave.Host.Theming;
 
 /// <summary>
 /// Pure, I/O-free validation of a fetched index.json payload against SPEC F90.2's strict shape
@@ -68,6 +70,14 @@ internal static partial class CatalogIndexValidator
 
     [GeneratedRegex(@"\A[a-f0-9]{64}\z")]
     private static partial Regex Sha256Pattern();
+
+    // The SAME hex-colour shape ThemeManifestParser enforces on a theme manifest's own token
+    // values (review finding, T185) — composed from its `internal const`, not a second copy, so a
+    // shelf-preview swatch off an untrusted index.json is held to the exact rule a manifest's real
+    // colour tokens already are, rather than reaching the wire (and an inline CSS `style` attribute
+    // in the Admin UI) unchecked. See ThemeManifestParser.TokenValueText's own remarks.
+    [GeneratedRegex(ThemeManifestParser.TokenValueText)]
+    private static partial Regex SwatchHexPattern();
 
     // Split per kind (and per field) so a manifest can't masquerade as a meta (or vice versa), and
     // a persona's manifest can't masquerade as a theme's (or vice versa), even though all three
@@ -217,8 +227,83 @@ internal static partial class CatalogIndexValidator
             return EntryValidationOutcome.Reject;
         }
 
-        summary = new CatalogEntrySummary(slug, kind, audience, raw.BestFor ?? [], manifest, meta);
+        summary = new CatalogEntrySummary(slug, kind, audience, raw.BestFor ?? [], manifest, meta, TryParsePreview(raw.Preview));
         return EntryValidationOutcome.Valid;
+    }
+
+    /// <summary>
+    /// Admits the optional <c>preview</c> object (SPEC F103.4, T185's contract) with the SAME
+    /// tolerant posture <see cref="BestFor"/> already has on this class's own raw entries — but,
+    /// unlike <c>BestFor</c>, a shape this deliberately permissive needs TWO separate defences
+    /// (review findings, T185):
+    ///
+    /// <para>
+    /// (1) <paramref name="raw"/> is read as a raw <see cref="JsonElement"/>, not the typed
+    /// <see cref="CatalogPreviewJson"/> record directly — a wrong-typed <c>preview</c> (a number,
+    /// string, or array, or a wrong-typed leaf inside an otherwise-shaped object) must never throw
+    /// out of the single top-level <c>Deserialize</c> call in <see cref="TryValidate"/> that parses
+    /// the WHOLE index — that would reject every entry, persona and theme alike, over one decorative
+    /// field. Any shape that can't convert into <see cref="CatalogPreviewJson"/> is caught here and
+    /// degrades ONLY this entry's preview to <see langword="null"/>.
+    /// </para>
+    ///
+    /// <para>
+    /// (2) Each swatch value that DOES deserialize as a string is still checked against
+    /// <see cref="SwatchHexPattern"/> (<see cref="ThemeManifestParser.TokenValueText"/>) before it is
+    /// trusted — index.json is remote, untrusted content, same as the manifest/meta paths above, and
+    /// this field reaches the wire (and an inline CSS <c>style</c> attribute in the Admin UI)
+    /// verbatim; a non-hex string (e.g. <c>'red;background-image:url(...)'</c>) never reaches a
+    /// caller.
+    /// </para>
+    ///
+    /// A field that is simply absent (every pre-T185 index, and every persona entry), or present but
+    /// missing a mode, a swatch key, or a valid hex value, resolves to <see langword="null"/> rather
+    /// than rejecting the whole index over a decorative shelf field — unlike an unrecognised
+    /// <c>audience</c>, malformed preview data is cosmetic (the catalog schema's own remarks: "a
+    /// stale swatch is a shelf cosmetic issue, not a broadcast one"), so an older or lightly-broken
+    /// index must still serve every other entry, and this one entry still shows its name with no
+    /// chips.
+    /// </summary>
+    static CatalogThemePreview? TryParsePreview(JsonElement? raw)
+    {
+        if (raw is not { ValueKind: JsonValueKind.Object } element)
+            return null;
+
+        CatalogPreviewJson? preview;
+        try
+        {
+            preview = element.Deserialize<CatalogPreviewJson>(JsonOptions);
+        }
+        catch (JsonException)
+        {
+            // A shape Deserialize can't convert (e.g. `light`/`dark` present but not an object, or
+            // a leaf like `bg` typed as a number) — cosmetic, not fatal; see this method's own
+            // remarks.
+            return null;
+        }
+
+        if (preview is not { Light: { } light, Dark: { } dark })
+            return null;
+
+        if (TryParseSwatchSet(light) is not { } lightSwatches || TryParseSwatchSet(dark) is not { } darkSwatches)
+            return null;
+
+        return new CatalogThemePreview(lightSwatches, darkSwatches);
+    }
+
+    static CatalogThemeSwatchSet? TryParseSwatchSet(CatalogSwatchSetJson raw)
+    {
+        if (raw is not
+            {
+                Bg: { } bg, Surface: { } surface, Ink: { } ink, Accent: { } accent, Accent2: { } accent2,
+            })
+            return null;
+
+        if (!SwatchHexPattern().IsMatch(bg) || !SwatchHexPattern().IsMatch(surface) || !SwatchHexPattern().IsMatch(ink)
+            || !SwatchHexPattern().IsMatch(accent) || !SwatchHexPattern().IsMatch(accent2))
+            return null;
+
+        return new CatalogThemeSwatchSet(bg, surface, ink, accent, accent2);
     }
 
     /// <summary>A missing <c>kind</c> defaults to persona (back-compat, F103.1/AC2); any value other than <c>"persona"</c>/<c>"theme"</c> is unrecognised.</summary>
@@ -326,6 +411,16 @@ internal static partial class CatalogIndexValidator
         public CatalogFileRefJson? Card { get; init; }
 
         public CatalogFileRefJson? Meta { get; init; }
+
+        /// <summary>
+        /// The optional F103.4 shelf-preview payload (T185) — a raw <see cref="JsonElement"/>, not
+        /// the typed <see cref="CatalogPreviewJson"/> directly (review finding): a wrong-typed
+        /// <c>preview</c> in an untrusted index.json (a number, string, array, or a wrong-typed
+        /// leaf) must never fail the top-level <c>Deserialize</c> call this record is itself a
+        /// member of — that would reject the WHOLE index over one decorative field. See
+        /// <see cref="TryParsePreview"/>.
+        /// </summary>
+        public JsonElement? Preview { get; init; }
     }
 
     /// <summary>Ephemeral JSON projection of a raw index.json <c>manifest</c>/<c>card</c>/<c>meta</c> file pointer.</summary>
@@ -333,5 +428,28 @@ internal static partial class CatalogIndexValidator
     {
         public string? Path { get; init; }
         public string? Sha256 { get; init; }
+    }
+
+    /// <summary>Ephemeral JSON projection of a raw index.json entry's <c>preview</c> object (SPEC F103.4).</summary>
+    sealed record CatalogPreviewJson
+    {
+        public CatalogSwatchSetJson? Light { get; init; }
+        public CatalogSwatchSetJson? Dark { get; init; }
+    }
+
+    /// <summary>
+    /// Ephemeral JSON projection of one raw <c>light</c>/<c>dark</c> swatch set — <see cref="Accent2"/>
+    /// carries the wire name <c>accent-2</c> (genwave-catalog's <c>theme-meta.schema.json</c>), the
+    /// one place in this projection that key name is spelled.
+    /// </summary>
+    sealed record CatalogSwatchSetJson
+    {
+        public string? Bg { get; init; }
+        public string? Surface { get; init; }
+        public string? Ink { get; init; }
+        public string? Accent { get; init; }
+
+        [JsonPropertyName("accent-2")]
+        public string? Accent2 { get; init; }
     }
 }

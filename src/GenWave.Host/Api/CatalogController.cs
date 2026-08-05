@@ -141,7 +141,15 @@ public sealed partial class CatalogController(
     }
 
     static CatalogShelfEntryDto ToShelfEntryDto(CatalogEntrySummary summary) =>
-        new(summary.Slug, ToWireKind(summary.Kind), ToWireAudience(summary.Audience), summary.BestFor);
+        new(summary.Slug, ToWireKind(summary.Kind), ToWireAudience(summary.Audience), summary.BestFor, ToPreviewDto(summary.Preview));
+
+    // Null exactly when CatalogEntrySummary.Preview is (every persona entry, and a theme entry
+    // whose index carries none, T185) — see that property's own remarks.
+    static CatalogShelfPreviewDto? ToPreviewDto(CatalogThemePreview? preview) =>
+        preview is null ? null : new CatalogShelfPreviewDto(ToSwatchSetDto(preview.Light), ToSwatchSetDto(preview.Dark));
+
+    static CatalogShelfSwatchSetDto ToSwatchSetDto(CatalogThemeSwatchSet swatches) =>
+        new(swatches.Bg, swatches.Surface, swatches.Ink, swatches.Accent, swatches.Accent2);
 
     // Lowercase, matching genwave-catalog's own schema vocabulary verbatim — see
     // CatalogShelfEntryDto's own remarks on why this is never the enum's default PascalCase serialization.

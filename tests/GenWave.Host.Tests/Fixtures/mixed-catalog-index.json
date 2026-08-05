@@ -1,0 +1,23 @@
+{
+  "generatedAt": "2026-08-05",
+  "entries": [
+    {
+      "slug": "valid-dj",
+      "audience": "everyone",
+      "bestFor": ["late-night", "chill"],
+      "card": { "path": "entries/valid-dj/valid-dj.persona.json", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+      "meta": { "path": "entries/valid-dj/valid-dj.meta.json", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    },
+    {
+      "slug": "golden-frequency",
+      "kind": "theme",
+      "audience": "everyone",
+      "manifest": { "path": "entries/golden-frequency/golden-frequency.theme.json", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+      "meta": { "path": "entries/golden-frequency/golden-frequency.meta.json", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+      "preview": {
+        "light": { "bg": "#f7ecd2", "surface": "#fff8e6", "ink": "#2c2410", "accent": "#b8860b", "accent-2": "#4f6b52" },
+        "dark": { "bg": "#171205", "surface": "#241c09", "ink": "#f4ecce", "accent": "#e0a52c", "accent-2": "#7fa382" }
+      }
+    }
+  ]
+}

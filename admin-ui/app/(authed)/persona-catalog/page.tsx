@@ -31,8 +31,8 @@ export default async function PersonaCatalogPage(): Promise<ReactNode> {
   if (!response.ok) {
     return (
       <main>
-        <h1 className="font-display text-[1.35rem] font-semibold text-ink">Persona Catalog</h1>
-        <p className="mt-4 text-[0.85rem] text-danger">Unable to load the persona catalog.</p>
+        <h1 className="font-display text-[1.35rem] font-semibold text-ink">Community Catalog</h1>
+        <p className="mt-4 text-[0.85rem] text-danger">Unable to load the community catalog.</p>
       </main>
     );
   }
@@ -41,7 +41,7 @@ export default async function PersonaCatalogPage(): Promise<ReactNode> {
 
   return (
     <main>
-      <h1 className="font-display text-[1.35rem] font-semibold text-ink">Persona Catalog</h1>
+      <h1 className="font-display text-[1.35rem] font-semibold text-ink">Community Catalog</h1>
       <div className="mt-4">
         <PersonaCatalogClient initialIndex={index} />
       </div>

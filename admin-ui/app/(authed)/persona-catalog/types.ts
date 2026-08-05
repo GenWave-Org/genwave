@@ -2,13 +2,40 @@
  * F90.2) — never the C# enum's default PascalCase serialization. */
 export type CatalogAudience = "everyone" | "mature";
 
-/** One `GET /api/catalog/index` row (SPEC F90.2, F90.4a) — see Host's `CatalogShelfEntryDto`.
- * Slug/audience/bestFor ONLY — tagline/description/author/sample patter live in the per-entry
- * `GET /api/catalog/entries/{slug}` fetch below, never eagerly loaded for the whole shelf. */
+/** The F103.1 entry-kind discriminator, lowercase — see Host's `CatalogEntryKind`/
+ * `CatalogController.ToWireKind`. Always present on a shelf row: the api never omits `kind`, even
+ * for a legacy persona entry whose own index.json predates the field (the api resolves that
+ * default server-side). */
+export type CatalogEntryKind = "persona" | "theme";
+
+/** One mode's five shelf-chip swatches (SPEC F103.4, PLAN T185) — see Host's
+ * `CatalogShelfSwatchSetDto`. `"accent-2"` keeps its hyphenated wire name (the app's own
+ * `ThemeModes` token vocabulary), not `accent2`. */
+export interface CatalogThemeSwatchSet {
+  bg: string;
+  surface: string;
+  ink: string;
+  accent: string;
+  "accent-2": string;
+}
+
+/** A theme entry's shelf-card preview (SPEC F103.4) — see Host's `CatalogShelfPreviewDto`. */
+export interface CatalogThemePreview {
+  light: CatalogThemeSwatchSet;
+  dark: CatalogThemeSwatchSet;
+}
+
+/** One `GET /api/catalog/index` row (SPEC F90.2, F90.4a, F103.3, F103.4) — see Host's
+ * `CatalogShelfEntryDto`. `preview` is `null` for every persona entry, and for a theme entry whose
+ * index carries none (an older index, T185) — tagline/description/author/sample patter still live
+ * in the per-entry `GET /api/catalog/entries/{slug}` fetch below, never eagerly loaded for the
+ * whole shelf. */
 export interface CatalogShelfEntryDto {
   slug: string;
+  kind: CatalogEntryKind;
   audience: CatalogAudience;
   bestFor: string[];
+  preview: CatalogThemePreview | null;
 }
 
 /** Wire shape of `GET /api/catalog/index` (SPEC F90.2, F90.4) — see Host's `CatalogIndexResponse`.

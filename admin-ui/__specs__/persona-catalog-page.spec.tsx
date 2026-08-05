@@ -58,14 +58,18 @@ beforeAll(async () => {
 
 const EVERYONE_ENTRY: CatalogShelfEntryDto = {
   slug: "late-night-lena",
+  kind: "persona",
   audience: "everyone",
   bestFor: ["late-night", "chill"],
+  preview: null,
 };
 
 const MATURE_ENTRY: CatalogShelfEntryDto = {
   slug: "gritty-gary",
+  kind: "persona",
   audience: "mature",
   bestFor: [],
+  preview: null,
 };
 
 /** A minimal-but-real card behind Lena's entry (SPEC F90.5's "Entry = unchanged F79 card"
@@ -121,7 +125,7 @@ function makeJsonResponse(status: number, body: unknown): Response {
  * the entries grid so it never ambiguously matches the detail panel's own heading, which can
  * carry the same text once an entry is selected. */
 function cardFor(name: string): HTMLElement {
-  const grid = screen.getByRole("list", { name: "Persona catalog entries" });
+  const grid = screen.getByRole("list", { name: "Community catalog entries" });
   const nameNode = within(grid).getByText(name);
   const card = nameNode.closest("button");
   if (card === null) throw new Error(`No <button> ancestor for "${name}"`);

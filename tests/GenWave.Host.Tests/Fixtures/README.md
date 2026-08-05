@@ -39,3 +39,20 @@ policy goes red here.
 **Regenerate ONLY by hand-authoring a new complete, valid manifest** (there is no catalog-side
 copy to pull from yet) and re-running the round-trip fact until it's green — never partially edit
 an existing field, since the fixture's whole job is being one fully-authored, byte-stable document.
+
+## `mixed-catalog-index.json` — the shelf's kind-routed fake index (PLAN T185, STORY-273)
+
+A fake `index.json`, shaped exactly per `genwave-catalog`'s `schemas/index.schema.json` and
+`tools/build_index.py`'s own emitted shape: one persona entry (`bestFor`, the legacy `card` file-ref,
+no `kind` key — the pre-F103.2 shape T176 must keep parsing) and one `kind:"theme"` entry (the
+`manifest` file ref, plus the optional `preview` object T185 admits). The theme entry's `slug` and
+`preview` swatch values are `golden-frequency`'s own light/dark `bg`/`surface`/`ink`/`accent`/
+`accent-2` tokens (see `golden.theme.json` above) — realistic values, not placeholders, while the
+`manifest`/`meta` `sha256` fields stay placeholder-shaped (64 hex chars): the index ROUTE this
+fixture drives (`GET /api/catalog/index`) never fetches an entry's manifest/meta bytes to build the
+shelf listing, so nothing here needs to hash-verify against real file content.
+
+`Specs/Story273_ThemeShelfPreview.cs` drives this file through the real `GET /api/catalog/index`
+route and separately through `CatalogIndexValidator.TryValidate` directly, proving the shelf lists
+both kinds and the theme entry's preview swatches reach the wire — never regenerate this file to
+add a THIRD entry/kind without updating that spec's own entry-count assertions.
