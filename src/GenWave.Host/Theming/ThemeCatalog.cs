@@ -105,6 +105,18 @@ public sealed class ThemeCatalog
         state.BySlug.TryGetValue(slug, out theme);
 
     /// <summary>
+    /// Is <paramref name="slug"/> one of THIS instance's own fixed <see cref="shippedState"/> slugs
+    /// (SPEC F103.8, "shipped slugs reserved")? Checked against <see cref="shippedState"/> — never the
+    /// current, possibly owner-widened <see cref="state"/> — for the exact reason
+    /// <see cref="ReloadOwnerThemesAsync"/>'s own collision check is: an EARLIER owner import must
+    /// never block a later, unrelated one from reusing what is, by construction, not actually a
+    /// shipped slug. The one place this rule is evaluated (PLAN T184 review F3) — callers that used to
+    /// keep their own <see cref="LoadShipped"/> parse purely to answer this question (six embedded-resource
+    /// parses per request) now ask the already-loaded DI singleton instead.
+    /// </summary>
+    public bool IsShippedSlug(string slug) => shippedState.BySlug.ContainsKey(slug);
+
+    /// <summary>
     /// Resolves the active theme for a request (SPEC F102.5/F102.6, STORY-265, PLAN T164). The ONE
     /// seam both <c>GET /spectator/theme.css</c> and <c>GET /api/theme.css</c> call — T160/T161 each
     /// carried their own private copy of this cascade until this task unified it here.
@@ -253,7 +265,7 @@ public sealed class ThemeCatalog
             var combinedSources = new List<ThemeManifestSource>(LoadShippedSources());
             foreach (var owner in ownerThemes)
             {
-                if (shippedState.BySlug.ContainsKey(owner.Slug))
+                if (IsShippedSlug(owner.Slug))
                 {
                     load.Logger.LogWarning(
                         "owner theme '{Slug}' collides with a shipped default's slug and is ignored — " +

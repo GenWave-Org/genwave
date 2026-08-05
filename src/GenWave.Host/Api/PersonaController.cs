@@ -46,13 +46,6 @@ public sealed partial class PersonaController(
     IStationClockProvider stationClock,
     ILogger<PersonaController> logger) : ControllerBase
 {
-    // SPEC F79.6 — enforced BEFORE deserialization, see Import's own remarks.
-    const int MaxImportBytes = 256 * 1024;
-
-    // SPEC F90.7 — a catalog entry's slug is a short, human-authored identifier; enforced BEFORE
-    // SlugFormat's regex, see Import's own remarks.
-    const int MaxCatalogSlugLength = 64;
-
     /// <summary>GET /api/personas — every persona row, ordered by name (F35.4). Each row is joined
     /// with its F71.1 card (one batch query, gh-#256) so the Admin UI can show a catalog-hired DJ's
     /// soul/quirks/lore — the fields its blank legacy backstory/style columns can't carry.</summary>
@@ -325,9 +318,10 @@ public sealed partial class PersonaController(
     /// <item><paramref name="catalogSlug"/> format (F90.7): checked against the SAME
     /// <see cref="SlugFormat"/> rule as the route slug above, when present — never silently dropped or
     /// coerced.</item>
-    /// <item>Payload size: capped at <see cref="MaxImportBytes"/>, enforced by
-    /// <see cref="ReadBoundedBodyAsync"/> reading the body itself with a running-total guard — see
-    /// that method's remarks for why <see cref="RequestSizeLimitAttribute"/> alone is not enough.</item>
+    /// <item>Payload size: capped at <see cref="BoundedImportBodyReader.MaxImportBytes"/>, enforced by
+    /// <see cref="BoundedImportBodyReader.ReadBoundedBodyAsync"/> reading the body itself with a
+    /// running-total guard — see that method's remarks for why
+    /// <see cref="RequestSizeLimitAttribute"/> alone is not enough.</item>
     /// <item>Deserialization IS the validation (F71.1, F79.6): <see cref="PersonaCardSerializer.Deserialize"/>
     /// is the only parse of the body, ever. A syntactically malformed body
     /// (<see cref="JsonException"/>) or an in-range-looking-but-invalid field — e.g. a
@@ -353,7 +347,7 @@ public sealed partial class PersonaController(
     /// </summary>
     [HttpPost("{slug}/import")]
     [Consumes("application/json")]
-    [RequestSizeLimit(MaxImportBytes)]
+    [RequestSizeLimit(BoundedImportBodyReader.MaxImportBytes)]
     public async Task<IActionResult> Import(string slug, [FromQuery] string? catalogSlug, CancellationToken ct)
     {
         if (!SlugFormat().IsMatch(slug))
@@ -364,14 +358,15 @@ public sealed partial class PersonaController(
             // Length bound BEFORE the regex (cheap reject; also keeps a pathological input away from
             // the regex engine at all) — matches SPEC F90.7's own "the entry slug" contract: a real
             // catalog entry slug is a short, human-authored identifier, never anywhere near this long.
-            if (catalogSlug.Length > MaxCatalogSlugLength)
+            if (catalogSlug.Length > BoundedImportBodyReader.MaxCatalogSlugLength)
                 return BadRequest(CatalogSlugTooLongProblem(catalogSlug.Length));
 
             if (!SlugFormat().IsMatch(catalogSlug))
                 return BadRequest(BadCatalogSlugProblem(catalogSlug));
         }
 
-        var (json, oversized) = await ReadBoundedBodyAsync(ct);
+        var (json, oversized) = await BoundedImportBodyReader.ReadBoundedBodyAsync(
+            Request, BoundedImportBodyReader.MaxImportBytes, ct);
         if (oversized)
             return StatusCode(StatusCodes.Status413PayloadTooLarge, OversizedProblem());
 
@@ -418,41 +413,6 @@ public sealed partial class PersonaController(
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Reads <c>Request.Body</c> up to <see cref="MaxImportBytes"/> bytes, never trusting a
-    /// client-declared <c>Content-Length</c> alone (SPEC F79.6; security-api's fail-closed posture —
-    /// a chunked request carries no <c>Content-Length</c> header at all, so a header-only check would
-    /// let one through unbounded). The declared-length check is a fast reject when the client is
-    /// honest about it; the running-total check while reading is what actually enforces the cap
-    /// either way. Returns <c>Oversized: true</c> the instant the total crosses the cap, without
-    /// buffering anything past that point.
-    ///
-    /// <see cref="RequestSizeLimitAttribute"/> is ALSO applied to <see cref="Import"/> — real defense
-    /// in depth for a Kestrel deployment, where exceeding it can short-circuit even earlier — but it
-    /// is <see cref="Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature"/>-based and
-    /// <c>TestServer</c> (this route's own test suite) does not enforce that feature the way Kestrel's
-    /// transport does; this method is what actually makes the 256 KB cap real and testable regardless
-    /// of host.
-    /// </summary>
-    async Task<(string Json, bool Oversized)> ReadBoundedBodyAsync(CancellationToken ct)
-    {
-        if (Request.ContentLength is long declared && declared > MaxImportBytes)
-            return (string.Empty, true);
-
-        using var buffer = new MemoryStream();
-        var chunk = new byte[8192];
-        int read;
-        while ((read = await Request.Body.ReadAsync(chunk, ct)) > 0)
-        {
-            if (buffer.Length + read > MaxImportBytes)
-                return (string.Empty, true);
-
-            buffer.Write(chunk, 0, read);
-        }
-
-        return (Encoding.UTF8.GetString(buffer.ToArray()), false);
-    }
 
     /// <summary>
     /// Resolves <paramref name="voice"/> against this station's live TTS voice list (SPEC F79.4).
@@ -744,14 +704,14 @@ public sealed partial class PersonaController(
     {
         Status = StatusCodes.Status400BadRequest,
         Title  = "Invalid catalog slug.",
-        Detail = $"catalogSlug must be at most {MaxCatalogSlugLength} characters (got {length}).",
+        Detail = $"catalogSlug must be at most {BoundedImportBodyReader.MaxCatalogSlugLength} characters (got {length}).",
     };
 
     static ProblemDetails OversizedProblem() => new()
     {
         Status = StatusCodes.Status413PayloadTooLarge,
         Title  = "Payload too large.",
-        Detail = $"Persona cards are capped at {MaxImportBytes / 1024} KB.",
+        Detail = $"Persona cards are capped at {BoundedImportBodyReader.MaxImportBytes / 1024} KB.",
     };
 
     static ProblemDetails MalformedCardProblem(string detail) => new()
