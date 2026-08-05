@@ -7,10 +7,10 @@
 // grounds, and why dark deliberately inverts --accent-ink). This file imports it rather
 // than growing a second, subtly different contrast implementation.
 //
-// Why data-driven: 6+ themes × 2 modes × the asserted token pairs is not hand-checkable,
-// and the failure mode is a 3.9:1 pair shipping unnoticed in theme #5. Iterating the
-// SHIPPED MANIFESTS (JSON, not parsed CSS) means adding a seventh theme cannot skip the
-// gate with no change to this file.
+// Why data-driven: N embedded themes × 2 modes × the asserted token pairs is not
+// hand-checkable, and the failure mode is a 3.9:1 pair shipping unnoticed in theme #5.
+// Iterating the SHIPPED MANIFESTS (JSON, not parsed CSS) means adding (or, per T191,
+// removing) an embedded theme needs no change to this file.
 //
 // ⚠️ MEMBERSHIP, NOT KEY-ITERATION (PLAN T158 hard precondition, ThemeManifestParser.
 // ParseModes review finding): every lookup below asks a mode object for a NAMED token out
@@ -25,10 +25,14 @@
 // the moment it is absent, in either mode, regardless of what other keys the manifest
 // happens to carry.
 //
-// ⚠️ AC1 IS KNOWN-RED BY RULING THROUGH SHIP 1, NOT A REGRESSION. Ship 1 (T156–T170)
-// delivers the mechanism carrying ONE theme — today's palette as its light+dark modes.
-// F102.1's "at least six" goes green at T171 (Ship 2). A reader seeing this fail during
-// Ship 1 is seeing the recorded plan, not a defect.
+// ⚠️ AC1's SHAPE CHANGED AT T191 (F103.9, F102.1 amended). Ship 1 (T156–T170) delivered the
+// mechanism carrying ONE theme; Ship 2 (T171) grew the embedded shelf to six so F102.1's
+// "at least six" read straight off this directory. T191 is the deliberate LATE split: the
+// four non-default themes move to the `genwave-catalog` repo as installable entries (proven
+// by that repo's own AA gate, ported from this file — T180), leaving exactly Cat's Whisker
+// and Test Pattern embedded here. F102.1's "at least six" is now met **across app +
+// catalog**, not by this directory's count alone — this gate only ever asserted the
+// embedded shelf, so it now asserts exactly two rather than a floor of six.
 
 import { describe, it, expect } from "@jest/globals";
 import { readdirSync, readFileSync } from "node:fs";
@@ -291,9 +295,11 @@ describe("Feature: the theme shelf and its contrast gate", () => {
   // ── HAPPY PATH ──────────────────────────────────────────────────────────
 
   describe("Scenario: the shelf is populated", () => {
-    // Ship 2 (T171) lands five new themes alongside cats-whisker — the AC1 floor is met.
-    it("ships at least six themes (T171, AC1)", () => {
-      expect(loadThemeManifests().length).toBeGreaterThanOrEqual(6);
+    // T191 trims the embedded set to exactly two — the other four now ship as
+    // genwave-catalog entries (STORY-277 AC1). F102.1's "at least six" is met across app +
+    // catalog, not by this embedded count alone.
+    it("embeds exactly the two default themes (T191, AC1)", () => {
+      expect(loadThemeManifests().length).toBe(2);
     });
   });
 

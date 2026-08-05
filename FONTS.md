@@ -82,7 +82,7 @@ rejected rather than silently shipped.
 ## Per-theme byte ceiling
 
 **Measurement.** GenWave ships five vendored faces today: the base pair — Fraunces variable,
-Fraunces italic variable, Source Sans 3 variable (all six embedded themes reference all three) —
+Fraunces italic variable, Source Sans 3 variable (both embedded themes reference all three) —
 plus PLAN T189's two Dean-approved additions, JetBrains Mono variable (a monospace role) and
 Grenze Gotisch variable (a display alternate). All five are `latin`-subsetted:
 
