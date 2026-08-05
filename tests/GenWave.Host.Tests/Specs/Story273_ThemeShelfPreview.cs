@@ -389,10 +389,4 @@ public static class FeatureThemeShelfPreview
             return client;
         }
     }
-
-    /// <summary>Hands every named-client request to the same fake handler (mirrors Story234's own copy).</summary>
-    sealed class SingleHandlerHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
-    }
 }

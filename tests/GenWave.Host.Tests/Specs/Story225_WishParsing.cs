@@ -24,13 +24,6 @@ namespace GenWave.Host.Tests.Specs;
 
 // ── In-process fakes ──────────────────────────────────────────────────────────────────────────────
 
-/// <summary>Hands every client the SAME shared handler (never disposed by the client) — mirrors
-/// GenWave.Tts.Tests' own Story189 precedent.</summary>
-file sealed class SingleHandlerHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
-{
-    public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
-}
-
 /// <summary>Captures every log entry at every level, tagged with its category (mirrors Story186's own
 /// CapturingDebugLoggerProvider, widened to Trace+ — AC5 must hold at "any level").</summary>
 file sealed class CapturingLoggerProvider : ILoggerProvider
