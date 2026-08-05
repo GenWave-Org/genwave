@@ -56,3 +56,58 @@ shelf listing, so nothing here needs to hash-verify against real file content.
 route and separately through `CatalogIndexValidator.TryValidate` directly, proving the shelf lists
 both kinds and the theme entry's preview swatches reach the wire — never regenerate this file to
 add a THIRD entry/kind without updating that spec's own entry-count assertions.
+
+## `golden.font.json` — the `.font.json` FORMAT contract, not a byte-parity promise (PLAN T193, STORY-279 AC3)
+
+The same authored-here-first pattern as `golden.theme.json` above, applied to the font kind (SPEC
+F104.1/F104.2): a real, complete `CatalogFontManifest` for **Space Grotesk** (OFL-1.1, one upright
+face) — family/files/licence/provenance fields shaped per `FONTS.md`'s own provenance-record
+convention. Unlike `golden.theme.json`, this is deliberately NOT staged for `genwave-catalog` to
+commit byte-for-byte identical: it pins the SHAPE `CatalogFontManifestSerializer` round-trips (field
+names, nesting, the `null`-vs-string `version` posture), not the actual Space Grotesk pack's real
+content — `"subset": "text"` (note-level review finding) is honest about what `golden-font.woff2`
+below actually is (a `--text="GenWave 0123456789"` cut, not a real latin subset), and `"version":
+"2.000"` is the real upstream TTF's own name ID 5 (`fonttools` `ttx`/`fonttools varLib.instancer`
+convention, the JBM/Grenze vendoring precedent this app's own `FONTS.md` already follows for its
+bundled fonts). T197's real Space Grotesk catalog pack will be a TRUE latin subset with its own,
+different hash and `"subset": "latin"` — this fixture never claims to be that pack early.
+
+`Specs/Story279_FontKindAssets.cs`'s `ScenarioGoldenParityFixtures.GoldenFontJsonRoundTripsByteStable`
+proves this file round-trips byte-exactly through `CatalogFontManifestSerializer` — a hand-edit
+that breaks either the shape or the serializer's naming policy goes red here.
+
+**Regenerate ONLY by hand-authoring a new complete, valid manifest** and re-running the round-trip
+fact until it's green — never partially edit an existing field.
+
+## `golden-font.woff2` — the first BINARY golden fixture (PLAN T193, STORY-279 AC3)
+
+A real, tiny woff2 face — Space Grotesk's own upstream variable TTF
+(`github.com/floriankarsten/space-grotesk`), **text-subsetted** to `--text="GenWave 0123456789"`
+(17 codepoints — deliberately NOT a latin subset) with `fonttools`' `pyftsubset` so the committed
+fixture stays small (7,844 bytes). The T177 parity precedent applied to binary content for the
+first time: this app has no runtime consumer for the bytes yet (that is T194's fetch/verify
+transport), so the fixture's whole job today is being a real, valid woff2 with a known sha256 —
+`4f8000489733987cfe711fb469bd932a3024290bea8bc44151f6807f588932ee` — for transport/parity specs in
+BOTH repos. It is a FORMAT/transport fixture only: T197's real Space Grotesk pack will be a true
+latin subset with its own, different bytes and hash (see the `golden.font.json` section above).
+
+`Specs/Story279_FontKindAssets.cs`'s `ScenarioGoldenParityFixtures.TheGoldenWoff2FixtureHashesToItsRecordedSha256`
+pins that hash directly; `Fixtures/font-catalog-index.json` below reuses the SAME real hash+byte
+count in its `assets[]` entry, so a hand-edit that silently swaps this file's bytes goes red in two
+places, not one.
+
+**Regenerate ONLY via the recipe above** (a fresh `pyftsubset` invocation against the same upstream
+TTF and text set) and update every hash this file's own remarks above name.
+
+## `font-catalog-index.json` — a font entry with real asset hashes (PLAN T193, STORY-279 AC4)
+
+A sibling to `mixed-catalog-index.json` (never that file itself — see its own remarks on why a third
+entry/kind never lands there without updating Story273's entry-count assertions): one persona entry
+(`valid-dj`, placeholder-shaped hashes, exactly `mixed-catalog-index.json`'s own persona entry) and
+one `kind:"font"` entry (`space-grotesk`) whose manifest/meta stay placeholder-shaped (this fixture's
+own route never fetches manifest/meta content either) but whose single `assets[]` entry carries
+`golden-font.woff2`'s REAL sha256 and byte count.
+
+`Specs/Story279_FontKindAssets.cs`'s `ScenarioOlderAppsSkipFontEntries.AnIndexCarryingAFontEntryStillServesEveryOtherEntry`
+drives this file through `CatalogIndexValidator.TryValidate` directly, proving a `kind:"font"` entry
+is now admitted (not forward-compat-skipped) alongside every other entry on the shelf.

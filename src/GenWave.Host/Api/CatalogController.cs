@@ -152,11 +152,22 @@ public sealed partial class CatalogController(
         new(swatches.Bg, swatches.Surface, swatches.Ink, swatches.Accent, swatches.Accent2);
 
     // Lowercase, matching genwave-catalog's own schema vocabulary verbatim — see
-    // CatalogShelfEntryDto's own remarks on why this is never the enum's default PascalCase serialization.
+    // CatalogShelfEntryDto's own remarks on why this is never the enum's default PascalCase
+    // serialization. F104.1/S1 review finding: this switch REJECTED CatalogEntryKind.Font (the
+    // default arm threw UnreachableException), 500ing BOTH routes the instant a font entry ever
+    // reached either projection below — CatalogIndexValidator had already learned to ADMIT the
+    // kind (T193), but this switch, the one place a summary's Kind becomes a wire string, had not.
+    // Every CatalogEntryKind member must have an arm here — there is no forward-compat "skip"
+    // available at this layer (unlike CatalogIndexValidator.TryResolveKind's own unrecognised-kind
+    // posture): by the time a CatalogEntrySummary/CatalogEntryContent exists, its Kind has ALREADY
+    // been validated as a member of this enum, so a missing arm is a genuine coding bug, not
+    // forward-compat data — UnreachableException stays the right shape for every OTHER member, it
+    // was only ever wrong for a kind this app now legitimately ships.
     static string ToWireKind(CatalogEntryKind kind) => kind switch
     {
         CatalogEntryKind.Persona => "persona",
         CatalogEntryKind.Theme => "theme",
+        CatalogEntryKind.Font => "font",
         _ => throw new UnreachableException($"Unhandled {nameof(CatalogEntryKind)} value: {kind}."),
     };
 

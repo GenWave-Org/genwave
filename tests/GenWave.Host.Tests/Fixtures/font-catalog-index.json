@@ -1,0 +1,22 @@
+{
+  "generatedAt": "2026-08-05",
+  "entries": [
+    {
+      "slug": "valid-dj",
+      "audience": "everyone",
+      "bestFor": ["late-night", "chill"],
+      "card": { "path": "entries/valid-dj/valid-dj.persona.json", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+      "meta": { "path": "entries/valid-dj/valid-dj.meta.json", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    },
+    {
+      "slug": "space-grotesk",
+      "kind": "font",
+      "audience": "everyone",
+      "manifest": { "path": "entries/space-grotesk/space-grotesk.font.json", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+      "meta": { "path": "entries/space-grotesk/space-grotesk.meta.json", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+      "assets": [
+        { "path": "entries/space-grotesk/space-grotesk-variable-latin.woff2", "sha256": "4f8000489733987cfe711fb469bd932a3024290bea8bc44151f6807f588932ee", "bytes": 7844 }
+      ]
+    }
+  ]
+}

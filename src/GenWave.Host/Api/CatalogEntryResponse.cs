@@ -36,7 +36,14 @@ namespace GenWave.Host.Api;
 /// <see langword="true"/> when the catalog itself is currently unreachable (no usable index to
 /// resolve this slug against) — distinct from a genuinely unknown slug, which 404s instead.
 /// </param>
-/// <param name="Kind"><c>"persona"</c> or <c>"theme"</c> (SPEC F103.1, F103.3), or <see langword="null"/> when <see cref="Unreachable"/>.</param>
+/// <param name="Kind">
+/// <c>"persona"</c>, <c>"theme"</c>, or <c>"font"</c> (SPEC F103.1, F103.3, widened by F104.1), or
+/// <see langword="null"/> when <see cref="Unreachable"/>. A font entry's <see cref="Card"/>/
+/// <see cref="Meta"/> are its raw <c>.font.json</c>/<c>.meta.json</c> text — the SAME generic,
+/// kind-agnostic fetch every other kind already gets (S1 review finding, T193): this endpoint
+/// never builds a font-specific projection (no asset list on the wire yet), it only had to stop
+/// 500ing on <see cref="Kind"/> itself.
+/// </param>
 /// <param name="Audience"><c>"everyone"</c> or <c>"mature"</c> (same lowercase wire vocabulary as <see cref="CatalogShelfEntryDto.Audience"/>), or <see langword="null"/> when <see cref="Unreachable"/>.</param>
 /// <param name="BestFor">Optional genre chips (F90.4a), or <see langword="null"/> when <see cref="Unreachable"/> — empty, never null, once reachable.</param>
 /// <param name="Author">The entry's credited author (F90.4a), or <see langword="null"/> when unreachable or absent from meta.json.</param>
