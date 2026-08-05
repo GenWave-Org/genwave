@@ -54,8 +54,8 @@ public static class ThemeFontProvenanceValidator
 {
     /// <summary>
     /// FONTS.md's documented per-theme byte ceiling — see that document's "Per-theme byte ceiling"
-    /// section for the full measurement and rationale (today's three vendored faces total ~135 KiB;
-    /// this leaves ~50% headroom for PLAN T189's still-undecided additional face(s)). Update
+    /// section for the full measurement and rationale (five vendored faces since T189; the base
+    /// pair plus at most ONE of the T189 additions fits — FONTS.md's "Pairing constraint"). Update
     /// FONTS.md and this constant together if the number ever changes.
     /// </summary>
     public const long PerThemeByteCeilingBytes = 200 * 1024;

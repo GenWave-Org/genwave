@@ -57,6 +57,25 @@ public static class FeatureCuratedFontProcess
         }
     }
 
+    public sealed class ScenarioTheNewCuratedFacesAreVendored
+    {
+        /// <summary>PLAN T189, Dean-approved 2026-08-05: JetBrains Mono + Grenze Gotisch. Reads the
+        /// real embedded provenance record — the same one <see cref="FontEndpoints"/> and
+        /// <see cref="ThemeFontProvenanceValidator"/> use — rather than the repo's <c>.woff2</c>
+        /// files directly, mirroring this file's own "real production path" posture.</summary>
+        [Theory]
+        [InlineData("/fonts/jetbrains-mono-variable-latin.woff2", 47392)]
+        [InlineData("/fonts/grenze-gotisch-variable-latin.woff2", 51992)]
+        public void TheFaceIsInTheProvenanceRecordWithItsMeasuredByteCount(string src, long expectedBytes)
+        {
+            var found = FontProvenanceCatalog.Default.BySrc.TryGetValue(src, out var face);
+
+            Assert.True(found, $"'{src}' is missing from the vendored provenance record.");
+            Assert.NotNull(face);
+            Assert.Equal(expectedBytes, face.Bytes);
+        }
+    }
+
     // ── SAD PATH ──────────────────────────────────────────────────────────
 
     public sealed class ScenarioAnUnvendoredFontIsRejected
@@ -105,6 +124,31 @@ public static class FeatureCuratedFontProcess
                 ThemeFontProvenanceValidator.PerThemeByteCeilingBytes.ToString(), ex.Message, StringComparison.Ordinal);
         }
     }
+
+    public sealed class ScenarioTheBasePairPlusBothNewFacesExceedsTheCeiling
+    {
+        [Fact]
+        public void ItNamesTheRealTotalAndTheCeiling()
+        {
+            // Arrange: a theme referencing all FIVE real vendored faces — the base pair (Fraunces,
+            //          Fraunces italic, Source Sans 3) PLUS both PLAN T189 additions (JetBrains Mono,
+            //          Grenze Gotisch). Unlike ScenarioAnOverBudgetThemeIsRejected above, this is a
+            //          REAL over-ceiling case now that both new faces are vendored (FONTS.md's own
+            //          "pairing constraint": base pair 138,272 + both new faces = 237,656 exceeds the
+            //          204,800-byte ceiling) — no fake fixture provenance record needed.
+            var theme = CuratedFontFixtures.ThemeReferencingBasePairPlusBothNewFaces();
+
+            // Act: validated against the REAL, embedded provenance record and the real ceiling
+            //      constant,
+            var ex = Assert.Throws<ThemeManifestException>(() => ThemeFontProvenanceValidator.Validate(
+                theme, FontProvenanceCatalog.Default.BySrc, ThemeFontProvenanceValidator.PerThemeByteCeilingBytes));
+
+            // Assert: the message names the real summed total and the real ceiling.
+            Assert.Contains("237656", ex.Message, StringComparison.Ordinal);
+            Assert.Contains(
+                ThemeFontProvenanceValidator.PerThemeByteCeilingBytes.ToString(), ex.Message, StringComparison.Ordinal);
+        }
+    }
 }
 
 /// <summary>Theme/provenance builders local to this file — this file is the only one PLAN T188 is
@@ -137,6 +181,32 @@ file static class CuratedFontFixtures
         Fonts: new ThemeFonts(
             new ThemeFontFace("Fake Family", [new ThemeFontAsset(src, "400 600", "normal")]),
             new ThemeFontFace("Fake Family", [new ThemeFontAsset(src, "400", "normal")])),
+        Modes: new ThemeModes(
+            new Dictionary<string, string> { ["bg"] = "#f6efe3" },
+            new Dictionary<string, string> { ["bg"] = "#1e1713" }));
+
+    /// <summary>A theme whose display face names all THREE base-pair-plus-display faces (Fraunces,
+    /// Fraunces italic, Grenze Gotisch) and whose sans face names the remaining two (Source Sans 3,
+    /// JetBrains Mono) — five distinct real vendored srcs total, i.e. the base pair plus both PLAN
+    /// T189 additions (FONTS.md's own "pairing constraint" sad path).</summary>
+    public static ThemeManifest ThemeReferencingBasePairPlusBothNewFaces() => new(
+        Slug: "font-fixture-theme",
+        Name: "Font Fixture Theme",
+        Author: "GenWave",
+        Fonts: new ThemeFonts(
+            new ThemeFontFace(
+                "Fraunces",
+                [
+                    new ThemeFontAsset("/fonts/fraunces-variable-latin.woff2", "400 600", "normal"),
+                    new ThemeFontAsset("/fonts/fraunces-italic-variable-latin.woff2", "400 600", "italic"),
+                    new ThemeFontAsset("/fonts/grenze-gotisch-variable-latin.woff2", "400", "normal"),
+                ]),
+            new ThemeFontFace(
+                "Source Sans 3",
+                [
+                    new ThemeFontAsset("/fonts/source-sans-3-variable-latin.woff2", "400", "normal"),
+                    new ThemeFontAsset("/fonts/jetbrains-mono-variable-latin.woff2", "400", "normal"),
+                ])),
         Modes: new ThemeModes(
             new Dictionary<string, string> { ["bg"] = "#f6efe3" },
             new Dictionary<string, string> { ["bg"] = "#1e1713" }));

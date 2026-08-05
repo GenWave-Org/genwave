@@ -48,6 +48,8 @@ public static class FeatureCanonicalFontRoute
         [InlineData("fraunces-variable-latin.woff2")]
         [InlineData("fraunces-italic-variable-latin.woff2")]
         [InlineData("source-sans-3-variable-latin.woff2")]
+        [InlineData("jetbrains-mono-variable-latin.woff2")]
+        [InlineData("grenze-gotisch-variable-latin.woff2")]
         public async Task TheFaceIsServedWithTheWoff2ContentType(string file)
         {
             await using var factory = new FontRouteWebFactory();
@@ -63,6 +65,8 @@ public static class FeatureCanonicalFontRoute
         [InlineData("fraunces-variable-latin.woff2")]
         [InlineData("fraunces-italic-variable-latin.woff2")]
         [InlineData("source-sans-3-variable-latin.woff2")]
+        [InlineData("jetbrains-mono-variable-latin.woff2")]
+        [InlineData("grenze-gotisch-variable-latin.woff2")]
         public async Task TheFaceBodyIsNonEmpty(string file)
         {
             await using var factory = new FontRouteWebFactory();

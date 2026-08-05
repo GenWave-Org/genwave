@@ -57,6 +57,8 @@ static class FontEndpoints
             "fraunces-variable-latin.woff2" => ServeFile(context, env, "fraunces-variable-latin.woff2"),
             "fraunces-italic-variable-latin.woff2" => ServeFile(context, env, "fraunces-italic-variable-latin.woff2"),
             "source-sans-3-variable-latin.woff2" => ServeFile(context, env, "source-sans-3-variable-latin.woff2"),
+            "jetbrains-mono-variable-latin.woff2" => ServeFile(context, env, "jetbrains-mono-variable-latin.woff2"),
+            "grenze-gotisch-variable-latin.woff2" => ServeFile(context, env, "grenze-gotisch-variable-latin.woff2"),
             _ => Results.NotFound(),
         };
 
