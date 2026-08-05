@@ -1192,6 +1192,63 @@ public static class FeatureCatalogProxyGuardedDoor
         }
     }
 
+    public sealed class ScenarioDuplicateIndexEntriesNeverThrow
+    {
+        // F1 review finding (T194): CatalogIndexValidator has no cross-entry slug-uniqueness check —
+        // a hand-built or hostile index CAN validly declare two entries sharing the same slug.
+        // PruneChangedEntries/PruneChangedAssets used a bare ToDictionary keyed by that (possibly
+        // duplicated) slug/asset-path, which threw ArgumentException straight out from under
+        // cacheGate's lock the moment ANY successful fetch's entries carried a duplicate — including
+        // a totally cold cache's very first fetch, an unhandled 500 on every catalog route, not
+        // merely a cache-staleness bug. Both prunes are now duplicate-tolerant (indexer assignment,
+        // never ToDictionary) regardless of what shape the validator admits.
+
+        [Fact]
+        public async Task AnIndexWithTwoEntriesSharingTheSameSlugStillLoads()
+        {
+            var index = CatalogFixtures.BuildIndexJson(
+                ("valid-dj", CatalogFixtures.ValidDjCard, CatalogFixtures.ValidDjMeta),
+                ("valid-dj", CatalogFixtures.ValidDjCard, CatalogFixtures.ValidDjMeta));
+            var handler = CatalogFixtures.RoutedHandler(new Dictionary<string, string>
+            {
+                [CatalogFixtures.IndexUrl] = index,
+                [CatalogFixtures.CardUrl("valid-dj")] = CatalogFixtures.ValidDjCard,
+                [CatalogFixtures.MetaUrl("valid-dj")] = CatalogFixtures.ValidDjMeta,
+            });
+            var service = CatalogFixtures.BuildService(handler, new FakeTimeProvider());
+
+            var result = await service.GetIndexAsync(CancellationToken.None);
+
+            Assert.IsType<CatalogIndexFetchResult.Ok>(result);
+        }
+
+        [Fact]
+        public async Task AnIndexWithTwoFontEntriesSharingTheSameSlugAndAssetPathStillLoads()
+        {
+            // The asset-level sibling of the fact above: two SEPARATE font entries sharing one
+            // slug, each declaring an asset whose path (entries/<slug>/<filename>) is therefore
+            // identical too — the exact shape that reached PruneChangedAssets's own ToDictionary.
+            const string Sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+            var index = $$"""
+                { "generatedAt": "2026-08-05", "entries": [
+                  { "slug": "sample-pack", "kind": "font", "audience": "everyone",
+                    "manifest": { "path": "entries/sample-pack/sample-pack.font.json", "sha256": "{{Sha}}" },
+                    "meta": { "path": "entries/sample-pack/sample-pack.meta.json", "sha256": "{{Sha}}" },
+                    "assets": [ { "path": "entries/sample-pack/sample-pack.woff2", "sha256": "{{Sha}}", "bytes": 100 } ] },
+                  { "slug": "sample-pack", "kind": "font", "audience": "everyone",
+                    "manifest": { "path": "entries/sample-pack/sample-pack.font.json", "sha256": "{{Sha}}" },
+                    "meta": { "path": "entries/sample-pack/sample-pack.meta.json", "sha256": "{{Sha}}" },
+                    "assets": [ { "path": "entries/sample-pack/sample-pack.woff2", "sha256": "{{Sha}}", "bytes": 100 } ] } ] }
+                """;
+            var handler = CatalogFixtures.RoutedHandler(new Dictionary<string, string> { [CatalogFixtures.IndexUrl] = index });
+            var service = CatalogFixtures.BuildService(handler, new FakeTimeProvider());
+
+            var result = await service.GetIndexAsync(CancellationToken.None);
+
+            Assert.IsType<CatalogIndexFetchResult.Ok>(result);
+        }
+    }
+
     public sealed class ScenarioEntryCacheCap
     {
         // Review finding #6: an unbounded per-slug cache is an unbounded growth vector.

@@ -7,6 +7,13 @@ namespace GenWave.Host.Catalog;
 /// back verbatim (the same shape a hand-uploaded manifest/meta pair has), and each kind's own
 /// import endpoint (SPEC F90.5, F103.6) is what actually deserializes and validates a manifest's
 /// shape at import time — this type never duplicates that parsing.
+///
+/// <see cref="Assets"/> (SPEC F104.1, T194) is carried straight off the index's own
+/// <see cref="CatalogEntrySummary.Assets"/> — empty for every non-font entry — so
+/// <see cref="Api.CatalogController"/>'s font-kind meta projection (byte total, the specimen's
+/// resolved file name) can read it without a second index lookup; the asset BYTES themselves still
+/// only ever reach this process through <see cref="CatalogProxyService.GetAssetAsync"/>'s own
+/// separate, size-capped, hash-verified fetch — never through this type.
 /// </summary>
 public sealed record CatalogEntryContent(
     string Slug,
@@ -14,4 +21,5 @@ public sealed record CatalogEntryContent(
     CatalogAudience Audience,
     IReadOnlyList<string> BestFor,
     string ManifestJson,
-    string MetaJson);
+    string MetaJson,
+    IReadOnlyList<CatalogAssetRef> Assets);

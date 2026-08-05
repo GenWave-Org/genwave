@@ -49,6 +49,22 @@ namespace GenWave.Host.Api;
 /// <param name="Author">The entry's credited author (F90.4a), or <see langword="null"/> when unreachable or absent from meta.json.</param>
 /// <param name="Description">The entry's shelf description (F90.4a), or <see langword="null"/> when unreachable or absent from meta.json.</param>
 /// <param name="SamplePatter">Sample patter lines (F90.4a), or <see langword="null"/> when <see cref="Unreachable"/> — empty, never null, once reachable.</param>
+/// <param name="FontFamily">
+/// A font entry's family name (SPEC F104.3, T194) — parsed from <see cref="Card"/> (the pack's own
+/// <c>.font.json</c> manifest, already fetched and hash-verified to build this same response, via
+/// the hardened <see cref="Catalog.CatalogFontManifestSerializer.Deserialize"/>) at ZERO extra
+/// network cost. <see langword="null"/> for every non-font entry, when unreachable, or when the
+/// manifest fails to parse (degrades — never a 500, see that method's own remarks).
+/// </param>
+/// <param name="FontByteTotal">A font entry's summed asset bytes (mirrors <see cref="CatalogShelfEntryDto.FontByteTotal"/>'s own computation) — <see langword="null"/> for every non-font entry or when unreachable.</param>
+/// <param name="FontSpecimenFile">
+/// The bare filename of the pack's upright face (SPEC F104.4's "the real face") — resolved by
+/// cross-referencing the manifest's own <c>files[]</c> <c>role:"upright"</c> entry against this
+/// entry's OWN hash-verified <see cref="Catalog.CatalogEntrySummary.Assets"/> list, so it only ever
+/// names something <c>GET /api/catalog/entries/{slug}/assets/{file}</c> can actually serve. Pass it
+/// straight to that route to render the transient specimen preview. <see langword="null"/> for every
+/// non-font entry, when unreachable, or when no upright face resolves.
+/// </param>
 public sealed record CatalogEntryResponse(
     string? Card,
     string? Meta,
@@ -59,4 +75,7 @@ public sealed record CatalogEntryResponse(
     IReadOnlyList<string>? BestFor,
     string? Author,
     string? Description,
-    IReadOnlyList<string>? SamplePatter);
+    IReadOnlyList<string>? SamplePatter,
+    string? FontFamily,
+    long? FontByteTotal,
+    string? FontSpecimenFile);

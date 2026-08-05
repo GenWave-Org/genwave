@@ -88,6 +88,39 @@ public sealed class CatalogProxyService(
     public const int MaxMetaBytes = 64 * 1024;
 
     /// <summary>
+    /// Size cap while streaming ONE binary asset — a font pack's woff2 face or its OFL licence text
+    /// (SPEC F104.1, T194) — enforced DURING the read by <see cref="CatalogHttpFetcher"/>'s own
+    /// bounded stream, the exact same mechanism <see cref="MaxCardBytes"/>/<see cref="MaxMetaBytes"/>
+    /// already use above. The cap actually PASSED to that read is
+    /// <c>min(the asset's own declared <see cref="CatalogAssetRef.Bytes"/>, this constant)</c> — see
+    /// <see cref="FetchAndVerifyAssetAsync"/> — never the origin's declared size alone (T193 review
+    /// obligation): a stream that keeps sending bytes past what index.json itself claimed must still
+    /// be cut off by a bound THIS process chose.
+    ///
+    /// <para>
+    /// 256 KiB (262,144 bytes): FONTS.md/SPEC F104.2 caps a whole PACK's SUMMED asset bytes at 200
+    /// KiB (204,800 bytes, catalog CI's own gate, T195 — not yet built in this app) — but that
+    /// ceiling bounds the pack's TOTAL, while this constant bounds ONE FILE at a time. A two-asset
+    /// pack sitting right at the 200 KiB pack ceiling could legally be one ~198 KiB face plus a few
+    /// KiB of OFL.txt, so a per-asset cap set AT 200 KiB would reject that single face on a rounding
+    /// technicality despite the whole pack being CI-approved. 256 KiB reuses <see cref="MaxCardBytes"/>'s
+    /// own already-established magnitude (one more headroom-over-a-real-ceiling constant, not a new
+    /// order of magnitude invented just for this cap) — comfortable headroom for any one file a
+    /// 200 KiB-ceilinged pack could ever declare.
+    /// </para>
+    /// </summary>
+    public const int MaxAssetBytes = 256 * 1024;
+
+    /// <summary>
+    /// Ceiling on <see cref="cachedAssets"/>' distinct entries — mirrors <see cref="MaxCachedEntries"/>'s
+    /// own bounded-growth rationale, set far lower because each slot here can hold up to
+    /// <see cref="MaxAssetBytes"/> (256 KiB) of raw bytes rather than a small JSON document: 64 slots
+    /// is a 16 MiB worst case, comfortably bounded for an admin-only, low-traffic specimen-preview
+    /// surface (SPEC F104.4) with headroom well beyond any one real pack's face count.
+    /// </summary>
+    const int MaxCachedAssets = 64;
+
+    /// <summary>
     /// Ceiling on the number of distinct slugs' content held in <see cref="cachedEntries"/> at once
     /// (review finding — an unbounded per-slug cache is an admin-controlled but still unbounded
     /// growth vector: nothing stops a large upstream catalog, or a churn of slugs over many index
@@ -105,6 +138,19 @@ public sealed class CatalogProxyService(
     readonly SemaphoreSlim singleFlight = new(1, 1);
     CachedIndex? cachedIndex;
     readonly Dictionary<string, CachedEntry> cachedEntries = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// One slot per fetched asset (SPEC F104.1, T194), keyed by the asset's own
+    /// <see cref="CatalogAssetRef.Path"/> (already globally unique — it embeds the owning slug).
+    /// Same house cache posture as <see cref="cachedEntries"/>: <see cref="CacheTtl"/> parity with
+    /// entries (no separate TTL invented for assets — a specimen preview and its pack's own
+    /// manifest/meta are the SAME "how stale is admin-only catalog content allowed to be" question,
+    /// F90.4), guarded by the SAME <see cref="singleFlight"/> gate (this type's own class remarks on
+    /// why one gate covers the whole surface), and pruned on index refresh by
+    /// <see cref="PruneChangedAssets"/> exactly the way <see cref="PruneChangedEntries"/> already
+    /// prunes <see cref="cachedEntries"/>.
+    /// </summary>
+    readonly Dictionary<string, CachedAsset> cachedAssets = new(StringComparer.Ordinal);
 
     /// <summary>Test seam only (SPEC F90.4's <see cref="MaxCachedEntries"/> cap) — the number of entries currently cached, so a spec can assert the eviction cap without depending on wall-clock LRU timing.</summary>
     internal int CachedEntryCountForTests
@@ -152,6 +198,7 @@ public sealed class CatalogProxyService(
                     // finding) — see PruneChangedEntries's own remarks for why a blanket Clear()
                     // here was wrong.
                     PruneChangedEntries(entries);
+                    PruneChangedAssets(entries);
                 }
 
                 return new CatalogIndexFetchResult.Ok(entries, fetchedAt);
@@ -225,6 +272,54 @@ public sealed class CatalogProxyService(
         }
     }
 
+    /// <summary>
+    /// GET one binary asset's hash-verified bytes (SPEC F104.1, F104.4, T194) — a font pack's woff2
+    /// face or its OFL licence text. Resolves the index first (same as <see cref="GetEntryAsync"/>),
+    /// then matches <paramref name="file"/> against the entry's own already-validated
+    /// <see cref="CatalogEntrySummary.Assets"/> BY BARE FILENAME — never by re-deriving a path from
+    /// caller input (mirrors <c>FontEndpoints</c>' own "compared for equality, never concatenated
+    /// into a path" posture): a <paramref name="file"/> naming nothing on the resolved entry's own
+    /// asset list is <see cref="CatalogAssetFetchResult.NotFound"/>, exactly like an unknown slug.
+    /// Same size-cap/hash-verify/single-flight/cache contract as <see cref="GetEntryAsync"/> — see
+    /// <see cref="MaxAssetBytes"/> and <see cref="cachedAssets"/>'s own remarks.
+    /// </summary>
+    public async Task<CatalogAssetFetchResult> GetAssetAsync(string slug, string file, CancellationToken ct)
+    {
+        var indexResult = await GetIndexAsync(ct);
+        if (indexResult is not CatalogIndexFetchResult.Ok)
+            return new CatalogAssetFetchResult.Unreachable();
+
+        if (!TryResolveAsset(slug, file, out var assetRef, out var directory))
+            return new CatalogAssetFetchResult.NotFound();
+
+        if (TryServeFreshAsset(assetRef.Path, out var fresh))
+            return fresh;
+
+        await singleFlight.WaitAsync(ct);
+        try
+        {
+            if (TryServeFreshAsset(assetRef.Path, out var freshAfterWait))
+                return freshAfterWait;
+
+            var outcome = await FetchAndVerifyAssetAsync(directory, assetRef, ct);
+            return outcome switch
+            {
+                AssetFetchOutcome.Ok ok => CacheAndReturnAsset(assetRef, ok),
+                AssetFetchOutcome.HashMismatch mismatch => WithheldAssetHashMismatch(slug, assetRef, mismatch),
+                AssetFetchOutcome.Oversize => WithheldAssetOversize(slug, assetRef),
+                AssetFetchOutcome.NetworkFailure => ServeStaleAssetOrUnreachable(assetRef.Path),
+                // AssetFetchOutcome's constructor is private (closed hierarchy) — this arm can never
+                // actually run; kept for the same Roslyn-exhaustiveness reason as GetEntryAsync's own
+                // discard arm above.
+                _ => throw new UnreachableException($"Unhandled {nameof(AssetFetchOutcome)} case."),
+            };
+        }
+        finally
+        {
+            singleFlight.Release();
+        }
+    }
+
     // ── Cache reads (all under cacheGate; never span an await) ─────────────────────────────────
 
     bool TryServeFreshIndex(string url, [NotNullWhen(true)] out CatalogIndexFetchResult.Ok? result)
@@ -274,12 +369,47 @@ public sealed class CatalogProxyService(
         }
     }
 
+    bool TryServeFreshAsset(string assetPath, [NotNullWhen(true)] out CatalogAssetFetchResult.Ok? result)
+    {
+        lock (cacheGate)
+        {
+            if (cachedAssets.TryGetValue(assetPath, out var snapshot)
+                && timeProvider.GetUtcNow() - snapshot.FetchedAt < CacheTtl)
+            {
+                result = new CatalogAssetFetchResult.Ok(snapshot.Bytes, snapshot.FetchedAt);
+                return true;
+            }
+        }
+
+        result = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Resolves <paramref name="file"/> (a bare filename, e.g. <c>"space-grotesk-variable-latin.woff2"</c>)
+    /// against the current index's entry for <paramref name="slug"/> — same "same cacheGate as every
+    /// writer, so this can only run once <see cref="GetIndexAsync"/> guaranteed a populated cache"
+    /// reasoning as <see cref="TryResolveSummary"/>.
+    /// </summary>
+    bool TryResolveAsset(string slug, string file, [NotNullWhen(true)] out CatalogAssetRef? assetRef, out Uri directory)
+    {
+        lock (cacheGate)
+        {
+            var snapshot = cachedIndex ?? throw new UnreachableException(
+                "Catalog index cache was empty immediately after a successful GetIndexAsync call.");
+            directory = snapshot.Directory;
+            var summary = snapshot.Entries.FirstOrDefault(e => e.Slug == slug);
+            assetRef = summary?.Assets.FirstOrDefault(a => Path.GetFileName(a.Path) == file);
+            return assetRef is not null;
+        }
+    }
+
     // ── Entry outcome mapping (cache write / WARN log, then the public result) ─────────────────
 
     CatalogEntryFetchResult.Ok CacheAndReturnEntry(string slug, CatalogEntrySummary summary, EntryFetchOutcome.Ok ok)
     {
         var fetchedAt = timeProvider.GetUtcNow();
-        var content = new CatalogEntryContent(summary.Slug, summary.Kind, summary.Audience, summary.BestFor, ok.ManifestJson, ok.MetaJson);
+        var content = new CatalogEntryContent(summary.Slug, summary.Kind, summary.Audience, summary.BestFor, ok.ManifestJson, ok.MetaJson, summary.Assets);
         lock (cacheGate)
         {
             cachedEntries[slug] = new CachedEntry(content, summary.Manifest.Sha256, summary.Meta.Sha256, fetchedAt);
@@ -306,10 +436,24 @@ public sealed class CatalogProxyService(
     /// DIFFERENT manifest/meta sha256 than the bytes currently cached under it (the F90.3 hash
     /// contract this cache promised its content matches) — every other cached slug keeps its
     /// content AND its original fetched-at, unaffected by this index refresh.
+    ///
+    /// <para>
+    /// DUPLICATE-SLUG TOLERANT (F1 review finding, T194): <see cref="CatalogIndexValidator"/> has no
+    /// cross-entry slug-uniqueness check — a hand-built or hostile index CAN validly declare two
+    /// entries sharing the same <see cref="CatalogEntrySummary.Slug"/>. The lookup below is built by
+    /// indexer assignment (last-one-wins), never <c>ToDictionary</c> (which throws
+    /// <see cref="ArgumentException"/> on a duplicate key) — this method must never throw regardless
+    /// of what shape <paramref name="currentEntries"/> turns out to have, since it runs on EVERY
+    /// successful fetch (including the very first, cold-cache one), straight out from under
+    /// <see cref="cacheGate"/>'s lock.
+    /// </para>
     /// </summary>
     void PruneChangedEntries(IReadOnlyList<CatalogEntrySummary> currentEntries)
     {
-        var bySlug = currentEntries.ToDictionary(e => e.Slug, StringComparer.Ordinal);
+        var bySlug = new Dictionary<string, CatalogEntrySummary>(StringComparer.Ordinal);
+        foreach (var entry in currentEntries)
+            bySlug[entry.Slug] = entry;
+
         foreach (var slug in cachedEntries.Keys.ToArray())
         {
             if (bySlug.TryGetValue(slug, out var current)
@@ -346,6 +490,88 @@ public sealed class CatalogProxyService(
         }
 
         return new CatalogEntryFetchResult.Unreachable();
+    }
+
+    // ── Asset outcome mapping (cache write / WARN log, then the public result) ─────────────────
+
+    CatalogAssetFetchResult.Ok CacheAndReturnAsset(CatalogAssetRef assetRef, AssetFetchOutcome.Ok ok)
+    {
+        var fetchedAt = timeProvider.GetUtcNow();
+        lock (cacheGate)
+        {
+            cachedAssets[assetRef.Path] = new CachedAsset(ok.Bytes, assetRef.Sha256, fetchedAt);
+            EvictOldestAssetIfOverCapacity();
+        }
+
+        return new CatalogAssetFetchResult.Ok(ok.Bytes, fetchedAt);
+    }
+
+    /// <summary>Called under <see cref="cacheGate"/>. See <see cref="MaxCachedAssets"/>'s own remarks.</summary>
+    void EvictOldestAssetIfOverCapacity()
+    {
+        while (cachedAssets.Count > MaxCachedAssets)
+            cachedAssets.Remove(cachedAssets.MinBy(pair => pair.Value.FetchedAt).Key);
+    }
+
+    /// <summary>
+    /// Called under <see cref="cacheGate"/>, right after <see cref="cachedIndex"/> is replaced —
+    /// the exact same reasoning as <see cref="PruneChangedEntries"/> (its own remarks), applied to
+    /// <see cref="cachedAssets"/>: a cached asset is dropped only when the refreshed index either no
+    /// longer declares that exact path, or declares it with a DIFFERENT sha256 than the bytes
+    /// currently cached under it.
+    ///
+    /// <para>
+    /// DUPLICATE-PATH TOLERANT (F1 review finding, T194): <see cref="CatalogIndexValidator.TryValidateAssets"/>
+    /// now rejects a single entry that declares the same asset path twice, but two SEPARATE entries
+    /// sharing the same slug (the sibling <see cref="PruneChangedEntries"/> hazard — nothing stops
+    /// that at the index level either) can still produce two <see cref="CatalogAssetRef"/>s with the
+    /// identical <see cref="CatalogAssetRef.Path"/>. The lookup below is built by indexer assignment
+    /// (last-one-wins), never <c>ToDictionary</c> (which throws <see cref="ArgumentException"/> on a
+    /// duplicate key) — this ran unconditionally on every fetch, including a totally cold cache, so a
+    /// throw here was a genuine unhandled 500 on every catalog route, not merely a cache-staleness bug.
+    /// </para>
+    /// </summary>
+    void PruneChangedAssets(IReadOnlyList<CatalogEntrySummary> currentEntries)
+    {
+        var byPath = new Dictionary<string, CatalogAssetRef>(StringComparer.Ordinal);
+        foreach (var asset in currentEntries.SelectMany(e => e.Assets))
+            byPath[asset.Path] = asset;
+
+        foreach (var path in cachedAssets.Keys.ToArray())
+        {
+            if (byPath.TryGetValue(path, out var current) && cachedAssets[path].Sha256 == current.Sha256)
+                continue;
+
+            cachedAssets.Remove(path);
+        }
+    }
+
+    CatalogAssetFetchResult.HashMismatch WithheldAssetHashMismatch(string slug, CatalogAssetRef assetRef, AssetFetchOutcome.HashMismatch mismatch)
+    {
+        var file = Path.GetFileName(assetRef.Path);
+        logger.LogWarning(
+            "Persona catalog asset withheld: slug={Slug} file={File} expected={Expected} actual={Actual}",
+            LogSafeText.Sanitize(slug), LogSafeText.Sanitize(file), LogSafeText.Sanitize(mismatch.Expected), LogSafeText.Sanitize(mismatch.Actual));
+        return new CatalogAssetFetchResult.HashMismatch(slug, file);
+    }
+
+    CatalogAssetFetchResult.Oversize WithheldAssetOversize(string slug, CatalogAssetRef assetRef)
+    {
+        var file = Path.GetFileName(assetRef.Path);
+        logger.LogWarning("Persona catalog asset withheld: slug={Slug} file={File} exceeded its size cap", LogSafeText.Sanitize(slug), LogSafeText.Sanitize(file));
+        return new CatalogAssetFetchResult.Oversize(slug, file);
+    }
+
+    CatalogAssetFetchResult ServeStaleAssetOrUnreachable(string assetPath)
+    {
+        // Stale-on-failure (F90.4) at asset granularity, same TTL-parity posture as entries.
+        lock (cacheGate)
+        {
+            if (cachedAssets.TryGetValue(assetPath, out var stale))
+                return new CatalogAssetFetchResult.Ok(stale.Bytes, stale.FetchedAt);
+        }
+
+        return new CatalogAssetFetchResult.Unreachable();
     }
 
     // ── HTTP fetch (CatalogHttpFetcher owns the request/bounded-read mechanics) ────────────────
@@ -428,6 +654,42 @@ public sealed class CatalogProxyService(
     }
 
     /// <summary>
+    /// Fetches and hash-verifies ONE binary asset (SPEC F104.1, T194) — the same belt-and-braces
+    /// directory re-check <see cref="FetchAndVerifyFileAsync"/> already does for a manifest/meta
+    /// pointer, applied to <see cref="CatalogAssetRef"/>. The size cap actually passed to the bounded
+    /// read is <c>min(the asset's own declared <see cref="CatalogAssetRef.Bytes"/>, <see cref="MaxAssetBytes"/>)</c>
+    /// (T193 review obligation) — <paramref name="assetRef"/>'s declared size is untrusted origin
+    /// content and must never be the ONLY bound the stream read trusts. The cast to <see langword="int"/>
+    /// is always safe here: <see cref="Math.Min(long, long)"/> can only ever return
+    /// <see cref="MaxAssetBytes"/> itself (an <see langword="int"/> literal) when the declared size is
+    /// the larger operand, and the declared size when IT is smaller — <see cref="CatalogIndexValidator"/>
+    /// already proved that value positive before this ever ran.
+    /// </summary>
+    async Task<AssetFetchOutcome> FetchAndVerifyAssetAsync(Uri directory, CatalogAssetRef assetRef, CancellationToken ct)
+    {
+        if (!CatalogIndexValidator.TryResolveWithinDirectory(directory, assetRef.Path, out var uri))
+            throw new UnreachableException($"'{assetRef.Path}' no longer resolves under its index directory.");
+
+        var effectiveCap = (int)Math.Min(assetRef.Bytes, MaxAssetBytes);
+        var outcome = await CatalogHttpFetcher.FetchAsync(httpClientFactory, uri, effectiveCap, ct);
+        return outcome switch
+        {
+            CatalogFetchOutcome.Ok ok => VerifyAssetHash(ok.Bytes, assetRef),
+            CatalogFetchOutcome.Oversize => new AssetFetchOutcome.Oversize(),
+            CatalogFetchOutcome.NetworkFailure => new AssetFetchOutcome.NetworkFailure(),
+            _ => throw new UnreachableException($"Unhandled {nameof(CatalogFetchOutcome)} case."),
+        };
+    }
+
+    static AssetFetchOutcome VerifyAssetHash(byte[] bytes, CatalogAssetRef assetRef)
+    {
+        var actualHash = Convert.ToHexStringLower(SHA256.HashData(bytes));
+        return string.Equals(actualHash, assetRef.Sha256, StringComparison.Ordinal)
+            ? new AssetFetchOutcome.Ok(bytes)
+            : new AssetFetchOutcome.HashMismatch(assetRef.Sha256, actualHash);
+    }
+
+    /// <summary>
     /// The index URL's own directory (SPEC F90.2 — entry paths resolve ONLY against this): RFC 3986
     /// base-URI resolution of "." against <paramref name="indexUri"/>, exactly what a browser or
     /// curl would treat as "the directory containing this file". Review finding: a prior version
@@ -450,4 +712,12 @@ public sealed class CatalogProxyService(
     /// with no re-fetch.
     /// </summary>
     sealed record CachedEntry(CatalogEntryContent Content, string ManifestSha256, string MetaSha256, DateTimeOffset FetchedAt);
+
+    /// <summary>
+    /// <see cref="Sha256"/> is the hash THIS content was verified against when fetched — mirrors
+    /// <see cref="CachedEntry"/>'s own <c>ManifestSha256</c>/<c>MetaSha256</c> fields, letting
+    /// <see cref="PruneChangedAssets"/> tell "the index still declares this exact asset" from "the
+    /// index moved on" with no re-fetch.
+    /// </summary>
+    sealed record CachedAsset(byte[] Bytes, string Sha256, DateTimeOffset FetchedAt);
 }

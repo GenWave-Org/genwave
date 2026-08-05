@@ -98,6 +98,15 @@ internal static partial class CatalogIndexValidator
     [GeneratedRegex(ThemeManifestParser.TokenValueText)]
     private static partial Regex SwatchHexPattern();
 
+    // The SAME CSS-injection-safe family shape ThemeManifestParser enforces on a theme manifest's
+    // own font family (T194 review finding — the blocker: an optional shelf-card `family` string
+    // was reaching CatalogShelfEntryDto.FontFamily with only a `Length > 0` check, admitting a
+    // payload like 'X;}</style><script>alert(1)</script>' verbatim) — composed from its
+    // `internal const` (mirrors SwatchHexPattern immediately above), not a second copy. See
+    // ThemeManifestParser.FontFamilyText's own remarks.
+    [GeneratedRegex(ThemeManifestParser.FontFamilyText)]
+    private static partial Regex FamilyPattern();
+
     // Split per kind (and per field) so a manifest can't masquerade as a meta (or vice versa), and
     // a persona's manifest can't masquerade as a theme's (or vice versa), even though all three
     // share the same entries/<slug>/<name>.EXT.json shape.
@@ -270,9 +279,60 @@ internal static partial class CatalogIndexValidator
             assets = [];
         }
 
-        summary = new CatalogEntrySummary(slug, kind, audience, raw.BestFor ?? [], manifest, meta, TryParsePreview(raw.Preview), assets);
+        // STORY-281 AC1 reconciliation (T194 review finding): only meaningful on a font entry,
+        // mirrors Assets' own kind-gating — see TryParseFamily's own remarks for the decorative,
+        // never-fails posture this field alone gets.
+        var family = kind == CatalogEntryKind.Font ? TryParseFamily(raw.Family) : null;
+
+        summary = new CatalogEntrySummary(slug, kind, audience, raw.BestFor ?? [], manifest, meta, TryParsePreview(raw.Preview), assets, family);
         return EntryValidationOutcome.Valid;
     }
+
+    // T194 review finding: ThemeManifestParser itself caps its own font family only by presence
+    // (`{ Length: > 0 }`), never by an upper bound — safe there because a theme manifest is
+    // first-party, embedded content, not remote input. This field is the opposite: it arrives off a
+    // remote, untrusted index.json, so a shape-valid-but-absurd blob (a many-KB run of
+    // letters/digits/spaces/hyphens, which FamilyPattern alone would still admit) still needs a
+    // bound. 64 is an honest, generous cap — no real font family name in this format's own
+    // vocabulary ("Space Grotesk", "Fraunces", "Source Sans 3") comes anywhere close — chosen for
+    // parity with this codebase's other short-identifier caps (e.g. CatalogController.MaxSlugLength)
+    // rather than derived from any real font's measured length.
+    const int MaxFamilyLength = 64;
+
+    /// <summary>
+    /// Admits the OPTIONAL shelf-card <c>family</c> string (STORY-281 AC1 reconciliation, T194
+    /// review finding — "the shelf card shows FAMILY, but family lives in the manifest which browse
+    /// never fetches"): the SAME seam <see cref="BestFor"/>/<see cref="TryParsePreview"/> already
+    /// fixed this shape of problem with — a field the INDEX itself carries so a zero-fetch shelf
+    /// listing can show it, rather than the shelf paying for a manifest fetch it otherwise never
+    /// makes. Decorative, like <see cref="BestFor"/>: absent, wrong-typed, over-length, or
+    /// wrong-shaped degrades to <see langword="null"/>, never fails validation of the entry it lives
+    /// on or rejects the whole index — a missing/bad family name is purely cosmetic, never a reason a
+    /// real, well-formed font entry should vanish from the shelf.
+    ///
+    /// <para>
+    /// SHAPE (T194 review finding — blocker): this value reaches <see cref="Api.CatalogShelfEntryDto.FontFamily"/>
+    /// verbatim, off UNTRUSTED index.json content, the exact same wire-injection exposure
+    /// <see cref="TryParsePreview"/>'s own swatch check (<see cref="SwatchHexPattern"/>) already
+    /// guards — a bare <c>Length &gt; 0</c> check let a CSS-injection payload (e.g.
+    /// <c>'X;}&lt;/style&gt;&lt;script&gt;alert(1)&lt;/script&gt;'</c>) straight through. Gated on
+    /// <see cref="FamilyPattern"/> — the same shape <see cref="ThemeManifestParser.FontFamilyPattern"/>
+    /// enforces on a theme manifest's own font family — so this class holds an untrusted index
+    /// entry's family to the exact rule a manifest's real one already is.
+    /// </para>
+    ///
+    /// <para>
+    /// LENGTH (T194 review finding): <see cref="MaxFamilyLength"/>'s own remarks explain the bound;
+    /// checked here alongside the shape and presence checks so all three fail the same way — degrade
+    /// to <see langword="null"/>, never throw or reject the whole index.
+    /// </para>
+    /// </summary>
+    static string? TryParseFamily(JsonElement? raw) =>
+        raw is { ValueKind: JsonValueKind.String } element
+            && element.GetString() is { Length: > 0 and <= MaxFamilyLength } family
+            && FamilyPattern().IsMatch(family)
+            ? family
+            : null;
 
     /// <summary>
     /// Admits the optional <c>preview</c> object (SPEC F103.4, T185's contract) with the SAME
@@ -359,7 +419,13 @@ internal static partial class CatalogIndexValidator
     /// partly-broken assets list would be a shelf card advertising a font nothing can actually
     /// serve, a strictly worse outcome than the entry simply not existing yet. So this is
     /// ALL-OR-NOTHING: every declared asset must individually validate (<see cref="TryValidateAssetRef"/>)
-    /// and at least one must be present, or the caller treats the entire font entry as absent.
+    /// and at least one must be present, or the caller treats the entire font entry as absent. A
+    /// path declared TWICE (F1 review finding, T194) is the SAME all-or-nothing failure — a pack
+    /// declaring the same file twice is malformed by definition (which of the two would even be the
+    /// real one?) — never merely de-duplicated into a shorter list, and never left for
+    /// <see cref="CatalogProxyService"/>'s own cache-prune bookkeeping to trip over downstream (that
+    /// bookkeeping is hardened separately, defense-in-depth, but the front door is where a malformed
+    /// pack belongs being turned away).
     ///
     /// <para>
     /// <paramref name="raw"/> is a raw <see cref="JsonElement"/>, not the typed
@@ -384,10 +450,20 @@ internal static partial class CatalogIndexValidator
         }
 
         var validated = new List<CatalogAssetRef>(array.GetArrayLength());
+        var seenPaths = new HashSet<string>(StringComparer.Ordinal);
         foreach (var element in array.EnumerateArray())
         {
             if (!TryValidateAssetRef(element, slug, directory, out var assetRef))
             {
+                assets = null;
+                return false;
+            }
+
+            if (!seenPaths.Add(assetRef.Path))
+            {
+                // The SAME path declared twice within one entry (F1 review finding) — see this
+                // method's own remarks on why that fails the whole entry rather than merely
+                // collapsing to one copy.
                 assets = null;
                 return false;
             }
@@ -410,13 +486,21 @@ internal static partial class CatalogIndexValidator
     /// rules <see cref="TryValidateFileRef"/> applies to a manifest/meta pointer (path shape, slug
     /// ownership, directory containment), plus a positive <see cref="CatalogAssetJson.Bytes"/> (the
     /// fetch transport's declared size cap, T194 — zero or negative names nothing a caller could
-    /// ever stream). S4 review finding: rather than re-implementing that whole belt-and-braces
-    /// check a second time, this calls <see cref="TryValidateFileRef"/> ITSELF — the one place that
-    /// security-critical traversal/SSRF logic lives — passing <see cref="AssetPathPattern"/> in place
-    /// of a manifest/meta pattern and discarding its WARN-worthy reason string (unlike
-    /// <see cref="TryValidateFileRef"/>'s callers, which reject the whole index and so need one, a
-    /// bad asset here degrades/skips its OWN entry silently — the same no-reason shape
-    /// <see cref="TryValidateEntry"/>'s unknown-kind <c>Skip</c> outcome already carries).
+    /// ever stream) THAT ALSO NEVER EXCEEDS <see cref="CatalogProxyService.MaxAssetBytes"/> (F2
+    /// review finding, T194): an asset declaring more bytes than the transport will EVER accept is
+    /// malformed by definition — admitting it anyway would only defer the rejection to fetch time
+    /// (withheld as <see cref="CatalogAssetFetchResult.Oversize"/>) while leaving an unbounded
+    /// declared value sitting in <see cref="CatalogEntrySummary.Assets"/> for every zero-fetch shelf
+    /// projection (<see cref="Api.CatalogController"/>'s <c>FontByteTotal</c> sum) to trust. Bounding
+    /// it HERE keeps that sum structurally bounded by construction, never merely by hoping every
+    /// summing call site remembers to guard against a hostile origin's declared size. S4 review
+    /// finding: rather than re-implementing the belt-and-braces path/slug/directory check a second
+    /// time, this calls <see cref="TryValidateFileRef"/> ITSELF — the one place that security-critical
+    /// traversal/SSRF logic lives — passing <see cref="AssetPathPattern"/> in place of a manifest/meta
+    /// pattern and discarding its WARN-worthy reason string (unlike <see cref="TryValidateFileRef"/>'s
+    /// callers, which reject the whole index and so need one, a bad asset here degrades/skips its OWN
+    /// entry silently — the same no-reason shape <see cref="TryValidateEntry"/>'s unknown-kind
+    /// <c>Skip</c> outcome already carries).
     ///
     /// <para>
     /// <paramref name="element"/> is a raw <see cref="JsonElement"/>, not the typed
@@ -445,7 +529,7 @@ internal static partial class CatalogIndexValidator
             return false;
         }
 
-        if (raw is not { Bytes: { } bytes } || bytes <= 0)
+        if (raw is not { Bytes: { } bytes } || bytes <= 0 || bytes > CatalogProxyService.MaxAssetBytes)
         {
             assetRef = null;
             return false;
@@ -596,6 +680,16 @@ internal static partial class CatalogIndexValidator
         /// reject-vs-degrade posture a malformed or empty list still carries once parsed defensively.
         /// </summary>
         public JsonElement? Assets { get; init; }
+
+        /// <summary>
+        /// The OPTIONAL F104.3/STORY-281 shelf-card family name — only ever meaningful on a
+        /// <c>kind:"font"</c> entry. A raw <see cref="JsonElement"/>, not a typed
+        /// <see cref="string"/> directly (mirrors <see cref="Preview"/>'s own remarks immediately
+        /// above): a wrong-typed <c>family</c> (a number, array, or object) must never fail the
+        /// top-level <c>Deserialize</c> call this record is itself a member of. See
+        /// <see cref="TryParseFamily"/> for the decorative, never-fails posture this field alone gets.
+        /// </summary>
+        public JsonElement? Family { get; init; }
     }
 
     /// <summary>Ephemeral JSON projection of a raw index.json <c>manifest</c>/<c>card</c>/<c>meta</c> file pointer.</summary>

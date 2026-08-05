@@ -200,13 +200,17 @@ public static class FeatureThemeCatalogIsolation
 
     public sealed class ScenarioNoNewPublicRoute
     {
-        // The known, deliberate set today (SPEC F103.6, F90.2, PLAN T184/T185) — a fifth route
-        // joining either prefix is a disclosure decision (SPEC F103.12), not a routing accident.
+        // The known, deliberate set today (SPEC F103.6, F90.2, F104.4, PLAN T184/T185/T194) — a
+        // sixth route joining either prefix is a disclosure decision (SPEC F103.12), not a routing
+        // accident. The assets/{file} route (T194) delivers a font pack's hash-verified binary
+        // asset (the F104.4 specimen face) — same CatalogController class-level AdminSurface+
+        // Settings attributes as its two siblings, never a new surface of its own.
         static readonly IReadOnlySet<(string Verb, string Route)> KnownCatalogAndThemeRoutes =
             new HashSet<(string Verb, string Route)>
             {
                 ("GET", "api/catalog/index"),
                 ("GET", "api/catalog/entries/{slug}"),
+                ("GET", "api/catalog/entries/{slug}/assets/{file}"),
                 ("POST", "api/themes/{slug}/import"),
                 ("POST", "api/themes/preview"),
             };
@@ -299,6 +303,7 @@ public static class FeatureThemeCatalogIsolation
         [Theory]
         [InlineData("GET", "/api/catalog/index")]
         [InlineData("GET", "/api/catalog/entries/anything")]
+        [InlineData("GET", "/api/catalog/entries/anything/assets/anything.woff2")]
         [InlineData("POST", "/api/themes/anything/import")]
         [InlineData("POST", "/api/themes/preview")]
         public async Task EveryRouteReturns404OnThePublicListener(string verb, string path)

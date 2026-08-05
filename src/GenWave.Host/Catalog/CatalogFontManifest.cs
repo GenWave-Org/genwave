@@ -16,11 +16,13 @@ namespace GenWave.Host.Catalog;
 /// </para>
 ///
 /// <para>
-/// This type is parse/serialize-only today — no consumer wires it in yet (<see cref="CatalogIndexValidator"/>
-/// checks only a font entry's manifest PATH shape, never its content; T194's meta projection and
-/// beyond are what will eventually read it). Its whole job right now is being the byte-stable shape
-/// both this app's <c>Fixtures/golden.font.json</c> and genwave-catalog's own future commit pin
-/// against — see <see cref="CatalogFontManifestSerializer"/>.
+/// T194 is this type's first real consumer: <see cref="Api.CatalogController"/>'s font-kind detail
+/// projection (SPEC F104.3, <c>GET /api/catalog/entries/{slug}</c>) deserializes a fetched pack's
+/// <c>.font.json</c> into this shape, via the hardened <see cref="CatalogFontManifestSerializer.Deserialize"/>,
+/// to read <see cref="Family"/> and resolve the specimen face from <see cref="Files"/>. Its other
+/// job, unchanged since T193, is being the byte-stable shape both this app's
+/// <c>Fixtures/golden.font.json</c> and genwave-catalog's own future commit pin against — see
+/// <see cref="CatalogFontManifestSerializer"/>.
 /// </para>
 /// </summary>
 public sealed record CatalogFontManifest(

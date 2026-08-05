@@ -129,7 +129,7 @@ public sealed partial class CatalogController(
             CatalogEntryFetchResult.Ok ok => Ok(ToEntryResponse(ok)),
             CatalogEntryFetchResult.NotFound => NotFound(UnknownEntryProblem(slug)),
             CatalogEntryFetchResult.Unreachable => Ok(new CatalogEntryResponse(
-                null, null, null, Unreachable: true, null, null, null, null, null, null)),
+                null, null, null, Unreachable: true, null, null, null, null, null, null, null, null, null)),
             CatalogEntryFetchResult.HashMismatch =>
                 StatusCode(StatusCodes.Status502BadGateway, WithheldProblem("failed its integrity check")),
             CatalogEntryFetchResult.Oversize =>
@@ -140,8 +140,102 @@ public sealed partial class CatalogController(
         };
     }
 
+    /// <summary>
+    /// GET /api/catalog/entries/{slug}/assets/{file} — one binary asset's hash-verified bytes (SPEC
+    /// F104.1, F104.4, T194): a font pack's woff2 face today, its OFL licence text too since the
+    /// route is asset-generic, never kind-specific. Same disabled/slug-shape guards as
+    /// <see cref="Entry"/>; <paramref name="file"/> gets only a cheap length bound (T101's own
+    /// <see cref="MaxSlugLength"/> precedent) — no shape regex, because
+    /// <see cref="CatalogProxyService.GetAssetAsync"/> only ever matches it for EQUALITY against the
+    /// resolved entry's own already-validated asset filenames (mirrors <c>FontEndpoints</c>' "compared
+    /// for equality, never concatenated into a path" posture) — anything not naming a real asset is
+    /// simply <see cref="CatalogAssetFetchResult.NotFound"/>, the same shape an unknown slug gets.
+    ///
+    /// <para>
+    /// NO-STORE (SPEC F104.4 — "transient... nothing persists, nothing is served station-wide"):
+    /// <see cref="AssetFileResult"/> sets <c>Cache-Control: no-store</c> EXPLICITLY, alongside
+    /// <c>X-Content-Type-Options: nosniff</c> (mirrors <c>FontEndpoints</c>' own stamp) — NOT left to
+    /// <see cref="NoCacheApiMiddleware"/> alone (F5 review finding): that middleware only writes its
+    /// headers <c>if (!Response.HasStarted)</c>, a best-effort guard silently dropped once a large
+    /// streamed asset's body has already begun flushing by the time the middleware runs on the way
+    /// back out — the exact shape a font pack's woff2 face IS. This is deliberately the OPPOSITE
+    /// posture from <c>FontEndpoints</c>' installed/vendored faces (immutable, one-year cache): those
+    /// are permanent, filename-versioned station assets; this is a transient, never-installed preview
+    /// of someone else's content, so a fresh admin request always re-verifies through this station's
+    /// own hash check rather than trusting a stale local copy.
+    /// </para>
+    ///
+    /// <para>
+    /// STATUS CODES: 404 (bare) disabled catalog; 400 malformed/over-length slug or file; 404 (body)
+    /// unknown slug or unknown asset for that slug; 502 hash mismatch/oversize — the SAME upstream
+    /// integrity posture <see cref="Entry"/> already uses (mirrors that action's own WithheldProblem);
+    /// 503 when the catalog itself is currently unreachable — UNLIKE <see cref="Entry"/>'s graceful
+    /// embedded-flag 200, a binary response has no JSON envelope to carry that signal in, so this is
+    /// the one route on this controller where "nothing to show yet" is a real non-2xx status rather
+    /// than state embedded in a 200 (a deliberate, stated deviation from this controller's own
+    /// class-level UNREACHABLE remarks, forced by the response's raw-bytes shape).
+    /// </para>
+    /// </summary>
+    [HttpGet("entries/{slug}/assets/{file}")]
+    public async Task<IActionResult> Asset(string slug, string file, CancellationToken ct)
+    {
+        if (!catalogAccessor.IsEnabled)
+            return DisabledSurfaceResult();
+
+        if (slug.Length > MaxSlugLength)
+            return BadRequest(SlugTooLongProblem(slug.Length));
+
+        if (!SlugFormat().IsMatch(slug))
+            return BadRequest(BadSlugProblem(slug));
+
+        if (file.Length > MaxAssetFileLength)
+            return BadRequest(AssetFileTooLongProblem(file.Length));
+
+        var result = await catalogProxyService.GetAssetAsync(slug, file, ct);
+
+        return result switch
+        {
+            CatalogAssetFetchResult.Ok ok => AssetFileResult(ok.Bytes, file),
+            CatalogAssetFetchResult.NotFound => NotFound(UnknownAssetProblem(slug, file)),
+            CatalogAssetFetchResult.Unreachable =>
+                StatusCode(StatusCodes.Status503ServiceUnavailable, CatalogUnavailableProblem()),
+            CatalogAssetFetchResult.HashMismatch =>
+                StatusCode(StatusCodes.Status502BadGateway, WithheldProblem("failed its integrity check")),
+            CatalogAssetFetchResult.Oversize =>
+                StatusCode(StatusCodes.Status502BadGateway, WithheldProblem("exceeded its size limit")),
+            // CatalogAssetFetchResult's constructor is private (closed hierarchy) — see Index's own
+            // discard arm for why this still needs one.
+            _ => throw new UnreachableException($"Unhandled {nameof(CatalogAssetFetchResult)} case."),
+        };
+    }
+
+    FileContentResult AssetFileResult(byte[] bytes, string file)
+    {
+        // Explicit, not left to NoCacheApiMiddleware alone (F5 review finding) — see this action's
+        // own NO-STORE remarks.
+        Response.Headers.CacheControl = "no-store";
+        Response.Headers.XContentTypeOptions = "nosniff";
+        return File(bytes, AssetContentType(file));
+    }
+
+    /// <summary><c>font/woff2</c> matches <c>FontEndpoints</c>' own vendored-face content type; the pack's OFL.txt (never a specimen itself, but served by the SAME asset-generic route) gets a plain-text type; anything else this pattern doesn't recognise falls back to a generic binary type rather than guessing.</summary>
+    static string AssetContentType(string file) => Path.GetExtension(file).ToLowerInvariant() switch
+    {
+        ".woff2" => "font/woff2",
+        ".txt" => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    };
+
     static CatalogShelfEntryDto ToShelfEntryDto(CatalogEntrySummary summary) =>
-        new(summary.Slug, ToWireKind(summary.Kind), ToWireAudience(summary.Audience), summary.BestFor, ToPreviewDto(summary.Preview));
+        new(summary.Slug, ToWireKind(summary.Kind), ToWireAudience(summary.Audience), summary.BestFor,
+            ToPreviewDto(summary.Preview), ToFontByteTotal(summary), summary.Family);
+
+    // SPEC F104.3's shelf-card byte total — zero fetch, straight off the index's own asset refs.
+    // summary.Family (STORY-281 AC1 reconciliation, T194 review finding) needs no equivalent helper
+    // here — CatalogIndexValidator already kind-gates it to font-only, null otherwise, so it passes
+    // straight through above; see CatalogShelfEntryDto.FontFamily's own remarks.
+    static long? ToFontByteTotal(CatalogEntrySummary summary) =>
+        summary.Kind == CatalogEntryKind.Font ? summary.Assets.Sum(a => a.Bytes) : null;
 
     // Null exactly when CatalogEntrySummary.Preview is (every persona entry, and a theme entry
     // whose index carries none, T185) — see that property's own remarks.
@@ -188,6 +282,8 @@ public sealed partial class CatalogController(
     static CatalogEntryResponse ToEntryResponse(CatalogEntryFetchResult.Ok ok)
     {
         var meta = ParseMetaFields(ok.Content.MetaJson);
+        var isFont = ok.Content.Kind == CatalogEntryKind.Font;
+        var fontManifest = isFont ? CatalogFontManifestSerializer.Deserialize(ok.Content.ManifestJson) : null;
         return new CatalogEntryResponse(
             ok.Content.ManifestJson,
             ok.Content.MetaJson,
@@ -198,7 +294,28 @@ public sealed partial class CatalogController(
             ok.Content.BestFor,
             meta.Author,
             meta.Description,
-            meta.SamplePatter ?? []);
+            meta.SamplePatter ?? [],
+            FontFamily: fontManifest?.Family,
+            FontByteTotal: isFont ? ok.Content.Assets.Sum(a => a.Bytes) : null,
+            FontSpecimenFile: ResolveSpecimenFile(fontManifest, ok.Content.Assets));
+    }
+
+    /// <summary>
+    /// Resolves the bare filename of the pack's UPRIGHT face — the one real face SPEC F104.4's
+    /// specimen preview renders — by cross-referencing <paramref name="manifest"/>'s own
+    /// <c>files[]</c> <c>role:"upright"</c> entry against <paramref name="assets"/>, this entry's own
+    /// hash-verified asset list (T193/T194): the manifest's filename is never trusted alone, only
+    /// once it also names something the index itself declared, so the result is guaranteed to be
+    /// something <see cref="Asset"/> can actually serve. Degrades to <see langword="null"/> — never
+    /// throws — when there is no manifest (parse failure, or a non-font entry), no upright file
+    /// declared, or no matching asset.
+    /// </summary>
+    static string? ResolveSpecimenFile(CatalogFontManifest? manifest, IReadOnlyList<CatalogAssetRef> assets)
+    {
+        var uprightFile = manifest?.Files.FirstOrDefault(f => f.Role == "upright")?.File;
+        return uprightFile is not null && assets.Any(a => Path.GetFileName(a.Path) == uprightFile)
+            ? uprightFile
+            : null;
     }
 
     static readonly JsonSerializerOptions MetaJsonOptions = new()
@@ -235,6 +352,16 @@ public sealed partial class CatalogController(
     /// vocabulary), never anywhere near this long.
     /// </summary>
     const int MaxSlugLength = 64;
+
+    /// <summary>
+    /// Length bound on the <c>{file}</c> route segment (T194, mirrors <see cref="MaxSlugLength"/>'s
+    /// own cheap-reject-before-any-real-work reasoning) — no regex needed alongside it, unlike
+    /// <see cref="SlugFormat"/>: <see cref="Asset"/>'s own remarks explain why an equality-only match
+    /// against the resolved entry's real asset filenames already closes the shape question. A real
+    /// asset filename (<c>CatalogIndexValidator</c>'s own <c>entries/&lt;slug&gt;/&lt;filename&gt;</c>
+    /// vocabulary) is a short, human-authored name, never anywhere near this long.
+    /// </summary>
+    const int MaxAssetFileLength = 128;
 
     // Composed from CatalogIndexValidator.SlugSegment — the catalog's OWN slug vocabulary (that
     // class parses the identical shape out of an untrusted index.json) — anchored \A/\z, not ^/$ (a
@@ -281,6 +408,27 @@ public sealed partial class CatalogController(
         Status = StatusCodes.Status404NotFound,
         Title  = "Not found.",
         Detail = $"No catalog entry with slug \"{slug}\" exists.",
+    };
+
+    static ProblemDetails AssetFileTooLongProblem(int length) => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Invalid asset file.",
+        Detail = $"file must be at most {MaxAssetFileLength} characters (got {length}).",
+    };
+
+    static ProblemDetails UnknownAssetProblem(string slug, string file) => new()
+    {
+        Status = StatusCodes.Status404NotFound,
+        Title  = "Not found.",
+        Detail = $"No asset \"{file}\" on catalog entry \"{slug}\".",
+    };
+
+    static ProblemDetails CatalogUnavailableProblem() => new()
+    {
+        Status = StatusCodes.Status503ServiceUnavailable,
+        Title  = "Persona catalog unavailable.",
+        Detail = "The catalog is currently unreachable. Try again shortly.",
     };
 
     // Deliberately no slug/hash/upstream detail here (F15.7 — mirrors VoicesController's own
