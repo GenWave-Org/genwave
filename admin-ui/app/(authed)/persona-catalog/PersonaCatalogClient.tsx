@@ -51,6 +51,13 @@ type DetailState =
  * generalised `{manifest, meta}` model, still named `card` on the wire, see `CatalogEntryResponse`'s
  * own remarks) — then routes to `ThemeDetailPreview` (a live composed mini-preview) instead of
  * `DetailPanel`, and "Install" opens `ThemeInstallModal` instead of `PersonaCardReviewModal`.
+ *
+ * A third kind, `font` (SPEC F104.1/F104.3, PLAN T201), renders `FontShelfCard` — a family-derived
+ * title and a human-readable byte total painted straight off the entry's already-fetched index row's
+ * own `fontFamily`/`fontByteTotal` (T194), no manifest or asset fetch on browse. It has no
+ * click-through yet: `renderDetailPanel` below has no `"font"` arm, so selecting one falls through
+ * to its own `default: return null` — the real hash-verified specimen preview is PLAN T202's job,
+ * mirroring how T185 shipped `ThemeShelfCard` inert before T186 wired its click-through.
  */
 export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps): ReactNode {
   const router = useRouter();
@@ -181,6 +188,8 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
             onSelect={() => handleCardClick(entry.slug)}
           />
         );
+      case "font":
+        return <FontShelfCard key={entry.slug} entry={entry} />;
       default:
         return null;
     }
@@ -401,6 +410,69 @@ function ThemeSwatchChips({ preview }: { preview: CatalogThemePreview | null }):
       ))}
     </ul>
   );
+}
+
+/**
+ * A font entry's shelf card (SPEC F104.3, PLAN T201) — a title, the 18+ badge, a small brass
+ * "Font pack" kind marker (the card has no swatches/art to read its kind from at a glance, unlike a
+ * theme card), and a human-readable byte total — all painted straight off the entry's already-
+ * fetched index row, no manifest or asset fetch, ever, while browsing. Static (a `<div>`, not a
+ * `<button>`): click-through to the real hash-verified specimen is PLAN T202's job, mirroring how
+ * T185 shipped `ThemeShelfCard` inert before T186 wired its own click-through — wiring a click here
+ * now would either do nothing or reach ahead into T202's asset-fetch contract this task deliberately
+ * doesn't touch.
+ *
+ * The title reads `entry.fontFamily ?? prettifySlug(entry.slug)` (review finding F1), NOT a separate
+ * family line under a slug-derived title: on every real pack the authoring convention is slug =
+ * kebab-cased family (e.g. slug "space-grotesk" ⇒ slug-derived title "Space Grotesk" ⇒ family "Space
+ * Grotesk"), so a family line under the title just repeated it verbatim. The "Font pack" micro-label
+ * already carries the kind, so the title alone satisfies AC1's "shows family" without the duplicate
+ * text. `fontFamily` falls back to the slug-derived title for an older index, or a malformed value
+ * `CatalogIndexValidator` couldn't admit (T194) — `??`, not an `!== null` guard (review finding F2,
+ * same falsy-tolerant contract `ThemeSwatchChips`'s own guard above is ruled on): a wire response
+ * that OMITS the field arrives as `undefined`, not `null`, and `??` degrades to the fallback either
+ * way, where an `!== null`-guarded direct render would have printed the literal word "undefined".
+ *
+ * Renders no `description` line at all: this story's own task line reads "meta-only:
+ * family/description/byte total", but the shelf wire this card actually reads from
+ * (`CatalogShelfEntryDto`) carries only `fontFamily`/`fontByteTotal` — `description` rides the
+ * per-entry `GET /api/catalog/entries/{slug}` detail fetch instead (T202), the same shelf/detail
+ * split `ShelfCard`/`DetailPanel` already draw for a persona's own `author`/`description` (STORY-281
+ * AC1 reconciliation).
+ */
+function FontShelfCard({ entry }: { entry: CatalogShelfEntryDto }): ReactNode {
+  return (
+    <li>
+      <div className="flex w-full flex-col items-start gap-2 rounded-[6px] border border-line bg-surface p-4">
+        <div className="flex w-full items-center justify-between gap-2">
+          <span className="font-display text-[1.05rem] text-ink">{entry.fontFamily ?? prettifySlug(entry.slug)}</span>
+          {entry.audience === "mature" && <MatureBadge />}
+        </div>
+        <p className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Font pack</p>
+        {/* `!= null` (review finding F2), not `!== null`: an omitted wire field arrives as
+            `undefined`, not `null`, and `formatFontByteTotal(undefined)` would render the literal
+            text "undefined B" instead of degrading — see `ThemeSwatchChips`'s own falsy-guard ruling
+            above for the same reasoning against `preview`. */}
+        {entry.fontByteTotal != null && (
+          <p className="text-[0.82rem] text-mute">{formatFontByteTotal(entry.fontByteTotal)}</p>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** Human-readable byte total for a font shelf card (SPEC F104.3) — the same 1024-based KiB/MiB
+ * ladder `HealthView`'s own `formatBytes` uses elsewhere in the app (not imported from there — that
+ * one lives beside an unrelated container-memory concern, and a shared byte formatter is more
+ * abstraction than two three-line call sites earn, YAGNI). Font packs stay small (T195's own ≤200
+ * KiB pack ceiling), so this renders KiB for every real pack today; MiB only ever fires for a future
+ * pack that outgrows that ceiling. */
+function formatFontByteTotal(bytes: number): string {
+  const kib = 1024;
+  const mib = kib * 1024;
+  if (bytes >= mib) return `${(bytes / mib).toFixed(1)} MiB`;
+  if (bytes >= kib) return `${Math.round(bytes / kib)} KiB`;
+  return `${bytes} B`;
 }
 
 function DetailPanel({

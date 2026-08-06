@@ -5,8 +5,8 @@ export type CatalogAudience = "everyone" | "mature";
 /** The F103.1 entry-kind discriminator, lowercase — see Host's `CatalogEntryKind`/
  * `CatalogController.ToWireKind`. Always present on a shelf row: the api never omits `kind`, even
  * for a legacy persona entry whose own index.json predates the field (the api resolves that
- * default server-side). */
-export type CatalogEntryKind = "persona" | "theme";
+ * default server-side). Widened to `"font"` at F104.1/T193. */
+export type CatalogEntryKind = "persona" | "theme" | "font";
 
 /** One mode's five shelf-chip swatches (SPEC F103.4, PLAN T185) — see Host's
  * `CatalogShelfSwatchSetDto`. `"accent-2"` keeps its hyphenated wire name (the app's own
@@ -25,17 +25,24 @@ export interface CatalogThemePreview {
   dark: CatalogThemeSwatchSet;
 }
 
-/** One `GET /api/catalog/index` row (SPEC F90.2, F90.4a, F103.3, F103.4) — see Host's
+/** One `GET /api/catalog/index` row (SPEC F90.2, F90.4a, F103.3, F103.4, F104.3) — see Host's
  * `CatalogShelfEntryDto`. `preview` is `null` for every persona entry, and for a theme entry whose
  * index carries none (an older index, T185) — tagline/description/author/sample patter still live
  * in the per-entry `GET /api/catalog/entries/{slug}` fetch below, never eagerly loaded for the
- * whole shelf. */
+ * whole shelf. `fontFamily`/`fontByteTotal` are `null` for every persona/theme entry (T194, T201).
+ * `fontFamily` here is the INDEX's own optional field — this one costs zero fetch (straight off the
+ * index row). A manifest-sourced sibling of the same name arrives on the DETAIL wire
+ * (`CatalogEntryDetailDto` below) at T202, costing the one fetch the detail panel already pays for.
+ * A font entry's `description` rides that same per-entry detail fetch, not this shelf row — the
+ * index carries no description field for any kind (STORY-281 AC1 reconciliation, T201). */
 export interface CatalogShelfEntryDto {
   slug: string;
   kind: CatalogEntryKind;
   audience: CatalogAudience;
   bestFor: string[];
   preview: CatalogThemePreview | null;
+  fontFamily: string | null;
+  fontByteTotal: number | null;
 }
 
 /** Wire shape of `GET /api/catalog/index` (SPEC F90.2, F90.4) — see Host's `CatalogIndexResponse`.
