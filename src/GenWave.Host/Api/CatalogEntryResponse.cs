@@ -94,4 +94,40 @@ public sealed record CatalogEntryResponse(
     string? FontSpecimenFile,
     string? FontLicense,
     string? FontVersion,
-    string? FontSubset);
+    string? FontSubset)
+{
+    /// <summary>
+    /// The graceful "catalog currently unreachable" shape (SPEC F90.4, <see cref="Unreachable"/> =
+    /// <see langword="true"/>, every other field <see langword="null"/>) — a named factory (gh-#375,
+    /// inherited from the font half's own review, finding N1) replacing the 15-positional-null literal <see cref="CatalogController.Entry"/>
+    /// used to construct inline. That literal predates this record's own by-name discipline (PLAN
+    /// T204's <see cref="CatalogController.ToEntryResponse"/> already names every argument it
+    /// passes) and had grown a silent trap: every widening of this record (three fields added at
+    /// T204 alone) meant one more null slotted into that same literal with nothing to catch a
+    /// miscount or a misordered pair of same-typed fields (two adjacent <see langword="string"/>?
+    /// positions swap silently). A one-time factory means the NEXT widening only ever touches this
+    /// method's own body, never a call site that has to be found and recounted. Named
+    /// <c>UnreachableCatalog</c>, not the record's own <see cref="Unreachable"/> property name — C#
+    /// forbids a method and a property sharing one identifier on the same type (CS0102), so the
+    /// dispatch's literal <c>CatalogEntryResponse.Unreachable()</c> naming could not compile as
+    /// written; this is the closest unambiguous name that still reads as "the unreachable shape" at
+    /// the call site.
+    /// </summary>
+    public static CatalogEntryResponse UnreachableCatalog() => new(
+        Card: null,
+        Meta: null,
+        FetchedAt: null,
+        Unreachable: true,
+        Kind: null,
+        Audience: null,
+        BestFor: null,
+        Author: null,
+        Description: null,
+        SamplePatter: null,
+        FontFamily: null,
+        FontByteTotal: null,
+        FontSpecimenFile: null,
+        FontLicense: null,
+        FontVersion: null,
+        FontSubset: null);
+}

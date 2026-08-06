@@ -85,3 +85,25 @@ export interface CatalogEntryDetailDto {
   fontVersion: string | null;
   fontSubset: string | null;
 }
+
+/**
+ * One catalog-imported theme's provenance (gh-#375, Dean's demo feedback — the theme half
+ * of the v3.1.1 polish, mirroring the font half's `installedFontSlugs` — see
+ * `PersonaCatalogClient`'s own remarks). Sourced from `GET /api/settings`'s own `Station:Theme`
+ * choices (SPEC F103.11, PLAN T187's `SettingChoice.importedFrom`/`importedAt`), never a new
+ * backend route: `persona-catalog/page.tsx` extracts every choice carrying provenance and hands the
+ * list straight through — the smaller diff over adding a dedicated `GET /api/themes` listing (this
+ * task's own dispatch weighed both; see that file's own remarks for the full reasoning).
+ *
+ * `slug` is the catalog entry's own slug, kept as its own field distinct from `importedFrom` even
+ * though the two are always equal today (`ThemeInstallModal` always installs a theme under its own
+ * catalog slug, threading that SAME value as both the import route's target slug and its
+ * `?catalogSlug=`) — a caller keyed on `slug` never has to assume that equality holds, the same
+ * "read the real field, don't infer it" discipline `WardrobeClient`'s own `ProvenanceChip` remarks
+ * state for its own always-equal `importedFrom`/`slug` pair.
+ */
+export interface ThemeCatalogProvenanceDto {
+  slug: string;
+  importedFrom: string;
+  importedAt: string;
+}

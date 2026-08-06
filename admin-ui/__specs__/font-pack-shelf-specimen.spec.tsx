@@ -561,4 +561,28 @@ describe("Feature: packs on the shelf with an honest specimen", () => {
       expect(fetchMock.mock.calls.some(([url]) => String(url) === INSTALL_URL)).toBe(false);
     });
   });
+
+  describe("Scenario: a failed install flips nothing (gh-#375 review carry-forward, N3)", () => {
+    it("flips nothing locally — the detail panel behind the dialog still reads Install, not Installed", async () => {
+      const fetchMock = fontFlowFetchMock({
+        install: makeJsonResponse(409, { detail: "This pack is already installed under a different family." }),
+      });
+      await openInstallDialog(fetchMock);
+
+      const dialog = within(screen.getByRole("dialog"));
+      await act(async () => {
+        fireEvent.click(dialog.getByRole("button", { name: "Confirm install" }));
+        await Promise.resolve();
+      });
+      await screen.findByRole("alert");
+
+      // `onInstalled` (PersonaCatalogClient.handleFontInstalled) only ever fires on
+      // FontInstallModal's own resp.ok branch — a 409 never reaches it, so the detail panel's own
+      // Install button, still present behind the open dialog, never flips to Re-install.
+      // `getByText`, not `getByRole` (Radix marks the background `aria-hidden` while the dialog is
+      // open, which `*ByRole` correctly excludes but a plain text query does not).
+      expect(screen.getByText("Install")).toBeInTheDocument();
+      expect(screen.queryByText("Installed")).not.toBeInTheDocument();
+    });
+  });
 });

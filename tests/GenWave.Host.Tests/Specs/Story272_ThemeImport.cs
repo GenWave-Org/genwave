@@ -353,6 +353,60 @@ public static class FeatureThemeImport
         }
     }
 
+    public sealed class ScenarioTheResponseCarriesImportedAt
+    {
+        [Fact]
+        public async Task TheImportResponseImportedAtMatchesTheStoredRow()
+        {
+            // Given a freshly imported catalog theme (gh-#375: the admin UI's catalog
+            // detail panel flips to "Installed" straight off THIS response, no second fetch — see
+            // ThemeImportResponse's own remarks — so it needs a real, store-sourced imported_at,
+            // never a client-side DateTime.UtcNow approximation),
+            var themeStore = new FakeThemeStore();
+            await using var factory = new ThemeImportWebFactory(themeStore);
+            var client = await LoggedInClientAsync(factory);
+
+            // When it is imported,
+            var response = await PostManifestAsync(
+                client, "midnight-drive", ThemeImportFixture.ValidManifestJson("midnight-drive"),
+                catalogSlug: "midnight-drive-catalog-entry");
+            var body = await response.Content.ReadFromJsonAsync<ThemeImportResponse>();
+
+            // Then the response's own ImportedAt is the SAME value the store actually persisted —
+            // a read-back, not a guess.
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+            var stored = await themeStore.GetBySlugAsync("midnight-drive", CancellationToken.None);
+            Assert.Equal(stored?.ImportedAt, body?.ImportedAt);
+            Assert.NotEqual(default, body?.ImportedAt);
+        }
+
+        [Fact]
+        public async Task TheSettingsSurfaceReportsTheSameImportedAtForTheChoice()
+        {
+            // Given a freshly imported catalog theme,
+            var settingsStore = new FakeThemeSettingsStore();
+            await using var factory = new ThemeImportWebFactory(settingsStore: settingsStore);
+            var client = await LoggedInClientAsync(factory);
+            var importResponse = await PostManifestAsync(
+                client, "aurora-glow", ThemeImportFixture.ValidManifestJson("aurora-glow"),
+                catalogSlug: "aurora-glow-catalog-entry");
+            var importBody = await importResponse.Content.ReadFromJsonAsync<ThemeImportResponse>();
+            Assert.True(importResponse.IsSuccessStatusCode, await importResponse.Content.ReadAsStringAsync());
+
+            // When Station:Theme's own choices are read back — the SAME seam gh-#375's own admin-ui
+            // catalog page reads to derive its installed-provenance list, no new backend route,
+            var getResponse = await client.GetAsync("/api/settings");
+            var settings = await getResponse.Content.ReadFromJsonAsync<IReadOnlyList<SettingDto>>();
+            var themeSetting = settings!.Single(s => s.Key.Equals("Station:Theme", StringComparison.OrdinalIgnoreCase));
+            var choice = themeSetting.Choices!.Single(c => c.Value == "aurora-glow");
+
+            // Then the choice's own importedFrom/importedAt agree with the import response — the
+            // two reads can never silently disagree about when this theme was imported.
+            Assert.Equal("aurora-glow-catalog-entry", choice.ImportedFrom);
+            Assert.Equal(importBody?.ImportedAt, choice.ImportedAt);
+        }
+    }
+
     // ── SAD PATH ────────────────────────────────────────────────────────────
 
     public sealed class ScenarioRejectingBadImports

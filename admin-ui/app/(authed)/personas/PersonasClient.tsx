@@ -2,6 +2,7 @@
 
 import { Fragment, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { Chip } from "@/components/ui/chip";
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "@/components/ui/toast";
 import { formatDateStamp } from "@/lib/format-clock";
@@ -107,7 +108,14 @@ function displayVoice(voice: string): string {
  * `lib/format-clock.ts`'s bare-calendar-date formatter — NOT `formatUpSince` (that one folds its
  * own `HH:MM · Mon D` pair, no year, into the string, which would both break the badge's literal
  * three-field shape and silently collide two imports a year apart). `timeZone` is a plain
- * pass-through from the page prop, the house test-injection idiom. */
+ * pass-through from the page prop, the house test-injection idiom.
+ *
+ * The shared `Chip` component (`components/ui/chip.tsx`, gh-#375 extraction — adjudicated
+ * compatible: this badge's own className differed from the other four sites only by `ml-2` in
+ * place of `w-fit`, and `inline-flex` already sizes to its content with no explicit width utility
+ * either way, so adding `Chip`'s own `w-fit` here changes nothing rendered) with an `ml-2` override
+ * — this badge sits inline immediately after the persona's name text (unlike every other chip
+ * site's standalone placement), so it alone needs the extra left margin. */
 function ProvenanceBadge({
   importedFrom,
   importedAt,
@@ -117,11 +125,7 @@ function ProvenanceBadge({
   importedAt: string;
   timeZone?: string;
 }): ReactNode {
-  return (
-    <span className="ml-2 inline-flex items-center rounded-[3px] border border-line px-1.5 py-0.5 text-[0.68rem] text-mute">
-      {`Hired · ${importedFrom} · ${formatDateStamp(importedAt, { timeZone })}`}
-    </span>
-  );
+  return <Chip className="ml-2">{`Hired · ${importedFrom} · ${formatDateStamp(importedAt, { timeZone })}`}</Chip>;
 }
 
 /** On The Air badge (SPEC F94.1, STORY-246, PLAN T127) — the roster's replacement for the retired

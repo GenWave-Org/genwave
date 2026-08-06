@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { Button } from "@/components/ui/button";
+import { Chip } from "@/components/ui/chip";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { toast } from "@/components/ui/toast";
 import { formatDateStamp } from "@/lib/format-clock";
@@ -1161,9 +1162,9 @@ function ThemeProvenanceList({
  *
  * Kept as its own small component in this file rather than merged with `PersonasClient`'s
  * `ProvenanceBadge` into one shared component (PLAN T187 review F1's "cheap, do it" note): the
- * shapes differ (this one folds the label into the same chip; persona's leaves the name outside
- * it) and a genuine merge would mean editing `PersonasClient.tsx` too, which sits outside this
- * task's file partition — noted rather than done silently.
+ * TEXT shapes differ (this one folds the label into the same chip; persona's leaves the name
+ * outside it) — only the visual chip styling was ever duplicated, and `Chip`
+ * (`components/ui/chip.tsx`, gh-#375 extraction) now owns that once, shared by both.
  */
 function ThemeProvenanceBadge({
   label,
@@ -1176,23 +1177,17 @@ function ThemeProvenanceBadge({
   importedAt: string;
   timeZone?: string;
 }): ReactNode {
-  return (
-    <span className="inline-flex w-fit items-center rounded-[3px] border border-line px-1.5 py-0.5 text-[0.68rem] text-mute">
-      {`${label} — Imported · ${importedFrom} · ${formatDateStamp(importedAt, { timeZone })}`}
-    </span>
-  );
+  return <Chip>{`${label} — Imported · ${importedFrom} · ${formatDateStamp(importedAt, { timeZone })}`}</Chip>;
 }
 
-/** 3px-radius bordered chip for the source tag, per design-aesthetic chip conventions. */
+/** 3px-radius bordered chip for the source tag, per design-aesthetic chip conventions — the shared
+ * `Chip` component, with `aria-label`/`data-source` passed straight through via its own `...props`
+ * spread. */
 function SourceChip({ source }: { source: SettingDto["source"] }): ReactNode {
   return (
-    <span
-      aria-label={`Source: ${sourceLabel(source)}`}
-      data-source={source}
-      className="inline-flex items-center rounded-[3px] border border-line px-1.5 py-0.5 text-[0.68rem] text-mute"
-    >
+    <Chip aria-label={`Source: ${sourceLabel(source)}`} data-source={source}>
       [{sourceLabel(source)}]
-    </span>
+    </Chip>
   );
 }
 

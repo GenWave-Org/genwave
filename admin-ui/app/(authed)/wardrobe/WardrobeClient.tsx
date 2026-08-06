@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { Chip } from "@/components/ui/chip";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatDateStamp } from "@/lib/format-clock";
 import { formatFontByteTotal, licenceLine } from "../persona-catalog/font-format";
@@ -27,14 +28,15 @@ export interface WardrobeClientProps {
 }
 
 /** Provenance chip — "Installed · &lt;slug&gt; · &lt;date&gt;" (SPEC F104.7 AC1, the db/25 pattern)
- * — mirrors `PersonasClient`'s own `ProvenanceBadge`/`SettingsForm`'s own `ThemeProvenanceBadge`
- * treatment (quiet bordered chip, T105/T187) rather than importing either: this page sits outside
- * both files' own partitions, and the shape here ("Installed", no leading label) differs from both
- * ("Hired"/"&lt;label&gt; — Imported") enough that a genuine shared component would need editing
- * either file anyway. `importedFrom` renders VERBATIM — this is provenance, not decoration, same
- * rule the persona/theme chips already follow — even though it is always equal to the pack's own
- * `slug` today (a pack has no authored-in-place path); reading it off its own field rather than
- * `pack.slug` keeps this chip honest about which column IS the provenance stamp. */
+ * — the shared `Chip` component (`components/ui/chip.tsx`, gh-#375 extraction) rather than
+ * `PersonasClient`'s own `ProvenanceBadge`/`SettingsForm`'s own `ThemeProvenanceBadge` directly:
+ * this page sits outside both files' own partitions, and the TEXT shape here ("Installed", no
+ * leading label) differs from both ("Hired"/"&lt;label&gt; — Imported") — only the visual chip
+ * styling itself was ever duplicated, which `Chip` now owns once. `importedFrom` renders VERBATIM —
+ * this is provenance, not decoration, same rule the persona/theme chips already follow — even
+ * though it is always equal to the pack's own `slug` today (a pack has no authored-in-place path);
+ * reading it off its own field rather than `pack.slug` keeps this chip honest about which column IS
+ * the provenance stamp. */
 function ProvenanceChip({
   importedFrom,
   importedAt,
@@ -44,11 +46,7 @@ function ProvenanceChip({
   importedAt: string;
   timeZone?: string;
 }): ReactNode {
-  return (
-    <span className="inline-flex w-fit items-center rounded-[3px] border border-line px-1.5 py-0.5 text-[0.68rem] text-mute">
-      {`Installed · ${importedFrom} · ${formatDateStamp(importedAt, { timeZone })}`}
-    </span>
-  );
+  return <Chip>{`Installed · ${importedFrom} · ${formatDateStamp(importedAt, { timeZone })}`}</Chip>;
 }
 
 /**

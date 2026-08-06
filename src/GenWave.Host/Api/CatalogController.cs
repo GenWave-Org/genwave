@@ -128,8 +128,7 @@ public sealed partial class CatalogController(
         {
             CatalogEntryFetchResult.Ok ok => Ok(ToEntryResponse(ok)),
             CatalogEntryFetchResult.NotFound => NotFound(UnknownEntryProblem(slug)),
-            CatalogEntryFetchResult.Unreachable => Ok(new CatalogEntryResponse(
-                null, null, null, Unreachable: true, null, null, null, null, null, null, null, null, null, null, null, null)),
+            CatalogEntryFetchResult.Unreachable => Ok(CatalogEntryResponse.UnreachableCatalog()),
             CatalogEntryFetchResult.HashMismatch =>
                 StatusCode(StatusCodes.Status502BadGateway, WithheldProblem("failed its integrity check")),
             CatalogEntryFetchResult.Oversize =>

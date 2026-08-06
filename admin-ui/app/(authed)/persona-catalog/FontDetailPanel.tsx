@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { Chip } from "@/components/ui/chip";
 import { formatFontByteTotal, licenceLine } from "./font-format";
 import { prettifySlug } from "./format-slug";
 import { SpecimenBlock } from "./SpecimenBlock";
@@ -54,7 +55,7 @@ export interface FontDetailPanelProps {
  * preview, never the pack itself), so that caption is now state-neutral in BOTH states (see
  * `SpecimenBlock`'s own remarks) and the installed signal moved here instead. `isInstalled` (sourced
  * by `PersonaCatalogClient` from `GET /api/fonts`, see its own remarks) drives an "Installed" chip —
- * the same quiet bordered-pill treatment the Wardrobe page's own provenance chip uses — and the
+ * the shared `Chip` component (`components/ui/chip.tsx`, gh-#375 extraction) — and the
  * button's own label: "Re-install" when a pack under this slug is already installed
  * (`FontPackController.Install` upserts, PLAN T199, so a re-install is a genuinely supported,
  * non-destructive action), "Install" otherwise.
@@ -65,7 +66,10 @@ export function FontDetailPanel({ slug, detail, isInstalled, onInstallClick }: F
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="font-display text-[1.1rem] text-ink">{prettifySlug(slug)}</h2>
-          {isInstalled && <InstalledChip />}
+          {/* Bare status word, not a provenance stamp (no slug/date — this panel already names the
+              slug in its own heading) — mirrors WardrobeClient's own ProvenanceChip shape one level
+              up, just narrower content. */}
+          {isInstalled && <Chip>Installed</Chip>}
         </div>
         {/* Install/Re-install (scope addition, see this component's own remarks) opens
             FontInstallModal's confirm step — this click itself issues no request; the modal POSTs
@@ -97,19 +101,5 @@ export function FontDetailPanel({ slug, detail, isInstalled, onInstallClick }: F
 
       <SpecimenBlock slug={slug} specimenFile={detail.fontSpecimenFile} />
     </div>
-  );
-}
-
-/** "Installed" chip (PLAN T204) — the SAME quiet bordered-pill treatment the Wardrobe page's own
- * `ProvenanceChip` uses (`app/(authed)/wardrobe/WardrobeClient.tsx`), reused here as a plain status
- * marker rather than a provenance stamp (no slug/date — this panel already names the slug in its own
- * heading): a genuine shared component would need editing both files for a shape that already
- * differs (provenance text vs a bare status word), the same reasoning that chip's own remarks give
- * for not sharing with the persona/theme chips either. */
-function InstalledChip(): ReactNode {
-  return (
-    <span className="inline-flex w-fit items-center rounded-[3px] border border-line px-1.5 py-0.5 text-[0.68rem] text-mute">
-      Installed
-    </span>
   );
 }

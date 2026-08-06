@@ -8,12 +8,22 @@ import { prettifySlug } from "./format-slug";
 
 export interface ThemeInstallResult {
   name: string;
+  /** The provenance stamp the import route actually wrote (SPEC F103.11) — always this modal's own
+   * `slug` in practice (see `ThemeCatalogProvenanceDto`'s own remarks), read off the response
+   * rather than assumed, mirroring `ThemeImportSuccessBody`'s own already-present field. */
+  importedFrom: string;
+  /** When {@link importedFrom} was stamped (gh-#375) — a server read-back
+   * (`ThemesImportController`'s own remarks), never a client-side `Date.now()` guess, so
+   * `PersonaCatalogClient`'s post-install local flip can show the SAME provenance line a fresh
+   * `GET /api/settings` read would. */
+  importedAt: string;
 }
 
 interface ThemeImportSuccessBody {
   slug: string;
   name: string;
   importedFrom: string;
+  importedAt: string;
 }
 
 export interface ThemeInstallModalProps {
@@ -67,7 +77,7 @@ export function ThemeInstallModal({ slug, manifestText, onCancel, onInstalled }:
 
       if (resp.ok) {
         const body = (await resp.json()) as ThemeImportSuccessBody;
-        onInstalled({ name: body.name });
+        onInstalled({ name: body.name, importedFrom: body.importedFrom, importedAt: body.importedAt });
         return;
       }
 
