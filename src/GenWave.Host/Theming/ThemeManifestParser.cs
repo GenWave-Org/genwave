@@ -55,7 +55,20 @@ internal static partial class ThemeManifestParser
     // font-family names in this codebase's own vendored set ("Fraunces", "Source Sans 3") — letters,
     // digits, spaces and hyphens only. Rejects the quote/brace/semicolon characters a CSS-injection
     // payload needs to escape the `font-family: "<value>"` position T159 interpolates it into.
-    [GeneratedRegex(@"\A[A-Za-z0-9][A-Za-z0-9 -]*\z")]
+    //
+    // `internal const` (T194 review finding — the exact TokenValueText precedent immediately below,
+    // applied to family instead of colour): CatalogIndexValidator's own community-catalog
+    // shelf-card family name (SPEC F104.3/STORY-281 AC1) is the SAME data class — a font's own
+    // CSS-interpolated family string — just arriving off an untrusted index.json `family` field
+    // instead of a manifest, and reaching CatalogShelfEntryDto.FontFamily (and, downstream, an
+    // inline CSS `style`/`font-family` position in the Admin UI) unvalidated would let a hostile
+    // value (e.g. `'X;}</style><script>alert(1)</script>'`) through; that class must reject exactly
+    // what this parser rejects rather than carry a second, independently-drifting copy of the shape.
+    // `const` (not `static readonly`), like `TokenValueText`, because `[GeneratedRegex]` attribute
+    // arguments must be compile-time constants.
+    internal const string FontFamilyText = @"\A[A-Za-z0-9][A-Za-z0-9 -]*\z";
+
+    [GeneratedRegex(FontFamilyText)]
     private static partial Regex FontFamilyPattern();
 
     // font-weight ("400", "normal", or a variable-font range like "400 600") and font-style

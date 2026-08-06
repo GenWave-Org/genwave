@@ -84,6 +84,20 @@ builder.Services.AddSingleton(sp =>
     ThemeCatalog.CreateForStation(sp.GetRequiredService<IThemeStore>(), sp.GetRequiredService<ILogger<ThemeCatalog>>()));
 builder.Services.AddHostedService<ThemeCatalogOwnerLoadHostedService>();
 
+// The installed-font catalog (SPEC F104.6/F104.8, STORY-283, PLAN T200): the OTHER half of the
+// widened /fonts/{file} closed set, over the IFontPackStore AddGenWaveStationSettings() just
+// registered. InstalledFontCatalog.Create itself reads nothing from the store merely by being
+// constructed (mirrors ThemeCatalog.CreateForStation's own "resolving is never enough to connect"
+// rule) — InstalledFontCatalogLoadHostedService below is what loads station.font_pack(+_face)'s rows
+// in, once per boot, without blocking Kestrel from listening; FontPackController reloads it again
+// after every successful install. The SPEC F104.8 offline floor holds throughout: an
+// unreachable/empty store (or one that later goes unreachable) leaves this catalog serving whatever
+// installed set it last loaded successfully — vendored faces (FontEndpoints' own literal switch) are
+// untouched by any of this either way.
+builder.Services.AddSingleton(sp =>
+    InstalledFontCatalog.Create(sp.GetRequiredService<IFontPackStore>(), sp.GetRequiredService<ILogger<InstalledFontCatalog>>()));
+builder.Services.AddHostedService<InstalledFontCatalogLoadHostedService>();
+
 var cfg = builder.Configuration;
 
 builder.Services

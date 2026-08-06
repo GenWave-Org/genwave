@@ -295,4 +295,39 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  imported_at   timestamptz,
 	  created_at    timestamptz NOT NULL DEFAULT now()
 	);
+
+	-- Font packs (SPEC F104 "The wardrobe workshop"; STORY-282, PLAN T198): Dean-curated font packs
+	-- installed from the Community Catalog's `font` kind — the library's first per-kind store,
+	-- mirroring station.theme's own shape immediately above. definition holds the raw catalog pack
+	-- manifest jsonb; a caller (GenWave.Host, downstream of this GenWave.Core seam) (de)serializes at
+	-- its own edge, exactly like station.theme's own definition column. imported_from is NOT NULL
+	-- here (unlike station.theme) — packs have no authored-in-place path, the catalog install route
+	-- is the only door a pack ever arrives through. NO CONSUMER YET (T198): IFontPackStore ships
+	-- dark — POST /api/fonts/{slug}/install (T199) is the first write consumer,
+	-- InstalledFontCatalog (T199/T200) and the library page (T203) the first read consumers. See
+	-- db/32-font-pack-migration.sh for the in-place upgrade path this table also ships as.
+	CREATE TABLE IF NOT EXISTS station.font_pack (
+	  id            serial      PRIMARY KEY,
+	  slug          text        NOT NULL UNIQUE,
+	  family        text        NOT NULL,
+	  definition    jsonb       NOT NULL,
+	  imported_from text        NOT NULL,
+	  imported_at   timestamptz NOT NULL DEFAULT now(),
+	  created_at    timestamptz NOT NULL DEFAULT now()
+	);
+
+	-- One row per face (upright/italic) a font_pack ships (SPEC F104): a pack is one family, 1-2
+	-- faces, role-agnostic — the editor (a later M2 task) assigns display/sans. FK CASCADE: deleting
+	-- a pack deletes its own faces with it, never orphaned rows. file is globally UNIQUE (not scoped
+	-- to pack_id) — it is the `/fonts/<file>` serving key the widened route (T200) looks up directly,
+	-- with no pack context available at request time.
+	CREATE TABLE IF NOT EXISTS station.font_pack_face (
+	  id        serial PRIMARY KEY,
+	  pack_id   int    NOT NULL REFERENCES station.font_pack(id) ON DELETE CASCADE,
+	  file      text   NOT NULL UNIQUE,
+	  style     text   NOT NULL DEFAULT 'normal',
+	  bytes     bytea  NOT NULL,
+	  byte_size int    NOT NULL,
+	  sha256    text   NOT NULL
+	);
 	SQL

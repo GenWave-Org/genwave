@@ -21,6 +21,21 @@ namespace GenWave.Host.Catalog;
 /// for a theme entry whose index predates the field or omits it — genuinely optional, unlike
 /// <see cref="BestFor"/>'s "absent means empty" posture, since a swatch set has no meaningful empty
 /// value: a caller either has five colours to paint chips with, or it has nothing to show at all.
+///
+/// <see cref="Assets"/> (SPEC F104.1, T193) follows <see cref="BestFor"/>'s "absent means empty"
+/// posture, not <see cref="Preview"/>'s "genuinely optional" one: empty (never null) for every
+/// persona/theme entry — those kinds have no assets concept at all, not merely an omitted one — and
+/// non-empty for a <see cref="CatalogEntryKind.Font"/> entry, which <see cref="CatalogIndexValidator"/>
+/// never constructs with zero (a pack IS its files; a font entry whose declared assets are missing
+/// or malformed is skipped outright rather than admitted with an empty list).
+///
+/// <see cref="Family"/> (SPEC F104.3, STORY-281 AC1 reconciliation, T194) is the index's OWN
+/// optional shelf-card family name — <see langword="null"/> for every persona/theme entry, and for
+/// a font entry whose index omits or malforms it (<see cref="Preview"/>'s "genuinely optional"
+/// posture, not <see cref="BestFor"/>'s "absent means empty" one: there is no meaningful empty
+/// family name). Exists so <c>CatalogController</c>'s zero-fetch shelf listing can show a family
+/// without paying for the manifest fetch only the detail route makes — see that DTO's own remarks
+/// for why this is a SEPARATE field from the detail route's own manifest-sourced family.
 /// </summary>
 public sealed record CatalogEntrySummary(
     string Slug,
@@ -29,4 +44,6 @@ public sealed record CatalogEntrySummary(
     IReadOnlyList<string> BestFor,
     CatalogFileRef Manifest,
     CatalogFileRef Meta,
-    CatalogThemePreview? Preview);
+    CatalogThemePreview? Preview,
+    IReadOnlyList<CatalogAssetRef> Assets,
+    string? Family);
