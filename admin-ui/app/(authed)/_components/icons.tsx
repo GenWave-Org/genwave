@@ -244,6 +244,20 @@ export function ScheduleIcon(props: IconProps): ReactNode {
   );
 }
 
+/** Library nav glyph (PLAN T203, SPEC F104.7) — an open book: two pages meeting at a center
+ * spine, reading as "the station's own shelf of installed components" — distinct from
+ * {@link PersonaCatalogIcon}'s three record-like shelf cards (the browsable Community Catalog,
+ * a different surface entirely) and {@link CatalogIcon}'s plain rule lines (the media library). */
+export function LibraryIcon(props: IconProps): ReactNode {
+  return (
+    <IconBase {...props}>
+      <path d="M8 3.2c-1.3-.9-3-1.2-4.5-.9v9.7c1.5-.3 3.2 0 4.5.9" />
+      <path d="M8 3.2c1.3-.9 3-1.2 4.5-.9v9.7c-1.5-.3-3.2 0-4.5.9" />
+      <line x1="8" y1="3.2" x2="8" y2="13" />
+    </IconBase>
+  );
+}
+
 /** Exploration-pick glyph (SPEC F86.3, F86.5; STORY-217, PLAN T75) — a three-pip die: the
  * "rolled the dice" idea rendered as a geometric stroke icon rather than an emoji (Wireless
  * anti-pattern: no emoji as icons), reused by {@link PickChips}' exploration badge. */

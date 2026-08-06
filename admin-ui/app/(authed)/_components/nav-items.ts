@@ -4,6 +4,7 @@ import {
   CatalogIcon,
   DashboardIcon,
   HealthIcon,
+  LibraryIcon,
   LiveIcon,
   PersonaCatalogIcon,
   PersonaIcon,
@@ -41,6 +42,11 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/personas", label: "Personas", Icon: PersonaIcon },
   { href: "/schedule", label: "Schedule", Icon: ScheduleIcon },
   { href: "/persona-catalog", label: "Community Catalog", Icon: PersonaCatalogIcon, requiresCatalog: true },
+  // Library (PLAN T203, SPEC F104.7) is deliberately NOT gated by `requiresCatalog` — unlike the
+  // Community Catalog browse surface, an installed pack keeps serving with the catalog disabled or
+  // unreachable (SPEC F104.8's offline floor), so the page that inspects what's ALREADY installed
+  // must stay reachable on that same axis too.
+  { href: "/library", label: "Library", Icon: LibraryIcon },
   { href: "/booth-log", label: "Booth log", Icon: BoothLogIcon },
   { href: "/health", label: "Health", Icon: HealthIcon },
   { href: "/settings", label: "Settings", Icon: SettingsIcon },

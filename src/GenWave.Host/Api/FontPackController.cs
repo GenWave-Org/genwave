@@ -111,6 +111,12 @@ namespace GenWave.Host.Api;
 /// for either column in a CSS context first MUST NOT trust it as CSS-safe merely because it came from
 /// this store — apply the same bound+shape discipline <c>TryParseFamily</c> already established for
 /// the index-side field, or an equivalent CSS-injection-safe escape/allowlist, first.
+/// <b>T203 compliance:</b> <see cref="List"/> is this obligation's first library-page consumer — its
+/// own <see cref="FontLibraryPackDto"/>/<see cref="FontLibraryFaceDto"/> wire carries
+/// <c>family</c>/<c>style</c> verbatim (still no bound/escape applied at THIS layer, deliberately —
+/// see those DTOs' own remarks for why), and the Admin UI's library page renders both as plain React
+/// text nodes ONLY, never interpolated into a stylesheet or inline <c>style</c> attribute. The
+/// obligation carries forward to T206's editor pickers, still undischarged.
 /// </para>
 /// </summary>
 [ApiController]
@@ -217,6 +223,69 @@ public sealed partial class FontPackController(
             LogSafeText.Sanitize(slug), LogSafeText.Sanitize(manifest.Family), faces.Count);
 
         return Ok(new FontPackInstallResponse(slug, manifest.Family, faces.Select(f => f.File).ToArray(), slug));
+    }
+
+    // ── Library listing (GET /api/fonts) ────────────────────────────────────
+
+    /// <summary>
+    /// GET /api/fonts — every installed pack (SPEC F104.7, STORY-284, PLAN T203): family, faces
+    /// (file/style/byteSize), licence/sourceUrl/version/subset, and "Installed · ⟨slug⟩ · ⟨date⟩"
+    /// provenance (db/25 pattern) for the Admin UI's library page. Reads straight off
+    /// <see cref="IFontPackStore.GetAllAsync"/> — METADATA ONLY, no face bytes ever reach this wire
+    /// (that store's own remarks: a listing has no use for a face's raw payload). Ordered by slug
+    /// (ordinal) for a stable, deterministic listing — <see cref="IFontPackStore.GetAllAsync"/>'s own
+    /// remarks guarantee no particular order from the store itself.
+    ///
+    /// <para>
+    /// <b>Route-set obligation (T200 review finding N7).</b> This is the first <c>GET</c> under
+    /// <c>api/fonts</c> — <c>Story278_ThemeCatalogIsolation.cs</c>'s own route-set pin (its
+    /// <c>ScenarioNoNewPublicRoute.KnownCatalogAndThemeRoutes</c>) is extended to include it, with the
+    /// SAME class-level <see cref="AdminSurfaceAttribute"/>+<see cref="AuthorizationPolicies.Settings"/>
+    /// pairing every route on this controller already carries — a plain <c>[HttpGet]</c> action
+    /// change would otherwise trip that file's exact-match assertion, exactly as the finding asked
+    /// for.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>NO <see cref="CommunityCatalogAccessor.IsEnabled"/> GATE — DELIBERATE (T203 review finding
+    /// F1, SPEC F104.8).</b> Unlike <see cref="Install"/>, this action never checks the catalog kill
+    /// switch. The library lists what is ALREADY INSTALLED — <c>station.font_pack</c>(+<c>_face</c>)
+    /// rows this station wrote for itself at some past install, station-local state that outlives the
+    /// catalog exactly the way an already-loaded <c>/fonts/{file}</c> face keeps serving with the
+    /// catalog or the DB gone (F104.8's retention posture, <see cref="InstalledFontCatalog"/>'s own
+    /// offline floor). <see cref="CommunityCatalogAccessor.IsEnabled"/> gates the CATALOG surface —
+    /// routes that reach out to (or exist only because of) the Community Catalog origin, which is
+    /// every OTHER route on this controller plus every route on <see cref="CatalogController"/> — not
+    /// the station's own inventory of what it already chose to keep. Disabling the catalog turns off
+    /// DISCOVERY of new packs, never REMEMBRANCE of installed ones: with the switch off, this action
+    /// still 200-lists every installed pack while <see cref="Install"/> still 404s bare — that
+    /// divergence is pinned by name in <c>Story284_FontPackLibrary.cs</c>'s own
+    /// <c>ScenarioTheCatalogKillSwitchDoesNotGateTheLibrary</c>.
+    /// </para>
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> List(CancellationToken ct)
+    {
+        var packs = await fontPackStore.GetAllAsync(ct);
+        return Ok(packs.OrderBy(pack => pack.Slug, StringComparer.Ordinal).Select(ToLibraryDto).ToArray());
+    }
+
+    /// <summary>See <see cref="FontLibraryPackDto"/>'s own remarks for why <see cref="FontLibraryPackDto.License"/>/
+    /// <see cref="FontLibraryPackDto.SourceUrl"/>/<see cref="FontLibraryPackDto.Version"/>/<see cref="FontLibraryPackDto.Subset"/>
+    /// are the only fields this re-parse can affect.</summary>
+    static FontLibraryPackDto ToLibraryDto(FontPack pack)
+    {
+        var manifest = CatalogFontManifestSerializer.Deserialize(pack.Definition);
+        return new FontLibraryPackDto(
+            pack.Slug,
+            pack.Family,
+            pack.Faces.Select(face => new FontLibraryFaceDto(face.File, face.Style, face.ByteSize)).ToArray(),
+            manifest?.License,
+            manifest?.SourceUrl,
+            manifest?.Version,
+            manifest?.Subset,
+            pack.ImportedFrom,
+            pack.ImportedAt);
     }
 
     // ── Entry resolution ────────────────────────────────────────────────────

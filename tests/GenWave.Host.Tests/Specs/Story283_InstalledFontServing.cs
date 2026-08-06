@@ -2,8 +2,14 @@
 //
 // BDD specification — xUnit. GET /fonts/{file}'s closed literal switch (STORY-263/T173) widens to a
 // closed SET: vendored literals ∪ station.font_pack_face rows, via InstalledFontCatalog's in-memory
-// snapshot (never a per-request store read). The set stays non-enumerable — no listing route joins
-// either "fonts" or "api/fonts" anywhere in the route table.
+// snapshot (never a per-request store read). F104.6's non-enumerability is an ANONYMOUS-surface rule:
+// no ANONYMOUS surface lists installed face filenames — 401 on GET /api/fonts, 404 on the public
+// listener, no bare listing route anywhere. It does NOT forbid the Settings-gated ADMIN listing GET
+// api/fonts (PLAN T203, SPEC F104.7) — that route deliberately carries every installed face's
+// filename via `faces[].file`, for an authenticated operator inspecting installed PACKS
+// (family/faces/licence/provenance), a different audience than the anonymous rule guards against —
+// see ScenarioTheSetStaysClosedAndNonEnumerable's own remarks for the distinction this file now draws
+// between the two.
 //
 // WIRED T200 — every Fact below drives the real production route table through
 // WebApplicationFactory<Program> (InstalledFontServingWebFactory below), mirroring
@@ -18,12 +24,13 @@
 // warm-up, simulated" idiom Story278 uses for ThemeCatalog.ReloadOwnerThemesAsync.
 //
 // One assertion per Fact where the scenario allows it; happy path first and exhaustive; the sad/edge
-// path (unknown file, no listing route) is its own block.
+// path (unknown file, the route-set pin) is its own block.
 
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
@@ -32,6 +39,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using GenWave.Core.Abstractions;
+using GenWave.Host.Api;
 using GenWave.Host.Theming;
 using GenWave.Host.Tests.Fakes;
 using Xunit;
@@ -168,7 +176,7 @@ public sealed class FeatureInstalledFontServing
         }
 
         [Fact]
-        public void NoRouteListsTheFontSetOnAnySurface()
+        public void TheRouteSetMatchesTheKnownDeliberateSet()
         {
             // Given the real route table (Community:CatalogIndexUrl's value is irrelevant to which
             //       ROUTES exist),
@@ -179,21 +187,73 @@ public sealed class FeatureInstalledFontServing
             //      table (never a hand-maintained mirror of it — mirrors
             //      Story264_AnonymousApiSurface/Story278_ThemeCatalogIsolation's own route-table-sweep
             //      idiom),
-            var endpoints = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints;
-            var discovered = endpoints
+            var discovered = DiscoverFontEndpoints(factory.Services).Select(entry => entry.Route).ToHashSet();
+
+            // Then it is EXACTLY the known serving/install/library set (PLAN T203, SPEC F104.7 —
+            //      widened from the pre-T203 serving-and-install-only set) — not a subset check, which
+            //      would let an EIGHTH route join either prefix silently. Segment-bounded matching
+            //      (mirrors Story278's own MatchesGuardedPrefix) means a hypothetical bare
+            //      filename-enumeration route under "fonts" — the one thing SPEC F104.6 still
+            //      forbids — would show up as an UNEXPECTED member of `discovered` and fail this
+            //      assertion by name, same as before T203.
+            Assert.True(ExpectedFontRoutes.SetEquals(discovered), FailureMessage(discovered));
+        }
+
+        /// <summary>
+        /// T203 review-obligation rider (T200 review finding N7, "assert surface attributes, not just
+        /// route names") — every route under <c>api/fonts</c> (both the pre-existing install route and
+        /// the new <c>GET api/fonts</c> library listing, SPEC F104.7) carries the SAME
+        /// <see cref="AdminSurfaceAttribute"/>+<see cref="AuthorizationPolicies.Settings"/> pairing
+        /// <c>Story278_ThemeCatalogIsolation.cs</c>'s own <c>EveryDiscoveredRouteCarriesAdminSurfaceAndTheSettingsPolicy</c>
+        /// asserts for its own three prefixes — repeated here rather than relied on solely over there,
+        /// because THIS file's <c>fonts/{file}</c> serving route is the one route this sweep discovers
+        /// that must NOT carry it (F104.6's public, non-admin serving route) — proving the split by
+        /// name, not merely a subset the other file's broader sweep happens to also cover.
+        /// </summary>
+        [Fact]
+        public void OnlyTheAdminFontsRoutesCarryAdminSurfaceAndSettingsThePublicServingRouteDoesNot()
+        {
+            using var factory = new InstalledFontServingWebFactory(new FakeFontPackStore());
+            _ = factory.CreateClient();
+
+            var discovered = DiscoverFontEndpoints(factory.Services).ToArray();
+            Assert.NotEmpty(discovered); // guards this sweep against a silent rename emptying it
+
+            Assert.All(discovered, entry =>
+            {
+                var isAdminRoute = entry.Route.Route.StartsWith("api/fonts", StringComparison.Ordinal);
+                var carriesAdminSurface = entry.Endpoint.Metadata.GetMetadata<AdminSurfaceAttribute>() is not null;
+                var policies = entry.Endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>()
+                    .Select(authorizeData => authorizeData.Policy)
+                    .Where(candidate => !string.IsNullOrEmpty(candidate))
+                    .Distinct()
+                    .ToArray();
+
+                if (isAdminRoute)
+                {
+                    Assert.True(carriesAdminSurface, $"{entry.Route} is under api/fonts but carries no AdminSurfaceAttribute.");
+                    Assert.True(
+                        policies is [var onlyPolicy] && onlyPolicy == AuthorizationPolicies.Settings,
+                        $"{entry.Route} carries policy set [{string.Join(", ", policies)}], expected exactly one: " +
+                        $"\"{AuthorizationPolicies.Settings}\".");
+                }
+                else
+                {
+                    Assert.False(carriesAdminSurface, $"{entry.Route} is the public fonts/{{file}} route but carries AdminSurfaceAttribute.");
+                    Assert.Empty(policies);
+                }
+            });
+        }
+
+        /// <summary>Every discovered fonts/api-fonts endpoint paired with its own (verb, route) —
+        /// one shared discovery walk both Facts above read from, so the route SET and the per-route
+        /// SURFACE ATTRIBUTE checks can never silently discover a different set from one another.</summary>
+        static IEnumerable<(RouteEndpoint Endpoint, (string Verb, string Route) Route)> DiscoverFontEndpoints(IServiceProvider services) =>
+            services.GetRequiredService<EndpointDataSource>().Endpoints
                 .OfType<RouteEndpoint>()
                 .Where(endpoint => endpoint.RoutePattern.RawText is { } raw && MatchesEitherFontsPrefix(raw.TrimStart('/')))
                 .SelectMany(endpoint => (endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? [])
-                    .Select(verb => (Verb: verb, Route: endpoint.RoutePattern.RawText!.TrimStart('/'))))
-                .ToHashSet();
-
-            // Then it is EXACTLY the known serving-and-install set — not a subset check, which would
-            //      let a bare, enumerable listing route (GET "fonts" or GET "api/fonts") join
-            //      silently. Segment-bounded matching (mirrors Story278's own MatchesGuardedPrefix)
-            //      means a hypothetical bare listing route would show up as an UNEXPECTED member of
-            //      `discovered` and fail this assertion by name.
-            Assert.True(ExpectedFontRoutes.SetEquals(discovered), FailureMessage(discovered));
-        }
+                    .Select(verb => (Endpoint: endpoint, Route: (Verb: verb, Route: endpoint.RoutePattern.RawText!.TrimStart('/')))));
 
         // "fonts" bare, or "fonts/…", or "api/fonts" bare, or "api/fonts/…" — segment-bounded so a
         // route at exactly "fontsomething" (a real but unrelated prefix) never falsely matches.
@@ -203,16 +263,20 @@ public sealed class FeatureInstalledFontServing
         static bool MatchesPrefix(string route, string prefix) =>
             route == prefix || route.StartsWith(prefix + "/", StringComparison.Ordinal);
 
-        // The known, deliberate set (SPEC F104.5/F104.6): the widened serving route (GET+HEAD, one
-        // parameterized segment, non-enumerable) and the install route (POST, write, one
-        // parameterized segment) — nothing else has ever listed the font set, and this pins it stays
-        // that way.
+        // The known, deliberate set (SPEC F104.5/F104.6/F104.7, widened at PLAN T203): the widened
+        // serving route (GET+HEAD, one parameterized segment — F104.6's non-enumerability is an
+        // ANONYMOUS-surface rule: no anonymous route lists these filenames), the install route (POST,
+        // write), and the library listing route (GET api/fonts, T203 — the Settings-gated ADMIN
+        // listing F104.7 requires, which DOES carry every installed face's filename via `faces[].file`
+        // by design; that is not the anonymous enumeration F104.6 forbids) — nothing else has ever
+        // joined either prefix, and this pins it stays that way.
         static readonly IReadOnlySet<(string Verb, string Route)> ExpectedFontRoutes =
             new HashSet<(string Verb, string Route)>
             {
                 ("GET", "fonts/{file}"),
                 ("HEAD", "fonts/{file}"),
                 ("POST", "api/fonts/{slug}/install"),
+                ("GET", "api/fonts"),
             };
 
         static string FailureMessage(IReadOnlySet<(string Verb, string Route)> discovered)
@@ -223,8 +287,10 @@ public sealed class FeatureInstalledFontServing
                 $"[{string.Join(", ", ExpectedFontRoutes)}]. " +
                 (added.Length > 0 ? $"Newly present: [{string.Join(", ", added)}]. " : "") +
                 (removed.Length > 0 ? $"No longer present: [{string.Join(", ", removed)}]. " : "") +
-                "The font set is deliberately non-enumerable (SPEC F104.6) — a bare listing route " +
-                "under either prefix is a disclosure decision, not a routing accident.";
+                "The /fonts/{file} SERVING set stays deliberately non-enumerable (SPEC F104.6) — a bare " +
+                "filename-listing route under either prefix is a disclosure decision, not a routing " +
+                "accident; the library's own PACK listing (SPEC F104.7, GET api/fonts) is a distinct, " +
+                "deliberate exception this set now names.";
         }
     }
 }
