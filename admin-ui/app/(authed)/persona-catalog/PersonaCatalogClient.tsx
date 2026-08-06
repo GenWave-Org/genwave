@@ -9,11 +9,15 @@ import { toast } from "@/components/ui/toast";
 import { readErrorMessage } from "@/lib/problem-details";
 import { cn } from "@/lib/utils";
 import { PersonaCardReviewModal, type PersonaCardReviewImportResult } from "../_components/PersonaCardReviewModal";
+import { FontDetailPanel } from "./FontDetailPanel";
+import { FontInstallModal, type FontInstallResult } from "./FontInstallModal";
+import { formatFontByteTotal } from "./font-format";
 import { prettifySlug } from "./format-slug";
 import { ThemeDetailPreview } from "./ThemeDetailPreview";
 import { ThemeInstallModal, type ThemeInstallResult } from "./ThemeInstallModal";
 import type {
   CatalogEntryDetailDto,
+  CatalogEntryKind,
   CatalogIndexResponseDto,
   CatalogShelfEntryDto,
   CatalogThemePreview,
@@ -54,16 +58,22 @@ type DetailState =
  *
  * A third kind, `font` (SPEC F104.1/F104.3, PLAN T201), renders `FontShelfCard` — a family-derived
  * title and a human-readable byte total painted straight off the entry's already-fetched index row's
- * own `fontFamily`/`fontByteTotal` (T194), no manifest or asset fetch on browse. It has no
- * click-through yet: `renderDetailPanel` below has no `"font"` arm, so selecting one falls through
- * to its own `default: return null` — the real hash-verified specimen preview is PLAN T202's job,
- * mirroring how T185 shipped `ThemeShelfCard` inert before T186 wired its click-through.
+ * own `fontFamily`/`fontByteTotal` (T194), no manifest or asset fetch on browse. Opening a font card
+ * (PLAN T202, SPEC F104.4) reuses the SAME `GET /api/catalog/entries/{slug}` detail fetch every
+ * other kind already uses — this time carrying T194's font-kind projection
+ * (`fontFamily`/`fontSpecimenFile`/`description`) — and routes to `FontDetailPanel`, whose own
+ * `SpecimenBlock` renders the pack's real hash-verified face through the asset proxy. "Install"
+ * opens `FontInstallModal` instead of `PersonaCardReviewModal`/`ThemeInstallModal` — a scope
+ * addition this task states plainly (see `FontDetailPanel`'s own remarks): the PLAN carries no
+ * dedicated install-button task for M1, and T204's exit-check checklist has no other UI surface to
+ * install a pack from.
  */
 export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps): ReactNode {
   const router = useRouter();
   const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
   const [reviewing, setReviewing] = useState(false);
   const [installingTheme, setInstallingTheme] = useState(false);
+  const [installingFont, setInstallingFont] = useState(false);
 
   // Request token (T102 review, HIGH): loadDetail's fetch is not the only thing that can change
   // `detail` between when a request starts and when it resolves — the operator can also collapse
@@ -160,6 +170,15 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
     toast.success(`"${result.name}" installed.`);
   }
 
+  /** SPEC F104.5's success path — mirrors `handleThemeInstalled`'s own remarks: no dedicated
+   * library-list page exists on THIS task's own owned files for the panel to route to (PLAN T203
+   * builds that separately); closing the modal and toasting the family that just entered the
+   * station's library is the whole client-side job. */
+  function handleFontInstalled(result: FontInstallResult): void {
+    setInstallingFont(false);
+    toast.success(`"${result.family}" installed.`);
+  }
+
   const selectedSlug = detail.kind !== "idle" ? detail.slug : null;
   const selectedEntry = entries.find((entry) => entry.slug === selectedSlug) ?? null;
 
@@ -189,7 +208,14 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
           />
         );
       case "font":
-        return <FontShelfCard key={entry.slug} entry={entry} />;
+        return (
+          <FontShelfCard
+            key={entry.slug}
+            entry={entry}
+            selected={entry.slug === selectedSlug}
+            onSelect={() => handleCardClick(entry.slug)}
+          />
+        );
       default:
         return null;
     }
@@ -198,7 +224,9 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
   /** Routes the loaded detail's own body to its entry's kind (review finding N6): the same
    * exhaustive `switch` discipline `renderShelfEntry` uses above, not a two-way `===`/`!==` check
    * against `"theme"` — the `default` renders nothing, so an entry whose kind this client doesn't
-   * recognise never falls through to the persona panel by default. */
+   * recognise never falls through to the persona panel by default. Widened at PLAN T202 with the
+   * `"font"` arm (`FontDetailPanel`) — before this, a selected font entry fell all the way to
+   * `default`, rendering nothing at all. */
   function renderDetailPanel(entry: CatalogShelfEntryDto, loaded: Extract<DetailState, { kind: "loaded" }>): ReactNode {
     // `loaded.detail.card` is `string | null`, `null` exactly when `unreachable` is `true`
     // (types.ts) — and `unreachable: true` never reaches `detail.kind === "loaded"` at all
@@ -217,6 +245,10 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
         );
       case "persona":
         return <DetailPanel slug={loaded.slug} detail={loaded.detail} onImportClick={() => setReviewing(true)} />;
+      case "font":
+        return (
+          <FontDetailPanel slug={loaded.slug} detail={loaded.detail} onInstallClick={() => setInstallingFont(true)} />
+        );
       default:
         return null;
     }
@@ -230,7 +262,7 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
 
       {detail.kind !== "idle" && (
         <section
-          aria-label={selectedEntry?.kind === "theme" ? "Theme details" : "Persona details"}
+          aria-label={detailSectionAriaLabel(selectedEntry?.kind)}
           className="mt-6 rounded-[6px] border border-line bg-surface p-5"
         >
           {detail.kind === "loading" && (
@@ -270,8 +302,35 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
           onInstalled={handleThemeInstalled}
         />
       )}
+
+      {/* Cancel = no-op (SPEC F104.5's own sad path, mirrors the theme block above): closing this
+          modal by any path just resets `installingFont`, never touching the network — see
+          FontInstallModal's own remarks. No `detail.detail.card !== null` guard needed here (unlike
+          the theme block above): FontInstallModal posts no body of its own, so it has nothing to
+          read off `detail.detail.card` at all — only `selectedEntry?.kind === "font"` gates it. */}
+      {installingFont && detail.kind === "loaded" && selectedEntry?.kind === "font" && (
+        <FontInstallModal slug={detail.slug} onCancel={() => setInstallingFont(false)} onInstalled={handleFontInstalled} />
+      )}
     </div>
   );
+}
+
+/** The detail panel's own aria-label, routed by the SELECTED entry's kind (T202, carrying forward
+ * T201 review finding N6): the original two-way ternary against `"theme"` alone meant a selected
+ * FONT entry fell through and announced "Persona details" to assistive tech — wrong. Mirrors
+ * `renderDetailPanel`'s own exhaustive-switch discipline one function up; `undefined` (no entry
+ * resolved yet, or an entry this client's own switch doesn't recognise) falls back to the
+ * pre-existing persona label, same as `"persona"` itself. */
+function detailSectionAriaLabel(kind: CatalogEntryKind | undefined): string {
+  switch (kind) {
+    case "theme":
+      return "Theme details";
+    case "font":
+      return "Font pack details";
+    case "persona":
+    default:
+      return "Persona details";
+  }
 }
 
 function ThemeDetailPanel({
@@ -413,14 +472,15 @@ function ThemeSwatchChips({ preview }: { preview: CatalogThemePreview | null }):
 }
 
 /**
- * A font entry's shelf card (SPEC F104.3, PLAN T201) — a title, the 18+ badge, a small brass
+ * A font entry's shelf card (SPEC F104.3, PLAN T201/T202) — a title, the 18+ badge, a small brass
  * "Font pack" kind marker (the card has no swatches/art to read its kind from at a glance, unlike a
  * theme card), and a human-readable byte total — all painted straight off the entry's already-
- * fetched index row, no manifest or asset fetch, ever, while browsing. Static (a `<div>`, not a
- * `<button>`): click-through to the real hash-verified specimen is PLAN T202's job, mirroring how
- * T185 shipped `ThemeShelfCard` inert before T186 wired its own click-through — wiring a click here
- * now would either do nothing or reach ahead into T202's asset-fetch contract this task deliberately
- * doesn't touch.
+ * fetched index row, no manifest or asset fetch, ever, while browsing. Now a `<button>` (PLAN T202,
+ * mirrors `ThemeShelfCard`'s own T185→T186 precedent): a click routes through the SAME
+ * `handleCardClick`/`loadDetail` machinery every other kind already uses — one
+ * `GET /api/catalog/entries/{slug}` fetch, this time carrying T194's font-kind detail projection
+ * (`fontFamily`/`fontSpecimenFile`/`description`) — which `PersonaCatalogClient` then routes to
+ * `FontDetailPanel` (PLAN T202) instead of `DetailPanel`/`ThemeDetailPanel`.
  *
  * The title reads `entry.fontFamily ?? prettifySlug(entry.slug)` (review finding F1), NOT a separate
  * family line under a slug-derived title: on every real pack the authoring convention is slug =
@@ -436,14 +496,30 @@ function ThemeSwatchChips({ preview }: { preview: CatalogThemePreview | null }):
  * Renders no `description` line at all: this story's own task line reads "meta-only:
  * family/description/byte total", but the shelf wire this card actually reads from
  * (`CatalogShelfEntryDto`) carries only `fontFamily`/`fontByteTotal` — `description` rides the
- * per-entry `GET /api/catalog/entries/{slug}` detail fetch instead (T202), the same shelf/detail
- * split `ShelfCard`/`DetailPanel` already draw for a persona's own `author`/`description` (STORY-281
- * AC1 reconciliation).
+ * per-entry `GET /api/catalog/entries/{slug}` detail fetch instead (T202, `FontDetailPanel`), the
+ * same shelf/detail split `ShelfCard`/`DetailPanel` already draw for a persona's own
+ * `author`/`description` (STORY-281 AC1 reconciliation).
  */
-function FontShelfCard({ entry }: { entry: CatalogShelfEntryDto }): ReactNode {
+function FontShelfCard({
+  entry,
+  selected,
+  onSelect,
+}: {
+  entry: CatalogShelfEntryDto;
+  selected: boolean;
+  onSelect: () => void;
+}): ReactNode {
   return (
     <li>
-      <div className="flex w-full flex-col items-start gap-2 rounded-[6px] border border-line bg-surface p-4">
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-expanded={selected}
+        className={cn(
+          "flex w-full flex-col items-start gap-2 rounded-[6px] border p-4 text-left transition-colors duration-[120ms] ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+          selected ? "border-accent bg-surface-2" : "border-line bg-surface hover:bg-surface-2"
+        )}
+      >
         <div className="flex w-full items-center justify-between gap-2">
           <span className="font-display text-[1.05rem] text-ink">{entry.fontFamily ?? prettifySlug(entry.slug)}</span>
           {entry.audience === "mature" && <MatureBadge />}
@@ -456,23 +532,9 @@ function FontShelfCard({ entry }: { entry: CatalogShelfEntryDto }): ReactNode {
         {entry.fontByteTotal != null && (
           <p className="text-[0.82rem] text-mute">{formatFontByteTotal(entry.fontByteTotal)}</p>
         )}
-      </div>
+      </button>
     </li>
   );
-}
-
-/** Human-readable byte total for a font shelf card (SPEC F104.3) — the same 1024-based KiB/MiB
- * ladder `HealthView`'s own `formatBytes` uses elsewhere in the app (not imported from there — that
- * one lives beside an unrelated container-memory concern, and a shared byte formatter is more
- * abstraction than two three-line call sites earn, YAGNI). Font packs stay small (T195's own ≤200
- * KiB pack ceiling), so this renders KiB for every real pack today; MiB only ever fires for a future
- * pack that outgrows that ceiling. */
-function formatFontByteTotal(bytes: number): string {
-  const kib = 1024;
-  const mib = kib * 1024;
-  if (bytes >= mib) return `${(bytes / mib).toFixed(1)} MiB`;
-  if (bytes >= kib) return `${Math.round(bytes / kib)} KiB`;
-  return `${bytes} B`;
 }
 
 function DetailPanel({
