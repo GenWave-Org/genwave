@@ -158,7 +158,7 @@ export function SpecimenBlock({ slug, specimenFile }: SpecimenBlockProps): React
         AaBbCcDdEe 0123456789
       </p>
       <p className="mt-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">
-        Admin-only specimen — not installed
+        Transient specimen — previewing installs nothing
       </p>
     </div>
   );

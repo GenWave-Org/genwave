@@ -129,7 +129,7 @@ public sealed partial class CatalogController(
             CatalogEntryFetchResult.Ok ok => Ok(ToEntryResponse(ok)),
             CatalogEntryFetchResult.NotFound => NotFound(UnknownEntryProblem(slug)),
             CatalogEntryFetchResult.Unreachable => Ok(new CatalogEntryResponse(
-                null, null, null, Unreachable: true, null, null, null, null, null, null, null, null, null)),
+                null, null, null, Unreachable: true, null, null, null, null, null, null, null, null, null, null, null, null)),
             CatalogEntryFetchResult.HashMismatch =>
                 StatusCode(StatusCodes.Status502BadGateway, WithheldProblem("failed its integrity check")),
             CatalogEntryFetchResult.Oversize =>
@@ -297,7 +297,10 @@ public sealed partial class CatalogController(
             meta.SamplePatter ?? [],
             FontFamily: fontManifest?.Family,
             FontByteTotal: isFont ? ok.Content.Assets.Sum(a => a.Bytes) : null,
-            FontSpecimenFile: ResolveSpecimenFile(fontManifest, ok.Content.Assets));
+            FontSpecimenFile: ResolveSpecimenFile(fontManifest, ok.Content.Assets),
+            FontLicense: fontManifest?.License,
+            FontVersion: fontManifest?.Version,
+            FontSubset: fontManifest?.Subset);
     }
 
     /// <summary>

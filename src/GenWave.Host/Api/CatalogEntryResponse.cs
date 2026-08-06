@@ -65,6 +65,19 @@ namespace GenWave.Host.Api;
 /// straight to that route to render the transient specimen preview. <see langword="null"/> for every
 /// non-font entry, when unreachable, or when no upright face resolves.
 /// </param>
+/// <param name="FontLicense">
+/// A font entry's licence identifier (PLAN T204, Dean's post-v3.1.0 review: the pre-install review
+/// panel showed no licence at all) — parsed off the SAME hash-verified <see cref="Card"/> manifest
+/// <see cref="FontFamily"/> already reads, via the same <see cref="Catalog.CatalogFontManifestSerializer.Deserialize"/>
+/// call, zero extra cost. Paired with <see cref="FontVersion"/>/<see cref="FontSubset"/> to mirror the
+/// admin UI's Wardrobe page's own "licence · version · subset" line (<c>FontLibraryPackDto</c> — the
+/// wire DTO keeps its pre-rename name; only the UI label/route became "Wardrobe") so the SAME trust
+/// fact reads identically whether an operator is reviewing a pack pre-install or inspecting one
+/// already installed. <see langword="null"/> for every non-font entry, when unreachable, or when the
+/// manifest fails to parse (degrades — never a 500, see that method's own remarks).
+/// </param>
+/// <param name="FontVersion">A font entry's manifest version (PLAN T204) — genuinely optional even on a cleanly-parsed manifest (<see cref="Catalog.CatalogFontManifest.Version"/>'s own shape); <see langword="null"/> for every non-font entry, when unreachable, or when absent/unparseable.</param>
+/// <param name="FontSubset">A font entry's manifest subset, e.g. <c>"latin"</c> (PLAN T204) — <see langword="null"/> for every non-font entry, when unreachable, or when the manifest fails to parse.</param>
 public sealed record CatalogEntryResponse(
     string? Card,
     string? Meta,
@@ -78,4 +91,7 @@ public sealed record CatalogEntryResponse(
     IReadOnlyList<string>? SamplePatter,
     string? FontFamily,
     long? FontByteTotal,
-    string? FontSpecimenFile);
+    string? FontSpecimenFile,
+    string? FontLicense,
+    string? FontVersion,
+    string? FontSubset);

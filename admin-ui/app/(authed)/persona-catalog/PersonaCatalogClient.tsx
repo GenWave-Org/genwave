@@ -27,6 +27,17 @@ import type {
 interface PersonaCatalogClientProps {
   /** The index this page's server component already fetched (SPEC F90.2, F90.4). */
   initialIndex: CatalogIndexResponseDto;
+  /**
+   * Slugs already installed, per `GET /api/fonts` (PLAN T204, Dean's post-v3.1.0 review: reopening
+   * an installed pack's detail panel showed no sign it was already installed). The page's own server
+   * component fetches this ALONGSIDE the index (the smaller diff over a lazy per-open fetch — one
+   * extra `Promise.all` leg server-side, versus threading a second client-side fetch/loading state
+   * through `loadDetail` for font entries only) and hands the slug list straight through; defaults to
+   * `[]` — fail closed, matching this file's own `catalogEnabled` default posture elsewhere in the
+   * app — so an isolated render with no live signal never CLAIMS a pack is installed that it has no
+   * evidence for.
+   */
+  installedFontSlugs?: string[];
 }
 
 type DetailState =
@@ -68,12 +79,17 @@ type DetailState =
  * dedicated install-button task for M1, and T204's exit-check checklist has no other UI surface to
  * install a pack from.
  */
-export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps): ReactNode {
+export function PersonaCatalogClient({ initialIndex, installedFontSlugs = [] }: PersonaCatalogClientProps): ReactNode {
   const router = useRouter();
   const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
   const [reviewing, setReviewing] = useState(false);
   const [installingTheme, setInstallingTheme] = useState(false);
   const [installingFont, setInstallingFont] = useState(false);
+  // Seeded from the server-fetched prop above, then flipped locally the instant an install
+  // succeeds (handleFontInstalled below) — cheap, no reload/re-fetch needed for a set this small.
+  // `useState(() => ...)` (lazy initializer): this only needs to run once, not re-derive the Set on
+  // every render.
+  const [installedSlugs, setInstalledSlugs] = useState<ReadonlySet<string>>(() => new Set(installedFontSlugs));
 
   // Request token (T102 review, HIGH): loadDetail's fetch is not the only thing that can change
   // `detail` between when a request starts and when it resolves — the operator can also collapse
@@ -171,11 +187,13 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
   }
 
   /** SPEC F104.5's success path — mirrors `handleThemeInstalled`'s own remarks: no dedicated
-   * library-list page exists on THIS task's own owned files for the panel to route to (PLAN T203
-   * builds that separately); closing the modal and toasting the family that just entered the
-   * station's library is the whole client-side job. */
-  function handleFontInstalled(result: FontInstallResult): void {
+   * wardrobe-list page exists on THIS task's own owned files for the panel to route to (PLAN T203
+   * builds that separately); closing the modal, toasting the family that just entered the station's
+   * Wardrobe, AND (PLAN T204) marking `slug` installed in local state — so `FontDetailPanel` flips
+   * to "Installed"/"Re-install" immediately, no reload — is the whole client-side job. */
+  function handleFontInstalled(slug: string, result: FontInstallResult): void {
     setInstallingFont(false);
+    setInstalledSlugs((prev) => new Set(prev).add(slug));
     toast.success(`"${result.family}" installed.`);
   }
 
@@ -247,7 +265,12 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
         return <DetailPanel slug={loaded.slug} detail={loaded.detail} onImportClick={() => setReviewing(true)} />;
       case "font":
         return (
-          <FontDetailPanel slug={loaded.slug} detail={loaded.detail} onInstallClick={() => setInstallingFont(true)} />
+          <FontDetailPanel
+            slug={loaded.slug}
+            detail={loaded.detail}
+            isInstalled={installedSlugs.has(loaded.slug)}
+            onInstallClick={() => setInstallingFont(true)}
+          />
         );
       default:
         return null;
@@ -309,7 +332,11 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
           the theme block above): FontInstallModal posts no body of its own, so it has nothing to
           read off `detail.detail.card` at all — only `selectedEntry?.kind === "font"` gates it. */}
       {installingFont && detail.kind === "loaded" && selectedEntry?.kind === "font" && (
-        <FontInstallModal slug={detail.slug} onCancel={() => setInstallingFont(false)} onInstalled={handleFontInstalled} />
+        <FontInstallModal
+          slug={detail.slug}
+          onCancel={() => setInstallingFont(false)}
+          onInstalled={(result) => handleFontInstalled(detail.slug, result)}
+        />
       )}
     </div>
   );

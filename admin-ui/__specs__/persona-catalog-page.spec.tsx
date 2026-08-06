@@ -507,6 +507,44 @@ describe("Feature: The Persona Catalog server page", () => {
     });
   });
 
+  describe("Scenario: installed-font-slug wiring (PLAN T204, Dean's post-v3.1.0 review)", () => {
+    const indexBody: CatalogIndexResponseDto = {
+      entries: [EVERYONE_ENTRY],
+      fetchedAt: "2026-07-26T00:00:00Z",
+      unreachable: false,
+    };
+
+    it("threads GET /api/fonts's own slugs into PersonaCatalogClient as installedFontSlugs", async () => {
+      global.fetch = jest.fn<typeof fetch>().mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.endsWith("/api/catalog/index")) return makeJsonResponse(200, indexBody);
+        if (url.endsWith("/api/fonts")) return makeJsonResponse(200, [{ slug: "space-grotesk" }, { slug: "libre-grotesk" }]);
+        throw new Error(`unexpected fetch ${url}`);
+      }) as unknown as typeof fetch;
+
+      const { default: PersonaCatalogPage } = await import("../app/(authed)/persona-catalog/page");
+      const node = await PersonaCatalogPage();
+
+      const clientEl = findElementByType(node, PersonaCatalogClient);
+      expect(clientEl?.props["installedFontSlugs"]).toEqual(["space-grotesk", "libre-grotesk"]);
+    });
+
+    it("degrades to an empty list — never crashing the page — when GET /api/fonts fails", async () => {
+      global.fetch = jest.fn<typeof fetch>().mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.endsWith("/api/catalog/index")) return makeJsonResponse(200, indexBody);
+        if (url.endsWith("/api/fonts")) return makeJsonResponse(500, {});
+        throw new Error(`unexpected fetch ${url}`);
+      }) as unknown as typeof fetch;
+
+      const { default: PersonaCatalogPage } = await import("../app/(authed)/persona-catalog/page");
+      const node = await PersonaCatalogPage();
+
+      const clientEl = findElementByType(node, PersonaCatalogClient);
+      expect(clientEl?.props["installedFontSlugs"]).toEqual([]);
+    });
+  });
+
   describe("Scenario: disabled surface is a bare 404 (SPEC F90.1, sad path)", () => {
     it("renders an inline 'Not found' page when GET /api/catalog/index 404s", async () => {
       global.fetch = jest

@@ -581,6 +581,24 @@ public sealed class FeatureFontKindAssets
         }
 
         [Fact]
+        public async Task TheDetailRouteProjectsTheLicenceVersionAndSubsetTrio()
+        {
+            // PLAN T204 (Dean's post-v3.1.0 review): the pre-install review panel showed no licence
+            // at all — FontLicense/FontVersion/FontSubset are parsed off the SAME hash-verified
+            // manifest FontFamily already reads (golden.font.json: "OFL-1.1"/"2.000"/"text"), so this
+            // trust fact reaches the panel at zero extra fetch cost.
+            await using var factory = new FontShelfWebFactory();
+            var client = await FontShelfWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync($"/api/catalog/entries/{FontShelfFixtures.FontSlug}");
+
+            var body = await response.Content.ReadFromJsonAsync<CatalogEntryResponse>();
+            Assert.Equal("OFL-1.1", body!.FontLicense);
+            Assert.Equal("2.000", body.FontVersion);
+            Assert.Equal("text", body.FontSubset);
+        }
+
+        [Fact]
         public async Task TheShelfRouteProjectsTheSameByteTotalAsTheDetailRoute()
         {
             await using var factory = new FontShelfWebFactory();

@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import { formatFontByteTotal } from "./font-format";
+import { formatFontByteTotal, licenceLine } from "./font-format";
 import { prettifySlug } from "./format-slug";
 import { SpecimenBlock } from "./SpecimenBlock";
 import type { CatalogEntryDetailDto } from "./types";
@@ -10,6 +10,11 @@ import type { CatalogEntryDetailDto } from "./types";
 export interface FontDetailPanelProps {
   slug: string;
   detail: CatalogEntryDetailDto;
+  /** Whether THIS slug already has an installed pack (PLAN T204, Dean's post-v3.1.0 review:
+   * reopening an installed pack's detail panel showed no sign it was already installed). Sourced
+   * from `GET /api/fonts`'s own listing — see `PersonaCatalogClient`'s own remarks for where that
+   * read happens and how a fresh install flips this without a reload. */
+  isInstalled: boolean;
   onInstallClick: () => void;
 }
 
@@ -35,16 +40,38 @@ export interface FontDetailPanelProps {
  * surface to install FROM. The T186 preview→confirm→POST precedent is the natural, minimal home,
  * so this panel's Install button opens `FontInstallModal` (confirm/cancel semantics mirrored from
  * `ThemeInstallModal`) rather than posting anything itself.
+ *
+ * <b>Licence line (PLAN T204, Dean's post-v3.1.0 review).</b> "&lt;licence&gt; · v&lt;version&gt; ·
+ * &lt;subset&gt;" via the shared `licenceLine` helper (`font-format.ts`) — the SAME line the
+ * Wardrobe page's own installed-pack cards render, so the one trust fact a PRE-install review most
+ * needs (what licence am I about to agree to?) reads identically whether the pack is already
+ * installed or not. Degrades to "Licence unknown" rather than an empty line — see that helper's own
+ * remarks.
+ *
+ * <b>Installed-state awareness (PLAN T204).</b> Reopening an already-installed pack's detail panel
+ * used to show no sign of that — `SpecimenBlock`'s OLD "Admin-only specimen — not installed" caption
+ * read as a status claim it never was (it only ever described the SPECIMEN, an always-transient
+ * preview, never the pack itself), so that caption is now state-neutral in BOTH states (see
+ * `SpecimenBlock`'s own remarks) and the installed signal moved here instead. `isInstalled` (sourced
+ * by `PersonaCatalogClient` from `GET /api/fonts`, see its own remarks) drives an "Installed" chip —
+ * the same quiet bordered-pill treatment the Wardrobe page's own provenance chip uses — and the
+ * button's own label: "Re-install" when a pack under this slug is already installed
+ * (`FontPackController.Install` upserts, PLAN T199, so a re-install is a genuinely supported,
+ * non-destructive action), "Install" otherwise.
  */
-export function FontDetailPanel({ slug, detail, onInstallClick }: FontDetailPanelProps): ReactNode {
+export function FontDetailPanel({ slug, detail, isInstalled, onInstallClick }: FontDetailPanelProps): ReactNode {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-display text-[1.1rem] text-ink">{prettifySlug(slug)}</h2>
-        {/* Install (scope addition, see this component's own remarks) opens FontInstallModal's
-            confirm step — this click itself issues no request; the modal POSTs on confirm only. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="font-display text-[1.1rem] text-ink">{prettifySlug(slug)}</h2>
+          {isInstalled && <InstalledChip />}
+        </div>
+        {/* Install/Re-install (scope addition, see this component's own remarks) opens
+            FontInstallModal's confirm step — this click itself issues no request; the modal POSTs
+            on confirm only. */}
         <Button type="button" variant="primary" onClick={onInstallClick}>
-          Install
+          {isInstalled ? "Re-install" : "Install"}
         </Button>
       </div>
 
@@ -58,6 +85,10 @@ export function FontDetailPanel({ slug, detail, onInstallClick }: FontDetailPane
         </p>
       )}
 
+      <p className="text-[0.75rem] text-mute">
+        {licenceLine({ license: detail.fontLicense, version: detail.fontVersion, subset: detail.fontSubset })}
+      </p>
+
       {/* Plain text ONLY (mirrors DetailPanel's own persona-description rule, SPEC F90.6) — a bare
           `{detail.description}` JSX child, React's default escaping, never dangerouslySetInnerHTML. */}
       {detail.description !== null && detail.description !== "" && (
@@ -66,5 +97,19 @@ export function FontDetailPanel({ slug, detail, onInstallClick }: FontDetailPane
 
       <SpecimenBlock slug={slug} specimenFile={detail.fontSpecimenFile} />
     </div>
+  );
+}
+
+/** "Installed" chip (PLAN T204) — the SAME quiet bordered-pill treatment the Wardrobe page's own
+ * `ProvenanceChip` uses (`app/(authed)/wardrobe/WardrobeClient.tsx`), reused here as a plain status
+ * marker rather than a provenance stamp (no slug/date — this panel already names the slug in its own
+ * heading): a genuine shared component would need editing both files for a shape that already
+ * differs (provenance text vs a bare status word), the same reasoning that chip's own remarks give
+ * for not sharing with the persona/theme chips either. */
+function InstalledChip(): ReactNode {
+  return (
+    <span className="inline-flex w-fit items-center rounded-[3px] border border-line px-1.5 py-0.5 text-[0.68rem] text-mute">
+      Installed
+    </span>
   );
 }
