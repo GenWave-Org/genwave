@@ -6,6 +6,7 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Catalog;
 using GenWave.Host.Options;
+using GenWave.Host.Theming;
 using Npgsql;
 
 namespace GenWave.Host.Api;
@@ -42,7 +43,8 @@ namespace GenWave.Host.Api;
 /// manifest's own <c>files[]</c> against what was actually fetched, rejecting a duplicate filename
 /// within <c>files[]</c> itself before it ever reaches the store (400 on either — review finding N2) →
 /// ONE <see cref="IFontPackStore.UpsertAsync"/> call (409 on a cross-pack filename collision — see this
-/// class's own COLLISION remarks) → 200.
+/// class's own COLLISION remarks) → <see cref="InstalledFontCatalog.ReloadAsync"/> (see this class's
+/// own "Rebuild after write" remarks) → 200.
 /// </para>
 ///
 /// <para>
@@ -74,6 +76,24 @@ namespace GenWave.Host.Api;
 /// </para>
 ///
 /// <para>
+/// <b>Rebuild after write (SPEC F104.6/F104.8, PLAN T200) — with <see cref="CancellationToken.None"/>,
+/// deliberately (the <see cref="ThemesImportController"/>/T184 review F1 precedent).</b>
+/// <see cref="InstalledFontCatalog.ReloadAsync"/> runs once, on the SAME DI'd singleton
+/// <see cref="InstalledFontCatalogLoadHostedService"/> warms at boot — the only way an install reaches
+/// every already-running request handler (the widened <c>GET /fonts/{file}</c> route) with no process
+/// restart. Runs only on the success path, AFTER <see cref="IFontPackStore.UpsertAsync"/> has already
+/// committed (including past the 23505-collision <see langword="catch"/> above, which returns before
+/// reaching this line) — the write is no longer this request's to abandon, so passing this method's own
+/// <paramref name="ct"/> here would let a client disconnecting mid-rebuild cancel it for no reason tied
+/// to the write's own correctness: <see cref="InstalledFontCatalog.ReloadAsync"/>'s own
+/// <see langword="catch"/> would swallow that as an ordinary reload failure and keep serving the
+/// PREVIOUS snapshot (SPEC F104.8's offline floor, correctly triggered for a REAL store fault) — stale
+/// for a request that merely stopped listening rather than anything wrong with
+/// <c>station.font_pack</c>(+<c>_face</c>). <see cref="CancellationToken.None"/> makes the rebuild run
+/// to completion regardless of who is still connected, which is what a committed write demands.
+/// </para>
+///
+/// <para>
 /// <b>STORED FAMILY/STYLE ARE UNBOUNDED — REVIEWER OBLIGATION FOR T200/T203.</b>
 /// <see cref="CatalogFontManifestSerializer.Deserialize"/> only checks <c>manifest.Family</c> and each
 /// <c>files[].style</c> are non-empty (<c>{ Length: > 0 }</c>) before this route writes them VERBATIM
@@ -82,11 +102,15 @@ namespace GenWave.Host.Api;
 /// <see cref="CatalogIndexValidator"/>'s own <c>TryParseFamily</c> bounds to a real CSS-family shape
 /// (regex + length ceiling) before it ever reaches a response. The index-side gate exists; the STORED
 /// side deliberately does not (T199 shipped no consumer that reads either column back into CSS — see
-/// <see cref="IFontPackStore"/>'s own "ships dark" remarks). Whichever task first interpolates either
-/// column into an <c>@font-face</c> rule (T200's widened <c>/fonts/{file}</c> route, or T203's library
-/// page) MUST NOT trust them as CSS-safe merely because they came from this store — apply the same
-/// bound+shape discipline <c>TryParseFamily</c> already established for the index-side field, or an
-/// equivalent CSS-injection-safe escape/allowlist, before either value ever reaches a stylesheet.
+/// <see cref="IFontPackStore"/>'s own "ships dark" remarks). <b>Still true after T200:</b> the widened
+/// <c>GET /fonts/{file}</c> route (<see cref="InstalledFontCatalog.TryGetFace"/>) serves an installed
+/// face's raw BYTES by file name and interpolates neither column into CSS — this obligation is
+/// re-recorded on <see cref="InstalledFontCatalog"/>'s own remarks (its first read consumer) rather
+/// than discharged here, so T203's library page and T206's editor pickers — the tasks that actually
+/// put a face's family/style into a stylesheet or a picker label — cannot miss it. Whichever reaches
+/// for either column in a CSS context first MUST NOT trust it as CSS-safe merely because it came from
+/// this store — apply the same bound+shape discipline <c>TryParseFamily</c> already established for
+/// the index-side field, or an equivalent CSS-injection-safe escape/allowlist, first.
 /// </para>
 /// </summary>
 [ApiController]
@@ -97,6 +121,7 @@ public sealed partial class FontPackController(
     CatalogProxyService catalogProxyService,
     CommunityCatalogAccessor catalogAccessor,
     IFontPackStore fontPackStore,
+    InstalledFontCatalog installedFontCatalog,
     ILogger<FontPackController> logger) : ControllerBase
 {
     // Postgres SQLSTATE for unique_violation — house idiom, no Npgsql.PostgresErrorCodes dependency
@@ -181,6 +206,11 @@ public sealed partial class FontPackController(
         {
             return Conflict(await ResolveFileCollisionAsync(slug, faces, ex, ct));
         }
+
+        // CancellationToken.None, deliberately — see this method's own "Rebuild after write" remarks
+        // (the T184/ThemesImportController lesson): the upsert above has already committed, so the
+        // rebuild is no longer this request's to abandon.
+        await installedFontCatalog.ReloadAsync(CancellationToken.None);
 
         logger.LogInformation(
             "Font pack installed slug={Slug} family={Family} faceCount={FaceCount}",

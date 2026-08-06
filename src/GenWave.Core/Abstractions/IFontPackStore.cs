@@ -43,9 +43,9 @@ public interface IFontPackStore
 
     /// <summary>
     /// The face's raw bytes plus just enough content metadata to serve it, by its serving-key
-    /// <paramref name="file"/>, or <see langword="null"/> if no such face is installed — the widened
-    /// <c>/fonts/{file}</c> route's (T200) hot path once a request falls through the vendored literal
-    /// switch. Deliberately bytes-and-hash only (no <c>style</c>/pack identity): every installed face
+    /// <paramref name="file"/>, or <see langword="null"/> if no such face is installed — read by
+    /// <c>InstalledFontCatalog</c>'s reload loop (T200), which snapshots faces into memory; the
+    /// widened <c>/fonts/{file}</c> route serves from that snapshot and NEVER calls this per-request. Deliberately bytes-and-hash only (no <c>style</c>/pack identity): every installed face
     /// serves the same <c>font/woff2</c> content type, so nothing else this table knows belongs on
     /// this path.
     /// </summary>

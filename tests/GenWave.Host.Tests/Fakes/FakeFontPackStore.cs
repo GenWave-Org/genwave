@@ -18,13 +18,52 @@ sealed class FakeFontPackStore : IFontPackStore
 {
     readonly Dictionary<string, FontPack> bySlug = new(StringComparer.Ordinal);
 
+    /// <summary>Content <see cref="GetFaceByFileAsync"/> serves, by file — <see cref="UpsertAsync"/>'s
+    /// own bytes-carrying counterpart to <see cref="bySlug"/>'s metadata-only <see cref="FontPack.Faces"/>
+    /// (mirrors <see cref="IFontPackStore.GetAllAsync"/>/<see cref="IFontPackStore.GetFaceByFileAsync"/>'s
+    /// own real-repository split: one method lists metadata, the other serves one face's payload).
+    /// <c>InstalledFontCatalog.ReloadAsync</c> (PLAN T200) is the first Fact-visible reader of this —
+    /// before T200 this always returned <see langword="null"/> (see this class's former remarks).</summary>
+    readonly Dictionary<string, FontPackFaceContent> contentByFile = new(StringComparer.Ordinal);
+
     /// <summary>Seeds already-"installed" packs, for a spec that needs one in place before the Fact's
-    /// own install attempt (e.g. a cross-pack filename collision).</summary>
+    /// own install attempt (e.g. a cross-pack filename collision). Metadata only, mirroring
+    /// <see cref="FontPack.Faces"/>'s own shape — a seeded pack carries no bytes for
+    /// <see cref="GetFaceByFileAsync"/> to serve, which is fine for every seeding use so far (none of
+    /// them exercises <c>/fonts/{file}</c> against a SEEDED face; <c>UpsertAsync</c> below is the one
+    /// path that populates <see cref="contentByFile"/>).</summary>
     public FakeFontPackStore(params FontPack[] seeded)
     {
         foreach (var pack in seeded)
             bySlug[pack.Slug] = pack;
     }
+
+    /// <summary>
+    /// Seeds one already-"installed" pack WITH its bytes-carrying content, bypassing the
+    /// install-route dance entirely — for a spec whose own concern is SERVING an installed face
+    /// (<c>Story283_InstalledFontServing.cs</c>, PLAN T200), not installing one
+    /// (<c>Story282_FontPackInstall.cs</c>'s own concern). Mirrors
+    /// <c>Story278_ThemeCatalogIsolation.cs</c>'s own <c>BuildLiveThemeStoreAsync</c> precedent: write
+    /// directly to the fake store rather than re-deriving a whole catalog-fetch fixture per serving
+    /// spec.
+    /// </summary>
+    public static FakeFontPackStore WithInstalledFace(
+        string slug, string family, string file, byte[] bytes, string sha256, string style = FontPackFaceInput.NormalStyle)
+    {
+        var store = new FakeFontPackStore();
+        var face = new FontPackFace(file, style, bytes.Length, sha256);
+        store.bySlug[slug] = new FontPack(slug, family, "{}", slug, DateTime.UtcNow, DateTime.UtcNow, [face]);
+        store.contentByFile[file] = new FontPackFaceContent(bytes, sha256);
+        return store;
+    }
+
+    /// <summary>When set, every read (<see cref="GetAllAsync"/>/<see cref="GetFaceByFileAsync"/>)
+    /// throws — simulates "the DB is gone" for <c>InstalledFontCatalog</c>'s own SPEC F104.8
+    /// offline-floor Facts (PLAN T200): a face already folded into <c>InstalledFontCatalog</c>'s
+    /// snapshot BEFORE this flips must keep serving even though the store itself can no longer
+    /// answer. <see cref="UpsertAsync"/> is deliberately unaffected — every outage Fact this exists
+    /// for is about a READ-side failure post-load, never a write attempt.</summary>
+    public bool Broken { get; set; }
 
     /// <summary>Scripts the NEXT <see cref="UpsertAsync"/> call to throw this
     /// <see cref="PostgresException"/> instead of writing — proves
@@ -53,15 +92,26 @@ sealed class FakeFontPackStore : IFontPackStore
         var createdAt = bySlug.TryGetValue(slug, out var existing) ? existing.CreatedAt : DateTime.UtcNow;
         var storedFaces = faces.Select(f => new FontPackFace(f.File, f.Style, f.ByteSize, f.Sha256)).ToList();
         bySlug[slug] = new FontPack(slug, family, definition, importedFrom, DateTime.UtcNow, createdAt, storedFaces);
+
+        foreach (var face in faces)
+            contentByFile[face.File] = new FontPackFaceContent(face.Bytes, face.Sha256);
+
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<FontPack>> GetAllAsync(CancellationToken ct) =>
-        Task.FromResult<IReadOnlyList<FontPack>>(bySlug.Values.ToList());
+    public Task<IReadOnlyList<FontPack>> GetAllAsync(CancellationToken ct)
+    {
+        if (Broken)
+            throw new InvalidOperationException("simulated station.font_pack outage (FakeFontPackStore.Broken)");
 
-    // No Fact in this project reaches for a served face's bytes yet — that seam belongs to PLAN T200
-    // (the widened /fonts/{file} route). A clean "nothing installed under this file" miss is enough
-    // to keep this double honest without a payload no Fact ever inspects.
-    public Task<FontPackFaceContent?> GetFaceByFileAsync(string file, CancellationToken ct) =>
-        Task.FromResult<FontPackFaceContent?>(null);
+        return Task.FromResult<IReadOnlyList<FontPack>>(bySlug.Values.ToList());
+    }
+
+    public Task<FontPackFaceContent?> GetFaceByFileAsync(string file, CancellationToken ct)
+    {
+        if (Broken)
+            throw new InvalidOperationException("simulated station.font_pack_face outage (FakeFontPackStore.Broken)");
+
+        return Task.FromResult(contentByFile.TryGetValue(file, out var content) ? content : null);
+    }
 }
