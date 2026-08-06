@@ -147,6 +147,20 @@ public sealed class DatabaseFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
+    /// <summary>
+    /// Truncate <c>station.font_pack</c> and reset its identity (SPEC F104, STORY-282, PLAN T198).
+    /// CASCADE (mirrors <see cref="ResetStationAsync"/>'s own remarks): <c>station.font_pack_face</c>'s
+    /// FK into this table makes Postgres refuse a plain TRUNCATE regardless of row count, and CASCADE
+    /// sweeps every face row along with its owning pack — there is nothing to reset separately.
+    /// </summary>
+    public async Task ResetFontPackAsync()
+    {
+        await using var conn = await StationDataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "truncate table station.font_pack restart identity cascade";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     async Task WaitForSchemaAsync()
     {
         for (var attempt = 0; attempt < 30; attempt++)
