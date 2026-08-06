@@ -122,6 +122,12 @@ static class StationSettingsHostingExtensions
         // ThemeCatalog (T182) and the theme import route (T184) are the first Host call sites.
         builder.Services.AddThemeStore(stationConnStr);
 
+        // Font pack store (SPEC F104, STORY-282, PLAN T198) — same station_svc connection string as
+        // every registration above; station.font_pack(+_face) lives in the same schema.
+        // FontPackRepository shipped dark at T198 (AddFontPackStore itself registered no consumer):
+        // FontPackController's install route (PLAN T199) is the first Host call site.
+        builder.Services.AddFontPackStore(stationConnStr);
+
         return builder;
     }
 }

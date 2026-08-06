@@ -200,11 +200,14 @@ public static class FeatureThemeCatalogIsolation
 
     public sealed class ScenarioNoNewPublicRoute
     {
-        // The known, deliberate set today (SPEC F103.6, F90.2, F104.4, PLAN T184/T185/T194) — a
-        // sixth route joining either prefix is a disclosure decision (SPEC F103.12), not a routing
-        // accident. The assets/{file} route (T194) delivers a font pack's hash-verified binary
-        // asset (the F104.4 specimen face) — same CatalogController class-level AdminSurface+
-        // Settings attributes as its two siblings, never a new surface of its own.
+        // The known, deliberate set today (SPEC F103.6, F90.2, F104.4, F104.5, PLAN T184/T185/T194/
+        // T199) — a seventh route joining any of the three prefixes is a disclosure decision
+        // (SPEC F103.12), not a routing accident. The assets/{file} route (T194) delivers a font
+        // pack's hash-verified binary asset (the F104.4 specimen face) — same CatalogController
+        // class-level AdminSurface+Settings attributes as its siblings, never a new surface of its
+        // own. api/fonts/{slug}/install (T199, SPEC F104.5) is FontPackController's own install
+        // route — a third guarded prefix joining api/catalog and api/themes, pinned here (review
+        // finding N4) the moment it exists rather than left to drift unnoticed.
         static readonly IReadOnlySet<(string Verb, string Route)> KnownCatalogAndThemeRoutes =
             new HashSet<(string Verb, string Route)>
             {
@@ -213,6 +216,7 @@ public static class FeatureThemeCatalogIsolation
                 ("GET", "api/catalog/entries/{slug}/assets/{file}"),
                 ("POST", "api/themes/{slug}/import"),
                 ("POST", "api/themes/preview"),
+                ("POST", "api/fonts/{slug}/install"),
             };
 
         static List<RouteEndpoint> DiscoverCatalogAndThemeEndpoints(IServiceProvider services) =>
@@ -220,14 +224,16 @@ public static class FeatureThemeCatalogIsolation
                 .OfType<RouteEndpoint>()
                 .Where(endpoint => endpoint.RoutePattern.RawText is { } raw
                     && (MatchesGuardedPrefix(raw.TrimStart('/'), "api/catalog")
-                        || MatchesGuardedPrefix(raw.TrimStart('/'), "api/themes")))
+                        || MatchesGuardedPrefix(raw.TrimStart('/'), "api/themes")
+                        || MatchesGuardedPrefix(raw.TrimStart('/'), "api/fonts")))
                 .ToList();
 
-        // Both controllers are ROOTED at the bare prefix ([Route("api/catalog")], [Route("api/themes")]
-        // — review finding F2): a `StartsWith(prefix + "/")`-only check misses a route at EXACTLY
-        // "api/catalog"/"api/themes" (a future parameterless [HttpGet] list action), so the match is
-        // segment-bounded — the prefix itself, or the prefix followed by a '/' — never a bare
-        // substring match.
+        // All three controllers are ROOTED at their own bare prefix ([Route("api/catalog")],
+        // [Route("api/themes")], [Route("api/fonts")] — review finding F2, extended to the third
+        // prefix at N4): a `StartsWith(prefix + "/")`-only check misses a route at EXACTLY
+        // "api/catalog"/"api/themes"/"api/fonts" (a future parameterless [HttpGet] list action), so
+        // the match is segment-bounded — the prefix itself, or the prefix followed by a '/' — never a
+        // bare substring match.
         static bool MatchesGuardedPrefix(string route, string prefix) =>
             route == prefix || route.StartsWith(prefix + "/", StringComparison.Ordinal);
 
@@ -239,14 +245,14 @@ public static class FeatureThemeCatalogIsolation
             using var factory = new IsolationWebFactory(IsolationFixtures.DisabledCatalogUrl);
             _ = factory.CreateClient(); // force host build so the route table is populated
 
-            // When every api/catalog/* and api/themes/* route is discovered off the app's OWN table
-            //      (never a hand-maintained mirror of it),
+            // When every api/catalog/*, api/themes/*, and api/fonts/* route is discovered off the
+            //      app's OWN table (never a hand-maintained mirror of it),
             var discovered = DiscoverCatalogAndThemeEndpoints(factory.Services)
                 .SelectMany(endpoint => (endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? [])
                     .Select(verb => (Verb: verb, Route: endpoint.RoutePattern.RawText!.TrimStart('/'))))
                 .ToHashSet();
 
-            // Then it is EXACTLY the known set (AC1) — not a subset check, which would let a fifth
+            // Then it is EXACTLY the known set (AC1) — not a subset check, which would let a seventh
             //      route join silently (mirrors Story264_AnonymousApiSurface's own "named, deliberate
             //      set" idiom, applied to the admin-not-public axis instead of the anonymous one).
             Assert.True(KnownCatalogAndThemeRoutes.SetEquals(discovered), FailureMessage(discovered));
@@ -256,12 +262,12 @@ public static class FeatureThemeCatalogIsolation
         {
             var added = discovered.Except(KnownCatalogAndThemeRoutes).ToArray();
             var removed = KnownCatalogAndThemeRoutes.Except(discovered).ToArray();
-            return "The api/catalog/* + api/themes/* route set no longer matches the known, " +
-                "deliberate set. " +
+            return "The api/catalog/* + api/themes/* + api/fonts/* route set no longer matches the " +
+                "known, deliberate set. " +
                 (added.Length > 0 ? $"Newly present: [{string.Join(", ", added)}]. " : "") +
                 (removed.Length > 0 ? $"No longer present: [{string.Join(", ", removed)}]. " : "") +
-                "A new route under either prefix is a disclosure decision (SPEC F103.12) — add it to " +
-                "KnownCatalogAndThemeRoutes above only once it carries AdminSurface + Settings.";
+                "A new route under any of these prefixes is a disclosure decision (SPEC F103.12) — " +
+                "add it to KnownCatalogAndThemeRoutes above only once it carries AdminSurface + Settings.";
         }
 
         [Fact]
@@ -306,11 +312,16 @@ public static class FeatureThemeCatalogIsolation
         [InlineData("GET", "/api/catalog/entries/anything/assets/anything.woff2")]
         [InlineData("POST", "/api/themes/anything/import")]
         [InlineData("POST", "/api/themes/preview")]
+        [InlineData("POST", "/api/fonts/anything/install")]
         public async Task EveryRouteReturns404OnThePublicListener(string verb, string path)
         {
             // AdminSurface alone is a proxy for "not public" — SurfaceGateMiddleware's public-listener
             // check is what actually enforces it (only SpectatorSurface-tagged endpoints, plus
             // /health and /fonts/*, exist there), so this proves the BEHAVIOR the attribute predicts.
+            // /api/fonts/anything/install (review finding N4) is the ADMIN install route this file's
+            // own KnownCatalogAndThemeRoutes now pins — a distinct prefix from the public /fonts/*
+            // this comment's own parenthetical names, which serves already-installed face bytes and
+            // carries no AdminSurface at all.
             await using var factory = new IsolationWebFactory(
                 IsolationFixtures.DisabledCatalogUrl, simulatedPublicPort: IsolationFixtures.PublicPort);
             var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });

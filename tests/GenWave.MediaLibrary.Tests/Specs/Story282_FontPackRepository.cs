@@ -170,4 +170,50 @@ public static class FeatureFontPackRepository
             Assert.Null(await repo.GetFaceByFileAsync("no-such-file.woff2", CancellationToken.None));
         }
     }
+
+    // ---------------------------------------------------------------------
+    // SAD PATH — a mid-upsert failure rolls back EVERYTHING ("abort-pinning", T198/T199 review
+    // obligation): station.font_pack_face.file is UNIQUE across every installed pack, not scoped
+    // per-pack, so installing a brand-new pack whose own face names an already-installed filename
+    // raises a REAL Postgres 23505 partway through UpsertAsync's single transaction — AFTER the new
+    // pack row itself has already been inserted. This proves that failure rolls back the WHOLE
+    // transaction, not just the failing insert: no trace of the new pack survives, not even the row
+    // that landed before the failing statement. (FontPackController's own 23505-to-409 HTTP mapping
+    // is proven separately, against a scripted throwing fake, in
+    // GenWave.Host.Tests/Specs/Story282_FontPackInstall.cs — this is the real-Postgres half of the
+    // same review obligation.)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioAMidUpsertFailureAborts(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task ACrossPackFilenameCollisionLeavesNoTraceOfTheAbortedPack()
+        {
+            await db.ResetFontPackAsync();
+            var repo = Repo(db);
+
+            // Given an already-installed pack owning "shared-latin.woff2",
+            var sharedBytes = "an already-installed pack's own face payload"u8.ToArray();
+            await repo.UpsertAsync(
+                "pack-a", "Pack A", Definition, "pack-a-catalog-entry",
+                [new FontPackFaceInput("shared-latin.woff2", sharedBytes, Sha256Hex(sharedBytes))],
+                CancellationToken.None);
+
+            // When installing a DIFFERENT, brand-new pack whose own face declares that SAME
+            // filename — UpsertAsync's own transaction inserts the new pack row FIRST, then hits the
+            // real unique_violation partway through inserting its faces,
+            var collidingBytes = "a different pack's own face payload, same filename"u8.ToArray();
+            await Assert.ThrowsAsync<PostgresException>(() => repo.UpsertAsync(
+                "pack-b", "Pack B", Definition, "pack-b-catalog-entry",
+                [new FontPackFaceInput("shared-latin.woff2", collidingBytes, Sha256Hex(collidingBytes))],
+                CancellationToken.None));
+
+            // Then the whole transaction rolled back — no "pack-b" row exists at all, not even the
+            // pack row UpsertAsync had already inserted before the face insert failed.
+            var packs = await repo.GetAllAsync(CancellationToken.None);
+            Assert.DoesNotContain(packs, pack => pack.Slug == "pack-b");
+        }
+    }
 }
