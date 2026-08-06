@@ -136,7 +136,12 @@ function themeFlowFetchMock(overrides: {
     if (url === IMPORT_URL) {
       return (
         overrides.importResponse ??
-        makeJsonResponse(200, { slug: "golden-frequency", name: "Golden Frequency", importedFrom: "golden-frequency" })
+        makeJsonResponse(200, {
+          slug: "golden-frequency",
+          name: "Golden Frequency",
+          importedFrom: "golden-frequency",
+          importedAt: "2026-08-06T00:00:00Z",
+        })
       );
     }
     throw new Error(`unexpected fetch ${url}`);
@@ -151,12 +156,22 @@ function cardFor(name: string): HTMLElement {
   return card;
 }
 
-/** Opens Golden Frequency's detail panel and waits for the live composed preview to render. */
-async function openGoldenFrequencyPreview(fetchMock: jest.MockedFunction<typeof fetch>): Promise<void> {
+/** Opens Golden Frequency's detail panel and waits for the live composed preview to render.
+ * `installedThemeProvenance` (gh-#375) defaults to `[]`, the same "not installed" default
+ * `PersonaCatalogClient`'s own prop carries — pass a row naming this entry's own slug to exercise
+ * the already-installed path. */
+async function openGoldenFrequencyPreview(
+  fetchMock: jest.MockedFunction<typeof fetch>,
+  installedThemeProvenance: { slug: string; importedFrom: string; importedAt: string }[] = []
+): Promise<void> {
   global.fetch = fetchMock;
   render(
     <>
-      <PersonaCatalogClient initialIndex={{ entries: [THEME_ENTRY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }} />
+      <PersonaCatalogClient
+        initialIndex={{ entries: [THEME_ENTRY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }}
+        installedThemeProvenance={installedThemeProvenance}
+        timeZone="UTC"
+      />
       <Toaster />
     </>
   );
@@ -299,6 +314,52 @@ describe("Feature: previewing and installing a catalog theme", () => {
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
       expect(await screen.findByText('"Golden Frequency" installed.')).toBeInTheDocument();
     });
+
+    it("flips the detail panel to Installed/Re-install with the real provenance locally, no reload (gh-#375)", async () => {
+      const fetchMock = themeFlowFetchMock();
+      // Starts NOT installed — the default `installedThemeProvenance=[]` — so the button starts
+      // "Install" and no provenance line renders yet.
+      await openInstallDialog(fetchMock);
+
+      const dialog = within(screen.getByRole("dialog"));
+      await act(async () => {
+        fireEvent.click(dialog.getByRole("button", { name: "Confirm install" }));
+        await Promise.resolve();
+      });
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+      // The detail panel itself (still open — only the confirm dialog closed) now reads installed,
+      // with the REAL provenance the import response carried (never a fabricated "just now") and
+      // no second fetch: PersonaCatalogClient.handleThemeInstalled flips its own local state on the
+      // toast, the same cheap path the font half's own T204 spec calls for.
+      expect(screen.getByText("Installed")).toBeInTheDocument();
+      expect(screen.getByText("Imported · golden-frequency · Aug 6, 2026")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Re-install" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Install" })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Scenario: installed-state awareness (gh-#375 — the theme half of Dean's demo feedback)", () => {
+    it("shows Install and no provenance line when the theme is not installed", async () => {
+      const fetchMock = themeFlowFetchMock();
+      await openGoldenFrequencyPreview(fetchMock);
+
+      expect(screen.getByRole("button", { name: "Install" })).toBeInTheDocument();
+      expect(screen.queryByText("Installed")).not.toBeInTheDocument();
+      expect(screen.queryByText(/^Imported ·/)).not.toBeInTheDocument();
+    });
+
+    it('shows an Installed chip, "Imported · <source> · <date>", and Re-install when the theme is already installed', async () => {
+      const fetchMock = themeFlowFetchMock();
+      await openGoldenFrequencyPreview(fetchMock, [
+        { slug: "golden-frequency", importedFrom: "golden-frequency", importedAt: "2026-07-21T09:05:00Z" },
+      ]);
+
+      expect(screen.getByText("Installed")).toBeInTheDocument();
+      expect(screen.getByText("Imported · golden-frequency · Jul 21, 2026")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Re-install" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Install" })).not.toBeInTheDocument();
+    });
   });
 
   // ── SAD PATH ────────────────────────────────────────────────────────────
@@ -361,6 +422,28 @@ describe("Feature: previewing and installing a catalog theme", () => {
       );
       // The dialog stays open — a failed confirm is not a crash, and the operator can still cancel.
       expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+
+    it("flips nothing locally — the detail panel behind the dialog still reads Install, not Installed (gh-#375)", async () => {
+      const fetchMock = themeFlowFetchMock({
+        importResponse: makeJsonResponse(409, { detail: '"golden-frequency" is a shipped theme\'s slug and cannot be overwritten by an import (SPEC F103.8).' }),
+      });
+      await openInstallDialog(fetchMock);
+
+      const dialog = within(screen.getByRole("dialog"));
+      await act(async () => {
+        fireEvent.click(dialog.getByRole("button", { name: "Confirm install" }));
+        await Promise.resolve();
+      });
+      await screen.findByRole("alert");
+
+      // `onInstalled` (PersonaCatalogClient.handleThemeInstalled) only ever fires on
+      // ThemeInstallModal's own 2xx branch — a 409 never reaches it, so the detail panel's own
+      // Install button, still present behind the open dialog, never flips to Re-install.
+      // `getByText`, not `getByRole` (Radix marks the background `aria-hidden` while the dialog is
+      // open, which `*ByRole` correctly excludes but a plain text query does not).
+      expect(screen.getByText("Install")).toBeInTheDocument();
+      expect(screen.queryByText("Installed")).not.toBeInTheDocument();
     });
   });
 });

@@ -15,4 +15,14 @@ namespace GenWave.Host.Api;
 /// <param name="Name">The manifest's own display name.</param>
 /// <param name="ImportedFrom">The provenance stamp actually written: the <c>catalogSlug</c> query
 /// value, or <c>"file"</c> for a direct upload (SPEC F103.6/F103.11).</param>
-public sealed record ThemeImportResponse(string Slug, string Name, string ImportedFrom);
+/// <param name="ImportedAt">
+/// The moment <see cref="ImportedFrom"/> was stamped (gh-#375, Dean's gh-#375 demo feedback — the
+/// theme half of the v3.1.1 polish, mirroring the font half's own <c>FontPackInstallResponse</c>
+/// shape) — read back from <see cref="IThemeStore.GetBySlugAsync"/> straight after the upsert
+/// commits, the same <see cref="OwnerTheme.ImportedAt"/> value <c>GET /api/settings</c>'s own
+/// <c>Station:Theme</c> choices will report from the next read, never a client-approximated
+/// <see cref="DateTime.UtcNow"/> guess: the admin UI's catalog detail panel flips to "Installed"
+/// entirely from THIS response (no second fetch, PersonaCatalogClient's own local-flip precedent),
+/// so a fabricated timestamp here would be a lie the very next settings read could contradict.
+/// </param>
+public sealed record ThemeImportResponse(string Slug, string Name, string ImportedFrom, DateTime ImportedAt);

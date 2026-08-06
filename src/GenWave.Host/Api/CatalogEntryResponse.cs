@@ -65,6 +65,19 @@ namespace GenWave.Host.Api;
 /// straight to that route to render the transient specimen preview. <see langword="null"/> for every
 /// non-font entry, when unreachable, or when no upright face resolves.
 /// </param>
+/// <param name="FontLicense">
+/// A font entry's licence identifier (PLAN T204, Dean's post-v3.1.0 review: the pre-install review
+/// panel showed no licence at all) — parsed off the SAME hash-verified <see cref="Card"/> manifest
+/// <see cref="FontFamily"/> already reads, via the same <see cref="Catalog.CatalogFontManifestSerializer.Deserialize"/>
+/// call, zero extra cost. Paired with <see cref="FontVersion"/>/<see cref="FontSubset"/> to mirror the
+/// admin UI's Wardrobe page's own "licence · version · subset" line (<c>FontLibraryPackDto</c> — the
+/// wire DTO keeps its pre-rename name; only the UI label/route became "Wardrobe") so the SAME trust
+/// fact reads identically whether an operator is reviewing a pack pre-install or inspecting one
+/// already installed. <see langword="null"/> for every non-font entry, when unreachable, or when the
+/// manifest fails to parse (degrades — never a 500, see that method's own remarks).
+/// </param>
+/// <param name="FontVersion">A font entry's manifest version (PLAN T204) — genuinely optional even on a cleanly-parsed manifest (<see cref="Catalog.CatalogFontManifest.Version"/>'s own shape); <see langword="null"/> for every non-font entry, when unreachable, or when absent/unparseable.</param>
+/// <param name="FontSubset">A font entry's manifest subset, e.g. <c>"latin"</c> (PLAN T204) — <see langword="null"/> for every non-font entry, when unreachable, or when the manifest fails to parse.</param>
 public sealed record CatalogEntryResponse(
     string? Card,
     string? Meta,
@@ -78,4 +91,43 @@ public sealed record CatalogEntryResponse(
     IReadOnlyList<string>? SamplePatter,
     string? FontFamily,
     long? FontByteTotal,
-    string? FontSpecimenFile);
+    string? FontSpecimenFile,
+    string? FontLicense,
+    string? FontVersion,
+    string? FontSubset)
+{
+    /// <summary>
+    /// The graceful "catalog currently unreachable" shape (SPEC F90.4, <see cref="Unreachable"/> =
+    /// <see langword="true"/>, every other field <see langword="null"/>) — a named factory (gh-#375,
+    /// inherited from the font half's own review, finding N1) replacing the 15-positional-null literal <see cref="CatalogController.Entry"/>
+    /// used to construct inline. That literal predates this record's own by-name discipline (PLAN
+    /// T204's <see cref="CatalogController.ToEntryResponse"/> already names every argument it
+    /// passes) and had grown a silent trap: every widening of this record (three fields added at
+    /// T204 alone) meant one more null slotted into that same literal with nothing to catch a
+    /// miscount or a misordered pair of same-typed fields (two adjacent <see langword="string"/>?
+    /// positions swap silently). A one-time factory means the NEXT widening only ever touches this
+    /// method's own body, never a call site that has to be found and recounted. Named
+    /// <c>UnreachableCatalog</c>, not the record's own <see cref="Unreachable"/> property name — C#
+    /// forbids a method and a property sharing one identifier on the same type (CS0102), so the
+    /// dispatch's literal <c>CatalogEntryResponse.Unreachable()</c> naming could not compile as
+    /// written; this is the closest unambiguous name that still reads as "the unreachable shape" at
+    /// the call site.
+    /// </summary>
+    public static CatalogEntryResponse UnreachableCatalog() => new(
+        Card: null,
+        Meta: null,
+        FetchedAt: null,
+        Unreachable: true,
+        Kind: null,
+        Audience: null,
+        BestFor: null,
+        Author: null,
+        Description: null,
+        SamplePatter: null,
+        FontFamily: null,
+        FontByteTotal: null,
+        FontSpecimenFile: null,
+        FontLicense: null,
+        FontVersion: null,
+        FontSubset: null);
+}

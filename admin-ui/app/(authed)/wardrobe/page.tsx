@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { apiGet } from "@/lib/api";
-import { FontLibraryClient } from "./FontLibraryClient";
+import { WardrobeClient } from "./WardrobeClient";
 import type { FontLibraryPackDto } from "./types";
 
 // A pack can be installed or (later, M2) uninstalled at any time from elsewhere in the app —
@@ -26,9 +26,9 @@ const CATALOG_INDEX_URL_KEY = "Community:CatalogIndexUrl";
  * read — the layout's folds `Station:Theme` in for the header's ThemeSwitcher, a combination this
  * page has no use for; mirrors how every other authed page, e.g. persona-catalog/page.tsx, fetches
  * what it needs on its own rather than threading props down from the layout, which the App Router
- * gives no channel for). Threads into `FontLibraryClient`'s empty-state CTA (PLAN T203 review finding
+ * gives no channel for). Threads into `WardrobeClient`'s empty-state CTA (PLAN T203 review finding
  * F3) so a disabled catalog swaps "browse the catalog" for a pointer at Settings instead of linking
- * to `/persona-catalog`, which itself 404s off-catalog — the exact dead end the Library nav item's
+ * to `/persona-catalog`, which itself 404s off-catalog — the exact dead end the Wardrobe nav item's
  * own deliberate ungating (SPEC F104.8) exists to let an operator avoid. Any failure (network error,
  * non-200) degrades to `false` — fail closed, matching F90.1's own posture.
  */
@@ -44,7 +44,7 @@ async function fetchCatalogEnabled(cookieHeader: string): Promise<boolean> {
   }
 }
 
-export default async function LibraryPage(): Promise<ReactNode> {
+export default async function WardrobePage(): Promise<ReactNode> {
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
   const [response, catalogEnabled] = await Promise.all([
@@ -55,8 +55,8 @@ export default async function LibraryPage(): Promise<ReactNode> {
   if (!response.ok) {
     return (
       <main>
-        <h1 className="font-display text-[1.35rem] font-semibold text-ink">Library</h1>
-        <p className="mt-4 text-[0.85rem] text-danger">Unable to load the installed font library.</p>
+        <h1 className="font-display text-[1.35rem] font-semibold text-ink">Wardrobe</h1>
+        <p className="mt-4 text-[0.85rem] text-danger">Unable to load the installed font wardrobe.</p>
       </main>
     );
   }
@@ -65,9 +65,9 @@ export default async function LibraryPage(): Promise<ReactNode> {
 
   return (
     <main>
-      <h1 className="font-display text-[1.35rem] font-semibold text-ink">Library</h1>
+      <h1 className="font-display text-[1.35rem] font-semibold text-ink">Wardrobe</h1>
       <div className="mt-4">
-        <FontLibraryClient packs={packs} catalogEnabled={catalogEnabled} />
+        <WardrobeClient packs={packs} catalogEnabled={catalogEnabled} />
       </div>
     </main>
   );

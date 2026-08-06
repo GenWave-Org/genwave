@@ -240,7 +240,19 @@ public sealed partial class ThemesImportController(
             LogSafeText.Sanitize(slug),
             LogSafeText.Sanitize(importedFrom));
 
-        return Ok(new ThemeImportResponse(normalized.Slug, normalized.Name, importedFrom));
+        // gh-#375 (gh-#375, ThemeImportResponse's own remarks) — a read-back, not a client-side
+        // DateTime.UtcNow guess: the store just stamped imported_at unconditionally (both the
+        // insert and the update ON CONFLICT branch, see IThemeStore.UpsertAsync's own remarks) with
+        // an importedFrom that is NEVER null on this path, so OwnerTheme's own "ImportedAt is null
+        // exactly when ImportedFrom is" invariant guarantees a value here — a null read-back would
+        // mean the write this request just awaited never actually committed, worth surfacing loudly
+        // rather than papering over with a fabricated timestamp the admin UI would show as fact.
+        var stored = await themeStore.GetBySlugAsync(slug, ct)
+            ?? throw new InvalidOperationException($"Theme '{slug}' was upserted but could not be read back.");
+        var importedAt = stored.ImportedAt
+            ?? throw new InvalidOperationException($"Theme '{slug}' was imported but carries no imported_at stamp.");
+
+        return Ok(new ThemeImportResponse(normalized.Slug, normalized.Name, importedFrom, importedAt));
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

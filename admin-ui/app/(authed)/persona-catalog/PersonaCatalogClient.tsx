@@ -3,9 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { Chip } from "@/components/ui/chip";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toast";
+import { formatDateStamp } from "@/lib/format-clock";
 import { readErrorMessage } from "@/lib/problem-details";
 import { cn } from "@/lib/utils";
 import { PersonaCardReviewModal, type PersonaCardReviewImportResult } from "../_components/PersonaCardReviewModal";
@@ -22,11 +24,36 @@ import type {
   CatalogShelfEntryDto,
   CatalogThemePreview,
   CatalogThemeSwatchSet,
+  ThemeCatalogProvenanceDto,
 } from "./types";
 
 interface PersonaCatalogClientProps {
   /** The index this page's server component already fetched (SPEC F90.2, F90.4). */
   initialIndex: CatalogIndexResponseDto;
+  /**
+   * Slugs already installed, per `GET /api/fonts` (PLAN T204, Dean's post-v3.1.0 review: reopening
+   * an installed pack's detail panel showed no sign it was already installed). The page's own server
+   * component fetches this ALONGSIDE the index (the smaller diff over a lazy per-open fetch — one
+   * extra `Promise.all` leg server-side, versus threading a second client-side fetch/loading state
+   * through `loadDetail` for font entries only) and hands the slug list straight through; defaults to
+   * `[]` — fail closed, matching this file's own `catalogEnabled` default posture elsewhere in the
+   * app — so an isolated render with no live signal never CLAIMS a pack is installed that it has no
+   * evidence for.
+   */
+  installedFontSlugs?: string[];
+  /**
+   * Every catalog-imported theme's provenance, per `GET /api/settings`'s own `Station:Theme` choices
+   * (gh-#375 — the theme half of the same reopening-shows-no-installed-state complaint the
+   * font half above already closed). Mirrors `installedFontSlugs`'s own shape and defaults ([]) —
+   * fail closed, so an isolated render with no live signal never CLAIMS a theme is installed that it
+   * has no evidence for — see `ThemeCatalogProvenanceDto`'s own remarks for why this rides
+   * `/api/settings` rather than a new backend route.
+   */
+  installedThemeProvenance?: ThemeCatalogProvenanceDto[];
+  /** Test-only injection point for the theme provenance line's `formatDateStamp` call (gh-#375);
+   * production omits this and gets the browser's local zone — the same SettingsForm/WardrobeClient/
+   * PersonasClient idiom, not a bespoke one. */
+  timeZone?: string;
 }
 
 type DetailState =
@@ -68,12 +95,28 @@ type DetailState =
  * dedicated install-button task for M1, and T204's exit-check checklist has no other UI surface to
  * install a pack from.
  */
-export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps): ReactNode {
+export function PersonaCatalogClient({
+  initialIndex,
+  installedFontSlugs = [],
+  installedThemeProvenance = [],
+  timeZone,
+}: PersonaCatalogClientProps): ReactNode {
   const router = useRouter();
   const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
   const [reviewing, setReviewing] = useState(false);
   const [installingTheme, setInstallingTheme] = useState(false);
   const [installingFont, setInstallingFont] = useState(false);
+  // Seeded from the server-fetched prop above, then flipped locally the instant an install
+  // succeeds (handleFontInstalled below) — cheap, no reload/re-fetch needed for a set this small.
+  // `useState(() => ...)` (lazy initializer): this only needs to run once, not re-derive the Set on
+  // every render.
+  const [installedSlugs, setInstalledSlugs] = useState<ReadonlySet<string>>(() => new Set(installedFontSlugs));
+  // Same lazy-initializer/local-flip shape as `installedSlugs` above, keyed by slug — a Map, not a
+  // Set, because the theme detail panel's provenance line needs the WHOLE row
+  // (importedFrom/importedAt), not just a boolean.
+  const [installedThemes, setInstalledThemes] = useState<ReadonlyMap<string, ThemeCatalogProvenanceDto>>(
+    () => new Map(installedThemeProvenance.map((provenance) => [provenance.slug, provenance]))
+  );
 
   // Request token (T102 review, HIGH): loadDetail's fetch is not the only thing that can change
   // `detail` between when a request starts and when it resolves — the operator can also collapse
@@ -163,19 +206,30 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
 
   /** SPEC F103.6's success path: no `/themes` list page exists to land on (unlike Personas' own
    * `router.push` above) — `Station:Theme`'s choice list widening is a server-side fact the next
-   * `GET /api/settings` read already reflects (PLAN T183/T184), nothing this component needs to
-   * fetch or thread. Closing the modal and toasting is the whole client-side job. */
-  function handleThemeInstalled(result: ThemeInstallResult): void {
+   * `GET /api/settings` read already reflects (PLAN T183/T184). Closing the modal, toasting, AND
+   * (gh-#375 — mirrors `handleFontInstalled`'s own local flip) marking `slug` installed
+   * in local state — so `ThemeDetailPanel` flips to "Installed"/"Re-install" with the real
+   * provenance line immediately, no reload — is the whole client-side job. A failed install never
+   * reaches this function at all (`ThemeInstallModal` only calls `onInstalled` on its own 2xx
+   * branch), so a rejected confirm flips nothing here, same as the font half. */
+  function handleThemeInstalled(slug: string, result: ThemeInstallResult): void {
     setInstallingTheme(false);
+    setInstalledThemes((prev) => {
+      const next = new Map(prev);
+      next.set(slug, { slug, importedFrom: result.importedFrom, importedAt: result.importedAt });
+      return next;
+    });
     toast.success(`"${result.name}" installed.`);
   }
 
   /** SPEC F104.5's success path — mirrors `handleThemeInstalled`'s own remarks: no dedicated
-   * library-list page exists on THIS task's own owned files for the panel to route to (PLAN T203
-   * builds that separately); closing the modal and toasting the family that just entered the
-   * station's library is the whole client-side job. */
-  function handleFontInstalled(result: FontInstallResult): void {
+   * wardrobe-list page exists on THIS task's own owned files for the panel to route to (PLAN T203
+   * builds that separately); closing the modal, toasting the family that just entered the station's
+   * Wardrobe, AND (PLAN T204) marking `slug` installed in local state — so `FontDetailPanel` flips
+   * to "Installed"/"Re-install" immediately, no reload — is the whole client-side job. */
+  function handleFontInstalled(slug: string, result: FontInstallResult): void {
     setInstallingFont(false);
+    setInstalledSlugs((prev) => new Set(prev).add(slug));
     toast.success(`"${result.family}" installed.`);
   }
 
@@ -240,6 +294,8 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
           <ThemeDetailPanel
             slug={loaded.slug}
             manifestText={loaded.detail.card}
+            provenance={installedThemes.get(loaded.slug) ?? null}
+            timeZone={timeZone}
             onInstallClick={() => setInstallingTheme(true)}
           />
         );
@@ -247,7 +303,12 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
         return <DetailPanel slug={loaded.slug} detail={loaded.detail} onImportClick={() => setReviewing(true)} />;
       case "font":
         return (
-          <FontDetailPanel slug={loaded.slug} detail={loaded.detail} onInstallClick={() => setInstallingFont(true)} />
+          <FontDetailPanel
+            slug={loaded.slug}
+            detail={loaded.detail}
+            isInstalled={installedSlugs.has(loaded.slug)}
+            onInstallClick={() => setInstallingFont(true)}
+          />
         );
       default:
         return null;
@@ -299,7 +360,7 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
           slug={detail.slug}
           manifestText={detail.detail.card}
           onCancel={() => setInstallingTheme(false)}
-          onInstalled={handleThemeInstalled}
+          onInstalled={(result) => handleThemeInstalled(detail.slug, result)}
         />
       )}
 
@@ -309,7 +370,11 @@ export function PersonaCatalogClient({ initialIndex }: PersonaCatalogClientProps
           the theme block above): FontInstallModal posts no body of its own, so it has nothing to
           read off `detail.detail.card` at all — only `selectedEntry?.kind === "font"` gates it. */}
       {installingFont && detail.kind === "loaded" && selectedEntry?.kind === "font" && (
-        <FontInstallModal slug={detail.slug} onCancel={() => setInstallingFont(false)} onInstalled={handleFontInstalled} />
+        <FontInstallModal
+          slug={detail.slug}
+          onCancel={() => setInstallingFont(false)}
+          onInstalled={(result) => handleFontInstalled(detail.slug, result)}
+        />
       )}
     </div>
   );
@@ -333,25 +398,53 @@ function detailSectionAriaLabel(kind: CatalogEntryKind | undefined): string {
   }
 }
 
+/**
+ * A theme entry's detail panel (SPEC F103.5, F103.6, PLAN T186; installed-state awareness gh-#375
+ * — the theme half of Dean's demo feedback, mirroring `FontDetailPanel`'s own
+ * `isInstalled`/Re-install treatment). `provenance` is `null` for a theme with no `station.theme`
+ * row under this catalog slug (never installed, or the shipped default it happens to share a slug
+ * with — see `ThemeCatalogProvenanceDto`'s own remarks); non-null drives the SAME "Installed" chip
+ * `FontDetailPanel` uses (the shared `Chip` component) plus an "Imported · ⟨source⟩ · ⟨date⟩"
+ * provenance line — the T187 copy verbatim, minus the leading label `SettingsForm`'s own
+ * `ThemeProvenanceBadge` folds in (this panel already names the theme in its own heading, exactly
+ * the same reasoning `FontDetailPanel`'s own bare-word chip gives) — and the Install→Re-install
+ * button label. `importedFrom` renders VERBATIM, same provenance rule every other chip in this
+ * codebase follows.
+ */
 function ThemeDetailPanel({
   slug,
   manifestText,
+  provenance,
+  timeZone,
   onInstallClick,
 }: {
   slug: string;
   manifestText: string;
+  provenance: ThemeCatalogProvenanceDto | null;
+  timeZone?: string;
   onInstallClick: () => void;
 }): ReactNode {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-display text-[1.1rem] text-ink">{prettifySlug(slug)}</h2>
-        {/* Install (SPEC F103.6) opens ThemeInstallModal's confirm/cancel step — this click itself
-            issues no request; the modal POSTs the SAME manifestText already reviewed here. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="font-display text-[1.1rem] text-ink">{prettifySlug(slug)}</h2>
+          {provenance !== null && <Chip>Installed</Chip>}
+        </div>
+        {/* Install/Re-install (SPEC F103.6; label gh-#375) opens ThemeInstallModal's
+            confirm/cancel step — this click itself issues no request; the modal POSTs the SAME
+            manifestText already reviewed here. Re-install is a genuinely supported, non-destructive
+            action — ThemesImportController.Import upserts by slug (SPEC F103.7). */}
         <Button type="button" variant="primary" onClick={onInstallClick}>
-          Install
+          {provenance !== null ? "Re-install" : "Install"}
         </Button>
       </div>
+
+      {provenance !== null && (
+        <p className="text-[0.75rem] text-mute">
+          {`Imported · ${provenance.importedFrom} · ${formatDateStamp(provenance.importedAt, { timeZone })}`}
+        </p>
+      )}
 
       <ThemeDetailPreview slug={slug} manifestText={manifestText} />
     </div>

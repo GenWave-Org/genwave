@@ -1,12 +1,13 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { Chip } from "@/components/ui/chip";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatDateStamp } from "@/lib/format-clock";
-import { formatFontByteTotal } from "../persona-catalog/font-format";
+import { formatFontByteTotal, licenceLine } from "../persona-catalog/font-format";
 import type { FontLibraryPackDto } from "./types";
 
-export interface FontLibraryClientProps {
+export interface WardrobeClientProps {
   /** Every installed pack, from `GET /api/fonts` (SPEC F104.7). */
   packs: FontLibraryPackDto[];
   /** Test-only injection point for the provenance chip's `formatDateStamp` call; production omits
@@ -15,7 +16,7 @@ export interface FontLibraryClientProps {
   timeZone?: string;
   /**
    * Whether the Community Catalog is currently enabled (SPEC F90.1, `Community:CatalogIndexUrl`
-   * non-empty) — swaps the empty-state CTA (PLAN T203 review finding F3). The Library nav item is
+   * non-empty) — swaps the empty-state CTA (PLAN T203 review finding F3). The Wardrobe nav item is
    * deliberately ungated (see nav-items.ts's own remarks: installed packs outlive the catalog,
    * F104.8), so a disabled catalog must never leave this page's own empty state pointing at
    * `/persona-catalog` — that page 404s off-catalog, the exact dead end the ungated nav exists to
@@ -26,31 +27,16 @@ export interface FontLibraryClientProps {
   catalogEnabled?: boolean;
 }
 
-/** One pack's licence line — "&lt;licence&gt; · v&lt;version&gt; · &lt;subset&gt;" — omitting
- * whichever of the three the pack's stored `definition` carries no value for (`version` is
- * genuinely optional even on a cleanly-parsed manifest; `license`/`subset` are `null` only if that
- * manifest failed to re-parse server-side, see `FontLibraryPackDto`'s own remarks). Degrades to
- * "Licence unknown" rather than an empty line on the all-null edge — this page never renders a
- * blank fact where a reader would expect one. */
-function licenceLine(pack: FontLibraryPackDto): string {
-  const parts = [
-    pack.license,
-    pack.version !== null && pack.version !== "" ? `v${pack.version}` : null,
-    pack.subset,
-  ].filter((part): part is string => part !== null && part !== "");
-
-  return parts.length > 0 ? parts.join(" · ") : "Licence unknown";
-}
-
 /** Provenance chip — "Installed · &lt;slug&gt; · &lt;date&gt;" (SPEC F104.7 AC1, the db/25 pattern)
- * — mirrors `PersonasClient`'s own `ProvenanceBadge`/`SettingsForm`'s own `ThemeProvenanceBadge`
- * treatment (quiet bordered chip, T105/T187) rather than importing either: this page sits outside
- * both files' own partitions, and the shape here ("Installed", no leading label) differs from both
- * ("Hired"/"&lt;label&gt; — Imported") enough that a genuine shared component would need editing
- * either file anyway. `importedFrom` renders VERBATIM — this is provenance, not decoration, same
- * rule the persona/theme chips already follow — even though it is always equal to the pack's own
- * `slug` today (a pack has no authored-in-place path); reading it off its own field rather than
- * `pack.slug` keeps this chip honest about which column IS the provenance stamp. */
+ * — the shared `Chip` component (`components/ui/chip.tsx`, gh-#375 extraction) rather than
+ * `PersonasClient`'s own `ProvenanceBadge`/`SettingsForm`'s own `ThemeProvenanceBadge` directly:
+ * this page sits outside both files' own partitions, and the TEXT shape here ("Installed", no
+ * leading label) differs from both ("Hired"/"&lt;label&gt; — Imported") — only the visual chip
+ * styling itself was ever duplicated, which `Chip` now owns once. `importedFrom` renders VERBATIM —
+ * this is provenance, not decoration, same rule the persona/theme chips already follow — even
+ * though it is always equal to the pack's own `slug` today (a pack has no authored-in-place path);
+ * reading it off its own field rather than `pack.slug` keeps this chip honest about which column IS
+ * the provenance stamp. */
 function ProvenanceChip({
   importedFrom,
   importedAt,
@@ -60,20 +46,19 @@ function ProvenanceChip({
   importedAt: string;
   timeZone?: string;
 }): ReactNode {
-  return (
-    <span className="inline-flex w-fit items-center rounded-[3px] border border-line px-1.5 py-0.5 text-[0.68rem] text-mute">
-      {`Installed · ${importedFrom} · ${formatDateStamp(importedAt, { timeZone })}`}
-    </span>
-  );
+  return <Chip>{`Installed · ${importedFrom} · ${formatDateStamp(importedAt, { timeZone })}`}</Chip>;
 }
 
 /**
- * The Library page's client half (SPEC F104.7, STORY-284, PLAN T203) — every installed font pack,
- * each rendered as its own card: family (title), faces with style + byte size (the shared
- * `font-format.ts` helper, mirroring the shelf card's own T201 byte-total treatment), the licence
- * line, and the "Installed · ⟨slug⟩ · ⟨date⟩" provenance chip (AC1). Read-only — this page lists
- * what T199's install route already wrote; it issues no requests of its own. On an empty library,
- * `catalogEnabled` picks the empty-state CTA (T203 review finding F3) — see that prop's own remarks.
+ * The Wardrobe page's client half (SPEC F104.7, STORY-284, PLAN T203; renamed "Library" → "Wardrobe"
+ * at PLAN T204, Dean's ruling — nav label and route only, see nav-items.ts's own remarks; the wire
+ * (`GET /api/fonts`, `FontLibraryPackDto`) keeps its name, backend DTOs don't chase UI labels) —
+ * every installed font pack, each rendered as its own card: family (title), faces with style + byte
+ * size (the shared `font-format.ts` helper, mirroring the shelf card's own T201 byte-total
+ * treatment), the licence line, and the "Installed · ⟨slug⟩ · ⟨date⟩" provenance chip (AC1).
+ * Read-only — this page lists what T199's install route already wrote; it issues no requests of its
+ * own. On an empty wardrobe, `catalogEnabled` picks the empty-state CTA (T203 review finding F3) —
+ * see that prop's own remarks.
  *
  * <b>PLAIN TEXT ONLY (the T199/T200 stored-family/style obligation, closed here).</b>
  * `pack.family` and each face's `style` are unbounded free-form prose (see `FontLibraryPackDto`'s
@@ -81,7 +66,7 @@ function ProvenanceChip({
  * never `dangerouslySetInnerHTML` and never interpolated into an inline `style` attribute or any
  * other CSS context anywhere on this page.
  */
-export function FontLibraryClient({ packs, timeZone, catalogEnabled = false }: FontLibraryClientProps): ReactNode {
+export function WardrobeClient({ packs, timeZone, catalogEnabled = false }: WardrobeClientProps): ReactNode {
   if (packs.length === 0) {
     return catalogEnabled ? (
       <EmptyState

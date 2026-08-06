@@ -16,7 +16,7 @@ export interface FontLibraryFaceDto {
  *
  * `family`/`FontLibraryFaceDto.style` are UNBOUNDED free-form prose (the T199/T200 stored-family/
  * style obligation) — this page renders both as plain text ONLY, never interpolated into a
- * stylesheet or inline `style` attribute (see `FontLibraryClient`'s own remarks). */
+ * stylesheet or inline `style` attribute (see `WardrobeClient`'s own remarks). */
 export interface FontLibraryPackDto {
   slug: string;
   family: string;

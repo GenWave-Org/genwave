@@ -507,6 +507,113 @@ describe("Feature: The Persona Catalog server page", () => {
     });
   });
 
+  describe("Scenario: installed-font-slug wiring (PLAN T204, Dean's post-v3.1.0 review)", () => {
+    const indexBody: CatalogIndexResponseDto = {
+      entries: [EVERYONE_ENTRY],
+      fetchedAt: "2026-07-26T00:00:00Z",
+      unreachable: false,
+    };
+
+    it("threads GET /api/fonts's own slugs into PersonaCatalogClient as installedFontSlugs", async () => {
+      global.fetch = jest.fn<typeof fetch>().mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.endsWith("/api/catalog/index")) return makeJsonResponse(200, indexBody);
+        if (url.endsWith("/api/fonts")) return makeJsonResponse(200, [{ slug: "space-grotesk" }, { slug: "libre-grotesk" }]);
+        throw new Error(`unexpected fetch ${url}`);
+      }) as unknown as typeof fetch;
+
+      const { default: PersonaCatalogPage } = await import("../app/(authed)/persona-catalog/page");
+      const node = await PersonaCatalogPage();
+
+      const clientEl = findElementByType(node, PersonaCatalogClient);
+      expect(clientEl?.props["installedFontSlugs"]).toEqual(["space-grotesk", "libre-grotesk"]);
+    });
+
+    it("degrades to an empty list — never crashing the page — when GET /api/fonts fails", async () => {
+      global.fetch = jest.fn<typeof fetch>().mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.endsWith("/api/catalog/index")) return makeJsonResponse(200, indexBody);
+        if (url.endsWith("/api/fonts")) return makeJsonResponse(500, {});
+        throw new Error(`unexpected fetch ${url}`);
+      }) as unknown as typeof fetch;
+
+      const { default: PersonaCatalogPage } = await import("../app/(authed)/persona-catalog/page");
+      const node = await PersonaCatalogPage();
+
+      const clientEl = findElementByType(node, PersonaCatalogClient);
+      expect(clientEl?.props["installedFontSlugs"]).toEqual([]);
+    });
+  });
+
+  describe("Scenario: installed-theme-provenance wiring (gh-#375 — the theme half of PLAN T204's font-half fix)", () => {
+    const indexBody: CatalogIndexResponseDto = {
+      entries: [EVERYONE_ENTRY],
+      fetchedAt: "2026-07-26T00:00:00Z",
+      unreachable: false,
+    };
+
+    /** A `GET /api/settings` body carrying `Station:Theme`'s own choices (SPEC F103.11, PLAN
+     * T187) — only the fields `fetchInstalledThemeProvenance` reads. */
+    const settingsBody = [
+      {
+        key: "Station:Theme",
+        value: "cats-whisker",
+        source: "default",
+        applyMode: "live",
+        kind: "choice",
+        unit: "",
+        choices: [
+          { value: "cats-whisker", label: "Cat's Whisker", isDefault: true },
+          {
+            value: "midnight-drive",
+            label: "Midnight Drive",
+            importedFrom: "midnight-drive-catalog-entry",
+            importedAt: "2026-07-21T09:05:00Z",
+          },
+          { value: "aurora-glow", label: "Aurora Glow", importedFrom: "file", importedAt: "2026-07-20T14:32:00Z" },
+        ],
+      },
+    ];
+
+    it("threads Station:Theme's own imported choices into PersonaCatalogClient as installedThemeProvenance", async () => {
+      global.fetch = jest.fn<typeof fetch>().mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.endsWith("/api/catalog/index")) return makeJsonResponse(200, indexBody);
+        if (url.endsWith("/api/fonts")) return makeJsonResponse(200, []);
+        if (url.endsWith("/api/settings")) return makeJsonResponse(200, settingsBody);
+        throw new Error(`unexpected fetch ${url}`);
+      }) as unknown as typeof fetch;
+
+      const { default: PersonaCatalogPage } = await import("../app/(authed)/persona-catalog/page");
+      const node = await PersonaCatalogPage();
+
+      const clientEl = findElementByType(node, PersonaCatalogClient);
+      // Every choice carrying provenance rides through — a shipped default (no importedFrom) does
+      // not, mirroring the theme-provenance-badge.spec.tsx precedent's own "shipped default never
+      // gets a row" rule one layer up.
+      expect(clientEl?.props["installedThemeProvenance"]).toEqual([
+        { slug: "midnight-drive", importedFrom: "midnight-drive-catalog-entry", importedAt: "2026-07-21T09:05:00Z" },
+        { slug: "aurora-glow", importedFrom: "file", importedAt: "2026-07-20T14:32:00Z" },
+      ]);
+    });
+
+    it("degrades to an empty list — never crashing the page — when GET /api/settings fails", async () => {
+      global.fetch = jest.fn<typeof fetch>().mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.endsWith("/api/catalog/index")) return makeJsonResponse(200, indexBody);
+        if (url.endsWith("/api/fonts")) return makeJsonResponse(200, []);
+        if (url.endsWith("/api/settings")) return makeJsonResponse(500, {});
+        throw new Error(`unexpected fetch ${url}`);
+      }) as unknown as typeof fetch;
+
+      const { default: PersonaCatalogPage } = await import("../app/(authed)/persona-catalog/page");
+      const node = await PersonaCatalogPage();
+
+      const clientEl = findElementByType(node, PersonaCatalogClient);
+      expect(clientEl?.props["installedThemeProvenance"]).toEqual([]);
+    });
+  });
+
   describe("Scenario: disabled surface is a bare 404 (SPEC F90.1, sad path)", () => {
     it("renders an inline 'Not found' page when GET /api/catalog/index 404s", async () => {
       global.fetch = jest

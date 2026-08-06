@@ -58,12 +58,16 @@ export interface CatalogIndexResponseDto {
  * reads the already-projected fields below, but `card` is exactly what `PersonaCardReviewModal`
  * (SPEC F90.5/F90.6, PLAN T103) both renders in full and POSTs byte-for-byte on confirm; `meta`
  * stays unused by this page. Every field but `unreachable` is `null` exactly when `unreachable` is
- * `true`. `fontFamily`/`fontByteTotal`/`fontSpecimenFile` are `null` for every non-font entry
- * (T202) — `fontFamily` here is parsed straight from `card` (the manifest, T194), a DETAIL-side
- * sibling of `CatalogShelfEntryDto.fontFamily`'s own index-sourced field of the same name, not the
- * same fetch; see `FontDetailPanel`'s own remarks for why this value is never interpolated into
- * CSS. `fontSpecimenFile` is the bare filename `SpecimenBlock` passes to
- * `GET /api/catalog/entries/{slug}/assets/{file}` to render the real face (SPEC F104.4). */
+ * `true`. `fontFamily`/`fontByteTotal`/`fontSpecimenFile`/`fontLicense`/`fontVersion`/`fontSubset`
+ * are `null` for every non-font entry (T202, T204) — `fontFamily` here is parsed straight from
+ * `card` (the manifest, T194), a DETAIL-side sibling of `CatalogShelfEntryDto.fontFamily`'s own
+ * index-sourced field of the same name, not the same fetch; see `FontDetailPanel`'s own remarks for
+ * why this value is never interpolated into CSS. `fontSpecimenFile` is the bare filename
+ * `SpecimenBlock` passes to `GET /api/catalog/entries/{slug}/assets/{file}` to render the real face
+ * (SPEC F104.4). `fontLicense`/`fontVersion`/`fontSubset` (PLAN T204, Dean's post-v3.1.0 review: the
+ * pre-install review panel showed no licence anywhere) are the SAME manifest trio a Wardrobe pack's
+ * own `license`/`version`/`subset` carry once installed (`FontLibraryPackDto`) — see
+ * `font-format.ts`'s shared `licenceLine` for the one place both render identically. */
 export interface CatalogEntryDetailDto {
   card: string | null;
   meta: string | null;
@@ -77,4 +81,29 @@ export interface CatalogEntryDetailDto {
   fontFamily: string | null;
   fontByteTotal: number | null;
   fontSpecimenFile: string | null;
+  fontLicense: string | null;
+  fontVersion: string | null;
+  fontSubset: string | null;
+}
+
+/**
+ * One catalog-imported theme's provenance (gh-#375, Dean's demo feedback — the theme half
+ * of the v3.1.1 polish, mirroring the font half's `installedFontSlugs` — see
+ * `PersonaCatalogClient`'s own remarks). Sourced from `GET /api/settings`'s own `Station:Theme`
+ * choices (SPEC F103.11, PLAN T187's `SettingChoice.importedFrom`/`importedAt`), never a new
+ * backend route: `persona-catalog/page.tsx` extracts every choice carrying provenance and hands the
+ * list straight through — the smaller diff over adding a dedicated `GET /api/themes` listing (this
+ * task's own dispatch weighed both; see that file's own remarks for the full reasoning).
+ *
+ * `slug` is the catalog entry's own slug, kept as its own field distinct from `importedFrom` even
+ * though the two are always equal today (`ThemeInstallModal` always installs a theme under its own
+ * catalog slug, threading that SAME value as both the import route's target slug and its
+ * `?catalogSlug=`) — a caller keyed on `slug` never has to assume that equality holds, the same
+ * "read the real field, don't infer it" discipline `WardrobeClient`'s own `ProvenanceChip` remarks
+ * state for its own always-equal `importedFrom`/`slug` pair.
+ */
+export interface ThemeCatalogProvenanceDto {
+  slug: string;
+  importedFrom: string;
+  importedAt: string;
 }

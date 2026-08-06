@@ -4,13 +4,13 @@ import {
   CatalogIcon,
   DashboardIcon,
   HealthIcon,
-  LibraryIcon,
   LiveIcon,
   PersonaCatalogIcon,
   PersonaIcon,
   SafeContentIcon,
   ScheduleIcon,
   SettingsIcon,
+  WardrobeIcon,
   type IconProps,
 } from "./icons";
 
@@ -30,9 +30,15 @@ export interface NavItem {
 /**
  * Sidebar sections per SPEC F28.5, shared by the persistent desktop
  * `Sidebar` (≥1024px) and the `MobileNav` drawer (<1024px, SPEC F28.13) so
- * the two never drift. Libraries is deliberately absent — it lives under
- * the Catalog page's Libraries tab (Q7, SPEC F28.11); /libraries is now
- * only a redirect into that tab, never its own rendered route.
+ * the two never drift.
+ *
+ * "Libraries" (plural — the MEDIA library, Q7, SPEC F28.11) is deliberately absent from this list:
+ * it lives under the Catalog page's Libraries tab, and /libraries is only a redirect into that tab,
+ * never its own rendered route. Do not confuse it with "Wardrobe" below — a DIFFERENT feature
+ * entirely (SPEC F104.7, installed font packs; named "Library" through v3.1.0, renamed "Wardrobe" at
+ * PLAN T204, Dean's ruling) that this same stale note used to read as ruling out too (PLAN T203
+ * review finding, closed here): the two features share no code, and the naming collision was never
+ * intentional.
  */
 export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", Icon: DashboardIcon },
@@ -42,11 +48,12 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/personas", label: "Personas", Icon: PersonaIcon },
   { href: "/schedule", label: "Schedule", Icon: ScheduleIcon },
   { href: "/persona-catalog", label: "Community Catalog", Icon: PersonaCatalogIcon, requiresCatalog: true },
-  // Library (PLAN T203, SPEC F104.7) is deliberately NOT gated by `requiresCatalog` — unlike the
-  // Community Catalog browse surface, an installed pack keeps serving with the catalog disabled or
-  // unreachable (SPEC F104.8's offline floor), so the page that inspects what's ALREADY installed
-  // must stay reachable on that same axis too.
-  { href: "/library", label: "Library", Icon: LibraryIcon },
+  // Wardrobe (PLAN T203, SPEC F104.7; renamed from "Library" at PLAN T204, Dean's ruling — nav label
+  // and route only, see this file's own class remarks) is deliberately NOT gated by
+  // `requiresCatalog` — unlike the Community Catalog browse surface, an installed pack keeps serving
+  // with the catalog disabled or unreachable (SPEC F104.8's offline floor), so the page that
+  // inspects what's ALREADY installed must stay reachable on that same axis too.
+  { href: "/wardrobe", label: "Wardrobe", Icon: WardrobeIcon },
   { href: "/booth-log", label: "Booth log", Icon: BoothLogIcon },
   { href: "/health", label: "Health", Icon: HealthIcon },
   { href: "/settings", label: "Settings", Icon: SettingsIcon },

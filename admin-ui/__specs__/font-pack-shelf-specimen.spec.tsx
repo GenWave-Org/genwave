@@ -137,6 +137,19 @@ const FONT_DETAIL: CatalogEntryDetailDto = {
   fontFamily: "Space Grotesk",
   fontByteTotal: 7844,
   fontSpecimenFile: "libre-grotesk-variable-latin.woff2",
+  fontLicense: "OFL-1.1",
+  fontVersion: "2.000",
+  fontSubset: "latin",
+};
+
+// PLAN T204 (Dean's post-v3.1.0 review): "no mention of license anywhere in the panel" — the
+// all-null edge, mirroring a manifest that failed to parse server-side (CatalogController's own
+// degrade-not-500 posture).
+const FONT_DETAIL_WITHOUT_LICENCE: CatalogEntryDetailDto = {
+  ...FONT_DETAIL,
+  fontLicense: null,
+  fontVersion: null,
+  fontSubset: null,
 };
 
 const ENTRY_URL = "/api/catalog/entries/libre-grotesk";
@@ -266,13 +279,20 @@ describe("Feature: packs on the shelf with an honest specimen", () => {
   });
 
   /** Opens Libre Grotesk's detail panel via the shelf card's own title text (the fontFamily "Space
-   * Grotesk" — see this file's own fixture remarks for why it deliberately differs from the slug). */
-  async function openLibreGroteskDetail(fetchMock: jest.MockedFunction<typeof fetch>): Promise<void> {
+   * Grotesk" — see this file's own fixture remarks for why it deliberately differs from the slug).
+   * `installedFontSlugs` (PLAN T204) defaults to `[]`, the same "not installed" default
+   * `PersonaCatalogClient`'s own prop carries — pass `["libre-grotesk"]` to exercise the
+   * already-installed path. */
+  async function openLibreGroteskDetail(
+    fetchMock: jest.MockedFunction<typeof fetch>,
+    installedFontSlugs: string[] = []
+  ): Promise<void> {
     global.fetch = fetchMock;
     render(
       <>
         <PersonaCatalogClient
           initialIndex={{ entries: [FONT_ENTRY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }}
+          installedFontSlugs={installedFontSlugs}
         />
         <Toaster />
       </>
@@ -425,6 +445,67 @@ describe("Feature: packs on the shelf with an honest specimen", () => {
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
       expect(await screen.findByText('"Space Grotesk" installed.')).toBeInTheDocument();
     });
+
+    it("flips the detail panel to Installed/Re-install locally once the install succeeds, no reload (PLAN T204)", async () => {
+      const fetchMock = fontFlowFetchMock();
+      // Starts NOT installed — the default `installedFontSlugs=[]` — so the button starts "Install".
+      await openInstallDialog(fetchMock);
+
+      const dialog = within(screen.getByRole("dialog"));
+      await act(async () => {
+        fireEvent.click(dialog.getByRole("button", { name: "Confirm install" }));
+        await Promise.resolve();
+      });
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+      // The detail panel itself (still open — only the confirm dialog closed) now reads installed,
+      // with no second fetch and no page reload: PersonaCatalogClient.handleFontInstalled flips its
+      // own local state on the toast, the cheap path this task's own spec calls for.
+      expect(screen.getByText("Installed")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Re-install" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Install" })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Scenario: the licence is visible before install (PLAN T204, Dean's post-v3.1.0 review)", () => {
+    it("shows the licence · version · subset line on the pre-install review panel", async () => {
+      const fetchMock = fontFlowFetchMock();
+      await openLibreGroteskDetail(fetchMock);
+
+      expect(await screen.findByText("OFL-1.1 · v2.000 · latin")).toBeInTheDocument();
+    });
+
+    it("degrades to 'Licence unknown' rather than a blank line when the manifest carries none", async () => {
+      const fetchMock = fontFlowFetchMock({ entry: makeJsonResponse(200, FONT_DETAIL_WITHOUT_LICENCE) });
+      await openLibreGroteskDetail(fetchMock);
+
+      expect(await screen.findByText("Licence unknown")).toBeInTheDocument();
+    });
+  });
+
+  describe("Scenario: installed-state awareness (PLAN T204, Dean's post-v3.1.0 review)", () => {
+    it("shows Install and a state-neutral specimen caption when the pack is not installed", async () => {
+      const fetchMock = fontFlowFetchMock();
+      await openLibreGroteskDetail(fetchMock);
+      await screen.findByTestId("font-specimen");
+
+      expect(screen.getByRole("button", { name: "Install" })).toBeInTheDocument();
+      expect(screen.queryByText("Installed")).not.toBeInTheDocument();
+      expect(screen.getByText("Transient specimen — previewing installs nothing")).toBeInTheDocument();
+    });
+
+    it("shows an Installed chip, Re-install, and the SAME neutral caption when the pack is already installed", async () => {
+      const fetchMock = fontFlowFetchMock();
+      await openLibreGroteskDetail(fetchMock, ["libre-grotesk"]);
+      await screen.findByTestId("font-specimen");
+
+      expect(screen.getByText("Installed")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Re-install" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Install" })).not.toBeInTheDocument();
+      // The specimen caption never claims install state either way (F104.4's own "transient,
+      // installs nothing" fact is true regardless) — see SpecimenBlock's own remarks.
+      expect(screen.getByText("Transient specimen — previewing installs nothing")).toBeInTheDocument();
+    });
   });
 
   // ── SAD PATH ────────────────────────────────────────────────────────────
@@ -478,6 +559,30 @@ describe("Feature: packs on the shelf with an honest specimen", () => {
       // Cancel itself issues zero requests — no install, nothing else either.
       expect(fetchMock.mock.calls.length).toBe(callsBeforeCancel);
       expect(fetchMock.mock.calls.some(([url]) => String(url) === INSTALL_URL)).toBe(false);
+    });
+  });
+
+  describe("Scenario: a failed install flips nothing (gh-#375 review carry-forward, N3)", () => {
+    it("flips nothing locally — the detail panel behind the dialog still reads Install, not Installed", async () => {
+      const fetchMock = fontFlowFetchMock({
+        install: makeJsonResponse(409, { detail: "This pack is already installed under a different family." }),
+      });
+      await openInstallDialog(fetchMock);
+
+      const dialog = within(screen.getByRole("dialog"));
+      await act(async () => {
+        fireEvent.click(dialog.getByRole("button", { name: "Confirm install" }));
+        await Promise.resolve();
+      });
+      await screen.findByRole("alert");
+
+      // `onInstalled` (PersonaCatalogClient.handleFontInstalled) only ever fires on
+      // FontInstallModal's own resp.ok branch — a 409 never reaches it, so the detail panel's own
+      // Install button, still present behind the open dialog, never flips to Re-install.
+      // `getByText`, not `getByRole` (Radix marks the background `aria-hidden` while the dialog is
+      // open, which `*ByRole` correctly excludes but a plain text query does not).
+      expect(screen.getByText("Install")).toBeInTheDocument();
+      expect(screen.queryByText("Installed")).not.toBeInTheDocument();
     });
   });
 });
