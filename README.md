@@ -47,10 +47,7 @@ cp .env.example .env
 ./launch.sh
 ```
 
-Both scripts preflight the machine before touching anything (Docker running, compose
-plugin, .NET SDK, `.env` secrets) and every failure exit says how to proceed; a launch
-that fails part-way rolls the stack back down rather than leaving half of it running.
-`SKIP_PREFLIGHT=1` bypasses the checks on unusual setups.
+Both scripts preflight the machine before touching anything (Docker running, compose plugin, .NET SDK, `.env` secrets) and every failure exit says how to proceed; on the dev flow, a launch that fails part-way rolls the stack back down rather than leaving half of it running. `--pinned` deliberately does **not** roll back — whatever is still broadcasting keeps broadcasting, and the failure report says how to converge (see [DEPLOYMENT.md](DEPLOYMENT.md)). `SKIP_PREFLIGHT=1` bypasses the checks on unusual setups.
 
 Eight services start: `db`, `icecast`, `engine`, `api`, `kokoro` (TTS synthesizer), `piper` (CPU-only fallback TTS), `admin_ui` (operator console), and `dockerproxy` (a read-only, allowlisted docker-stats sidecar feeding the admin Health page — internal network only, no ports). Two optional services ride compose profiles: a Cloudflare tunnel with health/metrics observability (`tunnel`) and a Grafana Alloy log shipper (`logging`) — `./launch.sh --with logging,tunnel` activates them; see [DEPLOYMENT.md](DEPLOYMENT.md) and [`observability/`](observability/).
 
@@ -61,7 +58,9 @@ Eight services start: `db`, `icecast`, `engine`, `api`, `kokoro` (TTS synthesize
 - **API:** `http://localhost:8080` — anonymous hot path (`GET /media/random`, `GET /media/{id}`, `GET /health`) plus the cookie-auth admin surface under `/api/*`
 - **Spectator page:** `http://localhost:8081` — the station's read-only public face (now playing, history, stats, an optional anonymous song-request line with free-text wishes plus genre/mood pickers). Off by default: flip the live `Station:SpectatorMode` setting to enable it; [DEPLOYMENT.md](DEPLOYMENT.md) covers the four operating modes and the public topology. Metadata-aware players also get **per-track album art** via ICY `StreamUrl` once `Station:PublicBaseUrl` is set.
 
-On first boot the library scans `MEDIA_DIR`, enriches each file (loudness + cue + energy + BPM + tags, plus a high-confidence MusicBrainz release-year lookup when the tags carry none — disable-able live via `Library:YearLookup:Enabled`), and the feeder begins pulling ready tracks. Until the first tracks are ready, the engine plays the safe-rotation source — a curated library scope (`Station:SafeScope:LibraryIds`) pulled via `GET /internal/safe-track`. On a fresh deploy, a one-shot boot seed creates a `safe` library, renders a branded TTS announcement ("Please Stand By"), and points SafeScope at it — so drains air the announcement, not a random track; an operator-set SafeScope is never overwritten. If the scope resolves empty, `mksafe` emits silence as a logged degraded mode. The Orchestrator interleaves TTS patter (station IDs, lead-ins, back-announces, time checks) with music once Kokoro is up. When an `Llm:Endpoint` is configured (Settings page — live, no restart), lead-ins and back-announces become LLM-authored copy, optionally in an operator-authored DJ persona's voice (Personas page) — or hire a ready-made DJ from the community [Persona Catalog](https://github.com/GenWave-Org/genwave-catalog) (CC0 persona cards, browsed and adopted one-click from the Admin UI after a full-card review); with no LLM configured the template patter airs unchanged. Station identity (`STATION_NAME`, voice, scope) defaults to `GWAV 108.8` / `af_heart` / library 1 — override via env if needed.
+On first boot the library scans `MEDIA_DIR`, enriches each file (loudness + cue + energy + BPM + tags, plus a high-confidence MusicBrainz release-year lookup when the tags carry none — disable-able live via `Library:YearLookup:Enabled`), and the feeder begins pulling ready tracks. Until the first tracks are ready, the engine plays the safe-rotation source — a curated library scope (`Station:SafeScope:LibraryIds`) pulled via `GET /internal/safe-track`. On a fresh deploy, a one-shot boot seed creates a `safe` library, renders a branded TTS announcement ("Please Stand By"), and points SafeScope at it — so drains air the announcement, not a random track; an operator-set SafeScope is never overwritten. If the scope resolves empty, `mksafe` emits silence as a logged degraded mode. The Orchestrator interleaves TTS patter (station IDs, lead-ins, back-announces, time checks) with music once Kokoro is up. When an `Llm:Endpoint` is configured (Settings page — live, no restart), lead-ins and back-announces become LLM-authored copy, optionally in an operator-authored DJ persona's voice (Personas page) — or hire a ready-made DJ from the community [Community Catalog](https://github.com/GenWave-Org/genwave-catalog) (CC0 persona cards, browsed and adopted one-click from the Admin UI after a full-card review); with no LLM configured the template patter airs unchanged. Station identity (`STATION_NAME`, voice, scope) defaults to `GWAV 108.8` / `af_heart` / library 1 — override via env if needed.
+
+The station's look is themeable too (v3.0.0–v3.2.0). A theme is one JSON manifest — colour tokens for light and dark plus curated fonts — composed live into CSS for both the Admin UI and the spectator page; pick one via Settings or the switcher on either surface (a cookie-remembered visitor choice outranks the station default). The Community Catalog generalized from a persona-only shelf into a multi-kind one — personas, themes, and Dean-curated font packs, all adopted through the same one-click review flow. Installed font packs list on the **Wardrobe** page (v3.1.0); the **theme editor** (`/editor`, v3.2.0) mixes any theme's palette with a vendored-or-installed face, saves the remix as your own station theme, and lets you uninstall a pack — refused when a saved theme still references one of its faces.
 
 ### Resilience & operator tools
 
@@ -78,7 +77,7 @@ The broadcast never depends on a sick dependency. **LLM failure is a mode, not a
 │  └─ genwave.liq          # Liquidsoap playout script
 ├─ db/
 │  ├─ 01-library.sh        # library schema + library_svc role (canonical fresh install)
-│  └─ 02..30-*-migration.sh # idempotent in-place upgrades, one per shipped feature —
+│  └─ 02..32-*-migration.sh # idempotent in-place upgrades, one per shipped feature —
 │                          #   each header says what it adds; ./migrate.sh applies them all
 ├─ icecast/
 │  ├─ Dockerfile           # self-owned Icecast2 image
@@ -167,8 +166,8 @@ If level checks fail by a consistent offset, the `replay_gain` annotation format
 
 ## Shipped phases
 
-GenWave's epic-by-epic history — from v1 broadcast playout through the Persona
-Catalog — lives in [CHANGELOG.md](CHANGELOG.md).
+GenWave's epic-by-epic history — from v1 broadcast playout through the wardrobe workshop
+(font packs + the theme editor, v3.2.0) — lives in [CHANGELOG.md](CHANGELOG.md).
 
 ## Roadmap
 
@@ -182,7 +181,7 @@ Catalog — lives in [CHANGELOG.md](CHANGELOG.md).
 - **Upgrading an existing deployment:** run `./migrate.sh` after pulling a new release — it applies every `db/*-migration.sh` idempotently against the running stack (`./migrate.sh -f compose.yaml -f compose.demo.yaml` on a demo/appliance box; see [DEPLOYMENT.md](DEPLOYMENT.md)). `./launch.sh` does this automatically for the dev stack; a raw `docker compose up` does **not**.
 - Secrets live only in `.env` (gitignored). Promote to Docker secrets before anything public.
 - If you change `duration=` in `engine/genwave.liq`, pass the matching `CROSSFADE=` to `smoke_test.sh` so its analysis windows line up.
-- The `crossfade` operator behavior and `output.icecast.metadata` on-air signal are specific to Liquidsoap 2.4.x. The engine image is pinned to `v2.4.4` in `compose.yaml` — do not change the pin without re-running the smoke test.
+- The `crossfade` operator behavior and `output.icecast.metadata` on-air signal are specific to Liquidsoap 2.4.x. The engine image is pinned to `v2.4.4` in `engine/Dockerfile` (`FROM savonet/liquidsoap:v2.4.4`) — `compose.yaml` only echoes the pin in a comment — do not change it without re-running the smoke test.
 
 ## Built with AI assistance
 

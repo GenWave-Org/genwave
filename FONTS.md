@@ -7,9 +7,14 @@ establish — it closes ARCHITECTURE.md's two "Theme system" TODOs ("Font licens
 "Page-weight ceiling") **for the curated set**. The face list itself is a separate decision each time the set grows
 (PLAN T189 added JetBrains Mono + Grenze Gotisch, Dean-approved 2026-08-05); this document fixes
 the steps every face — today's or a later one — must clear before it ships, plus the mechanism
-that enforces it. Known recipe limitation: the step-3 `pyftsubset` invocation drops OFL name
-records (IDs 13/14) from the output; copyright (ID 0) survives and the licence is recorded in
-the provenance file, but a future recipe revision should add `--name-IDs='*'` and re-subset.
+that enforces it. The step-3 `pyftsubset` invocation now includes `--name-IDs='*'` (the recipe
+revision this document once deferred — it landed with the font-pack process, PLAN T197, Space
+Grotesk, v3.1.0), so a newly-subset face keeps its OFL name/URL records (IDs 13/14) in the
+shipped woff2 alongside copyright (ID 0). **Open item, not settled here:** the five faces
+vendored before that revision were subset under the old recipe and don't carry those name
+records in the binary — the licence is still recorded in the provenance file either way, but
+whether those five get re-subsetted for OFL-record parity with the packs is a `/design`
+decision.
 
 **Owner-uploaded fonts are explicitly out of scope** (SPEC F103.10, ARCHITECTURE "Theme system" §
 Community Catalog v2 → "Curated-font *process* now, faces at `/plan`; no owner uploads"). This
@@ -60,16 +65,17 @@ own build pipeline uses), against the codepoint range Google Fonts itself define
 subset (verified 2026-08-05 against `fonts.googleapis.com`'s own served CSS):
 
 ```bash
-pip install fonttools brotli
+pip install fonttools brotli   # fonttools 4.63.0 at the time of the first pack
 pyftsubset SourceFont.ttf \
   --output-file=family-name-variable-latin.woff2 \
-  --flavor=woff2 \
-  --layout-features='*' \
+  --flavor=woff2 --layout-features='*' --name-IDs='*' \
   --unicodes="U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD"
 ```
 
 Output filename convention: `{family-kebab-case}[-italic]-variable-latin.woff2` — matches the
-three faces already vendored and `FontEndpoints`' literal per-file switch.
+five faces already vendored and the shape `FontEndpoints`' serving route expects. That route is
+no longer a closed literal switch over the vendored set alone: it now serves a **closed set of
+vendored ∪ installed faces** (installed = station-side font packs — see "Enforcement" below).
 
 ### 4. Measure against the ceiling
 
@@ -113,29 +119,43 @@ alone (no Fraunces) totals 128,124 B and also fits.
 ## Enforcement — the validator
 
 `ThemeFontProvenanceValidator` (`src/GenWave.Host/Theming/ThemeFontProvenanceValidator.cs`) checks
-two things against `fonts-provenance.json` (`FontProvenanceCatalog`):
+two things against `fonts-provenance.json` (`FontProvenanceCatalog`) **plus, since PLAN T205,
+whatever `InstalledFontCatalog` currently holds** — station-side installed font packs:
 
 1. **Existence** — every font asset `src` a theme's manifest declares resolves to a face in the
-   provenance record. `ThemeManifestParser.FontSrcPattern` already pins the URL *shape*
-   (`/fonts/<name>.woff2`, no traversal, no off-origin URL); this is the missing *existence* check —
-   a manifest naming `/fonts/nonexistent.woff2` is now rejected at load/import time, naming the
-   missing face and the whole vendored set, instead of only failing once a browser requests it and
-   `FontEndpoints`' closed switch 404s it per-visitor.
-2. **Per-theme byte ceiling** — the theme's distinct referenced faces' summed bytes (from the
-   provenance record) must clear the ceiling above.
+   provenance record **or** the installed set. `ThemeManifestParser.FontSrcPattern` already pins
+   the URL *shape* (`/fonts/<name>.woff2`, no traversal, no off-origin URL); this is the missing
+   *existence* check — a manifest naming `/fonts/nonexistent.woff2` is rejected at load/import
+   time, naming the missing face and the whole vendored set, instead of only failing once a
+   browser requests it and `FontEndpoints`' closed set 404s it per-visitor.
+2. **Per-theme byte ceiling** — the theme's distinct referenced faces' summed bytes, from the
+   provenance record **and** the installed set combined, must clear the ceiling above.
 
-Wired at exactly the two places a theme manifest **enters the running system** — see
+**The widened law (SPEC F104.9/F104.10, PLAN T205).** `Validate`'s optional
+`installedFacesBySrc` parameter is the only thing that changed shape. A caller that still passes
+just the first three arguments — `ThemeCatalog.LoadShipped()`'s boot canary — keeps validating
+against vendored-only, because a `null` default collapses to an empty set: `LoadShipped()` runs
+before any DI container exists, so it has no installed set to pass even if it wanted to, and
+**shipped themes stay structurally incapable of referencing a pack face.**
+`ThemesImportController`, `ThemePreviewController`, and (PLAN T207) `ThemesSaveAsOwnController`
+are the callers that DO pass one, all built from the same DI'd `InstalledFontCatalog` singleton
+the widened `GET /fonts/{file}` route reads — so "can this face be imported/saved" and "can this
+face be served" can never silently disagree.
+
+Wired at exactly the three places a theme manifest **enters the running system** — see
 `ThemeFontProvenanceValidator`'s own remarks for the full placement reasoning:
 
 - `ThemeCatalog.LoadShipped()` — every shipped manifest (also covers `ThemeCatalog.CreateForStation`'s
-  initial state, which reuses `LoadShipped()`'s already-validated result).
-- `ThemesImportController.Import` — the only `station.theme` write path (SPEC F103.6); a rejection
+  initial state, which reuses `LoadShipped()`'s already-validated result). Vendored-only, per above.
+- `ThemesImportController.Import` — the `station.theme` import write path (SPEC F103.6); a rejection
   here is a `400` naming the offending face(s), never a partial or silent store.
+- `ThemesSaveAsOwnController` (PLAN T207) — the editor's save-as-own write path; the same validator,
+  the same vendored ∪ installed set, so a remix can save exactly what the editor let you assign.
 
 Deliberately **not** re-checked on every `ThemeCatalog.ReloadOwnerThemesAsync` reload (owner rows
-are guaranteed to already satisfy this the moment they were imported, since the import route above
-is the only writer). `ThemePreviewController` **does** call the same validator (commit `d43305d`,
-Dean-approved 2026-08-05: "preview refuses what import refuses") — an operator must never be sold a
-live preview of a theme the import route would go on to reject. This is an additive, non-persisting
-check of the same rule against ephemeral preview input; the import gate above remains the one place
-that guarantees every *persisted* row satisfies SPEC F103.10.
+are guaranteed to already satisfy this the moment they were imported/saved, since the two write
+routes above are the only writers). `ThemePreviewController` **does** call the same validator
+(commit `d43305d`, Dean-approved 2026-08-05: "preview refuses what import refuses") — an operator
+must never be sold a live preview of a theme a write route would go on to reject. This is an
+additive, non-persisting check of the same rule against ephemeral preview input; the two write
+gates above remain the place that guarantees every *persisted* row satisfies SPEC F103.10/F104.9.
