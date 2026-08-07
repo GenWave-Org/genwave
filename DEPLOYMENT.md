@@ -59,8 +59,9 @@ bad env — `GET /api/settings` reports `source: "override"` when a row is winni
 `appsettings.json`: the precedence chain terminates at the shipped default structurally, so
 seeding a literal would duplicate a value nothing enforces. Resolution order, highest first:
 
-1. the visitor's own `genwave-theme` cookie (their personal choice; not yet settable — the
-   switchers are unbuilt)
+1. the visitor's own `genwave-theme` cookie (their personal choice — set via the switcher on
+   either surface: the admin `ThemeSwitcher` control, the spectator `switcher.js`, both shipped
+   v3.0.0)
 2. the `Station:Theme` settings row
 3. the `Station:Theme` env default
 4. the shipped default
@@ -68,10 +69,11 @@ seeding a literal would duplicate a value nothing enforces. Resolution order, hi
 An unrecognised slug at **any** level falls through to the next rather than erroring, so a
 bad value degrades to the shipped default rather than an unstyled page.
 
-> ℹ️ **Today this is a one-option dropdown.** GenWave currently ships a single theme
-> (*Cat's Whisker*), and the theme switchers are not built yet — so setting this changes
-> nothing visible. It is documented now because the env-seeded appliance path and the
-> DB-overrides-env trap are already live and already bite.
+> ℹ️ **The dropdown is no longer one option.** GenWave embeds two themes (*Cat's Whisker* +
+> *Test Pattern* — the offline floor that resolves with no DB and no catalog), the Community
+> Catalog adds more to install, and an owner can mix-and-save their own remix in the theme
+> editor (`/editor`) — so setting `Station:Theme` visibly changes the look, on both the admin
+> console and the spectator page.
 
 ⚠️ Not to be confused with the **`genwave-mode`** cookie, which carries light/dark. Theme and
 mode are independent axes: a visitor who chose dark keeps dark when the station's theme
