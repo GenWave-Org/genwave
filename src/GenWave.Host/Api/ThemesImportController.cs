@@ -101,14 +101,17 @@ namespace GenWave.Host.Api;
 /// </para>
 ///
 /// <para>
-/// <b>Curated-font provenance/byte-ceiling (SPEC F103.10, PLAN T188) — the one place it is
-/// enforced.</b> After <see cref="ThemeManifestParser.Parse"/> succeeds, the parsed manifest is
-/// checked against <see cref="ThemeFontProvenanceValidator"/>: every font asset it references must
-/// resolve to a face in <see cref="FontProvenanceCatalog.Default"/> (the GenWave-vendored curated
-/// set), and its distinct referenced faces' summed bytes must clear FONTS.md's per-theme ceiling. A
-/// failure maps to 400, same posture as a structural manifest defect. This route is the ONLY
+/// <b>Curated-font provenance/byte-ceiling — now the WIDENED law (SPEC F103.10/F104.9, PLAN
+/// T188/T205) — the one place it is enforced.</b> After <see cref="ThemeManifestParser.Parse"/>
+/// succeeds, the parsed manifest is checked against <see cref="ThemeFontProvenanceValidator"/>: every
+/// font asset it references must resolve to a face in <see cref="FontProvenanceCatalog.Default"/> (the
+/// GenWave-vendored curated set) ∪ <see cref="installedFontCatalog"/>'s own currently-installed set
+/// (PLAN T205), and its distinct referenced faces' summed bytes — across BOTH sets — must clear
+/// FONTS.md's per-theme ceiling. A failure maps to 400, same posture as a structural manifest defect,
+/// enriched with a providing-pack suggestion when the catalog index knows one for a missing face (SPEC
+/// F104.10 — see <see cref="BuildUnvendoredFontDetailAsync"/>'s own remarks). This route is the ONLY
 /// <c>station.theme</c> write path, so passing this gate here is what guarantees every row this
-/// store ever holds already satisfies SPEC F103.10 — see <see cref="ThemeFontProvenanceValidator"/>'s
+/// store ever holds already satisfies SPEC F103.10/F104.9 — see <see cref="ThemeFontProvenanceValidator"/>'s
 /// own remarks for why <see cref="ThemeCatalog.ReloadOwnerThemesAsync"/> needs no second check.
 /// </para>
 ///
@@ -138,6 +141,8 @@ namespace GenWave.Host.Api;
 public sealed partial class ThemesImportController(
     IThemeStore themeStore,
     ThemeCatalog themeCatalog,
+    InstalledFontCatalog installedFontCatalog,
+    CatalogProxyService catalogProxyService,
     ILogger<ThemesImportController> logger) : ControllerBase
 {
     /// <summary>
@@ -145,10 +150,10 @@ public sealed partial class ThemesImportController(
     /// the reasoning behind each one. Gate order: route slug format (400) → shipped-slug reservation
     /// (409, F103.8) → <paramref name="catalogSlug"/> format (400, F90.7 precedent) → bounded body
     /// read (413) → schema-major (400, AC6, checked ahead of structural parsing — PLAN T184 review F5)
-    /// → deserialize-as-validation (400, F103.6) → curated-font provenance/byte-ceiling (400, F103.10,
-    /// PLAN T188 — <see cref="ThemeFontProvenanceValidator"/>, the only <c>station.theme</c> write
-    /// path, so a row is never stored referencing an unvendored face or an over-budget font set) →
-    /// upsert + catalog rebuild (F103.7).
+    /// → deserialize-as-validation (400, F103.6) → curated-font provenance/byte-ceiling (400,
+    /// F103.10/F104.9, PLAN T188/T205 — <see cref="ThemeFontProvenanceValidator"/>, the only
+    /// <c>station.theme</c> write path, so a row is never stored referencing a face outside vendored ∪
+    /// installed or an over-budget font set) → upsert + catalog rebuild (F103.7).
     /// </summary>
     [HttpPost("{slug}/import")]
     [Consumes("application/json")]
@@ -209,17 +214,21 @@ public sealed partial class ThemesImportController(
             return BadRequest(ImportProblems.MalformedManifest(ex.Message));
         }
 
-        // SPEC F103.10, PLAN T188 — this route is the ONLY station.theme write path, so this is the
-        // one gate that must hold for every row ever persisted; see ThemeFontProvenanceValidator's
-        // own "Placement" remarks for why ThemeCatalog.ReloadOwnerThemesAsync needs no second check.
+        // SPEC F103.10/F104.9, PLAN T188/T205 — this route is the ONLY station.theme write path, so
+        // this is the one gate that must hold for every row ever persisted; see
+        // ThemeFontProvenanceValidator's own "Placement"/"THE WIDENED LAW" remarks for why
+        // ThemeCatalog.ReloadOwnerThemesAsync needs no second check, and why installedFontCatalog's
+        // own current snapshot is passed here rather than validating vendored-only.
         try
         {
             ThemeFontProvenanceValidator.Validate(
-                manifest, FontProvenanceCatalog.Default.BySrc, ThemeFontProvenanceValidator.PerThemeByteCeilingBytes);
+                manifest, FontProvenanceCatalog.Default.BySrc, ThemeFontProvenanceValidator.PerThemeByteCeilingBytes,
+                installedFontCatalog.InstalledByteSizeBySrc());
         }
         catch (ThemeManifestException ex)
         {
-            return BadRequest(ImportProblems.UnvendoredFont(ex.Message));
+            var detail = await BuildUnvendoredFontDetailAsync(manifest, ex.Message, ct);
+            return BadRequest(ImportProblems.UnvendoredFont(detail));
         }
 
         var normalized = NormalizeSlug(manifest, slug);
@@ -256,6 +265,52 @@ public sealed partial class ThemesImportController(
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// SPEC F104.10, PLAN T205 — enriches <see cref="ThemeFontProvenanceValidator.Validate"/>'s own
+    /// refusal (<paramref name="baseDetail"/>, its exception message verbatim) with a providing-pack
+    /// suggestion for every referenced face missing from BOTH the vendored and installed sets, when the
+    /// catalog index knows one. Runs ONLY on this already-decided failure path — never on every import
+    /// attempt — so a theme that clears provenance never pays for a catalog round trip it has no use
+    /// for.
+    ///
+    /// <para>
+    /// <b>Fail soft, by construction (SPEC F104.10's own "index unreachable ⇒ 400 still names the face,
+    /// just without a pack suggestion").</b> <see cref="CatalogProxyService.GetIndexAsync"/> already
+    /// collapses "the catalog is genuinely offline" and "the catalog kill switch is off" (SPEC F90.1)
+    /// into the SAME <see cref="CatalogIndexFetchResult.Unreachable"/> outcome — this method treats both
+    /// identically, returning <paramref name="baseDetail"/> untouched: the theme is refused either way,
+    /// the suggestion is best-effort, additive prose only, never a precondition for refusing.
+    /// </para>
+    /// </summary>
+    async Task<string> BuildUnvendoredFontDetailAsync(ThemeManifest manifest, string baseDetail, CancellationToken ct)
+    {
+        var missingSrcs = ThemeFontProvenanceValidator.FindMissingSrcs(
+            manifest, FontProvenanceCatalog.Default.BySrc, installedFontCatalog.InstalledByteSizeBySrc());
+        if (missingSrcs.Count == 0)
+            return baseDetail; // a ceiling-only refusal — nothing missing to suggest a pack for
+
+        if (await catalogProxyService.GetIndexAsync(ct) is not CatalogIndexFetchResult.Ok index)
+            return baseDetail; // fail soft — see this method's own remarks
+
+        var packSlugByFile = index.Entries
+            .Where(entry => entry.Kind == CatalogEntryKind.Font)
+            .SelectMany(entry => entry.Assets.Select(asset => (File: Path.GetFileName(asset.Path), entry.Slug)))
+            .GroupBy(pair => pair.File, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().Slug, StringComparer.Ordinal);
+
+        var providingPackSlugsByMissingSrc = missingSrcs
+            .Where(src => packSlugByFile.ContainsKey(FileFromSrc(src)))
+            .ToDictionary(src => src, src => packSlugByFile[FileFromSrc(src)], StringComparer.Ordinal);
+
+        return ImportProblems.UnvendoredFontDetail(baseDetail, providingPackSlugsByMissingSrc);
+    }
+
+    // ThemeManifestParser.FontSrcPattern pins every font asset src to the fixed "/fonts/<name>.woff2"
+    // shape before a manifest ever parses successfully — this route only ever reaches here past that
+    // gate, so a plain substring slice is exact, not a best-effort Path.GetFileName the shape check
+    // already makes unnecessary.
+    static string FileFromSrc(string src) => src["/fonts/".Length..];
 
     /// <summary>Re-stamps <paramref name="manifest"/>'s own <see cref="ThemeManifest.Slug"/> to the
     /// route <paramref name="routeSlug"/> — see this controller's own remarks ("Slug is the upsert

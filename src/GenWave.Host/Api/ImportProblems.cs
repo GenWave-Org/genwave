@@ -59,12 +59,43 @@ internal static class ImportProblems
 
     /// <summary>The shared 400 body both routes return when
     /// <see cref="ThemeFontProvenanceValidator.Validate"/> throws (SPEC F103.10, PLAN T188) —
-    /// <paramref name="detail"/> carries that exception's own message verbatim, either an
-    /// unvendored-face name (and the whole vendored set) or an over-ceiling byte total.</summary>
+    /// <paramref name="detail"/> carries that exception's own message verbatim (SPEC F104.9's widened
+    /// law, PLAN T205, still throws through the SAME exception), either an unvendored/uninstalled-face
+    /// name (and the whole vendored set) or an over-ceiling byte total, optionally already run through
+    /// <see cref="UnvendoredFontDetail"/> below.</summary>
     public static ProblemDetails UnvendoredFont(string detail) => new()
     {
         Status = StatusCodes.Status400BadRequest,
         Title  = "Theme fonts rejected.",
         Detail = detail,
     };
+
+    /// <summary>
+    /// SPEC F104.10, PLAN T205 — appends an "install pack…" suggestion for every missing font src the
+    /// catalog index tells the caller a pack could provide, onto <paramref name="baseDetail"/>
+    /// (<see cref="ThemeFontProvenanceValidator.Validate"/>'s own missing-face message). The ONE shared
+    /// copy home both the theme import route (T205) and the future save-as-own route (T207 — "the same
+    /// copy… reused verbatim") build their widened-font-law 400 detail from, so the two routes can never
+    /// silently drift onto two different phrasings for the identical refusal.
+    ///
+    /// <para>
+    /// <paramref name="providingPackSlugsByMissingSrc"/> is EMPTY — never a caller's own inline string —
+    /// whenever there is nothing to suggest: a ceiling-only refusal (nothing is actually missing), or a
+    /// missing face the catalog index could not resolve a pack for (including because the index itself
+    /// is unreachable — SPEC F104.10's own fail-soft posture: a missing face is ALWAYS named by
+    /// <paramref name="baseDetail"/> already; the pack suggestion is best-effort, additive prose only,
+    /// never a precondition for refusing).
+    /// </para>
+    /// </summary>
+    public static string UnvendoredFontDetail(
+        string baseDetail, IReadOnlyDictionary<string, string> providingPackSlugsByMissingSrc)
+    {
+        if (providingPackSlugsByMissingSrc.Count == 0)
+            return baseDetail;
+
+        var suggestions = providingPackSlugsByMissingSrc
+            .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            .Select(pair => $"\"{pair.Key}\" is provided by pack \"{pair.Value}\" — install it to make this face available.");
+        return $"{baseDetail} {string.Join(" ", suggestions)}";
+    }
 }

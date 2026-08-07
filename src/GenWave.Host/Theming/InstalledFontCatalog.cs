@@ -97,6 +97,20 @@ public sealed class InstalledFontCatalog
         facesByFile.TryGetValue(file, out content);
 
     /// <summary>
+    /// The widened font law's (SPEC F104.9, PLAN T205) OTHER hot-path consumer of the SAME snapshot
+    /// <see cref="TryGetFace"/> reads — every currently-installed face's byte size, keyed by its
+    /// <c>/fonts/{file}</c> src, for <see cref="ThemeFontProvenanceValidator.Validate"/>'s membership
+    /// and per-theme byte-ceiling checks. Deliberately projects down to size only, never a face's raw
+    /// bytes (<see cref="FontPackFaceContent.Bytes"/>) or its owning pack's <c>Family</c>/<c>Style</c> —
+    /// the SAME minimal-exposure discipline this class's own REVIEWER OBLIGATION remarks already hold
+    /// for every consumer that has no CSS/stylesheet use for either. A fresh dictionary per call
+    /// (bounded by how many faces are actually installed — this class's own memory-math remarks), never
+    /// a store round trip: still a plain read against the volatile <see cref="facesByFile"/> snapshot.
+    /// </summary>
+    public IReadOnlyDictionary<string, long> InstalledByteSizeBySrc() =>
+        facesByFile.ToDictionary(pair => $"/fonts/{pair.Key}", pair => (long)pair.Value.Bytes.Length, StringComparer.Ordinal);
+
+    /// <summary>
     /// Rebuilds the installed-faces snapshot from <see cref="store"/> — called once at boot
     /// (<see cref="InstalledFontCatalogLoadHostedService"/>) and again after every successful install
     /// (<c>FontPackController</c>, with <see cref="CancellationToken.None"/> — the T184 rebuild-after-
