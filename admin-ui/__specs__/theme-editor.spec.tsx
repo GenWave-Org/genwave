@@ -10,7 +10,7 @@
 // no cookie/localStorage/sessionStorage anywhere in its own module, asserted directly below). The
 // composer itself (ThemeCssComposer.ComposeScoped) is proven server-side in
 // tests/GenWave.Host.Tests/Specs/Story274_ThemeCatalogPreview.cs; the two new GET routes this page's
-// server component reads (GET /api/themes, GET /api/fonts/vendored) are proven server-side in
+// server component reads (GET /api/themes, GET /api/fonts/assignable) are proven server-side in
 // tests/GenWave.Host.Tests/Specs/Story286_EditorComposesTheRemix.cs — this file only pins what
 // EditorClient itself does with props it already has in hand.
 
@@ -23,8 +23,8 @@ import type { ThemeSummaryDto } from "../app/(authed)/editor/types";
 // ---------------------------------------------------------------------------
 // Fixtures — two resolvable themes (mirrors the two real shipped manifests, cats-whisker/
 // test-pattern) and the editor's own assignable face set, AS ALREADY UNIONED SERVER-SIDE (T206
-// review finding F4: `GET /api/fonts/vendored` now returns vendored ∪ installed itself — Space
-// Grotesk, the M1 golden installed pack, rides the SAME `vendoredFaces` prop as the curated set;
+// review finding F4: `GET /api/fonts/assignable` now returns vendored ∪ installed itself — Space
+// Grotesk, the M1 golden installed pack, rides the SAME `assignableFaces` prop as the curated set;
 // `EditorClient` no longer takes a separate installed-packs prop to re-merge client-side).
 // ---------------------------------------------------------------------------
 
@@ -68,7 +68,7 @@ const TEST_PATTERN: ThemeSummaryDto = {
   },
 };
 
-// A theme whose display face isn't in VENDORED_FACES at all — proves review finding F4's "the base
+// A theme whose display face isn't in ASSIGNABLE_FACES at all — proves review finding F4's "the base
 // theme's current face is not among the options" case: the picker must show it as the truthfully
 // selected value rather than a lying default.
 const OFF_ASSIGNABLE_SET_THEME: ThemeSummaryDto = {
@@ -93,12 +93,12 @@ const OFF_ASSIGNABLE_SET_THEME: ThemeSummaryDto = {
 
 const THEMES: ThemeSummaryDto[] = [CATS_WHISKER, TEST_PATTERN];
 
-// The editor's own assignable set (`GET /api/fonts/vendored`, widened at T206 review finding F4) —
+// The editor's own assignable set (`GET /api/fonts/assignable`, widened at T206 review finding F4) —
 // vendored ∪ installed ALREADY unioned server-side; Space Grotesk (the M1 golden installed pack)
 // rides this SAME array, not a separate installed-packs prop. Deliberately excludes "Grenze Gotisch"
 // — OFF_ASSIGNABLE_SET_THEME's own display face — so its own Scenario below can prove the "not among
 // the options" case against a real gap.
-const VENDORED_FACES = [
+const ASSIGNABLE_FACES = [
   { family: "Fraunces", src: "/fonts/fraunces-variable-latin.woff2" },
   { family: "Source Sans 3", src: "/fonts/source-sans-3-variable-latin.woff2" },
   { family: "JetBrains Mono", src: "/fonts/jetbrains-mono-variable-latin.woff2" },
@@ -182,7 +182,7 @@ describe("Feature: the editor mixes components", () => {
     it("assigning a face to a role re-composes the scoped live preview (T206, AC1)", async () => {
       const fetchMock = previewFetchMock();
       global.fetch = fetchMock;
-      render(<EditorClient themes={THEMES} vendoredFaces={VENDORED_FACES} />);
+      render(<EditorClient themes={THEMES} assignableFaces={ASSIGNABLE_FACES} />);
 
       // The preview already renders the base theme's OWN default face (Fraunces) before any
       // explicit assignment — AC1's "the editor with a base theme and the role pickers".
@@ -199,7 +199,7 @@ describe("Feature: the editor mixes components", () => {
 
     it("role pickers offer vendored plus installed faces and nothing else (T206, AC1)", async () => {
       global.fetch = previewFetchMock();
-      render(<EditorClient themes={THEMES} vendoredFaces={VENDORED_FACES} />);
+      render(<EditorClient themes={THEMES} assignableFaces={ASSIGNABLE_FACES} />);
       await screen.findByTestId("theme-live-preview");
 
       const displayPicker = within(screen.getByLabelText("Display face"));
@@ -214,7 +214,7 @@ describe("Feature: the editor mixes components", () => {
 
     it("no token-level colour editing surface exists (T206, AC1)", async () => {
       global.fetch = previewFetchMock();
-      render(<EditorClient themes={THEMES} vendoredFaces={VENDORED_FACES} />);
+      render(<EditorClient themes={THEMES} assignableFaces={ASSIGNABLE_FACES} />);
       await screen.findByTestId("theme-live-preview");
 
       // Exactly three controls exist — base theme, display face, sans face — no colour input, no
@@ -229,7 +229,7 @@ describe("Feature: the editor mixes components", () => {
     it("closing or reverting persists nothing (T206, AC2)", async () => {
       global.fetch = previewFetchMock();
 
-      const { unmount } = render(<EditorClient themes={THEMES} vendoredFaces={VENDORED_FACES} />);
+      const { unmount } = render(<EditorClient themes={THEMES} assignableFaces={ASSIGNABLE_FACES} />);
       await screen.findByTestId("theme-live-preview");
 
       // Assign a different base theme AND a different display face — a real, in-progress remix.
@@ -249,7 +249,7 @@ describe("Feature: the editor mixes components", () => {
       // equivalent of reopening after a reload) starts from the FIRST theme's own default face
       // again, not the assignment just made.
       unmount();
-      render(<EditorClient themes={THEMES} vendoredFaces={VENDORED_FACES} />);
+      render(<EditorClient themes={THEMES} assignableFaces={ASSIGNABLE_FACES} />);
       await screen.findByTestId("theme-live-preview");
       expect(screen.getByLabelText("Base theme")).toHaveValue("cats-whisker");
       expect(screen.getByLabelText("Display face")).toHaveValue("/fonts/fraunces-variable-latin.woff2");
@@ -258,7 +258,7 @@ describe("Feature: the editor mixes components", () => {
     it("only transient compose calls appear on the network (T206, AC2)", async () => {
       const fetchMock = previewFetchMock();
       global.fetch = fetchMock;
-      render(<EditorClient themes={THEMES} vendoredFaces={VENDORED_FACES} />);
+      render(<EditorClient themes={THEMES} assignableFaces={ASSIGNABLE_FACES} />);
       await screen.findByTestId("theme-live-preview");
 
       fireEvent.change(screen.getByLabelText("Display face"), { target: { value: "/fonts/space-grotesk-variable-latin.woff2" } });
@@ -285,7 +285,7 @@ describe("Feature: the editor mixes components", () => {
     it("composes the base theme's own font declaration byte-untouched when nothing is assigned", async () => {
       const fetchMock = previewFetchMock();
       global.fetch = fetchMock;
-      render(<EditorClient themes={THEMES} vendoredFaces={VENDORED_FACES} />);
+      render(<EditorClient themes={THEMES} assignableFaces={ASSIGNABLE_FACES} />);
       await screen.findByTestId("theme-live-preview");
       await waitFor(() => expect(fetchMock).toHaveBeenCalled());
 
@@ -301,7 +301,7 @@ describe("Feature: the editor mixes components", () => {
     it("replaces only the assigned role with the single-face 400/normal shape", async () => {
       const fetchMock = previewFetchMock();
       global.fetch = fetchMock;
-      render(<EditorClient themes={THEMES} vendoredFaces={VENDORED_FACES} />);
+      render(<EditorClient themes={THEMES} assignableFaces={ASSIGNABLE_FACES} />);
       await screen.findByTestId("theme-live-preview");
 
       fireEvent.change(screen.getByLabelText("Display face"), { target: { value: "/fonts/space-grotesk-variable-latin.woff2" } });
@@ -328,12 +328,12 @@ describe("Feature: the editor mixes components", () => {
       render(
         <EditorClient
           themes={[CATS_WHISKER, TEST_PATTERN, OFF_ASSIGNABLE_SET_THEME]}
-          vendoredFaces={VENDORED_FACES}
+          assignableFaces={ASSIGNABLE_FACES}
         />
       );
       await screen.findByTestId("theme-live-preview");
 
-      // Switching to a base theme whose display face ("Grenze Gotisch") is NOT in VENDORED_FACES,
+      // Switching to a base theme whose display face ("Grenze Gotisch") is NOT in ASSIGNABLE_FACES,
       fireEvent.change(screen.getByLabelText("Base theme"), { target: { value: "off-assignable-theme" } });
 
       // The Display picker shows it as the TRUTHFULLY selected value — never blank, never silently

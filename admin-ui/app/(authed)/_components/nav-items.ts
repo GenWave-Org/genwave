@@ -58,7 +58,7 @@ export const NAV_ITEMS: NavItem[] = [
   // Editor (PLAN T206, SPEC F104.11) — the v2 editor mixes a base theme's palette with wardrobe
   // faces, transient client state only. Deliberately NOT gated by `requiresCatalog`, the SAME
   // reasoning as Wardrobe's own ungated entry immediately above: the base-theme and vendored role
-  // picker options never touch the Community Catalog at all (GET /api/themes, GET /api/fonts/vendored
+  // picker options never touch the Community Catalog at all (GET /api/themes, GET /api/fonts/assignable
   // both read station-local/embedded data), so there is no catalog-reachability axis to gate on.
   { href: "/editor", label: "Editor", Icon: EditorIcon },
   { href: "/booth-log", label: "Booth log", Icon: BoothLogIcon },

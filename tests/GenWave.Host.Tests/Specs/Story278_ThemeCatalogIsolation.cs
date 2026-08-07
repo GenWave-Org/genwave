@@ -200,23 +200,27 @@ public static class FeatureThemeCatalogIsolation
 
     public sealed class ScenarioNoNewPublicRoute
     {
-        // The known, deliberate set today (SPEC F103.6, F90.2, F104.4, F104.5, F104.7, F104.11, PLAN
-        // T184/T185/T194/T199/T203/T206) — a ninth (now tenth) route joining any of the three prefixes
-        // is a disclosure decision (SPEC F103.12), not a routing accident. The assets/{file} route
-        // (T194) delivers a font pack's hash-verified binary asset (the F104.4 specimen face) — same
-        // CatalogController class-level AdminSurface+Settings attributes as its siblings, never a new
-        // surface of its own. api/fonts/{slug}/install (T199, SPEC F104.5) is FontPackController's
-        // own install route — a third guarded prefix joining api/catalog and api/themes, pinned here
-        // (review finding N4) the moment it exists rather than left to drift unnoticed. GET api/fonts
-        // (T203, SPEC F104.7) is that same controller's library-listing route — the T200 review's own
-        // N7 obligation: pinned here the moment it exists, joining its sibling install route, with the
-        // SAME class-level AdminSurface+Settings pairing this file's next Fact asserts on every
-        // discovered endpoint, not just this one by name. GET api/themes (T206, SPEC F104.11) is
-        // ThemesController's own read-only sibling to ThemesImportController — every resolvable
-        // theme's full manifest, for the v2 editor's base-theme picker. GET api/fonts/vendored (T206,
-        // SPEC F104.11) is FontPackController's OTHER new GET — the editor's ENTIRE assignable face
-        // set (vendored ∪ installed, widened at T206 review finding F4 — the URL and its auth posture
-        // are unchanged, only the response shape), for the SAME editor's role pickers.
+        // The known, deliberate set today (SPEC F103.6, F90.2, F104.4, F104.5, F104.7, F104.11,
+        // F104.13, PLAN T184/T185/T194/T199/T203/T206/T207) — an eleventh route joining any of the
+        // three prefixes is a disclosure decision (SPEC F103.12), not a routing accident. The
+        // assets/{file} route (T194) delivers a font pack's hash-verified binary asset (the F104.4
+        // specimen face) — same CatalogController class-level AdminSurface+Settings attributes as its
+        // siblings, never a new surface of its own. api/fonts/{slug}/install (T199, SPEC F104.5) is
+        // FontPackController's own install route — a third guarded prefix joining api/catalog and
+        // api/themes, pinned here (review finding N4) the moment it exists rather than left to drift
+        // unnoticed. GET api/fonts (T203, SPEC F104.7) is that same controller's library-listing
+        // route — the T200 review's own N7 obligation: pinned here the moment it exists, joining its
+        // sibling install route, with the SAME class-level AdminSurface+Settings pairing this file's
+        // next Fact asserts on every discovered endpoint, not just this one by name. GET api/themes
+        // (T206, SPEC F104.11) is ThemesController's own read-only sibling to ThemesImportController —
+        // every resolvable theme's full manifest, for the v2 editor's base-theme picker. GET
+        // api/fonts/assignable (T206, renamed from api/fonts/vendored at PLAN T207 review carry-in 1
+        // — the old name promised "vendored only" while the response has been vendored ∪ installed
+        // since T206; SPEC F104.11) is FontPackController's OTHER new GET — the editor's ENTIRE
+        // assignable face set, for the SAME editor's role pickers. POST
+        // api/themes/{slug}/save-as-own (T207, SPEC F104.13) is ThemesSaveAsOwnController's own
+        // route — station.theme's SECOND write path, the SAME class-level AdminSurface+Settings
+        // pairing every route on this prefix already carries.
         static readonly IReadOnlySet<(string Verb, string Route)> KnownCatalogAndThemeRoutes =
             new HashSet<(string Verb, string Route)>
             {
@@ -224,11 +228,12 @@ public static class FeatureThemeCatalogIsolation
                 ("GET", "api/catalog/entries/{slug}"),
                 ("GET", "api/catalog/entries/{slug}/assets/{file}"),
                 ("POST", "api/themes/{slug}/import"),
+                ("POST", "api/themes/{slug}/save-as-own"),
                 ("POST", "api/themes/preview"),
                 ("GET", "api/themes"),
                 ("POST", "api/fonts/{slug}/install"),
                 ("GET", "api/fonts"),
-                ("GET", "api/fonts/vendored"),
+                ("GET", "api/fonts/assignable"),
             };
 
         static List<RouteEndpoint> DiscoverCatalogAndThemeEndpoints(IServiceProvider services) =>
@@ -323,21 +328,23 @@ public static class FeatureThemeCatalogIsolation
         [InlineData("GET", "/api/catalog/entries/anything")]
         [InlineData("GET", "/api/catalog/entries/anything/assets/anything.woff2")]
         [InlineData("POST", "/api/themes/anything/import")]
+        [InlineData("POST", "/api/themes/anything/save-as-own")]
         [InlineData("POST", "/api/themes/preview")]
         [InlineData("GET", "/api/themes")]
         [InlineData("POST", "/api/fonts/anything/install")]
         [InlineData("GET", "/api/fonts")]
-        [InlineData("GET", "/api/fonts/vendored")]
+        [InlineData("GET", "/api/fonts/assignable")]
         public async Task EveryRouteReturns404OnThePublicListener(string verb, string path)
         {
             // AdminSurface alone is a proxy for "not public" — SurfaceGateMiddleware's public-listener
             // check is what actually enforces it (only SpectatorSurface-tagged endpoints, plus
             // /health and /fonts/*, exist there), so this proves the BEHAVIOR the attribute predicts.
             // /api/fonts/anything/install (review finding N4), /api/fonts (T203, SPEC F104.7's own
-            // N7 obligation), /api/themes and /api/fonts/vendored (T206, SPEC F104.11) are the ADMIN
-            // routes this file's own KnownCatalogAndThemeRoutes now pins — a distinct prefix from the
-            // public /fonts/* this comment's own parenthetical names, which serves already-installed
-            // face bytes and carries no AdminSurface at all.
+            // N7 obligation), /api/themes, /api/fonts/assignable (T206, SPEC F104.11), and
+            // /api/themes/anything/save-as-own (T207, SPEC F104.13) are the ADMIN routes this file's
+            // own KnownCatalogAndThemeRoutes now pins — a distinct prefix from the public /fonts/*
+            // this comment's own parenthetical names, which serves already-installed face bytes and
+            // carries no AdminSurface at all.
             await using var factory = new IsolationWebFactory(
                 IsolationFixtures.DisabledCatalogUrl, simulatedPublicPort: IsolationFixtures.PublicPort);
             var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });

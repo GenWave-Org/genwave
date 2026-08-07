@@ -118,11 +118,11 @@ namespace GenWave.Host.Api;
 /// text nodes ONLY, never interpolated into a stylesheet or inline <c>style</c> attribute.
 /// <b>T206 compliance (review finding F2 — the RECORD was wrong, not the code): <c>Family</c> IS
 /// discharged; <c>Style</c> stays undischarged but is moot for this consumer.</b> The editor's role
-/// pickers (<see cref="Vendored"/> below, <c>EditorClient.tsx</c>) DO let an operator route an
+/// pickers (<see cref="Assignable"/> below, <c>EditorClient.tsx</c>) DO let an operator route an
 /// installed pack's stored <c>Family</c> all the way into a real <c>font-family: "…"</c> declaration —
 /// assigning a face composes it into the remix manifest, POSTed to
-/// <see cref="ThemePreviewController.Preview"/> (and, once PLAN T207 ships, the save-as-own import
-/// route too), both of which call <see cref="ThemeManifestParser.Parse"/> BEFORE
+/// <see cref="ThemePreviewController.Preview"/> and <see cref="ThemesSaveAsOwnController.SaveAsOwn"/>
+/// (PLAN T207), both of which call <see cref="ThemeManifestParser.Parse"/> BEFORE
 /// <see cref="ThemeCssComposer"/> ever runs. <c>ThemeManifestParser</c>'s own <c>FontFamilyPattern</c>
 /// re-validates EVERY family a posted manifest carries at that exact parse boundary — vendored,
 /// installed, or otherwise, regardless of provenance — rejecting anything outside the CSS-safe shape
@@ -308,11 +308,14 @@ public sealed partial class FontPackController(
             pack.ImportedAt);
     }
 
-    // ── Assignable faces (GET /api/fonts/vendored) ──────────────────────────
+    // ── Assignable faces (GET /api/fonts/assignable) ──────────────────────────
 
     /// <summary>
-    /// GET /api/fonts/vendored — the v2 editor's role pickers' ENTIRE assignable set in one call
-    /// (SPEC F104.11, STORY-286, PLAN T206; widened at T206 review finding F4): vendored ∪ installed,
+    /// GET /api/fonts/assignable — the v2 editor's role pickers' ENTIRE assignable set in one call
+    /// (SPEC F104.11, STORY-286, PLAN T206; widened at T206 review finding F4; renamed from
+    /// <c>GET /api/fonts/vendored</c>/<see cref="Api.AssignableFaceDto"/>'s former
+    /// <c>VendoredFontDto</c> name at PLAN T207 review carry-in 1 — the old name promised "vendored
+    /// only" while the response has been vendored ∪ installed since T206): vendored ∪ installed,
     /// one row per FAMILY, each carrying the representative UPRIGHT src a role assignment composes
     /// with. Reads the SAME two sources <see cref="ThemeFontProvenanceValidator"/>'s own widened
     /// callers ultimately trust — <see cref="FontProvenanceCatalog.Default"/> for the vendored half
@@ -363,8 +366,8 @@ public sealed partial class FontPackController(
     /// <c>ScenarioTheCatalogKillSwitchDoesNotGateTheEditorReads</c>.
     /// </para>
     /// </summary>
-    [HttpGet("vendored")]
-    public async Task<IActionResult> Vendored(CancellationToken ct)
+    [HttpGet("assignable")]
+    public async Task<IActionResult> Assignable(CancellationToken ct)
     {
         var packs = await fontPackStore.GetAllAsync(ct);
         var assignable = VendoredFaceOptions()
@@ -376,13 +379,13 @@ public sealed partial class FontPackController(
         return Ok(assignable);
     }
 
-    /// <summary>One <see cref="VendoredFontDto"/> per curated family — see <see cref="Vendored"/>'s own
-    /// "ONE representative-face heuristic" remarks for why an italic file is filtered out here rather
-    /// than carried through.</summary>
-    static IEnumerable<VendoredFontDto> VendoredFaceOptions() =>
+    /// <summary>One <see cref="AssignableFaceDto"/> per curated family — see <see cref="Assignable"/>'s
+    /// own "ONE representative-face heuristic" remarks for why an italic file is filtered out here
+    /// rather than carried through.</summary>
+    static IEnumerable<AssignableFaceDto> VendoredFaceOptions() =>
         FontProvenanceCatalog.Default.BySrc.Values
             .GroupBy(face => face.Family, StringComparer.Ordinal)
-            .Select(group => new VendoredFontDto(group.Key, RepresentativeVendoredSrc(group)));
+            .Select(group => new AssignableFaceDto(group.Key, RepresentativeVendoredSrc(group)));
 
     /// <summary>The upright face's own src for a family that may carry an italic sibling too — falls
     /// back to whichever face is first when every face in the group happens to look italic (never
@@ -391,23 +394,23 @@ public sealed partial class FontPackController(
         (familyFaces.FirstOrDefault(face => !face.File.Contains("italic", StringComparison.Ordinal))
             ?? familyFaces.First()).Src;
 
-    /// <summary>One <see cref="VendoredFontDto"/> per installed pack (SPEC F104's own "role-agnostic,
+    /// <summary>One <see cref="AssignableFaceDto"/> per installed pack (SPEC F104's own "role-agnostic,
     /// one family per pack" shape) — silently skips a pack with no faces at all via
     /// <see cref="RepresentativeInstalledFace"/>'s own <see langword="null"/> return (SPEC F104.5's
     /// non-empty <c>files[]</c> install gate means this never actually happens in practice; defensive
     /// only, the same posture <c>EditorClient.tsx</c>'s own former client-side projection documented
     /// before this moved server-side).</summary>
-    static IEnumerable<VendoredFontDto> InstalledFaceOptions(IReadOnlyList<FontPack> packs) =>
-        packs.Select(RepresentativeInstalledFace).OfType<VendoredFontDto>();
+    static IEnumerable<AssignableFaceDto> InstalledFaceOptions(IReadOnlyList<FontPack> packs) =>
+        packs.Select(RepresentativeInstalledFace).OfType<AssignableFaceDto>();
 
     /// <summary>The installed pack's OWN "normal"-style face, falling back to its first face — the
     /// SAME representative-face rule <see cref="RepresentativeVendoredSrc"/> applies to the vendored
     /// half, expressed against <see cref="FontPackFace.Style"/>'s real, manifest-declared value instead
     /// of a filename guess (an installed pack's style is recorded truth, not inferred).</summary>
-    static VendoredFontDto? RepresentativeInstalledFace(FontPack pack)
+    static AssignableFaceDto? RepresentativeInstalledFace(FontPack pack)
     {
         var face = pack.Faces.FirstOrDefault(f => f.Style == FontPackFaceInput.NormalStyle) ?? pack.Faces.FirstOrDefault();
-        return face is null ? null : new VendoredFontDto(pack.Family, $"/fonts/{face.File}");
+        return face is null ? null : new AssignableFaceDto(pack.Family, $"/fonts/{face.File}");
     }
 
     // ── Entry resolution ────────────────────────────────────────────────────

@@ -45,8 +45,11 @@ export interface ThemeSummaryDto {
   modes: ThemeModesDto;
 }
 
-/** Wire shape of one `GET /api/fonts/vendored` row (SPEC F104.11, STORY-286, PLAN T206; widened at
- * T206 review finding F4) — see Host's `VendoredFontDto`. This route now returns the editor's ENTIRE
+/** Wire shape of one `GET /api/fonts/assignable` row (SPEC F104.11, STORY-286, PLAN T206; renamed
+ * from `GET /api/fonts/vendored` at PLAN T207 review carry-in 1 — the old name promised "vendored
+ * only" while the response has carried installed faces too since T206; widened at
+ * T206 review finding F4) — see Host's `AssignableFaceDto`, renamed here to match (PLAN T207 review
+ * finding N5). This route returns the editor's ENTIRE
  * assignable set, vendored ∪ installed, one row per family — `family` may be build-time vendored data
  * OR an installed pack's stored `FontPack.Family` (the SAME "unbounded, don't trust as CSS-safe on
  * its own" data class `FontLibraryPackDto.family` already carries); this type carries no promise
@@ -54,10 +57,11 @@ export interface ThemeSummaryDto {
  * to a role in `EditorClient` (review finding F2, correcting this comment's former, incorrect "never
  * interpolated into a stylesheet" claim) — what makes that safe is server-side, not anything on this
  * side of the wire: assigning a face threads `family` into the remix POSTed to `POST
- * /api/themes/preview`, which parses it through `ThemeManifestParser.Parse`'s own `FontFamilyPattern`
- * re-check BEFORE `ThemeCssComposer` ever composes it, rejecting anything CSS-unsafe with a 400
- * regardless of where `family` originated. Here it is rendered as plain picker-option text only. */
-export interface VendoredFontDto {
+ * /api/themes/preview` or, once Save-as-own is confirmed, `POST /api/themes/{slug}/save-as-own`
+ * (PLAN T207) — both parse it through `ThemeManifestParser.Parse`'s own `FontFamilyPattern` re-check
+ * BEFORE `ThemeCssComposer` ever composes it, rejecting anything CSS-unsafe with a 400 regardless of
+ * where `family` originated. Here it is rendered as plain picker-option text only. */
+export interface AssignableFaceDto {
   family: string;
   src: string;
 }

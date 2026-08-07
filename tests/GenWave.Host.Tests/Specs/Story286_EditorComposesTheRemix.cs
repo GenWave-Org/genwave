@@ -2,10 +2,11 @@
 //
 // BDD specification — xUnit. This file pins the TWO new read-only GET routes the v2 editor's
 // pickers consume: GET /api/themes (every resolvable theme's full manifest — the base-theme picker)
-// and GET /api/fonts/vendored (T206 review finding F4 widened this to the editor's ENTIRE assignable
-// face set — vendored ∪ installed, one row per family — not "vendored" alone; the name survives, the
-// shape widened). Neither route writes anything, so this file has no "the remix persists nothing"
-// scenario of its own to prove — that guarantee is structural (this file's two routes are GET, and
+// and GET /api/fonts/assignable (T206 review finding F4 widened this to the editor's ENTIRE
+// assignable face set — vendored ∪ installed, one row per family; renamed from GET /api/fonts/vendored
+// at PLAN T207 review carry-in 1, once the "vendored" name started actively contradicting the union
+// the route had returned since T206). Neither route writes anything, so this file has no "the remix
+// persists nothing" scenario of its own to prove — that guarantee is structural (this file's two routes are GET, and
 // the ONLY write-shaped route the editor's client ever calls is the ALREADY-PINNED POST
 // /api/themes/preview, Story274_ThemeCatalogPreview.cs's own transient-compose contract, reused
 // verbatim, not re-derived here) and is proven client-side instead, in
@@ -14,7 +15,7 @@
 // WIRED T206 — every Fact below drives the real production route table through
 // WebApplicationFactory<Program> (EditorDataWebFactory below). GET /api/themes reads only the
 // already-loaded ThemeCatalog singleton — no catalog HTTP double needed for it. GET
-// /api/fonts/vendored reads BOTH the embedded FontProvenanceCatalog singleton AND (since the F4
+// /api/fonts/assignable reads BOTH the embedded FontProvenanceCatalog singleton AND (since the F4
 // widening) IFontPackStore.GetAllAsync, so this factory always swaps in a FakeFontPackStore (empty by
 // default) the same way its Story282/283/284/285 siblings do — never the real Postgres-backed
 // repository against the deliberately-unreachable "Host=nowhere" connection string every factory in
@@ -128,7 +129,7 @@ public sealed class FeatureEditorComposesTheRemix
             var client = await EditorDataWebFactory.LoggedInClientAsync(factory);
 
             // When the role pickers' assignable list is fetched,
-            var response = await client.GetAsync("/api/fonts/vendored");
+            var response = await client.GetAsync("/api/fonts/assignable");
             using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
 
             // Then every curated family lists exactly once (Fraunces' own italic file does NOT add a
@@ -158,7 +159,7 @@ public sealed class FeatureEditorComposesTheRemix
             var client = await EditorDataWebFactory.LoggedInClientAsync(factory);
 
             // When the vendored list is fetched,
-            var response = await client.GetAsync("/api/fonts/vendored");
+            var response = await client.GetAsync("/api/fonts/assignable");
             using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
 
             // Then no row's src names an italic file — the role pickers offer a family, never a
@@ -187,7 +188,7 @@ public sealed class FeatureEditorComposesTheRemix
             var client = await EditorDataWebFactory.LoggedInClientAsync(factory);
 
             // When the role pickers' assignable list is fetched,
-            var response = await client.GetAsync("/api/fonts/vendored");
+            var response = await client.GetAsync("/api/fonts/assignable");
             using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
 
             // Then the installed pack joins the curated set as EXACTLY one row, carrying its
@@ -222,7 +223,7 @@ public sealed class FeatureEditorComposesTheRemix
 
             // When the role pickers' assignable list, the base-theme list, and an install attempt are
             // all requested,
-            var vendoredResponse = await client.GetAsync("/api/fonts/vendored");
+            var vendoredResponse = await client.GetAsync("/api/fonts/assignable");
             var themesResponse = await client.GetAsync("/api/themes");
             var installResponse = await client.PostAsync("/api/fonts/anything/install", null);
 
@@ -263,7 +264,7 @@ public sealed class FeatureEditorComposesTheRemix
             var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
             // When the vendored face list is requested anonymously,
-            var response = await client.GetAsync("/api/fonts/vendored");
+            var response = await client.GetAsync("/api/fonts/assignable");
 
             // Then it is refused 401 too.
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -275,9 +276,9 @@ public sealed class FeatureEditorComposesTheRemix
 
 /// <summary>
 /// <see cref="WebApplicationFactory{TEntryPoint}"/> for this file's own Facts. Neither
-/// <c>GET /api/themes</c> nor <c>GET /api/fonts/vendored</c> touches the Community Catalog HTTP
+/// <c>GET /api/themes</c> nor <c>GET /api/fonts/assignable</c> touches the Community Catalog HTTP
 /// client — unlike every sibling factory under this prefix, this one wires no fake catalog origin —
-/// but <c>GET /api/fonts/vendored</c> DOES touch <see cref="IFontPackStore"/> (T206 review finding F4
+/// but <c>GET /api/fonts/assignable</c> DOES touch <see cref="IFontPackStore"/> (T206 review finding F4
 /// widened it to vendored ∪ installed), so <paramref name="fontPackStore"/> always gets swapped for a
 /// <see cref="FakeFontPackStore"/> (empty when a Fact passes none), the SAME Story282/283/284/285
 /// precedent, so this factory never reaches the real Postgres-backed repository against the

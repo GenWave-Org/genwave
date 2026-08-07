@@ -188,6 +188,15 @@ public static class FeatureThemeImport
         return client.PostAsync(uri, new StringContent(json, Encoding.UTF8, "application/json"));
     }
 
+    /// <summary>Reads a <c>ProblemDetails</c> response's own <c>detail</c> field — mirrors
+    /// Story287_SaveAsOwn.cs's own identically-named helper (each spec file keeps its own committed
+    /// copy, the house idiom that file's own remarks already state).</summary>
+    static async Task<string> DetailAsync(HttpResponseMessage response)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return document.RootElement.GetProperty("detail").GetString() ?? "";
+    }
+
     // ── HAPPY PATH ──────────────────────────────────────────────────────────
 
     public sealed class ScenarioACatalogThemeImports
@@ -595,9 +604,84 @@ public static class FeatureThemeImport
             var response = await PostManifestAsync(
                 client, ThemeCatalog.ShippedDefaultSlug, ThemeImportFixture.ValidManifestJson(ThemeCatalog.ShippedDefaultSlug));
 
-            // Then it responds 409 and nothing is stored (SPEC F103.8) — the offline-fallback default
+            // Then it responds 409, naming the shipped slug (N1 — only the status was pinned before;
+            // ImportProblems.ShippedSlugReserved's own detail copy is what STORY-287 AC3's
+            // byte-identical-copy table in Story287_SaveAsOwn.cs now proves the save-as-own route
+            // shares verbatim), and nothing is stored (SPEC F103.8) — the offline-fallback default
             // cannot be shadowed by an import.
-            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            Assert.Equal(
+                (Status: HttpStatusCode.Conflict,
+                 Detail: $"\"{ThemeCatalog.ShippedDefaultSlug}\" is a shipped theme's slug and cannot be overwritten (SPEC F103.8)."),
+                (Status: response.StatusCode, Detail: await DetailAsync(response)));
+            Assert.Empty(await themeStore.GetAllAsync(CancellationToken.None));
+        }
+    }
+
+    /// <summary>
+    /// PLAN T207 review finding B2 — pins that <paramref name="catalogSlug"/>'s own format/length
+    /// check runs BEFORE <see cref="ThemeWriteGate.ReadParseAndValidateAsync"/>'s body read/parse/font
+    /// law, the ORIGINAL precedence a naive one-call refactor of the shared gate pipeline (PLAN T207
+    /// review finding F1) briefly broke: a bad <c>catalogSlug</c> used to win outright over EITHER an
+    /// oversized body OR an unvendored-font manifest, refusing 400 before the body was ever read (let
+    /// alone parsed, let alone — for the font-law case — before any live
+    /// <see cref="CatalogProxyService.GetIndexAsync"/> round trip). Folding the whole pipeline into one
+    /// call left <see cref="ThemesImportController.Import"/> only two places to run its own
+    /// <paramref name="catalogSlug"/> check: before EVERYTHING (wrong — a doomed route slug must still
+    /// win first) or after EVERYTHING (the regression this class pins against: the oversized-body case
+    /// would have silently become a 413, and the font-law case would have started paying for an
+    /// outbound fetch it never used to reach). <see cref="ThemeWriteGate.ValidateSlug"/>/
+    /// <see cref="ThemeWriteGate.ReadParseAndValidateAsync"/>'s two-phase split restores it: this route
+    /// runs <c>ValidateSlug</c> → its own <c>catalogSlug</c> checks → <c>ReadParseAndValidateAsync</c>.
+    /// </summary>
+    public sealed class ScenarioCatalogSlugPrecedence
+    {
+        [Fact]
+        public async Task ABadCatalogSlugWinsOverAnOversizedBody()
+        {
+            // Given a catalogSlug outside the same slug shape, paired with a body large enough to trip
+            // BoundedImportBodyReader's own 256 KB cap,
+            var themeStore = new FakeThemeStore();
+            await using var factory = new ThemeImportWebFactory(themeStore);
+            var client = await LoggedInClientAsync(factory);
+            var oversizedBody = new string('a', 300 * 1024);
+
+            // When it is posted,
+            var response = await PostManifestAsync(client, "midnight-drive", oversizedBody, catalogSlug: "Not_Valid");
+
+            // Then it refuses 400 with the catalogSlug problem's own copy — NEVER 413 (the regression:
+            // a body-read-first ordering would have refused 413 instead, since 300 KB always trips the
+            // size cap regardless of catalogSlug) — proving the format check ran before the body was
+            // ever read.
+            Assert.Equal(
+                (Status: HttpStatusCode.BadRequest,
+                 Detail: "\"Not_Valid\" is not a valid catalog slug (lowercase letters, digits, and single hyphens only)."),
+                (Status: response.StatusCode, Detail: await DetailAsync(response)));
+            Assert.Empty(await themeStore.GetAllAsync(CancellationToken.None));
+        }
+
+        [Fact]
+        public async Task ABadCatalogSlugWinsOverAnUnvendoredFontManifest()
+        {
+            // Given a catalogSlug outside the same slug shape, paired with an otherwise-valid manifest
+            // whose font src fails the widened provenance law,
+            var themeStore = new FakeThemeStore();
+            await using var factory = new ThemeImportWebFactory(themeStore);
+            var client = await LoggedInClientAsync(factory);
+
+            // When it is posted,
+            var response = await PostManifestAsync(
+                client, "midnight-drive", ThemeImportFixture.ManifestJsonWithUnvendoredFontSrc("midnight-drive"),
+                catalogSlug: "Not_Valid");
+
+            // Then it refuses 400 with the catalogSlug problem's own copy — NEVER the font-law refusal
+            // (the regression: a parse-first ordering would have reached ThemeFontProvenanceValidator
+            // and refused with the "references font(s) outside… vendored ∪ installed" copy instead,
+            // paying for a live CatalogProxyService.GetIndexAsync round trip along the way) — proving
+            // the format check ran before the body was ever read, let alone parsed or validated.
+            Assert.Equal(
+                (Status: HttpStatusCode.BadRequest,
+                 Detail: "\"Not_Valid\" is not a valid catalog slug (lowercase letters, digits, and single hyphens only)."),
+                (Status: response.StatusCode, Detail: await DetailAsync(response)));
             Assert.Empty(await themeStore.GetAllAsync(CancellationToken.None));
         }
     }

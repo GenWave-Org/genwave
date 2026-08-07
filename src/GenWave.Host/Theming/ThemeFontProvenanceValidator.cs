@@ -33,16 +33,20 @@ using System.Linq;
 /// <see cref="ThemeCatalog.CreateForStation"/>'s own initial state, so a bad shipped manifest still
 /// fails loudly before the process ever serves a request — the same authoring-bug posture
 /// <see cref="ThemeCatalog"/>'s own remarks already state for structural validation.</description></item>
-/// <item><description>The theme import route — the ONLY <c>station.theme</c> write path (SPEC
-/// F103.6). Enforcing here means every row ever persisted already satisfies this rule, so
+/// <item><description>The two <c>station.theme</c> write routes (SPEC F103.6, F104.13; PLAN
+/// T184/T207) — the theme import route AND the save-as-own route
+/// (<see cref="GenWave.Host.Api.ThemesSaveAsOwnController"/>), the only two ways this app ever writes
+/// <c>station.theme</c>. Both enforce this validator here, on the same posted-manifest shape, before
+/// either ever calls <see cref="Core.Abstractions.IThemeStore.UpsertAsync"/>. Enforcing here means
+/// every row ever persisted already satisfies this rule regardless of which of the two wrote it, so
 /// <see cref="ThemeCatalog.ReloadOwnerThemesAsync"/>'s shipped∪owner rebuild needs no SECOND check
 /// of its own: re-validating provenance on every reload would add a new exception source to the
 /// exact method the SPEC F102.7 offline floor depends on staying narrow (an unreachable/malformed
-/// store, not manifest content already settled at import time). The worst case for a row that
+/// store, not manifest content already settled at write time). The worst case for a row that
 /// somehow slipped through anyway (a hand-edited <c>station.theme</c> row — never possible through
-/// this app's own write path) is a 404'd font asset; <c>FontEndpoints</c>' closed, literal-filename
-/// switch cannot serve an arbitrary path regardless, so skipping the reload-time re-check trades
-/// away no security surface, only page-weight/UX budget the import gate already
+/// either of this app's own write paths) is a 404'd font asset; <c>FontEndpoints</c>' closed,
+/// literal-filename switch cannot serve an arbitrary path regardless, so skipping the reload-time
+/// re-check trades away no security surface, only page-weight/UX budget the write-time gate already
 /// protects.</description></item>
 /// </list>
 /// The theme detail LIVE-PREVIEW route (<see cref="GenWave.Host.Api.ThemePreviewController"/>) now calls this
@@ -61,11 +65,12 @@ using System.Linq;
 /// exact posture SPEC F104.9's own "shipped themes remain structurally incapable of referencing packs"
 /// sentence demands: <see cref="ThemeCatalog.LoadShipped"/> runs before <see cref="InstalledFontCatalog"/>
 /// has anything to offer anyway (no DI container exists yet), so it has no installed set to pass even
-/// if it wanted to. <see cref="GenWave.Host.Api.ThemesImportController"/> and
-/// <see cref="GenWave.Host.Api.ThemePreviewController"/> are the two callers that DO pass one, built
+/// if it wanted to. <see cref="GenWave.Host.Api.ThemesImportController"/>,
+/// <see cref="GenWave.Host.Api.ThemePreviewController"/>, and (PLAN T207)
+/// <see cref="GenWave.Host.Api.ThemesSaveAsOwnController"/> are the callers that DO pass one, built
 /// from the SAME DI'd <see cref="InstalledFontCatalog"/> singleton the widened <c>GET /fonts/{file}</c>
-/// route (PLAN T200) already reads — so "can this face be IMPORTED" and "can this face be SERVED" can
-/// never silently disagree.
+/// route (PLAN T200) already reads — so "can this face be IMPORTED/SAVED" and "can this face be
+/// SERVED" can never silently disagree.
 /// </para>
 /// </summary>
 public static class ThemeFontProvenanceValidator

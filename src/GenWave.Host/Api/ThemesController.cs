@@ -17,16 +17,19 @@ namespace GenWave.Host.Api;
 /// that settings row.
 /// </summary>
 /// <remarks>
-/// <b>A read-only sibling to <see cref="ThemesImportController"/>, deliberately its own class.</b>
-/// <see cref="ThemesImportController"/>'s own remarks describe it as "the ONLY <c>station.theme</c>
-/// WRITE path" — true before and after this class exists, since this action never touches
+/// <b>A read-only sibling to <see cref="ThemesImportController"/>/<see cref="ThemesSaveAsOwnController"/>,
+/// deliberately its own class.</b> This action never touches
 /// <see cref="GenWave.Core.Abstractions.IThemeStore"/> at all, only the already-loaded
 /// <see cref="ThemeCatalog"/> singleton (the SAME snapshot <c>GET /api/theme.css</c> resolves
-/// against). Naming this controller after the RESOURCE, not the verb — mirroring
-/// <see cref="FontPackController"/>'s own GET-list + POST-install split under one resource-named
-/// class — would put this read on <see cref="ThemesImportController"/> too, but that class's name
-/// (and its own "ONLY write path" framing throughout its remarks) is deliberately narrow to the
-/// import verb; bolting an unrelated read onto it would blur that promise for zero benefit.
+/// against) — true before and after <see cref="ThemesSaveAsOwnController"/> joined
+/// <see cref="ThemesImportController"/> as <c>station.theme</c>'s second write path (PLAN T207): both
+/// writers share the exact same font-law/ceiling/shipped-slug gate (see
+/// <see cref="ThemesSaveAsOwnController"/>'s own remarks), so a row this catalog ever serves still
+/// satisfies it regardless of which route wrote it. Naming this controller after the RESOURCE, not the
+/// verb — mirroring <see cref="FontPackController"/>'s own GET-list + POST-install split under one
+/// resource-named class — would put this read on either writer instead, but each writer's own name
+/// is deliberately narrow to its own verb; bolting an unrelated read onto either would blur that
+/// promise for zero benefit.
 ///
 /// <para>
 /// <b>Returns <see cref="ThemeManifest"/> verbatim — no parallel DTO.</b> The manifest format IS the
@@ -48,7 +51,7 @@ namespace GenWave.Host.Api;
 /// depends on nothing but <see cref="ThemeCatalog"/> — never
 /// <see cref="Catalog.CommunityCatalogAccessor"/>/<see cref="Catalog.CatalogProxyService"/> — so there
 /// is no catalog-reachability axis for it to even vary on. Previously documented but not Fact-pinned
-/// (T206 review finding F1); now pinned by name, alongside <see cref="FontPackController.Vendored"/>'s
+/// (T206 review finding F1); now pinned by name, alongside <see cref="FontPackController.Assignable"/>'s
 /// own identical posture, in <c>Story286_EditorComposesTheRemix.cs</c>'s own
 /// <c>ScenarioTheCatalogKillSwitchDoesNotGateTheEditorReads</c>.
 /// </para>

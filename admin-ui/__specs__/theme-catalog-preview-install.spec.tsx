@@ -407,7 +407,7 @@ describe("Feature: previewing and installing a catalog theme", () => {
   describe("Scenario: an import 4xx degrades gracefully", () => {
     it("shows the server's error copy inside the still-open dialog, without crashing", async () => {
       const fetchMock = themeFlowFetchMock({
-        importResponse: makeJsonResponse(409, { detail: '"golden-frequency" is a shipped theme\'s slug and cannot be overwritten by an import (SPEC F103.8).' }),
+        importResponse: makeJsonResponse(409, { detail: '"golden-frequency" is a shipped theme\'s slug and cannot be overwritten (SPEC F103.8).' }),
       });
       await openInstallDialog(fetchMock);
 
@@ -418,7 +418,7 @@ describe("Feature: previewing and installing a catalog theme", () => {
       });
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
-        '"golden-frequency" is a shipped theme\'s slug and cannot be overwritten by an import (SPEC F103.8).'
+        '"golden-frequency" is a shipped theme\'s slug and cannot be overwritten (SPEC F103.8).'
       );
       // The dialog stays open — a failed confirm is not a crash, and the operator can still cancel.
       expect(screen.getByRole("dialog")).toBeInTheDocument();
@@ -426,7 +426,7 @@ describe("Feature: previewing and installing a catalog theme", () => {
 
     it("flips nothing locally — the detail panel behind the dialog still reads Install, not Installed (gh-#375)", async () => {
       const fetchMock = themeFlowFetchMock({
-        importResponse: makeJsonResponse(409, { detail: '"golden-frequency" is a shipped theme\'s slug and cannot be overwritten by an import (SPEC F103.8).' }),
+        importResponse: makeJsonResponse(409, { detail: '"golden-frequency" is a shipped theme\'s slug and cannot be overwritten (SPEC F103.8).' }),
       });
       await openInstallDialog(fetchMock);
 

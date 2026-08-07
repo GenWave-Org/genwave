@@ -21,8 +21,15 @@ namespace GenWave.Host.Api;
 /// CSS-safe shape (see <see cref="Api.FontPackController"/>'s own remarks). This wire carries them
 /// verbatim; the Admin UI's library page (PLAN T203) is this DTO's one real consumer, and renders both
 /// as plain React text nodes ONLY — never interpolated into a stylesheet, inline <c>style</c> attribute,
-/// or any other CSS context. Whichever consumer next reaches for either field in a CSS context (the
-/// T206 editor pickers) still owns applying real CSS-injection-safe discipline first.
+/// or any other CSS context. <b>Re-pointed at PLAN T207 (this sentence was stale since T206):</b> the
+/// T206 editor pickers ARE now a CSS-context consumer of a pack's stored <c>Family</c> (never
+/// <c>Style</c>, which that consumer never reads at all) — the obligation is DISCHARGED there, not
+/// still owed, by <see cref="Theming.ThemeManifestParser.FontFamilyPattern"/>'s own re-validation of
+/// every family a posted remix/import manifest carries, vendored or installed, BEFORE
+/// <see cref="Theming.ThemeCssComposer"/> ever composes it — see
+/// <see cref="Api.FontPackController"/>'s own "T206 compliance" remarks for the full trace. Whichever
+/// consumer is next to put <c>Style</c> into a CSS context still owes it the same discipline; nothing
+/// does yet.
 /// </para>
 ///
 /// <para>
