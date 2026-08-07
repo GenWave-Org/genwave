@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- F105 architecture fitness suite (gh-#398). Analysis library (ArchUnitNET vs maintained
+       NetArchTest fork) is evaluated and adopted by PLAN T211 — the pending specs below are
+       library-agnostic by design. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GenWave.Abstractions\GenWave.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Core\GenWave.Core.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Loudness\GenWave.Loudness.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.MediaLibrary\GenWave.MediaLibrary.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Orchestration\GenWave.Orchestration.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Tts\GenWave.Tts.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Host\GenWave.Host.csproj" />
+  </ItemGroup>
+
+</Project>
