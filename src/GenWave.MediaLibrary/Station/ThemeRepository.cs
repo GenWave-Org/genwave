@@ -22,12 +22,19 @@ sealed class ThemeRepository(Lazy<NpgsqlDataSource> dataSource) : IThemeStore
         "select slug, definition::text as definition, imported_from, imported_at, created_at from station.theme";
 
     /// <summary>
-    /// Single-statement upsert (SPEC F103.6/F103.7): the real <c>UNIQUE(slug)</c> constraint is the
-    /// ON CONFLICT target, not a pre-check — mirrors <c>MediaRatingRepository.VoteAsync</c>'s own
-    /// insert-or-update-in-one-round-trip shape. <c>imported_at</c> is stamped <c>now()</c>
-    /// unconditionally on both the insert and the update branch, exactly like
+    /// Single-statement upsert (SPEC F103.6/F103.7/F104.13): the real <c>UNIQUE(slug)</c> constraint is
+    /// the ON CONFLICT target, not a pre-check — mirrors <c>MediaRatingRepository.VoteAsync</c>'s own
+    /// insert-or-update-in-one-round-trip shape. <c>imported_at</c> is stamped <c>now()</c> on both the
+    /// insert and the update branch whenever <paramref name="importedFrom"/> is non-null — mirroring
     /// <c>PersonaImportRepository.UpsertPersonaAsync</c>'s own "a re-import refreshes the stamp" rule
-    /// for <c>station.persona</c>.
+    /// for <c>station.persona</c> — and left <see langword="null"/> whenever it is (PLAN T207,
+    /// <see cref="GenWave.Host.Api.ThemesSaveAsOwnController"/>'s own SPEC F104.13 write, the first
+    /// caller ever to pass a null <paramref name="importedFrom"/>): the CASE expression below is what
+    /// makes <c>GenWave.Core.Domain.OwnerTheme</c>'s own documented "<c>ImportedAt</c> is
+    /// <see langword="null"/> exactly when <c>ImportedFrom</c> is" invariant actually true at the SQL
+    /// layer, rather than merely asserted in a doc comment no caller enforced before T207 — an
+    /// unconditional <c>now()</c> would have stamped a fabricated "imported at" moment onto an authored
+    /// theme that was never imported at all.
     /// </summary>
     public async Task UpsertAsync(string slug, string definition, string? importedFrom, CancellationToken ct)
     {
@@ -35,11 +42,11 @@ sealed class ThemeRepository(Lazy<NpgsqlDataSource> dataSource) : IThemeStore
         await conn.ExecuteAsync(new CommandDefinition(
             """
             insert into station.theme (slug, definition, imported_from, imported_at)
-            values (@Slug, @Definition::jsonb, @ImportedFrom, now())
+            values (@Slug, @Definition::jsonb, @ImportedFrom, case when @ImportedFrom is null then null else now() end)
             on conflict (slug) do update
               set definition = @Definition::jsonb,
                   imported_from = @ImportedFrom,
-                  imported_at = now()
+                  imported_at = case when @ImportedFrom is null then null else now() end
             """,
             new { Slug = slug, Definition = definition, ImportedFrom = importedFrom },
             cancellationToken: ct));

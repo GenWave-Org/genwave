@@ -42,15 +42,24 @@ namespace GenWave.Host.Api;
 /// curated-font gates, PORTED here in <see cref="ThemesImportController.Import"/>'s own documented
 /// order.</b> Without this, an operator could be sold a beautiful live preview of a theme its own
 /// import route would go on to reject — a v2-major manifest, or one referencing a font outside
-/// <see cref="FontProvenanceCatalog.Default"/> — an honest-looking dead end. Both gates now run here
-/// too, identically: the schema-version extraction and its <see cref="ThemeSchemaVersionGate.CurrentSchemaVersion"/>
+/// <see cref="FontProvenanceCatalog.Default"/> ∪ <see cref="InstalledFontCatalog"/>'s own installed set
+/// (SPEC F104.9, PLAN T205) — an honest-looking dead end. Both gates now run here too, identically: the
+/// schema-version extraction and its <see cref="ThemeSchemaVersionGate.CurrentSchemaVersion"/>
 /// comparison (<see cref="ThemeSchemaVersionGate"/> — the piece <see cref="ThemesImportController"/>
 /// used to own privately, now a shared type both routes call) BEFORE structural parsing, then
-/// <see cref="ThemeFontProvenanceValidator.Validate"/> AFTER it succeeds — same order, same
-/// <see cref="ImportProblems"/>-shaped 400 bodies, same refusal copy. Deliberately still NOT reused: the
-/// shipped-slug/route-slug machinery — nothing here is ever stored, so there is no upsert key to govern
-/// and no shipped-slug reservation to protect; a manifest that PARSES and clears both content gates is
-/// enough to preview honestly, exactly what <see cref="ThemeCssComposer"/> needs.
+/// <see cref="ThemeFontProvenanceValidator.Validate"/> AFTER it succeeds, against the SAME widened
+/// vendored ∪ installed union import validates against — same order, same
+/// <see cref="ImportProblems"/>-shaped 400 bodies, same base refusal copy. The ONE deliberate
+/// divergence (still true after T205): this route never enriches a missing-face refusal with a
+/// providing-pack suggestion (<see cref="ImportProblems.UnvendoredFontDetail"/>) — that enrichment costs
+/// a catalog-index round trip <see cref="ThemesImportController"/> pays only on its own already-decided
+/// failure path, and a transient, non-persisted preview has no REAL "go install this pack" action for
+/// an operator to take mid-preview the way a save decision does; the face is still named either way, so
+/// nothing this route promises ("preview refuses what import refuses") is weakened by the shorter
+/// message. Deliberately still NOT reused: the shipped-slug/route-slug machinery — nothing here is ever
+/// stored, so there is no upsert key to govern and no shipped-slug reservation to protect; a manifest
+/// that PARSES and clears both content gates is enough to preview honestly, exactly what
+/// <see cref="ThemeCssComposer"/> needs.
 /// </para>
 ///
 /// <para>
@@ -66,7 +75,7 @@ namespace GenWave.Host.Api;
 [Route("api/themes")]
 [AdminSurface]
 [Authorize(Policy = AuthorizationPolicies.Settings)]
-public sealed class ThemePreviewController : ControllerBase
+public sealed class ThemePreviewController(InstalledFontCatalog installedFontCatalog) : ControllerBase
 {
     const string CssContentType = "text/css; charset=utf-8";
 
@@ -133,13 +142,16 @@ public sealed class ThemePreviewController : ControllerBase
             return BadRequest(ImportProblems.MalformedManifest(ex.Message));
         }
 
-        // SPEC F103.10, PLAN T188, ported to preview (Dean's directive 2026-08-05) — see
+        // SPEC F103.10/F104.9, PLAN T188/T205, ported to preview (Dean's directive 2026-08-05) — see
         // ThemeFontProvenanceValidator's own remarks for why this is safe as an additive,
-        // non-persisting check of the same rule the import route enforces for real.
+        // non-persisting check of the same widened rule the import route enforces for real; see this
+        // class's own remarks for why a missing face is named but never enriched with a pack suggestion
+        // here.
         try
         {
             ThemeFontProvenanceValidator.Validate(
-                manifest, FontProvenanceCatalog.Default.BySrc, ThemeFontProvenanceValidator.PerThemeByteCeilingBytes);
+                manifest, FontProvenanceCatalog.Default.BySrc, ThemeFontProvenanceValidator.PerThemeByteCeilingBytes,
+                installedFontCatalog.InstalledByteSizeBySrc());
         }
         catch (ThemeManifestException ex)
         {

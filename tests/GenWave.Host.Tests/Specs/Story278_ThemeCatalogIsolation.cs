@@ -200,18 +200,31 @@ public static class FeatureThemeCatalogIsolation
 
     public sealed class ScenarioNoNewPublicRoute
     {
-        // The known, deliberate set today (SPEC F103.6, F90.2, F104.4, F104.5, F104.7, PLAN T184/
-        // T185/T194/T199/T203) — a seventh (now eighth) route joining any of the three prefixes is a
-        // disclosure decision (SPEC F103.12), not a routing accident. The assets/{file} route (T194)
-        // delivers a font pack's hash-verified binary asset (the F104.4 specimen face) — same
-        // CatalogController class-level AdminSurface+Settings attributes as its siblings, never a new
-        // surface of its own. api/fonts/{slug}/install (T199, SPEC F104.5) is FontPackController's
-        // own install route — a third guarded prefix joining api/catalog and api/themes, pinned here
-        // (review finding N4) the moment it exists rather than left to drift unnoticed. GET api/fonts
-        // (T203, SPEC F104.7) is that same controller's library-listing route — the T200 review's own
-        // N7 obligation: pinned here the moment it exists, joining its sibling install route, with the
-        // SAME class-level AdminSurface+Settings pairing this file's next Fact asserts on every
-        // discovered endpoint, not just this one by name.
+        // The known, deliberate set today (SPEC F103.6, F90.2, F104.4, F104.5, F104.7, F104.11,
+        // F104.13, PLAN T184/T185/T194/T199/T203/T206/T207) — an eleventh route joining any of the
+        // three prefixes is a disclosure decision (SPEC F103.12), not a routing accident. The
+        // assets/{file} route (T194) delivers a font pack's hash-verified binary asset (the F104.4
+        // specimen face) — same CatalogController class-level AdminSurface+Settings attributes as its
+        // siblings, never a new surface of its own. api/fonts/{slug}/install (T199, SPEC F104.5) is
+        // FontPackController's own install route — a third guarded prefix joining api/catalog and
+        // api/themes, pinned here (review finding N4) the moment it exists rather than left to drift
+        // unnoticed. GET api/fonts (T203, SPEC F104.7) is that same controller's library-listing
+        // route — the T200 review's own N7 obligation: pinned here the moment it exists, joining its
+        // sibling install route, with the SAME class-level AdminSurface+Settings pairing this file's
+        // next Fact asserts on every discovered endpoint, not just this one by name. GET api/themes
+        // (T206, SPEC F104.11) is ThemesController's own read-only sibling to ThemesImportController —
+        // every resolvable theme's full manifest, for the v2 editor's base-theme picker. GET
+        // api/fonts/assignable (T206, renamed from api/fonts/vendored at PLAN T207 review carry-in 1
+        // — the old name promised "vendored only" while the response has been vendored ∪ installed
+        // since T206; SPEC F104.11) is FontPackController's OTHER new GET — the editor's ENTIRE
+        // assignable face set, for the SAME editor's role pickers. POST
+        // api/themes/{slug}/save-as-own (T207, SPEC F104.13) is ThemesSaveAsOwnController's own
+        // route — station.theme's SECOND write path, the SAME class-level AdminSurface+Settings
+        // pairing every route on this prefix already carries. DELETE api/fonts/{slug} (T208, SPEC
+        // F104.14) is FontPackController's own uninstall route — the guarded pack library's FIRST
+        // delete, joining install/list/assignable under the SAME class-level AdminSurface+Settings
+        // pairing, pinned here (mirrors the N4/N7 "the moment it exists" precedent every sibling route
+        // above already followed) rather than left for the T209 disclosure re-audit to discover.
         static readonly IReadOnlySet<(string Verb, string Route)> KnownCatalogAndThemeRoutes =
             new HashSet<(string Verb, string Route)>
             {
@@ -219,28 +232,25 @@ public static class FeatureThemeCatalogIsolation
                 ("GET", "api/catalog/entries/{slug}"),
                 ("GET", "api/catalog/entries/{slug}/assets/{file}"),
                 ("POST", "api/themes/{slug}/import"),
+                ("POST", "api/themes/{slug}/save-as-own"),
                 ("POST", "api/themes/preview"),
+                ("GET", "api/themes"),
                 ("POST", "api/fonts/{slug}/install"),
                 ("GET", "api/fonts"),
+                ("GET", "api/fonts/assignable"),
+                ("DELETE", "api/fonts/{slug}"),
             };
-
-        static List<RouteEndpoint> DiscoverCatalogAndThemeEndpoints(IServiceProvider services) =>
-            services.GetRequiredService<EndpointDataSource>().Endpoints
-                .OfType<RouteEndpoint>()
-                .Where(endpoint => endpoint.RoutePattern.RawText is { } raw
-                    && (MatchesGuardedPrefix(raw.TrimStart('/'), "api/catalog")
-                        || MatchesGuardedPrefix(raw.TrimStart('/'), "api/themes")
-                        || MatchesGuardedPrefix(raw.TrimStart('/'), "api/fonts")))
-                .ToList();
 
         // All three controllers are ROOTED at their own bare prefix ([Route("api/catalog")],
         // [Route("api/themes")], [Route("api/fonts")] — review finding F2, extended to the third
-        // prefix at N4): a `StartsWith(prefix + "/")`-only check misses a route at EXACTLY
-        // "api/catalog"/"api/themes"/"api/fonts" (a future parameterless [HttpGet] list action), so
-        // the match is segment-bounded — the prefix itself, or the prefix followed by a '/' — never a
-        // bare substring match.
-        static bool MatchesGuardedPrefix(string route, string prefix) =>
-            route == prefix || route.StartsWith(prefix + "/", StringComparison.Ordinal);
+        // prefix at N4): GuardedRouteInspector.DiscoverEndpoints's own segment-bounded match — the
+        // prefix itself, or the prefix followed by a '/', never a bare substring match — is what makes
+        // that safe. Extracted to GenWave.Host.Tests.Fakes.GuardedRouteInspector (PLAN T209 review
+        // finding N3, the extract-on-third-copy precedent) once Story283_InstalledFontServing.cs and
+        // Story289_WardrobeIsolation.cs each carried their own near-verbatim copy of this discovery +
+        // AdminSurface/Settings shape check.
+        static List<RouteEndpoint> DiscoverCatalogAndThemeEndpoints(IServiceProvider services) =>
+            GuardedRouteInspector.DiscoverEndpoints(services, "api/catalog", "api/themes", "api/fonts");
 
         [Fact]
         public void TheDiscoveredRouteSetMatchesTheKnownDeliberateSet()
@@ -252,10 +262,7 @@ public static class FeatureThemeCatalogIsolation
 
             // When every api/catalog/*, api/themes/*, and api/fonts/* route is discovered off the
             //      app's OWN table (never a hand-maintained mirror of it),
-            var discovered = DiscoverCatalogAndThemeEndpoints(factory.Services)
-                .SelectMany(endpoint => (endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? [])
-                    .Select(verb => (Verb: verb, Route: endpoint.RoutePattern.RawText!.TrimStart('/'))))
-                .ToHashSet();
+            var discovered = GuardedRouteInspector.RouteVerbPairs(DiscoverCatalogAndThemeEndpoints(factory.Services)).ToHashSet();
 
             // Then it is EXACTLY the known set (AC1) — not a subset check, which would let a seventh
             //      route join silently (mirrors Story264_AnonymousApiSurface's own "named, deliberate
@@ -289,44 +296,50 @@ public static class FeatureThemeCatalogIsolation
             //      ThemePreviewController's own class-level attributes declare. This fact reads
             //      IAuthorizeData only — a route that additionally picked up [AllowAnonymous] is
             //      Story264_AnonymousApiSurface's own route-table sweep to catch, not this one's.
+            // An explicit assertion, not LINQ's SingleOrDefault (review finding, F2's neighbour):
+            // SingleOrDefault throws InvalidOperationException — an unhandled-exception test failure
+            // carrying no route/policy context — the moment an endpoint carries two distinct non-empty
+            // policies; GuardedRouteInspector.AdminSurfaceShape (PLAN T209 review finding N3) fails the
+            // normal xUnit way instead, naming the route and the policy set actually found.
             Assert.All(endpoints, endpoint =>
             {
-                Assert.NotNull(endpoint.Metadata.GetMetadata<AdminSurfaceAttribute>());
-
-                var policies = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>()
-                    .Select(authorizeData => authorizeData.Policy)
-                    .Where(candidate => !string.IsNullOrEmpty(candidate))
-                    .Distinct()
-                    .ToArray();
-
-                // An explicit assertion, not LINQ's SingleOrDefault (review finding, F2's neighbour):
-                // SingleOrDefault throws InvalidOperationException — an unhandled-exception test
-                // failure carrying no route/policy context — the moment an endpoint carries two
-                // distinct non-empty policies; this fails the normal xUnit way instead, naming the
-                // route and the policy set actually found.
+                var (carriesAdminSurface, hasExactlySettings, policies) = GuardedRouteInspector.AdminSurfaceShape(endpoint);
+                Assert.True(carriesAdminSurface, $"{endpoint.RoutePattern.RawText} is missing AdminSurfaceAttribute.");
                 Assert.True(
-                    policies is [var onlyPolicy] && onlyPolicy == AuthorizationPolicies.Settings,
+                    hasExactlySettings,
                     $"{endpoint.RoutePattern.RawText} carries policy set [{string.Join(", ", policies)}], " +
                     $"expected exactly one: \"{AuthorizationPolicies.Settings}\".");
             });
         }
 
+        // This literal InlineData list is DELIBERATE redundancy alongside
+        // Story289_WardrobeIsolation.cs's own self-derived, route-table-driven sweep (PLAN T209) — not
+        // dead weight to "clean up" onto that file's discovery helper. The rationale for keeping both
+        // lives at Story289_WardrobeIsolation.cs:81-85: a regression this hand-picked list catches is
+        // still caught even in the (unlikely) event the OTHER file's own discovery logic ever regresses
+        // for an unforeseen reason of its own.
         [Theory]
         [InlineData("GET", "/api/catalog/index")]
         [InlineData("GET", "/api/catalog/entries/anything")]
         [InlineData("GET", "/api/catalog/entries/anything/assets/anything.woff2")]
         [InlineData("POST", "/api/themes/anything/import")]
+        [InlineData("POST", "/api/themes/anything/save-as-own")]
         [InlineData("POST", "/api/themes/preview")]
+        [InlineData("GET", "/api/themes")]
         [InlineData("POST", "/api/fonts/anything/install")]
         [InlineData("GET", "/api/fonts")]
+        [InlineData("GET", "/api/fonts/assignable")]
+        [InlineData("DELETE", "/api/fonts/anything")]
         public async Task EveryRouteReturns404OnThePublicListener(string verb, string path)
         {
             // AdminSurface alone is a proxy for "not public" — SurfaceGateMiddleware's public-listener
             // check is what actually enforces it (only SpectatorSurface-tagged endpoints, plus
             // /health and /fonts/*, exist there), so this proves the BEHAVIOR the attribute predicts.
-            // /api/fonts/anything/install (review finding N4) and /api/fonts (T203, SPEC F104.7's own
-            // N7 obligation) are the ADMIN routes this file's own KnownCatalogAndThemeRoutes now pins
-            // — a distinct prefix from the public /fonts/* this comment's own parenthetical names,
+            // /api/fonts/anything/install (review finding N4), /api/fonts (T203, SPEC F104.7's own
+            // N7 obligation), /api/themes, /api/fonts/assignable (T206, SPEC F104.11),
+            // /api/themes/anything/save-as-own (T207, SPEC F104.13), and DELETE /api/fonts/anything
+            // (T208, SPEC F104.14) are the ADMIN routes this file's own KnownCatalogAndThemeRoutes now
+            // pins — a distinct prefix from the public /fonts/* this comment's own parenthetical names,
             // which serves already-installed face bytes and carries no AdminSurface at all.
             await using var factory = new IsolationWebFactory(
                 IsolationFixtures.DisabledCatalogUrl, simulatedPublicPort: IsolationFixtures.PublicPort);

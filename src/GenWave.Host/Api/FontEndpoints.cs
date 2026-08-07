@@ -93,11 +93,14 @@ static class FontEndpoints
     /// <see cref="ServeVendoredFile"/> does for a request that misses. A directive-identical serving
     /// posture to <see cref="ServeVendoredFile"/> (same <see cref="ApplyServingHeaders"/> call, same
     /// <see cref="FontContentType"/>) is the point of SPEC F104.6's "closed set". One measured
-    /// divergence (T200 review): the vendored PhysicalFile arm emits <c>Last-Modified</c>; this byte
-    /// arm emits no validator — immutable + 1-year max-age makes revalidation unreachable for a
-    /// conforming client, so the directives govern. A sha256-derived ETag on BOTH arms (the store and
-    /// fonts-provenance.json both hold the hashes) is the recorded T209 close if true wire parity is
-    /// ever wanted.
+    /// divergence (T200 review, closed at PLAN T209's own disclosure re-audit): the vendored
+    /// PhysicalFile arm emits <c>Last-Modified</c>; this byte arm emits no validator. RULED cosmetic,
+    /// not pursued: both arms already carry the IDENTICAL <c>immutable</c> + 1-year max-age directives
+    /// (<see cref="ApplyServingHeaders"/>), which make revalidation unreachable for any conforming
+    /// client regardless of which validator either arm does or doesn't also emit — and every vendored
+    /// FILENAME this divergence could theoretically distinguish is already public via
+    /// <c>styles.css</c>'s own <c>@font-face</c> rules, so a sha256-derived ETag on both arms would add
+    /// wire ceremony, not disclosure protection. Nothing here changes serving behaviour.
     /// </summary>
     static IResult ServeInstalledFaceOrNotFound(string file, HttpContext context, InstalledFontCatalog installedFonts)
     {

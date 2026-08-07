@@ -21,11 +21,15 @@ namespace GenWave.Core.Abstractions;
 public interface IThemeStore
 {
     /// <summary>
-    /// Upserts by <paramref name="slug"/> (SPEC F103.6/F103.7): a new slug inserts a row, an
+    /// Upserts by <paramref name="slug"/> (SPEC F103.6/F103.7/F104.13): a new slug inserts a row, an
     /// existing one replaces its <paramref name="definition"/> and refreshes
     /// <paramref name="importedFrom"/>/<c>imported_at</c> unconditionally — mirrors
     /// <see cref="IPersonaImportStore.ImportAsync"/>'s own "a re-import refreshes the stamp" rule.
-    /// <c>imported_at</c> is always the write's own <c>now()</c>.
+    /// <c>imported_at</c> is the write's own <c>now()</c> whenever <paramref name="importedFrom"/> is
+    /// non-null, and <see langword="null"/> whenever <paramref name="importedFrom"/> itself is
+    /// (PLAN T207's save-as-own write, SPEC F104.13's reserved authored-provenance value) — see
+    /// <see cref="OwnerTheme"/>'s own "<c>ImportedAt</c> is <see langword="null"/> exactly when
+    /// <c>ImportedFrom</c> is" invariant, which every implementation of this method must honour.
     /// </summary>
     Task UpsertAsync(string slug, string definition, string? importedFrom, CancellationToken ct);
 

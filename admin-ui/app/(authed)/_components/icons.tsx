@@ -260,6 +260,23 @@ export function WardrobeIcon(props: IconProps): ReactNode {
   );
 }
 
+/** Editor nav glyph (SPEC F104.11, STORY-286, PLAN T206) — three vertical mixer faders at different
+ * heights: "mixing components" (a base theme's palette + a face per role), distinct from
+ * {@link WardrobeIcon}'s open-book "shelf of installed components" — the editor COMBINES what the
+ * wardrobe stores, a different verb entirely. */
+export function EditorIcon(props: IconProps): ReactNode {
+  return (
+    <IconBase {...props}>
+      <line x1="4" y1="2.5" x2="4" y2="13.5" />
+      <line x1="8" y1="2.5" x2="8" y2="13.5" />
+      <line x1="12" y1="2.5" x2="12" y2="13.5" />
+      <circle cx="4" cy="10" r="1.3" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="5.5" r="1.3" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="8" r="1.3" fill="currentColor" stroke="none" />
+    </IconBase>
+  );
+}
+
 /** Exploration-pick glyph (SPEC F86.3, F86.5; STORY-217, PLAN T75) — a three-pip die: the
  * "rolled the dice" idea rendered as a geometric stroke icon rather than an emoji (Wireless
  * anti-pattern: no emoji as icons), reused by {@link PickChips}' exploration badge. */

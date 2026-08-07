@@ -1,4 +1,4 @@
-using System.Text.Json;
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -20,51 +20,48 @@ namespace GenWave.Host.Api;
 /// (<see cref="AdminSurfaceAttribute"/> + <see cref="AuthorizationPolicies.Settings"/>), same
 /// <see cref="BoundedImportBodyReader.MaxImportBytes"/> size cap enforced by both
 /// <see cref="RequestSizeLimitAttribute"/> and <see cref="BoundedImportBodyReader.ReadBoundedBodyAsync"/>'s
-/// own running-total read (see that method's remarks — a shared helper both this controller and
-/// <see cref="PersonaController.Import"/> call, PLAN T184 review F4; the two used to carry a verbatim
-/// copy each, a duplicated security control), same slug-format gate (here composed from
+/// own running-total read, same slug-format gate (composed from
 /// <see cref="CatalogIndexValidator.SlugSegment"/> — the catalog's own slug vocabulary, since this
-/// route is catalog-adjacent rather than persona-adjacent; see <see cref="CatalogController.SlugFormat"/>'s
-/// own remarks for why that composition, not a private copy, is the house idiom), and the same
-/// deserialization-IS-validation posture: a <see cref="ThemeManifestException"/> from
-/// <see cref="ThemeManifestParser.Parse"/> (malformed JSON, or any structural defect the parser's own
-/// load-time rules catch — missing slug/name/author, an incomplete mode pair, an unsafe token/font
-/// shape) maps to 400, never an unhandled 500.
+/// route is catalog-adjacent rather than persona-adjacent), and the same deserialization-IS-validation
+/// posture: a <see cref="ThemeManifestException"/> from <see cref="ThemeManifestParser.Parse"/>
+/// (malformed JSON, or any structural defect the parser's own load-time rules catch — missing
+/// slug/name/author, an incomplete mode pair, an unsafe token/font shape) maps to 400, never an
+/// unhandled 500.
 /// </para>
 ///
 /// <para>
-/// <b>Two parses, by design (PLAN T184 review F5).</b> The body is parsed TWICE, not once: first as a
-/// bare <see cref="JsonDocument"/> so <see cref="ThemeSchemaVersionGate.ExtractSchemaVersion"/> can
-/// read the optional <c>schemaVersion</c> field cheaply, then — only once that gate has passed — handed unchanged to
-/// <see cref="ThemeManifestParser.Parse"/> for the real structural validation. The order is the point:
-/// a v2-shaped manifest whose shape ALSO fails today's v1 parser (a newer major is free to look
-/// nothing like the current one) must fail with the version-naming message, never a misleading
-/// "missing mode" or similar structural complaint from a parser it was never going to satisfy. A
-/// syntactically malformed body still reports through <see cref="ThemeManifestParser.Parse"/>'s own
-/// message — the first, schema-version-only parse catches and defers to it rather than duplicating
-/// that message itself.
+/// <b>The shared gate pipeline, in TWO PHASES (SPEC F103.6/F103.10/F104.9, PLAN T184/T188/T205; PLAN
+/// T207 review findings F1/B2) — <see cref="ThemeWriteGate"/>.</b>
+/// <see cref="ThemeWriteGate.ValidateSlug"/> first (route slug format 400 → shipped-slug 409) — see
+/// this route's own <paramref name="catalogSlug"/> checks immediately below, which run BETWEEN the two
+/// phases — then <see cref="ThemeWriteGate.ReadParseAndValidateAsync"/> (body read 413 → schema-major
+/// 400 → deserialize-as-validation 400 → font law/ceiling 400). <see cref="ThemesSaveAsOwnController.SaveAsOwn"/>
+/// runs the SAME two phases back to back (via <see cref="ThemeWriteGate.RunAsync"/>) — this route and
+/// that one are the ONLY two <c>station.theme</c> write paths, and both share one gate implementation
+/// rather than two hand-copied blocks a reviewer had to eyeball for byte-identity: a gate added to
+/// <see cref="ThemeWriteGate"/> tomorrow is a compile-visible change both routes pick up, never a copy
+/// one route's own edit could silently leave the other behind on. See that type's own remarks for the
+/// full per-gate reasoning, including why every refusal body it builds — malformed/empty JSON included
+/// — is byte-identical between the two routes for the same input, and for the "TWO PHASES" reasoning
+/// behind the split itself (review finding B2 — a single end-to-end call left this route's own
+/// <paramref name="catalogSlug"/> check nowhere legal to run except BEHIND the body
+/// read/parse/font-law gate, silently reordering an observable, pre-existing precedence: a bad
+/// <c>catalogSlug</c> paired with an oversized body used to refuse 400 before the body was ever read;
+/// folded into one call it refused 413 instead, and a bad <c>catalogSlug</c> paired with an
+/// unvendored-font manifest started paying for a live <see cref="CatalogProxyService.GetIndexAsync"/>
+/// round trip it never used to reach).
 /// </para>
 ///
 /// <para>
-/// <b>Schema-major reject (SPEC F103.6, STORY-272 AC6) — a deliberate, additive gate.</b> Unlike
-/// <see cref="Core.Domain.PersonaCard"/>, <see cref="ThemeManifest"/> carries no
-/// <c>SchemaVersion</c> field today — the format has had exactly one shape since T156, and adding one
-/// would touch the byte-stable interchange contract T177/T178 pinned across this repo and
-/// <c>genwave-catalog</c> (<c>Fixtures/golden.theme.json</c>), which is out of this task's scope. AC6
-/// still needs a real gate, so this route reads an OPTIONAL <c>schemaVersion</c> integer straight off
-/// the raw request JSON (<see cref="ThemeSchemaVersionGate.ExtractSchemaVersion"/>) — three outcomes,
-/// not two (PLAN T184 review F2): ABSENT (every manifest that exists today, shipped or fixture) ⇒
-/// treated as version 1 and passes, at zero cost to any current caller; PRESENT and over
-/// <see cref="ThemeSchemaVersionGate.CurrentSchemaVersion"/> ⇒ refused, naming both; PRESENT but not a
-/// readable <see cref="int"/> — a JSON string, a fractional number, an integer that overflows — ⇒ ALSO
-/// refused, rather than silently coerced to "absent". Only true absence gets
-/// <see cref="Core.Domain.PersonaCard"/>'s own forward-compat treatment ("unknown fields within the
-/// current major are silently tolerated"); a present-but-unparsable value is an operator/tooling error
-/// worth surfacing, not one to paper over as version 1. This extraction — and the shared
-/// <c>ImportProblems</c>-shaped 400 bodies it feeds — is now a type both this route and
-/// <see cref="ThemePreviewController"/> share (<see cref="ThemeSchemaVersionGate"/>): an operator must
-/// never be sold a preview of a theme import would refuse for a version it cannot read (Dean's
-/// directive 2026-08-05, "preview refuses what import refuses").
+/// <b><paramref name="catalogSlug"/> format/length (400, F90.7 precedent) — the one gate
+/// <see cref="ThemeWriteGate"/> does NOT own, run between its two phases.</b> Meaningless for
+/// <see cref="ThemesSaveAsOwnController.SaveAsOwn"/> (a save carries no catalog-sourced slug at all),
+/// so it stays here — checked AFTER <see cref="ThemeWriteGate.ValidateSlug"/> (the route slug itself
+/// must still be well-formed and unreserved before anything about a DIFFERENT slug is even looked at —
+/// the original, pre-<see cref="ThemeWriteGate"/> precedence) and BEFORE
+/// <see cref="ThemeWriteGate.ReadParseAndValidateAsync"/> (a pure-string, no-I/O check has no business
+/// sitting behind a bounded body read, a JSON parse, and a possible outbound catalog fetch — review
+/// finding B2, pinned by name in <c>Story272_ThemeImport.cs</c>'s own <c>ScenarioCatalogSlugPrecedence</c>).
 /// </para>
 ///
 /// <para>
@@ -72,14 +69,12 @@ namespace GenWave.Host.Api;
 /// <see cref="Core.Domain.Persona"/>'s import never has a mismatch to resolve — a
 /// <see cref="Core.Domain.PersonaCard"/> carries no slug of its own, so the route slug always governs
 /// silently. <see cref="ThemeManifest"/> DOES carry its own <see cref="ThemeManifest.Slug"/>, so this
-/// route makes the same "route slug always governs" rule explicit: after a successful parse, the
-/// manifest is re-stamped with the route <paramref name="slug"/> (<see cref="NormalizeSlug"/>) before
-/// it is ever serialized for storage. Without this, an owner POSTing to
-/// <c>/api/themes/midnight-drive/import</c> with a manifest whose own <c>"slug"</c> field reads
-/// <c>"old-name"</c> would store under <c>station.theme.slug = "midnight-drive"</c> while
-/// <c>ThemeCatalog</c> re-parses <c>definition</c> and indexes the result under
-/// <c>"old-name"</c> instead — the exact split-identity bug this normalization exists to make
-/// impossible.
+/// route makes the same "route slug always governs" rule explicit — <see cref="ThemeWriteGate.RunAsync"/>
+/// re-stamps the manifest with the route <paramref name="slug"/> before ever returning it. Without this,
+/// an owner POSTing to <c>/api/themes/midnight-drive/import</c> with a manifest whose own <c>"slug"</c>
+/// field reads <c>"old-name"</c> would store under <c>station.theme.slug = "midnight-drive"</c> while
+/// <c>ThemeCatalog</c> re-parses <c>definition</c> and indexes the result under <c>"old-name"</c>
+/// instead — the exact split-identity bug this normalization exists to make impossible.
 /// </para>
 ///
 /// <para>
@@ -87,29 +82,10 @@ namespace GenWave.Host.Api;
 /// has no failure mode of its own (a plain upsert, unlike
 /// <see cref="IPersonaImportStore.ImportAsync"/>'s name-uniqueness conflict) — station.theme's only
 /// uniqueness constraint is the upsert key itself. A re-import of an existing OWNER slug is therefore
-/// always a plain update, never a conflict. The one real refusal is checked here, against
-/// <see cref="ThemeCatalog.IsShippedSlug"/> on the DI'd <see cref="themeCatalog"/> singleton (PLAN
-/// T184 review F3 — this used to parse a fresh, throwaway <see cref="ThemeCatalog.LoadShipped"/> per
-/// request instead; <see cref="ThemeCatalog.IsShippedSlug"/> reads that same instance's own fixed,
-/// construction-time shipped set, never its current, possibly owner-widened one, so an EARLIER owner
-/// import still can never block a later, unrelated one — SPEC F103.8's own "reserve whatever
-/// <c>LoadShipped</c> enumerates" contract, so a future shipped-set resize (T191's 6→2 split) changes
-/// what is reserved with no edit here, and the one rule now lives in exactly one place: see
-/// <see cref="ThemeCatalog.IsShippedSlug"/>'s own remarks). Checked before the body is even read: it
-/// depends on nothing but the already-validated route slug, so a doomed request fails as cheaply as
-/// the slug-format gate above it.
-/// </para>
-///
-/// <para>
-/// <b>Curated-font provenance/byte-ceiling (SPEC F103.10, PLAN T188) — the one place it is
-/// enforced.</b> After <see cref="ThemeManifestParser.Parse"/> succeeds, the parsed manifest is
-/// checked against <see cref="ThemeFontProvenanceValidator"/>: every font asset it references must
-/// resolve to a face in <see cref="FontProvenanceCatalog.Default"/> (the GenWave-vendored curated
-/// set), and its distinct referenced faces' summed bytes must clear FONTS.md's per-theme ceiling. A
-/// failure maps to 400, same posture as a structural manifest defect. This route is the ONLY
-/// <c>station.theme</c> write path, so passing this gate here is what guarantees every row this
-/// store ever holds already satisfies SPEC F103.10 — see <see cref="ThemeFontProvenanceValidator"/>'s
-/// own remarks for why <see cref="ThemeCatalog.ReloadOwnerThemesAsync"/> needs no second check.
+/// always a plain update, never a conflict — the shipped-slug check <see cref="ThemeWriteGate.RunAsync"/>
+/// runs is the one real refusal (PLAN T184 review F3 — against the DI'd <see cref="themeCatalog"/>
+/// singleton's own fixed, construction-time shipped set, never its current, possibly owner-widened one,
+/// so an EARLIER owner import still can never block a later, unrelated one).
 /// </para>
 ///
 /// <para>
@@ -138,29 +114,30 @@ namespace GenWave.Host.Api;
 public sealed partial class ThemesImportController(
     IThemeStore themeStore,
     ThemeCatalog themeCatalog,
+    InstalledFontCatalog installedFontCatalog,
+    CatalogProxyService catalogProxyService,
     ILogger<ThemesImportController> logger) : ControllerBase
 {
     /// <summary>
     /// POST /api/themes/{slug}/import — see this controller's own remarks for the full gate order and
-    /// the reasoning behind each one. Gate order: route slug format (400) → shipped-slug reservation
-    /// (409, F103.8) → <paramref name="catalogSlug"/> format (400, F90.7 precedent) → bounded body
-    /// read (413) → schema-major (400, AC6, checked ahead of structural parsing — PLAN T184 review F5)
-    /// → deserialize-as-validation (400, F103.6) → curated-font provenance/byte-ceiling (400, F103.10,
-    /// PLAN T188 — <see cref="ThemeFontProvenanceValidator"/>, the only <c>station.theme</c> write
-    /// path, so a row is never stored referencing an unvendored face or an over-budget font set) →
-    /// upsert + catalog rebuild (F103.7).
+    /// the reasoning behind each one. Gate order: <see cref="ThemeWriteGate.ValidateSlug"/> (slug
+    /// format 400 → shipped-slug 409) → <paramref name="catalogSlug"/> format/length (400, F90.7
+    /// precedent — the one gate this route alone runs, between the shared pipeline's two phases, PLAN
+    /// T207 review finding B2) → <see cref="ThemeWriteGate.ReadParseAndValidateAsync"/> (body read 413
+    /// → schema-major 400 → deserialize-as-validation 400 → font law/ceiling 400) → upsert + catalog
+    /// rebuild (F103.7).
     /// </summary>
     [HttpPost("{slug}/import")]
     [Consumes("application/json")]
     [RequestSizeLimit(BoundedImportBodyReader.MaxImportBytes)]
     public async Task<IActionResult> Import(string slug, [FromQuery] string? catalogSlug, CancellationToken ct)
     {
-        if (!SlugFormat().IsMatch(slug))
-            return BadRequest(BadSlugProblem(slug));
+        if (ThemeWriteGate.ValidateSlug(slug, themeCatalog) is { } slugRefusal)
+            return slugRefusal;
 
-        if (themeCatalog.IsShippedSlug(slug))
-            return Conflict(ShippedSlugReservedProblem(slug));
-
+        // Cheap, pure-string, no-I/O — deliberately BETWEEN ThemeWriteGate's two phases, never after
+        // ReadParseAndValidateAsync (review finding B2's own "must not sit behind a body read + parse +
+        // potential outbound call"): the original, pre-ThemeWriteGate precedence.
         if (!string.IsNullOrEmpty(catalogSlug))
         {
             if (catalogSlug.Length > BoundedImportBodyReader.MaxCatalogSlugLength)
@@ -170,59 +147,13 @@ public sealed partial class ThemesImportController(
                 return BadRequest(BadCatalogSlugProblem(catalogSlug));
         }
 
-        var (json, oversized) = await BoundedImportBodyReader.ReadBoundedBodyAsync(
-            Request, BoundedImportBodyReader.MaxImportBytes, ct);
-        if (oversized)
-            return StatusCode(StatusCodes.Status413PayloadTooLarge, ImportProblems.Oversized());
+        var (refusal, manifestOrNull) = await ThemeWriteGate.ReadParseAndValidateAsync(
+            Request, slug, installedFontCatalog, catalogProxyService, ct);
+        if (refusal is not null)
+            return refusal;
+        if (manifestOrNull is not { } normalized)
+            throw new UnreachableException($"{nameof(ThemeWriteGate)}.{nameof(ThemeWriteGate.ReadParseAndValidateAsync)} returned neither a refusal nor a manifest.");
 
-        // See this controller's own remarks ("Two parses, by design") — the schema-version gate below
-        // reads a bare JsonDocument BEFORE ThemeManifestParser.Parse ever sees the body, so a
-        // version-mismatched manifest is refused naming both versions even when its shape would also
-        // fail structural parsing. A syntactically malformed body is deliberately NOT reported here —
-        // ThemeManifestParser.Parse below throws the one, well-formed message for that.
-        int? schemaVersion = null;
-        try
-        {
-            using var document = JsonDocument.Parse(json);
-            var (version, unreadable) = ThemeSchemaVersionGate.ExtractSchemaVersion(document.RootElement);
-            if (unreadable)
-                return BadRequest(ImportProblems.UnreadableSchemaVersion());
-
-            schemaVersion = version;
-        }
-        catch (JsonException)
-        {
-            // Malformed JSON — deferred to ThemeManifestParser.Parse below, which throws the same
-            // failure as a ThemeManifestException carrying its own well-formed message.
-        }
-
-        if (schemaVersion is { } manifestSchemaVersion && manifestSchemaVersion > ThemeSchemaVersionGate.CurrentSchemaVersion)
-            return BadRequest(ImportProblems.NewerSchema(manifestSchemaVersion));
-
-        ThemeManifest manifest;
-        try
-        {
-            manifest = ThemeManifestParser.Parse(new ThemeManifestSource($"import:{slug}", json));
-        }
-        catch (ThemeManifestException ex)
-        {
-            return BadRequest(ImportProblems.MalformedManifest(ex.Message));
-        }
-
-        // SPEC F103.10, PLAN T188 — this route is the ONLY station.theme write path, so this is the
-        // one gate that must hold for every row ever persisted; see ThemeFontProvenanceValidator's
-        // own "Placement" remarks for why ThemeCatalog.ReloadOwnerThemesAsync needs no second check.
-        try
-        {
-            ThemeFontProvenanceValidator.Validate(
-                manifest, FontProvenanceCatalog.Default.BySrc, ThemeFontProvenanceValidator.PerThemeByteCeilingBytes);
-        }
-        catch (ThemeManifestException ex)
-        {
-            return BadRequest(ImportProblems.UnvendoredFont(ex.Message));
-        }
-
-        var normalized = NormalizeSlug(manifest, slug);
         var importedFrom = string.IsNullOrEmpty(catalogSlug) ? "file" : catalogSlug;
 
         await themeStore.UpsertAsync(slug, ThemeManifestSerializer.Serialize(normalized), importedFrom, ct);
@@ -257,25 +188,15 @@ public sealed partial class ThemesImportController(
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    /// <summary>Re-stamps <paramref name="manifest"/>'s own <see cref="ThemeManifest.Slug"/> to the
-    /// route <paramref name="routeSlug"/> — see this controller's own remarks ("Slug is the upsert
-    /// key, not the manifest's own opinion") for why.</summary>
-    static ThemeManifest NormalizeSlug(ThemeManifest manifest, string routeSlug) =>
-        manifest with { Slug = routeSlug };
-
     // Composed from CatalogIndexValidator.SlugSegment — the catalog's own slug vocabulary — mirroring
     // CatalogController.SlugFormat's own composition (see that member's remarks for the full \A/\z
     // anchoring rationale: .NET's `$` matches before a trailing '\n', which a naive ^/$ pattern would
-    // let slip through as e.g. "midnight-drive\n").
+    // let slip through as e.g. "midnight-drive\n"). Used ONLY for catalogSlug validation now that
+    // ThemeWriteGate.ValidateSlug owns the route-slug check (PLAN T207 review finding F1) — a private
+    // copy rather than a call to that type's own (internal, differently-scoped) slug regex, since the
+    // two checks validate two different strings for two different reasons.
     [GeneratedRegex(@"\A" + CatalogIndexValidator.SlugSegment + @"\z")]
     private static partial Regex SlugFormat();
-
-    static ProblemDetails BadSlugProblem(string slug) => new()
-    {
-        Status = StatusCodes.Status400BadRequest,
-        Title  = "Invalid slug.",
-        Detail = $"\"{slug}\" is not a valid theme slug (lowercase letters, digits, and single hyphens only).",
-    };
 
     static ProblemDetails BadCatalogSlugProblem(string catalogSlug) => new()
     {
@@ -290,12 +211,5 @@ public sealed partial class ThemesImportController(
         Status = StatusCodes.Status400BadRequest,
         Title  = "Invalid catalog slug.",
         Detail = $"catalogSlug must be at most {BoundedImportBodyReader.MaxCatalogSlugLength} characters (got {length}).",
-    };
-
-    static ProblemDetails ShippedSlugReservedProblem(string slug) => new()
-    {
-        Status = StatusCodes.Status409Conflict,
-        Title  = "Shipped theme slug is reserved.",
-        Detail = $"\"{slug}\" is a shipped theme's slug and cannot be overwritten by an import (SPEC F103.8).",
     };
 }

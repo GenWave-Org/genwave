@@ -115,8 +115,28 @@ namespace GenWave.Host.Api;
 /// own <see cref="FontLibraryPackDto"/>/<see cref="FontLibraryFaceDto"/> wire carries
 /// <c>family</c>/<c>style</c> verbatim (still no bound/escape applied at THIS layer, deliberately —
 /// see those DTOs' own remarks for why), and the Admin UI's library page renders both as plain React
-/// text nodes ONLY, never interpolated into a stylesheet or inline <c>style</c> attribute. The
-/// obligation carries forward to T206's editor pickers, still undischarged.
+/// text nodes ONLY, never interpolated into a stylesheet or inline <c>style</c> attribute.
+/// <b>T206 compliance (review finding F2 — the RECORD was wrong, not the code): <c>Family</c> IS
+/// discharged; <c>Style</c> stays undischarged but is moot for this consumer.</b> The editor's role
+/// pickers (<see cref="Assignable"/> below, <c>EditorClient.tsx</c>) DO let an operator route an
+/// installed pack's stored <c>Family</c> all the way into a real <c>font-family: "…"</c> declaration —
+/// assigning a face composes it into the remix manifest, POSTed to
+/// <see cref="ThemePreviewController.Preview"/> and <see cref="ThemesSaveAsOwnController.SaveAsOwn"/>
+/// (PLAN T207), both of which call <see cref="ThemeManifestParser.Parse"/> BEFORE
+/// <see cref="ThemeCssComposer"/> ever runs. <c>ThemeManifestParser</c>'s own <c>FontFamilyPattern</c>
+/// re-validates EVERY family a posted manifest carries at that exact parse boundary — vendored,
+/// installed, or otherwise, regardless of provenance — rejecting anything outside the CSS-safe shape
+/// with a 400 the editor's own error state surfaces, never silently composing it. That parse-time gate
+/// is what actually closes this obligation for <c>Family</c>, not a bound applied at this store or at
+/// <see cref="InstalledFontCatalog"/>; the "apply the same bound+shape discipline… first" instruction
+/// above is satisfied by an EQUIVALENT gate at the correct layer (the one place a family value ever
+/// crosses into CSS), not a literal copy of <c>TryParseFamily</c> onto this store's own write path.
+/// <c>Style</c>, by contrast, is never read by the editor at all — <c>EditorClient.tsx</c>'s
+/// <c>assignedFace</c> hardcodes <c>"normal"</c> for every explicit assignment, and an unassigned role
+/// passes the BASE THEME's own already-parsed <c>style</c> through untouched, never a pack's stored
+/// one — so <c>FontPackFace.Style</c>'s "unbounded, don't trust it" obligation remains factually true
+/// but is MOOT for this consumer, and carries forward unchanged to whichever future consumer, if any,
+/// ever reads a pack's stored <c>Style</c> into a CSS context.
 /// </para>
 /// </summary>
 [ApiController]
@@ -225,6 +245,62 @@ public sealed partial class FontPackController(
         return Ok(new FontPackInstallResponse(slug, manifest.Family, faces.Select(f => f.File).ToArray(), slug));
     }
 
+    // ── Uninstall (DELETE /api/fonts/{slug}) ───────────────────────────────
+
+    /// <summary>
+    /// DELETE /api/fonts/{slug} — uninstalls a pack (SPEC F104.14, STORY-288, PLAN T208). Refused with
+    /// 409, naming every referencing theme, while any saved/imported <c>station.theme</c> row still
+    /// references one of this pack's own faces (the persona-delete FK-guard precedent, applied where
+    /// the reference lives inside opaque jsonb rather than a real foreign key) — see
+    /// <see cref="IFontPackStore.DeleteAsync"/>'s own remarks for how the guard is enforced atomically,
+    /// inside the delete statement itself, never as an advisory pre-check this action could race past.
+    /// With no reference, 204: the pack row and every one of its faces are gone (db/32's own
+    /// <c>ON DELETE CASCADE</c>), and the SAME post-write rebuild <see cref="Install"/> already performs
+    /// (<see cref="InstalledFontCatalog.ReloadAsync"/>) runs again here — <c>GET /fonts/{file}</c> stops
+    /// serving this pack's faces on the very next request (SPEC F104.14's own "next request" wording),
+    /// never waiting on a process restart.
+    ///
+    /// <para>
+    /// <b>Loud either way (M1 carry-forward — no silent-vanish path).</b> Every outcome is logged: an
+    /// uninstall that actually removes a pack (INFO, naming the slug — mirrors <see cref="Install"/>'s
+    /// own INFO line), and a refusal (WARN, naming the slug and how many themes blocked it — mirrors
+    /// <c>PersonaController.Delete</c>'s own WARN-on-block precedent). A genuinely unknown slug is
+    /// neither — a plain 404, the same "nothing to log" posture <see cref="ResolveFontEntryAsync"/>'s
+    /// own unknown-pack 404 already carries.
+    /// </para>
+    /// </summary>
+    [HttpDelete("{slug}")]
+    public async Task<IActionResult> Uninstall(string slug, CancellationToken ct)
+    {
+        if (slug.Length > MaxSlugLength)
+            return BadRequest(SlugTooLongProblem(slug.Length));
+
+        if (!SlugFormat().IsMatch(slug))
+            return BadRequest(BadSlugProblem(slug));
+
+        var result = await fontPackStore.DeleteAsync(slug, ct);
+
+        switch (result)
+        {
+            case FontPackDeleteResult.Deleted:
+                // CancellationToken.None, deliberately — see Install's own "Rebuild after write"
+                // remarks: the delete above has already committed, so the rebuild is no longer this
+                // request's to abandon.
+                await installedFontCatalog.ReloadAsync(CancellationToken.None);
+                logger.LogInformation("Font pack uninstalled slug={Slug}", LogSafeText.Sanitize(slug));
+                return NoContent();
+            case FontPackDeleteResult.NotFound:
+                return NotFound(UnknownInstalledPackProblem(slug));
+            case FontPackDeleteResult.Referenced referenced:
+                logger.LogWarning(
+                    "Font pack uninstall refused slug={Slug} referencedByCount={Count}",
+                    LogSafeText.Sanitize(slug), referenced.ThemeSlugs.Count);
+                return Conflict(ReferencedProblem(slug, referenced.ThemeSlugs));
+            default:
+                throw new UnreachableException($"Unhandled {nameof(FontPackDeleteResult)} case.");
+        }
+    }
+
     // ── Library listing (GET /api/fonts) ────────────────────────────────────
 
     /// <summary>
@@ -286,6 +362,111 @@ public sealed partial class FontPackController(
             manifest?.Subset,
             pack.ImportedFrom,
             pack.ImportedAt);
+    }
+
+    // ── Assignable faces (GET /api/fonts/assignable) ──────────────────────────
+
+    /// <summary>
+    /// GET /api/fonts/assignable — the v2 editor's role pickers' ENTIRE assignable set in one call
+    /// (SPEC F104.11, STORY-286, PLAN T206; widened at T206 review finding F4; renamed from
+    /// <c>GET /api/fonts/vendored</c>/<see cref="Api.AssignableFaceDto"/>'s former
+    /// <c>VendoredFontDto</c> name at PLAN T207 review carry-in 1 — the old name promised "vendored
+    /// only" while the response has been vendored ∪ installed since T206): vendored ∪ installed,
+    /// one row per FAMILY, each carrying the representative UPRIGHT src a role assignment composes
+    /// with. Reads the SAME two sources <see cref="ThemeFontProvenanceValidator"/>'s own widened
+    /// callers ultimately trust — <see cref="FontProvenanceCatalog.Default"/> for the vendored half
+    /// (the SAME static singleton <see cref="ThemePreviewController"/>/<see cref="ThemesImportController"/>
+    /// already read for the widened font law), <see cref="IFontPackStore.GetAllAsync"/> for the
+    /// installed half (the SAME call <see cref="List"/> above already makes, and the same call
+    /// <see cref="InstalledFontCatalog.ReloadAsync"/> builds its own snapshot from) — never a second,
+    /// independently-maintained list.
+    ///
+    /// <para>
+    /// <b>ONE representative-face heuristic, not two (T206 review finding F4).</b> Before this fix, the
+    /// vendored half was filtered server-side by an ordinal filename-substring "italic" check while
+    /// <c>EditorClient.tsx</c> separately re-derived the installed half by <c>style === "normal"</c>
+    /// with its own <c>faces[0]</c> fallback — two DIFFERENT heuristics, derived in two different
+    /// languages, that could disagree with each other and with
+    /// <see cref="ThemeFontProvenanceValidator"/>. <see cref="RepresentativeVendoredSrc"/>/
+    /// <see cref="RepresentativeInstalledFace"/> below are now the ONLY place either determination is
+    /// made, server-side, once; the client consumes this DTO array verbatim and derives nothing of its
+    /// own. The vendored half still resorts to the filename-substring heuristic —
+    /// <see cref="VendoredFontFace"/> carries no explicit style flag to check instead — but there is
+    /// now exactly one such check in the whole app, not two that could drift apart. A family present in
+    /// BOTH sets (not a real case today — Dean's own curation keeps them disjoint, SPEC F104.16) keeps
+    /// its VENDORED row: <c>VendoredFaceOptions()</c> is concatenated before
+    /// <c>InstalledFaceOptions(...)</c>, and the dedupe-by-family group below keeps the first.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Route-set obligation</b> — unchanged by this widening: this is still the SECOND <c>GET</c>
+    /// under <c>api/fonts</c>, still pinned by name in <c>Story278_ThemeCatalogIsolation.cs</c>'s own
+    /// route-set pin (<c>ScenarioNoNewPublicRoute.KnownCatalogAndThemeRoutes</c>) and
+    /// <c>Story283_InstalledFontServing.cs</c>'s own <c>ExpectedFontRoutes</c>, with the SAME
+    /// class-level <see cref="AdminSurfaceAttribute"/>+<see cref="AuthorizationPolicies.Settings"/>
+    /// pairing every route on this controller already carries — the URL and its auth posture are
+    /// untouched, only the response SHAPE widened.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>NO <see cref="CommunityCatalogAccessor.IsEnabled"/> GATE — the SAME reasoning as
+    /// <see cref="List"/>'s own remarks, applied to a UNION of embedded (vendored) and stored
+    /// (installed) data rather than either alone.</b> Neither source has a Community Catalog origin
+    /// this route depends on, so there is no reachability axis for the kill switch to gate — disabling
+    /// the catalog (an empty <c>Community:CatalogIndexUrl</c>) never changes this route's answer while
+    /// <see cref="Install"/> still 404s bare. Previously documented but NOT Fact-pinned (T206 review
+    /// finding F1 — the sibling <see cref="List"/> route's own divergence WAS pinned,
+    /// <c>Story284_FontPackLibrary.cs</c>'s own <c>ScenarioTheCatalogKillSwitchDoesNotGateTheLibrary</c>,
+    /// this route's was not); now pinned by name, alongside <c>GET /api/themes</c>'s own identical
+    /// posture, in <c>Story286_EditorComposesTheRemix.cs</c>'s own
+    /// <c>ScenarioTheCatalogKillSwitchDoesNotGateTheEditorReads</c>.
+    /// </para>
+    /// </summary>
+    [HttpGet("assignable")]
+    public async Task<IActionResult> Assignable(CancellationToken ct)
+    {
+        var packs = await fontPackStore.GetAllAsync(ct);
+        var assignable = VendoredFaceOptions()
+            .Concat(InstalledFaceOptions(packs))
+            .GroupBy(face => face.Family, StringComparer.Ordinal)
+            .Select(group => group.First()) // vendored listed first — a family in both keeps its vendored row
+            .OrderBy(face => face.Family, StringComparer.Ordinal)
+            .ToArray();
+        return Ok(assignable);
+    }
+
+    /// <summary>One <see cref="AssignableFaceDto"/> per curated family — see <see cref="Assignable"/>'s
+    /// own "ONE representative-face heuristic" remarks for why an italic file is filtered out here
+    /// rather than carried through.</summary>
+    static IEnumerable<AssignableFaceDto> VendoredFaceOptions() =>
+        FontProvenanceCatalog.Default.BySrc.Values
+            .GroupBy(face => face.Family, StringComparer.Ordinal)
+            .Select(group => new AssignableFaceDto(group.Key, RepresentativeVendoredSrc(group)));
+
+    /// <summary>The upright face's own src for a family that may carry an italic sibling too — falls
+    /// back to whichever face is first when every face in the group happens to look italic (never
+    /// actually true of today's provenance record, defensive only).</summary>
+    static string RepresentativeVendoredSrc(IEnumerable<VendoredFontFace> familyFaces) =>
+        (familyFaces.FirstOrDefault(face => !face.File.Contains("italic", StringComparison.Ordinal))
+            ?? familyFaces.First()).Src;
+
+    /// <summary>One <see cref="AssignableFaceDto"/> per installed pack (SPEC F104's own "role-agnostic,
+    /// one family per pack" shape) — silently skips a pack with no faces at all via
+    /// <see cref="RepresentativeInstalledFace"/>'s own <see langword="null"/> return (SPEC F104.5's
+    /// non-empty <c>files[]</c> install gate means this never actually happens in practice; defensive
+    /// only, the same posture <c>EditorClient.tsx</c>'s own former client-side projection documented
+    /// before this moved server-side).</summary>
+    static IEnumerable<AssignableFaceDto> InstalledFaceOptions(IReadOnlyList<FontPack> packs) =>
+        packs.Select(RepresentativeInstalledFace).OfType<AssignableFaceDto>();
+
+    /// <summary>The installed pack's OWN "normal"-style face, falling back to its first face — the
+    /// SAME representative-face rule <see cref="RepresentativeVendoredSrc"/> applies to the vendored
+    /// half, expressed against <see cref="FontPackFace.Style"/>'s real, manifest-declared value instead
+    /// of a filename guess (an installed pack's style is recorded truth, not inferred).</summary>
+    static AssignableFaceDto? RepresentativeInstalledFace(FontPack pack)
+    {
+        var face = pack.Faces.FirstOrDefault(f => f.Style == FontPackFaceInput.NormalStyle) ?? pack.Faces.FirstOrDefault();
+        return face is null ? null : new AssignableFaceDto(pack.Family, $"/fonts/{face.File}");
     }
 
     // ── Entry resolution ────────────────────────────────────────────────────
@@ -506,6 +687,30 @@ public sealed partial class FontPackController(
         Status = StatusCodes.Status404NotFound,
         Title  = "Not found.",
         Detail = $"No installable font pack with slug \"{slug}\" exists.",
+    };
+
+    // Distinct from UnknownPackProblem above: that one names a CATALOG entry Install couldn't resolve;
+    // this one names an INSTALLED pack Uninstall couldn't find — two different "unknown" nouns that
+    // happen to share a status code.
+    static ProblemDetails UnknownInstalledPackProblem(string slug) => new()
+    {
+        Status = StatusCodes.Status404NotFound,
+        Title  = "Not found.",
+        Detail = $"No installed font pack with slug \"{slug}\" exists.",
+    };
+
+    // SPEC F104.14 — names every referencing theme by slug (the persona-delete precedent's own "name
+    // every offending row" contract). Falls back to generic wording only on FontPackDeleteResult.
+    // Referenced's own documented rare-empty race case (see that type's own remarks) — never a bare
+    // "cannot be uninstalled" with no theme list when one is actually available.
+    static ProblemDetails ReferencedProblem(string slug, IReadOnlyList<string> themeSlugs) => new()
+    {
+        Status = StatusCodes.Status409Conflict,
+        Title  = "Font pack is referenced.",
+        Detail = themeSlugs.Count > 0
+            ? $"\"{slug}\" is still referenced by theme(s) {string.Join(", ", themeSlugs.Select(t => $"\"{t}\""))} " +
+              "and cannot be uninstalled — remove or edit those themes first."
+            : $"\"{slug}\" is still referenced by a theme and cannot be uninstalled.",
     };
 
     static ProblemDetails CatalogUnavailableProblem() => new()

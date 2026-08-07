@@ -78,6 +78,21 @@ sealed class FakeFontPackStore : IFontPackStore
     /// honestly prove.</summary>
     public int UpsertCallCount { get; private set; }
 
+    /// <summary>
+    /// Scripts <see cref="DeleteAsync"/>'s own guard outcome (SPEC F104.14, STORY-288, PLAN T208):
+    /// when non-empty, the NEXT <see cref="DeleteAsync"/> call for a slug this fake actually holds
+    /// returns <see cref="FontPackDeleteResult.Referenced"/> naming these slugs instead of deleting
+    /// anything. This fake deliberately carries NO knowledge of <c>station.theme</c> — mirrors this
+    /// class's own header remarks ("proves the CONTRACT FontPackController's own route relies on; the
+    /// real repository's own SQL is proven against real Postgres instead"): the REAL cross-table
+    /// substring-search guard is <c>GenWave.MediaLibrary.Station.FontPackRepository.DeleteAsync</c>'s
+    /// own concern, proven in <c>GenWave.MediaLibrary.Tests/Specs/Story288_FontPackUninstall.cs</c>; a
+    /// spec against THIS fake sets this property directly to drive
+    /// <c>FontPackController.Uninstall</c>'s own response-mapping through both branches over a real HTTP
+    /// request.
+    /// </summary>
+    public IReadOnlyList<string> ReferencingThemeSlugs { get; set; } = [];
+
     public Task UpsertAsync(
         string slug, string family, string definition, string importedFrom,
         IReadOnlyList<FontPackFaceInput> faces, CancellationToken ct)
@@ -113,5 +128,23 @@ sealed class FakeFontPackStore : IFontPackStore
             throw new InvalidOperationException("simulated station.font_pack_face outage (FakeFontPackStore.Broken)");
 
         return Task.FromResult(contentByFile.TryGetValue(file, out var content) ? content : null);
+    }
+
+    /// <summary>See <see cref="ReferencingThemeSlugs"/>'s own remarks — a slug this fake does not hold
+    /// answers <see cref="FontPackDeleteResult.NotFound"/> regardless of that property, mirroring the
+    /// real repository's own "does it exist at all" check.</summary>
+    public Task<FontPackDeleteResult> DeleteAsync(string slug, CancellationToken ct)
+    {
+        if (!bySlug.TryGetValue(slug, out var pack))
+            return Task.FromResult<FontPackDeleteResult>(new FontPackDeleteResult.NotFound());
+
+        if (ReferencingThemeSlugs.Count > 0)
+            return Task.FromResult<FontPackDeleteResult>(new FontPackDeleteResult.Referenced(ReferencingThemeSlugs));
+
+        bySlug.Remove(slug);
+        foreach (var face in pack.Faces)
+            contentByFile.Remove(face.File);
+
+        return Task.FromResult<FontPackDeleteResult>(new FontPackDeleteResult.Deleted());
     }
 }

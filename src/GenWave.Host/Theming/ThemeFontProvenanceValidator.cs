@@ -3,9 +3,11 @@ namespace GenWave.Host.Theming;
 using System.Linq;
 
 /// <summary>
-/// Enforces SPEC F103.10 — a theme references fonts ONLY from the GenWave-vendored curated set
-/// (<see cref="FontProvenanceCatalog"/>) — plus the per-theme byte ceiling FONTS.md documents (PLAN
-/// T188, closing ARCHITECTURE "Theme system"'s two font TODOs, for the curated set).
+/// Enforces SPEC F103.10/F104.9 — a theme references fonts ONLY from GenWave's <b>vendored ∪
+/// installed</b> set (<see cref="FontProvenanceCatalog"/> plus, since PLAN T205, whatever
+/// <see cref="InstalledFontCatalog"/> currently holds) — plus the per-theme byte ceiling FONTS.md
+/// documents (PLAN T188, closing ARCHITECTURE "Theme system"'s two font TODOs; F104.9 widens the same
+/// ceiling to sum recorded bytes across both sets).
 ///
 /// <see cref="ThemeManifestParser"/> already pins the URL SHAPE (its <c>FontSrcPattern</c>: a plain
 /// <c>/fonts/&lt;name&gt;.woff2</c> path, never an absolute URL or a "../" traversal) — what THIS
@@ -31,16 +33,20 @@ using System.Linq;
 /// <see cref="ThemeCatalog.CreateForStation"/>'s own initial state, so a bad shipped manifest still
 /// fails loudly before the process ever serves a request — the same authoring-bug posture
 /// <see cref="ThemeCatalog"/>'s own remarks already state for structural validation.</description></item>
-/// <item><description>The theme import route — the ONLY <c>station.theme</c> write path (SPEC
-/// F103.6). Enforcing here means every row ever persisted already satisfies this rule, so
+/// <item><description>The two <c>station.theme</c> write routes (SPEC F103.6, F104.13; PLAN
+/// T184/T207) — the theme import route AND the save-as-own route
+/// (<see cref="GenWave.Host.Api.ThemesSaveAsOwnController"/>), the only two ways this app ever writes
+/// <c>station.theme</c>. Both enforce this validator here, on the same posted-manifest shape, before
+/// either ever calls <see cref="Core.Abstractions.IThemeStore.UpsertAsync"/>. Enforcing here means
+/// every row ever persisted already satisfies this rule regardless of which of the two wrote it, so
 /// <see cref="ThemeCatalog.ReloadOwnerThemesAsync"/>'s shipped∪owner rebuild needs no SECOND check
 /// of its own: re-validating provenance on every reload would add a new exception source to the
 /// exact method the SPEC F102.7 offline floor depends on staying narrow (an unreachable/malformed
-/// store, not manifest content already settled at import time). The worst case for a row that
+/// store, not manifest content already settled at write time). The worst case for a row that
 /// somehow slipped through anyway (a hand-edited <c>station.theme</c> row — never possible through
-/// this app's own write path) is a 404'd font asset; <c>FontEndpoints</c>' closed, literal-filename
-/// switch cannot serve an arbitrary path regardless, so skipping the reload-time re-check trades
-/// away no security surface, only page-weight/UX budget the import gate already
+/// either of this app's own write paths) is a 404'd font asset; <c>FontEndpoints</c>' closed,
+/// literal-filename switch cannot serve an arbitrary path regardless, so skipping the reload-time
+/// re-check trades away no security surface, only page-weight/UX budget the write-time gate already
 /// protects.</description></item>
 /// </list>
 /// The theme detail LIVE-PREVIEW route (<see cref="GenWave.Host.Api.ThemePreviewController"/>) now calls this
@@ -49,6 +55,23 @@ using System.Linq;
 /// Nothing that route composes is ever stored or served station-wide, so the import gate above
 /// remains the one place that guarantees every PERSISTED row satisfies SPEC F103.10; the preview
 /// call is an additive, non-persisting check of the same rule against ephemeral input.
+///
+/// <para>
+/// <b>THE WIDENED LAW (SPEC F104.9/F104.10, PLAN T205).</b> <see cref="Validate"/>'s optional
+/// <c>installedFacesBySrc</c> parameter is the ONLY thing that changed shape — every call site that
+/// still passes just <paramref name="Validate"/>'s first three arguments (<see cref="ThemeCatalog.LoadShipped"/>'s
+/// boot canary, and every fixture-driven spec PLAN T188 already committed) keeps validating against
+/// vendored-only, unchanged, because a <see langword="null"/> default collapses to an empty set — the
+/// exact posture SPEC F104.9's own "shipped themes remain structurally incapable of referencing packs"
+/// sentence demands: <see cref="ThemeCatalog.LoadShipped"/> runs before <see cref="InstalledFontCatalog"/>
+/// has anything to offer anyway (no DI container exists yet), so it has no installed set to pass even
+/// if it wanted to. <see cref="GenWave.Host.Api.ThemesImportController"/>,
+/// <see cref="GenWave.Host.Api.ThemePreviewController"/>, and (PLAN T207)
+/// <see cref="GenWave.Host.Api.ThemesSaveAsOwnController"/> are the callers that DO pass one, built
+/// from the SAME DI'd <see cref="InstalledFontCatalog"/> singleton the widened <c>GET /fonts/{file}</c>
+/// route (PLAN T200) already reads — so "can this face be IMPORTED/SAVED" and "can this face be
+/// SERVED" can never silently disagree.
+/// </para>
 /// </summary>
 public static class ThemeFontProvenanceValidator
 {
@@ -60,45 +83,83 @@ public static class ThemeFontProvenanceValidator
     /// </summary>
     public const long PerThemeByteCeilingBytes = 200 * 1024;
 
+    /// <summary>The empty set every <c>installedFacesBySrc: null</c> caller effectively validates
+    /// against (see this type's own "THE WIDENED LAW" remarks) — one shared instance, not a fresh
+    /// allocation per boot-time/vendored-only call.</summary>
+    static readonly IReadOnlyDictionary<string, long> NoInstalledFaces = new Dictionary<string, long>();
+
     /// <summary>
     /// Validates <paramref name="theme"/>'s font asset srcs against <paramref name="vendoredFacesBySrc"/>
-    /// and <paramref name="ceilingBytes"/>. <paramref name="vendoredFacesBySrc"/>/
-    /// <paramref name="ceilingBytes"/> are parameters, not a read of <see cref="FontProvenanceCatalog.Default"/>/
-    /// <see cref="PerThemeByteCeilingBytes"/> directly, so a test can prove the byte-ceiling path
-    /// with a small fixture provenance record instead of editing the real one (PLAN T188's own "you
-    /// may add a fake face entry in a TEST fixture provenance record, not the real one") — production
-    /// callers pass those two members explicitly.
+    /// ∪ <paramref name="installedFacesBySrc"/> and <paramref name="ceilingBytes"/>.
+    /// <paramref name="vendoredFacesBySrc"/>/<paramref name="ceilingBytes"/> are parameters, not a read
+    /// of <see cref="FontProvenanceCatalog.Default"/>/<see cref="PerThemeByteCeilingBytes"/> directly,
+    /// so a test can prove the byte-ceiling path with a small fixture provenance record instead of
+    /// editing the real one (PLAN T188's own "you may add a fake face entry in a TEST fixture
+    /// provenance record, not the real one") — production callers pass those two members explicitly.
+    /// <paramref name="installedFacesBySrc"/> (PLAN T205) is every installed face's byte size keyed by
+    /// its <c>/fonts/{file}</c> src (<see cref="InstalledFontCatalog.InstalledByteSizeBySrc"/>) — see
+    /// this type's own "THE WIDENED LAW" remarks for why it defaults to an empty set rather than being
+    /// required.
     /// </summary>
     /// <exception cref="ThemeManifestException">
-    /// <paramref name="theme"/> references a font asset src missing from
-    /// <paramref name="vendoredFacesBySrc"/> — naming the theme, the missing face(s), and the whole
-    /// vendored set — or its distinct referenced faces' summed bytes exceed
-    /// <paramref name="ceilingBytes"/> — naming the theme, the total, and the ceiling.
+    /// <paramref name="theme"/> references a font asset src missing from BOTH
+    /// <paramref name="vendoredFacesBySrc"/> and <paramref name="installedFacesBySrc"/> — naming the
+    /// theme, the missing face(s), and the whole vendored set — or its distinct referenced faces'
+    /// summed bytes (across both sets) exceed <paramref name="ceilingBytes"/> — naming the theme, the
+    /// total, and the ceiling.
     /// </exception>
     public static void Validate(
         ThemeManifest theme,
         IReadOnlyDictionary<string, VendoredFontFace> vendoredFacesBySrc,
-        long ceilingBytes)
+        long ceilingBytes,
+        IReadOnlyDictionary<string, long>? installedFacesBySrc = null)
     {
-        var referencedSrcs = theme.Fonts.Display.Assets
-            .Concat(theme.Fonts.Sans.Assets)
-            .Select(asset => asset.Src)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+        var installed = installedFacesBySrc ?? NoInstalledFaces;
+        var referencedSrcs = ReferencedSrcs(theme);
 
-        var missing = referencedSrcs.Where(src => !vendoredFacesBySrc.ContainsKey(src)).ToList();
+        var missing = FindMissingSrcs(referencedSrcs, vendoredFacesBySrc, installed);
         if (missing.Count > 0)
         {
             var vendoredSet = string.Join(", ", vendoredFacesBySrc.Keys.OrderBy(src => src, StringComparer.Ordinal));
             throw new ThemeManifestException(
-                $"theme '{theme.Slug}' references font(s) outside GenWave's vendored curated set: " +
+                $"theme '{theme.Slug}' references font(s) outside GenWave's vendored ∪ installed set: " +
                 $"{string.Join(", ", missing)} (vendored set: {vendoredSet})");
         }
 
-        var totalBytes = referencedSrcs.Sum(src => vendoredFacesBySrc[src].Bytes);
+        var totalBytes = referencedSrcs.Sum(src =>
+            vendoredFacesBySrc.TryGetValue(src, out var vendored) ? vendored.Bytes : installed[src]);
         if (totalBytes > ceilingBytes)
             throw new ThemeManifestException(
-                $"theme '{theme.Slug}' references {totalBytes} bytes of vendored fonts, over the " +
-                $"{ceilingBytes}-byte per-theme ceiling (FONTS.md)");
+                $"theme '{theme.Slug}' references {totalBytes} bytes of vendored/installed fonts, over " +
+                $"the {ceilingBytes}-byte per-theme ceiling (FONTS.md)");
     }
+
+    /// <summary>
+    /// The srcs <paramref name="theme"/> references that resolve to NEITHER <paramref name="vendoredFacesBySrc"/>
+    /// NOR <paramref name="installedFacesBySrc"/> — the exact set <see cref="Validate"/> itself computes
+    /// before throwing, exposed here (PLAN T205) so a caller that wants to enrich a refusal with a
+    /// providing-pack suggestion (SPEC F104.10 — <see cref="GenWave.Host.Api.ThemesImportController"/>'s
+    /// own catalog-index lookup) can learn exactly which faces are missing without re-deriving this
+    /// set-difference itself or parsing <see cref="Validate"/>'s own exception message. Returns empty
+    /// when <paramref name="theme"/> clears the membership check — including when <see cref="Validate"/>
+    /// would still go on to refuse it on the byte ceiling alone, which this method has no opinion on.
+    /// </summary>
+    public static IReadOnlyList<string> FindMissingSrcs(
+        ThemeManifest theme,
+        IReadOnlyDictionary<string, VendoredFontFace> vendoredFacesBySrc,
+        IReadOnlyDictionary<string, long>? installedFacesBySrc = null) =>
+        FindMissingSrcs(ReferencedSrcs(theme), vendoredFacesBySrc, installedFacesBySrc ?? NoInstalledFaces);
+
+    static List<string> FindMissingSrcs(
+        IReadOnlyList<string> referencedSrcs,
+        IReadOnlyDictionary<string, VendoredFontFace> vendoredFacesBySrc,
+        IReadOnlyDictionary<string, long> installedFacesBySrc) =>
+        referencedSrcs.Where(src => !vendoredFacesBySrc.ContainsKey(src) && !installedFacesBySrc.ContainsKey(src)).ToList();
+
+    static List<string> ReferencedSrcs(ThemeManifest theme) =>
+        theme.Fonts.Display.Assets
+            .Concat(theme.Fonts.Sans.Assets)
+            .Select(asset => asset.Src)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
 }

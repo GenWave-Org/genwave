@@ -8,6 +8,11 @@
 // own shipped∪owner load path (PLAN T182, GenWave.Host.Tests' Story271_OwnerThemeStorage.cs) is
 // proven against FakeThemeStore instead — that project carries no Postgres fixture; this file proves
 // the repository underneath actually has the SQL teeth the fake merely simulates.
+//
+// PLAN T207 addition (SPEC F104.13): ScenarioUpsertingAnAuthoredTheme proves UpsertAsync's own CASE
+// expression at the REAL SQL layer, not merely against GenWave.Host.Tests' FakeThemeStore double — a
+// null importedFrom (the save-as-own write) must leave imported_at null too, the OwnerTheme invariant
+// this file's other Scenario already proves the NON-null half of.
 
 using Dapper;
 using GenWave.MediaLibrary.Station;
@@ -73,6 +78,58 @@ public static class FeatureThemeRepository
 
             var all = await repo.GetAllAsync(CancellationToken.None);
             Assert.Equal("midnight-drive", Assert.Single(all).Slug);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — a null importedFrom (save-as-own, SPEC F104.13, PLAN T207) leaves imported_at
+    // null too — OwnerTheme's own "ImportedAt is null exactly when ImportedFrom is" invariant, proven
+    // at the REAL SQL layer (the CASE expression UpsertAsync's own remarks describe), not merely
+    // against the in-memory FakeThemeStore double.
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioUpsertingAnAuthoredTheme(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task ANullImportedFromLeavesImportedAtNullToo()
+        {
+            await db.ResetThemeAsync();
+            var repo = Repo(db);
+
+            await repo.UpsertAsync("midnight-drive", Definition, importedFrom: null, CancellationToken.None);
+            var theme = await repo.GetBySlugAsync("midnight-drive", CancellationToken.None)
+                ?? throw new InvalidOperationException("test arrange: theme not found immediately after upsert");
+
+            // A regression that reverted to the pre-T207 unconditional now() would fail THIS
+            // assertion, not merely leave it unexercised — the mutation this Scenario exists to catch.
+            Assert.Equal(
+                (DefinitionMatches: true, ImportedFrom: (string?)null, ImportedAt: (DateTime?)null),
+                (DefinitionMatches: JsonEquivalent(Definition, theme.Definition), ImportedFrom: theme.ImportedFrom, ImportedAt: theme.ImportedAt));
+        }
+
+        [Fact]
+        public async Task ReUpsertingWithANonNullImportedFromStampsImportedAt()
+        {
+            // Given a theme first saved as own (null provenance),
+            await db.ResetThemeAsync();
+            var repo = Repo(db);
+            await repo.UpsertAsync("midnight-drive", Definition, importedFrom: null, CancellationToken.None);
+
+            // When it is re-upserted with a real provenance value (a re-import over a previously
+            // authored slug — the shipped-slug reservation guards the OTHER direction, SPEC F103.8;
+            // this is the plain re-upsert path either write route shares),
+            await repo.UpsertAsync("midnight-drive", Definition, "file", CancellationToken.None);
+            var theme = await repo.GetBySlugAsync("midnight-drive", CancellationToken.None)
+                ?? throw new InvalidOperationException("test arrange: theme not found immediately after re-upsert");
+
+            // Then imported_at is stamped on this write — the CASE expression's OTHER branch, proven
+            // in the same file as the null branch so neither can silently regress without the other
+            // catching it.
+            Assert.Equal(
+                (ImportedFrom: "file", ImportedAtStamped: true),
+                (ImportedFrom: theme.ImportedFrom, ImportedAtStamped: theme.ImportedAt is not null));
         }
     }
 

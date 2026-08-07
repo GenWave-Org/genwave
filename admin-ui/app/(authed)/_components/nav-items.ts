@@ -3,6 +3,7 @@ import {
   BoothLogIcon,
   CatalogIcon,
   DashboardIcon,
+  EditorIcon,
   HealthIcon,
   LiveIcon,
   PersonaCatalogIcon,
@@ -54,6 +55,12 @@ export const NAV_ITEMS: NavItem[] = [
   // with the catalog disabled or unreachable (SPEC F104.8's offline floor), so the page that
   // inspects what's ALREADY installed must stay reachable on that same axis too.
   { href: "/wardrobe", label: "Wardrobe", Icon: WardrobeIcon },
+  // Editor (PLAN T206, SPEC F104.11) — the v2 editor mixes a base theme's palette with wardrobe
+  // faces, transient client state only. Deliberately NOT gated by `requiresCatalog`, the SAME
+  // reasoning as Wardrobe's own ungated entry immediately above: the base-theme and vendored role
+  // picker options never touch the Community Catalog at all (GET /api/themes, GET /api/fonts/assignable
+  // both read station-local/embedded data), so there is no catalog-reachability axis to gate on.
+  { href: "/editor", label: "Editor", Icon: EditorIcon },
   { href: "/booth-log", label: "Booth log", Icon: BoothLogIcon },
   { href: "/health", label: "Health", Icon: HealthIcon },
   { href: "/settings", label: "Settings", Icon: SettingsIcon },
