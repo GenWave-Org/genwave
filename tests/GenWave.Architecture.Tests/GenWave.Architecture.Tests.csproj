@@ -1,8 +1,34 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- F105 architecture fitness suite (gh-#398). Analysis library (ArchUnitNET vs maintained
-       NetArchTest fork) is evaluated and adopted by PLAN T211 — the pending specs below are
-       library-agnostic by design. -->
+  <!-- F105 architecture fitness suite (gh-#398). T211 library evaluation (2026-08-07):
+       TngTech.ArchUnitNET 0.13.3 adopted for L2's Postgres-confinement scan. Checked: repo
+       pushed to `main` the same day this PR was written (1.3k stars, 36 open issues), latest
+       NuGet release 2026-03-05; Mono.Cecil-based, walks INTO method bodies (IL instructions),
+       not just declared references — verified experimentally with a fixture type before relying
+       on it. Runner-up: NetArchTest.eNhancedEdition (github.com/NeVeSpl/NetArchTest.eNhancedEdition,
+       the maintained fork of the abandoned original NetArchTest.Rules, last released 2019) — same
+       Mono.Cecil foundation and IL-body reach, but a single-maintainer fork whose own last NuGet
+       release predates this PR by over a year, and a narrower fluent surface (no NotCallAny-style
+       member-level rule). Both libraries' dependency selectors only recognize assemblies
+       explicitly passed to their loader up front (confirmed experimentally: an unloaded target
+       assembly's type usage silently evaluates as "no violation") — sound for L2, whose forbidden
+       set is exactly two well-known assemblies (Npgsql, Dapper) always loaded together, unsound
+       for L1 (the whole unenumerable Microsoft.AspNetCore.* family) and L4-references ("anything
+       non-BCL"). L1 is hand-rolled instead, reading the compiled assembly's own AssemblyRef table
+       via System.Reflection.Metadata (GenWave.Architecture.Tests/Support/AssemblyReferenceScan.cs)
+       — exhaustive over DIRECT references by construction, nothing to enumerate or fall behind on
+       as the shared framework grows, and sound here because a forbidden AspNetCore/Npgsql/Dapper
+       type usage always shows up as a direct reference on the referencing assembly. L4-references
+       needs a different technique: a name-prefix check over that same table
+       (`StartsWith("System")`) has a proven bypass — a real `PackageReference` to a `System.*`-
+       named third-party package (e.g. `System.Diagnostics.EventLog`) never fails the name check
+       yet ships straight into the published package's dependency closure. So L4-references instead
+       reads the project's own build-output `.deps.json` "libraries" map
+       (GenWave.Architecture.Tests/Support/DepsJsonDependencyScan.cs): every restored NuGet/project
+       dependency gets exactly one entry there and shared-framework (BCL) assemblies never do, so
+       "nothing beyond the BCL" is exactly "no library entry besides the project's own self-entry"
+       — no name matching, no silent under-coverage. Smallest-dependency net effect: one library
+       dependency (ArchUnitNET), used only where it earns its keep. -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -14,6 +40,7 @@
   <ItemGroup>
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="TngTech.ArchUnitNET" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
