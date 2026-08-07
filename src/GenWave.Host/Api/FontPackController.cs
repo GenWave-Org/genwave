@@ -245,6 +245,62 @@ public sealed partial class FontPackController(
         return Ok(new FontPackInstallResponse(slug, manifest.Family, faces.Select(f => f.File).ToArray(), slug));
     }
 
+    // ── Uninstall (DELETE /api/fonts/{slug}) ───────────────────────────────
+
+    /// <summary>
+    /// DELETE /api/fonts/{slug} — uninstalls a pack (SPEC F104.14, STORY-288, PLAN T208). Refused with
+    /// 409, naming every referencing theme, while any saved/imported <c>station.theme</c> row still
+    /// references one of this pack's own faces (the persona-delete FK-guard precedent, applied where
+    /// the reference lives inside opaque jsonb rather than a real foreign key) — see
+    /// <see cref="IFontPackStore.DeleteAsync"/>'s own remarks for how the guard is enforced atomically,
+    /// inside the delete statement itself, never as an advisory pre-check this action could race past.
+    /// With no reference, 204: the pack row and every one of its faces are gone (db/32's own
+    /// <c>ON DELETE CASCADE</c>), and the SAME post-write rebuild <see cref="Install"/> already performs
+    /// (<see cref="InstalledFontCatalog.ReloadAsync"/>) runs again here — <c>GET /fonts/{file}</c> stops
+    /// serving this pack's faces on the very next request (SPEC F104.14's own "next request" wording),
+    /// never waiting on a process restart.
+    ///
+    /// <para>
+    /// <b>Loud either way (M1 carry-forward — no silent-vanish path).</b> Every outcome is logged: an
+    /// uninstall that actually removes a pack (INFO, naming the slug — mirrors <see cref="Install"/>'s
+    /// own INFO line), and a refusal (WARN, naming the slug and how many themes blocked it — mirrors
+    /// <c>PersonaController.Delete</c>'s own WARN-on-block precedent). A genuinely unknown slug is
+    /// neither — a plain 404, the same "nothing to log" posture <see cref="ResolveFontEntryAsync"/>'s
+    /// own unknown-pack 404 already carries.
+    /// </para>
+    /// </summary>
+    [HttpDelete("{slug}")]
+    public async Task<IActionResult> Uninstall(string slug, CancellationToken ct)
+    {
+        if (slug.Length > MaxSlugLength)
+            return BadRequest(SlugTooLongProblem(slug.Length));
+
+        if (!SlugFormat().IsMatch(slug))
+            return BadRequest(BadSlugProblem(slug));
+
+        var result = await fontPackStore.DeleteAsync(slug, ct);
+
+        switch (result)
+        {
+            case FontPackDeleteResult.Deleted:
+                // CancellationToken.None, deliberately — see Install's own "Rebuild after write"
+                // remarks: the delete above has already committed, so the rebuild is no longer this
+                // request's to abandon.
+                await installedFontCatalog.ReloadAsync(CancellationToken.None);
+                logger.LogInformation("Font pack uninstalled slug={Slug}", LogSafeText.Sanitize(slug));
+                return NoContent();
+            case FontPackDeleteResult.NotFound:
+                return NotFound(UnknownInstalledPackProblem(slug));
+            case FontPackDeleteResult.Referenced referenced:
+                logger.LogWarning(
+                    "Font pack uninstall refused slug={Slug} referencedByCount={Count}",
+                    LogSafeText.Sanitize(slug), referenced.ThemeSlugs.Count);
+                return Conflict(ReferencedProblem(slug, referenced.ThemeSlugs));
+            default:
+                throw new UnreachableException($"Unhandled {nameof(FontPackDeleteResult)} case.");
+        }
+    }
+
     // ── Library listing (GET /api/fonts) ────────────────────────────────────
 
     /// <summary>
@@ -631,6 +687,30 @@ public sealed partial class FontPackController(
         Status = StatusCodes.Status404NotFound,
         Title  = "Not found.",
         Detail = $"No installable font pack with slug \"{slug}\" exists.",
+    };
+
+    // Distinct from UnknownPackProblem above: that one names a CATALOG entry Install couldn't resolve;
+    // this one names an INSTALLED pack Uninstall couldn't find — two different "unknown" nouns that
+    // happen to share a status code.
+    static ProblemDetails UnknownInstalledPackProblem(string slug) => new()
+    {
+        Status = StatusCodes.Status404NotFound,
+        Title  = "Not found.",
+        Detail = $"No installed font pack with slug \"{slug}\" exists.",
+    };
+
+    // SPEC F104.14 — names every referencing theme by slug (the persona-delete precedent's own "name
+    // every offending row" contract). Falls back to generic wording only on FontPackDeleteResult.
+    // Referenced's own documented rare-empty race case (see that type's own remarks) — never a bare
+    // "cannot be uninstalled" with no theme list when one is actually available.
+    static ProblemDetails ReferencedProblem(string slug, IReadOnlyList<string> themeSlugs) => new()
+    {
+        Status = StatusCodes.Status409Conflict,
+        Title  = "Font pack is referenced.",
+        Detail = themeSlugs.Count > 0
+            ? $"\"{slug}\" is still referenced by theme(s) {string.Join(", ", themeSlugs.Select(t => $"\"{t}\""))} " +
+              "and cannot be uninstalled — remove or edit those themes first."
+            : $"\"{slug}\" is still referenced by a theme and cannot be uninstalled.",
     };
 
     static ProblemDetails CatalogUnavailableProblem() => new()

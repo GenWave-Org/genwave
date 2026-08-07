@@ -220,7 +220,11 @@ public static class FeatureThemeCatalogIsolation
         // assignable face set, for the SAME editor's role pickers. POST
         // api/themes/{slug}/save-as-own (T207, SPEC F104.13) is ThemesSaveAsOwnController's own
         // route — station.theme's SECOND write path, the SAME class-level AdminSurface+Settings
-        // pairing every route on this prefix already carries.
+        // pairing every route on this prefix already carries. DELETE api/fonts/{slug} (T208, SPEC
+        // F104.14) is FontPackController's own uninstall route — the guarded pack library's FIRST
+        // delete, joining install/list/assignable under the SAME class-level AdminSurface+Settings
+        // pairing, pinned here (mirrors the N4/N7 "the moment it exists" precedent every sibling route
+        // above already followed) rather than left for the T209 disclosure re-audit to discover.
         static readonly IReadOnlySet<(string Verb, string Route)> KnownCatalogAndThemeRoutes =
             new HashSet<(string Verb, string Route)>
             {
@@ -234,6 +238,7 @@ public static class FeatureThemeCatalogIsolation
                 ("POST", "api/fonts/{slug}/install"),
                 ("GET", "api/fonts"),
                 ("GET", "api/fonts/assignable"),
+                ("DELETE", "api/fonts/{slug}"),
             };
 
         static List<RouteEndpoint> DiscoverCatalogAndThemeEndpoints(IServiceProvider services) =>
@@ -334,17 +339,18 @@ public static class FeatureThemeCatalogIsolation
         [InlineData("POST", "/api/fonts/anything/install")]
         [InlineData("GET", "/api/fonts")]
         [InlineData("GET", "/api/fonts/assignable")]
+        [InlineData("DELETE", "/api/fonts/anything")]
         public async Task EveryRouteReturns404OnThePublicListener(string verb, string path)
         {
             // AdminSurface alone is a proxy for "not public" — SurfaceGateMiddleware's public-listener
             // check is what actually enforces it (only SpectatorSurface-tagged endpoints, plus
             // /health and /fonts/*, exist there), so this proves the BEHAVIOR the attribute predicts.
             // /api/fonts/anything/install (review finding N4), /api/fonts (T203, SPEC F104.7's own
-            // N7 obligation), /api/themes, /api/fonts/assignable (T206, SPEC F104.11), and
-            // /api/themes/anything/save-as-own (T207, SPEC F104.13) are the ADMIN routes this file's
-            // own KnownCatalogAndThemeRoutes now pins — a distinct prefix from the public /fonts/*
-            // this comment's own parenthetical names, which serves already-installed face bytes and
-            // carries no AdminSurface at all.
+            // N7 obligation), /api/themes, /api/fonts/assignable (T206, SPEC F104.11),
+            // /api/themes/anything/save-as-own (T207, SPEC F104.13), and DELETE /api/fonts/anything
+            // (T208, SPEC F104.14) are the ADMIN routes this file's own KnownCatalogAndThemeRoutes now
+            // pins — a distinct prefix from the public /fonts/* this comment's own parenthetical names,
+            // which serves already-installed face bytes and carries no AdminSurface at all.
             await using var factory = new IsolationWebFactory(
                 IsolationFixtures.DisabledCatalogUrl, simulatedPublicPort: IsolationFixtures.PublicPort);
             var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });

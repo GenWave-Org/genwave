@@ -50,4 +50,39 @@ public interface IFontPackStore
     /// this path.
     /// </summary>
     Task<FontPackFaceContent?> GetFaceByFileAsync(string file, CancellationToken ct);
+
+    /// <summary>
+    /// Removes an installed pack by <paramref name="slug"/> (SPEC F104.14, STORY-288, PLAN T208) —
+    /// refused, naming every referencing owner theme, while ANY <c>station.theme</c> row still
+    /// references one of its faces; with none, the pack row — and, by <c>ON DELETE CASCADE</c>, every
+    /// one of its <c>station.font_pack_face</c> rows — is removed in the SAME statement that checks for
+    /// references. "The delete IS the guard", mirroring <see cref="UpsertAsync"/>'s own "the insert
+    /// (upsert) IS the uniqueness check" idiom: there is no separate ROUND TRIP between checking and
+    /// deleting for a caller to get out of sync on (T208's own reviewer-culture obligation — the guard
+    /// must not be an advisory pre-check a completely separate delete call could ignore or race past).
+    ///
+    /// <para>
+    /// <b>Honest boundary (review finding N2) — this is one atomic STATEMENT, not serializable
+    /// isolation.</b> Under Postgres's default READ COMMITTED, a single statement's own sub-query still
+    /// reads a snapshot fixed at that statement's start: a save-as-own/import that COMMITS a
+    /// newly-referencing <c>station.theme</c> row in the narrow window between this delete statement's
+    /// own snapshot and its commit is not guaranteed to be seen, and the pack could still be removed. The
+    /// outcome is fail-soft, not silently broken: the widened <c>GET /fonts/{file}</c> route (SPEC
+    /// F104.6) stops serving the now-missing face on its very next request with an ordinary unknown-file
+    /// 404, not a crash, and the operator's freshly-saved theme still resolves and renders
+    /// — one of its two declared font roles simply falls back to whatever <c>@font-face</c> a browser
+    /// substitutes for a 404'd woff2, exactly as an operator hand-editing <c>station.theme</c> to name a
+    /// never-installed pack already could today. What this method's own single-statement shape DOES
+    /// close is the coarser, likelier hazard: an application-level "SELECT to check, THEN a separate
+    /// DELETE call" — which would leave an open window measured in ROUND TRIPS, not one statement's own
+    /// execution time, for a concurrent write to land in.
+    /// </para>
+    ///
+    /// See <c>FontPackRepository.DeleteAsync</c>'s own remarks for exactly how a reference is detected
+    /// WITHOUT this seam (or its caller) ever depending on <c>GenWave.Host.Theming.ThemeManifest</c> —
+    /// this project's own "opaque jsonb, deserialize at your own edge" discipline (this interface's own
+    /// remarks) extended to a QUERY, not just a write — and for the false-positive direction that same
+    /// substring search accepts as a deliberate, fail-closed trade-off.
+    /// </summary>
+    Task<FontPackDeleteResult> DeleteAsync(string slug, CancellationToken ct);
 }

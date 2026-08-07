@@ -273,8 +273,9 @@ public sealed class FeatureInstalledFontServing
         // T206 — the SAME Settings-gated posture, the v2 editor's ENTIRE assignable face set since
         // T206 review finding F4 widened it to vendored ∪ installed; renamed from api/fonts/vendored
         // at PLAN T207 — the old name promised "vendored only" while the response has carried
-        // installed faces too since T206) — nothing else has ever joined either prefix, and this pins
-        // it stays that way.
+        // installed faces too since T206), and the uninstall route (DELETE api/fonts/{slug}, T208,
+        // SPEC F104.14 — the library's own inverse of the install route, the SAME Settings-gated
+        // posture) — nothing else has ever joined either prefix, and this pins it stays that way.
         static readonly IReadOnlySet<(string Verb, string Route)> ExpectedFontRoutes =
             new HashSet<(string Verb, string Route)>
             {
@@ -283,6 +284,7 @@ public sealed class FeatureInstalledFontServing
                 ("POST", "api/fonts/{slug}/install"),
                 ("GET", "api/fonts"),
                 ("GET", "api/fonts/assignable"),
+                ("DELETE", "api/fonts/{slug}"),
             };
 
         static string FailureMessage(IReadOnlySet<(string Verb, string Route)> discovered)
