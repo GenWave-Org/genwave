@@ -241,23 +241,16 @@ public static class FeatureThemeCatalogIsolation
                 ("DELETE", "api/fonts/{slug}"),
             };
 
-        static List<RouteEndpoint> DiscoverCatalogAndThemeEndpoints(IServiceProvider services) =>
-            services.GetRequiredService<EndpointDataSource>().Endpoints
-                .OfType<RouteEndpoint>()
-                .Where(endpoint => endpoint.RoutePattern.RawText is { } raw
-                    && (MatchesGuardedPrefix(raw.TrimStart('/'), "api/catalog")
-                        || MatchesGuardedPrefix(raw.TrimStart('/'), "api/themes")
-                        || MatchesGuardedPrefix(raw.TrimStart('/'), "api/fonts")))
-                .ToList();
-
         // All three controllers are ROOTED at their own bare prefix ([Route("api/catalog")],
         // [Route("api/themes")], [Route("api/fonts")] — review finding F2, extended to the third
-        // prefix at N4): a `StartsWith(prefix + "/")`-only check misses a route at EXACTLY
-        // "api/catalog"/"api/themes"/"api/fonts" (a future parameterless [HttpGet] list action), so
-        // the match is segment-bounded — the prefix itself, or the prefix followed by a '/' — never a
-        // bare substring match.
-        static bool MatchesGuardedPrefix(string route, string prefix) =>
-            route == prefix || route.StartsWith(prefix + "/", StringComparison.Ordinal);
+        // prefix at N4): GuardedRouteInspector.DiscoverEndpoints's own segment-bounded match — the
+        // prefix itself, or the prefix followed by a '/', never a bare substring match — is what makes
+        // that safe. Extracted to GenWave.Host.Tests.Fakes.GuardedRouteInspector (PLAN T209 review
+        // finding N3, the extract-on-third-copy precedent) once Story283_InstalledFontServing.cs and
+        // Story289_WardrobeIsolation.cs each carried their own near-verbatim copy of this discovery +
+        // AdminSurface/Settings shape check.
+        static List<RouteEndpoint> DiscoverCatalogAndThemeEndpoints(IServiceProvider services) =>
+            GuardedRouteInspector.DiscoverEndpoints(services, "api/catalog", "api/themes", "api/fonts");
 
         [Fact]
         public void TheDiscoveredRouteSetMatchesTheKnownDeliberateSet()
@@ -269,10 +262,7 @@ public static class FeatureThemeCatalogIsolation
 
             // When every api/catalog/*, api/themes/*, and api/fonts/* route is discovered off the
             //      app's OWN table (never a hand-maintained mirror of it),
-            var discovered = DiscoverCatalogAndThemeEndpoints(factory.Services)
-                .SelectMany(endpoint => (endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? [])
-                    .Select(verb => (Verb: verb, Route: endpoint.RoutePattern.RawText!.TrimStart('/'))))
-                .ToHashSet();
+            var discovered = GuardedRouteInspector.RouteVerbPairs(DiscoverCatalogAndThemeEndpoints(factory.Services)).ToHashSet();
 
             // Then it is EXACTLY the known set (AC1) — not a subset check, which would let a seventh
             //      route join silently (mirrors Story264_AnonymousApiSurface's own "named, deliberate
@@ -306,28 +296,28 @@ public static class FeatureThemeCatalogIsolation
             //      ThemePreviewController's own class-level attributes declare. This fact reads
             //      IAuthorizeData only — a route that additionally picked up [AllowAnonymous] is
             //      Story264_AnonymousApiSurface's own route-table sweep to catch, not this one's.
+            // An explicit assertion, not LINQ's SingleOrDefault (review finding, F2's neighbour):
+            // SingleOrDefault throws InvalidOperationException — an unhandled-exception test failure
+            // carrying no route/policy context — the moment an endpoint carries two distinct non-empty
+            // policies; GuardedRouteInspector.AdminSurfaceShape (PLAN T209 review finding N3) fails the
+            // normal xUnit way instead, naming the route and the policy set actually found.
             Assert.All(endpoints, endpoint =>
             {
-                Assert.NotNull(endpoint.Metadata.GetMetadata<AdminSurfaceAttribute>());
-
-                var policies = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>()
-                    .Select(authorizeData => authorizeData.Policy)
-                    .Where(candidate => !string.IsNullOrEmpty(candidate))
-                    .Distinct()
-                    .ToArray();
-
-                // An explicit assertion, not LINQ's SingleOrDefault (review finding, F2's neighbour):
-                // SingleOrDefault throws InvalidOperationException — an unhandled-exception test
-                // failure carrying no route/policy context — the moment an endpoint carries two
-                // distinct non-empty policies; this fails the normal xUnit way instead, naming the
-                // route and the policy set actually found.
+                var (carriesAdminSurface, hasExactlySettings, policies) = GuardedRouteInspector.AdminSurfaceShape(endpoint);
+                Assert.True(carriesAdminSurface, $"{endpoint.RoutePattern.RawText} is missing AdminSurfaceAttribute.");
                 Assert.True(
-                    policies is [var onlyPolicy] && onlyPolicy == AuthorizationPolicies.Settings,
+                    hasExactlySettings,
                     $"{endpoint.RoutePattern.RawText} carries policy set [{string.Join(", ", policies)}], " +
                     $"expected exactly one: \"{AuthorizationPolicies.Settings}\".");
             });
         }
 
+        // This literal InlineData list is DELIBERATE redundancy alongside
+        // Story289_WardrobeIsolation.cs's own self-derived, route-table-driven sweep (PLAN T209) — not
+        // dead weight to "clean up" onto that file's discovery helper. The rationale for keeping both
+        // lives at Story289_WardrobeIsolation.cs:81-85: a regression this hand-picked list catches is
+        // still caught even in the (unlikely) event the OTHER file's own discovery logic ever regresses
+        // for an unforeseen reason of its own.
         [Theory]
         [InlineData("GET", "/api/catalog/index")]
         [InlineData("GET", "/api/catalog/entries/anything")]
