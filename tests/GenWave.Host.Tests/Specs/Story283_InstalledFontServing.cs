@@ -263,13 +263,16 @@ public sealed class FeatureInstalledFontServing
         static bool MatchesPrefix(string route, string prefix) =>
             route == prefix || route.StartsWith(prefix + "/", StringComparison.Ordinal);
 
-        // The known, deliberate set (SPEC F104.5/F104.6/F104.7, widened at PLAN T203): the widened
-        // serving route (GET+HEAD, one parameterized segment — F104.6's non-enumerability is an
-        // ANONYMOUS-surface rule: no anonymous route lists these filenames), the install route (POST,
-        // write), and the library listing route (GET api/fonts, T203 — the Settings-gated ADMIN
+        // The known, deliberate set (SPEC F104.5/F104.6/F104.7/F104.11, widened at PLAN T203/T206):
+        // the widened serving route (GET+HEAD, one parameterized segment — F104.6's non-enumerability
+        // is an ANONYMOUS-surface rule: no anonymous route lists these filenames), the install route
+        // (POST, write), the library listing route (GET api/fonts, T203 — the Settings-gated ADMIN
         // listing F104.7 requires, which DOES carry every installed face's filename via `faces[].file`
-        // by design; that is not the anonymous enumeration F104.6 forbids) — nothing else has ever
-        // joined either prefix, and this pins it stays that way.
+        // by design; that is not the anonymous enumeration F104.6 forbids), and the vendored listing
+        // route (GET api/fonts/vendored, T206 — the SAME Settings-gated posture, the v2 editor's
+        // ENTIRE assignable face set since T206 review finding F4 widened it to vendored ∪ installed;
+        // the URL is unchanged) — nothing else has ever joined either prefix, and this pins it stays
+        // that way.
         static readonly IReadOnlySet<(string Verb, string Route)> ExpectedFontRoutes =
             new HashSet<(string Verb, string Route)>
             {
@@ -277,6 +280,7 @@ public sealed class FeatureInstalledFontServing
                 ("HEAD", "fonts/{file}"),
                 ("POST", "api/fonts/{slug}/install"),
                 ("GET", "api/fonts"),
+                ("GET", "api/fonts/vendored"),
             };
 
         static string FailureMessage(IReadOnlySet<(string Verb, string Route)> discovered)

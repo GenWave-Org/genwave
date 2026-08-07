@@ -115,8 +115,28 @@ namespace GenWave.Host.Api;
 /// own <see cref="FontLibraryPackDto"/>/<see cref="FontLibraryFaceDto"/> wire carries
 /// <c>family</c>/<c>style</c> verbatim (still no bound/escape applied at THIS layer, deliberately —
 /// see those DTOs' own remarks for why), and the Admin UI's library page renders both as plain React
-/// text nodes ONLY, never interpolated into a stylesheet or inline <c>style</c> attribute. The
-/// obligation carries forward to T206's editor pickers, still undischarged.
+/// text nodes ONLY, never interpolated into a stylesheet or inline <c>style</c> attribute.
+/// <b>T206 compliance (review finding F2 — the RECORD was wrong, not the code): <c>Family</c> IS
+/// discharged; <c>Style</c> stays undischarged but is moot for this consumer.</b> The editor's role
+/// pickers (<see cref="Vendored"/> below, <c>EditorClient.tsx</c>) DO let an operator route an
+/// installed pack's stored <c>Family</c> all the way into a real <c>font-family: "…"</c> declaration —
+/// assigning a face composes it into the remix manifest, POSTed to
+/// <see cref="ThemePreviewController.Preview"/> (and, once PLAN T207 ships, the save-as-own import
+/// route too), both of which call <see cref="ThemeManifestParser.Parse"/> BEFORE
+/// <see cref="ThemeCssComposer"/> ever runs. <c>ThemeManifestParser</c>'s own <c>FontFamilyPattern</c>
+/// re-validates EVERY family a posted manifest carries at that exact parse boundary — vendored,
+/// installed, or otherwise, regardless of provenance — rejecting anything outside the CSS-safe shape
+/// with a 400 the editor's own error state surfaces, never silently composing it. That parse-time gate
+/// is what actually closes this obligation for <c>Family</c>, not a bound applied at this store or at
+/// <see cref="InstalledFontCatalog"/>; the "apply the same bound+shape discipline… first" instruction
+/// above is satisfied by an EQUIVALENT gate at the correct layer (the one place a family value ever
+/// crosses into CSS), not a literal copy of <c>TryParseFamily</c> onto this store's own write path.
+/// <c>Style</c>, by contrast, is never read by the editor at all — <c>EditorClient.tsx</c>'s
+/// <c>assignedFace</c> hardcodes <c>"normal"</c> for every explicit assignment, and an unassigned role
+/// passes the BASE THEME's own already-parsed <c>style</c> through untouched, never a pack's stored
+/// one — so <c>FontPackFace.Style</c>'s "unbounded, don't trust it" obligation remains factually true
+/// but is MOOT for this consumer, and carries forward unchanged to whichever future consumer, if any,
+/// ever reads a pack's stored <c>Style</c> into a CSS context.
 /// </para>
 /// </summary>
 [ApiController]
@@ -286,6 +306,108 @@ public sealed partial class FontPackController(
             manifest?.Subset,
             pack.ImportedFrom,
             pack.ImportedAt);
+    }
+
+    // ── Assignable faces (GET /api/fonts/vendored) ──────────────────────────
+
+    /// <summary>
+    /// GET /api/fonts/vendored — the v2 editor's role pickers' ENTIRE assignable set in one call
+    /// (SPEC F104.11, STORY-286, PLAN T206; widened at T206 review finding F4): vendored ∪ installed,
+    /// one row per FAMILY, each carrying the representative UPRIGHT src a role assignment composes
+    /// with. Reads the SAME two sources <see cref="ThemeFontProvenanceValidator"/>'s own widened
+    /// callers ultimately trust — <see cref="FontProvenanceCatalog.Default"/> for the vendored half
+    /// (the SAME static singleton <see cref="ThemePreviewController"/>/<see cref="ThemesImportController"/>
+    /// already read for the widened font law), <see cref="IFontPackStore.GetAllAsync"/> for the
+    /// installed half (the SAME call <see cref="List"/> above already makes, and the same call
+    /// <see cref="InstalledFontCatalog.ReloadAsync"/> builds its own snapshot from) — never a second,
+    /// independently-maintained list.
+    ///
+    /// <para>
+    /// <b>ONE representative-face heuristic, not two (T206 review finding F4).</b> Before this fix, the
+    /// vendored half was filtered server-side by an ordinal filename-substring "italic" check while
+    /// <c>EditorClient.tsx</c> separately re-derived the installed half by <c>style === "normal"</c>
+    /// with its own <c>faces[0]</c> fallback — two DIFFERENT heuristics, derived in two different
+    /// languages, that could disagree with each other and with
+    /// <see cref="ThemeFontProvenanceValidator"/>. <see cref="RepresentativeVendoredSrc"/>/
+    /// <see cref="RepresentativeInstalledFace"/> below are now the ONLY place either determination is
+    /// made, server-side, once; the client consumes this DTO array verbatim and derives nothing of its
+    /// own. The vendored half still resorts to the filename-substring heuristic —
+    /// <see cref="VendoredFontFace"/> carries no explicit style flag to check instead — but there is
+    /// now exactly one such check in the whole app, not two that could drift apart. A family present in
+    /// BOTH sets (not a real case today — Dean's own curation keeps them disjoint, SPEC F104.16) keeps
+    /// its VENDORED row: <c>VendoredFaceOptions()</c> is concatenated before
+    /// <c>InstalledFaceOptions(...)</c>, and the dedupe-by-family group below keeps the first.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Route-set obligation</b> — unchanged by this widening: this is still the SECOND <c>GET</c>
+    /// under <c>api/fonts</c>, still pinned by name in <c>Story278_ThemeCatalogIsolation.cs</c>'s own
+    /// route-set pin (<c>ScenarioNoNewPublicRoute.KnownCatalogAndThemeRoutes</c>) and
+    /// <c>Story283_InstalledFontServing.cs</c>'s own <c>ExpectedFontRoutes</c>, with the SAME
+    /// class-level <see cref="AdminSurfaceAttribute"/>+<see cref="AuthorizationPolicies.Settings"/>
+    /// pairing every route on this controller already carries — the URL and its auth posture are
+    /// untouched, only the response SHAPE widened.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>NO <see cref="CommunityCatalogAccessor.IsEnabled"/> GATE — the SAME reasoning as
+    /// <see cref="List"/>'s own remarks, applied to a UNION of embedded (vendored) and stored
+    /// (installed) data rather than either alone.</b> Neither source has a Community Catalog origin
+    /// this route depends on, so there is no reachability axis for the kill switch to gate — disabling
+    /// the catalog (an empty <c>Community:CatalogIndexUrl</c>) never changes this route's answer while
+    /// <see cref="Install"/> still 404s bare. Previously documented but NOT Fact-pinned (T206 review
+    /// finding F1 — the sibling <see cref="List"/> route's own divergence WAS pinned,
+    /// <c>Story284_FontPackLibrary.cs</c>'s own <c>ScenarioTheCatalogKillSwitchDoesNotGateTheLibrary</c>,
+    /// this route's was not); now pinned by name, alongside <c>GET /api/themes</c>'s own identical
+    /// posture, in <c>Story286_EditorComposesTheRemix.cs</c>'s own
+    /// <c>ScenarioTheCatalogKillSwitchDoesNotGateTheEditorReads</c>.
+    /// </para>
+    /// </summary>
+    [HttpGet("vendored")]
+    public async Task<IActionResult> Vendored(CancellationToken ct)
+    {
+        var packs = await fontPackStore.GetAllAsync(ct);
+        var assignable = VendoredFaceOptions()
+            .Concat(InstalledFaceOptions(packs))
+            .GroupBy(face => face.Family, StringComparer.Ordinal)
+            .Select(group => group.First()) // vendored listed first — a family in both keeps its vendored row
+            .OrderBy(face => face.Family, StringComparer.Ordinal)
+            .ToArray();
+        return Ok(assignable);
+    }
+
+    /// <summary>One <see cref="VendoredFontDto"/> per curated family — see <see cref="Vendored"/>'s own
+    /// "ONE representative-face heuristic" remarks for why an italic file is filtered out here rather
+    /// than carried through.</summary>
+    static IEnumerable<VendoredFontDto> VendoredFaceOptions() =>
+        FontProvenanceCatalog.Default.BySrc.Values
+            .GroupBy(face => face.Family, StringComparer.Ordinal)
+            .Select(group => new VendoredFontDto(group.Key, RepresentativeVendoredSrc(group)));
+
+    /// <summary>The upright face's own src for a family that may carry an italic sibling too — falls
+    /// back to whichever face is first when every face in the group happens to look italic (never
+    /// actually true of today's provenance record, defensive only).</summary>
+    static string RepresentativeVendoredSrc(IEnumerable<VendoredFontFace> familyFaces) =>
+        (familyFaces.FirstOrDefault(face => !face.File.Contains("italic", StringComparison.Ordinal))
+            ?? familyFaces.First()).Src;
+
+    /// <summary>One <see cref="VendoredFontDto"/> per installed pack (SPEC F104's own "role-agnostic,
+    /// one family per pack" shape) — silently skips a pack with no faces at all via
+    /// <see cref="RepresentativeInstalledFace"/>'s own <see langword="null"/> return (SPEC F104.5's
+    /// non-empty <c>files[]</c> install gate means this never actually happens in practice; defensive
+    /// only, the same posture <c>EditorClient.tsx</c>'s own former client-side projection documented
+    /// before this moved server-side).</summary>
+    static IEnumerable<VendoredFontDto> InstalledFaceOptions(IReadOnlyList<FontPack> packs) =>
+        packs.Select(RepresentativeInstalledFace).OfType<VendoredFontDto>();
+
+    /// <summary>The installed pack's OWN "normal"-style face, falling back to its first face — the
+    /// SAME representative-face rule <see cref="RepresentativeVendoredSrc"/> applies to the vendored
+    /// half, expressed against <see cref="FontPackFace.Style"/>'s real, manifest-declared value instead
+    /// of a filename guess (an installed pack's style is recorded truth, not inferred).</summary>
+    static VendoredFontDto? RepresentativeInstalledFace(FontPack pack)
+    {
+        var face = pack.Faces.FirstOrDefault(f => f.Style == FontPackFaceInput.NormalStyle) ?? pack.Faces.FirstOrDefault();
+        return face is null ? null : new VendoredFontDto(pack.Family, $"/fonts/{face.File}");
     }
 
     // ── Entry resolution ────────────────────────────────────────────────────
