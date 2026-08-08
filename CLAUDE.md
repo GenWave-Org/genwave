@@ -22,7 +22,7 @@ Self-hosted internet radio station for a small private community. A C# .NET 10 c
 | Streaming | Icecast |
 | Database | PostgreSQL |
 | Container | Docker Compose (`compose.yaml`) |
-| Tests | xUnit (5 test projects under `tests/`) |
+| Tests | xUnit (6 test projects under `tests/`) |
 
 ## Commands
 
@@ -44,6 +44,7 @@ dotnet test GenWave.sln
 
 ```
 src/
+  GenWave.Abstractions/  # MIT contract surface (published as the GenWave.Abstractions NuGet)
   GenWave.Core/          # domain types, abstractions (no infra deps)
   GenWave.Host/          # ASP.NET Core host: API, engine control, playout feeder
   GenWave.MediaLibrary/  # media scan, loudness enrichment, Postgres catalog
@@ -51,6 +52,7 @@ src/
   GenWave.Tts/           # Kokoro client, render→measure→cache (ITtsSegmentSource)
   GenWave.Orchestration/ # Orchestrator (INextItemProvider): music + TTS patter interleave
 tests/
+  GenWave.Architecture.Tests/  # the six fitness laws (see CONTRIBUTING.md + SEAMS.md)
   GenWave.Core.Tests/
   GenWave.Host.Tests/
   GenWave.MediaLibrary.Tests/
