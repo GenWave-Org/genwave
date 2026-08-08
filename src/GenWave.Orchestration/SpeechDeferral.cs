@@ -17,5 +17,19 @@ namespace GenWave.Orchestration;
 /// for why this is captured at enqueue time rather than re-resolved at drain time.
 /// <see langword="null"/> for every other kind (<see cref="SpeechDeferralKind.StationId"/> today).
 /// </param>
+/// <param name="Discriminator">
+/// Additive (SPEC F107.4, STORY-297): the sub-key <see cref="SpeechDeferralQueue"/>'s per-
+/// <c>(kind, discriminator)</c> supersede uses alongside <see cref="Kind"/> — for
+/// <see cref="SpeechDeferralKind.Context"/> this is the originating
+/// <see cref="GenWave.Core.Abstractions.IContextProvider.Key"/>, so a due weather fact and a due
+/// history fact coexist instead of one silently discarding the other. <see langword="null"/> for
+/// every other kind — every producer that existed before F107 keeps its old one-per-kind supersede,
+/// byte-identical. A future consumer (T224) reads this back off the dequeued entry to fetch the
+/// matching pipeline content by key.
+/// </param>
 public sealed record SpeechDeferral(
-    SpeechDeferralKind Kind, DateTimeOffset Due, string Reason, HandoffContext? Handoff = null);
+    SpeechDeferralKind Kind,
+    DateTimeOffset Due,
+    string Reason,
+    HandoffContext? Handoff = null,
+    string? Discriminator = null);

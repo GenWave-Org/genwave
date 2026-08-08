@@ -147,4 +147,36 @@ public static class FeaturePatterTemplates
             Assert.DoesNotContain("{Track.Artist}", text);
         }
     }
+
+    // ---------------------------------------------------------------------
+    // EXHAUSTIVENESS GUARD
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioEveryDefinedKindHasCopy
+    {
+        // PLAN T223 review (F2): nothing drove every SegmentKind through Expand, so a new kind
+        // (ContextSegment, SPEC F107.3) landed on the switch's uncovered default arm and threw
+        // ArgumentOutOfRangeException — reachable in production via POST /api/personas/preview —
+        // with the whole suite still green. This Theory walks Enum.GetValues<SegmentKind>() rather
+        // than naming kinds by hand, so the NEXT new kind is caught here automatically instead of
+        // relying on every future kind's author remembering to add its own scenario above.
+
+        readonly PatterTemplateRenderer renderer = new();
+
+        public static IEnumerable<object[]> AllKinds() =>
+            Enum.GetValues<SegmentKind>().Select(kind => new object[] { kind });
+
+        [Theory]
+        [MemberData(nameof(AllKinds))]
+        public void ExpandReturnsNonEmptyCopyAndNeverThrows(SegmentKind kind)
+        {
+            var req = new SegmentRequest(kind, "af_heart", "GenWave", Track: null, DateTimeOffset.Now, "test-station");
+
+            string? text = null;
+            var ex = Record.Exception(() => text = renderer.Expand(req));
+
+            Assert.Null(ex);
+            Assert.False(string.IsNullOrWhiteSpace(text));
+        }
+    }
 }

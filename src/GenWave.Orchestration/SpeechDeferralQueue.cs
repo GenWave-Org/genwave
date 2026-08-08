@@ -9,9 +9,17 @@ namespace GenWave.Orchestration;
 /// boundary by construction, never mid-track — drains whatever is due.
 ///
 /// <para>
-/// <b>Supersede-by-kind (F74.2):</b> at most one pending deferral per <see cref="SpeechDeferralKind"/>.
-/// A newer <see cref="Enqueue"/> of the same kind overwrites the pending one before it is ever
-/// drained; the superseded deferral is discarded and never airs.
+/// <b>Supersede-by-(kind, discriminator) (F74.2, F107.4):</b> at most one pending deferral per
+/// <c>(<see cref="SpeechDeferralKind"/>, discriminator)</c> pair. A newer <see cref="Enqueue"/> of
+/// the same pair overwrites the pending one before it is ever drained; the superseded deferral is
+/// discarded and never airs. <see cref="Enqueue"/>'s discriminator parameter defaults to
+/// <see langword="null"/> — every kind that predates F107 (<see cref="SpeechDeferralKind.StationId"/>,
+/// <see cref="SpeechDeferralKind.SignOff"/>, <see cref="SpeechDeferralKind.SignOn"/>) always enqueues
+/// with a null discriminator, so its supersede stays exactly one-pending-per-kind, byte-identical to
+/// pre-F107 behavior. Only <see cref="SpeechDeferralKind.Context"/> (STORY-297) enqueues with a
+/// non-null discriminator (the originating provider's key) — so two different providers' deferrals
+/// (e.g. weather, history) coexist as pending, while two enqueues from the SAME provider still
+/// collapse to the newer one.
 /// </para>
 ///
 /// <para>
@@ -36,7 +44,13 @@ namespace GenWave.Orchestration;
 public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
 {
     readonly object gate = new();
-    readonly Dictionary<SpeechDeferralKind, SpeechDeferral> pending = new();
+
+    // SPEC F107.4: the supersede key is (Kind, Discriminator), not Kind alone. A value-tuple key
+    // gives correct structural equality/hashing (including a null Discriminator) with no extra
+    // wrapper type — every pre-F107 kind (StationId, SignOff, SignOn) always enqueues with a null
+    // discriminator, so its slot in this dictionary is exactly the (Kind, null) it always was, byte-
+    // identical in every observable way to the old Dictionary<SpeechDeferralKind, SpeechDeferral>.
+    readonly Dictionary<(SpeechDeferralKind Kind, string? Discriminator), SpeechDeferral> pending = new();
 
     /// <summary>
     /// The earliest <see cref="SpeechDeferral.Due"/> among all currently pending deferrals, or
@@ -57,28 +71,26 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
 
     /// <summary>
     /// The full deferral behind <see cref="NextDue"/> (gh-#254): the earliest-due pending entry,
-    /// ordered by <see cref="SpeechDeferral.Due"/> ascending with the SAME kind tiebreak
-    /// <see cref="TryDequeueDue"/> contracts (declaration order — SignOff before SignOn), or
-    /// <see langword="null"/> when nothing is pending. Read-only — never consumes. Exposed so
-    /// boundary-fit selection can see WHAT is coming (kind + handoff context feed the patter
-    /// estimates), not merely when; <see cref="NextDue"/> stays for callers that only need the
-    /// instant.
+    /// ordered by <see cref="SpeechDeferral.Due"/> ascending with the SAME kind/discriminator
+    /// tiebreak <see cref="TryDequeueDue"/> contracts (declaration order — SignOff before SignOn —
+    /// then discriminator, ordinal), or <see langword="null"/> when nothing is pending. Read-only —
+    /// never consumes. Exposed so boundary-fit selection can see WHAT is coming (kind + handoff
+    /// context feed the patter estimates), not merely when; <see cref="NextDue"/> stays for callers
+    /// that only need the instant.
     /// </summary>
     public SpeechDeferral? PeekNextDue()
     {
         lock (gate)
         {
-            return pending.Count == 0
-                ? null
-                : pending.Values.OrderBy(deferral => deferral.Due).ThenBy(deferral => deferral.Kind).First();
+            return pending.Count == 0 ? null : InDrainOrder(pending.Values).First();
         }
     }
 
     /// <summary>
     /// Enqueues a deferral of <paramref name="kind"/>, due at <paramref name="due"/> (defaults to
     /// now — "due immediately, air at the very next boundary"). A pending deferral of the same
-    /// <paramref name="kind"/> is replaced (SPEC F74.2): the superseded one is discarded and never
-    /// airs.
+    /// <paramref name="kind"/>/<paramref name="discriminator"/> pair is replaced (SPEC F74.2,
+    /// F107.4): the superseded one is discarded and never airs.
     /// </summary>
     /// <param name="kind">Which scheduled speech this is.</param>
     /// <param name="reason">A short, human-readable note carried for logs/diagnostics.</param>
@@ -90,32 +102,53 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     /// <see cref="SpeechDeferralKind.SignOff"/>/<see cref="SpeechDeferralKind.SignOn"/> — see
     /// <see cref="HandoffContext"/>. <see langword="null"/> for every other kind.
     /// </param>
+    /// <param name="discriminator">
+    /// Additive (SPEC F107.4, STORY-297): the supersede sub-key alongside <paramref name="kind"/> —
+    /// see <see cref="SpeechDeferral.Discriminator"/>. Defaults to <see langword="null"/>, which is
+    /// what every pre-F107 caller passes (implicitly, by omission) — supersede for those kinds stays
+    /// exactly one-pending-per-kind, byte-identical to pre-F107 behavior. Only
+    /// <see cref="SpeechDeferralKind.Context"/> callers pass a non-null value (the provider key).
+    /// </param>
     public void Enqueue(
-        SpeechDeferralKind kind, string reason, DateTimeOffset? due = null, HandoffContext? handoff = null)
+        SpeechDeferralKind kind,
+        string reason,
+        DateTimeOffset? due = null,
+        HandoffContext? handoff = null,
+        string? discriminator = null)
     {
-        var deferral = new SpeechDeferral(kind, due ?? timeProvider.GetUtcNow(), reason, handoff);
+        var deferral = new SpeechDeferral(kind, due ?? timeProvider.GetUtcNow(), reason, handoff, discriminator);
         lock (gate)
         {
-            pending[kind] = deferral;
+            pending[(kind, discriminator)] = deferral;
         }
     }
 
     /// <summary>
-    /// Removes any pending deferral of <paramref name="kind"/>, regardless of its due time — the
-    /// explicit "the boundary this was armed for is no longer coming" retraction (SPEC F92.1
-    /// revisit, PLAN T124) that <see cref="Enqueue"/>'s own supersede-by-kind cannot express:
-    /// supersede only ever REPLACES a pending entry of the same kind with a newer one, it has no way
-    /// to say "nothing of this kind should be pending any more." A schedule write that moves a
-    /// boundary OUT of the F74.3 lookahead window (or removes it) needs exactly that — the
-    /// handoff-ceremony producer calls this once the current snapshot no longer names an in-window
-    /// boundary, so a ceremony armed for the OLD boundary can never air stale. A no-op when nothing
-    /// of that kind is pending.
+    /// Removes every pending deferral of <paramref name="kind"/>, across ALL discriminators,
+    /// regardless of due time — the explicit "the boundary this was armed for is no longer coming"
+    /// retraction (SPEC F92.1 revisit, PLAN T124) that <see cref="Enqueue"/>'s own supersede cannot
+    /// express: supersede only ever REPLACES a pending entry of the same
+    /// <paramref name="kind"/>/discriminator pair with a newer one, it has no way to say "nothing of
+    /// this kind should be pending any more." A schedule write that moves a boundary OUT of the
+    /// F74.3 lookahead window (or removes it) needs exactly that — the handoff-ceremony producer
+    /// calls this once the current snapshot no longer names an in-window boundary, so a ceremony
+    /// armed for the OLD boundary can never air stale. A no-op when nothing of that kind is pending.
+    ///
+    /// <para>
+    /// Kind-wide, not <c>(kind, discriminator)</c>-scoped (SPEC F107.4 review): every existing caller
+    /// (SignOff/SignOn) always enqueues with a null discriminator, so there is at most one entry to
+    /// clear per kind today and this is byte-identical to the pre-F107 single-key removal. Kept
+    /// kind-wide rather than adding a narrower overload because no caller has yet needed to retract
+    /// just one provider's <see cref="SpeechDeferralKind.Context"/> deferral while leaving another's
+    /// pending — a narrower <c>Clear(kind, discriminator)</c> overload can be added if/when one does.
+    /// </para>
     /// </summary>
     public void Clear(SpeechDeferralKind kind)
     {
         lock (gate)
         {
-            pending.Remove(kind);
+            var keys = pending.Keys.Where(key => key.Kind == kind).ToList();
+            foreach (var key in keys) pending.Remove(key);
         }
     }
 
@@ -123,15 +156,20 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     /// Removes and returns every deferral due at or before <paramref name="now"/>, ordered by
     /// <see cref="SpeechDeferral.Due"/> ascending with <see cref="SpeechDeferralKind"/>'s own
     /// declaration order (<see cref="SpeechDeferralKind.SignOff"/> before
-    /// <see cref="SpeechDeferralKind.SignOn"/>) as the tiebreak for two deferrals due at the exact
-    /// same instant (T124 review finding F1) — this is this queue's own contract, load-bearing for
-    /// any caller (a handoff ceremony) whose two pieces must always air in a fixed relative order
-    /// regardless of which one happens to be due first. Deliberately NOT <c>pending.Values</c>'
-    /// raw enumeration order: <see cref="Dictionary{TKey,TValue}"/> reuses a freed slot LIFO on the
-    /// next insert, so after one drain-then-re-enqueue cycle its enumeration order silently stops
-    /// matching insertion order — the exact bug this ordering closes (reproduced: sign-off/sign-on
-    /// airing backwards from the second boundary onward). Call this only from a genuine boundary
-    /// decision (SPEC F74.1) — the caller, not this queue, is what guarantees "never mid-track".
+    /// <see cref="SpeechDeferralKind.SignOn"/>) as the FIRST tiebreak for two deferrals due at the
+    /// exact same instant (T124 review finding F1) — this is this queue's own contract, load-bearing
+    /// for any caller (a handoff ceremony) whose two pieces must always air in a fixed relative order
+    /// regardless of which one happens to be due first. <see cref="SpeechDeferral.Discriminator"/>
+    /// (ordinal) is a SECOND tiebreak, added for F107.4: two same-kind, same-instant deferrals from
+    /// different providers (e.g. weather and history both due at once) still drain in a stable,
+    /// deterministic order — every pre-F107 kind's discriminator is always null, so this second
+    /// tiebreak is a no-op tie among them and changes nothing about their relative order. Deliberately
+    /// NOT <c>pending.Values</c>' raw enumeration order: <see cref="Dictionary{TKey,TValue}"/> reuses
+    /// a freed slot LIFO on the next insert, so after one drain-then-re-enqueue cycle its enumeration
+    /// order silently stops matching insertion order — the exact bug this ordering closes (reproduced:
+    /// sign-off/sign-on airing backwards from the second boundary onward). Call this only from a
+    /// genuine boundary decision (SPEC F74.1) — the caller, not this queue, is what guarantees "never
+    /// mid-track".
     /// </summary>
     public IReadOnlyList<SpeechDeferral> TryDequeueDue(DateTimeOffset now)
     {
@@ -139,13 +177,19 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
         {
             if (pending.Count == 0) return [];
 
-            var due = pending.Values
-                .Where(deferral => deferral.Due <= now)
-                .OrderBy(deferral => deferral.Due)
-                .ThenBy(deferral => deferral.Kind)
-                .ToList();
-            foreach (var deferral in due) pending.Remove(deferral.Kind);
+            var due = InDrainOrder(pending.Values.Where(deferral => deferral.Due <= now)).ToList();
+            foreach (var deferral in due) pending.Remove((deferral.Kind, deferral.Discriminator));
             return due;
         }
     }
+
+    // Shared ordering for PeekNextDue/TryDequeueDue (T223 review, F3): both callers need the SAME
+    // Due-ascending, (Kind, Discriminator)-tiebreak order — see TryDequeueDue's own remarks for why
+    // this exact order is load-bearing rather than incidental. Extracted so the two can never drift
+    // apart from each other silently; behavior is unchanged (still a stable OrderBy/ThenBy chain).
+    static IEnumerable<SpeechDeferral> InDrainOrder(IEnumerable<SpeechDeferral> deferrals) =>
+        deferrals
+            .OrderBy(deferral => deferral.Due)
+            .ThenBy(deferral => deferral.Kind)
+            .ThenBy(deferral => deferral.Discriminator, StringComparer.Ordinal);
 }

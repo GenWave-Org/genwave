@@ -1,5 +1,7 @@
 // STORY-297 — Context segments air at boundaries (F107.3, F107.4, F107.7)
 
+using GenWave.Orchestration.Tests.Fakes;
+
 namespace GenWave.Orchestration.Tests.Specs;
 
 public static class FeatureContextSegmentsAirAtBoundaries
@@ -31,29 +33,66 @@ public static class FeatureContextSegmentsAirAtBoundaries
 
     public sealed class ScenarioPerProviderSupersede
     {
-        [Fact(Skip = "Pending T223 — see docs/PLAN.md")]
+        [Fact]
         public void WeatherAndHistoryPendingTogetherBothDrain()
         {
-            // Two ContextSegment deferrals with different discriminators coexist.
-            // Assert.Equal(2, drainedCount);
-            Assert.Fail("pending T223");
+            // Two ContextSegment deferrals with different discriminators coexist — supersede is
+            // per (kind, discriminator), so a due weather fact never silently discards a due
+            // history fact (SPEC F107.4).
+            var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-08-08T00:00:00Z"));
+            var queue = new SpeechDeferralQueue(clock);
+
+            queue.Enqueue(SpeechDeferralKind.Context, "weather cadence elapsed", discriminator: "weather");
+            queue.Enqueue(SpeechDeferralKind.Context, "history cadence elapsed", discriminator: "history");
+
+            var drained = queue.TryDequeueDue(clock.GetUtcNow());
+
+            Assert.Equal(2, drained.Count);
+            Assert.Contains(drained, deferral => deferral.Discriminator == "weather");
+            Assert.Contains(drained, deferral => deferral.Discriminator == "history");
+            Assert.Null(queue.NextDue); // both consumed — nothing left leaking into a later boundary
         }
 
-        [Fact(Skip = "Pending T223 — see docs/PLAN.md")]
+        [Fact]
         public void TwoWeatherDeferralsCollapseToTheNewer()
         {
-            // Same (kind, discriminator) supersedes; the older never airs (F74.2 semantics).
-            // Assert.Equal(newerPayload, drained.Single().Payload);
-            Assert.Fail("pending T223");
+            // Same (kind, discriminator) pair still supersedes (F74.2 semantics, now scoped to the
+            // pair rather than the bare kind): the older weather deferral is discarded at the second
+            // Enqueue and never reaches the drain at all.
+            var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-08-08T00:00:00Z"));
+            var queue = new SpeechDeferralQueue(clock);
+
+            queue.Enqueue(SpeechDeferralKind.Context, "stale weather", discriminator: "weather");
+            clock.Advance(TimeSpan.FromMinutes(5)); // still mid-track — nothing has drained yet
+            queue.Enqueue(SpeechDeferralKind.Context, "fresh weather", discriminator: "weather");
+
+            var drained = queue.TryDequeueDue(clock.GetUtcNow());
+
+            var aired = Assert.Single(drained);
+            Assert.Equal("fresh weather", aired.Reason);
+            Assert.Equal("weather", aired.Discriminator);
         }
 
-        [Fact(Skip = "Pending T223 — see docs/PLAN.md")]
+        [Fact]
         public void NullDiscriminatorKindsBehaveExactlyAsToday()
         {
-            // Existing StationId/SignOff/SignOn queue specs pass unmodified — this fact
-            // pins the byte-identical claim for the null-discriminator path.
-            // Assert.True(existingBehaviorUnchanged);
-            Assert.Fail("pending T223");
+            // Pins the byte-identical claim (SPEC F107.4): every kind that predates F107 (StationId
+            // here) always enqueues with a null discriminator, so it drives the SAME supersede code
+            // path Story197_SpeechBoundaryDeferral's ScenarioSupersede fact already covers — this
+            // reproduces that exact scenario through the (kind, discriminator) seam and additionally
+            // pins that the surviving entry's own Discriminator reads back null.
+            var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-08-08T00:00:00Z"));
+            var queue = new SpeechDeferralQueue(clock);
+
+            queue.Enqueue(SpeechDeferralKind.StationId, "stale ident");
+            clock.Advance(TimeSpan.FromMinutes(5)); // still mid-track — the long track hasn't ended
+            queue.Enqueue(SpeechDeferralKind.StationId, "fresh ident");
+
+            var due = queue.TryDequeueDue(clock.GetUtcNow());
+
+            var aired = Assert.Single(due);
+            Assert.Equal("fresh ident", aired.Reason);
+            Assert.Null(aired.Discriminator);
         }
     }
 

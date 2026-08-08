@@ -333,15 +333,18 @@ static class LlmPromptBuilder
     }
 
     /// <summary>
-    /// The segment-framing line (SPEC F34.3, F92.2): states which of the four LLM-eligible kinds this
+    /// The segment-framing line (SPEC F34.3, F92.2): states which of the LLM-eligible kinds this
     /// break is so the model never has to guess its own role. Only ever called with a kind
     /// <see cref="LlmCopyWriter.IsLlmAuthored"/> reports true for — the single source of truth for
-    /// "which kinds"; the remaining two kinds (<see cref="SegmentKind.StationId"/>,
-    /// <see cref="SegmentKind.TimeDate"/>) never reach the LLM and so never reach this method either.
-    /// Exhaustive switch below: a new LLM-eligible <see cref="SegmentKind"/> needs a matching arm
-    /// added HERE as well as in <see cref="LlmCopyWriter.IsLlmAuthored"/> for it to actually take
-    /// effect end to end — the compiler's own exhaustiveness check on this switch is the guard
-    /// against silently forgetting this one.
+    /// "which kinds"; the remaining kinds (<see cref="SegmentKind.StationId"/>,
+    /// <see cref="SegmentKind.TimeDate"/>, and, as of T223, <see cref="SegmentKind.ContextSegment"/>
+    /// until T224 flips <see cref="LlmCopyWriter.IsLlmAuthored"/> for it) never reach the LLM and so
+    /// never reach this method either. Exhaustive switch below: a new LLM-eligible
+    /// <see cref="SegmentKind"/> needs a matching arm added HERE as well as in
+    /// <see cref="LlmCopyWriter.IsLlmAuthored"/> for it to actually take effect end to end — the
+    /// compiler's own exhaustiveness check on this switch is the guard against silently forgetting
+    /// this one; <see cref="SegmentKind.ContextSegment"/>'s own arm was added ahead of that flip
+    /// (T223) purely so this switch's arm-per-kind coverage never lags the enum itself.
     /// </summary>
     // gh-#195: the segment line is the ONLY thing separating a lead-in prompt from a back-announce
     // prompt for the same track, and the old one-clause phrasing lost to a wall of identical track
@@ -356,6 +359,11 @@ static class LlmPromptBuilder
             + "tense (e.g. \"that was...\"); never announce it as upcoming or say it is next.",
         SegmentKind.SignOff => "Segment: sign-off as you close out your shift on air.",
         SegmentKind.SignOn => "Segment: sign-on as you open your shift on air.",
+        // T223 (SPEC F107.3, STORY-297): a plain, truthful placeholder line only — this kind is not
+        // yet reachable (LlmCopyWriter.IsLlmAuthored does not report true for it, so BuildUserContent
+        // never calls this method with it today). T224 owns the real facts block/news-posture wording
+        // once the drain arm actually produces a ContextSegment request.
+        SegmentKind.ContextSegment => "Segment: context segment - a short factual note for listeners.",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, message: null),
     };
 

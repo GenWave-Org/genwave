@@ -35,35 +35,37 @@ public sealed class PatterTemplateRenderer
     /// </summary>
     public string Expand(SegmentRequest request) => request.Kind switch
     {
-        SegmentKind.StationId    => $"You're listening to {request.StationName}.",
-        SegmentKind.LeadIn       => request.Track switch
-                                    {
-                                        { RequestFulfilled: true, Artist.Length: > 0 } t =>
-                                            $"Got this one in from the request line: {t.Title} by {t.Artist}.",
-                                        { RequestFulfilled: true } t =>
-                                            $"Got this one in from the request line: {t.Title}.",
-                                        { Artist.Length: > 0 } t => $"Coming up: {t.Title} by {t.Artist}.",
-                                        { } t                    => $"Coming up: {t.Title}.",
-                                        null                     => "Coming up next.",
-                                    },
-        SegmentKind.BackAnnounce => request.Track switch
-                                    {
-                                        { Artist.Length: > 0 } t => $"That was {t.Title} by {t.Artist}.",
-                                        { } t                    => $"That was {t.Title}.",
-                                        null                     => "That was your last track.",
-                                    },
-        SegmentKind.TimeDate     => $"It's {request.LocalNow:h:mm tt} here on {request.StationName}.",
-        SegmentKind.SignOff      => request.CounterpartName switch
-                                    {
-                                        { Length: > 0 } name => $"That's me for now — coming up next, {name}.",
-                                        _                    => "That's me for now — the music keeps rolling.",
-                                    },
-        SegmentKind.SignOn       => request.CounterpartName switch
-                                    {
-                                        { Length: > 0 } name => $"Thanks, {name} — taking it from here.",
-                                        _                    => "Taking it from here after a run of nonstop music.",
-                                    },
-        _                        => throw new ArgumentOutOfRangeException(
+        SegmentKind.StationId      => $"You're listening to {request.StationName}.",
+        SegmentKind.LeadIn         => request.Track switch
+                                      {
+                                          { RequestFulfilled: true, Artist.Length: > 0 } t =>
+                                              $"Got this one in from the request line: {t.Title} by {t.Artist}.",
+                                          { RequestFulfilled: true } t =>
+                                              $"Got this one in from the request line: {t.Title}.",
+                                          { Artist.Length: > 0 } t => $"Coming up: {t.Title} by {t.Artist}.",
+                                          { } t                    => $"Coming up: {t.Title}.",
+                                          null                     => "Coming up next.",
+                                      },
+        SegmentKind.BackAnnounce   => request.Track switch
+                                      {
+                                          { Artist.Length: > 0 } t => $"That was {t.Title} by {t.Artist}.",
+                                          { } t                    => $"That was {t.Title}.",
+                                          null                     => "That was your last track.",
+                                      },
+        SegmentKind.TimeDate       => $"It's {request.LocalNow:h:mm tt} here on {request.StationName}.",
+        SegmentKind.SignOff        => request.CounterpartName switch
+                                      {
+                                          { Length: > 0 } name => $"That's me for now — coming up next, {name}.",
+                                          _                    => "That's me for now — the music keeps rolling.",
+                                      },
+        SegmentKind.SignOn         => request.CounterpartName switch
+                                      {
+                                          { Length: > 0 } name => $"Thanks, {name} — taking it from here.",
+                                          _                    => "Taking it from here after a run of nonstop music.",
+                                      },
+        // placeholder — T224 owns the real context copy
+        SegmentKind.ContextSegment => "Here's something worth knowing.",
+        _                          => throw new ArgumentOutOfRangeException(
                                         nameof(request.Kind), request.Kind, message: null),
     };
 }
