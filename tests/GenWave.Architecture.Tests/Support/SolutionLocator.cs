@@ -1,29 +1,18 @@
 namespace GenWave.Architecture.Tests.Support;
 
-/// <summary>Finds <c>GenWave.sln</c> by walking up from the test binary's own output directory —
-/// robust to build configuration (Debug/Release) without hardcoding a path depth.</summary>
+/// <summary>Finds <c>GenWave.sln</c> and the repo root. Delegates the actual walk-up to
+/// <c>GenWave.SeamIndexGenerator.RepoRoot</c> (T216, STORY-294) rather than carrying a second copy
+/// of the same loop — this project already references that tool for <c>SeamIndexDocument</c>.</summary>
 internal static class SolutionLocator
 {
-    public static string Find()
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        {
-            var candidate = Path.Combine(dir.FullName, "GenWave.sln");
-            if (File.Exists(candidate))
-                return candidate;
-        }
-
-        throw new FileNotFoundException($"GenWave.sln not found above {AppContext.BaseDirectory}.");
-    }
+    public static string Find() => Path.Combine(Root(), "GenWave.sln");
 
     /// <summary>The repo root — <see cref="Find"/>'s containing directory. Three call sites
     /// (<c>DepsJsonDependencyScan</c>, <c>Story291_ConventionLaws</c>'s <c>Program.cs</c> reader,
     /// <c>ContributingDocument</c>) each used to repeat "<c>Path.GetDirectoryName(Find()) ?? throw
-    /// ...</c>" independently (STORY-293 review) — lifted here once so the null-check for "a solution
-    /// file with no containing directory" (a condition that can't actually happen, since
-    /// <see cref="Find"/> only ever returns a path under a real directory it just walked) has exactly
-    /// one place to live.</summary>
-    public static string Root() =>
-        Path.GetDirectoryName(Find())
-            ?? throw new InvalidOperationException($"\"{Find()}\" has no containing directory.");
+    /// ...</c>" independently (STORY-293 review) — lifted here once. T216 (STORY-294) then moved the
+    /// walk-up itself into <c>GenWave.SeamIndexGenerator.RepoRoot.Find</c>, which returns the root
+    /// directory directly (no <c>GetDirectoryName</c>/null-check needed at all anymore); this method
+    /// is now a one-line delegation kept for its three existing call sites' sake.</summary>
+    public static string Root() => GenWave.SeamIndexGenerator.RepoRoot.Find();
 }

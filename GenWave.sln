@@ -33,6 +33,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GenWave.Abstractions", "src
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GenWave.Architecture.Tests", "tests\GenWave.Architecture.Tests\GenWave.Architecture.Tests.csproj", "{C169AA81-075B-414A-A44B-9C070E246EAF}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{07C2787E-EAC7-C090-1BA3-A61EC2A24D84}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SeamIndexGenerator", "tools\SeamIndexGenerator\SeamIndexGenerator.csproj", "{734A1FA2-9AA7-4A79-871F-21B6ED0C3745}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -199,6 +203,18 @@ Global
 		{C169AA81-075B-414A-A44B-9C070E246EAF}.Release|x64.Build.0 = Release|Any CPU
 		{C169AA81-075B-414A-A44B-9C070E246EAF}.Release|x86.ActiveCfg = Release|Any CPU
 		{C169AA81-075B-414A-A44B-9C070E246EAF}.Release|x86.Build.0 = Release|Any CPU
+		{734A1FA2-9AA7-4A79-871F-21B6ED0C3745}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{734A1FA2-9AA7-4A79-871F-21B6ED0C3745}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{734A1FA2-9AA7-4A79-871F-21B6ED0C3745}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{734A1FA2-9AA7-4A79-871F-21B6ED0C3745}.Debug|x64.Build.0 = Debug|Any CPU
+		{734A1FA2-9AA7-4A79-871F-21B6ED0C3745}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{734A1FA2-9AA7-4A79-871F-21B6ED0C3745}.Debug|x86.Build.0 = Debug|Any CPU
+		{734A1FA2-9AA7-4A79-871F-21B6ED0C3745}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{734A1FA2-9AA7-4A79-871F-21B6ED0C3745}.Release|Any CPU.Build.0 = Release|Any CPU
+		{734A1FA2-9AA7-4A79-871F-21B6ED0C3745}.Release|x64.ActiveCfg = Release|Any CPU
+		{734A1FA2-9AA7-4A79-871F-21B6ED0C3745}.Release|x64.Build.0 = Release|Any CPU
+		{734A1FA2-9AA7-4A79-871F-21B6ED0C3745}.Release|x86.ActiveCfg = Release|Any CPU
+		{734A1FA2-9AA7-4A79-871F-21B6ED0C3745}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -217,5 +233,6 @@ Global
 		{A412DC7D-2F7D-4ED8-834F-93D0DBA38385} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{546C3B92-44D3-438D-A572-DE141E55F2B8} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{C169AA81-075B-414A-A44B-9C070E246EAF} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{734A1FA2-9AA7-4A79-871F-21B6ED0C3745} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 	EndGlobalSection
 EndGlobal
