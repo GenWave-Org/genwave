@@ -346,4 +346,49 @@ public sealed class FeatureDependencyLaws
             DependencyLawAssert.AssertNone([baselined], localBaseline);
         }
     }
+
+    public sealed class ScenarioHasTypeResolvesEveryGranularity
+    {
+        // T213's review carry-forward (N1, folded in at T214/STORY-292): EveryExemptionsMemberResolvesToARealProductionType
+        // above and Story291_ConventionLaws.cs's EveryDesignatedSeamResolvesToARealProductionType both
+        // lean on ProductionAssemblies.HasType — this is that mechanism's own probe, proving it
+        // resolves at all three granularities a Member string is ever written at (a type's full name;
+        // L4-immutability's Type.Member shape; L4-references'/L6's bare-assembly-name shape), so a
+        // legitimate future exemption/reservation entry at any of those granularities never
+        // misreports as phantom. One real name and one deliberately-wrong name per granularity (the
+        // T212 seam-list lesson: a resolution fact that can't discriminate proves nothing).
+        [Fact]
+        public void AKnownProductionTypeResolves() =>
+            Assert.True(ProductionAssemblies.HasType("GenWave.Abstractions.Playout.EnergyRange"));
+
+        [Fact]
+        public void ATypoedTypeNameDoesNotResolve() =>
+            Assert.False(ProductionAssemblies.HasType("GenWave.Abstractions.Playout.EnergyRangeTypo"));
+
+        [Fact]
+        public void AKnownProductionMemberResolves() =>
+            Assert.True(ProductionAssemblies.HasType("GenWave.Abstractions.Playout.EnergyRange.Min"));
+
+        [Fact]
+        public void ATypoedMemberNameDoesNotResolve() =>
+            Assert.False(ProductionAssemblies.HasType("GenWave.Abstractions.Playout.EnergyRange.NoSuchMember"));
+
+        // DeclaredOnly's own probe (N5): an inherited object member is a real reflectable name but
+        // means nothing about EnergyRange specifically — resolving it would silently let a phantom
+        // "EnergyRange.GetType" exemption entry through. GetType, not ToString/Equals/GetHashCode:
+        // EnergyRange is a record, and the compiler DECLARES an override of those three directly on
+        // it — Object.GetType is non-virtual, never overridable, so it is the one member guaranteed
+        // to stay purely inherited (DeclaringType == object) on every type, records included.
+        [Fact]
+        public void AnInheritedObjectMemberDoesNotResolve() =>
+            Assert.False(ProductionAssemblies.HasType("GenWave.Abstractions.Playout.EnergyRange.GetType"));
+
+        [Fact]
+        public void AKnownProductionAssemblyNameResolves() =>
+            Assert.True(ProductionAssemblies.HasType("GenWave.Abstractions"));
+
+        [Fact]
+        public void ATypoedAssemblyNameDoesNotResolve() =>
+            Assert.False(ProductionAssemblies.HasType("GenWave.NoSuchAssembly"));
+    }
 }

@@ -46,13 +46,53 @@ internal static class ProductionAssemblies
         Core, Orchestration, Tts, Loudness, MediaLibrary, Host, Abstractions,
     };
 
-    /// <summary>Whether any <see cref="AllProductionAssemblies"/> assembly defines a type named
-    /// <paramref name="fullName"/> — reflection-based, so it resolves <c>internal</c> types too (no
-    /// <c>InternalsVisibleTo</c> needed), the same reason <see cref="HttpClientSeams.DesignatedSeams"/>
-    /// and <see cref="ExemptionBaseline"/> both name members as plain strings instead of
-    /// <c>typeof</c>. The shared "every named member resolves" check (STORY-291 review): a deleted or
-    /// typo'd entry in either list otherwise matches nothing and silently stops meaning
-    /// anything.</summary>
-    public static bool HasType(string fullName) =>
-        AllProductionAssemblies().Any(assembly => assembly.GetType(fullName) is not null);
+    /// <summary>Whether <paramref name="name"/> resolves to something real in
+    /// <see cref="AllProductionAssemblies"/> at ANY of the three granularities a
+    /// <see cref="LawViolation.Member"/>/<see cref="ArchitectureExemption.Member"/> string is ever
+    /// written at today: a type's full name (e.g. <c>"GenWave.Host.Api.FontPackController"</c> — L1,
+    /// L2, L3, L5's own shape, a plain type name), a member's <c>Type.Member</c> name (e.g.
+    /// <c>"GenWave.Abstractions.Playout.EnergyRange.Min"</c> — L4-immutability's shape, T213: a
+    /// settable property or mutable field), or a bare production assembly's simple name (e.g.
+    /// <c>"GenWave.Abstractions"</c> — L4-references'/L6's shape when the offender IS the assembly
+    /// itself, not one of its types). Reflection-based throughout, so it resolves <c>internal</c>
+    /// members too (no <c>InternalsVisibleTo</c> needed) — the same reason
+    /// <see cref="HttpClientSeams.DesignatedSeams"/> and <see cref="ExemptionBaseline"/> both name
+    /// members as plain strings instead of <c>typeof</c>/<c>nameof</c>. The shared "every named member
+    /// resolves" check (STORY-291 review, widened at T214/STORY-292's own resolution-fact review — L5
+    /// itself only ever emits a plain type name, never a member; the wider granularities existed
+    /// already via L4-immutability's and L4-references'/L6's shapes, just never previously exercised
+    /// through this one shared mechanism): a deleted or typo'd entry in any exemption/seam/reservation
+    /// list otherwise matches nothing and silently stops meaning anything.</summary>
+    public static bool HasType(string name) =>
+        AllProductionAssemblies().Any(assembly => assembly.GetType(name) is not null)
+        || AllProductionAssemblies().Any(assembly => assembly.GetName().Name == name)
+        || HasMember(name);
+
+    /// <summary>Splits <paramref name="typeDotMember"/> on its LAST <c>.</c> — the boundary between a
+    /// dotted type full name (itself containing dots for its namespace) and the one member name after
+    /// it — and checks whether the left side resolves to a real production type that DECLARES (not
+    /// inherits — <c>BindingFlags.DeclaredOnly</c>, closing the blind spot where e.g.
+    /// <c>"GenWave.Abstractions.Playout.EnergyRange.ToString"</c> would otherwise resolve via
+    /// <c>object.ToString</c>, meaning nothing about this type at all) a member (property, field,
+    /// method, or nested type — <c>Type.GetMember</c> covers all of them) named the right side. Public
+    /// or not: this answers "does this name mean something", not "is it a public API".</summary>
+    private static bool HasMember(string typeDotMember)
+    {
+        var lastDot = typeDotMember.LastIndexOf('.');
+        if (lastDot <= 0 || lastDot == typeDotMember.Length - 1)
+            return false;
+
+        var candidateTypeName = typeDotMember[..lastDot];
+        var candidateMemberName = typeDotMember[(lastDot + 1)..];
+
+        var declaringType = AllProductionAssemblies()
+            .Select(assembly => assembly.GetType(candidateTypeName))
+            .FirstOrDefault(type => type is not null);
+
+        return declaringType is not null
+            && declaringType.GetMember(
+                candidateMemberName,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+                .Length > 0;
+    }
 }
