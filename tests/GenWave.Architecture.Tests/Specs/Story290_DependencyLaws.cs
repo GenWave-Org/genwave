@@ -46,15 +46,12 @@ public sealed class FeatureDependencyLaws
         [Fact]
         public void CoreOrchestrationTtsAndLoudnessReferenceNoAspNetNpgsqlOrDapper()
         {
-            // Segment-boundary aware: a bare `StartsWith("Microsoft.AspNetCore")` would also match
-            // a hypothetical unrelated assembly named e.g. "Microsoft.AspNetCoreLike" — the same
-            // shape of hole L4-references had (see DepsJsonDependencyScan's remarks). Real
-            // AspNetCore assemblies are always either the bare family name or "<family>.<rest>".
-            static bool HasFamilyPrefix(string name, string family) =>
-                name == family || name.StartsWith(family + ".", StringComparison.Ordinal);
-
+            // AssemblyReferenceScan.HasFamilyPrefix is segment-boundary aware (its own remarks:
+            // the same shape of hole L4-references' name-prefix check had — DepsJsonDependencyScan's
+            // remarks). Lifted there at T212 (T211 review carry-forward) so it's a tested member
+            // with its own synthetic-string probe facts instead of an uncovered local function.
             static bool IsForbidden(string referencedAssemblyName) =>
-                HasFamilyPrefix(referencedAssemblyName, "Microsoft.AspNetCore")
+                AssemblyReferenceScan.HasFamilyPrefix(referencedAssemblyName, "Microsoft.AspNetCore")
                 || referencedAssemblyName is "Npgsql" or "Dapper";
 
             var violations = ProductionAssemblies.InnerProjects
@@ -73,14 +70,10 @@ public sealed class FeatureDependencyLaws
         [Fact]
         public void NpgsqlAndDapperAppearOnlyInTheRepositoryLayer()
         {
-            var genwaveAssemblies = Types().That()
-                .ResideInAssembly(ProductionAssemblies.Core)
-                .Or().ResideInAssembly(ProductionAssemblies.Orchestration)
-                .Or().ResideInAssembly(ProductionAssemblies.Tts)
-                .Or().ResideInAssembly(ProductionAssemblies.Loudness)
-                .Or().ResideInAssembly(ProductionAssemblies.MediaLibrary)
-                .Or().ResideInAssembly(ProductionAssemblies.Host)
-                .Or().ResideInAssembly(ProductionAssemblies.Abstractions);
+            var assemblies = ProductionAssemblies.AllProductionAssemblies();
+            var genwaveAssemblies = Types().That().ResideInAssembly(assemblies[0]);
+            for (var i = 1; i < assemblies.Count; i++)
+                genwaveAssemblies = genwaveAssemblies.Or().ResideInAssembly(assemblies[i]);
 
             var subjects = Types().That().Are(genwaveAssemblies).And().AreNot(PostgresConfinement.RepositoryLayer);
 
@@ -145,6 +138,11 @@ public sealed class FeatureDependencyLaws
         private readonly IReadOnlyList<string> l1MatchedOnANameItNeverReferences;
         private readonly string l1Message;
 
+        // ── L1's HasFamilyPrefix (T211 review carry-forward, lifted at T212) ────────────────────
+        private readonly bool hasFamilyPrefixForBareFamilyName;
+        private readonly bool hasFamilyPrefixForDottedFamilyMember;
+        private readonly bool hasFamilyPrefixForSamePrefixLookalike;
+
         // ── L4-references (deps.json-based DepsJsonDependencyScan) ─────────────────────────────
         private readonly IReadOnlyList<string> l4ExtraWhenSelfOnly;
         private readonly IReadOnlyList<string> l4ExtraWhenPolluted;
@@ -192,6 +190,17 @@ public sealed class FeatureDependencyLaws
             var l1Violation = new LawViolation(
                 LawId.L1, "Probe.ArchUnitNET", $"references forbidden assembly \"{l1MatchedOnAKnownReference[0]}\"");
             l1Message = DependencyLawAssert.Format(l1Violation);
+
+            // HasFamilyPrefix's own probe: synthetic strings, no assembly read at all (the L4
+            // fixture precedent below) — proves the segment-boundary discrimination the T211 review
+            // flagged as uncovered. A bare family name and a dotted family member must both match; a
+            // same-prefix lookalike (the exact hole a bare StartsWith would miss) must not.
+            hasFamilyPrefixForBareFamilyName =
+                AssemblyReferenceScan.HasFamilyPrefix("Microsoft.AspNetCore", "Microsoft.AspNetCore");
+            hasFamilyPrefixForDottedFamilyMember =
+                AssemblyReferenceScan.HasFamilyPrefix("Microsoft.AspNetCore.Http", "Microsoft.AspNetCore");
+            hasFamilyPrefixForSamePrefixLookalike =
+                AssemblyReferenceScan.HasFamilyPrefix("Microsoft.AspNetCoreLike", "Microsoft.AspNetCore");
 
             // L4-references' probe target: synthetic deps.json content (Fixtures/L4Probe), never
             // read from disk — decoupled from GenWave.Abstractions' real, live dependency graph. A
@@ -250,6 +259,16 @@ public sealed class FeatureDependencyLaws
             "[L1] Probe.ArchUnitNET: references forbidden assembly \"Mono.Cecil\"", l1Message);
 
         [Fact]
+        public void HasFamilyPrefixMatchesTheBareFamilyName() => Assert.True(hasFamilyPrefixForBareFamilyName);
+
+        [Fact]
+        public void HasFamilyPrefixMatchesADottedFamilyMember() => Assert.True(hasFamilyPrefixForDottedFamilyMember);
+
+        [Fact]
+        public void HasFamilyPrefixDoesNotMatchASamePrefixLookalike() =>
+            Assert.False(hasFamilyPrefixForSamePrefixLookalike);
+
+        [Fact]
         public void TheL4ProbeFindsNoExtraLibrariesWhenTheClosureIsSelfOnly() => Assert.Empty(l4ExtraWhenSelfOnly);
 
         [Fact]
@@ -279,6 +298,22 @@ public sealed class FeatureDependencyLaws
                 Assert.True(
                     DateOnly.TryParse(entry.Date, out _),
                     $"{entry.Member}'s exemption date \"{entry.Date}\" is not a valid date.");
+            }
+        }
+
+        [Fact]
+        public void EveryExemptionsMemberResolvesToARealProductionType()
+        {
+            // TheSeamListIsANamedConstantInTheSuite's own sibling check (Story291_ConventionLaws.cs)
+            // proves the same disease: NotEmpty alone lets a deleted/typo'd entry match nothing,
+            // silently. ProductionAssemblies.HasType is the one shared "does this name resolve"
+            // mechanism both lists lean on (STORY-291 review).
+            foreach (var entry in ExemptionBaseline.Entries)
+            {
+                Assert.True(
+                    ProductionAssemblies.HasType(entry.Member),
+                    $"\"{entry.Member}\" does not resolve to any loaded production type — a phantom " +
+                    "exemption entry would silently match nothing.");
             }
         }
 

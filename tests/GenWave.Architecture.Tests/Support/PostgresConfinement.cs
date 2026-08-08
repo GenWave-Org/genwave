@@ -38,7 +38,24 @@ internal static class PostgresConfinement
 
         return rule.Evaluate(architecture)
             .Where(r => !r.Passed)
-            .Select(r => new LawViolation(LawId.L2, r.EvaluatedObjectIdentifier.ToString() ?? "<unknown>", r.Description))
+            .Select(ToViolation)
             .ToList();
+    }
+
+    private static LawViolation ToViolation(ArchUnitNET.Fluent.EvaluationResult result)
+    {
+        var member = result.EvaluatedObjectIdentifier.ToString() ?? "<unknown>";
+        return new LawViolation(LawId.L2, member, StripRedundantMemberPrefix(result.Description, member));
+    }
+
+    /// <summary>ArchUnitNET's own <c>Description</c> already starts with the offending member's full
+    /// name (e.g. <c>"Foo does depend on \"Npgsql.NpgsqlConnection\""</c>) — <see cref="DependencyLawAssert.Format"/>
+    /// prints <c>Member</c> right beside <c>Detail</c>, so keeping that prefix would repeat the same
+    /// name twice in one failure line (STORY-291 review). Stripped only when it's actually there —
+    /// ArchUnitNET's exact phrasing isn't a documented contract this rule should assume forever.</summary>
+    private static string StripRedundantMemberPrefix(string description, string member)
+    {
+        var prefix = member + " ";
+        return description.StartsWith(prefix, StringComparison.Ordinal) ? description[prefix.Length..] : description;
     }
 }

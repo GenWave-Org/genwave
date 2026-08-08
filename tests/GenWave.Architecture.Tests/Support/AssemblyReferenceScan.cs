@@ -24,6 +24,16 @@ namespace GenWave.Architecture.Tests.Support;
 /// </summary>
 internal static class AssemblyReferenceScan
 {
+    /// <summary>Whether <paramref name="name"/> belongs to the assembly family
+    /// <paramref name="family"/> — either the bare family name itself, or a name segmented under it
+    /// (<c>family + "."</c>). Segment-boundary aware, not a bare prefix match: a plain
+    /// <c>StartsWith(family)</c> would also match a hypothetical unrelated assembly named e.g.
+    /// "Microsoft.AspNetCoreLike" — real assembly families (L1's Microsoft.AspNetCore.*) are always
+    /// either the bare family name or "&lt;family&gt;.&lt;rest&gt;", never a same-prefix
+    /// lookalike.</summary>
+    public static bool HasFamilyPrefix(string name, string family) =>
+        name == family || name.StartsWith(family + ".", StringComparison.Ordinal);
+
     /// <summary>Every assembly referenced by the assembly at <paramref name="assemblyPath"/> whose
     /// simple name matches <paramref name="isForbidden"/>.</summary>
     public static IReadOnlyList<string> ForbiddenReferences(string assemblyPath, Func<string, bool> isForbidden)

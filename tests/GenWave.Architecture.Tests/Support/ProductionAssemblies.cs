@@ -28,4 +28,31 @@ internal static class ProductionAssemblies
         ("GenWave.Tts", Tts),
         ("GenWave.Loudness", Loudness),
     };
+
+    /// <summary>Every GenWave production assembly, once (STORY-291 review carry-forward): L2 and L3
+    /// each independently built this same seven-assembly list inline — a genuine copy, not two
+    /// different lists that happen to look alike, so a project F105.4 adds later could go missing
+    /// from one law's subjects and stay silently unchecked. A method, not a static-readonly field:
+    /// L2 folds the result into an ArchUnitNET <c>GivenTypesConjunction</c>, whose fluent builders
+    /// mutate the object each <c>.Or()</c> call chains onto (this file's own <see cref="InnerProjects"/>
+    /// precedent and <see cref="HttpClientSeams"/>'s remarks both describe the same hazard) — sharing
+    /// one cached starting point across facts would risk one fact's chain silently widening another's.
+    /// Returning a fresh array every call costs nothing here and closes that door by construction.
+    /// L3 (a plain <c>Assembly.Location</c> file-path scan, no ArchUnitNET involved) has no such
+    /// hazard but takes the same list for the one reason this exists at all: one list, not
+    /// two.</summary>
+    public static IReadOnlyList<Assembly> AllProductionAssemblies() => new[]
+    {
+        Core, Orchestration, Tts, Loudness, MediaLibrary, Host, Abstractions,
+    };
+
+    /// <summary>Whether any <see cref="AllProductionAssemblies"/> assembly defines a type named
+    /// <paramref name="fullName"/> — reflection-based, so it resolves <c>internal</c> types too (no
+    /// <c>InternalsVisibleTo</c> needed), the same reason <see cref="HttpClientSeams.DesignatedSeams"/>
+    /// and <see cref="ExemptionBaseline"/> both name members as plain strings instead of
+    /// <c>typeof</c>. The shared "every named member resolves" check (STORY-291 review): a deleted or
+    /// typo'd entry in either list otherwise matches nothing and silently stops meaning
+    /// anything.</summary>
+    public static bool HasType(string fullName) =>
+        AllProductionAssemblies().Any(assembly => assembly.GetType(fullName) is not null);
 }
