@@ -93,10 +93,7 @@ The broadcast never depends on a sick dependency. **LLM failure is a mode, not a
 │  ├─ preflight.sh               # shared machine/env checks sourced by build.sh + launch.sh (gh-#19)
 │  ├─ check-compose-publish.sh   # CI guard: 0.0.0.0 host publishes allowed only for the front proxy (F67.1)
 │  ├─ check-compose-socket.sh    # CI guard: docker.sock read-only + alloy-only, every profile combo (F78.2)
-│  ├─ check-doc-drift.sh         # CI guard: DEPLOYMENT.md/HARDWARE.md values match the compose files (gh-#77)
-│  ├─ check-seam-index.sh        # CI guard: SEAMS.md matches a fresh generation byte-for-byte (F105.6)
-│  └─ SeamIndexGenerator/        # writes SEAMS.md from the live DI registrations — never hand-edit the map
-├─ SEAMS.md                # generated seam index: port → adapter → binding site (see CONTRIBUTING before adding a seam)
+│  └─ check-doc-drift.sh         # CI guard: DEPLOYMENT.md/HARDWARE.md values match the compose files (gh-#77)
 └─ src/                    # C# solution (.NET 10)
    ├─ GenWave.Abstractions/  #   the SDK contract surface: selection, catalog read, events, TTS seams
    ├─ GenWave.Core/          #   domain + engine-facing abstractions; zero I/O
@@ -124,7 +121,7 @@ dotnet test GenWave.sln
 npx tsc --noEmit && npm test && npm run build
 ```
 
-Six test projects: `Core.Tests`, `Host.Tests`, `MediaLibrary.Tests`, `Orchestration.Tests`, `Tts.Tests`, and `Architecture.Tests` — the last enforces the six architecture laws (dependency direction, Postgres/HttpClient confinement, contract immutability, the Host graduation tripwire) as ordinary red-green tests; the laws themselves are summarized front-and-center in [CONTRIBUTING.md](CONTRIBUTING.md). The full suite plus the on-air gate are required before anything merges to `main`.
+Five test projects: `Core.Tests`, `Host.Tests`, `MediaLibrary.Tests`, `Orchestration.Tests`, `Tts.Tests`. The full suite plus the on-air gate are required before anything merges to `main`.
 
 ### Versions
 
