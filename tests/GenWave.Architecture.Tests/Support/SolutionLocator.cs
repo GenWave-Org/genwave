@@ -15,4 +15,15 @@ internal static class SolutionLocator
 
         throw new FileNotFoundException($"GenWave.sln not found above {AppContext.BaseDirectory}.");
     }
+
+    /// <summary>The repo root — <see cref="Find"/>'s containing directory. Three call sites
+    /// (<c>DepsJsonDependencyScan</c>, <c>Story291_ConventionLaws</c>'s <c>Program.cs</c> reader,
+    /// <c>ContributingDocument</c>) each used to repeat "<c>Path.GetDirectoryName(Find()) ?? throw
+    /// ...</c>" independently (STORY-293 review) — lifted here once so the null-check for "a solution
+    /// file with no containing directory" (a condition that can't actually happen, since
+    /// <see cref="Find"/> only ever returns a path under a real directory it just walked) has exactly
+    /// one place to live.</summary>
+    public static string Root() =>
+        Path.GetDirectoryName(Find())
+            ?? throw new InvalidOperationException($"\"{Find()}\" has no containing directory.");
 }

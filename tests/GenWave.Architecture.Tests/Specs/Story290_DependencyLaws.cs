@@ -288,7 +288,11 @@ public sealed class FeatureDependencyLaws
         {
             Assert.NotEmpty(ExemptionBaseline.Entries);
 
-            var knownLawIds = new[] { LawId.L1, LawId.L2, LawId.L4References };
+            // T215/STORY-293 carry-forward: derived from LawId.All (reflection over LawId's own
+            // consts) instead of a hand-maintained subset — a future law landing here without ever
+            // updating a second, hardcoded list was exactly the drift this whitelist could silently
+            // grow stale against.
+            var knownLawIds = LawId.All;
 
             foreach (var entry in ExemptionBaseline.Entries)
             {

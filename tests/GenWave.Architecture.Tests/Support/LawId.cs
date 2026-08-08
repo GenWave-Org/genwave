@@ -1,3 +1,6 @@
+using System.Reflection;
+using System.Text.RegularExpressions;
+
 namespace GenWave.Architecture.Tests.Support;
 
 /// <summary>
@@ -7,6 +10,14 @@ namespace GenWave.Architecture.Tests.Support;
 /// </summary>
 internal static class LawId
 {
+    /// <summary>The shape every law id above takes — <c>L</c>, one or more digits, optionally a
+    /// lowercase <c>-word</c> suffix (<c>L1</c>...<c>L6</c>, <c>L4-references</c>,
+    /// <c>L4-immutability</c>) — owned here, once, so <see cref="All"/>'s own const-filter (below)
+    /// and <see cref="ContributingLawTable"/>'s doc-parser both consume the SAME shape definition
+    /// instead of each hand-rolling their own copy that could quietly drift apart (STORY-293
+    /// review). <c>L\d+</c>, not <c>L\d</c>: a tenth law (<c>L10</c>) must still match.</summary>
+    public const string IdPattern = @"^L\d+(-[a-z]+)?$";
+
     /// <summary>Inner projects (Core, Orchestration, Tts, Loudness) reference no ASP.NET, Npgsql,
     /// or Dapper assemblies.</summary>
     public const string L1 = "L1";
@@ -38,4 +49,25 @@ internal static class LawId
     /// <summary>Seam-placement mechanics: <c>GenWave.Abstractions</c> references no
     /// <c>GenWave.Core</c> type — the encodable half of the gh-#400 seam-placement criterion.</summary>
     public const string L6 = "L6";
+
+    /// <summary>Every law id above, discovered by reflection over this type's own <c>public const
+    /// string</c> fields rather than hand-listed a second time anywhere. STORY-293's carry-forward
+    /// (PLAN T215): this is now the SINGLE source both Story290_DependencyLaws.cs's exemption-id
+    /// whitelist and the suite↔doc parity test (<see cref="LawParity"/>) derive from — adding an
+    /// eighth law const above is enough, on its own, to keep both in sync; neither keeps its own copy
+    /// of the id list to forget to update.
+    ///
+    /// The filter is two-layered so it stays honest even as this class grows: <see cref="IdPattern"/>
+    /// itself is excluded by name (it is a <c>public const string</c> too, but it names a SHAPE, not a
+    /// law), and every surviving candidate is additionally required to actually MATCH
+    /// <see cref="IdPattern"/> — so a future, unrelated <c>public const string</c> added to this class
+    /// for some other reason can never silently masquerade as an eighth law id.</summary>
+    public static IReadOnlyList<string> All { get; } = typeof(LawId)
+        .GetFields(BindingFlags.Public | BindingFlags.Static)
+        .Where(field => field.IsLiteral && field.FieldType == typeof(string) && field.Name != nameof(IdPattern))
+        .Select(field => field.GetRawConstantValue())
+        .OfType<string>()
+        .Where(value => Regex.IsMatch(value, IdPattern))
+        .OrderBy(id => id, StringComparer.Ordinal)
+        .ToList();
 }

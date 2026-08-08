@@ -70,8 +70,7 @@ internal static class DepsJsonDependencyScan
 
     private static string ResolveDepsJsonPath(string projectDirectoryRelativeToSolution, string assemblyName)
     {
-        var solutionRoot = Path.GetDirectoryName(SolutionLocator.Find())
-            ?? throw new InvalidOperationException($"\"{SolutionLocator.Find()}\" has no containing directory.");
+        var solutionRoot = SolutionLocator.Root();
 
         var targetFrameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
         var configurationDirectory = targetFrameworkDirectory.Parent

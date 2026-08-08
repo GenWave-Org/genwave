@@ -92,12 +92,8 @@ public sealed class FeatureConventionLaws
         // structurally, not textually. Pinned by source text instead — the one thing that can catch a
         // 4th registration, an AllowAutoRedirect=true regression, or a bypass-the-DI-container raw
         // client neither the metadata scan nor a type-count assertion would notice (STORY-291 review).
-        private static string ReadProgramText()
-        {
-            var solutionRoot = Path.GetDirectoryName(SolutionLocator.Find())
-                ?? throw new InvalidOperationException($"\"{SolutionLocator.Find()}\" has no containing directory.");
-            return File.ReadAllText(Path.Combine(solutionRoot, "src", "GenWave.Host", "Program.cs"));
-        }
+        private static string ReadProgramText() =>
+            File.ReadAllText(Path.Combine(SolutionLocator.Root(), "src", "GenWave.Host", "Program.cs"));
 
         [Fact]
         public void ProgramRegistersExactlyThreeHttpClientsAndDisablesAutoRedirectOnTheNamedOne()
