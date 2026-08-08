@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- T216 (SEAMS.md generator, STORY-294, SPEC F105.6). References GenWave.Host.Tests — NOT
+       GenWave.Host directly — for SeamCompositionSnapshot: WebApplicationFactory<Program> needs
+       `Program` (the top-level-statements entry point, `internal` by default), and GenWave.Host.Tests
+       is the one assembly GenWave.Host.csproj's InternalsVisibleTo already names; T216 must not touch
+       src/. See SeamCompositionSnapshot's own remarks for the full rationale. Side effect inherited
+       for free: loading GenWave.Host.Tests.dll runs its DisableConfigFileWatchingModuleInitializer
+       once per process (nulls a handful of ambient env vars — Admin__Password,
+       ConnectionStrings__Library/Station, Llm__*, Station__SpectatorMode, Spectator__PublicPort — and
+       disables appsettings hot-reload), the same immunity to a developer shell's exported env vars
+       every Host.Tests spec already gets. No packages beyond what the repo already restores elsewhere
+       (this project adds none of its own). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\tests\GenWave.Host.Tests\GenWave.Host.Tests.csproj" />
+  </ItemGroup>
+
+</Project>

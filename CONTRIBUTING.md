@@ -22,6 +22,8 @@ Adoption is honest: violations that predate a law are named and dated in the sui
 
 L3's designated seams are a named constant, not a list here: `HttpClientSeams.DesignatedSeams`.
 
+**Check `SEAMS.md`** before adding a new seam — extend or decorate an existing port over minting a near-duplicate; regenerate with `dotnet run --project tools/SeamIndexGenerator` (CI byte-diffs it against committed, SPEC F105.6).
+
 ## 📜 Contributor License Agreement (required)
 
 GenWave Home is AGPL-3.0-only and always will be. Its development is funded by GenWave Business, a commercially licensed edition built on the same core. That model only works if the maintainer holds sufficient rights in every line of the core — so **every external contribution requires agreeing to the [Contributor License Agreement](CLA.md) before it can be merged**.
