@@ -16,7 +16,7 @@ internal static class LawId
     public const string L2 = "L2";
 
     /// <summary>The reference half of L4: <c>GenWave.Abstractions</c> references nothing beyond
-    /// the BCL. (The immutability half is STORY-291's law, not this suite's.)</summary>
+    /// the BCL. (The immutability half is <see cref="L4Immutability"/>.)</summary>
     public const string L4References = "L4-references";
 
     /// <summary>HttpClient confinement: <c>System.Net.Http.HttpClient</c> is constructed or asked
@@ -24,4 +24,13 @@ internal static class LawId
     /// by the designated seam types (<see cref="HttpClientSeams"/>) — every outbound origin stays
     /// enumerable (SSRF surface control).</summary>
     public const string L3 = "L3";
+
+    /// <summary>The immutability half of L4: every public type in <c>GenWave.Abstractions</c>
+    /// carries no publicly settable state — no non-init property setter, no mutable public field.
+    /// (The reference half is <see cref="L4References"/>.)</summary>
+    public const string L4Immutability = "L4-immutability";
+
+    /// <summary>Seam-placement mechanics: <c>GenWave.Abstractions</c> references no
+    /// <c>GenWave.Core</c> type — the encodable half of the gh-#400 seam-placement criterion.</summary>
+    public const string L6 = "L6";
 }
