@@ -1,4 +1,5 @@
 // STORY-296 — The context seam exists: the laws cover the new surface (F107.1, F107.2)
+using GenWave.Architecture.Tests.Support;
 
 namespace GenWave.Architecture.Tests.Specs;
 
@@ -39,22 +40,49 @@ public static class FeatureContextSeamUnderTheLaws
 
     public sealed class ScenarioTheContractStaysClean
     {
-        [Fact(Skip = "Pending T221 — see docs/PLAN.md")]
+        [Fact]
         public void IContextProviderLivesInAbstractions()
         {
-            // typeof from the Abstractions assembly: GenWave.Abstractions.Abstractions.IContextProvider
-            // exists with a Key property and a single fetch returning ContextContent?.
-            // Assert.NotNull(contractType);
-            Assert.Fail("pending T221");
+            // The contract lives under the SAME legacy namespace every other Abstractions/ seam
+            // interface does (ITtsSegmentSource, INextItemProvider, ...) — GenWave.Core.Abstractions,
+            // not the assembly's own GenWave.Abstractions.* — the folder's established convention
+            // (Playout/ is the one exception, its own newer namespace).
+            var contractType = ProductionAssemblies.Abstractions.GetType("GenWave.Core.Abstractions.IContextProvider");
+            Assert.NotNull(contractType);
+            Assert.True(contractType.IsInterface);
+
+            var keyProperty = contractType.GetProperty("Key");
+            Assert.NotNull(keyProperty);
+            Assert.Equal(typeof(string), keyProperty.PropertyType);
+
+            // The one fetch method: GetMethods() also reports get_Key as a compiler "special name"
+            // method, filtered out so exactly the fetch survives as the interface's single method.
+            var fetchMethod = Assert.Single(contractType.GetMethods(), m => !m.IsSpecialName);
+            Assert.Equal("FetchAsync", fetchMethod.Name);
+
+            var contentType = ProductionAssemblies.Abstractions.GetType("GenWave.Core.Domain.ContextContent");
+            Assert.NotNull(contentType);
+            Assert.Equal(typeof(Task<>).MakeGenericType(contentType), fetchMethod.ReturnType);
+
+            var parameter = Assert.Single(fetchMethod.GetParameters());
+            Assert.Equal(typeof(CancellationToken), parameter.ParameterType);
         }
 
-        [Fact(Skip = "Pending T221 — see docs/PLAN.md")]
+        [Fact]
         public void ContextContentIsAnImmutableRecord()
         {
-            // L4-immutability semantics hold on the new records (no mutable public state);
-            // the existing L4 law covers this automatically — this fact pins the intent.
-            // Assert.True(isImmutableRecord);
-            Assert.Fail("pending T221");
+            var contentType = ProductionAssemblies.Abstractions.GetType("GenWave.Core.Domain.ContextContent");
+            Assert.NotNull(contentType);
+
+            // "<Clone>$" is the one reflectable trace of the `record` keyword itself — the compiler
+            // synthesizes it on every record, class or struct, positional or not.
+            Assert.NotNull(contentType.GetMethod("<Clone>$"));
+
+            // L4-immutability's own detector (AbstractionsImmutability), reused rather than
+            // re-implemented — the exact mechanism ScenarioL4Immutability (Story291_ConventionLaws.cs)
+            // already runs over the whole assembly and would catch this type in either way.
+            var violations = AbstractionsImmutability.FindViolations([contentType]);
+            Assert.Empty(violations);
         }
     }
 
