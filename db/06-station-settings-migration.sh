@@ -175,7 +175,16 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  -- predates this column. Deliberately NO foreign key — library.media lives on the other side of
 	  -- the schema-role boundary (station_svc has no grant there); the Host resolves safe-scope
 	  -- membership for the taste-thumb exclusion via the library connection instead.
-	  media_id    bigint
+	  media_id    bigint,
+	  -- SPEC F113, STORY-304, PLAN T219/T220: the air-time kind stamp — the demo-hour instrument.
+	  -- NULL for every music row; a SegmentKind token (GenWave.Core.Domain, a growing C# enum) for
+	  -- tts:* rows, stamped by the booth-log drain loop at air time, the same synchronous-at-write
+	  -- way as persona_id/artist/pick above. Deliberately un-CHECKed (unlike most kind columns in
+	  -- this schema) — the token set churns with every new content kind, which a CHECK constraint
+	  -- would otherwise force this migration to keep pace with. NO CONSUMER YET (T219): T220 wires
+	  -- the write path. See db/33-show-and-segment-kind-migration.sh for the in-place upgrade path
+	  -- this column also ships as.
+	  segment_kind text
 	);
 
 	-- Keyset paging spine (SPEC F72.2): newest-first (occurred_at DESC, id DESC) with no OFFSET —
@@ -235,6 +244,22 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	CREATE INDEX IF NOT EXISTS request_pending
 	  ON station.request (status, expires_at);
 
+	-- Shows (SPEC F114, gh-#383 — the later slice, schema ruled at STORY-304/T219): a first-class
+	-- entity, singular like every other table in this schema (station.persona precedent) — renaming a
+	-- show touches one row, and identity is what patter/idents/spectator will reference once the
+	-- F114 slice lands. Defined here, ahead of station.segment_schedule below, purely so that table's
+	-- show_id column has something to reference — the two tables carry no other ordering relationship.
+	-- NO CONSUMER YET (T219): station.show stays dormant by design until F114 wires a writer/reader,
+	-- the same "seam before consumer" way station.persona_taste (T59), station.theme (T181), and
+	-- station.font_pack (T198) all shipped. See db/33-show-and-segment-kind-migration.sh for the
+	-- in-place upgrade path this table also ships as.
+	CREATE TABLE IF NOT EXISTS station.show (
+	  id         serial      PRIMARY KEY,
+	  name       text        NOT NULL CHECK (length(btrim(name)) > 0),
+	  created_at timestamptz NOT NULL DEFAULT now(),
+	  updated_at timestamptz NOT NULL DEFAULT now()
+	);
+
 	-- The weekly format-clock grid (SPEC F91.1, F91.2; STORY-240, STORY-242; PLAN T118) that replaces
 	-- the single owner-toggled Station:Persona:ActiveId. day_of_week is System.DayOfWeek's own 0-6
 	-- numbering (0 = Sunday) — no translation ever happens between this column and the C# side.
@@ -267,6 +292,12 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  energy_max   double precision,
 	  created_at   timestamptz NOT NULL DEFAULT now(),
 	  updated_at   timestamptz NOT NULL DEFAULT now(),
+	  -- SPEC F114 (gh-#383, schema ruled at STORY-304/T219): a nullable FK into station.show, created
+	  -- just above this table so this FK resolves at fresh-init time. NULL means "no show branding"
+	  -- (most painted blocks are unnamed); ON DELETE RESTRICT matches persona_id's own precedent
+	  -- immediately above: unassign a show from every slot before deleting it, never a silent cascade
+	  -- through the format clock. NO CONSUMER YET — dormant until the F114 slice.
+	  show_id      int         REFERENCES station.show (id) ON DELETE RESTRICT,
 	  CHECK (end_minute > start_minute),
 	  EXCLUDE USING gist (day_of_week WITH =, int4range(start_minute, end_minute) WITH &&)
 	);
