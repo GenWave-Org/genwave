@@ -19,6 +19,13 @@ public interface IContextProvider
     /// weather fact never silently supersedes a due history fact) and the settings segment prefix
     /// every provider's live configuration reads from (<c>Context:{Key}:*</c> — e.g.
     /// <c>Context:Weather:Enabled</c>, <c>Context:Weather:SegmentCadenceMinutes</c>).
+    ///
+    /// <b>Unique and shaped like a path segment</b> (T221 review carry-forward): must be unique
+    /// across every provider registered with the pipeline, and restricted to lowercase ASCII
+    /// letters, digits, and hyphens — it is both a settings path segment and a queue discriminator,
+    /// neither of which tolerates whitespace, casing collisions, or punctuation. The pipeline
+    /// (<c>GenWave.Context.ContextPipeline</c>) fails fast — an <see cref="ArgumentException"/> at
+    /// construction — on a duplicate or invalid key; it is never a runtime-discovered fault.
     /// </summary>
     string Key { get; }
 
@@ -27,6 +34,12 @@ public interface IContextProvider
     /// (disabled, stale, an upstream failure, or simply no news). <b>Null is never an error</b> — the
     /// pipeline treats it as ordinary skip-never-silence input (F107.6): no segment, no patter line,
     /// music continues unaffected.
+    ///
+    /// <b>Throwing is equally ordinary</b> (T221 review carry-forward): an implementation MAY throw
+    /// instead of returning null — the pipeline catches it and applies the exact same skip-never-silence
+    /// handling (F107.6) as a null return, one Information line per cadence slot naming the cause. A
+    /// provider therefore never needs its own try/catch purely to turn a failure into null; throwing
+    /// straight through an upstream fault is a valid, unwrapped implementation.
     /// </summary>
     Task<ContextContent?> FetchAsync(CancellationToken ct);
 }

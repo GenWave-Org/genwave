@@ -25,6 +25,7 @@ internal static class ProductionArchitecture
             ProductionAssemblies.Orchestration,
             ProductionAssemblies.Tts,
             ProductionAssemblies.Loudness,
+            ProductionAssemblies.Context,
             ProductionAssemblies.MediaLibrary,
             ProductionAssemblies.Host,
             ProductionAssemblies.Abstractions,

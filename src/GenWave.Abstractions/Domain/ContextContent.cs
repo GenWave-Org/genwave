@@ -9,6 +9,12 @@ namespace GenWave.Core.Domain;
 /// <param name="SegmentFacts">
 /// Plain-text facts for the segment-lane copywriter prompt (F107.3) — never spoken verbatim; the LLM
 /// paraphrases/reads them under a "read these facts, do not add facts" posture.
+///
+/// <b>Empty means "no segment lane this fetch"</b> (T221 review carry-forward): an empty or
+/// whitespace-only value is not an error and never logged as one — it simply means this fetch has
+/// nothing for a full segment even though <see cref="PatterFact"/> may still be present (e.g. a
+/// provider with a compact update but not enough material for a standalone segment). The pipeline
+/// produces no segment output for that fetch and moves on; the patter lane is unaffected.
 /// </param>
 /// <param name="PatterFact">
 /// One compact fact for the patter-lane prompt (F107.5) — at most one context line per break, and

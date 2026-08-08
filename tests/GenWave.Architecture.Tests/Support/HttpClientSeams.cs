@@ -103,7 +103,7 @@ internal static class HttpClientSeams
     /// <summary>Evaluates "no type in <paramref name="assemblyPaths"/> outside
     /// <paramref name="isDesignatedSeam"/> depends on <see cref="ForbiddenTypes"/>", returning one
     /// <see cref="LawViolation"/> per offending type. The same function backs both the production
-    /// fact (subjects = the seven GenWave assemblies, seam filter = <see cref="DesignatedSeams"/>) and
+    /// fact (subjects = the eight GenWave assemblies, seam filter = <see cref="DesignatedSeams"/>) and
     /// the fixture self-proof (subjects = a fixture assembly, seam filter = the fixture's own
     /// stand-in list) — one detector, exercised both ways, not a copy kept in sync by hand.</summary>
     public static IReadOnlyList<LawViolation> FindViolations(

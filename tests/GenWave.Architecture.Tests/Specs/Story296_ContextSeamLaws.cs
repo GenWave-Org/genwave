@@ -11,13 +11,20 @@ public static class FeatureContextSeamUnderTheLaws
 
     public sealed class ScenarioTheNewProjectJoinsTheLaws
     {
-        [Fact(Skip = "Pending T222 — see docs/PLAN.md")]
+        [Fact]
         public void L1ProjectListIncludesGenWaveContext()
         {
-            // The framework-free inner-project list gains GenWave.Context; a deliberate
-            // ASP.NET reference from it must go L1-red (mutation-checked at build).
-            // Assert.Contains("GenWave.Context", L1InnerProjects.All);
-            Assert.Fail("pending T222");
+            // The framework-free inner-project list gains GenWave.Context; a deliberate ASP.NET
+            // reference from it would now go L1-red automatically — ScenarioL1FrameworkFreeInnerProjects
+            // (Story290_DependencyLaws.cs) runs its forbidden-reference scan over EVERY entry in this
+            // list, so this fact only needs to prove membership, not re-run that scan itself.
+            var context = Assert.Single(
+                ProductionAssemblies.InnerProjects, project => project.Label == "GenWave.Context");
+
+            // Not a phantom label pointing at nothing: the anchor resolved a real, loadable assembly
+            // with real types in it (the T212 seam-list lesson — a resolution fact that can't
+            // discriminate proves nothing).
+            Assert.NotEmpty(context.Assembly.GetTypes());
         }
 
         [Fact(Skip = "Pending T227 — see docs/PLAN.md")]
@@ -92,13 +99,21 @@ public static class FeatureContextSeamUnderTheLaws
 
     public sealed class ScenarioHostStaysEmpty
     {
-        [Fact(Skip = "Pending T222 — see docs/PLAN.md")]
+        [Fact]
         public void HostContextReservationRemainsEmpty()
         {
-            // The L5 tripwire's GenWave.Host.Context reservation must still match zero types
-            // after the cycle builds — the subsystem was born outside (F105.4).
-            // Assert.Empty(typesUnderReservedNamespace);
-            Assert.Fail("pending T222");
+            // The L5 tripwire's GenWave.Host.Context reservation must still match zero types after
+            // this cycle builds GenWave.Context — the subsystem was born OUTSIDE Host (F105.4,
+            // gh-#378), and this build is the first real test of that: scoped to just the Context
+            // reservation entry (not the full HostReservedNamespaces.Entries list Story292 already
+            // covers) so this fact stays about T222 specifically, not a re-run of Story292's own proof.
+            var contextReservation = Assert.Single(
+                HostReservedNamespaces.Entries, entry => entry.ReservedNamespace == "GenWave.Host.Context");
+
+            var violations = HostNamespaceTripwire.FindViolations(
+                ProductionAssemblies.Host.GetTypes(), [contextReservation]);
+
+            Assert.Empty(violations);
         }
     }
 }

@@ -20,8 +20,9 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
-  <!-- T222 adds: ProjectReference to src/GenWave.Context (project born at that task) and
-       src/GenWave.Abstractions. Until then every spec here is pending (Skip) with a
-       comment-only body, so nothing references the unbuilt types. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GenWave.Context\GenWave.Context.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Abstractions\GenWave.Abstractions.csproj" />
+  </ItemGroup>
 
 </Project>

@@ -1,38 +1,93 @@
 // STORY-296 — The context seam exists: pipeline semantics (F107.2, F107.6)
+using GenWave.Context.Tests.Fakes;
+using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
 
 namespace GenWave.Context.Tests.Specs;
 
 public static class FeatureContextPipeline
 {
+    // A fixed, cadence-aligned instant (an exact UTC midnight — always a multiple of every cadence
+    // width this suite uses in minutes) so "how far into its slot is `now`" never depends on the
+    // wall clock the test happened to run at.
+    static readonly DateTimeOffset StartTime = new(2026, 8, 8, 0, 0, 0, TimeSpan.Zero);
+
+    static FakeTimeProvider NewTime() => new(StartTime);
+
+    static FakeContextSettingsProvider EnabledSettings(
+        string key, int segmentCadenceMinutes, int patterCadenceMinutes)
+    {
+        var settings = new FakeContextSettingsProvider();
+        settings.Set(key, new ContextProviderSettings(true, segmentCadenceMinutes, patterCadenceMinutes, null));
+        return settings;
+    }
+
     // ---------------------------------------------------------------------
     // HAPPY PATH
     // ---------------------------------------------------------------------
 
     public sealed class ScenarioFetchOncePerCadenceSlot
     {
-        [Fact(Skip = "Pending T222 — see docs/PLAN.md")]
-        public void TwoTicksInsideOneSlotFetchAtMostOnce()
+        [Fact]
+        public async Task TwoTicksInsideOneSlotFetchAtMostOnce()
         {
-            // Arrange: fake provider counting fetches, cadence 60min, FakeTimeProvider.
-            // Act: tick at T+0 and T+5min.
-            // Assert.Equal(1, fakeProvider.FetchCount);
-            Assert.Fail("pending T222");
+            var time = NewTime();
+            var provider = new FakeContextProvider("weather")
+            {
+                NextResult = () => new ContextContent("facts", "fact", time.GetUtcNow().AddHours(1)),
+            };
+            var pipeline = new ContextPipeline(
+                [provider], EnabledSettings("weather", 60, 60), time, new CapturingLogger<ContextPipeline>());
+
+            await pipeline.TickAsync(CancellationToken.None);
+            time.Advance(TimeSpan.FromMinutes(5));
+            await pipeline.TickAsync(CancellationToken.None);
+
+            Assert.Equal(1, provider.FetchCount);
         }
 
-        [Fact(Skip = "Pending T222 — see docs/PLAN.md")]
-        public void ANewSlotFetchesAgain()
+        [Fact]
+        public async Task ANewSlotFetchesAgain()
         {
-            // Advance past the cadence boundary; the next tick fetches exactly once more.
-            // Assert.Equal(2, fakeProvider.FetchCount);
-            Assert.Fail("pending T222");
+            var time = NewTime();
+            var provider = new FakeContextProvider("weather")
+            {
+                NextResult = () => new ContextContent("facts", "fact", time.GetUtcNow().AddHours(1)),
+            };
+            var pipeline = new ContextPipeline(
+                [provider], EnabledSettings("weather", 60, 60), time, new CapturingLogger<ContextPipeline>());
+
+            await pipeline.TickAsync(CancellationToken.None);
+            time.Advance(TimeSpan.FromMinutes(65)); // Past the 60-minute cadence boundary.
+            await pipeline.TickAsync(CancellationToken.None);
+
+            Assert.Equal(2, provider.FetchCount);
         }
 
-        [Fact(Skip = "Pending T222 — see docs/PLAN.md")]
-        public void FreshContentServesWithoutRefetch()
+        [Fact]
+        public async Task FreshContentServesWithoutRefetch()
         {
-            // Content with FreshUntil in the future serves from the pipeline's cache.
-            // Assert.Equal(1, fakeProvider.FetchCount);
-            Assert.Fail("pending T222");
+            var time = NewTime();
+            var provider = new FakeContextProvider("weather")
+            {
+                NextResult = () => new ContextContent("facts", "a compact fact", time.GetUtcNow().AddHours(2)),
+            };
+            var pipeline = new ContextPipeline(
+                [provider], EnabledSettings("weather", 60, 60), time, new CapturingLogger<ContextPipeline>());
+
+            var firstTick = await pipeline.TickAsync(CancellationToken.None);
+            time.Advance(TimeSpan.FromMinutes(10)); // Still inside the same 60-minute slot.
+            var secondTick = await pipeline.TickAsync(CancellationToken.None);
+
+            Assert.Equal(1, provider.FetchCount);
+            Assert.Contains(firstTick, due => due.Key == "weather");
+            // Already handed off for this slot on the first tick — the second tick must not enqueue
+            // the very same content again, but the underlying cache is still alive: the patter lane
+            // (a separate cadence, never yet vended) still resolves it from cache with no refetch.
+            Assert.Empty(secondTick);
+            Assert.NotNull(pipeline.TryTakeDuePatterFact());
         }
     }
 
@@ -42,36 +97,158 @@ public static class FeatureContextPipeline
 
     public sealed class ScenarioSkipNeverSilence
     {
-        [Fact(Skip = "Pending T222 — see docs/PLAN.md")]
-        public void DisabledProviderProducesNothingAndFetchesNothing()
+        [Fact]
+        public async Task DisabledProviderProducesNothingAndFetchesNothing()
         {
-            // Assert.Equal(0, fakeProvider.FetchCount); // and no segment/patter output
-            Assert.Fail("pending T222");
+            var time = NewTime();
+            var provider = new FakeContextProvider("weather")
+            {
+                NextResult = () => new ContextContent("facts", "fact", time.GetUtcNow().AddHours(1)),
+            };
+            // Never Set — every key resolves to FakeContextSettingsProvider.Disabled.
+            var pipeline = new ContextPipeline(
+                [provider], new FakeContextSettingsProvider(), time, new CapturingLogger<ContextPipeline>());
+
+            var due = await pipeline.TickAsync(CancellationToken.None);
+
+            Assert.Equal(0, provider.FetchCount);
+            Assert.Empty(due);
+            Assert.Null(pipeline.TryTakeDuePatterFact());
         }
 
-        [Fact(Skip = "Pending T222 — see docs/PLAN.md")]
-        public void NullReturnProducesNoOutputAndNoError()
+        [Fact]
+        public async Task DisabledProviderLogsAtMostOnceAcrossAMultiHourAdvance()
         {
-            // Null is a contract value ("nothing to say") — no warning, no error log.
-            // Assert.Empty(logSink.WarningsAndErrors);
-            Assert.Fail("pending T222");
+            var time = NewTime();
+            var provider = new FakeContextProvider("weather")
+            {
+                NextResult = () => new ContextContent("facts", "fact", time.GetUtcNow().AddHours(1)),
+            };
+            // Never Set — every key resolves to FakeContextSettingsProvider.Disabled, whose
+            // SegmentCadenceMinutes (0) clamps to a one-minute cadence slot (F7 regression pin): the
+            // OLD per-slot "disabled" logging would have produced one Information line per registered
+            // provider EVERY MINUTE here — 240 of them over this simulated four hours. Edge-triggered
+            // logging (this class's remarks) must produce exactly one, on the very first tick.
+            var logger = new CapturingLogger<ContextPipeline>();
+            var pipeline = new ContextPipeline([provider], new FakeContextSettingsProvider(), time, logger);
+
+            for (var i = 0; i < 240; i++) // Four simulated hours, one tick per minute.
+            {
+                await pipeline.TickAsync(CancellationToken.None);
+                time.Advance(TimeSpan.FromMinutes(1));
+            }
+
+            Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Information);
         }
 
-        [Fact(Skip = "Pending T222 — see docs/PLAN.md")]
-        public void AThrowingProviderLogsOneInformationLinePerSlot()
+        [Fact]
+        public async Task NullReturnProducesNoOutputAndNoError()
         {
-            // Two ticks inside the failed slot ⇒ exactly one Information line naming
-            // provider + cause; no retry storm.
-            // Assert.Single(logSink.InformationLines);
-            Assert.Fail("pending T222");
+            var time = NewTime();
+            var provider = new FakeContextProvider("weather") { NextResult = () => null };
+            var logger = new CapturingLogger<ContextPipeline>();
+            var pipeline = new ContextPipeline([provider], EnabledSettings("weather", 60, 60), time, logger);
+
+            var due = await pipeline.TickAsync(CancellationToken.None);
+
+            Assert.Empty(due);
+            // Null is a contract value ("nothing to say"), never a fault: no Warning/Error line, and
+            // exactly one Information line for the whole slot.
+            Assert.DoesNotContain(logger.Entries, entry => entry.Level >= LogLevel.Warning);
+            Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Information);
         }
 
-        [Fact(Skip = "Pending T222 — see docs/PLAN.md")]
-        public void StaleContentIsNeverServed()
+        [Fact]
+        public async Task AThrowingProviderLogsOneInformationLinePerSlot()
         {
-            // Content past FreshUntil yields no segment facts and no patter fact.
-            // Assert.Null(pipeline.CurrentContent("weather"));
-            Assert.Fail("pending T222");
+            var time = NewTime();
+            var provider = new FakeContextProvider("weather")
+            {
+                NextResult = () => throw new InvalidOperationException("upstream exploded"),
+            };
+            var logger = new CapturingLogger<ContextPipeline>();
+            var pipeline = new ContextPipeline([provider], EnabledSettings("weather", 60, 60), time, logger);
+
+            // Two ticks inside the failed slot ⇒ exactly one Information line naming provider + cause;
+            // no retry storm.
+            await pipeline.TickAsync(CancellationToken.None);
+            time.Advance(TimeSpan.FromMinutes(5));
+            await pipeline.TickAsync(CancellationToken.None);
+
+            Assert.Equal(1, provider.FetchCount);
+            var informationEntries = logger.Entries.Where(entry => entry.Level == LogLevel.Information).ToList();
+            var entry = Assert.Single(informationEntries);
+            Assert.Contains("weather", entry.Message);
+            // F108.3: the cause names the failure KIND, never echoes the provider's own message text.
+            Assert.DoesNotContain("upstream exploded", entry.Message);
+        }
+
+        [Fact]
+        public async Task StaleContentIsNeverServed()
+        {
+            var time = NewTime();
+            // FreshUntil expires well inside the 60-minute cadence slot — no retry is allowed until
+            // the NEXT slot (fetch-once-per-slot), so once it goes stale it must simply stop serving.
+            var provider = new FakeContextProvider("weather")
+            {
+                NextResult = () => new ContextContent("facts", "fact", time.GetUtcNow().AddMinutes(10)),
+            };
+            var pipeline = new ContextPipeline(
+                [provider], EnabledSettings("weather", 60, 60), time, new CapturingLogger<ContextPipeline>());
+
+            var firstTick = await pipeline.TickAsync(CancellationToken.None);
+            time.Advance(TimeSpan.FromMinutes(20)); // Past FreshUntil, still inside the same slot.
+            var secondTick = await pipeline.TickAsync(CancellationToken.None);
+
+            Assert.Contains(firstTick, due => due.Key == "weather");
+            Assert.Empty(secondTick);
+            Assert.Equal(1, provider.FetchCount); // No retry within the slot.
+            Assert.Null(pipeline.TryTakeDuePatterFact());
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // SAD PATH — the constructor fails fast on an invalid provider key (F107.1, T221/T222 review)
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioConstructorFailsFastOnAnInvalidKey
+    {
+        static void Build(params IContextProvider[] providers) =>
+            new ContextPipeline(
+                providers, new FakeContextSettingsProvider(), NewTime(), new CapturingLogger<ContextPipeline>());
+
+        [Fact]
+        public void ADuplicateKeyThrows()
+        {
+            Assert.Throws<ArgumentException>(
+                () => Build(new FakeContextProvider("weather"), new FakeContextProvider("weather")));
+        }
+
+        [Fact]
+        public void AnUppercaseKeyThrows()
+        {
+            Assert.Throws<ArgumentException>(() => Build(new FakeContextProvider("Weather")));
+        }
+
+        [Fact]
+        public void AKeyContainingASpaceThrows()
+        {
+            Assert.Throws<ArgumentException>(() => Build(new FakeContextProvider("weather report")));
+        }
+
+        [Fact]
+        public void AnEmptyKeyThrows()
+        {
+            Assert.Throws<ArgumentException>(() => Build(new FakeContextProvider("")));
+        }
+
+        // The F5 regression pin: .NET regex's `$` anchor matches just before a trailing '\n', not
+        // only at the true end of the string, so "^[a-z0-9-]+$" alone would have let this key through.
+        // The key contract (\z anchor) must still reject it.
+        [Fact]
+        public void AKeyWithATrailingNewlineThrows()
+        {
+            Assert.Throws<ArgumentException>(() => Build(new FakeContextProvider("weather\n")));
         }
     }
 }
