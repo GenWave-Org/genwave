@@ -22,6 +22,17 @@ jobs:
         run: dotnet restore GenWave.sln
       - name: Build (warnings are errors)
         run: dotnet build GenWave.sln --no-restore --configuration Release
+      # T217 (SPEC F105.6, STORY-294): SEAMS.md is generated, never hand-edited — rebuild it from
+      # the composition root's live DI registrations and byte-diff against the committed file (the
+      # catalog index.json convention). MUST stay in THIS job, right after the build above: the
+      # generator's content-root discovery bakes this runner's checkout paths into a build artifact
+      # (MvcTestingAppManifest.json — see tools/check-seam-index.sh's own header), so a separate job
+      # (even one restoring a cached build) is not guaranteed to resolve correctly. Also MUST run
+      # BEFORE Test: Story294's own byte-diff fact has no Category trait and runs inside Test too —
+      # a stale SEAMS.md reds that fact first and aborts the job, which would make this step's own
+      # red path unreachable if it ran after Test.
+      - name: SEAMS.md drift check
+        run: ./tools/check-seam-index.sh
       # Integration tests need fixture-managed side containers (Postgres, Kokoro) — they run
       # on-demand on a dev box, not in CI (same policy as the pre-migration pipeline).
       # ffmpeg: the F88 artwork specs (Story222) drive the REAL binary — both fixture generation

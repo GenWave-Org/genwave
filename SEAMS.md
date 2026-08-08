@@ -5,8 +5,8 @@
 > was resolved from a live `IServiceCollection`/`IServiceProvider`
 > (`WebApplicationFactory<Program>`, no Kestrel, no Postgres/Liquidsoap/Kokoro/Ollama/Icecast
 > reached), never re-typed by hand. Regenerate: `dotnet run --project tools/SeamIndexGenerator`.
-> Regenerated and byte-diffed by CI (SPEC F105.6, PLAN T217 — wired in that task, this PR's
-> second half) — a new or changed seam shipped without a regenerated index will be a red check.
+> Regenerated and byte-diffed by CI (SPEC F105.6, `tools/check-seam-index.sh`) — a new or
+> changed seam shipped without a regenerated index is a red check.
 >
 > **Check this file before adding a seam** — extend or decorate an existing port before
 > minting a near-duplicate.

@@ -10,7 +10,11 @@ using GenWave.SeamIndexGenerator;
 // where the tool is invoked from.
 Directory.SetCurrentDirectory(AppContext.BaseDirectory);
 
-var path = Path.Combine(RepoRoot.Find(), "SEAMS.md");
+// T217 (STORY-294 review, F2): optional output path so tools/check-seam-index.sh can generate to a
+// scratch file and byte-diff it against the tracked SEAMS.md WITHOUT ever writing the tracked file
+// itself — no-arg default behavior (write the committed root SEAMS.md) is unchanged, exactly what
+// T216 shipped and what a plain `dotnet run --project tools/SeamIndexGenerator` still does.
+var path = args.Length > 0 ? args[0] : Path.Combine(RepoRoot.Find(), "SEAMS.md");
 var markdown = SeamIndexDocument.Generate();
 
 File.WriteAllText(path, markdown);
