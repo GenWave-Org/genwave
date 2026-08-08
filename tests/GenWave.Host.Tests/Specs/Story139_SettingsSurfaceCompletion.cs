@@ -167,8 +167,9 @@ public static class FeatureSettingsSurfaceCompletion
             var tts = new DelayableTtsSegmentSource { RenderDelay = TimeSpan.FromMilliseconds(300) };
             var budgetProvider = new FakeRenderBudgetProvider(TimeSpan.FromMilliseconds(20));
 
+            var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
             var orchestrator = new Orchestrator(
-                identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, tts,
+                identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, tts,
                 new NoOpActivePersonaAccessor(), NullLogger<Orchestrator>.Instance, budgetProvider,
                 new SpeechDeferralQueue(TimeProvider.System),
                 TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));

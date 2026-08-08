@@ -48,12 +48,14 @@ public static class FeatureStationLocalSegmentClock
             StationIdEveryNUnits = 0,
         };
         var tts = new FakeTtsSegmentSource();
+        var musicSelectionPolicy = new MusicSelectionPolicy(
+            new FakeMediaCatalog(MakeRef("track1")), NullLogger<MusicSelectionPolicy>.Instance);
         var orchestrator = new Orchestrator(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "af_heart")),
             new FakeStationScopeProvider(new LibraryScope([1L])),
             new FakeCadenceProvider(cadence),
             new FakeRotationSettingsProvider(new RotationSettings()),
-            new FakeMediaCatalog(MakeRef("track1")),
+            musicSelectionPolicy,
             tts,
             new FakeActivePersonaAccessor(),
             NullLogger<Orchestrator>.Instance,

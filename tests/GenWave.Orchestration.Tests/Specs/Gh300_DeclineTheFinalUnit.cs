@@ -19,6 +19,7 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Orchestration.Tests.Fakes;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GenWave.Orchestration.Tests.Specs;
 
@@ -61,7 +62,7 @@ public static class FeatureDeclineTheFinalUnit
             new FakeStationScopeProvider(new LibraryScope([1L])),
             new FakeCadenceProvider(CadenceOff),
             new FakeRotationSettingsProvider(new RotationSettings()),
-            catalog,
+            new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance),
             tts,
             new FakeActivePersonaAccessor(),
             logger,

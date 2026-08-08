@@ -179,8 +179,9 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
         });
         var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
 
+        var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
         return new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, segmentSource,
+            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, segmentSource,
             new NoOpActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
             new FakeRenderBudgetProvider(renderBudget),
             new SpeechDeferralQueue(TimeProvider.System),

@@ -69,16 +69,14 @@ public static class FeatureDjsHandOffAudibly
         var events = new CapturingStationEventSink();
         var queue = new SpeechDeferralQueue(time);
         var catalog = new FakeMediaCatalog(MakeTrackRef("t1"));
+        var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
 
         var orchestrator = new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog,
+            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
             tts, personaAccessor, logger,
             new FakeRenderBudgetProvider(renderBudget ?? TimeSpan.FromSeconds(5)),
             queue,
             time, new FakeBoundaryBiasProvider(lookahead),
-            envelopeProvider: null,
-            personaPickProvider: null,
-            requestFulfillmentSource: null,
             scheduleResolver: caching,
             personaStore: personaStore,
             events: events);

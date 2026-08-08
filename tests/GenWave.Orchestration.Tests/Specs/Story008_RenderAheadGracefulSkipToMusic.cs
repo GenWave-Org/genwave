@@ -30,8 +30,9 @@ public static class FeatureRenderAheadGracefulSkipToMusic
         var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
         var cadenceProvider = new FakeCadenceProvider(cadence ?? new CadenceConfig());
         var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
+        var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
         return new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, ttsSource,
+            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, ttsSource,
             new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
             new FakeRenderBudgetProvider(renderBudget ?? TimeSpan.FromSeconds(30)),
             new SpeechDeferralQueue(TimeProvider.System),
@@ -245,8 +246,9 @@ public static class FeatureRenderAheadGracefulSkipToMusic
             var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
             var cadenceProvider = new FakeCadenceProvider(cadence);
             var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
+            var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
             var o2 = new Orchestrator(
-                identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, tts,
+                identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, tts,
                 new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
                 new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
                 new SpeechDeferralQueue(TimeProvider.System),

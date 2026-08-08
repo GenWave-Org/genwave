@@ -15,9 +15,12 @@ public static class OrchestrationServiceCollectionExtensions
     /// SEAM 1: <see cref="Orchestrator"/> is the <see cref="INextItemProvider"/> — interleaved
     /// music + TTS patter per the live cadence config. Every constructor dependency is a seam the
     /// host (or a module) has already registered: identity/scope/cadence/rotation/render-budget/
-    /// boundary-bias/envelope providers, <c>IMediaCatalog</c>, <c>ITtsSegmentSource</c>,
-    /// <c>IActivePersonaAccessor</c>, and the <see cref="SpeechDeferralQueue"/>/<see cref="TimeProvider"/>/
-    /// <see cref="IPersonaPickProvider"/> this method also registers.
+    /// boundary-bias providers, <see cref="MusicSelectionPolicy"/>, <c>ITtsSegmentSource</c>,
+    /// <c>IActivePersonaAccessor</c>, and the <see cref="SpeechDeferralQueue"/>/<see cref="TimeProvider"/>
+    /// this method also registers. <see cref="MusicSelectionPolicy"/> itself (F112, STORY-295) owns
+    /// the pick ladder — <c>IMediaCatalog</c>/<c>IEnvelopeProvider</c>/<see cref="IPersonaPickProvider"/>/
+    /// <see cref="IRequestFulfillmentSource"/> moved with it off <see cref="Orchestrator"/>'s own
+    /// constructor.
     ///
     /// <para>
     /// <b>Handoff ceremony seams (SPEC F92.1, STORY-243, PLAN T124) — deliberately NOT registered
@@ -63,6 +66,12 @@ public static class OrchestrationServiceCollectionExtensions
         // TryAdd so a module that binds a different estimator wins.
         services.TryAddSingleton<IPatterDurationEstimator>(sp =>
             new RollingPatterDurationEstimator(sp.GetService<ICopyBoundsProvider>()));
+
+        // F112 (STORY-295, PLAN T218): the pick ladder itself — request rung, persona rung,
+        // trust-but-verify, degradation ladder — TryAdd so a module that binds a different policy
+        // wins; consumes the SAME IPersonaPickProvider/IRequestFulfillmentSource seams registered
+        // above plus IMediaCatalog/IEnvelopeProvider from wherever the host wires those.
+        services.TryAddSingleton<MusicSelectionPolicy>();
 
         return services.AddSingleton<INextItemProvider, Orchestrator>();
     }

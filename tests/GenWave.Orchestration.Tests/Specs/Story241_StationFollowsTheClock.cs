@@ -27,12 +27,15 @@ public static class FeatureStationFollowsTheClock
     // every read, so advancing the clock alone is enough to flip every consumer.
     // -------------------------------------------------------------------------
 
+    // F112 (STORY-295, PLAN T218): Logger below is MusicSelectionPolicy's own capture — every
+    // WARN/Debug line this file asserts on (ladder relaxation, per-pick debug line) is logged there
+    // now, not by Orchestrator directly.
     sealed record ProductionChain(
         Orchestrator Orchestrator,
         OnAirPersonaAccessor PersonaAccessor,
         ScheduleEnvelopeProvider EnvelopeProvider,
         FakeTimeProvider Time,
-        CapturingLogger<Orchestrator> Logger,
+        CapturingLogger<MusicSelectionPolicy> Logger,
         FakeTtsSegmentSource Tts);
 
     static ProductionChain BuildProductionChain(
@@ -57,16 +60,15 @@ public static class FeatureStationFollowsTheClock
             StationIdEveryNUnits = 0,
         });
         var rotationProvider = new FakeRotationSettingsProvider(rotationSettings ?? new RotationSettings());
-        var logger = new CapturingLogger<Orchestrator>();
+        var logger = new CapturingLogger<MusicSelectionPolicy>();
+        var musicSelectionPolicy = new MusicSelectionPolicy(catalog, logger, envelopeProvider, personaPickProvider);
         var tts = new FakeTtsSegmentSource();
         var orchestrator = new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog,
-            tts, personaAccessor, logger,
+            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
+            tts, personaAccessor, NullLogger<Orchestrator>.Instance,
             new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
             new SpeechDeferralQueue(time),
-            time, new FakeBoundaryBiasProvider(TimeSpan.Zero),
-            envelopeProvider,
-            personaPickProvider);
+            time, new FakeBoundaryBiasProvider(TimeSpan.Zero));
 
         return new ProductionChain(orchestrator, personaAccessor, envelopeProvider, time, logger, tts);
     }

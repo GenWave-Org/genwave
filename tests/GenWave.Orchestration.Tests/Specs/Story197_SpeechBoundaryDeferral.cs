@@ -42,7 +42,7 @@ public static class FeatureSpeechBoundaryDeferral
             new FakeStationScopeProvider(new LibraryScope([1L])),
             new FakeCadenceProvider(cadence),
             new FakeRotationSettingsProvider(new RotationSettings()),
-            new FakeMediaCatalog(MakeRef("track")),
+            new MusicSelectionPolicy(new FakeMediaCatalog(MakeRef("track")), NullLogger<MusicSelectionPolicy>.Instance),
             new FakeTtsSegmentSource(),
             new FakeActivePersonaAccessor(),
             NullLogger<Orchestrator>.Instance,

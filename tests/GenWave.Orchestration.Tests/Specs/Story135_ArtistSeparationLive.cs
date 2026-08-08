@@ -5,6 +5,7 @@
 // IRotationSettingsProvider.Current.ArtistSeparation fresh on every selection (mirrors F30.1/gitea-#211)
 // and WARNs when the returned candidate carries RepeatedArtist.
 
+using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Orchestration.Tests.Fakes;
 
@@ -35,8 +36,9 @@ public static class FeatureArtistSeparationLive
         var cadenceProvider = new FakeCadenceProvider(SilentCadence);
         var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings { ArtistSeparation = artistSeparation });
         var logger = new CapturingLogger<Orchestrator>();
+        var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
         var orchestrator = new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog,
+            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
             new FakeTtsSegmentSource(), new FakeActivePersonaAccessor(), logger,
             new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
             new SpeechDeferralQueue(TimeProvider.System),

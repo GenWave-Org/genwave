@@ -43,8 +43,9 @@ public static class FeatureStationIdentityLive
         var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
         var catalog = new FakeMediaCatalog(MakeRef("track1"));
         var tts = new FakeTtsSegmentSource();
+        var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
         var orchestrator = new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, tts,
+            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, tts,
             new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
             new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
             new SpeechDeferralQueue(TimeProvider.System),
