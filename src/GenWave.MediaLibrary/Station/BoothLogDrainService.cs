@@ -25,6 +25,10 @@ namespace GenWave.MediaLibrary.Station;
 /// already resolved to its final jsonb text (or <see langword="null"/>) by
 /// <see cref="BoothLogWriter.Publish"/> — and is persisted verbatim, never re-serialized or
 /// re-derived here.
+///
+/// <see cref="BoothLogEntryRequest.SegmentKind"/> (SPEC F113.1, STORY-304, PLAN T220) arrives the
+/// same way — already stringified (or <see langword="null"/>) by <see cref="BoothLogWriter.Publish"/>
+/// — and is persisted verbatim.
 /// </summary>
 sealed class BoothLogDrainService(
     ChannelReader<BoothLogEntryRequest> queue,
@@ -46,7 +50,7 @@ sealed class BoothLogDrainService(
     {
         try
         {
-            await store.AppendAsync(request.Kind, request.Summary, request.PersonaId, request.Artist, request.Pick, request.MediaId, ct);
+            await store.AppendAsync(request.Kind, request.Summary, request.PersonaId, request.Artist, request.Pick, request.MediaId, request.SegmentKind, ct);
         }
         catch (OperationCanceledException)
         {

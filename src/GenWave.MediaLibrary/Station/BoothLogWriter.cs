@@ -52,10 +52,14 @@ sealed class BoothLogWriter(
             // IBoothLogReader. Pick (SPEC F86.1, STORY-217, PLAN T73) rides the SAME discipline: t's
             // own PersonaPick was already captured synchronously by PlayoutFeeder at push time, so
             // reading it here — rather than re-deriving anything — is the whole point (one source of
-            // truth shared with the copywriter, F83.1).
+            // truth shared with the copywriter, F83.1). SegmentKind (SPEC F113.1, STORY-304, PLAN
+            // T220) rides the SAME discipline: t.SegmentKind is PlayoutFeeder's own forwarded
+            // MediaItem.SegmentKind, stringified to its enum token name (or null for music/engine-
+            // initiated) — the demo-hour instrument's genuine AIR-time stamp, never patter-aired's
+            // render-time one.
             TrackAired t => new BoothLogEntryRequest(
                 "track-started", Summarize(t), personaAccessor.ActivePersonaId, t.Artist, BuildPickStamp(t.PersonaPick),
-                ParseMediaId(t.MediaId)),
+                ParseMediaId(t.MediaId), SegmentKind: t.SegmentKind?.ToString()),
             SegmentGenerated s => new BoothLogEntryRequest("patter-aired", Summarize(s), PersonaId: null),
             DegradationModeChanged d => new BoothLogEntryRequest("mode-changed", Summarize(d), PersonaId: null),
             HandoffPieceDropped h => new BoothLogEntryRequest("handoff-dropped", Summarize(h), PersonaId: null),

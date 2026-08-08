@@ -9,8 +9,25 @@
 // so they self-converge regardless of what a prior spec in the shared DatabaseCollection left behind
 // (e.g. Story242_UpgradeChangesNothing.cs's several scenarios drop station.segment_schedule and rebuild
 // it via db/27 alone, which predates show_id).
+//
+// The T220 write-path facts (AKindedTrackAiredWritesTheKind, MusicRowsStayNull,
+// ABudgetDroppedRenderProducesNoKindedRow) drive real StationEvents through the REAL
+// BoothLogWriter/BoothLogDrainService pipeline into the real (test) database — the same
+// production-pipeline discipline Story215_BoothLogPersonaStamp.cs's own DriveThroughAsync uses —
+// because the write-side types (BoothLogWriter, BoothLogDrainService, BoothLogEntryRequest) are
+// internal to GenWave.MediaLibrary, and a fake store would never prove the real INSERT column-list
+// wiring honestly. `segment_kind` is deliberately read back with a raw query rather than through
+// BoothLogRepository.ReadAsync/BoothLogEntry — F113.3 keeps the read path untouched this cycle, so
+// the column has no projection to assert against yet.
 
 using Dapper;
+using System.Threading.Channels;
+using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
+using GenWave.Core.Events;
+using GenWave.MediaLibrary.Station;
+using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
 
 namespace GenWave.MediaLibrary.Tests.Specs;
 
@@ -51,6 +68,125 @@ public static class FeatureAiredKindStamp
     /// unconditionally — the script is idempotent (CREATE TABLE / ADD COLUMN IF NOT EXISTS).</summary>
     static void RunMigrationScript(DatabaseFixture db) =>
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "33-show-and-segment-kind-migration.sh"));
+
+    /// <summary>No-op <see cref="IActivePersonaAccessor"/> double — these facts assert on
+    /// <c>segment_kind</c>, not the persona stamp (Story215_BoothLogPersonaStamp.cs's own concern),
+    /// so a fixed "no persona active" answer keeps every scenario below focused.</summary>
+    sealed class NullPersonaAccessor : IActivePersonaAccessor
+    {
+        public Task<Persona?> ResolveAsync(CancellationToken ct) => Task.FromResult<Persona?>(null);
+
+        public long? ActivePersonaId => null;
+    }
+
+    static BoothLogRepository Store(DatabaseFixture db) =>
+        new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource),
+            Microsoft.Extensions.Options.Options.Create(new BoothLogOptions()));
+
+    /// <summary>
+    /// Publishes every <paramref name="events"/> through the real <see cref="BoothLogWriter"/> and
+    /// drains each through the real <see cref="BoothLogDrainService.ProcessAsync"/> — the same
+    /// production pipeline Story215_BoothLogPersonaStamp.cs's own DriveThroughAsync drives.
+    /// </summary>
+    static async Task DriveThroughAsync(DatabaseFixture db, params StationEvent[] events)
+    {
+        var channel = Channel.CreateBounded<BoothLogEntryRequest>(16);
+        var writer = new BoothLogWriter(channel.Writer, new NullPersonaAccessor(), NullLogger<BoothLogWriter>.Instance);
+        var drain = new BoothLogDrainService(channel.Reader, Store(db), NullLogger<BoothLogDrainService>.Instance);
+
+        foreach (var evt in events)
+            writer.Publish(evt);
+
+        for (var i = 0; i < events.Length; i++)
+            await drain.ProcessAsync(await channel.Reader.ReadAsync(), CancellationToken.None);
+    }
+
+    /// <summary>The persisted `segment_kind` for every `track-started` row, newest first — a raw
+    /// query rather than <see cref="BoothLogRepository.ReadAsync"/> because the column has no
+    /// projection on <see cref="BoothLogEntry"/> yet (F113.3: the read path is untouched this
+    /// cycle).</summary>
+    static async Task<List<string?>> TrackStartedSegmentKindsAsync(DatabaseFixture db)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        var rows = await conn.QueryAsync<string?>(
+            """
+            select segment_kind from station.booth_log
+            where kind = 'track-started'
+            order by occurred_at desc, id desc
+            """);
+        return rows.ToList();
+    }
+
+    /// <summary>Every row's `kind`, newest first — used by the sad-path fact to prove a dropped
+    /// render's `patter-aired` row is the ONLY row written, never a `track-started` sibling.</summary>
+    static async Task<List<string>> AllKindsAsync(DatabaseFixture db)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        var rows = await conn.QueryAsync<string>(
+            "select kind from station.booth_log order by occurred_at desc, id desc");
+        return rows.ToList();
+    }
+
+    /// <summary>Inserts one raw <c>station.booth_log</c> row with an explicit <c>occurred_at</c> — the
+    /// demo-hour gate facts below need hour-bucket control the real writer/drain pipeline (which
+    /// always stamps <c>now()</c>) cannot give them, and need a <c>segment_kind</c> value
+    /// (<c>ContextSegment</c>) that has no <see cref="SegmentKind"/> enum member yet (see this file's
+    /// header and <c>tools/demo_hour_gate.sql</c>'s own remarks) so <see cref="TrackAired"/> cannot
+    /// carry it either.</summary>
+    static async Task InsertBoothLogRowAsync(
+        DatabaseFixture db, DateTimeOffset occurredAt, string kind, string? segmentKind)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        await conn.ExecuteAsync(
+            """
+            insert into station.booth_log (occurred_at, kind, summary, segment_kind)
+            values (@occurredAt, @kind, @summary, @segmentKind)
+            """,
+            new { occurredAt, kind, summary = $"{kind} row", segmentKind });
+    }
+
+    /// <summary>The top of an arbitrary, fixed UTC hour — the demo-hour gate facts' "qualifying"
+    /// broadcast hour. A fixed instant (not <c>DateTimeOffset.UtcNow</c>) keeps every seeded row's
+    /// hour bucket deterministic regardless of when the suite runs.</summary>
+    static readonly DateTimeOffset QualifyingHour = new(2026, 3, 10, 14, 0, 0, TimeSpan.Zero);
+
+    /// <summary>The "non-qualifying" hour — missing a ContextSegment row — three hours away from
+    /// <see cref="QualifyingHour"/> so no seeded row's minute offset can ever cross into it.</summary>
+    static readonly DateTimeOffset NonQualifyingHour = QualifyingHour.AddHours(3);
+
+    /// <summary>Dapper's row shape for <c>tools/demo_hour_gate.sql</c>'s own SELECT list, in column
+    /// order — mirrors <see cref="QueryColumnAsync"/>'s own tuple-projection convention.</summary>
+    static async Task<List<(DateTime BroadcastHour, bool HasStationId, bool HasContextSegment,
+        bool HasOtherNonMusicKind, long MusicRowCount, long KindedRowCount)>> RunDemoHourGateOverTwoHoursAsync(
+            DatabaseFixture db)
+    {
+        // Given two candidate broadcast hours: QualifyingHour carries a StationId ident, a
+        // ContextSegment, a further non-music kind (LeadIn), and a plain music row (segment_kind
+        // NULL) — everything the gate's HAVING predicate requires. A patter-aired row also carries
+        // segment_kind='StationId' in this hour to pin the gate's `kind = 'track-started'` filter:
+        // if the gate ever dropped that filter, this row would inflate kinded_row_count from 3 to 4.
+        // NonQualifyingHour is missing ContextSegment, so the gate's HAVING predicate must exclude it.
+        await db.ResetBoothLogAsync();
+
+        await InsertBoothLogRowAsync(db, QualifyingHour.AddMinutes(5), "track-started", "StationId");
+        await InsertBoothLogRowAsync(db, QualifyingHour.AddMinutes(15), "track-started", "ContextSegment");
+        await InsertBoothLogRowAsync(db, QualifyingHour.AddMinutes(25), "track-started", "LeadIn");
+        await InsertBoothLogRowAsync(db, QualifyingHour.AddMinutes(35), "track-started", null);
+        await InsertBoothLogRowAsync(db, QualifyingHour.AddMinutes(45), "patter-aired", "StationId");
+
+        await InsertBoothLogRowAsync(db, NonQualifyingHour.AddMinutes(5), "track-started", "StationId");
+        await InsertBoothLogRowAsync(db, NonQualifyingHour.AddMinutes(15), "track-started", "LeadIn");
+        await InsertBoothLogRowAsync(db, NonQualifyingHour.AddMinutes(25), "track-started", null);
+
+        // When the shipped gate (SPEC F113.2, PLAN T220) runs against them — the real file, executed
+        // through Npgsql, never merely read as text.
+        var sql = await File.ReadAllTextAsync(Path.Combine(db.RepoRoot, "tools", "demo_hour_gate.sql"));
+
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        var rows = await conn.QueryAsync<(DateTime BroadcastHour, bool HasStationId, bool HasContextSegment,
+            bool HasOtherNonMusicKind, long MusicRowCount, long KindedRowCount)>(sql);
+        return rows.ToList();
+    }
 
     // ---------------------------------------------------------------------
     // HAPPY PATH — fresh init (db/06's mirror of db/33)
@@ -104,31 +240,73 @@ public static class FeatureAiredKindStamp
             Assert.Equal("YES", column.Value.IsNullable);
         }
 
-        [Fact(Skip = "Pending T220 — see docs/PLAN.md")]
-        public void AKindedTrackAiredWritesTheKind()
+        [Fact]
+        public async Task AKindedTrackAiredWritesTheKind()
         {
-            // TrackAired carrying SegmentKind.StationId ⇒ the track-started row's
-            // segment_kind is 'StationId' (stamped synchronously at publish time).
-            // Assert.Equal("StationId", row.SegmentKind);
-            Assert.Fail("pending T220");
+            // Given a TrackAired event carrying SegmentKind.StationId — PlayoutFeeder's own
+            // forwarded MediaItem.SegmentKind (SPEC F113.1)...
+            await db.ResetBoothLogAsync();
+            var stationIdAiring = new TrackAired(
+                "tts:abc123", "GenWave", "GenWave", -2.0, DateTimeOffset.UtcNow, 4_000,
+                SegmentKind: SegmentKind.StationId);
+
+            // When it flows through the real writer/drain pipeline...
+            await DriveThroughAsync(db, stationIdAiring);
+
+            // Then the persisted track-started row's segment_kind is the enum's own token name —
+            // stamped synchronously at publish time, never re-derived.
+            var kinds = await TrackStartedSegmentKindsAsync(db);
+            Assert.Equal(["StationId"], kinds);
         }
 
-        [Fact(Skip = "Pending T220 — see docs/PLAN.md")]
-        public void MusicRowsStayNull()
+        [Fact]
+        public async Task MusicRowsStayNull()
         {
-            // A music TrackAired (SegmentKind null) writes NULL — the count query's
-            // non-music predicate is segment_kind IS NOT NULL.
-            // Assert.Null(row.SegmentKind);
-            Assert.Fail("pending T220");
+            // Given a music TrackAired — SegmentKind unset, the only shape
+            // MediaReferenceExtensions.ToMediaItem (the sole music-selection mapping) ever produces...
+            await db.ResetBoothLogAsync();
+            var musicAiring = new TrackAired("42", "Night Drive", "The Waveforms", -2.5, DateTimeOffset.UtcNow, 214_000);
+
+            // When it flows through the real writer/drain pipeline...
+            await DriveThroughAsync(db, musicAiring);
+
+            // Then the persisted row's segment_kind stays NULL — the demo-hour gate's non-music
+            // predicate (segment_kind IS NOT NULL) never counts a music row.
+            var kinds = await TrackStartedSegmentKindsAsync(db);
+            Assert.Equal([null], kinds);
         }
 
-        [Fact(Skip = "Pending T220 — see docs/PLAN.md")]
-        public void TheDemoHourQueryCountsFromTheColumnAlone()
+        [Fact]
+        public async Task TheDemoHourGateReturnsOnlyTheQualifyingHour()
         {
-            // The documented query groups by date_trunc('hour') over segment_kind — no
-            // LIKE over summary anywhere in it.
-            // Assert.DoesNotContain("LIKE", documentedQuery);
-            Assert.Fail("pending T220");
+            var rows = await RunDemoHourGateOverTwoHoursAsync(db);
+
+            // Then only the hour with a StationId, a ContextSegment, AND a further non-music kind
+            // survives the gate's HAVING predicate — the non-qualifying hour (missing ContextSegment)
+            // never appears, and no third, unrelated hour is fabricated either.
+            Assert.Equal([QualifyingHour.UtcDateTime], rows.Select(row => row.BroadcastHour));
+        }
+
+        [Fact]
+        public async Task TheDemoHourGateCountsKindedRowsFromSegmentKindAlone()
+        {
+            var rows = await RunDemoHourGateOverTwoHoursAsync(db);
+
+            // Three track-started rows carry a non-null segment_kind (StationId, ContextSegment,
+            // LeadIn) — the patter-aired row's own segment_kind='StationId' never counts, proving
+            // the gate's `kind = 'track-started'` predicate rather than a bare `segment_kind IS NOT
+            // NULL` scan across every row.
+            Assert.Equal(3L, rows.Single().KindedRowCount);
+        }
+
+        [Fact]
+        public async Task TheDemoHourGateCountsMusicRowsSeparatelyFromKindedRows()
+        {
+            var rows = await RunDemoHourGateOverTwoHoursAsync(db);
+
+            // Exactly the one segment_kind IS NULL track-started row in the qualifying hour — the
+            // gate's music_row_count and kinded_row_count are a partition, never overlapping.
+            Assert.Equal(1L, rows.Single().MusicRowCount);
         }
     }
 
@@ -177,15 +355,32 @@ public static class FeatureAiredKindStamp
     // SAD PATH
     // ---------------------------------------------------------------------
 
-    public sealed class ScenarioDroppedRendersNeverCount
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioDroppedRendersNeverCount(DatabaseFixture db)
     {
-        [Fact(Skip = "Pending T220 — see docs/PLAN.md")]
-        public void ABudgetDroppedRenderProducesNoKindedRow()
+        [Fact]
+        public async Task ABudgetDroppedRenderProducesNoKindedRow()
         {
-            // A render that times out of the budget logs patter-aired (render-time) but no
-            // kinded track-started row exists — the air-time signal is the honest one.
-            // Assert.Empty(kindedRowsForDroppedHash);
-            Assert.Fail("pending T220");
+            // Given a render that succeeded (SegmentGenerated published) but the segment it produced
+            // never actually reached air — no corresponding TrackAired ever follows it, the exact
+            // "budget-dropped" shape (the boundary producer's own null-piece degrade path never
+            // reaches PlayoutFeeder at all)...
+            await db.ResetBoothLogAsync();
+            var droppedRender = new SegmentGenerated("tts:dropped123", "StationId", "af_heart");
+
+            // When it flows through the real writer/drain pipeline...
+            await DriveThroughAsync(db, droppedRender);
+
+            // Then the render-time signal still logs (patter-aired keeps its existing meaning,
+            // F113.3)...
+            var kinds = await AllKindsAsync(db);
+            Assert.Equal(["patter-aired"], kinds);
+
+            // ...but no track-started row — kinded or otherwise — was ever written: the air-time
+            // stamp only ever comes from an observed TrackAired, which this scenario never publishes.
+            var kindedTrackStartedRows = await TrackStartedSegmentKindsAsync(db);
+            Assert.Empty(kindedTrackStartedRows);
         }
     }
 }

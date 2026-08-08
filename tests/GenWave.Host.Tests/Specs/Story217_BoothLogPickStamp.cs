@@ -48,11 +48,11 @@ file sealed class FakeBoothLogAppender : IBoothLogAppender
 {
     readonly SemaphoreSlim appended = new(0);
 
-    public List<(string Kind, string Summary, long? PersonaId, string? Artist, string? Pick, long? MediaId)> Calls { get; } = [];
+    public List<(string Kind, string Summary, long? PersonaId, string? Artist, string? Pick, long? MediaId, string? SegmentKind)> Calls { get; } = [];
 
-    public Task AppendAsync(string kind, string summary, long? personaId, string? artist, string? pick, long? mediaId, CancellationToken ct)
+    public Task AppendAsync(string kind, string summary, long? personaId, string? artist, string? pick, long? mediaId, string? segmentKind, CancellationToken ct)
     {
-        lock (Calls) Calls.Add((kind, summary, personaId, artist, pick, mediaId));
+        lock (Calls) Calls.Add((kind, summary, personaId, artist, pick, mediaId, segmentKind));
         appended.Release();
         return Task.CompletedTask;
     }

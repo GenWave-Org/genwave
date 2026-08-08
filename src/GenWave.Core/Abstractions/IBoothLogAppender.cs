@@ -27,6 +27,10 @@ public interface IBoothLogAppender
     /// way, <see langword="null"/> for every non-track row or a non-catalog id. It exists so the
     /// Host can resolve safe-scope membership for the taste-thumb exclusion on the library
     /// connection; <c>station.booth_log</c> itself can never join <c>library.media</c>.
+    /// <paramref name="segmentKind"/> (SPEC F113.1, STORY-304, PLAN T220) is that same track's
+    /// air-time <c>SegmentKind</c> token name (e.g. <c>"StationId"</c>), captured the same way —
+    /// <see langword="null"/> for a music row or a non-track row. This is the demo-hour
+    /// observability instrument's own column; never inferred from <c>summary</c>.
     /// </summary>
-    Task AppendAsync(string kind, string summary, long? personaId, string? artist, string? pick, long? mediaId, CancellationToken ct);
+    Task AppendAsync(string kind, string summary, long? personaId, string? artist, string? pick, long? mediaId, string? segmentKind, CancellationToken ct);
 }

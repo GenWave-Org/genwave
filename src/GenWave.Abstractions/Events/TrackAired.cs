@@ -18,6 +18,14 @@ namespace GenWave.Core.Events;
 /// common persona-off case. The booth log's own event consumer stamps <c>station.booth_log.pick</c>
 /// from exactly this value.
 /// </param>
+/// <param name="SegmentKind">
+/// SPEC F113.1 (STORY-304, PLAN T220) — the demo-hour observability instrument: the SAME
+/// <see cref="SegmentKind"/> the feeder's pushed-item metadata carries off <c>MediaItem.SegmentKind</c>,
+/// forwarded the same way <paramref name="PersonaPick"/> is above. <see langword="null"/> for every
+/// music row and every engine-initiated advance (the feeder never pushed it, so no kind was ever
+/// stamped). The booth log's event consumer stamps <c>station.booth_log.segment_kind</c> from exactly
+/// this value, at the genuine AIR-time instant this event is published — never at render time.
+/// </param>
 public sealed record TrackAired(
     string MediaId,
     string? Title,
@@ -25,4 +33,5 @@ public sealed record TrackAired(
     double GainDb,
     DateTimeOffset StartedAt,
     int? DurationMs,
-    PersonaPickDiagnostics? PersonaPick = null) : StationEvent;
+    PersonaPickDiagnostics? PersonaPick = null,
+    SegmentKind? SegmentKind = null) : StationEvent;

@@ -226,10 +226,13 @@ public sealed class TtsSegmentSource(
             // above): a station-voiced segment has no DJ of its own, and the Orchestrator stamps the
             // unit's show persona onto StationId segments itself. Per-airing state, same as Artist —
             // never part of the cache key.
+            // SegmentKind (SPEC F113.1, PLAN T220): stamped from this exact render's own request.Kind —
+            // the demo-hour instrument reads it back off the AIRED track, never re-derived, so a render
+            // that never reaches air (budget-dropped) never carries it into a track-started row at all.
             return new MediaItem(
                 $"tts:{hash}", path, request.StationName, loudness,
                 Artist: request.PersonaName ?? request.StationName, Cue: cuePoints, DurationMs: durationMs,
-                DjName: request.PersonaName);
+                DjName: request.PersonaName, SegmentKind: request.Kind);
         }
         catch (OperationCanceledException)
         {
