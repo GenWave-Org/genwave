@@ -325,6 +325,57 @@ the one that would move topology (a) from "proven working" to "proven to stay wo
 
 Results land as 🟢 rows in **Known deployments** above — problems are as valuable as successes.
 
+## 🔁 Soak runbook — the identical test on any box
+
+The step-8 soak (and its multi-day extension) as a repeatable procedure, so a Pi 4 — or any
+future appliance — runs exactly what the Pi 5 ran. One script owns the checkpoint:
+**`tools/soak-check.sh`** (read-only; every criterion below is a ✅/❌ line in its output).
+
+**Before starting** 🔍
+- Pi only: confirm `/boot/firmware/config.txt` carries **no `arm_freq`/`over_voltage` lines** —
+  the 2026-08-02 "undervoltage" hunt was an overclock all along; no measurement is trustworthy
+  over one. (The script checks this too, but check *before* burning a week.)
+- Free disk sanity: old release images accumulate ~1.5 GB per release and nothing prunes them
+  (gh-#441 — 46 GB of dead tags killed a demo-box deploy). On SD-card boxes run
+  `docker system df` first.
+
+**Start** 🚀 — `./launch.sh --pinned --piper-only` (topology (a)). Note the UTC boot time; every
+checkpoint compares against it.
+
+**Checkpoints** 📋 — run at ~9 h, ~24 h, and daily thereafter to 7 days:
+
+```bash
+./tools/soak-check.sh                       # on the box
+ssh <box> 'bash -s' < tools/soak-check.sh   # or from a workstation
+```
+
+**Pass criteria** (what the script enforces — same bar step 8 used):
+- 0 container restarts, 0 OOM kills, everything `running`
+- `get_throttled=0x0` (Pi), swap untouched, root disk < 80 %
+- `/health` 200; stream truth green (see gotchas)
+- **0 mid-broadcast safe-branch engagements** — switch history stays the ~5 boot-ladder lines;
+  the script counts only switches *away* from the main queue after T0+180 s
+- 0 render-budget drops; feeder refill holds well under `Tts:RenderBudgetSeconds`
+- Memory **plateau, not slope**: record the `docker stats` snapshot each checkpoint and compare
+  — the Compute-notes table above holds the Pi 5 reference numbers (engine plateaus high-200s
+  to ~300 MiB; piper crept 289 → 408 → 421 MiB over two weeks, decelerating, cap 768 MiB)
+
+**Gotchas that have burned us** ⚠️ (all encoded in the script, listed so nobody "fixes" them):
+- Icecast's public `status-json.xsl` shows **no mounts by design** (F67 hardening). "No source
+  connected" there is NOT an outage. Stream truth = `admin/metadata` lines in icecast's own log
+  + an ESTABLISHED socket on :8000 via `/proc/net/tcp` (`:8000` is deliberately not
+  host-published — never probe `localhost:8000` from the host).
+- Engine/liquidsoap log lines carry container-local time (UTC/BST skew) — compare timestamps
+  only via `docker logs -t` daemon-side UTC.
+- `docker exec` runs **inside the target's cgroup**: near a `mem_limit` it can evict page cache
+  and move the number being measured (observed live on alloy, 2026-08-09). Tiny execs only.
+- Known-benign error lines: `mjpeg` EXIF decode on bad album art; `wav` max-data-size on TTS
+  clips; a rare one-off icecast metadata `ECONNRESET`; a log-shipper 400 "entry too far behind"
+  burst right after a reboot (duplicate re-ship, zero loss).
+
+**Record** 📝 — paste each checkpoint's memory snapshot + any red lines into the step-8 row /
+Compute notes, then the final verdict lands as a **Known deployments** row.
+
 ## 🤝 Contributing an entry
 
 1. Run the stack (`./launch.sh`, or the `--pinned` appliance flow — see [DEPLOYMENT.md](DEPLOYMENT.md)).
