@@ -230,7 +230,14 @@ docker compose -f compose.yaml -f compose.demo.yaml pull
 docker compose -f compose.yaml -f compose.demo.yaml up -d --no-recreate db   # + health wait
 ./migrate.sh -f compose.yaml -f compose.demo.yaml
 docker compose -f compose.yaml -f compose.demo.yaml up -d
+docker image prune -af --filter "until=168h"   # success-path hygiene (gh-#441), + builder prune
 ```
+
+The final prune runs **only after a successful `up`** (a failed upgrade leaves the
+previous images untouched — they're what is still running) and keeps everything in use
+plus roughly the last week of releases for instant rollback. Without it, superseded
+release tags accumulate ~1.5 GB per release forever — 46 GB of dead tags filled the demo
+box's disk mid-deploy on 2026-08-09, and an SD-card box hits that wall far sooner.
 
 The `up -d --no-recreate db` step (gh-#305) is what makes a **first** boot work — before
 it, `migrate.sh` (which never starts anything by design) had no db to talk to on a fresh

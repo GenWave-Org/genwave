@@ -145,9 +145,11 @@ static class LlmPromptBuilder
     /// The persona's on-air name for <see cref="BuildSelfNameMentionLine"/>, card-first with the
     /// legacy row as fallback — the same read-path precedence <see cref="BuildSoul"/> established
     /// (for an admin-managed persona the two are kept in lockstep anyway; see BuildSoul's remarks).
-    /// Null when neither carries one — no name, no line.
+    /// Null when neither carries one — no name, no line. Internal (gh-#429) — <see cref="LlmCopyWriter"/>
+    /// reuses this exact precedence to stamp <see cref="LlmCallRecord.PersonaName"/>, rather than
+    /// duplicating the card-first-then-legacy-row rule at a second call site.
     /// </summary>
-    static string? ResolveName(Persona? persona, PersonaCard? card)
+    internal static string? ResolveName(Persona? persona, PersonaCard? card)
     {
         if (card is { Name.Length: > 0 })
             return card.Name;

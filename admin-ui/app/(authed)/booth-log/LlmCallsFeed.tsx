@@ -97,12 +97,12 @@ function DetailField({ label, value }: { label: string; value: string | null }):
 }
 
 /**
- * The LLM call inspector's table (PLAN T41, STORY-196, SPEC F73.1-F73.2): newest-first rows of
- * time / status chip / mode chip / elapsed / a truncated response preview, each expandable to the
- * full system prompt, user prompt, and raw response text — admin-only debug detail, never
- * persisted (see GenWave.Tts.LlmCallRing's own remarks). Loading/empty/error idioms match the
- * booth log's own BoothLogFeed (skeleton rows, EmptyState, a quiet unavailable hint on a poll
- * failure that keeps whatever was already loaded).
+ * The LLM call inspector's table (PLAN T41, STORY-196, SPEC F73.1-F73.2; persona column gh-#429):
+ * newest-first rows of time / persona / status chip / mode chip / elapsed / a truncated response
+ * preview, each expandable to the full system prompt, user prompt, and raw response text —
+ * admin-only debug detail, never persisted (see GenWave.Tts.LlmCallRing's own remarks). Loading/
+ * empty/error idioms match the booth log's own BoothLogFeed (skeleton rows, EmptyState, a quiet
+ * unavailable hint on a poll failure that keeps whatever was already loaded).
  */
 export function LlmCallsFeed({ entries, error, timeZone }: LlmCallsFeedProps): ReactNode {
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
@@ -150,6 +150,7 @@ export function LlmCallsFeed({ entries, error, timeZone }: LlmCallsFeedProps): R
             <thead>
               <tr className="border-b-2 border-line text-left">
                 <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Time</th>
+                <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Persona</th>
                 <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Status</th>
                 <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">
                   {/* gh-#210: the header carries the house `?` flyover (gh-#145 pattern) — the
@@ -187,6 +188,9 @@ export function LlmCallsFeed({ entries, error, timeZone }: LlmCallsFeedProps): R
                       <td className="py-2 pr-3 whitespace-nowrap tabular-nums text-mute">
                         {formatUpSince(entry.startedAt, { timeZone })}
                       </td>
+                      <td className="max-w-[10rem] truncate py-2 pr-3 text-ink">
+                        {entry.personaName ?? "—"}
+                      </td>
                       <td className="py-2 pr-3">
                         <StatusChip status={entry.status} />
                       </td>
@@ -210,7 +214,7 @@ export function LlmCallsFeed({ entries, error, timeZone }: LlmCallsFeedProps): R
                     </tr>
                     {isExpanded && (
                       <tr className="border-b border-line last:border-b-0">
-                        <td colSpan={6} className="py-3">
+                        <td colSpan={7} className="py-3">
                           <div className="space-y-3 rounded-[6px] border border-line bg-surface-2 p-3">
                             <DetailField label="System prompt" value={entry.promptSystem} />
                             <DetailField label="User prompt" value={entry.promptUser} />

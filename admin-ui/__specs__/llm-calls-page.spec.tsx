@@ -23,6 +23,7 @@ const ISO_NOW = "2026-07-20T12:00:00.000Z";
 
 interface EntryOverrides {
   seq?: number;
+  personaName?: string | null;
   startedAt?: string;
   elapsedMs?: number;
   status?: string;
@@ -38,6 +39,7 @@ interface EntryOverrides {
 function makeEntry(overrides: EntryOverrides = {}) {
   return {
     seq: 1,
+    personaName: "Neon Nightowl",
     startedAt: "2026-07-20T11:58:00.000Z",
     elapsedMs: 340,
     status: "ok",
@@ -152,6 +154,29 @@ describe("Feature: LLM call inspector", () => {
       await flush();
 
       expect(screen.getByText("HTTP 500")).toBeInTheDocument();
+    });
+  });
+
+  // gh-#429: personas now author the copy this table exists to triage, so each row names who
+  // authored it without an admin having to expand into the system prompt to find out.
+  describe("Scenario: rows show which persona authored the call", () => {
+    it("renders the entry's persona name in its own column", async () => {
+      installFetchMock(ok([makeEntry({ personaName: "The Archivist" })]));
+
+      render(<LlmCallsView timeZone="UTC" />);
+      await flush();
+
+      expect(screen.getByText("The Archivist")).toBeInTheDocument();
+    });
+
+    it("falls back to a dash when the call had no active persona", async () => {
+      installFetchMock(ok([makeEntry({ personaName: null })]));
+
+      render(<LlmCallsView timeZone="UTC" />);
+      await flush();
+
+      const rows = screen.getAllByRole("row");
+      expect(rows[1].textContent ?? "").toContain("—");
     });
   });
 

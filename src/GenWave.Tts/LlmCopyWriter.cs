@@ -51,8 +51,9 @@ using GenWave.Core.Domain;
 /// <para>
 /// The SAME single recording point (SPEC F73.1, STORY-196, T41) is also where every call — on-air,
 /// Soft-cadence, or preview — lands in <see cref="LlmCallRing"/>, the admin call inspector's
-/// in-memory ring: prompt, raw response, timing, outcome, and the degradation mode active at call
-/// time (<see cref="IDegradationModeReader.CurrentMode"/>, read fresh right here rather than passed
+/// in-memory ring: the active persona's name (gh-#429), prompt, raw response, timing, outcome, and
+/// the degradation mode active at call time
+/// (<see cref="IDegradationModeReader.CurrentMode"/>, read fresh right here rather than passed
 /// in — a preview never passes through <see cref="DegradationGatedCopyWriter"/>, so there is no
 /// caller-supplied mode to reuse for that path; reading it uniformly for every path keeps this the
 /// one recording point instead of two). Never logged, never persisted — see <see cref="LlmCallRing"/>'s
@@ -410,6 +411,10 @@ public sealed class LlmCopyWriter(
         // uniformly for every path keeps this the one recording point instead of two.
         var startedAt = timeProvider.GetUtcNow();
         var mode = degradationMode.CurrentMode;
+        // gh-#429: the SAME card-first-then-legacy-row precedence the prompt's own self-name-mention
+        // line already uses (LlmPromptBuilder.BuildSelfNameMentionLine) — resolved once, up front, so
+        // the ring entry names whichever persona authored this call whether it succeeds or faults.
+        var personaName = LlmPromptBuilder.ResolveName(persona, card);
 
         // Hoisted above the try (mirrors WriteAsync's own cfg/persona hoisting, T3 review finding)
         // so a fault EARLIER than prompt assembly (e.g. a malformed endpoint URI) still lets the
@@ -519,7 +524,7 @@ public sealed class LlmCopyWriter(
             // is a hygiene decision the caller makes, not a fact about whether the call itself
             // succeeded; see LlmCallOutcome.Ok's own remarks.
             callRing.Record(
-                systemPrompt, userPrompt, text, startedAt, ElapsedMs(startedAt),
+                personaName, systemPrompt, userPrompt, text, startedAt, ElapsedMs(startedAt),
                 LlmCallOutcome.Ok, statusDetail: null, mode);
             return text;
         }
@@ -534,7 +539,7 @@ public sealed class LlmCopyWriter(
         {
             var (outcome, detail) = ClassifyForRing(ex);
             callRing.Record(
-                systemPrompt, userPrompt, response: null, startedAt, ElapsedMs(startedAt),
+                personaName, systemPrompt, userPrompt, response: null, startedAt, ElapsedMs(startedAt),
                 outcome, detail, mode);
             throw;
         }
@@ -593,16 +598,28 @@ public sealed class LlmCopyWriter(
     }
 
     /// <summary>
-    /// gh-#186: drops a chat preamble in front of the copy ("Here's your lead-in copy:" followed
-    /// by the quoted body) — observed live rendering the preamble to air, because
-    /// <see cref="StripWrappingQuotes"/> only fires when the text STARTS with a quote. Three
-    /// conditions must all hold before anything is dropped, so legitimate announcer copy that
-    /// merely contains a colon survives: the first colon comes early (≤80 chars) with no quote or
-    /// line break before it; the preamble contains a meta word (<see cref="PreambleMetaWordPattern"/> —
-    /// a model talking ABOUT the copy, e.g. "Up next:" has none and is kept); and everything after
-    /// the colon is one quoted block running to the very end (a mid-copy quotation like
-    /// <c>Up next: "Blue Monday" by New Order</c> has trailing text and is kept). Returns the
-    /// quoted body still wrapped — <see cref="StripWrappingQuotes"/> unwraps it next.
+    /// gh-#186, widened by gh-#430: drops a chat preamble in front of the copy — observed live
+    /// rendering the preamble to air, both in the originally-fixed quoted-body shape ("Here's
+    /// your lead-in copy:" followed by a quoted body) and, per gh-#430, with an entirely UNQUOTED
+    /// body ("Here is the lead-in announcement: Tonight we're taking a detour..."). Two
+    /// conditions must both hold before anything is dropped, so legitimate announcer copy that
+    /// merely contains a colon survives untouched: the first colon comes early (≤80 chars) with no
+    /// quote or line break before it, and the preamble contains a meta word (see
+    /// <see cref="PreambleMetaWordPattern"/> — a model talking ABOUT the copy; ordinary phrasing
+    /// like "Up next:" has none and is kept). This pair is the whole heuristic and is deliberately
+    /// not widened further (gh-#430 review note) — it is what keeps legit copy such as
+    /// <c>Coming up at nine: a jazz number</c> intact.
+    ///
+    /// Once both gates hold, the preamble is gone: everything after the colon, trimmed, is what
+    /// remains, whatever shape the body takes. A body that is one quoted block running to the very
+    /// end (the gh-#186 shape) is returned still wrapped — <see cref="StripWrappingQuotes"/>
+    /// unwraps it next. A body with NO quotes at all (gh-#430) is returned as-is; there is nothing
+    /// left to unwrap. A body that OPENS with a quote but has trailing text after the closing one
+    /// (<c>Sure: "Great tune" - and plenty more where that came from.</c>) is also returned as-is —
+    /// <see cref="StripWrappingQuotes"/> only unwraps a string that IS entirely one quoted block,
+    /// so the embedded quote marks ride through untouched, which is the sensible reading: the chat
+    /// preamble is gone, and the quoted title inside the body stays exactly as quoted. A body under
+    /// 2 chars after trimming is treated as no real body at all, and the original text survives.
     /// </summary>
     static string StripChatPreamble(string text)
     {
@@ -617,12 +634,7 @@ public sealed class LlmCopyWriter(
             return text;
 
         var body = text[(colon + 1)..].Trim();
-        if (body.Length < 2)
-            return text;
-
-        var opensQuoted = body[0] is '"' or '“';
-        var closesQuoted = body[^1] is '"' or '”';
-        return opensQuoted && closesQuoted ? body : text;
+        return body.Length < 2 ? text : body;
     }
 
     static string StripWrappingQuotes(string text)

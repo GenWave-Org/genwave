@@ -155,8 +155,8 @@ file sealed class LlmCallInspectorSurfaceWebFactory(int? simulatedPublicPort) : 
 /// <summary>Wire shape of one row from <c>GET /api/llm-calls</c> — mirrors
 /// <see cref="GenWave.Host.Api.LlmCallDto"/> without depending on it directly.</summary>
 file sealed record LlmCallRow(
-    long Seq, DateTimeOffset StartedAt, long ElapsedMs, string Status, string? StatusDetail, string Mode,
-    string? PromptSystem, string? PromptUser, string? Response, int PromptChars, int ResponseChars);
+    long Seq, string? PersonaName, DateTimeOffset StartedAt, long ElapsedMs, string Status, string? StatusDetail,
+    string Mode, string? PromptSystem, string? PromptUser, string? Response, int PromptChars, int ResponseChars);
 
 public static class FeatureLlmCallInspector
 {
@@ -213,6 +213,10 @@ public static class FeatureLlmCallInspector
                 row.PromptSystem != null && row.PromptSystem.Contains("moody, late-night") &&
                 row.PromptChars == (row.PromptSystem!.Length + (row.PromptUser?.Length ?? 0)) &&
                 row.ResponseChars == stub.ReplyContent.Length);
+
+            // gh-#429: the DTO carries who authored the call — DraftPreviewBody's own "name" field,
+            // exactly as PersonaController built the override Persona the writer resolved it from.
+            Assert.Equal("Neon Nightowl", row.PersonaName);
         }
     }
 

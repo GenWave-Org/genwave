@@ -12,6 +12,14 @@ namespace GenWave.Tts;
 /// Ring-assigned, monotonically increasing — the newest record has the highest <see cref="Seq"/>.
 /// Doubles as a stable row key for the admin UI across polls.
 /// </param>
+/// <param name="PersonaName">
+/// gh-#429 — the on-air name of whichever persona was active for this call, via the same
+/// card-first-then-legacy-row precedence <see cref="LlmPromptBuilder.ResolveName"/> already applies
+/// to the prompt's own self-name-mention line, or <see langword="null"/> when no persona was active
+/// (persona-less rendering, or a call that faulted before a persona was even resolved). Personas now
+/// author the copy this ring exists to triage, so a row needs to name who wrote it without an admin
+/// having to read the system prompt to find out.
+/// </param>
 /// <param name="PromptSystem">
 /// The system prompt built for this call (persona/soul/quirks/station clock composed in), or
 /// <see langword="null"/> if the call faulted before prompt assembly was reached (e.g. a malformed
@@ -30,6 +38,7 @@ namespace GenWave.Tts;
 /// <param name="Mode">The degradation mode active at call time (SPEC F73.1, F69.1) — Normal/Soft/Hard.</param>
 public sealed record LlmCallRecord(
     long Seq,
+    string? PersonaName,
     string? PromptSystem,
     string? PromptUser,
     string? Response,
