@@ -120,7 +120,8 @@ file sealed class ContextTickerRegistrationWebFactory : WebApplicationFactory<Pr
 /// outbound-call counts with noise unrelated to the context seam.
 /// </para>
 /// </summary>
-file sealed class ContextTickerFixtureWebFactory(bool weatherEnabled) : WebApplicationFactory<Program>
+file sealed class ContextTickerFixtureWebFactory(bool weatherEnabled, bool clockAnchoredIdents = false)
+    : WebApplicationFactory<Program>
 {
     internal const string Password = "test-password-x7z";
 
@@ -140,6 +141,7 @@ file sealed class ContextTickerFixtureWebFactory(bool weatherEnabled) : WebAppli
         builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
         builder.UseSetting("Admin:Password", Password);
         builder.UseSetting("Context:Weather:Enabled", weatherEnabled ? "true" : "false");
+        builder.UseSetting("Station:Imaging:ClockAnchoredIdents", clockAnchoredIdents ? "true" : "false");
 
         if (weatherEnabled)
         {
@@ -279,6 +281,34 @@ public static class FeatureContextTickerWire
             Assert.NotNull(due);
             Assert.Equal(SpeechDeferralKind.Context, due.Kind);
             Assert.Equal("weather", due.Discriminator);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // The T230 rider: the SAME ticker also drives ClockAnchoredImagingProducer each tick — proven
+    // through the real composition root, not merely a unit-level producer.Produce() call (that
+    // coverage already lives in GenWave.Orchestration.Tests/Specs/Story301_ClockAnchoredIdents.cs).
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioTheTickerAlsoWiresTheImagingProducer
+    {
+        [Fact]
+        public async Task ClockAnchoredIdentsOnEnqueuesAStationIdDeferralOnTheSameTick()
+        {
+            await using var factory = new ContextTickerFixtureWebFactory(weatherEnabled: false, clockAnchoredIdents: true);
+
+            var ticker = Assert.Single(factory.Services.GetServices<IHostedService>().OfType<ContextTickerService>());
+
+            await ticker.TickOnceAsync(CancellationToken.None);
+
+            // No context provider is enabled in this fixture — zero outbound calls either way; the
+            // deferral below comes from ClockAnchoredImagingProducer, not ContextPipeline.
+            Assert.Empty(factory.Handler.Requests);
+
+            var deferralQueue = factory.Services.GetRequiredService<SpeechDeferralQueue>();
+            var due = deferralQueue.PeekNextDue();
+            Assert.NotNull(due);
+            Assert.Equal(SpeechDeferralKind.StationId, due.Kind);
         }
     }
 }

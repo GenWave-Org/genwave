@@ -217,9 +217,11 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	-- MediaRepository.InsertAuthoredAsync on every authored insert ('liner' by default). NULL for
 	-- every scanned row -- the scan/enrichment paths never write it -- and for authored rows that
 	-- predate the column (no backfill: nothing distinguishes an old authored row from a scanned one
-	-- after the fact, and displays default a NULL kind to Liner anyway). METADATA-ONLY for now:
-	-- playout and the /internal/safe-track predicate never read it; a future issue wires
-	-- kind-aware rotation.
+	-- after the fact, and displays default a NULL kind to Liner anyway). Read by a real production
+	-- caller as of PLAN T231/T232 (SPEC F110.2): MediaRepository.GetRandomReadyByImagingKindAsync
+	-- selects on it, and the Orchestrator's top-of-hour StationId drain queries it directly --
+	-- playout and the /internal/safe-track predicate still never read it (that remains F110.4:
+	-- only StationId gained a selection role this cycle, no other kind).
 	alter table library.media
 	  add column imaging_kind text
 	    check (imaging_kind is null or imaging_kind in ('liner', 'station_id', 'jingle', 'promo'));

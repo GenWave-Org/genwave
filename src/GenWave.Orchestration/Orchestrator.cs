@@ -136,6 +136,26 @@ using GenWave.Core.Events;
 /// (an LLM miss with no templated-filler rung — SPEC F107.6, mirrors F92.4's handoff-drop posture one
 /// paragraph up) logs a WARN and leaves the buffer untouched; the next boundary's own drain retries.
 /// </para>
+///
+/// <para>
+/// <b>Top-of-hour idents and time (SPEC F110.2/F110.3, STORY-301/302, PLAN T232):</b> a
+/// <see cref="SpeechDeferralKind.StationId"/> drain — from EITHER producer, the pre-existing
+/// unit-count cadence check above or <see cref="ClockAnchoredImagingProducer"/>'s top-of-hour trigger
+/// — tries <paramref name="catalog"/>'s authored <c>station_id</c> pool FIRST, in the SAME
+/// <paramref name="scopeProvider"/> scope the music pick uses (an operator's live library, not the
+/// F41.7 safe-scope never-silence floor — this path has a template fallback, so it is never that
+/// floor). A non-null pool hit routes the authored <see cref="MediaItem"/> (<see cref="BuildPooledStationIdItem"/>)
+/// through <c>KickResolved</c> — no TTS render, but the SAME buffer-ordering guarantee (and gh-#259
+/// DjName stamp) every rendered segment gets, so a pool-first ident can never jump ahead of a
+/// back-announce Kicked earlier in the same unit. An empty pool (or no <paramref name="catalog"/>
+/// wired at all) falls through to the ORIGINAL templated TTS ident, byte-identical to pre-F110
+/// behavior. <see cref="SpeechDeferralKind.TimeDate"/> (this enum value's
+/// only producer, <see cref="ClockAnchoredImagingProducer"/>) always renders templated, station-voiced
+/// copy — <see cref="BuildTimeDateRequest"/> reads the hour off the deferral's own <c>Due</c> instant
+/// (the top of the hour it was ARMED for), never a fresh drain-time clock read, so a drain landing
+/// minutes after the hour still speaks the right hour and, since the SAME hour always renders the SAME
+/// text, a second announcement within that hour is a forever-cache hit rather than a re-synthesis.
+/// </para>
 /// </summary>
 public sealed class Orchestrator(
     IStationIdentityProvider identityProvider,
@@ -155,7 +175,8 @@ public sealed class Orchestrator(
     IStationEventSink? events = null,
     IStationClockProvider? stationClock = null,
     IPatterDurationEstimator? patterEstimator = null,
-    IContextSettingsProvider? contextSettings = null) : INextItemProvider
+    IContextSettingsProvider? contextSettings = null,
+    IMediaCatalog? catalog = null) : INextItemProvider
 {
     // gh-#254 — how far from the boundary a candidate may land and still count as a WIN ("±30s of
     // the boundary is a win"), widened as the gh-#253 estimate's confidence tier drops: the fit's
@@ -624,13 +645,30 @@ public sealed class Orchestrator(
         // WHICH provider dropped, not just "a context segment") rides alongside for exactly one
         // kind: null for every other kind's render, the drain arm's own providerKey for
         // SpeechDeferralKind.Context's Kick call below.
-        var pendingRenders = new List<(SegmentRequest Request, Task<MediaItem?> Render, string? ContextProviderKey)>();
+        // ObserveDuration (SPEC F110.2, PLAN T232) gates the gh-#253 estimator feed below — true for
+        // every genuine TTS render (unchanged), false for a pool-first StationId item (KickResolved):
+        // an authored ident's measured duration reflects whatever the operator produced, not a
+        // synthesis the estimator should learn from — blending it into the templated-TTS StationId
+        // bucket would skew future boundary-fit estimates for the fallback rung, which is still a
+        // real TTS render with its own, separate duration profile.
+        var pendingRenders =
+            new List<(SegmentRequest Request, Task<MediaItem?> Render, string? ContextProviderKey, bool ObserveDuration)>();
 
         // Starts one render and remembers the request alongside the Task (T124 review simplify) —
         // every call site below used to repeat the Add call verbatim; the render itself is still
         // kicked off immediately, nothing awaited in between.
         void Kick(SegmentRequest request, string? contextProviderKey = null) =>
-            pendingRenders.Add((request, tts.RenderAsync(request, ct), contextProviderKey));
+            pendingRenders.Add((request, tts.RenderAsync(request, ct), contextProviderKey, true));
+
+        // SPEC F110.2 (STORY-301, PLAN T232) — the pool-first sibling of Kick: no render to start,
+        // but the SAME ordering guarantee every other segment gets. The render-await loop below
+        // enqueues buffer items strictly in Kick/KickResolved CALL order (never completion order —
+        // see that loop's own remarks), which is what keeps a pool-first ident from ever jumping
+        // ahead of a back-announce or behind a lead-in Kicked on either side of it. An already-
+        // completed Task stands in for the (nonexistent) render, so Task.WhenAny below resolves it
+        // instantly, no render-budget delay spent on an item that never needed one.
+        void KickResolved(SegmentRequest request, MediaItem item) =>
+            pendingRenders.Add((request, Task.FromResult<MediaItem?>(item), null, false));
 
         // 1. Back-announce for the previous track
         if (cadence.BackAnnounceAfterEachTrack && prev is not null)
@@ -681,26 +719,30 @@ public sealed class Orchestrator(
             switch (deferral.Kind)
             {
                 case SpeechDeferralKind.StationId:
-                    // Station IDs are station imaging (gh-#96): ALWAYS the station's own voice and
-                    // credit, never the active persona's — real-radio convention, the ID is the brand
-                    // speaking, not the DJ. Deliberately no ResolvePersonaAsync here (LeadIn/BackAnnounce
-                    // below stay persona-voiced), and deliberately not solved by touching
-                    // Station:Persona:ActiveId — a future multi-DJ scheduler slots personas in and out,
-                    // and imaging must stay the station's voice regardless of who is in the chair.
-                    // PersonaName stays null so the airing credits the station
-                    // (TtsSegmentSource: Artist = PersonaName ?? StationName). The TTS cache key
-                    // contains the voice, so a live Station:Voice edit re-keys and re-renders the ID at
-                    // its next slot with no regen tooling.
-                    var stationIdReq = new SegmentRequest(
-                        SegmentKind.StationId,
-                        identity.Voice,
-                        identity.Name,
-                        null,
-                        StationLocalNow(),
-                        identity.Id,
-                        PersonaName: null);
+                {
+                    // SPEC F110.2 (STORY-301, PLAN T232) — pool-first: an authored station_id row
+                    // from the operator's own imaging collection airs ahead of the templated TTS
+                    // ident whenever one is ready. The DB call happens HERE, at drain time inside
+                    // this render-ahead section — the SAME discipline exception T224 ruled for the
+                    // Context arm's persona-id lookup two cases down: a genuine catalog round trip
+                    // rather than the fast per-unit accessor read every other kind gets, safe
+                    // because a drain only ever runs at a boundary (SPEC F74.1 — never mid-track).
+                    // A null catalog (no IMediaCatalog wired — an older host, or a test double that
+                    // never scripts one) skips the pool outright, same as a genuinely empty one.
+                    var pooled = catalog is null
+                        ? null
+                        : await catalog.GetRandomReadyByImagingKindAsync(
+                            scopeProvider.Current, ImagingKind.StationId, ct);
+                    var stationIdReq = BuildStationIdRequest(identity);
+                    if (pooled is not null)
+                    {
+                        KickResolved(stationIdReq, BuildPooledStationIdItem(pooled));
+                        break;
+                    }
+
                     Kick(stationIdReq);
                     break;
+                }
 
                 case SpeechDeferralKind.SignOff:
                 case SpeechDeferralKind.SignOn:
@@ -711,72 +753,21 @@ public sealed class Orchestrator(
                     // of this kind is never enqueued without one (EnqueueHandoffCeremonyAsync always
                     // supplies it) — the null-check below is defensive only.
                     if (deferral.Handoff is not { } handoff) break;
-                    var handoffKind = deferral.Kind == SpeechDeferralKind.SignOff
-                        ? SegmentKind.SignOff : SegmentKind.SignOn;
-                    var handoffReq = new SegmentRequest(
-                        handoffKind,
-                        handoff.Voice,
-                        identity.Name,
-                        null,
-                        StationLocalNow(),
-                        identity.Id,
-                        handoff.PersonaName,
-                        handoff.CounterpartName);
-                    Kick(handoffReq);
+                    Kick(BuildHandoffRequest(deferral.Kind, handoff, identity));
+                    break;
+
+                case SpeechDeferralKind.TimeDate:
+                    // SPEC F110.3 (STORY-302, PLAN T232) — the clock-anchored time announcement:
+                    // always the templated rung (TimeDate is not one of LlmCopyWriter.IsLlmAuthored's
+                    // kinds, so there is no LLM rung above it to miss). See BuildTimeDateRequest's
+                    // own remarks for why the hour comes from the deferral's Due, not StationLocalNow.
+                    Kick(BuildTimeDateRequest(deferral, identity));
                     break;
 
                 case SpeechDeferralKind.Context:
                 {
-                    // SPEC F107.3/F107.6 (STORY-297, PLAN T224): re-verify freshness HERE, at drain
-                    // time — the payload was captured by the T226 ticker at ENQUEUE time (see
-                    // SpeechDeferral.Context's own remarks), and the boundary this drain actually
-                    // fires at can land well after that. Discriminator is always the originating
-                    // provider's own Key for this kind (SpeechDeferral's own doc) — "(unknown)" is a
-                    // defensive fallback only, never expected to appear in production.
-                    var providerKey = deferral.Discriminator ?? "(unknown)";
-
-                    if (deferral.Context is not { } content)
-                    {
-                        logger.LogInformation(
-                            "Context segment for provider {ProviderKey} skipped at drain time: no " +
-                            "content captured (SPEC F107.6).", providerKey);
-                        break;
-                    }
-
-                    if (content.FreshUntil <= drainNow)
-                    {
-                        logger.LogInformation(
-                            "Context segment for provider {ProviderKey} skipped at drain time: stale " +
-                            "(past FreshUntil) — music continues (SPEC F107.6).", providerKey);
-                        break;
-                    }
-
-                    // T222 ruling: blank SegmentFacts means "no segment lane this fetch" even though
-                    // the fetch itself succeeded (e.g. a PatterFact-only update) — not a failure, but
-                    // still nothing this drain arm can build a segment from.
-                    if (string.IsNullOrWhiteSpace(content.SegmentFacts))
-                    {
-                        logger.LogInformation(
-                            "Context segment for provider {ProviderKey} skipped at drain time: no " +
-                            "segment facts (SPEC F107.6).", providerKey);
-                        break;
-                    }
-
-                    // SPEC F107.7 — Context:{Key}:PersonaId picks the voice; see this class's own
-                    // remarks and ResolveContextSegmentVoiceAsync for the full resolution table.
-                    var contextProviderSettings = contextSettings.For(providerKey);
-                    var (contextVoice, contextPersonaName) = await ResolveContextSegmentVoiceAsync(
-                        contextProviderSettings.PersonaId, providerKey, identity.Voice, ct);
-                    var contextReq = new SegmentRequest(
-                        SegmentKind.ContextSegment,
-                        contextVoice,
-                        identity.Name,
-                        null,
-                        StationLocalNow(),
-                        identity.Id,
-                        PersonaName: contextPersonaName,
-                        ContextFacts: content.SegmentFacts);
-                    Kick(contextReq, providerKey);
+                    var built = await BuildContextSegmentRequestAsync(deferral, identity, drainNow, ct);
+                    if (built is { } b) Kick(b.Request, b.ProviderKey);
                     break;
                 }
             }
@@ -821,7 +812,7 @@ public sealed class Orchestrator(
         // faulted," so a ternary keyed on "did renderTask win the race" mislabeled every synth outage
         // that happened to beat the budget delay as "render returned null" instead of "render
         // faulted".
-        foreach (var (request, renderTask, contextProviderKey) in pendingRenders)
+        foreach (var (request, renderTask, contextProviderKey, observeDuration) in pendingRenders)
         {
             var kind = request.Kind;
             var winner = await Task.WhenAny(renderTask, Task.Delay(renderBudget, ct));
@@ -841,7 +832,10 @@ public sealed class Orchestrator(
                 // analysis failed, in which case nothing is observed: never fabricated) back into
                 // the estimation seam, keyed by the request's own kind/persona/voice, so the
                 // historical tier self-improves with every segment that actually rendered.
-                if (seg.DurationMs is int measuredMs)
+                // observeDuration is false only for a KickResolved pool-first item (SPEC F110.2,
+                // PLAN T232) — see pendingRenders' own remarks for why that duration must not join
+                // this bucket.
+                if (observeDuration && seg.DurationMs is int measuredMs)
                     patterEstimator.ObserveRendered(
                         kind, request.PersonaName, request.Voice, TimeSpan.FromMilliseconds(measuredMs));
 
@@ -864,6 +858,161 @@ public sealed class Orchestrator(
             }
             // else: renderTask completed with a null segment → silently skip (every other kind)
         }
+    }
+
+    /// <summary>
+    /// The ONE <see cref="SegmentKind.StationId"/> request shape (SPEC F110.2): station's own voice
+    /// and credit, never the active persona's — real-radio convention, the ID is the brand speaking,
+    /// not the DJ. Deliberately no <see cref="ResolvePersonaAsync"/> here (LeadIn/BackAnnounce stay
+    /// persona-voiced), and deliberately not solved by touching <c>Station:Persona:ActiveId</c> — a
+    /// future multi-DJ scheduler slots personas in and out, and imaging must stay the station's voice
+    /// regardless of who is in the chair. <see cref="SegmentRequest.PersonaName"/> stays null so the
+    /// airing credits the station (<c>TtsSegmentSource</c>: <c>Artist = PersonaName ?? StationName</c>).
+    ///
+    /// <para>
+    /// Serves BOTH StationId rungs, not just the templated fallback its pre-F110 name implied: a
+    /// direct <c>Kick</c> for the templated TTS ident (the TTS cache key contains the voice, so a
+    /// live <c>Station:Voice</c> edit re-keys and re-renders it at its next slot with no regen
+    /// tooling), or <c>KickResolved</c>'s classification tag for a pool-first authored item (SPEC
+    /// F110.2, PLAN T232) — the render-await loop below reads only this request's own <c>Kind</c>
+    /// off a resolved item, so the SAME shape serves as an honest, non-garbage tag rather than
+    /// inventing a second one.
+    /// </para>
+    /// </summary>
+    SegmentRequest BuildStationIdRequest(StationIdentity identity) =>
+        new(
+            SegmentKind.StationId,
+            identity.Voice,
+            identity.Name,
+            null,
+            StationLocalNow(),
+            identity.Id,
+            PersonaName: null);
+
+    /// <summary>
+    /// SPEC F110.2 (STORY-301, PLAN T232) — the pool-first rung: an authored <c>station_id</c> row
+    /// airs verbatim, no TTS render involved. <see cref="MediaReferenceExtensions.ToMediaItem"/>'s
+    /// own 12-arg mapping never sets <see cref="MediaItem.SegmentKind"/> (its only OTHER production
+    /// caller is the music pick, where a null SegmentKind is correct) — a <c>with</c> expression
+    /// stamps it honestly here instead of silently leaving the F113 booth-log stamp off an ident that
+    /// plainly has one. <see cref="MediaItem.DjName"/> (gh-#259) is deliberately NOT stamped here:
+    /// this item is routed through <c>KickResolved</c>, so the render-await loop's own
+    /// <c>if (kind == SegmentKind.StationId) seg = seg with { DjName = unitDjName };</c> line stamps
+    /// it at the exact same point the templated fallback's own render result would have — one
+    /// stamping site for both rungs, never two copies of the same rule.
+    /// </summary>
+    static MediaItem BuildPooledStationIdItem(MediaReference pooled) =>
+        pooled.ToMediaItem() with { SegmentKind = SegmentKind.StationId };
+
+    /// <summary>
+    /// Builds a <see cref="SegmentKind.SignOff"/>/<see cref="SegmentKind.SignOn"/> request from the
+    /// deferral's own captured <paramref name="handoff"/> (SPEC F92.2, PLAN T124) — see
+    /// <see cref="HandoffContext"/>'s own remarks for why this is never a fresh
+    /// <see cref="ResolvePersonaAsync"/>/accessor read.
+    /// </summary>
+    SegmentRequest BuildHandoffRequest(SpeechDeferralKind kind, HandoffContext handoff, StationIdentity identity)
+    {
+        var handoffKind = kind == SpeechDeferralKind.SignOff ? SegmentKind.SignOff : SegmentKind.SignOn;
+        return new SegmentRequest(
+            handoffKind,
+            handoff.Voice,
+            identity.Name,
+            null,
+            StationLocalNow(),
+            identity.Id,
+            handoff.PersonaName,
+            handoff.CounterpartName);
+    }
+
+    /// <summary>
+    /// SPEC F110.3 (STORY-302, PLAN T232) — the clock-anchored time announcement: templated,
+    /// station-voiced (<see cref="SegmentRequest.PersonaName"/> stays null, the StationId imaging
+    /// precedent), zero LLM (<c>TimeDate</c> is not one of <c>LlmCopyWriter.IsLlmAuthored</c>'s
+    /// kinds, so this always reaches <see cref="PatterTemplateRenderer"/> — there is no LLM rung
+    /// above it to miss). <see cref="SegmentRequest.LocalNow"/> carries <paramref name="deferral"/>'s
+    /// own <see cref="SpeechDeferral.Due"/> — the station-local top of the hour this announcement was
+    /// ARMED for — deliberately NOT <see cref="StationLocalNow"/>'s drain-time read: a drain landing
+    /// at 14:02 must still speak "two o'clock" (the 14:00 top), not whatever hour the wall clock
+    /// happens to read once the boundary is finally reached. <c>Due</c> is already a real,
+    /// correctly-offset instant (<see cref="WallClockInstantResolver.Resolve"/>, via
+    /// <c>ClockAnchoredImagingProducer</c>), so formatting it directly names the right station-local
+    /// hour with no second zone conversion here. This is also what makes SPEC F110.3's cache-hit
+    /// acceptance true: the SAME hour always renders the SAME text
+    /// (<see cref="PatterTemplateRenderer.Expand"/> reads only the hour component), so a second
+    /// drain within that hour hashes identically and hits the forever-cache
+    /// (<c>TtsSegmentSource</c>'s <c>FreshPerAiring=false</c> path) rather than re-synthesizing.
+    /// </summary>
+    static SegmentRequest BuildTimeDateRequest(SpeechDeferral deferral, StationIdentity identity) =>
+        new(
+            SegmentKind.TimeDate,
+            identity.Voice,
+            identity.Name,
+            null,
+            deferral.Due,
+            identity.Id,
+            PersonaName: null);
+
+    /// <summary>
+    /// Builds the <see cref="SegmentKind.ContextSegment"/> request for a due
+    /// <see cref="SpeechDeferralKind.Context"/> <paramref name="deferral"/> (SPEC
+    /// F107.3/F107.6/F107.7, STORY-297, PLAN T224), or <see langword="null"/> when the drain-time
+    /// re-check finds nothing to build from — no captured content, a stale
+    /// <see cref="ContextContent.FreshUntil"/>, or blank <see cref="ContextContent.SegmentFacts"/> —
+    /// each logged at Information, naming the provider and cause (T224 review finding), never echoing
+    /// the provider's own facts (F108.3).
+    /// </summary>
+    async Task<(SegmentRequest Request, string ProviderKey)?> BuildContextSegmentRequestAsync(
+        SpeechDeferral deferral, StationIdentity identity, DateTimeOffset drainNow, CancellationToken ct)
+    {
+        // SPEC F107.3/F107.6 (STORY-297, PLAN T224): re-verify freshness HERE, at drain time — the
+        // payload was captured by the T226 ticker at ENQUEUE time (see SpeechDeferral.Context's own
+        // remarks), and the boundary this drain actually fires at can land well after that.
+        // Discriminator is always the originating provider's own Key for this kind (SpeechDeferral's
+        // own doc) — "(unknown)" is a defensive fallback only, never expected to appear in production.
+        var providerKey = deferral.Discriminator ?? "(unknown)";
+
+        if (deferral.Context is not { } content)
+        {
+            logger.LogInformation(
+                "Context segment for provider {ProviderKey} skipped at drain time: no " +
+                "content captured (SPEC F107.6).", providerKey);
+            return null;
+        }
+
+        if (content.FreshUntil <= drainNow)
+        {
+            logger.LogInformation(
+                "Context segment for provider {ProviderKey} skipped at drain time: stale " +
+                "(past FreshUntil) — music continues (SPEC F107.6).", providerKey);
+            return null;
+        }
+
+        // T222 ruling: blank SegmentFacts means "no segment lane this fetch" even though the fetch
+        // itself succeeded (e.g. a PatterFact-only update) — not a failure, but still nothing this
+        // drain arm can build a segment from.
+        if (string.IsNullOrWhiteSpace(content.SegmentFacts))
+        {
+            logger.LogInformation(
+                "Context segment for provider {ProviderKey} skipped at drain time: no " +
+                "segment facts (SPEC F107.6).", providerKey);
+            return null;
+        }
+
+        // SPEC F107.7 — Context:{Key}:PersonaId picks the voice; see this class's own remarks and
+        // ResolveContextSegmentVoiceAsync for the full resolution table.
+        var contextProviderSettings = contextSettings.For(providerKey);
+        var (contextVoice, contextPersonaName) = await ResolveContextSegmentVoiceAsync(
+            contextProviderSettings.PersonaId, providerKey, identity.Voice, ct);
+        var contextReq = new SegmentRequest(
+            SegmentKind.ContextSegment,
+            contextVoice,
+            identity.Name,
+            null,
+            StationLocalNow(),
+            identity.Id,
+            PersonaName: contextPersonaName,
+            ContextFacts: content.SegmentFacts);
+        return (contextReq, providerKey);
     }
 
     /// <summary>

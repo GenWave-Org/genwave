@@ -34,6 +34,16 @@ sealed class MediaRepository(
         "artist, album, genre, year, integrated_lufs, true_peak_dbtp, measurable, " +
         "cue_in_sec, cue_out_sec, intro_energy, outro_energy from library.media";
 
+    // The m.-qualified playable predicate shared, byte-identical, by the three tiered
+    // rotation/envelope candidate queries (GetRotationCandidateAsync, GetEnvelopeCandidateAsync,
+    // GetEnvelopeCandidatePoolAsync — PLAN T232 review, extracted from three copies). NOT
+    // GetRandomReadyAsync/GetRandomReadyByImagingKindAsync's own unqualified "state = 'ready' and
+    // measurable and eligible and not coalesce(r.never_play, false)" text — those two alias columns
+    // without the m. prefix, a different (if logically equivalent) string, so folding them in here
+    // would NOT be byte-identical SQL output.
+    const string PlayablePredicate =
+        "m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)";
+
     // xmin is a Postgres system column; cast to text so Dapper maps it as a plain string. The
     // LEFT JOIN + COALESCE resolves rating state (SPEC F33.10) — an unrated row (no
     // library.media_rating row) reads the F33.2 ledger default (score 50, not flagged) rather
@@ -96,8 +106,9 @@ sealed class MediaRepository(
         //
         // No ExplicitPredicate() here: this backs /internal/safe-track, the operator-curated safe scope
         // (gh-#99) — a separate universe from main rotation — and the never-silence floor must not trade
-        // a curation mistake for dead air. F95.4 enumerates exactly three paths; this is deliberately not
-        // a fourth.
+        // a curation mistake for dead air. This is the ONE selection path over library.media that
+        // deliberately never calls ExplicitPredicate() — see that method's own remarks for the full
+        // enumeration of paths that do (T232 added a fourth: GetRandomReadyByImagingKindAsync).
         var exclude = new List<long>(excludeIds.Count);
         foreach (var s in excludeIds)
             if (long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v))
@@ -111,6 +122,42 @@ sealed class MediaRepository(
             "and id <> all(@exclude) and library_id = any(@libraryIds) " +
             "order by random() limit 1",
             new { exclude, libraryIds = scope.LibraryIds.ToArray() }, cancellationToken: ct));
+        return row?.ToReference(logger);
+    }
+
+    /// <summary>
+    /// SPEC F110.2 (STORY-301, PLAN T231) — <see cref="GetRandomReadyAsync"/>'s exact playable
+    /// predicate (<c>ready + measurable + eligible + not never_play</c>) plus one more term:
+    /// <c>imaging_kind = kind</c>. No <c>excludeIds</c> — idents/jingles are functional station
+    /// furniture, not music, so repetition is fine (F21.11's safe-loop posture); see the interface
+    /// remarks for the full rationale. Null on an empty pool or an empty <paramref name="scope"/>
+    /// (default-deny) — either way, "no pool" is the drain's own template-fallback signal.
+    ///
+    /// <para>
+    /// SPEC F95.4, PLAN T232 — <see cref="ExplicitPredicate"/> ANDs in too, unlike
+    /// <see cref="GetRandomReadyAsync"/>'s own deliberate exemption one method up: THIS path is not a
+    /// never-silence floor — an explicit-marked authored row simply falls through to the templated TTS
+    /// fallback the same as a genuinely empty pool would, so there is no dead-air trade to make, and
+    /// F95.6's "nothing explicit airs on an everyone station" stays absolute rather than gaining a
+    /// second carve-out.
+    /// </para>
+    /// </summary>
+    public async Task<MediaReference?> GetRandomReadyByImagingKindAsync(LibraryScope scope, ImagingKind kind, CancellationToken ct)
+    {
+        // Default-deny: no scope means no access, no SQL issued.
+        if (scope.IsEmpty) return null;
+
+        var explicitPredicate = ExplicitPredicate();
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<MediaRow>(new CommandDefinition(
+            $"{SelectColumns} m " +
+            "left join library.media_rating r on r.media_id = m.id " +
+            "where state = 'ready' and measurable and eligible and not coalesce(r.never_play, false) " +
+            "and imaging_kind = @kind and library_id = any(@libraryIds) " +
+            $"{explicitPredicate} " +
+            "order by random() limit 1",
+            new { kind = ImagingKindTokens.ToToken(kind), libraryIds = scope.LibraryIds.ToArray() }, cancellationToken: ct));
         return row?.ToReference(logger);
     }
 
@@ -180,7 +227,7 @@ sealed class MediaRepository(
               ) as repeated_artist
             from library.media m
             left join library.media_rating r on r.media_id = m.id
-            where m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)
+            where {PlayablePredicate}
               and m.library_id = any(@libraryIds)
               {explicitPredicate}
             order by
@@ -197,14 +244,15 @@ sealed class MediaRepository(
     }
 
     /// <summary>
-    /// SPEC F95.4, STORY-250, PLAN T114 — the ONE audience-posture WHERE fragment shared by every
-    /// pool-predicate query this repository builds (<see cref="GetRotationCandidateAsync"/>,
-    /// <see cref="GetEnvelopeCandidateAsync"/>, <see cref="GetEnvelopeCandidatePoolAsync"/>): empty
-    /// (no constraint) on <see cref="AudiencePosture.Mature"/>, or <c>and not coalesce(m.explicit, false)</c>
-    /// on <see cref="AudiencePosture.Everyone"/> — mirrors <see cref="GetEnvelopeCandidateAsync"/>'s own
-    /// "omitted entirely, not merely always-true" genre-predicate idiom. <see cref="GetRandomReadyAsync"/>
-    /// is the deliberate fourth selection path over <c>library.media</c> that does NOT call this helper —
-    /// see the comment there for why F95.4 stops at three paths.
+    /// SPEC F95.4, STORY-250, PLAN T114 (extended PLAN T232) — the ONE audience-posture WHERE
+    /// fragment shared by every pool-predicate query this repository builds
+    /// (<see cref="GetRotationCandidateAsync"/>, <see cref="GetEnvelopeCandidateAsync"/>,
+    /// <see cref="GetEnvelopeCandidatePoolAsync"/>, <see cref="GetRandomReadyByImagingKindAsync"/>):
+    /// empty (no constraint) on <see cref="AudiencePosture.Mature"/>, or
+    /// <c>and not coalesce(m.explicit, false)</c> on <see cref="AudiencePosture.Everyone"/> — mirrors
+    /// <see cref="GetEnvelopeCandidateAsync"/>'s own "omitted entirely, not merely always-true"
+    /// genre-predicate idiom. <see cref="GetRandomReadyAsync"/> is the deliberate ONE selection path
+    /// over <c>library.media</c> that does NOT call this helper — see the comment there for why.
     /// </summary>
     string ExplicitPredicate() =>
         audiencePosture.Current == AudiencePosture.Mature ? "" : "and not coalesce(m.explicit, false)";
@@ -298,7 +346,7 @@ sealed class MediaRepository(
               ) as repeated_artist
             from library.media m
             left join library.media_rating r on r.media_id = m.id
-            where m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)
+            where {PlayablePredicate}
               and m.library_id = any(@libraryIds)
               and (m.energy is null or (m.energy >= @energyMin and m.energy <= @energyMax))
               {genrePredicate}
@@ -386,7 +434,7 @@ sealed class MediaRepository(
               ) as repeated_artist
             from library.media m
             left join library.media_rating r on r.media_id = m.id
-            where m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)
+            where {PlayablePredicate}
               and m.library_id = any(@libraryIds)
               and (m.energy is null or (m.energy >= @energyMin and m.energy <= @energyMax))
               {genrePredicate}
@@ -1694,7 +1742,10 @@ sealed class MediaRepository(
                 introEnergy = insert.Energy?.IntroEnergy,
                 outroEnergy = insert.Energy?.OutroEnergy,
                 // gh-#149 — the Station Imaging content kind, always stamped for authored rows
-                // (scanned rows stay NULL). Metadata-only: nothing selects by it yet.
+                // (scanned rows stay NULL). SPEC F110.2 (PLAN T231) is the first selection reader —
+                // see GetRandomReadyByImagingKindAsync's own imaging_kind = @kind predicate — so this
+                // insert is no longer metadata-only for the StationId kind specifically; every other
+                // kind (Liner/Jingle/Promo) is still stamped but unread until its own selector lands.
                 imagingKind = ImagingKindTokens.ToToken(insert.Kind),
             },
             cancellationToken: ct));

@@ -18,9 +18,15 @@ public static class OrchestrationServiceCollectionExtensions
     /// boundary-bias providers, <see cref="MusicSelectionPolicy"/>, <c>ITtsSegmentSource</c>,
     /// <c>IActivePersonaAccessor</c>, and the <see cref="SpeechDeferralQueue"/>/<see cref="TimeProvider"/>
     /// this method also registers. <see cref="MusicSelectionPolicy"/> itself (F112, STORY-295) owns
-    /// the pick ladder — <c>IMediaCatalog</c>/<c>IEnvelopeProvider</c>/<see cref="IPersonaPickProvider"/>/
+    /// the pick ladder — <c>IEnvelopeProvider</c>/<see cref="IPersonaPickProvider"/>/
     /// <see cref="IRequestFulfillmentSource"/> moved with it off <see cref="Orchestrator"/>'s own
-    /// constructor.
+    /// constructor. <c>IMediaCatalog</c> itself is registered by <c>AddMediaLibrary</c> (GenWave.MediaLibrary),
+    /// not this method — it has TWO independent consumers today: <see cref="MusicSelectionPolicy"/>'s
+    /// pick ladder, and (SPEC F110.2, PLAN T232) <see cref="Orchestrator"/>'s own optional constructor
+    /// parameter, for the top-of-hour StationId drain's pool-first lookup. A host that never wires
+    /// <c>AddMediaLibrary</c> (no catalog available at all) leaves that parameter at its default
+    /// (<see langword="null"/>) — the drain then skips the pool outright and falls straight to the
+    /// templated TTS ident, same as an empty pool would.
     ///
     /// <para>
     /// <b>Handoff ceremony seams (SPEC F92.1, STORY-243, PLAN T124) — deliberately NOT registered
@@ -82,6 +88,22 @@ public static class OrchestrationServiceCollectionExtensions
         // wins; consumes the SAME IPersonaPickProvider/IRequestFulfillmentSource seams registered
         // above plus IMediaCatalog/IEnvelopeProvider from wherever the host wires those.
         services.TryAddSingleton<MusicSelectionPolicy>();
+
+        // SPEC F110.1/F110.3 (STORY-301/302, PLAN T230): the settings seam
+        // ClockAnchoredImagingProducer reads — both-false is the correct fail-closed default (T230
+        // acceptance), not merely a placeholder. TryAdd so the Host's
+        // OptionsMonitorStationImagingProvider wins once registered — mirrors GenWave.Context's own
+        // IStationLocationProvider default one project over.
+        services.TryAddSingleton<IStationImagingSettingsProvider>(NoOpStationImagingSettingsProvider.Instance);
+
+        // The top-of-hour producer itself: no NoOp-replacement semantics — nothing else ever needs a
+        // different ClockAnchoredImagingProducer swapped in, so a plain AddSingleton, not TryAdd
+        // (contrast MusicSelectionPolicy/IPersonaPickProvider above, both of which exist precisely so
+        // something CAN override them). Called each tick by the Host's ContextTickerService
+        // (PLAN T230); consumes the SAME SpeechDeferralQueue/TimeProvider this method already
+        // registers plus whatever IStationClockProvider the Host wires (optional — see that
+        // constructor parameter's own remarks).
+        services.AddSingleton<ClockAnchoredImagingProducer>();
 
         return services.AddSingleton<INextItemProvider, Orchestrator>();
     }

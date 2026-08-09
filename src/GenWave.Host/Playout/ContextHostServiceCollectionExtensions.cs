@@ -5,7 +5,9 @@ using GenWave.Host.Options;
 namespace GenWave.Host.Playout;
 
 /// <summary>
-/// The Host's composition of the F107 context seam (STORY-297, PLAN T226).
+/// The Host's composition of the F107 context seam (STORY-297, PLAN T226) — and, additively, the
+/// F110.1/F110.3 clock-anchored imaging settings override (STORY-301/302, PLAN T230), which rides
+/// the SAME wall-clock actor this method wires.
 /// <c>GenWave.Context.ContextServiceCollectionExtensions.AddGenWaveContext</c> registers the
 /// framework-free defaults — the typed HTTP clients, the NoOp
 /// <see cref="IStationLocationProvider"/>/<see cref="IContextCacheRootProvider"/> bindings, and the
@@ -49,6 +51,13 @@ static class ContextHostServiceCollectionExtensions
         services.AddSingleton<IContextCacheRootProvider, OptionsMonitorContextCacheRootProvider>();
         services.AddSingleton<IContextSettingsProvider, ConfigurationContextSettingsProvider>();
 
+        // SPEC F110.1/F110.3 (PLAN T230): overrides AddGenWaveOrchestration's own
+        // TryAddSingleton<IStationImagingSettingsProvider, NoOpStationImagingSettingsProvider>
+        // default — same "override after the default" idiom the three bindings above already use.
+        // ClockAnchoredImagingProducer itself needs no override here (no NoOp-replacement semantics —
+        // that method's own AddSingleton is the only registration it ever gets).
+        services.AddSingleton<IStationImagingSettingsProvider, OptionsMonitorStationImagingProvider>();
+
         // The ticker's own polling cadence (see ContextTickerOptions' own remarks) — deployment
         // tuning, deliberately absent from StationSettingsAllowlist.
         services
@@ -66,9 +75,12 @@ static class ContextHostServiceCollectionExtensions
         // Ruling #1 — see this class's own remarks: AddSingleton, never TryAdd.
         services.AddSingleton<IContextPatterFactSource>(sp => sp.GetRequiredService<ContextPipeline>());
 
-        // The one wall-clock actor (SPEC F107.3): advances the pipeline and feeds the SAME
-        // SpeechDeferralQueue AddGenWaveOrchestration registered — see ContextTickerService's own
-        // remarks for why it lives under GenWave.Host.Playout, not the reserved GenWave.Host.Context.
+        // The one wall-clock actor (SPEC F107.3, and additively F110.1/F110.3): advances the pipeline
+        // AND calls ClockAnchoredImagingProducer.Produce() each tick, feeding the SAME
+        // SpeechDeferralQueue AddGenWaveOrchestration registered (both that producer and the queue
+        // come from AddGenWaveOrchestration, called earlier in Program.cs) — see
+        // ContextTickerService's own remarks for why it lives under GenWave.Host.Playout, not the
+        // reserved GenWave.Host.Context.
         services.AddHostedService<ContextTickerService>();
 
         return services;

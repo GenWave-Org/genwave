@@ -67,7 +67,8 @@ sealed class FakeTtsSegmentSource : ITtsSegmentSource
             $"/tts/{mediaId}.wav",
             $"[{request.Kind}]",
             new Loudness(-23.0, -1.0, true),
-            DurationMs: DurationMs);
+            DurationMs: DurationMs,
+            SegmentKind: request.Kind);
 
         return item;
     }
