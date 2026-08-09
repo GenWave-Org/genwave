@@ -2,7 +2,18 @@
 
 import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { HelpFlyover } from "@/components/ui/help-flyover";
 import { cn } from "@/lib/utils";
+
+/** The bed field's `?` flyover copy (gh-#431), verbatim per the issue. */
+const BED_HELP_TEXT =
+  "An optional music bed mixed UNDER the generated voice when this segment is created — pick " +
+  "any main-catalog jingle or instrumental. The bed is ducked (−12 dB), padded 1.5 s " +
+  "before and after the voice, loops if shorter, and honours the track's cue points. It is " +
+  "baked into the audio file at generate time — changing it later means regenerating the " +
+  "segment. Duck/pad amounts are deployment settings (env), not live settings.";
+
+const BED_HELP_ID = "bed-search-help";
 
 /** A catalog row offered as a bed candidate — id is numeric (bedMediaId on the wire, F27.3). */
 export interface BedCandidate {
@@ -129,9 +140,14 @@ export function BedPicker({ selected, onSelect, onClear, disabled }: BedPickerPr
 
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor="bed-search" className={FIELD_LABEL_CLASSES}>
-        Bed (optional)
-      </label>
+      <div className="flex items-center gap-1.5">
+        <label htmlFor="bed-search" className={FIELD_LABEL_CLASSES}>
+          Bed (optional)
+        </label>
+        <HelpFlyover label="Help: Bed" helpId={BED_HELP_ID} testId="bed-help">
+          {BED_HELP_TEXT}
+        </HelpFlyover>
+      </div>
 
       {selected !== null ? (
         <div className="flex items-center gap-2 rounded-[6px] border border-line bg-surface-2 px-3 py-2 text-[0.85rem] text-ink">
@@ -151,6 +167,7 @@ export function BedPicker({ selected, onSelect, onClear, disabled }: BedPickerPr
               aria-controls={listboxId}
               aria-autocomplete="list"
               aria-activedescendant={activeOptionId}
+              aria-describedby={BED_HELP_ID}
               value={query}
               onChange={(e) => setQuery(e.currentTarget.value)}
               onKeyDown={handleKeyDown}

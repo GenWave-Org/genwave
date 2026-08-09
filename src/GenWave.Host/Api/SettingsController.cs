@@ -97,25 +97,40 @@ public sealed class SettingsController(
             });
         }
 
-        // Validate all entries first — reject the entire request on the first error
-        // so the caller gets a clear diagnostic and nothing is partially written.
-        var errors = new List<string>();
+        // Validate all entries first — reject the entire request on the first error so the
+        // caller gets a clear diagnostic and nothing is partially written. Errors are keyed by
+        // the setting key they belong to (gh-#425): one bucket per offending key, so a single
+        // invalid entry in a multi-entry batch no longer paints its message under every other
+        // key. An empty-key entry names no setting to attribute the message to, so it — like the
+        // cross-field check below — lands in ASP.NET's own conventional keyless bucket, "".
+        var fieldErrors = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        void AddError(string key, string message)
+        {
+            if (!fieldErrors.TryGetValue(key, out var messages))
+            {
+                messages = [];
+                fieldErrors[key] = messages;
+            }
+            messages.Add(message);
+        }
+
         foreach (var update in updates)
         {
             if (string.IsNullOrWhiteSpace(update.Key))
             {
-                errors.Add("Each entry must have a non-empty key.");
+                AddError(string.Empty, "Each entry must have a non-empty key.");
                 continue;
             }
 
             var error = validator.Validate(update.Key, update.Value ?? string.Empty);
             if (error is not null)
-                errors.Add(error);
+                AddError(update.Key, error);
         }
 
-        // Cross-field check: run only when all per-key validations pass so error messages
-        // are not conflated with parse failures.
-        if (errors.Count == 0)
+        // Cross-field check: run only when all per-key validations pass so error messages are
+        // not conflated with parse failures. Its message names two keys at once, so — like an
+        // empty-key entry above — it belongs in the keyless "" bucket, not either individual key.
+        if (fieldErrors.Count == 0)
         {
             var batch = updates
                 .Where(u => u.Key is not null)
@@ -123,17 +138,18 @@ public sealed class SettingsController(
 
             var crossFieldError = validator.ValidateBatch(batch);
             if (crossFieldError is not null)
-                errors.Add(crossFieldError);
+                AddError(string.Empty, crossFieldError);
         }
 
-        if (errors.Count > 0)
+        if (fieldErrors.Count > 0)
         {
             var problem = new ValidationProblemDetails
             {
                 Status = StatusCodes.Status400BadRequest,
                 Title  = "One or more settings values are invalid.",
             };
-            problem.Errors["settings"] = errors.ToArray();
+            foreach (var (key, messages) in fieldErrors)
+                problem.Errors[key] = messages.ToArray();
             return BadRequest(problem);
         }
 

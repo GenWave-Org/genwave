@@ -158,6 +158,16 @@ describe("Feature: Every settings field explains itself", () => {
       expect(
         screen.getByTestId("setting-help-Library:CueDetection:MinSilenceDurationSec")
       ).toHaveTextContent(/greater than 0.*60/i);
+      // gh-#427 — pin the ±90/±180 lat/lon bounds stated in the help copy so they can't silently
+      // drift from the real coordinate ranges (SettingValidator itself is deliberately
+      // AlwaysValid for these two keys; WeatherContextProvider's own fail-closed check is what
+      // actually treats anything outside these ranges the same as blank — F108.1).
+      expect(screen.getByTestId("setting-help-Station:Location:Latitude")).toHaveTextContent(
+        /-90.*90/
+      );
+      expect(screen.getByTestId("setting-help-Station:Location:Longitude")).toHaveTextContent(
+        /-180.*180/
+      );
     });
   });
 

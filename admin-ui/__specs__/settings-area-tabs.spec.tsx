@@ -281,7 +281,8 @@ describe("Feature: settings areas render as tabs", () => {
   describe("Scenario (sad path): a rejected key on a non-visible tab is surfaced", () => {
     it("a 400 auto-switches to the first offending tab and shows the inline error", async () => {
       const validationProblem = {
-        errors: { settings: ["Must be a non-empty absolute http/https URL"] },
+        // gh-#425 real shape — keyed by the offending setting key, not a flat "settings" bucket.
+        errors: { "Tts:Endpoint": ["Must be a non-empty absolute http/https URL"] },
         title: "One or more settings values are invalid.",
         status: 400,
       };
@@ -307,7 +308,8 @@ describe("Feature: settings areas render as tabs", () => {
 
     it("marks the offending tab with a validation-error flag", async () => {
       const validationProblem = {
-        errors: { settings: ["Must be a non-empty absolute http/https URL"] },
+        // gh-#425 real shape — keyed by the offending setting key, not a flat "settings" bucket.
+        errors: { "Tts:Endpoint": ["Must be a non-empty absolute http/https URL"] },
         status: 400,
       };
       makeFetchMock(400, validationProblem);

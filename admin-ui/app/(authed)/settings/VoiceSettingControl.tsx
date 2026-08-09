@@ -1,16 +1,8 @@
 "use client";
 
-import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
+import { type ChangeEvent, type ReactNode } from "react";
+import { useVoiceList } from "@/lib/use-voice-list";
 import type { SettingControlProps } from "./settings-types";
-
-type VoiceListStatus =
-  | { kind: "loading" }
-  | { kind: "loaded"; voices: string[] }
-  | { kind: "error" };
-
-function isVoiceIdList(raw: unknown): raw is string[] {
-  return Array.isArray(raw) && raw.every((entry) => typeof entry === "string");
-}
 
 /** Matches SettingField's shipped single-line control styling (text/number inputs). */
 const CONTROL_CLASSES =
@@ -29,7 +21,9 @@ const CONTROL_CLASSES =
  *     an external `Tts:Endpoint` may serve a voice set the shipped Kokoro list doesn't know
  *     about (F36), so silently dropping it would strand the operator on an unrelated voice.
  * Fetch failure degrades to the same free-text-input-plus-notice fallback as the safe-content
- * control. One fetch per mount, no polling/retry.
+ * control. Sources the roster from `useVoiceList` (SPEC F79.5 — the one `GET /api/voices`
+ * listing path; this control used to duplicate that fetch inline — fixed gh-#426, alongside
+ * `PersonaSettingControl` adopting the same one-hook idiom for `GET /api/personas`).
  */
 export function VoiceSettingControl({
   controlId,
@@ -37,34 +31,7 @@ export function VoiceSettingControl({
   onChange,
   disabled,
 }: SettingControlProps): ReactNode {
-  const [status, setStatus] = useState<VoiceListStatus>({ kind: "loading" });
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadVoices(): Promise<void> {
-      try {
-        const resp = await fetch("/api/voices");
-        if (!resp.ok) {
-          if (!cancelled) setStatus({ kind: "error" });
-          return;
-        }
-        const raw = (await resp.json()) as unknown;
-        if (!isVoiceIdList(raw)) {
-          if (!cancelled) setStatus({ kind: "error" });
-          return;
-        }
-        if (!cancelled) setStatus({ kind: "loaded", voices: raw });
-      } catch {
-        if (!cancelled) setStatus({ kind: "error" });
-      }
-    }
-
-    void loadVoices();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const status = useVoiceList();
 
   if (status.kind === "error") {
     const noticeId = `${controlId}-notice`;
