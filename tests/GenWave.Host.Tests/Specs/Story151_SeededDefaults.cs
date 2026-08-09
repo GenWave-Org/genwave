@@ -26,6 +26,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using GenWave.Context.History;
+using GenWave.Context.Weather;
 using GenWave.Host.Api;
 using GenWave.Host.Configuration;
 using GenWave.Host.Options;
@@ -129,8 +131,15 @@ public static class FeatureSeededDefaults
     /// seeding this key would duplicate that structural floor as an appsettings.json literal
     /// nothing enforces against the const it is copying, AND would permanently shadow F102.5's own
     /// "no value anywhere" branch so it never fires against a real deployment. Blank here is the
-    /// chain having a floor, not a gap F55.1 exists to close. Every other allowlisted key's C#
-    /// default is non-empty.
+    /// chain having a floor, not a gap F55.1 exists to close.
+    /// Context:Weather:PersonaId/Context:History:PersonaId (SPEC F107.7, PLAN T226) join on the
+    /// SAME rationale as the URL/free-text pair below, not the boolean-default pair above: null and
+    /// an absent key resolve identically (ContextProviderSettings' own remarks — "an unconfigured
+    /// provider ... must resolve the same way" as an explicit 0), so an unset PersonaId is a
+    /// deliberate, honest "defer to the on-air DJ", not a gap. Station:Location:Latitude/Longitude/
+    /// SpokenName (SPEC F108.1, F108.3, PLAN T226) join on PublicStreamUrl's own identical
+    /// rationale: blank means "no coordinate/place name configured", the correct fresh-deploy state
+    /// until an operator sets one. Every other allowlisted key's C# default is non-empty.
     /// </summary>
     static readonly IReadOnlySet<string> HonestlyBlankKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -144,6 +153,11 @@ public static class FeatureSeededDefaults
         "Station:Envelope:Genres",
         "Station:Timezone",
         "Station:Theme",
+        "Context:Weather:PersonaId",
+        "Context:History:PersonaId",
+        "Station:Location:Latitude",
+        "Station:Location:Longitude",
+        "Station:Location:SpokenName",
     };
 
     /// <summary>
@@ -377,6 +391,42 @@ public static class FeatureSeededDefaults
             Assert.Equal(
                 new StationOptions().Audience,
                 RequireValue(config, "Station:Audience"));
+
+            // The F107 context seam (SPEC F107.2/F108.2, F109.1, STORY-297, PLAN T226; F3 fix, T226
+            // review) — Context:Weather:*/Context:History:* pinned against each provider's OWN
+            // Default* consts (WeatherContextProvider/HistoryContextProvider's own remarks), not
+            // ConfigurationContextSettingsProvider's generic fallback — that class stays
+            // provider-agnostic by design (F4 fix), so it is never the right pin for a
+            // provider-specific number like history's 240-minute default.
+            Assert.Equal(
+                WeatherContextProvider.DefaultEnabled,
+                bool.Parse(RequireValue(config, "Context:Weather:Enabled")));
+            Assert.Equal(
+                WeatherContextProvider.DefaultSegmentCadenceMinutes,
+                int.Parse(RequireValue(config, "Context:Weather:SegmentCadenceMinutes"), NumberStyles.Integer, CultureInfo.InvariantCulture));
+            Assert.Equal(
+                WeatherContextProvider.DefaultPatterCadenceMinutes,
+                int.Parse(RequireValue(config, "Context:Weather:PatterCadenceMinutes"), NumberStyles.Integer, CultureInfo.InvariantCulture));
+            Assert.Equal(
+                HistoryContextProvider.DefaultEnabled,
+                bool.Parse(RequireValue(config, "Context:History:Enabled")));
+            Assert.Equal(
+                HistoryContextProvider.DefaultSegmentCadenceMinutes,
+                int.Parse(RequireValue(config, "Context:History:SegmentCadenceMinutes"), NumberStyles.Integer, CultureInfo.InvariantCulture));
+            Assert.Equal(
+                HistoryContextProvider.DefaultPatterCadenceMinutes,
+                int.Parse(RequireValue(config, "Context:History:PatterCadenceMinutes"), NumberStyles.Integer, CultureInfo.InvariantCulture));
+
+            // Station:Imaging:* (SPEC F110.1/F110.3, gh-#381, PLAN T226; F3 fix, T226 review) —
+            // pinned against StationImagingOptions' own property defaults, the same
+            // options-class-initializer discipline as every other pair above.
+            var imagingDefaults = new StationImagingOptions();
+            Assert.Equal(
+                imagingDefaults.ClockAnchoredIdents,
+                bool.Parse(RequireValue(config, "Station:Imaging:ClockAnchoredIdents")));
+            Assert.Equal(
+                imagingDefaults.TimeAnnouncements,
+                bool.Parse(RequireValue(config, "Station:Imaging:TimeAnnouncements")));
         }
     }
 

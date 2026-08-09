@@ -35,35 +35,45 @@ public sealed class PatterTemplateRenderer
     /// </summary>
     public string Expand(SegmentRequest request) => request.Kind switch
     {
-        SegmentKind.StationId    => $"You're listening to {request.StationName}.",
-        SegmentKind.LeadIn       => request.Track switch
-                                    {
-                                        { RequestFulfilled: true, Artist.Length: > 0 } t =>
-                                            $"Got this one in from the request line: {t.Title} by {t.Artist}.",
-                                        { RequestFulfilled: true } t =>
-                                            $"Got this one in from the request line: {t.Title}.",
-                                        { Artist.Length: > 0 } t => $"Coming up: {t.Title} by {t.Artist}.",
-                                        { } t                    => $"Coming up: {t.Title}.",
-                                        null                     => "Coming up next.",
-                                    },
-        SegmentKind.BackAnnounce => request.Track switch
-                                    {
-                                        { Artist.Length: > 0 } t => $"That was {t.Title} by {t.Artist}.",
-                                        { } t                    => $"That was {t.Title}.",
-                                        null                     => "That was your last track.",
-                                    },
-        SegmentKind.TimeDate     => $"It's {request.LocalNow:h:mm tt} here on {request.StationName}.",
-        SegmentKind.SignOff      => request.CounterpartName switch
-                                    {
-                                        { Length: > 0 } name => $"That's me for now — coming up next, {name}.",
-                                        _                    => "That's me for now — the music keeps rolling.",
-                                    },
-        SegmentKind.SignOn       => request.CounterpartName switch
-                                    {
-                                        { Length: > 0 } name => $"Thanks, {name} — taking it from here.",
-                                        _                    => "Taking it from here after a run of nonstop music.",
-                                    },
-        _                        => throw new ArgumentOutOfRangeException(
+        SegmentKind.StationId      => $"You're listening to {request.StationName}.",
+        SegmentKind.LeadIn         => request.Track switch
+                                      {
+                                          { RequestFulfilled: true, Artist.Length: > 0 } t =>
+                                              $"Got this one in from the request line: {t.Title} by {t.Artist}.",
+                                          { RequestFulfilled: true } t =>
+                                              $"Got this one in from the request line: {t.Title}.",
+                                          { Artist.Length: > 0 } t => $"Coming up: {t.Title} by {t.Artist}.",
+                                          { } t                    => $"Coming up: {t.Title}.",
+                                          null                     => "Coming up next.",
+                                      },
+        SegmentKind.BackAnnounce   => request.Track switch
+                                      {
+                                          { Artist.Length: > 0 } t => $"That was {t.Title} by {t.Artist}.",
+                                          { } t                    => $"That was {t.Title}.",
+                                          null                     => "That was your last track.",
+                                      },
+        SegmentKind.TimeDate       => $"It's {request.LocalNow:h:mm tt} here on {request.StationName}.",
+        SegmentKind.SignOff        => request.CounterpartName switch
+                                      {
+                                          { Length: > 0 } name => $"That's me for now — coming up next, {name}.",
+                                          _                    => "That's me for now — the music keeps rolling.",
+                                      },
+        SegmentKind.SignOn         => request.CounterpartName switch
+                                      {
+                                          { Length: > 0 } name => $"Thanks, {name} — taking it from here.",
+                                          _                    => "Taking it from here after a run of nonstop music.",
+                                      },
+        // Never actually airs (SPEC F107.6, PLAN T224): TtsSegmentSource drops any ContextSegment
+        // render that isn't genuinely LLM-authored — reading raw provider facts as inert filler like
+        // this would defeat the whole point of a context provider. This arm exists purely so the
+        // switch below stays total: DegradationGatedCopyWriter's unconditional Hard-mode routing needs
+        // a correct, non-throwing landing spot for this kind. NOT reached by a persona-preview miss
+        // (T224 review finding): ContextSegment is now one of LlmCopyWriter.IsLlmAuthored's kinds, so
+        // WritePreviewAsync never falls through to this template rung on an LLM miss the way it would
+        // have under T223 — it returns PersonaPreviewResult.Failed instead (F35.6: a preview never
+        // silently substitutes template copy).
+        SegmentKind.ContextSegment => "Here's something worth knowing.",
+        _                          => throw new ArgumentOutOfRangeException(
                                         nameof(request.Kind), request.Kind, message: null),
     };
 }

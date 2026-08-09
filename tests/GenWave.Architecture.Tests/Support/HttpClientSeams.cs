@@ -15,12 +15,15 @@ namespace GenWave.Architecture.Tests.Support;
 /// <c>HttpClient</c> green-lights it. <see cref="ForbiddenTypes"/> widens the forbid to the whole
 /// construction/invocation family: <c>HttpClient</c>, <c>HttpMessageInvoker</c>,
 /// <c>HttpMessageHandler</c>, <c>HttpClientHandler</c>, <c>SocketsHttpHandler</c>. Verified against
-/// the real production graph: the widened forbid still finds exactly the same 17 designated-seam
-/// types below (18 counting <c>Program</c>'s composition-root wiring), zero false positives — nothing
-/// in GenWave's production code touches <c>HttpMessageInvoker</c>/<c>HttpMessageHandler</c>/
-/// <c>HttpClientHandler</c>/<c>SocketsHttpHandler</c> outside those same seam sites (Program.cs's
+/// the real production graph: the widened forbid still finds exactly the types
+/// <see cref="DesignatedSeams"/> below names — including <c>Program</c>'s composition-root wiring —
+/// zero false positives — nothing in GenWave's production code touches
+/// <c>HttpMessageInvoker</c>/<c>HttpMessageHandler</c>/<c>HttpClientHandler</c>/
+/// <c>SocketsHttpHandler</c> outside those same seam sites (Program.cs's
 /// <c>ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler {...})</c> is exactly the kind of
-/// construction the wider forbid exists to catch).
+/// construction the wider forbid exists to catch). Deliberately count-free here (a hardcoded count in
+/// this prose has drifted out of sync with <see cref="DesignatedSeams"/> before) — the list itself,
+/// and the tests that assert against it, are the source of truth for how many seams exist.
 ///
 /// <b>Program.cs is now in scope.</b> <see cref="HttpClientMetadataScan"/> reads every
 /// <c>TypeDefinition</c> row directly, including the compiler-generated <c>Program</c> class
@@ -92,6 +95,14 @@ internal static class HttpClientSeams
         "GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup",
         "GenWave.MediaLibrary.MediaLibraryServiceCollectionExtensions",
 
+        // Context providers (SPEC F108/F109, PLAN T227/T228) — the weather + history providers' typed
+        // clients, plus their shared composition root (ContextServiceCollectionExtensions.AddHttpClient<T>'s
+        // configure delegate references HttpClient directly, same shape as every other
+        // *ServiceCollectionExtensions entry above/below).
+        "GenWave.Context.Weather.WeatherContextProvider",
+        "GenWave.Context.History.HistoryContextProvider",
+        "GenWave.Context.ContextServiceCollectionExtensions",
+
         // Host: stats polling (typed clients) + IHttpClientFactory askers + the composition root.
         "GenWave.Host.Stats.IcecastListenerStatsSource",
         "GenWave.Host.Stats.DockerContainerStatsSource",
@@ -103,7 +114,7 @@ internal static class HttpClientSeams
     /// <summary>Evaluates "no type in <paramref name="assemblyPaths"/> outside
     /// <paramref name="isDesignatedSeam"/> depends on <see cref="ForbiddenTypes"/>", returning one
     /// <see cref="LawViolation"/> per offending type. The same function backs both the production
-    /// fact (subjects = the seven GenWave assemblies, seam filter = <see cref="DesignatedSeams"/>) and
+    /// fact (subjects = the eight GenWave assemblies, seam filter = <see cref="DesignatedSeams"/>) and
     /// the fixture self-proof (subjects = a fixture assembly, seam filter = the fixture's own
     /// stand-in list) — one detector, exercised both ways, not a copy kept in sync by hand.</summary>
     public static IReadOnlyList<LawViolation> FindViolations(

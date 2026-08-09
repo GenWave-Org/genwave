@@ -110,11 +110,11 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
         }
 
         [Fact]
-        public void SegmentKindEnumHasSixCases()
+        public void SegmentKindEnumHasSevenCases()
         {
-            // Bumped from four (STORY-243, PLAN T123): SignOff/SignOn joined the enum (SPEC F92.2).
+            // Bumped from six (STORY-297, PLAN T223): ContextSegment joined the enum (SPEC F107.3).
             var values = Enum.GetValues<SegmentKind>();
-            Assert.Equal(6, values.Length);
+            Assert.Equal(7, values.Length);
         }
     }
 

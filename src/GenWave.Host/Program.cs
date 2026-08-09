@@ -133,6 +133,14 @@ builder.Services
     // own TryAddSingleton<..., NoOpRequestFulfillmentSource> default (mirrors AddGenWavePersonaRanking's
     // own ordering rule one line above).
     .AddGenWaveRequestFulfillment()
+    // The F107 context seam's Host half (SPEC F107.2-F107.7, STORY-297, PLAN T226): live
+    // Options-backed IContextSettingsProvider/IStationLocationProvider/IContextCacheRootProvider,
+    // the ContextPipeline singleton, its IContextPatterFactSource override, and the ContextTickerService
+    // hosted service. MUST run after .AddGenWaveOrchestration() (needs SpeechDeferralQueue) and
+    // .AddGenWaveTts() (needs IOptionsMonitor<TtsOptions> and must win over its own
+    // TryAddSingleton<IContextPatterFactSource, NoOpContextPatterFactSource> default) — both already
+    // ran above. See AddGenWaveContextHost's own remarks for the full ordering rationale.
+    .AddGenWaveContextHost(cfg)
     // Playout chain: engine control → feeder → feeder service → PlayoutSupervisor (hosted).
     .AddGenWavePlayout()
     // Boot seed: branded safe-loop backstop (F27.6), one-shot + idempotent.

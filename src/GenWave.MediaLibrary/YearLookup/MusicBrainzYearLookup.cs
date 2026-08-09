@@ -2,10 +2,10 @@ namespace GenWave.MediaLibrary.YearLookup;
 
 using System.Globalization;
 using System.Net.Http.Json;
-using System.Reflection;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
+using GenWave.Core.Http;
 using GenWave.MediaLibrary.Options;
 
 /// <summary>
@@ -41,8 +41,11 @@ using GenWave.MediaLibrary.Options;
 /// MusicBrainz etiquette (SPEC F76.1): every request awaits <see cref="MusicBrainzRateLimiter"/> —
 /// a shared, process-wide gate, not a delay hand-rolled by whichever caller happens to drive this
 /// class today — immediately before it is sent, and carries a descriptive <see cref="UserAgent"/>
-/// identifying GenWave and a contact URL, built from the build-stamped
-/// <see cref="AssemblyInformationalVersionAttribute"/> (SPEC F65.1) rather than a hardcoded literal.
+/// identifying GenWave and a contact URL, built by the shared
+/// <see cref="GenWave.Core.Http.EtiquetteUserAgent"/> helper (F7 fix, T228 review — this class's own
+/// construction used to be a hand-copied twin of <c>HistoryContextProvider</c>'s; see that helper's
+/// own remarks) from this assembly's build-stamped <c>AssemblyInformationalVersionAttribute</c> (SPEC
+/// F65.1) rather than a hardcoded literal.
 /// </summary>
 public sealed class MusicBrainzYearLookup(
     HttpClient http, IOptionsMonitor<YearLookupOptions> optionsMonitor, MusicBrainzRateLimiter rateLimiter)
@@ -52,13 +55,12 @@ public sealed class MusicBrainzYearLookup(
     const string ProjectUrl = "https://github.com/GenWave-Org/genwave";
 
     /// <summary>
-    /// "GenWave/&lt;version&gt; (+repo)" (SPEC F76.1). The version segment is read once, from this
-    /// assembly's own build-stamped <see cref="AssemblyInformationalVersionAttribute"/> (SPEC F65.1)
-    /// — never a hardcoded literal that silently goes stale — falling back to "unknown" for a dev
-    /// build with no stamp at all (mirrors <c>SpectatorController.HostVersion</c>'s own fallback).
+    /// "GenWave/&lt;version&gt; (+repo)" (SPEC F76.1), byte-identical to the pre-F7 construction —
+    /// see <see cref="GenWave.Core.Http.EtiquetteUserAgent"/>'s own remarks for how the version
+    /// segment is derived and why this assembly's own <see cref="System.Reflection.Assembly"/> is
+    /// passed explicitly rather than resolved inside the shared helper.
     /// </summary>
-    static readonly string UserAgent =
-        $"GenWave/{typeof(MusicBrainzYearLookup).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown"} (+{ProjectUrl})";
+    static readonly string UserAgent = EtiquetteUserAgent.Build(typeof(MusicBrainzYearLookup).Assembly, ProjectUrl);
 
     /// <summary>
     /// Response-buffer ceiling for this typed client (review finding — mirrors

@@ -145,6 +145,31 @@ public sealed class SettingValidator
     internal const int RequestsWindowMinutesMin = 1;
     internal const int RequestsWindowMinutesMax = 1440;
 
+    // Context:{Key}:SegmentCadenceMinutes/PatterCadenceMinutes (SPEC F107.2/F107.5, F108.2, PLAN
+    // T226) — floors mirror ContextProviderSettings' own contract: no options class exists for a
+    // dynamic Context:{Key}:* key (no bound [Range]/IValidateOptions at all), so this validator is
+    // the operator-facing write-time floor. History (and any future non-floored provider) uses the
+    // generic 1-minute floor below; weather ALONE carries SPEC F108.2's own extra 30-minute floor
+    // (F2 fix, T226 review — the write-time range genuinely enforces it, not merely a comment
+    // claiming it does) via WeatherSegmentCadenceMinutesMin. Both provider's own
+    // GenWave.Context.ICadenceFlooredContextProvider capability, consulted directly by
+    // GenWave.Context.ContextPipeline (F4 fix), is the structural backstop for a value that reaches
+    // the pipeline some way other than this validator (an appsettings/env override). Both
+    // PatterCadenceMinutes floor at 0 — 0 legally means "off" (F107.5). All four share the generic
+    // 1440-minute (24h) F53.1 ceiling every other "minutes" knob on this list uses.
+    internal const int ContextSegmentCadenceMinutesMin = 1;
+    internal const int ContextSegmentCadenceMinutesMax = 1440;
+    internal const int WeatherSegmentCadenceMinutesMin = 30;
+    internal const int WeatherSegmentCadenceMinutesMax = 1440;
+    internal const int ContextPatterCadenceMinutesMin = 0;
+    internal const int ContextPatterCadenceMinutesMax = 1440;
+
+    // Context:{Key}:PersonaId (SPEC F107.7, PLAN T226) — ContextProviderSettings' own remarks: null,
+    // 0, and any negative value all mean "the on-air DJ"; only a positive value names an explicit
+    // persona. The floor here is a fat-finger guard (F53.1's own ethos), not a domain requirement —
+    // a negative value would still resolve safely if it slipped through some other path.
+    internal const int ContextPersonaIdMin = 0;
+
     // Maps each allowlisted key to a per-key (range + type) validator. An instance method (not a
     // static field) purely because the Station:Theme entry below closes over the constructor's own
     // themeCatalog — every other entry is a plain static delegate exactly as before.
@@ -329,6 +354,33 @@ public sealed class SettingValidator
             // HERE, at write time, rather than silently falling back to the default at read time the
             // way an unresolvable String value would (F102.6).
             ["Station:Theme"] = v => IsValidThemeSlug(v, themeCatalog),
+
+            // The F107 context seam (SPEC F107.2/F107.7, F108.1-F108.2, F109.1, STORY-297, PLAN
+            // T226) — Context:{Key}:* per registered IContextProvider. Enabled is a plain bool kill
+            // switch, same shape as every other surface toggle above.
+            ["Context:Weather:Enabled"] = IsBool,
+            // Weather's own SPEC F108.2 floor (30, not the generic 1) — see this class's own
+            // Context:{Key}:SegmentCadenceMinutes remarks above (F2 fix, T226 review).
+            ["Context:Weather:SegmentCadenceMinutes"] = v => IsIntInRange(v, WeatherSegmentCadenceMinutesMin, WeatherSegmentCadenceMinutesMax),
+            ["Context:Weather:PatterCadenceMinutes"] = v => IsIntInRange(v, ContextPatterCadenceMinutesMin, ContextPatterCadenceMinutesMax),
+            ["Context:Weather:PersonaId"] = v => IsIntInRange(v, ContextPersonaIdMin, int.MaxValue),
+            ["Context:History:Enabled"] = IsBool,
+            ["Context:History:SegmentCadenceMinutes"] = v => IsIntInRange(v, ContextSegmentCadenceMinutesMin, ContextSegmentCadenceMinutesMax),
+            ["Context:History:PatterCadenceMinutes"] = v => IsIntInRange(v, ContextPatterCadenceMinutesMin, ContextPatterCadenceMinutesMax),
+            ["Context:History:PersonaId"] = v => IsIntInRange(v, ContextPersonaIdMin, int.MaxValue),
+
+            // Station broadcast location (SPEC F108.1, F108.3, PLAN T226) — free text, deliberately
+            // unvalidated (StationLocation's own remarks: "blank or invalid" is
+            // WeatherContextProvider's own fail-closed check, not this validator's — mirrors
+            // Llm:Model/Tts:Fallback:Voice's own "no shape to police" posture).
+            ["Station:Location:Latitude"] = AlwaysValid,
+            ["Station:Location:Longitude"] = AlwaysValid,
+            ["Station:Location:SpokenName"] = AlwaysValid,
+
+            // Clock-anchored imaging knobs (SPEC F110.1/F110.3, gh-#381, PLAN T226) — plain bool
+            // kill switches, no consumer reads them yet (Station:Audience's own T111 precedent).
+            ["Station:Imaging:ClockAnchoredIdents"] = IsBool,
+            ["Station:Imaging:TimeAnnouncements"] = IsBool,
         };
 
     // ── Per-key validation ─────────────────────────────────────────────────────────────────────
@@ -864,6 +916,22 @@ public sealed class SettingValidator
             // moment it becomes selectable.
             => $"Value '{value}' is not valid for '{key}'. Must be one of the available theme " +
                $"slugs: {string.Join(", ", themeCatalog.All.Select(t => t.Slug))}.",
+        var k when k.Equals("Context:Weather:Enabled", StringComparison.OrdinalIgnoreCase) ||
+                   k.Equals("Context:History:Enabled", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
+        var k when k.Equals("Context:Weather:SegmentCadenceMinutes", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {WeatherSegmentCadenceMinutesMin} and {WeatherSegmentCadenceMinutesMax} (minutes) — {WeatherSegmentCadenceMinutesMin} is SPEC F108.2's enforced floor (twice an hour, at most).",
+        var k when k.Equals("Context:History:SegmentCadenceMinutes", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {ContextSegmentCadenceMinutesMin} and {ContextSegmentCadenceMinutesMax} (minutes).",
+        var k when k.Equals("Context:Weather:PatterCadenceMinutes", StringComparison.OrdinalIgnoreCase) ||
+                   k.Equals("Context:History:PatterCadenceMinutes", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {ContextPatterCadenceMinutesMin} and {ContextPatterCadenceMinutesMax} (minutes); 0 disables patter for this provider.",
+        var k when k.Equals("Context:Weather:PersonaId", StringComparison.OrdinalIgnoreCase) ||
+                   k.Equals("Context:History:PersonaId", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be a non-negative integer; 0 defers to the on-air DJ.",
+        var k when k.Equals("Station:Imaging:ClockAnchoredIdents", StringComparison.OrdinalIgnoreCase) ||
+                   k.Equals("Station:Imaging:TimeAnnouncements", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }

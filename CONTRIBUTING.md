@@ -8,7 +8,7 @@ Six laws, seven ids (L4 has two halves), enforced as fitness tests in `tests/Gen
 
 | Law | Rule | Why |
 |---|---|---|
-| `L1` | Inner projects (`Core`, `Orchestration`, `Tts`, `Loudness`) reference no ASP.NET, Npgsql, or Dapper | Keeps the hexagon's inner logic host-agnostic and unit-testable without infrastructure |
+| `L1` | Inner projects (`Core`, `Orchestration`, `Tts`, `Loudness`, `Context`) reference no ASP.NET, Npgsql, or Dapper | Keeps the hexagon's inner logic host-agnostic and unit-testable without infrastructure |
 | `L2` | Npgsql/Dapper appear only in `MediaLibrary`'s repository layer — composition-root construction is the *designed* exemption; a handful of pre-existing Host query sites are baselined (gh-#406) | One place owns SQL; connection-per-query safety stays auditable |
 | `L3` | `HttpClient` (and the handler family it can be built from) is constructed **or acquired** (injected, factory-resolved) only at designated client seams | SSRF surface control — every outbound origin is enumerable |
 | `L4-references` | `GenWave.Abstractions` references nothing beyond the BCL | The MIT NuGet contract is a product boundary; accidental deps become semver pain |

@@ -22,4 +22,12 @@ public enum SegmentKind
 
     /// <summary>Incoming DJ opens their shift at a roster boundary (SPEC F92.2).</summary>
     SignOn,
+
+    /// <summary>
+    /// A context provider's fact-based segment (SPEC F107.3, STORY-297) — weather, this-day-in-
+    /// history, or any future <c>IContextProvider</c> kind. Drained from a
+    /// <c>SpeechDeferralKind.Context</c> deferral at the next track boundary (F74.1); the wiring
+    /// that actually produces a <c>SegmentRequest</c> of this kind is T224's, not this enum's own.
+    /// </summary>
+    ContextSegment,
 }

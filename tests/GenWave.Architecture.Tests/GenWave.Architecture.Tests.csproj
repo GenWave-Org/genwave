@@ -51,6 +51,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\GenWave.Abstractions\GenWave.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Context\GenWave.Context.csproj" />
     <ProjectReference Include="..\..\src\GenWave.Core\GenWave.Core.csproj" />
     <ProjectReference Include="..\..\src\GenWave.Loudness\GenWave.Loudness.csproj" />
     <ProjectReference Include="..\..\src\GenWave.MediaLibrary\GenWave.MediaLibrary.csproj" />

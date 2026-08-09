@@ -11,7 +11,7 @@
 #     resident in the stack, and a 4GB box (Raspberry Pi 4, small VPS) can't afford it
 #   * drops api's hard `depends_on: kokoro: service_healthy` (keeps db/engine), so the
 #     api boots without any kokoro container existing at all
-#   * seeds `Tts:EngineByKind` mapping ALL SIX SegmentKinds -> "piper", so every on-air
+#   * seeds `Tts:EngineByKind` mapping ALL SEVEN SegmentKinds -> "piper", so every on-air
 #     render routes straight to the piper sidecar and never touches the absent primary
 #
 # The default experience is untouched: this file is opt-in via -f (never auto-loaded),
@@ -83,14 +83,15 @@ services:
       engine:
         condition: service_healthy              # convenience; the feeder retries regardless
     environment:
-      # All six SegmentKinds pinned to the piper engine (SPEC F70.3, STORY-191) — the
+      # All seven SegmentKinds pinned to the piper engine (SPEC F70.3, STORY-191; bumped
+      # from six to seven for ContextSegment, SPEC F107.3, STORY-297, PLAN T223) — the
       # allowlist's expected shape: a JSON object mapping SegmentKind names to
       # "kokoro"/"piper". With this map, every on-air render (TtsSegmentSource carries
-      # the kind) goes straight to Piper; kokoro is never contacted. If a seventh kind
+      # the kind) goes straight to Piper; kokoro is never contacted. If an eighth kind
       # is ever added to SegmentKind, add it here too — the gh-#242 spec pins this map
       # against the enum, so the build fails loudly rather than silently routing the
       # new kind at a kokoro that doesn't exist.
-      Tts__EngineByKind: '{"StationId":"piper","LeadIn":"piper","BackAnnounce":"piper","TimeDate":"piper","SignOff":"piper","SignOn":"piper"}'
+      Tts__EngineByKind: '{"StationId":"piper","LeadIn":"piper","BackAnnounce":"piper","TimeDate":"piper","SignOff":"piper","SignOn":"piper","ContextSegment":"piper"}'
       # gh-#334 — enrichment halved, by the same reasoning as the kokoro and LLM removals above.
       # This overlay exists because a 4GB/4-core box cannot afford the default topology, and the
       # ffmpeg analyzers are the heaviest sustained load GenWave produces: base compose's 4 pins

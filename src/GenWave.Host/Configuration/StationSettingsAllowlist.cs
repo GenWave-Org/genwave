@@ -336,6 +336,47 @@ public static class StationSettingsAllowlist
         // deployment. A fresh deploy with no key present resolves to the shipped default exactly
         // because the chain has a floor, not because appsettings.json states one.
         new("Station:Theme",                                  SettingApplyMode.Live,          SettingKind.Choice,     "", ShippedThemeChoices),
+
+        // The F107 context seam (SPEC F107.2/F107.7, F108.1-F108.2, F109.1, STORY-297, PLAN T226) —
+        // Context:{Key}:* per registered IContextProvider (weather, history today; any future
+        // provider joins with the identical four-key shape, no allowlist change needed beyond its
+        // own row). Read live via ConfigurationContextSettingsProvider, so a PUT here reaches the
+        // very next cadence-slot tick with no api restart. Enabled off by default (fail-closed,
+        // F107.2/F108.1); SegmentCadenceMinutes/PatterCadenceMinutes/PersonaId all default to the
+        // NoOp answer (60/0/null) when unset — see ContextProviderSettings' own remarks for why
+        // null/0/negative PersonaId all mean "the on-air DJ".
+        new("Context:Weather:Enabled",                        SettingApplyMode.Live,          SettingKind.Boolean,    ""),
+        // F108.2's segment-cadence floor (30 minutes, "the ruled hard max of twice an hour") is
+        // enforced HERE at write time — SettingValidator's own weather-specific range (F2/F4 fix,
+        // T226 review) — the operator-facing rule; WeatherContextProvider's own
+        // ICadenceFlooredContextProvider capability, consulted directly by ContextPipeline, is the
+        // structural backstop for a value that reaches it some other way (an appsettings/env
+        // override, which never passes through this validator at all).
+        new("Context:Weather:SegmentCadenceMinutes",          SettingApplyMode.Live,          SettingKind.Number,     "minutes"),
+        new("Context:Weather:PatterCadenceMinutes",           SettingApplyMode.Live,          SettingKind.Number,     "minutes"),
+        new("Context:Weather:PersonaId",                      SettingApplyMode.Live,          SettingKind.Number,     ""),
+        new("Context:History:Enabled",                        SettingApplyMode.Live,          SettingKind.Boolean,    ""),
+        new("Context:History:SegmentCadenceMinutes",          SettingApplyMode.Live,          SettingKind.Number,     "minutes"),
+        new("Context:History:PatterCadenceMinutes",           SettingApplyMode.Live,          SettingKind.Number,     "minutes"),
+        new("Context:History:PersonaId",                      SettingApplyMode.Live,          SettingKind.Number,     ""),
+
+        // Station broadcast location (SPEC F108.1, F108.3, PLAN T226) — read live through
+        // IStationLocationProvider by WeatherContextProvider, so a PUT here reaches the very next
+        // fetch with no api restart. Latitude/Longitude are raw strings, deliberately unvalidated
+        // (StationLocation's own remarks: "blank or invalid" is each coordinate-consuming provider's
+        // own fail-closed check, not this validator's) — WeatherContextProvider degrades to "off"
+        // rather than erroring on a bad value. SpokenName is the ONLY location string ever spoken
+        // (F108.3); blank means no place name is ever spoken.
+        new("Station:Location:Latitude",                      SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Station:Location:Longitude",                     SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Station:Location:SpokenName",                    SettingApplyMode.Live,          SettingKind.String,     ""),
+
+        // Clock-anchored imaging knobs (SPEC F110.1/F110.3, gh-#381) — allowlisted now per PLAN
+        // T226, read starting PLAN T230's top-of-hour producer (called by the same ContextTickerService
+        // this task adds). Both off by default — mirrors Station:Audience's own T111 precedent (the
+        // property + allowlist entry land before the first consumer).
+        new("Station:Imaging:ClockAnchoredIdents",            SettingApplyMode.Live,          SettingKind.Boolean,    ""),
+        new("Station:Imaging:TimeAnnouncements",              SettingApplyMode.Live,          SettingKind.Boolean,    ""),
     };
 
     /// <summary>All operator-editable settings, keyed by configuration key.</summary>

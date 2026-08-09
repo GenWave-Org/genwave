@@ -72,8 +72,13 @@ public static class FeatureRequestShoutOut
         // DjName (gh-#259) joined the MediaItem whitelist deliberately: it is a persona display
         // name stamped at plan time for Now Playing attribution — the same station/persona-identity
         // family as PersonaName/CounterpartName, never listener-supplied text.
+        // ContextFacts (SPEC F107.3, STORY-297, PLAN T224) joined the SegmentRequest whitelist
+        // deliberately: it is a vetted IContextProvider's own fetched facts (weather, this-day-in-
+        // history), never anything a listener typed — the copywriter prompt renders it under the
+        // news posture ("use only these facts, do not add facts"), structurally distinct from the
+        // request line's own listener-supplied wish text this pin guards against.
         static readonly string[] SegmentRequestStringMembers =
-            ["Voice", "StationName", "StationId", "PersonaName", "CounterpartName"];
+            ["Voice", "StationName", "StationId", "PersonaName", "CounterpartName", "ContextFacts"];
         static readonly string[] MediaItemStringMembers = ["MediaId", "Locator", "Title", "Artist", "Album", "Genre", "DjName"];
 
         [Fact]
