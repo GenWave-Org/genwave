@@ -95,11 +95,12 @@ internal static class HttpClientSeams
         "GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup",
         "GenWave.MediaLibrary.MediaLibraryServiceCollectionExtensions",
 
-        // Context providers (SPEC F108, PLAN T227) — the weather reference provider's typed client,
-        // plus its own composition root (ContextServiceCollectionExtensions.AddHttpClient<T>'s
+        // Context providers (SPEC F108/F109, PLAN T227/T228) — the weather + history providers' typed
+        // clients, plus their shared composition root (ContextServiceCollectionExtensions.AddHttpClient<T>'s
         // configure delegate references HttpClient directly, same shape as every other
         // *ServiceCollectionExtensions entry above/below).
         "GenWave.Context.Weather.WeatherContextProvider",
+        "GenWave.Context.History.HistoryContextProvider",
         "GenWave.Context.ContextServiceCollectionExtensions",
 
         // Host: stats polling (typed clients) + IHttpClientFactory askers + the composition root.

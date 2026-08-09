@@ -184,6 +184,30 @@ public static class FeatureContextPipeline
         }
 
         [Fact]
+        public async Task AHostileProviderWithNullSegmentFactsProducesNoOutputAndNoError()
+        {
+            // F4 fix, T228 review: ContextContent.SegmentFacts is declared `string` (never `string?`)
+            // but the record itself validates nothing at runtime — a broken/hostile third-party
+            // provider can still hand back one whose SegmentFacts is null despite that compile-time
+            // contract. Sanitizing that must degrade to skip-never-silence exactly like a thrown
+            // FetchAsync, never escape TickAsync as an uncaught ArgumentNullException. `null!`
+            // deliberately violates the contract to prove the guard — never legal production input.
+            var time = NewTime();
+            var provider = new FakeContextProvider("weather")
+            {
+                NextResult = () => new ContextContent(null!, null, time.GetUtcNow().AddHours(1)),
+            };
+            var logger = new CapturingLogger<ContextPipeline>();
+            var pipeline = new ContextPipeline([provider], EnabledSettings("weather", 60, 60), time, logger);
+
+            var due = await pipeline.TickAsync(CancellationToken.None);
+
+            Assert.Empty(due);
+            Assert.DoesNotContain(logger.Entries, entry => entry.Level >= LogLevel.Warning);
+            Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Information);
+        }
+
+        [Fact]
         public async Task StaleContentIsNeverServed()
         {
             var time = NewTime();

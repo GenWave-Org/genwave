@@ -268,10 +268,31 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
         if (!state.TryBeginFetch(slot))
             return;
 
-        ContextContent? content;
         try
         {
-            content = await provider.FetchAsync(ct).ConfigureAwait(false);
+            var content = await provider.FetchAsync(ct).ConfigureAwait(false);
+
+            if (content is null)
+            {
+                LogSkipOnce(state, slot, provider.Key, "fetch returned no content");
+                return;
+            }
+
+            // The fencing gate's sanitizing chokepoint (T228, carried forward from the T224/T225
+            // reviews; see ContextFactSanitizer's own remarks for why THIS call site, not each
+            // provider): every provider's raw ContextContent is neutralized here, once, before ever
+            // reaching the cache both TickAsync and TryTakeDuePatterFact read from — so no present or
+            // future provider (and no future consumer of ProviderState.Content) can bypass it by
+            // forgetting to call it themselves.
+            //
+            // Deliberately INSIDE this same try (F4 fix, T227/T228 review): ContextContent validates
+            // nothing at construction time, so a hostile/broken provider handing back a null
+            // SegmentFacts — despite its own `string`, never `string?`, contract — makes Sanitize
+            // throw ArgumentNullException. That must degrade to skip-never-silence exactly like a
+            // thrown FetchAsync (the catch below), never escape TickAsync/TryTakeDuePatterFact
+            // uncaught — moving this call outside the guard, as it stood before this fix, is exactly
+            // what let it.
+            state.CommitContent(Sanitize(content));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -284,17 +305,17 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
             // the cause — never ex.Message, which a provider could have populated with the very
             // provider-authored content F108.3 forbids echoing into a log line.
             LogSkipOnce(state, slot, provider.Key, $"fetch threw {ex.GetType().Name}");
-            return;
         }
-
-        if (content is null)
-        {
-            LogSkipOnce(state, slot, provider.Key, "fetch returned no content");
-            return;
-        }
-
-        state.CommitContent(content);
     }
+
+    /// <summary>Applies <see cref="ContextFactSanitizer.Sanitize"/> to every fact string a provider's
+    /// <see cref="ContextContent"/> carries — <see cref="ContextContent.PatterFact"/> is nullable and
+    /// preserved as null rather than sanitized into a spurious empty string.</summary>
+    static ContextContent Sanitize(ContextContent content) => content with
+    {
+        SegmentFacts = ContextFactSanitizer.Sanitize(content.SegmentFacts),
+        PatterFact = content.PatterFact is { } fact ? ContextFactSanitizer.Sanitize(fact) : null,
+    };
 
     /// <summary>Logs at most one Information line per (provider, cadence slot) — the first cause
     /// observed in a slot wins; every later skip evaluation in that same slot is silent.</summary>

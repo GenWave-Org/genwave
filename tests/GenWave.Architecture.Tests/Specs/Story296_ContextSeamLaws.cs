@@ -36,12 +36,13 @@ public static class FeatureContextSeamUnderTheLaws
                 HttpClientSeams.DesignatedSeams, seam => seam.Contains("WeatherContextProvider", StringComparison.Ordinal));
         }
 
-        [Fact(Skip = "Pending T228 — see docs/PLAN.md")]
+        [Fact]
         public void L3SeamListCarriesTheHistoryProvider()
         {
-            // Same rule for GenWave.Context.HistoryContextProvider.
-            // Assert.Contains(seams, s => s.Contains("HistoryContextProvider"));
-            Assert.Fail("pending T228");
+            // HttpClientSeams.DesignatedSeams gains GenWave.Context.History.HistoryContextProvider
+            // (the typed-client construction site) in the same change that introduces it.
+            Assert.Contains(
+                HttpClientSeams.DesignatedSeams, seam => seam.Contains("HistoryContextProvider", StringComparison.Ordinal));
         }
     }
 
