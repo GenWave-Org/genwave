@@ -8,17 +8,22 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- L1 framework-free inner project (SPEC F107.1/F107.2, STORY-296): only ILogger<T> is needed
-         today — no HTTP client (the T227/T228 providers add their own typed clients + L3 seam entries
-         later), no Options (the Host's IOptionsMonitor shim lands at T226 behind
-         IContextSettingsProvider, GenWave.Core.Abstractions — this project never sees IOptionsMonitor
-         directly). GenWave.Core pulls in GenWave.Abstractions transitively, the same shape
-         GenWave.Orchestration's csproj uses — not GenWave.Tts's FrameworkReference, which would pull
-         the whole ASP.NET Core shared framework into an L1 project. -->
+    <!-- L1 framework-free inner project (SPEC F107.1/F107.2, STORY-296): ILogger<T> plus, as of T227,
+         Microsoft.Extensions.Http/DependencyInjection.Abstractions for WeatherContextProvider's typed
+         HttpClient and this project's own ContextServiceCollectionExtensions — neither pulls ASP.NET
+         Core (L1's forbidden family is the Microsoft.AspNetCore.* prefix plus Npgsql/Dapper; these
+         Microsoft.Extensions.* packages are the same console/worker-safe shape GenWave.Orchestration's
+         csproj already uses). No Options — the Host's IOptionsMonitor shim lands at T226 behind
+         IContextSettingsProvider/IStationLocationProvider, GenWave.Core.Abstractions — this project
+         never sees IOptionsMonitor directly. GenWave.Core pulls in GenWave.Abstractions transitively,
+         the same shape GenWave.Orchestration's csproj uses — not GenWave.Tts's FrameworkReference,
+         which would pull the whole ASP.NET Core shared framework into an L1 project. -->
     <ProjectReference Include="..\GenWave.Core\GenWave.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 

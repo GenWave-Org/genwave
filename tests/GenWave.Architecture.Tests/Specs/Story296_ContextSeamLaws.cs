@@ -27,13 +27,13 @@ public static class FeatureContextSeamUnderTheLaws
             Assert.NotEmpty(context.Assembly.GetTypes());
         }
 
-        [Fact(Skip = "Pending T227 — see docs/PLAN.md")]
+        [Fact]
         public void L3SeamListCarriesTheWeatherProvider()
         {
-            // HttpClientSeams.DesignatedSeams gains GenWave.Context.WeatherContextProvider
-            // (or its typed-client factory site) in the same change that introduces it.
-            // Assert.Contains(seams, s => s.Contains("WeatherContextProvider"));
-            Assert.Fail("pending T227");
+            // HttpClientSeams.DesignatedSeams gains GenWave.Context.Weather.WeatherContextProvider
+            // (the typed-client construction site) in the same change that introduces it.
+            Assert.Contains(
+                HttpClientSeams.DesignatedSeams, seam => seam.Contains("WeatherContextProvider", StringComparison.Ordinal));
         }
 
         [Fact(Skip = "Pending T228 — see docs/PLAN.md")]

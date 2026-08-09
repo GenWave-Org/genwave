@@ -36,14 +36,29 @@ using GenWave.Core.Domain;
 /// provider's <see cref="IContextProvider.Key"/> and the cause — never a warning or error (an
 /// external context source being unavailable is ordinary operation, not a fault), and never the
 /// provider's own facts (F108.3 forbids echoing coordinates or any other provider-authored content
-/// into a log line). A DISABLED provider is the one skip-never-silence cause NOT governed by that
-/// per-slot cadence (F7 fix, T222 review): <see cref="ContextProviderSettings.SegmentCadenceMinutes"/>
-/// clamps to one minute for a disabled provider (whose configured cadence is typically still the
-/// zero-value default), so a per-slot log there would mean one Information line per registered
-/// provider EVERY MINUTE, forever, out of the box. Disabled instead logs on the enabled→disabled
-/// transition edge only (the gh-#338 precedent) — one line when a provider is first observed
-/// disabled, silence for as long as it stays that way, and a fresh line the next time it goes
-/// disabled again after being re-enabled.
+/// into a log line). Two skip-never-silence causes are NOT governed by that per-slot cadence (F7 fix,
+/// T222 review; F2 fix, T227 review) — both are long-lived operator-controlled STATES, not transient
+/// fetch outcomes, so logging them every slot forever would mean one Information line per registered
+/// provider every cadence tick, out of the box, for as long as an operator leaves them that way:
+/// <list type="bullet">
+/// <item>DISABLED: <see cref="ContextProviderSettings.SegmentCadenceMinutes"/> clamps to one minute
+/// for a disabled provider (whose configured cadence is typically still the zero-value default), so a
+/// per-slot log there would mean one line EVERY MINUTE. Logs on the enabled→disabled transition edge
+/// only (the gh-#338 precedent).</item>
+/// <item>SELF-GATED UNAVAILABLE (<see cref="ISelfGatingContextProvider"/>): a provider that can tell
+/// this pipeline it has nothing to produce WITHOUT a fetch (e.g. <c>WeatherContextProvider</c>'s
+/// F108.1 fail-closed coordinate check) gets the exact same edge-triggered treatment, via the same
+/// mechanism, on its own independent edge — checked in BOTH <see cref="TickAsync"/> and
+/// <see cref="TryTakeDuePatterFact"/> (a review-round fix: checking it in only one lane left the
+/// other free to keep vending a provider's last-fetched content for up to its own
+/// <see cref="ContextContent.FreshUntil"/> after the provider went unavailable). The SAME edge also
+/// clears that provider's cached content (<c>ProviderState.ClearContent</c>) — nothing repopulates
+/// it while unavailable, so this is the one edit that keeps every reader of
+/// <c>ProviderState.Content</c> honest, present callers and future ones alike, not just the two
+/// lanes that happen to gate on <see cref="ISelfGatingContextProvider.IsAvailable"/> today.</item>
+/// </list>
+/// Both: one line when first observed in that state, silence for as long as it stays that way, and a
+/// fresh line the next time it re-enters that state after leaving it.
 /// </para>
 ///
 /// <para>
@@ -143,6 +158,33 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
 
             state.NoteEnabled(true); // Re-arms the disabled-edge log for the NEXT time this provider goes disabled.
 
+            if (provider is ISelfGatingContextProvider gated && !gated.IsAvailable)
+            {
+                // Edge-triggered (F2 fix, T227 review) — the exact mirror of the disabled branch
+                // above, on its own independent edge (see the class remarks). Crucially, this never
+                // calls FetchAsync: that is what keeps EnsureFetchedAsync's own "fetch returned no
+                // content" line — an honest cause for a GENUINE null reply — from also firing for a
+                // cause that was never a fetch attempt at all.
+                if (state.NoteAvailable(false))
+                {
+                    // Invalidates whatever this provider fetched before going unavailable (F2/F3
+                    // interaction fix, T227 re-review): without this, content already cached from a
+                    // healthy slot would keep reading back from ProviderState.Content — and, before
+                    // TryTakeDuePatterFact's own gate below existed, kept being VENDED — for up to
+                    // its own FreshUntil, long after the operator broke the config. Nothing
+                    // repopulates content while unavailable (EnsureFetchedAsync is never reached
+                    // below this branch), so clearing once, here, on the edge, covers the entire
+                    // unavailable streak.
+                    state.ClearContent();
+                    logger.LogInformation(
+                        "Context provider {ProviderKey} produced no output: misconfigured.", provider.Key);
+                }
+
+                continue;
+            }
+
+            state.NoteAvailable(true); // Re-arms the unavailable-edge log for the NEXT time this provider goes unavailable.
+
             var slot = ComputeSlot(now, settings.SegmentCadenceMinutes);
             await EnsureFetchedAsync(provider, state, slot, ct).ConfigureAwait(false);
 
@@ -191,6 +233,15 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
         {
             var settings = settingsProvider.For(provider.Key);
             if (!settings.Enabled)
+                continue;
+
+            // Mirrors the Enabled check immediately above, silently — no log call here (F2/F3
+            // interaction fix, T227 re-review): TickAsync already owns the ONE edge-triggered
+            // Information line for this cause (see the class remarks); this gate exists purely so
+            // this lane stops vending the instant a provider self-reports unavailable, whether or
+            // not TickAsync has run since — it never depended on TickAsync's own content-clearing to
+            // be correct, only to be prompt.
+            if (provider is ISelfGatingContextProvider gated && !gated.IsAvailable)
                 continue;
 
             var state = states[provider.Key];
@@ -301,6 +352,12 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
         /// disable logs exactly once again.</summary>
         bool disabledLogged;
 
+        /// <summary>Whether the self-gated-unavailable cause (<see cref="ISelfGatingContextProvider"/>,
+        /// F2) has already been logged for the CURRENT unavailable streak — cleared the next time this
+        /// provider is observed available. Tracked separately from <see cref="disabledLogged"/> so the
+        /// "disabled" and "misconfigured" edges never share or clobber one another's state.</summary>
+        bool unavailableLogged;
+
         /// <summary>The most recently committed fetch content, or <see langword="null"/> if this
         /// slot's attempt has not yet succeeded (or has not been attempted). Freshness against
         /// <see cref="ContextContent.FreshUntil"/> is the caller's own comparison — the record itself
@@ -335,6 +392,20 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
             lock (gate)
             {
                 content = fetchedContent;
+            }
+        }
+
+        /// <summary>Clears any cached content (F2/F3 interaction fix, T227 re-review) — called on the
+        /// self-gated-unavailable edge (<see cref="NoteAvailable"/> returning <see langword="true"/>),
+        /// the moment a provider's last-fetched content stops being trustworthy. Nothing repopulates
+        /// content while a provider stays unavailable (<c>EnsureFetchedAsync</c> is never reached for
+        /// it), so clearing once, on the edge, is enough for the whole unavailable streak — there is
+        /// no need to call this again on every subsequent unavailable tick.</summary>
+        public void ClearContent()
+        {
+            lock (gate)
+            {
+                content = null;
             }
         }
 
@@ -403,6 +474,29 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
                     return false;
 
                 disabledLogged = true;
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Feeds this tick's <see cref="ISelfGatingContextProvider.IsAvailable"/> reading and reports
+        /// whether the "misconfigured" cause should be logged THIS call — the exact mirror of
+        /// <see cref="NoteEnabled"/>, on its own independent edge (F2, T227 review).
+        /// </summary>
+        public bool NoteAvailable(bool available)
+        {
+            lock (gate)
+            {
+                if (available)
+                {
+                    unavailableLogged = false;
+                    return false;
+                }
+
+                if (unavailableLogged)
+                    return false;
+
+                unavailableLogged = true;
                 return true;
             }
         }

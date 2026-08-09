@@ -15,12 +15,15 @@ namespace GenWave.Architecture.Tests.Support;
 /// <c>HttpClient</c> green-lights it. <see cref="ForbiddenTypes"/> widens the forbid to the whole
 /// construction/invocation family: <c>HttpClient</c>, <c>HttpMessageInvoker</c>,
 /// <c>HttpMessageHandler</c>, <c>HttpClientHandler</c>, <c>SocketsHttpHandler</c>. Verified against
-/// the real production graph: the widened forbid still finds exactly the same 17 designated-seam
-/// types below (18 counting <c>Program</c>'s composition-root wiring), zero false positives — nothing
-/// in GenWave's production code touches <c>HttpMessageInvoker</c>/<c>HttpMessageHandler</c>/
-/// <c>HttpClientHandler</c>/<c>SocketsHttpHandler</c> outside those same seam sites (Program.cs's
+/// the real production graph: the widened forbid still finds exactly the types
+/// <see cref="DesignatedSeams"/> below names — including <c>Program</c>'s composition-root wiring —
+/// zero false positives — nothing in GenWave's production code touches
+/// <c>HttpMessageInvoker</c>/<c>HttpMessageHandler</c>/<c>HttpClientHandler</c>/
+/// <c>SocketsHttpHandler</c> outside those same seam sites (Program.cs's
 /// <c>ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler {...})</c> is exactly the kind of
-/// construction the wider forbid exists to catch).
+/// construction the wider forbid exists to catch). Deliberately count-free here (a hardcoded count in
+/// this prose has drifted out of sync with <see cref="DesignatedSeams"/> before) — the list itself,
+/// and the tests that assert against it, are the source of truth for how many seams exist.
 ///
 /// <b>Program.cs is now in scope.</b> <see cref="HttpClientMetadataScan"/> reads every
 /// <c>TypeDefinition</c> row directly, including the compiler-generated <c>Program</c> class
@@ -91,6 +94,13 @@ internal static class HttpClientSeams
         "GenWave.MediaLibrary.ExplicitClassification.OllamaExplicitClassifier",
         "GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup",
         "GenWave.MediaLibrary.MediaLibraryServiceCollectionExtensions",
+
+        // Context providers (SPEC F108, PLAN T227) — the weather reference provider's typed client,
+        // plus its own composition root (ContextServiceCollectionExtensions.AddHttpClient<T>'s
+        // configure delegate references HttpClient directly, same shape as every other
+        // *ServiceCollectionExtensions entry above/below).
+        "GenWave.Context.Weather.WeatherContextProvider",
+        "GenWave.Context.ContextServiceCollectionExtensions",
 
         // Host: stats polling (typed clients) + IHttpClientFactory askers + the composition root.
         "GenWave.Host.Stats.IcecastListenerStatsSource",
