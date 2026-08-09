@@ -263,8 +263,10 @@ public static class FeatureLlmCopyWriter
         [Fact]
         public async Task AnnouncerCopyWithAColonButNoMetaWordIsKeptIntact()
         {
-            // gh-#186 guard 1 — "Up next:" is ordinary announcer phrasing, no meta word: nothing
-            // is dropped even though a colon precedes a quote.
+            // gh-#186 guard — "Up next:" is ordinary announcer phrasing, no meta word: nothing
+            // is dropped even though a colon precedes a quote. This is the ONLY guard left after
+            // gh-#430 widened the strip to unquoted bodies too — see the meta-word-window pair
+            // that StripChatPreamble's remarks call out as the whole heuristic.
             mock.ReplyContent = "Up next: \"Blue Monday\" by New Order, right here on GenWave.";
             var (writer, _, _) = BuildWriter(mock.BaseUri.ToString());
 
@@ -274,16 +276,49 @@ public static class FeatureLlmCopyWriter
         }
 
         [Fact]
-        public async Task AMetaWordWhoseQuoteDoesNotRunToTheEndIsKeptIntact()
+        public async Task LegitCopyWithAColonButNoMetaWordSurvivesUntouched()
         {
-            // gh-#186 guard 2 — a mid-copy quotation with trailing text is not a preamble+body
-            // shape, even when a meta word sits before the colon.
+            // gh-#430 (c) — ordinary announcer copy that happens to contain a colon, and has no
+            // meta word before it, must survive byte-identical: the two-gate heuristic (colon
+            // position + meta word) is deliberately not widened any further than this.
+            mock.ReplyContent = "Coming up at nine: a jazz number to ease you into the evening.";
+            var (writer, _, _) = BuildWriter(mock.BaseUri.ToString());
+
+            var result = await writer.WriteAsync(LeadInRequest(), CancellationToken.None);
+
+            Assert.Equal("Coming up at nine: a jazz number to ease you into the evening.", result.Text);
+        }
+
+        [Fact]
+        public async Task AnUnquotedBodyAfterAPreambleIsStripped()
+        {
+            // gh-#430 root cause — the ORIGINAL bug: an unquoted body used to fail gate 3 (the
+            // "quoted block running to end" requirement) and the whole string, preamble included,
+            // aired live. Gates 1+2 (colon ≤80 chars, meta word present) are now sufficient on
+            // their own; the body needs no quotes at all.
+            mock.ReplyContent = "Here is the lead-in announcement: Tonight we're taking a detour "
+                + "through some deep cuts.";
+            var (writer, _, _) = BuildWriter(mock.BaseUri.ToString());
+
+            var result = await writer.WriteAsync(LeadInRequest(), CancellationToken.None);
+
+            Assert.Equal("Tonight we're taking a detour through some deep cuts.", result.Text);
+        }
+
+        [Fact]
+        public async Task AMetaWordWhoseQuoteDoesNotRunToTheEndStillDropsThePreamble()
+        {
+            // gh-#430 (b) — a body that OPENS with a quote but has trailing text after the
+            // closing one is no longer a reason to keep the preamble around: the preamble is
+            // still gone, and the embedded quote marks ride through untouched (StripWrappingQuotes
+            // only unwraps a string that IS entirely one quoted block) — the sensible reading is
+            // "the chat preamble is gone; the quoted title inside stays quoted".
             mock.ReplyContent = "Sure: \"Great tune\" - and plenty more where that came from.";
             var (writer, _, _) = BuildWriter(mock.BaseUri.ToString());
 
             var result = await writer.WriteAsync(LeadInRequest(), CancellationToken.None);
 
-            Assert.Equal("Sure: \"Great tune\" - and plenty more where that came from.", result.Text);
+            Assert.Equal("\"Great tune\" - and plenty more where that came from.", result.Text);
         }
     }
 

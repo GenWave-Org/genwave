@@ -593,16 +593,28 @@ public sealed class LlmCopyWriter(
     }
 
     /// <summary>
-    /// gh-#186: drops a chat preamble in front of the copy ("Here's your lead-in copy:" followed
-    /// by the quoted body) — observed live rendering the preamble to air, because
-    /// <see cref="StripWrappingQuotes"/> only fires when the text STARTS with a quote. Three
-    /// conditions must all hold before anything is dropped, so legitimate announcer copy that
-    /// merely contains a colon survives: the first colon comes early (≤80 chars) with no quote or
-    /// line break before it; the preamble contains a meta word (<see cref="PreambleMetaWordPattern"/> —
-    /// a model talking ABOUT the copy, e.g. "Up next:" has none and is kept); and everything after
-    /// the colon is one quoted block running to the very end (a mid-copy quotation like
-    /// <c>Up next: "Blue Monday" by New Order</c> has trailing text and is kept). Returns the
-    /// quoted body still wrapped — <see cref="StripWrappingQuotes"/> unwraps it next.
+    /// gh-#186, widened by gh-#430: drops a chat preamble in front of the copy — observed live
+    /// rendering the preamble to air, both in the originally-fixed quoted-body shape ("Here's
+    /// your lead-in copy:" followed by a quoted body) and, per gh-#430, with an entirely UNQUOTED
+    /// body ("Here is the lead-in announcement: Tonight we're taking a detour..."). Two
+    /// conditions must both hold before anything is dropped, so legitimate announcer copy that
+    /// merely contains a colon survives untouched: the first colon comes early (≤80 chars) with no
+    /// quote or line break before it, and the preamble contains a meta word (see
+    /// <see cref="PreambleMetaWordPattern"/> — a model talking ABOUT the copy; ordinary phrasing
+    /// like "Up next:" has none and is kept). This pair is the whole heuristic and is deliberately
+    /// not widened further (gh-#430 review note) — it is what keeps legit copy such as
+    /// <c>Coming up at nine: a jazz number</c> intact.
+    ///
+    /// Once both gates hold, the preamble is gone: everything after the colon, trimmed, is what
+    /// remains, whatever shape the body takes. A body that is one quoted block running to the very
+    /// end (the gh-#186 shape) is returned still wrapped — <see cref="StripWrappingQuotes"/>
+    /// unwraps it next. A body with NO quotes at all (gh-#430) is returned as-is; there is nothing
+    /// left to unwrap. A body that OPENS with a quote but has trailing text after the closing one
+    /// (<c>Sure: "Great tune" - and plenty more where that came from.</c>) is also returned as-is —
+    /// <see cref="StripWrappingQuotes"/> only unwraps a string that IS entirely one quoted block,
+    /// so the embedded quote marks ride through untouched, which is the sensible reading: the chat
+    /// preamble is gone, and the quoted title inside the body stays exactly as quoted. A body under
+    /// 2 chars after trimming is treated as no real body at all, and the original text survives.
     /// </summary>
     static string StripChatPreamble(string text)
     {
@@ -617,12 +629,7 @@ public sealed class LlmCopyWriter(
             return text;
 
         var body = text[(colon + 1)..].Trim();
-        if (body.Length < 2)
-            return text;
-
-        var opensQuoted = body[0] is '"' or '“';
-        var closesQuoted = body[^1] is '"' or '”';
-        return opensQuoted && closesQuoted ? body : text;
+        return body.Length < 2 ? text : body;
     }
 
     static string StripWrappingQuotes(string text)
