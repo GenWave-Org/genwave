@@ -79,24 +79,49 @@ public static class FeaturePatterTemplates
 
     public sealed class ScenarioTimeDateTemplate
     {
+        // SPEC F110.3, PLAN T232: top-of-hour, o'clock phrasing — the hour spoken as a word (never
+        // digits), read off SegmentRequest.LocalNow's hour component. Minutes never enter into it:
+        // the ONE producer of this kind (ClockAnchoredImagingProducer) only ever arms a top-of-hour
+        // due instant, so a 14:37 LocalNow below is a stand-in for "whatever minute the drain
+        // happens to land on" — the template only ever reads the hour.
         readonly PatterTemplateRenderer renderer = new();
 
         [Fact]
-        public void OutputContainsClockLikeTimeString()
+        public void OutputSpeaksTheHourAsAWord()
         {
             var local = new DateTimeOffset(2026, 6, 9, 14, 37, 0, TimeSpan.FromHours(-4));
             var req = new SegmentRequest(SegmentKind.TimeDate, "af_heart", "GenWave", null, local, "test-station");
             var text = renderer.Expand(req);
-            Assert.Matches(@"\b\d{1,2}[:.]\d{2}\b", text);
+            Assert.Contains("two o'clock", text, StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]
-        public void OutputContainsStationName()
+        public void OutputNamesNoStationAndNoDigits()
         {
+            // Deliberately the simplest honest phrasing (T232 ruling): no station name (the
+            // station-id ident already carries branding), no digits (spoken words only) — an
+            // LLM-authored blurb, not this zero-LLM template, is where either would belong if ever
+            // wanted.
             var local = new DateTimeOffset(2026, 6, 9, 14, 37, 0, TimeSpan.FromHours(-4));
             var req = new SegmentRequest(SegmentKind.TimeDate, "af_heart", "GenWave", null, local, "test-station");
             var text = renderer.Expand(req);
-            Assert.Contains("GenWave", text);
+            Assert.DoesNotContain("GenWave", text);
+            Assert.DoesNotMatch(@"\d", text);
+        }
+
+        [Fact]
+        public void MidnightAndNoonBothSpeakTwelve()
+        {
+            var midnight = new DateTimeOffset(2026, 6, 9, 0, 5, 0, TimeSpan.FromHours(-4));
+            var noon = new DateTimeOffset(2026, 6, 9, 12, 5, 0, TimeSpan.FromHours(-4));
+
+            var midnightText = renderer.Expand(
+                new SegmentRequest(SegmentKind.TimeDate, "af_heart", "GenWave", null, midnight, "test-station"));
+            var noonText = renderer.Expand(
+                new SegmentRequest(SegmentKind.TimeDate, "af_heart", "GenWave", null, noon, "test-station"));
+
+            Assert.Contains("twelve o'clock", midnightText, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("twelve o'clock", noonText, StringComparison.OrdinalIgnoreCase);
         }
     }
 

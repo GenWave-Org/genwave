@@ -32,6 +32,19 @@ public sealed class PatterTemplateRenderer
     /// method still needs a correct, non-throwing arm for both kinds regardless, since
     /// <c>DegradationGatedCopyWriter</c> can route straight here (e.g. Hard mode) before that drop
     /// ever gets a chance to apply.
+    ///
+    /// <see cref="SegmentKind.TimeDate"/> (SPEC F110.3, STORY-302, PLAN T232) is ALWAYS this rung —
+    /// zero LLM, <c>LlmCopyWriter.IsLlmAuthored</c> does not list it, so there is no rung above this
+    /// one to miss. Top-of-hour, o'clock phrasing only (the producer that arms this kind is a
+    /// top-of-hour trigger, never a mid-hour one, so minutes never enter into it):
+    /// <see cref="SegmentRequest.LocalNow"/>'s hour, mapped 24h→12h (0 and 12 both read "twelve") and
+    /// spoken as a word via <see cref="HourWord"/>, never digits — "It's two o'clock," not "It's 2
+    /// o'clock." Deliberately the ONLY thing this line says: no station name, no minute, nothing an
+    /// LLM would add — the simplest honest phrasing the acceptance criteria (templated, station-voiced,
+    /// forever-cacheable) call for. The Orchestrator's own drain arm stamps this field from the
+    /// deferral's <c>Due</c> instant (the top of the hour the announcement was ARMED for), never a
+    /// fresh drain-time clock read, so the SAME hour always renders the SAME text — the cache-hit half
+    /// of F110.3's acceptance.
     /// </summary>
     public string Expand(SegmentRequest request) => request.Kind switch
     {
@@ -52,7 +65,7 @@ public sealed class PatterTemplateRenderer
                                           { } t                    => $"That was {t.Title}.",
                                           null                     => "That was your last track.",
                                       },
-        SegmentKind.TimeDate       => $"It's {request.LocalNow:h:mm tt} here on {request.StationName}.",
+        SegmentKind.TimeDate       => $"It's {HourWord(request.LocalNow.Hour)} o'clock.",
         SegmentKind.SignOff        => request.CounterpartName switch
                                       {
                                           { Length: > 0 } name => $"That's me for now — coming up next, {name}.",
@@ -76,4 +89,20 @@ public sealed class PatterTemplateRenderer
         _                          => throw new ArgumentOutOfRangeException(
                                         nameof(request.Kind), request.Kind, message: null),
     };
+
+    // Word forms for the 12 possible top-of-hour values (SPEC F110.3) — index 0 is "one" o'clock,
+    // index 11 (the wrap) is "twelve". Spoken words, deliberately never digits: a TTS engine reads
+    // "2" ambiguously (could land as "two" or spell out "2"), but "two" is unambiguous.
+    static readonly string[] HourWords =
+    [
+        "one", "two", "three", "four", "five", "six",
+        "seven", "eight", "nine", "ten", "eleven", "twelve",
+    ];
+
+    /// <summary>Maps a 24-hour clock hour (0-23) to its spoken 12-hour word — 0 and 12 both "twelve".</summary>
+    static string HourWord(int hour24)
+    {
+        var hour12 = hour24 % 12;
+        return HourWords[hour12 == 0 ? 11 : hour12 - 1];
+    }
 }

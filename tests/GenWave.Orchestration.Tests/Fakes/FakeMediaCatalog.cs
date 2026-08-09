@@ -59,6 +59,25 @@ sealed class FakeMediaCatalog : IMediaCatalog
     /// </summary>
     public bool ScriptedRepeatedArtist { get; set; }
 
+    /// <summary>
+    /// SPEC F110.2 (STORY-301, PLAN T232) — scripts <see cref="GetRandomReadyByImagingKindAsync"/>'s
+    /// return value directly, independent of <see cref="pool"/> (the music-selection pool above): a
+    /// pool-first ident spec cares about a DIFFERENT catalog query entirely, over a DIFFERENT (usually
+    /// empty) collection. <see langword="null"/> (the default) is "no pool" — the drain's own
+    /// template-fallback signal, the same answer this interface's own default implementation gives a
+    /// caller with no override at all.
+    /// </summary>
+    public MediaReference? ImagingPoolResult { get; set; }
+
+    /// <summary>Every (scope, kind) pair passed to <see cref="GetRandomReadyByImagingKindAsync"/>, in call order.</summary>
+    public List<(LibraryScope Scope, ImagingKind Kind)> ImagingKindCalls { get; } = [];
+
+    public Task<MediaReference?> GetRandomReadyByImagingKindAsync(LibraryScope scope, ImagingKind kind, CancellationToken ct)
+    {
+        ImagingKindCalls.Add((scope, kind));
+        return Task.FromResult(ImagingPoolResult);
+    }
+
     public Task<MediaReference?> GetByIdAsync(LibraryScope scope, string mediaId, CancellationToken ct)
         => Task.FromResult(pool.FirstOrDefault(m => m.MediaId == mediaId));
 

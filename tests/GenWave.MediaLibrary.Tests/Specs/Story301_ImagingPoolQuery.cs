@@ -7,6 +7,8 @@
 using Dapper;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.MediaLibrary.Catalog;
+using GenWave.MediaLibrary.Tests.Fakes;
 
 namespace GenWave.MediaLibrary.Tests.Specs;
 
@@ -151,6 +153,47 @@ public static class FeatureImagingPoolQuery
 
             var catalog = (IMediaCatalog)Harness.Repo(db);
             var result = await catalog.GetRandomReadyByImagingKindAsync(LibraryScope.None, ImagingKind.StationId, CancellationToken.None);
+
+            Assert.Null(result);
+        }
+    }
+
+    // SPEC F95.4 ruling (PLAN T232): the pool path is NOT a never-silence floor — it has a
+    // templated TTS fallback, unlike GetRandomReadyAsync's own documented exception one method
+    // over — so ExplicitPredicate applies here exactly like every other pool-predicate query.
+    // "Nothing explicit airs on an everyone station" (F95.6) stays absolute; the cost of applying
+    // it here is only ever a template fallback, never dead air.
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioExplicitPostureExclusion(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AnExplicitMarkedStationIdRowNeverReturnsOnAnEveryoneStation()
+        {
+            await db.ResetAsync();
+            var repo = Harness.Repo(db, audiencePosture: new FakeAudiencePostureProvider(AudiencePosture.Everyone));
+
+            var id = await repo.InsertDiscoveredAsync(
+                "/imaging/explicit-ident.wav", "wav", 1, Harness.Mtime, CancellationToken.None);
+            await repo.WriteEnrichmentAsync(id, new EnrichmentResult(
+                DurationMs: 5_000, SampleRate: 44_100, Channels: 2, BitrateKbps: 1000,
+                Title: "Explicit Ident", Artist: "Station Name", Album: "al", AlbumArtist: "aa", Genre: "g",
+                TrackNo: 1, Year: 2020,
+                Explicit: true,
+                IntegratedLufs: -14.0, TruePeakDbtp: -1.0, Measurable: true,
+                CueInSec: null, CueOutSec: null, CueAnalyzedAt: DateTime.UtcNow,
+                IntroEnergy: null, OutroEnergy: null, EnergyAnalyzedAt: DateTime.UtcNow,
+                Bpm: null, BpmAnalyzedAt: DateTime.UtcNow), CancellationToken.None);
+            await using (var conn = await db.DataSource.OpenConnectionAsync())
+            {
+                await conn.ExecuteAsync(
+                    "update library.media set imaging_kind = @kind where id = @id",
+                    new { id, kind = ImagingKindTokens.ToToken(ImagingKind.StationId) });
+            }
+
+            var catalog = (IMediaCatalog)repo;
+            var result = await catalog.GetRandomReadyByImagingKindAsync(
+                DefaultScope, ImagingKind.StationId, CancellationToken.None);
 
             Assert.Null(result);
         }

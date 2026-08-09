@@ -18,9 +18,15 @@ public static class OrchestrationServiceCollectionExtensions
     /// boundary-bias providers, <see cref="MusicSelectionPolicy"/>, <c>ITtsSegmentSource</c>,
     /// <c>IActivePersonaAccessor</c>, and the <see cref="SpeechDeferralQueue"/>/<see cref="TimeProvider"/>
     /// this method also registers. <see cref="MusicSelectionPolicy"/> itself (F112, STORY-295) owns
-    /// the pick ladder — <c>IMediaCatalog</c>/<c>IEnvelopeProvider</c>/<see cref="IPersonaPickProvider"/>/
+    /// the pick ladder — <c>IEnvelopeProvider</c>/<see cref="IPersonaPickProvider"/>/
     /// <see cref="IRequestFulfillmentSource"/> moved with it off <see cref="Orchestrator"/>'s own
-    /// constructor.
+    /// constructor. <c>IMediaCatalog</c> itself is registered by <c>AddMediaLibrary</c> (GenWave.MediaLibrary),
+    /// not this method — it has TWO independent consumers today: <see cref="MusicSelectionPolicy"/>'s
+    /// pick ladder, and (SPEC F110.2, PLAN T232) <see cref="Orchestrator"/>'s own optional constructor
+    /// parameter, for the top-of-hour StationId drain's pool-first lookup. A host that never wires
+    /// <c>AddMediaLibrary</c> (no catalog available at all) leaves that parameter at its default
+    /// (<see langword="null"/>) — the drain then skips the pool outright and falls straight to the
+    /// templated TTS ident, same as an empty pool would.
     ///
     /// <para>
     /// <b>Handoff ceremony seams (SPEC F92.1, STORY-243, PLAN T124) — deliberately NOT registered

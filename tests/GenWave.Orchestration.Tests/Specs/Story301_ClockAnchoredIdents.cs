@@ -1,5 +1,6 @@
 // STORY-301 — Top-of-hour idents from the imaging pool (F110.1, F110.2, gh-#381)
 
+using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Orchestration.Tests.Fakes;
 
@@ -7,6 +8,37 @@ namespace GenWave.Orchestration.Tests.Specs;
 
 public static class FeatureClockAnchoredIdents
 {
+    // PoolFirstAiring/EmptyPoolFallsBackToTheTemplatedIdent (PLAN T232) exercise the ORCHESTRATOR's
+    // own drain arm, not the producer above them — mirrors Story297_ContextSegmentsAir.cs's harness
+    // idiom (a real Orchestrator wired to fakes at the catalog/tts/clock seams).
+
+    static MediaReference MakeTrackRef(string id) => new(
+        id, $"/media/{id}.mp3", $"Track {id}", new Loudness(-23.0, -1.0, true),
+        null, null, null, null, null, null, null, null);
+
+    static Orchestrator BuildOrchestrator(
+        SpeechDeferralQueue queue, TimeProvider clock, FakeTtsSegmentSource tts, FakeMediaCatalog catalog,
+        CadenceConfig? cadence = null)
+    {
+        var identityProvider = new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default"));
+        var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
+        var cadenceProvider = new FakeCadenceProvider(cadence ?? new CadenceConfig
+        {
+            LeadInBeforeEachTrack = false,
+            BackAnnounceAfterEachTrack = false,
+            StationIdEveryNUnits = 0,
+        });
+        var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
+        var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
+
+        return new Orchestrator(
+            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, tts,
+            new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
+            new FakeRenderBudgetProvider(TimeSpan.FromSeconds(30)),
+            queue, clock, new FakeBoundaryBiasProvider(TimeSpan.Zero),
+            catalog: catalog);
+    }
+
     // ---------------------------------------------------------------------
     // HAPPY PATH
     // ---------------------------------------------------------------------
@@ -88,22 +120,99 @@ public static class FeatureClockAnchoredIdents
             Assert.Contains(due, deferral => deferral.Kind == SpeechDeferralKind.TimeDate);
         }
 
-        [Fact(Skip = "Pending T232 — see docs/PLAN.md")]
-        public void PoolFirstAiring()
+        [Fact]
+        public async Task PoolFirstAiring()
         {
             // With a ready authored station_id row in the fake catalog, the drain airs the
-            // authored MediaItem (no TTS render for the ident).
-            // Assert.Equal(authoredItem.Id, bufferedItem.Id);
-            Assert.Fail("pending T232");
+            // authored MediaItem directly — no TTS render for the ident.
+            var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-08-08T00:00:00Z"));
+            var queue = new SpeechDeferralQueue(clock);
+            var tts = new FakeTtsSegmentSource();
+            var scope = new LibraryScope([1L]);
+            var authoredIdent = new MediaReference(
+                "42", "/imaging/ident.wav", "Station Ident", new Loudness(-14.0, -1.0, true),
+                DurationMs: 5000, SampleRate: null, Channels: null, BitrateKbps: null,
+                Artist: "Legacy Voice", Album: null, Genre: null, Year: null);
+            var catalog = new FakeMediaCatalog(MakeTrackRef("t1")) { ImagingPoolResult = authoredIdent };
+            var orchestrator = BuildOrchestrator(queue, clock, tts, catalog);
+
+            queue.Enqueue(SpeechDeferralKind.StationId, "cadence: test");
+
+            var first = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            Assert.NotNull(first);
+            Assert.Equal(authoredIdent.MediaId, first!.MediaId);
+            Assert.Equal(SegmentKind.StationId, first.SegmentKind);
+            Assert.Empty(tts.Requests); // pool-first — no TTS render at all for this ident
+
+            // The SAME scope the music pick uses (Station:Scope) — never a separate safe scope.
+            var call = Assert.Single(catalog.ImagingKindCalls);
+            Assert.Equal(scope.LibraryIds, call.Scope.LibraryIds);
+            Assert.Equal(ImagingKind.StationId, call.Kind);
         }
 
-        [Fact(Skip = "Pending T232 — see docs/PLAN.md")]
-        public void EmptyPoolFallsBackToTheTemplatedIdent()
+        [Fact]
+        public async Task EmptyPoolFallsBackToTheTemplatedIdent()
         {
             // Empty pool ⇒ today's templated TTS ident renders unchanged (station voice,
             // never LLM-authored).
-            // Assert.Equal(SegmentKind.StationId, capturedRequest.Kind);
-            Assert.Fail("pending T232");
+            var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-08-08T00:00:00Z"));
+            var queue = new SpeechDeferralQueue(clock);
+            var tts = new FakeTtsSegmentSource();
+            var catalog = new FakeMediaCatalog(MakeTrackRef("t1")); // ImagingPoolResult left null
+            var orchestrator = BuildOrchestrator(queue, clock, tts, catalog);
+
+            queue.Enqueue(SpeechDeferralKind.StationId, "cadence: test");
+
+            var first = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            Assert.NotNull(first);
+            var request = Assert.Single(tts.Requests, r => r.Kind == SegmentKind.StationId);
+            Assert.Equal("default", request.Voice); // the station's own identity voice, gh-#96
+            Assert.Null(request.PersonaName); // never persona-voiced, never LLM-authored
+        }
+
+        [Fact]
+        public async Task PoolFirstIdentNeverJumpsAheadOfAnAlreadyKickedBackAnnounce()
+        {
+            // Regression pin: a pool-first ident resolves INSTANTLY (no TTS render to await), but
+            // must still respect Kick/KickResolved CALL order, not completion order — otherwise it
+            // would race ahead of a back-announce that was Kicked earlier in the SAME unit but is
+            // still awaiting its own (fake, but still awaited) TTS render.
+            var clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-08-08T00:00:00Z"));
+            var queue = new SpeechDeferralQueue(clock);
+            var tts = new FakeTtsSegmentSource();
+            var authoredIdent = new MediaReference(
+                "77", "/imaging/ident2.wav", "Station Ident", new Loudness(-14.0, -1.0, true),
+                DurationMs: 5000, SampleRate: null, Channels: null, BitrateKbps: null,
+                Artist: "Legacy Voice", Album: null, Genre: null, Year: null);
+            var catalog = new FakeMediaCatalog(MakeTrackRef("t1")) { ImagingPoolResult = authoredIdent };
+            var cadence = new CadenceConfig
+            {
+                LeadInBeforeEachTrack = false,
+                BackAnnounceAfterEachTrack = true,
+                StationIdEveryNUnits = 0,
+            };
+            var orchestrator = BuildOrchestrator(queue, clock, tts, catalog, cadence);
+
+            // Unit 1: no prior track ⇒ no back-announce, no deferral pending ⇒ just the music track.
+            var unit1Music = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+            Assert.NotNull(unit1Music);
+
+            // Arm a StationId deferral for unit 2, where a back-announce for unit 1's track is ALSO
+            // due (Kicked FIRST, per the class's own documented cadence order).
+            queue.Enqueue(SpeechDeferralKind.StationId, "cadence: test");
+
+            var backAnnounce = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+            var pooledIdent = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+            var unit2Music = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            Assert.NotNull(backAnnounce);
+            Assert.StartsWith("tts:backannounce", backAnnounce!.MediaId, StringComparison.OrdinalIgnoreCase);
+            Assert.NotNull(pooledIdent);
+            Assert.Equal(authoredIdent.MediaId, pooledIdent!.MediaId);
+            Assert.NotNull(unit2Music);
+            Assert.False(unit2Music!.MediaId.StartsWith("tts:", StringComparison.Ordinal));
         }
     }
 
