@@ -8,12 +8,39 @@
 // the "Installed · <slug> · <date>" db/25 provenance chip (AC1). `timeZone="UTC"` is pinned
 // explicitly (the StatusTiles/BoothLogFeed/PersonasClient/SettingsForm house idiom, T105/T187) so
 // the date half of the provenance chip is deterministic regardless of the host's TZ.
+//
+// gh-#428: every non-empty render now also renders `UninstallPackButton` per card, which calls
+// `useConfirm()`/`useRouter()` unconditionally — so every such render here needs `ConfirmDialogProvider`
+// and a mocked `next/navigation`, mirroring `wardrobe-uninstall-pack.spec.tsx`'s own harness. This
+// file's own Facts never click Uninstall (that's the dedicated spec file's concern) — the wrapper is
+// here only so these read-only listing Facts keep rendering at all.
 
-import { describe, it, expect } from "@jest/globals";
+jest.mock("next/navigation", () => ({
+  ...jest.requireActual("next/navigation"),
+  useRouter: jest.fn(),
+}));
+
+import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
-import { WardrobeClient } from "../app/(authed)/wardrobe/WardrobeClient";
+import type { useRouter } from "next/navigation";
+import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import type { FontLibraryPackDto } from "../app/(authed)/wardrobe/types";
+import type { WardrobeClient as WardrobeClientType } from "../app/(authed)/wardrobe/WardrobeClient";
+
+const mockedUseRouter = jest
+  .requireMock<{ useRouter: typeof useRouter }>("next/navigation")
+  .useRouter as jest.MockedFunction<typeof useRouter>;
+
+let WardrobeClient: typeof WardrobeClientType;
+
+beforeEach(async () => {
+  mockedUseRouter.mockReturnValue({ refresh: jest.fn() } as unknown as ReturnType<typeof useRouter>);
+  // Dynamic import after the mock is in place — the directory's established convention
+  // (catalog-purge-unavailable.spec.tsx's renderAction does the same); WardrobeClient renders
+  // UninstallPackButton, which calls useRouter() unconditionally.
+  ({ WardrobeClient } = await import("../app/(authed)/wardrobe/WardrobeClient"));
+});
 
 const SPACE_GROTESK_PACK: FontLibraryPackDto = {
   slug: "space-grotesk",
@@ -30,7 +57,11 @@ const SPACE_GROTESK_PACK: FontLibraryPackDto = {
 describe("Feature: the wardrobe is inspectable", () => {
   describe("Scenario: the wardrobe lists installed packs", () => {
     it("shows family, faces, byte sizes, and licence per pack (T203, AC1)", () => {
-      render(<WardrobeClient packs={[SPACE_GROTESK_PACK]} timeZone="UTC" />);
+      render(
+        <ConfirmDialogProvider>
+          <WardrobeClient packs={[SPACE_GROTESK_PACK]} timeZone="UTC" />
+        </ConfirmDialogProvider>
+      );
 
       const list = screen.getByRole("list", { name: "Installed font packs" });
       const card = within(list).getByText("Space Grotesk").closest("li");
@@ -42,9 +73,27 @@ describe("Feature: the wardrobe is inspectable", () => {
     });
 
     it("shows 'Installed · <slug> · <date>' provenance per pack (T203, AC1)", () => {
-      render(<WardrobeClient packs={[SPACE_GROTESK_PACK]} timeZone="UTC" />);
+      render(
+        <ConfirmDialogProvider>
+          <WardrobeClient packs={[SPACE_GROTESK_PACK]} timeZone="UTC" />
+        </ConfirmDialogProvider>
+      );
 
       expect(screen.getByText("Installed · space-grotesk · Aug 5, 2026")).toBeInTheDocument();
+    });
+
+    // gh-#428 — the wardrobe stops being pure-read-only: each card gets its own uninstall
+    // affordance. The button's own confirm/DELETE/toast/refresh cycle is UninstallPackButton's own
+    // concern (wardrobe-uninstall-pack.spec.tsx); this Fact only proves WardrobeClient wires one in
+    // per card, named for that card's own pack.
+    it("renders an Uninstall button per pack, named for that pack", () => {
+      render(
+        <ConfirmDialogProvider>
+          <WardrobeClient packs={[SPACE_GROTESK_PACK]} timeZone="UTC" />
+        </ConfirmDialogProvider>
+      );
+
+      expect(screen.getByRole("button", { name: "Uninstall Space Grotesk" })).toBeInTheDocument();
     });
   });
 
@@ -84,7 +133,11 @@ describe("Feature: the wardrobe is inspectable", () => {
         version: null,
         subset: null,
       };
-      render(<WardrobeClient packs={[packWithoutManifest]} timeZone="UTC" />);
+      render(
+        <ConfirmDialogProvider>
+          <WardrobeClient packs={[packWithoutManifest]} timeZone="UTC" />
+        </ConfirmDialogProvider>
+      );
 
       expect(screen.getByText("Licence unknown")).toBeInTheDocument();
     });
