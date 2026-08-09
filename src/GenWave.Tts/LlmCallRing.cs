@@ -41,15 +41,19 @@ public sealed class LlmCallRing(IOptionsMonitor<LlmOptions> options)
     /// fresh from <see cref="IOptionsMonitor{LlmOptions}.CurrentValue"/> on every call (mirrors
     /// <c>PlayHistoryService.Push</c>'s own live-capacity seam), so a live edit to
     /// <c>Llm:CallRingCapacity</c> trims (or grows) the ring on the very next record.
+    /// <paramref name="personaName"/> (gh-#429) is the caller's already-resolved
+    /// <see cref="LlmPromptBuilder.ResolveName"/> result — this ring never re-derives a name itself,
+    /// it only stores what it was handed.
     /// </summary>
     public void Record(
-        string? promptSystem, string? promptUser, string? response, DateTimeOffset startedAt,
+        string? personaName, string? promptSystem, string? promptUser, string? response, DateTimeOffset startedAt,
         long elapsedMs, LlmCallOutcome outcome, string? statusDetail, DegradationMode mode)
     {
         lock (gate)
         {
             var record = new LlmCallRecord(
-                ++nextSeq, promptSystem, promptUser, response, startedAt, elapsedMs, outcome, statusDetail, mode);
+                ++nextSeq, personaName, promptSystem, promptUser, response, startedAt, elapsedMs, outcome,
+                statusDetail, mode);
             ring.AddFirst(record);   // newest first
 
             var capacity = options.CurrentValue.CallRingCapacity;
