@@ -5,6 +5,7 @@ import { Chip } from "@/components/ui/chip";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatDateStamp } from "@/lib/format-clock";
 import { formatFontByteTotal, licenceLine } from "../persona-catalog/font-format";
+import { UninstallPackButton } from "./UninstallPackButton";
 import type { FontLibraryPackDto } from "./types";
 
 export interface WardrobeClientProps {
@@ -56,9 +57,12 @@ function ProvenanceChip({
  * every installed font pack, each rendered as its own card: family (title), faces with style + byte
  * size (the shared `font-format.ts` helper, mirroring the shelf card's own T201 byte-total
  * treatment), the licence line, and the "Installed · ⟨slug⟩ · ⟨date⟩" provenance chip (AC1).
- * Read-only — this page lists what T199's install route already wrote; it issues no requests of its
- * own. On an empty wardrobe, `catalogEnabled` picks the empty-state CTA (T203 review finding F3) —
- * see that prop's own remarks.
+ * Read-only listing (gh-#428): this component's own render issues no requests of its own — every
+ * card still lists exactly what T199's install route wrote, nothing here reshapes or filters that
+ * data. The one action a card offers, uninstalling, is `UninstallPackButton`'s own self-contained
+ * concern (its own confirm/fetch/toast/refresh cycle), not logic this component performs itself. On
+ * an empty wardrobe, `catalogEnabled` picks the empty-state CTA (T203 review finding F3) — see that
+ * prop's own remarks.
  *
  * <b>PLAIN TEXT ONLY (the T199/T200 stored-family/style obligation, closed here).</b>
  * `pack.family` and each face's `style` are unbounded free-form prose (see `FontLibraryPackDto`'s
@@ -89,7 +93,10 @@ export function WardrobeClient({ packs, timeZone, catalogEnabled = false }: Ward
         <li key={pack.slug} className="rounded-[6px] border border-line bg-surface p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="font-display text-[1.1rem] text-ink">{pack.family}</h2>
-            <ProvenanceChip importedFrom={pack.importedFrom} importedAt={pack.importedAt} timeZone={timeZone} />
+            <div className="flex flex-wrap items-center gap-3">
+              <ProvenanceChip importedFrom={pack.importedFrom} importedAt={pack.importedAt} timeZone={timeZone} />
+              <UninstallPackButton slug={pack.slug} family={pack.family} />
+            </div>
           </div>
 
           <ul className="mt-3 flex flex-col gap-1 text-[0.85rem] text-ink">

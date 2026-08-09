@@ -4,8 +4,9 @@ import { apiGet } from "@/lib/api";
 import { WardrobeClient } from "./WardrobeClient";
 import type { FontLibraryPackDto } from "./types";
 
-// A pack can be installed or (later, M2) uninstalled at any time from elsewhere in the app —
-// always re-render from the server, mirroring personas/page.tsx and persona-catalog/page.tsx.
+// A pack can be installed elsewhere in the app, or uninstalled right here (gh-#428,
+// UninstallPackButton's own router.refresh() call re-triggers this exact server render) — always
+// re-render from the server, mirroring personas/page.tsx and persona-catalog/page.tsx.
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 
