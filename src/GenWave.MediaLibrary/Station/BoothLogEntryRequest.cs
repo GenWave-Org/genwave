@@ -32,6 +32,15 @@ namespace GenWave.MediaLibrary.Station;
 /// <see langword="null"/> for every other kind or a non-catalog id. It is what lets the Host answer
 /// "was this airing safe-scope content?" for the taste-thumb exclusion, since <c>station.booth_log</c>
 /// itself can never join <c>library.media</c> (schema-role boundary).
+///
+/// <see cref="SegmentKind"/> (SPEC F113.1, STORY-304, PLAN T220) rides the same track-start-only,
+/// captured-at-publish-time path: <see cref="BoothLogWriter.Publish"/> reads it straight off the
+/// <see cref="TrackAired"/> event's own <c>SegmentKind</c> — which <c>PlayoutFeeder</c> already
+/// forwarded from the airing <c>MediaItem</c> — and stringifies it (the enum's token name, e.g.
+/// <c>"StationId"</c>) before this request ever reaches the queue. <see langword="null"/> for a music
+/// row or an engine-initiated advance — the demo-hour instrument's whole point is that this is the
+/// genuine AIR-time signal, never a render-time guess.
 /// </summary>
 sealed record BoothLogEntryRequest(
-    string Kind, string Summary, long? PersonaId, string? Artist = null, string? Pick = null, long? MediaId = null);
+    string Kind, string Summary, long? PersonaId, string? Artist = null, string? Pick = null, long? MediaId = null,
+    string? SegmentKind = null);

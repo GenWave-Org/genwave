@@ -54,7 +54,7 @@ public static class FeatureBoundaryAwareSelection
             new FakeStationScopeProvider(new LibraryScope([1L])),
             new FakeCadenceProvider(CadenceOff),
             new FakeRotationSettingsProvider(new RotationSettings()),
-            catalog,
+            new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance),
             new FakeTtsSegmentSource(),
             new FakeActivePersonaAccessor(),
             NullLogger<Orchestrator>.Instance,

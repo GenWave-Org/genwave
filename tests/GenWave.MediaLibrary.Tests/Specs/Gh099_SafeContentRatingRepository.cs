@@ -228,7 +228,7 @@ public static class FeatureSafeContentRatingRepository
 
             await repo.AppendAsync(
                 "track-started", "Started 'Song' by Someone", personaId: null, artist: "Someone",
-                pick: null, mediaId: 42, CancellationToken.None);
+                pick: null, mediaId: 42, segmentKind: null, CancellationToken.None);
 
             var page = await repo.ReadAsync(before: null, take: 1, CancellationToken.None);
             var entry = Assert.Single(page.Entries);
@@ -244,7 +244,7 @@ public static class FeatureSafeContentRatingRepository
 
             await repo.AppendAsync(
                 "patter-aired", "Patter aired (station-id)", personaId: null, artist: null,
-                pick: null, mediaId: null, CancellationToken.None);
+                pick: null, mediaId: null, segmentKind: null, CancellationToken.None);
 
             var page = await repo.ReadAsync(before: null, take: 1, CancellationToken.None);
             var entry = Assert.Single(page.Entries);

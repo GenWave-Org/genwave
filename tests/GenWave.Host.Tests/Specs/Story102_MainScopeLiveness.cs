@@ -209,8 +209,10 @@ public static class FeatureMainScopeLiveness
             var identityProvider = new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default"));
             var cadenceProvider = new FakeCadenceProvider(SilentCadence);
             var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
+            var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
             var orchestrator = new Orchestrator(
-                identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, new NoOpTtsSegmentSource(),
+                identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
+                new NoOpTtsSegmentSource(),
                 new NoOpActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
                 new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
                 new SpeechDeferralQueue(TimeProvider.System),
@@ -284,8 +286,10 @@ public static class FeatureMainScopeLiveness
             var identityProvider = new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default"));
             var cadenceProvider = new FakeCadenceProvider(SilentCadence);
             var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
+            var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
             var orchestrator = new Orchestrator(
-                identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog, new NoOpTtsSegmentSource(),
+                identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
+                new NoOpTtsSegmentSource(),
                 new NoOpActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
                 new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
                 new SpeechDeferralQueue(TimeProvider.System),

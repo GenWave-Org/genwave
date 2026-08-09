@@ -56,35 +56,38 @@ sealed class BoothLogRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<Boot
     /// (SPEC F84.1, STORY-215, PLAN T70) is plain text — no FK, no degrade path of its own.
     /// <paramref name="pick"/> (SPEC F86.1, STORY-217, PLAN T73) is likewise plain text (pre-serialized
     /// jsonb, no FK) — the persona-id retry below never touches it either way.
+    /// <paramref name="segmentKind"/> (SPEC F113.1, STORY-304, PLAN T220) is likewise plain text (the
+    /// SegmentKind enum's token name, or null) — no FK, no degrade path; the persona-id retry never
+    /// touches it either.
     /// </summary>
-    public async Task AppendAsync(string kind, string summary, long? personaId, string? artist, string? pick, long? mediaId, CancellationToken ct)
+    public async Task AppendAsync(string kind, string summary, long? personaId, string? artist, string? pick, long? mediaId, string? segmentKind, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
 
         try
         {
-            await InsertAndEvictAsync(conn, kind, summary, personaId, artist, pick, mediaId, ct);
+            await InsertAndEvictAsync(conn, kind, summary, personaId, artist, pick, mediaId, segmentKind, ct);
         }
         catch (PostgresException ex) when (ex.SqlState == ForeignKeyViolation && personaId is not null)
         {
             // The failed attempt's `await using var tx` already rolled back (disposal runs as the
             // exception unwinds InsertAndEvictAsync, before it reaches this catch) — the connection
             // is clean, so retrying a fresh transaction on the SAME conn is safe.
-            await InsertAndEvictAsync(conn, kind, summary, personaId: null, artist, pick, mediaId, ct);
+            await InsertAndEvictAsync(conn, kind, summary, personaId: null, artist, pick, mediaId, segmentKind, ct);
         }
     }
 
     async Task InsertAndEvictAsync(
-        NpgsqlConnection conn, string kind, string summary, long? personaId, string? artist, string? pick, long? mediaId, CancellationToken ct)
+        NpgsqlConnection conn, string kind, string summary, long? personaId, string? artist, string? pick, long? mediaId, string? segmentKind, CancellationToken ct)
     {
         await using var tx = await conn.BeginTransactionAsync(ct);
 
         await conn.ExecuteAsync(new CommandDefinition(
             """
-            insert into station.booth_log (kind, summary, persona_id, artist, pick, media_id)
-            values (@Kind, @Summary, @PersonaId, @Artist, @Pick::jsonb, @MediaId)
+            insert into station.booth_log (kind, summary, persona_id, artist, pick, media_id, segment_kind)
+            values (@Kind, @Summary, @PersonaId, @Artist, @Pick::jsonb, @MediaId, @SegmentKind)
             """,
-            new { Kind = kind, Summary = summary, PersonaId = personaId, Artist = artist, Pick = pick, MediaId = mediaId },
+            new { Kind = kind, Summary = summary, PersonaId = personaId, Artist = artist, Pick = pick, MediaId = mediaId, SegmentKind = segmentKind },
             transaction: tx,
             cancellationToken: ct));
 

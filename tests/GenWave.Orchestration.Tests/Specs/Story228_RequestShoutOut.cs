@@ -49,23 +49,25 @@ public static class FeatureRequestShoutOutRidesTheLeadIn
             NextResult = new RequestFulfillment(fulfilled, RequestId: 42, WasVibe: false),
         };
         var envelope = new SegmentEnvelope(TimeOnly.MinValue, TimeOnly.MaxValue, [], EnergyRange.Unconstrained);
+        var musicSelectionPolicy = new MusicSelectionPolicy(
+            new FakeMediaCatalog(null), new CapturingLogger<MusicSelectionPolicy>(),
+            new FakeEnvelopeProvider(envelope),
+            personaPickProvider: null,
+            requestFulfillmentSource: fulfillmentSource);
 
         return new Orchestrator(
             new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
             new FakeStationScopeProvider(new LibraryScope([1L])),
             new FakeCadenceProvider(cadence),
             new FakeRotationSettingsProvider(new RotationSettings()),
-            new FakeMediaCatalog(null),
+            musicSelectionPolicy,
             ttsSource,
             new FakeActivePersonaAccessor(),
             new CapturingLogger<Orchestrator>(),
             new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
             new SpeechDeferralQueue(TimeProvider.System),
             TimeProvider.System,
-            new FakeBoundaryBiasProvider(TimeSpan.Zero),
-            new FakeEnvelopeProvider(envelope),
-            personaPickProvider: null,
-            requestFulfillmentSource: fulfillmentSource);
+            new FakeBoundaryBiasProvider(TimeSpan.Zero));
     }
 
     static CadenceConfig CadenceWithLeadIn(bool leadInBeforeEachTrack) => new()

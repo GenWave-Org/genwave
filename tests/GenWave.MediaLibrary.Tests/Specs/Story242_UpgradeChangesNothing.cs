@@ -9,7 +9,11 @@
 // scenario below that drops the table goes on to run a migration script expected to exit 0, which
 // recreates it — so the table is present again by the time each such fact finishes. (A migration that
 // itself throws would leave the drop uncorrected; no fact here exercises that case, so it never
-// arises.) No other spec file's facts ever assume segment_schedule is absent.
+// arises.) Story304_AiredKindStamp.cs's fresh-init facts read this same table's show_id column — a
+// column db/27 alone (this file's own migration script) predates, so those scenarios here would leave
+// it missing for whichever Story304 fact ran next in the shared DatabaseCollection. Story304 guards
+// against that itself, by (re)running db/33 in its own Arrange before every assertion — so a scenario
+// here leaving segment_schedule mid-upgrade-shape is safe to the rest of the suite.
 //
 // The allowlist-retirement half (AC3) lives in Story242_ActiveIdKeyRetired.cs (Host.Tests) — it
 // drives PUT /api/settings and is out of this task's scope (PLAN T120).
@@ -27,6 +31,13 @@ public static class FeatureUpgradeChangesNothing
 
     static void RunMigrationScript(DatabaseFixture db) =>
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "27-segment-schedule-migration.sh"));
+
+    /// <summary>db/33 (STORY-304, PLAN T219) is the next migration to touch this table after db/27 —
+    /// it adds segment_schedule.show_id. An upgrading box that already ran db/27 reaches db/06's own
+    /// shape only once db/33 has also run, so <see cref="ScenarioFreshInstallAndUpgradeProduceTheIdenticalShape"/>
+    /// below chains this after <see cref="RunMigrationScript"/>.</summary>
+    static void RunShowAndSegmentKindMigrationScript(DatabaseFixture db) =>
+        db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "33-show-and-segment-kind-migration.sh"));
 
     static void RunFreshInstallScript(DatabaseFixture db) =>
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "06-station-settings-migration.sh"));
@@ -335,7 +346,9 @@ public static class FeatureUpgradeChangesNothing
         // list, the FK's ON DELETE action — and every other fact here would keep passing, because they
         // all read the db/27-created table. This fact drops the table, builds it via db/06, captures
         // its exact shape, proves the EXCLUDE + FK constraints have teeth on THAT copy, then drops and
-        // rebuilds it via db/27 and asserts the two captured shapes are equal.
+        // rebuilds it via db/27 THEN db/33 (STORY-304/T219 added segment_schedule.show_id after db/27's
+        // original CREATE TABLE — an upgrading box reaches db/06's shape only once both have run) and
+        // asserts the two captured shapes are equal.
 
         [Fact]
         public async Task Db06AndDb27CreateByteIdenticalColumnsAndConstraints()
@@ -368,13 +381,15 @@ public static class FeatureUpgradeChangesNothing
 
             await DropScheduleTableAsync(db);
             RunMigrationScript(db);
+            RunShowAndSegmentKindMigrationScript(db);
             var db27Columns = await CaptureColumnShapeAsync(db);
             var db27Constraints = await CaptureConstraintShapeAsync(db);
 
             Assert.Equal(db06Columns, db27Columns);
             Assert.Equal(db06Constraints, db27Constraints);
 
-            // Table is left present (db/27-created) — matches every other scenario in this file.
+            // Table is left present (db/27-then-db/33-created) — matches every other scenario in this
+            // file's own convention of leaving the table present.
         }
     }
 }

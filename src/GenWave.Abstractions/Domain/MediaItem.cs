@@ -50,4 +50,14 @@ namespace GenWave.Core.Domain;
 /// gh-#96 untouched). <see langword="null"/> = no DJ (gap/music-only segment, or a pre-gh-#259
 /// caller that never stamps it).
 /// </param>
-public sealed record MediaItem(string MediaId, string Locator, string Title, Loudness Loudness, string? Artist = null, CuePoints? Cue = null, double? IntroEnergy = null, double? OutroEnergy = null, string? Album = null, string? Genre = null, int? Year = null, int? DurationMs = null, PersonaPickDiagnostics? PersonaPick = null, bool RequestFulfilled = false, string? DjName = null);
+/// <param name="SegmentKind">
+/// SPEC F113.1 (STORY-304, PLAN T220) — the demo-hour observability instrument's own token:
+/// <see langword="null"/> for every music/audio row (the only caller is
+/// <see cref="MediaReferenceExtensions.ToMediaItem"/>, which never sets this), the segment's own
+/// <see cref="SegmentRequest.Kind"/> for a TTS render (<c>TtsSegmentSource.RenderAsync</c> stamps
+/// it verbatim). Rides through <c>PlayoutFeeder</c>'s push-time metadata into
+/// <see cref="GenWave.Core.Events.TrackAired.SegmentKind"/> the same way <see cref="DjName"/> does,
+/// so the booth log's <c>track-started</c> row can stamp a structured <c>segment_kind</c> at the
+/// genuine AIR-time instant — never at render time, when a budget-dropped piece never actually airs.
+/// </param>
+public sealed record MediaItem(string MediaId, string Locator, string Title, Loudness Loudness, string? Artist = null, CuePoints? Cue = null, double? IntroEnergy = null, double? OutroEnergy = null, string? Album = null, string? Genre = null, int? Year = null, int? DurationMs = null, PersonaPickDiagnostics? PersonaPick = null, bool RequestFulfilled = false, string? DjName = null, SegmentKind? SegmentKind = null);

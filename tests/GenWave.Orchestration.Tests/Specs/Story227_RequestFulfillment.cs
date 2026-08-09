@@ -56,16 +56,16 @@ public static class FeatureOrchestratorConsultationOrder
         // non-null pick matching the fulfillment's own media id is only possible via the short-circuit
         // this feature proves.
         var catalog = new FakeMediaCatalog(null);
+        var musicSelectionPolicy = new MusicSelectionPolicy(
+            catalog, new CapturingLogger<MusicSelectionPolicy>(),
+            new FakeEnvelopeProvider(envelope), personaPickProvider, requestFulfillmentSource);
 
         return new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog,
+            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
             new FakeTtsSegmentSource(), new FakeActivePersonaAccessor(), new CapturingLogger<Orchestrator>(),
             new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
             new SpeechDeferralQueue(TimeProvider.System),
-            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero),
-            new FakeEnvelopeProvider(envelope),
-            personaPickProvider,
-            requestFulfillmentSource);
+            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
     }
 
     public static class ScenarioALiveRequestShortCircuitsTheChain
@@ -184,22 +184,24 @@ public static class FeatureSingleConsultationPerPick
             ]);
 
             var envelope = new SegmentEnvelope(TimeOnly.MinValue, TimeOnly.MaxValue, [], EnergyRange.Unconstrained);
+            var musicSelectionPolicy = new MusicSelectionPolicy(
+                catalog, new CapturingLogger<MusicSelectionPolicy>(),
+                new FakeEnvelopeProvider(envelope),
+                personaPickProvider: null,
+                requestFulfillmentSource: fulfillmentSource);
             var orchestrator = new Orchestrator(
                 new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),
                 new FakeStationScopeProvider(new LibraryScope([1L])),
                 new FakeCadenceProvider(SilentCadence),
                 new FakeRotationSettingsProvider(new RotationSettings()),
-                catalog,
+                musicSelectionPolicy,
                 new FakeTtsSegmentSource(),
                 new FakeActivePersonaAccessor(),
                 new CapturingLogger<Orchestrator>(),
                 new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
                 deferralQueue,
                 clock,
-                new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)),
-                new FakeEnvelopeProvider(envelope),
-                personaPickProvider: null,
-                requestFulfillmentSource: fulfillmentSource);
+                new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)));
 
             // Act: pull the next item — the bias window is active, so pre-fix this drove the
             // resample loop straight through the fulfillment rung on every attempt.

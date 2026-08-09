@@ -50,7 +50,7 @@ public static class FeatureBoundaryFitSelection
             new FakeStationScopeProvider(new LibraryScope([1L])),
             new FakeCadenceProvider(cadence ?? CadenceOff),
             new FakeRotationSettingsProvider(new RotationSettings()),
-            catalog,
+            new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance),
             new FakeTtsSegmentSource(),
             new FakeActivePersonaAccessor(),
             NullLogger<Orchestrator>.Instance,

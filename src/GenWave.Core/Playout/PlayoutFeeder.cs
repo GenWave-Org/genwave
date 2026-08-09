@@ -100,7 +100,11 @@ public sealed class PlayoutFeeder(
     // DjName (gh-#259) rides the same two paths as Title/Artist: a feeder push captures the
     // MediaItem's own plan-time attribution stamp; an engine-initiated advance always carries null —
     // the feeder never planned it, so no show attribution exists (safe rotation is nobody's show).
-    readonly Dictionary<string, (string? Title, string? Artist, double GainDb, int? DurationMs, PersonaPickDiagnostics? PersonaPick, string? ArtworkUrl, string? DjName)> pushedMeta
+    // SegmentKind (SPEC F113.1, PLAN T220) rides the SAME two paths as DjName: a feeder push captures
+    // the MediaItem's own SegmentKind (null for music, TtsSegmentSource's request.Kind for a TTS
+    // render); an engine-initiated advance always carries null — the feeder never pushed it, so no
+    // kind was ever stamped. TrackAired forwards it verbatim to the booth log (SPEC F113.1).
+    readonly Dictionary<string, (string? Title, string? Artist, double GainDb, int? DurationMs, PersonaPickDiagnostics? PersonaPick, string? ArtworkUrl, string? DjName, SegmentKind? SegmentKind)> pushedMeta
         = new(StringComparer.Ordinal);
 
     // Media ids whose pushedMeta entry is feeder-authoritative — set at PushAsync time from the
@@ -224,7 +228,7 @@ public sealed class PlayoutFeeder(
                     var artworkUrl = echoedArtworkUrl is not null && (artworkUrlEchoValidator?.IsTrusted(echoedArtworkUrl) ?? false)
                         ? echoedArtworkUrl
                         : null;
-                    pushedMeta[mediaId] = (title, artist, gainDb, DurationMs: null, PersonaPick: null, ArtworkUrl: artworkUrl, DjName: null);
+                    pushedMeta[mediaId] = (title, artist, gainDb, DurationMs: null, PersonaPick: null, ArtworkUrl: artworkUrl, DjName: null, SegmentKind: null);
                 }
                 else
                 {
@@ -239,7 +243,7 @@ public sealed class PlayoutFeeder(
                 // Core-friendly primitives — no Host types cross this seam.
                 {
                     pushedMeta.TryGetValue(mediaId, out var pm);
-                    events.Publish(new TrackAired(mediaId, pm.Title, pm.Artist, pm.GainDb, advancedAt, pm.DurationMs, pm.PersonaPick));
+                    events.Publish(new TrackAired(mediaId, pm.Title, pm.Artist, pm.GainDb, advancedAt, pm.DurationMs, pm.PersonaPick, pm.SegmentKind));
                 }
             }
 
@@ -348,7 +352,7 @@ public sealed class PlayoutFeeder(
                 // advance (elsewhere in this method) is null, rehydrated later at the Host layer (F66.2).
                 // ArtworkUrl (SPEC F88.4, F93.3, PLAN T125) is the SAME url= this exact push already
                 // stamped, handed back on EnginePushResult — never re-resolved.
-                pushedMeta[item.MediaId] = (item.Title, item.Artist, gainDb, item.DurationMs, item.PersonaPick, pushResult.ArtworkUrl, item.DjName);
+                pushedMeta[item.MediaId] = (item.Title, item.Artist, gainDb, item.DurationMs, item.PersonaPick, pushResult.ArtworkUrl, item.DjName, item.SegmentKind);
                 feederOwnedIds.Add(item.MediaId);
                 MarkPendingAir(item.MediaId);   // claim (d) starts here (SPEC F57.1(d), gh-#88)
                 chainIds.Add(item.MediaId);
@@ -379,7 +383,7 @@ public sealed class PlayoutFeeder(
     void PublishOnAirState()
     {
         string? currentMediaId = onAirIsReal ? onAirId : null;
-        (string? Title, string? Artist, double GainDb, int? DurationMs, PersonaPickDiagnostics? PersonaPick, string? ArtworkUrl, string? DjName) currentMeta = currentMediaId is not null
+        (string? Title, string? Artist, double GainDb, int? DurationMs, PersonaPickDiagnostics? PersonaPick, string? ArtworkUrl, string? DjName, SegmentKind? SegmentKind) currentMeta = currentMediaId is not null
             ? pushedMeta.GetValueOrDefault(currentMediaId)
             : default;
 

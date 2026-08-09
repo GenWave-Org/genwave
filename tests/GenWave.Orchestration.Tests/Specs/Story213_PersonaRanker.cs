@@ -269,15 +269,17 @@ public static class FeaturePersonaRanker
                 StationIdEveryNUnits = 0,
             });
             var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings { ArtistSeparation = 0 });
-            var logger = new CapturingLogger<Orchestrator>();
+            // F112 (STORY-295, PLAN T218): the per-pick Debug line below is logged by
+            // MusicSelectionPolicy now — logger captures ITS output, not Orchestrator's own.
+            var logger = new CapturingLogger<MusicSelectionPolicy>();
+            var musicSelectionPolicy = new MusicSelectionPolicy(
+                catalog, logger, new FakeEnvelopeProvider(SegmentEnvelope.StationDefault), provider);
             var orchestrator = new Orchestrator(
-                identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog,
-                new FakeTtsSegmentSource(), personaAccessor, logger,
+                identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
+                new FakeTtsSegmentSource(), personaAccessor, NullLogger<Orchestrator>.Instance,
                 new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
                 new SpeechDeferralQueue(TimeProvider.System),
-                TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero),
-                new FakeEnvelopeProvider(SegmentEnvelope.StationDefault),
-                provider);
+                TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
 
             var item = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
 

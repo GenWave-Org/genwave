@@ -6,6 +6,7 @@
 // INextItemProvider into the feeder — the ladder is proven as behavior of the production pick path
 // (Orchestrator.GetNextAsync), not of a helper, with a fake IMediaCatalog adapter (Story007 idiom).
 
+using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -40,7 +41,12 @@ public static class FeatureEnvelopeProviderAndLadder
         StationIdEveryNUnits = 0,
     };
 
-    static (Orchestrator Orchestrator, CapturingLogger<Orchestrator> Logger) BuildOrchestrator(
+    // F112 (STORY-295, PLAN T218): every WARN/Debug line this file asserts on (trust-but-verify
+    // discard, ladder relaxation, never-silence, persona-throw degrade) is logged by
+    // MusicSelectionPolicy now, not Orchestrator directly — the returned Logger is the POLICY's own
+    // capture, and Orchestrator's own logger param is a throwaway NullLogger since no fact here
+    // asserts on it.
+    static (Orchestrator Orchestrator, CapturingLogger<MusicSelectionPolicy> Logger) BuildOrchestrator(
         IMediaCatalog catalog,
         SegmentEnvelope envelope,
         IPersonaPickProvider? personaPickProvider = null,
@@ -50,16 +56,16 @@ public static class FeatureEnvelopeProviderAndLadder
         var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
         var cadenceProvider = new FakeCadenceProvider(SilentCadence);
         var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings { ArtistSeparation = artistSeparation });
-        var logger = new CapturingLogger<Orchestrator>();
+        var policyLogger = new CapturingLogger<MusicSelectionPolicy>();
+        var musicSelectionPolicy = new MusicSelectionPolicy(
+            catalog, policyLogger, new FakeEnvelopeProvider(envelope), personaPickProvider);
         var orchestrator = new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog,
-            new FakeTtsSegmentSource(), new FakeActivePersonaAccessor(), logger,
+            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
+            new FakeTtsSegmentSource(), new FakeActivePersonaAccessor(), NullLogger<Orchestrator>.Instance,
             new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
             new SpeechDeferralQueue(TimeProvider.System),
-            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero),
-            new FakeEnvelopeProvider(envelope),
-            personaPickProvider);
-        return (orchestrator, logger);
+            TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
+        return (orchestrator, policyLogger);
     }
 
     // -------------------------------------------------------------------------

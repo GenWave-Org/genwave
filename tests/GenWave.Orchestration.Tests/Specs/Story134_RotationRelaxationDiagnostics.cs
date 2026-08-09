@@ -7,6 +7,7 @@
 // RepeatedArtist — the gitea-#210 "why did it drain" diagnostic becomes "why did it relax" — and WARNs
 // naming the zero-playable pool on a genuine (F41.2) drain, which stays non-fatal (F6.3).
 
+using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Orchestration.Tests.Fakes;
 
@@ -43,8 +44,9 @@ public static class FeatureRotationRelaxationDiagnostics
         var cadenceProvider = new FakeCadenceProvider(SilentCadence);
         var rotationProvider = new FakeRotationSettingsProvider(new RotationSettings());
         var logger = new CapturingLogger<Orchestrator>();
+        var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
         var orchestrator = new Orchestrator(
-            identityProvider, scopeProvider, cadenceProvider, rotationProvider, catalog,
+            identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy,
             new FakeTtsSegmentSource(), new FakeActivePersonaAccessor(), logger,
             new FakeRenderBudgetProvider(TimeSpan.FromSeconds(5)),
             new SpeechDeferralQueue(TimeProvider.System),
