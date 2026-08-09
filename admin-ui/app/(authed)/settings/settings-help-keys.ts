@@ -68,6 +68,19 @@ export const SETTINGS_HELP_KEYS = [
   "Station:Audience",
   "Station:Timezone",
   "Station:Theme",
+  "Context:Weather:Enabled",
+  "Context:Weather:SegmentCadenceMinutes",
+  "Context:Weather:PatterCadenceMinutes",
+  "Context:Weather:PersonaId",
+  "Context:History:Enabled",
+  "Context:History:SegmentCadenceMinutes",
+  "Context:History:PatterCadenceMinutes",
+  "Context:History:PersonaId",
+  "Station:Location:Latitude",
+  "Station:Location:Longitude",
+  "Station:Location:SpokenName",
+  "Station:Imaging:ClockAnchoredIdents",
+  "Station:Imaging:TimeAnnouncements",
 ] as const;
 
 export type SettingsHelpKey = (typeof SETTINGS_HELP_KEYS)[number];

@@ -34,6 +34,10 @@ const BOOLEAN_KEYS = new Set<SettingsHelpKey>([
   "Library:YearLookup:Enabled",
   "Station:Requests:Enabled",
   "Station:Requests:OverrideEnvelope",
+  "Context:Weather:Enabled",
+  "Context:History:Enabled",
+  "Station:Imaging:ClockAnchoredIdents",
+  "Station:Imaging:TimeAnnouncements",
 ]);
 
 const NUMBER_LIST_KEYS = new Set<SettingsHelpKey>([
@@ -51,6 +55,9 @@ const STRING_KEYS = new Set<SettingsHelpKey>([
   "Community:CatalogIndexUrl",
   "Station:Audience",
   "Station:Timezone",
+  "Station:Location:Latitude",
+  "Station:Location:Longitude",
+  "Station:Location:SpokenName",
 ]);
 
 function kindAndUnitFor(key: SettingsHelpKey): Pick<SettingDto, "kind" | "unit"> {

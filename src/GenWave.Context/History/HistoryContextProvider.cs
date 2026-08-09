@@ -158,6 +158,24 @@ public sealed class HistoryContextProvider(
     /// own <see cref="ContextFactSanitizer"/>, this is belt-and-suspenders at the source).</summary>
     const string FactSeparator = " · ";
 
+    /// <summary>SPEC F109.1's stated shipped defaults for this provider — the C# home
+    /// <c>appsettings.json</c>'s <c>Context:History:*</c> seed literals pin against
+    /// (STORY-151's <c>ScenarioSeedsEqualTheInitializers</c>, F3 fix, T226 review): off by default
+    /// (fail-closed), a fresh segment/patter fact may surface once every four hours — well above
+    /// SPEC F108.2's weather-only 30-minute floor, and well inside a single Wikimedia On-This-Day
+    /// day file's own multi-hour relevance — no patter cadence. Before this fix, 240 existed ONLY as
+    /// an appsettings.json literal with no C# home a test could pin against;
+    /// <c>GenWave.Host.Options.ConfigurationContextSettingsProvider</c>'s own generic 60-minute
+    /// fallback (deliberately provider-agnostic, see its own remarks) is not this number — the seed
+    /// is what actually reaches a fresh deploy.</summary>
+    public const bool DefaultEnabled = false;
+
+    /// <summary>See <see cref="DefaultEnabled"/>'s own remarks.</summary>
+    public const int DefaultSegmentCadenceMinutes = 240;
+
+    /// <summary>See <see cref="DefaultEnabled"/>'s own remarks.</summary>
+    public const int DefaultPatterCadenceMinutes = 0;
+
     public string Key => "history";
 
     /// <summary>

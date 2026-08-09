@@ -67,7 +67,8 @@ using GenWave.Core.Domain;
 /// </summary>
 public sealed class WeatherContextProvider(
     HttpClient http, IStationLocationProvider locationProvider, TimeProvider timeProvider,
-    ILogger<WeatherContextProvider> logger) : IContextProvider, ISelfGatingContextProvider
+    ILogger<WeatherContextProvider> logger)
+    : IContextProvider, ISelfGatingContextProvider, ICadenceFlooredContextProvider
 {
     /// <summary>
     /// The fixed, keyless Open-Meteo host (SPEC F108.1) — set as this typed client's
@@ -95,6 +96,18 @@ public sealed class WeatherContextProvider(
     /// there is no accuracy cost to outliving the cadence this generously.</summary>
     static readonly TimeSpan Freshness = TimeSpan.FromHours(2);
 
+    /// <summary>SPEC F108.2's segment-cadence floor — "the ruled hard max of twice an hour" — a
+    /// structural backstop <see cref="ContextPipeline"/> enforces via
+    /// <see cref="ICadenceFlooredContextProvider.MinimumSegmentCadenceMinutes"/> below (F4 fix, T226
+    /// review) regardless of how a configured value reached it (a live PUT, which
+    /// <c>GenWave.Host.Configuration.SettingValidator</c>'s own write-time 30–1440 range already
+    /// guards, OR an appsettings.json/env override, which never passes through that validator at
+    /// all). Sits comfortably below <see cref="Freshness"/> — the floor bounds how OFTEN a fetch may
+    /// run, <see cref="Freshness"/> bounds how long its result stays servable, and the latter must
+    /// always be allowed to exceed the former (see that field's own remarks) for a healthy station
+    /// never to see a false "stale" skip.</summary>
+    const int SegmentCadenceFloorMinutes = 30;
+
     /// <summary>Wind is called out in the facts only once it is this fast (km/h — the request always
     /// asks for <c>wind_speed_unit=kmh</c>, so this threshold means the same thing regardless of any
     /// later query change): below it, a calm/breezy day says nothing about wind at all rather than
@@ -111,6 +124,22 @@ public sealed class WeatherContextProvider(
     /// by construction.</summary>
     const string WindUnit = "km/h";
 
+    /// <summary>SPEC F108.1/F108.2's stated shipped defaults for this provider — the C# home
+    /// <c>appsettings.json</c>'s <c>Context:Weather:*</c> seed literals pin against
+    /// (STORY-151's <c>ScenarioSeedsEqualTheInitializers</c>, F3 fix, T226 review): off by default
+    /// (fail-closed), a fresh segment/patter fact may surface once an hour, no patter cadence. These
+    /// are DEPLOYMENT defaults an operator can override live — not a second source of truth for
+    /// <c>GenWave.Host.Options.ConfigurationContextSettingsProvider</c>'s own generic fallback (that
+    /// class stays provider-agnostic by design, see its own remarks); the seed pins against the
+    /// number THIS provider's own SPEC section states, which today happens to equal that fallback.</summary>
+    public const bool DefaultEnabled = false;
+
+    /// <summary>See <see cref="DefaultEnabled"/>'s own remarks.</summary>
+    public const int DefaultSegmentCadenceMinutes = 60;
+
+    /// <summary>See <see cref="DefaultEnabled"/>'s own remarks.</summary>
+    public const int DefaultPatterCadenceMinutes = 0;
+
     public string Key => "weather";
 
     /// <summary>
@@ -120,6 +149,14 @@ public sealed class WeatherContextProvider(
     /// pipeline-facing seam, not part of this class's own public surface.
     /// </summary>
     bool ISelfGatingContextProvider.IsAvailable => TryParseCoordinates(locationProvider.Current, out _, out _);
+
+    /// <summary>
+    /// The <see cref="ICadenceFlooredContextProvider"/> hook <see cref="ContextPipeline"/> actually
+    /// calls in production (F4 fix, T226 review) — <see cref="SegmentCadenceFloorMinutes"/>'s own
+    /// remarks. Explicit interface implementation, the same pipeline-facing-seam posture as
+    /// <see cref="ISelfGatingContextProvider.IsAvailable"/> just above.
+    /// </summary>
+    int ICadenceFlooredContextProvider.MinimumSegmentCadenceMinutes => SegmentCadenceFloorMinutes;
 
     public async Task<ContextContent?> FetchAsync(CancellationToken ct)
     {

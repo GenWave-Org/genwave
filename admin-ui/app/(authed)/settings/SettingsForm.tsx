@@ -320,6 +320,48 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "The station's active theme, by slug (e.g. cats-whisker) — must name one of the shipped " +
     "themes; an unrecognized slug is rejected outright rather than silently failing to " +
     "resolve. Changes apply live.",
+
+  // ── The F107 context seam (SPEC F107.2/F107.7, F108.1-F108.2, F109.1, STORY-297, PLAN T226) ──
+  "Context:Weather:Enabled":
+    "Airs a weather segment/patter line sourced from Open-Meteo. Off by default; also requires " +
+    "Station:Location:Latitude/Longitude — blank or invalid coordinates leave weather off even " +
+    "when this is on.",
+  "Context:Weather:SegmentCadenceMinutes":
+    "How often a fresh weather segment may air, in minutes. Accepted range: 30–1440 (30 minutes " +
+    "is the enforced floor — twice an hour, at most).",
+  "Context:Weather:PatterCadenceMinutes":
+    "How often a compact weather line may be folded into patter, in minutes — independent of " +
+    "the segment cadence above. 0 disables weather patter lines. Accepted range: 0–1440.",
+  "Context:Weather:PersonaId":
+    "Which persona voices weather segments. 0 defers to the on-air DJ (the unset default does the same).",
+  "Context:History:Enabled":
+    "Airs a this-day-in-history segment/patter line sourced from Wikimedia's On This Day feed. " +
+    "Off by default.",
+  "Context:History:SegmentCadenceMinutes":
+    "How often a fresh history segment may air, in minutes. Accepted range: 1–1440.",
+  "Context:History:PatterCadenceMinutes":
+    "How often a compact history line may be folded into patter, in minutes — independent of " +
+    "the segment cadence above. 0 disables history patter lines. Accepted range: 0–1440.",
+  "Context:History:PersonaId":
+    "Which persona voices history segments. 0 defers to the on-air DJ (the unset default does the same).",
+
+  // ── Station broadcast location (SPEC F108.1, F108.3, PLAN T226) ───────────────────────────
+  "Station:Location:Latitude":
+    "The station's broadcast latitude, used only to fetch weather — never spoken or logged. " +
+    "Blank means no coordinate is configured; an invalid value behaves the same as blank.",
+  "Station:Location:Longitude":
+    "The station's broadcast longitude, used only to fetch weather — never spoken or logged. " +
+    "Blank means no coordinate is configured; an invalid value behaves the same as blank.",
+  "Station:Location:SpokenName":
+    "The only location text ever spoken or logged, e.g. \"Calgary\" — coordinates themselves " +
+    "never air. Blank means weather segments name no place at all.",
+
+  // ── Clock-anchored imaging (SPEC F110.1/F110.3, gh-#381) ───────────────────────────────────
+  "Station:Imaging:ClockAnchoredIdents":
+    "When on, a station ID airs at the top of every hour in addition to the regular cadence " +
+    "count. Off by default.",
+  "Station:Imaging:TimeAnnouncements":
+    "When on, a spoken time announcement airs at the top of every hour. Off by default.",
 };
 
 /**

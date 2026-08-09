@@ -44,21 +44,24 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **72 seams across 6 projects.**
+> **76 seams across 6 projects.**
 
-## GenWave.Core (1 seam)
+## GenWave.Context (2 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
-| `GenWave.Core.Abstractions.IContextPatterFactSource` | `GenWave.Core.Abstractions.NoOpContextPatterFactSource` | Singleton | — |
+| `GenWave.Core.Abstractions.IContextPatterFactSource` | `GenWave.Context.ContextPipeline` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextPatterFactSource` (GenWave.Core) |
+| `GenWave.Core.Abstractions.IContextProvider` | `GenWave.Context.History.HistoryContextProvider` | Singleton | also registered: `GenWave.Context.Weather.WeatherContextProvider` (GenWave.Context) |
 
-## GenWave.Host (17 seams)
+## GenWave.Host (20 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
 | `GenWave.Core.Abstractions.IAudiencePostureProvider` | `GenWave.Host.Options.OptionsMonitorAudiencePostureProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IBoundaryBiasProvider` | `GenWave.Host.Options.OptionsMonitorBoundaryBiasProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.ICadenceProvider` | `GenWave.Host.Options.OptionsMonitorCadenceProvider` | Singleton | — |
+| `GenWave.Core.Abstractions.IContextCacheRootProvider` | `GenWave.Host.Options.OptionsMonitorContextCacheRootProvider` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextCacheRootProvider` (GenWave.Core) |
+| `GenWave.Core.Abstractions.IContextSettingsProvider` | `GenWave.Host.Options.ConfigurationContextSettingsProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.ILiquidsoapControl` | `GenWave.Host.Engine.LiquidsoapControl` | Singleton | — |
 | `GenWave.Core.Abstractions.IListenerStatsSource` | `GenWave.Host.Stats.IcecastListenerStatsSource` | Singleton | — |
 | `GenWave.Core.Abstractions.ILlmBatchGate` | `GenWave.Host.Enrichment.LlmBatchGate` | Singleton | — |
@@ -70,6 +73,7 @@
 | `GenWave.Core.Abstractions.IStationDefaultEnvelopeSource` | `GenWave.Host.Options.OptionsMonitorStationDefaultEnvelopeSource` | Singleton | — |
 | `GenWave.Core.Abstractions.IStationEventSink` | `GenWave.Host.Playout.CompositeStationEventSink` | Singleton | also registered: `GenWave.Core.Events.NoOpStationEventSink` (GenWave.Abstractions) |
 | `GenWave.Core.Abstractions.IStationIdentityProvider` | `GenWave.Host.Options.OptionsMonitorStationIdentityProvider` | Singleton | — |
+| `GenWave.Core.Abstractions.IStationLocationProvider` | `GenWave.Host.Options.OptionsMonitorStationLocationProvider` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpStationLocationProvider` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IStationScopeProvider` | `GenWave.Host.Options.OptionsMonitorStationScopeProvider` | Singleton | — |
 | `GenWave.Host.Configuration.IStationSettingsStore` | `GenWave.Host.Configuration.StationSettingsStore` | Singleton | — |
 | `GenWave.Host.Seeding.ISafeLoopSeedMarkerStore` | `GenWave.Host.Seeding.SafeLoopSeedMarkerStore` | Singleton | — |

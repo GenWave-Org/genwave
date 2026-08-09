@@ -16,9 +16,11 @@ using GenWave.Core.Domain;
 ///
 /// <para>
 /// <b>Fetch-once-per-slot.</b> Time is bucketed into fixed-width windows of
-/// <see cref="ContextProviderSettings.SegmentCadenceMinutes"/> minutes (floor-divided from the
+/// <see cref="ContextProviderSettings.SegmentCadenceMinutes"/> minutes — floored at 1, and further
+/// floored per-provider by <see cref="ICadenceFlooredContextProvider.MinimumSegmentCadenceMinutes"/>
+/// when a provider opts in (F4 fix, T226 review, SPEC F108.2) — and floor-divided from the
 /// <see cref="TimeProvider"/> epoch, so every instance buckets identically without needing to agree
-/// on a start time). A provider's <see cref="IContextProvider.FetchAsync"/> is invoked AT MOST ONCE
+/// on a start time. A provider's <see cref="IContextProvider.FetchAsync"/> is invoked AT MOST ONCE
 /// per slot, on whichever tick first lands in it — success, null, or a thrown exception all count as
 /// "attempted this slot" and none of them trigger a retry before the next slot begins.
 /// </para>
@@ -185,7 +187,17 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
 
             state.NoteAvailable(true); // Re-arms the unavailable-edge log for the NEXT time this provider goes unavailable.
 
-            var slot = ComputeSlot(now, settings.SegmentCadenceMinutes);
+            // Structural cadence floor (F4 fix, T226 review; see ICadenceFlooredContextProvider's
+            // own remarks) — the ONE place SegmentCadenceMinutes is actually consumed, so this is
+            // where a provider-declared floor is enforced regardless of how a value reached this
+            // pipeline (a live PUT, which SettingValidator's own write-time range already guards, OR
+            // an appsettings.json/env override, which never passes through that validator at all). A
+            // provider that implements no such floor is unaffected — Math.Max against 1 is a no-op
+            // ahead of ComputeSlot's own identical floor-divide clamp below.
+            var minimumSegmentCadenceMinutes = provider is ICadenceFlooredContextProvider floored
+                ? floored.MinimumSegmentCadenceMinutes
+                : 1;
+            var slot = ComputeSlot(now, Math.Max(settings.SegmentCadenceMinutes, minimumSegmentCadenceMinutes));
             await EnsureFetchedAsync(provider, state, slot, ct).ConfigureAwait(false);
 
             if (state.Content is not { } content || content.FreshUntil <= now)

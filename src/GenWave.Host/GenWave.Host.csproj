@@ -5,6 +5,7 @@
     <ProjectReference Include="..\GenWave.MediaLibrary\GenWave.MediaLibrary.csproj" />
     <ProjectReference Include="..\GenWave.Tts\GenWave.Tts.csproj" />
     <ProjectReference Include="..\GenWave.Orchestration\GenWave.Orchestration.csproj" />
+    <ProjectReference Include="..\GenWave.Context\GenWave.Context.csproj" />
   </ItemGroup>
 
   <ItemGroup>

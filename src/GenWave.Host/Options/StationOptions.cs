@@ -118,4 +118,15 @@ public sealed class StationOptions
     /// between the two.
     /// </summary>
     public string Theme { get; set; } = string.Empty;
+
+    /// <summary>The station's broadcast location (SPEC F108.1, F108.3, PLAN T226) — read live
+    /// through <see cref="OptionsMonitorStationLocationProvider"/> by
+    /// <c>GenWave.Context.Weather.WeatherContextProvider</c>. Bound to <c>Station:Location</c>.
+    /// </summary>
+    public StationLocationOptions Location { get; set; } = new();
+
+    /// <summary>Clock-anchored imaging knobs (SPEC F110.1/F110.3, gh-#381, PLAN T226) — see
+    /// <see cref="StationImagingOptions"/>'s own remarks for why this task adds the binding with no
+    /// consumer yet. Bound to <c>Station:Imaging</c>.</summary>
+    public StationImagingOptions Imaging { get; set; } = new();
 }
