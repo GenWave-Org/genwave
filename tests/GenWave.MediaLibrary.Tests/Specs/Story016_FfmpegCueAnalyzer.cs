@@ -85,6 +85,57 @@ public static class FeatureFfmpegCueAnalyzer
         }
     }
 
+    // gh-#424 — an interior pause (a TTS sentence gap, a quiet mid-track break) must never become
+    // cue_out; only silence that actually extends to EOF is a tail to trim. The buggy parser took
+    // the LAST silence region unconditionally, cutting the final sentence of every multi-sentence
+    // patter clip on air.
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioInteriorPauseDoesNotSetCueOut
+    {
+        [Fact]
+        public async Task CueOutSecIsTheFullFileNotThePauseStart()
+        {
+            var dir = TestMedia.NewTempDir();
+            try
+            {
+                // tone 4s + pause 0.8s + tone 4s → audible to EOF at ~8.8s; the buggy parser cut at 4.0.
+                var path = TestMedia.CreateToneSilenceTone(dir, "interior_pause.wav");
+                var analyzer = new FfmpegCueAnalyzer(new FakeOptionsMonitor<CueDetectionOptions>(new CueDetectionOptions()));
+                var cue = await analyzer.AnalyzeAsync(path, CancellationToken.None);
+                Assert.NotNull(cue);
+                Assert.Equal(0.0, cue.CueInSec);
+                Assert.InRange(cue.CueOutSec, 8.5, 9.1);
+            }
+            finally
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+        }
+    }
+
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioInteriorPausePlusTrailingSilenceTrimsOnlyTheTail
+    {
+        [Fact]
+        public async Task CueOutSecApproximatesTheTrailingRegionStart()
+        {
+            var dir = TestMedia.NewTempDir();
+            try
+            {
+                // tone 4s + pause 0.8s + tone 4s + trailing 3s → the trailing region starts at ~8.8s.
+                var path = TestMedia.CreateToneSilenceToneSilence(dir, "pause_and_tail.wav");
+                var analyzer = new FfmpegCueAnalyzer(new FakeOptionsMonitor<CueDetectionOptions>(new CueDetectionOptions()));
+                var cue = await analyzer.AnalyzeAsync(path, CancellationToken.None);
+                Assert.NotNull(cue);
+                Assert.InRange(cue.CueOutSec, 8.6, 9.0);
+            }
+            finally
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+        }
+    }
+
     public sealed class ScenarioThresholdAndMinDurationAreConfigBound
     {
         [Fact(Skip = "Requires ffmpeg process recorder — no interception facility in this test project")]
@@ -127,6 +178,29 @@ public static class FeatureFfmpegCueAnalyzer
                 var analyzer = new FfmpegCueAnalyzer(new FakeOptionsMonitor<CueDetectionOptions>(new CueDetectionOptions()));
                 var cue = await analyzer.AnalyzeAsync(path, CancellationToken.None);
                 Assert.True(cue is null || cue.CueInSec == 0.0);
+            }
+            finally
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+        }
+    }
+
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioEntirelySilentFileReturnsNull
+    {
+        [Fact]
+        public async Task NoUsableContentYieldsNullNotFullExtent()
+        {
+            var dir = TestMedia.NewTempDir();
+            try
+            {
+                // Guards the gh-#424 restructure: silence-only must stay null whether ffmpeg leaves
+                // the final region open-ended or flushes a silence_end at EOF.
+                var path = TestMedia.CreateSilenceOnly(dir, "silence_only.wav");
+                var analyzer = new FfmpegCueAnalyzer(new FakeOptionsMonitor<CueDetectionOptions>(new CueDetectionOptions()));
+                var cue = await analyzer.AnalyzeAsync(path, CancellationToken.None);
+                Assert.Null(cue);
             }
             finally
             {
