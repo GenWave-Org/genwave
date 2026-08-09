@@ -16,8 +16,27 @@ public static class FeatureHistoryProvider
     // this fixture keeps the real field names/types (text/year) and an empty pages array (never
     // deserialized by WikimediaSelectedEvent) rather than the full, much larger real payload. Five
     // entries — one more than SPEC F109.1's 2-4 segment cap, so ScenarioParaphraseNeverInvention proves
-    // the trim actually happens.
+    // the trim actually happens. Texts are NEUTRAL by construction since gh-#433: the tone gate now
+    // sits between the payload and ContextContent, and these scenarios prove fetch/cache/trim
+    // mechanics, not the gate — the gate has its own ScenarioToneGate below, which pins the REAL
+    // (five-for-five somber) reply this fixture's texts originally carried.
     const string RealShapeFixture = """
+        {
+          "selected": [
+            { "text": "The Beatles played their final rooftop concert in London.", "year": 1969, "pages": [] },
+            { "text": "The first transatlantic radio broadcast reached listeners in both hemispheres.", "year": 1926, "pages": [] },
+            { "text": "Voyager 2 transmitted the first close-up images of Neptune.", "year": 1989, "pages": [] },
+            { "text": "The metric system was adopted as the international standard of measurement.", "year": 1875, "pages": [] },
+            { "text": "A young programmer released the first version of the Linux kernel.", "year": 1991, "pages": [] }
+          ]
+        }
+        """;
+
+    // The REAL selected reply captured at T228 build time — five for five somber (epidemic, mudslide,
+    // mid-air collision, derailment, armed raid). This is why the gh-#433 tone gate exists; kept
+    // verbatim as the all-somber fixture so the gate is proven against Wikimedia's actual output, not
+    // a strawman.
+    const string AllSomberRealReplyFixture = """
         {
           "selected": [
             { "text": "The World Health Organization declared the Western African Ebola epidemic a public health emergency.", "year": 2014, "pages": [] },
@@ -25,6 +44,20 @@ public static class FeatureHistoryProvider
             { "text": "A tour helicopter and a small airplane collided over the Hudson River.", "year": 2009, "pages": [] },
             { "text": "A EuroCity train derailed near Studenka station.", "year": 2008, "pages": [] },
             { "text": "The Iranian consulate in Mazar-i-Sharif was raided by Taliban leaders.", "year": 1998, "pages": [] }
+          ]
+        }
+        """;
+
+    // gh-#433's live sighting shapes, verbatim where it matters: a somber fact carrying wiki-markup
+    // bracket residue ("Flight 2283]" — the half-stripped [[wikilink]] the demo box aired), a benign
+    // fact ALSO carrying residue (proves cleaning is independent of the tone screen), and a clean
+    // benign fact. First entry somber ⇒ the patter fact must come from the first AIRABLE entry.
+    const string SomberMixFixture = """
+        {
+          "selected": [
+            { "text": "Voepass Linhas Aéreas Flight 2283] crashed near Vinhedo, São Paulo, Brazil, killing all 62 people on board.", "year": 2024, "pages": [] },
+            { "text": "The first electric traffic signal] was installed in Cleveland, Ohio.", "year": 1914, "pages": [] },
+            { "text": "The Mars rover Curiosity landed in Gale Crater.", "year": 2012, "pages": [] }
           ]
         }
         """;
@@ -76,15 +109,15 @@ public static class FeatureHistoryProvider
 
             Assert.NotNull(content);
             const string Expected =
-                "2014: The World Health Organization declared the Western African Ebola epidemic a public health emergency. · " +
-                "2010: A massive mudslide struck the Chinese province of Gansu. · " +
-                "2009: A tour helicopter and a small airplane collided over the Hudson River. · " +
-                "2008: A EuroCity train derailed near Studenka station.";
+                "1969: The Beatles played their final rooftop concert in London. · " +
+                "1926: The first transatlantic radio broadcast reached listeners in both hemispheres. · " +
+                "1989: Voyager 2 transmitted the first close-up images of Neptune. · " +
+                "1875: The metric system was adopted as the international standard of measurement.";
             Assert.Equal(Expected, content.SegmentFacts);
             Assert.Equal(
-                "2014: The World Health Organization declared the Western African Ebola epidemic a public health emergency.",
+                "1969: The Beatles played their final rooftop concert in London.",
                 content.PatterFact);
-            Assert.DoesNotContain("Mazar-i-Sharif", content.SegmentFacts); // The 5th entry never made the cut.
+            Assert.DoesNotContain("Linux", content.SegmentFacts); // The 5th entry never made the cut.
         }
 
         public void Dispose() => Directory.Delete(build.CacheRoot, recursive: true);
@@ -173,6 +206,114 @@ public static class FeatureHistoryProvider
             await build.Provider.FetchAsync(CancellationToken.None); // Any successful fetch sweeps.
 
             Assert.False(File.Exists(orphanTempPath));
+        }
+
+        public void Dispose()
+        {
+            foreach (var root in cacheRoots)
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // gh-#433 — the airability gate: somber facts (violent death / disaster / atrocity) never air in
+    // either lane, wiki-markup bracket residue is stripped from what does, and the gate runs at VEND
+    // time so day files cached before the gate existed get the same screen.
+    public sealed class ScenarioToneGate : IDisposable
+    {
+        readonly List<string> cacheRoots = [];
+
+        (HistoryContextProvider Provider, FakeHttpMessageHandler Handler, string CacheRoot, FakeTimeProvider Time)
+            NewBuild(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond, string? cacheRoot = null)
+        {
+            var built = Build(respond, cacheRoot);
+            cacheRoots.Add(built.CacheRoot);
+            return built;
+        }
+
+        [Fact]
+        public async Task ASomberFactNeverReachesEitherLane()
+        {
+            var build = NewBuild((_, _) => RespondWith(SomberMixFixture));
+
+            var content = await build.Provider.FetchAsync(CancellationToken.None);
+
+            Assert.NotNull(content);
+            Assert.DoesNotContain("Voepass", content.SegmentFacts);
+            Assert.DoesNotContain("crashed", content.SegmentFacts);
+            Assert.DoesNotContain("Voepass", content.PatterFact);
+            // The patter fact is the first AIRABLE entry, not the first entry.
+            Assert.Equal("1914: The first electric traffic signal was installed in Cleveland, Ohio.", content.PatterFact);
+        }
+
+        [Fact]
+        public async Task WikiMarkupBracketResidueIsStrippedFromWhatAirs()
+        {
+            var build = NewBuild((_, _) => RespondWith(SomberMixFixture));
+
+            var content = await build.Provider.FetchAsync(CancellationToken.None);
+
+            Assert.NotNull(content);
+            Assert.DoesNotContain("]", content.SegmentFacts);
+            Assert.Contains("traffic signal was installed", content.SegmentFacts);
+        }
+
+        [Fact]
+        public async Task TheRealAllSomberReplyIsALegalSkipNotASegment()
+        {
+            // Wikimedia's actual 08/08 selected reply — five for five somber. Nothing airable ⇒ null
+            // (F107.6 skip-never-silence), never a segment scraped from the least-bad entry.
+            var build = NewBuild((_, _) => RespondWith(AllSomberRealReplyFixture));
+
+            var content = await build.Provider.FetchAsync(CancellationToken.None);
+
+            Assert.Null(content);
+        }
+
+        [Fact]
+        public async Task TheGateScreensDayFilesCachedBeforeItExisted()
+        {
+            // Vend-time application (this class's header): a pre-gate day file — seeded directly, the
+            // network down so the file is provably the only source — still gets the screen. This is
+            // the demo box's own upgrade shape: its 08-09 cache already held the Voepass fact.
+            var cacheRoot = Directory.CreateTempSubdirectory("genwave-history-tests-").FullName;
+            var historyDir = HistoryDir(cacheRoot);
+            Directory.CreateDirectory(historyDir);
+            await File.WriteAllTextAsync(
+                Path.Combine(historyDir, TodayFile),
+                """
+                {"Entries":[
+                  {"Year":2024,"Text":"Voepass Linhas Aéreas Flight 2283] crashed near Vinhedo, São Paulo, Brazil, killing all 62 people on board."},
+                  {"Year":1969,"Text":"The first cash-dispensing ATM opened."}
+                ]}
+                """);
+
+            var build = NewBuild((_, _) => throw new HttpRequestException("network down"), cacheRoot);
+
+            var content = await build.Provider.FetchAsync(CancellationToken.None);
+
+            Assert.NotNull(content);
+            Assert.Equal("1969: The first cash-dispensing ATM opened.", content.SegmentFacts);
+            Assert.Equal("1969: The first cash-dispensing ATM opened.", content.PatterFact);
+        }
+
+        [Fact]
+        public async Task APartialRemovalLogsOneInformationLine()
+        {
+            var handler = new FakeHttpMessageHandler((_, _) => RespondWith(SomberMixFixture));
+            var http = new HttpClient(handler) { BaseAddress = new Uri(HistoryContextProvider.WikimediaBaseAddress) };
+            var cacheRoot = Directory.CreateTempSubdirectory("genwave-history-tests-").FullName;
+            cacheRoots.Add(cacheRoot);
+            var cacheRootProvider = new FakeContextCacheRootProvider { Root = cacheRoot };
+            var logger = new CapturingLogger<HistoryContextProvider>();
+            var provider = new HistoryContextProvider(http, cacheRootProvider, new FakeTimeProvider(FixedNow), logger);
+
+            await provider.FetchAsync(CancellationToken.None);
+
+            // Information, not Debug — Debug never reaches the fleet's log pipeline, and "why is the
+            // history segment thin today" must be answerable from Loki.
+            Assert.Single(
+                logger.Entries,
+                entry => entry.Level == LogLevel.Information && entry.Message.Contains("tone gate"));
         }
 
         public void Dispose()
