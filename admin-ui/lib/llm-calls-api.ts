@@ -10,6 +10,8 @@
  */
 export interface LlmCallEntry {
   seq: number;
+  /** gh-#429 — who authored this call's copy, or `null` for a persona-less render (never `""`). */
+  personaName: string | null;
   startedAt: string;
   elapsedMs: number;
   status: string;

@@ -51,8 +51,9 @@ using GenWave.Core.Domain;
 /// <para>
 /// The SAME single recording point (SPEC F73.1, STORY-196, T41) is also where every call — on-air,
 /// Soft-cadence, or preview — lands in <see cref="LlmCallRing"/>, the admin call inspector's
-/// in-memory ring: prompt, raw response, timing, outcome, and the degradation mode active at call
-/// time (<see cref="IDegradationModeReader.CurrentMode"/>, read fresh right here rather than passed
+/// in-memory ring: the active persona's name (gh-#429), prompt, raw response, timing, outcome, and
+/// the degradation mode active at call time
+/// (<see cref="IDegradationModeReader.CurrentMode"/>, read fresh right here rather than passed
 /// in — a preview never passes through <see cref="DegradationGatedCopyWriter"/>, so there is no
 /// caller-supplied mode to reuse for that path; reading it uniformly for every path keeps this the
 /// one recording point instead of two). Never logged, never persisted — see <see cref="LlmCallRing"/>'s
@@ -410,6 +411,10 @@ public sealed class LlmCopyWriter(
         // uniformly for every path keeps this the one recording point instead of two.
         var startedAt = timeProvider.GetUtcNow();
         var mode = degradationMode.CurrentMode;
+        // gh-#429: the SAME card-first-then-legacy-row precedence the prompt's own self-name-mention
+        // line already uses (LlmPromptBuilder.BuildSelfNameMentionLine) — resolved once, up front, so
+        // the ring entry names whichever persona authored this call whether it succeeds or faults.
+        var personaName = LlmPromptBuilder.ResolveName(persona, card);
 
         // Hoisted above the try (mirrors WriteAsync's own cfg/persona hoisting, T3 review finding)
         // so a fault EARLIER than prompt assembly (e.g. a malformed endpoint URI) still lets the
@@ -519,7 +524,7 @@ public sealed class LlmCopyWriter(
             // is a hygiene decision the caller makes, not a fact about whether the call itself
             // succeeded; see LlmCallOutcome.Ok's own remarks.
             callRing.Record(
-                systemPrompt, userPrompt, text, startedAt, ElapsedMs(startedAt),
+                personaName, systemPrompt, userPrompt, text, startedAt, ElapsedMs(startedAt),
                 LlmCallOutcome.Ok, statusDetail: null, mode);
             return text;
         }
@@ -534,7 +539,7 @@ public sealed class LlmCopyWriter(
         {
             var (outcome, detail) = ClassifyForRing(ex);
             callRing.Record(
-                systemPrompt, userPrompt, response: null, startedAt, ElapsedMs(startedAt),
+                personaName, systemPrompt, userPrompt, response: null, startedAt, ElapsedMs(startedAt),
                 outcome, detail, mode);
             throw;
         }

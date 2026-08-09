@@ -337,6 +337,79 @@ public static class FeatureLlmCopyWriter
     }
 
     // ---------------------------------------------------------------------
+    // gh-#429 — the call ring names which persona authored each call, success or failure
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioCallRingRecordsThePersonaName : IAsyncLifetime
+    {
+        MockCompletionsServer mock = null!;
+
+        public async Task InitializeAsync() => mock = await MockCompletionsServer.StartAsync();
+
+        public async Task DisposeAsync() => await mock.DisposeAsync();
+
+        static (LlmCopyWriter Writer, LlmCallRing Ring) BuildWriterWithRing(string endpoint, Persona? persona)
+        {
+            var ring = new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions()));
+            var writer = new LlmCopyWriter(
+                new TemplateCopyWriter(new PatterTemplateRenderer()),
+                new FakeHttpClientFactory(),
+                new TestOptionsMonitor<LlmOptions>(new LlmOptions
+                {
+                    Endpoint = endpoint,
+                    Model = "test-model",
+                    TimeoutSeconds = 5,
+                    MaxCopyChars = 450,
+                }),
+                new LlmCopyStatusHolder(),
+                new FakeActivePersonaAccessor { Persona = persona },
+                new CapturingLogger<LlmCopyWriter>(),
+                TimeProvider.System,
+                ring,
+                new FakeDegradationModeReader());
+            return (writer, ring);
+        }
+
+        [Fact]
+        public async Task ASuccessfulCallRecordsTheActivePersonasName()
+        {
+            var persona = new Persona(1, "Neon Nightowl", "Spins vinyl til dawn.", "moody, late-night", "af_sky",
+                DateTime.UtcNow, DateTime.UtcNow);
+            var (writer, ring) = BuildWriterWithRing(mock.BaseUri.ToString(), persona);
+
+            await writer.WriteAsync(LeadInRequest(), CancellationToken.None);
+
+            var record = Assert.Single(ring.Snapshot());
+            Assert.Equal("Neon Nightowl", record.PersonaName);
+        }
+
+        [Fact]
+        public async Task AFailedCallStillRecordsTheActivePersonasName()
+        {
+            mock.Mode = MockCompletionsMode.Fail;
+            var persona = new Persona(2, "The Archivist", "Keeper of the catalog.", "dry, precise", "af_sky",
+                DateTime.UtcNow, DateTime.UtcNow);
+            var (writer, ring) = BuildWriterWithRing(mock.BaseUri.ToString(), persona);
+
+            await writer.WriteAsync(LeadInRequest(), CancellationToken.None);
+
+            var record = Assert.Single(ring.Snapshot());
+            Assert.Equal("The Archivist", record.PersonaName);
+        }
+
+        [Fact]
+        public async Task NoActivePersonaRecordsANullPersonaName()
+        {
+            var (writer, ring) = BuildWriterWithRing(mock.BaseUri.ToString(), persona: null);
+
+            await writer.WriteAsync(LeadInRequest(), CancellationToken.None);
+
+            var record = Assert.Single(ring.Snapshot());
+            Assert.Null(record.PersonaName);
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // SAD PATH — every miss lands on the template rung
     // ---------------------------------------------------------------------
 

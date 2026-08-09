@@ -35,6 +35,7 @@ public sealed class LlmCallsController(LlmCallRing ring) : ControllerBase
 
     static LlmCallDto ToDto(LlmCallRecord record) => new(
         record.Seq,
+        record.PersonaName,
         record.StartedAt,
         record.ElapsedMs,
         record.Outcome.ToString().ToLowerInvariant(),

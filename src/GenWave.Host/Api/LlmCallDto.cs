@@ -6,10 +6,13 @@ namespace GenWave.Host.Api;
 /// <see cref="PromptUser"/>/<see cref="Response"/> carry the FULL text — this is admin-only debug
 /// detail, never a public surface, and never persisted (see <see cref="GenWave.Tts.LlmCallRing"/>'s
 /// own remarks). <see cref="PromptChars"/>/<see cref="ResponseChars"/> are a cheap at-a-glance size
-/// for the table view; the full text is what the expandable row shows.
+/// for the table view; the full text is what the expandable row shows. <see cref="PersonaName"/>
+/// (gh-#429) is who authored the call — <see langword="null"/> for a persona-less render, never an
+/// empty string.
 /// </summary>
 public sealed record LlmCallDto(
     long Seq,
+    string? PersonaName,
     DateTimeOffset StartedAt,
     long ElapsedMs,
     string Status,
