@@ -34,6 +34,16 @@ public static class OrchestrationServiceCollectionExtensions
     /// failing composition; <see cref="Orchestrator"/>'s handoff producer then logs ONE WARN on its
     /// first unit and stays a permanent, silent-after-that no-op (the pre-F91 station shape).
     /// </para>
+    ///
+    /// <para>
+    /// <b><see cref="IContextSettingsProvider"/> (SPEC F107.2/F107.7, STORY-297, PLAN T224) — same
+    /// deliberately-not-registered-here posture:</b> the T226 <c>IOptionsMonitor</c>-backed
+    /// implementation is a future Host/GenWave.Context registration, not this method's. A host that
+    /// never wires one leaves <see cref="Orchestrator"/>'s constructor parameter at its default
+    /// (<see langword="null"/>) — <see cref="Orchestrator"/> itself, not this method, falls back to
+    /// <c>NoOpContextSettingsProvider.Instance</c> for that case (see that type's own remarks), so
+    /// composition never fails either way.
+    /// </para>
     /// </summary>
     public static IServiceCollection AddGenWaveOrchestration(this IServiceCollection services)
     {

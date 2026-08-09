@@ -333,18 +333,48 @@ static class LlmPromptBuilder
     }
 
     /// <summary>
-    /// The segment-framing line (SPEC F34.3, F92.2): states which of the LLM-eligible kinds this
-    /// break is so the model never has to guess its own role. Only ever called with a kind
+    /// SPEC F107.3 (STORY-297, PLAN T224) — the facts block for a <see cref="SegmentKind.ContextSegment"/>
+    /// prompt: the provider's own <see cref="SegmentRequest.ContextFacts"/> verbatim, followed by the
+    /// news posture in the epic's own ruled wording — <b>"Use only these facts. Do not add facts."</b>
+    /// — so the model paraphrases/reads what it was given rather than inventing color the way a
+    /// music-anchored break is otherwise welcome to (contrast <see cref="BuildSystemPrompt"/>'s "you
+    /// may add color about the era or genre" license, which this instruction deliberately overrides
+    /// for this one segment kind). <paramref name="facts"/> is truncated to <see cref="MaxSoulChars"/>
+    /// — provider-authored, not operator-authored, but still unbounded text flowing straight into a
+    /// prompt, so it gets the same house cap every other injected-text field here does.
+    ///
+    /// Returns <see langword="null"/> — no line at all — when <paramref name="facts"/> is null or
+    /// blank, rather than a contentless <c>"Facts:  Use only these facts. Do not add facts."</c> line
+    /// with nothing between the label and the instruction. This is NOT a defensive-only branch (T224
+    /// review finding — corrects the prior remarks here, which claimed the on-air drain arm's own
+    /// "blank means no segment lane" ruling, SPEC F107.6/T222, made this unreachable): that ruling
+    /// governs <c>Orchestrator</c>'s drain arm, which indeed never enqueues a blank-facts request, but
+    /// <c>PersonaController.Preview</c> reaches this exact branch on EVERY ContextSegment preview,
+    /// every time — a preview request has no provider behind it to ever populate
+    /// <see cref="SegmentRequest.ContextFacts"/> in the first place. <see cref="BuildUserContent"/>
+    /// omits the whole line when this returns null, so previewing a context segment with no facts
+    /// still yields a coherent prompt — the segment-role line (<see cref="BuildSegmentLine"/>) already
+    /// tells the model what kind of break this is.
+    /// </summary>
+    static string? BuildContextFactsLine(string? facts) =>
+        string.IsNullOrWhiteSpace(facts)
+            ? null
+            : $"Facts: {Truncate(facts, MaxSoulChars)} Use only these facts. Do not add facts.";
+
+    /// <summary>
+    /// The segment-framing line (SPEC F34.3, F92.2, F107.3): states which of the LLM-eligible kinds
+    /// this break is so the model never has to guess its own role. Only ever called with a kind
     /// <see cref="LlmCopyWriter.IsLlmAuthored"/> reports true for — the single source of truth for
     /// "which kinds"; the remaining kinds (<see cref="SegmentKind.StationId"/>,
-    /// <see cref="SegmentKind.TimeDate"/>, and, as of T223, <see cref="SegmentKind.ContextSegment"/>
-    /// until T224 flips <see cref="LlmCopyWriter.IsLlmAuthored"/> for it) never reach the LLM and so
-    /// never reach this method either. Exhaustive switch below: a new LLM-eligible
-    /// <see cref="SegmentKind"/> needs a matching arm added HERE as well as in
-    /// <see cref="LlmCopyWriter.IsLlmAuthored"/> for it to actually take effect end to end — the
-    /// compiler's own exhaustiveness check on this switch is the guard against silently forgetting
-    /// this one; <see cref="SegmentKind.ContextSegment"/>'s own arm was added ahead of that flip
-    /// (T223) purely so this switch's arm-per-kind coverage never lags the enum itself.
+    /// <see cref="SegmentKind.TimeDate"/>) never reach the LLM and so never reach this method either.
+    /// Exhaustive switch below: a new LLM-eligible <see cref="SegmentKind"/> needs a matching arm
+    /// added HERE as well as in <see cref="LlmCopyWriter.IsLlmAuthored"/> for it to actually take
+    /// effect end to end — the compiler's own exhaustiveness check on this switch is the guard
+    /// against silently forgetting this one; <see cref="SegmentKind.ContextSegment"/>'s own arm was
+    /// added ahead of the T223 flip purely so this switch's arm-per-kind coverage never lagged the
+    /// enum itself, and now (T224) carries its real, reachable wording — the actual facts and the
+    /// news-posture instruction ride separately, in <see cref="BuildUserContent"/>'s own
+    /// ContextSegment-only facts block, immediately below this line in the finished prompt.
     /// </summary>
     // gh-#195: the segment line is the ONLY thing separating a lead-in prompt from a back-announce
     // prompt for the same track, and the old one-clause phrasing lost to a wall of identical track
@@ -359,23 +389,29 @@ static class LlmPromptBuilder
             + "tense (e.g. \"that was...\"); never announce it as upcoming or say it is next.",
         SegmentKind.SignOff => "Segment: sign-off as you close out your shift on air.",
         SegmentKind.SignOn => "Segment: sign-on as you open your shift on air.",
-        // T223 (SPEC F107.3, STORY-297): a plain, truthful placeholder line only — this kind is not
-        // yet reachable (LlmCopyWriter.IsLlmAuthored does not report true for it, so BuildUserContent
-        // never calls this method with it today). T224 owns the real facts block/news-posture wording
-        // once the drain arm actually produces a ContextSegment request.
-        SegmentKind.ContextSegment => "Segment: context segment - a short factual note for listeners.",
+        SegmentKind.ContextSegment =>
+            "Segment: context segment - a short spoken note for listeners, written in your own " +
+            "words from the facts given below.",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, message: null),
     };
 
     /// <summary>
-    /// Composes the user-content half of the prompt (SPEC F34.3, F71.8, F83.1-F83.3, F87.7, F92.2):
-    /// station/time/clock/segment framing, then — for a sign-off/sign-on only — the handoff-color
-    /// line (see <see cref="BuildHandoffLine"/>), then whatever the track itself carries (title/
-    /// artist/album/genre/year — unchanged since before F71; null for a handoff, which is not
-    /// track-anchored), then an OPTIONAL request-color line (SPEC F87.7, PLAN T91 — see
-    /// <see cref="RequestLineAcknowledgmentLine"/>) for a fulfilled track's own lead-in only, then,
-    /// last, an OPTIONAL persona-taste line (see <see cref="BuildTasteLine"/>) so each reads as one
-    /// more piece of color about THIS track rather than a separate directive.
+    /// Composes the user-content half of the prompt (SPEC F34.3, F71.8, F83.1-F83.3, F87.7, F92.2,
+    /// F107.3): station/time/clock/segment framing, then — for a sign-off/sign-on only — the
+    /// handoff-color line (see <see cref="BuildHandoffLine"/>), or — for a context segment WITH facts
+    /// to show — the facts block (see <see cref="BuildContextFactsLine"/>, whose own null return omits
+    /// the line entirely for a preview's typically-blank <see cref="SegmentRequest.ContextFacts"/>;
+    /// T224 note: this arm and the track-anchored arm below are mutually exclusive by construction,
+    /// since a <see cref="SegmentKind.ContextSegment"/> request's own <see cref="SegmentRequest.Track"/>
+    /// is always null), then whatever the track
+    /// itself carries (title/artist/album/genre/year — unchanged since before F71; null for a
+    /// handoff or a context segment, neither of which is track-anchored), then an OPTIONAL
+    /// request-color line (SPEC F87.7, PLAN T91 — see <see cref="RequestLineAcknowledgmentLine"/>) for
+    /// a fulfilled track's own lead-in only, then, last, an OPTIONAL persona-taste line (see
+    /// <see cref="BuildTasteLine"/>) so each reads as one more piece of color about THIS track rather
+    /// than a separate directive. Every one of these kind-specific arms is additive — a request whose
+    /// kind matches none of them (every kind that predates F92/F107) produces the exact same output
+    /// as before either feature shipped.
     /// <paramref name="previouslyVoicedTasteNotes"/> is the immediately preceding ON-AIR break's
     /// fired-rule descriptions (see <see cref="DescribeFiredRules"/>) — see <see cref="LlmCopyWriter"/>'s
     /// own remarks on where that memory lives and why a preview never supplies it.
@@ -393,6 +429,9 @@ static class LlmPromptBuilder
 
         if (request.Kind is SegmentKind.SignOff or SegmentKind.SignOn)
             lines.Add(BuildHandoffLine(request.Kind, request.CounterpartName));
+
+        if (request.Kind == SegmentKind.ContextSegment && BuildContextFactsLine(request.ContextFacts) is { } factsLine)
+            lines.Add(factsLine);
 
         if (request.Track is { } track)
         {

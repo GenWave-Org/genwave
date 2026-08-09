@@ -1,5 +1,7 @@
 namespace GenWave.Orchestration;
 
+using GenWave.Core.Domain;
+
 /// <summary>
 /// The seam SPEC F74.1/F74.2/F74.4 (STORY-197) is built on: decouples "an ident is DUE" (a
 /// wall-clock or unit-count trigger firing) from "an ident AIRS" (the next track-boundary
@@ -109,14 +111,22 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     /// exactly one-pending-per-kind, byte-identical to pre-F107 behavior. Only
     /// <see cref="SpeechDeferralKind.Context"/> callers pass a non-null value (the provider key).
     /// </param>
+    /// <param name="context">
+    /// Additive (SPEC F107.3, STORY-297, PLAN T224) — see <see cref="SpeechDeferral.Context"/>. The
+    /// T226 Host ticker is this parameter's one production caller, passing the very
+    /// <see cref="ContextContent"/> <c>ContextPipeline.TickAsync</c> just handed it. Every pre-F107
+    /// kind leaves this <see langword="null"/>, unchanged.
+    /// </param>
     public void Enqueue(
         SpeechDeferralKind kind,
         string reason,
         DateTimeOffset? due = null,
         HandoffContext? handoff = null,
-        string? discriminator = null)
+        string? discriminator = null,
+        ContextContent? context = null)
     {
-        var deferral = new SpeechDeferral(kind, due ?? timeProvider.GetUtcNow(), reason, handoff, discriminator);
+        var deferral = new SpeechDeferral(
+            kind, due ?? timeProvider.GetUtcNow(), reason, handoff, discriminator, context);
         lock (gate)
         {
             pending[(kind, discriminator)] = deferral;

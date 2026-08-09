@@ -32,6 +32,14 @@ namespace GenWave.Core.Domain;
 /// (default <see langword="null"/>) so every existing caller is diff-free; the F74 queue producer
 /// (PLAN T124) is the only writer.
 /// </param>
+/// <param name="ContextFacts">
+/// Plain-text facts for a <see cref="SegmentKind.ContextSegment"/> render (SPEC F107.3, STORY-297,
+/// PLAN T224) — <c>GenWave.Core.Domain.ContextContent.SegmentFacts</c> verbatim, never re-derived.
+/// The copywriter prompt renders these under the news posture ("read these facts, do not add
+/// facts") rather than inventing content of its own. <see langword="null"/> for every other kind —
+/// additive and optional (default <see langword="null"/>) so every existing caller is diff-free; the
+/// Orchestrator's F74 context-segment drain arm (PLAN T224) is the only writer.
+/// </param>
 public sealed record SegmentRequest(
     SegmentKind    Kind,
     string         Voice,
@@ -40,4 +48,5 @@ public sealed record SegmentRequest(
     DateTimeOffset LocalNow,
     string         StationId,
     string?        PersonaName = null,
-    string?        CounterpartName = null);
+    string?        CounterpartName = null,
+    string?        ContextFacts = null);

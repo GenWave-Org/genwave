@@ -63,25 +63,31 @@ public sealed class TtsSegmentSource(
             var cfg = options.CurrentValue;
             var copy = await copyWriter.WriteAsync(request, ct);
 
-            // Design ruling, spec-cited (T123 review finding): a handoff piece must NEVER air
-            // non-LLM-authored copy. F92.4's ladder is "two-piece -> whichever piece rendered ->
-            // clean cut" — there is no "templated piece" rung — and F92.5 states handoff pieces ARE
-            // LLM-authored blurbs, full stop. copy.FreshPerAiring false on a SignOff/SignOn render
-            // means every writer in the chain missed: LlmCopyWriter's own three degrade paths
+            // Design ruling, spec-cited (T123 review finding, extended to ContextSegment at T224):
+            // a handoff piece OR a context segment must NEVER air non-LLM-authored copy. F92.4's
+            // ladder is "two-piece -> whichever piece rendered -> clean cut" — there is no "templated
+            // piece" rung — and F92.5/F107.6 both state this copy IS an LLM-authored blurb, full
+            // stop: for a handoff, the alternative is silently wrong ceremony phrasing; for a context
+            // segment, the alternative is PatterTemplateRenderer's inert placeholder ("Here's
+            // something worth knowing") standing in for actual facts, which defeats the entire point
+            // of a context provider (never airable filler, SPEC F107.6). copy.FreshPerAiring false
+            // here means every writer in the chain missed: LlmCopyWriter's own three degrade paths
             // (disabled endpoint, timeout/non-2xx/connect, empty-or-over-length after cleanup) AND
             // DegradationGatedCopyWriter routing straight to TemplateCopyWriter — unconditionally in
             // Hard mode, or off an unclaimed Soft cadence slot — bypassing LlmCopyWriter entirely.
             // Every one of those returns template copy rather than throwing (ISegmentCopyWriter's own
             // never-throws contract), which is exactly why PatterTemplateRenderer still needs correct
-            // SignOff/SignOn arms — they just must never reach air. One WARN, then null:
-            // ITtsSegmentSource already allows null-never-throws, and T124's boundary producer treats
-            // a null piece exactly like F92.4's "whichever piece rendered airs (else clean cut)".
-            if (request.Kind is SegmentKind.SignOff or SegmentKind.SignOn && !copy.FreshPerAiring)
+            // SignOff/SignOn/ContextSegment arms — they just must never reach air. One WARN, then
+            // null: ITtsSegmentSource already allows null-never-throws, and the Orchestrator's own
+            // drain arm treats a null render exactly like F92.4's "whichever piece rendered airs
+            // (else clean cut)"/F107.6's skip-never-silence posture.
+            if (request.Kind is SegmentKind.SignOff or SegmentKind.SignOn or SegmentKind.ContextSegment
+                && !copy.FreshPerAiring)
             {
                 logger.LogWarning(
-                    "Handoff copy for {Kind} on station {StationId} was not LLM-authored (writer " +
-                    "degraded to template) — dropping this piece rather than airing non-LLM-authored " +
-                    "handoff copy (SPEC F92.4, F92.5)",
+                    "Copy for {Kind} on station {StationId} was not LLM-authored (writer degraded to " +
+                    "template) — dropping this segment rather than airing non-LLM-authored copy " +
+                    "(SPEC F92.4, F92.5, F107.6)",
                     request.Kind, request.StationId);
                 return null;
             }

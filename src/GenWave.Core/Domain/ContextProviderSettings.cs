@@ -20,9 +20,18 @@ namespace GenWave.Core.Domain;
 /// patter, not a second fetch.
 /// </param>
 /// <param name="PersonaId">
-/// Which persona voices this provider's aired content (F107.7, <c>Context:{Key}:PersonaId</c>) — null
-/// means the station's own voice. Read by the T224 Orchestrator drain arm; the pipeline itself never
-/// interprets this value.
+/// Which persona voices this provider's aired content (F107.7, <c>Context:{Key}:PersonaId</c>). Read
+/// only by the T224 Orchestrator drain arm — the pipeline itself never interprets this value.
+/// <see langword="null"/> and <c>0</c> (and any negative value) all mean the SAME thing: defer to the
+/// on-air DJ, exactly like every other persona-voiced segment (LeadIn/BackAnnounce). Only a POSITIVE
+/// value names an explicit persona; it is never the station's own voice by construction — the drain
+/// arm degrades to the station voice only as the one further fallback for that positive id itself
+/// failing to resolve (deleted persona, no store wired, F12.4), or for the on-air-DJ rung finding
+/// nobody in the chair. <see langword="null"/> reads back identically to <c>0</c> on purpose: config
+/// binding cannot distinguish "key absent" from "key bound to 0" for a nullable numeric setting, so an
+/// unconfigured provider and an explicitly-zeroed one must resolve the same way — see
+/// <see cref="Abstractions.NoOpContextSettingsProvider"/>'s own remarks for the "never itself the
+/// reason a segment fails to air" framing this shares.
 /// </param>
 public sealed record ContextProviderSettings(
     bool Enabled, int SegmentCadenceMinutes, int PatterCadenceMinutes, long? PersonaId);

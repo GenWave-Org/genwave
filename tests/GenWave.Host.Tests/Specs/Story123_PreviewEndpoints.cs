@@ -267,13 +267,19 @@ file static class PreviewControllerFactory
 /// <summary>
 /// Minimal <see cref="WebApplicationFactory{TEntryPoint}"/> that brings up the real HTTP pipeline
 /// (routing, auth, content-type negotiation) while removing hosted services that would attempt
-/// real Liquidsoap/Postgres connections. Mirrors Story120's <c>PersonaApiWebFactory</c>: neither
-/// posture scenario ever resolves <see cref="IPersonaPreviewWriter"/> (401 is rejected by auth
-/// middleware, 415 by action-selection) — both happen before <see cref="PersonaController"/> is
-/// constructed — so the persona store's connection string is left at its (empty, dev-mode) default.
+/// real Liquidsoap/Postgres connections. Mirrors Story120's <c>PersonaApiWebFactory</c>. The two
+/// posture scenarios below (<see cref="FeaturePreviewEndpoints.ScenarioGates"/>) never resolve
+/// <see cref="IPersonaPreviewWriter"/> at all (401 is rejected by auth middleware, 415 by
+/// action-selection — both happen before <see cref="PersonaController"/> is ever constructed).
+/// <see cref="FeaturePreviewEndpoints.ScenarioContextSegmentRoutesToTheLlmRung"/> (T224 review
+/// finding R4) is the one exception — it logs in for real and DOES reach the real, DI-wired
+/// <see cref="IPersonaPreviewWriter"/> (the real <c>LlmCopyWriter</c>), deliberately, to pin which
+/// writer a <c>ContextSegment</c> preview actually routes to.
 /// </summary>
 file sealed class PersonaPreviewApiWebFactory(bool withAdminPassword) : WebApplicationFactory<Program>
 {
+    internal const string AdminPassword = "test-password-x7z";
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // Development config provides Station:Id/Name/Voice/Scope/SafeScope and Tts:Endpoint
@@ -287,7 +293,7 @@ file sealed class PersonaPreviewApiWebFactory(bool withAdminPassword) : WebAppli
 
         if (withAdminPassword)
         {
-            builder.UseSetting("Admin:Password", "test-password-x7z");
+            builder.UseSetting("Admin:Password", AdminPassword);
         }
 
         builder.ConfigureTestServices(services =>
@@ -518,6 +524,47 @@ public static class FeaturePreviewEndpoints
             var response = await client.PostAsync("/api/personas/preview", body);
 
             Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
+        }
+    }
+
+    // T223 -> T224 transition (SPEC F35.6, F107.3, T224 review finding R4): T223 shipped
+    // kind=ContextSegment as a 200 template placeholder — PatterTemplateRenderer's fixed "Here's
+    // something worth knowing." copy, never touching IPersonaPreviewWriter at all. T224 made
+    // ContextSegment one of LlmCopyWriter.IsLlmAuthored's kinds (an LLM-authored kind belongs on the
+    // LLM rung, same as LeadIn/BackAnnounce/SignOff/SignOn), so the SAME preview request now routes
+    // through the real LlmCopyWriter.WritePreviewAsync and reports 502 exactly like every other
+    // LLM-eligible kind previews when Llm:Endpoint is unconfigured — never the old always-succeeds
+    // template rung. Drives the REAL DI-wired IPersonaPreviewWriter (PersonaPreviewApiWebFactory,
+    // unlike this file's controller-direct scenarios above, which fake IPersonaPreviewWriter
+    // entirely and so cannot see which writer a kind actually routes to) so this proves the routing
+    // decision itself, not just the fake's scripted answer.
+    public sealed class ScenarioContextSegmentRoutesToTheLlmRung
+    {
+        [Fact]
+        public async Task ContextSegmentPreviewReturns502WhenTheLlmEndpointIsUnconfigured()
+        {
+            // Admin:Password configured and a real login round-trip (mirrors
+            // Story163_NamedAuthorizationPolicies's LoggedInClientAsync idiom) — this fact needs to
+            // actually REACH PersonaController.Preview, not stop at the auth gate the way both
+            // ScenarioGates facts above deliberately do.
+            await using var factory = new PersonaPreviewApiWebFactory(withAdminPassword: true);
+            var client = factory.CreateClient();
+            var login = await client.PostAsJsonAsync(
+                "/api/auth/login", new { password = PersonaPreviewApiWebFactory.AdminPassword });
+            Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
+
+            // Neither appsettings.json nor appsettings.Development.json sets Llm:Endpoint — the
+            // shipped "LLM disabled" default (see LlmOptions.Endpoint's own remarks).
+            var response = await client.PostAsJsonAsync(
+                "/api/personas/preview",
+                new PersonaPreviewRequest(
+                    Kind: "ContextSegment", MediaId: null, PersonaId: null,
+                    Name: null, Backstory: null, Style: null, Voice: null));
+
+            Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+            var details = await response.Content.ReadFromJsonAsync<ProblemDetails>();
+            Assert.NotNull(details);
+            Assert.Equal(StatusCodes.Status502BadGateway, details.Status);
         }
     }
 }

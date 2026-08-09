@@ -63,7 +63,15 @@ public sealed class PatterTemplateRenderer
                                           { Length: > 0 } name => $"Thanks, {name} — taking it from here.",
                                           _                    => "Taking it from here after a run of nonstop music.",
                                       },
-        // placeholder — T224 owns the real context copy
+        // Never actually airs (SPEC F107.6, PLAN T224): TtsSegmentSource drops any ContextSegment
+        // render that isn't genuinely LLM-authored — reading raw provider facts as inert filler like
+        // this would defeat the whole point of a context provider. This arm exists purely so the
+        // switch below stays total: DegradationGatedCopyWriter's unconditional Hard-mode routing needs
+        // a correct, non-throwing landing spot for this kind. NOT reached by a persona-preview miss
+        // (T224 review finding): ContextSegment is now one of LlmCopyWriter.IsLlmAuthored's kinds, so
+        // WritePreviewAsync never falls through to this template rung on an LLM miss the way it would
+        // have under T223 — it returns PersonaPreviewResult.Failed instead (F35.6: a preview never
+        // silently substitutes template copy).
         SegmentKind.ContextSegment => "Here's something worth knowing.",
         _                          => throw new ArgumentOutOfRangeException(
                                         nameof(request.Kind), request.Kind, message: null),

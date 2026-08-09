@@ -131,8 +131,10 @@ public sealed class RollingPatterDurationEstimator(ICopyBoundsProvider? copyBoun
         {
             SegmentKind.StationId => TypicalStationIdChars,
             SegmentKind.TimeDate => TypicalTimeDateChars,
-            // The LLM-authored kinds (LeadIn/BackAnnounce/SignOff/SignOn — LlmCopyWriter.IsLlmAuthored):
-            // typical two-sentence copy, with the live MaxCopyChars bounding the worst case (gh-#253).
+            // The LLM-authored kinds (LeadIn/BackAnnounce/SignOff/SignOn/ContextSegment as of T224 —
+            // LlmCopyWriter.IsLlmAuthored): typical two-sentence copy, with the live MaxCopyChars
+            // bounding the worst case (gh-#253). Deliberately NOT exhaustive by name — a future
+            // LLM-eligible kind lands here automatically via this same fallback arm, never a throw.
             _ => Math.Min(TypicalLlmCopyChars, maxCopyChars),
         };
 

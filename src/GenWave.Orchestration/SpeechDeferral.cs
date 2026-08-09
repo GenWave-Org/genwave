@@ -1,5 +1,7 @@
 namespace GenWave.Orchestration;
 
+using GenWave.Core.Domain;
+
 /// <summary>
 /// A single pending "speak at the next boundary" request held by <see cref="SpeechDeferralQueue"/>
 /// (SPEC F74.1). <paramref name="Due"/> is the wall-clock instant the deferral became due — for
@@ -27,9 +29,21 @@ namespace GenWave.Orchestration;
 /// byte-identical. A future consumer (T224) reads this back off the dequeued entry to fetch the
 /// matching pipeline content by key.
 /// </param>
+/// <param name="Context">
+/// Additive, optional (SPEC F107.3, STORY-297, PLAN T224): the immutable payload a
+/// <see cref="SpeechDeferralKind.Context"/> deferral needs to drain — <c>GenWave.Context</c>'s own
+/// <c>ContextPipeline.TickAsync</c> result, captured by the T226 Host ticker at ENQUEUE time and
+/// carried verbatim to the drain (the same "capture, never re-fetch" posture <see cref="Handoff"/>
+/// established one field up — see that param's own remarks). The drain arm re-checks freshness
+/// against <see cref="ContextContent.FreshUntil"/> at DRAIN time regardless (a unit boundary can
+/// land well after this deferral was enqueued), so capturing the content early never risks airing
+/// stale facts. <see langword="null"/> for every other kind, and defensively tolerated (skip, not
+/// throw) should a <see cref="SpeechDeferralKind.Context"/> deferral ever somehow arrive without one.
+/// </param>
 public sealed record SpeechDeferral(
     SpeechDeferralKind Kind,
     DateTimeOffset Due,
     string Reason,
     HandoffContext? Handoff = null,
-    string? Discriminator = null);
+    string? Discriminator = null,
+    ContextContent? Context = null);

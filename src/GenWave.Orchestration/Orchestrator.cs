@@ -118,6 +118,24 @@ using GenWave.Core.Events;
 /// for the F92.3 dedupe rules and the explicit <see cref="SpeechDeferralQueue.Clear"/> a boundary
 /// leaving the window triggers.
 /// </para>
+///
+/// <para>
+/// <b>Context segments (SPEC F107.3-F107.7, STORY-297, PLAN T224):</b> a <see cref="SpeechDeferralKind.Context"/>
+/// deferral (enqueued by the T226 Host ticker off <c>GenWave.Context.ContextPipeline.TickAsync</c>,
+/// carrying the fetched <see cref="SpeechDeferral.Context"/> payload) drains through the SAME loop
+/// the station-id/handoff kinds share, one boundary at a time (F74.1 — never mid-track). Freshness is
+/// re-checked at DRAIN time, not trusted from enqueue time: a stale, content-less, or blank-facts
+/// deferral is skipped with one Information line naming the provider key and cause, never echoing the
+/// provider's own facts (F108.3) — music is unaffected either way. <c>Context:{Key}:PersonaId</c>
+/// (read fresh, per drain, through <paramref name="contextSettings"/>) picks the voice: a positive id
+/// names an explicit persona (resolved through <paramref name="personaStore"/>, degrading to the
+/// station voice on any miss); zero, negative, or unset defers to the on-air DJ via the SAME
+/// <see cref="ResolvePersonaAsync"/> every LeadIn/BackAnnounce segment already uses — whose own
+/// no-active-persona fallback already IS "music-only segment or gap ⇒ station voice" (the StationId
+/// imaging precedent), so that half of F107.7 needed no new code here. A render that comes back null
+/// (an LLM miss with no templated-filler rung — SPEC F107.6, mirrors F92.4's handoff-drop posture one
+/// paragraph up) logs a WARN and leaves the buffer untouched; the next boundary's own drain retries.
+/// </para>
 /// </summary>
 public sealed class Orchestrator(
     IStationIdentityProvider identityProvider,
@@ -136,7 +154,8 @@ public sealed class Orchestrator(
     IPersonaStore? personaStore = null,
     IStationEventSink? events = null,
     IStationClockProvider? stationClock = null,
-    IPatterDurationEstimator? patterEstimator = null) : INextItemProvider
+    IPatterDurationEstimator? patterEstimator = null,
+    IContextSettingsProvider? contextSettings = null) : INextItemProvider
 {
     // gh-#254 — how far from the boundary a candidate may land and still count as a WIN ("±30s of
     // the boundary is a win"), widened as the gh-#253 estimate's confidence tier drops: the fit's
@@ -227,6 +246,13 @@ public sealed class Orchestrator(
     // rolling state, and sharing one static instance across constructions would bleed one test's
     // (or one hypothetical second station's) observed history into another's estimates.
     readonly IPatterDurationEstimator patterEstimator = patterEstimator ?? new RollingPatterDurationEstimator();
+
+    // SPEC F107.7 (STORY-297, PLAN T224): the Context:{Key}:PersonaId seam — same null-coalesced-
+    // default idiom as events/patterEstimator above. A host that has not yet wired T226's real
+    // IOptionsMonitor-backed implementation (every pre-T226 construction site, including every unit
+    // test) reads back "no explicit persona configured for any key", which the drain arm's own
+    // resolution degrades to the on-air DJ — never a null-check, never a stall.
+    readonly IContextSettingsProvider contextSettings = contextSettings ?? NoOpContextSettingsProvider.Instance;
 
     readonly Queue<MediaItem> buffer = new();
     MediaItem? previousTrack;
@@ -586,17 +612,25 @@ public sealed class Orchestrator(
         // call, returning both values from the same read (F39.1) — never resolve Voice and
         // PersonaName from two separate accessor calls, which could straddle a concurrent
         // activate/deactivate and pair a stale name with a fresh voice or vice versa.
+        // Carried exception (T224 review, accepted as-is): a SpeechDeferralKind.Context drain with a
+        // positive Context:{Key}:PersonaId resolves through a genuine personaStore.GetByIdAsync round
+        // trip between two Kicks instead — not the negligible accessor read every other kind gets.
         // The full request rides alongside each render task — Kind for the F92.4 drop
         // classification (SPEC F92.4, PLAN T124: the await loop below tells a handoff-kind drop,
         // WARN + booth row, from every other kind's ordinary silent skip), and Voice/PersonaName for
         // the gh-#253 measured-duration observation a successful render feeds the estimator — the
         // render itself is still kicked off immediately here, nothing awaited in between.
-        var pendingRenders = new List<(SegmentRequest Request, Task<MediaItem?> Render)>();
+        // ContextProviderKey (T224 review finding — the WARN this key ultimately feeds must name
+        // WHICH provider dropped, not just "a context segment") rides alongside for exactly one
+        // kind: null for every other kind's render, the drain arm's own providerKey for
+        // SpeechDeferralKind.Context's Kick call below.
+        var pendingRenders = new List<(SegmentRequest Request, Task<MediaItem?> Render, string? ContextProviderKey)>();
 
         // Starts one render and remembers the request alongside the Task (T124 review simplify) —
         // every call site below used to repeat the Add call verbatim; the render itself is still
         // kicked off immediately, nothing awaited in between.
-        void Kick(SegmentRequest request) => pendingRenders.Add((request, tts.RenderAsync(request, ct)));
+        void Kick(SegmentRequest request, string? contextProviderKey = null) =>
+            pendingRenders.Add((request, tts.RenderAsync(request, ct), contextProviderKey));
 
         // 1. Back-announce for the previous track
         if (cadence.BackAnnounceAfterEachTrack && prev is not null)
@@ -637,8 +671,12 @@ public sealed class Orchestrator(
         // review finding). Reads the SAME injected clock GetNextAsync compares NextDue against
         // (SPEC F74.3) — one clock for both halves of this seam, never a mix of a real and a fake
         // one. Written for ANY due deferral, including one enqueued several units ago (SPEC
-        // F74.1 — "regardless of wall-clock slip").
-        foreach (var deferral in deferralQueue.TryDequeueDue(drainAsOf ?? timeProvider.GetUtcNow()))
+        // F74.1 — "regardless of wall-clock slip"). Hoisted into a local (T224) so the
+        // SpeechDeferralKind.Context arm's own freshness re-check below compares against the EXACT
+        // same instant the dequeue decision itself was made against, rather than a second, later
+        // clock read.
+        var drainNow = drainAsOf ?? timeProvider.GetUtcNow();
+        foreach (var deferral in deferralQueue.TryDequeueDue(drainNow))
         {
             switch (deferral.Kind)
             {
@@ -686,6 +724,61 @@ public sealed class Orchestrator(
                         handoff.CounterpartName);
                     Kick(handoffReq);
                     break;
+
+                case SpeechDeferralKind.Context:
+                {
+                    // SPEC F107.3/F107.6 (STORY-297, PLAN T224): re-verify freshness HERE, at drain
+                    // time — the payload was captured by the T226 ticker at ENQUEUE time (see
+                    // SpeechDeferral.Context's own remarks), and the boundary this drain actually
+                    // fires at can land well after that. Discriminator is always the originating
+                    // provider's own Key for this kind (SpeechDeferral's own doc) — "(unknown)" is a
+                    // defensive fallback only, never expected to appear in production.
+                    var providerKey = deferral.Discriminator ?? "(unknown)";
+
+                    if (deferral.Context is not { } content)
+                    {
+                        logger.LogInformation(
+                            "Context segment for provider {ProviderKey} skipped at drain time: no " +
+                            "content captured (SPEC F107.6).", providerKey);
+                        break;
+                    }
+
+                    if (content.FreshUntil <= drainNow)
+                    {
+                        logger.LogInformation(
+                            "Context segment for provider {ProviderKey} skipped at drain time: stale " +
+                            "(past FreshUntil) — music continues (SPEC F107.6).", providerKey);
+                        break;
+                    }
+
+                    // T222 ruling: blank SegmentFacts means "no segment lane this fetch" even though
+                    // the fetch itself succeeded (e.g. a PatterFact-only update) — not a failure, but
+                    // still nothing this drain arm can build a segment from.
+                    if (string.IsNullOrWhiteSpace(content.SegmentFacts))
+                    {
+                        logger.LogInformation(
+                            "Context segment for provider {ProviderKey} skipped at drain time: no " +
+                            "segment facts (SPEC F107.6).", providerKey);
+                        break;
+                    }
+
+                    // SPEC F107.7 — Context:{Key}:PersonaId picks the voice; see this class's own
+                    // remarks and ResolveContextSegmentVoiceAsync for the full resolution table.
+                    var contextProviderSettings = contextSettings.For(providerKey);
+                    var (contextVoice, contextPersonaName) = await ResolveContextSegmentVoiceAsync(
+                        contextProviderSettings.PersonaId, providerKey, identity.Voice, ct);
+                    var contextReq = new SegmentRequest(
+                        SegmentKind.ContextSegment,
+                        contextVoice,
+                        identity.Name,
+                        null,
+                        StationLocalNow(),
+                        identity.Id,
+                        PersonaName: contextPersonaName,
+                        ContextFacts: content.SegmentFacts);
+                    Kick(contextReq, providerKey);
+                    break;
+                }
             }
         }
 
@@ -717,15 +810,18 @@ public sealed class Orchestrator(
         }
 
         // Await each render with the budget; skip any that time out, fault, or return null. A
-        // handoff-kind (SignOff/SignOn) drop additionally logs a WARN + booth-log entry (SPEC F92.4)
-        // — every other kind's drop stays the pre-existing silent skip. Classified from the
+        // handoff-kind (SignOff/SignOn) drop additionally logs a WARN + booth-log entry (SPEC F92.4);
+        // a ContextSegment drop logs a WARN only, no booth-log entry (SPEC F107.6, PLAN T224 — the
+        // F107 epic has no booth-log-drop event of its own, and this drop is expected, ordinary
+        // skip-never-silence operation rather than the handoff ladder's own two-piece degrade); every
+        // OTHER kind's drop stays the pre-existing silent skip (StationId today). Classified from the
         // COMPLETED task's own state below, never from which race member <c>Task.WhenAny</c> named
         // the winner (T124 review finding F6): <c>Task.WhenAny</c> completes successfully the moment
         // EITHER task completes, fault or not — it never throws or otherwise signals "the winner
         // faulted," so a ternary keyed on "did renderTask win the race" mislabeled every synth outage
         // that happened to beat the budget delay as "render returned null" instead of "render
         // faulted".
-        foreach (var (request, renderTask) in pendingRenders)
+        foreach (var (request, renderTask, contextProviderKey) in pendingRenders)
         {
             var kind = request.Kind;
             var winner = await Task.WhenAny(renderTask, Task.Delay(renderBudget, ct));
@@ -734,6 +830,8 @@ public sealed class Orchestrator(
             {
                 if (kind is SegmentKind.SignOff or SegmentKind.SignOn)
                     LogHandoffDrop(kind, "render budget exceeded");
+                else if (kind == SegmentKind.ContextSegment)
+                    LogContextSegmentDrop(contextProviderKey, "render budget exceeded");
                 continue; // timed out — the still-running render is left unawaited, unchanged behavior
             }
 
@@ -760,7 +858,11 @@ public sealed class Orchestrator(
             {
                 LogHandoffDrop(kind, renderTask.IsFaulted ? "render faulted" : "render returned null");
             }
-            // else: renderTask completed with a null segment → silently skip (every non-handoff kind)
+            else if (kind == SegmentKind.ContextSegment)
+            {
+                LogContextSegmentDrop(contextProviderKey, renderTask.IsFaulted ? "render faulted" : "render returned null");
+            }
+            // else: renderTask completed with a null segment → silently skip (every other kind)
         }
     }
 
@@ -996,6 +1098,27 @@ public sealed class Orchestrator(
     }
 
     /// <summary>
+    /// SPEC F107.6 (STORY-297, PLAN T224) — a context segment that failed to render (budget
+    /// exceeded, faulted, or a null result — e.g. <c>TtsSegmentSource</c>'s own drop of non-LLM-
+    /// authored context copy, mirroring PLAN T123's handoff precedent) never airs and never blocks
+    /// music: WARN only, one line, naming the provider and cause (T224 review finding — the earlier
+    /// shape named only the cause, leaving an operator unable to tell which provider dropped when
+    /// more than one is configured; <paramref name="providerKey"/> is the SAME discriminator the
+    /// Information-level freshness/blank-facts skips two calls up already name, threaded through
+    /// <c>pendingRenders</c> alongside the request so this AFTER-render drop can name it too — see
+    /// this class's own <c>Kick</c> local for where it rides in). No <see cref="events"/> publish —
+    /// unlike <see cref="LogHandoffDrop"/>'s F92.4 booth-log entry, F107 defines no drop-specific
+    /// booth-log event, and a render miss here is ordinary skip-never-silence operation (the SAME
+    /// posture the drain arm's own freshness/blank-facts skips already log at Information one call
+    /// up), not a ceremony half going dark. The next boundary's own drain simply gets another chance.
+    /// </summary>
+    void LogContextSegmentDrop(string? providerKey, string cause) =>
+        logger.LogWarning(
+            "Context segment for provider {ProviderKey} dropped ({Cause}) — no context item reaches " +
+            "air this boundary; music continues, and the next drain retries (SPEC F107.6).",
+            providerKey ?? "(unknown)", cause);
+
+    /// <summary>
     /// gh-#259 — resolves the display name the whole UNIT's items are attributed to (the music
     /// track's <see cref="MediaItem.DjName"/> stamp, and the StationId segment's), from ONE
     /// <paramref name="personaAccessor"/> read per unit. Deliberately separate from
@@ -1052,6 +1175,76 @@ public sealed class Orchestrator(
         }
 
         return (stationVoice, null);
+    }
+
+    /// <summary>
+    /// SPEC F107.7 (STORY-297, PLAN T224) — resolves the voice/name a <see cref="SegmentKind.ContextSegment"/>
+    /// airs with, from <c>Context:{Key}:PersonaId</c> (<paramref name="configuredPersonaId"/>, the
+    /// drain arm's own <see cref="contextSettings"/> read). A positive value names an EXPLICIT
+    /// persona, resolved through <see cref="ResolveContextPersonaAsync"/> and degrading to the
+    /// station voice on any miss (unresolvable id, no <paramref name="personaStore"/> wired, or a
+    /// store fault — F12.4). Zero, negative, or unset (an unconfigured provider binds the same as
+    /// zero) means the on-air DJ — delegated straight to <see cref="ResolvePersonaAsync"/>, whose own
+    /// no-active-persona fallback already IS "music-only segment or gap ⇒ station voice, PersonaName
+    /// null" (the StationId imaging precedent), so that half of F107.7 needs no code of its own here.
+    /// </summary>
+    async Task<(string Voice, string? PersonaName)> ResolveContextSegmentVoiceAsync(
+        long? configuredPersonaId, string providerKey, string stationVoice, CancellationToken ct)
+    {
+        if (configuredPersonaId is { } explicitPersonaId && explicitPersonaId > 0)
+        {
+            var resolved = await ResolveContextPersonaAsync(explicitPersonaId, providerKey, stationVoice, ct);
+            if (resolved is { } r) return (r.Voice, r.Name);
+
+            return (stationVoice, null); // unresolvable explicit persona id — station voice, never a stall
+        }
+
+        return await ResolvePersonaAsync(stationVoice, ct);
+    }
+
+    /// <summary>
+    /// Resolves an EXPLICITLY configured context-provider persona (<c>Context:{Key}:PersonaId &gt; 0</c>,
+    /// SPEC F107.7) from <paramref name="personaStore"/> — never throws (F12.4): a missing row
+    /// (deleted out of band), an unwired <paramref name="personaStore"/>, or any store fault all
+    /// degrade to <see langword="null"/>, which <see cref="ResolveContextSegmentVoiceAsync"/> treats
+    /// as "fall back to the station voice". Mirrors <see cref="ResolveHandoffPersonaAsync"/>'s own
+    /// shape one call up (same never-throws contract, same <see cref="VoiceOf"/> empty-sentinel rule)
+    /// but kept as its own method rather than shared: the two log different, context-appropriate WARN
+    /// wording on a miss — a context provider's misconfigured persona id is not "a handoff boundary
+    /// names" anything, and reusing that method's wording verbatim here would misdescribe the cause.
+    /// </summary>
+    async Task<(string Voice, string Name)?> ResolveContextPersonaAsync(
+        long personaId, string providerKey, string stationVoice, CancellationToken ct)
+    {
+        if (personaStore is null) return null;
+
+        try
+        {
+            var persona = await personaStore.GetByIdAsync(personaId, ct);
+            if (persona is null)
+            {
+                logger.LogWarning(
+                    "Context provider {ProviderKey} names persona id={PersonaId} with no matching " +
+                    "persona row — falling back to the station voice (SPEC F107.7 degrade).",
+                    providerKey, personaId);
+                return null;
+            }
+
+            return (VoiceOf(persona, stationVoice), persona.Name);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Failed to resolve context provider {ProviderKey}'s persona id={PersonaId} — " +
+                "falling back to the station voice (F12.4).",
+                providerKey, personaId);
+            return null;
+        }
     }
 
     /// <summary>

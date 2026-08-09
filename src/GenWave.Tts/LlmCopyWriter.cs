@@ -9,13 +9,13 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 
 /// <summary>
-/// LLM-backed <see cref="ISegmentCopyWriter"/> (SPEC F34.2-F34.5, F92.2, F92.5): authors copy for
-/// exactly the kinds <see cref="IsLlmAuthored"/> reports true for — <see cref="SegmentKind.LeadIn"/>,
-/// <see cref="SegmentKind.BackAnnounce"/>, <see cref="SegmentKind.SignOff"/>, and
-/// <see cref="SegmentKind.SignOn"/> — from an OpenAI-compatible chat-completions endpoint.
-/// <see cref="SegmentKind.StationId"/> and <see cref="SegmentKind.TimeDate"/> always delegate
-/// straight to <paramref name="fallback"/> with zero HTTP — brand/time copy stays fixed and
-/// forever-cached.
+/// LLM-backed <see cref="ISegmentCopyWriter"/> (SPEC F34.2-F34.5, F92.2, F92.5, F107.3): authors
+/// copy for exactly the kinds <see cref="IsLlmAuthored"/> reports true for — <see cref="SegmentKind.LeadIn"/>,
+/// <see cref="SegmentKind.BackAnnounce"/>, <see cref="SegmentKind.SignOff"/>,
+/// <see cref="SegmentKind.SignOn"/>, and, as of T224, <see cref="SegmentKind.ContextSegment"/> —
+/// from an OpenAI-compatible chat-completions endpoint. <see cref="SegmentKind.StationId"/> and
+/// <see cref="SegmentKind.TimeDate"/> always delegate straight to <paramref name="fallback"/> with
+/// zero HTTP — brand/time copy stays fixed and forever-cached.
 /// Enabled-ness and every other option are read from <paramref name="optionsMonitor"/> fresh on each
 /// call (F36.2) — an empty <c>Llm:Endpoint</c> means disabled. Any failure (disabled, timeout,
 /// non-2xx, connect, empty/over-length copy) degrades to <paramref name="fallback"/>'s template copy
@@ -152,16 +152,21 @@ public sealed class LlmCopyWriter(
 
     /// <summary>
     /// Single source of truth for exactly which <see cref="SegmentKind"/> values this writer calls
-    /// the LLM for (SPEC F34.2, F92.2, F92.5): the two track-anchored kinds (LeadIn, BackAnnounce)
-    /// plus the two handoff kinds (SignOff, SignOn). Gates both <see cref="WriteAsync"/> and
-    /// <see cref="WritePreviewAsync"/> so the two can never drift apart, and is the fact
-    /// <see cref="LlmPromptBuilder.BuildSegmentLine"/>'s own exhaustiveness switch relies on staying
-    /// in sync with (see that method's remarks): <see cref="SegmentKind.StationId"/> and
-    /// <see cref="SegmentKind.TimeDate"/> are the only two kinds this reports false for, and they
+    /// the LLM for (SPEC F34.2, F92.2, F92.5, F107.3): the two track-anchored kinds (LeadIn,
+    /// BackAnnounce), the two handoff kinds (SignOff, SignOn), and, as of T224,
+    /// <see cref="SegmentKind.ContextSegment"/> — a provider's facts read as prose, never templated
+    /// filler (F107.6: facts aren't airable as "Here's something worth knowing", so this kind has no
+    /// templated rung that is ever allowed to reach air — see <c>TtsSegmentSource</c>'s own
+    /// non-fresh-copy guard, extended alongside SignOff/SignOn for exactly that reason). Gates both
+    /// <see cref="WriteAsync"/> and <see cref="WritePreviewAsync"/> so the two can never drift apart,
+    /// and is the fact <see cref="LlmPromptBuilder.BuildSegmentLine"/>'s own exhaustiveness switch
+    /// relies on staying in sync with (see that method's remarks): <see cref="SegmentKind.StationId"/>
+    /// and <see cref="SegmentKind.TimeDate"/> are the only two kinds this reports false for, and they
     /// never reach a prompt at all.
     /// </summary>
     static bool IsLlmAuthored(SegmentKind kind) =>
-        kind is SegmentKind.LeadIn or SegmentKind.BackAnnounce or SegmentKind.SignOff or SegmentKind.SignOn;
+        kind is SegmentKind.LeadIn or SegmentKind.BackAnnounce or SegmentKind.SignOff or SegmentKind.SignOn
+            or SegmentKind.ContextSegment;
 
     public async Task<SegmentCopy> WriteAsync(SegmentRequest request, CancellationToken ct)
     {
