@@ -77,8 +77,16 @@ public static class FeatureRequestShoutOut
         // history), never anything a listener typed — the copywriter prompt renders it under the
         // news posture ("use only these facts, do not add facts"), structurally distinct from the
         // request line's own listener-supplied wish text this pin guards against.
+        // CrossingTrackTitle/CrossingTrackArtist (SPEC F111.3, PLAN T235) joined the SegmentRequest
+        // whitelist deliberately: the deliberately boundary-crossing track's own catalog title/artist,
+        // carried verbatim from Orchestrator.CaptureCrossingTrackForHeldSignOn's capture of the very
+        // MediaItem this same pick ladder just selected — the same station/catalog-owned metadata
+        // family as MediaItem's own Title/Artist below, never anything a listener typed.
         static readonly string[] SegmentRequestStringMembers =
-            ["Voice", "StationName", "StationId", "PersonaName", "CounterpartName", "ContextFacts"];
+        [
+            "Voice", "StationName", "StationId", "PersonaName", "CounterpartName", "ContextFacts",
+            "CrossingTrackTitle", "CrossingTrackArtist",
+        ];
         static readonly string[] MediaItemStringMembers = ["MediaId", "Locator", "Title", "Artist", "Album", "Genre", "DjName"];
 
         [Fact]

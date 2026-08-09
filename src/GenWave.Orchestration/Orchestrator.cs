@@ -176,7 +176,7 @@ public sealed class Orchestrator(
     IStationClockProvider? stationClock = null,
     IPatterDurationEstimator? patterEstimator = null,
     IContextSettingsProvider? contextSettings = null,
-    IMediaCatalog? catalog = null) : INextItemProvider
+    IMediaCatalog? catalog = null) : INextItemProvider, IBoundaryFitLog
 {
     // gh-#254 — how far from the boundary a candidate may land and still count as a WIN ("±30s of
     // the boundary is a win"), widened as the gh-#253 estimate's confidence tier drops: the fit's
@@ -222,39 +222,11 @@ public sealed class Orchestrator(
     /// </summary>
     static readonly TimeSpan SignOffLeadTime = TimeSpan.FromSeconds(15);
 
-    /// <summary>
-    /// gh-#300 — below this much room left in front of a handoff boundary, no music unit is planned
-    /// at all: the ceremony itself becomes the unit.
-    ///
-    /// <para>
-    /// <b>Where the number comes from.</b> Planning a track of length L into D of remaining room
-    /// lands the ceremony <c>L - D</c> LATE; declining lands it <c>D</c> EARLY. Declining is
-    /// therefore the better trade exactly while <c>D &lt; L / 2</c>. With a typical unit around
-    /// three minutes that break-even sits at ninety seconds, and this is that number. Above it the
-    /// gh-#254 fit keeps its existing least-late behavior, which is still the right answer there.
-    /// </para>
-    ///
-    /// <para>
-    /// The 2:05 incident sat far below this line — the queued audio already ran PAST the boundary,
-    /// so <c>desired</c> was deeply negative and every candidate was hopeless. A judged constant in
-    /// the spirit of <c>MusicSelectionPolicy.ExpectedCrossfadeTrim</c> and <see cref="SignOffLeadTime"/>, not a
-    /// live knob: gh-#300's own fit logging is what makes promoting it to one an argument from
-    /// field data rather than taste, and that data does not exist yet.
-    /// </para>
-    ///
-    /// <para>
-    /// <b>Interim, and known to be.</b> This floor is the bottom rung of three, and it only ever
-    /// gets reached because an EARLIER unit overshot — it limits the damage rather than repairing
-    /// it. The rung above (gh-#320, the straddle handoff) is the real answer for the band where
-    /// room is positive but no track fits: sign off into a track that crosses the hour and sign on
-    /// after it, which is what a live DJ does when the rotation traps them. Until that exists, this
-    /// floor holds the middle band at "up to 90s early" instead of "up to ~2 minutes late", and the
-    /// trade above 90s is still lateness — the honest bound, not a fix. Once gh-#320 lands, the
-    /// straddle owns that band and this floor should collapse toward zero: bare-ceremony is right
-    /// only once the boundary is genuinely unreachable.
-    /// </para>
-    /// </summary>
-    static readonly TimeSpan MusicUnitFloor = TimeSpan.FromSeconds(90);
+    // SPEC F111.2 (PLAN T235) — the straddle seam's drain hold-set: a single-purpose, never-mutated
+    // singleton rather than allocating a fresh HashSet per straddle unit, since its one member never
+    // varies. See GetNextAsync's own remarks (the straddle branch) for what this actually guards.
+    static readonly IReadOnlySet<SpeechDeferralKind> HoldSignOnAtStraddle =
+        new HashSet<SpeechDeferralKind> { SpeechDeferralKind.SignOn };
 
     // SPEC F92.4 (PLAN T124): the same null-coalesced-default idiom MusicSelectionPolicy's own
     // envelope/persona/request-fulfillment seams use (F112, STORY-295) — a dropped handoff piece
@@ -348,12 +320,26 @@ public sealed class Orchestrator(
             return ceremony;
         }
 
-        // F112 (STORY-295, PLAN T218): the pick ladder itself lives on MusicSelectionPolicy —
-        // logBoundaryFit is this Orchestrator's own LogBoundaryFit, threaded in so every outcome
-        // line the resample loop logs still lands on the SAME Information sink the ceremony-decline
-        // path ("declined") uses (see MusicSelectionPolicy.SelectMusicCandidateAsync's own remarks).
-        var candidate = await musicSelectionPolicy.SelectMusicCandidateAsync(
-            scopeProvider.Current, orderedRecentIds, artistSeparation, fit, LogBoundaryFit, ct);
+        // F112 (STORY-295, PLAN T218): the pick ladder itself lives on MusicSelectionPolicy — this
+        // Orchestrator (implementing IBoundaryFitLog explicitly, PLAN T234) is threaded in as the log
+        // sink so every outcome line the resample loop logs still lands on the SAME Information sink
+        // the ceremony-decline path ("declined") uses (see MusicSelectionPolicy.SelectMusicCandidateAsync's
+        // own remarks). SPEC F111.1's outcome rides along on the result but changes nothing about
+        // this unit's flow yet — Fit and Straddle both take today's ordinary music-unit path
+        // unchanged; only PLAN T235 gives Straddle its own assembly shape. CeremonyOnly DOES reach
+        // this call, routinely (T234 review finding F1 — corrects an earlier version of this comment
+        // that claimed the opposite): ShouldDeclineFinalUnit only ever short-circuits handoff kinds
+        // (SignOff/SignOn) below the floor. A StationId/TimeDate fit below the floor is NEVER
+        // declined (see that method's own remarks) and lands here every time, classifying
+        // CeremonyOnly on the policy's own least-late/unscored/drained line — an everyday path, not a
+        // corner case. A SignOff/SignOn fit CAN also reach here below the floor: when the decline's
+        // own TryServeCeremonyOnlyUnitAsync renders nothing at all, it returns null and this SAME
+        // below-floor fit falls through to this call, which classifies CeremonyOnly the identical way.
+        // T235's straddle-assembly implementer: CeremonyOnly is not exclusively the decline path's own
+        // hard-coded literal.
+        var selection = await musicSelectionPolicy.SelectMusicCandidateAsync(
+            scopeProvider.Current, orderedRecentIds, artistSeparation, fit, this, ct);
+        var candidate = selection.Candidate;
         if (candidate is null)
         {
             // F41.2: null now means a GENUINE drain — zero playable rows in scope, never merely
@@ -402,7 +388,88 @@ public sealed class Orchestrator(
         // schedule's live answer.
         track = track with { DjName = unitDjName };
 
-        await EnqueuePatterAsync(previousTrack, track, unitDjName, cadence, identity, ct);
+        // SPEC F111.2/F111.3 (gh-#320, PLAN T235) — the straddle assembly. A Straddle outcome whose
+        // peeked deferral is a SignOff, AND whose picked candidate genuinely CROSSES the boundary
+        // (<see cref="MusicSelectionResult.CrossesBoundary"/> — T235 review findings F1/F5: the
+        // ladder's own <see cref="BoundaryOutcome.Straddle"/> rung fires for ANY off-tolerance pick
+        // clearing the floor, including one running far SHORTER than desired, which cannot possibly
+        // cross anything; only <see cref="MusicSelectionPolicy"/> ever measured the candidate's
+        // effective length against the boundary, so it — not this Orchestrator — decides crossing, at
+        // the source), means the track just picked is deliberately going to run past the boundary
+        // (that IS the ladder's middle rung — nothing fit, but the room is there); left to the ordinary
+        // drain (as-of "now", untilDue > 0 or the fit above would never have built at all) the SignOff
+        // would sit pending until whatever LATER unit's normal drain finally reaches its due — quite
+        // possibly the SAME one the SignOn (due at the boundary itself) also reaches by then,
+        // reproducing gh-#300's own back-to-back field report one rung up the ladder. Force THIS unit's
+        // drain forward to the SignOff's own Due instead (mirrors TryServeCeremonyOnlyUnitAsync's
+        // identical "drain as of a future instant, not now" precedent two methods down) so it airs
+        // ahead of the crossing track, and hold the paired SignOn out of that same forced call (SPEC
+        // F111.2's hold-set) so it stays queued through this seam and drains first at the next one,
+        // once the crossing track has actually aired.
+        //
+        // A NON-crossing off-tolerance pick (F1's short-track fact) takes the ordinary unforced path
+        // below instead: the SignOff stays exactly where TryDequeueDue would have left it, airing near
+        // its own due (T234 baseline) rather than being forced ahead of a track that was never going to
+        // run past it. A one-sided straddle (SignOff with no SignOn queued at all — F92.3's "into
+        // music-only" shape) takes the identical forced path when it crosses; holding a kind with
+        // nothing pending is a no-op. A SignOn-headed fit (the opposite one-sided shape, "out of
+        // music-only" — no SignOff exists to drain ahead of anything) needs none of this: it is not yet
+        // due either, so the ordinary unforced drain below already leaves it queued until the seam
+        // after this crossing track, with nothing to hold.
+        //
+        // drainAsOf/hold (SPEC F111.2) collapse to locals here — the single home for the F1/F2 guards
+        // below (T235 review finding F4) — rather than three near-identical EnqueuePatterAsync call
+        // sites: every path through this method falls through to the ONE call at the bottom, differing
+        // only in what these two locals hold.
+        DateTimeOffset? drainAsOf = null;
+        IReadOnlySet<SpeechDeferralKind>? hold = null;
+
+        if (selection.Outcome == BoundaryOutcome.Straddle
+            && selection.CrossesBoundary
+            && pending is { Kind: SpeechDeferralKind.SignOff })
+        {
+            // Reconcile the handoff producer's OWN state for this unit's boundary/schedule snapshot
+            // before trusting the peeked SignOff as forceable (ScenarioSupersedeProtects regression,
+            // T235 review): pending.Kind == SignOff with untilDue > 0 (fit above was only built
+            // because of that) proves this SignOff is the GLOBALLY earliest-due pending entry across
+            // every kind, so nothing else is currently due for EnqueueHandoffCeremonyAsync's own
+            // re-evaluation to wrongly race ahead of — unlike its ordinary step-2.5 call (deliberately
+            // placed AFTER the drain, see EnqueuePatterAsync's own remarks, so it never clears a piece
+            // the drain was about to fire), calling it here first is safe precisely because there is no
+            // due piece for it to preempt. A schedule write that already superseded or retracted this
+            // ceremony (SPEC F92.1 revisit) takes effect right here, before this unit's own forced
+            // drain would otherwise race past it. The SAME method runs again from inside
+            // EnqueuePatterAsync's normal step 2.5 immediately below; seeing the identical
+            // (now-reconciled) triple, that call is a safe no-op (the arm-once guard).
+            await EnqueueHandoffCeremonyAsync(identity.Voice, ct);
+
+            // T235 review finding F2: only force when the reconciliation left the EXACT ceremony
+            // peeked above untouched — reconciledSignOff.Due == pending.Due proves nothing changed
+            // (same triple, same due). A schedule write that MOVED the boundary re-arms a SignOff at a
+            // DIFFERENT due (still non-null — it is still in-window, just for a new boundary); forcing
+            // to that reconciled-but-different due fired the sign-off against the WRONG boundary (the
+            // field report: 6:45 early), and CaptureCrossingTrackForHeldSignOn would have stamped the
+            // MOVED SignOn's copy with a track that has nothing to do with its own, later boundary. The
+            // fresh, moved ceremony gets its own fair shot at a later, correctly-classified straddle
+            // unit instead — this unit simply falls through to the ordinary unforced drain below.
+            //
+            // A null reconciledSignOff is the OTHER shape this SAME reconciliation can take (T235
+            // review finding F3, the retraction half): the boundary left the F74.3 window entirely (or
+            // collapsed to a gap-to-gap/self-handoff), and EnqueueHandoffCeremonyAsync's own
+            // ClearCeremony wiped BOTH pieces — there is no ceremony left, moved or otherwise, to force.
+            // That falls through to the SAME ordinary unforced drain below, which is simply a no-op for
+            // a ceremony that no longer exists — this unit plans as an ordinary music unit.
+            if (deferralQueue.Peek(SpeechDeferralKind.SignOff) is { } reconciledSignOff
+                && reconciledSignOff.Due == pending.Due)
+            {
+                CaptureCrossingTrackForHeldSignOn(track);
+                drainAsOf = reconciledSignOff.Due;
+                hold = HoldSignOnAtStraddle;
+            }
+        }
+
+        await EnqueuePatterAsync(previousTrack, track, unitDjName, cadence, identity, ct, drainAsOf, hold);
+
         buffer.Enqueue(track);
 
         previousTrack = track;
@@ -495,22 +562,53 @@ public sealed class Orchestrator(
 
     /// <summary>
     /// gh-#300 — "the last unit before a due ceremony IS the ceremony". True when the room left in
-    /// front of the boundary is under <see cref="MusicUnitFloor"/>, in which case planning one more
-    /// full track is strictly worse than planning none (see that constant for the arithmetic).
+    /// front of the boundary is under <see cref="MusicSelectionPolicy.MusicFloor"/>, via
+    /// <see cref="MusicSelectionPolicy.IsBelowFloor"/> (PLAN T234, T234 review finding F3: the SAME
+    /// predicate <see cref="MusicSelectionPolicy"/> classifies its own <see cref="BoundaryOutcome.CeremonyOnly"/>
+    /// rung against — one predicate, called from both sites, never two hand-written complementary
+    /// comparisons), in which case planning one more full track is strictly worse than planning none
+    /// (see that constant for the arithmetic).
     ///
     /// <para>
     /// <b>Handoff kinds only.</b> A show boundary is an appointment the audience can hear being
     /// missed — the incoming DJ announcing "it's Thursday two o'clock" at 2:05 is the whole issue.
     /// A station ID is not: it is imaging that can ride the next seam quite happily, and skipping a
-    /// whole track for one would trade a small blemish for a large one. Today's ident producer only
-    /// ever enqueues due-NOW deferrals, so such a fit is never even built (a due-now deferral takes
-    /// the plain unbiased path) — this guard is what keeps that true if a future producer ever
-    /// future-dates one.
+    /// whole track for one would trade a small blemish for a large one. This guard is scoped by KIND,
+    /// not by whether a deferral happens to be future-dated (T235 review — corrects an earlier version
+    /// of this comment, which claimed "today's ident producer only ever enqueues due-NOW deferrals,
+    /// so such a fit is never even built"; false since <see cref="ClockAnchoredImagingProducer"/>,
+    /// PLAN T230, future-dates <c>StationId</c>/<c>TimeDate</c> deferrals too, the identical shape a
+    /// handoff's own SignOff/SignOn already used). A future-dated StationId/TimeDate fit reaches this
+    /// method exactly like a due-now one always did — the <c>fit.Kind is SignOff or SignOn</c> check
+    /// below is the ONLY thing that keeps it from ever declining, not its due time. This is why this
+    /// method still short-circuits BEFORE
+    /// <see cref="MusicSelectionPolicy.SelectMusicCandidateAsync"/> ever runs (gh-#320, PLAN T234
+    /// keeps <see cref="TryServeCeremonyOnlyUnitAsync"/>'s mechanics here, Orchestrator-side, rather
+    /// than moving unit-assembly itself into the policy) — a StationId/TimeDate fit below the floor
+    /// is never declined, exactly as today, even though the policy's OWN off-tolerance classification
+    /// would report <see cref="BoundaryOutcome.CeremonyOnly"/> for it if asked (T234 review finding
+    /// F1(a) — not a hypothetical: it is the everyday path a below-floor StationId/TimeDate fit
+    /// actually takes, every time).
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The decline can ALSO fall through to that same policy call (T234 review finding F1(b)).</b>
+    /// A handoff kind's decline is not unconditional: when <see cref="TryServeCeremonyOnlyUnitAsync"/>'s
+    /// own drain renders nothing at all (SPEC F92.4 — every piece of the ceremony dropped), it returns
+    /// <see langword="null"/>, and <see cref="GetNextAsync"/> falls through to the ordinary
+    /// <see cref="MusicSelectionPolicy.SelectMusicCandidateAsync"/> call with the very SAME below-floor
+    /// <see cref="BoundaryFitPlan"/> this method already evaluated — which classifies
+    /// <see cref="BoundaryOutcome.CeremonyOnly"/> off the identical <see cref="MusicSelectionPolicy.IsBelowFloor"/>
+    /// predicate. So <see cref="BoundaryOutcome.CeremonyOnly"/> reaches the log two ways, not one: this
+    /// method's own decline caller (a hard-coded literal, no classification needed — the decline itself
+    /// already proves it), and the policy's off-tolerance classification (both the non-handoff case
+    /// above and this handoff-decline-fell-through case). T235's straddle-assembly implementer should
+    /// not assume <see cref="BoundaryOutcome.CeremonyOnly"/> only ever arrives via the decline branch.
     /// </para>
     /// </summary>
     bool ShouldDeclineFinalUnit(BoundaryFitPlan fit) =>
         fit.Kind is SpeechDeferralKind.SignOff or SpeechDeferralKind.SignOn
-        && fit.DesiredEffectiveLength < MusicUnitFloor;
+        && MusicSelectionPolicy.IsBelowFloor(fit);
 
     /// <summary>
     /// gh-#300 — plans the ceremony as a unit of its own: back-announce (the fit already reserved
@@ -547,10 +645,13 @@ public sealed class Orchestrator(
     {
         // ONE line, not two: the fit line already carries every term (desired, queuedAhead, the
         // lot), so a second human-readable "declining because…" would restate it. The floor is the
-        // only fact the fit itself does not know, so it rides the outcome.
+        // only fact the fit itself does not know, so it rides the outcome. This IS the SPEC F111.1
+        // CeremonyOnly rung by construction — ShouldDeclineFinalUnit only ever reaches this method
+        // once it has already found room below MusicSelectionPolicy.MusicFloor.
         LogBoundaryFit(
             fit,
-            $"declined (floor={MusicUnitFloor.TotalSeconds.ToString("F0", CultureInfo.InvariantCulture)}s)",
+            $"declined (floor={MusicSelectionPolicy.MusicFloor.TotalSeconds.ToString("F0", CultureInfo.InvariantCulture)}s)",
+            BoundaryOutcome.CeremonyOnly,
             sampled: [],
             chosenDiff: null);
 
@@ -564,7 +665,9 @@ public sealed class Orchestrator(
     /// gh-#300 — the one line that makes a boundary fit arguable after the fact. The 2:05 handoff
     /// was reconstructible only from kokoro's own render timestamps because this method did not
     /// exist; every term the fit reasoned from is now on the record, alongside what the sampler did
-    /// with it.
+    /// with it. <see cref="IBoundaryFitLog.Log"/> forwards here explicitly (PLAN T234) — see that
+    /// interface's own remarks for why a named interface replaced the delegate
+    /// <see cref="MusicSelectionPolicy.SelectMusicCandidateAsync"/> used to be threaded with.
     ///
     /// <para>
     /// <b>INFORMATION, deliberately.</b> The sibling per-pick "Pick —" line is Debug, and the demo
@@ -573,8 +676,18 @@ public sealed class Orchestrator(
     /// The volume is affordable because this fires only while a deferral sits inside the F74.3
     /// lookahead window — a handful of lines per boundary, not one per pick.
     /// </para>
+    ///
+    /// <para>
+    /// <paramref name="rung"/> is SPEC F111.5's addition (gh-#320, PLAN T234): the SPEC F111.1 ladder
+    /// rung <paramref name="fit"/> resolved to, appended as its own token so every existing
+    /// grep/Loki query built against <paramref name="outcome"/>'s pre-existing "win"/"least-late"/
+    /// "unscored"/"drained"/"declined …" vocabulary keeps matching unchanged (additive, never a
+    /// reshape of the line).
+    /// </para>
     /// </summary>
-    void LogBoundaryFit(BoundaryFitPlan fit, string outcome, IReadOnlyList<TimeSpan> sampled, TimeSpan? chosenDiff)
+    void LogBoundaryFit(
+        BoundaryFitPlan fit, string outcome, BoundaryOutcome rung, IReadOnlyList<TimeSpan> sampled,
+        TimeSpan? chosenDiff)
     {
         static string Secs(TimeSpan value) => value.TotalSeconds.ToString("F1", CultureInfo.InvariantCulture);
 
@@ -582,12 +695,25 @@ public sealed class Orchestrator(
             "Boundary fit ({Kind}) — untilBoundary={UntilBoundary}s queuedAhead={QueuedAhead}s " +
             "preMusicPatter={PreMusicPatter}s breakPatter={BreakPatter}s desired={Desired}s " +
             "tolerance=±{Tolerance}s confidence={Confidence} sampled=[{Sampled}] " +
-            "chosenDiff={ChosenDiff} outcome={Outcome}",
+            "chosenDiff={ChosenDiff} outcome={Outcome} rung={Rung}",
             fit.Kind, Secs(fit.UntilBoundary), Secs(fit.QueuedAhead), Secs(fit.PreMusicPatter),
             Secs(fit.BreakPatter), Secs(fit.DesiredEffectiveLength), Secs(fit.Tolerance),
             fit.Confidence, string.Join(", ", sampled.Select(Secs)),
-            chosenDiff is { } diff ? Secs(diff) + "s" : "n/a", outcome);
+            chosenDiff is { } diff ? Secs(diff) + "s" : "n/a", outcome, rung);
     }
+
+    /// <summary>
+    /// Explicit <see cref="IBoundaryFitLog"/> implementation (PLAN T234) — forwards to
+    /// <see cref="LogBoundaryFit"/> verbatim so every boundary-fit line, regardless of which class
+    /// decided the outcome, still lands on this SAME <c>ILogger&lt;Orchestrator&gt;</c> sink. Kept
+    /// explicit rather than public: <see cref="IBoundaryFitLog"/> is internal planning wiring (its
+    /// own parameter types are), so a public member here would be the wrong shape for
+    /// <see cref="Orchestrator"/>'s own public surface.
+    /// </summary>
+    void IBoundaryFitLog.Log(
+        BoundaryFitPlan fit, string outcome, BoundaryOutcome rung, IReadOnlyList<TimeSpan> sampled,
+        TimeSpan? chosenDiff) =>
+        LogBoundaryFit(fit, outcome, rung, sampled, chosenDiff);
 
     /// <param name="cadence">
     /// The unit's ONE cadence snapshot (gitea-#211) — read by <see cref="GetNextAsync"/> at the top
@@ -613,11 +739,17 @@ public sealed class Orchestrator(
     /// The instant the deferral drain is evaluated against — <see langword="null"/> means "now",
     /// every pre-gh-#300 caller's behavior. The ceremony-only unit passes the BOUNDARY instead; see
     /// <see cref="TryServeCeremonyOnlyUnitAsync"/> for why an as-of-now drain is the exact shape of
-    /// the bug.
+    /// the bug. The straddle unit (SPEC F111.2, PLAN T235) passes a pending SignOff's own Due for the
+    /// identical reason — see <see cref="GetNextAsync"/>'s own straddle branch.
+    /// </param>
+    /// <param name="hold">
+    /// SPEC F111.2 (PLAN T235) — forwarded verbatim to <see cref="SpeechDeferralQueue.TryDequeueDue"/>;
+    /// see that method's own remarks. <see langword="null"/> (nothing held) for every caller except the
+    /// straddle branch.
     /// </param>
     async Task EnqueuePatterAsync(
         MediaItem? prev, MediaItem? next, string? unitDjName, CadenceConfig cadence, StationIdentity identity,
-        CancellationToken ct, DateTimeOffset? drainAsOf = null)
+        CancellationToken ct, DateTimeOffset? drainAsOf = null, IReadOnlySet<SpeechDeferralKind>? hold = null)
     {
         // Read the render budget ONCE per unit, up front (SPEC F44.2, gitea-#197) — the same
         // per-unit-snapshot discipline cadence/identity arrive under (see the params above): a
@@ -714,7 +846,7 @@ public sealed class Orchestrator(
         // same instant the dequeue decision itself was made against, rather than a second, later
         // clock read.
         var drainNow = drainAsOf ?? timeProvider.GetUtcNow();
-        foreach (var deferral in deferralQueue.TryDequeueDue(drainNow))
+        foreach (var deferral in deferralQueue.TryDequeueDue(drainNow, hold))
         {
             switch (deferral.Kind)
             {
@@ -908,7 +1040,10 @@ public sealed class Orchestrator(
     /// Builds a <see cref="SegmentKind.SignOff"/>/<see cref="SegmentKind.SignOn"/> request from the
     /// deferral's own captured <paramref name="handoff"/> (SPEC F92.2, PLAN T124) — see
     /// <see cref="HandoffContext"/>'s own remarks for why this is never a fresh
-    /// <see cref="ResolvePersonaAsync"/>/accessor read.
+    /// <see cref="ResolvePersonaAsync"/>/accessor read. <see cref="HandoffContext.CrossingTrackTitle"/>/
+    /// <see cref="HandoffContext.CrossingTrackArtist"/> (SPEC F111.3, PLAN T235) ride straight across
+    /// onto <see cref="SegmentRequest.CrossingTrackTitle"/>/<see cref="SegmentRequest.CrossingTrackArtist"/>
+    /// — null for every non-straddle piece, exactly like every other optional field here.
     /// </summary>
     SegmentRequest BuildHandoffRequest(SpeechDeferralKind kind, HandoffContext handoff, StationIdentity identity)
     {
@@ -921,7 +1056,43 @@ public sealed class Orchestrator(
             StationLocalNow(),
             identity.Id,
             handoff.PersonaName,
-            handoff.CounterpartName);
+            handoff.CounterpartName,
+            CrossingTrackTitle: handoff.CrossingTrackTitle,
+            CrossingTrackArtist: handoff.CrossingTrackArtist);
+    }
+
+    /// <summary>
+    /// SPEC F111.3 (PLAN T235) — captures the crossing track's title/artist into the HELD SignOn's own
+    /// <see cref="HandoffContext"/> at straddle plan time (the F92.2 immutable-capture pattern this
+    /// whole record already follows — see its own remarks — extended to a fact that is not knowable
+    /// until the very unit that straddles it). A no-op when no SignOn is pending: <see cref="GetNextAsync"/>'s
+    /// straddle branch calls this only for a crossing SignOff-headed straddle whose reconciliation left
+    /// the ceremony unchanged (see that branch's own remarks), including the one-sided F92.3 "into
+    /// music-only" shape, which has nothing to enrich.
+    ///
+    /// <para>
+    /// <b>Peek then Enqueue — two separate lock acquisitions, not one atomic operation</b> (T235 review
+    /// finding F6, corrects an earlier version of this comment that called it "the SAME atomic
+    /// supersede-by-(kind, discriminator) path"; it re-uses that supersede's KEY, never its atomicity —
+    /// <see cref="SpeechDeferralQueue.Peek"/> and <see cref="SpeechDeferralQueue.Enqueue"/> each take
+    /// and release the queue's lock independently). This read-then-write is safe here ONLY because the
+    /// SignOn slot has exactly one OTHER writer — <see cref="EnqueueHandoffCeremonyAsync"/> — and both
+    /// it and this method run on the SAME feeder thread, one <see cref="GetNextAsync"/> pull at a time,
+    /// never concurrently with each other or with this method. Nothing inside
+    /// <see cref="SpeechDeferralQueue"/> itself enforces that; it is an Orchestrator-side invariant
+    /// (single-writer-thread), not a queue-side guarantee.
+    /// </para>
+    /// </summary>
+    void CaptureCrossingTrackForHeldSignOn(MediaItem crossingTrack)
+    {
+        if (deferralQueue.Peek(SpeechDeferralKind.SignOn) is not { } signOn || signOn.Handoff is not { } handoff)
+            return; // one-sided straddle (SignOff only, F92.3) — no SignOn to enrich
+
+        deferralQueue.Enqueue(
+            SpeechDeferralKind.SignOn,
+            signOn.Reason,
+            signOn.Due,
+            handoff with { CrossingTrackTitle = crossingTrack.Title, CrossingTrackArtist = crossingTrack.Artist });
     }
 
     /// <summary>

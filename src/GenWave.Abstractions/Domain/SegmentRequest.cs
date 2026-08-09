@@ -40,6 +40,18 @@ namespace GenWave.Core.Domain;
 /// additive and optional (default <see langword="null"/>) so every existing caller is diff-free; the
 /// Orchestrator's F74 context-segment drain arm (PLAN T224) is the only writer.
 /// </param>
+/// <param name="CrossingTrackTitle">
+/// SPEC F111.3 (PLAN T235) — for a <see cref="SegmentKind.SignOn"/> held at a straddle seam (SPEC
+/// F111.2), the deliberately boundary-crossing track's own title, carried verbatim from the
+/// deferral's own captured <c>HandoffContext.CrossingTrackTitle</c> (never re-derived here) so the
+/// copywriter prompt can back-announce it. <see langword="null"/> for every other segment — additive
+/// and optional (default <see langword="null"/>) so every existing caller is diff-free; the
+/// Orchestrator's straddle-assembly drain arm (PLAN T235) is the only writer.
+/// </param>
+/// <param name="CrossingTrackArtist">
+/// The same crossing track's artist, alongside <see cref="CrossingTrackTitle"/> — <see langword="null"/>
+/// whenever that is.
+/// </param>
 public sealed record SegmentRequest(
     SegmentKind    Kind,
     string         Voice,
@@ -49,4 +61,6 @@ public sealed record SegmentRequest(
     string         StationId,
     string?        PersonaName = null,
     string?        CounterpartName = null,
-    string?        ContextFacts = null);
+    string?        ContextFacts = null,
+    string?        CrossingTrackTitle = null,
+    string?        CrossingTrackArtist = null);
