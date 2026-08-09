@@ -85,6 +85,32 @@ public sealed class MusicSelectionPolicy(
         requestFulfillmentSource ?? NoOpRequestFulfillmentSource.Instance;
 
     /// <summary>
+    /// gh-#300 — below this much room left in front of a boundary, no music unit belongs there at
+    /// all: the ceremony itself becomes the unit (SPEC F111.1's <see cref="BoundaryOutcome.CeremonyOnly"/>
+    /// rung). Moved here verbatim from <c>Orchestrator.MusicUnitFloor</c> (PLAN T234, SPEC F112.3 —
+    /// the ladder's own authority, so <c>Orchestrator.ShouldDeclineFinalUnit</c> now reads THIS
+    /// constant rather than keeping a second copy of the same number).
+    ///
+    /// <para>
+    /// <b>Where the number comes from.</b> Planning a track of length L into D of remaining room
+    /// lands the ceremony <c>L - D</c> LATE; declining lands it <c>D</c> EARLY. Declining is
+    /// therefore the better trade exactly while <c>D &lt; L / 2</c>. With a typical unit around
+    /// three minutes that break-even sits at ninety seconds, and this is that number. Above it the
+    /// gh-#254 fit keeps its existing least-late behavior (SPEC F111.1's <see cref="BoundaryOutcome.Straddle"/>
+    /// rung as of gh-#320/PLAN T234), which is still the right answer there.
+    /// </para>
+    ///
+    /// <para>
+    /// The 2:05 incident sat far below this line — the queued audio already ran PAST the boundary,
+    /// so <c>desired</c> was deeply negative and every candidate was hopeless. A judged constant in
+    /// the spirit of <see cref="ExpectedCrossfadeTrim"/> and <c>Orchestrator.SignOffLeadTime</c>, not
+    /// a live knob: gh-#300's own fit logging is what makes promoting it to one an argument from
+    /// field data rather than taste, and that data does not exist yet.
+    /// </para>
+    /// </summary>
+    internal static readonly TimeSpan MusicFloor = TimeSpan.FromSeconds(90);
+
+    /// <summary>
     /// Picks the next music candidate — SPEC F41.1/F41.3 tiering is unchanged and still governs
     /// which candidates are even eligible — and, when <paramref name="fit"/> is non-null (a pending
     /// deferral is due strictly in the future within the boundary-bias provider's lookahead
@@ -98,11 +124,28 @@ public sealed class MusicSelectionPolicy(
     /// <para>
     /// <b>F112/STORY-295:</b> <paramref name="fit"/> arrives as a plain argument — built and owned by
     /// <c>Orchestrator.BuildBoundaryFit</c>, which reads unit-assembly state (cadence, previous track,
-    /// unit count) this class deliberately never sees. <paramref name="logBoundaryFit"/> is
-    /// <c>Orchestrator.LogBoundaryFit</c> itself, threaded in as a delegate so every outcome line this
-    /// method used to log directly still lands on the SAME Information sink
-    /// <c>Orchestrator.TryServeCeremonyOnlyUnitAsync</c>'s own "declined" line uses — one boundary-fit
-    /// log, one owner, regardless of which class decided the outcome.
+    /// unit count) this class deliberately never sees. <paramref name="boundaryFitLog"/> is
+    /// <see cref="Orchestrator"/> itself (it implements <see cref="IBoundaryFitLog"/> explicitly, PLAN
+    /// T234 — see that interface's own remarks for why a named interface replaced the delegate this
+    /// parameter used to be), so every outcome line this method logs still lands on the SAME
+    /// Information sink <c>Orchestrator.TryServeCeremonyOnlyUnitAsync</c>'s own "declined" line uses —
+    /// one boundary-fit log, one owner, regardless of which class decided the outcome. A
+    /// <see langword="null"/> <paramref name="boundaryFitLog"/> (every construction site that never
+    /// scripts one, including every pre-T234 test) degrades to <see cref="NoOpBoundaryFitLog"/> —
+    /// the same optional-seam idiom <see cref="envelopeProvider"/>/<see cref="personaPickProvider"/>/
+    /// <see cref="requestFulfillmentSource"/> already follow.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>SPEC F111.1 (gh-#320, PLAN T234):</b> the return value's <see cref="BoundaryOutcome"/> names
+    /// which rung of the ladder this pick resolved to — <see cref="BoundaryOutcome.Fit"/> when a
+    /// sample lands within tolerance (the win rule below, unchanged since gh-#254); otherwise
+    /// <see cref="BoundaryOutcome.Straddle"/> when <see cref="BoundaryFitPlan.DesiredEffectiveLength"/>
+    /// still clears <see cref="MusicFloor"/>, or <see cref="BoundaryOutcome.CeremonyOnly"/> when it
+    /// does not — the SAME floor <c>Orchestrator.ShouldDeclineFinalUnit</c> already gates its own
+    /// pre-emptive decline on, now with one authority for the comparison. This is reported, never
+    /// acted on, here: the Orchestrator maps every outcome to today's behavior unchanged (SPEC
+    /// F112.3 — the straddle becomes a distinct unit-assembly shape only once PLAN T235 lands).
     /// </para>
     ///
     /// <para>
@@ -169,25 +212,31 @@ public sealed class MusicSelectionPolicy(
     /// degrades to exactly one call — today's behavior, unchanged.
     /// </para>
     /// </summary>
-    internal async Task<RotationCandidate?> SelectMusicCandidateAsync(
+    internal async Task<MusicSelectionResult> SelectMusicCandidateAsync(
         LibraryScope scope,
         IReadOnlyList<string> orderedRecentIds,
         int artistSeparation,
         BoundaryFitPlan? fit,
-        Action<BoundaryFitPlan, string, IReadOnlyList<TimeSpan>, TimeSpan?> logBoundaryFit,
+        IBoundaryFitLog? boundaryFitLog,
         CancellationToken ct)
     {
+        var log = boundaryFitLog ?? NoOpBoundaryFitLog.Instance;
+
         // Rung -1, once per pick (SPEC F87.6, PLAN T90 review) — see this method's own remarks for
-        // why this sits above the bias branch rather than inside the sampler it guards.
+        // why this sits above the bias branch rather than inside the sampler it guards. No boundary
+        // ladder governs a request short-circuit (SPEC F111.1) — None, same as no fit at all.
         var envelope = envelopeProvider.Current;
         if (await TryFulfillPendingRequestAsync(envelope, ct) is { } fulfilledCandidate)
-            return fulfilledCandidate;
+            return new MusicSelectionResult(fulfilledCandidate, BoundaryOutcome.None);
 
         // No in-window deferral to aim at (gh-#300 hoisted the peek and the fit build up to
         // GetNextAsync, which needs the same fit to decide whether a music unit belongs here at
         // all) — the no-imminent-boundary common case, exactly one catalog call as always.
         if (fit is null)
-            return await SelectEnvelopeAwareCandidateAsync(scope, orderedRecentIds, artistSeparation, ct);
+        {
+            var plain = await SelectEnvelopeAwareCandidateAsync(scope, orderedRecentIds, artistSeparation, ct);
+            return new MusicSelectionResult(plain, BoundaryOutcome.None);
+        }
 
         RotationCandidate? best = null;
         TimeSpan? bestDiff = null;
@@ -199,11 +248,14 @@ public sealed class MusicSelectionPolicy(
             var sample = await SelectEnvelopeAwareCandidateAsync(scope, orderedRecentIds, artistSeparation, ct);
             if (sample is null)
             {
-                // Nothing sampled yet at all — a genuine drain (F41.2), not a bias artifact.
+                // Nothing sampled yet at all — a genuine drain (F41.2), not a bias artifact. Still
+                // classified against the floor (SPEC F111.1): the ladder's rung names how much room
+                // was left, independent of whether this particular draw found anything to fill it.
                 if (best is null && firstUnscored is null)
                 {
-                    logBoundaryFit(fit, "drained", sampled, null);
-                    return null;
+                    var drainedRung = ClassifyOffToleranceRung(fit);
+                    log.Log(fit, "drained", drainedRung, sampled, chosenDiff: null);
+                    return new MusicSelectionResult(null, drainedRung);
                 }
 
                 break; // the pool emptied mid-sample; keep whatever was already sampled.
@@ -219,11 +271,12 @@ public sealed class MusicSelectionPolicy(
 
                 // Within tolerance is a WIN (gh-#254, ±30s widened by confidence) — keep THIS
                 // rotation-tiered random sample and stop sampling: see this method's remarks for
-                // why first-inside-the-window, not closest-fit, is the degenerate-pick guard.
+                // why first-inside-the-window, not closest-fit, is the degenerate-pick guard. SPEC
+                // F111.1's Fit rung, exactly — the ladder's top.
                 if (diff <= fit.Tolerance)
                 {
-                    logBoundaryFit(fit, "win", sampled, diff);
-                    return sample;
+                    log.Log(fit, "win", BoundaryOutcome.Fit, sampled, diff);
+                    return new MusicSelectionResult(sample, BoundaryOutcome.Fit);
                 }
 
                 if (bestDiff is null || diff < bestDiff)
@@ -240,10 +293,39 @@ public sealed class MusicSelectionPolicy(
 
         // No sample landed inside the tolerance. "least-late" is the min-diff pick; "unscored" is
         // the last-resort duration-less candidate that carried no score at all (F74.3 keeps it
-        // eligible — an un-enriched row is never penalized for enrichment lag).
-        logBoundaryFit(fit, best is not null ? "least-late" : "unscored", sampled, bestDiff);
-        return best ?? firstUnscored;
+        // eligible — an un-enriched row is never penalized for enrichment lag). Either way the ladder
+        // rung is decided the SAME way (SPEC F111.1): Straddle with room to spare, CeremonyOnly
+        // without it.
+        var offToleranceRung = ClassifyOffToleranceRung(fit);
+        log.Log(fit, best is not null ? "least-late" : "unscored", offToleranceRung, sampled, bestDiff);
+        return new MusicSelectionResult(best ?? firstUnscored, offToleranceRung);
     }
+
+    /// <summary>
+    /// SPEC F111.1 (gh-#320, PLAN T234) — the ladder's rung once a pick has already missed tolerance:
+    /// <see cref="BoundaryOutcome.Straddle"/> while <see cref="BoundaryFitPlan.DesiredEffectiveLength"/>
+    /// still clears <see cref="MusicFloor"/>, else <see cref="BoundaryOutcome.CeremonyOnly"/> — reads
+    /// <see cref="IsBelowFloor"/> (T234 review finding F3) rather than comparing
+    /// <see cref="BoundaryFitPlan.DesiredEffectiveLength"/> against <see cref="MusicFloor"/> a second
+    /// time by hand.
+    /// </summary>
+    static BoundaryOutcome ClassifyOffToleranceRung(BoundaryFitPlan fit) =>
+        IsBelowFloor(fit) ? BoundaryOutcome.CeremonyOnly : BoundaryOutcome.Straddle;
+
+    /// <summary>
+    /// T234 review finding F3 — the ONE place <see cref="BoundaryFitPlan.DesiredEffectiveLength"/> is
+    /// ever compared against <see cref="MusicFloor"/>. Before this method existed,
+    /// <see cref="ClassifyOffToleranceRung"/> (<c>&gt;= MusicFloor ? Straddle : CeremonyOnly</c>) and
+    /// <c>Orchestrator.ShouldDeclineFinalUnit</c> (<c>&lt; MusicSelectionPolicy.MusicFloor</c>) each
+    /// hand-wrote what was supposed to be the SAME comparison as its own complement — two call sites a
+    /// future edit to either one could silently drift out of sync with the other, exactly the drift
+    /// the doc comment on the old <see cref="ClassifyOffToleranceRung"/> claimed could not happen.
+    /// Both call sites now call this instead. <c>&gt;=</c> is the floor's own edge convention (SPEC
+    /// F112.3): exactly at the floor is NOT below it, so a fit landing exactly on
+    /// <see cref="MusicFloor"/> straddles rather than declines — pinned by
+    /// <c>Story303_StraddleHandoff</c>'s own exact-floor fact.
+    /// </summary>
+    internal static bool IsBelowFloor(BoundaryFitPlan fit) => fit.DesiredEffectiveLength < MusicFloor;
 
     /// <summary>
     /// The envelope-aware pick seam (SPEC F81.2/F81.5/F81.6, STORY-212 T62) — every call site that
