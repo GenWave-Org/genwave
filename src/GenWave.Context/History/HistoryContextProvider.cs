@@ -103,6 +103,16 @@ using GenWave.Core.Http;
 /// </para>
 ///
 /// <para>
+/// <b>Airability gate at vend time (gh-#433).</b> Between the day file and <see cref="ContextContent"/>
+/// sits <see cref="HistoryFactHygiene"/>: wiki-markup residue is stripped and somber facts (violent
+/// death / disaster / atrocity vocabulary) never air — in EITHER lane, since segment facts and the
+/// patter fact both derive from the same filtered list. Applied when vending, never when caching, so
+/// day files written before the gate existed get the same screen. An all-somber day (the real
+/// <c>selected</c> reply skews grim) is an ordinary F107.6 skip: one Information line, no segment,
+/// never silence.
+/// </para>
+///
+/// <para>
 /// <b>Wikimedia etiquette (SPEC F109.1, the F76 MusicBrainz precedent).</b> Every request carries a
 /// descriptive, version-stamped <see cref="UserAgent"/> identifying GenWave and a contact URL — built
 /// by the shared <see cref="GenWave.Core.Http.EtiquetteUserAgent"/> helper (F7 fix, T228 review — this
@@ -216,12 +226,47 @@ public sealed class HistoryContextProvider(
         await PreFetchTomorrowAsync(cacheDir, tomorrow, ct).ConfigureAwait(false);
         SweepOldDayFiles(cacheDir);
 
+        // The gh-#433 airability gate (see this class's own remarks) — after pre-fetch/sweep, which
+        // are storage hygiene and must run regardless of what today's facts turn out to be.
+        var airable = FilterAirable(entries);
+        if (airable.Count == 0)
+        {
+            logger.LogInformation(
+                "Context provider {ProviderKey} tone gate (gh-#433) removed all {Total} of today's facts — nothing airable",
+                Key, entries.Count);
+            return null; // F107.6 skip-never-silence.
+        }
+
         // FreshUntil = end of the station-local day (SPEC F109.2): the facts are date-anchored, so
         // they stay servable for exactly as long as "today" (the day they were fetched/cached for)
         // still is today, in the station's own zone.
         var freshUntil = new DateTimeOffset(tomorrow, zone.GetUtcOffset(tomorrow));
 
-        return BuildContent(entries, freshUntil);
+        return BuildContent(airable, freshUntil);
+    }
+
+    /// <summary>Applies <see cref="HistoryFactHygiene"/> to a day's entries: markup residue stripped,
+    /// somber facts dropped (gh-#433). Logs one Information line when the gate removed some-but-not-all
+    /// facts; the all-removed case gets its own line at the call site, where it also becomes a skip.</summary>
+    IReadOnlyList<HistoryDayCacheEntry> FilterAirable(IReadOnlyList<HistoryDayCacheEntry> entries)
+    {
+        var airable = new List<HistoryDayCacheEntry>(entries.Count);
+        foreach (var entry in entries)
+        {
+            var cleaned = HistoryFactHygiene.CleanMarkupResidue(entry.Text);
+            if (string.IsNullOrWhiteSpace(cleaned) || HistoryFactHygiene.IsSomber(cleaned))
+                continue;
+            airable.Add(entry with { Text = cleaned });
+        }
+
+        if (airable.Count > 0 && airable.Count < entries.Count)
+        {
+            logger.LogInformation(
+                "Context provider {ProviderKey} tone gate (gh-#433) removed {Removed} of {Total} facts for today",
+                Key, entries.Count - airable.Count, entries.Count);
+        }
+
+        return airable;
     }
 
     /// <summary>Cache-first (see this class's own remarks): a valid day file is used with zero
