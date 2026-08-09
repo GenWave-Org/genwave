@@ -85,18 +85,56 @@ public static class FeatureContextSegmentsAir
         [Fact]
         public void EveryOtherKindsPromptStaysByteIdentical()
         {
-            // T225 note (guard, not scope): BuildUserContent's ContextSegment-only facts block must
-            // never leak onto any other kind's output — the golden pin every pre-F107 kind's own spec
-            // already carries (e.g. Story243's SignOffPromptMatchesExpectedContentByteForByte) is the
-            // real proof; this fact just pins that a LeadIn request with no ContextFacts set produces
-            // no "Facts:" line at all.
+            // Real byte comparison (T225 rider — was a DoesNotContain("Facts:") substring check, which
+            // a mutant adding/reordering/renaming any OTHER line here would have survived):
+            // BuildUserContent's ContextSegment-only facts block must never leak onto any other kind's
+            // output, and nothing else about that kind's own shape may drift either.
             var request = new SegmentRequest(
                 SegmentKind.LeadIn, "af_heart", "GenWave",
                 new MediaItem("m1", "/media/m1.mp3", "Song", default), FixedLocalNow, StationId);
 
             var content = LlmPromptBuilder.BuildUserContent(request, StationClockLine, previouslyVoicedTasteNotes: []);
 
+            const string Expected =
+                "Station: GenWave\n" +
+                "Local time: 2026-08-08 09:00\n" +
+                "Current date/time (station-local): irrelevant\n" +
+                "Segment: lead-in - the track below is about to play next. Announce it as upcoming.\n" +
+                "Title: Song";
+
+            Assert.Equal(Expected, content);
+        }
+
+        [Fact]
+        public void NullContextFactsProducesNoFactsBlock()
+        {
+            // T224 review rider (T225): BuildContextFactsLine's null-branch — a ContextSegment
+            // request with no ContextFacts at all (PersonaController.Preview's own shape, no provider
+            // behind it) must never emit a contentless "Facts:  Use only these facts. Do not add
+            // facts." line.
+            var content = LlmPromptBuilder.BuildUserContent(ContextRequest(null), StationClockLine, previouslyVoicedTasteNotes: []);
+
             Assert.DoesNotContain("Facts:", content);
+        }
+
+        [Fact]
+        public void BlankContextFactsProducesNoFactsBlock()
+        {
+            var content = LlmPromptBuilder.BuildUserContent(ContextRequest("   "), StationClockLine, previouslyVoicedTasteNotes: []);
+
+            Assert.DoesNotContain("Facts:", content);
+        }
+
+        [Fact]
+        public void SegmentRoleLineStaysNeutralWithNoFactsToPromise()
+        {
+            // T224 review rider (T225): with no ContextFacts, the role line must not promise "from
+            // the facts given below" — a preview prompt (no provider, ContextFacts always null) would
+            // otherwise reference a facts block that never follows it, an inconsistent prompt.
+            var content = LlmPromptBuilder.BuildUserContent(ContextRequest(null), StationClockLine, previouslyVoicedTasteNotes: []);
+
+            Assert.Contains("context segment", content);
+            Assert.DoesNotContain("from the facts given below", content);
         }
     }
 
@@ -222,6 +260,71 @@ public static class FeatureContextSegmentsAir
                 ContextRequest("Sunny and seventy-two degrees."), CancellationToken.None);
 
             Assert.Null(item);
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            if (Directory.Exists(synth.OutputDirectory)) Directory.Delete(synth.OutputDirectory, recursive: true);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // T224 review rider (PLAN T225): the "never air non-LLM-authored copy" guard above was WIDENED
+    // at T224 from {SignOff, SignOn} to also cover ContextSegment — this pins that the widening
+    // stayed exactly that scoped. LeadIn/BackAnnounce's own template-fallback copy (FreshPerAiring:
+    // false) has ALWAYS been the ordinary forever-cache rung (Story122_BlurbAudioGc.cs) and must
+    // keep airing untouched; a guard that accidentally swept those two kinds in as well would be a
+    // silent product regression (dead air with no WARN, since RenderAsync's guard returns null with
+    // no failure of its own).
+    // -----------------------------------------------------------------------
+
+    public sealed class ScenarioGuardStaysScopedToHandoffAndContextKinds : IDisposable
+    {
+        readonly string cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        readonly FakeTtsSynthesizer synth = new();
+
+        static TtsSegmentSource BuildSource(ISegmentCopyWriter copyWriter, FakeTtsSynthesizer synth, string cacheRoot) =>
+            new(
+                copyWriter,
+                synth,
+                new FakeLoudnessAnalyzer(),
+                new FakeCueAnalyzer(),
+                NoCorrections.Provider(),
+                NoCorrections.PersonaCache(),
+                NoCorrections.PronunciationProvider(),
+                NoCorrections.PersonaPronunciationCache(),
+                new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
+                NullLogger<TtsSegmentSource>.Instance);
+
+        static SegmentRequest LeadInRequest() =>
+            new(SegmentKind.LeadIn, "af_heart", "GenWave",
+                new MediaItem("m1", "/media/m1.mp3", "Song", default), FixedLocalNow, StationId);
+
+        static SegmentRequest BackAnnounceRequest() =>
+            new(SegmentKind.BackAnnounce, "af_heart", "GenWave",
+                new MediaItem("m1", "/media/m1.mp3", "Song", default), FixedLocalNow, StationId);
+
+        [Fact]
+        public async Task LeadInTemplateFallbackCopyStillAirs()
+        {
+            var copyWriter = new FakeSegmentCopyWriter("Coming up next.", freshPerAiring: false);
+            var source = BuildSource(copyWriter, synth, cacheRoot);
+
+            var item = await source.RenderAsync(LeadInRequest(), CancellationToken.None);
+
+            Assert.NotNull(item);
+        }
+
+        [Fact]
+        public async Task BackAnnounceTemplateFallbackCopyStillAirs()
+        {
+            var copyWriter = new FakeSegmentCopyWriter("That was a great one.", freshPerAiring: false);
+            var source = BuildSource(copyWriter, synth, cacheRoot);
+
+            var item = await source.RenderAsync(BackAnnounceRequest(), CancellationToken.None);
+
+            Assert.NotNull(item);
         }
 
         public void Dispose()

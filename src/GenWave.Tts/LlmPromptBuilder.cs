@@ -362,6 +362,39 @@ static class LlmPromptBuilder
             : $"Facts: {Truncate(facts, MaxSoulChars)} Use only these facts. Do not add facts.";
 
     /// <summary>
+    /// SPEC F107.5 (STORY-298, PLAN T225) — the single source of truth for which
+    /// <see cref="SegmentKind"/> values a patter fact may season: <see cref="SegmentKind.LeadIn"/>
+    /// and <see cref="SegmentKind.BackAnnounce"/> only (review finding, PLAN T225 — was duplicated
+    /// separately in this method and in <see cref="LlmCopyWriter.TakeDuePatterFactForOnAirRender"/>).
+    /// Shared by <see cref="BuildUserContent"/>'s own defense-in-depth kind re-check below AND
+    /// <see cref="LlmCopyWriter.TakeDuePatterFactForOnAirRender"/> (the take-time gate) so the two
+    /// can never drift apart — mirrors <see cref="LlmCopyWriter.IsLlmAuthored"/>'s own "one source of
+    /// truth" idiom one gate over.
+    /// </summary>
+    public static bool IsPatterFactKind(SegmentKind kind) =>
+        kind is SegmentKind.LeadIn or SegmentKind.BackAnnounce;
+
+    /// <summary>
+    /// SPEC F107.5 (STORY-298, PLAN T225) — the patter lane's own one-line addition: a compact
+    /// <c>Context: {fact}</c> line, or no line at all when <paramref name="fact"/> is null/blank.
+    /// Deliberately NOT <see cref="BuildContextFactsLine"/>'s heavier "Use only these facts. Do not
+    /// add facts." framing — that instruction governs a WHOLE segment built from a provider's facts
+    /// (F107.3, <see cref="SegmentKind.ContextSegment"/> only); this line rides a LeadIn/BackAnnounce
+    /// that is still fundamentally about the track, so it reads as one more piece of color alongside
+    /// the taste/request-line color <see cref="BuildUserContent"/> already adds, not a second
+    /// segment's worth of instruction — the two DO share the same <see cref="MaxSoulChars"/> cap,
+    /// though (review finding, PLAN T225): <paramref name="fact"/> is provider-authored, not
+    /// operator-authored, but it is still unbounded text flowing straight into a prompt, exactly like
+    /// every other injected-text field in this file (<see cref="BuildSoul"/>,
+    /// <see cref="BuildLegacySoul"/>, <see cref="BuildSelfNameMentionLine"/>,
+    /// <see cref="BuildHandoffLine"/>, <see cref="BuildContextFactsLine"/>) — and this is the LARGEST
+    /// blast radius of any of them (every LeadIn and every BackAnnounce, not one occasional segment),
+    /// with the unbounded string also retained verbatim in <see cref="LlmCallRing"/>'s in-memory ring.
+    /// </summary>
+    static string? BuildPatterFactLine(string? fact) =>
+        string.IsNullOrWhiteSpace(fact) ? null : $"Context: {Truncate(fact, MaxSoulChars)}";
+
+    /// <summary>
     /// The segment-framing line (SPEC F34.3, F92.2, F107.3): states which of the LLM-eligible kinds
     /// this break is so the model never has to guess its own role. Only ever called with a kind
     /// <see cref="LlmCopyWriter.IsLlmAuthored"/> reports true for — the single source of truth for
@@ -375,12 +408,20 @@ static class LlmPromptBuilder
     /// enum itself, and now (T224) carries its real, reachable wording — the actual facts and the
     /// news-posture instruction ride separately, in <see cref="BuildUserContent"/>'s own
     /// ContextSegment-only facts block, immediately below this line in the finished prompt.
+    ///
+    /// <paramref name="hasContextFacts"/> (T224 review rider, PLAN T225) exists ONLY for the
+    /// <see cref="SegmentKind.ContextSegment"/> arm: with facts to show, the line promises "from the
+    /// facts given below" — a promise the very next line (<see cref="BuildContextFactsLine"/>)
+    /// fulfills. A preview request typically carries no <see cref="SegmentRequest.ContextFacts"/> at
+    /// all (no provider stands behind an admin preview), and without this branch the role line would
+    /// promise facts the finished prompt never actually shows — a self-inconsistent prompt. Every
+    /// other kind ignores this parameter; it exists purely to keep this one arm honest.
     /// </summary>
     // gh-#195: the segment line is the ONLY thing separating a lead-in prompt from a back-announce
     // prompt for the same track, and the old one-clause phrasing lost to a wall of identical track
     // facts — observed live: a back-announce airing AFTER the song announced it as "just dropped!".
     // Each line now states the tense/direction contract outright instead of implying it.
-    static string BuildSegmentLine(SegmentKind kind) => kind switch
+    static string BuildSegmentLine(SegmentKind kind, bool hasContextFacts) => kind switch
     {
         SegmentKind.LeadIn =>
             "Segment: lead-in - the track below is about to play next. Announce it as upcoming.",
@@ -389,15 +430,17 @@ static class LlmPromptBuilder
             + "tense (e.g. \"that was...\"); never announce it as upcoming or say it is next.",
         SegmentKind.SignOff => "Segment: sign-off as you close out your shift on air.",
         SegmentKind.SignOn => "Segment: sign-on as you open your shift on air.",
-        SegmentKind.ContextSegment =>
-            "Segment: context segment - a short spoken note for listeners, written in your own " +
-            "words from the facts given below.",
+        SegmentKind.ContextSegment => hasContextFacts
+            ? "Segment: context segment - a short spoken note for listeners, written in your own " +
+              "words from the facts given below."
+            : "Segment: context segment - a short spoken note for listeners, written in your own " +
+              "words.",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, message: null),
     };
 
     /// <summary>
     /// Composes the user-content half of the prompt (SPEC F34.3, F71.8, F83.1-F83.3, F87.7, F92.2,
-    /// F107.3): station/time/clock/segment framing, then — for a sign-off/sign-on only — the
+    /// F107.3, F107.5): station/time/clock/segment framing, then — for a sign-off/sign-on only — the
     /// handoff-color line (see <see cref="BuildHandoffLine"/>), or — for a context segment WITH facts
     /// to show — the facts block (see <see cref="BuildContextFactsLine"/>, whose own null return omits
     /// the line entirely for a preview's typically-blank <see cref="SegmentRequest.ContextFacts"/>;
@@ -407,24 +450,34 @@ static class LlmPromptBuilder
     /// itself carries (title/artist/album/genre/year — unchanged since before F71; null for a
     /// handoff or a context segment, neither of which is track-anchored), then an OPTIONAL
     /// request-color line (SPEC F87.7, PLAN T91 — see <see cref="RequestLineAcknowledgmentLine"/>) for
-    /// a fulfilled track's own lead-in only, then, last, an OPTIONAL persona-taste line (see
+    /// a fulfilled track's own lead-in only, then an OPTIONAL persona-taste line (see
     /// <see cref="BuildTasteLine"/>) so each reads as one more piece of color about THIS track rather
-    /// than a separate directive. Every one of these kind-specific arms is additive — a request whose
-    /// kind matches none of them (every kind that predates F92/F107) produces the exact same output
-    /// as before either feature shipped.
+    /// than a separate directive, then, last, the patter lane's own OPTIONAL context line (SPEC
+    /// F107.5, PLAN T225 — see <see cref="BuildPatterFactLine"/>) for LeadIn/BackAnnounce only. Every
+    /// one of these kind-specific arms is additive — a request whose kind matches none of them (every
+    /// kind that predates F92/F107) produces the exact same output as before either feature shipped,
+    /// and <paramref name="duePatterFact"/> defaulting to <see langword="null"/> means every existing
+    /// caller of this overload is unaffected.
     /// <paramref name="previouslyVoicedTasteNotes"/> is the immediately preceding ON-AIR break's
     /// fired-rule descriptions (see <see cref="DescribeFiredRules"/>) — see <see cref="LlmCopyWriter"/>'s
     /// own remarks on where that memory lives and why a preview never supplies it.
+    /// <paramref name="duePatterFact"/> is <see cref="GenWave.Core.Domain.ContextPatterFact.Fact"/>
+    /// verbatim, already TAKEN from <c>IContextPatterFactSource</c> by the caller — this method never
+    /// takes anything itself, it only renders what it was handed (see
+    /// <see cref="LlmCopyWriter"/>'s own remarks for exactly where and why that take happens, and
+    /// why <c>WritePreviewAsync</c> never supplies one).
     /// </summary>
     public static string BuildUserContent(
-        SegmentRequest request, string stationClockLine, IReadOnlyList<string> previouslyVoicedTasteNotes)
+        SegmentRequest request, string stationClockLine, IReadOnlyList<string> previouslyVoicedTasteNotes,
+        string? duePatterFact = null)
     {
+        var hasContextFacts = !string.IsNullOrWhiteSpace(request.ContextFacts);
         var lines = new List<string>
         {
             $"Station: {request.StationName}",
             $"Local time: {request.LocalNow.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}",
             stationClockLine,
-            BuildSegmentLine(request.Kind),
+            BuildSegmentLine(request.Kind, hasContextFacts),
         };
 
         if (request.Kind is SegmentKind.SignOff or SegmentKind.SignOn)
@@ -458,6 +511,19 @@ static class LlmPromptBuilder
             {
                 lines.Add(tasteLine);
             }
+        }
+
+        // SPEC F107.5 (STORY-298, PLAN T225): music-adjacent kinds only — never a handoff ceremony
+        // (SignOff/SignOn) and never a context segment itself (that segment IS a provider's facts
+        // already; see BuildPatterFactLine's own remarks for why a second, unrelated fact would be a
+        // confusing double-fact break, not an enrichment). Re-checking IsPatterFactKind here, even
+        // though the ONE caller (LlmCopyWriter.WriteAsync) already gates which kinds ever pass a
+        // non-null duePatterFact in the first place, mirrors this method's own established
+        // defense-in-depth idiom (see the ContextSegment facts-block arm above, which re-checks its
+        // kind the same way).
+        if (IsPatterFactKind(request.Kind) && BuildPatterFactLine(duePatterFact) is { } patterLine)
+        {
+            lines.Add(patterLine);
         }
 
         return string.Join('\n', lines);

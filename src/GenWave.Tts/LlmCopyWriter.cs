@@ -81,6 +81,16 @@ using GenWave.Core.Domain;
 /// persona in the admin UI can never perturb what the NEXT real on-air break considers "recently
 /// voiced".
 /// </para>
+///
+/// <para>
+/// The patter lane's single fact slot (SPEC F107.5, STORY-214, PLAN T225): exactly like
+/// <see cref="previousBreakTasteNotes"/> above, this is an on-air-only concern with its own
+/// dedicated take point — see <see cref="TakeDuePatterFactForOnAirRender"/>'s remarks for exactly
+/// where that take happens and why <see cref="WritePreviewAsync"/> can never trigger it. Unlike the
+/// taste-note field, there is no writer-owned STATE here at all — <c>IContextPatterFactSource</c>
+/// (<paramref name="patterFactSource"/>) already owns the one slot per cadence window; this class
+/// only ever reads it, once, per eligible on-air render.
+/// </para>
 /// </summary>
 public sealed class LlmCopyWriter(
     TemplateCopyWriter fallback,
@@ -92,7 +102,8 @@ public sealed class LlmCopyWriter(
     TimeProvider timeProvider,
     LlmCallRing callRing,
     IDegradationModeReader degradationMode,
-    IStationClockProvider? stationClock = null) : ISegmentCopyWriter, IPersonaPreviewWriter
+    IStationClockProvider? stationClock = null,
+    IContextPatterFactSource? patterFactSource = null) : ISegmentCopyWriter, IPersonaPreviewWriter
 {
     /// <summary>Name of the <see cref="IHttpClientFactory"/> client this writer resolves (registered in Program.cs).</summary>
     public const string HttpClientName = "Llm";
@@ -204,12 +215,17 @@ public sealed class LlmCopyWriter(
             // contract as ResolveAsync above. Soul/quirks are sourced from THIS, with legacy
             // Backstory/Style as the fallback (see LlmPromptBuilder.BuildSoul's own remarks).
             var card = await personaAccessor.ResolveCardAsync(ct);
+            // SPEC F107.5 (STORY-298, PLAN T225) — the ONE place in this writer that may consume the
+            // patter lane's due fact; see TakeDuePatterFactForOnAirRender's own remarks for why this
+            // call lives HERE, in WriteAsync's own body, rather than inside the shared
+            // RequestCompletionAsync below (which WritePreviewAsync also calls).
+            var patterFact = TakeDuePatterFactForOnAirRender(request.Kind);
             // updateTasteMemory: true — this is an on-air call, so previousBreakTasteNotes is both
             // read and (on success) overwritten INSIDE RequestCompletionAsync's own single-flight
             // critical section (SPEC F83.1, T65 review finding); see that method's own remarks for
             // why the field can no longer be touched out here.
             var raw = await RequestCompletionAsync(
-                cfg, request, persona, card, updateTasteMemory: true, queueWaitBudget: null, ct);
+                cfg, request, persona, card, updateTasteMemory: true, patterFact, queueWaitBudget: null, ct);
             var cleaned = CleanCopy(raw, cfg.MaxCopyChars);
             if (cleaned is null)
             {
@@ -280,8 +296,13 @@ public sealed class LlmCopyWriter(
             // legacy Backstory/Style composition (see LlmPromptBuilder.BuildSoul); quirks stay
             // absent. The clock (F71.8) still reaches this prompt regardless — it lives in
             // LlmPromptBuilder.BuildUserContent, not here.
+            //
+            // patterFact: null, ALWAYS (SPEC F107.5, PLAN T225) — this method never calls
+            // TakeDuePatterFactForOnAirRender, full stop, so there is no fact here to pass even by
+            // mistake; see that method's own remarks for why a preview must never be ABLE to consume
+            // the break's one due fact, not merely configured not to.
             var raw = await RequestCompletionAsync(
-                cfg, request, personaOverride, card: null, updateTasteMemory: false,
+                cfg, request, personaOverride, card: null, updateTasteMemory: false, patterFact: null,
                 queueWaitBudget: TimeSpan.FromSeconds(cfg.PreviewQueueWaitSeconds), ct);
             var cleaned = CleanCopy(raw, cfg.MaxCopyChars);
             return cleaned is null
@@ -352,9 +373,34 @@ public sealed class LlmCopyWriter(
             detail.ReplaceLineEndings(" "), outcome);
     }
 
+    /// <summary>
+    /// SPEC F107.5 (STORY-298, PLAN T225) — the patter lane's ONE pull point in this writer: called
+    /// exclusively from <see cref="WriteAsync"/>, and only for the two music-adjacent kinds a patter
+    /// fact is meant to season (<see cref="LlmPromptBuilder.IsPatterFactKind"/> — the single source
+    /// of truth this method shares with <see cref="LlmPromptBuilder.BuildUserContent"/>'s own
+    /// defense-in-depth kind re-check, review finding PLAN T225, so the two can never drift apart).
+    /// Deliberately excludes <see cref="SegmentKind.SignOff"/>/<see cref="SegmentKind.SignOn"/>
+    /// (handoff ceremonies, not "stay cool cats" track patter — a fact riding a sign-off would read
+    /// as a non sequitur) and <see cref="SegmentKind.ContextSegment"/> itself (that segment IS a
+    /// provider's facts already; layering a second, unrelated fact from a DIFFERENT provider on top
+    /// would be a confusing double-fact break, not an enrichment).
+    ///
+    /// <see cref="IContextPatterFactSource.TryTakeDuePatterFact"/> is a CONSUMING read (see that
+    /// interface's own remarks) — this method, and this method alone, ever calls it, and it is
+    /// called from nowhere but <see cref="WriteAsync"/>. <see cref="WritePreviewAsync"/> never calls
+    /// this method at all — not "calls it and discards the result", which would still burn the slot
+    /// — which is what keeps auditioning a persona in the admin UI from ever being able to eat the
+    /// current break's only due fact out from under the on-air render that actually airs (the exact
+    /// CQS trap the T222 review flagged for <c>GenWave.Context.ContextPipeline</c>'s own TryTake).
+    /// </summary>
+    ContextPatterFact? TakeDuePatterFactForOnAirRender(SegmentKind kind) =>
+        LlmPromptBuilder.IsPatterFactKind(kind)
+            ? (patterFactSource ?? NoOpContextPatterFactSource.Instance).TryTakeDuePatterFact()
+            : null;
+
     async Task<string> RequestCompletionAsync(
         LlmOptions cfg, SegmentRequest request, Persona? persona, PersonaCard? card,
-        bool updateTasteMemory, TimeSpan? queueWaitBudget, CancellationToken ct)
+        bool updateTasteMemory, ContextPatterFact? patterFact, TimeSpan? queueWaitBudget, CancellationToken ct)
     {
         // Captured up front, once, for LlmCallRing (SPEC F73.1, T41) — startedAt mirrors
         // LlmCopyStatusHolder's own attemptedAt semantics (includes any single-flight queueing wait
@@ -419,8 +465,12 @@ public sealed class LlmCopyWriter(
             // render's snapshot against the first render's own write. Only an on-air call
             // (updateTasteMemory) reads the real field; a preview always compares against empty.
             IReadOnlyList<string> previouslyVoicedTasteNotes = updateTasteMemory ? previousBreakTasteNotes : [];
+            // patterFact?.Fact (SPEC F107.5, PLAN T225): already TAKEN by the caller (WriteAsync, via
+            // TakeDuePatterFactForOnAirRender) — this method only renders what it was handed, it
+            // never calls IContextPatterFactSource itself. Null for every WritePreviewAsync call.
             userPrompt = LlmPromptBuilder.BuildUserContent(
-                request, LlmPromptBuilder.BuildStationClockLine(StationLocalNow()), previouslyVoicedTasteNotes);
+                request, LlmPromptBuilder.BuildStationClockLine(StationLocalNow()), previouslyVoicedTasteNotes,
+                patterFact?.Fact);
 
             // No boot-frozen BaseAddress (F36.2) — the endpoint is read from CurrentValue above and an
             // absolute URI is built per call (EndpointUri preserves a subpath in Llm:Endpoint, e.g.

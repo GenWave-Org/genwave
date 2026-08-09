@@ -23,6 +23,13 @@ public static class TtsServiceCollectionExtensions
         // host's real binding (AddGenWavePlayout) wins.
         services.TryAddSingleton<IStationEventSink, NoOpStationEventSink>();
 
+        // Patter-lane fact source default (SPEC F107.5, STORY-298, PLAN T225) — mirrors
+        // IStationEventSink's own shape immediately above: TryAdd so the T226 Host wiring, once it
+        // registers the real GenWave.Context.ContextPipeline binding, overrides it. This project has
+        // no reference to GenWave.Context (an L1 project one layer further out) and never needs one —
+        // the seam lives in GenWave.Core precisely so LlmCopyWriter can depend on the contract alone.
+        services.TryAddSingleton<IContextPatterFactSource, NoOpContextPatterFactSource>();
+
         // TTS options — validated at startup; RenderBudgetSeconds must be positive.
         services
             .AddOptions<TtsOptions>()

@@ -208,6 +208,24 @@ public static class FeatureContextPipeline
     }
 
     // ---------------------------------------------------------------------
+    // The patter lane's seam (SPEC F107.5, STORY-298, PLAN T225): ContextPipeline is THE production
+    // IContextPatterFactSource — GenWave.Tts depends on the interface alone (Core), never on this L1
+    // project, so this structural fact is what keeps that promise honest.
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioPatterLaneSeam
+    {
+        [Fact]
+        public void PipelineImplementsThePatterFactSourceContract()
+        {
+            var pipeline = new ContextPipeline(
+                [], new FakeContextSettingsProvider(), NewTime(), new CapturingLogger<ContextPipeline>());
+
+            Assert.IsAssignableFrom<IContextPatterFactSource>(pipeline);
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // SAD PATH — the constructor fails fast on an invalid provider key (F107.1, T221/T222 review)
     // ---------------------------------------------------------------------
 

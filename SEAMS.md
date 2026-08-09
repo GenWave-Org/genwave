@@ -44,7 +44,13 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **71 seams across 5 projects.**
+> **72 seams across 6 projects.**
+
+## GenWave.Core (1 seam)
+
+| Port | Adapter | Lifetime | Notes |
+|---|---|---|---|
+| `GenWave.Core.Abstractions.IContextPatterFactSource` | `GenWave.Core.Abstractions.NoOpContextPatterFactSource` | Singleton | — |
 
 ## GenWave.Host (17 seams)
 

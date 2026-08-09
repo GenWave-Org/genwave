@@ -10,7 +10,9 @@ using GenWave.Core.Domain;
 /// and freshness cache. Single responsibility: decide WHEN a provider may fetch and WHETHER its
 /// cached content is currently servable; it never renders copy, never picks a voice, and never talks
 /// to a queue — those are the T223/T224/T225 consumers' jobs, reached through <see cref="TickAsync"/>
-/// (segment lane) and <see cref="TryTakeDuePatterFact"/> (patter lane).
+/// (segment lane) and <see cref="TryTakeDuePatterFact"/> (patter lane, fulfilling
+/// <see cref="IContextPatterFactSource"/> — PLAN T225's seam for <c>GenWave.Tts.LlmCopyWriter</c> to
+/// depend on without a project reference to this L1 project).
 ///
 /// <para>
 /// <b>Fetch-once-per-slot.</b> Time is bucketed into fixed-width windows of
@@ -56,7 +58,7 @@ using GenWave.Core.Domain;
 /// all), so concurrent reads of it are always safe.
 /// </para>
 /// </summary>
-public sealed partial class ContextPipeline
+public sealed partial class ContextPipeline : IContextPatterFactSource
 {
     [GeneratedRegex("^[a-z0-9-]+\\z")]
     private static partial Regex KeyPattern();
