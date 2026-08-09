@@ -58,15 +58,19 @@ public sealed partial class FfmpegCueAnalyzer : ICueAnalyzer
     /// <summary>
     /// Parses silence_start / silence_end events from ffmpeg silencedetect stderr output into cue points.
     ///
-    /// Events arrive in order: silence_start / silence_end pairs for each silence region.
+    /// Events arrive in order: silence_start / silence_end pairs for each silence region; the final
+    /// region may be open-ended (a silence_start with no silence_end) when the file ends silent.
     ///
     /// Rules:
     ///   - No silence events at all → null (blank.eat is the runtime backstop).
     ///   - Leading silence  = first region whose start is at or within <see cref="LeadingEpsilonSec"/> of 0.
     ///                        CueIn = that region's end time.
-    ///   - Trailing silence = last region that begins AFTER the leading region (or after 0 if none).
+    ///   - Trailing silence = a final region that actually extends to EOF: open-ended, or closed within
+    ///                        <see cref="TrailingEpsilonSec"/> of the container duration.
     ///                        CueOut = that region's start time.
-    ///                        If no trailing silence: CueOut = <paramref name="fileDurationSec"/> (whole track audible to EOF).
+    ///   - Interior silence (a region that ends before EOF) never sets CueOut (gh-#424) — a TTS
+    ///                        sentence pause or a quiet mid-track break is content, not a tail to trim.
+    ///   - If no trailing silence: CueOut = <paramref name="fileDurationSec"/> (whole track audible to EOF).
     ///   - Entirely silent (one region spanning ~full duration, no audible content) → null.
     /// </summary>
     static CuePoints? ParseCuePoints(string stderr, double? fileDurationSec)
@@ -95,6 +99,10 @@ public sealed partial class FfmpegCueAnalyzer : ICueAnalyzer
         if (starts.Count == 0)
             return null;
 
+        // A single region opening at the head and never ending is a fully-silent file.
+        if (starts[0] <= LeadingEpsilonSec && ends.Count == 0)
+            return null;
+
         double cueIn = 0.0;
         double? cueOut = null;
 
@@ -103,35 +111,30 @@ public sealed partial class FfmpegCueAnalyzer : ICueAnalyzer
         if (hasLeading)
             cueIn = ends[0];
 
-        // Trailing silence: last region whose start is after the leading region ends (or after epsilon).
+        // Trailing silence must actually extend to EOF (gh-#424): events alternate start/end, so the
+        // last region is open-ended (still silent at EOF) when there is one more start than there are
+        // ends; a closed region also counts as trailing when its end lands within TrailingEpsilonSec
+        // of the container duration. A region that ends earlier than that is an INTERIOR pause — a
+        // TTS sentence gap (0.6 s injected pauses clear the 0.5 s detection floor), a quiet mid-track
+        // break — and must never become cue_out: that cut the final sentence of every multi-sentence
+        // patter clip on air.
         var lastStart = starts[^1];
-        if (lastStart > LeadingEpsilonSec)
+        double? lastEnd = ends.Count == starts.Count ? ends[^1] : null;
+        var lastRegionRunsToEof = lastEnd is null
+            || (fileDurationSec is not null && lastEnd.Value >= fileDurationSec.Value - TrailingEpsilonSec);
+        if (lastStart > LeadingEpsilonSec && lastRegionRunsToEof)
             cueOut = lastStart;
 
-        // If we have only a leading region and it covers most of the file, the content is entirely silent.
-        if (hasLeading && cueOut is null)
-        {
-            // We detected leading silence but no trailing region. Use the file duration as CueOut so
-            // the full audible content (from cueIn to EOF) can be expressed.
-            if (fileDurationSec is null)
-                return null;
-
-            var resolvedCueOut = fileDurationSec.Value;
-            if (cueIn >= resolvedCueOut)
-                return null;   // File is entirely/mostly silent — no usable content.
-
-            return new CuePoints(cueIn, resolvedCueOut);
-        }
-
-        if (!hasLeading && cueOut is null)
-            return null;
-
+        // No trailing region to trim: the audible content runs to EOF, so express the full extent —
+        // duration-dependent consumers (F66.1 DurationMs, straddle boundary fit) still need the
+        // measurement. Without a container duration there is nothing usable to report; runtime
+        // blank.eat remains the backstop either way.
         var finalCueOut = cueOut ?? fileDurationSec;
         if (finalCueOut is null)
             return null;
 
         if (cueIn >= finalCueOut.Value)
-            return null;
+            return null;   // File is entirely/mostly silent — no usable content.
 
         return new CuePoints(cueIn, finalCueOut.Value);
     }
@@ -154,6 +157,13 @@ public sealed partial class FfmpegCueAnalyzer : ICueAnalyzer
 
     // Small epsilon to classify a silence_start as "at file head" (accounts for sample-boundary rounding).
     const double LeadingEpsilonSec = 0.1;
+
+    // A closed silence region whose end lands within this of the container duration still counts as
+    // trailing: ffmpeg flushes a final silence_end at EOF on some builds, and container duration
+    // (especially bitrate-estimated) can drift slightly from decoded timestamps. Misclassifying in
+    // the safe direction (trailing treated as interior → no trim → blank.eat backstop) is preferred
+    // over the unsafe one (interior treated as trailing → truncated content).
+    const double TrailingEpsilonSec = 0.25;
 
     // Matches: silence_start: 1.23456
     [GeneratedRegex(@"silence_start:\s*(-?[\d.]+)")]

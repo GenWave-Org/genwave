@@ -182,6 +182,78 @@ static class TestMedia
         return path;
     }
 
+    /// <summary>
+    /// A WAV with a 1 kHz tone, an interior silence of <paramref name="pauseSec"/>, then a second
+    /// tone running to EOF — the shape of a multi-sentence TTS clip with an injected sentence pause
+    /// (gh-#424). No leading or trailing silence.
+    /// </summary>
+    public static string CreateToneSilenceTone(
+        string dir, string fileName, double toneSec = 4.0, double pauseSec = 0.8, double secondToneSec = 4.0)
+    {
+        var path = Path.Combine(dir, fileName);
+        var tone = toneSec.ToString(CultureInfo.InvariantCulture);
+        var pause = pauseSec.ToString(CultureInfo.InvariantCulture);
+        var secondTone = secondToneSec.ToString(CultureInfo.InvariantCulture);
+        var args = new List<string>
+        {
+            "-nostats", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", $"sine=frequency=1000:duration={tone}",
+            "-f", "lavfi", "-i", $"aevalsrc=0:d={pause}",
+            "-f", "lavfi", "-i", $"sine=frequency=1000:duration={secondTone}",
+            "-filter_complex", "[0:a][1:a][2:a]concat=n=3:v=0:a=1[out]",
+            "-map", "[out]",
+            "-ar", "44100", "-ac", "2",
+            path
+        };
+        RunFfmpeg(args);
+        return path;
+    }
+
+    /// <summary>
+    /// A WAV with a 1 kHz tone, an interior silence, a second tone, then trailing silence to EOF —
+    /// only the trailing region is a legitimate cue-out (gh-#424).
+    /// </summary>
+    public static string CreateToneSilenceToneSilence(
+        string dir, string fileName,
+        double toneSec = 4.0, double pauseSec = 0.8, double secondToneSec = 4.0, double trailingSilenceSec = 3.0)
+    {
+        var path = Path.Combine(dir, fileName);
+        var tone = toneSec.ToString(CultureInfo.InvariantCulture);
+        var pause = pauseSec.ToString(CultureInfo.InvariantCulture);
+        var secondTone = secondToneSec.ToString(CultureInfo.InvariantCulture);
+        var trail = trailingSilenceSec.ToString(CultureInfo.InvariantCulture);
+        var args = new List<string>
+        {
+            "-nostats", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", $"sine=frequency=1000:duration={tone}",
+            "-f", "lavfi", "-i", $"aevalsrc=0:d={pause}",
+            "-f", "lavfi", "-i", $"sine=frequency=1000:duration={secondTone}",
+            "-f", "lavfi", "-i", $"aevalsrc=0:d={trail}",
+            "-filter_complex", "[0:a][1:a][2:a][3:a]concat=n=4:v=0:a=1[out]",
+            "-map", "[out]",
+            "-ar", "44100", "-ac", "2",
+            path
+        };
+        RunFfmpeg(args);
+        return path;
+    }
+
+    /// <summary>A WAV containing only silence.</summary>
+    public static string CreateSilenceOnly(string dir, string fileName, double durationSec = 6.0)
+    {
+        var path = Path.Combine(dir, fileName);
+        var dur = durationSec.ToString(CultureInfo.InvariantCulture);
+        var args = new List<string>
+        {
+            "-nostats", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", $"aevalsrc=0:d={dur}",
+            "-ar", "44100", "-ac", "2",
+            path
+        };
+        RunFfmpeg(args);
+        return path;
+    }
+
     static void RunFfmpeg(IReadOnlyList<string> args)
     {
         var psi = new ProcessStartInfo("ffmpeg") { RedirectStandardError = true, UseShellExecute = false };
