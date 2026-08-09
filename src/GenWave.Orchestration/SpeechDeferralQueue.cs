@@ -89,6 +89,23 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     }
 
     /// <summary>
+    /// The pending deferral occupying exactly the <paramref name="kind"/>/<paramref name="discriminator"/>
+    /// slot, or <see langword="null"/> when nothing does — read-only, never consumes. Unlike
+    /// <see cref="PeekNextDue"/> (the earliest-due entry across every slot), this looks up ONE named
+    /// slot regardless of where — or whether — it sorts first in due order. SPEC F111.3 (PLAN T235):
+    /// the straddle assembly reads a pending SignOn's current <see cref="SpeechDeferral.Handoff"/>
+    /// back this way at plan time, before re-<see cref="Enqueue"/>-ing an enriched copy of it (the
+    /// same supersede-by-key path <see cref="Enqueue"/>'s own remarks describe).
+    /// </summary>
+    public SpeechDeferral? Peek(SpeechDeferralKind kind, string? discriminator = null)
+    {
+        lock (gate)
+        {
+            return pending.GetValueOrDefault((kind, discriminator));
+        }
+    }
+
+    /// <summary>
     /// Enqueues a deferral of <paramref name="kind"/>, due at <paramref name="due"/> (defaults to
     /// now — "due immediately, air at the very next boundary"). A pending deferral of the same
     /// <paramref name="kind"/>/<paramref name="discriminator"/> pair is replaced (SPEC F74.2,
@@ -230,13 +247,32 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     /// genuine boundary decision (SPEC F74.1) — the caller, not this queue, is what guarantees "never
     /// mid-track".
     /// </summary>
-    public IReadOnlyList<SpeechDeferral> TryDequeueDue(DateTimeOffset now)
+    /// <param name="now">The instant to drain as of — every deferral due at or before this fires.</param>
+    /// <param name="hold">
+    /// SPEC F111.2 (PLAN T235 — the /plan-ruled parameter shape over queue-side state, the smallest
+    /// sound one since this only ever needs to suppress a kind for exactly ONE call): kinds to leave
+    /// pending even though due, for this call only. The straddle seam's own forced-forward drain
+    /// (<c>Orchestrator.GetNextAsync</c>, called with <paramref name="now"/> advanced to a SignOff's
+    /// own <see cref="SpeechDeferral.Due"/> rather than the real "now" — mirrors
+    /// <c>TryServeCeremonyOnlyUnitAsync</c>'s identical "drain as of a future instant, not now"
+    /// precedent) must never sweep the paired SignOn up in that same forced call, even though today's
+    /// <c>SignOffLeadTime</c> gap already keeps their due times apart on its own — belt-and-suspenders,
+    /// and self-documenting at the call site. Defaults to <see langword="null"/> (nothing held) — every
+    /// pre-T235 caller's behavior, byte-identical: an entry a plain <c>deferral.Due &lt;= now</c>
+    /// already excludes stays excluded regardless of whether this parameter also names its kind, and a
+    /// held-but-due entry is left exactly where <see cref="Enqueue"/> put it, ready for a later call
+    /// (with no hold, or a different one) to pick up.
+    /// </param>
+    public IReadOnlyList<SpeechDeferral> TryDequeueDue(
+        DateTimeOffset now, IReadOnlySet<SpeechDeferralKind>? hold = null)
     {
         lock (gate)
         {
             if (pending.Count == 0) return [];
 
-            var due = InDrainOrder(pending.Values.Where(deferral => deferral.Due <= now)).ToList();
+            var due = InDrainOrder(pending.Values.Where(deferral =>
+                    deferral.Due <= now && (hold is null || !hold.Contains(deferral.Kind))))
+                .ToList();
             foreach (var deferral in due) pending.Remove((deferral.Kind, deferral.Discriminator));
             return due;
         }

@@ -30,4 +30,23 @@ namespace GenWave.Orchestration;
 /// The OTHER DJ's display name (<c>SegmentRequest.CounterpartName</c>), or <see langword="null"/>
 /// when no counterpart exists for this boundary (a music-only half, SPEC F92.3).
 /// </param>
-public sealed record HandoffContext(string Voice, string? PersonaName, string? CounterpartName);
+/// <param name="CrossingTrackTitle">
+/// SPEC F111.3 (PLAN T235), additive and optional (default <see langword="null"/> — every pre-T235
+/// construction site, including the SignOff half of every ceremony, stays diff-free): the deliberately
+/// boundary-crossing track's own <c>MediaItem.Title</c>, captured into the HELD SignOn's context at
+/// straddle plan time (<c>Orchestrator.CaptureCrossingTrackForHeldSignOn</c>) — the SAME
+/// immutable-capture pattern this whole record already establishes for Voice/PersonaName/
+/// CounterpartName, just captured one straddle-seam later than the rest of them. <see langword="null"/>
+/// for every non-straddle handoff (both pieces of an ordinary boundary, and the SignOff half of a
+/// straddle one) — there is no crossing track to name.
+/// </param>
+/// <param name="CrossingTrackArtist">
+/// The same crossing track's <c>MediaItem.Artist</c>, captured alongside <see cref="CrossingTrackTitle"/>
+/// — <see langword="null"/> whenever that is (an untagged track, or no straddle at all).
+/// </param>
+public sealed record HandoffContext(
+    string Voice,
+    string? PersonaName,
+    string? CounterpartName,
+    string? CrossingTrackTitle = null,
+    string? CrossingTrackArtist = null);

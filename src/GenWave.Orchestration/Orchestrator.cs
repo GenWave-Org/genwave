@@ -222,6 +222,12 @@ public sealed class Orchestrator(
     /// </summary>
     static readonly TimeSpan SignOffLeadTime = TimeSpan.FromSeconds(15);
 
+    // SPEC F111.2 (PLAN T235) — the straddle seam's drain hold-set: a single-purpose, never-mutated
+    // singleton rather than allocating a fresh HashSet per straddle unit, since its one member never
+    // varies. See GetNextAsync's own remarks (the straddle branch) for what this actually guards.
+    static readonly IReadOnlySet<SpeechDeferralKind> HoldSignOnAtStraddle =
+        new HashSet<SpeechDeferralKind> { SpeechDeferralKind.SignOn };
+
     // SPEC F92.4 (PLAN T124): the same null-coalesced-default idiom MusicSelectionPolicy's own
     // envelope/persona/request-fulfillment seams use (F112, STORY-295) — a dropped handoff piece
     // still needs somewhere to publish to even when no host binds a real sink (every pre-T124
@@ -382,7 +388,88 @@ public sealed class Orchestrator(
         // schedule's live answer.
         track = track with { DjName = unitDjName };
 
-        await EnqueuePatterAsync(previousTrack, track, unitDjName, cadence, identity, ct);
+        // SPEC F111.2/F111.3 (gh-#320, PLAN T235) — the straddle assembly. A Straddle outcome whose
+        // peeked deferral is a SignOff, AND whose picked candidate genuinely CROSSES the boundary
+        // (<see cref="MusicSelectionResult.CrossesBoundary"/> — T235 review findings F1/F5: the
+        // ladder's own <see cref="BoundaryOutcome.Straddle"/> rung fires for ANY off-tolerance pick
+        // clearing the floor, including one running far SHORTER than desired, which cannot possibly
+        // cross anything; only <see cref="MusicSelectionPolicy"/> ever measured the candidate's
+        // effective length against the boundary, so it — not this Orchestrator — decides crossing, at
+        // the source), means the track just picked is deliberately going to run past the boundary
+        // (that IS the ladder's middle rung — nothing fit, but the room is there); left to the ordinary
+        // drain (as-of "now", untilDue > 0 or the fit above would never have built at all) the SignOff
+        // would sit pending until whatever LATER unit's normal drain finally reaches its due — quite
+        // possibly the SAME one the SignOn (due at the boundary itself) also reaches by then,
+        // reproducing gh-#300's own back-to-back field report one rung up the ladder. Force THIS unit's
+        // drain forward to the SignOff's own Due instead (mirrors TryServeCeremonyOnlyUnitAsync's
+        // identical "drain as of a future instant, not now" precedent two methods down) so it airs
+        // ahead of the crossing track, and hold the paired SignOn out of that same forced call (SPEC
+        // F111.2's hold-set) so it stays queued through this seam and drains first at the next one,
+        // once the crossing track has actually aired.
+        //
+        // A NON-crossing off-tolerance pick (F1's short-track fact) takes the ordinary unforced path
+        // below instead: the SignOff stays exactly where TryDequeueDue would have left it, airing near
+        // its own due (T234 baseline) rather than being forced ahead of a track that was never going to
+        // run past it. A one-sided straddle (SignOff with no SignOn queued at all — F92.3's "into
+        // music-only" shape) takes the identical forced path when it crosses; holding a kind with
+        // nothing pending is a no-op. A SignOn-headed fit (the opposite one-sided shape, "out of
+        // music-only" — no SignOff exists to drain ahead of anything) needs none of this: it is not yet
+        // due either, so the ordinary unforced drain below already leaves it queued until the seam
+        // after this crossing track, with nothing to hold.
+        //
+        // drainAsOf/hold (SPEC F111.2) collapse to locals here — the single home for the F1/F2 guards
+        // below (T235 review finding F4) — rather than three near-identical EnqueuePatterAsync call
+        // sites: every path through this method falls through to the ONE call at the bottom, differing
+        // only in what these two locals hold.
+        DateTimeOffset? drainAsOf = null;
+        IReadOnlySet<SpeechDeferralKind>? hold = null;
+
+        if (selection.Outcome == BoundaryOutcome.Straddle
+            && selection.CrossesBoundary
+            && pending is { Kind: SpeechDeferralKind.SignOff })
+        {
+            // Reconcile the handoff producer's OWN state for this unit's boundary/schedule snapshot
+            // before trusting the peeked SignOff as forceable (ScenarioSupersedeProtects regression,
+            // T235 review): pending.Kind == SignOff with untilDue > 0 (fit above was only built
+            // because of that) proves this SignOff is the GLOBALLY earliest-due pending entry across
+            // every kind, so nothing else is currently due for EnqueueHandoffCeremonyAsync's own
+            // re-evaluation to wrongly race ahead of — unlike its ordinary step-2.5 call (deliberately
+            // placed AFTER the drain, see EnqueuePatterAsync's own remarks, so it never clears a piece
+            // the drain was about to fire), calling it here first is safe precisely because there is no
+            // due piece for it to preempt. A schedule write that already superseded or retracted this
+            // ceremony (SPEC F92.1 revisit) takes effect right here, before this unit's own forced
+            // drain would otherwise race past it. The SAME method runs again from inside
+            // EnqueuePatterAsync's normal step 2.5 immediately below; seeing the identical
+            // (now-reconciled) triple, that call is a safe no-op (the arm-once guard).
+            await EnqueueHandoffCeremonyAsync(identity.Voice, ct);
+
+            // T235 review finding F2: only force when the reconciliation left the EXACT ceremony
+            // peeked above untouched — reconciledSignOff.Due == pending.Due proves nothing changed
+            // (same triple, same due). A schedule write that MOVED the boundary re-arms a SignOff at a
+            // DIFFERENT due (still non-null — it is still in-window, just for a new boundary); forcing
+            // to that reconciled-but-different due fired the sign-off against the WRONG boundary (the
+            // field report: 6:45 early), and CaptureCrossingTrackForHeldSignOn would have stamped the
+            // MOVED SignOn's copy with a track that has nothing to do with its own, later boundary. The
+            // fresh, moved ceremony gets its own fair shot at a later, correctly-classified straddle
+            // unit instead — this unit simply falls through to the ordinary unforced drain below.
+            //
+            // A null reconciledSignOff is the OTHER shape this SAME reconciliation can take (T235
+            // review finding F3, the retraction half): the boundary left the F74.3 window entirely (or
+            // collapsed to a gap-to-gap/self-handoff), and EnqueueHandoffCeremonyAsync's own
+            // ClearCeremony wiped BOTH pieces — there is no ceremony left, moved or otherwise, to force.
+            // That falls through to the SAME ordinary unforced drain below, which is simply a no-op for
+            // a ceremony that no longer exists — this unit plans as an ordinary music unit.
+            if (deferralQueue.Peek(SpeechDeferralKind.SignOff) is { } reconciledSignOff
+                && reconciledSignOff.Due == pending.Due)
+            {
+                CaptureCrossingTrackForHeldSignOn(track);
+                drainAsOf = reconciledSignOff.Due;
+                hold = HoldSignOnAtStraddle;
+            }
+        }
+
+        await EnqueuePatterAsync(previousTrack, track, unitDjName, cadence, identity, ct, drainAsOf, hold);
+
         buffer.Enqueue(track);
 
         previousTrack = track;
@@ -486,10 +573,15 @@ public sealed class Orchestrator(
     /// <b>Handoff kinds only.</b> A show boundary is an appointment the audience can hear being
     /// missed — the incoming DJ announcing "it's Thursday two o'clock" at 2:05 is the whole issue.
     /// A station ID is not: it is imaging that can ride the next seam quite happily, and skipping a
-    /// whole track for one would trade a small blemish for a large one. Today's ident producer only
-    /// ever enqueues due-NOW deferrals, so such a fit is never even built (a due-now deferral takes
-    /// the plain unbiased path) — this guard is what keeps that true if a future producer ever
-    /// future-dates one. This is why this method still short-circuits BEFORE
+    /// whole track for one would trade a small blemish for a large one. This guard is scoped by KIND,
+    /// not by whether a deferral happens to be future-dated (T235 review — corrects an earlier version
+    /// of this comment, which claimed "today's ident producer only ever enqueues due-NOW deferrals,
+    /// so such a fit is never even built"; false since <see cref="ClockAnchoredImagingProducer"/>,
+    /// PLAN T230, future-dates <c>StationId</c>/<c>TimeDate</c> deferrals too, the identical shape a
+    /// handoff's own SignOff/SignOn already used). A future-dated StationId/TimeDate fit reaches this
+    /// method exactly like a due-now one always did — the <c>fit.Kind is SignOff or SignOn</c> check
+    /// below is the ONLY thing that keeps it from ever declining, not its due time. This is why this
+    /// method still short-circuits BEFORE
     /// <see cref="MusicSelectionPolicy.SelectMusicCandidateAsync"/> ever runs (gh-#320, PLAN T234
     /// keeps <see cref="TryServeCeremonyOnlyUnitAsync"/>'s mechanics here, Orchestrator-side, rather
     /// than moving unit-assembly itself into the policy) — a StationId/TimeDate fit below the floor
@@ -647,11 +739,17 @@ public sealed class Orchestrator(
     /// The instant the deferral drain is evaluated against — <see langword="null"/> means "now",
     /// every pre-gh-#300 caller's behavior. The ceremony-only unit passes the BOUNDARY instead; see
     /// <see cref="TryServeCeremonyOnlyUnitAsync"/> for why an as-of-now drain is the exact shape of
-    /// the bug.
+    /// the bug. The straddle unit (SPEC F111.2, PLAN T235) passes a pending SignOff's own Due for the
+    /// identical reason — see <see cref="GetNextAsync"/>'s own straddle branch.
+    /// </param>
+    /// <param name="hold">
+    /// SPEC F111.2 (PLAN T235) — forwarded verbatim to <see cref="SpeechDeferralQueue.TryDequeueDue"/>;
+    /// see that method's own remarks. <see langword="null"/> (nothing held) for every caller except the
+    /// straddle branch.
     /// </param>
     async Task EnqueuePatterAsync(
         MediaItem? prev, MediaItem? next, string? unitDjName, CadenceConfig cadence, StationIdentity identity,
-        CancellationToken ct, DateTimeOffset? drainAsOf = null)
+        CancellationToken ct, DateTimeOffset? drainAsOf = null, IReadOnlySet<SpeechDeferralKind>? hold = null)
     {
         // Read the render budget ONCE per unit, up front (SPEC F44.2, gitea-#197) — the same
         // per-unit-snapshot discipline cadence/identity arrive under (see the params above): a
@@ -748,7 +846,7 @@ public sealed class Orchestrator(
         // same instant the dequeue decision itself was made against, rather than a second, later
         // clock read.
         var drainNow = drainAsOf ?? timeProvider.GetUtcNow();
-        foreach (var deferral in deferralQueue.TryDequeueDue(drainNow))
+        foreach (var deferral in deferralQueue.TryDequeueDue(drainNow, hold))
         {
             switch (deferral.Kind)
             {
@@ -942,7 +1040,10 @@ public sealed class Orchestrator(
     /// Builds a <see cref="SegmentKind.SignOff"/>/<see cref="SegmentKind.SignOn"/> request from the
     /// deferral's own captured <paramref name="handoff"/> (SPEC F92.2, PLAN T124) — see
     /// <see cref="HandoffContext"/>'s own remarks for why this is never a fresh
-    /// <see cref="ResolvePersonaAsync"/>/accessor read.
+    /// <see cref="ResolvePersonaAsync"/>/accessor read. <see cref="HandoffContext.CrossingTrackTitle"/>/
+    /// <see cref="HandoffContext.CrossingTrackArtist"/> (SPEC F111.3, PLAN T235) ride straight across
+    /// onto <see cref="SegmentRequest.CrossingTrackTitle"/>/<see cref="SegmentRequest.CrossingTrackArtist"/>
+    /// — null for every non-straddle piece, exactly like every other optional field here.
     /// </summary>
     SegmentRequest BuildHandoffRequest(SpeechDeferralKind kind, HandoffContext handoff, StationIdentity identity)
     {
@@ -955,7 +1056,43 @@ public sealed class Orchestrator(
             StationLocalNow(),
             identity.Id,
             handoff.PersonaName,
-            handoff.CounterpartName);
+            handoff.CounterpartName,
+            CrossingTrackTitle: handoff.CrossingTrackTitle,
+            CrossingTrackArtist: handoff.CrossingTrackArtist);
+    }
+
+    /// <summary>
+    /// SPEC F111.3 (PLAN T235) — captures the crossing track's title/artist into the HELD SignOn's own
+    /// <see cref="HandoffContext"/> at straddle plan time (the F92.2 immutable-capture pattern this
+    /// whole record already follows — see its own remarks — extended to a fact that is not knowable
+    /// until the very unit that straddles it). A no-op when no SignOn is pending: <see cref="GetNextAsync"/>'s
+    /// straddle branch calls this only for a crossing SignOff-headed straddle whose reconciliation left
+    /// the ceremony unchanged (see that branch's own remarks), including the one-sided F92.3 "into
+    /// music-only" shape, which has nothing to enrich.
+    ///
+    /// <para>
+    /// <b>Peek then Enqueue — two separate lock acquisitions, not one atomic operation</b> (T235 review
+    /// finding F6, corrects an earlier version of this comment that called it "the SAME atomic
+    /// supersede-by-(kind, discriminator) path"; it re-uses that supersede's KEY, never its atomicity —
+    /// <see cref="SpeechDeferralQueue.Peek"/> and <see cref="SpeechDeferralQueue.Enqueue"/> each take
+    /// and release the queue's lock independently). This read-then-write is safe here ONLY because the
+    /// SignOn slot has exactly one OTHER writer — <see cref="EnqueueHandoffCeremonyAsync"/> — and both
+    /// it and this method run on the SAME feeder thread, one <see cref="GetNextAsync"/> pull at a time,
+    /// never concurrently with each other or with this method. Nothing inside
+    /// <see cref="SpeechDeferralQueue"/> itself enforces that; it is an Orchestrator-side invariant
+    /// (single-writer-thread), not a queue-side guarantee.
+    /// </para>
+    /// </summary>
+    void CaptureCrossingTrackForHeldSignOn(MediaItem crossingTrack)
+    {
+        if (deferralQueue.Peek(SpeechDeferralKind.SignOn) is not { } signOn || signOn.Handoff is not { } handoff)
+            return; // one-sided straddle (SignOff only, F92.3) — no SignOn to enrich
+
+        deferralQueue.Enqueue(
+            SpeechDeferralKind.SignOn,
+            signOn.Reason,
+            signOn.Due,
+            handoff with { CrossingTrackTitle = crossingTrack.Title, CrossingTrackArtist = crossingTrack.Artist });
     }
 
     /// <summary>

@@ -143,9 +143,13 @@ public sealed class MusicSelectionPolicy(
     /// <see cref="BoundaryOutcome.Straddle"/> when <see cref="BoundaryFitPlan.DesiredEffectiveLength"/>
     /// still clears <see cref="MusicFloor"/>, or <see cref="BoundaryOutcome.CeremonyOnly"/> when it
     /// does not — the SAME floor <c>Orchestrator.ShouldDeclineFinalUnit</c> already gates its own
-    /// pre-emptive decline on, now with one authority for the comparison. This is reported, never
-    /// acted on, here: the Orchestrator maps every outcome to today's behavior unchanged (SPEC
-    /// F112.3 — the straddle becomes a distinct unit-assembly shape only once PLAN T235 lands).
+    /// pre-emptive decline on, now with one authority for the comparison. Reported here, and read by
+    /// <c>Orchestrator.GetNextAsync</c>'s straddle branch as of PLAN T235 — but
+    /// <see cref="BoundaryOutcome.Straddle"/> ALONE never forces anything there (T235 review findings
+    /// F1/F5): <see cref="MusicSelectionResult.CrossesBoundary"/>, computed alongside this outcome, is
+    /// the honest answer to whether THIS pick's own effective length actually reaches the boundary —
+    /// off-tolerance-but-above-the-floor says nothing about that by itself, since a pick can miss
+    /// tolerance by running too SHORT just as easily as too long.
     /// </para>
     ///
     /// <para>
@@ -227,7 +231,7 @@ public sealed class MusicSelectionPolicy(
         // ladder governs a request short-circuit (SPEC F111.1) — None, same as no fit at all.
         var envelope = envelopeProvider.Current;
         if (await TryFulfillPendingRequestAsync(envelope, ct) is { } fulfilledCandidate)
-            return new MusicSelectionResult(fulfilledCandidate, BoundaryOutcome.None);
+            return new MusicSelectionResult(fulfilledCandidate, BoundaryOutcome.None, CrossesBoundary: false);
 
         // No in-window deferral to aim at (gh-#300 hoisted the peek and the fit build up to
         // GetNextAsync, which needs the same fit to decide whether a music unit belongs here at
@@ -235,11 +239,12 @@ public sealed class MusicSelectionPolicy(
         if (fit is null)
         {
             var plain = await SelectEnvelopeAwareCandidateAsync(scope, orderedRecentIds, artistSeparation, ct);
-            return new MusicSelectionResult(plain, BoundaryOutcome.None);
+            return new MusicSelectionResult(plain, BoundaryOutcome.None, CrossesBoundary: false);
         }
 
         RotationCandidate? best = null;
         TimeSpan? bestDiff = null;
+        TimeSpan? bestEffective = null;
         RotationCandidate? firstUnscored = null;
         var sampled = new List<TimeSpan>(BoundarySampleAttempts);
 
@@ -255,7 +260,7 @@ public sealed class MusicSelectionPolicy(
                 {
                     var drainedRung = ClassifyOffToleranceRung(fit);
                     log.Log(fit, "drained", drainedRung, sampled, chosenDiff: null);
-                    return new MusicSelectionResult(null, drainedRung);
+                    return new MusicSelectionResult(null, drainedRung, CrossesBoundary: false);
                 }
 
                 break; // the pool emptied mid-sample; keep whatever was already sampled.
@@ -276,13 +281,14 @@ public sealed class MusicSelectionPolicy(
                 if (diff <= fit.Tolerance)
                 {
                     log.Log(fit, "win", BoundaryOutcome.Fit, sampled, diff);
-                    return new MusicSelectionResult(sample, BoundaryOutcome.Fit);
+                    return new MusicSelectionResult(sample, BoundaryOutcome.Fit, CrossesBoundary: false);
                 }
 
                 if (bestDiff is null || diff < bestDiff)
                 {
                     best = sample;
                     bestDiff = diff;
+                    bestEffective = effective;
                 }
             }
             else
@@ -297,8 +303,18 @@ public sealed class MusicSelectionPolicy(
         // rung is decided the SAME way (SPEC F111.1): Straddle with room to spare, CeremonyOnly
         // without it.
         var offToleranceRung = ClassifyOffToleranceRung(fit);
+
+        // T235 review findings F1/F5 — "off tolerance, above the floor" (Straddle) says nothing on
+        // its own about whether THIS pick actually crosses the boundary: a "least-late" candidate can
+        // miss tolerance by running too SHORT just as easily as too long, and "unscored" never even
+        // measured a length. Only a "least-late" pick whose own effective length reaches the boundary
+        // itself (fit.UntilBoundary — the SAME instant BuildBoundaryFit reasoned about) is genuinely
+        // going to still be airing when the SignOff would otherwise be due; a duration-less
+        // firstUnscored pick never claims it (nothing was measured to compare).
+        var crossesBoundary = bestEffective is { } effectiveLength && effectiveLength >= fit.UntilBoundary;
+
         log.Log(fit, best is not null ? "least-late" : "unscored", offToleranceRung, sampled, bestDiff);
-        return new MusicSelectionResult(best ?? firstUnscored, offToleranceRung);
+        return new MusicSelectionResult(best ?? firstUnscored, offToleranceRung, crossesBoundary);
     }
 
     /// <summary>

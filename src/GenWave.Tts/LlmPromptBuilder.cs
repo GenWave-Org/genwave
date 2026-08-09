@@ -333,6 +333,37 @@ static class LlmPromptBuilder
     }
 
     /// <summary>
+    /// SPEC F111.3 (PLAN T235) — the straddle back-announce line: a SignOn held at a straddle seam
+    /// (SPEC F111.2) rides the deliberately boundary-crossing track's own title/artist, captured into
+    /// the deferral's <see cref="HandoffContext"/> at plan time and carried here verbatim on
+    /// <see cref="SegmentRequest.CrossingTrackTitle"/>/<see cref="SegmentRequest.CrossingTrackArtist"/>
+    /// — <see langword="null"/> for every ordinary (non-straddle) handoff piece, in which case this
+    /// returns null and adds no line, byte-identical to pre-T235 output (the Story243 golden's own
+    /// regression pin). Mirrors <see cref="BuildHandoffLine"/>'s own "invent nothing" discipline: the
+    /// title/artist given here are the ONLY facts about the crossing track this prompt carries, so the
+    /// instruction says so explicitly, and both are truncated to <see cref="MaxSoulChars"/> exactly
+    /// like every other injected-text field in this file.
+    /// </summary>
+    static string? BuildCrossingTrackLine(string? crossingTrackTitle, string? crossingTrackArtist, string? counterpartName)
+    {
+        if (string.IsNullOrEmpty(crossingTrackTitle)) return null;
+
+        var title = Truncate(crossingTrackTitle, MaxSoulChars);
+        var trackDescription = crossingTrackArtist is { Length: > 0 } a
+            ? $"\"{title}\" by {Truncate(a, MaxSoulChars)}"
+            : $"\"{title}\"";
+        var counterpart = counterpartName is { Length: > 0 } n ? Truncate(n, MaxSoulChars) : null;
+
+        return counterpart is not null
+            ? $"Straddle note: {trackDescription} was still playing when you took the chair - you may " +
+              $"name the track that just played and thank {counterpart} for keeping the music going " +
+              "through the handoff. Only use the track, artist, and name given here; never invent details."
+            : $"Straddle note: {trackDescription} was still playing when you took the chair - you may " +
+              "name the track that just played. Only use the track and artist given here; never invent " +
+              "details.";
+    }
+
+    /// <summary>
     /// SPEC F107.3 (STORY-297, PLAN T224; fenced at T228 — see below) — the facts block for a
     /// <see cref="SegmentKind.ContextSegment"/> prompt: the provider's own
     /// <see cref="SegmentRequest.ContextFacts"/>, delimited as DATA rather than instructions, followed
@@ -507,6 +538,19 @@ static class LlmPromptBuilder
 
         if (request.Kind is SegmentKind.SignOff or SegmentKind.SignOn)
             lines.Add(BuildHandoffLine(request.Kind, request.CounterpartName));
+
+        // SPEC F111.3 (PLAN T235): the straddle back-announce rides ONLY the SignOn half — the piece
+        // held at the straddle seam until the crossing track has actually aired (SPEC F111.2). A
+        // SignOff piece's own CrossingTrackTitle is always null (Orchestrator.CaptureCrossingTrackForHeldSignOn
+        // only ever enriches the pending SignOn), so this Kind gate is defense-in-depth as much as it
+        // is routing, mirroring this method's own established per-kind-arm idiom (the ContextSegment
+        // facts block and the patter-fact line both re-check their own kind the same way).
+        if (request.Kind == SegmentKind.SignOn
+            && BuildCrossingTrackLine(request.CrossingTrackTitle, request.CrossingTrackArtist, request.CounterpartName)
+                is { } crossingTrackLine)
+        {
+            lines.Add(crossingTrackLine);
+        }
 
         if (request.Kind == SegmentKind.ContextSegment && BuildContextFactsLine(request.ContextFacts) is { } factsLine)
             lines.Add(factsLine);
