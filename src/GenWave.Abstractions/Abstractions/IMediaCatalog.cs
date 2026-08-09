@@ -140,6 +140,48 @@ public interface IMediaCatalog
     Task<MediaReference?> GetRandomReadyAsync(LibraryScope scope, IReadOnlyList<string> excludeIds, CancellationToken ct);
 
     /// <summary>
+    /// SPEC F110.2 (STORY-301, PLAN T231) — one random ready authored Station Imaging row of
+    /// <paramref name="kind"/> (the gh-#149 <c>imaging_kind</c> column), the pool the top-of-hour
+    /// <c>StationId</c> drain prefers over its templated TTS fallback whenever it is non-empty
+    /// (T232 decides). Mirrors <see cref="GetRandomReadyAsync"/>'s exact playable predicate
+    /// (<c>ready + measurable + eligible + not never_play</c>) with one more term ANDed in:
+    /// <c>imaging_kind = kind</c>. Null when the pool is empty (no ready row of that kind in scope)
+    /// or <paramref name="scope"/> is empty (default-deny) — either way the drain reads it as "no
+    /// pool," its own fallback-to-template signal, never an error.
+    /// <para>
+    /// <c>imaging_kind = @kind</c> is a strict equality test, so it excludes <c>NULL</c> rows exactly
+    /// like every other equality predicate in Postgres: an authored row that predates gh-#149 reads
+    /// NULL and displays as <see cref="ImagingKind.Liner"/> in the admin UI, but a
+    /// <see cref="ImagingKind.Liner"/> query here will NOT match it — only a row explicitly stamped
+    /// <c>liner</c> comes back. This has no effect on <see cref="ImagingKind.StationId"/> (F110.2's
+    /// only caller so far) since a pre-gh-#149 row was never a station id to begin with.
+    /// </para>
+    /// <para>
+    /// Deliberately carries NO recent-exclusion list, unlike <see cref="GetRandomReadyAsync"/>'s own
+    /// <paramref name="scope"/>-sibling <c>excludeIds</c> parameter: idents/jingles are functional
+    /// station furniture, not music — repetition across hours is fine (the same F21.11 posture the
+    /// safe loop already applies to its own repeats).
+    /// </para>
+    /// <para>
+    /// <paramref name="scope"/> is caller-CHOSEN, not pinned to a fixed library: an authored imaging
+    /// row can land in any library an operator names when authoring it
+    /// (<c>POST /api/safe-segments</c>'s <c>libraryId</c> is a free per-call choice, not defaulted to
+    /// the safe scope) — this method stays scope-parameterized like every other read on this
+    /// interface, and lets its caller decide which scope answers "in scope" for this drain.
+    /// </para>
+    ///
+    /// Default-implemented (not abstract) so this addition to a published MIT contract
+    /// (<c>GenWave.Abstractions</c>) stays strictly additive — mirrors
+    /// <see cref="IActivePersonaAccessor.ResolveCardAsync"/>'s precedent: every pre-F110 implementer
+    /// (a test double, or a host built against an older SDK version) keeps compiling unchanged,
+    /// reporting "no pool" (null) — which IS the drain's own template-fallback path, not a
+    /// degraded/wrong answer — until it opts in with a real override (the concrete catalog
+    /// implementation in <c>GenWave.MediaLibrary</c> is the only production override).
+    /// </summary>
+    Task<MediaReference?> GetRandomReadyByImagingKindAsync(LibraryScope scope, ImagingKind kind, CancellationToken ct) =>
+        Task.FromResult<MediaReference?>(null);
+
+    /// <summary>
     /// One track for main rotation (SPEC F41, closes gitea-#210, gitea-#213) — a tiered preference query, not a
     /// hard exclusion. Prefers, most-binding first: (1) an id not in <paramref name="orderedRecentIds"/>;
     /// (2) an artist that does not case-insensitively match any artist among the last

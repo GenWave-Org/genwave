@@ -115,6 +115,30 @@ sealed class MediaRepository(
     }
 
     /// <summary>
+    /// SPEC F110.2 (STORY-301, PLAN T231) — <see cref="GetRandomReadyAsync"/>'s exact playable
+    /// predicate (<c>ready + measurable + eligible + not never_play</c>) plus one more term:
+    /// <c>imaging_kind = kind</c>. No <c>excludeIds</c> — idents/jingles are functional station
+    /// furniture, not music, so repetition is fine (F21.11's safe-loop posture); see the interface
+    /// remarks for the full rationale. Null on an empty pool or an empty <paramref name="scope"/>
+    /// (default-deny) — either way, "no pool" is the drain's own template-fallback signal.
+    /// </summary>
+    public async Task<MediaReference?> GetRandomReadyByImagingKindAsync(LibraryScope scope, ImagingKind kind, CancellationToken ct)
+    {
+        // Default-deny: no scope means no access, no SQL issued.
+        if (scope.IsEmpty) return null;
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<MediaRow>(new CommandDefinition(
+            $"{SelectColumns} m " +
+            "left join library.media_rating r on r.media_id = m.id " +
+            "where state = 'ready' and measurable and eligible and not coalesce(r.never_play, false) " +
+            "and imaging_kind = @kind and library_id = any(@libraryIds) " +
+            "order by random() limit 1",
+            new { kind = ImagingKindTokens.ToToken(kind), libraryIds = scope.LibraryIds.ToArray() }, cancellationToken: ct));
+        return row?.ToReference(logger);
+    }
+
+    /// <summary>
     /// SPEC F41.1/F41.3 — one tiered query. The playable predicate is byte-identical to
     /// <see cref="GetRandomReadyAsync"/>'s; the ORDER BY adds two preference tiers ahead of
     /// <c>random()</c>, most-binding first, so a relaxation never becomes a hard exclusion (F41.2/F41.4):
@@ -1694,7 +1718,10 @@ sealed class MediaRepository(
                 introEnergy = insert.Energy?.IntroEnergy,
                 outroEnergy = insert.Energy?.OutroEnergy,
                 // gh-#149 — the Station Imaging content kind, always stamped for authored rows
-                // (scanned rows stay NULL). Metadata-only: nothing selects by it yet.
+                // (scanned rows stay NULL). SPEC F110.2 (PLAN T231) is the first selection reader —
+                // see GetRandomReadyByImagingKindAsync's own imaging_kind = @kind predicate — so this
+                // insert is no longer metadata-only for the StationId kind specifically; every other
+                // kind (Liner/Jingle/Promo) is still stamped but unread until its own selector lands.
                 imagingKind = ImagingKindTokens.ToToken(insert.Kind),
             },
             cancellationToken: ct));
