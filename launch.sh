@@ -232,6 +232,8 @@ if [ "$PINNED" = "1" ]; then
     plan_line "./migrate.sh ${MIGRATE_ARGS[*]}"
     plan_line "$(compose_display) up -d"
     plan_line "record COMPOSE_FILE=$(compose_file_value) in .env (gh-#309)"
+    plan_line "docker image prune -af --filter until=168h (success-path hygiene, gh-#441)"
+    plan_line "docker builder prune -af"
     plan_line "$(compose_display) ps"
     plan_profiles
     exit 0
@@ -292,6 +294,18 @@ if [ "$PINNED" = "1" ]; then
   fi
 
   persist_compose_file
+
+  # gh-#441: superseded release images accumulate ~1.5 GB per release and nothing else ever
+  # prunes them — 46 GB of dead tags filled the demo box's disk mid-deploy (2026-08-09), and an
+  # SD-card Pi hits that wall far sooner. Success path only: every failure above bails via
+  # preflight_fail before reaching here, so a failed upgrade never touches the previous images
+  # (they are what is still running). Best-effort — hygiene never fails a launch that already
+  # succeeded. `until=168h` keys on image CREATED time, so everything in use plus roughly the
+  # last week of releases survives for instant rollback; older tags go. The builder cache is
+  # pure waste on a --pinned box, which never builds (BUILD=1 + --pinned errors at parse time).
+  echo "==> pruning superseded images (kept: in-use + last 7 days)"
+  docker image prune -af --filter "until=168h" | tail -1 || true
+  docker builder prune -af >/dev/null 2>&1 || true
 
   echo "==> stack status"
   compose ps
