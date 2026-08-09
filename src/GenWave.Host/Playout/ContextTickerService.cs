@@ -6,13 +6,17 @@ using GenWave.Orchestration;
 namespace GenWave.Host.Playout;
 
 /// <summary>
-/// The Host's one wall-clock actor for the context seam (SPEC F107.3, STORY-297, PLAN T226):
-/// advances <see cref="ContextPipeline"/> on a fixed interval and enqueues whatever it reports due
-/// into the SAME <see cref="SpeechDeferralQueue"/> <c>Orchestrator</c> drains at track boundaries
-/// (F74.1). Deliberately dumb — it owns no cadence logic of its own (that is
-/// <see cref="ContextPipeline"/>'s job, SPEC F107.2's fetch-once-per-slot rule); it only calls in
-/// more often than any provider's own cadence could possibly need (F108.2's 30-minute floor is the
-/// tightest today).
+/// The Host's one wall-clock actor for the context seam (SPEC F107.3, STORY-297, PLAN T226) — and,
+/// additively (SPEC F110.1/F110.3, STORY-301/302, PLAN T230), for the clock-anchored imaging seam:
+/// advances <see cref="ContextPipeline"/> on a fixed interval, enqueues whatever it reports due, and
+/// calls <see cref="ClockAnchoredImagingProducer.Produce"/> — all three land in the SAME
+/// <see cref="SpeechDeferralQueue"/> <c>Orchestrator</c> drains at track boundaries (F74.1).
+/// Deliberately dumb — it owns no cadence or due-ness logic of its own (that is
+/// <see cref="ContextPipeline"/>'s job for context segments, SPEC F107.2's fetch-once-per-slot rule,
+/// and <see cref="ClockAnchoredImagingProducer"/>'s own job for idents/time announcements, SPEC
+/// F110.1/F110.3's top-of-hour rule); this class only calls in more often than either could possibly
+/// need (F108.2's 30-minute floor is the tightest cadence today, and an hourly due-ness check is
+/// cheaper still).
 ///
 /// <para>
 /// <b>Deliberately NOT under <c>GenWave.Host.Context</c></b> — that namespace is reserved forever
@@ -51,6 +55,7 @@ namespace GenWave.Host.Playout;
 sealed class ContextTickerService(
     ContextPipeline pipeline,
     SpeechDeferralQueue deferralQueue,
+    ClockAnchoredImagingProducer imagingProducer,
     IOptions<ContextTickerOptions> options,
     ILogger<ContextTickerService> logger) : BackgroundService
 {
@@ -73,9 +78,10 @@ sealed class ContextTickerService(
         logger.LogInformation("Context ticker stopped");
     }
 
-    /// <summary>One tick: advance the pipeline, enqueue whatever came due. A thrown exception here
-    /// is logged and swallowed — see this class's own "never crashes the host" remarks. Internal so
-    /// a test can drive exactly one tick without waiting on the real timer.</summary>
+    /// <summary>One tick: advance the pipeline, enqueue whatever came due, then let the imaging
+    /// producer take its own turn. A thrown exception anywhere in here is logged and swallowed — see
+    /// this class's own "never crashes the host" remarks. Internal so a test can drive exactly one
+    /// tick without waiting on the real timer.</summary>
     internal async Task TickOnceAsync(CancellationToken ct)
     {
         try
@@ -94,6 +100,14 @@ sealed class ContextTickerService(
                     discriminator: segment.Key,
                     context: segment.Content);
             }
+
+            // SPEC F110.1/F110.3 (PLAN T230): the top-of-hour producer — settings-gated, a complete
+            // no-op while both Station:Imaging:* knobs stay at their false default (byte-identical
+            // sound). Synchronous and cheap (no I/O, no cadence logic of its own — see
+            // ClockAnchoredImagingProducer's own remarks), so it is safe to call on every tick
+            // alongside the pipeline advance above; kept inside the SAME try so a fault here gets the
+            // SAME "never crashes the host" handling as a fault in the pipeline advance.
+            imagingProducer.Produce();
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

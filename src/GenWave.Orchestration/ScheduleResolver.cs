@@ -162,45 +162,19 @@ public sealed class ScheduleResolver(
 
     /// <summary>
     /// Converts an "Unspecified" local wall-clock <paramref name="wallClock"/> into a real instant in
-    /// <paramref name="zone"/>, choosing a deterministic rule for the two ways a wall clock lies (SPEC
-    /// F91.2, PLAN T119). <paramref name="now"/> is the real instant this resolution is anchored to —
-    /// used only to break the fall-back tie below, never to change which day/minute was targeted.
-    /// <list type="bullet">
-    /// <item>Spring-forward gap (the wall time never happens, e.g. 02:15 the morning the clock jumps
-    /// 02:00→03:00): resolves FORWARD to the first wall-clock minute that DOES exist — the missing hour
-    /// is simply skipped, which is exactly why a segment spanning the jump airs an hour short.</item>
-    /// <item>Fall-back overlap (the wall time happens twice, e.g. 01:30 the morning the clock repeats
-    /// 02:00→01:00): resolves to the FIRST occurrence by default — the offset still in effect before the
-    /// clocks roll back — which is exactly why a segment spanning the repeat airs an hour long.
-    /// <see cref="TimeZoneInfo.GetAmbiguousTimeOffsets"/> returns the pre-transition offset as the
-    /// numerically LARGER of the two candidates in every zone, not merely America/Denver's -06:00/-07:00
-    /// pair — a fall-back is defined as the UTC offset strictly DECREASING, so <c>Max()</c> always names
-    /// the first occurrence, universally. But the first occurrence can itself already be in the past by
-    /// the time this runs: the SECOND pass through that same repeated hour (PLAN T119 review F2). A
-    /// boundary resolving to an elapsed instant would violate <see cref="OnAirSnapshot"/>'s "next
-    /// instant" contract, so once the first-occurrence candidate is <c>&lt;= now</c>, this falls through
-    /// to the second (later, <c>Min()</c>) occurrence instead.</item>
-    /// </list>
+    /// <paramref name="zone"/> (SPEC F91.2, PLAN T119) — delegates to
+    /// <see cref="WallClockInstantResolver.Resolve"/>, the shared DST rule
+    /// <see cref="ClockAnchoredImagingProducer"/>'s own top-of-hour math also uses (PLAN T230 review
+    /// F2) — see that helper's own remarks for the two rules (spring-forward steps forward, fall-back
+    /// resolves to its first occurrence unless already elapsed) and why a boundary resolving to an
+    /// elapsed instant would violate <see cref="OnAirSnapshot"/>'s "next instant" contract.
+    /// <paramref name="now"/> is the real instant this resolution is anchored to — used only to break
+    /// the fall-back tie, never to change which day/minute was targeted. This method's behavior is
+    /// unchanged by the extraction (PLAN T230 review F2 requirement): byte-identical to its own prior
+    /// inline implementation.
     /// </summary>
-    static DateTimeOffset ResolveWallClockInstant(DateTime wallClock, TimeZoneInfo zone, DateTimeOffset now)
-    {
-        if (zone.IsInvalidTime(wallClock))
-        {
-            var probe = wallClock;
-            while (zone.IsInvalidTime(probe))
-                probe = probe.AddMinutes(1);
-            return new DateTimeOffset(probe, zone.GetUtcOffset(probe));
-        }
-
-        if (zone.IsAmbiguousTime(wallClock))
-        {
-            var offsets = zone.GetAmbiguousTimeOffsets(wallClock);
-            var firstOccurrence = new DateTimeOffset(wallClock, offsets.Max());
-            return firstOccurrence > now ? firstOccurrence : new DateTimeOffset(wallClock, offsets.Min());
-        }
-
-        return new DateTimeOffset(wallClock, zone.GetUtcOffset(wallClock));
-    }
+    static DateTimeOffset ResolveWallClockInstant(DateTime wallClock, TimeZoneInfo zone, DateTimeOffset now) =>
+        WallClockInstantResolver.Resolve(wallClock, zone, now);
 
     /// <summary>Converts a schedule minute-of-day into a display <see cref="TimeOnly"/>. A schema
     /// <c>EndMinute</c> of <see cref="MinutesPerDay"/> (1440) means "runs to midnight" — but

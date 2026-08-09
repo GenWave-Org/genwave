@@ -33,9 +33,9 @@ using GenWave.Core.Domain;
 /// </para>
 ///
 /// <para>
-/// Thread-safe: <see cref="Enqueue"/>, <see cref="TryDequeueDue"/>, and <see cref="NextDue"/> may
-/// all be called concurrently — the Orchestrator's own boundary decision today, and any future
-/// producer running on its own trigger (timer, admin action, etc.) tomorrow.
+/// Thread-safe: <see cref="Enqueue"/>, <see cref="EnqueueIfAbsent"/>, <see cref="TryDequeueDue"/>, and
+/// <see cref="NextDue"/> may all be called concurrently — the Orchestrator's own boundary decision
+/// today, and any future producer running on its own trigger (timer, admin action, etc.) tomorrow.
 /// </para>
 /// </summary>
 /// <param name="timeProvider">
@@ -130,6 +130,55 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
         lock (gate)
         {
             pending[(kind, discriminator)] = deferral;
+        }
+    }
+
+    /// <summary>
+    /// Enqueues a deferral of <paramref name="kind"/> — but ONLY when nothing is already pending for
+    /// the same <paramref name="kind"/>/<paramref name="discriminator"/> pair; a no-op, not a
+    /// supersede, when one already occupies that slot (PLAN T230 review F1). This is the conditional
+    /// twin of <see cref="Enqueue"/>'s own always-overwrite supersede (SPEC F74.2): a producer that
+    /// RE-DERIVES the same due instant on every tick while waiting for it to arrive (e.g.
+    /// <see cref="ClockAnchoredImagingProducer"/>'s top-of-hour recompute) must never race its own
+    /// not-yet-drained deferral off the queue merely because the wall clock ticked past that due
+    /// instant before a boundary drained it. That is the exact bug this method closes:
+    /// <see cref="Enqueue"/>'s unconditional overwrite silently discarded a still-pending, due-but-
+    /// unaired deferral the moment the SAME producer's next tick recomputed a LATER due instant for
+    /// the FOLLOWING hour — the deferral for the hour that just turned never aired. A pending FUTURE
+    /// deferral for the same slot is left exactly as untouched as a pending due-or-past one; for a
+    /// producer that always recomputes the identical due instant while one is still pending, that is a
+    /// functional no-op either way (SPEC F110.1/F110.3's own "a pending future deferral for the same
+    /// target hour may re-arm freely" contract holds because re-arming it changes nothing observable).
+    /// </summary>
+    /// <param name="kind">Which scheduled speech this is.</param>
+    /// <param name="reason">A short, human-readable note carried for logs/diagnostics.</param>
+    /// <param name="due">
+    /// The instant this deferral becomes eligible to air, when it IS enqueued; <see langword="null"/>
+    /// means "now". Ignored when the slot is already occupied.
+    /// </param>
+    /// <param name="discriminator">
+    /// The supersede sub-key alongside <paramref name="kind"/> — see <see cref="Enqueue"/>'s own
+    /// remarks for the full contract. Defaults to <see langword="null"/>.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> when the deferral was enqueued; <see langword="false"/> when a pending
+    /// entry already occupied the <paramref name="kind"/>/<paramref name="discriminator"/> slot and was
+    /// left untouched.
+    /// </returns>
+    public bool EnqueueIfAbsent(
+        SpeechDeferralKind kind,
+        string reason,
+        DateTimeOffset? due = null,
+        string? discriminator = null)
+    {
+        lock (gate)
+        {
+            var key = (kind, discriminator);
+            if (pending.ContainsKey(key))
+                return false;
+
+            pending[key] = new SpeechDeferral(kind, due ?? timeProvider.GetUtcNow(), reason, Discriminator: discriminator);
+            return true;
         }
     }
 

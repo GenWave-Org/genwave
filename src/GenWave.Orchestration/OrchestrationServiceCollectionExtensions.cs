@@ -83,6 +83,22 @@ public static class OrchestrationServiceCollectionExtensions
         // above plus IMediaCatalog/IEnvelopeProvider from wherever the host wires those.
         services.TryAddSingleton<MusicSelectionPolicy>();
 
+        // SPEC F110.1/F110.3 (STORY-301/302, PLAN T230): the settings seam
+        // ClockAnchoredImagingProducer reads — both-false is the correct fail-closed default (T230
+        // acceptance), not merely a placeholder. TryAdd so the Host's
+        // OptionsMonitorStationImagingProvider wins once registered — mirrors GenWave.Context's own
+        // IStationLocationProvider default one project over.
+        services.TryAddSingleton<IStationImagingSettingsProvider>(NoOpStationImagingSettingsProvider.Instance);
+
+        // The top-of-hour producer itself: no NoOp-replacement semantics — nothing else ever needs a
+        // different ClockAnchoredImagingProducer swapped in, so a plain AddSingleton, not TryAdd
+        // (contrast MusicSelectionPolicy/IPersonaPickProvider above, both of which exist precisely so
+        // something CAN override them). Called each tick by the Host's ContextTickerService
+        // (PLAN T230); consumes the SAME SpeechDeferralQueue/TimeProvider this method already
+        // registers plus whatever IStationClockProvider the Host wires (optional — see that
+        // constructor parameter's own remarks).
+        services.AddSingleton<ClockAnchoredImagingProducer>();
+
         return services.AddSingleton<INextItemProvider, Orchestrator>();
     }
 }

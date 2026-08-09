@@ -1,5 +1,8 @@
 // STORY-302 — The time announcement (F110.3)
 
+using GenWave.Core.Domain;
+using GenWave.Orchestration.Tests.Fakes;
+
 namespace GenWave.Orchestration.Tests.Specs;
 
 public static class FeatureTimeAnnouncements
@@ -10,13 +13,25 @@ public static class FeatureTimeAnnouncements
 
     public sealed class ScenarioTheEnumGainsItsFirstProducer
     {
-        [Fact(Skip = "Pending T230 — see docs/PLAN.md")]
+        [Fact]
         public void TimeAnnouncementsOnEnqueuesATimeDateDeferral()
         {
             // Station:Imaging:TimeAnnouncements=true ⇒ the producer enqueues a
             // future-dated TimeDate deferral for the top of the hour.
-            // Assert.Equal(1, queue.PendingCount(SpeechDeferralKind.TimeDate));
-            Assert.Fail("pending T230");
+            var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 8, 13, 45, 0, TimeSpan.Zero));
+            var queue = new SpeechDeferralQueue(clock);
+            var settings = new FakeStationImagingSettingsProvider
+            {
+                Current = new StationImagingSettings(ClockAnchoredIdents: false, TimeAnnouncements: true),
+            };
+            var producer = new ClockAnchoredImagingProducer(queue, settings, clock);
+
+            producer.Produce();
+
+            var due = queue.PeekNextDue();
+            Assert.NotNull(due);
+            Assert.Equal(SpeechDeferralKind.TimeDate, due.Kind);
+            Assert.Equal(new DateTimeOffset(2026, 8, 8, 14, 0, 0, TimeSpan.Zero), due.Due);
         }
 
         [Fact(Skip = "Pending T232 — see docs/PLAN.md")]
