@@ -19,6 +19,7 @@ import { AudienceSettingControl } from "./AudienceSettingControl";
 import { ChoiceSettingControl } from "./ChoiceSettingControl";
 import { CorrectionsSettingControl } from "./CorrectionsSettingControl";
 import { EngineByKindSettingControl } from "./EngineByKindSettingControl";
+import { PersonaSettingControl } from "./PersonaSettingControl";
 import { SafeScopeAvailabilityBadge } from "./SafeScopeAvailabilityBadge";
 import { SettingHelpFlyover } from "./SettingHelpFlyover";
 import type { SettingsHelpKey } from "./settings-help-keys";
@@ -345,13 +346,19 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
   "Context:History:PersonaId":
     "Which persona voices history segments. 0 defers to the on-air DJ (the unset default does the same).",
 
-  // ── Station broadcast location (SPEC F108.1, F108.3, PLAN T226) ───────────────────────────
+  // ── Station broadcast location (SPEC F108.1, F108.3, PLAN T226, gh-#427) ──────────────────
   "Station:Location:Latitude":
-    "The station's broadcast latitude, used only to fetch weather — never spoken or logged. " +
-    "Blank means no coordinate is configured; an invalid value behaves the same as blank.",
+    "Signed decimal degrees only (negative = south), with a period as the decimal separator — " +
+    "e.g. 51.0447 or -33.8688. Accepted range: -90 to 90; only the first 4 decimal places are " +
+    "used. Degrees-minutes-seconds and degrees-decimal-minutes formats are NOT accepted. Used " +
+    "only to fetch weather — never spoken or logged. Blank behaves exactly like an invalid " +
+    "value: weather stays silently off (F108.1).",
   "Station:Location:Longitude":
-    "The station's broadcast longitude, used only to fetch weather — never spoken or logged. " +
-    "Blank means no coordinate is configured; an invalid value behaves the same as blank.",
+    "Signed decimal degrees only (negative = west), with a period as the decimal separator — " +
+    "e.g. -114.0719 or 151.2093. Accepted range: -180 to 180; only the first 4 decimal places " +
+    "are used. Degrees-minutes-seconds and degrees-decimal-minutes formats are NOT accepted. " +
+    "Used only to fetch weather — never spoken or logged. Blank behaves exactly like an invalid " +
+    "value: weather stays silently off (F108.1).",
   "Station:Location:SpokenName":
     "The only location text ever spoken or logged, e.g. \"Calgary\" — coordinates themselves " +
     "never air. Blank means weather segments name no place at all.",
@@ -393,6 +400,10 @@ const SETTING_CONTROL_REGISTRY: Record<string, ComponentType<SettingControlProps
   // T175 (SPEC F102.14, STORY-265) — ChoiceSettingControl is generic over `setting.choices`, not
   // Theme-specific; a future SettingKind.Choice setting registers the SAME component here.
   "Station:Theme": ChoiceSettingControl,
+  // gh-#426 — both hold a persona ROW ID; PersonaSettingControl is generic over which key it's
+  // fed (it never hardcodes either), so one component serves both registrations.
+  "Context:Weather:PersonaId": PersonaSettingControl,
+  "Context:History:PersonaId": PersonaSettingControl,
 };
 
 /** applyMode badge copy (SPEC F28.12 wording verbatim; F44.3 adds the third "enrichment" mode). */
@@ -498,11 +509,13 @@ export function SettingsForm({ settings, libraries = [], timeZone }: SettingsFor
   const [values, setValues] = useState<Record<string, string>>(() => initialValuesFrom(settings));
   const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
   /**
-   * Per-field validation errors surfaced inline next to the relevant control.
-   * Populated when a 400 is returned from PUT — attributed to every key in the
-   * submitted batch, since the backend reports validation failures batch-wide
-   * under a single "settings" key (F28.9: field-level errors stay inline, never
-   * a page-wide banner).
+   * Per-field validation errors surfaced inline next to the relevant control. Populated when a
+   * 400 is returned from PUT, keyed exactly the way the backend's own `ValidationProblemDetails`
+   * keys them (gh-#425): a message under the offending setting's own key lands ONLY on that
+   * field; a message under "" — ASP.NET's conventional keyless bucket, used for both an
+   * empty-key entry and a cross-field `ValidateBatch` failure — has no single field to blame, so
+   * it paints every CHANGED field, exactly the old aggregate behavior, but scoped to just those
+   * messages (F28.9: field-level errors stay inline, never a page-wide banner).
    */
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
 
@@ -719,32 +732,52 @@ export function SettingsForm({ settings, libraries = [], timeZone }: SettingsFor
       }
 
       if (resp.status === 400) {
-        let messages: string[] = [];
+        // gh-#425 — the backend keys each message by the setting key it actually belongs to. A
+        // message under "" (or under a key that isn't part of THIS batch at all) has no single
+        // field to blame — it's batch-wide (an empty-key entry, or a cross-field ValidateBatch
+        // failure) and paints every changed field, exactly the old aggregate behavior; a message
+        // under a real submitted key stays scoped to that field alone, never leaking onto a
+        // valid sibling in the same batch.
+        const keyedErrors: Record<string, string[]> = {};
+        const batchWideMessages: string[] = [];
         try {
           const raw = (await resp.json()) as unknown;
           if (isValidationProblemDetails(raw)) {
-            const errors = raw.errors as Record<string, string[]>;
-            const settingsErrors = errors["settings"];
-            if (Array.isArray(settingsErrors) && settingsErrors.length > 0) {
-              messages = settingsErrors;
-            } else {
-              messages = Object.values(errors).flat();
+            const changedKeys = new Set(changed.map((c) => c.key));
+            for (const [key, messages] of Object.entries(raw.errors)) {
+              if (!Array.isArray(messages) || messages.length === 0) continue;
+              if (key !== "" && changedKeys.has(key)) {
+                keyedErrors[key] = messages;
+              } else {
+                batchWideMessages.push(...messages);
+              }
             }
           }
         } catch {
-          // malformed 400 body — fall through to empty messages
+          // malformed 400 body — fall through to no messages
         }
 
-        // AC5 — every key in the submitted batch gets the returned message(s) inline at its
-        // field (the backend reports validation failures batch-wide, not per key). Status
-        // resets to idle so isPending drops to false and the form re-enables, letting the
+        const nextFieldErrors: Record<string, string[]> = { ...keyedErrors };
+        if (batchWideMessages.length > 0) {
+          for (const { key } of changed) {
+            if (keyedErrors[key] === undefined) {
+              nextFieldErrors[key] = batchWideMessages;
+            }
+          }
+        }
+
+        // Status resets to idle so isPending drops to false and the form re-enables, letting the
         // operator correct the value and retry (the K5 stuck-Saving regression class).
         setStatus({ kind: "idle" });
-        setFieldErrors(Object.fromEntries(changed.map((c) => [c.key, messages])));
-        // gh-#144 — the rejected batch may span tabs the operator isn't looking at. Auto-switch
-        // to the first offending tab (strip order) so the inline error is on screen; the other
+        setFieldErrors(nextFieldErrors);
+        // gh-#144/gh-#425 — the rejected batch may span tabs the operator isn't looking at.
+        // Auto-switch to the first tab (strip order) carrying an OFFENDING key: a per-key
+        // failure names its own tab precisely; a batch-wide-only failure (no per-key entries at
+        // all) falls back to any changed key, matching the pre-per-key behavior. The other
         // implicated tabs stay flagged by their danger dot in the strip.
-        const offendingTabId = firstTabWithAnyKey(changed.map((c) => c.key));
+        const offendingKeys =
+          Object.keys(keyedErrors).length > 0 ? Object.keys(keyedErrors) : changed.map((c) => c.key);
+        const offendingTabId = firstTabWithAnyKey(offendingKeys);
         if (offendingTabId !== undefined) {
           setActiveTabId(offendingTabId);
         }

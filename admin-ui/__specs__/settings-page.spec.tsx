@@ -366,9 +366,10 @@ describe("Feature: Edit station settings", () => {
 
   describe("Scenario: a rejected setting is surfaced", () => {
     it("a 400 ValidationProblemDetails shows the real backend message and does not claim success", async () => {
-      // Real shape: ASP.NET Core ValidationProblemDetails with errors keyed under "settings"
+      // Real shape (gh-#425): ASP.NET Core ValidationProblemDetails, keyed by the actual
+      // offending setting key — not a flat "settings" bucket.
       const validationProblem = {
-        errors: { settings: ["Must be between -40 and 0"] },
+        errors: { "Loudness:TargetLufs": ["Must be between -40 and 0"] },
         title: "One or more settings values are invalid.",
         status: 400,
       };
@@ -393,6 +394,33 @@ describe("Feature: Edit station settings", () => {
 
       // "Settings saved." must NOT appear
       expect(screen.queryByRole("status")).toBeNull();
+    });
+
+    it("a per-key error paints only the offending field, not every changed field (gh-#425)", async () => {
+      // Two fields changed; the backend rejects only one of them, keyed by ITS key alone.
+      const validationProblem = {
+        errors: { "Loudness:TargetLufs": ["Must be between -40 and 0"] },
+        title: "One or more settings values are invalid.",
+        status: 400,
+      };
+      makeFetchMock(400, validationProblem);
+      const settings = makeSettings();
+      renderWithProviders(<SettingsForm settings={settings} />);
+
+      fireEvent.change(screen.getByLabelText(/Loudness:TargetLufs/), { target: { value: "50" } });
+      fireEvent.change(screen.getByLabelText(/GW_XFADE_MAX/), { target: { value: "10" } });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /save settings/i }));
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        // Exactly one alert region exists, and it names the offending key's own message — the
+        // valid GW_XFADE_MAX change gets no error at all.
+        expect(screen.getAllByRole("alert")).toHaveLength(1);
+        expect(screen.getByRole("alert")).toHaveTextContent("Must be between -40 and 0");
+      });
     });
   });
 });

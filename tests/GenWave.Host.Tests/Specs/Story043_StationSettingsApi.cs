@@ -587,6 +587,85 @@ public static class FeatureStationSettingsApi
     }
 
     // =========================================================================
+    // gh-#425 — one invalid setting must not paint its error under every field: the
+    // ValidationProblemDetails.Errors dictionary is keyed by the actual offending setting key,
+    // not a single flat "settings" bucket every field shared before this fix.
+    // =========================================================================
+
+    public sealed class ScenarioValidationErrorsAreKeyedPerField
+    {
+        [Fact]
+        public async Task TwoUpdatesOneInvalidReturnsExactlyOneEntryKeyedByThatSettingKey()
+        {
+            var config     = BuildConfig(AllDefaults());
+            var store      = new FakeSettingsStore();
+            var controller = BuildController(config, store);
+
+            var updates = new List<SettingUpdateRequest>
+            {
+                new("Loudness:TargetLufs",  "-14"),   // valid
+                new("Loudness:CeilingDbtp", "oops"),  // invalid — not a double
+            };
+
+            var result = await controller.Put(updates, CancellationToken.None);
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            var problem    = Assert.IsType<ValidationProblemDetails>(badRequest.Value);
+
+            // Exactly one keyed entry — the valid "Loudness:TargetLufs" gets none at all.
+            var entry = Assert.Single(problem.Errors);
+            Assert.Equal("Loudness:CeilingDbtp", entry.Key, ignoreCase: true);
+            Assert.Single(entry.Value);
+            Assert.Equal(0, store.WriteCallCount);
+        }
+
+        [Fact]
+        public async Task ACrossFieldFailureLandsUnderTheEmptyStringKeyNotEitherFieldItNames()
+        {
+            // MIN=9, MAX=8 — both values individually pass their own per-key range check; only
+            // ValidateBatch's MIN<=MAX invariant rejects them, so this is a genuinely cross-field
+            // failure with no single offending setting key to attribute it to.
+            var config     = BuildConfig(AllDefaults());
+            var store      = new FakeSettingsStore();
+            var controller = BuildController(config, store);
+
+            var updates = new List<SettingUpdateRequest>
+            {
+                new("GW_XFADE_MIN", "9"),
+                new("GW_XFADE_MAX", "8"),
+            };
+
+            var result = await controller.Put(updates, CancellationToken.None);
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            var problem    = Assert.IsType<ValidationProblemDetails>(badRequest.Value);
+
+            var entry = Assert.Single(problem.Errors);
+            Assert.Equal(string.Empty, entry.Key);
+            Assert.Equal(0, store.WriteCallCount);
+        }
+
+        [Fact]
+        public async Task AnEmptyKeyEntryLandsUnderTheEmptyStringKey()
+        {
+            var config     = BuildConfig(AllDefaults());
+            var store      = new FakeSettingsStore();
+            var controller = BuildController(config, store);
+
+            var updates = new List<SettingUpdateRequest> { new("", "whatever") };
+
+            var result = await controller.Put(updates, CancellationToken.None);
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            var problem    = Assert.IsType<ValidationProblemDetails>(badRequest.Value);
+
+            var entry = Assert.Single(problem.Errors);
+            Assert.Equal(string.Empty, entry.Key);
+            Assert.Equal(0, store.WriteCallCount);
+        }
+    }
+
+    // =========================================================================
     // OPERATOR-GATED (live stack required — skip in CI)
     // =========================================================================
 
