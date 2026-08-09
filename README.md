@@ -58,7 +58,7 @@ Eight services start: `db`, `icecast`, `engine`, `api`, `kokoro` (TTS synthesize
 - **API:** `http://localhost:8080` — anonymous hot path (`GET /media/random`, `GET /media/{id}`, `GET /health`) plus the cookie-auth admin surface under `/api/*`
 - **Spectator page:** `http://localhost:8081` — the station's read-only public face (now playing, history, stats, an optional anonymous song-request line with free-text wishes plus genre/mood pickers). Off by default: flip the live `Station:SpectatorMode` setting to enable it; [DEPLOYMENT.md](DEPLOYMENT.md) covers the four operating modes and the public topology. Metadata-aware players also get **per-track album art** via ICY `StreamUrl` once `Station:PublicBaseUrl` is set.
 
-On first boot the library scans `MEDIA_DIR`, enriches each file (loudness + cue + energy + BPM + tags, plus a high-confidence MusicBrainz release-year lookup when the tags carry none — disable-able live via `Library:YearLookup:Enabled`), and the feeder begins pulling ready tracks. Until the first tracks are ready, the engine plays the safe-rotation source — a curated library scope (`Station:SafeScope:LibraryIds`) pulled via `GET /internal/safe-track`. On a fresh deploy, a one-shot boot seed creates a `safe` library, renders a branded TTS announcement ("Please Stand By"), and points SafeScope at it — so drains air the announcement, not a random track; an operator-set SafeScope is never overwritten. If the scope resolves empty, `mksafe` emits silence as a logged degraded mode. The Orchestrator interleaves TTS patter (station IDs, lead-ins, back-announces, time checks) with music once Kokoro is up. When an `Llm:Endpoint` is configured (Settings page — live, no restart), lead-ins and back-announces become LLM-authored copy, optionally in an operator-authored DJ persona's voice (Personas page) — or hire a ready-made DJ from the community [Community Catalog](https://github.com/GenWave-Org/genwave-catalog) (CC0 persona cards, browsed and adopted one-click from the Admin UI after a full-card review); with no LLM configured the template patter airs unchanged. Station identity (`STATION_NAME`, voice, scope) defaults to `GWAV 108.8` / `af_heart` / library 1 — override via env if needed.
+On first boot the library scans `MEDIA_DIR`, enriches each file (loudness + cue + energy + BPM + tags, plus a high-confidence MusicBrainz release-year lookup when the tags carry none — disable-able live via `Library:YearLookup:Enabled`), and the feeder begins pulling ready tracks. Until the first tracks are ready, the engine plays the safe-rotation source — a curated library scope (`Station:SafeScope:LibraryIds`) pulled via `GET /internal/safe-track`. On a fresh deploy, a one-shot boot seed creates a `safe` library, renders a branded TTS announcement ("Please Stand By"), and points SafeScope at it — so drains air the announcement, not a random track; an operator-set SafeScope is never overwritten. If the scope resolves empty, `mksafe` emits silence as a logged degraded mode. The Orchestrator interleaves TTS patter (station IDs, lead-ins, back-announces — and, opt-in, top-of-hour time checks plus weather and this-day-in-history segments) with music once Kokoro is up. When an `Llm:Endpoint` is configured (Settings page — live, no restart), lead-ins and back-announces become LLM-authored copy, optionally in an operator-authored DJ persona's voice (Personas page) — or hire a ready-made DJ from the community [Community Catalog](https://github.com/GenWave-Org/genwave-catalog) (CC0 persona cards, browsed and adopted one-click from the Admin UI after a full-card review); with no LLM configured the template patter airs unchanged. Station identity (`STATION_NAME`, voice, scope) defaults to `GWAV 108.8` / `af_heart` / library 1 — override via env if needed.
 
 The station's look is themeable too (v3.0.0–v3.2.0). A theme is one JSON manifest — colour tokens for light and dark plus curated fonts — composed live into CSS for both the Admin UI and the spectator page; pick one via Settings or the switcher on either surface (a cookie-remembered visitor choice outranks the station default). The Community Catalog generalized from a persona-only shelf into a multi-kind one — personas, themes, and Dean-curated font packs, all adopted through the same one-click review flow. Installed font packs list on the **Wardrobe** page (v3.1.0); the **theme editor** (`/editor`, v3.2.0) mixes any theme's palette with a vendored-or-installed face, saves the remix as your own station theme, and lets you uninstall a pack — refused when a saved theme still references one of its faces.
 
@@ -77,7 +77,7 @@ The broadcast never depends on a sick dependency. **LLM failure is a mode, not a
 │  └─ genwave.liq          # Liquidsoap playout script
 ├─ db/
 │  ├─ 01-library.sh        # library schema + library_svc role (canonical fresh install)
-│  └─ 02..32-*-migration.sh # idempotent in-place upgrades, one per shipped feature —
+│  └─ 02..33-*-migration.sh # idempotent in-place upgrades, one per shipped feature —
 │                          #   each header says what it adds; ./migrate.sh applies them all
 ├─ icecast/
 │  ├─ Dockerfile           # self-owned Icecast2 image
@@ -93,10 +93,15 @@ The broadcast never depends on a sick dependency. **LLM failure is a mode, not a
 │  ├─ preflight.sh               # shared machine/env checks sourced by build.sh + launch.sh (gh-#19)
 │  ├─ check-compose-publish.sh   # CI guard: 0.0.0.0 host publishes allowed only for the front proxy (F67.1)
 │  ├─ check-compose-socket.sh    # CI guard: docker.sock read-only + alloy-only, every profile combo (F78.2)
-│  └─ check-doc-drift.sh         # CI guard: DEPLOYMENT.md/HARDWARE.md values match the compose files (gh-#77)
+│  ├─ check-doc-drift.sh         # CI guard: DEPLOYMENT.md/HARDWARE.md values match the compose files (gh-#77)
+│  ├─ check-seam-index.sh        # CI guard: SEAMS.md matches a fresh generation byte-for-byte (F105.6)
+│  └─ SeamIndexGenerator/        # writes SEAMS.md from the live DI registrations — never hand-edit the map
+├─ SEAMS.md                # generated seam index: port → adapter → binding site (see CONTRIBUTING before adding a seam)
 └─ src/                    # C# solution (.NET 10)
    ├─ GenWave.Abstractions/  #   the SDK contract surface: selection, catalog read, events, TTS seams
    ├─ GenWave.Core/          #   domain + engine-facing abstractions; zero I/O
+   ├─ GenWave.Context/       #   external-context providers (weather, this-day-in-history): one pipeline,
+   │                         #   fetch-once-per-slot, fact sanitizer — skip, never silence
    ├─ GenWave.MediaLibrary/  #   scan, enrich, catalog (Postgres)
    ├─ GenWave.Loudness/      #   Ffmpeg{Loudness,Cue,Energy}Analyzer + AubioBpmAnalyzer; shared by MediaLibrary + Tts
    ├─ GenWave.Tts/           #   Kokoro client, LLM copy writer (ISegmentCopyWriter), render→measure→cache
@@ -121,7 +126,7 @@ dotnet test GenWave.sln
 npx tsc --noEmit && npm test && npm run build
 ```
 
-Five test projects: `Core.Tests`, `Host.Tests`, `MediaLibrary.Tests`, `Orchestration.Tests`, `Tts.Tests`. The full suite plus the on-air gate are required before anything merges to `main`.
+Seven test projects: `Core.Tests`, `Context.Tests`, `Host.Tests`, `MediaLibrary.Tests`, `Orchestration.Tests`, `Tts.Tests`, and `Architecture.Tests` — the last enforces the architecture laws (dependency direction, Postgres/HttpClient confinement, contract immutability, the Host graduation tripwire) as ordinary red-green tests; the laws themselves are summarized front-and-center in [CONTRIBUTING.md](CONTRIBUTING.md). The full suite plus the on-air gate are required before anything merges to `main`.
 
 ### Versions
 
