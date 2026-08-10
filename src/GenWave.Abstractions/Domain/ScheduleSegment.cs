@@ -14,6 +14,17 @@ namespace GenWave.Core.Domain;
 /// station-default envelope" (F91.4) — each is independently nullable, so a segment may override only
 /// one of the three while the others fall back to the station default.
 /// </para>
+///
+/// <para>
+/// <see cref="Show"/> (SPEC F116.1, STORY-306, PLAN T241) is this block's own named show, or
+/// <see langword="null"/> for an unnamed (painted-persona-only or music-only) block —
+/// <c>GenWave.MediaLibrary.Station.ScheduleRepository</c> resolves it at LOAD time (a join against
+/// <c>station.show</c> keyed by <c>segment_schedule.show_id</c>), never a per-tick lookup, so the week
+/// snapshot this record is part of already carries every block's show identity in memory before
+/// <c>ScheduleResolver</c> ever runs. Defaults to <see langword="null"/> so every pre-T241
+/// construction site (test fixtures included) stays diff-free — the additive-null-member shape SPEC
+/// F116.1's own "showless station byte-identical" test leans on.
+/// </para>
 /// </summary>
 public sealed record ScheduleSegment(
     long? Id,
@@ -23,4 +34,5 @@ public sealed record ScheduleSegment(
     long? PersonaId,
     IReadOnlyList<string>? Genres,
     double? EnergyMin,
-    double? EnergyMax);
+    double? EnergyMax,
+    ShowSummary? Show = null);

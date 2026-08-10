@@ -28,6 +28,14 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSt
     /// column (<c>genres</c>) as the general <see cref="Array"/> CLR type, which Dapper's stricter
     /// positional-record constructor matching rejects; the property-setter fallback this shape uses
     /// coerces it instead.
+    ///
+    /// <para>
+    /// <c>ShowId</c>/<c>ShowName</c>/<c>ShowTagline</c>/<c>ShowFlavor</c> (SPEC F116.1, PLAN T241) are
+    /// <see cref="SelectColumns"/>'s own LEFT JOIN against <c>station.show</c> — deliberately never
+    /// <c>show.persona_id</c>/<c>show.envelope</c> (SPEC F115.2's dormant-columns-unread pin: this row
+    /// shape has no property to even receive them). All four are null together on an unnamed block
+    /// (no matching join row).
+    /// </para>
     /// </summary>
     sealed record ScheduleRow
     {
@@ -39,14 +47,27 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSt
         public string[]? Genres { get; init; }
         public double? EnergyMin { get; init; }
         public double? EnergyMax { get; init; }
+        public long? ShowId { get; init; }
+        public string? ShowName { get; init; }
+        public string? ShowTagline { get; init; }
+        public string? ShowFlavor { get; init; }
     }
 
+    // SPEC F116.1/F91.3 (PLAN T241): the LEFT JOIN resolves every block's show identity at THIS one
+    // load (LoadWeekAsync/ReplaceWeekAsync's own post-write reload both share this constant) rather
+    // than a per-tick lookup — ScheduleResolver only ever sees the already-joined ScheduleWeekSnapshot
+    // (ARCHITECTURE.md "the 3s feeder tick performs no schedule query", now extended to show identity
+    // too). Selects ONLY show.id/name/tagline/flavor — never show.persona_id/envelope (SPEC F115.2's
+    // dormant-columns-unread pin), enforced here at the query itself, not merely by ScheduleRow's own
+    // shape above.
     const string SelectColumns =
         """
-        select id::bigint as id, day_of_week, start_minute, end_minute,
-               persona_id::bigint as persona_id, genres,
-               energy_min::double precision as energy_min, energy_max::double precision as energy_max
-        from station.segment_schedule
+        select s.id::bigint as id, s.day_of_week, s.start_minute, s.end_minute,
+               s.persona_id::bigint as persona_id, s.genres,
+               s.energy_min::double precision as energy_min, s.energy_max::double precision as energy_max,
+               sh.id::bigint as show_id, sh.name as show_name, sh.tagline as show_tagline, sh.flavor as show_flavor
+        from station.segment_schedule s
+        left join station.show sh on sh.id = s.show_id
         """;
 
     public async Task<ScheduleWeekSnapshot> LoadWeekAsync(CancellationToken ct)
@@ -86,6 +107,9 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSt
 
         if (week.Count > 0)
         {
+            // ScheduleSegment.Show (SPEC F116.1, PLAN T241) is deliberately absent from this column
+            // list — it is LOAD-only through SelectColumns' LEFT JOIN, never written here. show_id is
+            // read-only through this epic; T243's writer owns adding it to this insert.
             await conn.ExecuteAsync(new CommandDefinition(
                 """
                 insert into station.segment_schedule
@@ -122,7 +146,7 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSt
         NpgsqlConnection conn, NpgsqlTransaction? transaction, CancellationToken ct)
     {
         var rows = await conn.QueryAsync<ScheduleRow>(new CommandDefinition(
-            $"{SelectColumns} order by day_of_week, start_minute",
+            $"{SelectColumns} order by s.day_of_week, s.start_minute",
             transaction: transaction,
             cancellationToken: ct));
         return rows.Select(ToSegment).ToList();
@@ -204,7 +228,21 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSt
 
     static ScheduleSegment ToSegment(ScheduleRow row) => new(
         row.Id, (DayOfWeek)row.DayOfWeek, row.StartMinute, row.EndMinute, row.PersonaId,
-        row.Genres, row.EnergyMin, row.EnergyMax);
+        row.Genres, row.EnergyMin, row.EnergyMax, ToShowSummary(row));
+
+    /// <summary>SPEC F116.1 (PLAN T241) — <see langword="null"/> when the block names no show (the
+    /// LEFT JOIN found no matching <c>station.show</c> row); otherwise the four identity columns
+    /// <see cref="SelectColumns"/> selected, never <c>persona_id</c>/<c>envelope</c> (SPEC F115.2's
+    /// dormant-columns-unread pin — this method has no row data to even attempt reading either from).
+    /// <c>ShowName</c> is checked alongside <c>ShowId</c> purely as belt-and-suspenders null-safety
+    /// (never the actual guard in practice — <c>station.show.name</c> is <c>NOT NULL</c>, so any row
+    /// the join finds by id always carries one): this avoids ever needing the null-forgiving operator
+    /// to construct <see cref="ShowSummary"/> from a row Dapper types every column of as nullable.
+    /// </summary>
+    static ShowSummary? ToShowSummary(ScheduleRow row) =>
+        row.ShowId is { } showId && row.ShowName is { } showName
+            ? new ShowSummary(showId, showName, row.ShowTagline, row.ShowFlavor)
+            : null;
 
     /// <summary>
     /// Ephemeral Dapper projection for <see cref="GetSlotsByShowIdAsync"/> — settable properties, not

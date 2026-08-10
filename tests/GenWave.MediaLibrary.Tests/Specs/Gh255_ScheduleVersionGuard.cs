@@ -16,8 +16,20 @@ namespace GenWave.MediaLibrary.Tests.Specs;
 
 public static class FeatureScheduleVersionGuard
 {
-    static ScheduleRepository Repo(DatabaseFixture db) =>
-        new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+    /// <summary>
+    /// PLAN T241 review: mirrors Story240_ScheduleStore.cs's own identically-named helper — see its
+    /// own remarks in full. <see cref="ScheduleRepository"/>'s load query now LEFT JOINs
+    /// <c>station.show</c> keyed on <c>segment_schedule.show_id</c> (SPEC F116.1), so this file also
+    /// needs BOTH idempotent migration scripts (db/33 then db/35) re-run before every fact's own
+    /// connection, regardless of xUnit's class scheduling against Story242_UpgradeChangesNothing.cs's
+    /// and Story305_ShowRepository.cs's own in-place scenarios.
+    /// </summary>
+    static ScheduleRepository Repo(DatabaseFixture db)
+    {
+        db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "33-show-and-segment-kind-migration.sh"));
+        db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "35-show-identity-migration.sh"));
+        return new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+    }
 
     static ScheduleSegment MusicOnly(DayOfWeek day, int start, int end) =>
         new(null, day, start, end, PersonaId: null, Genres: null, EnergyMin: null, EnergyMax: null);
