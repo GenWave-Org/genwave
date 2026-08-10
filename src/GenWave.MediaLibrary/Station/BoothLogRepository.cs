@@ -45,49 +45,54 @@ sealed class BoothLogRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<Boot
         """;
 
     /// <summary>
-    /// <paramref name="personaId"/> (SPEC F84.6, STORY-215) was captured SYNCHRONOUSLY by
-    /// <see cref="BoothLogWriter.Publish"/> at air time, well before this append ever runs — a new
-    /// edge that drain-time resolution never had: the persona can be DELETED in the gap between air
-    /// and this call, leaving <paramref name="personaId"/> a dangling reference. That insert fails
-    /// the <c>persona_id</c> FK (23503) even though <c>booth_log.persona_id</c>'s own <c>ON DELETE SET
-    /// NULL</c> already protects every row persisted BEFORE the delete — SET NULL cannot help a row
-    /// that has not been inserted yet. Caught here specifically and retried unstamped: the booth-log
-    /// row itself must never be dropped over a stamp that went stale mid-flight. <paramref name="artist"/>
-    /// (SPEC F84.1, STORY-215, PLAN T70) is plain text — no FK, no degrade path of its own.
-    /// <paramref name="pick"/> (SPEC F86.1, STORY-217, PLAN T73) is likewise plain text (pre-serialized
-    /// jsonb, no FK) — the persona-id retry below never touches it either way.
-    /// <paramref name="segmentKind"/> (SPEC F113.1, STORY-304, PLAN T220) is likewise plain text (the
-    /// SegmentKind enum's token name, or null) — no FK, no degrade path; the persona-id retry never
-    /// touches it either.
+    /// <paramref name="request"/>'s <see cref="BoothLogAppendRequest.PersonaId"/> (SPEC F84.6,
+    /// STORY-215) was captured SYNCHRONOUSLY by <see cref="BoothLogWriter.Publish"/> at air time, well
+    /// before this append ever runs — a new edge that drain-time resolution never had: the persona can
+    /// be DELETED in the gap between air and this call, leaving it a dangling reference. That insert
+    /// fails the <c>persona_id</c> FK (23503) even though <c>booth_log.persona_id</c>'s own
+    /// <c>ON DELETE SET NULL</c> already protects every row persisted BEFORE the delete — SET NULL
+    /// cannot help a row that has not been inserted yet. Caught here specifically and retried
+    /// unstamped: the booth-log row itself must never be dropped over a stamp that went stale
+    /// mid-flight. <see cref="BoothLogAppendRequest.Artist"/> (SPEC F84.1, STORY-215, PLAN T70) is
+    /// plain text — no FK, no degrade path of its own. <see cref="BoothLogAppendRequest.Pick"/> (SPEC
+    /// F86.1, STORY-217, PLAN T73) is likewise plain text (pre-serialized jsonb, no FK) — the
+    /// persona-id retry below never touches it either way. <see cref="BoothLogAppendRequest.SegmentKind"/>
+    /// (SPEC F113.1, STORY-304, PLAN T220) is likewise plain text (the SegmentKind enum's token name,
+    /// or null) — no FK, no degrade path. <see cref="BoothLogAppendRequest.ShowId"/> (SPEC F121.1,
+    /// STORY-310, PLAN T242) is likewise no-FK-by-design (history outlives the entity) — the
+    /// persona-id retry never touches any of these three either.
     /// </summary>
-    public async Task AppendAsync(string kind, string summary, long? personaId, string? artist, string? pick, long? mediaId, string? segmentKind, CancellationToken ct)
+    public async Task AppendAsync(BoothLogAppendRequest request, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
 
         try
         {
-            await InsertAndEvictAsync(conn, kind, summary, personaId, artist, pick, mediaId, segmentKind, ct);
+            await InsertAndEvictAsync(conn, request, ct);
         }
-        catch (PostgresException ex) when (ex.SqlState == ForeignKeyViolation && personaId is not null)
+        catch (PostgresException ex) when (ex.SqlState == ForeignKeyViolation && request.PersonaId is not null)
         {
             // The failed attempt's `await using var tx` already rolled back (disposal runs as the
             // exception unwinds InsertAndEvictAsync, before it reaches this catch) — the connection
             // is clean, so retrying a fresh transaction on the SAME conn is safe.
-            await InsertAndEvictAsync(conn, kind, summary, personaId: null, artist, pick, mediaId, segmentKind, ct);
+            await InsertAndEvictAsync(conn, request with { PersonaId = null }, ct);
         }
     }
 
-    async Task InsertAndEvictAsync(
-        NpgsqlConnection conn, string kind, string summary, long? personaId, string? artist, string? pick, long? mediaId, string? segmentKind, CancellationToken ct)
+    async Task InsertAndEvictAsync(NpgsqlConnection conn, BoothLogAppendRequest request, CancellationToken ct)
     {
         await using var tx = await conn.BeginTransactionAsync(ct);
 
         await conn.ExecuteAsync(new CommandDefinition(
             """
-            insert into station.booth_log (kind, summary, persona_id, artist, pick, media_id, segment_kind)
-            values (@Kind, @Summary, @PersonaId, @Artist, @Pick::jsonb, @MediaId, @SegmentKind)
+            insert into station.booth_log (kind, summary, persona_id, artist, pick, media_id, segment_kind, show_id)
+            values (@Kind, @Summary, @PersonaId, @Artist, @Pick::jsonb, @MediaId, @SegmentKind, @ShowId)
             """,
-            new { Kind = kind, Summary = summary, PersonaId = personaId, Artist = artist, Pick = pick, MediaId = mediaId, SegmentKind = segmentKind },
+            new
+            {
+                request.Kind, request.Summary, request.PersonaId, request.Artist, request.Pick,
+                request.MediaId, request.SegmentKind, request.ShowId,
+            },
             transaction: tx,
             cancellationToken: ct));
 

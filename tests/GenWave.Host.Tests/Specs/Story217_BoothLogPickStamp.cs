@@ -39,20 +39,20 @@ namespace GenWave.Host.Tests.Specs;
 
 /// <summary>
 /// In-memory <see cref="IBoothLogAppender"/> double: records every <see cref="AppendAsync"/> call's
-/// arguments instead of touching Postgres — the repository seam <see cref="BoothLogWriteHarness"/>
-/// fakes (mirrors <c>FakeBoothLogReader</c>'s idiom on the read side, Story195_BoothLog.cs). Releases
-/// a signal per call so a scenario can await exactly as many appends as it published, with no
-/// arbitrary sleep.
+/// <see cref="BoothLogAppendRequest"/> instead of touching Postgres — the repository seam
+/// <see cref="BoothLogWriteHarness"/> fakes (mirrors <c>FakeBoothLogReader</c>'s idiom on the read
+/// side, Story195_BoothLog.cs). Releases a signal per call so a scenario can await exactly as many
+/// appends as it published, with no arbitrary sleep.
 /// </summary>
 file sealed class FakeBoothLogAppender : IBoothLogAppender
 {
     readonly SemaphoreSlim appended = new(0);
 
-    public List<(string Kind, string Summary, long? PersonaId, string? Artist, string? Pick, long? MediaId, string? SegmentKind)> Calls { get; } = [];
+    public List<BoothLogAppendRequest> Calls { get; } = [];
 
-    public Task AppendAsync(string kind, string summary, long? personaId, string? artist, string? pick, long? mediaId, string? segmentKind, CancellationToken ct)
+    public Task AppendAsync(BoothLogAppendRequest request, CancellationToken ct)
     {
-        lock (Calls) Calls.Add((kind, summary, personaId, artist, pick, mediaId, segmentKind));
+        lock (Calls) Calls.Add(request);
         appended.Release();
         return Task.CompletedTask;
     }
