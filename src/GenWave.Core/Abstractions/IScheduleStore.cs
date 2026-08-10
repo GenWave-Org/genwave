@@ -57,6 +57,53 @@ public interface IScheduleStore
     event Action? WeekChanged;
 
     /// <summary>
+    /// Assigns (or, for a <see langword="null"/> <paramref name="showId"/>, clears) the named show on
+    /// the schedule block identified by <paramref name="blockId"/> — SPEC F119.2, STORY-313, PLAN T243.
+    /// Transactional: locates the target, validates <paramref name="showId"/> (when non-null), and
+    /// writes in one transaction, so any rejection leaves the stored week byte-identical to before the
+    /// call — never a partially-applied run.
+    ///
+    /// <para>
+    /// <b>The span rule (F119.2).</b> When <paramref name="applyToRun"/> is <see langword="true"/> (the
+    /// picker's own default), the write lands on every block in <paramref name="blockId"/>'s
+    /// contiguous same-persona run <i>within its own day</i> — blocks are per-day rows (SPEC F91.1), so
+    /// a run never crosses a day boundary even for a block that happens to sit at day-end. Two blocks on
+    /// the same day are part of the same run when, walking outward from the clicked block in start-minute
+    /// order, each step's <c>persona_id</c> matches the clicked block's own (<c>IS NOT DISTINCT FROM</c>
+    /// — two music-only, NULL-persona blocks match each other exactly like two blocks naming the same
+    /// persona id do) AND its <c>end_minute</c> exactly meets the next block's <c>start_minute</c> — a
+    /// gap in the grid (unscheduled time) ends the run exactly the way an other-persona block does, even
+    /// when the blocks on either side of the gap happen to share the same persona.
+    /// <paramref name="applyToRun"/> <see langword="false"/> narrows the write to
+    /// <paramref name="blockId"/> alone (the picker's own narrow-to-one checkbox).
+    /// </para>
+    ///
+    /// <para>
+    /// <b>RATIFIED, Dean, 2026-08-10:</b> a contiguous run of music-only (NULL-persona) blocks is a
+    /// legal run of its own — one click names an overnight music-only stretch, and a music-only block
+    /// can legally carry a show (SPEC F115.2's dormant-bundle-future groundwork). SPEC F119.2's own
+    /// prose ("a run ends at any music-only or other-persona block") names the case a STAFFED run hits a
+    /// music-only interruption — the interruption ends THAT run — not a run that is music-only
+    /// throughout; this is the settled reading, not an open one, per that ruling.
+    /// </para>
+    ///
+    /// <para>
+    /// Returns <see cref="ShowAssignResult.Assigned"/> — naming every block id actually touched, plus
+    /// the fresh <c>ScheduleWeekVersion</c> content fingerprint recomputed from the post-write rows
+    /// inside the same transaction as the write (SPEC F2, gh-#255) — on success;
+    /// <see cref="ShowAssignResult.BlockNotFound"/> if no row named <paramref name="blockId"/>
+    /// exists (including a row that named it a moment ago but was removed by a concurrent write before
+    /// this call's own write landed); or <see cref="ShowAssignResult.ShowNotFound"/> if
+    /// <paramref name="showId"/> is non-null and names no <c>station.show</c> row — in either rejection
+    /// case nothing is written. A successful write raises <see cref="WeekChanged"/> exactly once, and
+    /// exactly like a successful <see cref="ReplaceWeekAsync"/> does — never on either rejection — so
+    /// the T119 <c>ScheduleResolver</c>'s cache (and, downstream, the on-air show identity a live
+    /// listener/spectator sees) never goes stale waiting for a full week replace.
+    /// </para>
+    /// </summary>
+    Task<ShowAssignResult> AssignShowAsync(long blockId, long? showId, bool applyToRun, CancellationToken ct);
+
+    /// <summary>
     /// Every <c>station.segment_schedule</c> row naming <paramref name="showId"/>, ordered by day
     /// then start minute — the show delete guard's own detail read (SPEC F115.4, PLAN T240):
     /// <see cref="ShowWriteResult.Referenced"/> stays a bare singleton at the store seam (see

@@ -170,7 +170,7 @@ export function ScheduleEditor({ initialWeek, personas }: ScheduleEditorProps): 
     const key = runKey(day, start, brush);
     setOverrides((prev) => {
       const next = new Map(prev);
-      const existing = next.get(key)?.overrides ?? { genres: null, energyMin: null, energyMax: null };
+      const existing = next.get(key)?.overrides ?? { genres: null, energyMin: null, energyMax: null, showId: null };
       next.set(key, { end, overrides: { ...existing, ...patch } });
       return next;
     });

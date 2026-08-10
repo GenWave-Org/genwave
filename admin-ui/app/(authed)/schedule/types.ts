@@ -4,7 +4,13 @@
  * on every row a GET returns and is IGNORED by the server on a PUT body (T122's own documented
  * "PUT always treats the week as brand-new rows" contract) — this editor never reads or round-trips
  * it, it just sends `null` on every submitted row. `personaId: null` is the music-only segment (no
- * DJ). `genres`/`energyMin`/`energyMax` all `null` means "station default" for that block. */
+ * DJ). `genres`/`energyMin`/`energyMax` all `null` means "station default" for that block.
+ *
+ * `showId` (SPEC F116.1/F119.2, PLAN T243): the block's currently-named show, or `null` for an
+ * unnamed block. A GET response carries whatever the store has; a PUT round-trips it back —
+ * carrying a block's show through a whole-grid repaint unless the submission itself changes it. This
+ * is a NARROWER capability than the dedicated `POST /api/schedule/assign-show` endpoint's own F119.2
+ * run-span picker (T245): this field never fans a single row's edit out across a run. */
 export interface ScheduleSegmentDto {
   id: number | null;
   day: number;
@@ -14,6 +20,7 @@ export interface ScheduleSegmentDto {
   genres: string[] | null;
   energyMin: number | null;
   energyMax: number | null;
+  showId: number | null;
 }
 
 /** The whole-week document body shared by GET and PUT `/api/schedule` — mirrors

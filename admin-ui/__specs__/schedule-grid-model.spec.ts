@@ -86,6 +86,7 @@ describe("Feature: multi-day spans serialize and round-trip (gh-#255)", () => {
         genres: null,
         energyMin: null,
         energyMax: null,
+        showId: null,
       });
     }
 
@@ -142,6 +143,50 @@ describe("Feature: multi-day spans serialize and round-trip (gh-#255)", () => {
       end: 24,
       overrides: { genres: ["jazz"], energyMin: 0.2, energyMax: 0.9 },
     });
+  });
+
+  // PLAN T243 (B2): showId rides the same runKey-keyed overrides bag genres/energyMin/energyMax
+  // already do (deriveGridFromWeek's own hasOverrides/set, serializeWeek's own emit) — pinned here
+  // the same way the genres/energy fact just above is. Two rows in the SAME GET document, one with a
+  // real showId and one without, so this fails on at least one row if the carry-through is dropped
+  // rather than passing by both rows' values coincidentally agreeing.
+  it("a week derived from a GET and re-serialized preserves each run's showId", () => {
+    const getWeek: ScheduleWeekDto = {
+      segments: [
+        {
+          id: 1,
+          day: 3,
+          startMinute: 600,
+          endMinute: 660,
+          personaId: PERSONA,
+          genres: null,
+          energyMin: null,
+          energyMax: null,
+          showId: 42,
+        },
+        {
+          id: 2,
+          day: 4,
+          startMinute: 0,
+          endMinute: 60,
+          personaId: PERSONA,
+          genres: null,
+          energyMin: null,
+          energyMax: null,
+          showId: null,
+        },
+      ],
+    };
+
+    const { cells, overrides } = deriveGridFromWeek(getWeek);
+    const resubmitted = serializeWeek(cells, overrides);
+
+    expect(resubmitted.segments).toContainEqual(
+      expect.objectContaining({ day: 3, startMinute: 600, endMinute: 660, showId: 42 })
+    );
+    expect(resubmitted.segments).toContainEqual(
+      expect.objectContaining({ day: 4, startMinute: 0, endMinute: 60, showId: null })
+    );
   });
 });
 

@@ -249,6 +249,107 @@ public static class FeatureGridHoldsTheWeek
         }
     }
 
+    // PLAN T243 review (B1): the whole-grid PUT round-trips show identity too (ScheduleController's
+    // own class remarks) — ToDto (Get, and Put's own 200 body) emits ScheduleSegment.ShowId, and
+    // ToSegment (Put) carries a submitted showId into ScheduleSegment.ShowId. Every fact below submits
+    // a MIX — one row with a real showId, one that should end up with none — in the SAME request, so
+    // a mapping line collapsed to "always null" (or "always whatever was submitted") fails on at
+    // least one row rather than passing by the two rows' expected values coincidentally agreeing.
+    public sealed class ScenarioShowIdRoundTrip
+    {
+        [Fact]
+        public async Task AGetDocumentPutStraightBackPreservesEachRowsShowId()
+        {
+            var store = new FakeScheduleStore();
+            await using var factory = new ScheduleApiWebFactory(store);
+            var client = await ScheduleApiWebFactory.LoggedInClientAsync(factory);
+
+            // Given a stored week with one row carrying a show id and one carrying none
+            var seed = new ScheduleWeekDto(
+            [
+                new ScheduleSegmentDto(null, 1, 0, 600, 11, null, null, null, ShowId: 42),
+                MusicOnly(1, 600, 1440),
+            ]);
+            await client.PutAsJsonAsync("/api/schedule", seed);
+
+            // When the GET document is PUT straight back — the T129 whole-grid repaint idiom, which
+            // never issues a follow-up GET and instead trusts the PUT's own 200 body as the fresh
+            // document.
+            var getResponse = await client.GetAsync("/api/schedule");
+            Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+            var getBody = await getResponse.Content.ReadFromJsonAsync<ScheduleWeekDto>();
+            Assert.NotNull(getBody);
+
+            var putResponse = await client.PutAsJsonAsync("/api/schedule", getBody);
+            Assert.Equal(HttpStatusCode.OK, putResponse.StatusCode);
+            var putBody = await putResponse.Content.ReadFromJsonAsync<ScheduleWeekDto>();
+            Assert.NotNull(putBody);
+
+            // Then each row's showId survived the whole trip — GET, and the PUT built straight from
+            // GET's own document — untouched.
+            Assert.Equal(42, getBody.Segments.Single(s => s.StartMinute == 0).ShowId);
+            Assert.Null(getBody.Segments.Single(s => s.StartMinute == 600).ShowId);
+            Assert.Equal(42, putBody.Segments.Single(s => s.StartMinute == 0).ShowId);
+            Assert.Null(putBody.Segments.Single(s => s.StartMinute == 600).ShowId);
+        }
+
+        [Fact]
+        public async Task AnExplicitNullShowIdOnAPutRowClearsIt()
+        {
+            var store = new FakeScheduleStore();
+            await using var factory = new ScheduleApiWebFactory(store);
+            var client = await ScheduleApiWebFactory.LoggedInClientAsync(factory);
+
+            // When one row explicitly carries "showId": null while a sibling row in the SAME request
+            // carries a real id — PutAsJsonAsync's own serialization writes the null property
+            // explicitly (System.Text.Json's default null-writing behavior), never an omitted key.
+            var request = new ScheduleWeekDto(
+            [
+                new ScheduleSegmentDto(null, 1, 0, 600, 11, null, null, null, ShowId: 7),
+                new ScheduleSegmentDto(null, 1, 600, 1200, 11, null, null, null, ShowId: null),
+            ]);
+
+            var response = await client.PutAsJsonAsync("/api/schedule", request);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<ScheduleWeekDto>();
+            Assert.NotNull(body);
+            Assert.Equal(7, body.Segments.Single(s => s.StartMinute == 0).ShowId);
+            Assert.Null(body.Segments.Single(s => s.StartMinute == 600).ShowId);
+        }
+
+        [Fact]
+        public async Task AnAbsentShowIdFieldOnASubmittedRowClearsItTheFullReplaceDefault()
+        {
+            var store = new FakeScheduleStore();
+            await using var factory = new ScheduleApiWebFactory(store);
+            var client = await ScheduleApiWebFactory.LoggedInClientAsync(factory);
+
+            // Given a raw JSON body — never the typed ScheduleSegmentDto serializer, which always
+            // writes the "showId" key even when its own value is null — where the SECOND row's object
+            // omits the "showId" property entirely. SPEC F91.8's documented full-replace posture
+            // (ScheduleSegmentDto's own remarks): an absent field on PUT clears exactly like an
+            // explicit null does, since PUT never carries a "leave unchanged" wire shape.
+            const string json = """
+                {
+                  "segments": [
+                    { "day": 1, "startMinute": 0, "endMinute": 600, "personaId": 11, "showId": 7 },
+                    { "day": 1, "startMinute": 600, "endMinute": 1200, "personaId": 11 }
+                  ]
+                }
+                """;
+
+            var response = await client.PutAsync(
+                "/api/schedule", new StringContent(json, System.Text.Encoding.UTF8, "application/json"));
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<ScheduleWeekDto>();
+            Assert.NotNull(body);
+            Assert.Equal(7, body.Segments.Single(s => s.StartMinute == 0).ShowId);
+            Assert.Null(body.Segments.Single(s => s.StartMinute == 600).ShowId);
+        }
+    }
+
     public sealed class ScenarioRejectingInvalidWeeks
     {
         // Sad path — F91.1 constraints surface as per-cell 400s; the stored week never changes.

@@ -107,14 +107,22 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSt
 
         if (week.Count > 0)
         {
-            // ScheduleSegment.Show (SPEC F116.1, PLAN T241) is deliberately absent from this column
-            // list — it is LOAD-only through SelectColumns' LEFT JOIN, never written here. show_id is
-            // read-only through this epic; T243's writer owns adding it to this insert.
+            // PLAN T243: ScheduleSegment.ShowId (SPEC F116.1, PLAN T241) now rides this insert too —
+            // the bare foreign key, written straight into show_id, never Show's own Name/Tagline/Flavor
+            // (those are station.show's own entity fields, re-resolved by SelectColumns' own LEFT JOIN
+            // on the reload below, never written from here — ScheduleSegment's own remarks on why ShowId,
+            // not Show, is the write-authoritative field). This is deliberately the ONLY way
+            // ReplaceWeekAsync itself changed for T243: whatever ShowId a caller's own ScheduleSegment
+            // already carries survives a whole-week replace instead of being silently dropped — closing
+            // the "load-only" gap this comment used to describe. The Host GET/PUT wire
+            // (ScheduleSegmentDto/ScheduleController) round-trips this same field too (ScheduleController's
+            // own class remarks) — a whole-grid repaint no longer silently erases a show assignment set
+            // through AssignShowAsync's own dedicated endpoint.
             await conn.ExecuteAsync(new CommandDefinition(
                 """
                 insert into station.segment_schedule
-                    (day_of_week, start_minute, end_minute, persona_id, genres, energy_min, energy_max)
-                values (@Day, @StartMinute, @EndMinute, @PersonaId, @Genres::text[], @EnergyMin, @EnergyMax)
+                    (day_of_week, start_minute, end_minute, persona_id, genres, energy_min, energy_max, show_id)
+                values (@Day, @StartMinute, @EndMinute, @PersonaId, @Genres::text[], @EnergyMin, @EnergyMax, @ShowId)
                 """,
                 week.Select(seg => new
                 {
@@ -125,6 +133,7 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSt
                     Genres = seg.Genres?.ToArray(),
                     seg.EnergyMin,
                     seg.EnergyMax,
+                    seg.ShowId,
                 }),
                 transaction: tx,
                 cancellationToken: ct));
@@ -140,6 +149,147 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSt
         var snapshot = new ScheduleWeekSnapshot(segments);
         WeekChanged?.Invoke();
         return new ScheduleReplaceResult.Replaced(snapshot);
+    }
+
+    /// <summary>
+    /// Ephemeral Dapper projection for <see cref="AssignShowAsync"/>'s own single day-scoped read —
+    /// settable properties, not a positional record, mirrors this file's own
+    /// <see cref="ScheduledSlotRow"/>/<see cref="ScheduleRow"/> idiom for a plain-int projection.
+    /// </summary>
+    sealed record RunRow
+    {
+        public long Id { get; init; }
+        public int DayOfWeek { get; init; }
+        public int StartMinute { get; init; }
+        public int EndMinute { get; init; }
+        public long? PersonaId { get; init; }
+    }
+
+    public async Task<ShowAssignResult> AssignShowAsync(long blockId, long? showId, bool applyToRun, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        // Single statement (PLAN T243 review F3): the clicked block's own row and every OTHER row on
+        // its day, read together — the day is resolved by a correlated subquery against blockId
+        // itself, so a blockId naming no row at all returns an empty set (day_of_week = NULL matches
+        // nothing in SQL) rather than needing a separate existence SELECT first. This also closes a
+        // READ COMMITTED race the previous two-statement shape left open: a concurrent
+        // ReplaceWeekAsync's delete-then-insert landing between two separate SELECTs (a first read
+        // that found the block, a second keyed by the day value that first read returned) could leave
+        // blockId absent from the second read's result — this fold makes "is blockId present in THIS
+        // one result set" the single existence check, never two, so there is nothing left for a
+        // between-reads race to land in.
+        var dayRows = (await conn.QueryAsync<RunRow>(new CommandDefinition(
+            """
+            select id::bigint as id, day_of_week, start_minute, end_minute, persona_id::bigint as persona_id
+            from station.segment_schedule
+            where day_of_week = (select day_of_week from station.segment_schedule where id = @blockId)
+            order by start_minute
+            """,
+            new { blockId },
+            transaction: tx,
+            cancellationToken: ct))).ToList();
+
+        // No explicit rollback on any early return below — mirrors ReplaceWeekAsync's own
+        // VersionConflict path (this class's remarks): the transaction is disposed un-committed, and
+        // NpgsqlTransaction's own DisposeAsync rolls back, so nothing this method has read so far can
+        // ever be mistaken for a write.
+        //
+        // N3 review: this existence check IS the FindIndex ComputeRun would otherwise repeat — folded
+        // into one scan so a blockId absent from dayRows can never reach ComputeRun's own indexer at
+        // all (dayRows[index] with index == -1 would throw, not return BlockNotFound), and the day's
+        // row set is only ever walked once to answer "is blockId here."
+        var blockIndex = dayRows.FindIndex(r => r.Id == blockId);
+        if (blockIndex < 0)
+            return new ShowAssignResult.BlockNotFound();
+
+        if (showId is { } targetShowId)
+        {
+            var exists = await conn.ExecuteScalarAsync<bool>(new CommandDefinition(
+                "select exists(select 1 from station.show where id = @targetShowId)",
+                new { targetShowId },
+                transaction: tx,
+                cancellationToken: ct));
+
+            // Checked INSIDE this same transaction, immediately before the write below — a show
+            // deleted between this check and the UPDATE cannot land a dangling show_id either way,
+            // since Postgres would still hold this transaction's own read committed snapshot for the
+            // FK check the UPDATE itself is subject to.
+            if (!exists)
+                return new ShowAssignResult.ShowNotFound();
+        }
+
+        var runIds = applyToRun ? ComputeRun(dayRows, blockIndex) : [blockId];
+
+        // RETURNING id (PLAN T243 review F3): UpdatedBlockIds reports what the UPDATE actually
+        // touched, never the pre-computed runIds list — a row named in runIds a moment ago but deleted
+        // by a concurrent ReplaceWeekAsync before this statement runs simply does not come back, so
+        // this call can never claim to have changed a row it didn't. An empty result means every row
+        // this call intended to touch is already gone by the time the write ran — reported as
+        // BlockNotFound, the same "nothing was written" contract as the existence check above, never a
+        // hollow Assigned with an empty list.
+        var updatedIds = (await conn.QueryAsync<long>(new CommandDefinition(
+            """
+            update station.segment_schedule set show_id = @showId, updated_at = now()
+            where id = any(@runIds)
+            returning id::bigint
+            """,
+            new { showId, runIds = runIds.ToArray() },
+            transaction: tx,
+            cancellationToken: ct))).ToList();
+
+        if (updatedIds.Count == 0)
+            return new ShowAssignResult.BlockNotFound();
+
+        // The fresh week fingerprint (SPEC F2, gh-#255), computed from the post-write rows INSIDE this
+        // same transaction — mirrors ReplaceWeekAsync's own "reload before commit" discipline just
+        // above, so AssignShowResponseDto.Version and a subsequent GET's own Version agree on exactly
+        // the same content, never a version read from a connection that could observe a concurrent
+        // writer's interleaved state.
+        var segments = await LoadSegmentsAsync(conn, tx, ct);
+        var version = ScheduleWeekVersion.Compute(segments);
+
+        await tx.CommitAsync(ct);
+
+        WeekChanged?.Invoke();
+        return new ShowAssignResult.Assigned(updatedIds, version);
+    }
+
+    /// <summary>
+    /// SPEC F119.2's span rule: <paramref name="dayRows"/> is every block on the clicked block's own
+    /// day, ordered by start minute (the EXCLUDE constraint already guarantees no two rows overlap, so
+    /// "ordered by start minute" and "ordered by end minute" agree). <paramref name="index"/> is the
+    /// clicked block's own position in <paramref name="dayRows"/> — resolved ONCE by
+    /// <see cref="AssignShowAsync"/>'s own existence guard (never re-derived here, and never negative:
+    /// that guard already returned <see cref="ShowAssignResult.BlockNotFound"/> before this method is
+    /// ever called). Walks outward from <paramref name="index"/> in both directions, extending the run
+    /// one row at a time only while the neighbor is BOTH time-adjacent (its end/start minute exactly
+    /// meets the run's own edge — a gap in the grid ends the run) AND persona-matching (<c>long?</c>'s
+    /// own <c>==</c> already implements Postgres's <c>IS NOT DISTINCT FROM</c> — two
+    /// <see langword="null"/> persona ids compare equal, so a run of contiguous music-only blocks is
+    /// exactly as legal a run as one of contiguous same-persona blocks; RATIFIED by Dean, 2026-08-10 —
+    /// see <see cref="Abstractions.IScheduleStore.AssignShowAsync"/>'s own remarks for the ruling).
+    /// Returns every id in the run, never the <see cref="RunRow"/>s themselves —
+    /// <see cref="AssignShowAsync"/>'s own callers only ever need the id list.
+    /// </summary>
+    static IReadOnlyList<long> ComputeRun(List<RunRow> dayRows, int index)
+    {
+        var persona = dayRows[index].PersonaId;
+
+        var start = index;
+        while (start > 0
+               && dayRows[start - 1].EndMinute == dayRows[start].StartMinute
+               && dayRows[start - 1].PersonaId == persona)
+            start--;
+
+        var end = index;
+        while (end < dayRows.Count - 1
+               && dayRows[end + 1].StartMinute == dayRows[end].EndMinute
+               && dayRows[end + 1].PersonaId == persona)
+            end++;
+
+        return dayRows.Skip(start).Take(end - start + 1).Select(r => r.Id).ToList();
     }
 
     static async Task<IReadOnlyList<ScheduleSegment>> LoadSegmentsAsync(
@@ -226,9 +376,12 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSt
     static ScheduleCellError Error(int rowIndex, ScheduleSegment seg, ScheduleCellErrorKind kind, string message) =>
         new(rowIndex, seg.Day, seg.StartMinute, seg.EndMinute, kind, message);
 
+    // PLAN T243 — Show and ShowId are set TOGETHER here, both derived from the same row.ShowId, so a
+    // loaded segment's two show fields never disagree (ScheduleSegment's own remarks: Show is the
+    // load-time display projection, ShowId is what every writer and ScheduleWeekVersion.Compute read).
     static ScheduleSegment ToSegment(ScheduleRow row) => new(
         row.Id, (DayOfWeek)row.DayOfWeek, row.StartMinute, row.EndMinute, row.PersonaId,
-        row.Genres, row.EnergyMin, row.EnergyMax, ToShowSummary(row));
+        row.Genres, row.EnergyMin, row.EnergyMax, ToShowSummary(row), row.ShowId);
 
     /// <summary>SPEC F116.1 (PLAN T241) — <see langword="null"/> when the block names no show (the
     /// LEFT JOIN found no matching <c>station.show</c> row); otherwise the four identity columns

@@ -198,7 +198,7 @@ describe("Feature: Paint the week", () => {
 
       const body = lastPutBody(mockFetch);
       expect(body.segments).toEqual([
-        { id: null, day: 1, startMinute: 0, endMinute: 90, personaId: REX.id, genres: null, energyMin: null, energyMax: null },
+        { id: null, day: 1, startMinute: 0, endMinute: 90, personaId: REX.id, genres: null, energyMin: null, energyMax: null, showId: null },
       ]);
     });
 
@@ -237,7 +237,7 @@ describe("Feature: Paint the week", () => {
 
       const body = lastPutBody(mockFetch);
       expect(body.segments).toEqual([
-        { id: null, day: 1, startMinute: 480, endMinute: 720, personaId: REX.id, genres: null, energyMin: null, energyMax: null },
+        { id: null, day: 1, startMinute: 480, endMinute: 720, personaId: REX.id, genres: null, energyMin: null, energyMax: null, showId: null },
       ]);
     });
 
@@ -252,7 +252,7 @@ describe("Feature: Paint the week", () => {
 
       const body = lastPutBody(mockFetch);
       expect(body.segments).toEqual([
-        { id: null, day: 0, startMinute: 300, endMinute: 360, personaId: null, genres: null, energyMin: null, energyMax: null },
+        { id: null, day: 0, startMinute: 300, endMinute: 360, personaId: null, genres: null, energyMin: null, energyMax: null, showId: null },
       ]);
     });
   });
@@ -269,6 +269,7 @@ describe("Feature: Paint the week", () => {
           genres: ["rock", "pop"],
           energyMin: 0.2,
           energyMax: 0.8,
+          showId: null,
         },
       ],
     };
@@ -305,7 +306,7 @@ describe("Feature: Paint the week", () => {
 
       const body = lastPutBody(mockFetch);
       expect(body.segments).toEqual([
-        { id: null, day: 3, startMinute: 360, endMinute: 600, personaId: REX.id, genres: null, energyMin: null, energyMax: null },
+        { id: null, day: 3, startMinute: 360, endMinute: 600, personaId: REX.id, genres: null, energyMin: null, energyMax: null, showId: null },
       ]);
     });
   });
@@ -313,7 +314,7 @@ describe("Feature: Paint the week", () => {
   describe("Scenario: save is the whole week", () => {
     const NOVA_WEEK: ScheduleWeekDto = {
       segments: [
-        { id: 3, day: 5, startMinute: 0, endMinute: 60, personaId: NOVA.id, genres: null, energyMin: null, energyMax: null },
+        { id: 3, day: 5, startMinute: 0, endMinute: 60, personaId: NOVA.id, genres: null, energyMin: null, energyMax: null, showId: null },
       ],
     };
 
@@ -345,7 +346,7 @@ describe("Feature: Paint the week", () => {
     it("the grid re-renders from the PUT response", async () => {
       const serverWeek: ScheduleWeekDto = {
         segments: [
-          { id: 99, day: 4, startMinute: 60, endMinute: 120, personaId: NOVA.id, genres: null, energyMin: null, energyMax: null },
+          { id: 99, day: 4, startMinute: 60, endMinute: 120, personaId: NOVA.id, genres: null, energyMin: null, energyMax: null, showId: null },
         ],
       };
       makePutFetchMock({ status: 200, body: serverWeek });

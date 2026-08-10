@@ -32,6 +32,18 @@ namespace GenWave.Host.Api;
 /// checks as a per-cell 400 or is written and echoed back as a visibly-different stored week; there
 /// is no "absent means unchanged" carry-forward from whatever was previously stored.
 /// </para>
+///
+/// <para>
+/// <see cref="ShowId"/> (SPEC F116.1/F119.2, PLAN T243): <c>GET /api/schedule</c> emits the block's
+/// current show id (or <see langword="null"/> for an unnamed block), and <c>PUT /api/schedule</c>
+/// round-trips it back into <c>segment_schedule.show_id</c> — a full-grid repaint carries whatever show
+/// identity each row already had unless the submission itself changes it. An explicit JSON
+/// <c>"showId": null</c> clears the block's show exactly like a missing field does (PUT is
+/// full-replace, so there is no distinct "leave unchanged" wire shape). This is a NARROWER capability
+/// than the dedicated <c>POST /api/schedule/assign-show</c> endpoint's own F119.2 run-span semantics —
+/// this field never fans a single edit out across a run; a client wanting the span behavior calls that
+/// endpoint instead.
+/// </para>
 /// </summary>
 public sealed record ScheduleSegmentDto(
     long? Id,
@@ -41,4 +53,5 @@ public sealed record ScheduleSegmentDto(
     long? PersonaId,
     IReadOnlyList<string>? Genres,
     double? EnergyMin,
-    double? EnergyMax);
+    double? EnergyMax,
+    long? ShowId = null);

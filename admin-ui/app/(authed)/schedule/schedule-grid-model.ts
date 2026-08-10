@@ -20,7 +20,8 @@ import type { RosterPersonaDto, ScheduleCellErrorDto, ScheduleSegmentDto, Schedu
  * falls out of whatever's contiguous afterward.
  *
  * ── Envelope overrides, keyed by run identity ────────────────────────────────────────────────
- * A run's optional genre/energy override is stored in a `Map<string, StoredOverride>` keyed by
+ * A run's optional genre/energy override — and, since PLAN T243, its show id — is stored in a
+ * `Map<string, StoredOverride>` keyed by
  * {@link runKey} = `day:start:brush` (see that function's own remarks for exactly why `brush` is
  * part of the key, not just `day:start`). Each stored entry also carries the run's `end` AS OF
  * the mutation that last touched it — the one extra fact {@link pruneOverrides} needs to tell a
@@ -92,6 +93,12 @@ export interface BlockOverrides {
   genres: string[] | null;
   energyMin: number | null;
   energyMax: number | null;
+  /** T243: carried in this same bag, the same way as `genres`/`energyMin`/`energyMax` — see this
+   * module's own remarks on `deriveGridFromWeek`/`serializeWeek` for exactly how it rides the
+   * `runKey`-keyed overrides map (and therefore inherits {@link pruneOverrides}' own
+   * survives/drops rules on a repaint — merged-run disagreement is T245's picker's own concern, not
+   * this bag's). */
+  showId: number | null;
 }
 
 /** An override entry as stored in the overrides map — the {@link BlockOverrides} the operator set,
@@ -106,7 +113,7 @@ export interface StoredOverride {
 /** The overrides map's own type — `Map<string, StoredOverride>`, keyed by {@link runKey}. */
 export type OverridesMap = Map<string, StoredOverride>;
 
-const NO_OVERRIDES: BlockOverrides = { genres: null, energyMin: null, energyMax: null };
+const NO_OVERRIDES: BlockOverrides = { genres: null, energyMin: null, energyMax: null, showId: null };
 
 /** A contiguous same-brush run within one day — the unit `computeRuns` derives from the grid and
  * the unit a segment on the wire round-trips to/from. */
@@ -279,7 +286,8 @@ export function deriveGridFromWeek(week: ScheduleWeekDto): {
       row[h] = value;
     }
 
-    const hasOverrides = segment.genres !== null || segment.energyMin !== null || segment.energyMax !== null;
+    const hasOverrides =
+      segment.genres !== null || segment.energyMin !== null || segment.energyMax !== null || segment.showId !== null;
     if (hasOverrides) {
       overrides.set(runKey(segment.day, start, value), {
         end,
@@ -287,6 +295,7 @@ export function deriveGridFromWeek(week: ScheduleWeekDto): {
           genres: segment.genres,
           energyMin: segment.energyMin,
           energyMax: segment.energyMax,
+          showId: segment.showId,
         },
       });
     }
@@ -314,6 +323,7 @@ export function serializeWeek(
       genres: override.genres,
       energyMin: override.energyMin,
       energyMax: override.energyMax,
+      showId: override.showId,
     };
   });
   return { segments };

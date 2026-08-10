@@ -99,5 +99,70 @@ public static class FeatureScheduleWeekVersion
 
             Assert.NotEqual(ScheduleWeekVersion.Compute(full), ScheduleWeekVersion.Compute(missingSunday));
         }
+
+        // PLAN T243 — the landmine this class's own remarks name: Show stopped being read-only the
+        // moment IScheduleStore.AssignShowAsync shipped, so this fingerprint must now go blind to a
+        // concurrent show-assignment write no longer. Compute reads ShowId (ScheduleSegment's own
+        // write-authoritative field), never Show?.Id — these facts set ShowId directly, the same field
+        // every writer (ReplaceWeekAsync/AssignShowAsync) actually populates.
+
+        [Fact]
+        public void AssigningAShowChangesTheFingerprint()
+        {
+            var unnamed = new[] { Segment(DayOfWeek.Monday, 0, 1440) };
+            var named = new[] { Segment(DayOfWeek.Monday, 0, 1440) with { ShowId = 1 } };
+
+            Assert.NotEqual(ScheduleWeekVersion.Compute(unnamed), ScheduleWeekVersion.Compute(named));
+        }
+
+        [Fact]
+        public void ChangingWhichShowIsAssignedChangesTheFingerprint()
+        {
+            var showA = new[] { Segment(DayOfWeek.Monday, 0, 1440) with { ShowId = 1 } };
+            var showB = new[] { Segment(DayOfWeek.Monday, 0, 1440) with { ShowId = 2 } };
+
+            Assert.NotEqual(ScheduleWeekVersion.Compute(showA), ScheduleWeekVersion.Compute(showB));
+        }
+
+        [Fact]
+        public void ClearingAnAssignedShowChangesTheFingerprintBack()
+        {
+            var named = new[] { Segment(DayOfWeek.Monday, 0, 1440) with { ShowId = 1 } };
+            var cleared = new[] { Segment(DayOfWeek.Monday, 0, 1440) };
+
+            Assert.NotEqual(ScheduleWeekVersion.Compute(named), ScheduleWeekVersion.Compute(cleared));
+        }
+    }
+
+    public sealed class ScenarioShowDisplayFieldsNeverInfluenceTheFingerprint
+    {
+        // ScheduleWeekVersion's own remarks (PLAN T243): only ScheduleSegment.ShowId is hashed — the
+        // actual foreign key ReplaceWeekAsync/AssignShowAsync write — never Show's own
+        // Name/Tagline/Flavor, which are station.show's own entity fields resolved by the load-time
+        // LEFT JOIN. Renaming a show via ShowsController must never itself 409 an editor whose own grid
+        // content never changed. Both segments here carry the SAME ShowId (the loader's own "Show and
+        // ShowId always agree" shape) so this fact isolates Name/Tagline/Flavor as the one thing that
+        // varies.
+
+        [Fact]
+        public void TheSameShowIdWithDifferentNameTaglineOrFlavorAgrees()
+        {
+            var before = new[]
+            {
+                Segment(DayOfWeek.Monday, 0, 1440) with
+                {
+                    Show = new ShowSummary(1, "Night Moves", "Old tagline", "moody"), ShowId = 1,
+                },
+            };
+            var afterRename = new[]
+            {
+                Segment(DayOfWeek.Monday, 0, 1440) with
+                {
+                    Show = new ShowSummary(1, "Renamed Show", "New tagline", "upbeat"), ShowId = 1,
+                },
+            };
+
+            Assert.Equal(ScheduleWeekVersion.Compute(before), ScheduleWeekVersion.Compute(afterRename));
+        }
     }
 }
