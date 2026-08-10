@@ -118,7 +118,7 @@ section "Render pressure (last 24h; informational)"
 API=$(cid_of api)
 if [ -n "$API" ]; then
   maxhold=$(docker logs --since 24h "$API" 2>&1 | grep -oP 'Feeder refill held the tick for \K[0-9.]+' | sort -n | tail -1)
-  info "max feeder refill hold: ${maxhold:+${maxhold}s}${maxhold:-none logged} (compare against Tts:RenderBudgetSeconds)"
+  info "max feeder refill hold: ${maxhold:-none logged}${maxhold:+s} (compare against Tts:RenderBudgetSeconds)"
   drops=$(docker logs --since 24h "$API" 2>&1 | grep -c 'render budget exceeded' || true)
   [ "${drops:-0}" -eq 0 ] && pass "zero render-budget drops in 24h" || warn "${drops} render-budget drop(s) in 24h — segments were silently skipped"
 fi
