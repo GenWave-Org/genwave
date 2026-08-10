@@ -128,6 +128,12 @@ static class StationSettingsHostingExtensions
         // FontPackController's install route (PLAN T199) is the first Host call site.
         builder.Services.AddFontPackStore(stationConnStr);
 
+        // Show store (SPEC F115.1, STORY-305, PLAN T239) — same station_svc connection string as
+        // every registration above; station.show lives in the same schema. ShowRepository shipped
+        // dark at T239 (AddShowStore itself registers no consumer): ShowsController (PLAN T240) is
+        // the first Host call site.
+        builder.Services.AddShowStore(stationConnStr);
+
         return builder;
     }
 }

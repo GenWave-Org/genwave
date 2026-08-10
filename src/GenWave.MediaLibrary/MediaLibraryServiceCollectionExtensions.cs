@@ -86,6 +86,11 @@ public static class MediaLibraryServiceCollectionExtensions
         // on library.media.
         services.AddSingleton<IMediaLibraryMembership, MediaLibraryMembershipRepository>();
 
+        // SPEC F115.4, STORY-305, PLAN T240: the show delete guard's own cross-schema answer — which
+        // library.media rows are scoped to a show, and clearing them — same station_svc-has-no-grant
+        // rationale as IMediaLibraryMembership immediately above. First consumer: ShowsController.
+        services.AddSingleton<IShowImagingScope, ShowImagingScopeRepository>();
+
         // SPEC F87.5, STORY-226, PLAN T89: the listener-request matcher's catalog probe — same
         // cross-schema-boundary rationale as IMediaLibraryMembership above (station_svc has no grant
         // on library.media). First consumer: GenWave.Host.Requests.RequestMatcher.

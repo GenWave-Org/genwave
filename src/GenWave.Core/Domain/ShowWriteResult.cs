@@ -37,13 +37,16 @@ public abstract record ShowWriteResult
     public sealed record BudgetExceeded(ShowBudgetField Field) : ShowWriteResult;
 
     /// <summary>
-    /// <c>Name</c> was blank/whitespace-only, or its house-Slugify output collapsed to the fallback
-    /// literal <c>"persona"</c> (<c>LegacyPersonaCardMapper.Slugify</c>'s own empty-slug rescue — e.g.
-    /// an emoji-only name) — rejected at the app seam before the write ever reaches Postgres. Mirrors
-    /// <c>PersonaController</c>'s import-slug REJECT-not-autocorrect posture (never silently coerce a
-    /// bad name into something plausible-looking), enforced here at the store seam so every future
-    /// caller of <see cref="Abstractions.IShowStore"/> inherits the guard rather than each needing its
-    /// own.
+    /// <c>Name</c> was blank/whitespace-only, or its house-Slugify output equals the fallback literal
+    /// <c>"persona"</c> (<c>LegacyPersonaCardMapper.FallbackSlug</c>) — rejected regardless of HOW the
+    /// slug got there: an emoji-only name that hits <c>Slugify</c>'s own empty-slug rescue, but also
+    /// (PLAN T240 review A1) a name that slugifies to <c>"persona"</c> the ordinary way, e.g. the
+    /// literal name <c>"Persona"</c> itself (lowercases unchanged — the rescue never fires; the
+    /// ordinary path just lands on the same string). Rejected at the app seam before the write ever
+    /// reaches Postgres. Mirrors <c>PersonaController</c>'s import-slug REJECT-not-autocorrect posture
+    /// (never silently coerce a bad name into something plausible-looking), enforced here at the
+    /// store seam so every future caller of <see cref="Abstractions.IShowStore"/> inherits the guard
+    /// rather than each needing its own.
     /// </summary>
     public sealed record InvalidName : ShowWriteResult;
 

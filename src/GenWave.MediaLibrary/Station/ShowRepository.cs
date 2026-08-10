@@ -33,14 +33,6 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource) : IShowStore
     // blocks; ShowWriteResult.Referenced stays a bare singleton here.
     const string ForeignKeyViolation = "23503";
 
-    // LegacyPersonaCardMapper.Slugify's own empty-slug rescue literal (see that method's remarks): a
-    // name that collapses to nothing under Slugify — an emoji-only name, for instance — resolves to
-    // this exact string rather than "". Accepting it here would silently misname a show "persona"
-    // instead of rejecting the input outright — the PersonaController import-slug
-    // REJECT-not-autocorrect posture (see ShowWriteResult.InvalidName's own remarks), enforced at this
-    // store seam so every future caller inherits the guard.
-    const string SlugifyFallback = "persona";
-
     // id is `serial` (int4) at rest — mirrors PersonaRepository's own SelectColumns comment: every id
     // in this codebase is `long` (bigint) in C#, so it is cast on the way out for a consistent,
     // single-width C# id type.
@@ -180,14 +172,18 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource) : IShowStore
     /// SPEC F115.1's name-shape guard — pure C#, evaluated before either write method ever opens a
     /// connection. Rejects a blank/whitespace-only <c>Name</c> outright (station.show's own <c>check
     /// (length(btrim(name)) > 0)</c>, db/33, would otherwise surface as an unhandled 23514
-    /// check_violation) and a <paramref name="slug"/> that collapsed to <see cref="SlugifyFallback"/>
-    /// — see <see cref="ShowWriteResult.InvalidName"/>'s own remarks for the REJECT-not-autocorrect
-    /// rationale. <paramref name="slug"/> is passed in rather than re-derived so the two call sites
-    /// (<see cref="CreateAsync"/>/<see cref="UpdateAsync"/>) compute <c>LegacyPersonaCardMapper.Slugify</c>
-    /// exactly once each.
+    /// check_violation) and a <paramref name="slug"/> equal to
+    /// <see cref="LegacyPersonaCardMapper.FallbackSlug"/> — REJECTED regardless of how it got there:
+    /// an emoji-only name that hits Slugify's own empty-slug rescue AND a name that slugifies to
+    /// <c>"persona"</c> the ordinary way (the literal name <c>"Persona"</c>, for instance — see
+    /// <see cref="LegacyPersonaCardMapper.FallbackSlug"/>'s own remarks, PLAN T240 review A1) both
+    /// land here. See <see cref="ShowWriteResult.InvalidName"/>'s own remarks for the
+    /// REJECT-not-autocorrect rationale. <paramref name="slug"/> is passed in rather than re-derived
+    /// so the two call sites (<see cref="CreateAsync"/>/<see cref="UpdateAsync"/>) compute
+    /// <c>LegacyPersonaCardMapper.Slugify</c> exactly once each.
     /// </summary>
     static ShowWriteResult.InvalidName? ValidateName(ShowDraft draft, string slug) =>
-        string.IsNullOrWhiteSpace(draft.Name) || slug == SlugifyFallback
+        string.IsNullOrWhiteSpace(draft.Name) || slug == LegacyPersonaCardMapper.FallbackSlug
             ? new ShowWriteResult.InvalidName()
             : null;
 

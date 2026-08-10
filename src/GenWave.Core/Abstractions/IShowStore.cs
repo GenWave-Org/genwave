@@ -26,8 +26,10 @@ public interface IShowStore
     /// <paramref name="draft"/>'s <c>Name</c> via the house Slugify, <c>imported_from</c>/
     /// <c>imported_at</c> stay null. Returns <see cref="ShowWriteResult.Created"/> with the new row on
     /// success, <see cref="ShowWriteResult.InvalidName"/> if <c>Name</c> is blank/whitespace-only or
-    /// its Slugify output collapses to the fallback literal <c>"persona"</c>,
-    /// <see cref="ShowWriteResult.BudgetExceeded"/> if a field exceeds its SPEC F115.1 1×
+    /// its Slugify output equals the fallback literal <c>"persona"</c> — whether by Slugify's own
+    /// empty-slug rescue (an emoji-only name) or the ordinary path landing on that same string (e.g.
+    /// the literal name <c>"Persona"</c> itself; see <see cref="ShowWriteResult.InvalidName"/>'s own
+    /// remarks, PLAN T240 review A1), <see cref="ShowWriteResult.BudgetExceeded"/> if a field exceeds its SPEC F115.1 1×
     /// budget (checked before the write ever reaches Postgres), or
     /// <see cref="ShowWriteResult.SlugConflict"/> if the derived slug collides with an existing show
     /// (enforced by the DB's <c>UNIQUE(slug)</c>, not a pre-read).

@@ -59,8 +59,21 @@ static partial class LegacyPersonaCardMapper
     public static string Slugify(string name)
     {
         var slug = NonAlphaNumeric().Replace(name.Trim().ToLowerInvariant(), "-").Trim('-');
-        return slug.Length == 0 ? "persona" : slug;
+        return slug.Length == 0 ? FallbackSlug : slug;
     }
+
+    /// <summary>
+    /// The empty-slug rescue literal (PLAN T240 review A3 — promoted from a hand-copied string
+    /// constant in <c>ShowRepository</c>). Returned whenever <see cref="Slugify"/>'s regex strips a
+    /// name down to nothing (an emoji-only name, for instance) — but a caller that REJECTS any
+    /// resulting slug equal to this literal (rather than only ever reaching it via that empty-input
+    /// path) also catches the plainer case of a name that slugifies to it directly, e.g. the literal
+    /// name <c>"Persona"</c> itself (lowercases to <c>"persona"</c> unchanged — no character is
+    /// non-alphanumeric, so the empty-slug rescue never even fires; the ordinary path just happens to
+    /// land on the same string). <see cref="ShowRepository"/>'s own <c>ValidateName</c> is exactly
+    /// that caller.
+    /// </summary>
+    public const string FallbackSlug = "persona";
 
     [GeneratedRegex("[^a-z0-9]+")]
     private static partial Regex NonAlphaNumeric();

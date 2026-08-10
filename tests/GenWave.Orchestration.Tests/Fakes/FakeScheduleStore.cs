@@ -45,6 +45,11 @@ sealed class FakeScheduleStore(ScheduleWeekSnapshot snapshot) : IScheduleStore
         IReadOnlyList<ScheduleSegment> week, string? expectedVersion, CancellationToken ct) =>
         throw new NotSupportedException("FakeScheduleStore is a read-only double for T119 specs.");
 
+    // PLAN T240's show delete guard read — not exercised by any T119 spec (this double never carries
+    // show_id-scoped rows), mirrors ReplaceWeekAsync's own NotSupportedException posture above.
+    public Task<IReadOnlyList<ScheduledSlot>> GetSlotsByShowIdAsync(long showId, CancellationToken ct) =>
+        throw new NotSupportedException("FakeScheduleStore is a read-only double for T119 specs.");
+
     public void RaiseWeekChanged() => WeekChanged?.Invoke();
 
     /// <summary>Arms a gate so the NEXT <see cref="LoadWeekAsync"/> call returns an incomplete task,

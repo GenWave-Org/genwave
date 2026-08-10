@@ -205,4 +205,43 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSt
     static ScheduleSegment ToSegment(ScheduleRow row) => new(
         row.Id, (DayOfWeek)row.DayOfWeek, row.StartMinute, row.EndMinute, row.PersonaId,
         row.Genres, row.EnergyMin, row.EnergyMax);
+
+    /// <summary>
+    /// Ephemeral Dapper projection for <see cref="GetSlotsByShowIdAsync"/> — settable properties, not
+    /// a positional record, mirrors <see cref="PersonaRepository"/>'s own identically-shaped
+    /// <c>ScheduledSlotRow</c>: kept as a plain <see cref="int"/> here and cast to
+    /// <see cref="DayOfWeek"/> only when building the public <see cref="ScheduledSlot"/>, rather than
+    /// trusting Dapper's constructor-based binding to coerce an integer column straight into an
+    /// enum-typed positional-record parameter.
+    /// </summary>
+    sealed record ScheduledSlotRow
+    {
+        public int DayOfWeek { get; init; }
+        public int StartMinute { get; init; }
+        public int EndMinute { get; init; }
+    }
+
+    /// <summary>
+    /// The show delete guard's own detail read (SPEC F115.4, PLAN T240) — mirrors
+    /// <see cref="PersonaRepository"/>'s own <c>QueryScheduledSlotsAsync</c> shape exactly, just
+    /// against <c>show_id</c> instead of <c>persona_id</c> and as a public seam member rather than a
+    /// private helper, since <see cref="Abstractions.IShowStore.DeleteAsync"/> deliberately never
+    /// pre-queries this table itself (that store's own remarks) — <c>ShowsController</c> calls this
+    /// directly instead.
+    /// </summary>
+    public async Task<IReadOnlyList<ScheduledSlot>> GetSlotsByShowIdAsync(long showId, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<ScheduledSlotRow>(new CommandDefinition(
+            """
+            select day_of_week, start_minute, end_minute
+            from station.segment_schedule
+            where show_id = @showId
+            order by day_of_week, start_minute
+            """,
+            new { showId },
+            cancellationToken: ct));
+
+        return rows.Select(row => new ScheduledSlot((DayOfWeek)row.DayOfWeek, row.StartMinute, row.EndMinute)).ToList();
+    }
 }

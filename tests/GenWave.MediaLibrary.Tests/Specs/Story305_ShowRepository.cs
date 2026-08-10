@@ -32,6 +32,7 @@
 
 using Dapper;
 using GenWave.Core.Domain;
+using GenWave.MediaLibrary.Catalog;
 using GenWave.MediaLibrary.Station;
 using Npgsql;
 
@@ -134,6 +135,12 @@ public static class FeatureShowRepository
     /// StationDataSource" way Story118_PersonaStorage.cs's own <c>Repo</c> helper wires
     /// <c>PersonaRepository</c>.</summary>
     static ShowRepository Repo(DatabaseFixture db) => new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+
+    /// <summary>The show delete guard's own detail-read repository (PLAN T240 review — this method
+    /// carried zero live-DB coverage before <see cref="ScenarioDeleteFkGuard"/>'s two round-trip
+    /// facts below), wired the same "Lazy over the fixture's own StationDataSource" way as
+    /// <see cref="Repo"/>; mirrors Story240_ScheduleStore.cs's own identically-shaped helper.</summary>
+    static ScheduleRepository ScheduleRepo(DatabaseFixture db) => new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
 
     // ---------------------------------------------------------------------
     // HAPPY PATH — fresh init (db/06's mirror of db/35)
@@ -615,15 +622,16 @@ public static class FeatureShowRepository
     [Trait("Category", "Integration")]
     public sealed class ScenarioDeleteFkGuard(DatabaseFixture db)
     {
-        static async Task InsertScheduleRowReferencingShowAsync(DatabaseFixture db, long showId)
+        static async Task InsertScheduleRowReferencingShowAsync(
+            DatabaseFixture db, long showId, int dayOfWeek = 1, int startMinute = 540, int endMinute = 720)
         {
             await using var conn = await db.StationDataSource.OpenConnectionAsync();
             await conn.ExecuteAsync(
                 """
                 insert into station.segment_schedule (day_of_week, start_minute, end_minute, show_id)
-                values (1, 540, 720, @showId)
+                values (@dayOfWeek, @startMinute, @endMinute, @showId)
                 """,
-                new { showId });
+                new { dayOfWeek, startMinute, endMinute, showId });
         }
 
         [Fact]
@@ -652,6 +660,111 @@ public static class FeatureShowRepository
 
             // Then it succeeds
             Assert.IsType<ShowWriteResult.Deleted>(onceUnreferenced);
+        }
+
+        // PLAN T240 review — ScheduleRepository.GetSlotsByShowIdAsync itself (the show delete guard's
+        // own endpoint-layer detail read, ShowsController.Delete's Referenced case) carried zero live
+        // Postgres coverage before the two facts below: only the FK's own RESTRICT, above, was proven
+        // for real. Mirrors Story118_PersonaStorage.cs's own ScenarioDeleteFkGuard round-trip facts,
+        // just against ScheduleRepository directly rather than through a ShowRepository.DeleteAsync
+        // FK trip (this method is never called from that seam — ShowsController calls it directly).
+
+        [Fact]
+        public async Task GetSlotsByShowIdAsyncRoundTripsASingleSlot()
+        {
+            // Given an authored show referenced by exactly one schedule row
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            var created = Assert.IsType<ShowWriteResult.Created>(
+                await repo.CreateAsync(new ShowDraft("Slot Round Trip Show"), CancellationToken.None));
+            await InsertScheduleRowReferencingShowAsync(
+                db, created.Show.Id, dayOfWeek: 1, startMinute: 540, endMinute: 720);
+
+            // When ScheduleRepository.GetSlotsByShowIdAsync reads it back
+            var slots = await ScheduleRepo(db).GetSlotsByShowIdAsync(created.Show.Id, CancellationToken.None);
+
+            // Then day/start/end round-trip through the real SQL + Dapper mapping exactly — not just
+            // scripted on a fake, the way ShowsController's own wire specs cover this shape
+            var slot = Assert.Single(slots);
+            Assert.Equal(DayOfWeek.Monday, slot.Day);
+            Assert.Equal(540, slot.StartMinute);
+            Assert.Equal(720, slot.EndMinute);
+        }
+
+        [Fact]
+        public async Task GetSlotsByShowIdAsyncOrdersMultipleSlotsByDayThenStartMinute()
+        {
+            // Given an authored show referenced by two schedule rows, inserted deliberately out of
+            // order (Tuesday before Monday) — proves the query orders by day/start_minute, not
+            // insert order
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            var created = Assert.IsType<ShowWriteResult.Created>(
+                await repo.CreateAsync(new ShowDraft("Busy Show"), CancellationToken.None));
+            await InsertScheduleRowReferencingShowAsync(
+                db, created.Show.Id, dayOfWeek: 2, startMinute: 840, endMinute: 960);
+            await InsertScheduleRowReferencingShowAsync(
+                db, created.Show.Id, dayOfWeek: 1, startMinute: 540, endMinute: 720);
+
+            // When ScheduleRepository.GetSlotsByShowIdAsync reads them back
+            var slots = await ScheduleRepo(db).GetSlotsByShowIdAsync(created.Show.Id, CancellationToken.None);
+
+            // Then the result comes back ordered day-then-start-minute
+            Assert.Equal(2, slots.Count);
+            Assert.Equal(DayOfWeek.Monday, slots[0].Day);
+            Assert.Equal(540, slots[0].StartMinute);
+            Assert.Equal(DayOfWeek.Tuesday, slots[1].Day);
+            Assert.Equal(840, slots[1].StartMinute);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // PLAN T240 review — ShowImagingScopeRepository.UnscopeAsync (SPEC F115.4): the only writer of
+    // library.media.show_id, over the library connection (station_svc has no grant on library.media —
+    // the same db/22 cross-schema boundary IMediaLibraryMembership's own remarks already carry).
+    // Deliberately no station.show row involved: F117.1's own show_id column carries NO FK, by
+    // design, so this seam is provably reachable with any long id, real show or not.
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioShowImagingScopeRepository(DatabaseFixture db)
+    {
+        static async Task<long> InsertScopedMediaRowAsync(DatabaseFixture db, long showId, string title)
+        {
+            await using var conn = await db.DataSource.OpenConnectionAsync();
+            return await conn.ExecuteScalarAsync<long>(
+                """
+                insert into library.media (path, format, size_bytes, mtime, title, show_id)
+                values (@path, 'flac', 100, now(), @title, @showId)
+                returning id
+                """,
+                new { path = $"/imaging/{Guid.NewGuid()}.flac", title, showId });
+        }
+
+        [Fact]
+        public async Task UnscopeAsyncClearsShowIdAndNamesTheRowItCleared()
+        {
+            // Given a library.media row scoped to a show
+            await db.ResetAsync();
+            const long showId = 4242L;
+            var mediaId = await InsertScopedMediaRowAsync(db, showId, "Sunset Ident");
+            var repo = new ShowImagingScopeRepository(db.DataSource);
+
+            // When UnscopeAsync clears every row scoped to that show
+            var unscoped = await repo.UnscopeAsync(showId, CancellationToken.None);
+
+            // Then the single UPDATE ... RETURNING named exactly the row it cleared, and a fresh read
+            // confirms show_id genuinely persists as NULL — not just what the RETURNING clause claims
+            var row = Assert.Single(unscoped);
+            await using var conn = await db.DataSource.OpenConnectionAsync();
+            var showIdAfter = await conn.ExecuteScalarAsync<long?>(
+                "select show_id from library.media where id = @mediaId", new { mediaId });
+            Assert.Equal(
+                (MediaId: mediaId, Title: "Sunset Ident", ShowIdAfter: (long?)null),
+                (MediaId: row.MediaId, Title: row.Title, ShowIdAfter: showIdAfter));
         }
     }
 
@@ -745,6 +858,24 @@ public static class FeatureShowRepository
         }
 
         [Fact]
+        public async Task NameOverBudgetRejected()
+        {
+            // Given a show whose name exceeds 60 chars (PLAN T240 review A2 — a dedicated name-budget
+            // fact beside the tagline/flavor ones above; ShowBudgets.FirstViolation checks name first,
+            // so this also pins that field-order precedence rather than trusting it un-Fact-pinned)
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            var draft = new ShowDraft(new string('n', ShowBudgets.NameMaxChars + 1));
+
+            // When the repository write is attempted
+            var outcome = await repo.CreateAsync(draft, CancellationToken.None);
+
+            // Then it rejects at the seam, naming the name field specifically
+            Assert.Equal(new ShowWriteResult.BudgetExceeded(ShowBudgetField.Name), outcome);
+        }
+
+        [Fact]
         public async Task DuplicateSlugRejected()
         {
             // Given an existing show slug
@@ -833,18 +964,24 @@ public static class FeatureShowRepository
             Assert.IsType<ShowWriteResult.InvalidName>(outcome);
         }
 
-        [Fact]
-        public async Task NameThatSlugifiesToTheFallbackLiteralRejected()
+        [Theory]
+        [InlineData("🎧🎶")]
+        // PLAN T240 review A1: ValidateName rejects on the RESULTING slug equaling the fallback
+        // literal, not on "how" it got there — the literal name "Persona" slugifies to "persona" the
+        // ORDINARY way (lowercases unchanged; Slugify's own empty-slug rescue never fires, since no
+        // character is non-alphanumeric) and must reject exactly the same as the emoji-only case above.
+        [InlineData("Persona")]
+        public async Task NameThatSlugifiesToTheFallbackLiteralRejected(string name)
         {
-            // Given a name with no alphanumeric characters at all — LegacyPersonaCardMapper.Slugify's
-            // own empty-slug rescue would otherwise resolve it to the bare literal "persona"
+            // Given a name whose Slugify output is the bare literal "persona" — either via the
+            // empty-slug rescue (an emoji-only name) or the ordinary lowercase-unchanged path
             RunMigrationScript(db);
             await db.ResetShowAsync();
             var repo = Repo(db);
-            Assert.Equal("persona", LegacyPersonaCardMapper.Slugify("🎧🎶"));
+            Assert.Equal("persona", LegacyPersonaCardMapper.Slugify(name));
 
             // When the repository write is attempted
-            var outcome = await repo.CreateAsync(new ShowDraft("🎧🎶"), CancellationToken.None);
+            var outcome = await repo.CreateAsync(new ShowDraft(name), CancellationToken.None);
 
             // Then it rejects — REJECT, not silently autocorrect into a misleadingly-named show
             Assert.IsType<ShowWriteResult.InvalidName>(outcome);
