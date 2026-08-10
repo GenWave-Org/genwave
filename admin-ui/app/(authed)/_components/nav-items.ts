@@ -11,6 +11,7 @@ import {
   SafeContentIcon,
   ScheduleIcon,
   SettingsIcon,
+  ShowsIcon,
   WardrobeIcon,
   type IconProps,
 } from "./icons";
@@ -48,6 +49,11 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/safe-content", label: "Station Imaging", Icon: SafeContentIcon },
   { href: "/personas", label: "Personas", Icon: PersonaIcon },
   { href: "/schedule", label: "Schedule", Icon: ScheduleIcon },
+  // Shows (SPEC F119.1, STORY-312, PLAN T244) sits immediately after Schedule — the format-clock
+  // grid that assigns them (T243's assign-show endpoint) is the reason this entity exists at all.
+  // Final placement across the whole sidebar is the Admin-UI-Polish lane's own call (ARCHITECTURE
+  // TODO); this is the sensible spot until that pass reorders the shell.
+  { href: "/shows", label: "Shows", Icon: ShowsIcon },
   { href: "/persona-catalog", label: "Community Catalog", Icon: PersonaCatalogIcon, requiresCatalog: true },
   // Wardrobe (PLAN T203, SPEC F104.7; renamed from "Library" at PLAN T204, Dean's ruling — nav label
   // and route only, see this file's own class remarks) is deliberately NOT gated by
