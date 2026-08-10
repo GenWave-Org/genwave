@@ -19,14 +19,21 @@
 //
 // ScenarioDormantBundleColumns is likewise real: persona_id/envelope exist with no DEFAULT (read from
 // the same snapshot) and read back NULL on an inserted row — the table has no writer anywhere this
-// epic (F115.2) — rather than the T239 repository CRUD pending scaffold below it, which still awaits
-// the Show type and store T239 builds.
+// epic (F115.2).
 //
-// ScenarioAuthoredCrud and ScenarioRejectingInvalidShows remain PENDING (T239): the types under spec
-// (Show, the show store) do not exist yet. The endpoint half lives in
-// GenWave.Host.Tests/Specs/Story305_ShowsApi.cs.
+// ScenarioAuthoredCrud and ScenarioRejectingInvalidShows are now real too (PLAN T239: the Show domain
+// type, IShowStore, and ShowRepository — GenWave.Core.Domain/Abstractions,
+// GenWave.MediaLibrary.Station). Both are Category=Integration via DatabaseCollection, mirroring the
+// two scenarios above: RunMigrationScript(db) first (the convergence idiom — this file's own live
+// database may have had station.show's T238 columns dropped and re-added mid-suite by
+// ScenarioMigrationAddsTheColumnsInPlace, with no ordering guarantee against it), then
+// DatabaseFixture.ResetShowAsync() for a clean table before every fact. The endpoint half lives in
+// GenWave.Host.Tests/Specs/Story305_ShowsApi.cs (PLAN T240, still pending).
 
 using Dapper;
+using GenWave.Core.Domain;
+using GenWave.MediaLibrary.Station;
+using Npgsql;
 
 namespace GenWave.MediaLibrary.Tests.Specs;
 
@@ -122,6 +129,11 @@ public static class FeatureShowRepository
     /// is a list rather than a single name).</summary>
     static IReadOnlyList<string> InitialUniqueConstraintNames(DatabaseFixture db, string table) =>
         db.InitialUniqueConstraints.GetValueOrDefault(table, []);
+
+    /// <summary>The T239 repository under spec, wired the same "Lazy over the fixture's own
+    /// StationDataSource" way Story118_PersonaStorage.cs's own <c>Repo</c> helper wires
+    /// <c>PersonaRepository</c>.</summary>
+    static ShowRepository Repo(DatabaseFixture db) => new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
 
     // ---------------------------------------------------------------------
     // HAPPY PATH — fresh init (db/06's mirror of db/35)
@@ -243,6 +255,17 @@ public static class FeatureShowRepository
         [Fact]
         public async Task MigrationAddsTheSevenShowColumnsAndBothShowIdColumnsInPlace()
         {
+            // T239 review: station.show shipped dormant through T238 (never a single row, any test
+            // order), but PLAN T239's own repository specs (ScenarioAuthoredCrud/
+            // ScenarioRejectingInvalidShows below) now insert real rows and leave them behind for
+            // whichever sibling class runs next — this class carries no ordering guarantee against
+            // them. Re-adding `slug text not null` below with no DEFAULT fails outright if a leftover
+            // row exists at that instant (NOT NULL against an unbackfillable new column), so clear the
+            // table first — this scenario's own DROP COLUMN a few lines down removes any pre-existing
+            // slug value anyway, so a row surviving this reset would only ever break the re-ADD, never
+            // help prove anything about it.
+            await db.ResetShowAsync();
+
             // Simulate a pre-T238 database by dropping the seven station.show columns db/35 adds
             // (DROP COLUMN also drops the show_slug_key UNIQUE constraint the slug column carries)
             // plus the two show_id stamp columns it adds on the other two tables.
@@ -331,33 +354,304 @@ public static class FeatureShowRepository
     }
 
     // ---------------------------------------------------------------------
-    // T239 pending scaffold — repository CRUD (still pending; unchanged by T238)
+    // T239 — repository CRUD, now real (Integration)
     // ---------------------------------------------------------------------
 
-    public sealed class ScenarioAuthoredCrud
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioAuthoredCrud(DatabaseFixture db)
     {
-        [Fact(Skip = "Pending (T239)")]
-        public void RoundTripsEveryField()
+        [Fact]
+        public async Task RoundTripsEveryField()
         {
             // Given an authored show "Night Moves" (tagline + flavor within budgets)
-            // When  it is created, edited, and re-read through the repository
-            // Then  name, slug, tagline, and flavor all round-trip; provenance stays NULL
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            var created = Assert.IsType<ShowWriteResult.Created>(await repo.CreateAsync(
+                new ShowDraft("Night Moves", "Late-night deep cuts", "moody, sparse, past midnight"),
+                CancellationToken.None));
+
+            // When it is created, edited, and re-read through the repository
+            var edited = Assert.IsType<ShowWriteResult.Updated>(await repo.UpdateAsync(
+                created.Show.Id,
+                new ShowDraft("Night Moves", "Late-night deep cuts, revisited", "moodier, sparser, past 1am"),
+                CancellationToken.None));
+            var read = await repo.GetByIdAsync(created.Show.Id, CancellationToken.None);
+
+            // Then name, slug, tagline, and flavor all round-trip; provenance stays NULL — pinned in
+            // one assertion via full-record equality against the literal expected values (CreatedAt/
+            // UpdatedAt are server-set, so those two are taken from the write results themselves).
+            var expected = new Show(
+                created.Show.Id,
+                "Night Moves",
+                created.Show.Slug,
+                "Late-night deep cuts, revisited",
+                "moodier, sparser, past 1am",
+                ImportedFrom: null,
+                ImportedAt: null,
+                created.Show.CreatedAt,
+                edited.Show.UpdatedAt);
+            Assert.Equal(expected, read);
         }
 
-        [Fact(Skip = "Pending (T239)")]
-        public void SlugDerivesViaHouseSlugify()
+        [Fact]
+        public async Task SlugDerivesViaHouseSlugify()
         {
             // Given an authored create with name "Night Moves"
-            // When  the row lands
-            // Then  slug is the house Slugify output (the T68 golden-table contract)
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+
+            // When the row lands
+            var created = Assert.IsType<ShowWriteResult.Created>(
+                await repo.CreateAsync(new ShowDraft("Night Moves"), CancellationToken.None));
+
+            // Then slug is the house Slugify output (the T68 golden-table contract) — compared
+            // against the real LegacyPersonaCardMapper.Slugify call, not a hand-typed literal, so a
+            // future Slugify change can never silently disagree with what CreateAsync actually wrote.
+            Assert.Equal(LegacyPersonaCardMapper.Slugify("Night Moves"), created.Show.Slug);
         }
 
-        [Fact(Skip = "Pending (T239)")]
-        public void OneDjManyShows()
+        [Fact]
+        public async Task OneDjManyShows()
         {
-            // Given one persona
-            // When  three shows are authored (later assignable across their blocks)
-            // Then  nothing structural objects — shows-per-DJ is unbounded by design (STORY-305 AC3)
+            // Given one persona — deliberately never created here: persona linkage is block-level
+            // (later tasks; F115.2's dormant persona_id stays unread this epic), so this fact stays
+            // honest to its own GWT comment by proving only the show side: three shows authored with
+            // nothing referencing a persona at all.
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+
+            // When three shows are authored (later assignable across their blocks), deliberately out
+            // of alphabetical order
+            await repo.CreateAsync(new ShowDraft("Morning Drive"), CancellationToken.None);
+            await repo.CreateAsync(new ShowDraft("Afternoon Session"), CancellationToken.None);
+            await repo.CreateAsync(new ShowDraft("Night Moves"), CancellationToken.None);
+
+            // Then nothing structural objects — shows-per-DJ is unbounded by design (STORY-305 AC3):
+            // all three land, none rejected, and GetAllAsync's own IShowStore contract ("ordered by
+            // name") reads back alphabetically regardless of the create order above.
+            var all = await repo.GetAllAsync(CancellationToken.None);
+            Assert.Equal(["Afternoon Session", "Morning Drive", "Night Moves"], all.Select(s => s.Name));
+        }
+
+        [Fact]
+        public async Task UpdateAdvancesUpdatedAt()
+        {
+            // Given an authored show (mirrors Story118_PersonaStorage's own UpdateAdvancesUpdatedAt)
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            var created = Assert.IsType<ShowWriteResult.Created>(
+                await repo.CreateAsync(new ShowDraft("Original Name"), CancellationToken.None));
+
+            // When it is renamed via an edit
+            var updated = Assert.IsType<ShowWriteResult.Updated>(await repo.UpdateAsync(
+                created.Show.Id, new ShowDraft("Renamed"), CancellationToken.None));
+
+            // Then updated_at moves forward and the read reflects the rename
+            Assert.True(updated.Show.UpdatedAt > created.Show.UpdatedAt);
+            var read = await repo.GetByIdAsync(created.Show.Id, CancellationToken.None);
+            Assert.NotNull(read);
+            Assert.Equal("Renamed", read.Name);
+        }
+
+        [Fact]
+        public async Task BudgetsAcceptAtExactlyTheLimit()
+        {
+            // Given a draft with every field at its exact SPEC F115.1 1× budget — the boundary is
+            // inclusive (BudgetsRejectAtOneTimes, below, proves budget+1 rejects)
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            var draft = new ShowDraft(
+                new string('n', ShowBudgets.NameMaxChars),
+                new string('t', ShowBudgets.TaglineMaxChars),
+                new string('f', ShowBudgets.FlavorMaxChars));
+
+            // When the repository write is attempted
+            var outcome = await repo.CreateAsync(draft, CancellationToken.None);
+
+            // Then it is accepted, not rejected
+            var created = Assert.IsType<ShowWriteResult.Created>(outcome);
+            Assert.Equal(draft.Name, created.Show.Name);
+            Assert.Equal(draft.Tagline, created.Show.Tagline);
+            Assert.Equal(draft.Flavor, created.Show.Flavor);
+        }
+
+        [Fact]
+        public async Task EmptyOrWhitespaceTaglineAndFlavorPersistAsNull()
+        {
+            // Given a show authored with a blank tagline and a whitespace-only flavor (create path)
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            var created = Assert.IsType<ShowWriteResult.Created>(await repo.CreateAsync(
+                new ShowDraft("Night Moves", Tagline: "", Flavor: "   "), CancellationToken.None));
+
+            // Then both coerce to null on create — Show/ShowDraft's own docs promise null "when the
+            // show carries none", never a stray empty/whitespace string
+            Assert.Null(created.Show.Tagline);
+            Assert.Null(created.Show.Flavor);
+
+            // When an edit first gives the show a real tagline/flavor, then a later edit clears both
+            // back to blank/whitespace (update path)
+            var withValues = Assert.IsType<ShowWriteResult.Updated>(await repo.UpdateAsync(
+                created.Show.Id,
+                new ShowDraft("Night Moves", "Real tagline", "Real flavor"),
+                CancellationToken.None));
+            Assert.Equal("Real tagline", withValues.Show.Tagline);
+            Assert.Equal("Real flavor", withValues.Show.Flavor);
+
+            var cleared = Assert.IsType<ShowWriteResult.Updated>(await repo.UpdateAsync(
+                created.Show.Id,
+                new ShowDraft("Night Moves", Tagline: "", Flavor: "   "),
+                CancellationToken.None));
+
+            // Then the cleared fields read back null through UpdateAsync too, never the empty/
+            // whitespace string verbatim
+            Assert.Null(cleared.Show.Tagline);
+            Assert.Null(cleared.Show.Flavor);
+            var read = await repo.GetByIdAsync(created.Show.Id, CancellationToken.None);
+            Assert.NotNull(read);
+            Assert.Null(read.Tagline);
+            Assert.Null(read.Flavor);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // T239 — GetBySlugAsync (Integration)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioGetBySlugAsync(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task ReturnsTheShowWhenTheSlugExists()
+        {
+            // Given an authored show
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            var created = Assert.IsType<ShowWriteResult.Created>(
+                await repo.CreateAsync(new ShowDraft("Night Moves"), CancellationToken.None));
+
+            // When it is looked up by its derived slug
+            var read = await repo.GetBySlugAsync(created.Show.Slug, CancellationToken.None);
+
+            // Then the same row comes back
+            Assert.Equal(created.Show, read);
+        }
+
+        [Fact]
+        public async Task ReturnsNullWhenTheSlugIsUnknown()
+        {
+            // Given an empty table
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+
+            // When a slug naming no row is looked up
+            var read = await repo.GetBySlugAsync("no-such-show", CancellationToken.None);
+
+            // Then it misses cleanly
+            Assert.Null(read);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // T239 — DeleteAsync (Integration)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioDeleteAsync(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task DeletesAnExistingShow()
+        {
+            // Given an authored show with no references
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            var created = Assert.IsType<ShowWriteResult.Created>(
+                await repo.CreateAsync(new ShowDraft("To Be Deleted"), CancellationToken.None));
+
+            // When it is deleted
+            var outcome = await repo.DeleteAsync(created.Show.Id, CancellationToken.None);
+
+            // Then it succeeds and the row is gone
+            Assert.IsType<ShowWriteResult.Deleted>(outcome);
+            Assert.Null(await repo.GetByIdAsync(created.Show.Id, CancellationToken.None));
+        }
+
+        [Fact]
+        public async Task ReturnsNotFoundForAMissingShow()
+        {
+            // Given an empty table (no show with this id has ever existed)
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+
+            // When a delete targets an id that names no row
+            var outcome = await repo.DeleteAsync(999_999, CancellationToken.None);
+
+            // Then it reports not found, never a silent no-op success
+            Assert.IsType<ShowWriteResult.NotFound>(outcome);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // T239 — DeleteAsync's FK guard (SPEC F115.4): station.segment_schedule.show_id's own ON DELETE
+    // RESTRICT, surfaced as ShowWriteResult.Referenced (mirrors Story118_PersonaStorage's own
+    // ScenarioDeleteFkGuard idiom — direct SQL insert into segment_schedule, bypassing ScheduleRepository
+    // entirely, so this fact exercises the FK itself rather than any other seam).
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioDeleteFkGuard(DatabaseFixture db)
+    {
+        static async Task InsertScheduleRowReferencingShowAsync(DatabaseFixture db, long showId)
+        {
+            await using var conn = await db.StationDataSource.OpenConnectionAsync();
+            await conn.ExecuteAsync(
+                """
+                insert into station.segment_schedule (day_of_week, start_minute, end_minute, show_id)
+                values (1, 540, 720, @showId)
+                """,
+                new { showId });
+        }
+
+        [Fact]
+        public async Task DeletingAReferencedShowIsRejectedThenSucceedsOnceUnreferenced()
+        {
+            // Given an authored show referenced by one schedule row
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            var created = Assert.IsType<ShowWriteResult.Created>(
+                await repo.CreateAsync(new ShowDraft("Scheduled Show"), CancellationToken.None));
+            await InsertScheduleRowReferencingShowAsync(db, created.Show.Id);
+
+            // When delete is attempted while the reference stands
+            var whileReferenced = await repo.DeleteAsync(created.Show.Id, CancellationToken.None);
+
+            // Then the FK's own RESTRICT rejects it — the store-level case names nothing beyond
+            // "referenced" (PLAN T240 enriches this with block-naming at the endpoint layer)
+            Assert.IsType<ShowWriteResult.Referenced>(whileReferenced);
+
+            // When the reference is removed and delete is retried
+            await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+                await conn.ExecuteAsync(
+                    "delete from station.segment_schedule where show_id = @showId", new { showId = created.Show.Id });
+            var onceUnreferenced = await repo.DeleteAsync(created.Show.Id, CancellationToken.None);
+
+            // Then it succeeds
+            Assert.IsType<ShowWriteResult.Deleted>(onceUnreferenced);
         }
     }
 
@@ -393,9 +687,12 @@ public static class FeatureShowRepository
             // class scheduling.
             RunMigrationScript(db);
 
-            // When a row is inserted through the only two columns any writer touches (name, slug —
-            // the table has no writer anywhere this epic, F115.2), inside a transaction that always
-            // rolls back so this fact leaves nothing behind for its siblings...
+            // When a row is inserted through the bare name/slug columns — deliberately NOT through
+            // ShowRepository (PLAN T239's real writer of this table as of this task, but it has no
+            // parameter for persona_id/envelope at all — SPEC F115.2's "unread this epic" law — so a
+            // raw INSERT is the only way to even attempt setting them, and this one doesn't either) —
+            // inside a transaction that always rolls back so this fact leaves nothing behind for its
+            // siblings...
             await using var conn = await db.StationDataSource.OpenConnectionAsync();
             await using var tx = await conn.BeginTransactionAsync();
 
@@ -422,25 +719,155 @@ public static class FeatureShowRepository
     }
 
     // ---------------------------------------------------------------------
-    // T239 pending scaffold — validation & conflicts (still pending; unchanged by T238)
+    // T239 — validation & conflicts, now real (Integration)
     // ---------------------------------------------------------------------
 
-    public sealed class ScenarioRejectingInvalidShows
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioRejectingInvalidShows(DatabaseFixture db)
     {
-        [Fact(Skip = "Pending (T239)")]
-        public void BudgetsRejectAtOneTimes()
+        [Fact]
+        public async Task BudgetsRejectAtOneTimes()
         {
-            // Given a show whose flavor exceeds 400 chars (or name > 60, tagline > 120)
-            // When  the repository write is attempted
-            // Then  it rejects at the seam — the 1× budget is the app-side hard line (F115.1)
+            // Given a show whose flavor exceeds 400 chars (the same 1x line also covers name > 60,
+            // tagline > 120 — ShowRepository.ValidateBudgets checks all three; flavor is the
+            // representative case here, mirroring the GWT comment's own primary example)
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            var draft = new ShowDraft("Night Moves", Flavor: new string('a', ShowBudgets.FlavorMaxChars + 1));
+
+            // When the repository write is attempted
+            var outcome = await repo.CreateAsync(draft, CancellationToken.None);
+
+            // Then it rejects at the seam — the 1× budget is the app-side hard line (F115.1)
+            Assert.Equal(new ShowWriteResult.BudgetExceeded(ShowBudgetField.Flavor), outcome);
         }
 
-        [Fact(Skip = "Pending (T239)")]
-        public void DuplicateSlugRejected()
+        [Fact]
+        public async Task DuplicateSlugRejected()
         {
             // Given an existing show slug
-            // When  a second show would land on the same slug
-            // Then  the unique constraint surfaces as a conflict, not a silent overwrite
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            await repo.CreateAsync(new ShowDraft("Night Moves"), CancellationToken.None);
+
+            // When a second show would land on the same slug
+            var outcome = await repo.CreateAsync(new ShowDraft("Night Moves"), CancellationToken.None);
+
+            // Then the unique constraint surfaces as a conflict, not a silent overwrite
+            Assert.IsType<ShowWriteResult.SlugConflict>(outcome);
+        }
+
+        [Fact]
+        public async Task UpdateRejectsABudgetViolation()
+        {
+            // Given an existing show
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            var created = Assert.IsType<ShowWriteResult.Created>(
+                await repo.CreateAsync(new ShowDraft("Night Moves"), CancellationToken.None));
+
+            // When it is edited with a tagline over its SPEC F115.1 1× budget
+            var outcome = await repo.UpdateAsync(
+                created.Show.Id,
+                new ShowDraft("Night Moves", Tagline: new string('a', ShowBudgets.TaglineMaxChars + 1)),
+                CancellationToken.None);
+
+            // Then it rejects at the seam the same way CreateAsync does — checked before the write
+            // ever reaches Postgres, the row left unchanged
+            Assert.Equal(new ShowWriteResult.BudgetExceeded(ShowBudgetField.Tagline), outcome);
+        }
+
+        [Fact]
+        public async Task UpdateRejectsASlugConflict()
+        {
+            // Given two existing shows
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            await repo.CreateAsync(new ShowDraft("Night Moves"), CancellationToken.None);
+            var second = Assert.IsType<ShowWriteResult.Created>(
+                await repo.CreateAsync(new ShowDraft("Day Drift"), CancellationToken.None));
+
+            // When the second is renamed onto the first's slug
+            var outcome = await repo.UpdateAsync(
+                second.Show.Id, new ShowDraft("Night Moves"), CancellationToken.None);
+
+            // Then the unique constraint surfaces as a conflict, not a silent overwrite
+            Assert.IsType<ShowWriteResult.SlugConflict>(outcome);
+        }
+
+        [Fact]
+        public async Task UpdateReturnsNotFoundForAMissingShow()
+        {
+            // Given an empty table (no show with this id has ever existed)
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+
+            // When an edit targets an id that names no row
+            var outcome = await repo.UpdateAsync(999_999, new ShowDraft("Night Moves"), CancellationToken.None);
+
+            // Then it reports not found, never a silent insert
+            Assert.IsType<ShowWriteResult.NotFound>(outcome);
+        }
+
+        [Theory]
+        [InlineData("")]
+        [InlineData("   ")]
+        public async Task BlankOrWhitespaceNameRejected(string name)
+        {
+            // Given a draft whose name is blank or whitespace-only
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+
+            // When the repository write is attempted
+            var outcome = await repo.CreateAsync(new ShowDraft(name), CancellationToken.None);
+
+            // Then it rejects at the seam, never reaching station.show's own NOT NULL/check
+            // (length(btrim(name)) > 0) constraint (db/33)
+            Assert.IsType<ShowWriteResult.InvalidName>(outcome);
+        }
+
+        [Fact]
+        public async Task NameThatSlugifiesToTheFallbackLiteralRejected()
+        {
+            // Given a name with no alphanumeric characters at all — LegacyPersonaCardMapper.Slugify's
+            // own empty-slug rescue would otherwise resolve it to the bare literal "persona"
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            Assert.Equal("persona", LegacyPersonaCardMapper.Slugify("🎧🎶"));
+
+            // When the repository write is attempted
+            var outcome = await repo.CreateAsync(new ShowDraft("🎧🎶"), CancellationToken.None);
+
+            // Then it rejects — REJECT, not silently autocorrect into a misleadingly-named show
+            Assert.IsType<ShowWriteResult.InvalidName>(outcome);
+        }
+
+        [Fact]
+        public async Task UpdateRejectsABlankName()
+        {
+            // Given an existing show
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            var created = Assert.IsType<ShowWriteResult.Created>(
+                await repo.CreateAsync(new ShowDraft("Night Moves"), CancellationToken.None));
+
+            // When it is edited with a blank name
+            var outcome = await repo.UpdateAsync(created.Show.Id, new ShowDraft(""), CancellationToken.None);
+
+            // Then it rejects at the seam the same way CreateAsync does, the row left unchanged
+            Assert.IsType<ShowWriteResult.InvalidName>(outcome);
+            var read = await repo.GetByIdAsync(created.Show.Id, CancellationToken.None);
+            Assert.NotNull(read);
+            Assert.Equal("Night Moves", read.Name);
         }
     }
 }

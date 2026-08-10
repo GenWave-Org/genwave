@@ -186,6 +186,25 @@ public sealed class DatabaseFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
+    /// <summary>
+    /// Truncate <c>station.show</c> and reset its identity (SPEC F115.1, STORY-305, PLAN T239).
+    /// CASCADE (mirrors <see cref="ResetStationAsync"/>'s own remarks): <c>station.segment_schedule</c>'s
+    /// <c>show_id</c> FK (db/06, SPEC F114) — <c>ON DELETE RESTRICT</c> though it is — still makes
+    /// Postgres refuse a plain TRUNCATE, since TRUNCATE's own FK check is stricter than any single
+    /// row's <c>ON DELETE</c> action; CASCADE follows it and sweeps that table's rows along with
+    /// <c>station.show</c>'s, same as it already does for the persona-referencing tables
+    /// <see cref="ResetStationAsync"/> truncates. <c>station.booth_log.show_id</c>/
+    /// <c>library.media.show_id</c> carry no FK (db/35 — history/imaging must outlive the entity), so
+    /// neither is touched by this reset.
+    /// </summary>
+    public async Task ResetShowAsync()
+    {
+        await using var conn = await StationDataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "truncate table station.show restart identity cascade";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     async Task WaitForSchemaAsync()
     {
         for (var attempt = 0; attempt < 30; attempt++)
