@@ -184,7 +184,15 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  -- would otherwise force this migration to keep pace with. NO CONSUMER YET (T219): T220 wires
 	  -- the write path. See db/33-show-and-segment-kind-migration.sh for the in-place upgrade path
 	  -- this column also ships as.
-	  segment_kind text
+	  segment_kind text,
+	  -- SPEC F121.1, STORY-310, PLAN T238/T242: the air-time show stamp, written the same
+	  -- synchronous-at-write-time way as persona_id/artist/pick/segment_kind above. NULL for every
+	  -- row aired outside a show or predating this column. Deliberately NO FK — history must outlive
+	  -- the entity; a deleted show must never rewrite or block on past airings (the exact media_id/
+	  -- segment_kind precedent already on this table). NO CONSUMER YET (T238): T242 wires the write
+	  -- path. See db/35-show-identity-migration.sh for the in-place upgrade path this column also
+	  -- ships as.
+	  show_id int
 	);
 
 	-- Keyset paging spine (SPEC F72.2): newest-first (occurred_at DESC, id DESC) with no OFFSET —
@@ -244,20 +252,40 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	CREATE INDEX IF NOT EXISTS request_pending
 	  ON station.request (status, expires_at);
 
-	-- Shows (SPEC F114, gh-#383 — the later slice, schema ruled at STORY-304/T219): a first-class
-	-- entity, singular like every other table in this schema (station.persona precedent) — renaming a
-	-- show touches one row, and identity is what patter/idents/spectator will reference once the
-	-- F114 slice lands. Defined here, ahead of station.segment_schedule below, purely so that table's
-	-- show_id column has something to reference — the two tables carry no other ordering relationship.
-	-- NO CONSUMER YET (T219): station.show stays dormant by design until F114 wires a writer/reader,
-	-- the same "seam before consumer" way station.persona_taste (T59), station.theme (T181), and
-	-- station.font_pack (T198) all shipped. See db/33-show-and-segment-kind-migration.sh for the
-	-- in-place upgrade path this table also ships as.
+	-- Shows (SPEC F114/F115, gh-#383 — the later slice, schema ruled at STORY-304/T219 then widened
+	-- at STORY-305/STORY-310/T238): a first-class entity, singular like every other table in this
+	-- schema (station.persona precedent) — renaming a show touches one row, and identity is what
+	-- patter/idents/spectator will reference once the F114/F115 slices land. Defined here, ahead of
+	-- station.segment_schedule below, purely so that table's show_id column has something to
+	-- reference — the two tables carry no other ordering relationship.
+	--
+	-- slug is the import identity (a catalog slug for an import, the house Slugify output for an
+	-- authored show — T239), UNIQUE and NOT NULL — safe with no backfill because this table is still
+	-- empty on every install (NO CONSUMER YET below). tagline is public (broadcast-shaped); flavor is
+	-- prompt-only and NEVER public (F115.3 — the persona-soul precedent). imported_from/imported_at
+	-- mirror station.persona's own db/25 provenance pair exactly.
+	--
+	-- persona_id/envelope are DORMANT bundle columns (ARCHITECTURE.md ruled 2026-08-10): UNREAD until
+	-- the deferred schedulable-bundle slice. Future semantics recorded there, not enforced here:
+	-- effective assignment = block ?? show ?? none, block always wins.
+	--
+	-- NO CONSUMER YET (T219, still true after T238's widening): station.show stays dormant by design
+	-- until F114/F115 wire a writer/reader, the same "seam before consumer" way station.persona_taste
+	-- (T59), station.theme (T181), and station.font_pack (T198) all shipped. See
+	-- db/33-show-and-segment-kind-migration.sh and db/35-show-identity-migration.sh for the in-place
+	-- upgrade paths this table also ships as.
 	CREATE TABLE IF NOT EXISTS station.show (
-	  id         serial      PRIMARY KEY,
-	  name       text        NOT NULL CHECK (length(btrim(name)) > 0),
-	  created_at timestamptz NOT NULL DEFAULT now(),
-	  updated_at timestamptz NOT NULL DEFAULT now()
+	  id            serial      PRIMARY KEY,
+	  name          text        NOT NULL CHECK (length(btrim(name)) > 0),
+	  slug          text        NOT NULL CONSTRAINT show_slug_key UNIQUE,
+	  tagline       text,
+	  flavor        text,
+	  imported_from text,
+	  imported_at   timestamptz,
+	  persona_id    int         REFERENCES station.persona (id),
+	  envelope      jsonb,
+	  created_at    timestamptz NOT NULL DEFAULT now(),
+	  updated_at    timestamptz NOT NULL DEFAULT now()
 	);
 
 	-- The weekly format-clock grid (SPEC F91.1, F91.2; STORY-240, STORY-242; PLAN T118) that replaces

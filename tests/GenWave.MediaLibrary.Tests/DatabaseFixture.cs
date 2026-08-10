@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Diagnostics;
 using Dapper;
 using Npgsql;
@@ -29,6 +30,29 @@ public sealed class DatabaseFixture : IAsyncLifetime
 
     public NpgsqlDataSource StationDataSource { get; private set; } = null!;
 
+    /// <summary>
+    /// (data_type, is_nullable, column_default) for every column of the <c>station</c> and
+    /// <c>library</c> schemas, snapshotted in <see cref="InitializeAsync"/> right after
+    /// <see cref="WaitForSchemaAsync"/> — the one instant that is the PURE db/01+db/06 fresh-init
+    /// world, since <c>db-compose.yaml</c> mounts only those two files as Postgres init scripts. No
+    /// test class has run yet, so nothing here can have been shaped by db/35 (or any other in-place
+    /// migration script) rather than by db/06's own CREATE. Story305_ShowRepository.cs's fresh-init
+    /// facts assert against this snapshot instead of re-running a migration script, which is the only
+    /// way a dropped db/06 mirror of a db/35 column can actually turn a fact red.
+    /// </summary>
+    public IReadOnlyDictionary<(string Schema, string Table, string Column), (string DataType, string IsNullable, string? ColumnDefault)> InitialSchema
+    { get; private set; } = new Dictionary<(string, string, string), (string, string, string?)>();
+
+    /// <summary>
+    /// The UNIQUE constraint names (<c>pg_constraint.conname</c>, <c>contype = 'u'</c>) present on
+    /// each <c>station</c>-schema table at the same fresh-init instant <see cref="InitialSchema"/>
+    /// captures, keyed by bare table name. A table can carry more than one UNIQUE constraint (e.g.
+    /// <c>station.persona</c> has both <c>name</c> and <c>slug</c>), hence a list per table rather
+    /// than a single name.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> InitialUniqueConstraints
+    { get; private set; } = new Dictionary<string, IReadOnlyList<string>>();
+
     string composeFile = "";
 
     public async Task InitializeAsync()
@@ -43,6 +67,7 @@ public sealed class DatabaseFixture : IAsyncLifetime
         DataSource = new NpgsqlDataSourceBuilder(ConnectionString).Build();
         StationDataSource = new NpgsqlDataSourceBuilder(StationConnectionString).Build();
         await WaitForSchemaAsync();
+        await SnapshotInitialSchemaAsync();
     }
 
     public async Task DisposeAsync()
@@ -180,6 +205,63 @@ public sealed class DatabaseFixture : IAsyncLifetime
         }
 
         throw new InvalidOperationException("library schema not ready on the test database");
+    }
+
+    /// <summary>
+    /// Populates <see cref="InitialSchema"/> and <see cref="InitialUniqueConstraints"/> — must run
+    /// only once, immediately after <see cref="WaitForSchemaAsync"/> and before any test class gets a
+    /// chance to run a migration script or otherwise mutate the schema (see those properties' own
+    /// remarks for why that instant matters). Reads the station schema over
+    /// <see cref="StationDataSource"/> and the library schema over <see cref="DataSource"/> — the two
+    /// roles have no cross-schema grants, the same reason <c>QueryColumnAsync</c>/
+    /// <c>QueryLibraryMediaColumnAsync</c> in Story305_ShowRepository.cs split the same way.
+    /// </summary>
+    async Task SnapshotInitialSchemaAsync()
+    {
+        var schema = new Dictionary<(string, string, string), (string, string, string?)>();
+
+        await AddColumnsAsync(StationDataSource, "station");
+        await AddColumnsAsync(DataSource, "library");
+
+        async Task AddColumnsAsync(NpgsqlDataSource dataSource, string schemaName)
+        {
+            await using var conn = await dataSource.OpenConnectionAsync();
+            var rows = await conn.QueryAsync<(string TableName, string ColumnName, string DataType, string IsNullable, string? ColumnDefault)>(
+                """
+                select table_name, column_name, data_type, is_nullable, column_default
+                from information_schema.columns
+                where table_schema = @schemaName
+                """,
+                new { schemaName });
+            foreach (var row in rows)
+                schema[(schemaName, row.TableName, row.ColumnName)] = (row.DataType, row.IsNullable, row.ColumnDefault);
+        }
+
+        // Frozen so no spec can mutate the shared snapshot via a cast back to a mutable dictionary type.
+        InitialSchema = schema.ToFrozenDictionary();
+
+        var uniqueConstraints = new Dictionary<string, List<string>>();
+        await using (var conn = await StationDataSource.OpenConnectionAsync())
+        {
+            var rows = await conn.QueryAsync<(string TableName, string ConstraintName)>(
+                """
+                select c.relname as table_name, con.conname as constraint_name
+                from pg_constraint con
+                join pg_class c on c.oid = con.conrelid
+                join pg_namespace n on n.oid = c.relnamespace
+                where con.contype = 'u' and n.nspname = 'station'
+                """);
+            foreach (var row in rows)
+            {
+                if (!uniqueConstraints.TryGetValue(row.TableName, out var names))
+                    uniqueConstraints[row.TableName] = names = [];
+                names.Add(row.ConstraintName);
+            }
+        }
+
+        // Each value is a defensive copy (not the live List) so no spec can mutate the shared snapshot.
+        InitialUniqueConstraints = uniqueConstraints.ToDictionary(
+            entry => entry.Key, entry => (IReadOnlyList<string>)entry.Value.ToArray());
     }
 
     /// <summary>

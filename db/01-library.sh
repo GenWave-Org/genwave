@@ -226,6 +226,15 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	  add column imaging_kind text
 	    check (imaging_kind is null or imaging_kind in ('liner', 'station_id', 'jingle', 'promo'));
 
+	-- show_id (SPEC F119.4, STORY-305/STORY-310, PLAN T238): scopes an authored imaging row to a
+	-- station.show. Crosses the db/22 schema-role boundary (station_svc has no grant into library) the
+	-- same way booth_log.media_id already crosses it in the other direction -- plain int, deliberately
+	-- NO FK, resolved by the app at its own edge, never a cross-schema join. NULL = station-wide
+	-- (every row today); set only on an authored imaging row scoped to a show once T246 wires the
+	-- write path. NO CONSUMER YET (T238): the pool query gains the show filter at T250.
+	alter table library.media
+	  add column show_id int;
+
 	-- Composite partial index: scope-filtered random-ready pick (replaces scalar media_ready).
 	create index media_scope_ready on library.media (library_id, state) where state = 'ready';
 	create index media_artist      on library.media (artist);                       -- ready for criteria queries
