@@ -173,6 +173,30 @@ Verify — the limit column must show the fence, not total RAM:
 docker stats --no-stream    # piper should read e.g. 220MiB / 768MiB, not / 3.953GiB
 ```
 
+⚠️ **If the stack ever ran before this fix, a reboot is not enough** (learned live on the second
+Pi, 2026-08-09): the containers were *created* with the discarded (zero) limit baked into their
+config, Docker's restart policy resurrects them unfenced after the reboot, and a plain `up -d`
+sees no compose diff so it recreates nothing. Force the recreate:
+
+```bash
+docker compose down          # COMPOSE_FILE in .env carries your overlays (gh-#309)
+./launch.sh --pinned --piper-only
+docker inspect <project>-piper-1 --format '{{.HostConfig.Memory}}'   # want 805306368
+```
+
+**3½. 📻 LAN-only listening — scheme-prefix `PUBLIC_HOST`.** The Caddyfile's site address is the
+raw `{$PUBLIC_HOST}`, and a bare hostname (or `localhost`) gets Caddy's full auto-HTTPS
+treatment: HTTP 308-redirects to HTTPS with a self-signed cert nothing else trusts — from
+another machine the stream is simply unreachable. For a LAN test box, prefix the scheme to turn
+all of that off:
+
+```bash
+PUBLIC_HOST=http://<lan-name>     # in .env — plain HTTP on :80, no redirect, no cert
+```
+
+Stream at `http://<lan-name>/stream`, spectator page at `http://<lan-name>/` — hardware radios
+tune it directly. Public boxes keep the bare domain form; TLS issuance is the whole point there.
+
 **3. 🔌 Official Raspberry Pi 27 W (5 V/5 A) PSU.** Not "a 27 W supply" — the official unit.
 A branded third-party kit PSU on the test box negotiated 5 A correctly and *still* sagged under
 load transients, logging 12+ undervoltage events in the first hour and eventually hard
