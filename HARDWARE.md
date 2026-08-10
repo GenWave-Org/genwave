@@ -139,6 +139,34 @@ If your library depends on automatic explicit classification, topology (c) or an
 Field-verified 2026-08-02 on a Pi 5 4GB (gh-#213 spike → gh-#307/#308 hardening). The 4 GB result
 matters: the entry price for topology (a) is lower than this file previously claimed (it said 8 GB).
 
+### 🔑 SSH access — key-only, in the right order
+
+A playout appliance is a headless box you'll be reaching for at odd hours; set key auth up first
+and turn password auth off. The **order matters exactly once**: verify the key works *before*
+disabling passwords, or you've locked yourself out of a machine with no screen.
+
+```bash
+# From your workstation — copies your public key (add -i ~/.ssh/id_ed25519.pub to pick one):
+ssh-copy-id <user>@<pi-ip>
+
+# Verify key login works BEFORE the next step:
+ssh <user>@<pi-ip>
+
+# On the Pi — key login confirmed? Now close password auth:
+sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo systemctl restart ssh
+
+# Optional, workstation: an alias so it's just `ssh <name>` forever
+cat >> ~/.ssh/config <<'EOF'
+Host <name>
+    HostName <pi-ip>
+    User <user>
+EOF
+```
+
+`tools/soak-check.sh` assumes exactly this shape — `ssh <box> 'bash -s' < tools/soak-check.sh`
+is the whole remote checkpoint.
+
 ### 🔧 Prep — do these before anything else
 
 Every one of these was learned the hard way. Steps 1–3 each caused a failure that looked like a
