@@ -1007,4 +1007,119 @@ public static class FeatureShowRepository
             Assert.Equal("Night Moves", read.Name);
         }
     }
+
+    // ---------------------------------------------------------------------
+    // T254 — ImportAsync (SPEC F118.2, STORY-315): the single-statement upsert-by-slug write path
+    // (real Postgres — every OTHER T254 gate, including the collision/reservation/budget/schema-major
+    // rules, is app-seam validation proven against FakeShowStore in
+    // GenWave.Host.Tests/Specs/Story315_ShowImport.cs; this file's own job is proving the RAW SQL
+    // upsert itself: insert, re-import-replaces, blank-collapses-to-null, and updated_at advances).
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioImportAsync(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task InsertsANewRowWithProvenanceStamped()
+        {
+            // Given an empty table
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+
+            // When a show is imported under a fresh slug
+            var imported = await repo.ImportAsync(
+                "night-moves", "Night Moves", "Late-night deep cuts", "moody, sparse", "catalog-entry-slug",
+                CancellationToken.None);
+
+            // Then it lands whole, provenance stamped, and reads back identically (a fresh slug can
+            // never trip the conflict-only WHERE guard — see ImportAsync's own remarks)
+            Assert.NotNull(imported);
+            Assert.Equal(
+                (Name: "Night Moves", Slug: "night-moves", Tagline: "Late-night deep cuts", Flavor: "moody, sparse",
+                 ImportedFrom: "catalog-entry-slug", ImportedAtSet: true),
+                (imported.Name, imported.Slug, imported.Tagline, imported.Flavor, imported.ImportedFrom,
+                 ImportedAtSet: imported.ImportedAt is not null));
+            var read = await repo.GetBySlugAsync("night-moves", CancellationToken.None);
+            Assert.Equal(imported, read);
+        }
+
+        [Fact]
+        public async Task ReimportingTheSameSlugReplacesFieldsAndRestampsProvenanceWithExactlyOneRow()
+        {
+            // Given a show already imported once
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            var first = await repo.ImportAsync(
+                "night-moves", "Night Moves", "First cut", "moody", "entry-a", CancellationToken.None);
+            Assert.NotNull(first);
+
+            // When it is imported again, under the SAME slug, with different content and provenance —
+            // the conflict-only WHERE guard passes (the existing row's own imported_from is non-null)
+            var second = await repo.ImportAsync(
+                "night-moves", "Night Moves Redux", "Second cut", "moodier", "entry-b", CancellationToken.None);
+
+            // Then the SAME row (id unchanged) is replaced whole — no duplicate insert — and
+            // imported_at/updated_at both advance past the first import's own stamp
+            Assert.NotNull(second);
+            var all = await repo.GetAllAsync(CancellationToken.None);
+            Assert.Equal(
+                (RowCount: 1, Id: first.Id, Name: "Night Moves Redux", Tagline: "Second cut", Flavor: "moodier",
+                 ImportedFrom: "entry-b", ImportedAtAdvanced: second.ImportedAt > first.ImportedAt,
+                 UpdatedAtAdvanced: second.UpdatedAt > first.UpdatedAt),
+                (RowCount: all.Count, second.Id, second.Name, second.Tagline, second.Flavor, second.ImportedFrom,
+                 ImportedAtAdvanced: second.ImportedAt > first.ImportedAt,
+                 UpdatedAtAdvanced: second.UpdatedAt > first.UpdatedAt));
+        }
+
+        [Fact]
+        public async Task BlankOrWhitespaceTaglineAndFlavorPersistAsNull()
+        {
+            // Given a manifest whose tagline is blank and flavor is whitespace-only (the manifest's
+            // own "" export shape for "no tagline/flavor" — ShowManifest's own remarks)
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+
+            // When it is imported
+            var imported = await repo.ImportAsync(
+                "night-moves", "Night Moves", "", "   ", "file", CancellationToken.None);
+
+            // Then both collapse to null — the SAME NullIfBlank contract CreateAsync/UpdateAsync
+            // already honour (Show's own "null when the show carries none" contract), never a stray
+            // empty/whitespace string
+            Assert.NotNull(imported);
+            Assert.Null(imported.Tagline);
+            Assert.Null(imported.Flavor);
+        }
+
+        [Fact]
+        public async Task ImportOverAnAuthoredShowsSlugIsDeclinedAtomicallyAndTheAuthoredRowSurvives()
+        {
+            // F2 review finding — INVERTED from this fact's own pre-review shape (which pinned the
+            // opposite, unguarded overwrite): SPEC F115.5's authored-collision gate now lives INSIDE
+            // this very statement (ON CONFLICT ... WHERE imported_from IS NOT NULL — the gh-#394
+            // conditional-write form, ImportAsync's own remarks), not only at the ShowsController seam
+            // — so a caller bypassing the controller gate entirely (a hand-rolled script, a different
+            // route) still cannot silently clobber an authored row through this store.
+            RunMigrationScript(db);
+            await db.ResetShowAsync();
+            var repo = Repo(db);
+            var authored = Assert.IsType<ShowWriteResult.Created>(
+                await repo.CreateAsync(new ShowDraft("Authored Show"), CancellationToken.None));
+            Assert.Null(authored.Show.ImportedFrom);
+
+            // When an import targets the SAME slug
+            var imported = await repo.ImportAsync(
+                authored.Show.Slug, "Overwritten Show", null, null, "some-catalog-entry", CancellationToken.None);
+
+            // Then the conditional upsert declines (null — the WHERE guard's own signal) and the
+            // authored row survives completely unchanged, byte for byte.
+            Assert.Null(imported);
+            var stillThere = await repo.GetByIdAsync(authored.Show.Id, CancellationToken.None);
+            Assert.Equal(authored.Show, stillThere);
+        }
+    }
 }

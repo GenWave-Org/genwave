@@ -1,10 +1,13 @@
 using System.Diagnostics;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Logging;
 using GenWave.Host.Catalog;
+using GenWave.Host.Shows;
 
 namespace GenWave.Host.Api;
 
@@ -70,7 +73,7 @@ namespace GenWave.Host.Api;
 [Route("api/shows")]
 [AdminSurface]
 [Authorize(Policy = AuthorizationPolicies.Settings)]
-public sealed class ShowsController(
+public sealed partial class ShowsController(
     IShowStore showStore,
     IScheduleStore scheduleStore,
     IShowImagingScope imagingScope,
@@ -161,6 +164,139 @@ public sealed class ShowsController(
             ShowWriteResult.NotFound => NotFound(NotFoundProblem(slug)),
             _ => WriteProblem(result, draft.Name),
         };
+    }
+
+    /// <summary>
+    /// POST /api/shows/{slug}/import — imports a show via the F79 shell (SPEC F118.1/F118.2, STORY-315,
+    /// PLAN T254): the show-kind sibling of <see cref="ThemesImportController.Import"/>/
+    /// <see cref="PersonaController.Import"/>, folded into THIS controller rather than a separate one —
+    /// mirrors <see cref="PersonaController"/>'s own "one controller owns its resource's CRUD AND
+    /// import" shape, not <c>ThemesImportController</c>'s split-out one: Show's import needs no EXTRA
+    /// dependency of the kind that split <c>ThemesImportController</c> off in the first place (a live
+    /// font-provenance/catalog-proxy check) — <see cref="showStore"/>/<see cref="logger"/> are already
+    /// here for the rest of this resource's CRUD, the same "no second file to drift against" reasoning
+    /// this class's own F115.5 remarks already give for keeping the write gate inline rather than a
+    /// dedicated <c>ShowWriteGate</c> type.
+    ///
+    /// <para>
+    /// GATE ORDER: route slug format (400) → the reserved <c>"persona"</c> literal (400, T239's
+    /// <see cref="ShowWriteResult.InvalidName"/> semantics mirrored — see <see cref="ReservedSlug"/>'s
+    /// own remarks) → <paramref name="catalogSlug"/> format/length (400, F90.7 precedent, the same
+    /// cheap pure-string check <see cref="ThemesImportController"/> runs at this exact point in its own
+    /// pipeline) → bounded body read (413, <see cref="BoundedImportBodyReader"/>) → schema-major (400,
+    /// naming both versions, even against an otherwise-malformed body —
+    /// <see cref="ShowManifestParser.ExtractSchemaVersion"/>, mirrors <c>ThemeWriteGate</c>'s own
+    /// two-parse trick) → deserialization-as-validation (400, <see cref="ShowManifestParser.Parse"/> —
+    /// malformed JSON, a missing/blank name, or a field over its 2× import ceiling) → the atomic upsert
+    /// (<see cref="IShowStore.ImportAsync"/>, ONE statement that also OWNS the authored-vs-imported
+    /// collision gate — see below — so there is no separate 409 STEP in this list; the gate and the
+    /// write are the same operation). Unlike <see cref="ThemesImportController.Import"/>, there is no
+    /// in-process catalog cache to rebuild afterwards — <see cref="IShowStore"/> reads straight through
+    /// to Postgres on every call, so an imported show is visible to the very next
+    /// <see cref="Get"/>/<see cref="List"/> with no extra step.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>THE COLLISION DIRECTION (SPEC F115.5's OTHER half) — mirrors <c>ThemeWriteGate</c>'s
+    /// shipped-slug posture, translated to Show's own two provenance classes, and made ATOMIC (F2
+    /// review finding).</b> An AUTHORED show's slug (<see cref="Show.ImportedFrom"/> null) can never be
+    /// silently overwritten by an import — 409 — the same fail-closed DIRECTION <see cref="Update"/>'s
+    /// own F115.5 gate already refuses an authored EDIT targeting an IMPORTED show's slug, now closed
+    /// from the other side too. UNLIKE <see cref="Update"/>'s own gate, this is NOT a read-then-write
+    /// pair (<see cref="IShowStore.ImportAsync"/>'s own remarks): the collision check lives INSIDE the
+    /// single upsert statement (<c>ON CONFLICT ... WHERE imported_from IS NOT NULL</c>, the gh-#394
+    /// conditional-write form) and returns <see langword="null"/> when it declines — this route reacts
+    /// to that <see langword="null"/>, it never performs its own separate read/decide step that a
+    /// concurrent write could race. The theme precedent this mirrors: <c>ThemesImportController</c>'s
+    /// own 409 fires ONLY against a SHIPPED theme's fixed slug set, never against a PRIOR IMPORT — "an
+    /// EARLIER owner import still can never block a later, unrelated one" (that controller's own
+    /// remarks). Shows have no shipped/embedded set to protect; AUTHORED rows are this kind's
+    /// equivalent protected class, so the identical rule translates: an import may always overwrite ITS
+    /// OWN slug's PRIOR IMPORT (a plain re-import, <c>imported_from</c>/<c>imported_at</c> simply
+    /// re-stamped), but never an AUTHORED row.
+    /// </para>
+    /// </summary>
+    [HttpPost("{slug}/import")]
+    [Consumes("application/json")]
+    [RequestSizeLimit(BoundedImportBodyReader.MaxImportBytes)]
+    public async Task<IActionResult> Import(string slug, [FromQuery] string? catalogSlug, CancellationToken ct)
+    {
+        if (!SlugFormat().IsMatch(slug))
+            return BadRequest(BadShowSlugProblem(slug));
+
+        // T239's InvalidName reserved literal, mirrored — see ReservedSlug's own remarks for why this
+        // route cannot reference LegacyPersonaCardMapper.FallbackSlug directly.
+        if (slug == ReservedSlug)
+            return BadRequest(ReservedShowSlugProblem(slug));
+
+        // Cheap, pure-string, no-I/O — BETWEEN the route-slug gate above and the body read below,
+        // mirrors ThemesImportController's own catalogSlug precedence (PLAN T207 review finding B2): a
+        // bad catalogSlug must refuse before a body is ever read, let alone parsed.
+        if (!string.IsNullOrEmpty(catalogSlug))
+        {
+            if (catalogSlug.Length > BoundedImportBodyReader.MaxCatalogSlugLength)
+                return BadRequest(CatalogSlugTooLongProblem(catalogSlug.Length));
+
+            if (!SlugFormat().IsMatch(catalogSlug))
+                return BadRequest(BadCatalogSlugProblem(catalogSlug));
+        }
+
+        var (json, oversized) = await BoundedImportBodyReader.ReadBoundedBodyAsync(
+            Request, BoundedImportBodyReader.MaxImportBytes, ct);
+        if (oversized)
+            return StatusCode(StatusCodes.Status413PayloadTooLarge, OversizedShowManifestProblem());
+
+        // Two parses, by design (mirrors ThemeWriteGate.ReadParseAndValidateAsync's own remarks): a
+        // bare JsonDocument parse reads the optional schemaVersion field BEFORE ShowManifestParser.Parse
+        // ever sees the body, so a version-mismatched manifest is refused naming both versions even
+        // when its shape would also fail structural parsing. Malformed JSON is deliberately NOT
+        // reported here — ShowManifestParser.Parse below throws the one, well-formed message for that.
+        int? schemaVersion = null;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var (version, unreadable) = ShowManifestParser.ExtractSchemaVersion(document.RootElement);
+            if (unreadable)
+                return BadRequest(UnreadableShowSchemaVersionProblem());
+
+            schemaVersion = version;
+        }
+        catch (JsonException)
+        {
+            // Deferred to ShowManifestParser.Parse below.
+        }
+
+        if (schemaVersion is { } manifestSchemaVersion && manifestSchemaVersion > ShowManifestParser.CurrentSchemaVersion)
+            return BadRequest(NewerShowSchemaProblem(manifestSchemaVersion));
+
+        ShowManifest manifest;
+        try
+        {
+            manifest = ShowManifestParser.Parse(new ShowManifestSource(slug, json));
+        }
+        catch (ShowManifestException ex)
+        {
+            return BadRequest(MalformedShowManifestProblem(ex.Message));
+        }
+
+        var importedFrom = string.IsNullOrEmpty(catalogSlug) ? "file" : catalogSlug;
+        var imported = await showStore.ImportAsync(slug, manifest.Name, manifest.Tagline, manifest.Flavor, importedFrom, ct);
+
+        // SPEC F115.5's other direction (see this action's own remarks): the atomic upsert above
+        // already OWNS the authored-vs-imported collision gate — a null result means it declined
+        // (the conflicting row is AUTHORED), nothing was touched. No separate read: this action never
+        // had its own decision to race against.
+        if (imported is null)
+        {
+            logger.LogWarning("Show import refused slug={Slug} reason=authored", LogSafeText.Sanitize(slug));
+            return Conflict(AuthoredSlugReservedProblem(slug));
+        }
+
+        logger.LogInformation(
+            "Show imported slug={Slug} importedFrom={ImportedFrom}",
+            LogSafeText.Sanitize(slug), LogSanitize.Strip(importedFrom));
+
+        return Ok(ToDto(imported));
     }
 
     /// <summary>
@@ -333,6 +469,91 @@ public sealed class ShowsController(
         Detail =
             $"\"{slug}\" was imported (from \"{importedFrom}\") and cannot be edited as an authored " +
             "show; its provenance is left untouched.",
+    };
+
+    // ── Import helpers (SPEC F118.2, PLAN T254) ─────────────────────────────────
+
+    // Composed from CatalogIndexValidator.SlugSegment — the catalog's own slug vocabulary — mirroring
+    // CatalogController.SlugFormat/ThemeWriteGate.SlugFormat's own identical composition (see either
+    // member's remarks for the full \A/\z anchoring rationale: .NET's `$` matches before a trailing
+    // '\n', which a naive ^/$ pattern would let slip through). Used for BOTH the route slug and
+    // catalogSlug — the two DIFFERENT strings ThemesImportController's own SlugFormat also holds to
+    // this one shape.
+    [GeneratedRegex(@"\A" + CatalogIndexValidator.SlugSegment + @"\z")]
+    private static partial Regex SlugFormat();
+
+    // T239's reserved fallback literal (GenWave.MediaLibrary.Station.LegacyPersonaCardMapper.FallbackSlug
+    // — internal to that assembly, so GenWave.Host cannot reference it directly). Restated here rather
+    // than imported: the SAME "mirror, not import" posture PersonaController.SlugFormat's own remarks
+    // already take for LegacyPersonaCardMapper.Slugify's character class. ShowRepository.CreateAsync/
+    // UpdateAsync reject a NAME whose DERIVED slug equals this literal; Import's own route slug is
+    // never derived from a name at all (ShowManifest carries none — see that type's own remarks), so
+    // this route checks the literal directly rather than re-deriving anything.
+    const string ReservedSlug = "persona";
+
+    static ProblemDetails BadShowSlugProblem(string slug) => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Invalid slug.",
+        Detail = $"\"{slug}\" is not a valid show slug (lowercase letters, digits, and single hyphens only).",
+    };
+
+    static ProblemDetails ReservedShowSlugProblem(string slug) => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Invalid slug.",
+        Detail = $"\"{slug}\" is a reserved slug and cannot be used for a show (SPEC F115.1).",
+    };
+
+    static ProblemDetails CatalogSlugTooLongProblem(int length) => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Invalid catalog slug.",
+        Detail = $"catalogSlug must be at most {BoundedImportBodyReader.MaxCatalogSlugLength} characters (got {length}).",
+    };
+
+    static ProblemDetails BadCatalogSlugProblem(string catalogSlug) => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Invalid catalog slug.",
+        Detail = $"\"{catalogSlug}\" is not a valid catalog slug (lowercase letters, digits, and single hyphens only).",
+    };
+
+    static ProblemDetails OversizedShowManifestProblem() => new()
+    {
+        Status = StatusCodes.Status413PayloadTooLarge,
+        Title  = "Payload too large.",
+        Detail = $"Show manifests are capped at {BoundedImportBodyReader.MaxImportBytes / 1024} KB.",
+    };
+
+    static ProblemDetails UnreadableShowSchemaVersionProblem() => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Invalid schema version.",
+        Detail = "schemaVersion, when present, must be a whole number.",
+    };
+
+    static ProblemDetails NewerShowSchemaProblem(int manifestSchemaVersion) => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Unsupported schema version.",
+        Detail =
+            $"Show manifest schema version {manifestSchemaVersion} is newer than this station's " +
+            $"supported version {ShowManifestParser.CurrentSchemaVersion}.",
+    };
+
+    static ProblemDetails MalformedShowManifestProblem(string detail) => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Malformed show manifest.",
+        Detail = detail,
+    };
+
+    static ProblemDetails AuthoredSlugReservedProblem(string slug) => new()
+    {
+        Status = StatusCodes.Status409Conflict,
+        Title  = "Show is authored.",
+        Detail = $"\"{slug}\" is an authored show's slug and cannot be overwritten by an import (SPEC F115.5).",
     };
 
     // SPEC F115.4 — names every referencing block the same day/time shape PersonaController.Delete's

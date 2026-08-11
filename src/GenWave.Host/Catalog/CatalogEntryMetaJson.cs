@@ -22,4 +22,14 @@ public sealed record CatalogEntryMetaJson
     public string? Author { get; init; }
     public string? Description { get; init; }
     public IReadOnlyList<string>? SamplePatter { get; init; }
+
+    /// <summary>
+    /// A <c>kind:"show"</c> entry's OPTIONAL catalog persona slug the import modal offers to "also
+    /// hire" (SPEC F118.3, PLAN T254) — meaningless, and never read, for any other kind. Shape/length
+    /// validated at the one place this reaches the wire
+    /// (<see cref="Api.CatalogController.ValidateSuggestedPersonaShape"/>), not here — this record
+    /// stays the same all-nullable, degrade-don't-throw ephemeral projection every other field on it
+    /// already is.
+    /// </summary>
+    public string? SuggestedPersona { get; init; }
 }

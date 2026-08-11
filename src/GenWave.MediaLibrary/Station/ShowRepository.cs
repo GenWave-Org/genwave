@@ -169,6 +169,46 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource) : IShowStore
     }
 
     /// <summary>
+    /// The import write path (SPEC F118.2, F115.5, STORY-315, PLAN T254) — a single, ATOMIC
+    /// CONDITIONAL upsert-by-slug (the gh-#394 conditional-write form): <c>ON CONFLICT (slug) DO
+    /// UPDATE ... WHERE imported_from IS NOT NULL</c>, not <c>ThemeRepository.UpsertAsync</c>'s own
+    /// unconditional <c>ON CONFLICT DO UPDATE</c> (station.theme carries no authored-vs-imported
+    /// distinction to guard — every owner theme IS an import). The WHERE clause is what makes SPEC
+    /// F115.5's collision gate part of THIS statement rather than a read-then-write pair around it: on
+    /// a fresh slug the INSERT branch always applies (the WHERE only ever gates the CONFLICT branch);
+    /// on a conflict with an existing AUTHORED row (<c>imported_from IS NULL</c>) the WHERE evaluates
+    /// false, so Postgres performs NEITHER the update NOR emits a RETURNING row for it — the statement
+    /// touches nothing, and the <c>QuerySingleOrDefaultAsync</c> call below reads back
+    /// <see langword="null"/>, the caller's own signal to refuse. On a conflict with an existing
+    /// IMPORTED row (<c>imported_from IS NOT NULL</c>) the WHERE evaluates true and the update applies
+    /// normally: every authored field (name/tagline/flavor) replaced, provenance re-stamped
+    /// unconditionally — a re-import always refreshes <c>imported_at</c>, mirroring
+    /// <c>IPersonaImportStore.ImportAsync</c>'s own "a re-import refreshes the stamp" rule.
+    /// <c>updated_at</c> advances the same way <see cref="UpdateAsync"/>'s own explicit <c>now()</c>
+    /// does. Beyond this ONE gate, this method performs no other validation (mirrors
+    /// <c>ThemeRepository.UpsertAsync</c>'s "pure persistence" posture otherwise) — route-slug
+    /// shape/reservation and the 2× import budget ceiling already ran in <c>ShowsController.Import</c>
+    /// before this is ever called.
+    /// </summary>
+    public async Task<Show?> ImportAsync(string slug, string name, string? tagline, string? flavor, string importedFrom, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<Show>(new CommandDefinition(
+            """
+            insert into station.show (name, slug, tagline, flavor, imported_from, imported_at)
+            values (@Name, @Slug, @Tagline, @Flavor, @ImportedFrom, now())
+            on conflict (slug) do update
+              set name = @Name, tagline = @Tagline, flavor = @Flavor,
+                  imported_from = @ImportedFrom, imported_at = now(), updated_at = now()
+              where station.show.imported_from is not null
+            returning id::bigint as id, name, slug, tagline, flavor, imported_from, imported_at,
+                created_at, updated_at
+            """,
+            new { Name = name, Slug = slug, Tagline = NullIfBlank(tagline), Flavor = NullIfBlank(flavor), ImportedFrom = importedFrom },
+            cancellationToken: ct));
+    }
+
+    /// <summary>
     /// SPEC F115.1's name-shape guard — pure C#, evaluated before either write method ever opens a
     /// connection. Rejects a blank/whitespace-only <c>Name</c> outright (station.show's own <c>check
     /// (length(btrim(name)) > 0)</c>, db/33, would otherwise surface as an unhandled 23514

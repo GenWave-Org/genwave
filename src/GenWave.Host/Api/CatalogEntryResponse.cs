@@ -78,6 +78,18 @@ namespace GenWave.Host.Api;
 /// </param>
 /// <param name="FontVersion">A font entry's manifest version (PLAN T204) — genuinely optional even on a cleanly-parsed manifest (<see cref="Catalog.CatalogFontManifest.Version"/>'s own shape); <see langword="null"/> for every non-font entry, when unreachable, or when absent/unparseable.</param>
 /// <param name="FontSubset">A font entry's manifest subset, e.g. <c>"latin"</c> (PLAN T204) — <see langword="null"/> for every non-font entry, when unreachable, or when the manifest fails to parse.</param>
+/// <param name="SuggestedPersona">
+/// A show entry's OPTIONAL "also hire" catalog persona slug (SPEC F118.3, PLAN T254), parsed off
+/// <see cref="Meta"/> (the show-kind sibling of <see cref="FontFamily"/>'s own "parsed off the
+/// fetched content this response is already built from, zero extra network cost" shape — here off
+/// <see cref="Meta"/> rather than <see cref="Card"/>, since genwave-catalog's own <c>show-meta.schema.json</c>
+/// places this field in the entry's meta document, not its manifest). SOFT by design (F118.3): this
+/// endpoint only ever SURFACES the value for <c>PLAN T255</c>'s import modal to offer against — it is
+/// never validated for "is this slug actually on the shelf" or "is it already hired" here, and
+/// <c>POST /api/shows/{slug}/import</c> never reads or acts on it at all. <see langword="null"/> for
+/// every non-show entry, when unreachable, when the entry's meta.json omits it, or when it fails its
+/// own shape check (a real catalog slug, ≤64 chars — <see cref="CatalogController.ValidateSuggestedPersonaShape"/>).
+/// </param>
 public sealed record CatalogEntryResponse(
     string? Card,
     string? Meta,
@@ -94,7 +106,8 @@ public sealed record CatalogEntryResponse(
     string? FontSpecimenFile,
     string? FontLicense,
     string? FontVersion,
-    string? FontSubset)
+    string? FontSubset,
+    string? SuggestedPersona)
 {
     /// <summary>
     /// The graceful "catalog currently unreachable" shape (SPEC F90.4, <see cref="Unreachable"/> =
@@ -129,5 +142,6 @@ public sealed record CatalogEntryResponse(
         FontSpecimenFile: null,
         FontLicense: null,
         FontVersion: null,
-        FontSubset: null);
+        FontSubset: null,
+        SuggestedPersona: null);
 }

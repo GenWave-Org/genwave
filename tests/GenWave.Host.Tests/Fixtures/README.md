@@ -99,6 +99,33 @@ places, not one.
 **Regenerate ONLY via the recipe above** (a fresh `pyftsubset` invocation against the same upstream
 TTF and text set) and update every hash this file's own remarks above name.
 
+## `golden.show.json` — cross-repo parity pin (PLAN T254, STORY-315, the T107 precedent)
+
+Byte-for-byte identical to `genwave-catalog`'s own `fixtures/golden.show.json`, pinned at
+`genwave-catalog@8be3d002e66d674bbd97adb01dc3d4d5db6ffdf8`. The SAME catalog→app direction as
+`golden.persona.json` above (not `golden.theme.json`'s app→catalog one — a show-manifest document
+has no catalog-side owner gap to fill; genwave-catalog authored this fixture first, T253): both repos
+ship the SAME artifact so a drift in either the app's `ShowManifestParser` or the catalog's
+`show-manifest.schema.json` shows up as exactly one deterministic red test, no cross-repo network
+call involved.
+
+`Specs/Story315_ShowImport.cs`'s `GoldenParityPinsTheCrossRepoContract` proves this file imports,
+unmodified, through the real F79 shell (`POST /api/shows/{slug}/import`) — there is no
+`ShowManifestSerializer` to round-trip through (unlike `golden.theme.json`'s reserialize proof):
+`Show` is a flat `station.show` row, not a JSON blob, so the shell's own parse-then-persist path IS
+the round trip.
+
+**Regenerate ONLY by copying `fixtures/golden.show.json` from `genwave-catalog` verbatim** — run from
+the parent directory holding both repo checkouts as siblings (`genwave/` and `genwave-catalog/`),
+both path halves repo-root-relative:
+
+```
+cp genwave-catalog/fixtures/golden.show.json genwave/tests/GenWave.Host.Tests/Fixtures/golden.show.json
+```
+
+and update the pinned commit above. Never hand-edit this file in place — see
+`genwave-catalog/README.md`'s own "golden fixture" section for how that repo generates/curates it.
+
 ## `font-catalog-index.json` — a font entry with real asset hashes (PLAN T193, STORY-279 AC4)
 
 A sibling to `mixed-catalog-index.json` (never that file itself — see its own remarks on why a third
