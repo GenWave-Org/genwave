@@ -33,19 +33,31 @@ public interface IScheduleSpecialStore
     Task<IReadOnlyList<ScheduleSpecial>> ListUpcomingAsync(DateOnly fromDate, CancellationToken ct);
 
     /// <summary>
-    /// Inserts <paramref name="special"/> and returns the persisted row (store-assigned <c>Id</c>, and
-    /// <c>Show</c> re-resolved by the same LEFT JOIN <see cref="ListUpcomingAsync"/> uses, never
-    /// fabricated from <paramref name="special"/>'s own possibly-stale <c>Show</c> field — mirrors
-    /// <c>ScheduleRepository</c>'s own "<c>ShowId</c> is write-authoritative, <c>Show</c> is a load-time
-    /// projection" split). No application-side pre-validation runs here (deliberately — SPEC F120.1's
-    /// own "CRUD minimal" instruction, and unlike <see cref="IScheduleStore.ReplaceWeekAsync"/> this
-    /// method has no per-cell error contract to report through): the database's own CHECK/EXCLUDE/FK
-    /// constraints (db/36) are the ONLY line of defense, so a caller passing an off-grid minute, an
-    /// overlapping span, or an unknown persona/show id gets a raw <c>Npgsql.PostgresException</c>
-    /// straight back, exactly like <see cref="IScheduleStore.ReplaceWeekAsync"/>'s own documented
-    /// concurrent-FK-violation case. Raises <see cref="SpecialsChanged"/> exactly once on success.
+    /// Inserts <paramref name="special"/> and returns a <see cref="ScheduleSpecialCreateResult"/>: on
+    /// success, <see cref="ScheduleSpecialCreateResult.Created"/> carries the persisted row
+    /// (store-assigned <c>Id</c>, and <c>Show</c> re-resolved by the same LEFT JOIN
+    /// <see cref="ListUpcomingAsync"/> uses, never fabricated from <paramref name="special"/>'s own
+    /// possibly-stale <c>Show</c> field — mirrors <c>ScheduleRepository</c>'s own "<c>ShowId</c> is
+    /// write-authoritative, <c>Show</c> is a load-time projection" split). No application-side
+    /// PRE-validation runs here (deliberately — SPEC F120.1's own "CRUD minimal" instruction, and
+    /// unlike <see cref="IScheduleStore.ReplaceWeekAsync"/> this method has no per-cell error contract
+    /// to report through): the database's own CHECK/EXCLUDE/FK constraints (db/36) are the ONLY line of
+    /// defense against an off-grid minute, an overlapping span, or an unknown persona/show id — but
+    /// unlike <see cref="IScheduleStore.ReplaceWeekAsync"/>'s own "raw <c>PostgresException</c>
+    /// straight back" contract, THIS method translates db/36's own two possible rejections into
+    /// <see cref="ScheduleSpecialCreateResult.Overlap"/> (the per-date EXCLUDE) and
+    /// <see cref="ScheduleSpecialCreateResult.UnknownReference"/> (either FK) itself — a POST-hoc
+    /// translation of the database's own rejection, not a validation this method performs, the same
+    /// distinction <c>ShowRepository</c>'s own unique/foreign-key catches already draw (PLAN T259: a
+    /// controller consuming this store may never reference <c>Npgsql.PostgresException</c> itself — see
+    /// <see cref="ScheduleSpecialCreateResult"/>'s own remarks for why). A CHECK violation (an off-grid
+    /// minute) is not one of the two cases above — <c>GenWave.Host.Api.SpecialsController</c>'s own
+    /// app-side range validation is what an ordinary caller hits before this method is ever called,
+    /// so an off-grid minute reaching this far at all is a caller bug, not a modeled outcome; the
+    /// underlying <c>Npgsql.PostgresException</c> still propagates unmodified in that case. Raises
+    /// <see cref="SpecialsChanged"/> exactly once, only on <see cref="ScheduleSpecialCreateResult.Created"/>.
     /// </summary>
-    Task<ScheduleSpecial> CreateAsync(ScheduleSpecial special, CancellationToken ct);
+    Task<ScheduleSpecialCreateResult> CreateAsync(ScheduleSpecial special, CancellationToken ct);
 
     /// <summary>
     /// Deletes the special identified by <paramref name="id"/>. Returns <see langword="true"/> and

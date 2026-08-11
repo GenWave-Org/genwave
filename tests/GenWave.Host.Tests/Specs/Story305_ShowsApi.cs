@@ -133,6 +133,37 @@ public static class FeatureShowsApi
         }
 
         [Fact]
+        public async Task DeleteWithAReferencingSpecialFails409NamingIt()
+        {
+            // Given a show referenced ONLY by a dated special (PLAN T259, F115.4's own "and specials
+            // when F120 ships" carry-forward) — no weekly block at all, proving the guard's specials
+            // half stands on its own, not merely alongside a block
+            var show = new Show(1, "Special Guest Night", "special-guest-night", null, null, null, null, DateTime.UtcNow, DateTime.UtcNow);
+            var store = new FakeShowStore([show]) { NextDeleteResult = new ShowWriteResult.Referenced() };
+            // Far-future date — this Fact never controls the container's own clock, so a fixed date
+            // safely inside ListUpcomingAsync's own "on or after today" window regardless of when the
+            // suite runs is what keeps this deterministic.
+            var special = new ScheduleSpecial(1, new DateOnly(2030, 6, 1), 540, 720, null, null, null, null, ShowId: show.Id);
+            var specialStore = new FakeScheduleSpecialStore([special]);
+            var imagingScope = new FakeShowImagingScope();
+            await using var factory = new ShowsApiWebFactory(store, imagingScope: imagingScope, specialStore: specialStore);
+            var client = await ShowsApiWebFactory.LoggedInClientAsync(factory);
+
+            // When DELETE runs
+            var response = await client.DeleteAsync($"/api/shows/{show.Slug}");
+
+            // Then 409 whose body names the referencing special's date and span — and, as with a
+            // block-only refusal, nothing was unscoped
+            var detail = await DetailAsync(response);
+            Assert.Equal(
+                (Status: HttpStatusCode.Conflict, NamesTheDate: true, NamesTheTime: true, UnscopeCalls: 0),
+                (Status: response.StatusCode,
+                 NamesTheDate: detail.Contains("2030-06-01", StringComparison.Ordinal),
+                 NamesTheTime: detail.Contains("09:00", StringComparison.Ordinal),
+                 UnscopeCalls: imagingScope.UnscopeCalls.Count));
+        }
+
+        [Fact]
         public async Task ScopedImagingRowsAreNamedAndUnscopedBestEffort()
         {
             // Given a show referenced only by a scoped imaging row (no FK — F117.1)
@@ -422,15 +453,18 @@ file sealed class CapturingWarningLoggerProvider : ILoggerProvider
 /// <summary>
 /// <see cref="WebApplicationFactory{TEntryPoint}"/> for this file's own Facts — mirrors
 /// Story240_GridHoldsTheWeek.cs's own <c>ScheduleApiWebFactory</c> idiom: <see cref="IShowStore"/>,
-/// <see cref="IScheduleStore"/>, and <see cref="IShowImagingScope"/> all replaced by stateful fakes
-/// (defaulted to empty ones when a Fact doesn't need to script them). <paramref name="logs"/> is
-/// wired only when a Fact actually needs to assert on logged output (PLAN T240 review) — every other
-/// Fact leaves it null and gets the host's ordinary logging pipeline, untouched.
+/// <see cref="IScheduleStore"/>, <see cref="IScheduleSpecialStore"/> (PLAN T259 — the delete guard's
+/// new dependency, see <c>ShowsController</c>'s own class remarks), and <see cref="IShowImagingScope"/>
+/// all replaced by stateful fakes (defaulted to empty ones when a Fact doesn't need to script them).
+/// <paramref name="logs"/> is wired only when a Fact actually needs to assert on logged output (PLAN
+/// T240 review) — every other Fact leaves it null and gets the host's ordinary logging pipeline,
+/// untouched.
 /// </summary>
 file sealed class ShowsApiWebFactory(
     FakeShowStore store,
     FakeScheduleStore? scheduleStore = null,
     FakeShowImagingScope? imagingScope = null,
+    FakeScheduleSpecialStore? specialStore = null,
     bool withAdminPassword = true,
     CapturingWarningLoggerProvider? logs = null)
     : WebApplicationFactory<Program>
@@ -460,6 +494,9 @@ file sealed class ShowsApiWebFactory(
 
             services.RemoveAll<IScheduleStore>();
             services.AddSingleton<IScheduleStore>(scheduleStore ?? new FakeScheduleStore());
+
+            services.RemoveAll<IScheduleSpecialStore>();
+            services.AddSingleton<IScheduleSpecialStore>(specialStore ?? new FakeScheduleSpecialStore());
 
             services.RemoveAll<IShowImagingScope>();
             services.AddSingleton<IShowImagingScope>(imagingScope ?? new FakeShowImagingScope());

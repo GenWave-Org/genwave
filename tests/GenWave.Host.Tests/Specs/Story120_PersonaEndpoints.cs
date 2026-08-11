@@ -400,6 +400,33 @@ public static class FeaturePersonaEndpoints
         }
 
         [Fact]
+        public async Task DeletingAPersonaBlockedOnlyByASpecialNamesBothPossibilitiesInTheFallback()
+        {
+            // PLAN T259 review finding 1: PersonaRepository's own pre-query only ever reaches
+            // station.segment_schedule (SPEC F91.9's T121 scaffolding predates specials) — a persona
+            // referenced ONLY by a dated special (station.schedule_special.persona_id, db/36's own
+            // identical ON DELETE RESTRICT) still trips the FK race-backstop path and lands here with
+            // EMPTY Slots, since that backstop's own re-query never looks at schedule_special either.
+            // Mirrors Story305_ShowsApi.cs's own DeleteWithEmptyReferencedBlocksStillRefusesWithAGenericDetail
+            // wording-pin precedent: this asserts the FALLBACK wording literally, not just the shape —
+            // it must name BOTH possibilities honestly rather than blaming the format-clock schedule
+            // alone (PersonaController.Delete's own remarks carry the full story; naming the actual
+            // referencing special is the documented follow-up, not this fact's claim).
+            var store = new FakePersonaStore
+            {
+                DeleteResult = new PersonaWriteResult.ScheduledElsewhere([]),
+            };
+            var controller = BuildController(store, new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
+
+            var result = await controller.Delete(5, CancellationToken.None);
+
+            var conflict = Assert.IsType<ConflictObjectResult>(result);
+            var problem = Assert.IsType<ProblemDetails>(conflict.Value);
+            Assert.Contains("format-clock schedule", problem.Detail, StringComparison.Ordinal);
+            Assert.Contains("dated special", problem.Detail, StringComparison.Ordinal);
+        }
+
+        [Fact]
         public async Task NonJsonWriteReturns415()
         {
             // F18.7 posture applies (F35.4, AC5). No Admin:Password set — content-type negotiation

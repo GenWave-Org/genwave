@@ -91,3 +91,33 @@ export interface ScheduleShowOptionDto {
  * a terminal, honest "unavailable" state — never a perpetually-loading one that will never resolve.
  */
 export type ScheduleShowsStatus = { kind: "loaded"; shows: ScheduleShowOptionDto[] } | { kind: "error" };
+
+/** Wire shape of one row from `GET/POST /api/schedule/specials` — mirrors
+ * `GenWave.Host.Api.SpecialDto` field for field (SPEC F120.1/F120.3, STORY-317, PLAN T259). `onDate`
+ * is a plain ISO calendar date string (`"yyyy-MM-dd"`, System.Text.Json's built-in `DateOnly`
+ * converter) — rendered by `SpecialsForm` verbatim rather than routed through a `Date`/`Intl`
+ * formatter, which would risk a timezone-driven day shift for a value that names a calendar date, not
+ * an instant (this admin UI has no station-timezone concept anywhere, `ScheduleEditor`'s own remarks).
+ * `showId` is the bare foreign key, never a nested show object — same posture
+ * `ScheduleSegmentDto.showId` already takes; `SpecialsForm` resolves a name from the `shows` prop it
+ * already holds. */
+export interface ScheduleSpecialDto {
+  id: number;
+  onDate: string;
+  startMinute: number;
+  endMinute: number;
+  personaId: number | null;
+  genres: string[] | null;
+  energyMin: number | null;
+  energyMax: number | null;
+  showId: number | null;
+}
+
+/** The specials tail's own LIST load state (PLAN T259) — mirrors {@link ScheduleShowsStatus}'s exact
+ * shape/rationale, one level down: `page.tsx`'s own `Promise.allSettled` fetches
+ * `GET /api/schedule/specials` alongside personas/schedule/shows, and a failed read degrades this
+ * section alone (SPEC F120's own droppable-tail posture: an unreadable specials list must never block
+ * the paint grid the rest of this page exists for) rather than failing the whole page. */
+export type ScheduleSpecialsStatus =
+  | { kind: "loaded"; specials: ScheduleSpecialDto[] }
+  | { kind: "error" };

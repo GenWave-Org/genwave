@@ -17,19 +17,40 @@ namespace GenWave.MediaLibrary.Station;
 ///
 /// <para>
 /// <see cref="DateOnlyTypeHandler"/> (this repository's own <c>on_date</c> column needs it) is
-/// registered by <see cref="MediaLibraryServiceCollectionExtensions.AddMediaLibrary"/>, NOT here — this
-/// type ships dark (SPEC F120.1: no Host call site until PLAN T260 wires <c>AddScheduleSpecialStore</c>
-/// in), so a registration tied to THIS class's own construction (a static constructor, an earlier
-/// revision's choice) would never fire in production until T260 lands. <c>AddMediaLibrary</c> runs
-/// unconditionally at Host startup regardless — the same reason it is also where
-/// <c>DefaultTypeMap.MatchNamesWithUnderscores</c> is set, not any one repository's own static
-/// constructor. <c>GenWave.MediaLibrary.Tests.DatabaseFixture</c>'s own <c>InitializeAsync</c> registers
-/// it too, for the identical "tests construct the repository directly, never through AddMediaLibrary"
-/// reason that fixture already sets <c>MatchNamesWithUnderscores</c> itself.
+/// registered by <see cref="MediaLibraryServiceCollectionExtensions.AddMediaLibrary"/>, NOT here — a
+/// registration tied to THIS class's own construction (a static constructor, an earlier revision's
+/// choice) would only fire once something actually resolves <see cref="IScheduleSpecialStore"/>, which
+/// is exactly the ordering <c>AddMediaLibrary</c>'s own unconditional, Host-startup-time registration
+/// avoids depending on — the same reason it is also where <c>DefaultTypeMap.MatchNamesWithUnderscores</c>
+/// is set, not any one repository's own static constructor. <c>GenWave.MediaLibrary.Tests.DatabaseFixture</c>'s
+/// own <c>InitializeAsync</c> registers it too, for the identical "tests construct the repository
+/// directly, never through AddMediaLibrary" reason that fixture already sets
+/// <c>MatchNamesWithUnderscores</c> itself.
+/// </para>
+///
+/// <para>
+/// <b>PLAN T259 — <see cref="CreateAsync"/> now translates db/36's own rejections instead of letting
+/// them propagate raw.</b> See <see cref="ScheduleSpecialCreateResult"/>'s own remarks for exactly why
+/// this repository — not <c>GenWave.Host.Api.SpecialsController</c> — is where SQLSTATE 23P01
+/// (exclusion_violation, an overlapping same-date span) and 23503 (foreign_key_violation, an unknown/
+/// concurrently-deleted persona or show) become <see cref="ScheduleSpecialCreateResult.Overlap"/>/
+/// <see cref="ScheduleSpecialCreateResult.UnknownReference"/>: <c>GenWave.Architecture.Tests</c>' L2
+/// law confines every <c>Npgsql</c> reference to this project's <c>Catalog</c>/<c>Station</c>
+/// namespaces, with no baseline exemption for a new controller.
 /// </para>
 /// </summary>
 sealed class SpecialsRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSpecialStore
 {
+    // Postgres SQLSTATEs db/36's own CHECK/EXCLUDE/FK constraints can raise out of CreateAsync's
+    // insert — mirrors ShowRepository's own well-known-constant idiom (no Npgsql.PostgresErrorCodes
+    // dependency). exclusion_violation is the per-date EXCLUDE guard (SPEC F120.1); foreign_key_violation
+    // is either of schedule_special's two ON DELETE RESTRICT FKs (persona_id/show_id) — db/36 never
+    // distinguishes which column raised it in the SQLSTATE alone, and this repository doesn't need to:
+    // ScheduleSpecialCreateResult.UnknownReference covers both, exactly like ScheduleSpecialCreateResult's
+    // own remarks document.
+    const string ExclusionViolation = "23P01";
+    const string ForeignKeyViolation = "23503";
+
     public event Action? SpecialsChanged;
 
     /// <summary>
@@ -80,44 +101,61 @@ sealed class SpecialsRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSp
     /// <summary>
     /// Single-statement insert-then-join (SPEC F120.1) via a CTE — one round trip, atomic by
     /// construction (a single statement needs no explicit transaction). No application-side
-    /// pre-validation (see <see cref="IScheduleSpecialStore.CreateAsync"/>'s own remarks): an off-grid
-    /// minute, an overlapping per-date span, or an unknown persona/show id all surface as a raw
-    /// <see cref="PostgresException"/> from db/36's own CHECK/EXCLUDE/FK constraints, never caught or
-    /// translated here.
+    /// PRE-validation (see <see cref="IScheduleSpecialStore.CreateAsync"/>'s own remarks): db/36's own
+    /// CHECK/EXCLUDE/FK constraints are the ONLY line of defense against an off-grid minute, an
+    /// overlapping per-date span, or an unknown persona/show id. An overlapping span (exclusion_violation)
+    /// or an unknown/concurrently-deleted persona/show (foreign_key_violation) are caught here and
+    /// translated (PLAN T259 — see <see cref="ScheduleSpecialCreateResult"/>'s own remarks for why this
+    /// moved into the repository layer); an off-grid minute (a CHECK violation) is NOT one of those two
+    /// SQLSTATEs and still propagates as a raw <see cref="PostgresException"/> — <c>SpecialsController</c>'s
+    /// own app-side range validation means an ordinary caller never reaches that path.
     /// </summary>
-    public async Task<ScheduleSpecial> CreateAsync(ScheduleSpecial special, CancellationToken ct)
+    public async Task<ScheduleSpecialCreateResult> CreateAsync(ScheduleSpecial special, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-        var row = await conn.QuerySingleAsync<SpecialRow>(new CommandDefinition(
-            """
-            with ins as (
-                insert into station.schedule_special
-                    (on_date, start_minute, end_minute, persona_id, show_id, genres, energy_min, energy_max)
-                values (@OnDate, @StartMinute, @EndMinute, @PersonaId, @ShowId, @Genres::text[], @EnergyMin, @EnergyMax)
-                returning id, on_date, start_minute, end_minute, persona_id, show_id, genres, energy_min, energy_max
-            )
-            select ins.id::bigint as id, ins.on_date, ins.start_minute, ins.end_minute,
-                   ins.persona_id::bigint as persona_id, ins.genres,
-                   ins.energy_min::double precision as energy_min, ins.energy_max::double precision as energy_max,
-                   sh.id::bigint as show_id, sh.name as show_name, sh.tagline as show_tagline, sh.flavor as show_flavor
-            from ins
-            left join station.show sh on sh.id = ins.show_id
-            """,
-            new
-            {
-                special.OnDate,
-                special.StartMinute,
-                special.EndMinute,
-                special.PersonaId,
-                special.ShowId,
-                Genres = special.Genres?.ToArray(),
-                special.EnergyMin,
-                special.EnergyMax,
-            },
-            cancellationToken: ct));
+
+        SpecialRow row;
+        try
+        {
+            row = await conn.QuerySingleAsync<SpecialRow>(new CommandDefinition(
+                """
+                with ins as (
+                    insert into station.schedule_special
+                        (on_date, start_minute, end_minute, persona_id, show_id, genres, energy_min, energy_max)
+                    values (@OnDate, @StartMinute, @EndMinute, @PersonaId, @ShowId, @Genres::text[], @EnergyMin, @EnergyMax)
+                    returning id, on_date, start_minute, end_minute, persona_id, show_id, genres, energy_min, energy_max
+                )
+                select ins.id::bigint as id, ins.on_date, ins.start_minute, ins.end_minute,
+                       ins.persona_id::bigint as persona_id, ins.genres,
+                       ins.energy_min::double precision as energy_min, ins.energy_max::double precision as energy_max,
+                       sh.id::bigint as show_id, sh.name as show_name, sh.tagline as show_tagline, sh.flavor as show_flavor
+                from ins
+                left join station.show sh on sh.id = ins.show_id
+                """,
+                new
+                {
+                    special.OnDate,
+                    special.StartMinute,
+                    special.EndMinute,
+                    special.PersonaId,
+                    special.ShowId,
+                    Genres = special.Genres?.ToArray(),
+                    special.EnergyMin,
+                    special.EnergyMax,
+                },
+                cancellationToken: ct));
+        }
+        catch (PostgresException ex) when (ex.SqlState == ExclusionViolation)
+        {
+            return new ScheduleSpecialCreateResult.Overlap();
+        }
+        catch (PostgresException ex) when (ex.SqlState == ForeignKeyViolation)
+        {
+            return new ScheduleSpecialCreateResult.UnknownReference();
+        }
 
         SpecialsChanged?.Invoke();
-        return ToSpecial(row);
+        return new ScheduleSpecialCreateResult.Created(ToSpecial(row));
     }
 
     public async Task<bool> DeleteAsync(long id, CancellationToken ct)

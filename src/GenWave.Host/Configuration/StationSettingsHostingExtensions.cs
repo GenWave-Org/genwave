@@ -134,6 +134,15 @@ static class StationSettingsHostingExtensions
         // the first Host call site.
         builder.Services.AddShowStore(stationConnStr);
 
+        // Dated-specials store (SPEC F120.1, STORY-317, PLAN T258) — same station_svc connection
+        // string as every registration above; station.schedule_special lives in the same schema.
+        // SpecialsRepository shipped dark at T258 (AddScheduleSpecialStore itself registers no
+        // consumer): SpecialsController (PLAN T259) is the first Host call site — the resolver's own
+        // specials-first rung (PLAN T258, GenWave.Orchestration.ScheduleResolver) still takes specials
+        // as a plain in-memory argument, not this store, until PLAN T260 wires that consumption live
+        // (see SpecialsController's own class remarks for the full T118→T120-pattern honesty note).
+        builder.Services.AddScheduleSpecialStore(stationConnStr);
+
         return builder;
     }
 }

@@ -129,6 +129,19 @@ public sealed partial class PersonaController(
     /// own unique_violation mapping). This action's only job for that case is formatting those slots
     /// into the 409 <c>Detail</c> an operator can read at a glance.
     /// </para>
+    ///
+    /// <para>
+    /// PLAN T259 REVIEW FOLLOW-UP: <see cref="IPersonaStore.DeleteAsync"/>'s own pre-query only reaches
+    /// <c>station.segment_schedule</c> — a persona referenced ONLY by a dated special
+    /// (<c>station.schedule_special.persona_id</c>, db/36's own identical <c>ON DELETE RESTRICT</c>)
+    /// still hits the FK race-backstop path and lands here with an EMPTY <c>Slots</c>, since the
+    /// backstop's own re-query never looks at that table either. <see cref="ScheduledPersonaProblem"/>'s
+    /// fallback wording is widened to name that possibility honestly rather than blaming the
+    /// format-clock schedule alone; naming the actual referencing special (mirroring
+    /// <c>ShowsController.Delete</c>'s own PLAN T259 extension) is left as the documented follow-up —
+    /// see <see cref="SpecialsController"/>'s own class remarks for why that guard extension is not
+    /// "cheap" the way the show side was.
+    /// </para>
     /// </summary>
     [HttpDelete("{id:long}")]
     public async Task<IActionResult> Delete(long id, CancellationToken ct)
@@ -652,13 +665,19 @@ public sealed partial class PersonaController(
     /// found) — the detail falls back to the T120 scaffolding's generic wording for that one case,
     /// since there is nothing left to name.
     /// </summary>
+    // PLAN T259 review finding 1: the fallback (empty-slots) branch fires for BOTH the pre-existing
+    // race (the FK fired, the re-query found nothing — station.segment_schedule changed between the
+    // pre-query and the delete) AND, since db/36 gave station.schedule_special.persona_id the
+    // identical ON DELETE RESTRICT FK, a persona referenced ONLY by a dated special (this action's
+    // own remarks above have the full story). Naming "or a dated special" here is the honest minimum
+    // fix — it does not identify WHICH special, just that one might be why.
     static ProblemDetails ScheduledPersonaProblem(long id, IReadOnlyList<ScheduledSlot> slots) => new()
     {
         Status = StatusCodes.Status409Conflict,
         Title  = "Persona is scheduled.",
         Detail = slots.Count > 0
             ? $"Persona {id} is still scheduled and cannot be deleted: {string.Join(", ", slots.Select(ScheduledSlotText.FormatSlot))}."
-            : $"Persona {id} still appears in the format-clock schedule and cannot be deleted while scheduled.",
+            : $"Persona {id} still appears in the format-clock schedule or a dated special and cannot be deleted while scheduled.",
     };
 
     static ProblemDetails UnknownSlugProblem(string slug) => new()

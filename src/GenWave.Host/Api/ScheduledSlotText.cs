@@ -23,6 +23,21 @@ internal static class ScheduledSlotText
         $"{CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedDayName(slot.Day)} " +
         $"{FormatMinutes(slot.StartMinute)}–{FormatMinutes(slot.EndMinute)}";
 
+    /// <summary>
+    /// <c>"2026-08-20 09:00–12:00"</c> — the <see cref="ScheduleSpecial"/> sibling of
+    /// <see cref="FormatSlot"/> (SPEC F120.1, PLAN T259): <see cref="ShowsController.Delete"/>'s own
+    /// guard now names a referencing dated special alongside a referencing weekly block, since
+    /// <c>station.schedule_special.show_id</c> carries the identical <c>ON DELETE RESTRICT</c> FK
+    /// (db/36) that already backs <see cref="FormatSlot"/>'s own callers. ISO <c>yyyy-MM-dd</c>
+    /// (invariant, unambiguous — never a station-configurable locale, the same posture
+    /// <see cref="FormatSlot"/>'s own abbreviated day name already takes) rather than a day name: a
+    /// special names ONE calendar date, not a repeating weekday, so there is no day-of-week to
+    /// abbreviate in the first place.
+    /// </summary>
+    internal static string FormatSpecial(ScheduleSpecial special) =>
+        $"{special.OnDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} " +
+        $"{FormatMinutes(special.StartMinute)}–{FormatMinutes(special.EndMinute)}";
+
     // Minutes-since-midnight as HH:mm — plain arithmetic, not TimeSpan's "hh" format specifier: a
     // 1440-minute end (midnight, the grid's own maximum) rolls into TimeSpan's Days component, which
     // "hh" ignores entirely, silently printing "00:00" for what is actually the end of the day.

@@ -58,6 +58,21 @@ public static class FeatureSpecialsStore
         string[]? genres = null, double? energyMin = null, double? energyMax = null) =>
         new(null, onDate, start, end, personaId, genres, energyMin, energyMax, ShowId: showId);
 
+    /// <summary>
+    /// Unwraps a HAPPY-PATH <see cref="SpecialsRepository.CreateAsync"/> call down to the persisted
+    /// row (PLAN T259 correction: <c>CreateAsync</c> now returns <see cref="ScheduleSpecialCreateResult"/>,
+    /// not a bare <see cref="ScheduleSpecial"/> — see that type's own remarks) — every Fact in this
+    /// file that expects a create to SUCCEED calls through here rather than pattern-matching the
+    /// result itself at each call site; <see cref="ScenarioRejectingOverlap"/>'s own sad-path Fact
+    /// asserts the <see cref="ScheduleSpecialCreateResult.Overlap"/> case directly instead, since a
+    /// REJECTED create is exactly the claim under test there.
+    /// </summary>
+    static async Task<ScheduleSpecial> CreateSpecialAsync(SpecialsRepository repo, ScheduleSpecial draft)
+    {
+        var result = await repo.CreateAsync(draft, CancellationToken.None);
+        return Assert.IsType<ScheduleSpecialCreateResult.Created>(result).Special;
+    }
+
     // ---------------------------------------------------------------------
     // HAPPY PATH — round trip (SPEC F120.1)
     // ---------------------------------------------------------------------
@@ -78,7 +93,7 @@ public static class FeatureSpecialsStore
             var draft = Draft(onDate, 19 * 60, 21 * 60, personaId, showId, ["holiday", "jazz"], 0.2, 0.7);
 
             // When it is written and re-read
-            var created = await repo.CreateAsync(draft, CancellationToken.None);
+            var created = await CreateSpecialAsync(repo, draft);
             var upcoming = await repo.ListUpcomingAsync(onDate, CancellationToken.None);
 
             // Then every field round-trips; minutes obey the 30-min steps (F91 mirrored)
@@ -113,13 +128,15 @@ public static class FeatureSpecialsStore
             var repo = Repo(db);
             await db.ResetSpecialsAsync();
             var onDate = new DateOnly(2026, 7, 4);
-            await repo.CreateAsync(Draft(onDate, 600, 900), CancellationToken.None);
+            await CreateSpecialAsync(repo, Draft(onDate, 600, 900));
 
             // When a second special overlaps it — the per-date EXCLUDE guard rejects at the database
-            // (F120.1); the weekly table's own invariant is untouched by construction (a wholly separate
-            // constraint on a wholly separate table, never consulted here).
-            await Assert.ThrowsAsync<PostgresException>(
-                () => repo.CreateAsync(Draft(onDate, 750, 1050), CancellationToken.None));
+            // (F120.1), translated by CreateAsync itself into ScheduleSpecialCreateResult.Overlap
+            // (PLAN T259 — see that type's own remarks); the weekly table's own invariant is untouched
+            // by construction (a wholly separate constraint on a wholly separate table, never
+            // consulted here).
+            var result = await repo.CreateAsync(Draft(onDate, 750, 1050), CancellationToken.None);
+            Assert.IsType<ScheduleSpecialCreateResult.Overlap>(result);
         }
 
         [Fact]
@@ -129,12 +146,12 @@ public static class FeatureSpecialsStore
             // half: the identical span on a DIFFERENT date must never collide with it.
             var repo = Repo(db);
             await db.ResetSpecialsAsync();
-            await repo.CreateAsync(Draft(new DateOnly(2026, 7, 4), 600, 900), CancellationToken.None);
+            await CreateSpecialAsync(repo, Draft(new DateOnly(2026, 7, 4), 600, 900));
 
             // When a second special repeats the exact same start/end on a different date
-            var second = await repo.CreateAsync(Draft(new DateOnly(2026, 7, 5), 600, 900), CancellationToken.None);
+            var second = await CreateSpecialAsync(repo, Draft(new DateOnly(2026, 7, 5), 600, 900));
 
-            // Then it is accepted — no exception, and both rows persist independently
+            // Then it is accepted — no rejection, and both rows persist independently
             Assert.NotNull(second.Id);
             var upcoming = await repo.ListUpcomingAsync(new DateOnly(2026, 7, 4), CancellationToken.None);
             Assert.Equal(2, upcoming.Count);
@@ -150,12 +167,12 @@ public static class FeatureSpecialsStore
             var repo = Repo(db);
             await db.ResetSpecialsAsync();
             var onDate = new DateOnly(2026, 7, 4);
-            await repo.CreateAsync(Draft(onDate, 600, 900), CancellationToken.None);
+            await CreateSpecialAsync(repo, Draft(onDate, 600, 900));
 
             // When a second special starts exactly where the first ends
-            var second = await repo.CreateAsync(Draft(onDate, 900, 1200), CancellationToken.None);
+            var second = await CreateSpecialAsync(repo, Draft(onDate, 900, 1200));
 
-            // Then it is accepted — no exception, and both rows persist independently on the same date
+            // Then it is accepted — no rejection, and both rows persist independently on the same date
             Assert.NotNull(second.Id);
             var upcoming = await repo.ListUpcomingAsync(onDate, CancellationToken.None);
             Assert.Equal(2, upcoming.Count);
@@ -177,7 +194,7 @@ public static class FeatureSpecialsStore
             await db.ResetSpecialsAsync();
             var fired = 0;
             repo.SpecialsChanged += () => fired++;
-            var created = await repo.CreateAsync(Draft(new DateOnly(2026, 3, 1), 60, 120), CancellationToken.None);
+            var created = await CreateSpecialAsync(repo, Draft(new DateOnly(2026, 3, 1), 60, 120));
             Assert.NotNull(created.Id);
             fired = 0; // isolate the delete's own notification from the create above
 
