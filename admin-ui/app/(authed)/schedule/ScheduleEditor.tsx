@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { toast } from "@/components/ui/toast";
@@ -118,6 +118,20 @@ function computeNowMarker(): NowMarker {
  * (a second `setState` call from within another state updater is exactly the kind of impurity React
  * warns about) — so it runs in an effect keyed on `cells` instead, which by construction only ever
  * sees the fully-batched, post-commit value.
+ *
+ * ── That reconciliation must NOT run after a server re-sync ──────────────────────────────────────
+ * `cells` also changes on mount, after a Save's 200, and after `handleShowAssigned`'s follow-up
+ * GET — none of those are a local paint mutation; each already sets `cells` AND `overrides` together
+ * from one fresh `deriveGridFromWeek` call, so there is nothing to reconcile. Running
+ * `pruneOverrides` against that pair anyway is actively wrong: `pruneOverrides`'s case-5 merge
+ * check (`schedule-grid-model`'s own doc comment) can't tell "two STORED rows that merely loaded
+ * already-contiguous" (e.g. a run-wide show assignment split across rows, T243) apart from "an
+ * operator just painted the gap between two separately-overridden runs" — both look identical by
+ * key alone — so it silently dropped a freshly-loaded, correct override (T247 wire-smoke finding:
+ * "Current: None" for a named run right after assigning it, on both the mount load and the
+ * assign-show follow-up GET). `pendingOverridePruneRef` is what tells the two cases apart:
+ * `commitCells` is the ONLY place that arms it, so the effect below only ever prunes after an
+ * actual local mutation, never after a bare `setCells` from a server response.
  */
 export function ScheduleEditor({ initialWeek, personas, shows }: ScheduleEditorProps): ReactNode {
   const initialGrid = deriveGridFromWeek(initialWeek);
@@ -145,6 +159,11 @@ export function ScheduleEditor({ initialWeek, personas, shows }: ScheduleEditorP
   const [weekVersion, setWeekVersion] = useState<string | null>(initialWeek.version ?? null);
   const [nowMarker] = useState<NowMarker>(computeNowMarker);
   const confirm = useConfirm();
+  // Arms the `cells` effect below to reconcile `overrides` via `pruneOverrides` — set ONLY by
+  // `commitCells` (a local paint mutation), never by a server re-sync's own `setCells` call. See
+  // this component's own doc comment ("That reconciliation must NOT run after a server re-sync")
+  // for exactly why the two cases can't share this effect unconditionally.
+  const pendingOverridePruneRef = useRef(false);
 
   const runs = computeRuns(cells);
   const personaNames = personaNameMap(personas);
@@ -172,11 +191,13 @@ export function ScheduleEditor({ initialWeek, personas, shows }: ScheduleEditorP
       ? { kind: "disabled", reason: "Reload the schedule to assign a show for this block." }
       : { kind: "ready", blockId: openBlockId, narrowDisabledReason };
 
-  // Reconciles `overrides` against whatever `cells` actually ended up as, every time it changes —
-  // see this component's own doc comment for why this can't live inside `commitCells` itself. A
-  // no-op on the initial render (the mounted `overrides` already matches the mounted `cells`, both
-  // derived from the same `initialWeek` a moment ago) beyond one harmless, equal-by-value re-set.
+  // Reconciles `overrides` against whatever `cells` actually ended up as, every time a local paint
+  // mutation changed it — see this component's own doc comment for why this can't live inside
+  // `commitCells` itself, and why it must skip every OTHER `cells` change (mount, a Save's 200, the
+  // show-assign follow-up GET all set `overrides` correctly themselves and never arm this ref).
   useEffect(() => {
+    if (!pendingOverridePruneRef.current) return;
+    pendingOverridePruneRef.current = false;
     setOverrides((prev) => pruneOverrides(prev, computeRuns(cells)));
   }, [cells]);
 
@@ -198,6 +219,7 @@ export function ScheduleEditor({ initialWeek, personas, shows }: ScheduleEditorP
    * describe the LAST save attempt, and any further edit makes them stale (a highlighted block the
    * operator has since repainted, or moved past, shouldn't keep showing a prior rejection). */
   function commitCells(update: (prev: CellValue[][]) => CellValue[][]): void {
+    pendingOverridePruneRef.current = true;
     setCells(update);
     setIsDirty(true);
     setCellErrors([]);

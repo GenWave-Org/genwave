@@ -88,6 +88,20 @@ const TWO_ROW_RUN_WEEK: ScheduleWeekDto = {
   version: "v-1",
 };
 
+/** T247 wire-smoke finding fixture: two SEPARATE stored rows (ids 41/42), both MUSIC-ONLY
+ * (`personaId: null`), back-to-back with no gap, BOTH already carrying the SAME `showId` — exactly
+ * the shape a run-wide show assignment across a merged music-only run leaves in the store (Postgres
+ * confirmed `show_id` set on both rows in the live repro). Unlike {@link TWO_ROW_RUN_WEEK}, these
+ * rows load with the override ALREADY set — the P2 fixture never did, which is why the merged-run
+ * scenario below is the one the jest suite was missing before this fix. */
+const TWO_ROW_MUSIC_RUN_WEEK: ScheduleWeekDto = {
+  segments: [
+    { id: 41, day: 0, startMinute: 0, endMinute: 240, personaId: null, genres: null, energyMin: null, energyMax: null, showId: LATE_NIGHT.id },
+    { id: 42, day: 0, startMinute: 240, endMinute: 480, personaId: null, genres: null, energyMin: null, energyMax: null, showId: LATE_NIGHT.id },
+  ],
+  version: "v-1",
+};
+
 // ---------------------------------------------------------------------------
 // Fetch mock — dispatched by METHOD + URL (mirrors schedule-editor.spec.tsx's own makePutFetchMock,
 // generalized to the several routes this suite's flows touch: POST /api/schedule/assign-show, the
@@ -460,6 +474,46 @@ describe("Feature: Grid show picker with span-assign", () => {
         showId: MORNING_DRIVE.id,
         applyToRun: true,
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // T247 wire-smoke finding: Postgres confirmed the write path was correct (both stored rows of a
+  // merged run carried the assigned show's id), but the panel's "Current:" line read "None" —
+  // reproduced after both the assign-show follow-up GET AND a full page reload. Root cause:
+  // `ScheduleEditor`'s mount-time `pruneOverrides` reconciliation misread two already-adjacent
+  // STORED rows (loaded straight off `deriveGridFromWeek`, never painted together by an operator) as
+  // a same-brush run MERGE (`schedule-grid-model`'s own case-5 rule) and dropped the override it had
+  // just loaded — on the very first render, before any assign action ever ran. These two specs drive
+  // the REAL `ScheduleEditor` + `deriveGridFromWeek` from an already-assigned `initialWeek`, asserting
+  // the panel's own "Current:" line — never a prop-scripted `currentShowId` — for exactly the two run
+  // shapes STORY-313's suspects named: a music-only run spanning more than one stored row, and a
+  // persona run backed by a single row.
+  // -------------------------------------------------------------------------
+
+  describe("Scenario: the Current line for an already-assigned run, straight from load", () => {
+    it("a music-only run merging two separately-stored rows with the same show id shows that show, not None", () => {
+      makeRouteFetchMock({});
+      renderEditor({ initialWeek: TWO_ROW_MUSIC_RUN_WEEK });
+
+      // Half-hour 0 sits inside the leftmost stored row (id 41); the visual run merges it with the
+      // second row (id 42) — both music-only, no gap between them.
+      openBlock(0, 0);
+
+      expect(within(panel()).getByText(`Current: ${LATE_NIGHT.name}`)).toBeInTheDocument();
+    });
+
+    it("a persona run backed by a single stored row shows its assigned show on the very first render", () => {
+      const assignedWeek: ScheduleWeekDto = {
+        segments: [{ ...REX_SEGMENT, showId: MORNING_DRIVE.id }],
+        version: "v-1",
+      };
+      makeRouteFetchMock({});
+      renderEditor({ initialWeek: assignedWeek });
+
+      openBlock(3, 15);
+
+      expect(within(panel()).getByText(`Current: ${MORNING_DRIVE.name}`)).toBeInTheDocument();
     });
   });
 
