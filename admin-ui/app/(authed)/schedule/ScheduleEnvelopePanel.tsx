@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { formatRunTimeRange, DAY_FULL_NAMES, type BlockOverrides, type ScheduleRun } from "./schedule-grid-model";
+import { ScheduleShowPicker, type ScheduleShowPickerProps } from "./ScheduleShowPicker";
 
 export interface ScheduleEnvelopePanelProps {
   run: ScheduleRun;
@@ -17,6 +18,10 @@ export interface ScheduleEnvelopePanelProps {
   onChangeOverrides: (patch: Partial<BlockOverrides>) => void;
   onDelete: () => void;
   onClose: () => void;
+  /** Everything the show-picker section (`ScheduleShowPicker`, SPEC F119.2, PLAN T245) needs —
+   * passed through verbatim. This panel has no opinion of its own about show assignment beyond
+   * rendering the section between the envelope fields and Delete. */
+  showPicker: ScheduleShowPickerProps;
 }
 
 const FIELD_LABEL_CLASSES = "text-[0.78rem] font-semibold text-mute";
@@ -61,6 +66,7 @@ export function ScheduleEnvelopePanel({
   onChangeOverrides,
   onDelete,
   onClose,
+  showPicker,
 }: ScheduleEnvelopePanelProps): ReactNode {
   const [genresText, setGenresText] = useState(overrides?.genres?.join(", ") ?? "");
   const [energyMinText, setEnergyMinText] = useState(overrides?.energyMin?.toString() ?? "");
@@ -144,6 +150,8 @@ export function ScheduleEnvelopePanel({
           </div>
         </div>
       </div>
+
+      <ScheduleShowPicker {...showPicker} />
 
       <Button type="button" variant="destructive" aria-label={`Delete ${title} block`} onClick={onDelete}>
         Delete block

@@ -253,6 +253,63 @@ export function findRunByStart(runs: readonly ScheduleRun[], day: number, start:
 }
 
 /**
+ * The stored `segment_schedule` row id for a run's own leftmost half-hour — the `blockId`
+ * `POST /api/schedule/assign-show` (SPEC F119.2, PLAN T245) addresses. `segments` is the RAW list
+ * from the last GET/PUT/assign-refresh response, never re-derived from `cells` (which, unlike a
+ * wire segment, carries no id at all — see this module's own doc comment). `ScheduleEditor` always
+ * opens the side panel keyed to a run's own `start` (`ScheduleGrid`'s `onInspectCell` always resolves
+ * to the covering run, regardless of which cell inside it was clicked), so the leftmost half-hour is
+ * exactly the anchor every caller of this function already has.
+ *
+ * Returns `null` when no stored segment starts exactly there. `ScheduleEditor` only calls this while
+ * the grid is guaranteed to match `segments` (T245 wire-contract decision (a): the picker acts on the
+ * SAVED grid only, disabled while a paint edit is unsaved) — so a `null` here means the run's start
+ * doesn't land on any stored row's own `startMinute`, the same "authored some other way" caveat
+ * {@link deriveGridFromWeek}'s own doc comment names (a week whose segments don't align to a
+ * half-hour boundary). The picker degrades to disabled in that case too; it never guesses.
+ *
+ * ── A run this returns an id for can still cover MORE than one stored row ───────────────────────
+ * `computeRuns` merges by cell VALUE only (this module's own doc comment) — two adjacent stored rows
+ * of the same brush with no gap between them render as one visual run even though the store still
+ * holds them as separate `segment_schedule` rows (each with its own id, possibly its own envelope).
+ * This function only ever names the LEFTMOST row's id; it never reports "there were actually N rows
+ * here." A caller that then narrows an assignment to just THIS one id would silently abandon the
+ * other rows the visual run actually spans, even though the operator was looking at (and meant to
+ * act on) the whole merged run. {@link countStoredSegmentsInRun} is the counterpart that surfaces
+ * that count so a caller (`ScheduleEditor`, for the narrow-to-one-block picker affordance) can
+ * disable narrowing instead of quietly mis-scoping it — run-wide assignment stays correct regardless,
+ * since the server computes the run against the STORE, not this leftmost-id guess.
+ */
+export function findBlockId(segments: readonly ScheduleSegmentDto[], day: number, start: number): number | null {
+  const startMinute = start * MINUTES_PER_HALF_HOUR;
+  const match = segments.find((segment) => segment.day === day && segment.startMinute === startMinute);
+  return match?.id ?? null;
+}
+
+/**
+ * How many separate STORED `segment_schedule` rows the open visual run `[start, end)` on `day`
+ * covers — see {@link findBlockId}'s own remarks for why a visual run and a stored row are not the
+ * same unit. A row counts if its own `startMinute` falls inside the run's span; a run derived from
+ * `computeRuns` is by construction one contiguous same-brush stretch, so every stored row whose start
+ * lands in that span is part of THIS run, not some other one. Used by `ScheduleEditor` to disable the
+ * show picker's narrow-to-one-block checkbox whenever this is `> 1` (STORY-313 P2): assigning "just
+ * this block" would only ever be able to name the leftmost row ({@link findBlockId}), silently
+ * dropping the rest of the run from the assignment.
+ */
+export function countStoredSegmentsInRun(
+  segments: readonly ScheduleSegmentDto[],
+  day: number,
+  start: number,
+  end: number
+): number {
+  const startMinute = start * MINUTES_PER_HALF_HOUR;
+  const endMinute = end * MINUTES_PER_HALF_HOUR;
+  return segments.filter(
+    (segment) => segment.day === day && segment.startMinute >= startMinute && segment.startMinute < endMinute
+  ).length;
+}
+
+/**
  * Builds the local grid + overrides map from a `GET /api/schedule` (or a PUT's 200 response) week
  * document. Known, documented limitation: if the server ever returns two ADJACENT same-persona
  * segments with different envelope overrides, loading them onto the grid merges them into one run

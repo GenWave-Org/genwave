@@ -8,9 +8,12 @@ import { readErrorMessage } from "@/lib/problem-details";
 import { ScheduleEnvelopePanel } from "./ScheduleEnvelopePanel";
 import { ScheduleGrid, type NowMarker } from "./ScheduleGrid";
 import { SchedulePalette } from "./SchedulePalette";
+import type { ScheduleShowPickerTarget } from "./ScheduleShowPicker";
 import {
   computeRuns,
+  countStoredSegmentsInRun,
   deriveGridFromWeek,
+  findBlockId,
   findRunAt,
   findRunByStart,
   HALF_HOURS_PER_DAY,
@@ -24,12 +27,31 @@ import {
   type Brush,
   type CellValue,
 } from "./schedule-grid-model";
-import type { RosterPersonaDto, ScheduleCellErrorDto, ScheduleWeekDto } from "./types";
+import type {
+  RosterPersonaDto,
+  ScheduleCellErrorDto,
+  ScheduleSegmentDto,
+  ScheduleShowsStatus,
+  ScheduleWeekDto,
+} from "./types";
 
 export interface ScheduleEditorProps {
   initialWeek: ScheduleWeekDto;
   personas: readonly RosterPersonaDto[];
+  /** The show roster for the side panel's picker (STORY-313 P6) — loaded ONCE, server-side, by the
+   * schedule page's own `Promise.allSettled` (mirroring `personas`) and passed straight through to
+   * `ScheduleEnvelopePanel`/`ScheduleShowPicker`; this component fetches nothing itself. */
+  shows: ScheduleShowsStatus;
 }
+
+/** The follow-up `GET /api/schedule` after a successful assignment can itself fail two ways (a
+ * non-ok response, or the fetch throwing outright) — both leave the operator in exactly the same
+ * spot: the assignment already landed server-side, only the LOCAL re-sync didn't. One shared,
+ * honest message for both (STORY-313 P3, reviewer finding: the two branches used to read
+ * differently, one generic-error, one recovery-worded) — reloading the page is the actual recovery
+ * (a fresh SSR load re-derives `cells`/`overrides`/`segments`/`weekVersion` from scratch), so there
+ * is nothing else useful to attempt from inside this handler beyond saying so clearly. */
+const FOLLOWUP_REFRESH_FAILED_MESSAGE = "The assignment saved, but the grid couldn't refresh — reload the page.";
 
 interface SavedProblemBody {
   detail?: string;
@@ -75,6 +97,15 @@ function computeNowMarker(): NowMarker {
  * `beforeunload` listener (mounted only while `isDirty`, torn down the instant it isn't) asks the
  * browser to confirm leaving, so a drag-painted week can't vanish on an accidental tab close.
  *
+ * PLAN T245 adds exactly one exception: the side panel's show picker (`ScheduleShowPicker`) posts to
+ * `POST /api/schedule/assign-show` immediately on its own Assign action, no Save step — SPEC F119.2's
+ * dedicated, transactional, server-computed-run endpoint. It is disabled whenever `isDirty` is true
+ * (the endpoint addresses a STORED row by id; an unsaved paint stroke has none yet), so it can never
+ * race a pending Save. `handleShowAssigned` is the one place this component reaches back to the
+ * server on its own initiative afterward — a follow-up `GET /api/schedule` (safe, since the round
+ * trip preserves `showId` — T243's own reviewer note) that re-syncs `cells`/`overrides`/`segments`/
+ * `weekVersion` the same way a Save's own 200 does.
+ *
  * ── One cell mutation can paint several cells in a single React batch ───────────────────────────
  * A drag paints every cell the pointer crosses (`ScheduleGrid`'s pointermove hit-test) — several
  * `onPaintCell` calls can land inside ONE React batch (e.g. a fast drag, or a spec driving multiple
@@ -88,10 +119,16 @@ function computeNowMarker(): NowMarker {
  * warns about) — so it runs in an effect keyed on `cells` instead, which by construction only ever
  * sees the fully-batched, post-commit value.
  */
-export function ScheduleEditor({ initialWeek, personas }: ScheduleEditorProps): ReactNode {
+export function ScheduleEditor({ initialWeek, personas, shows }: ScheduleEditorProps): ReactNode {
   const initialGrid = deriveGridFromWeek(initialWeek);
   const [cells, setCells] = useState<CellValue[][]>(initialGrid.cells);
   const [overrides, setOverrides] = useState(initialGrid.overrides);
+  // The RAW segment list backing `cells`/`overrides` — the one place a stored row's own id survives
+  // (see `findBlockId`'s own remarks: `cells` has no id at all). Kept in lockstep with `cells`/
+  // `overrides` on every server re-sync (mount, a Save's 200, a show assignment's follow-up GET) —
+  // never touched by a local paint edit, the same "network response only" discipline `weekVersion`
+  // already follows.
+  const [segments, setSegments] = useState<readonly ScheduleSegmentDto[]>(initialWeek.segments);
   const [selectedBrush, setSelectedBrush] = useState<Brush | null>(null);
   const [openBlockAnchor, setOpenBlockAnchor] = useState<{ day: number; start: number } | null>(null);
   const [cellErrors, setCellErrors] = useState<readonly ScheduleCellErrorDto[]>([]);
@@ -112,6 +149,28 @@ export function ScheduleEditor({ initialWeek, personas }: ScheduleEditorProps): 
   const runs = computeRuns(cells);
   const personaNames = personaNameMap(personas);
   const openRun = openBlockAnchor === null ? null : findRunByStart(runs, openBlockAnchor.day, openBlockAnchor.start);
+  const openBlockId = openRun === null ? null : findBlockId(segments, openRun.day, openRun.start);
+  const openOverrides =
+    openRun === null ? null : (overrides.get(runKey(openRun.day, openRun.start, openRun.brush))?.overrides ?? null);
+  // STORY-313 P2: how many STORED segments the open run actually merges — `findBlockId` only ever
+  // names the LEFTMOST one, so narrowing to "just this block" is only well-defined when the run is
+  // exactly one stored row (see `countStoredSegmentsInRun`'s own remarks).
+  const openRunSegmentCount =
+    openRun === null ? 0 : countStoredSegmentsInRun(segments, openRun.day, openRun.start, openRun.end);
+  const narrowDisabledReason =
+    openRunSegmentCount > 1
+      ? `This run merges ${openRunSegmentCount} saved blocks — only "Apply to the whole run" is available.`
+      : null;
+  // T245 wire-contract decision (a): the show picker only ever acts on the SAVED grid — `isDirty`
+  // takes priority (the common case an operator hits), `openBlockId === null` is the residual
+  // edge case (see `findBlockId`'s own remarks) once nothing is dirty. STORY-313 P7: `blockId` and
+  // its disabled reason are folded into one union here — the caller-side fold the reviewer asked
+  // for — so `ScheduleShowPicker` never has to reconcile two independently-nullable fields itself.
+  const showPickerTarget: ScheduleShowPickerTarget = isDirty
+    ? { kind: "disabled", reason: "Save your changes before assigning a show." }
+    : openBlockId === null
+      ? { kind: "disabled", reason: "Reload the schedule to assign a show for this block." }
+      : { kind: "ready", blockId: openBlockId, narrowDisabledReason };
 
   // Reconciles `overrides` against whatever `cells` actually ended up as, every time it changes —
   // see this component's own doc comment for why this can't live inside `commitCells` itself. A
@@ -214,6 +273,7 @@ export function ScheduleEditor({ initialWeek, personas }: ScheduleEditorProps): 
         const derived = deriveGridFromWeek(week);
         setCells(derived.cells);
         setOverrides(derived.overrides);
+        setSegments(week.segments);
         setCellErrors([]);
         setOpenBlockAnchor(null);
         setIsDirty(false);
@@ -254,6 +314,40 @@ export function ScheduleEditor({ initialWeek, personas }: ScheduleEditorProps): 
       toast.error("Network error — check your connection");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  /**
+   * `ScheduleShowPicker`'s own `onAssigned` callback (T245): a `POST /api/schedule/assign-show` just
+   * succeeded, but its response only names updated block ids plus a fresh version — never the whole
+   * week document — so re-syncing `cells`/`overrides`/`segments`/`weekVersion` needs a follow-up
+   * `GET /api/schedule` (safe: the round trip preserves `showId`, T243's own reviewer note). Mirrors
+   * `handleSave`'s own 200 branch exactly, minus the save-specific bookkeeping (`isDirty`/
+   * `cellErrors`/`openBlockAnchor` are all untouched by an assignment — see this component's own doc
+   * comment). The open panel stays mounted throughout: an assignment never changes a run's own
+   * day/start/brush, so `runKey` — and therefore the panel's own React `key` — never changes either.
+   *
+   * Both failure shapes (a non-ok response, or the fetch itself throwing) leave local state exactly
+   * as it stood before this call — deliberately NOT patched here (STORY-313 P3, reviewer finding):
+   * the shared {@link FOLLOWUP_REFRESH_FAILED_MESSAGE} already tells the operator the real recovery
+   * (reload the page), which re-derives every one of these fields fresh from the server; there is no
+   * partial, in-place fix-up worth attempting from inside this handler.
+   */
+  async function handleShowAssigned(): Promise<void> {
+    try {
+      const resp = await fetch("/api/schedule");
+      if (!resp.ok) {
+        toast.error(FOLLOWUP_REFRESH_FAILED_MESSAGE);
+        return;
+      }
+      const week = (await resp.json()) as ScheduleWeekDto;
+      const derived = deriveGridFromWeek(week);
+      setCells(derived.cells);
+      setOverrides(derived.overrides);
+      setSegments(week.segments);
+      setWeekVersion(week.version ?? null);
+    } catch {
+      toast.error(FOLLOWUP_REFRESH_FAILED_MESSAGE);
     }
   }
 
@@ -307,7 +401,7 @@ export function ScheduleEditor({ initialWeek, personas }: ScheduleEditorProps): 
             key={runKey(openRun.day, openRun.start, openRun.brush)}
             run={openRun}
             personaName={openRun.brush === "music" ? null : personaNames.get(openRun.brush) ?? null}
-            overrides={overrides.get(runKey(openRun.day, openRun.start, openRun.brush))?.overrides ?? null}
+            overrides={openOverrides}
             onChangeOverrides={(patch) =>
               handleChangeOverrides(openRun.day, openRun.start, openRun.end, openRun.brush, patch)
             }
@@ -315,6 +409,14 @@ export function ScheduleEditor({ initialWeek, personas }: ScheduleEditorProps): 
               void handleDeleteBlock(openRun.day, openRun.start, openRun.end);
             }}
             onClose={() => setOpenBlockAnchor(null)}
+            showPicker={{
+              target: showPickerTarget,
+              currentShowId: openOverrides?.showId ?? null,
+              shows,
+              onAssigned: () => {
+                void handleShowAssigned();
+              },
+            }}
           />
         )}
       </div>

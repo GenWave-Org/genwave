@@ -62,3 +62,32 @@ export interface RosterPersonaDto {
   id: number;
   name: string;
 }
+
+/** The grid side panel's show-picker option (SPEC F119.2, F119.3; STORY-313, PLAN T245) — the
+ * narrow shape the schedule PAGE (`page.tsx`) projects `GET /api/shows`'s full
+ * `GenWave.Host.Api.ShowDto` down to the instant it fetches the roster (SPEC F91's server-load
+ * discipline, PLAN T245's P6): `name` for the label, `tagline` as cheap secondary text under the
+ * select once chosen. Deliberately excludes `slug`/`flavor`/provenance — `flavor` is prompt-only and
+ * private everywhere except the Shows page itself (SPEC F115.3, the persona-soul precedent), which
+ * this panel is not — so the projection strips it (and everything else this folder has no reason to
+ * hold) AT THE FETCH BOUNDARY, before it ever reaches client-side state, not merely at render. The
+ * picker only ever ADDRESSES a show by numeric id (`AssignShowRequestDto.ShowId`), never by slug. */
+export interface ScheduleShowOptionDto {
+  id: number;
+  name: string;
+  tagline: string | null;
+}
+
+/**
+ * The grid side panel's show LIST load state (STORY-313, PLAN T245's P1/P6 fix) — computed once,
+ * server-side, in `page.tsx`'s own `Promise.allSettled` roster load, and threaded down through
+ * `ScheduleEditor` → `ScheduleEnvelopePanel` → `ScheduleShowPicker` as a plain prop. Unlike the
+ * `FacetFilterControl.tsx` house precedent this mirrors (a CLIENT-side fetch-on-mount, which needs a
+ * third `"loading"` member for the window before its effect resolves), this load happens on the
+ * SERVER before the client component tree ever mounts — there is no in-between tick to represent, so
+ * this union only has the two states an already-settled load can produce. A failed load degrades to
+ * `"error"` rather than failing the whole page (SPEC F119.3's coverage-neutral posture: an operator
+ * who can't see the show roster can still paint/save the grid); `ScheduleShowPicker` renders that as
+ * a terminal, honest "unavailable" state — never a perpetually-loading one that will never resolve.
+ */
+export type ScheduleShowsStatus = { kind: "loaded"; shows: ScheduleShowOptionDto[] } | { kind: "error" };

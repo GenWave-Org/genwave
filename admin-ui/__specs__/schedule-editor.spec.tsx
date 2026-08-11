@@ -55,7 +55,7 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { ScheduleEditor } from "../app/(authed)/schedule/ScheduleEditor";
 import type { ScheduleEditorProps } from "../app/(authed)/schedule/ScheduleEditor";
-import type { RosterPersonaDto, ScheduleWeekDto } from "../app/(authed)/schedule/types";
+import type { RosterPersonaDto, ScheduleShowsStatus, ScheduleWeekDto } from "../app/(authed)/schedule/types";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -65,6 +65,12 @@ const REX: RosterPersonaDto = { id: 1, name: "Radio Rex" };
 const NOVA: RosterPersonaDto = { id: 2, name: "Nova" };
 
 const EMPTY_WEEK: ScheduleWeekDto = { segments: [] };
+
+// This suite never opens the show-picker section of the side panel (that's
+// schedule-show-picker.spec.tsx's own scope) — an empty, already-loaded roster is enough to satisfy
+// `ScheduleEditorProps.shows` (STORY-313 P6: the schedule page now loads it once, server-side, and
+// passes it straight through).
+const LOADED_SHOWS: ScheduleShowsStatus = { kind: "loaded", shows: [] };
 
 // ---------------------------------------------------------------------------
 // Fetch mock — this component issues exactly one kind of request ever
@@ -105,6 +111,7 @@ function renderEditor(overrides: Partial<ScheduleEditorProps> = {}): ReturnType<
   const props: ScheduleEditorProps = {
     initialWeek: EMPTY_WEEK,
     personas: [REX, NOVA],
+    shows: LOADED_SHOWS,
     ...overrides,
   };
   return render(
