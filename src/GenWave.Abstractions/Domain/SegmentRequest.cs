@@ -53,10 +53,20 @@ namespace GenWave.Core.Domain;
 /// whenever that is.
 /// </param>
 /// <param name="ShowName">
-/// SPEC F116.2 (STORY-307, PLAN T248) — for a <see cref="SegmentKind.SignOff"/>/<see cref="SegmentKind.SignOn"/>
-/// only: this piece's OWN show, carried verbatim from the deferral's own captured
-/// <c>HandoffContext.ShowName</c> (never re-derived here). <see langword="null"/> for every other
-/// kind, and for a showless boundary — additive and optional so every existing caller is diff-free.
+/// SPEC F116.2 (STORY-307, PLAN T248) — for a <see cref="SegmentKind.SignOff"/>/<see cref="SegmentKind.SignOn"/>:
+/// this piece's OWN show, carried verbatim from the deferral's own captured
+/// <c>HandoffContext.ShowName</c> (never re-derived here). <see langword="null"/> for a showless
+/// boundary — additive and optional so every existing caller is diff-free.
+///
+/// <para>
+/// SPEC F117.2 (STORY-309, PLAN T250) — ALSO rides on a <see cref="SegmentKind.StationId"/> request
+/// when the drain is firing during a show and the authored imaging pool came up empty: the
+/// Orchestrator's own drain arm stamps the on-air show's name here, and
+/// <c>GenWave.Tts.PatterTemplateRenderer.Expand</c>'s <see cref="SegmentKind.StationId"/> arm
+/// renders "You're listening to {ShowName} on {StationName}." instead of the plain
+/// "You're listening to {StationName}." <see langword="null"/> (the F110.2-original, byte-identical
+/// phrasing) outside a show, or whenever an authored pool row already served the drain.
+/// </para>
 /// </param>
 /// <param name="ShowFlavor">
 /// SPEC F116.2/F115.3 — <see cref="ShowName"/>'s own flavor text, carried the same way; populated only

@@ -60,21 +60,36 @@ sealed class FakeMediaCatalog : IMediaCatalog
     public bool ScriptedRepeatedArtist { get; set; }
 
     /// <summary>
-    /// SPEC F110.2 (STORY-301, PLAN T232) — scripts <see cref="GetRandomReadyByImagingKindAsync"/>'s
-    /// return value directly, independent of <see cref="pool"/> (the music-selection pool above): a
-    /// pool-first ident spec cares about a DIFFERENT catalog query entirely, over a DIFFERENT (usually
-    /// empty) collection. <see langword="null"/> (the default) is "no pool" — the drain's own
-    /// template-fallback signal, the same answer this interface's own default implementation gives a
-    /// caller with no override at all.
+    /// SPEC F110.2 (STORY-301, PLAN T232) — scripts BOTH <see cref="GetRandomReadyByImagingKindAsync(LibraryScope,ImagingKind,CancellationToken)"/>
+    /// and its F117.2 show-scoped sibling's return value directly, independent of <see cref="pool"/>
+    /// (the music-selection pool above): a pool-first ident spec cares about a DIFFERENT catalog query
+    /// entirely, over a DIFFERENT (usually empty) collection. <see langword="null"/> (the default) is
+    /// "no pool" — the drain's own template-fallback signal, the same answer this interface's own
+    /// default implementation gives a caller with no override at all.
     /// </summary>
     public MediaReference? ImagingPoolResult { get; set; }
 
-    /// <summary>Every (scope, kind) pair passed to <see cref="GetRandomReadyByImagingKindAsync"/>, in call order.</summary>
-    public List<(LibraryScope Scope, ImagingKind Kind)> ImagingKindCalls { get; } = [];
+    /// <summary>Every (scope, kind, showId) triple passed to either
+    /// <see cref="GetRandomReadyByImagingKindAsync(LibraryScope,ImagingKind,CancellationToken)"/> (ShowId
+    /// recorded null) or its <see cref="GetRandomReadyByImagingKindAsync(LibraryScope,ImagingKind,long?,CancellationToken)"/>
+    /// show-scoped sibling (SPEC F117.2, STORY-309, PLAN T250), in call order.</summary>
+    public List<(LibraryScope Scope, ImagingKind Kind, long? ShowId)> ImagingKindCalls { get; } = [];
 
-    public Task<MediaReference?> GetRandomReadyByImagingKindAsync(LibraryScope scope, ImagingKind kind, CancellationToken ct)
+    /// <summary>
+    /// The pre-F117 3-arg member — mirrors <c>MediaRepository</c>'s own two-member split (SPEC F117.2,
+    /// PLAN T250 review): a genuinely separate interface member, not an overload of the show-scoped
+    /// one below, so this double's own shape matches production's real binary-compat split. Delegates
+    /// to the show-scoped member with <c>showId: null</c> — a fake carries none of the byte-identical-
+    /// SQL concern the real repository's own deliberate non-delegation guards against, so one scripted
+    /// answer source is simpler and no less honest here.
+    /// </summary>
+    public Task<MediaReference?> GetRandomReadyByImagingKindAsync(LibraryScope scope, ImagingKind kind, CancellationToken ct) =>
+        GetRandomReadyByImagingKindAsync(scope, kind, showId: null, ct);
+
+    public Task<MediaReference?> GetRandomReadyByImagingKindAsync(
+        LibraryScope scope, ImagingKind kind, long? showId, CancellationToken ct)
     {
-        ImagingKindCalls.Add((scope, kind));
+        ImagingKindCalls.Add((scope, kind, showId));
         return Task.FromResult(ImagingPoolResult);
     }
 

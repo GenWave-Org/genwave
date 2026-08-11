@@ -156,6 +156,21 @@ using GenWave.Core.Events;
 /// minutes after the hour still speaks the right hour and, since the SAME hour always renders the SAME
 /// text, a second announcement within that hour is a forever-cache hit rather than a re-synthesis.
 /// </para>
+///
+/// <para>
+/// <b>Show idents (SPEC F117.1/F117.2, STORY-309, PLAN T250):</b> the SAME
+/// <see cref="SpeechDeferralKind.StationId"/> drain above additionally reads the on-air show (via
+/// <paramref name="scheduleResolver"/>'s synchronous <c>TryGetCurrent()</c> snapshot, the T241
+/// chokepoint) and hands its id to <paramref name="catalog"/>'s pool call, which now carries the
+/// whole show-scope preference ladder in ONE query (show-scoped rows preferred, the station-wide
+/// pool as fallback, a foreign-show row never a candidate — see
+/// <c>IMediaCatalog.GetRandomReadyByImagingKindAsync</c>'s own remarks). Only when that combined pool
+/// comes up empty AND a show is on the air does a NEW floor apply ahead of the plain templated ident:
+/// the templated SHOW line ("You're listening to {show} on {station}." — still
+/// <see cref="SegmentKind.StationId"/>, so zero-LLM, station-voiced, and forever-cached exactly like
+/// every other StationId render, no new kind needed). No show on the air degrades this whole
+/// paragraph away — byte-identical to F110.2/F110.3 above, the required outside-show posture.
+/// </para>
 /// </summary>
 public sealed class Orchestrator(
     IStationIdentityProvider identityProvider,
@@ -785,9 +800,12 @@ public sealed class Orchestrator(
         // ObserveDuration (SPEC F110.2, PLAN T232) gates the gh-#253 estimator feed below — true for
         // every genuine TTS render (unchanged), false for a pool-first StationId item (KickResolved):
         // an authored ident's measured duration reflects whatever the operator produced, not a
-        // synthesis the estimator should learn from — blending it into the templated-TTS StationId
+        // synthesis the estimator should learn from — blending it into a templated-TTS StationId
         // bucket would skew future boundary-fit estimates for the fallback rung, which is still a
-        // real TTS render with its own, separate duration profile.
+        // real TTS render with its own, separate duration profile. "A templated-TTS StationId bucket"
+        // is now plural, not singular (SPEC F117.2, PLAN T250 review finding F1): the estimator keys
+        // its Exact tier on (voice, show-or-null), so the plain ident and each show's own templated
+        // line each land in their OWN bucket — a pool-first item still observes into NONE of them.
         var pendingRenders =
             new List<(SegmentRequest Request, Task<MediaItem?> Render, string? ContextProviderKey, bool ObserveDuration)>();
 
@@ -866,10 +884,26 @@ public sealed class Orchestrator(
                     // because a drain only ever runs at a boundary (SPEC F74.1 — never mid-track).
                     // A null catalog (no IMediaCatalog wired — an older host, or a test double that
                     // never scripts one) skips the pool outright, same as a genuinely empty one.
+                    //
+                    // SPEC F117.2 (STORY-309, PLAN T250) — the on-air show, read via the SAME
+                    // CachingScheduleResolver.TryGetCurrent() synchronous snapshot
+                    // OnAirPersonaAccessor's own hot path already trusts: no extra store round trip,
+                    // and a null scheduleResolver or a not-yet-warm cache both degrade to "no show" —
+                    // exactly the branch below that keeps this arm byte-identical to F110.2. Read
+                    // ONCE into a local, never twice: the Id handed to the pool query below and the
+                    // Name that may decide the templated floor further down must describe the SAME
+                    // on-air show, not two snapshots straddling a boundary flip.
+                    var currentShow = scheduleResolver?.TryGetCurrent()?.Show;
+
+                    // The pool query itself now carries the WHOLE show-scope preference ladder
+                    // (MediaRepository.GetRandomReadyByImagingKindAsync's own remarks, T250):
+                    // show-scoped rows win when currentShow is set, the station-wide (unscoped) pool
+                    // is the fallback, and a foreign-show row is never a candidate — currentShow?.Id
+                    // is exactly "no show" (null) on the F110.2 path this arm has always had.
                     var pooled = catalog is null
                         ? null
                         : await catalog.GetRandomReadyByImagingKindAsync(
-                            scopeProvider.Current, ImagingKind.StationId, ct);
+                            scopeProvider.Current, ImagingKind.StationId, currentShow?.Id, ct);
                     var stationIdReq = BuildStationIdRequest(identity);
                     if (pooled is not null)
                     {
@@ -877,7 +911,16 @@ public sealed class Orchestrator(
                         break;
                     }
 
-                    Kick(stationIdReq);
+                    // SPEC F117.2 — the templated show line is the floor for a show with no ready
+                    // pool row at all (scoped or station-wide): the SAME SegmentKind.StationId
+                    // request, ShowName additionally stamped, so PatterTemplateRenderer's StationId
+                    // arm renders "You're listening to {show} on {station}." instead of the plain
+                    // ident — station-voiced, zero LLM, forever-cached exactly like every other
+                    // StationId render (BuildStationIdRequest's own remarks), no new SegmentKind
+                    // needed. currentShow null (no show on the air) falls straight through to the
+                    // ORIGINAL plain ident — byte-identical to F110.2, the required outside-show
+                    // posture.
+                    Kick(currentShow is { } show ? stationIdReq with { ShowName = show.Name } : stationIdReq);
                     break;
                 }
 
@@ -967,14 +1010,19 @@ public sealed class Orchestrator(
             {
                 // gh-#253: feed the MEASURED duration (F66.1's cue-derived stamp — null when cue
                 // analysis failed, in which case nothing is observed: never fabricated) back into
-                // the estimation seam, keyed by the request's own kind/persona/voice, so the
-                // historical tier self-improves with every segment that actually rendered.
-                // observeDuration is false only for a KickResolved pool-first item (SPEC F110.2,
-                // PLAN T232) — see pendingRenders' own remarks for why that duration must not join
-                // this bucket.
+                // the estimation seam, keyed by the request's own kind/persona/voice — and, as of
+                // SPEC F117.2 (PLAN T250 review finding F1), request.ShowName too, so the Exact tier's
+                // (voice, show) memo never lets a show-branded StationId render's duration stand in
+                // for a DIFFERENT show's (or the plain ident's) airing under the SAME voice. ShowName
+                // is null for every non-StationId kind and for a showless/pool-served StationId
+                // airing, which the estimator treats as its own (voice, null) bucket — byte-identical
+                // to pre-F117 behavior for every one of those. The historical tier self-improves with
+                // every segment that actually rendered. observeDuration is false only for a
+                // KickResolved pool-first item (SPEC F110.2, PLAN T232) — see pendingRenders' own
+                // remarks for why that duration must not join this bucket.
                 if (observeDuration && seg.DurationMs is int measuredMs)
                     patterEstimator.ObserveRendered(
-                        kind, request.PersonaName, request.Voice, TimeSpan.FromMilliseconds(measuredMs));
+                        kind, request.PersonaName, request.Voice, TimeSpan.FromMilliseconds(measuredMs), request.ShowName);
 
                 // gh-#259: a station ID keeps the station's CREDIT (Artist, gh-#96 untouched) but
                 // still airs inside the unit's show — stamp the unit persona so Now Playing
@@ -1014,6 +1062,14 @@ public sealed class Orchestrator(
     /// F110.2, PLAN T232) — the render-await loop below reads only this request's own <c>Kind</c>
     /// off a resolved item, so the SAME shape serves as an honest, non-garbage tag rather than
     /// inventing a second one.
+    /// </para>
+    ///
+    /// <para>
+    /// SPEC F117.2 (STORY-309, PLAN T250) — the StationId drain arm layers
+    /// <c>with { ShowName = show.Name }</c> onto this SAME shape for the templated show-line floor,
+    /// never a second request-builder: <see cref="SegmentRequest.ShowName"/> is additive and
+    /// <see langword="null"/> here, so every call site that does NOT layer it keeps producing the
+    /// original plain-ident request unchanged.
     /// </para>
     /// </summary>
     SegmentRequest BuildStationIdRequest(StationIdentity identity) =>

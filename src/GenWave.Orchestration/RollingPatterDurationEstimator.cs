@@ -9,13 +9,19 @@ using GenWave.Core.Domain;
 ///
 /// <list type="number">
 /// <item><b>Exact</b> — <see cref="SegmentKind.StationId"/> only: its copy is deterministic per
-/// (station name, voice) — always templated (<c>LlmCopyWriter.IsLlmAuthored</c> reports false for
-/// it), so the TTS cache serves the SAME rendered file on every airing and the last measured
-/// duration for that voice IS the next airing's duration. A corrections/settings edit that re-keys
-/// the cache simply re-measures on the next render and the very next observation replaces the memo.
-/// No other kind qualifies today (LeadIn/BackAnnounce vary per track, TimeDate per clock read,
-/// SignOff/SignOn are LLM-authored blurbs) — a future render-ahead producer that holds a rendered
-/// segment in hand needs no tier here at all, it already has the real <c>DurationMs</c>.</item>
+/// (voice, on-air show) — always templated (<c>LlmCopyWriter.IsLlmAuthored</c> reports false for
+/// it), so the TTS cache serves the SAME rendered file on every airing of that (voice, show) pair and
+/// the last measured duration for it IS that pair's next airing duration. SPEC F117.2 (STORY-309,
+/// PLAN T250 review finding F1) widened the memo key from voice alone to (voice, show-name-or-null):
+/// the templated show line ("You're listening to {show} on {station}.") is a DIFFERENT rendered clip
+/// than the plain ident ("You're listening to {station}.") for the SAME voice, so a voice-only key
+/// would let one show's measured duration silently stand in for another show's — or the plain
+/// ident's — airing. <see langword="null"/> show-name is its own bucket (the F110.2-original,
+/// showless ident). A corrections/settings edit that re-keys the TTS cache simply re-measures on the
+/// next render and the very next observation replaces that (voice, show) memo. No other kind
+/// qualifies today (LeadIn/BackAnnounce vary per track, TimeDate per clock read, SignOff/SignOn are
+/// LLM-authored blurbs) — a future render-ahead producer that holds a rendered segment in hand needs
+/// no tier here at all, it already has the real <c>DurationMs</c>.</item>
 /// <item><b>Historical</b> — a per-(persona × kind) rolling average over the last
 /// <see cref="HistoryWindow"/> MEASURED durations (SPEC F66.1's cue-derived stamp, observed back in
 /// via <see cref="ObserveRendered"/>), reported once <see cref="MinHistoricalSamples"/> samples
@@ -74,15 +80,25 @@ public sealed class RollingPatterDurationEstimator(ICopyBoundsProvider? copyBoun
 
     readonly object gate = new();
     readonly Dictionary<(SegmentKind Kind, string Persona), Queue<double>> history = new();
-    readonly Dictionary<string, double> exactStationIdMsByVoice = new(StringComparer.Ordinal);
+
+    // SPEC F117.2 (STORY-309, PLAN T250 review finding F1) — keyed on (voice, show-name-or-null),
+    // never voice alone: see the class remarks' Exact-tier paragraph for why a voice-only key would
+    // let one show's (or the plain ident's) measured duration silently stand in for another's. Default
+    // tuple/string equality is ordinal (String's own IEquatable&lt;string&gt; implementation), the
+    // same comparison the old voice-only dictionary's explicit StringComparer.Ordinal gave.
+    readonly Dictionary<(string Voice, string? ShowName), double> exactStationIdMs = new();
 
     /// <inheritdoc/>
-    public PatterDurationEstimate Estimate(SegmentKind kind, string? personaName, string voice)
+    public PatterDurationEstimate Estimate(SegmentKind kind, string? personaName, string voice) =>
+        Estimate(kind, personaName, voice, showName: null);
+
+    /// <inheritdoc/>
+    public PatterDurationEstimate Estimate(SegmentKind kind, string? personaName, string voice, string? showName)
     {
         lock (gate)
         {
             // Tier 1 — exact: the cache-stable StationId clip replays verbatim (see class remarks).
-            if (kind == SegmentKind.StationId && exactStationIdMsByVoice.TryGetValue(voice, out var exactMs))
+            if (kind == SegmentKind.StationId && exactStationIdMs.TryGetValue((voice, showName), out var exactMs))
                 return new PatterDurationEstimate(TimeSpan.FromMilliseconds(exactMs), PatterEstimateConfidence.Exact);
 
             // Tier 2 — historical rolling average, per persona × kind.
@@ -103,14 +119,18 @@ public sealed class RollingPatterDurationEstimator(ICopyBoundsProvider? copyBoun
     }
 
     /// <inheritdoc/>
-    public void ObserveRendered(SegmentKind kind, string? personaName, string voice, TimeSpan measured)
+    public void ObserveRendered(SegmentKind kind, string? personaName, string voice, TimeSpan measured) =>
+        ObserveRendered(kind, personaName, voice, measured, showName: null);
+
+    /// <inheritdoc/>
+    public void ObserveRendered(SegmentKind kind, string? personaName, string voice, TimeSpan measured, string? showName)
     {
         if (measured <= TimeSpan.Zero) return; // measured-never-fabricated (F66.1) — a non-positive value is neither
 
         lock (gate)
         {
             if (kind == SegmentKind.StationId)
-                exactStationIdMsByVoice[voice] = measured.TotalMilliseconds;
+                exactStationIdMs[(voice, showName)] = measured.TotalMilliseconds;
 
             var key = (kind, personaName ?? "");
             if (!history.TryGetValue(key, out var samples))

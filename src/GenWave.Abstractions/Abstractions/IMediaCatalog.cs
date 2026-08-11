@@ -182,6 +182,37 @@ public interface IMediaCatalog
         Task.FromResult<MediaReference?>(null);
 
     /// <summary>
+    /// SPEC F117.1/F117.2 (STORY-309, PLAN T250) — <see cref="GetRandomReadyByImagingKindAsync(LibraryScope,ImagingKind,CancellationToken)"/>'s
+    /// show-scoped sibling: a genuinely NEW interface member, never that 3-arg member widened in
+    /// place. Widening the published 3-arg signature (even with a trailing optional parameter) would
+    /// have been a binary break for any already-compiled caller reaching for the OLD 3-arg overload —
+    /// a <see cref="System.MissingMethodException"/> at that call site, since the metadata signature
+    /// itself changes — and would have silently orphaned any pre-T250 implementer's own override: an
+    /// implementer that only ever overrode the 3-arg shape would, the moment a NEW caller reached for
+    /// a show-scoped call, have fallen through to a hardcoded-null default instead of the real (if
+    /// show-unaware) answer its own code already knows how to give.
+    /// <para>
+    /// Default-implemented (not abstract), same additive-contract discipline as every other DIM on
+    /// this interface — but this one's default body DELEGATES to the 3-arg member above (dropping
+    /// <paramref name="showId"/>) rather than fabricating <see langword="null"/>: a pre-T250
+    /// implementer that overrides ONLY the 3-arg shape still answers honestly — its own unscoped pool
+    /// — when reached through this NEW shape, rather than reporting a manufactured empty pool. The
+    /// ONE production implementer (<c>GenWave.MediaLibrary.Catalog.MediaRepository</c>) overrides BOTH
+    /// members explicitly; this default only ever matters for an implementer that has not opted in.
+    /// </para>
+    /// <para>
+    /// <paramref name="showId"/> preference ladder (see <c>MediaRepository</c>'s own concrete override
+    /// for the SQL): a row scoped to <paramref name="showId"/> is preferred, a station-wide
+    /// (<c>show_id</c> null) row is the fallback, and a row scoped to a DIFFERENT show is never a
+    /// candidate at all (F117.1, "scoped means scoped"). <see langword="null"/> means "no show" — the
+    /// F110.2-original behavior the 3-arg member above has always given.
+    /// </para>
+    /// </summary>
+    Task<MediaReference?> GetRandomReadyByImagingKindAsync(
+        LibraryScope scope, ImagingKind kind, long? showId, CancellationToken ct) =>
+        GetRandomReadyByImagingKindAsync(scope, kind, ct);
+
+    /// <summary>
     /// One track for main rotation (SPEC F41, closes gitea-#210, gitea-#213) — a tiered preference query, not a
     /// hard exclusion. Prefers, most-binding first: (1) an id not in <paramref name="orderedRecentIds"/>;
     /// (2) an artist that does not case-insensitively match any artist among the last

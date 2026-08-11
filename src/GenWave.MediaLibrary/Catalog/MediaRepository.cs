@@ -162,6 +162,47 @@ sealed class MediaRepository(
     }
 
     /// <summary>
+    /// SPEC F117.1/F117.2 (STORY-309, PLAN T250) — <see cref="GetRandomReadyByImagingKindAsync(LibraryScope,ImagingKind,CancellationToken)"/>'s
+    /// show-scoped sibling (see that member's interface-level remarks for why this is a genuinely NEW
+    /// member rather than that one widened in place): the SAME playable/kind/explicit predicate, plus
+    /// <paramref name="showId"/> folding the WHOLE show-scope preference ladder into this ONE query,
+    /// never a wider fetch narrowed afterward in C#. The WHERE clause admits a row only when its OWN
+    /// <c>show_id</c> either matches <paramref name="showId"/> exactly or is NULL (station-wide) — a
+    /// row scoped to a DIFFERENT show is excluded outright, so a showless drain
+    /// (<paramref name="showId"/> null) can never surface one (F117.1, "scoped means scoped":
+    /// <c>show_id = NULL</c> is never true in SQL, so the equality arm drops out entirely and only the
+    /// <c>show_id is null</c> arm can still match). The ORDER BY adds ONE preference tier ahead of
+    /// <c>random()</c> — <c>coalesce(show_id = @showId, false) desc</c> — so a ready row scoped to the
+    /// CURRENT show always wins over an unscoped one when both exist, while the unscoped station-wide
+    /// pool still serves as the fallback when no scoped row does (F117.2, "the station-wide pool
+    /// survives"). <paramref name="showId"/> null is exactly the 3-arg sibling's own behavior for
+    /// every authored row that carries no show scope (the F117.1 default an operator never opts out
+    /// of by omission) — the new predicate's <c>show_id is null</c> arm always admits those regardless
+    /// of what <paramref name="showId"/> a caller passes.
+    /// </summary>
+    public async Task<MediaReference?> GetRandomReadyByImagingKindAsync(
+        LibraryScope scope, ImagingKind kind, long? showId, CancellationToken ct)
+    {
+        // Default-deny: no scope means no access, no SQL issued.
+        if (scope.IsEmpty) return null;
+
+        var explicitPredicate = ExplicitPredicate();
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<MediaRow>(new CommandDefinition(
+            $"{SelectColumns} m " +
+            "left join library.media_rating r on r.media_id = m.id " +
+            "where state = 'ready' and measurable and eligible and not coalesce(r.never_play, false) " +
+            "and imaging_kind = @kind and library_id = any(@libraryIds) " +
+            "and (show_id = @showId or show_id is null) " +
+            $"{explicitPredicate} " +
+            "order by coalesce(show_id = @showId, false) desc, random() limit 1",
+            new { kind = ImagingKindTokens.ToToken(kind), libraryIds = scope.LibraryIds.ToArray(), showId },
+            cancellationToken: ct));
+        return row?.ToReference(logger);
+    }
+
+    /// <summary>
     /// SPEC F41.1/F41.3 — one tiered query. The playable predicate is byte-identical to
     /// <see cref="GetRandomReadyAsync"/>'s; the ORDER BY adds two preference tiers ahead of
     /// <c>random()</c>, most-binding first, so a relaxation never becomes a hard exclusion (F41.2/F41.4):
@@ -247,7 +288,10 @@ sealed class MediaRepository(
     /// SPEC F95.4, STORY-250, PLAN T114 (extended PLAN T232) — the ONE audience-posture WHERE
     /// fragment shared by every pool-predicate query this repository builds
     /// (<see cref="GetRotationCandidateAsync"/>, <see cref="GetEnvelopeCandidateAsync"/>,
-    /// <see cref="GetEnvelopeCandidatePoolAsync"/>, <see cref="GetRandomReadyByImagingKindAsync"/>):
+    /// <see cref="GetEnvelopeCandidatePoolAsync"/>,
+    /// <see cref="GetRandomReadyByImagingKindAsync(LibraryScope,ImagingKind,CancellationToken)"/> and
+    /// its <see cref="GetRandomReadyByImagingKindAsync(LibraryScope,ImagingKind,long?,CancellationToken)"/>
+    /// show-scoped sibling):
     /// empty (no constraint) on <see cref="AudiencePosture.Mature"/>, or
     /// <c>and not coalesce(m.explicit, false)</c> on <see cref="AudiencePosture.Everyone"/> — mirrors
     /// <see cref="GetEnvelopeCandidateAsync"/>'s own "omitted entirely, not merely always-true"

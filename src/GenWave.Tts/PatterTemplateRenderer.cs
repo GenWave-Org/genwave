@@ -33,6 +33,20 @@ public sealed class PatterTemplateRenderer
     /// <c>DegradationGatedCopyWriter</c> can route straight here (e.g. Hard mode) before that drop
     /// ever gets a chance to apply.
     ///
+    /// <see cref="SegmentKind.StationId"/> gains a show-branded variant (SPEC F117.2, STORY-309,
+    /// PLAN T250): whenever the Orchestrator's drain arm stamps <see cref="SegmentRequest.ShowName"/>
+    /// (only ever done during a show, and only when the authored imaging pool came up empty for it),
+    /// the line names the show ahead of the station — "You're listening to {show} on {station}."
+    /// A null, empty, or whitespace-only <see cref="SegmentRequest.ShowName"/> (every pre-F117 caller,
+    /// and every outside-show drain) renders the ORIGINAL "You're listening to {station}." unchanged —
+    /// F117.2's own "outside shows, byte-identical to F110.2" acceptance; a whitespace-only value is
+    /// deliberately treated the same as absent (<see cref="string.IsNullOrWhiteSpace(string?)"/>, not
+    /// merely a null/empty check) rather than as a real — and visibly broken — spoken show name. No
+    /// new <see cref="SegmentKind"/> was
+    /// added for this: reusing <see cref="SegmentKind.StationId"/> is what makes zero-LLM routing
+    /// (<c>LlmCopyWriter.IsLlmAuthored</c>), station-voicing, and forever-caching all apply for free —
+    /// see <c>Orchestrator.BuildStationIdRequest</c>'s own remarks.
+    ///
     /// <see cref="SegmentKind.TimeDate"/> (SPEC F110.3, STORY-302, PLAN T232) is ALWAYS this rung —
     /// zero LLM, <c>LlmCopyWriter.IsLlmAuthored</c> does not list it, so there is no rung above this
     /// one to miss. Top-of-hour, o'clock phrasing only (the producer that arms this kind is a
@@ -48,7 +62,9 @@ public sealed class PatterTemplateRenderer
     /// </summary>
     public string Expand(SegmentRequest request) => request.Kind switch
     {
-        SegmentKind.StationId      => $"You're listening to {request.StationName}.",
+        SegmentKind.StationId      => !string.IsNullOrWhiteSpace(request.ShowName)
+                                          ? $"You're listening to {request.ShowName} on {request.StationName}."
+                                          : $"You're listening to {request.StationName}.",
         SegmentKind.LeadIn         => request.Track switch
                                       {
                                           { RequestFulfilled: true, Artist.Length: > 0 } t =>
