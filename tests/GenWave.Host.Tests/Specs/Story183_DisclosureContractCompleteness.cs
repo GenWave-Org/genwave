@@ -56,21 +56,34 @@ public static class FeatureDisclosureContractCompleteness
     [
         // now-playing (SPEC F62.4; amended 2026-07-20 to carry listeners — STORY-179; amended
         // 2026-07-27 to carry dj/upNext/artworkUrl — SPEC F93.1/F93.2/F93.3/F93.5, STORY-244/245,
-        // PLAN T125). SpectatorUpNext is its own nested shape, blessed separately below.
+        // PLAN T125; amended 2026-08-11 to carry show/upNext.show — SPEC F116.4, STORY-311, PLAN
+        // T251). SpectatorUpNext/SpectatorShow/SpectatorUpNextShow are their own nested shapes,
+        // blessed separately below. Flavor is deliberately absent from both show shapes (SPEC
+        // F115.3) — see ScenarioDisclosureHoldsTheLine in Story311_SpectatorShowFields.cs for the
+        // structural-absence assertion this table's own omission relies on.
         new(typeof(SpectatorTrackNowPlaying),
             new SpectatorTrackNowPlaying("Night Drive", "The Waveforms", DateTimeOffset.UtcNow, 214_000, 12,
-                "Nova", new SpectatorUpNext(DateTimeOffset.UtcNow, "Echo"), "https://example.test/artwork/abc"),
-            ["title", "artist", "startedAt", "durationMs", "listeners", "dj", "upNext", "artworkUrl", "state", "kind"]),
+                "Nova", new SpectatorShow("Night Drive Radio", "Two hours of driving synths"),
+                new SpectatorUpNext(DateTimeOffset.UtcNow, "Echo", new SpectatorUpNextShow("Echo Chamber")),
+                "https://example.test/artwork/abc"),
+            ["title", "artist", "startedAt", "durationMs", "listeners", "dj", "show", "upNext", "artworkUrl", "state", "kind"]),
         new(typeof(SpectatorPatterNowPlaying),
             new SpectatorPatterNowPlaying(DateTimeOffset.UtcNow, 9_000, 12,
-                "Nova", new SpectatorUpNext(DateTimeOffset.UtcNow, "Echo")),
-            ["startedAt", "durationMs", "listeners", "dj", "upNext", "state", "kind"]),
+                "Nova", new SpectatorShow("Night Drive Radio", "Two hours of driving synths"),
+                new SpectatorUpNext(DateTimeOffset.UtcNow, "Echo", new SpectatorUpNextShow("Echo Chamber"))),
+            ["startedAt", "durationMs", "listeners", "dj", "show", "upNext", "state", "kind"]),
         new(typeof(SpectatorStandbyNowPlaying),
             new SpectatorStandbyNowPlaying(12),
             ["listeners", "state"]),
         new(typeof(SpectatorUpNext),
-            new SpectatorUpNext(DateTimeOffset.UtcNow, "Echo"),
-            ["startsAt", "dj"]),
+            new SpectatorUpNext(DateTimeOffset.UtcNow, "Echo", new SpectatorUpNextShow("Echo Chamber")),
+            ["startsAt", "dj", "show"]),
+        new(typeof(SpectatorShow),
+            new SpectatorShow("Night Drive Radio", "Two hours of driving synths"),
+            ["name", "tagline"]),
+        new(typeof(SpectatorUpNextShow),
+            new SpectatorUpNextShow("Echo Chamber"),
+            ["name"]),
 
         // stats (SPEC F62.7) — Unavailable/Playable stay excluded by construction (F62.9)
         new(typeof(SpectatorStats),

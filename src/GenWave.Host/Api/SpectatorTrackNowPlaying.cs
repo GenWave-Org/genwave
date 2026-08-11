@@ -23,6 +23,13 @@ namespace GenWave.Host.Api;
 /// The On-The-Air persona display name (SPEC F67.5-public, F93.1, STORY-244, PLAN T125), or null in
 /// a music-only segment or grid gap — never the admin persona id, backstory, or any other field.
 /// </param>
+/// <param name="Show">
+/// The on-air show's <c>{name, tagline}</c> (SPEC F116.4, F115.3; STORY-311, PLAN T251), or null on
+/// a grid gap or an unnamed block — read straight off
+/// <see cref="GenWave.Abstractions.Playout.OnAirSnapshot.Show"/> (the resolver's own snapshot,
+/// F116.1), never a store read on the poll path (F93.4). <see cref="GenWave.Core.Domain.ShowSummary.Flavor"/>
+/// never rides here — this type simply has no member for it (F115.3, the persona-soul precedent).
+/// </param>
 /// <param name="UpNext">
 /// Exactly one upcoming segment (SPEC F93.2), or null when there is nothing to announce — see
 /// <see cref="SpectatorUpNext"/>'s own remarks for the same-persona collapse rule.
@@ -33,7 +40,7 @@ namespace GenWave.Host.Api;
 /// </param>
 public sealed record SpectatorTrackNowPlaying(
     string? Title, string? Artist, DateTimeOffset StartedAt, int? DurationMs, int? Listeners,
-    string? Dj, SpectatorUpNext? UpNext, string? ArtworkUrl)
+    string? Dj, SpectatorShow? Show, SpectatorUpNext? UpNext, string? ArtworkUrl)
 {
     public string State => "onAir";
     public string Kind => "track";

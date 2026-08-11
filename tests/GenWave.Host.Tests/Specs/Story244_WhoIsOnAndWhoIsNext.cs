@@ -227,8 +227,11 @@ public static class FeatureWhoIsOnAndWhoIsNext
         [Fact]
         public async Task NoDeeperLookaheadExistsInAnyPublicPayload()
         {
-            // upNext itself carries exactly {startsAt, dj} — no nested "next", no further segments,
-            // no schedule/week structure of any kind (F93.2's "no deeper lookahead").
+            // upNext itself carries exactly {startsAt, dj, show} — no nested "next", no further
+            // segments, no schedule/week structure of any kind (F93.2's "no deeper lookahead").
+            // show joined this set at SPEC F116.4 (STORY-311, PLAN T251) — F93.5's own amended
+            // inventory; the showless fixtures here still resolve show to null, proving the PROPERTY
+            // is present-but-null rather than absent (Story311 owns the named-show content facts).
             await using var factory = BuildFactory(TwoStaffedSegments(nextPersonaId: 2), out _, out var accessor);
             accessor.Names[1] = "Nova";
             accessor.Names[2] = "Echo";
@@ -237,7 +240,7 @@ public static class FeatureWhoIsOnAndWhoIsNext
 
             var upNextProperties = body.GetProperty("upNext").EnumerateObject()
                 .Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
-            Assert.Equal(new HashSet<string>(["startsAt", "dj"]), upNextProperties);
+            Assert.Equal(new HashSet<string>(["startsAt", "dj", "show"]), upNextProperties);
         }
     }
 
@@ -394,6 +397,8 @@ public static class FeatureWhoIsOnAndWhoIsNext
         {
             // Live-wire exhaustive shape for the track state — SPEC F93.5's own inventory, proved
             // over HTTP rather than only against the DTO in isolation (Story183 owns that half).
+            // Amended SPEC F116.4 (STORY-311, PLAN T251): show joins this set too — the showless
+            // segment below still resolves it to a present-but-null property.
             await using var factory = BuildFactory(
                 [new ScheduleSegment(1, DayOfWeek.Wednesday, 0, Midnight, PersonaId: 1, null, null, null)],
                 out _, out var accessor);
@@ -404,7 +409,7 @@ public static class FeatureWhoIsOnAndWhoIsNext
             var properties = body.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
             Assert.Equal(
                 new HashSet<string>(
-                    ["title", "artist", "startedAt", "durationMs", "listeners", "dj", "upNext", "artworkUrl", "state", "kind"]),
+                    ["title", "artist", "startedAt", "durationMs", "listeners", "dj", "show", "upNext", "artworkUrl", "state", "kind"]),
                 properties);
         }
     }

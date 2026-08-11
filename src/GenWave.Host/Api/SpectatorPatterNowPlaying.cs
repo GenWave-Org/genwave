@@ -20,12 +20,19 @@ namespace GenWave.Host.Api;
 /// on-air shapes one persona-name field with one name. Null in a music-only segment or grid gap —
 /// never generated patter text or any other persona field (F62.9 still holds for those).
 /// </param>
+/// <param name="Show">
+/// The on-air show's <c>{name, tagline}</c> (SPEC F116.4, F115.3; STORY-311, PLAN T251) — the same
+/// field <see cref="SpectatorTrackNowPlaying"/> carries, read straight off
+/// <see cref="GenWave.Abstractions.Playout.OnAirSnapshot.Show"/> (F116.1). Null on a grid gap or an
+/// unnamed block; never carries <see cref="GenWave.Core.Domain.ShowSummary.Flavor"/> — this type
+/// has no member for it (F115.3).
+/// </param>
 /// <param name="UpNext">
 /// Exactly one upcoming segment (SPEC F93.2), or null when there is nothing to announce — see
 /// <see cref="SpectatorUpNext"/>'s own remarks for the same-persona collapse rule.
 /// </param>
 public sealed record SpectatorPatterNowPlaying(
-    DateTimeOffset StartedAt, int? DurationMs, int? Listeners, string? Dj, SpectatorUpNext? UpNext)
+    DateTimeOffset StartedAt, int? DurationMs, int? Listeners, string? Dj, SpectatorShow? Show, SpectatorUpNext? UpNext)
 {
     public string State => "onAir";
     public string Kind => "patter";

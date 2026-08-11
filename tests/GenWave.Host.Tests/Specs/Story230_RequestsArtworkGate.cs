@@ -188,6 +188,10 @@ public static class FeatureRequestsArtworkGate
         /// both on-air shapes, `artworkUrl` joins the track shape, and the new nested
         /// <c>SpectatorUpNext</c> type (discovered by this file's own by-prefix reflection) is
         /// pinned here for the first time.
+        /// ⚠️ Amended PLAN T251 (SPEC F116.4, STORY-311): `show` joins both on-air shapes and
+        /// `upNext.show` (NAME ONLY — <c>SpectatorUpNextShow</c>, no <c>Tagline</c> member) joins
+        /// upNext — blessed in Story183's contract table alongside this census; Flavor never
+        /// appears here or anywhere on this surface (F115.3).
         /// </summary>
         static readonly string[] PinnedFieldCensus =
         [
@@ -201,6 +205,7 @@ public static class FeatureRequestsArtworkGate
             "SpectatorPatterNowPlaying.DurationMs",
             "SpectatorPatterNowPlaying.Kind",
             "SpectatorPatterNowPlaying.Listeners",
+            "SpectatorPatterNowPlaying.Show",
             "SpectatorPatterNowPlaying.StartedAt",
             "SpectatorPatterNowPlaying.State",
             "SpectatorPatterNowPlaying.UpNext",
@@ -221,6 +226,10 @@ public static class FeatureRequestsArtworkGate
             "SpectatorRequestSubmission.Genre",
             "SpectatorRequestSubmission.Mood",
             "SpectatorRequestSubmission.Wish",
+            // SPEC F116.4/F115.3, STORY-311, PLAN T251: the now-playing show identity — name +
+            // tagline only, never Flavor (F115.3, the persona-soul precedent).
+            "SpectatorShow.Name",
+            "SpectatorShow.Tagline",
             "SpectatorStandbyNowPlaying.Listeners",
             "SpectatorStandbyNowPlaying.State",
             "SpectatorStats.Enriching",
@@ -239,12 +248,16 @@ public static class FeatureRequestsArtworkGate
             "SpectatorTrackNowPlaying.DurationMs",
             "SpectatorTrackNowPlaying.Kind",
             "SpectatorTrackNowPlaying.Listeners",
+            "SpectatorTrackNowPlaying.Show",
             "SpectatorTrackNowPlaying.StartedAt",
             "SpectatorTrackNowPlaying.State",
             "SpectatorTrackNowPlaying.Title",
             "SpectatorTrackNowPlaying.UpNext",
             "SpectatorUpNext.Dj",
+            "SpectatorUpNext.Show",
             "SpectatorUpNext.StartsAt",
+            // NAME ONLY (SPEC F116.4) — no Tagline member, unlike SpectatorShow above.
+            "SpectatorUpNextShow.Name",
         ];
 
         [Fact]

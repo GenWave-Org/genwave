@@ -102,10 +102,34 @@ public sealed class SpectatorController(
     /// feeder-planned at all (safe rotation, engine-initiated). <c>upNext</c> stays schedule-truth —
     /// exactly one upcoming segment off <see cref="CachingScheduleResolver.TryGetCurrent"/> (no
     /// store round trip) and <see cref="IActivePersonaAccessor.TryGetCachedName"/> (no store round
-    /// trip), collapsing to null under the SAME-PERSONA rule (see <see cref="SpectatorUpNext"/>'s
-    /// own remarks) — F93.4's "no DB or engine call on the poll path" holds for both fields. Track
-    /// state also carries <c>artworkUrl</c> (SPEC F93.3, STORY-245) straight off the snapshot —
-    /// never a fresh per-poll lookup.
+    /// trip), collapsing to null under the SAME-PERSONA-AND-SAME-SHOW rule (see
+    /// <see cref="SpectatorUpNext"/>'s own remarks) — F93.4's "no DB or engine call on the poll
+    /// path" holds for both fields. Track state also carries <c>artworkUrl</c> (SPEC F93.3,
+    /// STORY-245) straight off the snapshot — never a fresh per-poll lookup.
+    /// </para>
+    /// <para>
+    /// Both on-air shapes also carry <c>show</c> (SPEC F116.4, F116.1; STORY-311, PLAN T251) —
+    /// UNLIKE <c>dj</c>, sourced entirely from the resolver snapshot's own
+    /// <see cref="OnAirSnapshot.Show"/> (<see cref="CachingScheduleResolver.TryGetCurrent"/>, no
+    /// store round trip), never the airing item's per-poll stamp: F116.1 pins identity resolution
+    /// to the ONE chokepoint (<c>EffectiveAssignment</c>) the resolver already runs through, so a
+    /// future consumer never has a second place to disagree with. <c>{name, tagline}</c> only —
+    /// <see cref="GenWave.Core.Domain.ShowSummary.Flavor"/> is prompt-only and never rides a public
+    /// payload (F115.3): <see cref="SpectatorShow"/> simply has no member for it. <c>upNext.show</c>
+    /// mirrors <c>upNext.dj</c>'s own source (<see cref="OnAirSnapshot.NextSegment"/>) but is NAME
+    /// ONLY (<see cref="SpectatorUpNextShow"/>) — see <see cref="ResolveUpNext"/>.
+    /// </para>
+    /// <para>
+    /// <b>dj-vs-show BOUNDARY SKEW (PLAN T251 review, gh-#259):</b> <c>dj</c> and <c>show</c> read
+    /// from two DIFFERENT clocks — <c>dj</c> from the AIRING item's own plan-time stamp (follows
+    /// the engine queue, lags a boundary while the previous show's rendered items drain, per the
+    /// gh-#259 rationale above) and <c>show</c> from the resolver's WALL-CLOCK "now" (flips exactly
+    /// at the boundary instant, no drain lag — F116.1). Across a boundary the page can therefore
+    /// read the OUTGOING DJ beside the INCOMING show for the span the queue takes to catch up — most
+    /// visibly during an F111 straddle, where a crossing track spans the boundary and the two
+    /// clocks disagree for that track's whole remaining runtime. This is the SAME one-ahead caveat
+    /// F92.6 already accepts and documents for ceremony timing, now visible on the public surface
+    /// too: not a bug to chase, a property of two independently-correct sources of truth.
     /// </para>
     /// </summary>
     [HttpGet("now-playing")]
@@ -123,30 +147,44 @@ public sealed class SpectatorController(
         var dj = snapshot.DjName;
         var onAir = scheduleResolver.TryGetCurrent();
         var upNext = onAir is null ? null : ResolveUpNext(onAir);
+        var show = onAir?.Show is { } onAirShow ? new SpectatorShow(onAirShow.Name, onAirShow.Tagline) : null;
 
         if (snapshot.MediaId is { } mediaId && mediaId.StartsWith("tts:", StringComparison.Ordinal))
-            return Ok(new SpectatorPatterNowPlaying(snapshot.StartedAt, snapshot.DurationMs, listeners, dj, upNext));
+            return Ok(new SpectatorPatterNowPlaying(snapshot.StartedAt, snapshot.DurationMs, listeners, dj, show, upNext));
 
         return Ok(new SpectatorTrackNowPlaying(
             snapshot.Title, snapshot.Artist, snapshot.StartedAt, snapshot.DurationMs, listeners,
-            dj, upNext, snapshot.ArtworkUrl));
+            dj, show, upNext, snapshot.ArtworkUrl));
     }
 
     /// <summary>
     /// Projects <see cref="OnAirSnapshot.NextSegment"/>/<see cref="OnAirSnapshot.BoundaryAt"/> into
     /// the public <see cref="SpectatorUpNext"/> shape, or null when there is nothing to announce
-    /// (SPEC F93.2) — see <see cref="SpectatorUpNext"/>'s own remarks for the full same-persona
-    /// collapse rule this single comparison implements.
+    /// (SPEC F93.2) — see <see cref="SpectatorUpNext"/>'s own remarks for the full SAME-PERSONA-
+    /// AND-SAME-SHOW collapse rule this single comparison implements (widened at T251 review, SPEC
+    /// F116.2: a same-persona DIFFERENT-show boundary airs a real ceremony piece on air, so this
+    /// property must still report it — collapsing it would silently disagree with what listeners
+    /// actually hear). <c>Show</c> (SPEC F116.4, STORY-311, PLAN T251) rides
+    /// <see cref="OnAirSnapshot.NextSegment"/>'s own
+    /// <see cref="GenWave.Core.Domain.ScheduleSegment.Show"/> — NAME ONLY.
     /// </summary>
     SpectatorUpNext? ResolveUpNext(OnAirSnapshot onAir)
     {
         if (onAir.BoundaryAt is not { } boundaryAt) return null;
-        if (onAir.NextSegment?.PersonaId == onAir.PersonaId) return null;
+        // ScheduleSegment.ShowId, not Show?.Id: the write-authoritative FK (PLAN T243's own
+        // ruling) — a show rename re-keys Show.Name but never ShowId, so this comparison stays
+        // correct across a rename without this method needing to know that.
+        if (onAir.NextSegment?.PersonaId == onAir.PersonaId
+            && onAir.NextSegment?.ShowId == onAir.Segment?.ShowId)
+            return null;
 
         var nextDj = onAir.NextSegment?.PersonaId is { } nextPersonaId
             ? personaAccessor.TryGetCachedName(nextPersonaId)
             : null;
-        return new SpectatorUpNext(boundaryAt, nextDj);
+        var nextShow = onAir.NextSegment?.Show is { } nextShowSummary
+            ? new SpectatorUpNextShow(nextShowSummary.Name)
+            : null;
+        return new SpectatorUpNext(boundaryAt, nextDj, nextShow);
     }
 
     /// <summary>
