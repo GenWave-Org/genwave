@@ -8,11 +8,13 @@
 // wardrobe-uninstall-pack.spec.tsx's own harness).
 //
 // PLAN T259's own honesty note: this suite proves the FORM (author/list/edit/delete against the real
-// /api/schedule/specials wire shape) — it never touches GenWave.Orchestration.ScheduleResolver, which
-// still does not consume this store in production until PLAN T260 (SpecialsController's own class
-// remarks). Endpoint validation itself (30-minute steps, range, persona/show existence, the EXCLUDE
-// overlap) is proven for real in GenWave.Host.Tests/Specs/Story317_SpecialsApi.cs; this file only
-// proves the WIRE mapping — the request this component builds, and how a 201/409/400 response renders.
+// /api/schedule/specials wire shape) — it never touches GenWave.Orchestration.ScheduleResolver/
+// CachingScheduleResolver directly; the resolver's own live consumption of this store (PLAN T260, now
+// landed — see SpecialsController's own class remarks) is proven server-side, in
+// GenWave.Orchestration.Tests/Story241_StationFollowsTheClock.cs. Endpoint validation itself
+// (30-minute steps, range, persona/show existence, the EXCLUDE overlap) is proven for real in
+// GenWave.Host.Tests/Specs/Story317_SpecialsApi.cs; this file only proves the WIRE mapping — the
+// request this component builds, and how a 201/409/400 response renders.
 
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";

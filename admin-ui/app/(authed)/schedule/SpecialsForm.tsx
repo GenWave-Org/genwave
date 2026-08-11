@@ -145,10 +145,10 @@ const FIELD_INPUT_CLASSES = "h-9 rounded-[6px] border border-line bg-surface px-
  * use tail below the grid the rest of this page exists for, not a control an operator needs open on
  * every visit.
  *
- * <b>THE RESOLVER DOES NOT CONSUME THIS YET.</b> Mirrors `SpecialsController`'s own class remarks
- * (PLAN T259, the T118→T120 pattern): a special created here writes/reads the store only — nothing on
- * the production feeder path shadows the weekly grid with it until PLAN T260 wires that consumption
- * live. This form does not claim otherwise anywhere in its copy.
+ * <b>The resolver now consumes this live.</b> Mirrors `SpecialsController`'s own class remarks (PLAN
+ * T259 made the store live for authoring; PLAN T260 wired the production feeder path to shadow the
+ * weekly grid with a written special, on the next cache cycle) — a special created here is on the air,
+ * not merely stored.
  *
  * <b>Edit = delete + recreate (SPEC F120.3's own "acceptable for v1" allowance).</b> There is no
  * `PATCH /api/schedule/specials/{id}` — clicking Edit pre-fills the form from the selected row, and
