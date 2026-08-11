@@ -53,8 +53,10 @@ public sealed class PatterTemplateRenderer
     /// top-of-hour trigger, never a mid-hour one, so minutes never enter into it):
     /// <see cref="SegmentRequest.LocalNow"/>'s hour, mapped 24h→12h (0 and 12 both read "twelve") and
     /// spoken as a word via <see cref="HourWord"/>, never digits — "It's two o'clock," not "It's 2
-    /// o'clock." Deliberately the ONLY thing this line says: no station name, no minute, nothing an
-    /// LLM would add — the simplest honest phrasing the acceptance criteria (templated, station-voiced,
+    /// o'clock." The station name JOINS the line ("…on {station}.") — gh-#453, ruled by Dean
+    /// 2026-08-11 after the first live listen ("bare just sounds strange, like we're a time signal"),
+    /// overturning T232's original no-station-name cut. Still no minutes and nothing an LLM would
+    /// add — the simplest honest phrasing the acceptance criteria (templated, station-voiced,
     /// forever-cacheable) call for. The Orchestrator's own drain arm stamps this field from the
     /// deferral's <c>Due</c> instant (the top of the hour the announcement was ARMED for), never a
     /// fresh drain-time clock read, so the SAME hour always renders the SAME text — the cache-hit half
@@ -81,7 +83,7 @@ public sealed class PatterTemplateRenderer
                                           { } t                    => $"That was {t.Title}.",
                                           null                     => "That was your last track.",
                                       },
-        SegmentKind.TimeDate       => $"It's {HourWord(request.LocalNow.Hour)} o'clock.",
+        SegmentKind.TimeDate       => $"It's {HourWord(request.LocalNow.Hour)} o'clock on {request.StationName}.",
         SegmentKind.SignOff        => request.CounterpartName switch
                                       {
                                           { Length: > 0 } name => $"That's me for now — coming up next, {name}.",

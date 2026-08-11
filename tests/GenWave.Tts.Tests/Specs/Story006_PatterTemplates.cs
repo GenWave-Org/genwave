@@ -126,16 +126,17 @@ public static class FeaturePatterTemplates
         }
 
         [Fact]
-        public void OutputNamesNoStationAndNoDigits()
+        public void OutputJoinsTheStationIdentButNeverDigits()
         {
-            // Deliberately the simplest honest phrasing (T232 ruling): no station name (the
-            // station-id ident already carries branding), no digits (spoken words only) — an
-            // LLM-authored blurb, not this zero-LLM template, is where either would belong if ever
-            // wanted.
+            // gh-#453 (Dean, 2026-08-11, after the first live listen): the station name JOINS the
+            // line — bare time copy "sounds strange, like we're a time signal". Overturns T232's
+            // original no-station-name cut; digits stay banned (spoken words only). The forever-cache
+            // re-keys by construction (the key is the rendered text), so the fleet self-heals on
+            // deploy exactly like the F110.3 per-hour warm.
             var local = new DateTimeOffset(2026, 6, 9, 14, 37, 0, TimeSpan.FromHours(-4));
             var req = new SegmentRequest(SegmentKind.TimeDate, "af_heart", "GenWave", null, local, "test-station");
             var text = renderer.Expand(req);
-            Assert.DoesNotContain("GenWave", text);
+            Assert.Contains("on GenWave", text, StringComparison.Ordinal);
             Assert.DoesNotMatch(@"\d", text);
         }
 
