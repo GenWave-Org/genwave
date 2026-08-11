@@ -29,9 +29,19 @@ using GenWave.Core.Domain;
 /// <see langword="null"/> when a gap follows. Same F92.3 ruling as <see cref="BoundaryAt"/>: a
 /// same-persona successor (e.g. the F91.6 seeded grid's own midnight roll) is still reported here, never
 /// collapsed away just because it will air no handoff ceremony.</param>
+/// <param name="Show">SPEC F116.1 (STORY-306, PLAN T241) — the on-air show identity, or
+/// <see langword="null"/> on a grid gap or an unnamed block. Resolver-sourced through
+/// <c>GenWave.Orchestration.EffectiveAssignment</c>, the ONE identity chokepoint (SPEC F115.2): always
+/// exactly <see cref="Segment"/>'s own <see cref="GenWave.Core.Domain.ScheduleSegment.Show"/>, carried
+/// here for the same reason <see cref="PersonaId"/> already is — a caller never has to null-check
+/// <see cref="Segment"/> first just to learn which show (if any) is on. Every downstream consumer this
+/// epic adds (ceremony T248, the flavor line T249, show idents T250, spectator T251, the booth-log
+/// stamp T242) reads identity through THIS member, never re-deriving it from <see cref="Segment"/> or
+/// re-querying <c>station.show</c> itself.</param>
 public sealed record OnAirSnapshot(
     ScheduleSegment? Segment,
     long? PersonaId,
     SegmentEnvelope Envelope,
     DateTimeOffset? BoundaryAt,
-    ScheduleSegment? NextSegment);
+    ScheduleSegment? NextSegment,
+    ShowSummary? Show = null);

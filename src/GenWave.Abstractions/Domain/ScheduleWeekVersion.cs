@@ -14,11 +14,19 @@ namespace GenWave.Core.Domain;
 ///
 /// <para>
 /// Pure CONTENT hash: SHA-256 over an invariant-culture rendering of every segment's
-/// day/start/end/persona/envelope, ordered by day then start minute. Row ids are deliberately
-/// EXCLUDED — <c>ReplaceWeekAsync</c> is delete-then-insert, so ids churn on every write even when
-/// the content is identical; a version that changed with them would 409 an editor whose grid still
-/// matches the stored week exactly. Two weeks with the same content are, for staleness purposes,
-/// the same week.
+/// day/start-minute/end-minute/persona-id/genres/energy-min/energy-max, ordered by day then start
+/// minute. Row ids are deliberately EXCLUDED — <c>ReplaceWeekAsync</c> is delete-then-insert, so ids
+/// churn on every write even when the content is identical; a version that changed with them would
+/// 409 an editor whose grid still matches the stored week exactly. Two weeks with the same content
+/// are, for staleness purposes, the same week.
+/// </para>
+///
+/// <para>
+/// <see cref="ScheduleSegment.Show"/> (SPEC F116.1, PLAN T241) is ALSO deliberately excluded — show
+/// assignment is read-only through this epic, so this hash has nothing to protect yet. T243's writer
+/// (the first caller that lets an editor SET <c>Show</c>) must add it to the fields rendered here, or
+/// this staleness guard goes blind to concurrent show-assignment writes — the exact gh-#255
+/// save-loss class this type exists to prevent, just for a field it doesn't yet know about.
 /// </para>
 /// </summary>
 public static class ScheduleWeekVersion

@@ -3,11 +3,19 @@ using GenWave.Core.Domain;
 namespace GenWave.Core.Abstractions;
 
 /// <summary>
-/// SEAM (SPEC F35.2, F35.5) — the thin Core-visible accessor between
+/// SEAM (SPEC F35.2, F35.5, F121.1) — the thin Core-visible ON-AIR IDENTITY accessor between
 /// <c>GenWave.Orchestration</c> (which cannot see the Host's <c>IOptionsMonitor&lt;StationOptions&gt;</c>
 /// or <see cref="IPersonaStore"/> directly) and the Host's live station configuration + persona
 /// storage. Mirrors <see cref="IStationScopeProvider"/>'s seam shape one level up: both sides of the
 /// boundary depend on this one interface instead of inventing separate idioms.
+///
+/// Answers BOTH halves of "who/what is on air right now" — the persona (<see cref="ResolveAsync"/>,
+/// <see cref="ActivePersonaId"/>) and, since PLAN T242, the show (<see cref="ActiveShowId"/>) — because
+/// a single implementation already owns the one on-air resolve both facts are read off (see
+/// <c>OnAirPersonaAccessor</c>'s own remarks for how). Show identity rides THIS seam rather than a
+/// second one for that reason: a dedicated "active show" seam would just duplicate the same resolver
+/// dependency and the same never-throws/degrade discipline for no gain, when the implementation that
+/// already exists can name both.
 ///
 /// Implementations MUST re-evaluate the active persona id fresh on every call — never cache it in a
 /// field — so a live activate/deactivate (the F19 overlay write) is visible to the very next render
@@ -79,4 +87,24 @@ public interface IActivePersonaAccessor
     /// </para>
     /// </summary>
     string? TryGetCachedName(long personaId) => null;
+
+    /// <summary>
+    /// Synchronous, in-memory read of the on-air show's id (SPEC F121.1, STORY-310, PLAN T242) — the
+    /// SAME resolver-backed "who/what is on air right now" answer <see cref="ActivePersonaId"/>
+    /// already reads, off the SAME cached snapshot source, exposed on this seam rather than a second
+    /// one so the booth log's hot-path publish (<c>BoothLogWriter.Publish</c>) draws both stamps off
+    /// ONE dependency, the same "never a store round trip" way <see cref="ActivePersonaId"/> already
+    /// does. NOT literally one read at one instant: each property getter independently re-resolves
+    /// against the current wall clock (see the concrete resolver's own remarks), so a schedule
+    /// boundary landing between <c>Publish</c>'s two reads can split the pair on at most one narrative
+    /// row — accepted, not a new risk this member introduces. No store round trip, no awaiting.
+    ///
+    /// Same never-throws, same null contract as <see cref="ActivePersonaId"/>: <see langword="null"/>
+    /// for a grid gap, an unnamed block, or any resolver fault — the default "no show" state, not a
+    /// degradation. Default-implemented as "no show" for the same additive reason
+    /// <see cref="ActivePersonaId"/> is: every pre-F121 implementer (a test double, an older SDK
+    /// consumer) keeps compiling unchanged and simply reports "no show on air" until it opts in with a
+    /// real override.
+    /// </summary>
+    long? ActiveShowId => null;
 }

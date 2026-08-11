@@ -45,6 +45,18 @@ sealed class BoothLogWriter(
         // track-start with whatever persona is active once the backlog clears, not the one that was
         // actually on air when the track started. Only a track-start row is ever a stamp candidate;
         // patter/mode-change rows always publish PersonaId: null.
+        //
+        // The show stamp (SPEC F121.1, STORY-310, PLAN T242) rides the IDENTICAL discipline off the
+        // SAME dependency: personaAccessor.ActiveShowId reads off the same cached snapshot source
+        // ActivePersonaId already reads (see IActivePersonaAccessor's own remarks), captured here
+        // rather than at drain time for the exact same backlog-mis-stamp reason. Not one read at one
+        // instant, though: each property getter independently re-resolves against the current wall
+        // clock, so a schedule boundary landing between these two reads can split the pair on this
+        // one row at most — accepted (see IActivePersonaAccessor.ActiveShowId's own remarks). It is
+        // captured HERE — never carried on TrackAired itself — because a show is a schedule-grid fact
+        // (who is on air right now), not a pushed-item one: SegmentKind/PersonaPick ride TrackAired
+        // because PlayoutFeeder already captured them off the pushed MediaItem at push time; a show
+        // has no such per-item origin, only the on-air answer at the moment this event publishes.
         var request = evt switch
         {
             // Artist (SPEC F84.1, STORY-215, PLAN T70) rides the same capture-at-publish-time
@@ -56,10 +68,12 @@ sealed class BoothLogWriter(
             // T220) rides the SAME discipline: t.SegmentKind is PlayoutFeeder's own forwarded
             // MediaItem.SegmentKind, stringified to its enum token name (or null for music/engine-
             // initiated) — the demo-hour instrument's genuine AIR-time stamp, never patter-aired's
-            // render-time one.
+            // render-time one. ShowId rides personaAccessor.ActiveShowId, same capture-at-publish-time,
+            // never-re-derived discipline — the ONE chokepoint this switch arm already is covers
+            // music and kinded TrackAired alike (PLAN T242's own "verify one chokepoint" note).
             TrackAired t => new BoothLogEntryRequest(
                 "track-started", Summarize(t), personaAccessor.ActivePersonaId, t.Artist, BuildPickStamp(t.PersonaPick),
-                ParseMediaId(t.MediaId), SegmentKind: t.SegmentKind?.ToString()),
+                ParseMediaId(t.MediaId), SegmentKind: t.SegmentKind?.ToString(), ShowId: personaAccessor.ActiveShowId),
             SegmentGenerated s => new BoothLogEntryRequest("patter-aired", Summarize(s), PersonaId: null),
             DegradationModeChanged d => new BoothLogEntryRequest("mode-changed", Summarize(d), PersonaId: null),
             HandoffPieceDropped h => new BoothLogEntryRequest("handoff-dropped", Summarize(h), PersonaId: null),

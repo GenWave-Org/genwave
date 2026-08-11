@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -29,6 +30,12 @@ namespace GenWave.MediaLibrary.Station;
 /// <see cref="BoothLogEntryRequest.SegmentKind"/> (SPEC F113.1, STORY-304, PLAN T220) arrives the
 /// same way — already stringified (or <see langword="null"/>) by <see cref="BoothLogWriter.Publish"/>
 /// — and is persisted verbatim.
+///
+/// <see cref="BoothLogEntryRequest.ShowId"/> (SPEC F121.1, STORY-310, PLAN T242) arrives the same
+/// way — already resolved off <c>IActivePersonaAccessor.ActiveShowId</c> by
+/// <see cref="BoothLogWriter.Publish"/> at air time — and is persisted verbatim; no FK to degrade
+/// (F121.1: history outlives the entity), so unlike <see cref="BoothLogEntryRequest.PersonaId"/> it
+/// has no append-time retry concern for <c>BoothLogRepository</c> to handle either.
 /// </summary>
 sealed class BoothLogDrainService(
     ChannelReader<BoothLogEntryRequest> queue,
@@ -50,7 +57,16 @@ sealed class BoothLogDrainService(
     {
         try
         {
-            await store.AppendAsync(request.Kind, request.Summary, request.PersonaId, request.Artist, request.Pick, request.MediaId, request.SegmentKind, ct);
+            // Recorded carry-forward (T220 review, still only half-closed): BoothLogEntryRequest and
+            // BoothLogAppendRequest duplicate these same 8 fields positionally — this mapping exists
+            // only because the two types are two records, not one. Not merged now (out of this task's
+            // scope); merge candidate is passing BoothLogEntryRequest straight onto the channel and
+            // dropping BoothLogAppendRequest as a separate type.
+            await store.AppendAsync(
+                new BoothLogAppendRequest(
+                    request.Kind, request.Summary, request.PersonaId, request.Artist, request.Pick,
+                    request.MediaId, request.SegmentKind, request.ShowId),
+                ct);
         }
         catch (OperationCanceledException)
         {

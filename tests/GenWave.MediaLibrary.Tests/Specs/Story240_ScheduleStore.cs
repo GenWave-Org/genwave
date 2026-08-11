@@ -21,7 +21,29 @@ public static class FeatureScheduleStore
     // Helpers
     // ---------------------------------------------------------------------
 
-    static ScheduleRepository Repo(DatabaseFixture db) => new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+    /// <summary>
+    /// PLAN T241 review: <see cref="ScheduleRepository"/>'s own load query now LEFT JOINs
+    /// <c>station.show</c> keyed on <c>segment_schedule.show_id</c> (SPEC F116.1), so every fact in
+    /// this file gained an implicit dependency on BOTH columns existing that it never had before. This
+    /// class carries no ordering guarantee against two sibling files' own in-place scenarios in the
+    /// same DatabaseCollection: Story242_UpgradeChangesNothing.cs's several scenarios drop
+    /// <c>station.segment_schedule</c> and rebuild it via db/27 ALONE (predates <c>show_id</c>
+    /// entirely — see that file's own header, which already documents this exact hazard for
+    /// Story304_AiredKindStamp.cs and names db/33 as the guard); Story305_ShowRepository.cs's own
+    /// in-place scenario drops <c>station.show</c>'s db/35 columns (no <c>tagline</c>/<c>flavor</c>).
+    /// Running BOTH idempotent migration scripts here, in order — db/33 first (restores
+    /// <c>segment_schedule.show_id</c> and a bare <c>station.show</c> if either is missing), db/35
+    /// second (widens <c>station.show</c> to its full identity shape) — right before the repository's
+    /// own connection is even built, makes every fact in this file self-sufficient regardless of
+    /// xUnit's class scheduling, mirroring Story304's own "(re)running db/33 in its own Arrange before
+    /// every assertion" guard and Story305_ShowRepository.cs's own db/35 guard, combined.
+    /// </summary>
+    static ScheduleRepository Repo(DatabaseFixture db)
+    {
+        db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "33-show-and-segment-kind-migration.sh"));
+        db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "35-show-identity-migration.sh"));
+        return new ScheduleRepository(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+    }
 
     static ScheduleSegment MusicOnly(DayOfWeek day, int start, int end) =>
         new(null, day, start, end, PersonaId: null, Genres: null, EnergyMin: null, EnergyMax: null);
@@ -140,6 +162,101 @@ public static class FeatureScheduleStore
             Assert.Null(tuesday.Genres);
             Assert.Null(tuesday.EnergyMin);
             Assert.Null(tuesday.EnergyMax);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — show identity rides the load, dormant bundle columns unread (SPEC F115.2, F116.1,
+    // STORY-306, PLAN T241)
+    //
+    // ARCHITECTURE.md's own guidance for this pin: "put the live pin where it can be real ... extend
+    // the schedule repository's spec: populate dormant columns via SQL, reload the week, assert the
+    // loaded model is identical." ScheduleRepository has no writer for show_id/station.show at all
+    // (T243/T239 are the write-side seams), so both are populated by direct SQL here, mirroring this
+    // file's own ScenarioPersonaForeignKeyHasTeeth idiom.
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioShowIdentityRidesTheLoad(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task HandPopulatingShowPersonaIdAndEnvelopeChangesNothingAboutTheLoadedWeek()
+        {
+            // Given a show (tagline + flavor set) referenced by one schedule block naming its OWN
+            // block-level persona, and a SECOND real persona standing by to hand-populate the show's
+            // own DORMANT persona_id column with.
+            await db.ResetShowAsync();
+            await db.ResetScheduleAsync();
+            var blockPersonaId = await ScheduleTestPersonas.InsertAsync(db, "Block DJ");
+            var dormantShowPersonaId = await ScheduleTestPersonas.InsertAsync(db, "Dormant Show DJ");
+
+            long showId;
+            await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+            {
+                showId = await conn.ExecuteScalarAsync<long>(
+                    """
+                    insert into station.show (name, slug, tagline, flavor)
+                    values ('Night Moves', 'night-moves', 'Late-night deep cuts', 'moody, sparse')
+                    returning id
+                    """);
+                await conn.ExecuteAsync(
+                    """
+                    insert into station.segment_schedule (day_of_week, start_minute, end_minute, persona_id, show_id)
+                    values (1, 540, 720, @blockPersonaId, @showId)
+                    """,
+                    new { blockPersonaId, showId });
+            }
+            var repo = Repo(db);
+
+            // When the week is loaded BEFORE the dormant columns are ever touched...
+            var before = await repo.LoadWeekAsync(CancellationToken.None);
+
+            // ...then station.show's own DORMANT persona_id/envelope columns are hand-populated
+            // directly (SPEC F115.2's pin — ShowRepository has no parameter for either; a raw UPDATE
+            // is the only way to even attempt setting them)...
+            await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+                await conn.ExecuteAsync(
+                    """
+                    update station.show
+                    set persona_id = @dormantShowPersonaId,
+                        envelope = '{"genres": ["Jazz"], "energyMin": 0.1, "energyMax": 0.9}'::jsonb
+                    where id = @showId
+                    """,
+                    new { dormantShowPersonaId, showId });
+
+            // ...and the week is loaded again.
+            var after = await repo.LoadWeekAsync(CancellationToken.None);
+
+            // Then the loaded model is IDENTICAL — hand-populating the dormant bundle columns changed
+            // NO v1 behavior (sequence-compared, not whole-snapshot: ScheduleWeekSnapshot's own
+            // compiler-generated Equals compares its Segments list by reference, the same
+            // Genres-by-reference gotcha Story241_StationFollowsTheClock.cs's own facts document).
+            Assert.Equal(before.Segments, after.Segments);
+
+            // And the loaded show identity itself carries only the four public fields (SPEC F115.2's
+            // pin enforced by ShowSummary's own shape — there is no PersonaId/Envelope member to have
+            // picked either dormant value up even if the query tried).
+            var block = Assert.Single(after.Segments);
+            Assert.Equal(blockPersonaId, block.PersonaId);
+            Assert.NotNull(block.Show);
+            Assert.Equal(new ShowSummary(showId, "Night Moves", "Late-night deep cuts", "moody, sparse"), block.Show);
+        }
+
+        [Fact]
+        public async Task UnnamedBlockLoadsWithNoShow()
+        {
+            // Given a schedule block with no show_id at all
+            await db.ResetScheduleAsync();
+            var repo = Repo(db);
+
+            await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Monday, 0, 1440)], expectedVersion: null, CancellationToken.None);
+
+            // When the week is loaded
+            var snapshot = await repo.LoadWeekAsync(CancellationToken.None);
+
+            // Then the block's own Show is null — the LEFT JOIN finds no matching station.show row
+            Assert.Null(Assert.Single(snapshot.Segments).Show);
         }
     }
 

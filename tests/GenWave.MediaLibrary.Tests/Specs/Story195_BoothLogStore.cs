@@ -140,7 +140,11 @@ public static class FeatureBoothLogStore
             var store = Store(db, retentionDays: 1);
 
             // When a new row is inserted...
-            await store.AppendAsync("track-started", "Started 'New Song' by New Artist", personaId: null, artist: null, pick: null, mediaId: null, segmentKind: null, ct: CancellationToken.None);
+            await store.AppendAsync(
+                new BoothLogAppendRequest(
+                    "track-started", "Started 'New Song' by New Artist", PersonaId: null, Artist: null,
+                    Pick: null, MediaId: null, SegmentKind: null, ShowId: null),
+                CancellationToken.None);
 
             // Then the expired rows are gone and only the new row remains — the table stays bounded.
             var rows = await AllRowsAsync(db);

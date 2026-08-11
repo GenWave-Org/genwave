@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -658,22 +657,9 @@ public sealed partial class PersonaController(
         Status = StatusCodes.Status409Conflict,
         Title  = "Persona is scheduled.",
         Detail = slots.Count > 0
-            ? $"Persona {id} is still scheduled and cannot be deleted: {string.Join(", ", slots.Select(FormatSlot))}."
+            ? $"Persona {id} is still scheduled and cannot be deleted: {string.Join(", ", slots.Select(ScheduledSlotText.FormatSlot))}."
             : $"Persona {id} still appears in the format-clock schedule and cannot be deleted while scheduled.",
     };
-
-    // Invariant-culture abbreviated day name ("Mon", "Tue", ...) — never a station-configurable
-    // locale; this is an operator-facing admin message, not station-facing broadcast copy.
-    static string FormatSlot(ScheduledSlot slot) =>
-        $"{CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedDayName(slot.Day)} " +
-        $"{FormatMinutes(slot.StartMinute)}–{FormatMinutes(slot.EndMinute)}";
-
-    // Minutes-since-midnight as HH:mm — plain arithmetic, not TimeSpan's "hh" format specifier: a
-    // 1440-minute end (midnight, the grid's own maximum) rolls into TimeSpan's Days component, which
-    // "hh" ignores entirely, silently printing "00:00" for what is actually the end of the day.
-    static string FormatMinutes(int minutesSinceMidnight) =>
-        $"{(minutesSinceMidnight / 60).ToString("D2", CultureInfo.InvariantCulture)}:" +
-        $"{(minutesSinceMidnight % 60).ToString("D2", CultureInfo.InvariantCulture)}";
 
     static ProblemDetails UnknownSlugProblem(string slug) => new()
     {

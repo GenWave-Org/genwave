@@ -44,6 +44,12 @@ sealed class FakeScheduleStore(ScheduleWeekSnapshot? initial = null) : ISchedule
 
     public int ReplaceWeekAsyncCallCount { get; private set; }
 
+    /// <summary>What <see cref="GetSlotsByShowIdAsync"/> answers for a given show id (PLAN T240's
+    /// show delete guard) — keyed by showId so a scenario can seed the exact referencing blocks a
+    /// <see cref="ShowWriteResult.Referenced"/>-scripted delete should be named by, without
+    /// re-deriving <c>ScheduleRepository</c>'s own SQL. Unseeded ids answer empty, never an error.</summary>
+    public Dictionary<long, IReadOnlyList<ScheduledSlot>> SlotsByShowId { get; } = [];
+
     /// <summary>Counts every <see cref="LoadWeekAsync"/> call (SPEC F93.4, STORY-244, PLAN T125) — the
     /// structural proof that <see cref="GenWave.Orchestration.CachingScheduleResolver.TryGetCurrent"/>
     /// never reloads: only an explicit <see cref="GenWave.Orchestration.CachingScheduleResolver.ResolveAsync"/>
@@ -102,4 +108,7 @@ sealed class FakeScheduleStore(ScheduleWeekSnapshot? initial = null) : ISchedule
         WeekChanged?.Invoke();
         return Task.FromResult<ScheduleReplaceResult>(new ScheduleReplaceResult.Replaced(current));
     }
+
+    public Task<IReadOnlyList<ScheduledSlot>> GetSlotsByShowIdAsync(long showId, CancellationToken ct) =>
+        Task.FromResult(SlotsByShowId.TryGetValue(showId, out var slots) ? slots : []);
 }

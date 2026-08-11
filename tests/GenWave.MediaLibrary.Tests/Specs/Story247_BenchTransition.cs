@@ -31,13 +31,29 @@ public static class FeatureTwoStageFiringBenchTransition
         // Given a DJ scheduled in one slot, When that slot is removed by replacing the week without
         // it (ScheduleRepository.ReplaceWeekAsync — the store beneath T122's PUT /api/schedule).
 
+        /// <summary>
+        /// PLAN T241 review: mirrors Story240_ScheduleStore.cs's own identically-purposed helper —
+        /// see its own remarks in full. <see cref="ScheduleRepository"/>'s load query now LEFT JOINs
+        /// <c>station.show</c> keyed on <c>segment_schedule.show_id</c> (SPEC F116.1), so this file
+        /// also needs BOTH idempotent migration scripts (db/33 then db/35) re-run before every fact's
+        /// own connection, regardless of xUnit's class scheduling against
+        /// Story242_UpgradeChangesNothing.cs's and Story305_ShowRepository.cs's own in-place
+        /// scenarios.
+        /// </summary>
+        static ScheduleRepository ScheduleRepo(DatabaseFixture db)
+        {
+            db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "33-show-and-segment-kind-migration.sh"));
+            db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "35-show-identity-migration.sh"));
+            return new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+        }
+
         [Fact]
         public async Task PersonaRecordIsUntouched()
         {
             await db.ResetStationAsync();
             await db.ResetScheduleAsync();
             var personaId = await ScheduleTestPersonas.InsertAsync(db, "Bench Transition DJ");
-            var scheduleRepo = new ScheduleRepository(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+            var scheduleRepo = ScheduleRepo(db);
             var personaRepo = new PersonaRepository(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
             await scheduleRepo.ReplaceWeekAsync(
                 [new ScheduleSegment(null, DayOfWeek.Monday, 0, 600, personaId, Genres: null, EnergyMin: null, EnergyMax: null)],
@@ -60,7 +76,7 @@ public static class FeatureTwoStageFiringBenchTransition
             await db.ResetStationAsync();
             await db.ResetScheduleAsync();
             var personaId = await ScheduleTestPersonas.InsertAsync(db, "Bench Transition DJ");
-            var scheduleRepo = new ScheduleRepository(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+            var scheduleRepo = ScheduleRepo(db);
             await scheduleRepo.ReplaceWeekAsync(
                 [new ScheduleSegment(null, DayOfWeek.Monday, 0, 600, personaId, Genres: null, EnergyMin: null, EnergyMax: null)],
                 expectedVersion: null, CancellationToken.None);

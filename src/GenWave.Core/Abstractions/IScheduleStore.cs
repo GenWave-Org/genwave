@@ -55,4 +55,16 @@ public interface IScheduleStore
     /// <see cref="ScheduleReplaceResult.ValidationFailed"/>.
     /// </summary>
     event Action? WeekChanged;
+
+    /// <summary>
+    /// Every <c>station.segment_schedule</c> row naming <paramref name="showId"/>, ordered by day
+    /// then start minute — the show delete guard's own detail read (SPEC F115.4, PLAN T240):
+    /// <see cref="ShowWriteResult.Referenced"/> stays a bare singleton at the store seam (see
+    /// its own remarks), so <c>ShowsController.Delete</c> calls this directly to NAME the blocking
+    /// slots in its 409 body, mirroring <c>PersonaRepository.DeleteAsync</c>'s own pre-T121
+    /// query-for-detail shape but at the endpoint layer instead — <c>IShowStore</c> never pre-queries
+    /// this table itself (PLAN T239's own deliberate choice). An empty result means nothing in
+    /// <c>station.segment_schedule</c> currently names this show.
+    /// </summary>
+    Task<IReadOnlyList<ScheduledSlot>> GetSlotsByShowIdAsync(long showId, CancellationToken ct);
 }

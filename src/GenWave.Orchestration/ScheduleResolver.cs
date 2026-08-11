@@ -73,20 +73,23 @@ public sealed class ScheduleResolver(
         var (boundaryDay, boundaryMinute) = NormalizeMinute(current.Day, current.EndMinute);
         var boundaryAt = ResolveBoundaryInstant(todayDate, today, nowMinute, boundaryDay, boundaryMinute, zone, now);
         var next = FindAdjacent(segments, boundaryDay, boundaryMinute);
-        return new OnAirSnapshot(current, current.PersonaId, envelope, boundaryAt, next);
+        var assignment = EffectiveAssignment.Resolve(current, current.Show);
+        return new OnAirSnapshot(current, assignment.PersonaId, envelope, boundaryAt, next, assignment.Show);
     }
 
     OnAirSnapshot ResolveGap(
         IReadOnlyList<ScheduleSegment> segments, TimeZoneInfo zone, DateTime todayDate, DayOfWeek today, int nowMinute,
         DateTimeOffset now)
     {
+        // No block is on air (SPEC F91.4) — nothing for EffectiveAssignment to resolve: persona and
+        // show are both unconditionally none, the only honest answer for a grid gap.
         var envelope = defaultEnvelopeSource.Current;
         var next = FindNextUpcoming(segments, today, nowMinute);
         if (next is null)
-            return new OnAirSnapshot(Segment: null, PersonaId: null, envelope, BoundaryAt: null, NextSegment: null);
+            return new OnAirSnapshot(Segment: null, PersonaId: null, envelope, BoundaryAt: null, NextSegment: null, Show: null);
 
         var boundaryAt = ResolveBoundaryInstant(todayDate, today, nowMinute, next.Day, next.StartMinute, zone, now);
-        return new OnAirSnapshot(Segment: null, PersonaId: null, envelope, boundaryAt, next);
+        return new OnAirSnapshot(Segment: null, PersonaId: null, envelope, boundaryAt, next, Show: null);
     }
 
     SegmentEnvelope BuildSegmentEnvelope(ScheduleSegment segment)

@@ -40,7 +40,15 @@ namespace GenWave.MediaLibrary.Station;
 /// <c>"StationId"</c>) before this request ever reaches the queue. <see langword="null"/> for a music
 /// row or an engine-initiated advance — the demo-hour instrument's whole point is that this is the
 /// genuine AIR-time signal, never a render-time guess.
+///
+/// <see cref="ShowId"/> (SPEC F121.1, STORY-310, PLAN T242) rides the SAME track-start-only,
+/// captured-at-publish-time path as <see cref="PersonaId"/> — <see cref="BoothLogWriter.Publish"/>
+/// reads it off <c>IActivePersonaAccessor.ActiveShowId</c>, the SAME resolver-backed on-air answer
+/// <see cref="PersonaId"/> reads <c>ActivePersonaId</c> off, at the SAME instant — never off
+/// <see cref="TrackAired"/> itself (a show is a schedule-grid fact, not a pushed-item one, so it rides
+/// the persona's capture mechanism, not the kind's). <see langword="null"/> for every non-track row or
+/// a showless airing.
 /// </summary>
 sealed record BoothLogEntryRequest(
     string Kind, string Summary, long? PersonaId, string? Artist = null, string? Pick = null, long? MediaId = null,
-    string? SegmentKind = null);
+    string? SegmentKind = null, long? ShowId = null);

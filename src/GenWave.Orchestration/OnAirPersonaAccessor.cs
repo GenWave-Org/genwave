@@ -221,6 +221,14 @@ public sealed class OnAirPersonaAccessor(
         cachedNames.TryGetValue(personaId, out var name) ? name : null;
 
     /// <summary>
+    /// SPEC F121.1 (STORY-310, PLAN T242) — reads the SAME cached snapshot <see cref="ActivePersonaId"/>
+    /// does, off <see cref="OnAirSnapshot.Show"/> instead of <see cref="OnAirSnapshot.PersonaId"/>: no
+    /// second resolve, no new I/O, the identical "before the first resolve, or an empty grid, answers
+    /// null" boot-window behavior.
+    /// </summary>
+    public long? ActiveShowId => scheduleResolver.TryGetCurrent()?.Show?.Id;
+
+    /// <summary>
     /// Resolves the on-air snapshot, degrading to <see langword="null"/> on any
     /// <see cref="CachingScheduleResolver.ResolveAsync"/> fault (F12.4) — most notably an unconfigured
     /// <c>ConnectionStrings:Station</c> (empty string), the documented "no Station Postgres at all"
