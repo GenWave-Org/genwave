@@ -93,6 +93,14 @@ class MediaRow
     public string? ImagingKind { get; set; }
 
     /// <summary>
+    /// Show scope (SPEC F117.1, STORY-313, PLAN T246) — <c>library.media.show_id</c>, NO FK (the
+    /// db/22 grant-boundary precedent). Null means station-wide, the only meaning every pre-F117 row
+    /// carries; only populated by projections that select it (the admin queries), mirroring
+    /// <see cref="ImagingKind"/>'s own pattern.
+    /// </summary>
+    public long? ShowId { get; set; }
+
+    /// <summary>
     /// Postgres system column <c>xmin</c> — the transaction id that last wrote this row.
     /// Exposed as a string for use as an optimistic-concurrency token (ETag) on the admin write path.
     /// Dapper maps this because <c>MatchNamesWithUnderscores</c> is enabled globally and the column is
@@ -187,5 +195,6 @@ class MediaRow
         Rateable: Rateable,
         Explicit: Explicit,
         ExplicitSource: ExplicitSource,
-        ImagingKind: ImagingKind);
+        ImagingKind: ImagingKind,
+        ShowId: ShowId);
 }

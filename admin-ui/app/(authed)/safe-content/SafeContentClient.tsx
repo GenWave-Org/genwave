@@ -15,6 +15,15 @@ import {
   imagingKindLabel,
   type ImagingKindToken,
 } from "./imaging-kinds";
+import { showScopeLabel, type ImagingShowOption } from "./imaging-show-scope";
+
+/** The kind the show-scope picker is gated to (SPEC F117.1, F119.4, PLAN T246): station_id is what
+ * T250's drain will consume — every other kind's scoped behavior is undefined until a consumer
+ * exists, so this editor doesn't offer the config there (avoids dead config, the smaller of the two
+ * surfaces the task's own SPEC anchor names). RATIFIED by Dean, 2026-08-10 — station_id-only is a
+ * deliberate product call, not just builder judgment; widening to another kind is additive once
+ * that kind has a consumer, same as this one did. */
+const SCOPE_GATED_KIND: ImagingKindToken = "station_id";
 
 /** Shape of a GET /api/media row — the fields this page renders + the PATCH If-Match token. */
 export interface SafeSegmentDto {
@@ -30,6 +39,10 @@ export interface SafeSegmentDto {
    * null for rows authored before kinds existed. Optional so pre-#149 object literals keep
    * compiling (the catalog `rateable` precedent); absent displays as the Liner default. */
   imagingKind?: string | null;
+  /** SPEC F117.1, STORY-313, PLAN T246 — the show this row is scoped to, or null for station-wide
+   * (every pre-F117 row's only meaning). Optional so pre-F117 object literals keep compiling,
+   * mirroring `imagingKind`'s own pattern. */
+  showId?: number | null;
 }
 
 export interface SafeContentClientProps {
@@ -45,6 +58,9 @@ export interface SafeContentClientProps {
   defaultText: string;
   /** Default title pre-fill — "Please Stand By" (F27.3/F27.9). */
   defaultTitle: string;
+  /** The show roster for the scope picker (SPEC F117.1/F119.4, PLAN T246) — loaded ONCE, server-side,
+   * by the page (mirrors `libraries`' own posture); this component never fetches its own copy. */
+  shows: ImagingShowOption[];
 }
 
 /** ProblemDetails body shape returned on 400/502 from POST /api/safe-segments (F27.3). */
@@ -111,6 +127,7 @@ export function SafeContentClient({
   initialOutOfScope,
   defaultText,
   defaultTitle,
+  shows,
 }: SafeContentClientProps): ReactNode {
   const [libraryId, setLibraryId] = useState<number | null>(initialLibraryId);
   const [segments, setSegments] = useState<SafeSegmentDto[]>(initialSegments);
@@ -122,6 +139,9 @@ export function SafeContentClient({
   const [bed, setBed] = useState<BedCandidate | null>(null);
   // gh-#149 — the authored segment's Station Imaging kind; metadata-only (playout unchanged).
   const [segmentKind, setSegmentKind] = useState<ImagingKindToken>(DEFAULT_IMAGING_KIND);
+  // SPEC F117.1, STORY-313, PLAN T246 — the authored segment's show scope; null is station-wide
+  // (the default, and the only value ever submitted for a kind other than SCOPE_GATED_KIND).
+  const [scopeShowId, setScopeShowId] = useState<number | null>(null);
   // gh-#149 — list filter; "all" shows every segment in the target library.
   const [kindFilter, setKindFilter] = useState<string>("all");
   const [status, setStatus] = useState<GenerateStatus>({ kind: "idle" });
@@ -167,6 +187,16 @@ export function SafeContentClient({
     refreshSegments(id);
   }
 
+  /** SPEC F117.1/F119.4 — switching away from the scope-gated kind resets any picked scope back to
+   * station-wide, so a hidden picker can never leave a stale show silently armed underneath it
+   * (Principle of Least Astonishment): the picker's own visibility and the value actually submitted
+   * never disagree. */
+  function handleKindChange(e: ChangeEvent<HTMLSelectElement>): void {
+    const nextKind = e.currentTarget.value as ImagingKindToken;
+    setSegmentKind(nextKind);
+    if (nextKind !== SCOPE_GATED_KIND) setScopeShowId(null);
+  }
+
   async function handleGenerate(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
 
@@ -181,6 +211,9 @@ export function SafeContentClient({
     if (title.trim() !== "") body["title"] = title;
     if (voice.trim() !== "") body["voice"] = voice;
     if (bed !== null) body["bedMediaId"] = bed.mediaId;
+    // SPEC F117.1/F119.4 — the scope only ever rides the request for the gated kind, even if
+    // scopeShowId somehow held a stale value (defense-in-depth alongside handleKindChange's reset).
+    if (segmentKind === SCOPE_GATED_KIND && scopeShowId !== null) body["showId"] = scopeShowId;
 
     try {
       const resp = await fetch("/api/safe-segments", {
@@ -276,7 +309,7 @@ export function SafeContentClient({
               id="safe-kind"
               name="kind"
               value={segmentKind}
-              onChange={(e) => setSegmentKind(e.currentTarget.value as ImagingKindToken)}
+              onChange={handleKindChange}
               disabled={isPending}
               className={`${FIELD_INPUT_CLASSES} w-fit`}
             >
@@ -287,6 +320,33 @@ export function SafeContentClient({
               ))}
             </select>
           </div>
+
+          {/* SPEC F117.1/F119.4, STORY-313, PLAN T246 — the show-scope picker: gated to the
+              station_id kind only (see SCOPE_GATED_KIND's own remarks). Station-wide is the
+              default — a scoped station ID airs only during its own show; that pool/drain
+              preference is PLAN T250's, not this editor's. */}
+          {segmentKind === SCOPE_GATED_KIND && (
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="safe-scope" className={FIELD_LABEL_CLASSES}>Scope</label>
+              <select
+                id="safe-scope"
+                name="scope"
+                value={scopeShowId === null ? "" : String(scopeShowId)}
+                onChange={(e) =>
+                  setScopeShowId(e.currentTarget.value === "" ? null : Number(e.currentTarget.value))
+                }
+                disabled={isPending}
+                className={`${FIELD_INPUT_CLASSES} w-fit`}
+              >
+                <option value="">Station-wide</option>
+                {shows.map((show) => (
+                  <option key={show.id} value={show.id}>
+                    {show.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <VoiceControl value={voice} onChange={setVoice} disabled={isPending} />
 
@@ -373,6 +433,7 @@ export function SafeContentClient({
                 <tr className="border-b-2 border-line text-left">
                   <th scope="col" className={HEADER_CELL}>Title</th>
                   <th scope="col" className={HEADER_CELL}>Kind</th>
+                  <th scope="col" className={HEADER_CELL}>Scope</th>
                   <th scope="col" className={HEADER_CELL}>State</th>
                   <th scope="col" className={HEADER_CELL}>Eligible</th>
                 </tr>
@@ -388,6 +449,9 @@ export function SafeContentClient({
                         {imagingKindLabel(segment.imagingKind)}
                       </span>
                     </td>
+                    {/* SPEC F117.1, STORY-313, PLAN T246 — station-wide | show name, resolved
+                        against the already-loaded roster (never a joined server-side field). */}
+                    <td className="py-2 pr-3 text-mute">{showScopeLabel(segment.showId, shows)}</td>
                     <td className="py-2 pr-3 text-mute">{segment.state}</td>
                     <td className="py-2 pr-3">
                       <label className="inline-flex min-h-10 items-center gap-1.5">

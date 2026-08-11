@@ -55,7 +55,7 @@ sealed class MediaRepository(
         "artist, album, genre, year, integrated_lufs, true_peak_dbtp, measurable, " +
         "cue_in_sec, cue_out_sec, intro_energy, outro_energy, bpm, track_energy, eligible, m.xmin::text as xmin, " +
         "coalesce(r.score, 50) as score, coalesce(r.never_play, false) as never_play, m.moods, " +
-        "m.explicit, m.explicit_source, m.imaging_kind " +
+        "m.explicit, m.explicit_source, m.imaging_kind, m.show_id " +
         "from library.media m left join library.media_rating r on r.media_id = m.id";
 
     public async Task<MediaReference?> GetByIdAsync(LibraryScope scope, string mediaId, CancellationToken ct)
@@ -652,7 +652,7 @@ sealed class MediaRepository(
                    cue_in_sec, cue_out_sec, intro_energy, outro_energy, bpm, track_energy,
                    eligible, m.xmin::text as xmin,
                    coalesce(r.score, 50) as score, coalesce(r.never_play, false) as never_play,
-                   m.moods, m.explicit, m.explicit_source, m.imaging_kind,
+                   m.moods, m.explicit, m.explicit_source, m.imaging_kind, m.show_id,
                    not (m.library_id = any(@safeLibraryIds)) as rateable,
                    count(*) over() as total_count
             from library.media m
@@ -1705,7 +1705,7 @@ sealed class MediaRepository(
               year_lookup_at,
               year_lookup_missed_at,
               enriched_at,
-              imaging_kind
+              imaging_kind, show_id
             ) values (
               @path, @format, @sizeBytes, @mtime, 'ready', @libraryId,
               @durationMs, @sampleRate, @channels, @bitrateKbps,
@@ -1717,7 +1717,7 @@ sealed class MediaRepository(
               now(),
               now(),
               now(),
-              @imagingKind
+              @imagingKind, @showId
             )
             returning id
             """,
@@ -1747,6 +1747,10 @@ sealed class MediaRepository(
                 // insert is no longer metadata-only for the StationId kind specifically; every other
                 // kind (Liner/Jingle/Promo) is still stamped but unread until its own selector lands.
                 imagingKind = ImagingKindTokens.ToToken(insert.Kind),
+                // SPEC F117.1, STORY-313, PLAN T246 — the show scope the authoring UI's picker chose;
+                // null (the default) is station-wide. No FK, no validation here — see
+                // AuthoredMediaInsert.ShowId's own remarks.
+                showId = insert.ShowId,
             },
             cancellationToken: ct));
     }

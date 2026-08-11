@@ -14,6 +14,15 @@ namespace GenWave.Host.Api;
 /// <c>ImagingKindTokens.TryParse</c>. Absent/null defaults to <c>liner</c> (today's behavior);
 /// an unknown value is a 400, nothing rendered. Metadata-only: it never changes how the segment
 /// renders or plays.
+///
+/// <see cref="ShowId"/> (SPEC F117.1, STORY-313, PLAN T246) is the optional show scope the
+/// authoring UI's scope picker chose — station-wide when absent/null (today's only behavior for
+/// every pre-F117 request). A non-null value referencing no <c>station.show</c> row is a 400,
+/// nothing rendered, mirroring <see cref="LibraryId"/>/<see cref="BedMediaId"/>'s own
+/// validate-first discipline. The UI gates its own picker to the <c>station_id</c> kind (F119.4),
+/// but this field itself is not kind-restricted server-side — the write seam it rides
+/// (<c>IAuthoredCatalogWriter.InsertAuthoredAsync</c>) accepts a scope on any kind; a scope on a
+/// kind no consumer reads yet is simply unread, never rejected.
 /// </summary>
 public sealed record SafeSegmentCreateRequest(
     string? Text,
@@ -21,4 +30,5 @@ public sealed record SafeSegmentCreateRequest(
     string? Title = null,
     string? Voice = null,
     long? BedMediaId = null,
-    string? Kind = null);
+    string? Kind = null,
+    long? ShowId = null);

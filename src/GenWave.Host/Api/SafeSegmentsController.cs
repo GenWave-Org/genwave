@@ -21,10 +21,11 @@ namespace GenWave.Host.Api;
 ///   <item>Requires <c>Content-Type: application/json</c> — <c>[Consumes]</c> rejects other types with 415.</item>
 /// </list>
 ///
-/// Validation runs BEFORE any render (F27.3): blank <c>text</c>, an unknown <c>libraryId</c>, or an
-/// unknown <c>bedMediaId</c> all return 400 ProblemDetails with nothing rendered or persisted. A
-/// <c>bedMediaId</c> is never trusted as a raw path — it is resolved to its catalog row so the mixer
-/// receives a <see cref="BedSpec"/> built from the row's own path and cue points.
+/// Validation runs BEFORE any render (F27.3): blank <c>text</c>, an unknown <c>libraryId</c>, an
+/// unknown <c>bedMediaId</c>, or an unknown <c>showId</c> (SPEC F117.1, STORY-313, PLAN T246) all
+/// return 400 ProblemDetails with nothing rendered or persisted. A <c>bedMediaId</c> is never
+/// trusted as a raw path — it is resolved to its catalog row so the mixer receives a
+/// <see cref="BedSpec"/> built from the row's own path and cue points.
 ///
 /// A synthesis/mix/measurement/insert failure reported by <see cref="ISafeSegmentAuthor"/>, or the
 /// render exceeding <c>Tts:RenderBudgetSeconds</c>, returns 502 ProblemDetails with no internals
@@ -38,6 +39,7 @@ public sealed class SafeSegmentsController(
     ISafeSegmentAuthor author,
     ILibraryRepository libraryRepository,
     IAdminMediaLookup adminLookup,
+    IShowStore showStore,
     IOptionsMonitor<StationOptions> stationMonitor,
     IOptionsMonitor<TtsOptions> ttsMonitor,
     ILogger<SafeSegmentsController> logger) : ControllerBase
@@ -103,6 +105,29 @@ public sealed class SafeSegmentsController(
         if (bedError is not null)
             return bedError;
 
+        // SPEC F117.1, STORY-313, PLAN T246 — an optional show scope. Absent/null stays station-wide
+        // (today's only behavior). A named id that resolves no station.show row is a 400 with
+        // nothing rendered, the same validate-first posture as libraryId/bedMediaId above — even
+        // though the write seam itself carries no FK across the schema boundary (AuthoredMediaInsert.
+        // ShowId's own remarks), this endpoint is the one place that CAN cheaply confirm the id is
+        // real before ever rendering anything.
+        //
+        // Unlike ScheduleRepository's own showId check (its :214 remarks), this one is NOT inside a
+        // transaction immediately before the write: the render below can run for up to
+        // Tts:RenderBudgetSeconds, so a show deleted in that window lands an orphaned show_id on the
+        // inserted row (no FK to catch it) — the row simply never airs under T250's scoped pool.
+        // Recovery today is delete-and-re-author; there's no re-scope UI this cycle (AuthoredMediaInsert
+        // carries no path back through MediaPatch).
+        if (request.ShowId is { } showId && await showStore.GetByIdAsync(showId, ct) is null)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title  = "Unknown show.",
+                Detail = $"No show with id {showId} exists.",
+            });
+        }
+
         var station = stationMonitor.CurrentValue;
         var safe    = station.Safe;
 
@@ -117,7 +142,8 @@ public sealed class SafeSegmentsController(
             Title: request.Title,
             Voice: request.Voice,
             Bed: bed,
-            Kind: kind);
+            Kind: kind,
+            ShowId: request.ShowId);
 
         var budget = TimeSpan.FromSeconds(ttsMonitor.CurrentValue.RenderBudgetSeconds);
         using var boundedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
