@@ -153,14 +153,20 @@ public sealed class SpecialsController(
         switch (result)
         {
             case ScheduleSpecialCreateResult.Created created:
+                // Invariant-rendered date (the same posture PastDateProblem/OverlapProblem took at the
+                // T259 review): DateOnly's default ToString is ambient-culture, and rendering it
+                // explicitly also makes the "value" provably fixed-format for log-analysis tooling.
                 logger.LogInformation(
                     "Special created id={SpecialId} onDate={OnDate} startMinute={StartMinute} endMinute={EndMinute}",
-                    created.Special.Id, created.Special.OnDate, created.Special.StartMinute, created.Special.EndMinute);
+                    created.Special.Id,
+                    created.Special.OnDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    created.Special.StartMinute, created.Special.EndMinute);
                 return StatusCode(StatusCodes.Status201Created, ToDto(created.Special));
 
             case ScheduleSpecialCreateResult.Overlap:
                 logger.LogWarning(
-                    "Special create refused: overlaps another special onDate={OnDate}", request.OnDate);
+                    "Special create refused: overlaps another special onDate={OnDate}",
+                    request.OnDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
                 return Conflict(OverlapProblem(request.OnDate));
 
             case ScheduleSpecialCreateResult.UnknownReference:
