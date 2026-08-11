@@ -44,9 +44,41 @@ namespace GenWave.Orchestration;
 /// The same crossing track's <c>MediaItem.Artist</c>, captured alongside <see cref="CrossingTrackTitle"/>
 /// — <see langword="null"/> whenever that is (an untagged track, or no straddle at all).
 /// </param>
+/// <param name="ShowName">
+/// SPEC F116.1/F116.2 (STORY-307, PLAN T248): this piece's OWN show — the ending show's name for a
+/// <see cref="SpeechDeferralKind.SignOff"/> deferral, the incoming show's name for a
+/// <see cref="SpeechDeferralKind.SignOn"/> one — mirrors <see cref="PersonaName"/>'s own
+/// self/counterpart split. Captured at <c>Orchestrator.EnqueueHandoffCeremonyAsync</c> ENQUEUE time
+/// straight off the resolver's own <c>OnAirSnapshot.Show</c>/<c>OnAirSnapshot.NextSegment.Show</c>
+/// (SPEC F116.1's chokepoint — never re-derived), the SAME immutable-capture pattern this whole
+/// record already establishes for Voice/PersonaName/CounterpartName. <see langword="null"/> for an
+/// unnamed block, additive and optional so every pre-F116 construction site stays diff-free.
+/// </param>
+/// <param name="ShowFlavor">
+/// SPEC F116.2/F115.3: <see cref="ShowName"/>'s own flavor text, captured ONLY for the incoming show
+/// on a <see cref="SpeechDeferralKind.SignOn"/> deferral (F116.2 names flavor for the sign-on prompt
+/// alone) — always <see langword="null"/> on a <see cref="SpeechDeferralKind.SignOff"/> deferral's
+/// context, deliberately, not merely because it happens to be unset. Prompt-only forever (F115.3, the
+/// persona-soul precedent): reaches <c>LlmPromptBuilder</c>'s prompt text and nothing else — never a
+/// public payload, never a log line (this record's own compiler-generated <c>ToString()</c> would
+/// render it verbatim, so no <c>{Handoff}</c>-style placeholder may ever bind this type; log
+/// <see cref="PersonaName"/>/<see cref="ShowName"/> by name instead, exactly like
+/// <see cref="GenWave.Core.Domain.ShowSummary"/>'s own remarks require for the type this field's
+/// value is sourced from).
+/// </param>
+/// <param name="CounterpartShowName">
+/// SPEC F114.3/F116.2: the OTHER piece's show — mirrors <see cref="CounterpartName"/>'s own
+/// self/counterpart split, but populated for a <see cref="SpeechDeferralKind.SignOff"/> deferral only
+/// (F114.3's "sign-off may name the ending show and the next"; F116.2 gives sign-on no analogous
+/// license to name the show it is leaving). <see langword="null"/> on a <see cref="SpeechDeferralKind.SignOn"/>
+/// deferral's context, and whenever no next show is named.
+/// </param>
 public sealed record HandoffContext(
     string Voice,
     string? PersonaName,
     string? CounterpartName,
     string? CrossingTrackTitle = null,
-    string? CrossingTrackArtist = null);
+    string? CrossingTrackArtist = null,
+    string? ShowName = null,
+    string? ShowFlavor = null,
+    string? CounterpartShowName = null);

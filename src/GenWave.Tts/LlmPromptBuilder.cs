@@ -302,14 +302,16 @@ static class LlmPromptBuilder
     /// sign-on. <paramref name="counterpartName"/> is the display name of the OTHER DJ at this
     /// boundary (<see cref="SegmentRequest.CounterpartName"/>) — the ONLY fact about the counterpart
     /// this prompt is given, so "invent nothing" is enforced structurally the same way
-    /// <see cref="RequestLineAcknowledgmentLine"/> enforces it for the request line: no show name,
-    /// time, or event exists anywhere in <see cref="SegmentRequest"/> for the model to draw on, only a
-    /// name. A null/empty name (F92.3 — the music-only half of a handoff) yields the music-only
-    /// variant instead, matching what the template fallback (<c>PatterTemplateRenderer</c>) would say
-    /// for the same case. Truncated to <see cref="MaxSoulChars"/> (T123 review finding) — an
-    /// operator-editable display name flows straight into this prompt with no length constraint of
-    /// its own, exactly like <see cref="BuildLegacySoul"/>'s Backstory/Style fields, so it gets the
-    /// same house cap rather than a new one.
+    /// <see cref="RequestLineAcknowledgmentLine"/> enforces it for the request line: no time or event
+    /// exists anywhere in <see cref="SegmentRequest"/> for the model to draw on, only a name (SPEC
+    /// F116.2, PLAN T248 additionally supplies the show — see <see cref="BuildShowLine"/> — as its
+    /// own separate, optional line, never folded into this one). A null/empty name (F92.3 — the
+    /// music-only half of a handoff) yields the music-only variant instead, matching what the
+    /// template fallback (<c>PatterTemplateRenderer</c>) would say for the same case. Truncated to
+    /// <see cref="MaxSoulChars"/> (T123 review finding) — an operator-editable display name flows
+    /// straight into this prompt with no length constraint of its own, exactly like
+    /// <see cref="BuildLegacySoul"/>'s Backstory/Style fields, so it gets the same house cap rather
+    /// than a new one.
     /// </summary>
     static string BuildHandoffLine(SegmentKind kind, string? counterpartName)
     {
@@ -332,6 +334,69 @@ static class LlmPromptBuilder
                   "never invent a DJ, show, or time that didn't happen.",
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, message: null),
         };
+    }
+
+    /// <summary>
+    /// SPEC F116.2/F114.3 (STORY-307, PLAN T248) — the show-color instruction line, additive and
+    /// entirely separate from <see cref="BuildHandoffLine"/>: ceremony is show-aware with no gate, so
+    /// this is called for EVERY sign-off/sign-on, and returns null (no line, byte-identical to the
+    /// pre-F116 golden) whenever the boundary names no show at all — an unnamed block or a showless
+    /// station. <paramref name="showName"/>/<paramref name="showFlavor"/> are this piece's OWN show
+    /// (<see cref="SegmentRequest.ShowName"/>/<see cref="SegmentRequest.ShowFlavor"/> — the ending
+    /// show for a sign-off, the incoming show for a sign-on); <paramref name="counterpartShowName"/>
+    /// is the OTHER piece's show (<see cref="SegmentRequest.CounterpartShowName"/>) and is only ever
+    /// non-null on a sign-off request (F114.3's "may name the ending show and the next" — the
+    /// producer never populates it for a sign-on, SPEC F116.2 giving sign-on no license to name the
+    /// show it is leaving).
+    ///
+    /// <para>
+    /// A sign-on names only its OWN (incoming) show, with flavor (F116.2): the flavor text is
+    /// prompt-only forever (F115.3, the persona-soul precedent) and reaches nowhere else. A sign-off
+    /// may name its OWN (ending) show, the counterpart's (next) show, both, or neither, depending on
+    /// which sides of the boundary actually carry one — mirrors <see cref="BuildHandoffLine"/>'s own
+    /// "invent nothing beyond what's given" discipline: the only shows the model may ever name are the
+    /// ones supplied here.
+    /// </para>
+    /// </summary>
+    static string? BuildShowLine(SegmentKind kind, string? showName, string? showFlavor, string? counterpartShowName)
+    {
+        var name = showName is { Length: > 0 } n ? Truncate(n, MaxSoulChars) : null;
+
+        return kind switch
+        {
+            SegmentKind.SignOn => name is null ? null : BuildSignOnShowLine(name, showFlavor),
+            SegmentKind.SignOff => BuildSignOffShowLine(
+                name, counterpartShowName is { Length: > 0 } cn ? Truncate(cn, MaxSoulChars) : null),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, message: null),
+        };
+    }
+
+    static string BuildSignOnShowLine(string showName, string? showFlavor)
+    {
+        var flavor = showFlavor is { Length: > 0 } f ? Truncate(f, MaxSoulChars) : null;
+
+        return flavor is not null
+            ? $"Show note: you are opening the show \"{showName}\" - its flavor: {flavor}. You may " +
+              "welcome listeners to it by name and let that flavor color your delivery; never invent " +
+              "a show that doesn't exist."
+            : $"Show note: you are opening the show \"{showName}\" - you may welcome listeners to it " +
+              "by name; never invent a show that doesn't exist.";
+    }
+
+    static string? BuildSignOffShowLine(string? endingShowName, string? nextShowName)
+    {
+        if (endingShowName is null && nextShowName is null) return null;
+
+        if (endingShowName is not null && nextShowName is not null)
+            return $"Show note: you are closing out \"{endingShowName}\" and \"{nextShowName}\" is up " +
+                "next - you may name either or both as you sign off; never invent a show that doesn't " +
+                "exist.";
+
+        return endingShowName is not null
+            ? $"Show note: you are closing out the show \"{endingShowName}\" - you may name it as you " +
+              "sign off; never invent a show that doesn't exist."
+            : $"Show note: \"{nextShowName}\" is up next - you may name it as you sign off; never " +
+              "invent a show that doesn't exist.";
     }
 
     /// <summary>
@@ -498,9 +563,11 @@ static class LlmPromptBuilder
 
     /// <summary>
     /// Composes the user-content half of the prompt (SPEC F34.3, F71.8, F83.1-F83.3, F87.7, F92.2,
-    /// F107.3, F107.5): station/time/clock/segment framing, then — for a sign-off/sign-on only — the
-    /// handoff-color line (see <see cref="BuildHandoffLine"/>), or — for a context segment WITH facts
-    /// to show — the facts block (see <see cref="BuildContextFactsLine"/>, whose own null return omits
+    /// F107.3, F107.5, F116.2): station/time/clock/segment framing, then — for a sign-off/sign-on only
+    /// — the handoff-color line (see <see cref="BuildHandoffLine"/>) followed by an OPTIONAL show-color
+    /// line (SPEC F116.2, PLAN T248 — see <see cref="BuildShowLine"/>, whose own null return keeps a
+    /// showless boundary's prompt byte-identical to the pre-F116 golden), or — for a context segment
+    /// WITH facts to show — the facts block (see <see cref="BuildContextFactsLine"/>, whose own null return omits
     /// the line entirely for a preview's typically-blank <see cref="SegmentRequest.ContextFacts"/>;
     /// T224 note: this arm and the track-anchored arm below are mutually exclusive by construction,
     /// since a <see cref="SegmentKind.ContextSegment"/> request's own <see cref="SegmentRequest.Track"/>
@@ -539,7 +606,19 @@ static class LlmPromptBuilder
         };
 
         if (request.Kind is SegmentKind.SignOff or SegmentKind.SignOn)
+        {
             lines.Add(BuildHandoffLine(request.Kind, request.CounterpartName));
+
+            // SPEC F116.2 (PLAN T248): show-aware ceremony, no gate — called for every sign-off/
+            // sign-on, but adds no line (byte-identical to the pre-F116 golden) whenever the boundary
+            // names no show at all. See BuildShowLine's own remarks for exactly which side names
+            // which show.
+            if (BuildShowLine(request.Kind, request.ShowName, request.ShowFlavor, request.CounterpartShowName)
+                is { } showLine)
+            {
+                lines.Add(showLine);
+            }
+        }
 
         // SPEC F111.3 (PLAN T235): the straddle back-announce rides ONLY the SignOn half — the piece
         // held at the straddle seam until the crossing track has actually aired (SPEC F111.2). A
