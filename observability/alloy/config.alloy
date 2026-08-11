@@ -50,6 +50,26 @@ loki.source.docker "containers" {
 loki.process "containers" {
   forward_to = [loki.write.loki.receiver]
 
+  // gh-#251: icecast 2.5 logs an 8-line ceremony for EVERY liquidsoap metadata push (~75% of the
+  // service's volume, ~2,900 WARN-matching lines/day on the demo — it drowned the ops dashboard's
+  // error/warn panels; the 2026-08-11 LLL misread started here). Drop exactly the ceremony, at
+  // ingest, scoped to the icecast service only: the access log (listener connects/durations —
+  // gh-#115's acceptance), "listener count" lines, source connect/disconnect, and every real
+  // error still ship. Each alternative names the metadata ceremony specifically — the stats-poll
+  // admin traffic (~17k access lines/day) shares none of these shapes and is untouched.
+  // Maintenance note: wording is icecast 2.5.0's; re-verify on any icecast upgrade (the spec
+  // pins the expression against captured real lines, so a drift shows up as a red fact, not
+  // silently-resumed spam).
+  stage.match {
+    selector = "{service=\"icecast\"}"
+
+    stage.drop {
+      // drop:begin
+      expression = "(admin/admin_handle_request Received admin command metadata|admin/admin_enforce_unsafe .* on /admin/metadata|admin/command_metadata Metadata (request mountpoint .* contains|on mountpoint .* changed to)|util/util_conv_string converting metadata|event-stream/event_stream_queue event queued)"
+      // drop:end
+    }
+  }
+
   stage.label_keep {
     values = ["service", "station", "env"]
   }

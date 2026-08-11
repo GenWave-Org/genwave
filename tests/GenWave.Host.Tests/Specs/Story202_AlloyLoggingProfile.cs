@@ -220,6 +220,72 @@ public static class FeatureAlloyLoggingProfile
         }
     }
 
+    // gh-#251 — the icecast metadata-ceremony drop stage: icecast 2.5 logs an 8-line ceremony per
+    // liquidsoap metadata push (~75% of the service's volume); config.alloy drops exactly those
+    // shapes at ingest, icecast-scoped. The drop expression is delimited by `// drop:begin` /
+    // `// drop:end` (the labels-block idiom) so these facts can extract it without an Alloy
+    // parser and pin it against REAL captured lines — an icecast upgrade that rewords the
+    // ceremony turns into a red fact here, never silently-resumed spam.
+    public static class ScenarioIcecastCeremonyDrop
+    {
+        static string DropExpression()
+        {
+            var config = File.ReadAllText(Path.Combine(RepoRoot(), "observability", "alloy", "config.alloy"));
+            var block = Regex.Match(config, @"// drop:begin(.*?)// drop:end", RegexOptions.Singleline).Groups[1].Value;
+            var expression = Regex.Match(block, "expression = \"(.*)\"").Groups[1].Value;
+            Assert.False(string.IsNullOrWhiteSpace(expression), "drop:begin/end block with an expression must exist in config.alloy");
+            return expression;
+        }
+
+        // All five ceremony shapes, captured verbatim from the demo box via Loki, 2026-08-11.
+        static readonly string[] CeremonyLines =
+        [
+            "[2026-08-11  11:59:46] INFO admin/admin_handle_request Received admin command metadata on mount '/stream'",
+            "[2026-08-11  11:59:46] WARN admin/admin_enforce_unsafe Client 0x59917577c630 (role=legacy-global-source, acl=legacy-global-source, username=source) uses safe method GET on /admin/metadata",
+            "[2026-08-11  11:59:46] WARN admin/command_metadata Metadata request mountpoint /stream contains \"song\" but also \"artist\" and/or \"title\"",
+            "[2026-08-11  11:59:46] INFO admin/command_metadata Metadata on mountpoint /stream changed to \"GWAV 108.8 | House of Lords - My Generation\"",
+            "[2026-08-11  11:59:46] INFO util/util_conv_string converting metadata from \"UTF-8\" to \"ISO8859-1\"",
+            "[2026-08-11  11:59:46] INFO event-stream/event_stream_queue event queued",
+        ];
+
+        // Lines that MUST keep shipping. The access-log line (captured) is the adversarial one —
+        // it contains "/admin/metadata" yet is gh-#115's acceptance signal; the error and
+        // listener lines are constructed to icecast 2.5's shapes (no live capture available in
+        // the sampled window) and marked as such.
+        static readonly string[] MustSurviveLines =
+        [
+            "172.28.20.4 - source [09/Aug/2026:19:11:01 +0000] \"GET /admin/metadata HTTP/1.0\" 200 433 \"-\" \"Liquidsoap/2.4.4 (Unix; OCaml 4.14.2)\" 0", // captured
+            "[2026-08-09  19:17:20] EROR admin/command_metadata Metadata update failed: connection reset by peer",   // constructed
+            "[2026-08-11  11:59:46] INFO source/source_main listener count on /stream now 2",                        // constructed
+        ];
+
+        [Fact]
+        public static void Every_ceremony_shape_is_dropped()
+        {
+            var drop = new Regex(DropExpression());
+            foreach (var line in CeremonyLines)
+                Assert.True(drop.IsMatch(line), $"ceremony line escaped the drop expression:\n{line}");
+        }
+
+        [Fact]
+        public static void Access_log_errors_and_listener_lines_survive()
+        {
+            var drop = new Regex(DropExpression());
+            foreach (var line in MustSurviveLines)
+                Assert.False(drop.IsMatch(line), $"a keep-line would be dropped:\n{line}");
+        }
+
+        [Fact]
+        public static void Drop_stage_is_scoped_to_the_icecast_service_only()
+        {
+            // The stage.match selector fences the drop to icecast — every other service's lines
+            // must never pass through the drop expression at all.
+            var config = File.ReadAllText(Path.Combine(RepoRoot(), "observability", "alloy", "config.alloy"));
+            var match = Regex.Match(config, @"stage\.match\s*\{(.*?)stage\.drop", RegexOptions.Singleline).Groups[1].Value;
+            Assert.Contains("selector = \"{service=\\\"icecast\\\"}\"", match, StringComparison.Ordinal);
+        }
+    }
+
     public static class SadPathFailLoudOnEmptyPushUrl
     {
         [Fact]
