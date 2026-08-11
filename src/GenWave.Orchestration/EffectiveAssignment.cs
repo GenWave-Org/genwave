@@ -36,7 +36,7 @@ namespace GenWave.Orchestration;
 /// </para>
 ///
 /// <para>
-/// Envelope resolution is deliberately OUT of this function's scope: <see cref="ScheduleResolver.Resolve(ScheduleWeekSnapshot)"/>'s
+/// Envelope resolution is deliberately OUT of this function's scope: <see cref="ScheduleResolver.Resolve"/>'s
 /// own <c>BuildSegmentEnvelope</c> already implements the unrelated "segment fields ?? station-default"
 /// fallback (SPEC F91.4) — that chain never involves a show today, so moving it here would be a diff
 /// with no behavior change. The bundle slice's own envelope widening lands in <see cref="Resolve"/>

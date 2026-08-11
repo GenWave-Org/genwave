@@ -323,9 +323,18 @@ public static class FeatureAiredKindStamp
         {
             // Simulate a pre-T219 database by dropping the three objects db/33 adds — FK-safe order:
             // the show_id column (and its FK) first, then the table it referenced, then the unrelated
-            // booth_log column.
+            // booth_log column. station.schedule_special (PLAN T258 addition) is dropped WHOLESALE
+            // immediately before station.show for the identical FK-safe reason — it is a sibling table
+            // in the SAME DatabaseCollection that may already exist by the time this fact runs
+            // (Story317_SpecialsStore.cs's own facts create it) and carries its own FK into
+            // station.show. A bare CASCADE on the station.show drop would only strip that FK
+            // CONSTRAINT, leaving the table itself behind in a state db/36's idempotent CREATE TABLE IF
+            // NOT EXISTS can never repair (unlike station.show/segment_schedule.show_id here, which
+            // db/33's own CREATE/ADD COLUMN restores below) — dropping the whole table instead keeps it
+            // self-healing the same way every other table in this file already is.
             await using (var conn = await db.StationDataSource.OpenConnectionAsync())
             {
+                await conn.ExecuteAsync("drop table if exists station.schedule_special");
                 await conn.ExecuteAsync("alter table station.segment_schedule drop column if exists show_id");
                 await conn.ExecuteAsync("drop table if exists station.show");
                 await conn.ExecuteAsync("alter table station.booth_log drop column if exists segment_kind");

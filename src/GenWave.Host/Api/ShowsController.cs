@@ -21,14 +21,17 @@ namespace GenWave.Host.Api;
 ///
 /// <para>
 /// <b>Delete guard (SPEC F115.4) — two independent reference kinds, two different postures.</b>
-/// <see cref="IShowStore.DeleteAsync"/>'s own <see cref="ShowWriteResult.Referenced"/> case fires only
-/// for a real FK (<c>station.segment_schedule.show_id</c>, <c>ON DELETE RESTRICT</c>) — <see cref="Delete"/>
-/// re-queries that table (<see cref="IScheduleStore.GetSlotsByShowIdAsync"/>) to NAME the blocking
-/// slots in the 409 body the store's own bare case can't carry (mirrors <c>PersonaController.Delete</c>'s
-/// pre-T121 posture — see <see cref="ShowWriteResult.Referenced"/>'s own remarks).
-/// <c>library.media.show_id</c> (show-scoped imaging, F117.1) carries NO FK at all, so it can never
-/// block the DELETE statement itself — it is handled entirely on the OTHER side of a successful
-/// delete instead: <see cref="IShowImagingScope.UnscopeAsync"/> only ever runs after
+/// <see cref="IShowStore.DeleteAsync"/>'s own <see cref="ShowWriteResult.Referenced"/> case fires for
+/// either of TWO real FKs sharing the identical <c>ON DELETE RESTRICT</c> shape:
+/// <c>station.segment_schedule.show_id</c> (the weekly grid) and, since PLAN T259 wired the seam live,
+/// <c>station.schedule_special.show_id</c> (SPEC F120.1's dated-specials tail — F115.4's own "and
+/// specials when F120 ships" carry-forward) — <see cref="Delete"/> re-queries BOTH
+/// (<see cref="IScheduleStore.GetSlotsByShowIdAsync"/>, <see cref="SpecialsReferencingShowAsync"/>) to
+/// NAME every blocking slot/special in the 409 body the store's own bare case can't carry (mirrors
+/// <c>PersonaController.Delete</c>'s pre-T121 posture — see <see cref="ShowWriteResult.Referenced"/>'s
+/// own remarks). <c>library.media.show_id</c> (show-scoped imaging, F117.1) carries NO FK at all, so
+/// it can never block the DELETE statement itself — it is handled entirely on the OTHER side of a
+/// successful delete instead: <see cref="IShowImagingScope.UnscopeAsync"/> only ever runs after
 /// <see cref="ShowWriteResult.Deleted"/> comes back, clearing every imaging row that named the
 /// now-gone show and naming what it cleared in the response body.
 /// </para>
@@ -76,6 +79,8 @@ namespace GenWave.Host.Api;
 public sealed partial class ShowsController(
     IShowStore showStore,
     IScheduleStore scheduleStore,
+    IScheduleSpecialStore specialStore,
+    IStationClockProvider stationClock,
     IShowImagingScope imagingScope,
     ILogger<ShowsController> logger) : ControllerBase
 {
@@ -300,11 +305,12 @@ public sealed partial class ShowsController(
     }
 
     /// <summary>
-    /// DELETE /api/shows/{slug} — remove a show (SPEC F115.4; see this class's own remarks for the
-    /// full guard). 404 for an unknown slug. 409, naming every referencing schedule block, when
-    /// <c>station.segment_schedule</c> still names it — nothing deleted, nothing unscoped. Otherwise:
-    /// 204 when nothing else named it either, or 200 naming every show-scoped imaging row this call
-    /// unscoped.
+    /// DELETE /api/shows/{slug} — remove a show (SPEC F115.4, F120.1; see this class's own remarks for
+    /// the full guard). 404 for an unknown slug. 409, naming every referencing weekly block AND every
+    /// referencing dated special, when either <c>station.segment_schedule</c> or (PLAN T259,
+    /// F115.4's own "and specials when F120 ships" carry-forward) <c>station.schedule_special</c> still
+    /// names it — nothing deleted, nothing unscoped. Otherwise: 204 when nothing else named it either,
+    /// or 200 naming every show-scoped imaging row this call unscoped.
     /// </summary>
     [HttpDelete("{slug}")]
     public async Task<IActionResult> Delete(string slug, CancellationToken ct)
@@ -328,9 +334,11 @@ public sealed partial class ShowsController(
 
             case ShowWriteResult.Referenced:
                 var blocks = await scheduleStore.GetSlotsByShowIdAsync(existing.Id, ct);
+                var specials = await SpecialsReferencingShowAsync(existing.Id, ct);
                 logger.LogWarning(
-                    "Show delete refused slug={Slug} blockCount={Count}", LogSafeText.Sanitize(slug), blocks.Count);
-                return Conflict(ReferencedProblem(slug, blocks));
+                    "Show delete refused slug={Slug} blockCount={Count} specialCount={SpecialCount}",
+                    LogSafeText.Sanitize(slug), blocks.Count, specials.Count);
+                return Conflict(ReferencedProblem(slug, blocks, specials));
 
             case ShowWriteResult.NotFound:
                 // Race backstop: gone between the GetBySlugAsync read above and this DeleteAsync call.
@@ -387,6 +395,35 @@ public sealed partial class ShowsController(
                 showId, LogSafeText.Sanitize(slug));
             return [];
         }
+    }
+
+    /// <summary>
+    /// PLAN T259 (F115.4's own "and specials when F120 ships" carry-forward) — every
+    /// <c>station.schedule_special</c> row still naming <paramref name="showId"/>, for
+    /// <see cref="Delete"/>'s own <c>Referenced</c> case to name alongside a referencing weekly block.
+    /// <see cref="IScheduleSpecialStore"/> deliberately carries no "by show id" query of its own (its
+    /// own remarks: list + create + delete, nothing narrower) — <see cref="IScheduleSpecialStore.ListUpcomingAsync"/>
+    /// is exactly the "unbounded above <c>fromDate</c>, a caller filters the returned list itself" seam
+    /// that store's own docs describe for a caller wanting a narrower read, so this filters client-side
+    /// rather than growing the store a second query method for one guard.
+    ///
+    /// <para>
+    /// UPCOMING ONLY, deliberately — a special dated BEFORE today can, in principle, still hold the
+    /// identical <c>ON DELETE RESTRICT</c> FK (db/36) and block this same DELETE, but this method never
+    /// sees it: <see cref="IScheduleSpecialStore.ListUpcomingAsync"/> has no "every special ever" query
+    /// to ask for one, and specials are documented rare rows an operator is expected to let lapse or
+    /// clean up, not an unbounded historical ledger this guard needs to search. A show blocked ONLY by
+    /// such a stale special still 409s (the FK still fires — <see cref="ShowWriteResult.Referenced"/>
+    /// is unconditional on SQLSTATE 23503, not on THIS method finding anything), it just falls through
+    /// to <see cref="ReferencedProblem"/>'s own generic fallback wording — the identical, already-
+    /// documented "the FK fired but the re-query named nothing new" rare race this class's own
+    /// <c>ReferencedProblem</c> remarks already cover for a weekly block.
+    /// </para>
+    /// </summary>
+    async Task<IReadOnlyList<ScheduleSpecial>> SpecialsReferencingShowAsync(long showId, CancellationToken ct)
+    {
+        var upcoming = await specialStore.ListUpcomingAsync(stationClock.Today(), ct);
+        return upcoming.Where(s => s.ShowId == showId).ToList();
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -557,18 +594,31 @@ public sealed partial class ShowsController(
     };
 
     // SPEC F115.4 — names every referencing block the same day/time shape PersonaController.Delete's
-    // own ScheduledPersonaProblem uses. The PROBLEM-BODY builders stay two separate methods
-    // (mirrored, not shared: each carries its own title/detail wording, and ScheduledPersonaProblem
-    // is private to PersonaController — see this controller's own class remarks on mirror-vs-share).
+    // own ScheduledPersonaProblem uses, now joined by every referencing dated special (PLAN T259,
+    // F115.4's own "and specials when F120 ships" carry-forward). The PROBLEM-BODY builders stay two
+    // separate methods (mirrored, not shared: each carries its own title/detail wording, and
+    // ScheduledPersonaProblem is private to PersonaController — see this controller's own class
+    // remarks on mirror-vs-share; PersonaController's own persona-delete guard is NOT extended to
+    // specials by this same task — see SpecialsController's own class remarks and this task's PLAN
+    // entry for why that side is left as a documented follow-up, not "cheap" the way this one is).
     // Slot FORMATTING is a different claim — ScheduledSlotText.FormatSlot is the one shared
     // implementation both this method and ScheduledPersonaProblem call into (PLAN T240 review).
-    static ProblemDetails ReferencedProblem(string slug, IReadOnlyList<ScheduledSlot> blocks) => new()
+    // ScheduledSlotText.FormatSpecial (PLAN T259) is this method's own addition — PersonaController's
+    // own guard has no special-naming case to share it with (see the "not cheap" remark above).
+    static ProblemDetails ReferencedProblem(
+        string slug, IReadOnlyList<ScheduledSlot> blocks, IReadOnlyList<ScheduleSpecial> specials)
     {
-        Status = StatusCodes.Status409Conflict,
-        Title  = "Show is scheduled.",
-        Detail = blocks.Count > 0
-            ? $"\"{slug}\" is still scheduled and cannot be deleted: " +
-              $"{string.Join(", ", blocks.Select(ScheduledSlotText.FormatSlot))}."
-            : $"\"{slug}\" still appears in the format-clock schedule and cannot be deleted while scheduled.",
-    };
+        var references = blocks.Select(ScheduledSlotText.FormatSlot)
+            .Concat(specials.Select(ScheduledSlotText.FormatSpecial))
+            .ToList();
+
+        return new ProblemDetails
+        {
+            Status = StatusCodes.Status409Conflict,
+            Title  = "Show is scheduled.",
+            Detail = references.Count > 0
+                ? $"\"{slug}\" is still scheduled and cannot be deleted: {string.Join(", ", references)}."
+                : $"\"{slug}\" still appears in the format-clock schedule and cannot be deleted while scheduled.",
+        };
+    }
 }

@@ -12,6 +12,7 @@ using GenWave.MediaLibrary.ExplicitClassification;
 using GenWave.MediaLibrary.Mood;
 using GenWave.MediaLibrary.Options;
 using GenWave.MediaLibrary.Scan;
+using GenWave.MediaLibrary.Station;
 using GenWave.MediaLibrary.YearLookup;
 using Npgsql;
 
@@ -29,6 +30,17 @@ public static class MediaLibraryServiceCollectionExtensions
     {
         // snake_case columns -> PascalCase row props (e.g. duration_ms -> DurationMs).
         DefaultTypeMap.MatchNamesWithUnderscores = true;
+
+        // Dapper has no built-in DateOnly parameter binding (PLAN T258 review MF2 — see
+        // Station.DateOnlyTypeHandler's own remarks); station.schedule_special.on_date is this
+        // codebase's first DateOnly-typed column. Registered here, unconditionally, rather than on
+        // Station.SpecialsRepository's own construction: this call runs unconditionally at Host
+        // startup regardless of which stores end up with a live consumer (PLAN T259 wired
+        // SpecialsController as this store's first Host call site — the store no longer ships dark —
+        // but the registration was never conditioned on that in the first place), so a registration
+        // gated on the repository's own construction would still be the wrong ordering to depend on.
+        // Global/process-wide the same way MatchNamesWithUnderscores just above is.
+        SqlMapper.AddTypeHandler(DateOnlyTypeHandler.Instance);
 
         var connectionString = configuration.GetConnectionString("Library")
             ?? throw new InvalidOperationException("Missing connection string 'Library'.");

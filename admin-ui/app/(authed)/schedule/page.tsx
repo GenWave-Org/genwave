@@ -2,7 +2,15 @@ import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { apiGet } from "@/lib/api";
 import { ScheduleEditor } from "./ScheduleEditor";
-import type { RosterPersonaDto, ScheduleShowOptionDto, ScheduleShowsStatus, ScheduleWeekDto } from "./types";
+import { SpecialsForm } from "./SpecialsForm";
+import type {
+  RosterPersonaDto,
+  ScheduleShowOptionDto,
+  ScheduleShowsStatus,
+  ScheduleSpecialDto,
+  ScheduleSpecialsStatus,
+  ScheduleWeekDto,
+} from "./types";
 
 // The format-clock schedule is live/mutable station configuration (an operator paints it here,
 // the clock ticks against it elsewhere) — always re-render from the server, mirroring
@@ -34,14 +42,26 @@ async function deriveShowsStatus(result: PromiseSettledResult<Response>): Promis
   return { kind: "loaded", shows };
 }
 
+/** Projects a settled `GET /api/schedule/specials` result down to {@link ScheduleSpecialsStatus}
+ * (PLAN T259) — mirrors {@link deriveShowsStatus}'s exact shape: loaded-and-narrowed on a 200,
+ * `"error"` on anything else, never thrown. An unreadable specials list degrades `SpecialsForm`'s own
+ * list section alone (SPEC F120's droppable-tail posture) — it never blocks the paint grid this page
+ * exists for. */
+async function deriveSpecialsStatus(result: PromiseSettledResult<Response>): Promise<ScheduleSpecialsStatus> {
+  if (result.status === "rejected" || !result.value.ok) return { kind: "error" };
+  const specials = (await result.value.json()) as ScheduleSpecialDto[];
+  return { kind: "loaded", specials };
+}
+
 export default async function SchedulePage(): Promise<ReactNode> {
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
 
-  const [personasResult, scheduleResult, showsResult] = await Promise.allSettled([
+  const [personasResult, scheduleResult, showsResult, specialsResult] = await Promise.allSettled([
     apiGet("/api/personas", { cookies: cookieHeader }),
     apiGet("/api/schedule", { cookies: cookieHeader }),
     apiGet("/api/shows", { cookies: cookieHeader }),
+    apiGet("/api/schedule/specials", { cookies: cookieHeader }),
   ]);
 
   if (personasResult.status === "rejected" || !personasResult.value.ok) {
@@ -73,6 +93,7 @@ export default async function SchedulePage(): Promise<ReactNode> {
   const personas = (await personasResult.value.json()) as RosterPersonaDto[];
   const week = (await scheduleResult.value.json()) as ScheduleWeekDto;
   const shows = await deriveShowsStatus(showsResult);
+  const specials = await deriveSpecialsStatus(specialsResult);
 
   return (
     <main>
@@ -82,6 +103,9 @@ export default async function SchedulePage(): Promise<ReactNode> {
       </p>
       <div className="mt-4">
         <ScheduleEditor initialWeek={week} personas={personas} shows={shows} />
+      </div>
+      <div className="mt-8">
+        <SpecialsForm personas={personas} shows={shows} specials={specials} />
       </div>
     </main>
   );

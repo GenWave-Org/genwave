@@ -34,7 +34,10 @@ namespace GenWave.Host.Tests.Specs;
 /// <see cref="CachingScheduleResolver"/>/<see cref="ScheduleResolver"/> themselves stay the REAL
 /// production types resolving through the real DI graph, so <c>show</c>/<c>upNext.show</c> prove
 /// the actual resolver + <c>EffectiveAssignment</c> chokepoint (SPEC F115.2), not a
-/// re-implementation of it.
+/// re-implementation of it. <see cref="IScheduleSpecialStore"/> is ALSO swapped (PLAN T260, mirrors
+/// Story244's own <c>WhoIsOnWebFactory</c>) — <see cref="CachingScheduleResolver.ResolveAsync"/> now
+/// reads it on every call alongside <see cref="IScheduleStore"/>; an empty fake is enough since none
+/// of these facts author a special.
 /// </summary>
 file sealed class ShowFieldsWebFactory(IScheduleStore scheduleStore, FakeTimeProvider timeProvider)
     : WebApplicationFactory<Program>
@@ -54,6 +57,8 @@ file sealed class ShowFieldsWebFactory(IScheduleStore scheduleStore, FakeTimePro
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
             services.RemoveAll<IScheduleStore>();
             services.AddSingleton(scheduleStore);
+            services.RemoveAll<IScheduleSpecialStore>();
+            services.AddSingleton<IScheduleSpecialStore>(new FakeScheduleSpecialStore());
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(timeProvider);
         });

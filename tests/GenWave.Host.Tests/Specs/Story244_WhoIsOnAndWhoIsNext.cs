@@ -31,7 +31,13 @@ namespace GenWave.Host.Tests.Specs;
 /// real DI graph: this proves the actual resolver math (SPEC F91.2/F91.3), not a re-implementation
 /// of it. <see cref="IActivePersonaAccessor"/> is replaced with the shared
 /// <see cref="FakeActivePersonaAccessor"/> so a persona id's display name is scriptable without a
-/// live orchestrator ever running to warm it.
+/// live orchestrator ever running to warm it. <see cref="IScheduleSpecialStore"/> is ALSO swapped
+/// (PLAN T260) — <see cref="CachingScheduleResolver.ResolveAsync"/> now reads it on every call
+/// alongside <see cref="IScheduleStore"/>; leaving the real, Postgres-backed
+/// <c>SpecialsRepository</c> in place would fault against this factory's own connectionless
+/// <c>ConnectionStrings:Station</c>. None of these facts author a special, so an empty fake is
+/// enough — the resolver's own specials-first rung is proven separately (Story317_SpecialsRung.cs,
+/// Story241_StationFollowsTheClock.cs's own <c>ScenarioSpecialsRideTheCache</c>).
 /// </summary>
 file sealed class WhoIsOnWebFactory(
     IScheduleStore scheduleStore, FakeTimeProvider timeProvider, FakeActivePersonaAccessor personaAccessor)
@@ -52,6 +58,8 @@ file sealed class WhoIsOnWebFactory(
             services.AddSingleton<IActivePersonaAccessor>(personaAccessor);
             services.RemoveAll<IScheduleStore>();
             services.AddSingleton(scheduleStore);
+            services.RemoveAll<IScheduleSpecialStore>();
+            services.AddSingleton<IScheduleSpecialStore>(new FakeScheduleSpecialStore());
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(timeProvider);
         });

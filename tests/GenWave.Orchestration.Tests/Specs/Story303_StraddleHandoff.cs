@@ -503,7 +503,7 @@ public static class FeatureStraddleHandoff
             var time = new FakeTimeProvider(JustBeforeNoon);
             var scheduleStore = new FakeScheduleStore(snapshot);
             var resolver = new ScheduleResolver(time, new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault));
-            var caching = new CachingScheduleResolver(scheduleStore, resolver);
+            var caching = new CachingScheduleResolver(scheduleStore, resolver, new FakeScheduleSpecialStore());
             var queue = new SpeechDeferralQueue(time);
             var orchestrator = new Orchestrator(
                 new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default")),

@@ -59,7 +59,7 @@ public static class FeatureShowFlavorLineGate
         var store = new FakeScheduleStore(snapshot);
         var stationDefault = new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault);
         var resolver = new ScheduleResolver(time, stationDefault);
-        var caching = new CachingScheduleResolver(store, resolver);
+        var caching = new CachingScheduleResolver(store, resolver, new FakeScheduleSpecialStore());
         await caching.ResolveAsync(CancellationToken.None); // Populates the cache TryGetCurrent reads.
 
         var cadence = new FakeShowPatterCadenceProvider(cadenceMinutes);
