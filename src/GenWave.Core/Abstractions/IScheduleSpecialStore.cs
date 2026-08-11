@@ -1,0 +1,65 @@
+using GenWave.Core.Domain;
+
+namespace GenWave.Core.Abstractions;
+
+/// <summary>
+/// SEAM (SPEC F120.1, STORY-317, PLAN T258) — CRUD access to <c>station.schedule_special</c>, the
+/// dated-specials tail that shadows <see cref="IScheduleStore"/>'s weekly grid for a single calendar
+/// date's span. Deliberately minimal (SPEC F120.1's own "CRUD minimal" instruction, PLAN T258): list +
+/// create + delete only — no update (a caller wanting to change a special deletes and re-creates it;
+/// nothing in this epic's own scope needs an in-place edit). Ships the same "dark seam" way
+/// <see cref="IScheduleStore"/> itself did at T118 and <see cref="IShowStore"/> did at T239: this
+/// interface, its implementation, and its DI registration extension all exist after PLAN T258, but no
+/// Host composition root calls the registration and no consumer reads from it yet — the resolver's own
+/// specials-first rung (<c>GenWave.Orchestration.ScheduleResolver</c>) takes a specials LIST as a plain
+/// argument, never this store, so it stays reachable and unit-testable with zero DI/database
+/// involvement. PLAN T259 (the dated-list form + API) is this seam's first Host consumer; PLAN T260
+/// ("wire") is what makes a written special shadow the weekly grid LIVE, on the production 3s feeder
+/// tick — see <c>ScheduleResolver</c>'s own remarks for exactly what is, and is not, wired at T258.
+/// </summary>
+public interface IScheduleSpecialStore
+{
+    /// <summary>
+    /// Every <c>station.schedule_special</c> row on or after <paramref name="fromDate"/>, ordered by
+    /// date then start minute — the store stays time-agnostic itself (no wall clock dependency, mirrors
+    /// <see cref="IScheduleStore.LoadWeekAsync"/>'s own "Postgres is the only truth" posture): the
+    /// caller supplies "today" (station-local, via whatever clock seam it already holds) rather than
+    /// this method reading one. Unbounded above <paramref name="fromDate"/> deliberately — specials are
+    /// rare rows (SPEC F120.1's own framing), so an admin list view showing "every special from today
+    /// forward" carries no real pagination concern; a caller wanting a narrower window (e.g. the T260
+    /// resolver cache's own bounded lookahead) filters the returned list itself rather than this method
+    /// growing a second date parameter no other caller needs yet.
+    /// </summary>
+    Task<IReadOnlyList<ScheduleSpecial>> ListUpcomingAsync(DateOnly fromDate, CancellationToken ct);
+
+    /// <summary>
+    /// Inserts <paramref name="special"/> and returns the persisted row (store-assigned <c>Id</c>, and
+    /// <c>Show</c> re-resolved by the same LEFT JOIN <see cref="ListUpcomingAsync"/> uses, never
+    /// fabricated from <paramref name="special"/>'s own possibly-stale <c>Show</c> field — mirrors
+    /// <c>ScheduleRepository</c>'s own "<c>ShowId</c> is write-authoritative, <c>Show</c> is a load-time
+    /// projection" split). No application-side pre-validation runs here (deliberately — SPEC F120.1's
+    /// own "CRUD minimal" instruction, and unlike <see cref="IScheduleStore.ReplaceWeekAsync"/> this
+    /// method has no per-cell error contract to report through): the database's own CHECK/EXCLUDE/FK
+    /// constraints (db/36) are the ONLY line of defense, so a caller passing an off-grid minute, an
+    /// overlapping span, or an unknown persona/show id gets a raw <c>Npgsql.PostgresException</c>
+    /// straight back, exactly like <see cref="IScheduleStore.ReplaceWeekAsync"/>'s own documented
+    /// concurrent-FK-violation case. Raises <see cref="SpecialsChanged"/> exactly once on success.
+    /// </summary>
+    Task<ScheduleSpecial> CreateAsync(ScheduleSpecial special, CancellationToken ct);
+
+    /// <summary>
+    /// Deletes the special identified by <paramref name="id"/>. Returns <see langword="true"/> and
+    /// raises <see cref="SpecialsChanged"/> exactly once if a row was actually removed,
+    /// <see langword="false"/> (no event) if no such row exists — mirrors
+    /// <c>IScheduleStore.AssignShowAsync</c>'s own "never raised on a no-op" discipline.
+    /// </summary>
+    Task<bool> DeleteAsync(long id, CancellationToken ct);
+
+    /// <summary>
+    /// Raised synchronously right after a successful <see cref="CreateAsync"/> or <see cref="DeleteAsync"/>
+    /// commit — the sibling of <see cref="IScheduleStore.WeekChanged"/> (SPEC F120's own design note: "a
+    /// sibling event") a future in-memory cache (PLAN T260) subscribes to for invalidation. Never raised
+    /// on a no-op or a rejected write.
+    /// </summary>
+    event Action? SpecialsChanged;
+}

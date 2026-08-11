@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Diagnostics;
 using Dapper;
+using GenWave.MediaLibrary.Station;
 using Npgsql;
 
 namespace GenWave.MediaLibrary.Tests;
@@ -59,6 +60,11 @@ public sealed class DatabaseFixture : IAsyncLifetime
     {
         // Production sets this in AddMediaLibrary; these tests construct the repository directly.
         DefaultTypeMap.MatchNamesWithUnderscores = true;
+
+        // Same reason (PLAN T258 review MF2): production registers DateOnlyTypeHandler in
+        // AddMediaLibrary too — SpecialsRepository (station.schedule_special.on_date) is constructed
+        // directly here, never through that DI extension.
+        SqlMapper.AddTypeHandler(DateOnlyTypeHandler.Instance);
 
         composeFile = LocateComposeFile(out var repoRoot);
         RepoRoot = repoRoot;
@@ -202,6 +208,20 @@ public sealed class DatabaseFixture : IAsyncLifetime
         await using var conn = await StationDataSource.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "truncate table station.show restart identity cascade";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// Truncate <c>station.schedule_special</c> and reset its identity (SPEC F120.1, STORY-317, PLAN
+    /// T258). No FK references this table — <c>persona_id</c>/<c>show_id</c> point OUT to
+    /// <c>station.persona</c>/<c>station.show</c>, not the other way around — so no CASCADE is
+    /// required, the same reasoning <see cref="ResetScheduleAsync"/>'s own remarks give.
+    /// </summary>
+    public async Task ResetSpecialsAsync()
+    {
+        await using var conn = await StationDataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "truncate table station.schedule_special restart identity";
         await cmd.ExecuteNonQueryAsync();
     }
 

@@ -41,6 +41,44 @@ namespace GenWave.Orchestration;
 /// in which case the second occurrence is used instead, so a boundary can never resolve into the past
 /// (PLAN T119 review F2). See <see cref="ResolveWallClockInstant"/>.
 /// </para>
+///
+/// <para>
+/// <b>Specials-first rung (SPEC F120.2, PLAN T258): TODAY shadows, TODAY+TOMORROW race the boundary.</b>
+/// <see cref="Resolve"/>'s optional <c>specials</c> parameter is the ONLY diff this rung makes — every
+/// existing call site (<see cref="CachingScheduleResolver"/>'s own <c>resolver.Resolve(snapshot)</c>
+/// calls) stays byte-identical, since the parameter defaults to none. A dated row whose
+/// <see cref="ScheduleSegment"/>-shaped projection covers "now" (see <see cref="ProjectSpecial"/>) is
+/// fed through the SAME <see cref="EffectiveAssignment"/>/<see cref="BuildSegmentEnvelope"/> pipeline a
+/// weekly block already uses — no downstream consumer of <see cref="OnAirSnapshot"/> gains a
+/// special-aware branch, because there is nothing on <see cref="OnAirSnapshot"/> that could tell it
+/// apart from an ordinary block (beyond <see cref="ScheduleSegment.Id"/>'s own sign — see
+/// <see cref="ProjectSpecial"/>'s remarks — which no consumer treats as anything but an opaque
+/// diagnostic token). Only TODAY's specials (by station-local date) can ever SHADOW "now" —
+/// <see cref="Resolve"/> re-reads the clock on every call and holds no state, so a caller may safely
+/// hand a multi-day window (PLAN T260's own bounded lookahead) without this method ever shadowing a day
+/// that is not "today" for THIS call.
+/// </para>
+///
+/// <para>
+/// <b>The boundary-peek (PLAN T258 review MF3).</b> Shadowing alone is not enough: a special dated
+/// TOMORROW, starting at 00:00, is invisible to <see cref="OnAirSnapshot.BoundaryAt"/>/
+/// <see cref="OnAirSnapshot.NextSegment"/> right up until the exact instant it becomes "today" — and
+/// production hand-off machinery (sign-on/sign-off ceremony included) arms off <c>BoundaryAt</c>, not
+/// off a fresh re-resolve at the stroke of midnight. So the "what happens next" computation (never the
+/// "what is on now" shadow) also considers TOMORROW's specials: <see cref="ResolveGap"/>'s race and
+/// <see cref="ResolveNext"/>'s exact-start lookup both extend one day ahead. A weekly block or gap can
+/// only ever run up TO midnight (SPEC F91.1's own <c>end_minute &lt;= 1440</c> CHECK) — so tomorrow's
+/// earliest special can only ever be a NEXT-boundary candidate at minute 0, never able to truncate a
+/// weekly block early the way a same-day special can (<see cref="ResolveCurrent"/>'s own remarks). This
+/// stays a ONE-day peek, not an unbounded lookahead — the same "specials are rare rows, bound the
+/// window honestly" posture PLAN T258's own design notes set for the (separate, T260) resolver cache.
+/// </para>
+///
+/// <para>
+/// Not wired into <see cref="CachingScheduleResolver"/>'s live cache/invalidation yet (PLAN T258 ships
+/// this rung dark, same posture <see cref="IScheduleStore"/> itself shipped at T118): PLAN T260 is the
+/// "wire" task that makes a written special shadow the weekly grid on the production feeder tick.
+/// </para>
 /// </summary>
 public sealed class ScheduleResolver(
     TimeProvider timeProvider,
@@ -50,46 +88,138 @@ public sealed class ScheduleResolver(
     const int MinutesPerDay = 1440;
     const int MinutesPerWeek = MinutesPerDay * 7;
 
-    /// <summary>Resolves <paramref name="snapshot"/> against station-local "now" (SPEC F91.2, F91.3).</summary>
-    public OnAirSnapshot Resolve(ScheduleWeekSnapshot snapshot)
+    /// <summary>Resolves <paramref name="snapshot"/> (and, for TODAY only as a shadow / TODAY+TOMORROW
+    /// as a boundary race, <paramref name="specials"/> — SPEC F120.2) against station-local "now" (SPEC
+    /// F91.2, F91.3). <paramref name="specials"/> defaults to none, so every pre-T258 call site is
+    /// unaffected.</summary>
+    public OnAirSnapshot Resolve(ScheduleWeekSnapshot snapshot, IReadOnlyList<ScheduleSpecial>? specials = null)
     {
         var zone = stationClock?.Zone ?? timeProvider.LocalTimeZone;
         var localNow = stationClock?.LocalNow ?? TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), zone);
         var today = localNow.DayOfWeek;
+        var tomorrow = (DayOfWeek)(((int)today + 1) % 7);
         var nowMinute = localNow.Hour * 60 + localNow.Minute;
         var todayDate = localNow.Date;
+        var onDate = DateOnly.FromDateTime(todayDate);
+        var tomorrowDate = onDate.AddDays(1);
+
+        var allSpecials = specials ?? [];
+        // Specials-first rung: only TODAY's rows can ever shadow "now" (see this type's own class
+        // remarks for why a future-dated row in the list is safely inert for shadowing purposes).
+        var todaysSpecials = allSpecials.Where(s => s.OnDate == onDate).OrderBy(s => s.StartMinute).ToList();
+        // The boundary-peek (PLAN T258 review MF3): never shadows, only races for "what happens next"
+        // when today's own answer runs right up to midnight.
+        var tomorrowsSpecials = allSpecials.Where(s => s.OnDate == tomorrowDate).OrderBy(s => s.StartMinute).ToList();
+
+        var currentSpecial = FindCurrentSpecial(todaysSpecials, nowMinute);
+        if (currentSpecial is not null)
+        {
+            return ResolveCurrentSpecial(
+                snapshot.Segments, todaysSpecials, tomorrowsSpecials, currentSpecial, today, tomorrow, zone, todayDate, nowMinute, localNow);
+        }
 
         var current = FindCurrent(snapshot.Segments, today, nowMinute);
         return current is null
-            ? ResolveGap(snapshot.Segments, zone, todayDate, today, nowMinute, localNow)
-            : ResolveCurrent(snapshot.Segments, current, zone, todayDate, today, nowMinute, localNow);
+            ? ResolveGap(snapshot.Segments, todaysSpecials, tomorrowsSpecials, zone, todayDate, today, tomorrow, nowMinute, localNow)
+            : ResolveCurrent(snapshot.Segments, todaysSpecials, tomorrowsSpecials, current, zone, todayDate, today, tomorrow, nowMinute, localNow);
     }
 
+    /// <summary>
+    /// A special covers "now" — SPEC F120.2's shadow itself. <paramref name="special"/> is projected
+    /// into a <see cref="ScheduleSegment"/> (<see cref="ProjectSpecial"/>) and fed through the same
+    /// envelope/identity pipeline <see cref="ResolveCurrent"/> uses for a weekly block, so this method's
+    /// own shape mirrors that one deliberately. <see cref="OnAirSnapshot.NextSegment"/> after the
+    /// special ends may resume MID a weekly block (the special's own end need not land on any weekly
+    /// block's start), or — when the special runs right up to midnight — be TOMORROW's own earliest
+    /// special (the boundary-peek) — <see cref="ResolveNext"/> handles both, not the old
+    /// exact-start-only lookup.
+    /// </summary>
+    OnAirSnapshot ResolveCurrentSpecial(
+        IReadOnlyList<ScheduleSegment> segments, IReadOnlyList<ScheduleSpecial> todaysSpecials,
+        IReadOnlyList<ScheduleSpecial> tomorrowsSpecials, ScheduleSpecial special, DayOfWeek today, DayOfWeek tomorrow,
+        TimeZoneInfo zone, DateTime todayDate, int nowMinute, DateTimeOffset now)
+    {
+        var projected = ProjectSpecial(special, today);
+        var envelope = BuildSegmentEnvelope(projected);
+        var (boundaryDay, boundaryMinute) = NormalizeMinute(today, special.EndMinute);
+        var boundaryAt = ResolveBoundaryInstant(todayDate, today, nowMinute, boundaryDay, boundaryMinute, zone, now);
+        var next = ResolveNext(segments, todaysSpecials, tomorrowsSpecials, today, tomorrow, boundaryDay, boundaryMinute);
+        var assignment = EffectiveAssignment.Resolve(projected, projected.Show);
+        return new OnAirSnapshot(projected, assignment.PersonaId, envelope, boundaryAt, next, assignment.Show);
+    }
+
+    /// <summary>
+    /// A weekly block covers "now", with no special shadowing it yet. SPEC F120.2's other half of "a
+    /// special creates a boundary": when a special LATER TODAY would start before this block's own end,
+    /// that special pre-empts it early — the reported boundary is the special's start (not the block's
+    /// own natural end) and <see cref="OnAirSnapshot.NextSegment"/> is the special itself, projected.
+    /// "Now" is still served by the unmodified weekly block either way — the special has not started.
+    /// TOMORROW's specials are never candidates for this early-truncation check: a block's own
+    /// <c>EndMinute</c> never exceeds <see cref="MinutesPerDay"/> (SPEC F91.1's CHECK), so tomorrow's
+    /// earliest possible effective start (minute <see cref="MinutesPerDay"/> + 0) can never be STRICTLY
+    /// before it — only exactly AT it, which is the ordinary <see cref="ResolveNext"/> boundary path
+    /// below, not a truncation.
+    /// </summary>
     OnAirSnapshot ResolveCurrent(
-        IReadOnlyList<ScheduleSegment> segments, ScheduleSegment current, TimeZoneInfo zone,
-        DateTime todayDate, DayOfWeek today, int nowMinute, DateTimeOffset now)
+        IReadOnlyList<ScheduleSegment> segments, IReadOnlyList<ScheduleSpecial> todaysSpecials,
+        IReadOnlyList<ScheduleSpecial> tomorrowsSpecials, ScheduleSegment current, TimeZoneInfo zone,
+        DateTime todayDate, DayOfWeek today, DayOfWeek tomorrow, int nowMinute, DateTimeOffset now)
     {
         var envelope = BuildSegmentEnvelope(current);
+        var assignment = EffectiveAssignment.Resolve(current, current.Show);
+
+        var truncatingSpecial = todaysSpecials
+            .Where(s => s.StartMinute > nowMinute && s.StartMinute < current.EndMinute)
+            .OrderBy(s => s.StartMinute)
+            .FirstOrDefault();
+
+        if (truncatingSpecial is not null)
+        {
+            var truncatedBoundaryAt = ResolveBoundaryInstant(
+                todayDate, today, nowMinute, today, truncatingSpecial.StartMinute, zone, now);
+            return new OnAirSnapshot(
+                current, assignment.PersonaId, envelope, truncatedBoundaryAt, ProjectSpecial(truncatingSpecial, today), assignment.Show);
+        }
+
         var (boundaryDay, boundaryMinute) = NormalizeMinute(current.Day, current.EndMinute);
         var boundaryAt = ResolveBoundaryInstant(todayDate, today, nowMinute, boundaryDay, boundaryMinute, zone, now);
-        var next = FindAdjacent(segments, boundaryDay, boundaryMinute);
-        var assignment = EffectiveAssignment.Resolve(current, current.Show);
+        var next = ResolveNext(segments, todaysSpecials, tomorrowsSpecials, today, tomorrow, boundaryDay, boundaryMinute);
         return new OnAirSnapshot(current, assignment.PersonaId, envelope, boundaryAt, next, assignment.Show);
     }
 
+    /// <summary>
+    /// No block (weekly or special) covers "now". Races every "what happens next" candidate — a later
+    /// special TODAY, TOMORROW's earliest special (the boundary-peek, PLAN T258 review MF3), and the
+    /// weekly grid's own cyclic next start (<see cref="FindNextUpcoming"/>) — by minutes-from-now
+    /// distance, favoring a special on any tie (specials-first, SPEC F120.2, same rule every other
+    /// resolved instant in this file already follows).
+    /// </summary>
     OnAirSnapshot ResolveGap(
-        IReadOnlyList<ScheduleSegment> segments, TimeZoneInfo zone, DateTime todayDate, DayOfWeek today, int nowMinute,
-        DateTimeOffset now)
+        IReadOnlyList<ScheduleSegment> segments, IReadOnlyList<ScheduleSpecial> todaysSpecials,
+        IReadOnlyList<ScheduleSpecial> tomorrowsSpecials, TimeZoneInfo zone, DateTime todayDate,
+        DayOfWeek today, DayOfWeek tomorrow, int nowMinute, DateTimeOffset now)
     {
+        var envelope = defaultEnvelopeSource.Current;
+
+        var nextWeekly = FindNextUpcoming(segments, today, nowMinute);
+        var weeklyDistance = nextWeekly is null ? (int?)null : CyclicDistance(today, nowMinute, nextWeekly);
+
+        var nearestSpecial = NearestUpcomingSpecial(todaysSpecials, tomorrowsSpecials, today, tomorrow, nowMinute);
+
+        if (nearestSpecial is { } near && (weeklyDistance is null || near.Distance <= weeklyDistance))
+        {
+            var specialBoundaryAt = ResolveBoundaryInstant(todayDate, today, nowMinute, near.Day, near.Special.StartMinute, zone, now);
+            return new OnAirSnapshot(
+                Segment: null, PersonaId: null, envelope, specialBoundaryAt, ProjectSpecial(near.Special, near.Day), Show: null);
+        }
+
         // No block is on air (SPEC F91.4) — nothing for EffectiveAssignment to resolve: persona and
         // show are both unconditionally none, the only honest answer for a grid gap.
-        var envelope = defaultEnvelopeSource.Current;
-        var next = FindNextUpcoming(segments, today, nowMinute);
-        if (next is null)
+        if (nextWeekly is null)
             return new OnAirSnapshot(Segment: null, PersonaId: null, envelope, BoundaryAt: null, NextSegment: null, Show: null);
 
-        var boundaryAt = ResolveBoundaryInstant(todayDate, today, nowMinute, next.Day, next.StartMinute, zone, now);
-        return new OnAirSnapshot(Segment: null, PersonaId: null, envelope, boundaryAt, next, Show: null);
+        var boundaryAt = ResolveBoundaryInstant(todayDate, today, nowMinute, nextWeekly.Day, nextWeekly.StartMinute, zone, now);
+        return new OnAirSnapshot(Segment: null, PersonaId: null, envelope, boundaryAt, nextWeekly, Show: null);
     }
 
     SegmentEnvelope BuildSegmentEnvelope(ScheduleSegment segment)
@@ -107,10 +237,39 @@ public sealed class ScheduleResolver(
     static ScheduleSegment? FindCurrent(IReadOnlyList<ScheduleSegment> segments, DayOfWeek day, int minute) =>
         segments.FirstOrDefault(s => s.Day == day && s.StartMinute <= minute && minute < s.EndMinute);
 
-    /// <summary>The segment (if any) whose start is exactly the given (already-normalized) day/minute —
-    /// i.e. the segment that plays on immediately once the current one ends, with no gap between.</summary>
-    static ScheduleSegment? FindAdjacent(IReadOnlyList<ScheduleSegment> segments, DayOfWeek day, int minute) =>
-        segments.FirstOrDefault(s => s.Day == day && s.StartMinute == minute);
+    /// <summary>The special (if any, from an already today-filtered list) covering <paramref name="minute"/>
+    /// — the specials-only mirror of <see cref="FindCurrent"/> (SPEC F120.1's per-date EXCLUDE guarantees
+    /// at most one match).</summary>
+    static ScheduleSpecial? FindCurrentSpecial(IReadOnlyList<ScheduleSpecial> todaysSpecials, int minute) =>
+        todaysSpecials.FirstOrDefault(s => s.StartMinute <= minute && minute < s.EndMinute);
+
+    /// <summary>
+    /// What plays at (<paramref name="day"/>, <paramref name="minute"/>) — a boundary target reached
+    /// either by a weekly block's own natural end or by a special's own end (SPEC F120.2, PLAN T258).
+    /// <paramref name="day"/> is always exactly <paramref name="today"/> or <paramref name="tomorrow"/>
+    /// (the only two values <see cref="NormalizeMinute"/> can ever produce): checks the matching one of
+    /// <paramref name="todaysSpecials"/>/<paramref name="tomorrowsSpecials"/> for an exact-start match
+    /// first (a special immediately following another special or a weekly block — specials always
+    /// shadow, and this is also PLAN T258 review MF3's boundary-peek for a special starting AT
+    /// midnight), then falls back to a weekly "covers this minute" lookup (<see cref="FindCurrent"/>)
+    /// rather than the narrower "starts exactly here" the pre-T258 code used: leaving a special can
+    /// resume MID a weekly block (the special's own end need not land on any weekly block's start). For
+    /// a boundary that is itself a weekly block's own end (no special involved at all), "covers" and
+    /// "starts here" agree exactly — station.segment_schedule's own EXCLUDE constraint guarantees no two
+    /// weekly blocks can both cover <paramref name="minute"/> unless one of them starts there — so this
+    /// replaces the old exact-start-only <c>FindAdjacent</c> helper with zero behavior change on that
+    /// path.
+    /// </summary>
+    static ScheduleSegment? ResolveNext(
+        IReadOnlyList<ScheduleSegment> segments, IReadOnlyList<ScheduleSpecial> todaysSpecials,
+        IReadOnlyList<ScheduleSpecial> tomorrowsSpecials, DayOfWeek today, DayOfWeek tomorrow, DayOfWeek day, int minute)
+    {
+        var sameDaySpecials = day == today ? todaysSpecials : day == tomorrow ? tomorrowsSpecials : [];
+        var special = sameDaySpecials.FirstOrDefault(s => s.StartMinute == minute);
+        if (special is not null) return ProjectSpecial(special, day);
+
+        return FindCurrent(segments, day, minute);
+    }
 
     /// <summary>The segment whose start is nearest in the future, searching forward cyclically across
     /// the whole week (SPEC F91.1's grid repeats every 7 days) — used only for a gap "now", so a
@@ -118,14 +277,12 @@ public sealed class ScheduleResolver(
     /// already have been <see cref="FindCurrent"/>'s match.</summary>
     static ScheduleSegment? FindNextUpcoming(IReadOnlyList<ScheduleSegment> segments, DayOfWeek day, int minute)
     {
-        var nowWeekly = (int)day * MinutesPerDay + minute;
         ScheduleSegment? best = null;
         var bestDistance = int.MaxValue;
 
         foreach (var segment in segments)
         {
-            var startWeekly = (int)segment.Day * MinutesPerDay + segment.StartMinute;
-            var distance = Mod(startWeekly - nowWeekly, MinutesPerWeek);
+            var distance = CyclicDistance(day, minute, segment);
             if (distance == 0 || distance >= bestDistance)
                 continue;
 
@@ -135,6 +292,77 @@ public sealed class ScheduleResolver(
 
         return best;
     }
+
+    /// <summary>Minutes from (<paramref name="day"/>, <paramref name="minute"/>) forward to
+    /// <paramref name="target"/>'s own start, searching cyclically across the whole week (SPEC F91.1's
+    /// grid repeats every 7 days) — the shared distance metric <see cref="FindNextUpcoming"/> and
+    /// <see cref="ResolveGap"/>'s own special-vs-weekly race both compare against.</summary>
+    static int CyclicDistance(DayOfWeek day, int minute, ScheduleSegment target)
+    {
+        var fromWeekly = (int)day * MinutesPerDay + minute;
+        var targetWeekly = (int)target.Day * MinutesPerDay + target.StartMinute;
+        return Mod(targetWeekly - fromWeekly, MinutesPerWeek);
+    }
+
+    /// <summary>
+    /// The closest upcoming special — TODAY's later-than-now rows or TOMORROW's earliest row (PLAN T258
+    /// review MF3's boundary-peek), by plain minutes-from-now distance — or <see langword="null"/> when
+    /// neither set has one. Only the SINGLE earliest tomorrow candidate is ever considered: if it does
+    /// not win its race against the weekly grid's own next start, no later tomorrow row could either
+    /// (the race is monotonic in distance), so nothing is lost by not carrying the whole list forward.
+    /// </summary>
+    static (ScheduleSpecial Special, DayOfWeek Day, int Distance)? NearestUpcomingSpecial(
+        IReadOnlyList<ScheduleSpecial> todaysSpecials, IReadOnlyList<ScheduleSpecial> tomorrowsSpecials,
+        DayOfWeek today, DayOfWeek tomorrow, int nowMinute)
+    {
+        (ScheduleSpecial Special, DayOfWeek Day, int Distance)? best = null;
+
+        var laterToday = todaysSpecials.Where(s => s.StartMinute > nowMinute).OrderBy(s => s.StartMinute).FirstOrDefault();
+        if (laterToday is not null)
+            best = (laterToday, today, laterToday.StartMinute - nowMinute);
+
+        var earliestTomorrow = tomorrowsSpecials.FirstOrDefault(); // already ordered by StartMinute by the caller
+        if (earliestTomorrow is not null)
+        {
+            var distance = (MinutesPerDay - nowMinute) + earliestTomorrow.StartMinute;
+            if (best is null || distance < best.Value.Distance)
+                best = (earliestTomorrow, tomorrow, distance);
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// Projects <paramref name="special"/> into the existing <see cref="ScheduleSegment"/> shape (PLAN
+    /// T258 design: "prefer projecting specials into the existing resolved-segment model so downstream
+    /// truly doesn't change") — every consumer below (<see cref="BuildSegmentEnvelope"/>,
+    /// <see cref="EffectiveAssignment.Resolve"/>, and every field of the resulting
+    /// <see cref="OnAirSnapshot"/>) operates on this projected value completely unmodified. No
+    /// downstream reader of <see cref="OnAirSnapshot"/> can distinguish a special-sourced
+    /// <see cref="OnAirSnapshot.Segment"/> from an ordinary weekly one by SHAPE — there is nothing on
+    /// either type that could tell them apart. <see cref="ScheduleSegment.Day"/> is set to
+    /// <paramref name="day"/> (the day the special actually airs on — TODAY for a shadow, TOMORROW for
+    /// a boundary-peek result), never re-derived from <paramref name="special"/> itself (which carries
+    /// no day-of-week at all, only a calendar date).
+    ///
+    /// <para>
+    /// <b><see cref="ScheduleSegment.Id"/> is NEGATED (PLAN T258 review should-fix 5).</b>
+    /// <c>station.schedule_special.id</c> and <c>station.segment_schedule.id</c> are independent
+    /// Postgres <c>serial</c> sequences, both starting at 1 — a special and a weekly block can carry the
+    /// identical numeric id. The one place this codebase renders <c>Segment.Id</c> at all
+    /// (<c>ScheduleEnvelopeProvider.EnvelopeId</c>'s <c>"segment:{id}"</c> per-pick DEBUG log token,
+    /// <c>MusicSelectionPolicy</c>'s own trace line — no cache key, no branch, no equality check
+    /// anywhere reads it) would otherwise silently conflate the two. Negating keeps the two id spaces
+    /// disjoint by construction (a <c>serial</c> id is always &gt;= 1, so a special's projected id is
+    /// always &lt;= -1) with no new type, no wrapper, and nothing for a future consumer to accidentally
+    /// treat as a real <c>segment_schedule.id</c> — <see langword="null"/> only for the (currently
+    /// impossible in practice — every special this method ever receives came from a store round trip)
+    /// not-yet-persisted case, mirroring <see cref="ScheduleSegment.Id"/>'s own null contract.
+    /// </para>
+    /// </summary>
+    static ScheduleSegment ProjectSpecial(ScheduleSpecial special, DayOfWeek day) => new(
+        special.Id is { } id ? -id : null, day, special.StartMinute, special.EndMinute, special.PersonaId,
+        special.Genres, special.EnergyMin, special.EnergyMax, special.Show, special.ShowId);
 
     /// <summary>Rolls a day-of-week/minute-of-day pair forward when <paramref name="minute"/> is the
     /// schema's own end-of-day value (1440, i.e. midnight) — a <see cref="ScheduleSegment.EndMinute"/>
