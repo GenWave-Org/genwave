@@ -156,6 +156,21 @@ using GenWave.Core.Events;
 /// minutes after the hour still speaks the right hour and, since the SAME hour always renders the SAME
 /// text, a second announcement within that hour is a forever-cache hit rather than a re-synthesis.
 /// </para>
+///
+/// <para>
+/// <b>Show idents (SPEC F117.1/F117.2, STORY-309, PLAN T250):</b> the SAME
+/// <see cref="SpeechDeferralKind.StationId"/> drain above additionally reads the on-air show (via
+/// <paramref name="scheduleResolver"/>'s synchronous <c>TryGetCurrent()</c> snapshot, the T241
+/// chokepoint) and hands its id to <paramref name="catalog"/>'s pool call, which now carries the
+/// whole show-scope preference ladder in ONE query (show-scoped rows preferred, the station-wide
+/// pool as fallback, a foreign-show row never a candidate — see
+/// <c>IMediaCatalog.GetRandomReadyByImagingKindAsync</c>'s own remarks). Only when that combined pool
+/// comes up empty AND a show is on the air does a NEW floor apply ahead of the plain templated ident:
+/// the templated SHOW line ("You're listening to {show} on {station}." — still
+/// <see cref="SegmentKind.StationId"/>, so zero-LLM, station-voiced, and forever-cached exactly like
+/// every other StationId render, no new kind needed). No show on the air degrades this whole
+/// paragraph away — byte-identical to F110.2/F110.3 above, the required outside-show posture.
+/// </para>
 /// </summary>
 public sealed class Orchestrator(
     IStationIdentityProvider identityProvider,
@@ -251,13 +266,18 @@ public sealed class Orchestrator(
     MediaItem? previousTrack;
     int unitCount;
 
-    // SPEC F92.1/F92.3 arm-once state (T124 review finding F2): the (BoundaryAt, outgoing persona
-    // id, incoming persona id) triple EnqueueHandoffCeremonyAsync last acted on — null before the
-    // first unit, or once a boundary has left the window and was explicitly cleared. Re-evaluating
-    // this producer every unit is by design (a schedule write must be noticed promptly), but ACTING
-    // on the SAME triple twice is not: see EnqueueHandoffCeremonyAsync's own remarks for the
-    // double-sign-off bug this guards against.
-    (DateTimeOffset BoundaryAt, long? OutgoingPersonaId, long? IncomingPersonaId)? lastArmedHandoff;
+    // SPEC F92.1/F92.3 arm-once state (T124 review finding F2), widened at F116.2/PLAN T248 to also
+    // key on show id: the (BoundaryAt, outgoing persona id, incoming persona id, outgoing show id,
+    // incoming show id) tuple EnqueueHandoffCeremonyAsync last acted on — null before the first unit,
+    // or once a boundary has left the window and was explicitly cleared. Re-evaluating this producer
+    // every unit is by design (a schedule write must be noticed promptly), but ACTING on the SAME
+    // tuple twice is not: see EnqueueHandoffCeremonyAsync's own remarks for the double-sign-off bug
+    // this guards against. The two show-id members are additive (T248): a showless schedule always
+    // reads both as null on both sides, so this tuple behaves byte-identically to the pre-T248 triple
+    // for every station that has never assigned a show — the widening only ever matters for an
+    // in-window edit that changes a block's show_id without also changing its persona_id, which
+    // otherwise this arm-once guard would wrongly treat as "nothing changed".
+    (DateTimeOffset BoundaryAt, long? OutgoingPersonaId, long? IncomingPersonaId, long? OutgoingShowId, long? IncomingShowId)? lastArmedHandoff;
 
     // T124 review finding F7: fires at most once for the life of this Orchestrator — a null
     // scheduleResolver makes EnqueueHandoffCeremonyAsync a permanent no-op, which would otherwise be
@@ -440,12 +460,12 @@ public sealed class Orchestrator(
             // ceremony (SPEC F92.1 revisit) takes effect right here, before this unit's own forced
             // drain would otherwise race past it. The SAME method runs again from inside
             // EnqueuePatterAsync's normal step 2.5 immediately below; seeing the identical
-            // (now-reconciled) triple, that call is a safe no-op (the arm-once guard).
+            // (now-reconciled) key, that call is a safe no-op (the arm-once guard).
             await EnqueueHandoffCeremonyAsync(identity.Voice, ct);
 
             // T235 review finding F2: only force when the reconciliation left the EXACT ceremony
             // peeked above untouched — reconciledSignOff.Due == pending.Due proves nothing changed
-            // (same triple, same due). A schedule write that MOVED the boundary re-arms a SignOff at a
+            // (same key, same due). A schedule write that MOVED the boundary re-arms a SignOff at a
             // DIFFERENT due (still non-null — it is still in-window, just for a new boundary); forcing
             // to that reconciled-but-different due fired the sign-off against the WRONG boundary (the
             // field report: 6:45 early), and CaptureCrossingTrackForHeldSignOn would have stamped the
@@ -780,9 +800,12 @@ public sealed class Orchestrator(
         // ObserveDuration (SPEC F110.2, PLAN T232) gates the gh-#253 estimator feed below — true for
         // every genuine TTS render (unchanged), false for a pool-first StationId item (KickResolved):
         // an authored ident's measured duration reflects whatever the operator produced, not a
-        // synthesis the estimator should learn from — blending it into the templated-TTS StationId
+        // synthesis the estimator should learn from — blending it into a templated-TTS StationId
         // bucket would skew future boundary-fit estimates for the fallback rung, which is still a
-        // real TTS render with its own, separate duration profile.
+        // real TTS render with its own, separate duration profile. "A templated-TTS StationId bucket"
+        // is now plural, not singular (SPEC F117.2, PLAN T250 review finding F1): the estimator keys
+        // its Exact tier on (voice, show-or-null), so the plain ident and each show's own templated
+        // line each land in their OWN bucket — a pool-first item still observes into NONE of them.
         var pendingRenders =
             new List<(SegmentRequest Request, Task<MediaItem?> Render, string? ContextProviderKey, bool ObserveDuration)>();
 
@@ -861,10 +884,26 @@ public sealed class Orchestrator(
                     // because a drain only ever runs at a boundary (SPEC F74.1 — never mid-track).
                     // A null catalog (no IMediaCatalog wired — an older host, or a test double that
                     // never scripts one) skips the pool outright, same as a genuinely empty one.
+                    //
+                    // SPEC F117.2 (STORY-309, PLAN T250) — the on-air show, read via the SAME
+                    // CachingScheduleResolver.TryGetCurrent() synchronous snapshot
+                    // OnAirPersonaAccessor's own hot path already trusts: no extra store round trip,
+                    // and a null scheduleResolver or a not-yet-warm cache both degrade to "no show" —
+                    // exactly the branch below that keeps this arm byte-identical to F110.2. Read
+                    // ONCE into a local, never twice: the Id handed to the pool query below and the
+                    // Name that may decide the templated floor further down must describe the SAME
+                    // on-air show, not two snapshots straddling a boundary flip.
+                    var currentShow = scheduleResolver?.TryGetCurrent()?.Show;
+
+                    // The pool query itself now carries the WHOLE show-scope preference ladder
+                    // (MediaRepository.GetRandomReadyByImagingKindAsync's own remarks, T250):
+                    // show-scoped rows win when currentShow is set, the station-wide (unscoped) pool
+                    // is the fallback, and a foreign-show row is never a candidate — currentShow?.Id
+                    // is exactly "no show" (null) on the F110.2 path this arm has always had.
                     var pooled = catalog is null
                         ? null
                         : await catalog.GetRandomReadyByImagingKindAsync(
-                            scopeProvider.Current, ImagingKind.StationId, ct);
+                            scopeProvider.Current, ImagingKind.StationId, currentShow?.Id, ct);
                     var stationIdReq = BuildStationIdRequest(identity);
                     if (pooled is not null)
                     {
@@ -872,7 +911,16 @@ public sealed class Orchestrator(
                         break;
                     }
 
-                    Kick(stationIdReq);
+                    // SPEC F117.2 — the templated show line is the floor for a show with no ready
+                    // pool row at all (scoped or station-wide): the SAME SegmentKind.StationId
+                    // request, ShowName additionally stamped, so PatterTemplateRenderer's StationId
+                    // arm renders "You're listening to {show} on {station}." instead of the plain
+                    // ident — station-voiced, zero LLM, forever-cached exactly like every other
+                    // StationId render (BuildStationIdRequest's own remarks), no new SegmentKind
+                    // needed. currentShow null (no show on the air) falls straight through to the
+                    // ORIGINAL plain ident — byte-identical to F110.2, the required outside-show
+                    // posture.
+                    Kick(currentShow is { } show ? stationIdReq with { ShowName = show.Name } : stationIdReq);
                     break;
                 }
 
@@ -962,14 +1010,19 @@ public sealed class Orchestrator(
             {
                 // gh-#253: feed the MEASURED duration (F66.1's cue-derived stamp — null when cue
                 // analysis failed, in which case nothing is observed: never fabricated) back into
-                // the estimation seam, keyed by the request's own kind/persona/voice, so the
-                // historical tier self-improves with every segment that actually rendered.
-                // observeDuration is false only for a KickResolved pool-first item (SPEC F110.2,
-                // PLAN T232) — see pendingRenders' own remarks for why that duration must not join
-                // this bucket.
+                // the estimation seam, keyed by the request's own kind/persona/voice — and, as of
+                // SPEC F117.2 (PLAN T250 review finding F1), request.ShowName too, so the Exact tier's
+                // (voice, show) memo never lets a show-branded StationId render's duration stand in
+                // for a DIFFERENT show's (or the plain ident's) airing under the SAME voice. ShowName
+                // is null for every non-StationId kind and for a showless/pool-served StationId
+                // airing, which the estimator treats as its own (voice, null) bucket — byte-identical
+                // to pre-F117 behavior for every one of those. The historical tier self-improves with
+                // every segment that actually rendered. observeDuration is false only for a
+                // KickResolved pool-first item (SPEC F110.2, PLAN T232) — see pendingRenders' own
+                // remarks for why that duration must not join this bucket.
                 if (observeDuration && seg.DurationMs is int measuredMs)
                     patterEstimator.ObserveRendered(
-                        kind, request.PersonaName, request.Voice, TimeSpan.FromMilliseconds(measuredMs));
+                        kind, request.PersonaName, request.Voice, TimeSpan.FromMilliseconds(measuredMs), request.ShowName);
 
                 // gh-#259: a station ID keeps the station's CREDIT (Artist, gh-#96 untouched) but
                 // still airs inside the unit's show — stamp the unit persona so Now Playing
@@ -1010,6 +1063,14 @@ public sealed class Orchestrator(
     /// off a resolved item, so the SAME shape serves as an honest, non-garbage tag rather than
     /// inventing a second one.
     /// </para>
+    ///
+    /// <para>
+    /// SPEC F117.2 (STORY-309, PLAN T250) — the StationId drain arm layers
+    /// <c>with { ShowName = show.Name }</c> onto this SAME shape for the templated show-line floor,
+    /// never a second request-builder: <see cref="SegmentRequest.ShowName"/> is additive and
+    /// <see langword="null"/> here, so every call site that does NOT layer it keeps producing the
+    /// original plain-ident request unchanged.
+    /// </para>
     /// </summary>
     SegmentRequest BuildStationIdRequest(StationIdentity identity) =>
         new(
@@ -1044,6 +1105,10 @@ public sealed class Orchestrator(
     /// <see cref="HandoffContext.CrossingTrackArtist"/> (SPEC F111.3, PLAN T235) ride straight across
     /// onto <see cref="SegmentRequest.CrossingTrackTitle"/>/<see cref="SegmentRequest.CrossingTrackArtist"/>
     /// — null for every non-straddle piece, exactly like every other optional field here.
+    /// <see cref="HandoffContext.ShowName"/>/<see cref="HandoffContext.ShowFlavor"/>/
+    /// <see cref="HandoffContext.CounterpartShowName"/> (SPEC F116.2, PLAN T248) ride across the same
+    /// way, onto <see cref="SegmentRequest.ShowName"/>/<see cref="SegmentRequest.ShowFlavor"/>/
+    /// <see cref="SegmentRequest.CounterpartShowName"/>.
     /// </summary>
     SegmentRequest BuildHandoffRequest(SpeechDeferralKind kind, HandoffContext handoff, StationIdentity identity)
     {
@@ -1058,7 +1123,10 @@ public sealed class Orchestrator(
             handoff.PersonaName,
             handoff.CounterpartName,
             CrossingTrackTitle: handoff.CrossingTrackTitle,
-            CrossingTrackArtist: handoff.CrossingTrackArtist);
+            CrossingTrackArtist: handoff.CrossingTrackArtist,
+            ShowName: handoff.ShowName,
+            ShowFlavor: handoff.ShowFlavor,
+            CounterpartShowName: handoff.CounterpartShowName);
     }
 
     /// <summary>
@@ -1198,32 +1266,34 @@ public sealed class Orchestrator(
     /// again for the life of this Orchestrator.
     ///
     /// <para>
-    /// <b>Arm once per triple, never every unit (T124 review finding F2 — the double-sign-off bug this
+    /// <b>Arm once per key, never every unit (T124 review finding F2 — the double-sign-off bug this
     /// fixes):</b> this producer runs on EVERY unit while a boundary sits in-window, but it only ever
-    /// ACTS the first time it sees a given <c>(BoundaryAt, outgoing persona id, incoming persona id)</c>
-    /// triple — <see cref="lastArmedHandoff"/> remembers the last one it armed or cleared for, and an
-    /// unchanged triple returns immediately, touching neither <paramref name="deferralQueue"/> nor
-    /// <paramref name="personaStore"/> again. Without this, re-running the OLD unconditional
-    /// enqueue-every-unit logic on a seam landing in <c>[BoundaryAt - SignOffLeadTime, BoundaryAt)</c>
-    /// would: drain SignOff at this unit (its due has arrived) — see it drain, then IMMEDIATELY
-    /// re-<see cref="SpeechDeferralQueue.Enqueue"/> a FRESH SignOff for the very same boundary with a
-    /// due time that is now itself already in the past (the resolver's "current" segment has not yet
-    /// flipped, so <c>BoundaryAt</c>/the persona ids still read identically) — which the NEXT unit's
-    /// drain would fire AGAIN, a second sign-off airing for one boundary. The two elapsed-due guards
-    /// below (skip arming SignOff once <c>BoundaryAt - SignOffLeadTime &lt;= now</c>; skip arming
-    /// SignOn once <c>BoundaryAt &lt;= now</c>) are the belt to this triple-check's suspenders: a
-    /// piece is never handed to <see cref="SpeechDeferralQueue.Enqueue"/> with a due time that has
-    /// already elapsed, full stop, even on the very first unit a triple is ever seen.
+    /// ACTS the first time it sees a given <c>(BoundaryAt, outgoing persona id, incoming persona id,
+    /// outgoing show id, incoming show id)</c> key (the show-id pair widened this at F116.2/PLAN T248
+    /// — see <see cref="lastArmedHandoff"/>'s own remarks) — <see cref="lastArmedHandoff"/> remembers
+    /// the last one it armed or cleared for, and an unchanged key returns immediately, touching
+    /// neither <paramref name="deferralQueue"/> nor <paramref name="personaStore"/> again. Without
+    /// this, re-running the OLD unconditional enqueue-every-unit logic on a seam landing in
+    /// <c>[BoundaryAt - SignOffLeadTime, BoundaryAt)</c> would: drain SignOff at this unit (its due
+    /// has arrived) — see it drain, then IMMEDIATELY re-<see cref="SpeechDeferralQueue.Enqueue"/> a
+    /// FRESH SignOff for the very same boundary with a due time that is now itself already in the
+    /// past (the resolver's "current" segment has not yet flipped, so <c>BoundaryAt</c>/the persona
+    /// ids still read identically) — which the NEXT unit's drain would fire AGAIN, a second sign-off
+    /// airing for one boundary. The two elapsed-due guards below (skip arming SignOff once
+    /// <c>BoundaryAt - SignOffLeadTime &lt;= now</c>; skip arming SignOn once <c>BoundaryAt &lt;=
+    /// now</c>) are the belt to this key-check's suspenders: a piece is never handed to
+    /// <see cref="SpeechDeferralQueue.Enqueue"/> with a due time that has already elapsed, full stop,
+    /// even on the very first unit a key is ever seen.
     /// </para>
     ///
     /// <para>
-    /// A CHANGED triple — the common case is a schedule write moving the boundary, or the resolver's
-    /// own "current" segment finally flipping to the incoming one once <c>now</c> passes the old
-    /// boundary — re-arms fresh: <see cref="SpeechDeferralQueue.Enqueue"/>'s own supersede-by-kind
-    /// (SPEC F74.2) discards whatever the OLD triple left pending of the same kind, and this method's
-    /// own <c>ClearCeremony</c> local retracts anything the old triple armed that the new one has no
-    /// replacement for (window exit, gap-to-gap, self-handoff — see the dedupe list below). Nothing
-    /// here is left to expire on its own.
+    /// A CHANGED key — the common case is a schedule write moving the boundary or reassigning a
+    /// show, or the resolver's own "current" segment finally flipping to the incoming one once
+    /// <c>now</c> passes the old boundary — re-arms fresh: <see cref="SpeechDeferralQueue.Enqueue"/>'s
+    /// own supersede-by-kind (SPEC F74.2) discards whatever the OLD key left pending of the same
+    /// kind, and this method's own <c>ClearCeremony</c> local retracts anything the old key armed
+    /// that the new one has no replacement for (window exit, gap-to-gap, self-handoff — see the
+    /// dedupe list below). Nothing here is left to expire on its own.
     /// </para>
     ///
     /// <para>
@@ -1240,21 +1310,47 @@ public sealed class Orchestrator(
     /// </para>
     ///
     /// <para>
-    /// <b>Dedupe (SPEC F92.3, the T119-review build clarification):</b> the resolver's own
-    /// <c>BoundaryAt</c>/<c>NextSegment</c> stay row-accurate even across a same-persona adjacency —
-    /// THIS method is where "no ceremony airs" for that case is decided, never the resolver. Five
-    /// shapes, by outgoing/incoming persona id:
+    /// <b>Dedupe (SPEC F92.3, the T119-review build clarification; amended by F114.3/F116.2, PLAN
+    /// T248):</b> the resolver's own <c>BoundaryAt</c>/<c>NextSegment</c> stay row-accurate even
+    /// across a same-persona adjacency — THIS method is where "no ceremony airs" (or "airs as a
+    /// one-piece transition") for that case is decided, never the resolver. Six shapes, by
+    /// outgoing/incoming persona id and — for the equal-persona case only — show id (compared, never
+    /// the display <c>Name</c>, per <c>ScheduleSegment.ShowId</c>'s own "write-authoritative identity
+    /// field" ruling — a show rename can never look like a show change this way):
     /// <list type="bullet">
-    /// <item>both null (a genuine gap, or a gap followed by an explicit persona-less/music-only
-    /// scheduled segment) — gap-to-gap: nothing airs.</item>
-    /// <item>equal and non-null (the F91.6 seeded grid's own midnight roll) — self-handoff: nothing
-    /// airs.</item>
+    /// <item>both persona ids null (a genuine gap, or a gap followed by an explicit
+    /// persona-less/music-only scheduled segment) — gap-to-gap: nothing airs.</item>
+    /// <item>persona ids equal and non-null, AND show ids equal (both named the SAME show, or both
+    /// showless — the F91.6 seeded grid's own midnight roll is the showless instance) — self-handoff:
+    /// nothing airs (F92.3 as amended by F114.3).</item>
+    /// <item>persona ids equal and non-null, but show ids DIFFER (F114.3/F116.2) — a real boundary for
+    /// ceremony purposes, but exactly ONE piece airs: the incoming sign-on, styled as a transition
+    /// (the F92.4 incoming-welcome rung as designed behavior here, not a degrade) — no SignOff at all
+    /// (there is no OTHER persona to hand off to), <see cref="HandoffContext.CounterpartName"/> null,
+    /// <see cref="HandoffContext.ShowName"/>/<see cref="HandoffContext.ShowFlavor"/> the incoming
+    /// show's own name/flavor.</item>
     /// <item>outgoing non-null, incoming null — SignOff only, <see cref="HandoffContext.CounterpartName"/>
-    /// null ("the music keeps rolling").</item>
+    /// null ("the music keeps rolling"); <see cref="HandoffContext.ShowName"/> the ending show, if
+    /// any (F114.3 — sign-off may still name the show it is closing out).</item>
     /// <item>outgoing null, incoming non-null — SignOn only, <see cref="HandoffContext.CounterpartName"/>
-    /// null ("no predecessor").</item>
-    /// <item>both non-null and different — both pieces, each naming the other.</item>
+    /// null ("no predecessor"); <see cref="HandoffContext.ShowName"/>/<see cref="HandoffContext.ShowFlavor"/>
+    /// the incoming show, if any.</item>
+    /// <item>both non-null and different persona — both pieces, each naming the OTHER persona
+    /// (<see cref="HandoffContext.CounterpartName"/>); F116.2's show-awareness rides EVERY shape ABOVE
+    /// this one too, always via <see cref="OnAirSnapshot.Show"/>/<see cref="OnAirSnapshot.NextSegment"/>'s
+    /// own <c>Show</c> (SPEC F116.1's chokepoint — never re-derived, never re-queried), never gated on
+    /// whether a show happens to be assigned: an unnamed block simply carries null show fields
+    /// straight through, so a showless station's ceremony stays byte-identical to pre-F116 (SPEC
+    /// F116.1's own test).</item>
     /// </list>
+    /// <see cref="HandoffContext.ShowFlavor"/> is captured on the SIGN-ON half only (F116.2 names
+    /// flavor for the sign-on prompt alone); <see cref="HandoffContext.CounterpartShowName"/> is
+    /// captured on the SIGN-OFF half only (F114.3's "may name the ending show and the next" — the
+    /// "next" is the counterpart's show). Both stay prompt-only forever (SPEC F115.3) — this method
+    /// never logs either.
+    /// </para>
+    ///
+    /// <para>
     /// A persona id present on the schedule row but unresolvable through <paramref name="personaStore"/>
     /// (deleted out of band) degrades that HALF to "no DJ" (never-throws, SPEC F12.4) — the OTHER
     /// half still enqueues if it has one; see <see cref="ResolveHandoffPersonaAsync"/>.
@@ -1301,12 +1397,19 @@ public sealed class Orchestrator(
 
         var outgoingId = onAir.PersonaId;
         var incomingId = onAir.NextSegment?.PersonaId;
-        var triple = (boundaryAt.Value, outgoingId, incomingId);
 
-        // Arm-once (T124 review finding F2): this exact triple was already armed/cleared by a prior
+        // SPEC F114.3/F116.2 (PLAN T248): ShowId is the write-authoritative identity field
+        // (ScheduleSegment's own remarks) — compared here, never the display Name, so a rename can
+        // never look like a show change. onAir.Segment is the SAME row onAir.PersonaId was read off;
+        // onAir.NextSegment is the resolver's own next-boundary row (SPEC F116.1's chokepoint).
+        var outgoingShowId = onAir.Segment?.ShowId;
+        var incomingShowId = onAir.NextSegment?.ShowId;
+        var tuple = (boundaryAt.Value, outgoingId, incomingId, outgoingShowId, incomingShowId);
+
+        // Arm-once (T124 review finding F2): this exact tuple was already armed/cleared by a prior
         // unit — nothing has changed, so touch neither the queue nor personaStore again.
-        if (lastArmedHandoff == triple) return;
-        lastArmedHandoff = triple;
+        if (lastArmedHandoff == tuple) return;
+        lastArmedHandoff = tuple;
 
         if (outgoingId is null && incomingId is null)
         {
@@ -1316,9 +1419,40 @@ public sealed class Orchestrator(
 
         if (outgoingId is not null && outgoingId == incomingId)
         {
-            // F92.3 build clarification: same persona on both sides of a row-accurate boundary airs
-            // no ceremony at all — never even attempted, so this never shows up as a "drop" either.
-            ClearCeremony(); // self-handoff
+            if (outgoingShowId == incomingShowId)
+            {
+                // F92.3 as amended by F114.3: same persona AND same show (or both showless) on a
+                // row-accurate boundary airs no ceremony at all — never even attempted, so this never
+                // shows up as a "drop" either.
+                ClearCeremony(); // self-handoff
+                return;
+            }
+
+            // F116.2: same persona, DIFFERENT show — a real boundary for ceremony purposes, but airs
+            // exactly ONE piece: the incoming sign-on, styled as a transition (the F92.4
+            // incoming-welcome rung as designed behavior here, not a degrade). There is no OTHER
+            // persona to hand off to, so no SignOff is ever enqueued for this shape.
+            deferralQueue.Clear(SpeechDeferralKind.SignOff);
+
+            var transitionPersona = await ResolveHandoffPersonaAsync(incomingId, stationVoice, ct);
+            if (transitionPersona is null || boundaryAt.Value <= now)
+            {
+                deferralQueue.Clear(SpeechDeferralKind.SignOn);
+            }
+            else
+            {
+                deferralQueue.Enqueue(
+                    SpeechDeferralKind.SignOn,
+                    "handoff: same-persona show transition (SPEC F116.2)",
+                    boundaryAt.Value,
+                    new HandoffContext(
+                        transitionPersona.Value.Voice,
+                        transitionPersona.Value.Name,
+                        CounterpartName: null, // no OTHER DJ to name — it is the same persona
+                        ShowName: onAir.NextSegment?.Show?.Name,
+                        ShowFlavor: onAir.NextSegment?.Show?.Flavor));
+            }
+
             return;
         }
 
@@ -1339,7 +1473,10 @@ public sealed class Orchestrator(
                 SpeechDeferralKind.SignOff,
                 "handoff: boundary entered the F74.3 window",
                 signOffDue,
-                new HandoffContext(outgoing.Value.Voice, outgoing.Value.Name, incoming?.Name));
+                new HandoffContext(
+                    outgoing.Value.Voice, outgoing.Value.Name, incoming?.Name,
+                    ShowName: onAir.Show?.Name,
+                    CounterpartShowName: onAir.NextSegment?.Show?.Name));
         }
 
         if (incoming is null || boundaryAt.Value <= now)
@@ -1352,7 +1489,10 @@ public sealed class Orchestrator(
                 SpeechDeferralKind.SignOn,
                 "handoff: boundary entered the F74.3 window",
                 boundaryAt.Value,
-                new HandoffContext(incoming.Value.Voice, incoming.Value.Name, outgoing?.Name));
+                new HandoffContext(
+                    incoming.Value.Voice, incoming.Value.Name, outgoing?.Name,
+                    ShowName: onAir.NextSegment?.Show?.Name,
+                    ShowFlavor: onAir.NextSegment?.Show?.Flavor));
         }
     }
 

@@ -38,4 +38,34 @@ public interface IPatterDurationEstimator
     /// observed back in.
     /// </summary>
     void ObserveRendered(SegmentKind kind, string? personaName, string voice, TimeSpan measured);
+
+    /// <summary>
+    /// SPEC F117.2 (STORY-309, PLAN T250 review finding F1) — <see cref="Estimate(SegmentKind,string?,string)"/>'s
+    /// show-aware sibling: a genuinely NEW interface member, never that one widened in place (the SAME
+    /// binary-compat/orphaned-implementer reasoning that governs every other addition to this published
+    /// <c>GenWave.Abstractions</c> contract — see <see cref="IMediaCatalog"/>'s own F117 addition for
+    /// the fuller rationale). <paramref name="showName"/> lets an implementation
+    /// key its Exact tier on the RENDERED-TEXT identity for a <see cref="SegmentKind.StationId"/> segment
+    /// whose copy now varies by on-air show (F117.2's templated show line — "You're listening to
+    /// {show} on {station}." — is a DIFFERENT clip than the plain "You're listening to {station}."), so
+    /// a show-branded observation can never be reported back as the Exact duration for an unrelated
+    /// plain (or differently-shown) airing.
+    /// <para>
+    /// Default-implemented so this stays strictly additive: any implementer that has not opted in
+    /// (only <c>RollingPatterDurationEstimator</c> does, today) degrades to the 3-arg overload with
+    /// <paramref name="showName"/> simply dropped — exactly its own pre-F117 behavior, unchanged.
+    /// </para>
+    /// </summary>
+    PatterDurationEstimate Estimate(SegmentKind kind, string? personaName, string voice, string? showName) =>
+        Estimate(kind, personaName, voice);
+
+    /// <summary>
+    /// SPEC F117.2 (STORY-309, PLAN T250 review finding F1) — <see cref="ObserveRendered(SegmentKind,string?,string,TimeSpan)"/>'s
+    /// show-aware sibling, the write-side counterpart to <see cref="Estimate(SegmentKind,string?,string,string?)"/>
+    /// above; see that member's own remarks for why this is additive rather than an in-place widening,
+    /// and for what <paramref name="showName"/> means. Default-implemented the same way: an implementer
+    /// that has not opted in degrades to the 4-arg overload with <paramref name="showName"/> dropped.
+    /// </summary>
+    void ObserveRendered(SegmentKind kind, string? personaName, string voice, TimeSpan measured, string? showName) =>
+        ObserveRendered(kind, personaName, voice, measured);
 }

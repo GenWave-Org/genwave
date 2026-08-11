@@ -30,6 +30,14 @@ public static class TtsServiceCollectionExtensions
         // the seam lives in GenWave.Core precisely so LlmCopyWriter can depend on the contract alone.
         services.TryAddSingleton<IContextPatterFactSource, NoOpContextPatterFactSource>();
 
+        // Show-flavor patter line default (SPEC F116.3, STORY-308, PLAN T249) — the exact same
+        // TryAdd-default-overridden-by-the-Host idiom as IContextPatterFactSource immediately above:
+        // this project has no reference to GenWave.Orchestration (an L1 project one layer further
+        // out) either, and never needs one — the seam lives in GenWave.Core so LlmCopyWriter can
+        // depend on the contract alone. The Host's real GenWave.Orchestration.ShowFlavorLineGate
+        // binding (StationOptionsServiceCollectionExtensions) overrides this with plain AddSingleton.
+        services.TryAddSingleton<IShowFlavorLineSource, NoOpShowFlavorLineSource>();
+
         // TTS options — validated at startup; RenderBudgetSeconds must be positive.
         services
             .AddOptions<TtsOptions>()

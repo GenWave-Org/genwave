@@ -129,4 +129,8 @@ public sealed class StationOptions
     /// <see cref="StationImagingOptions"/>'s own remarks for why this task adds the binding with no
     /// consumer yet. Bound to <c>Station:Imaging</c>.</summary>
     public StationImagingOptions Imaging { get; set; } = new();
+
+    /// <summary>Show-domain knobs (SPEC F116.3, STORY-308, PLAN T249) — see
+    /// <see cref="StationShowsOptions"/>'s own remarks. Bound to <c>Station:Shows</c>.</summary>
+    public StationShowsOptions Shows { get; set; } = new();
 }

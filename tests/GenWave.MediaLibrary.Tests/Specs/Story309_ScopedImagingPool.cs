@@ -18,36 +18,83 @@ using Xunit;
 
 public static class FeatureScopedImagingPool
 {
-    public sealed class ScenarioScopedQuery
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioScopedQuery(DatabaseFixture db)
     {
-        [Fact(Skip = "Pending (T250)")]
-        public void ScopedRowsPreferredWhenAShowIsActive()
+        [Fact]
+        public async Task ScopedRowsPreferredWhenAShowIsActive()
         {
             // Given ready station_id rows both scoped to show 7 and unscoped
-            // When  the pool query runs for show 7
-            // Then  only scoped rows are candidates in the scoped-first pass
+            await db.ResetAsync();
+            var scopedId = await InsertReadyStationIdAsync(db, "/imaging/scoped.wav", showId: 7);
+            await InsertReadyStationIdAsync(db, "/imaging/unscoped.wav");
+
+            var catalog = (IMediaCatalog)Harness.Repo(db);
+
+            // When the pool query runs for show 7 (repeatedly — proving it, not luck)...
+            for (var i = 0; i < 10; i++)
+            {
+                var result = await catalog.GetRandomReadyByImagingKindAsync(
+                    DefaultScope, ImagingKind.StationId, showId: 7, CancellationToken.None);
+
+                // Then only scoped rows are candidates in the scoped-first pass
+                Assert.NotNull(result);
+                Assert.Equal(scopedId.ToString(), result.MediaId);
+            }
         }
 
-        [Fact(Skip = "Pending (T250)")]
-        public void UnscopedFallbackWhenNoScopedRows()
+        [Fact]
+        public async Task UnscopedFallbackWhenNoScopedRows()
         {
             // Given only unscoped ready station_id rows
-            // When  the pool query runs for a show
-            // Then  the unscoped fallback pass serves them (the station-wide pool survives)
+            await db.ResetAsync();
+            var unscopedId = await InsertReadyStationIdAsync(db, "/imaging/unscoped-only.wav");
+
+            var catalog = (IMediaCatalog)Harness.Repo(db);
+
+            // When the pool query runs for a show...
+            var result = await catalog.GetRandomReadyByImagingKindAsync(
+                DefaultScope, ImagingKind.StationId, showId: 7, CancellationToken.None);
+
+            // Then the unscoped fallback pass serves them (the station-wide pool survives)
+            Assert.NotNull(result);
+            Assert.Equal(unscopedId.ToString(), result.MediaId);
         }
 
-        [Fact(Skip = "Pending (T250)")]
-        public void ScopedRowsNeverServeOutsideTheirShow()
+        [Fact]
+        public async Task ScopedRowsNeverServeOutsideTheirShow()
         {
             // Given a ready row scoped to show 7
-            // When  the pool query runs with no show (or another show) active
-            // Then  the scoped row is not a candidate — scoped means scoped (F117.1)
+            await db.ResetAsync();
+            await InsertReadyStationIdAsync(db, "/imaging/scoped-only.wav", showId: 7);
+
+            var catalog = (IMediaCatalog)Harness.Repo(db);
+
+            // When the pool query runs with no show active...
+            var noShow = await catalog.GetRandomReadyByImagingKindAsync(
+                DefaultScope, ImagingKind.StationId, showId: null, CancellationToken.None);
+            // ...or another show active...
+            var otherShow = await catalog.GetRandomReadyByImagingKindAsync(
+                DefaultScope, ImagingKind.StationId, showId: 99, CancellationToken.None);
+
+            // Then the scoped row is not a candidate — scoped means scoped (F117.1)
+            Assert.Null(noShow);
+            Assert.Null(otherShow);
         }
     }
 
     // -----------------------------------------------------------------
-    // Helpers (spec-local, the Gh149_ImagingKindAuthoredRows convention)
+    // Helpers (spec-local, the Gh149_ImagingKindAuthoredRows/Story301_ImagingPoolQuery convention)
     // -----------------------------------------------------------------
+
+    static readonly LibraryScope DefaultScope = new([1L]);
+
+    /// <summary>Authors a ready <c>station_id</c> row at <paramref name="path"/> (unique path per
+    /// row — <c>library.media.path</c> is unique), optionally scoped to <paramref name="showId"/>.</summary>
+    static async Task<long> InsertReadyStationIdAsync(DatabaseFixture db, string path, long? showId = null) =>
+        await ((IAuthoredCatalogWriter)Harness.Repo(db)).InsertAuthoredAsync(
+            Harness.AuthoredInsert(path: path, kind: ImagingKind.StationId, showId: showId), CancellationToken.None);
 
     static async Task<long?> ShowIdOfAsync(DatabaseFixture db, long id)
     {

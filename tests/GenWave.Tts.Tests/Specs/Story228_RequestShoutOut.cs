@@ -82,10 +82,17 @@ public static class FeatureRequestShoutOut
         // carried verbatim from Orchestrator.CaptureCrossingTrackForHeldSignOn's capture of the very
         // MediaItem this same pick ladder just selected — the same station/catalog-owned metadata
         // family as MediaItem's own Title/Artist below, never anything a listener typed.
+        // ShowName/ShowFlavor/CounterpartShowName (SPEC F116.2, STORY-307, PLAN T248) joined the
+        // SegmentRequest whitelist deliberately: resolver-sourced show identity (SPEC F116.1's
+        // chokepoint, OnAirSnapshot.Show/NextSegment.Show) carried verbatim from the deferral's own
+        // captured HandoffContext — the same station-owned-identity family as PersonaName/
+        // CounterpartName above, never anything a listener typed. Flavor is operator-authored show
+        // config (station.show.flavor), not listener text either — the same class of text the
+        // persona Soul/Backstory fields already are.
         static readonly string[] SegmentRequestStringMembers =
         [
             "Voice", "StationName", "StationId", "PersonaName", "CounterpartName", "ContextFacts",
-            "CrossingTrackTitle", "CrossingTrackArtist",
+            "CrossingTrackTitle", "CrossingTrackArtist", "ShowName", "ShowFlavor", "CounterpartShowName",
         ];
         static readonly string[] MediaItemStringMembers = ["MediaId", "Locator", "Title", "Artist", "Album", "Genre", "DjName"];
 

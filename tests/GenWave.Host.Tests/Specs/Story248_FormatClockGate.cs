@@ -141,6 +141,9 @@ public static class FeatureFormatClockGate
         /// at this task's own build time to be byte-identical to Story230's PinnedFieldCensus: nothing
         /// on this surface moved since T125/T126 shipped — no drift found writing this gate.
         /// </summary>
+        /// ⚠️ Amended PLAN T251 (SPEC F116.4, STORY-311, outside this file's own T118-T130 epic):
+        /// `show` joins both on-air shapes and `upNext.show` (NAME ONLY — no <c>Tagline</c> member)
+        /// joins upNext — same amendment Story183/Story230 carry; Flavor never appears here (F115.3).
         static readonly string[] PinnedFieldCensus =
         [
             "SpectatorAbout.License",
@@ -153,6 +156,7 @@ public static class FeatureFormatClockGate
             "SpectatorPatterNowPlaying.DurationMs",
             "SpectatorPatterNowPlaying.Kind",
             "SpectatorPatterNowPlaying.Listeners",
+            "SpectatorPatterNowPlaying.Show",
             "SpectatorPatterNowPlaying.StartedAt",
             "SpectatorPatterNowPlaying.State",
             "SpectatorPatterNowPlaying.UpNext",
@@ -173,6 +177,10 @@ public static class FeatureFormatClockGate
             "SpectatorRequestSubmission.Genre",
             "SpectatorRequestSubmission.Mood",
             "SpectatorRequestSubmission.Wish",
+            // SPEC F116.4/F115.3, STORY-311, PLAN T251: the now-playing show identity — name +
+            // tagline only, never Flavor (F115.3, the persona-soul precedent).
+            "SpectatorShow.Name",
+            "SpectatorShow.Tagline",
             "SpectatorStandbyNowPlaying.Listeners",
             "SpectatorStandbyNowPlaying.State",
             "SpectatorStats.Enriching",
@@ -191,12 +199,16 @@ public static class FeatureFormatClockGate
             "SpectatorTrackNowPlaying.DurationMs",
             "SpectatorTrackNowPlaying.Kind",
             "SpectatorTrackNowPlaying.Listeners",
+            "SpectatorTrackNowPlaying.Show",
             "SpectatorTrackNowPlaying.StartedAt",
             "SpectatorTrackNowPlaying.State",
             "SpectatorTrackNowPlaying.Title",
             "SpectatorTrackNowPlaying.UpNext",
             "SpectatorUpNext.Dj",
+            "SpectatorUpNext.Show",
             "SpectatorUpNext.StartsAt",
+            // NAME ONLY (SPEC F116.4) — no Tagline member, unlike SpectatorShow above.
+            "SpectatorUpNextShow.Name",
         ];
 
         [Fact]

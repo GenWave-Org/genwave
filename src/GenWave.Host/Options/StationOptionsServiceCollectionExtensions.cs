@@ -108,7 +108,30 @@ static class StationOptionsServiceCollectionExtensions
             // PersonaController (preview requests) — the SAME instance, so the DJ's clock never
             // disagrees with itself. TimeProvider resolves to the TimeProvider.System TryAdd in
             // AddGenWaveTts/AddGenWaveOrchestration (or a test's own registration).
-            .AddSingleton<IStationClockProvider, OptionsMonitorStationClockProvider>();
+            .AddSingleton<IStationClockProvider, OptionsMonitorStationClockProvider>()
+            // Show-flavor patter line (SPEC F116.3, STORY-308, PLAN T249): Station:Shows:PatterCadenceMinutes
+            // is advertised Live in the settings allowlist. Wraps IOptionsMonitor<StationOptions> and
+            // re-reads CurrentValue on every call, so a live PUT /api/settings edit reaches the very
+            // next eligible break with no api restart — mirrors ICadenceProvider's own live-read shape.
+            .AddSingleton<IShowPatterCadenceProvider, OptionsMonitorShowPatterCadenceProvider>()
+            // The gate itself (mirrors IEnvelopeProvider/ScheduleEnvelopeProvider two lines above):
+            // depends on CachingScheduleResolver, registered by AddGenWaveStationSettings, which runs
+            // BEFORE this method in Program.cs. Plain AddSingleton, never TryAdd (the IContextPatterFactSource
+            // ruling, ContextHostServiceCollectionExtensions' own remarks).
+            //
+            // The ACTUAL order in Program.cs: AddGenWaveStationOptions (this method) runs BEFORE
+            // AddGenWaveTts, so GenWave.Tts's own TryAddSingleton<IShowFlavorLineSource,
+            // NoOpShowFlavorLineSource> default finds a registration already present here and simply
+            // never adds — one registration total. Had the order been reversed (Tts's TryAdd running
+            // first, succeeding, then this AddSingleton running second), the outcome would still
+            // resolve to ShowFlavorLineGate, but via a DIFFERENT mechanism: two registrations for the
+            // same service type, with the LAST one added winning a single (non-enumerable)
+            // GetRequiredService resolution — not a TryAdd no-op. The outcome is order-independent;
+            // the mechanism is not. Verified end to end (not just by construction) by the SeamIndex
+            // generator — a real WebApplicationFactory<Program> build — which lists
+            // GenWave.Orchestration.ShowFlavorLineGate, not the NoOp, as this port's adapter in the
+            // committed SEAMS.md.
+            .AddSingleton<IShowFlavorLineSource, ShowFlavorLineGate>();
 
         return services;
     }

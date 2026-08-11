@@ -92,6 +92,15 @@ using GenWave.Core.Domain;
 /// (<paramref name="patterFactSource"/>) already owns the one slot per cadence window; this class
 /// only ever reads it, once, per eligible on-air render.
 /// </para>
+///
+/// <para>
+/// The show-flavor line SHARES that same slot (SPEC F116.3, STORY-308, PLAN T249, amending F107.5):
+/// <see cref="TakeDueShowFlavorLineForOnAirRender"/> is only ever consulted when
+/// <see cref="TakeDuePatterFactForOnAirRender"/> answered <see langword="null"/> for this break —
+/// "context wins" — so a due show line that loses the slot to a context fact is never even ASKED for,
+/// which is what keeps its own show's cadence window from being spent on a line that never aired. See
+/// that method's own remarks for the full reasoning.
+/// </para>
 /// </summary>
 public sealed class LlmCopyWriter(
     TemplateCopyWriter fallback,
@@ -104,7 +113,8 @@ public sealed class LlmCopyWriter(
     LlmCallRing callRing,
     IDegradationModeReader degradationMode,
     IStationClockProvider? stationClock = null,
-    IContextPatterFactSource? patterFactSource = null) : ISegmentCopyWriter, IPersonaPreviewWriter
+    IContextPatterFactSource? patterFactSource = null,
+    IShowFlavorLineSource? showFlavorLineSource = null) : ISegmentCopyWriter, IPersonaPreviewWriter
 {
     /// <summary>Name of the <see cref="IHttpClientFactory"/> client this writer resolves (registered in Program.cs).</summary>
     public const string HttpClientName = "Llm";
@@ -221,12 +231,20 @@ public sealed class LlmCopyWriter(
             // call lives HERE, in WriteAsync's own body, rather than inside the shared
             // RequestCompletionAsync below (which WritePreviewAsync also calls).
             var patterFact = TakeDuePatterFactForOnAirRender(request.Kind);
+            // SPEC F116.3 (STORY-308, PLAN T249) — the show-flavor line's own pull point, ONLY
+            // consulted when patterFact above is null; see TakeDueShowFlavorLineForOnAirRender's own
+            // remarks for why "never even ask" (not "ask and discard") is what keeps a lost slot from
+            // spending the show's own cadence window.
+            var showFlavorFact = patterFact is null
+                ? TakeDueShowFlavorLineForOnAirRender(request.Kind)
+                : null;
             // updateTasteMemory: true — this is an on-air call, so previousBreakTasteNotes is both
             // read and (on success) overwritten INSIDE RequestCompletionAsync's own single-flight
             // critical section (SPEC F83.1, T65 review finding); see that method's own remarks for
             // why the field can no longer be touched out here.
             var raw = await RequestCompletionAsync(
-                cfg, request, persona, card, updateTasteMemory: true, patterFact, queueWaitBudget: null, ct);
+                cfg, request, persona, card, updateTasteMemory: true, patterFact, showFlavorFact,
+                queueWaitBudget: null, ct);
             var cleaned = CleanCopy(raw, cfg.MaxCopyChars);
             if (cleaned is null)
             {
@@ -298,13 +316,14 @@ public sealed class LlmCopyWriter(
             // absent. The clock (F71.8) still reaches this prompt regardless — it lives in
             // LlmPromptBuilder.BuildUserContent, not here.
             //
-            // patterFact: null, ALWAYS (SPEC F107.5, PLAN T225) — this method never calls
-            // TakeDuePatterFactForOnAirRender, full stop, so there is no fact here to pass even by
-            // mistake; see that method's own remarks for why a preview must never be ABLE to consume
-            // the break's one due fact, not merely configured not to.
+            // patterFact/showFlavorFact: null, ALWAYS (SPEC F107.5/F116.3, PLAN T225/T249) — this
+            // method never calls TakeDuePatterFactForOnAirRender or TakeDueShowFlavorLineForOnAirRender,
+            // full stop, so there is nothing here to pass even by mistake; see those methods' own
+            // remarks for why a preview must never be ABLE to consume either break-scoped slot, not
+            // merely configured not to.
             var raw = await RequestCompletionAsync(
                 cfg, request, personaOverride, card: null, updateTasteMemory: false, patterFact: null,
-                queueWaitBudget: TimeSpan.FromSeconds(cfg.PreviewQueueWaitSeconds), ct);
+                showFlavorFact: null, queueWaitBudget: TimeSpan.FromSeconds(cfg.PreviewQueueWaitSeconds), ct);
             var cleaned = CleanCopy(raw, cfg.MaxCopyChars);
             return cleaned is null
                 ? new PersonaPreviewResult.Failed("The LLM returned empty or over-length copy.")
@@ -399,9 +418,33 @@ public sealed class LlmCopyWriter(
             ? (patterFactSource ?? NoOpContextPatterFactSource.Instance).TryTakeDuePatterFact()
             : null;
 
+    /// <summary>
+    /// SPEC F116.3 (STORY-308, PLAN T249) — the show-flavor line's own pull point, mirroring
+    /// <see cref="TakeDuePatterFactForOnAirRender"/> exactly one seam over: called exclusively from
+    /// <see cref="WriteAsync"/>, for the SAME two music-adjacent kinds
+    /// (<see cref="LlmPromptBuilder.IsPatterFactKind"/> — shared, not duplicated, so the two seams can
+    /// never drift on which kinds are eligible), and ONLY when <see cref="WriteAsync"/>'s own
+    /// <c>patterFact</c> is null.
+    ///
+    /// <see cref="IShowFlavorLineSource.TryTakeDueShowLine"/> is a CONSUMING read (see that interface's
+    /// own remarks) — this method, and this method alone, ever calls it, and it is called from nowhere
+    /// but <see cref="WriteAsync"/>, and only on that null-patterFact branch (SPEC F116.3's own
+    /// arbitration: "context wins... the show gate stays open for the next eligible break" — simply
+    /// never calling this seam when a context fact already claimed the slot is what keeps a lost show
+    /// line from spending its own cadence window; a "call and discard" shape would still burn it, the
+    /// exact CQS trap <see cref="TakeDuePatterFactForOnAirRender"/>'s own remarks describe one seam
+    /// over). <see cref="WritePreviewAsync"/> never calls this method at all, for the identical reason
+    /// it never calls <see cref="TakeDuePatterFactForOnAirRender"/>.
+    /// </summary>
+    ShowFlavorFact? TakeDueShowFlavorLineForOnAirRender(SegmentKind kind) =>
+        LlmPromptBuilder.IsPatterFactKind(kind)
+            ? (showFlavorLineSource ?? NoOpShowFlavorLineSource.Instance).TryTakeDueShowLine()
+            : null;
+
     async Task<string> RequestCompletionAsync(
         LlmOptions cfg, SegmentRequest request, Persona? persona, PersonaCard? card,
-        bool updateTasteMemory, ContextPatterFact? patterFact, TimeSpan? queueWaitBudget, CancellationToken ct)
+        bool updateTasteMemory, ContextPatterFact? patterFact, ShowFlavorFact? showFlavorFact,
+        TimeSpan? queueWaitBudget, CancellationToken ct)
     {
         // Captured up front, once, for LlmCallRing (SPEC F73.1, T41) — startedAt mirrors
         // LlmCopyStatusHolder's own attemptedAt semantics (includes any single-flight queueing wait
@@ -473,9 +516,13 @@ public sealed class LlmCopyWriter(
             // patterFact?.Fact (SPEC F107.5, PLAN T225): already TAKEN by the caller (WriteAsync, via
             // TakeDuePatterFactForOnAirRender) — this method only renders what it was handed, it
             // never calls IContextPatterFactSource itself. Null for every WritePreviewAsync call.
+            // showFlavorFact (SPEC F116.3, PLAN T249): the same shape one seam over, already TAKEN by
+            // WriteAsync via TakeDueShowFlavorLineForOnAirRender, and only ever non-null when
+            // patterFact above was null (context wins) — BuildUserContent enforces that structurally
+            // too (its own defense-in-depth `?? ` fallback), so this call passes both through as-is.
             userPrompt = LlmPromptBuilder.BuildUserContent(
                 request, LlmPromptBuilder.BuildStationClockLine(StationLocalNow()), previouslyVoicedTasteNotes,
-                patterFact?.Fact);
+                patterFact?.Fact, showFlavorFact);
 
             // No boot-frozen BaseAddress (F36.2) — the endpoint is read from CurrentValue above and an
             // absolute URI is built per call (EndpointUri preserves a subpath in Llm:Endpoint, e.g.

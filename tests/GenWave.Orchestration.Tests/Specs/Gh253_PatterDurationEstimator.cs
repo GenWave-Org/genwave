@@ -162,6 +162,74 @@ public static class FeaturePatterDurationEstimator
         }
     }
 
+    // SPEC F117.2, PLAN T250 review finding F1 — the templated show line varies the StationId
+    // render's TEXT (and so its measured duration) by on-air show; the Exact memo must key on
+    // (voice, show) rather than voice alone, or one show's measurement corrupts another's — and the
+    // plain (showless) ident's — Exact answer.
+    public static class ScenarioShowBrandedExactTier
+    {
+        [Fact]
+        public static void A_show_branded_observation_is_exact_only_for_that_shows_own_estimate()
+        {
+            // Given one measured show-branded station-ID render for "The Morning Mix"
+            var estimator = new RollingPatterDurationEstimator();
+            estimator.ObserveRendered(
+                SegmentKind.StationId, personaName: null, "af_heart", TimeSpan.FromSeconds(9), showName: "The Morning Mix");
+
+            // When that SAME show is estimated
+            var estimate = estimator.Estimate(SegmentKind.StationId, personaName: null, "af_heart", showName: "The Morning Mix");
+
+            // Then the answer IS the measured duration, at the exact tier.
+            Assert.Equal(PatterEstimateConfidence.Exact, estimate.Confidence);
+            Assert.Equal(TimeSpan.FromSeconds(9), estimate.Duration);
+        }
+
+        [Fact]
+        public static void MixedShowDurationsNeverCrossContaminateTheExactAnswer()
+        {
+            // Given two DIFFERENT shows' station-ID renders measured under the SAME voice, plus a
+            // plain (showless) ident measured under that same voice too
+            var estimator = new RollingPatterDurationEstimator();
+            estimator.ObserveRendered(
+                SegmentKind.StationId, personaName: null, "af_heart", TimeSpan.FromSeconds(9), showName: "The Morning Mix");
+            estimator.ObserveRendered(
+                SegmentKind.StationId, personaName: null, "af_heart", TimeSpan.FromSeconds(5), showName: "Night Moves");
+            estimator.ObserveRendered(
+                SegmentKind.StationId, personaName: null, "af_heart", TimeSpan.FromSeconds(3), showName: null);
+
+            // When each is estimated by its OWN (voice, show) key
+            var morning = estimator.Estimate(SegmentKind.StationId, personaName: null, "af_heart", showName: "The Morning Mix");
+            var night = estimator.Estimate(SegmentKind.StationId, personaName: null, "af_heart", showName: "Night Moves");
+            var plain = estimator.Estimate(SegmentKind.StationId, personaName: null, "af_heart", showName: null);
+
+            // Then each answer is its OWN exact measurement — none leaks into another's.
+            Assert.Equal(PatterEstimateConfidence.Exact, morning.Confidence);
+            Assert.Equal(TimeSpan.FromSeconds(9), morning.Duration);
+            Assert.Equal(PatterEstimateConfidence.Exact, night.Confidence);
+            Assert.Equal(TimeSpan.FromSeconds(5), night.Duration);
+            Assert.Equal(PatterEstimateConfidence.Exact, plain.Confidence);
+            Assert.Equal(TimeSpan.FromSeconds(3), plain.Duration);
+        }
+
+        [Fact]
+        public static void TheShowUnawareOverloadNeverAnswersFromAShowBrandedObservationAlone()
+        {
+            // Given ONLY a show-branded observation for this voice (no plain ident ever measured) —
+            // BuildBoundaryFit's own forward-looking cadence guess calls the OLD 3-arg overload, which
+            // has no show context to offer
+            var estimator = new RollingPatterDurationEstimator();
+            estimator.ObserveRendered(
+                SegmentKind.StationId, personaName: null, "af_heart", TimeSpan.FromSeconds(9), showName: "The Morning Mix");
+
+            // When the show-unaware 3-arg overload estimates the same voice
+            var estimate = estimator.Estimate(SegmentKind.StationId, personaName: null, "af_heart");
+
+            // Then it never fabricates the show's own Exact duration for a request with no show
+            // context — it degrades honestly (cold, no plain-ident history exists either).
+            Assert.NotEqual(PatterEstimateConfidence.Exact, estimate.Confidence);
+        }
+    }
+
     public static class ScenarioOrchestratorFeedsTheSeam
     {
         static MediaReference MakeTrack(string id) => new(

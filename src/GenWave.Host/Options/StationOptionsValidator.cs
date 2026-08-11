@@ -46,6 +46,12 @@ using Microsoft.Extensions.Options;
 /// </para>
 ///
 /// <para>
+/// Guards <c>Station:Shows:PatterCadenceMinutes</c> (SPEC F116.3, STORY-308, PLAN T249): must be
+/// non-negative (same "documentation-only [Range], this validator is the real floor" story as the
+/// nested knobs above) — 0 legally disables the show-flavor line entirely.
+/// </para>
+///
+/// <para>
 /// Registered as a singleton and triggered by <c>ValidateOnStart()</c> in
 /// <c>Program.cs</c>.
 /// </para>
@@ -104,6 +110,11 @@ public sealed class StationOptionsValidator(ILogger<StationOptionsValidator> log
         if (options.Requests.WindowMinutes < 1)
             return ValidateOptionsResult.Fail(
                 "Station:Requests:WindowMinutes must be a positive integer.");
+
+        if (options.Shows.PatterCadenceMinutes < 0)
+            return ValidateOptionsResult.Fail(
+                "Station:Shows:PatterCadenceMinutes must be non-negative " +
+                "(0 disables the show-flavor line).");
 
         if (options.SafeScope.LibraryIds.Count == 0)
         {

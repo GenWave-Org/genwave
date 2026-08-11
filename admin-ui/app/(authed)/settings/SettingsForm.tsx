@@ -369,6 +369,12 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "count. Off by default.",
   "Station:Imaging:TimeAnnouncements":
     "When on, a spoken time announcement airs at the top of every hour. Off by default.",
+
+  // ── Show-flavor patter line (SPEC F116.3) ───────────────────────────────────────────────────
+  "Station:Shows:PatterCadenceMinutes":
+    "How often a show's flavor may color an ordinary lead-in/back-announce, in minutes — shares " +
+    "the same one-line slot as the context patter lines above; a due context fact always wins. " +
+    "0 disables the show-flavor line. Accepted range: 0–1440.",
 };
 
 /**

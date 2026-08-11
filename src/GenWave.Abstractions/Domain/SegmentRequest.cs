@@ -52,6 +52,36 @@ namespace GenWave.Core.Domain;
 /// The same crossing track's artist, alongside <see cref="CrossingTrackTitle"/> — <see langword="null"/>
 /// whenever that is.
 /// </param>
+/// <param name="ShowName">
+/// SPEC F116.2 (STORY-307, PLAN T248) — for a <see cref="SegmentKind.SignOff"/>/<see cref="SegmentKind.SignOn"/>:
+/// this piece's OWN show, carried verbatim from the deferral's own captured
+/// <c>HandoffContext.ShowName</c> (never re-derived here). <see langword="null"/> for a showless
+/// boundary — additive and optional so every existing caller is diff-free.
+///
+/// <para>
+/// SPEC F117.2 (STORY-309, PLAN T250) — ALSO rides on a <see cref="SegmentKind.StationId"/> request
+/// when the drain is firing during a show and the authored imaging pool came up empty: the
+/// Orchestrator's own drain arm stamps the on-air show's name here, and
+/// <c>GenWave.Tts.PatterTemplateRenderer.Expand</c>'s <see cref="SegmentKind.StationId"/> arm
+/// renders "You're listening to {ShowName} on {StationName}." instead of the plain
+/// "You're listening to {StationName}." <see langword="null"/> (the F110.2-original, byte-identical
+/// phrasing) outside a show, or whenever an authored pool row already served the drain.
+/// </para>
+/// </param>
+/// <param name="ShowFlavor">
+/// SPEC F116.2/F115.3 — <see cref="ShowName"/>'s own flavor text, carried the same way; populated only
+/// on a <see cref="SegmentKind.SignOn"/> request (F116.2 names flavor for the sign-on prompt alone).
+/// Reaches the LLM prompt ONLY — never a public payload or a log line (F115.3, the persona-soul
+/// precedent) — <c>GenWave.Core.Domain.ShowSummary.Flavor</c> and <c>GenWave.Orchestration.HandoffContext.ShowFlavor</c>
+/// both carry the same warning this field does: this record's own compiler-generated
+/// <c>ToString()</c> renders it verbatim, so no <c>{Request}</c>-style structured-log placeholder may
+/// ever bind a <see cref="SegmentRequest"/> on any public-adjacent logging path; log
+/// <see cref="PersonaName"/>/<see cref="ShowName"/> by name instead.
+/// </param>
+/// <param name="CounterpartShowName">
+/// SPEC F114.3/F116.2 — the OTHER piece's show, carried the same way; populated only on a
+/// <see cref="SegmentKind.SignOff"/> request ("sign-off may name the ending show and the next").
+/// </param>
 public sealed record SegmentRequest(
     SegmentKind    Kind,
     string         Voice,
@@ -63,4 +93,7 @@ public sealed record SegmentRequest(
     string?        CounterpartName = null,
     string?        ContextFacts = null,
     string?        CrossingTrackTitle = null,
-    string?        CrossingTrackArtist = null);
+    string?        CrossingTrackArtist = null,
+    string?        ShowName = null,
+    string?        ShowFlavor = null,
+    string?        CounterpartShowName = null);

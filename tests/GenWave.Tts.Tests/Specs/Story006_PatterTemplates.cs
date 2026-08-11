@@ -29,6 +29,36 @@ public static class FeaturePatterTemplates
             var text = renderer.Expand(req);
             Assert.Matches(@"[.!?]\s*$", text);
         }
+
+        // SPEC F117.2 (STORY-309, PLAN T250 review finding F3) — the show-branded variant: the
+        // Orchestrator's drain arm stamps SegmentRequest.ShowName only when a show is on air and the
+        // authored pool came up empty; this renderer is what turns that stamp into the literal spoken
+        // text. GenWave.Orchestration.Tests/Specs/Story309_ShowIdentDrain.cs's own facts stop at
+        // proving the Orchestrator stamped the right fields onto the request — this is where the
+        // ACTUAL rendered text is pinned.
+
+        [Fact]
+        public void ShowNameStampsTheShowBrandedLine()
+        {
+            var req = new SegmentRequest(
+                SegmentKind.StationId, "af_heart", "GenWave", null, DateTimeOffset.Now, "test-station",
+                ShowName: "The Morning Mix");
+            var text = renderer.Expand(req);
+            Assert.Equal("You're listening to The Morning Mix on GenWave.", text);
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("   ")]
+        public void BlankShowNameFallsBackToThePlainIdent(string? showName)
+        {
+            var req = new SegmentRequest(
+                SegmentKind.StationId, "af_heart", "GenWave", null, DateTimeOffset.Now, "test-station",
+                ShowName: showName);
+            var text = renderer.Expand(req);
+            Assert.Equal("You're listening to GenWave.", text);
+        }
     }
 
     public sealed class ScenarioLeadInTemplate
