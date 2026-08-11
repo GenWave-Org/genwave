@@ -81,6 +81,7 @@ export const SETTINGS_HELP_KEYS = [
   "Station:Location:SpokenName",
   "Station:Imaging:ClockAnchoredIdents",
   "Station:Imaging:TimeAnnouncements",
+  "Station:Shows:PatterCadenceMinutes",
 ] as const;
 
 export type SettingsHelpKey = (typeof SETTINGS_HELP_KEYS)[number];

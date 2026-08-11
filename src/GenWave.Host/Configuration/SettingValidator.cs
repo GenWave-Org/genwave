@@ -164,6 +164,14 @@ public sealed class SettingValidator
     internal const int ContextPatterCadenceMinutesMin = 0;
     internal const int ContextPatterCadenceMinutesMax = 1440;
 
+    // Station:Shows:PatterCadenceMinutes (SPEC F116.3, STORY-308, PLAN T249) — StationShowsOptions'
+    // own documentation-only [Range] (StationOptionsValidator is the real boot floor, the
+    // StationCadenceOptions precedent). Floor stays 0 — 0 legally means "off" (F116.3, mirrors
+    // ContextPatterCadenceMinutesMin's own "0 = off" floor immediately above); ceiling is the same
+    // generic 1440-minute (24h) F53.1 cap every other "minutes" knob on this list uses.
+    internal const int ShowsPatterCadenceMinutesMin = 0;
+    internal const int ShowsPatterCadenceMinutesMax = 1440;
+
     // Context:{Key}:PersonaId (SPEC F107.7, PLAN T226) — ContextProviderSettings' own remarks: null,
     // 0, and any negative value all mean "the on-air DJ"; only a positive value names an explicit
     // persona. The floor here is a fat-finger guard (F53.1's own ethos), not a domain requirement —
@@ -381,6 +389,10 @@ public sealed class SettingValidator
             // kill switches, no consumer reads them yet (Station:Audience's own T111 precedent).
             ["Station:Imaging:ClockAnchoredIdents"] = IsBool,
             ["Station:Imaging:TimeAnnouncements"] = IsBool,
+
+            // Show-flavor patter line cadence (SPEC F116.3, STORY-308, PLAN T249) — same
+            // "0 = off, 1440 ceiling" shape as Context:{Key}:PatterCadenceMinutes above.
+            ["Station:Shows:PatterCadenceMinutes"] = v => IsIntInRange(v, ShowsPatterCadenceMinutesMin, ShowsPatterCadenceMinutesMax),
         };
 
     // ── Per-key validation ─────────────────────────────────────────────────────────────────────
@@ -932,6 +944,8 @@ public sealed class SettingValidator
         var k when k.Equals("Station:Imaging:ClockAnchoredIdents", StringComparison.OrdinalIgnoreCase) ||
                    k.Equals("Station:Imaging:TimeAnnouncements", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
+        var k when k.Equals("Station:Shows:PatterCadenceMinutes", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {ShowsPatterCadenceMinutesMin} and {ShowsPatterCadenceMinutesMax} (minutes); 0 disables the show-flavor line.",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }

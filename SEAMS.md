@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **79 seams across 6 projects.**
+> **81 seams across 6 projects.**
 
 ## GenWave.Context (2 seams)
 
@@ -53,7 +53,7 @@
 | `GenWave.Core.Abstractions.IContextPatterFactSource` | `GenWave.Context.ContextPipeline` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextPatterFactSource` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IContextProvider` | `GenWave.Context.History.HistoryContextProvider` | Singleton | also registered: `GenWave.Context.Weather.WeatherContextProvider` (GenWave.Context) |
 
-## GenWave.Host (21 seams)
+## GenWave.Host (22 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -69,6 +69,7 @@
 | `GenWave.Core.Abstractions.IRequestOverrideEnvelopeProvider` | `GenWave.Host.Options.OptionsMonitorRequestOverrideEnvelopeProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IRotationSettingsProvider` | `GenWave.Host.Options.OptionsMonitorRotationSettingsProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.ISafeScopeProvider` | `GenWave.Host.Options.OptionsMonitorSafeScopeProvider` | Singleton | — |
+| `GenWave.Core.Abstractions.IShowPatterCadenceProvider` | `GenWave.Host.Options.OptionsMonitorShowPatterCadenceProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IStationClockProvider` | `GenWave.Host.Options.OptionsMonitorStationClockProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IStationDefaultEnvelopeSource` | `GenWave.Host.Options.OptionsMonitorStationDefaultEnvelopeSource` | Singleton | — |
 | `GenWave.Core.Abstractions.IStationEventSink` | `GenWave.Host.Playout.CompositeStationEventSink` | Singleton | also registered: `GenWave.Core.Events.NoOpStationEventSink` (GenWave.Abstractions) |
@@ -126,7 +127,7 @@
 | `GenWave.Core.Abstractions.IThemeStore` | `GenWave.MediaLibrary.Station.ThemeRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IYearLookup` | `GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup` | Singleton | — |
 
-## GenWave.Orchestration (7 seams)
+## GenWave.Orchestration (8 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -134,6 +135,7 @@
 | `GenWave.Core.Abstractions.IEnvelopeProvider` | `GenWave.Orchestration.ScheduleEnvelopeProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.INextItemProvider` | `GenWave.Orchestration.Orchestrator` | Singleton | — |
 | `GenWave.Core.Abstractions.IPatterDurationEstimator` | `GenWave.Orchestration.RollingPatterDurationEstimator` | Singleton | — |
+| `GenWave.Core.Abstractions.IShowFlavorLineSource` | `GenWave.Orchestration.ShowFlavorLineGate` | Singleton | — |
 | `GenWave.Orchestration.IPersonaPickProvider` | `GenWave.Orchestration.RankerPersonaPickProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpPersonaPickProvider` (GenWave.Orchestration) |
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |

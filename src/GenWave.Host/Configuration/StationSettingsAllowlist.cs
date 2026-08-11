@@ -377,6 +377,15 @@ public static class StationSettingsAllowlist
         // property + allowlist entry land before the first consumer).
         new("Station:Imaging:ClockAnchoredIdents",            SettingApplyMode.Live,          SettingKind.Boolean,    ""),
         new("Station:Imaging:TimeAnnouncements",              SettingApplyMode.Live,          SettingKind.Boolean,    ""),
+
+        // Show-flavor patter line (SPEC F116.3, STORY-308, PLAN T249) — an ordinary LeadIn/BackAnnounce
+        // break during a show may carry the show's flavor as spoken color, sharing F107.5's own single
+        // extra-line slot with the context-fact patter lane (context always wins when both are due).
+        // Read live through IShowPatterCadenceProvider by GenWave.Orchestration.ShowFlavorLineGate, so
+        // a PUT here reaches the very next eligible break with no api restart. 0 (the default) disables
+        // it entirely — an opt-in feature, not a default-on one (mirrors Context:{Key}:PatterCadenceMinutes's
+        // own "0 = off" floor immediately above).
+        new("Station:Shows:PatterCadenceMinutes",             SettingApplyMode.Live,          SettingKind.Number,     "minutes"),
     };
 
     /// <summary>All operator-editable settings, keyed by configuration key.</summary>
