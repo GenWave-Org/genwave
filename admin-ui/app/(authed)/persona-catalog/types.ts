@@ -5,8 +5,8 @@ export type CatalogAudience = "everyone" | "mature";
 /** The F103.1 entry-kind discriminator, lowercase — see Host's `CatalogEntryKind`/
  * `CatalogController.ToWireKind`. Always present on a shelf row: the api never omits `kind`, even
  * for a legacy persona entry whose own index.json predates the field (the api resolves that
- * default server-side). Widened to `"font"` at F104.1/T193. */
-export type CatalogEntryKind = "persona" | "theme" | "font";
+ * default server-side). Widened to `"font"` at F104.1/T193, `"show"` at F118.1/T254. */
+export type CatalogEntryKind = "persona" | "theme" | "font" | "show";
 
 /** One mode's five shelf-chip swatches (SPEC F103.4, PLAN T185) — see Host's
  * `CatalogShelfSwatchSetDto`. `"accent-2"` keeps its hyphenated wire name (the app's own
@@ -67,7 +67,15 @@ export interface CatalogIndexResponseDto {
  * (SPEC F104.4). `fontLicense`/`fontVersion`/`fontSubset` (PLAN T204, Dean's post-v3.1.0 review: the
  * pre-install review panel showed no licence anywhere) are the SAME manifest trio a Wardrobe pack's
  * own `license`/`version`/`subset` carry once installed (`FontLibraryPackDto`) — see
- * `font-format.ts`'s shared `licenceLine` for the one place both render identically. */
+ * `font-format.ts`'s shared `licenceLine` for the one place both render identically.
+ * `suggestedPersona` (SPEC F118.3, PLAN T254/T255) is a show entry's OPTIONAL "also hire" catalog
+ * persona slug, parsed off the entry's `meta.json` server-side — `null` for every non-show entry,
+ * when unreachable, when the entry's meta.json omits it, or when it fails its own slug-shape check
+ * (see `CatalogController.ValidateSuggestedPersonaShape`). SOFT by design: `ShowCardReviewModal`
+ * only ever surfaces this value to offer against — it is never itself validated here for "is this
+ * slug actually on the shelf" or "is it already hired"; that eligibility check is `PersonaCatalogClient`'s
+ * own job (SPEC F118.3's "on-shelf and un-hired" gate), reading this station's already-fetched
+ * index/personas state, not a further catalog fetch. */
 export interface CatalogEntryDetailDto {
   card: string | null;
   meta: string | null;
@@ -84,6 +92,7 @@ export interface CatalogEntryDetailDto {
   fontLicense: string | null;
   fontVersion: string | null;
   fontSubset: string | null;
+  suggestedPersona: string | null;
 }
 
 /**

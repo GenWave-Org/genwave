@@ -15,17 +15,20 @@ using GenWave.Host.Theming;
 /// and independently testable without a fake HTTP handler in play).
 ///
 /// <para>
-/// THE `kind` SEAM (SPEC F103.1, widened to <c>"font"</c> by F104.1): each entry declares a
-/// <c>kind</c> (<c>"persona"</c> | <c>"theme"</c> | <c>"font"</c>); a missing field defaults to
-/// <see cref="CatalogEntryKind.Persona"/> (back-compat for every entry authored before the field
-/// existed). A <c>kind</c> naming none of these is forward-compat, not fatal — that ONE entry is
-/// silently dropped and the rest of the index still loads (<see cref="TryValidateEntry"/>'s own
-/// early return) — deliberately unlike an unrecognised <c>audience</c> below, which still rejects
-/// the WHOLE index (audience is content-safety; kind is forward-compat). The per-kind manifest
-/// file pattern (<see cref="PersonaManifestPathPattern"/> / <see cref="ThemeManifestPathPattern"/> /
-/// <see cref="FontManifestPathPattern"/>) is picked only once an entry's kind is known. A font
-/// entry ALSO carries <c>assets[]</c> (SPEC F104.1) — validated once the manifest/meta refs pass,
-/// with its own reject-vs-degrade posture: see <see cref="TryValidateAssets"/>'s own remarks.
+/// THE `kind` SEAM (SPEC F103.1, widened to <c>"font"</c> by F104.1, <c>"show"</c> by F118.1): each
+/// entry declares a <c>kind</c> (<c>"persona"</c> | <c>"theme"</c> | <c>"font"</c> | <c>"show"</c>); a
+/// missing field defaults to <see cref="CatalogEntryKind.Persona"/> (back-compat for every entry
+/// authored before the field existed). A <c>kind</c> naming none of these is forward-compat, not fatal
+/// — that ONE entry is silently dropped and the rest of the index still loads
+/// (<see cref="TryValidateEntry"/>'s own early return) — deliberately unlike an unrecognised
+/// <c>audience</c> below, which still rejects the WHOLE index (audience is content-safety; kind is
+/// forward-compat). The per-kind manifest file pattern (<see cref="PersonaManifestPathPattern"/> /
+/// <see cref="ThemeManifestPathPattern"/> / <see cref="FontManifestPathPattern"/> /
+/// <see cref="ShowManifestPathPattern"/>) is picked only once an entry's kind is known. A font entry
+/// ALSO carries <c>assets[]</c> (SPEC F104.1) — validated once the manifest/meta refs pass, with its
+/// own reject-vs-degrade posture: see <see cref="TryValidateAssets"/>'s own remarks. A show entry
+/// carries no assets/family/preview at all — the same minimal <c>{manifest, meta}</c> shape a persona
+/// entry has, just under the <c>.show.json</c> manifest pattern.
 /// </para>
 ///
 /// <para>
@@ -60,14 +63,15 @@ internal static partial class CatalogIndexValidator
     internal const string SlugSegment = "[a-z0-9]+(-[a-z0-9]+)*";
 
     // entries/<slug>/<name>.persona.json / entries/<slug>/<name>.theme.json / entries/<slug>/<name>.font.json
-    // — the per-kind manifest shape (SPEC F103.2, F104.1): the filename segment is the SAME shape
-    // as the slug segment (SPEC F90.2/F89.2: schemas/index.schema.json's card/meta path patterns
-    // use this one shape for both segments, not the looser "any run of [a-z0-9-]" a prior version
-    // allowed here, which would have tolerated a leading/trailing/doubled hyphen the real schema
-    // rejects).
+    // / entries/<slug>/<name>.show.json — the per-kind manifest shape (SPEC F103.2, F104.1, F118.1):
+    // the filename segment is the SAME shape as the slug segment (SPEC F90.2/F89.2: schemas/index.schema.json's
+    // card/meta path patterns use this one shape for both segments, not the looser "any run of
+    // [a-z0-9-]" a prior version allowed here, which would have tolerated a leading/trailing/doubled
+    // hyphen the real schema rejects).
     const string PersonaManifestPathText = @"\Aentries/" + SlugSegment + "/" + SlugSegment + @"\.persona\.json\z";
     const string ThemeManifestPathText = @"\Aentries/" + SlugSegment + "/" + SlugSegment + @"\.theme\.json\z";
     const string FontManifestPathText = @"\Aentries/" + SlugSegment + "/" + SlugSegment + @"\.font\.json\z";
+    const string ShowManifestPathText = @"\Aentries/" + SlugSegment + "/" + SlugSegment + @"\.show\.json\z";
     const string MetaPathText = @"\Aentries/" + SlugSegment + "/" + SlugSegment + @"\.meta\.json\z";
 
     // entries/<slug>/<filename> — a font pack's binary asset (SPEC F104.1): 1-2 latin-subsetted
@@ -118,6 +122,9 @@ internal static partial class CatalogIndexValidator
 
     [GeneratedRegex(FontManifestPathText)]
     private static partial Regex FontManifestPathPattern();
+
+    [GeneratedRegex(ShowManifestPathText)]
+    private static partial Regex ShowManifestPathPattern();
 
     [GeneratedRegex(MetaPathText)]
     private static partial Regex MetaPathPattern();
@@ -562,6 +569,9 @@ internal static partial class CatalogIndexValidator
             case "font":
                 kind = CatalogEntryKind.Font;
                 return true;
+            case "show":
+                kind = CatalogEntryKind.Show;
+                return true;
             default:
                 kind = default;
                 return false;
@@ -573,6 +583,7 @@ internal static partial class CatalogIndexValidator
         CatalogEntryKind.Persona => PersonaManifestPathPattern(),
         CatalogEntryKind.Theme => ThemeManifestPathPattern(),
         CatalogEntryKind.Font => FontManifestPathPattern(),
+        CatalogEntryKind.Show => ShowManifestPathPattern(),
         _ => throw new UnreachableException($"Unhandled {nameof(CatalogEntryKind)} value: {kind}."),
     };
 
@@ -643,7 +654,7 @@ internal static partial class CatalogIndexValidator
     {
         public string? Slug { get; init; }
 
-        /// <summary><c>"persona"</c> | <c>"theme"</c> | <c>"font"</c> (SPEC F103.1, F104.1); absent means persona (back-compat).</summary>
+        /// <summary><c>"persona"</c> | <c>"theme"</c> | <c>"font"</c> | <c>"show"</c> (SPEC F103.1, F104.1, F118.1); absent means persona (back-compat).</summary>
         public string? Kind { get; init; }
 
         public string? Audience { get; init; }

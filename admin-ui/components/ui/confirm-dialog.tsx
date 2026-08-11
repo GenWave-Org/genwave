@@ -11,6 +11,7 @@ import {
 } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Button } from "@/components/ui/button";
+import { DialogShell } from "@/components/ui/dialog-shell";
 
 // Wireless confirm-dialog conventions (.claude/skills/design-aesthetic,
 // SPEC F28.9/F28.14): the browser's native confirm prompt is removed in
@@ -90,45 +91,41 @@ export function ConfirmDialogProvider({ children }: ConfirmDialogProviderProps):
   return (
     <ConfirmContext.Provider value={contextValue}>
       {children}
-      <Dialog.Root open={pending !== null} onOpenChange={handleOpenChange}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-50 bg-ink/40 transition-opacity duration-200 ease-out motion-reduce:transition-none" />
-          <Dialog.Content
-            className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-surface p-6 transition-opacity duration-200 ease-out focus:outline-none motion-reduce:transition-none"
-            onCloseAutoFocus={(event) => {
-              event.preventDefault();
-              restoreFocusRef.current?.focus();
-            }}
-          >
-            {pending && (
-              <>
-                <Dialog.Title className="font-display text-[1.1rem] text-ink">
-                  {pending.options.title}
-                </Dialog.Title>
-                <Dialog.Description className="mt-2 text-[0.85rem] text-mute">
-                  {pending.options.consequence}
-                </Dialog.Description>
-                <div className="mt-6 flex justify-end gap-2">
-                  <Button variant="secondary" onClick={() => settle(false)}>
-                    {pending.options.cancelLabel ?? "Cancel"}
-                  </Button>
-                  {/* No autoFocus here: Radix's FocusScope owns initial-focus
-                      placement on mount (and captures the pre-open activeElement
-                      to restore on close) — a React autoFocus prop would fire
-                      during commit, before FocusScope's effect runs, and get
-                      mistaken by FocusScope for the caller's own focus target. */}
-                  <Button
-                    variant={pending.options.destructive ? "destructive" : "primary"}
-                    onClick={() => settle(true)}
-                  >
-                    {pending.options.confirmLabel ?? "Confirm"}
-                  </Button>
-                </div>
-              </>
-            )}
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+      <DialogShell
+        open={pending !== null}
+        onOpenChange={handleOpenChange}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          restoreFocusRef.current?.focus();
+        }}
+      >
+        {pending && (
+          <>
+            <Dialog.Title className="font-display text-[1.1rem] text-ink">
+              {pending.options.title}
+            </Dialog.Title>
+            <Dialog.Description className="mt-2 text-[0.85rem] text-mute">
+              {pending.options.consequence}
+            </Dialog.Description>
+            <div className="mt-6 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => settle(false)}>
+                {pending.options.cancelLabel ?? "Cancel"}
+              </Button>
+              {/* No autoFocus here: Radix's FocusScope owns initial-focus
+                  placement on mount (and captures the pre-open activeElement
+                  to restore on close) — a React autoFocus prop would fire
+                  during commit, before FocusScope's effect runs, and get
+                  mistaken by FocusScope for the caller's own focus target. */}
+              <Button
+                variant={pending.options.destructive ? "destructive" : "primary"}
+                onClick={() => settle(true)}
+              >
+                {pending.options.confirmLabel ?? "Confirm"}
+              </Button>
+            </div>
+          </>
+        )}
+      </DialogShell>
     </ConfirmContext.Provider>
   );
 }

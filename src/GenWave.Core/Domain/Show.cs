@@ -19,9 +19,8 @@ namespace GenWave.Core.Domain;
 /// <param name="ImportedFrom">
 /// Provenance stamp (SPEC F115.1, the F90/db-25 pattern): <c>null</c> for a show authored in place via
 /// <see cref="Abstractions.IShowStore.CreateAsync"/>/<see cref="Abstractions.IShowStore.UpdateAsync"/>,
-/// <c>"file"</c> for a file-uploaded import, or the catalog entry's slug for a catalog import. No
-/// writer for the import path exists yet (PLAN T254) — every row this seam can itself produce carries
-/// <c>null</c> here.
+/// <c>"file"</c> for a file-uploaded import, or the catalog entry's slug for a catalog import
+/// (<see cref="Abstractions.IShowStore.ImportAsync"/>, PLAN T254).
 /// </param>
 /// <param name="ImportedAt">The moment <see cref="ImportedFrom"/> was last stamped; <c>null</c> exactly
 /// when <see cref="ImportedFrom"/> is.</param>

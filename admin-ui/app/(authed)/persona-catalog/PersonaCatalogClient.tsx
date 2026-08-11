@@ -1,9 +1,11 @@
 "use client";
 
+import * as Dialog from "@radix-ui/react-dialog";
 import { useRouter } from "next/navigation";
-import { useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
+import { DialogShell } from "@/components/ui/dialog-shell";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toast";
@@ -11,10 +13,12 @@ import { formatDateStamp } from "@/lib/format-clock";
 import { readErrorMessage } from "@/lib/problem-details";
 import { cn } from "@/lib/utils";
 import { PersonaCardReviewModal, type PersonaCardReviewImportResult } from "../_components/PersonaCardReviewModal";
+import { BestForChips, MatureBadge } from "./catalog-badges";
 import { FontDetailPanel } from "./FontDetailPanel";
 import { FontInstallModal, type FontInstallResult } from "./FontInstallModal";
 import { formatFontByteTotal } from "./font-format";
 import { prettifySlug } from "./format-slug";
+import { ShowCardReviewModal, type ShowCardReviewImportResult } from "./ShowCardReviewModal";
 import { ThemeDetailPreview } from "./ThemeDetailPreview";
 import { ThemeInstallModal, type ThemeInstallResult } from "./ThemeInstallModal";
 import type {
@@ -50,6 +54,30 @@ interface PersonaCatalogClientProps {
    * `/api/settings` rather than a new backend route.
    */
   installedThemeProvenance?: ThemeCatalogProvenanceDto[];
+  /**
+   * Every catalog slug already imported as a local show, per `GET /api/shows` (SPEC F118.1, PLAN
+   * T255) — mirrors `installedFontSlugs`'s own "reopening shows no installed state" fix (gh-#375),
+   * applied to the show kind: an `ImportedFrom`-bearing OR authored-under-the-same-slug row both
+   * count, since either way a re-import off this exact slug is a real, already-informed choice, not
+   * a surprise. Drives `ShowShelfCard`'s "Imported" chip and `ShowCardReviewModal`'s
+   * Confirm-relabel; the actual authored-vs-imported collision gate stays server-side (SPEC F115.5),
+   * this prop only keeps the UI honest. Defaults to `[]` — fail closed, same posture as
+   * `installedFontSlugs`/`installedThemeProvenance` above: no live signal never CLAIMS a slug is
+   * already taken.
+   */
+  importedShowSlugs?: string[];
+  /**
+   * Every local persona's own slug, per `GET /api/personas` (SPEC F118.3, PLAN T255) — the "not
+   * already hired" half of the soft "also hire ⟨persona⟩" offer's eligibility gate (the "on the
+   * shelf" half reads `initialIndex.entries` directly, already in hand). Sourced from the SAME
+   * listing `PersonasClient`'s own hired-state already reads, fetched afresh here since this is a
+   * separate page/server component — mirrors `installedFontSlugs`'s own per-page-fetch shape rather
+   * than threading persona state across a route boundary. Defaults to `[]` — fail closed: no live
+   * signal never CLAIMS a persona is already hired, which would silently WITHHOLD an offer the
+   * operator should have seen (the safer failure direction here is the opposite of the installed-
+   * state props above, but the same "no live signal, no false claim" posture).
+   */
+  hiredPersonaSlugs?: string[];
   /** Test-only injection point for the theme provenance line's `formatDateStamp` call (gh-#375);
    * production omits this and gets the browser's local zone — the same SettingsForm/WardrobeClient/
    * PersonasClient idiom, not a bespoke one. */
@@ -99,13 +127,35 @@ export function PersonaCatalogClient({
   initialIndex,
   installedFontSlugs = [],
   installedThemeProvenance = [],
+  importedShowSlugs = [],
+  hiredPersonaSlugs = [],
   timeZone,
 }: PersonaCatalogClientProps): ReactNode {
   const router = useRouter();
   const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
-  const [reviewing, setReviewing] = useState(false);
+  // Which persona's review modal is open, keyed by SLUG — not a bare boolean (PLAN T255 review
+  // finding F1, HIGH): the render gate below (`detail.kind === "loaded" && detail.slug ===
+  // reviewingPersonaSlug`) requires an EXACT match against whatever `detail` currently holds, so a
+  // failed or superseded `loadDetail` call (a different card clicked while a fetch is still in
+  // flight, or the offer's own suggested-persona fetch failing outright) can never satisfy it — the
+  // modal simply never opens for the wrong persona, or for none at all. A bare boolean (the
+  // original shape) had neither property: once armed by `handleAcceptPersonaOffer` it stayed armed
+  // through a failed fetch, so the NEXT successfully-loaded card of ANY kind — not just the one the
+  // offer named — popped the review modal open under it.
+  const [reviewingPersonaSlug, setReviewingPersonaSlug] = useState<string | null>(null);
   const [installingTheme, setInstallingTheme] = useState(false);
   const [installingFont, setInstallingFont] = useState(false);
+  // Which show entry (if any) has its combined detail/review modal open (PLAN T255) — a show never
+  // routes through `detail`/`loadDetail` at all (see `ShowCardReviewModal`'s own remarks for why),
+  // so this is its own, independent piece of state.
+  const [reviewingShowSlug, setReviewingShowSlug] = useState<string | null>(null);
+  // The pending soft "also hire ⟨persona⟩" offer (SPEC F118.3, PLAN T255) — `null` until a show
+  // import succeeds AND names an eligible `suggestedPersona` (see `handleShowImported`'s own
+  // remarks). A dedicated, file-local dialog (`PersonaOfferDialog` below) rather than the shared
+  // `useConfirm()` hook (T255 review note): this component already renders unconditionally on
+  // several existing spec harnesses with no `ConfirmDialogProvider` ancestor — a `useConfirm()` call
+  // here would throw on every one of them. `PersonaOfferDialog` needs no such ancestor.
+  const [personaOffer, setPersonaOffer] = useState<{ suggestedSlug: string; showName: string } | null>(null);
   // Seeded from the server-fetched prop above, then flipped locally the instant an install
   // succeeds (handleFontInstalled below) — cheap, no reload/re-fetch needed for a set this small.
   // `useState(() => ...)` (lazy initializer): this only needs to run once, not re-derive the Set on
@@ -117,6 +167,14 @@ export function PersonaCatalogClient({
   const [installedThemes, setInstalledThemes] = useState<ReadonlyMap<string, ThemeCatalogProvenanceDto>>(
     () => new Map(installedThemeProvenance.map((provenance) => [provenance.slug, provenance]))
   );
+  // Same lazy-initializer/local-flip shape as `installedSlugs` above (PLAN T255) — flipped the
+  // instant a show import succeeds (handleShowImported below), so re-opening that same slug reads
+  // "Imported" with no reload.
+  const [importedShows, setImportedShows] = useState<ReadonlySet<string>>(() => new Set(importedShowSlugs));
+  // Never locally flipped (contrast `installedSlugs`/`importedShows` above): a persona hired via the
+  // soft offer below navigates away (`handleImported`'s own `router.push("/personas")`) before a
+  // second offer in the same session could ever matter — see `handleShowImported`'s own remarks.
+  const hiredPersonaSlugSet = useMemo(() => new Set(hiredPersonaSlugs), [hiredPersonaSlugs]);
 
   // Request token (T102 review, HIGH): loadDetail's fetch is not the only thing that can change
   // `detail` between when a request starts and when it resolves — the operator can also collapse
@@ -198,7 +256,7 @@ export function PersonaCatalogClient({
    * "hired" for a new row, "updated" for an existing one — the same `created` split
    * `PersonaImportPanel`'s own (unchanged, Import-speaking) success copy already uses. */
   function handleImported(result: PersonaCardReviewImportResult): void {
-    setReviewing(false);
+    setReviewingPersonaSlug(null);
     toast.success(`"${result.name}" ${result.created ? "hired" : "updated"}.`);
     for (const warning of result.warnings) toast.error(warning);
     router.push("/personas");
@@ -231,6 +289,73 @@ export function PersonaCatalogClient({
     setInstallingFont(false);
     setInstalledSlugs((prev) => new Set(prev).add(slug));
     toast.success(`"${result.family}" installed.`);
+  }
+
+  /**
+   * A show entry's OPTIONAL `suggestedPersona` (SPEC F118.3, PLAN T255) is on the shelf when the
+   * ALREADY-fetched index carries a persona entry under that exact slug — never a further catalog
+   * fetch just to answer this. An absent/unknown suggestion (no such persona entry at all) reads
+   * `false` here the same as one that's on the shelf but already hired — `handleShowImported`'s
+   * caller doesn't need to distinguish the two, both mean "no offer, no error" (SPEC F118.3).
+   */
+  function suggestedPersonaIsOfferable(suggestedPersona: string): boolean {
+    const onShelf = entries.some((entry) => entry.kind === "persona" && entry.slug === suggestedPersona);
+    return onShelf && !hiredPersonaSlugSet.has(suggestedPersona);
+  }
+
+  /**
+   * SPEC F118.2's success path: closes the review modal, marks the slug imported locally (gh-#375's
+   * "reopening shows no installed state" fix, applied here — mirrors `handleFontInstalled`'s own
+   * local flip), and toasts. Then SPEC F118.3's soft offer: eligible only when `suggestedPersona` is
+   * present, on the shelf, and not already hired (`suggestedPersonaIsOfferable` above) arms
+   * `personaOffer`, which `PersonaOfferDialog` below renders — a plain yes/no with a plain-words
+   * consequence, not rich content to review (that review already happened for the SHOW above, and
+   * happens again, in full, for the PERSONA once accepted).
+   */
+  function handleShowImported(result: ShowCardReviewImportResult): void {
+    setReviewingShowSlug(null);
+    setImportedShows((prev) => new Set(prev).add(result.slug));
+    toast.success(`"${result.name}" imported.`);
+
+    const suggested = result.suggestedPersona;
+    if (suggested === null || !suggestedPersonaIsOfferable(suggested)) return;
+
+    setPersonaOffer({ suggestedSlug: suggested, showName: result.name });
+  }
+
+  /**
+   * Accepting the soft offer (SPEC F118.3) reuses the EXISTING persona import flow verbatim: `loadDetail`
+   * is the SAME fetch a click on that persona's own shelf card already triggers, and
+   * `setReviewingPersonaSlug(suggestedSlug)` arms the SAME `PersonaCardReviewModal` `DetailPanel`'s
+   * own Hire button arms — the full-card trust ruling for the PERSONA'S card is never skipped just
+   * because the offer that led here was itself a simple yes/no. This is the smaller, house-
+   * consistent shape: zero new import-chaining logic, one `fetch` this file already owns, one modal
+   * this file already renders.
+   *
+   * Arming BEFORE `loadDetail` resolves is safe (PLAN T255 review finding F1): the render gate
+   * below only ever opens the modal once `detail.kind === "loaded" && detail.slug ===
+   * reviewingPersonaSlug` — a failed fetch leaves `detail.kind` at `"error"`, which can never
+   * satisfy that gate, and a DIFFERENT card clicked before this one resolves moves `detail.slug`
+   * off `suggestedSlug` entirely. Nothing else needs to react to failure here.
+   *
+   * `hiredPersonaSlugSet` is never locally updated after this (contrast `importedShows`/
+   * `installedSlugs` elsewhere in this file): `handleImported`'s own `router.push("/personas")`
+   * navigates the operator off this page the instant that second hire completes, so a second offer
+   * naming the SAME persona could only ever re-arise within an already-superseded render of this
+   * page — tracking it would be dead code, not a real fix (YAGNI).
+   */
+  function handleAcceptPersonaOffer(): void {
+    if (personaOffer === null) return;
+    const { suggestedSlug } = personaOffer;
+    setPersonaOffer(null);
+    void loadDetail(suggestedSlug);
+    setReviewingPersonaSlug(suggestedSlug);
+  }
+
+  /** Declining leaves the show imported and hires nothing (SPEC F118.3) — the offer simply closes,
+   * no request of any kind; the show import already committed before this offer ever appeared. */
+  function handleDeclinePersonaOffer(): void {
+    setPersonaOffer(null);
   }
 
   const selectedSlug = detail.kind !== "idle" ? detail.slug : null;
@@ -270,6 +395,18 @@ export function PersonaCatalogClient({
             onSelect={() => handleCardClick(entry.slug)}
           />
         );
+      case "show":
+        // Deliberately NOT `handleCardClick`/`detail` (PLAN T255) — a show card opens its own
+        // combined detail-and-review modal directly (see `ShowCardReviewModal`'s own remarks), so
+        // it never enters the `selected`/inline-panel state the other three kinds share.
+        return (
+          <ShowShelfCard
+            key={entry.slug}
+            entry={entry}
+            imported={importedShows.has(entry.slug)}
+            onSelect={() => setReviewingShowSlug(entry.slug)}
+          />
+        );
       default:
         return null;
     }
@@ -280,7 +417,10 @@ export function PersonaCatalogClient({
    * against `"theme"` — the `default` renders nothing, so an entry whose kind this client doesn't
    * recognise never falls through to the persona panel by default. Widened at PLAN T202 with the
    * `"font"` arm (`FontDetailPanel`) — before this, a selected font entry fell all the way to
-   * `default`, rendering nothing at all. */
+   * `default`, rendering nothing at all. No `"show"` arm (PLAN T255): a show entry never sets
+   * `detail.kind` to `"loaded"` in the first place (its own card routes through `reviewingShowSlug`
+   * instead, see `renderShelfEntry`'s own `"show"` case) — this switch's `default` arm is simply
+   * never reached for that kind, not a gap. */
   function renderDetailPanel(entry: CatalogShelfEntryDto, loaded: Extract<DetailState, { kind: "loaded" }>): ReactNode {
     // `loaded.detail.card` is `string | null`, `null` exactly when `unreachable` is `true`
     // (types.ts) — and `unreachable: true` never reaches `detail.kind === "loaded"` at all
@@ -300,7 +440,13 @@ export function PersonaCatalogClient({
           />
         );
       case "persona":
-        return <DetailPanel slug={loaded.slug} detail={loaded.detail} onImportClick={() => setReviewing(true)} />;
+        return (
+          <DetailPanel
+            slug={loaded.slug}
+            detail={loaded.detail}
+            onImportClick={() => setReviewingPersonaSlug(loaded.slug)}
+          />
+        );
       case "font":
         return (
           <FontDetailPanel
@@ -341,14 +487,22 @@ export function PersonaCatalogClient({
       {/* `detail.detail.card` is `string | null`, `null` exactly when `unreachable` is `true`
           (types.ts) — and `unreachable: true` never reaches `detail.kind === "loaded"` at all
           (loadDetail routes it to the "error" branch instead), so this guard is a type-level
-          formality, not a real runtime path. */}
-      {reviewing && detail.kind === "loaded" && detail.detail.card !== null && (
+          formality, not a real runtime path.
+
+          `detail.slug === reviewingPersonaSlug` (PLAN T255 review finding F1, HIGH), not a bare
+          `reviewingPersonaSlug !== null` check: `reviewingPersonaSlug` can be armed (by
+          `handleAcceptPersonaOffer`) BEFORE `detail` ever reflects that slug, and `detail` can move
+          on to a DIFFERENT slug (another card clicked) before that fetch resolves — this exact
+          match is what stops either race from popping the modal open for the wrong persona, or for
+          a persona whose own fetch failed outright (`detail.kind` would be `"error"`, never
+          `"loaded"`, for that slug). */}
+      {detail.kind === "loaded" && detail.slug === reviewingPersonaSlug && detail.detail.card !== null && (
         <PersonaCardReviewModal
           cardText={detail.detail.card}
           catalogSlug={detail.slug}
           samples={detail.detail.samplePatter ?? []}
           verb="hire"
-          onCancel={() => setReviewing(false)}
+          onCancel={() => setReviewingPersonaSlug(null)}
           onImported={handleImported}
         />
       )}
@@ -376,7 +530,92 @@ export function PersonaCatalogClient({
           onInstalled={(result) => handleFontInstalled(detail.slug, result)}
         />
       )}
+
+      {/* Cancel = no-op (mirrors the theme/font blocks above): closing this modal by any path just
+          resets `reviewingShowSlug`, never touching the network — see ShowCardReviewModal's own
+          remarks. Independent of `detail`/`selectedEntry` entirely (PLAN T255) — this modal owns
+          its own entry fetch keyed on `reviewingShowSlug` alone. */}
+      {reviewingShowSlug !== null && (
+        <ShowCardReviewModal
+          slug={reviewingShowSlug}
+          alreadyImported={importedShows.has(reviewingShowSlug)}
+          onCancel={() => setReviewingShowSlug(null)}
+          onImported={handleShowImported}
+        />
+      )}
+
+      {/* SPEC F118.3's soft offer — see `handleShowImported`'s own remarks for the eligibility
+          gate and `handleAcceptPersonaOffer`'s own remarks for why accepting reuses the persona
+          import flow verbatim rather than posting anything itself. */}
+      {personaOffer !== null && (
+        <PersonaOfferDialog
+          suggestedSlug={personaOffer.suggestedSlug}
+          showName={personaOffer.showName}
+          onAccept={handleAcceptPersonaOffer}
+          onDecline={handleDeclinePersonaOffer}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * The soft "also hire ⟨persona⟩" offer's own plain yes/no dialog (SPEC F118.3, PLAN T255) — a
+ * small, FILE-LOCAL dialog rather than the shared `useConfirm()` hook (T255 review note):
+ * `PersonaCatalogClient` renders unconditionally on several existing spec harnesses with no
+ * `ConfirmDialogProvider` ancestor, so a `useConfirm()` call inside that component would throw on
+ * every one of them. This component needs no such ancestor: it owns its own state and shares only
+ * the presentational chrome with `ConfirmDialogProvider`'s dialog, via `DialogShell` (PLAN T255
+ * review finding F4 — the same "extract, don't duplicate" reasoning `catalog-badges.tsx` already
+ * applies one level up). Accepting/declining are pure state transitions the PARENT performs
+ * (`onAccept`/`onDecline`), mirroring `FireModal`'s own "no request of its own" shape one level up.
+ */
+function PersonaOfferDialog({
+  suggestedSlug,
+  showName,
+  onAccept,
+  onDecline,
+}: {
+  suggestedSlug: string;
+  showName: string;
+  onAccept: () => void;
+  onDecline: () => void;
+}): ReactNode {
+  // Hand-wired focus restoration (mirrors every other modal in this file): this component mounts
+  // fresh with no real `Dialog.Trigger` of its own, so Radix has nothing to auto-refocus. Owned
+  // HERE, not by `DialogShell` (see that component's own remarks on why the capture timing can't
+  // be centralised between it and `ConfirmDialogProvider`'s own always-mounted dialog).
+  const restoreFocusRef = useRef<HTMLElement | null | undefined>(undefined);
+  if (restoreFocusRef.current === undefined) {
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+
+  return (
+    <DialogShell
+      open
+      onOpenChange={(open) => {
+        if (!open) onDecline();
+      }}
+      onCloseAutoFocus={(event) => {
+        event.preventDefault();
+        restoreFocusRef.current?.focus();
+      }}
+    >
+      <Dialog.Title className="font-display text-[1.1rem] text-ink">
+        {`Also hire "${prettifySlug(suggestedSlug)}"?`}
+      </Dialog.Title>
+      <Dialog.Description className="mt-2 text-[0.85rem] text-mute">
+        {`"${showName}" suggests pairing with this persona. Nothing is hired until you review its own card and confirm.`}
+      </Dialog.Description>
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onDecline}>
+          No thanks
+        </Button>
+        <Button variant="primary" onClick={onAccept}>
+          Review persona
+        </Button>
+      </div>
+    </DialogShell>
   );
 }
 
@@ -630,6 +869,53 @@ function FontShelfCard({
   );
 }
 
+/**
+ * A show entry's shelf card (SPEC F118.1, PLAN T255) — name (title-cased slug, the same fallback
+ * every other kind's card uses — see `ShelfCard`'s own precedent) and `bestFor` chips, both painted
+ * straight off the entry's already-fetched index row, NO manifest fetch while browsing (the shelf's
+ * own zero-cost-browse contract every other kind already holds to). Tagline/flavor are NOT here:
+ * `CatalogShelfEntryDto` carries no such field for any kind (verified against the T254 wire this
+ * task builds against — those two only ever live inside the manifest text `GET
+ * /api/catalog/entries/{slug}` fetches, T255's own dispatch note flagged this as worth checking) —
+ * they render inside `ShowCardReviewModal` instead, the one place this kind pays that fetch.
+ *
+ * Not a toggling `aria-expanded` button like `ShelfCard`/`ThemeShelfCard`/`FontShelfCard` (PLAN
+ * T255): a click here opens `ShowCardReviewModal` directly, a genuinely different interaction
+ * (a dialog, not an inline expand/collapse panel) — `aria-haspopup="dialog"` names that honestly.
+ */
+function ShowShelfCard({
+  entry,
+  imported,
+  onSelect,
+}: {
+  entry: CatalogShelfEntryDto;
+  imported: boolean;
+  onSelect: () => void;
+}): ReactNode {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-haspopup="dialog"
+        className="flex w-full flex-col items-start gap-2 rounded-[6px] border border-line bg-surface p-4 text-left transition-colors duration-[120ms] ease-out hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      >
+        <div className="flex w-full items-center justify-between gap-2">
+          <span className="font-display text-[1.05rem] text-ink">{prettifySlug(entry.slug)}</span>
+          <div className="flex items-center gap-2">
+            {/* Installed-state honesty (PLAN T255, the font/theme gh-#375 precedent, applied to
+                shows): an already-imported slug says so right on the shelf, never left to be
+                discovered only after re-opening the review modal. */}
+            {imported && <Chip>Imported</Chip>}
+            {entry.audience === "mature" && <MatureBadge />}
+          </div>
+        </div>
+        <BestForChips items={entry.bestFor} />
+      </button>
+    </li>
+  );
+}
+
 function DetailPanel({
   slug,
   detail,
@@ -692,35 +978,3 @@ function DetailPanel({
   );
 }
 
-/** The 18+ badge (SPEC F90.4a) — ALWAYS shown on a mature entry, never behind a toggle (ruled).
- * Pill treatment (999px radius) per the Wireless state-badge convention, brass (`--accent-2`) so
- * it reads as a clear, calm label rather than an alarm. */
-function MatureBadge(): ReactNode {
-  return (
-    <span
-      aria-label="Mature content"
-      className="inline-flex w-fit shrink-0 items-center rounded-[999px] border border-accent-2 px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-accent-2"
-    >
-      18+
-    </span>
-  );
-}
-
-/** `bestFor[]` genre chips (SPEC F90.4a) — 3px-radius bordered source-tag treatment, rendered only
- * when present (an entry with none renders nothing, not an empty container). Shared between the
- * shelf grid and the detail panel so the two never drift on how a chip looks. */
-function BestForChips({ items }: { items: string[] }): ReactNode {
-  if (items.length === 0) return null;
-
-  return (
-    <ul aria-label="Best for" className="m-0 flex list-none flex-wrap gap-1.5 p-0">
-      {items.map((tag) => (
-        <li key={tag}>
-          <span className="inline-flex items-center rounded-[3px] border border-line bg-surface-2 px-1.5 py-0.5 text-[0.72rem] text-mute">
-            {tag}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-}

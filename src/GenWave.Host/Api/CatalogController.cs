@@ -261,6 +261,7 @@ public sealed partial class CatalogController(
         CatalogEntryKind.Persona => "persona",
         CatalogEntryKind.Theme => "theme",
         CatalogEntryKind.Font => "font",
+        CatalogEntryKind.Show => "show",
         _ => throw new UnreachableException($"Unhandled {nameof(CatalogEntryKind)} value: {kind}."),
     };
 
@@ -282,6 +283,7 @@ public sealed partial class CatalogController(
     {
         var meta = ParseMetaFields(ok.Content.MetaJson);
         var isFont = ok.Content.Kind == CatalogEntryKind.Font;
+        var isShow = ok.Content.Kind == CatalogEntryKind.Show;
         var fontManifest = isFont ? CatalogFontManifestSerializer.Deserialize(ok.Content.ManifestJson) : null;
         return new CatalogEntryResponse(
             ok.Content.ManifestJson,
@@ -299,8 +301,29 @@ public sealed partial class CatalogController(
             FontSpecimenFile: ResolveSpecimenFile(fontManifest, ok.Content.Assets),
             FontLicense: fontManifest?.License,
             FontVersion: fontManifest?.Version,
-            FontSubset: fontManifest?.Subset);
+            FontSubset: fontManifest?.Subset,
+            SuggestedPersona: isShow ? ValidateSuggestedPersonaShape(meta.SuggestedPersona) : null);
     }
+
+    /// <summary>
+    /// A show entry's OPTIONAL <c>suggestedPersona</c> meta field (SPEC F118.3, PLAN T254) — read
+    /// straight off the already hash-verified <c>meta.json</c> content <see cref="ParseMetaFields"/>
+    /// already parsed for author/description/samplePatter, degraded to <see langword="null"/> (never
+    /// a 400/500) when absent, over-length, or outside the catalog's own slug shape — mirrors
+    /// <c>CatalogIndexValidator.TryParseFamily</c>'s own "decorative, never-fails" posture for an
+    /// optional index-adjacent field. Shape-checked here (unlike <c>Author</c>/<c>Description</c>,
+    /// free text with no further use): genwave-catalog's own <c>show-meta.schema.json</c> pins this
+    /// value to its slug vocabulary because it is "read back out at import time and offered as a
+    /// candidate slug for a second catalog fetch" (that schema's own remarks) — untrusted input the
+    /// same way any other slug-shaped field is, not free text like <c>description</c>. Reuses THIS
+    /// controller's own <see cref="SlugFormat"/>/<see cref="MaxSlugLength"/> — the identical rule a
+    /// real catalog slug is already held to everywhere else on this controller — rather than a second,
+    /// independently-drifting copy of the shape.
+    /// </summary>
+    static string? ValidateSuggestedPersonaShape(string? suggestedPersona) =>
+        suggestedPersona is { Length: > 0 and <= MaxSlugLength } candidate && SlugFormat().IsMatch(candidate)
+            ? candidate
+            : null;
 
     /// <summary>
     /// Resolves the bare filename of the pack's UPRIGHT face — the one real face SPEC F104.4's

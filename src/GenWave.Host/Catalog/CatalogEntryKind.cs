@@ -24,4 +24,15 @@ public enum CatalogEntryKind
     /// (<see cref="CatalogAssetRef"/>).
     /// </summary>
     Font,
+
+    /// <summary>
+    /// A named show (SPEC F118.1, PLAN T254) — the same minimal <c>{manifest, meta}</c> shape a theme
+    /// entry carries, minus a theme's own <c>preview</c>/<c>family</c>/<c>assets</c> (a show has none
+    /// of those): manifest <c>&lt;slug&gt;.show.json</c> (schema version, name, tagline, flavor); meta
+    /// carries the usual author/description/audience/added/bestFor plus the show-specific, OPTIONAL
+    /// <c>suggestedPersona</c> field (SPEC F118.3) — never projected onto the index (unlike
+    /// <c>bestFor</c>), since it is only ever consulted once, at import time
+    /// (<see cref="Api.CatalogController"/>'s own <c>ToEntryResponse</c>).
+    /// </summary>
+    Show,
 }

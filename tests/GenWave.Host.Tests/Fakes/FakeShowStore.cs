@@ -103,6 +103,37 @@ sealed class FakeShowStore : IShowStore
             byId.Remove(id) ? new ShowWriteResult.Deleted() : new ShowWriteResult.NotFound());
     }
 
+    /// <summary>Mirrors <c>ShowRepository.ImportAsync</c>'s own ATOMIC conditional upsert-by-slug
+    /// contract (PLAN T254, F2 review finding): a fresh slug inserts a new row; an existing IMPORTED
+    /// row (<c>ImportedFrom</c> non-null) keeps its id/CreatedAt and replaces every other field,
+    /// re-stamping provenance unconditionally; an existing AUTHORED row (<c>ImportedFrom</c> null)
+    /// declines — returns <see langword="null"/>, nothing touched — the same shape the real
+    /// <c>WHERE imported_from IS NOT NULL</c> conflict clause produces. No scripting knob otherwise —
+    /// the OTHER sad-path import gates (route-slug shape/reservation, budgets) all run in
+    /// ShowsController.Import BEFORE this is ever reached, so there is no further store-level outcome
+    /// left to script (mirrors FakeThemeStore.UpsertAsync's own unscripted shape).</summary>
+    public Task<Show?> ImportAsync(string slug, string name, string? tagline, string? flavor, string importedFrom, CancellationToken ct)
+    {
+        var existing = byId.Values.FirstOrDefault(s => s.Slug == slug);
+        if (existing is { ImportedFrom: null })
+            return Task.FromResult<Show?>(null);
+
+        var now = DateTime.UtcNow;
+        var show = existing is null
+            ? new Show(nextId++, name, slug, NullIfBlank(tagline), NullIfBlank(flavor), importedFrom, now, now, now)
+            : existing with
+            {
+                Name = name,
+                Tagline = NullIfBlank(tagline),
+                Flavor = NullIfBlank(flavor),
+                ImportedFrom = importedFrom,
+                ImportedAt = now,
+                UpdatedAt = now,
+            };
+        byId[show.Id] = show;
+        return Task.FromResult<Show?>(show);
+    }
+
     // A deterministic, display-only stand-in for the production house Slugify (never accessible from
     // this project — internal to GenWave.MediaLibrary) — good enough for round-trip routing through
     // GetBySlugAsync-addressed routes; this double never needs to match LegacyPersonaCardMapper.Slugify
