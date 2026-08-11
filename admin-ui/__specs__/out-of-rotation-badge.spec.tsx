@@ -213,6 +213,7 @@ function renderSafeContent(overrides: Partial<SafeContentClientProps> = {}): Ret
     initialOutOfScope: false,
     defaultText: SEED_MESSAGE,
     defaultTitle: DEFAULT_TITLE,
+    shows: [],
     ...overrides,
   };
   return render(

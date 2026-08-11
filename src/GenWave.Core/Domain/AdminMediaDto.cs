@@ -39,6 +39,12 @@ namespace GenWave.Core.Domain;
 /// as its storage token — <c>liner</c>/<c>station_id</c>/<c>jingle</c>/<c>promo</c> — and is
 /// <see langword="null"/> for scanned rows and for authored rows that predate db/30. Metadata-only:
 /// playout and the safe loop ignore it entirely (a future issue wires kind-aware rotation).
+///
+/// <c>ShowId</c> (SPEC F117.1, STORY-313, PLAN T246) surfaces <c>library.media.show_id</c> — the
+/// show an authored imaging row is scoped to, or <see langword="null"/> for station-wide (the only
+/// meaning every pre-F117 row carries). The Admin UI resolves this id against its own already-loaded
+/// show roster (<c>GET /api/shows</c>) to display a name; this DTO never joins across the db/22
+/// schema/role boundary to fetch one itself.
 /// </summary>
 public sealed record AdminMediaDto(
     string MediaId,
@@ -66,4 +72,5 @@ public sealed record AdminMediaDto(
     bool Rateable = true,
     bool? Explicit = null,
     string? ExplicitSource = null,
-    string? ImagingKind = null);
+    string? ImagingKind = null,
+    long? ShowId = null);

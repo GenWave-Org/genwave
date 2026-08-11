@@ -319,6 +319,29 @@ public static class FeatureShowsApi
         }
     }
 
+    public sealed class ScenarioAuthPosture
+    {
+        [Fact]
+        public async Task AnUnauthenticatedListReturns401()
+        {
+            // Admin:Password set, no cookie -> 401 — the same deny-by-default AdminOnly-plane
+            // posture GET/PUT /api/schedule and POST /api/media/{id}/vote already carry
+            // (Story240_GridHoldsTheWeek.cs's UnauthenticatedCallsMatchSettingsEndpointPosture /
+            // Story112_RatingEndpoints.cs's AWriteWithoutACookieReturns401 — the precedent PLAN
+            // T244 names). ShowsApiWebFactory's own withAdminPassword knob (declared at T240) had
+            // no Fact ever passing it explicitly, so no Fact in this file proved the deny-by-default
+            // policy is actually wired for /api/shows rather than merely assumed from
+            // ShowsController's [Authorize] attribute — this is that proof.
+            var store = new FakeShowStore();
+            await using var factory = new ShowsApiWebFactory(store, withAdminPassword: true);
+            var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+            var response = await client.GetAsync("/api/shows");
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+    }
+
     static async Task<string> DetailAsync(HttpResponseMessage response)
     {
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());

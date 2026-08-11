@@ -1,13 +1,14 @@
-// gh-#149 — Authored segments carry a Station Imaging content kind (wire half).
+// STORY-313 — Show scope rides the imaging authoring endpoint (F117.1, PLAN T246 — wire half).
 //
-// BDD specification — xUnit, in-process. POST /api/safe-segments grows an optional `kind` token
-// (liner | station_id | jingle | promo): absent defaults to liner (today's behavior), a known
-// token flows into SafeSegmentRequest.Kind unchanged, and an unknown token is a 400 with nothing
-// rendered (F27.3's validate-first discipline). Kinds are METADATA-ONLY — the render pipeline is
-// untouched by them. Mirrors Story079's construct-the-controller-with-fakes pattern (the fakes
-// there are file-scoped, so this file carries its own minimal copies — the BulkRatingController
-// duplicate-helper precedent); IShowStore is the one exception — no scenario here names a showId,
-// so the shared Fakes.FakeShowStore's empty-roster default is enough.
+// BDD specification — xUnit, in-process. POST /api/safe-segments grows an optional `showId` field:
+// absent/null stays station-wide (today's only behavior), a known id flows into
+// SafeSegmentRequest.ShowId unchanged, and an unknown id is a 400 with nothing rendered (F27.3's
+// validate-first discipline — the same posture libraryId/bedMediaId already have). Mirrors
+// Gh149_ImagingKindEndpoint.cs's own construct-the-controller-with-fakes pattern for the other
+// collaborators (file-scoped minimal copies — the BulkRatingController duplicate-helper precedent);
+// IShowStore is the one exception — it uses the shared Fakes.FakeShowStore, since seeding a known
+// show is a one-liner (`new FakeShowStore([new Show(...)])`) that five call sites across this
+// project already share.
 
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -22,7 +23,7 @@ using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
 
-// ── In-process fakes (minimal Gh149 copies of Story079's file-scoped fakes) ──────────────────────
+// ── In-process fakes (minimal Story313 copies of Story079's file-scoped fakes) ───────────────────
 
 file sealed class FakeOptionsMonitor<T>(T value) : IOptionsMonitor<T>
 {
@@ -69,9 +70,9 @@ file sealed class FakeAdminMediaLookup : IAdminMediaLookup
             : ((AdminMediaDto Row, long LibraryId)?)null);
 }
 
-file static class Gh149ControllerFactory
+file static class Story313ControllerFactory
 {
-    public static (SafeSegmentsController Controller, FakeSafeSegmentAuthor Author) Build()
+    public static (SafeSegmentsController Controller, FakeSafeSegmentAuthor Author) Build(IShowStore? showStore = null)
     {
         var author = new FakeSafeSegmentAuthor { Result = SafeSegmentAuthorResult.Success(42) };
         var lookup = new FakeAdminMediaLookup();
@@ -81,7 +82,7 @@ file static class Gh149ControllerFactory
             author,
             new FakeLibraryRepository(1),
             lookup,
-            new FakeShowStore(),
+            showStore ?? new FakeShowStore(),
             new FakeOptionsMonitor<StationOptions>(new StationOptions
             {
                 Id    = "test",
@@ -121,81 +122,70 @@ file static class Gh149ControllerFactory
         CueOutSec:      null,
         Eligible:       true,
         Version:        "12345",
-        ImagingKind:    "jingle");
+        ShowId:         7);
 }
 
 // ── Specs ────────────────────────────────────────────────────────────────────────────────────────
 
-public static class FeatureImagingKindEndpoint
+public static class FeatureSafeSegmentShowScope
 {
     // ---------------------------------------------------------------------
-    // HAPPY PATH — a known kind token flows into the authoring request
+    // HAPPY PATH — a known showId flows into the authoring request
     // ---------------------------------------------------------------------
 
-    public sealed class ScenarioAKnownKindFlowsIntoTheAuthoringRequest
+    public sealed class ScenarioAKnownShowIdFlowsIntoTheAuthoringRequest
     {
         [Fact]
-        public async Task StationIdIsParsedAndPassedThrough()
+        public async Task AKnownShowIdIsPassedThrough()
         {
-            var (controller, author) = Gh149ControllerFactory.Build();
+            var show = new Show(7, "Show 7", "show-7", null, null, null, null, DateTime.UtcNow, DateTime.UtcNow);
+            var (controller, author) = Story313ControllerFactory.Build(new FakeShowStore([show]));
 
             var result = await controller.Create(
-                new SafeSegmentCreateRequest("Text.", 1, Kind: "station_id"), CancellationToken.None);
+                new SafeSegmentCreateRequest("Text.", 1, ShowId: 7), CancellationToken.None);
 
             Assert.IsType<CreatedResult>(result);
-            Assert.Equal(ImagingKind.StationId, author.LastRequest!.Kind);
-        }
-
-        [Fact]
-        public async Task TheEnumSpellingIsAcceptedCaseInsensitively()
-        {
-            var (controller, author) = Gh149ControllerFactory.Build();
-
-            var result = await controller.Create(
-                new SafeSegmentCreateRequest("Text.", 1, Kind: "StationId"), CancellationToken.None);
-
-            Assert.IsType<CreatedResult>(result);
-            Assert.Equal(ImagingKind.StationId, author.LastRequest!.Kind);
+            Assert.Equal(7, author.LastRequest!.ShowId);
         }
     }
 
     // ---------------------------------------------------------------------
-    // HAPPY PATH — an absent kind defaults to Liner (today's behavior)
+    // HAPPY PATH — an absent showId stays station-wide (today's behavior)
     // ---------------------------------------------------------------------
 
-    public sealed class ScenarioAnAbsentKindDefaultsToLiner
+    public sealed class ScenarioAnAbsentShowIdDefaultsToStationWide
     {
         [Fact]
-        public async Task ARequestWithoutAKindAuthorsALiner()
+        public async Task ARequestWithoutAShowIdAuthorsAStationWideRow()
         {
-            var (controller, author) = Gh149ControllerFactory.Build();
+            var (controller, author) = Story313ControllerFactory.Build();
 
             var result = await controller.Create(
                 new SafeSegmentCreateRequest("Text.", 1), CancellationToken.None);
 
             Assert.IsType<CreatedResult>(result);
-            Assert.Equal(ImagingKind.Liner, author.LastRequest!.Kind);
+            Assert.Null(author.LastRequest!.ShowId);
         }
     }
 
     // ---------------------------------------------------------------------
-    // SAD PATH — an unknown kind is a 400 with nothing rendered
+    // SAD PATH — an unknown showId is a 400 with nothing rendered
     // ---------------------------------------------------------------------
 
-    public sealed class ScenarioAnUnknownKindIsRejectedBeforeAnyRender
+    public sealed class ScenarioAnUnknownShowIdIsRejectedBeforeAnyRender
     {
         [Fact]
-        public async Task AnUnknownTokenReturns400AndNeverReachesTheAuthor()
+        public async Task AnUnknownIdReturns400AndNeverReachesTheAuthor()
         {
-            var (controller, author) = Gh149ControllerFactory.Build();
+            var (controller, author) = Story313ControllerFactory.Build(new FakeShowStore());
 
             var result = await controller.Create(
-                new SafeSegmentCreateRequest("Text.", 1, Kind: "sweeper-of-doom"), CancellationToken.None);
+                new SafeSegmentCreateRequest("Text.", 1, ShowId: 999), CancellationToken.None);
 
             var bad = Assert.IsType<BadRequestObjectResult>(result);
             var problem = Assert.IsType<ProblemDetails>(bad.Value);
             Assert.Equal(StatusCodes.Status400BadRequest, problem.Status);
-            Assert.Contains("liner, station_id, jingle, promo", problem.Detail);
+            Assert.Contains("999", problem.Detail);
             Assert.Equal(0, author.CallCount);
         }
     }

@@ -137,7 +137,8 @@ public sealed class SafeSegmentAuthor(
         // treated as NULL, exactly like the enricher, never as an authoring failure.
         var cue = await MeasureCueAsync(artifactPath, ct);
         var energy = await MeasureEnergyAsync(artifactPath, cue, ct);
-        var insert = BuildInsert(request.LibraryId, artifactPath, cfg.Format, tags, loudness, cue, energy, request.Kind);
+        var insert = BuildInsert(
+            request.LibraryId, artifactPath, cfg.Format, tags, loudness, cue, energy, request.Kind, request.ShowId);
 
         try
         {
@@ -196,7 +197,7 @@ public sealed class SafeSegmentAuthor(
     /// </summary>
     static AuthoredMediaInsert BuildInsert(
         long libraryId, string artifactPath, string format, AudioTags tags,
-        LoudnessMeasurement loudness, CuePoints? cue, EnergyPoints? energy, ImagingKind kind)
+        LoudnessMeasurement loudness, CuePoints? cue, EnergyPoints? energy, ImagingKind kind, long? showId)
     {
         var info = new FileInfo(artifactPath);
         var durationMs = cue is not null
@@ -217,7 +218,8 @@ public sealed class SafeSegmentAuthor(
             SampleRate: null,
             Channels: null,
             BitrateKbps: null,
-            Kind: kind);
+            Kind: kind,
+            ShowId: showId);
     }
 
     static void DeleteIfExists(string path)

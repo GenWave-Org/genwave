@@ -25,6 +25,20 @@ namespace GenWave.Core.Domain;
 /// construction site (test fixtures included) stays diff-free — the additive-null-member shape SPEC
 /// F116.1's own "showless station byte-identical" test leans on.
 /// </para>
+///
+/// <para>
+/// <b>PLAN T243 — <see cref="ShowId"/> is the write-authoritative field; <see cref="Show"/> stays the
+/// load-time projection.</b> A caller building a segment to WRITE (the PUT wire's
+/// <c>ScheduleController.ToSegment</c>, or any future caller of
+/// <see cref="Abstractions.IScheduleStore.ReplaceWeekAsync"/>) sets only <see cref="ShowId"/> — the
+/// bare foreign key <c>segment_schedule.show_id</c> actually stores — never fabricates a
+/// <see cref="ShowSummary"/> with invented <c>Name</c>/<c>Tagline</c>/<c>Flavor</c> just to carry an id
+/// through. <c>ScheduleRepository</c>'s own load path sets BOTH fields from the same row (so a loaded
+/// segment's <c>ShowId</c> and <c>Show?.Id</c> always agree), but every other reader —
+/// <see cref="ScheduleWeekVersion.Compute"/> included — reads <see cref="ShowId"/> alone, so a writer
+/// and the load-time projection can never disagree about which field means "the show this block
+/// carries."
+/// </para>
 /// </summary>
 public sealed record ScheduleSegment(
     long? Id,
@@ -35,4 +49,5 @@ public sealed record ScheduleSegment(
     IReadOnlyList<string>? Genres,
     double? EnergyMin,
     double? EnergyMax,
-    ShowSummary? Show = null);
+    ShowSummary? Show = null,
+    long? ShowId = null);

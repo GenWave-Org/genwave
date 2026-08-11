@@ -20,6 +20,7 @@ using GenWave.Host.Api;
 using GenWave.Host.Configuration;
 using GenWave.Host.Options;
 using GenWave.Host.Seeding;
+using GenWave.Host.Tests.Fakes;
 using GenWave.Tts;
 // This test project also references GenWave.Loudness (see the csproj comment), which brings the
 // `GenWave.Loudness` namespace into scope and shadows the unqualified `Loudness` domain type name
@@ -264,6 +265,7 @@ file static class EndpointFixture
             author,
             new StubLibraryRepository(1),
             new BridgingAdminMediaLookup(writer),
+            new FakeShowStore(),
             new FakeOptionsMonitor<StationOptions>(stationOptions),
             new FakeOptionsMonitor<TtsOptions>(new TtsOptions()),
             NullLogger<SafeSegmentsController>.Instance)

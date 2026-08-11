@@ -55,7 +55,7 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { ScheduleEditor } from "../app/(authed)/schedule/ScheduleEditor";
 import type { ScheduleEditorProps } from "../app/(authed)/schedule/ScheduleEditor";
-import type { RosterPersonaDto, ScheduleWeekDto } from "../app/(authed)/schedule/types";
+import type { RosterPersonaDto, ScheduleShowsStatus, ScheduleWeekDto } from "../app/(authed)/schedule/types";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -65,6 +65,12 @@ const REX: RosterPersonaDto = { id: 1, name: "Radio Rex" };
 const NOVA: RosterPersonaDto = { id: 2, name: "Nova" };
 
 const EMPTY_WEEK: ScheduleWeekDto = { segments: [] };
+
+// This suite never opens the show-picker section of the side panel (that's
+// schedule-show-picker.spec.tsx's own scope) — an empty, already-loaded roster is enough to satisfy
+// `ScheduleEditorProps.shows` (STORY-313 P6: the schedule page now loads it once, server-side, and
+// passes it straight through).
+const LOADED_SHOWS: ScheduleShowsStatus = { kind: "loaded", shows: [] };
 
 // ---------------------------------------------------------------------------
 // Fetch mock — this component issues exactly one kind of request ever
@@ -105,6 +111,7 @@ function renderEditor(overrides: Partial<ScheduleEditorProps> = {}): ReturnType<
   const props: ScheduleEditorProps = {
     initialWeek: EMPTY_WEEK,
     personas: [REX, NOVA],
+    shows: LOADED_SHOWS,
     ...overrides,
   };
   return render(
@@ -198,7 +205,7 @@ describe("Feature: Paint the week", () => {
 
       const body = lastPutBody(mockFetch);
       expect(body.segments).toEqual([
-        { id: null, day: 1, startMinute: 0, endMinute: 90, personaId: REX.id, genres: null, energyMin: null, energyMax: null },
+        { id: null, day: 1, startMinute: 0, endMinute: 90, personaId: REX.id, genres: null, energyMin: null, energyMax: null, showId: null },
       ]);
     });
 
@@ -237,7 +244,7 @@ describe("Feature: Paint the week", () => {
 
       const body = lastPutBody(mockFetch);
       expect(body.segments).toEqual([
-        { id: null, day: 1, startMinute: 480, endMinute: 720, personaId: REX.id, genres: null, energyMin: null, energyMax: null },
+        { id: null, day: 1, startMinute: 480, endMinute: 720, personaId: REX.id, genres: null, energyMin: null, energyMax: null, showId: null },
       ]);
     });
 
@@ -252,7 +259,7 @@ describe("Feature: Paint the week", () => {
 
       const body = lastPutBody(mockFetch);
       expect(body.segments).toEqual([
-        { id: null, day: 0, startMinute: 300, endMinute: 360, personaId: null, genres: null, energyMin: null, energyMax: null },
+        { id: null, day: 0, startMinute: 300, endMinute: 360, personaId: null, genres: null, energyMin: null, energyMax: null, showId: null },
       ]);
     });
   });
@@ -269,6 +276,7 @@ describe("Feature: Paint the week", () => {
           genres: ["rock", "pop"],
           energyMin: 0.2,
           energyMax: 0.8,
+          showId: null,
         },
       ],
     };
@@ -305,7 +313,7 @@ describe("Feature: Paint the week", () => {
 
       const body = lastPutBody(mockFetch);
       expect(body.segments).toEqual([
-        { id: null, day: 3, startMinute: 360, endMinute: 600, personaId: REX.id, genres: null, energyMin: null, energyMax: null },
+        { id: null, day: 3, startMinute: 360, endMinute: 600, personaId: REX.id, genres: null, energyMin: null, energyMax: null, showId: null },
       ]);
     });
   });
@@ -313,7 +321,7 @@ describe("Feature: Paint the week", () => {
   describe("Scenario: save is the whole week", () => {
     const NOVA_WEEK: ScheduleWeekDto = {
       segments: [
-        { id: 3, day: 5, startMinute: 0, endMinute: 60, personaId: NOVA.id, genres: null, energyMin: null, energyMax: null },
+        { id: 3, day: 5, startMinute: 0, endMinute: 60, personaId: NOVA.id, genres: null, energyMin: null, energyMax: null, showId: null },
       ],
     };
 
@@ -345,7 +353,7 @@ describe("Feature: Paint the week", () => {
     it("the grid re-renders from the PUT response", async () => {
       const serverWeek: ScheduleWeekDto = {
         segments: [
-          { id: 99, day: 4, startMinute: 60, endMinute: 120, personaId: NOVA.id, genres: null, energyMin: null, energyMax: null },
+          { id: 99, day: 4, startMinute: 60, endMinute: 120, personaId: NOVA.id, genres: null, energyMin: null, energyMax: null, showId: null },
         ],
       };
       makePutFetchMock({ status: 200, body: serverWeek });

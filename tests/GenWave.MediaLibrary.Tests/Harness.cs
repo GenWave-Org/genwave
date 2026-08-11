@@ -351,7 +351,8 @@ static class Harness
         LoudnessMeasurement? loudness = null,
         CuePoints? cue = null,
         EnergyPoints? energy = null,
-        ImagingKind kind = ImagingKind.Liner) =>
+        ImagingKind kind = ImagingKind.Liner,
+        long? showId = null) =>
         new(
             Path: path ?? "/authored/probe.wav",
             Format: "wav",
@@ -366,7 +367,8 @@ static class Harness
             SampleRate: 44_100,
             Channels: 2,
             BitrateKbps: 1_000,
-            Kind: kind);
+            Kind: kind,
+            ShowId: showId);
 
     public static async Task<(double? IntegratedLufs, double? TruePeakDbtp, bool? Measurable,
         double? CueInSec, double? CueOutSec, double? IntroEnergy, double? OutroEnergy)>

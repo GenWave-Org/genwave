@@ -244,6 +244,20 @@ export function ScheduleIcon(props: IconProps): ReactNode {
   );
 }
 
+/** Shows nav glyph (SPEC F119.1, STORY-312, PLAN T244) — a rounded card with a title bar and one
+ * text line: a single named show entry, distinct from {@link BoothLogIcon}'s bound multi-line
+ * ledger (a LOG, not an authored roster) and {@link PersonaCatalogIcon}'s three stacked shelf cards
+ * (a browsable catalog, not this station's own authored list). */
+export function ShowsIcon(props: IconProps): ReactNode {
+  return (
+    <IconBase {...props}>
+      <rect x="2" y="3" width="12" height="10" rx="1.4" />
+      <line x1="2" y1="6.5" x2="14" y2="6.5" />
+      <line x1="4.5" y1="9.5" x2="11.5" y2="9.5" />
+    </IconBase>
+  );
+}
+
 /** Wardrobe nav glyph (PLAN T203, SPEC F104.7; nav item renamed "Library" → "Wardrobe" at PLAN
  * T204, Dean's ruling — this glyph itself is unchanged, only its export name follows the rename) —
  * an open book: two pages meeting at a center spine, reading as "the station's own shelf of

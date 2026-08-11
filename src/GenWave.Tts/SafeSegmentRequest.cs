@@ -53,6 +53,14 @@ using GenWave.Core.Domain;
 /// <see cref="ImagingKind.Liner"/> (today's behavior) so pre-kind callers, including the boot
 /// seed, are unchanged.
 /// </param>
+/// <param name="ShowId">
+/// The show this authored row is scoped to (SPEC F117.1, STORY-313, PLAN T246), resolved and
+/// validated by the caller (<see cref="SafeSegmentRequest"/>'s own layering rule: this project takes
+/// no store dependency beyond the authored-insert write seam) before it ever reaches here. Null (the
+/// default) is station-wide — every pre-F117 caller, including the boot seed, is unchanged. Rides
+/// straight through to <see cref="AuthoredMediaInsert.ShowId"/>; changes nothing about how the
+/// segment renders or plays.
+/// </param>
 public sealed record SafeSegmentRequest(
     string Text,
     long LibraryId,
@@ -64,4 +72,5 @@ public sealed record SafeSegmentRequest(
     string? Title = null,
     string? Voice = null,
     BedSpec? Bed = null,
-    ImagingKind Kind = ImagingKind.Liner);
+    ImagingKind Kind = ImagingKind.Liner,
+    long? ShowId = null);

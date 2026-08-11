@@ -36,6 +36,22 @@ namespace GenWave.Host.Api;
 /// the generic 500 — folding it into "reload and try again" would hide a fault that reloading can't
 /// fix.
 /// </para>
+///
+/// <para>
+/// <b>PLAN T243 — the whole-grid PUT round-trips show identity too, alongside the dedicated
+/// run-span endpoint.</b> <see cref="ScheduleSegmentDto.ShowId"/> now rides both verbs:
+/// <see cref="Get"/> emits each block's current show id, and <see cref="Put"/>'s <c>ToSegment</c>
+/// carries a submitted <c>showId</c> straight into <see cref="ScheduleSegment.ShowId"/> — the field
+/// <see cref="IScheduleStore.ReplaceWeekAsync"/> actually writes into <c>segment_schedule.show_id</c>
+/// (see <see cref="ScheduleSegment"/>'s own remarks on why <c>ShowId</c>, never a fabricated
+/// <see cref="ShowSummary"/>, is what a writer sets). This closes the repaint gap the previous version
+/// of this remarks paragraph named: a T129 drag-paint whole-grid repaint that echoes back the document
+/// it loaded (GET's own <c>ShowId</c> included) no longer silently drops show assignments set through
+/// <see cref="AssignShow"/>. <see cref="AssignShow"/> remains the ONLY wire surface with F119.2's
+/// run-span semantics — a single <see cref="Put"/> row edits exactly the one block it names, never fans
+/// out across a run — so a client wanting the span behavior still calls that endpoint; <see cref="Put"/>
+/// is not a replacement for it, just no longer a silent eraser of its results.
+/// </para>
 /// </summary>
 [ApiController]
 [Route("api")]
@@ -97,6 +113,48 @@ public sealed class ScheduleController(IScheduleStore scheduleStore, ILogger<Sch
         };
     }
 
+    /// <summary>
+    /// POST /api/schedule/assign-show — SPEC F119.2's run-span show assignment (STORY-313, PLAN T243),
+    /// entirely over <see cref="IScheduleStore.AssignShowAsync"/> — the ONLY wire surface with the
+    /// F119.2 span rule (see this class's own remarks: <see cref="Put"/> also round-trips show identity
+    /// now, but one row at a time, never fanned out across a run). 200 naming every block id the write
+    /// actually touched, alongside the fresh week fingerprint (SPEC F2, gh-#255's own guard — a
+    /// subsequent <see cref="Put"/> from an editor that re-rendered off THIS response's
+    /// <see cref="AssignShowResponseDto.Version"/> compares cleanly against the store, the same way a
+    /// GET's own <see cref="ScheduleWeekDto.Version"/> would); 400 ProblemDetails when <c>blockId</c> or
+    /// a non-null <c>showId</c> names no row — mirrors
+    /// <c>PersonaController.ResolvePreviewPersonaAsync</c>'s own "unknown id referenced by the request
+    /// body is a 400, not a 404" posture (a body field, not a URL resource, is what's invalid). Nothing
+    /// is written on either rejection.
+    ///
+    /// <para>
+    /// <see cref="AssignShowRequestDto.ApplyToRun"/> is wire-nullable (SPEC F6): an absent field means
+    /// the grid side-panel's own documented default — run-span, exactly as if <c>true</c> had been sent
+    /// — never System.Text.Json's ordinary "missing non-nullable bool defaults to false" behavior, which
+    /// would silently narrow every legacy/incomplete submission to the single clicked block instead.
+    /// </para>
+    /// </summary>
+    [HttpPost("schedule/assign-show")]
+    [Consumes("application/json")]
+    public async Task<IActionResult> AssignShow([FromBody] AssignShowRequestDto request, CancellationToken ct)
+    {
+        var applyToRun = request.ApplyToRun ?? true;
+        var result = await scheduleStore.AssignShowAsync(request.BlockId, request.ShowId, applyToRun, ct);
+
+        if (result is ShowAssignResult.Assigned assigned)
+            logger.LogInformation(
+                "Schedule show assignment blockId={BlockId} showId={ShowId} applyToRun={ApplyToRun} updatedCount={Count}",
+                request.BlockId, request.ShowId, applyToRun, assigned.UpdatedBlockIds.Count);
+
+        return result switch
+        {
+            ShowAssignResult.Assigned a => Ok(new AssignShowResponseDto(a.UpdatedBlockIds, a.Version)),
+            ShowAssignResult.BlockNotFound => BadRequest(UnknownBlockProblem(request.BlockId)),
+            ShowAssignResult.ShowNotFound => BadRequest(UnknownShowProblem(request.ShowId)),
+            _ => StatusCode(StatusCodes.Status500InternalServerError),
+        };
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     static ScheduleWeekDto ToDto(ScheduleWeekSnapshot week) =>
@@ -104,15 +162,17 @@ public sealed class ScheduleController(IScheduleStore scheduleStore, ILogger<Sch
 
     static ScheduleSegmentDto ToDto(ScheduleSegment segment) => new(
         segment.Id, (int)segment.Day, segment.StartMinute, segment.EndMinute,
-        segment.PersonaId, segment.Genres, segment.EnergyMin, segment.EnergyMax);
+        segment.PersonaId, segment.Genres, segment.EnergyMin, segment.EnergyMax, segment.ShowId);
 
     // Id is deliberately never read here — see ScheduleSegmentDto's own remarks: a submitted week is
-    // always brand-new rows to the store, and PersonaId/Genres/EnergyMin/EnergyMax are bound only to
-    // the fields ScheduleSegmentDto itself declares, so nothing beyond those known fields can ever
-    // reach IScheduleStore from this request body.
+    // always brand-new rows to the store, and PersonaId/Genres/EnergyMin/EnergyMax/ShowId are bound
+    // only to the fields ScheduleSegmentDto itself declares, so nothing beyond those known fields can
+    // ever reach IScheduleStore from this request body. ShowId reaches ScheduleSegment.ShowId — never
+    // Show, which stays load-projection-only (ScheduleSegment's own remarks): this endpoint never
+    // fabricates a ShowSummary just to carry an id through.
     static ScheduleSegment ToSegment(ScheduleSegmentDto dto) => new(
         Id: null, (DayOfWeek)dto.Day, dto.StartMinute, dto.EndMinute,
-        dto.PersonaId, dto.Genres, dto.EnergyMin, dto.EnergyMax);
+        dto.PersonaId, dto.Genres, dto.EnergyMin, dto.EnergyMax, Show: null, ShowId: dto.ShowId);
 
     static ProblemDetails ValidationProblem(IReadOnlyList<ScheduleCellError> errors)
     {
@@ -169,4 +229,21 @@ public sealed class ScheduleController(IScheduleStore scheduleStore, ILogger<Sch
         problem.Extensions["conflict"] = "staleWeek";
         return problem;
     }
+
+    // PLAN T243 — mirrors PersonaController's own UnknownPersonaProblem/UnknownMediaProblem posture:
+    // an id the REQUEST BODY names (never a URL segment) that turns out not to exist is a 400, not a
+    // 404 — the request itself is the malformed thing, not a missing URL resource.
+    static ProblemDetails UnknownBlockProblem(long blockId) => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Unknown schedule block.",
+        Detail = $"No schedule block with id {blockId} exists.",
+    };
+
+    static ProblemDetails UnknownShowProblem(long? showId) => new()
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title  = "Unknown show.",
+        Detail = $"No show with id {showId} exists.",
+    };
 }

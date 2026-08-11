@@ -50,6 +50,7 @@ function renderClient(overrides: Partial<SafeContentClientProps> = {}): ReturnTy
     initialOutOfScope: false,
     defaultText: SEED_MESSAGE,
     defaultTitle: DEFAULT_TITLE,
+    shows: [],
     ...overrides,
   };
   return render(<SafeContentClient {...props} />);

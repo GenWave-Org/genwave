@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { apiGet } from "@/lib/api";
 import type { LibraryDto } from "@/lib/library";
+import type { ImagingShowOption } from "./imaging-show-scope";
 import { SafeContentClient } from "./SafeContentClient";
 import type { SafeSegmentDto } from "./SafeContentClient";
 
@@ -27,13 +28,44 @@ function resolveDefaultLibraryId(libraries: LibraryDto[]): number | null {
   return libraries[0]?.id ?? null;
 }
 
+/** The two fields this page's projection reads off `GET /api/shows`'s full `ShowDto` — mirrors the
+ * schedule page's own `ScheduleShowWireRow` local-not-imported posture (PLAN T245's own precedent):
+ * this folder has no reason to know that DTO's full shape. */
+interface ImagingShowWireRow {
+  id: number;
+  name: string;
+}
+
+/** Projects a settled `GET /api/shows` result down to the scope picker's roster (SPEC F117.1/
+ * F119.4, PLAN T246) — empty roster on anything but a 200 (a rejected promise, same as a non-2xx
+ * response), never thrown: the scope picker is a minimal, optional delta on this editor (F119.4),
+ * not load-bearing the way the libraries fetch below is. Mirrors schedule/page.tsx's own
+ * `deriveShowsStatus` PromiseSettledResult posture.
+ *
+ * `GET /api/shows` lives on the Settings/format-clock plane, not this page's own Operator plane
+ * (F27's surface) — reading it here couples the two; a future RBAC split that separates them would
+ * empty this picker silently rather than error loudly, which is the intended degrade for now (the
+ * picker is optional, per the remarks above) but worth naming for whoever draws that boundary. */
+async function deriveShowOptions(result: PromiseSettledResult<Response>): Promise<ImagingShowOption[]> {
+  if (result.status === "rejected" || !result.value.ok) return [];
+  const rows = (await result.value.json()) as ImagingShowWireRow[];
+  return rows.map((row) => ({ id: row.id, name: row.name }));
+}
+
 export default async function SafeContentPage(): Promise<ReactNode> {
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
 
-  const librariesResp = await apiGet("/api/libraries", { cookies: cookieHeader });
+  // Promise.allSettled, not sequential awaits: a rejected fetch (network error, DNS, ...) must
+  // never throw out of this Server Component and 500 the whole page (there's no error.tsx here) —
+  // mirrors schedule/page.tsx and personas/page.tsx's own posture. The two reads are independent
+  // (shows doesn't need libraries), so they run in parallel rather than one after the other.
+  const [librariesResult, showsResult] = await Promise.allSettled([
+    apiGet("/api/libraries", { cookies: cookieHeader }),
+    apiGet("/api/shows", { cookies: cookieHeader }),
+  ]);
 
-  if (!librariesResp.ok) {
+  if (librariesResult.status === "rejected" || !librariesResult.value.ok) {
     return (
       <main>
         <h1 className="font-display text-[1.35rem] font-semibold text-ink">Station Imaging</h1>
@@ -42,8 +74,9 @@ export default async function SafeContentPage(): Promise<ReactNode> {
     );
   }
 
-  const libraries = (await librariesResp.json()) as LibraryDto[];
+  const libraries = (await librariesResult.value.json()) as LibraryDto[];
   const defaultLibraryId = resolveDefaultLibraryId(libraries);
+  const shows = await deriveShowOptions(showsResult);
 
   let initialSegments: SafeSegmentDto[] = [];
   let initialOutOfScope = false;
@@ -77,6 +110,7 @@ export default async function SafeContentPage(): Promise<ReactNode> {
           initialOutOfScope={initialOutOfScope}
           defaultText={DEFAULT_SEED_MESSAGE}
           defaultTitle={DEFAULT_TITLE}
+          shows={shows}
         />
       </div>
     </main>

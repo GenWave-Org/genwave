@@ -137,6 +137,7 @@ function renderSafeContentClient() {
     initialOutOfScope: false,
     defaultText: "You're listening to {StationName}.",
     defaultTitle: "Please Stand By",
+    shows: [],
   };
   return render(
     <>

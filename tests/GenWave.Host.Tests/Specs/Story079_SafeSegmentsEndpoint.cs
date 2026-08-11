@@ -24,6 +24,7 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
 using GenWave.Host.Options;
+using GenWave.Host.Tests.Fakes;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
@@ -102,11 +103,13 @@ file static class SafeSegmentsControllerFactory
         ILibraryRepository libraryRepository,
         IAdminMediaLookup adminLookup,
         StationOptions? stationOptions = null,
-        TtsOptions? ttsOptions = null) =>
+        TtsOptions? ttsOptions = null,
+        IShowStore? showStore = null) =>
         new(
             author,
             libraryRepository,
             adminLookup,
+            showStore ?? new FakeShowStore(),
             new FakeOptionsMonitor<StationOptions>(stationOptions ?? DefaultStationOptions()),
             new FakeOptionsMonitor<TtsOptions>(ttsOptions ?? new TtsOptions()),
             NullLogger<SafeSegmentsController>.Instance)

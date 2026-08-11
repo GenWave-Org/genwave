@@ -41,6 +41,19 @@ namespace GenWave.Core.Domain;
 /// Metadata-only for now — playout/safe-loop behavior is unchanged by it. Defaults to
 /// <see cref="ImagingKind.Liner"/> so pre-kind call sites keep compiling with today's behavior.
 /// </param>
+/// <param name="ShowId">
+/// The show this row is scoped to, stored on <c>library.media.show_id</c> (SPEC F117.1, STORY-313,
+/// PLAN T246) — <c>null</c> (the default) means station-wide, today's only meaning for every
+/// pre-F117 call site. NO FK (the db/22 grant-boundary precedent already used elsewhere on this
+/// table — see the db/35 migration's own remarks): this project never validates the id against
+/// <c>station.show</c> itself, since that table lives across the schema/role boundary this seam
+/// deliberately never crosses; the caller (the authoring endpoint) is responsible for resolving it
+/// against a real show first. A scoped row is meant to air only during its show — the pool/drain
+/// side of that rule is PLAN T250's, not this seam's. Only ever populated for the
+/// <c>station_id</c> kind today — the admin UI's picker is gated to that kind alone (RATIFIED by
+/// Dean, 2026-08-10: a deliberate product call, not just builder judgment); widening to another
+/// kind is additive once that kind has a scoped consumer, same as this one did.
+/// </param>
 public sealed record AuthoredMediaInsert(
     string Path,
     string Format,
@@ -55,4 +68,5 @@ public sealed record AuthoredMediaInsert(
     int? SampleRate,
     short? Channels,
     int? BitrateKbps,
-    ImagingKind Kind = ImagingKind.Liner);
+    ImagingKind Kind = ImagingKind.Liner,
+    long? ShowId = null);

@@ -34,6 +34,7 @@ function renderClient(overrides: Partial<SafeContentClientProps> = {}): ReturnTy
     initialOutOfScope: false,
     defaultText: "You're listening to {StationName}. We'll be right back — stay tuned.",
     defaultTitle: "Please Stand By",
+    shows: [],
     ...overrides,
   };
   return render(

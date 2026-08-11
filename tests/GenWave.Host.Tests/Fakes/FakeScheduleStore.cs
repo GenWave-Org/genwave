@@ -111,4 +111,32 @@ sealed class FakeScheduleStore(ScheduleWeekSnapshot? initial = null) : ISchedule
 
     public Task<IReadOnlyList<ScheduledSlot>> GetSlotsByShowIdAsync(long showId, CancellationToken ct) =>
         Task.FromResult(SlotsByShowId.TryGetValue(showId, out var slots) ? slots : []);
+
+    /// <summary>Scripts the NEXT <see cref="AssignShowAsync"/> call's outcome verbatim. Cleared after
+    /// one use. Deliberately NOT a reimplementation of <see cref="GenWave.MediaLibrary.Station.ScheduleRepository"/>'s
+    /// own F119.2 run-span algorithm (that algorithm is proven for real, against a real Postgres
+    /// fixture, in <c>GenWave.MediaLibrary.Tests/Specs/Story313_ScheduleShowAssignment.cs</c> — a
+    /// reimplementation here would be a lookalike double, mirrors this class's own posture toward
+    /// ReplaceWeekAsync's per-cell validation). <see cref="ScheduleController.AssignShow"/>'s own specs
+    /// only need this double to prove the WIRE mapping of a real <see cref="ShowAssignResult"/>.</summary>
+    public ShowAssignResult? NextAssignShowResult { get; set; }
+
+    /// <summary>Every <see cref="AssignShowAsync"/> call's own arguments, in call order — lets a spec
+    /// assert the controller passed <c>blockId</c>/<c>showId</c>/<c>applyToRun</c> through unchanged
+    /// (narrow-to-one, clear) without this double having to judge them itself.</summary>
+    public List<(long BlockId, long? ShowId, bool ApplyToRun)> AssignShowAsyncCalls { get; } = [];
+
+    public Task<ShowAssignResult> AssignShowAsync(long blockId, long? showId, bool applyToRun, CancellationToken ct)
+    {
+        AssignShowAsyncCalls.Add((blockId, showId, applyToRun));
+
+        if (NextAssignShowResult is { } scripted)
+        {
+            NextAssignShowResult = null;
+            return Task.FromResult(scripted);
+        }
+
+        return Task.FromResult<ShowAssignResult>(
+            new ShowAssignResult.Assigned([blockId], ScheduleWeekVersion.Compute(current.Segments)));
+    }
 }
