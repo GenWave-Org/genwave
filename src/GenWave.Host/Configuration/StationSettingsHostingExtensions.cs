@@ -80,12 +80,22 @@ static class StationSettingsHostingExtensions
         // registers no consumer); this is the first Host call site.
         builder.Services.AddScheduleStore(stationConnStr);
 
+        // Dated-specials store (SPEC F120.1, STORY-317, PLAN T258-T260) — same station_svc connection
+        // string as every registration above; station.schedule_special lives in the same schema.
+        // SpecialsRepository shipped dark at T258; SpecialsController (PLAN T259) made this store's
+        // FIRST Host call site (author/list/delete a special through the Admin UI). CachingScheduleResolver
+        // just below is the SECOND — and the one that makes a written special actually shadow the
+        // weekly grid live, on the production feeder tick, rather than remain authoring-surface-only
+        // (see that type's own class remarks for the caching/invalidation design).
+        builder.Services.AddScheduleSpecialStore(stationConnStr);
+
         // CachingScheduleResolver MUST be a singleton — its constructor subscribes to
-        // IScheduleStore.WeekChanged and never unsubscribes (no IDisposable), so a scoped/transient
-        // registration would leak one subscription (and the wrapped store reference) per instance
-        // created (T119 review F6, T119's own class remarks). ScheduleResolver itself is a pure
-        // (snapshot, wall clock) function with no state of its own — plain AddSingleton is enough,
-        // no lifetime hazard either way.
+        // IScheduleStore.WeekChanged AND (PLAN T260) IScheduleSpecialStore.SpecialsChanged, never
+        // unsubscribing from either (no IDisposable), so a scoped/transient registration would leak one
+        // subscription (and both wrapped store references) per instance created (T119 review F6, T119's
+        // own class remarks). ScheduleResolver itself is a pure (snapshot, specials, wall clock)
+        // function with no state of its own — plain AddSingleton is enough, no lifetime hazard either
+        // way.
         builder.Services.AddSingleton<ScheduleResolver>();
         builder.Services.AddSingleton<CachingScheduleResolver>();
 
@@ -133,15 +143,6 @@ static class StationSettingsHostingExtensions
         // dark at T239 (AddShowStore itself registers no consumer): ShowsController (PLAN T240) is
         // the first Host call site.
         builder.Services.AddShowStore(stationConnStr);
-
-        // Dated-specials store (SPEC F120.1, STORY-317, PLAN T258) — same station_svc connection
-        // string as every registration above; station.schedule_special lives in the same schema.
-        // SpecialsRepository shipped dark at T258 (AddScheduleSpecialStore itself registers no
-        // consumer): SpecialsController (PLAN T259) is the first Host call site — the resolver's own
-        // specials-first rung (PLAN T258, GenWave.Orchestration.ScheduleResolver) still takes specials
-        // as a plain in-memory argument, not this store, until PLAN T260 wires that consumption live
-        // (see SpecialsController's own class remarks for the full T118→T120-pattern honesty note).
-        builder.Services.AddScheduleSpecialStore(stationConnStr);
 
         return builder;
     }

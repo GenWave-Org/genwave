@@ -44,9 +44,11 @@ namespace GenWave.Orchestration;
 ///
 /// <para>
 /// <b>Specials-first rung (SPEC F120.2, PLAN T258): TODAY shadows, TODAY+TOMORROW race the boundary.</b>
-/// <see cref="Resolve"/>'s optional <c>specials</c> parameter is the ONLY diff this rung makes — every
-/// existing call site (<see cref="CachingScheduleResolver"/>'s own <c>resolver.Resolve(snapshot)</c>
-/// calls) stays byte-identical, since the parameter defaults to none. A dated row whose
+/// <see cref="Resolve"/>'s optional <c>specials</c> parameter is the ONLY diff this rung makes — a
+/// caller that never has specials to offer (e.g. a hand-built <see cref="ScheduleWeekSnapshot"/> in a
+/// pure-function spec) stays byte-identical, since the parameter defaults to none.
+/// <see cref="CachingScheduleResolver"/> is PLAN T260's own such caller: it feeds this parameter from
+/// <c>IScheduleSpecialStore</c> on every resolve (see its own remarks). A dated row whose
 /// <see cref="ScheduleSegment"/>-shaped projection covers "now" (see <see cref="ProjectSpecial"/>) is
 /// fed through the SAME <see cref="EffectiveAssignment"/>/<see cref="BuildSegmentEnvelope"/> pipeline a
 /// weekly block already uses — no downstream consumer of <see cref="OnAirSnapshot"/> gains a
@@ -75,9 +77,12 @@ namespace GenWave.Orchestration;
 /// </para>
 ///
 /// <para>
-/// Not wired into <see cref="CachingScheduleResolver"/>'s live cache/invalidation yet (PLAN T258 ships
-/// this rung dark, same posture <see cref="IScheduleStore"/> itself shipped at T118): PLAN T260 is the
-/// "wire" task that makes a written special shadow the weekly grid on the production feeder tick.
+/// Wired into <see cref="CachingScheduleResolver"/>'s live cache/invalidation as of PLAN T260 (PLAN
+/// T258 shipped this rung dark, same posture <see cref="IScheduleStore"/> itself shipped at T118, and
+/// PLAN T259 made <c>IScheduleSpecialStore</c> a Host call site for authoring only) — a special written
+/// through <c>SpecialsController</c> now shadows the weekly grid on the production feeder tick within
+/// one cache cycle. See <see cref="CachingScheduleResolver"/>'s own remarks for exactly how it feeds
+/// this method's <c>specials</c> parameter and what invalidates its cache.
 /// </para>
 /// </summary>
 public sealed class ScheduleResolver(
@@ -122,6 +127,24 @@ public sealed class ScheduleResolver(
         return current is null
             ? ResolveGap(snapshot.Segments, todaysSpecials, tomorrowsSpecials, zone, todayDate, today, tomorrow, nowMinute, localNow)
             : ResolveCurrent(snapshot.Segments, todaysSpecials, tomorrowsSpecials, current, zone, todayDate, today, tomorrow, nowMinute, localNow);
+    }
+
+    /// <summary>
+    /// Station-local "today" (SPEC F91.2's own clock seam), resolved fresh on every call through the
+    /// SAME optional <see cref="IStationClockProvider"/>-over-<see cref="TimeProvider"/> resolution
+    /// <see cref="Resolve"/> itself uses to compute its own <c>onDate</c> — pulled out as its own pure,
+    /// side-effect-free public member (PLAN T260 review SF4) so a caller that needs ONLY the date, not
+    /// a full <see cref="Resolve"/>, has one place to ask rather than a hand-rolled second copy of this
+    /// arithmetic. <see cref="CachingScheduleResolver"/> is exactly that caller: anchoring its specials
+    /// cache's reload date through THIS method (rather than resolving its own clock independently)
+    /// makes "what day does the cache think it is" and "what day does the resolver think it is"
+    /// structurally the SAME answer, not two independently-computed ones that could drift apart.
+    /// </summary>
+    public DateOnly StationToday()
+    {
+        var zone = stationClock?.Zone ?? timeProvider.LocalTimeZone;
+        var localNow = stationClock?.LocalNow ?? TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), zone);
+        return DateOnly.FromDateTime(localNow.Date);
     }
 
     /// <summary>

@@ -7,15 +7,18 @@ namespace GenWave.Core.Abstractions;
 /// dated-specials tail that shadows <see cref="IScheduleStore"/>'s weekly grid for a single calendar
 /// date's span. Deliberately minimal (SPEC F120.1's own "CRUD minimal" instruction, PLAN T258): list +
 /// create + delete only — no update (a caller wanting to change a special deletes and re-creates it;
-/// nothing in this epic's own scope needs an in-place edit). Ships the same "dark seam" way
+/// nothing in this epic's own scope needs an in-place edit). Shipped the same "dark seam" way
 /// <see cref="IScheduleStore"/> itself did at T118 and <see cref="IShowStore"/> did at T239: this
-/// interface, its implementation, and its DI registration extension all exist after PLAN T258, but no
-/// Host composition root calls the registration and no consumer reads from it yet — the resolver's own
-/// specials-first rung (<c>GenWave.Orchestration.ScheduleResolver</c>) takes a specials LIST as a plain
-/// argument, never this store, so it stays reachable and unit-testable with zero DI/database
-/// involvement. PLAN T259 (the dated-list form + API) is this seam's first Host consumer; PLAN T260
-/// ("wire") is what makes a written special shadow the weekly grid LIVE, on the production 3s feeder
-/// tick — see <c>ScheduleResolver</c>'s own remarks for exactly what is, and is not, wired at T258.
+/// interface, its implementation, and its DI registration extension all existed after PLAN T258 with no
+/// Host composition root calling the registration and no consumer reading from it — the resolver's own
+/// specials-first rung (<c>GenWave.Orchestration.ScheduleResolver</c>) took a specials LIST as a plain
+/// argument, never this store, so it stayed reachable and unit-testable with zero DI/database
+/// involvement even before this seam went live. That dark period is over as of PLAN T260:
+/// <c>GenWave.Host.Api.SpecialsController</c> (PLAN T259) is this seam's first Host consumer, for
+/// authoring; <c>GenWave.Orchestration.CachingScheduleResolver</c> (PLAN T260) is the second, and the
+/// one that makes a written special shadow the weekly grid LIVE, on the production feeder tick — see
+/// that type's own remarks for the caching/invalidation design, and <c>ScheduleResolver</c>'s own
+/// remarks for the specials-first rung it feeds.
 /// </summary>
 public interface IScheduleSpecialStore
 {
@@ -26,9 +29,9 @@ public interface IScheduleSpecialStore
     /// caller supplies "today" (station-local, via whatever clock seam it already holds) rather than
     /// this method reading one. Unbounded above <paramref name="fromDate"/> deliberately — specials are
     /// rare rows (SPEC F120.1's own framing), so an admin list view showing "every special from today
-    /// forward" carries no real pagination concern; a caller wanting a narrower window (e.g. the T260
-    /// resolver cache's own bounded lookahead) filters the returned list itself rather than this method
-    /// growing a second date parameter no other caller needs yet.
+    /// forward" carries no real pagination concern; a caller wanting a narrower window (e.g.
+    /// <c>CachingScheduleResolver</c>'s own today+tomorrow lookahead, PLAN T260) filters the returned
+    /// list itself rather than this method growing a second date parameter no other caller needs.
     /// </summary>
     Task<IReadOnlyList<ScheduleSpecial>> ListUpcomingAsync(DateOnly fromDate, CancellationToken ct);
 
@@ -70,8 +73,8 @@ public interface IScheduleSpecialStore
     /// <summary>
     /// Raised synchronously right after a successful <see cref="CreateAsync"/> or <see cref="DeleteAsync"/>
     /// commit — the sibling of <see cref="IScheduleStore.WeekChanged"/> (SPEC F120's own design note: "a
-    /// sibling event") a future in-memory cache (PLAN T260) subscribes to for invalidation. Never raised
-    /// on a no-op or a rejected write.
+    /// sibling event") <c>GenWave.Orchestration.CachingScheduleResolver</c> (PLAN T260) subscribes to
+    /// for invalidation. Never raised on a no-op or a rejected write.
     /// </summary>
     event Action? SpecialsChanged;
 }

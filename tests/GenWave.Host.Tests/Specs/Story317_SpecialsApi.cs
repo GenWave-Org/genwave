@@ -16,8 +16,10 @@
 //
 // PLAN T259's own honesty note (SpecialsController's class remarks): these Facts prove the store is
 // LIVE (authorable/listable/deletable through the Admin UI's own API surface) — none of them touch
-// GenWave.Orchestration.ScheduleResolver, which still does not consume this store in production until
-// PLAN T260.
+// GenWave.Orchestration.ScheduleResolver/CachingScheduleResolver directly; the resolver's own
+// consumption of this store (PLAN T260, now landed) is proven in
+// GenWave.Orchestration.Tests/Story241_StationFollowsTheClock.cs's own ScenarioSpecialsRideTheCache
+// instead — this file stays scoped to the WIRE mapping described above.
 
 using System.Net;
 using System.Net.Http.Json;

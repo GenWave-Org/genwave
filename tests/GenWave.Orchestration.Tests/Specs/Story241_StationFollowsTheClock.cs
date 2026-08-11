@@ -47,7 +47,7 @@ public static class FeatureStationFollowsTheClock
         var scheduleStore = new FakeScheduleStore(snapshot);
         var stationDefault = new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault);
         var resolver = new ScheduleResolver(time, stationDefault);
-        var caching = new CachingScheduleResolver(scheduleStore, resolver);
+        var caching = new CachingScheduleResolver(scheduleStore, resolver, new FakeScheduleSpecialStore());
         var personaAccessor = new OnAirPersonaAccessor(caching, personaStore, NullLogger<OnAirPersonaAccessor>.Instance);
         var envelopeProvider = new ScheduleEnvelopeProvider(caching, stationDefault);
 
@@ -143,7 +143,7 @@ public static class FeatureStationFollowsTheClock
                 PersonaId: 3, Genres: null, EnergyMin: null, EnergyMax: null);
             var store = new FakeScheduleStore(new ScheduleWeekSnapshot([segment]));
             var resolver = new ScheduleResolver(time, new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault));
-            var caching = new CachingScheduleResolver(store, resolver);
+            var caching = new CachingScheduleResolver(store, resolver, new FakeScheduleSpecialStore());
 
             for (var tick = 0; tick < 5; tick++)
                 await caching.ResolveAsync(CancellationToken.None);
@@ -289,7 +289,7 @@ public static class FeatureStationFollowsTheClock
             var scheduleStore = new FakeScheduleStore(TwoDjSchedule());
             var stationDefault = new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault);
             var resolver = new ScheduleResolver(time, stationDefault);
-            var caching = new CachingScheduleResolver(scheduleStore, resolver);
+            var caching = new CachingScheduleResolver(scheduleStore, resolver, new FakeScheduleSpecialStore());
             var personaAccessor = new OnAirPersonaAccessor(caching, TwoDjStore(), NullLogger<OnAirPersonaAccessor>.Instance);
 
             // Exploration roll (0.99, above the 5% floor) ⇒ not exploration; sample roll (0.0) ⇒
@@ -654,7 +654,7 @@ public static class FeatureStationFollowsTheClock
                 PersonaId: 2, Genres: null, EnergyMin: null, EnergyMax: null);
             var store = new FakeScheduleStore(new ScheduleWeekSnapshot([staleSegment]));
             var resolver = new ScheduleResolver(time, new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault));
-            var caching = new CachingScheduleResolver(store, resolver);
+            var caching = new CachingScheduleResolver(store, resolver, new FakeScheduleSpecialStore());
 
             store.ArmGate();
             var resolveTask = caching.ResolveAsync(CancellationToken.None);
@@ -668,6 +668,226 @@ public static class FeatureStationFollowsTheClock
             Assert.Equal(1L, first.PersonaId); // acceptable: the read in flight when the write landed
             Assert.Equal(2L, second.PersonaId); // the mid-flight invalidation was NOT lost — reloaded
             Assert.Equal(2, store.LoadWeekAsyncCallCount);
+        }
+    }
+
+    public sealed class ScenarioSpecialsRideTheCache
+    {
+        // PLAN T260 — the cache layer that feeds ScheduleResolver's own specials-first rung (SPEC
+        // F120.2, proven at the pure-function level by FeatureSpecialsRung) with a REAL
+        // IScheduleSpecialStore: a written special shadows the weekly grid through BOTH
+        // CachingScheduleResolver call sites (ResolveAsync's own fresh return value, and
+        // TryGetCurrent's sync cached-snapshot read), a specials-store write (SpecialsChanged)
+        // invalidates the cache the same way a schedule-store write (WeekChanged) already does
+        // (including the SAME mid-flight-invalidation race ScenarioCacheReloadsAfterMidFlightInvalidation
+        // above proves for the week snapshot), and the cache ALSO reloads once a station-local day rolls
+        // over — but review MF1/MF2 corrected this suite's own first draft here: that reload is NOT
+        // needed for the shadow to resolve correctly (CachingScheduleResolver's own class remarks explain
+        // why), so ScenarioSpecialsRideTheCache's own rollover fact proves the RELOAD happens
+        // structurally (a store call count), not a symptom that would hold even without it.
+
+        static ScheduleSegment WeeklyBlock(DayOfWeek day, long personaId) => new(
+            Id: 1, Day: day, StartMinute: 0, EndMinute: 1440,
+            PersonaId: personaId, Genres: null, EnergyMin: null, EnergyMax: null);
+
+        [Fact]
+        public async Task ResolveAsyncServesASpecialFromTheSpecialsStore()
+        {
+            var now = new DateTimeOffset(2026, 3, 2, 10, 0, 0, TimeSpan.Zero);
+            var time = new FakeTimeProvider(now);
+            var day = now.DayOfWeek;
+            var onDate = DateOnly.FromDateTime(now.DateTime);
+            var store = new FakeScheduleStore(new ScheduleWeekSnapshot([WeeklyBlock(day, personaId: 1)]));
+            var special = new ScheduleSpecial(Id: 9, onDate, 0, 1440, PersonaId: 99, Genres: null, EnergyMin: null, EnergyMax: null);
+            var specialStore = new FakeScheduleSpecialStore([special]);
+            var resolver = new ScheduleResolver(time, new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault));
+            var caching = new CachingScheduleResolver(store, resolver, specialStore);
+
+            var result = await caching.ResolveAsync(CancellationToken.None);
+
+            Assert.Equal(99L, result.PersonaId);
+        }
+
+        [Fact]
+        public async Task TryGetCurrentAlsoServesTheCachedSpecial()
+        {
+            // TryGetCurrent's own contract (this type's remarks): sync, no store round trip, reads
+            // whatever ResolveAsync most recently cached — proving the special rides THAT cached path
+            // too, not only ResolveAsync's own return value.
+            var now = new DateTimeOffset(2026, 3, 2, 10, 0, 0, TimeSpan.Zero);
+            var time = new FakeTimeProvider(now);
+            var day = now.DayOfWeek;
+            var onDate = DateOnly.FromDateTime(now.DateTime);
+            var store = new FakeScheduleStore(new ScheduleWeekSnapshot([WeeklyBlock(day, personaId: 1)]));
+            var special = new ScheduleSpecial(Id: 9, onDate, 0, 1440, PersonaId: 99, Genres: null, EnergyMin: null, EnergyMax: null);
+            var specialStore = new FakeScheduleSpecialStore([special]);
+            var resolver = new ScheduleResolver(time, new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault));
+            var caching = new CachingScheduleResolver(store, resolver, specialStore);
+            await caching.ResolveAsync(CancellationToken.None); // warms the cache TryGetCurrent reads
+
+            var result = caching.TryGetCurrent();
+
+            Assert.NotNull(result);
+            Assert.Equal(99L, result.PersonaId);
+        }
+
+        [Fact]
+        public async Task SpecialsChangedInvalidatesTheCacheJustLikeAScheduleWrite()
+        {
+            var now = new DateTimeOffset(2026, 3, 2, 10, 0, 0, TimeSpan.Zero);
+            var time = new FakeTimeProvider(now);
+            var day = now.DayOfWeek;
+            var onDate = DateOnly.FromDateTime(now.DateTime);
+            var store = new FakeScheduleStore(new ScheduleWeekSnapshot([WeeklyBlock(day, personaId: 1)]));
+            var specialStore = new FakeScheduleSpecialStore(); // empty — no special yet
+            var resolver = new ScheduleResolver(time, new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault));
+            var caching = new CachingScheduleResolver(store, resolver, specialStore);
+
+            var before = await caching.ResolveAsync(CancellationToken.None);
+            Assert.Equal(1L, before.PersonaId); // the weekly block, no special yet
+
+            var special = new ScheduleSpecial(Id: 9, onDate, 0, 1440, PersonaId: 99, Genres: null, EnergyMin: null, EnergyMax: null);
+            specialStore.SetSpecials([special]);
+            specialStore.RaiseSpecialsChanged(); // the write — no WeekChanged involved at all
+
+            var after = await caching.ResolveAsync(CancellationToken.None);
+
+            Assert.Equal(99L, after.PersonaId);
+            Assert.Equal(2, specialStore.ListUpcomingAsyncCallCount);
+        }
+
+        [Fact]
+        public async Task RepeatedResolvesOnTheSameDayIssueExactlyOneSpecialsStoreQuery()
+        {
+            // Mirrors ScenarioResolvingTheCurrentSegment.FeederTickPathIssuesNoScheduleStoreQuery — the
+            // specials cache must be exactly as tick-cheap as the week snapshot one when nothing has
+            // changed and the day has not rolled over.
+            var now = new DateTimeOffset(2026, 3, 2, 10, 30, 0, TimeSpan.Zero);
+            var time = new FakeTimeProvider(now);
+            var day = now.DayOfWeek;
+            var store = new FakeScheduleStore(new ScheduleWeekSnapshot([WeeklyBlock(day, personaId: 1)]));
+            var specialStore = new FakeScheduleSpecialStore();
+            var resolver = new ScheduleResolver(time, new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault));
+            var caching = new CachingScheduleResolver(store, resolver, specialStore);
+
+            for (var tick = 0; tick < 5; tick++)
+                await caching.ResolveAsync(CancellationToken.None);
+
+            Assert.Equal(1, specialStore.ListUpcomingAsyncCallCount);
+        }
+
+        [Fact]
+        public async Task ResolveAsyncPassesStationTodayAsTheFromDate()
+        {
+            // Structural pin (PLAN T260 design: "pass today, take what comes; the resolver filters") —
+            // proves the fromDate this cache asks the store for is station-local "today," not some
+            // other date, without needing a special in the response to observe it indirectly.
+            var now = new DateTimeOffset(2026, 3, 2, 10, 0, 0, TimeSpan.Zero);
+            var time = new FakeTimeProvider(now);
+            var day = now.DayOfWeek;
+            var store = new FakeScheduleStore(new ScheduleWeekSnapshot([WeeklyBlock(day, personaId: 1)]));
+            var specialStore = new FakeScheduleSpecialStore();
+            var resolver = new ScheduleResolver(time, new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault));
+            var caching = new CachingScheduleResolver(store, resolver, specialStore);
+
+            await caching.ResolveAsync(CancellationToken.None);
+
+            Assert.Equal([new DateOnly(2026, 3, 2)], specialStore.RequestedFromDates);
+        }
+
+        [Fact]
+        public async Task DayRolloverReloadsTheSpecialsCacheEvenWithNoWriteAtAll()
+        {
+            // REVIEW MF1/MF2 (this suite's own first draft here was a FALSE proof — see below).
+            //
+            // What this does NOT prove: that the reload is needed for the SHADOW to resolve correctly.
+            // IScheduleSpecialStore.ListUpcomingAsync(fromDate) is unbounded ABOVE fromDate, so a special
+            // dated TOMORROW is already present in the very FIRST load's own result — seeded here from
+            // construction, exactly as a real store would already return it — and ScheduleResolver.Resolve
+            // re-computes "today"/"tomorrow" fresh on every call regardless of when the cache last
+            // reloaded. So the shadow would resolve correctly here even with ZERO reloads after the
+            // first; asserting on PersonaId after the rollover would hold either way and prove nothing
+            // about the rollover mechanism specifically.
+            //
+            // What this DOES prove instead (CachingScheduleResolver's own class remarks give the real,
+            // non-correctness reasons: fromDate re-anchoring for memory/CPU hygiene on a 24/7 process,
+            // and a once-a-day backstop for a write that bypasses SpecialsChanged entirely — e.g. a
+            // manual psql INSERT/DELETE): the cache still issues a SECOND ListUpcomingAsync call once
+            // the station-local date rolls over, with NO SpecialsChanged raised and NO write of any kind
+            // — proven structurally, by the store's own call count, the only honest way to observe it.
+            var beforeMidnight = new DateTimeOffset(2026, 3, 2, 23, 0, 0, TimeSpan.Zero);
+            var time = new FakeTimeProvider(beforeMidnight);
+            var mondayBlock = WeeklyBlock(beforeMidnight.DayOfWeek, personaId: 1);
+            var store = new FakeScheduleStore(new ScheduleWeekSnapshot([mondayBlock]));
+            var tomorrowsSpecial = new ScheduleSpecial(
+                Id: 9, DateOnly.FromDateTime(beforeMidnight.AddDays(1).DateTime), 0, 1440,
+                PersonaId: 99, Genres: null, EnergyMin: null, EnergyMax: null);
+            var specialStore = new FakeScheduleSpecialStore([tomorrowsSpecial]); // seeded from the START
+            var resolver = new ScheduleResolver(time, new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault));
+            var caching = new CachingScheduleResolver(store, resolver, specialStore);
+
+            var before = await caching.ResolveAsync(CancellationToken.None);
+            Assert.Equal(1L, before.PersonaId); // tonight's weekly block — the special is dated TOMORROW
+            Assert.Equal(1, specialStore.ListUpcomingAsyncCallCount);
+
+            time.Advance(TimeSpan.FromHours(2)); // crosses midnight — no SpecialsChanged, no write at all
+            await caching.ResolveAsync(CancellationToken.None);
+
+            Assert.Equal(2, specialStore.ListUpcomingAsyncCallCount); // reloaded once for the new day
+        }
+
+        [Fact]
+        public async Task SpecialsChangedDuringInFlightLoadForcesReloadOnNextResolve()
+        {
+            // REAL DEFECT pin, mirrors ScenarioCacheReloadsAfterMidFlightInvalidation above (T119
+            // review F4) for the week snapshot — the fact FakeScheduleSpecialStore's own
+            // ArmGate/ReleaseGate pair exists for: a SpecialsChanged invalidation firing WHILE a
+            // specials load is already in flight must not be lost — the cache must reload again on a
+            // SUBSEQUENT call rather than serving the pre-invalidation list forever. Proves the
+            // clear-before-the-await discipline ResolveAsync's own remarks describe, for specials.
+            var now = new DateTimeOffset(2026, 3, 2, 10, 0, 0, TimeSpan.Zero);
+            var time = new FakeTimeProvider(now);
+            var day = now.DayOfWeek;
+            var onDate = DateOnly.FromDateTime(now.DateTime);
+            var store = new FakeScheduleStore(new ScheduleWeekSnapshot([WeeklyBlock(day, personaId: 1)]));
+            var staleSpecial = new ScheduleSpecial(Id: 1, onDate, 0, 1440, PersonaId: 11, Genres: null, EnergyMin: null, EnergyMax: null);
+            var freshSpecial = new ScheduleSpecial(Id: 2, onDate, 0, 1440, PersonaId: 22, Genres: null, EnergyMin: null, EnergyMax: null);
+            var specialStore = new FakeScheduleSpecialStore([staleSpecial]);
+            var resolver = new ScheduleResolver(time, new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault));
+            var caching = new CachingScheduleResolver(store, resolver, specialStore);
+
+            specialStore.ArmGate();
+            var resolveTask = caching.ResolveAsync(CancellationToken.None);
+            specialStore.RaiseSpecialsChanged(); // fires WHILE the first load is still in flight
+            specialStore.SetSpecials([freshSpecial]); // the write that triggered it
+            specialStore.ReleaseGate([staleSpecial]); // this in-flight read started before the write
+            var first = await resolveTask;
+
+            var second = await caching.ResolveAsync(CancellationToken.None);
+
+            Assert.Equal(11L, first.PersonaId); // acceptable: the read in flight when the write landed
+            Assert.Equal(22L, second.PersonaId); // the mid-flight invalidation was NOT lost — reloaded
+            Assert.Equal(2, specialStore.ListUpcomingAsyncCallCount);
+        }
+
+        [Fact]
+        public async Task SpecialsStoreLoadFaultPropagatesFromResolveAsync()
+        {
+            // The specials store gets no bespoke fault handling of its own inside CachingScheduleResolver
+            // — an IScheduleSpecialStore fault propagates out of ResolveAsync exactly the way an
+            // IScheduleStore fault already does (ScenarioStalePersonaDegrades.ScheduleStoreLoadFaultDegradesWithWarnOnceAndRecovers
+            // below proves OnAirPersonaAccessor's own never-throws/WarnOnce degrade wraps BOTH the same
+            // way) — nothing here swallows or reshapes it.
+            var now = new DateTimeOffset(2026, 3, 2, 10, 0, 0, TimeSpan.Zero);
+            var time = new FakeTimeProvider(now);
+            var day = now.DayOfWeek;
+            var store = new FakeScheduleStore(new ScheduleWeekSnapshot([WeeklyBlock(day, personaId: 1)]));
+            var specialStore = new FakeScheduleSpecialStore();
+            specialStore.ThrowOnListUpcoming = new InvalidOperationException("specials store boom (test double)");
+            var resolver = new ScheduleResolver(time, new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault));
+            var caching = new CachingScheduleResolver(store, resolver, specialStore);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => caching.ResolveAsync(CancellationToken.None));
         }
     }
 
@@ -687,7 +907,7 @@ public static class FeatureStationFollowsTheClock
             var time = new FakeTimeProvider(now);
             var store = new FakeScheduleStore(new ScheduleWeekSnapshot([segment]));
             var resolver = new ScheduleResolver(time, new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault));
-            var caching = new CachingScheduleResolver(store, resolver);
+            var caching = new CachingScheduleResolver(store, resolver, new FakeScheduleSpecialStore());
             var personaStore = new FakePersonaStore();
             var logger = new CapturingLogger<OnAirPersonaAccessor>();
             var accessor = new OnAirPersonaAccessor(caching, personaStore, logger);
@@ -744,7 +964,7 @@ public static class FeatureStationFollowsTheClock
             var time = new FakeTimeProvider(now);
             var scheduleStore = new FakeScheduleStore(new ScheduleWeekSnapshot([segment]));
             var resolver = new ScheduleResolver(time, new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault));
-            var caching = new CachingScheduleResolver(scheduleStore, resolver);
+            var caching = new CachingScheduleResolver(scheduleStore, resolver, new FakeScheduleSpecialStore());
             var personaStore = new FakePersonaStore();
             personaStore.Add(MakePersona(7, "DJ Fault", "af_fault"));
             var logger = new CapturingLogger<OnAirPersonaAccessor>();

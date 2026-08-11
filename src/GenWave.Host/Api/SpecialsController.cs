@@ -17,15 +17,15 @@ namespace GenWave.Host.Api;
 /// exact round trip on an "edit").
 ///
 /// <para>
-/// <b>THE RESOLVER DOES NOT CONSUME THIS YET (T118→T120 pattern, repeated here).</b> Exactly like
-/// <see cref="IScheduleStore"/> at PLAN T118/T120 and <see cref="IShowStore"/> at PLAN T239/T240: this
-/// controller makes the store LIVE (an operator can author/list/remove a special through the Admin
-/// UI, right now), but <c>GenWave.Orchestration.ScheduleResolver</c>'s specials-first rung (SPEC
-/// F120.2, PLAN T258) still only ever receives specials as a plain in-memory argument a caller
-/// supplies — nothing on the production feeder path reads through <see cref="IScheduleSpecialStore"/>
-/// yet, so a special written here has NO effect on what plays until PLAN T260 wires the resolver's own
-/// consumption of this store. State this honestly rather than implying otherwise: this endpoint is
-/// authoring surface only, not a live broadcast control, until that task lands.
+/// <b>The resolver now consumes this live (T118→T120→T260 pattern, completed here).</b> Exactly like
+/// <see cref="IScheduleStore"/> reached T120 and <see cref="IShowStore"/> reached T240: this
+/// controller already made the store LIVE for authoring (PLAN T259 — an operator can author/list/
+/// remove a special through the Admin UI); PLAN T260 is what makes a written special actually shadow
+/// the weekly grid on the production feeder tick — <c>GenWave.Orchestration.CachingScheduleResolver</c>
+/// reads <see cref="IScheduleSpecialStore"/> itself now (alongside <see cref="IScheduleStore"/>) and
+/// hands the result into <c>ScheduleResolver.Resolve</c>'s own specials-first rung (SPEC F120.2, PLAN
+/// T258) on every resolve. A special created through this controller is on the air within one cache
+/// cycle — see <c>CachingScheduleResolver</c>'s own remarks for the caching/invalidation design.
 /// </para>
 ///
 /// <para>
@@ -62,9 +62,9 @@ namespace GenWave.Host.Api;
 /// (or adding a sibling case) is a <see cref="Core.Domain.PersonaWriteResult"/> shape change that
 /// ripples into <c>PersonaRepository</c> and every existing <c>PersonaWriteResult.ScheduledElsewhere</c>
 /// consumer/test, not a same-shaped filter this controller's own store can already answer. That
-/// widening rides PLAN T260's own standing (the resolver-wiring task this store's specials already
-/// wait on) rather than landing here; <c>PersonaController.Delete</c>'s own remarks carry the interim,
-/// honest fallback-wording fix in the meantime.
+/// widening is deliberately out of scope here too — a follow-up beyond PLAN T260 (the resolver-wiring
+/// task, now landed) — rather than landing in this controller; <c>PersonaController.Delete</c>'s own
+/// remarks carry the interim, honest fallback-wording fix in the meantime.
 /// </para>
 ///
 /// Security: <c>AdminSurface</c>/<c>Settings</c> — the same admin-plane pairing every other

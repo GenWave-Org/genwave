@@ -52,7 +52,7 @@ public static class FeatureDjsHandOffAudibly
         var scheduleStore = new FakeScheduleStore(snapshot);
         var stationDefault = new FakeStationDefaultEnvelopeSource(SegmentEnvelope.StationDefault);
         var resolver = new ScheduleResolver(time, stationDefault);
-        var caching = new CachingScheduleResolver(scheduleStore, resolver);
+        var caching = new CachingScheduleResolver(scheduleStore, resolver, new FakeScheduleSpecialStore());
         var personaAccessor = new OnAirPersonaAccessor(caching, personaStore, NullLogger<OnAirPersonaAccessor>.Instance);
 
         var identityProvider = new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default"));

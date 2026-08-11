@@ -16,11 +16,13 @@ namespace GenWave.MediaLibrary.Station;
 /// Registered once, process-wide, by <see cref="MediaLibraryServiceCollectionExtensions.AddMediaLibrary"/>
 /// (PLAN T258 review MF2 — <c>station.schedule_special.on_date</c> is this codebase's first
 /// <see cref="DateOnly"/>-typed column) right beside <c>DefaultTypeMap.MatchNamesWithUnderscores</c>,
-/// NOT by <see cref="SpecialsRepository"/>'s own construction: that store ships dark (no Host call site
-/// until PLAN T260), so a registration tied to ITS construction would never fire in production before
-/// then. <c>AddMediaLibrary</c> runs unconditionally at Host startup regardless of which individual
-/// store DI extensions are wired, so any later repository adding another date-only column inherits this
-/// registration for free — a claim that is only true because it lives here, not on a dark seam.
+/// NOT by <see cref="SpecialsRepository"/>'s own construction: at T258 that store shipped dark (no Host
+/// call site at all yet), so a registration tied to ITS construction would never have fired in
+/// production before <c>SpecialsController</c> (PLAN T259) and <c>CachingScheduleResolver</c> (PLAN
+/// T260) later became its two Host call sites. <c>AddMediaLibrary</c> runs unconditionally at Host
+/// startup regardless of which individual store DI extensions are wired, so any later repository adding
+/// another date-only column inherits this registration for free — a claim that is only true because it
+/// lives here, not on a dark seam.
 /// </para>
 /// </summary>
 sealed class DateOnlyTypeHandler : SqlMapper.TypeHandler<DateOnly>
