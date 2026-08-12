@@ -37,8 +37,9 @@ using GenWave.Host.Theming;
 /// body itself — never chooses a fetch target. Every entry path is checked against the entry's own
 /// manifest pattern / <see cref="MetaPathPattern"/> (no absolute URL, no <c>..</c>, no leading
 /// <c>/</c> — the pattern shape itself rules all three out, it can never match anything but a plain
-/// <c>entries/&lt;slug&gt;/&lt;name&gt;.(persona|theme|meta).json</c> relative path), that its own
-/// <c>&lt;slug&gt;</c> segment equals the entry's own declared slug, and then resolved ONLY against
+/// <c>entries/[&lt;kind-plural&gt;/]&lt;slug&gt;/&lt;name&gt;.(persona|theme|meta).json</c> relative
+/// path — both shelf layouts, genwave-catalog#33), that its own <c>&lt;slug&gt;</c> segment (always
+/// the second-to-last) equals the entry's own declared slug, and then resolved ONLY against
 /// the index URL's own directory, with a second, independent "still starts with that directory"
 /// check on the resolved absolute URI (<see cref="TryResolveWithinDirectory"/>) — belt and braces,
 /// SPEC F90.2. A single bad entry rejects the WHOLE index, never just that one entry.
@@ -62,17 +63,34 @@ internal static partial class CatalogIndexValidator
     // its route-parameter check from this same const rather than inventing a second copy of the shape.
     internal const string SlugSegment = "[a-z0-9]+(-[a-z0-9]+)*";
 
-    // entries/<slug>/<name>.persona.json / entries/<slug>/<name>.theme.json / entries/<slug>/<name>.font.json
-    // / entries/<slug>/<name>.show.json — the per-kind manifest shape (SPEC F103.2, F104.1, F118.1):
-    // the filename segment is the SAME shape as the slug segment (SPEC F90.2/F89.2: schemas/index.schema.json's
-    // card/meta path patterns use this one shape for both segments, not the looser "any run of
-    // [a-z0-9-]" a prior version allowed here, which would have tolerated a leading/trailing/doubled
-    // hyphen the real schema rejects).
-    const string PersonaManifestPathText = @"\Aentries/" + SlugSegment + "/" + SlugSegment + @"\.persona\.json\z";
-    const string ThemeManifestPathText = @"\Aentries/" + SlugSegment + "/" + SlugSegment + @"\.theme\.json\z";
-    const string FontManifestPathText = @"\Aentries/" + SlugSegment + "/" + SlugSegment + @"\.font\.json\z";
-    const string ShowManifestPathText = @"\Aentries/" + SlugSegment + "/" + SlugSegment + @"\.show\.json\z";
-    const string MetaPathText = @"\Aentries/" + SlugSegment + "/" + SlugSegment + @"\.meta\.json\z";
+    // The OPTIONAL per-kind folder segment (genwave-catalog#33): the shelf repo is migrating from a
+    // flat entries/<slug>/ tree to per-kind entries/<kind-plural>/<slug>/ folders, and this app must
+    // admit BOTH layouts through the transition (the old one is what the live origin serves today;
+    // the new one is what it serves after the move). When the folder IS present it must name the
+    // entry's OWN kind — a persona manifest under entries/shows/ is a lie about what the file is,
+    // not an alternative layout, and fails the persona pattern outright. The folder set is CLOSED
+    // (the four kinds this app recognises), mirroring TryResolveKind: an unrecognised-kind entry is
+    // already skipped before any path pattern is consulted, so an unrecognised kind FOLDER can only
+    // ever appear on a known-kind entry — where it is exactly the mismatch case above.
+    const string PersonaFolderText = "(?:personas/)?";
+    const string ThemeFolderText = "(?:themes/)?";
+    const string FontFolderText = "(?:fonts/)?";
+    const string ShowFolderText = "(?:shows/)?";
+    const string AnyKindFolderText = "(?:(?:personas|themes|fonts|shows)/)?";
+
+    // entries/[<kind-plural>/]<slug>/<name>.persona.json (and .theme/.font/.show) — the per-kind
+    // manifest shape (SPEC F103.2, F104.1, F118.1): the filename segment is the SAME shape as the
+    // slug segment (SPEC F90.2/F89.2: schemas/index.schema.json's card/meta path patterns use this
+    // one shape for both segments, not the looser "any run of [a-z0-9-]" a prior version allowed
+    // here, which would have tolerated a leading/trailing/doubled hyphen the real schema rejects).
+    // The meta pattern alone takes the ANY-kind folder alternation — a meta filename carries no kind
+    // of its own — with the manifest-directory equality check in TryValidateEntry pinning it to the
+    // one folder its entry actually lives in.
+    const string PersonaManifestPathText = @"\Aentries/" + PersonaFolderText + SlugSegment + "/" + SlugSegment + @"\.persona\.json\z";
+    const string ThemeManifestPathText = @"\Aentries/" + ThemeFolderText + SlugSegment + "/" + SlugSegment + @"\.theme\.json\z";
+    const string FontManifestPathText = @"\Aentries/" + FontFolderText + SlugSegment + "/" + SlugSegment + @"\.font\.json\z";
+    const string ShowManifestPathText = @"\Aentries/" + ShowFolderText + SlugSegment + "/" + SlugSegment + @"\.show\.json\z";
+    const string MetaPathText = @"\Aentries/" + AnyKindFolderText + SlugSegment + "/" + SlugSegment + @"\.meta\.json\z";
 
     // entries/<slug>/<filename> — a font pack's binary asset (SPEC F104.1): 1-2 latin-subsetted
     // woff2 faces and the pack's OFL licence text, sitting alongside (never inside) its
@@ -86,7 +104,7 @@ internal static partial class CatalogIndexValidator
     // set F104.1 actually ships — woff2 (the subsetted faces) and txt (the licence file) — anything
     // else is a shape this app does not expect a font pack to carry.
     const string AssetFileNameText = @"[A-Za-z0-9][A-Za-z0-9._-]*\.(?:woff2|txt)";
-    const string AssetPathText = @"\Aentries/" + SlugSegment + "/" + AssetFileNameText + @"\z";
+    const string AssetPathText = @"\Aentries/" + FontFolderText + SlugSegment + "/" + AssetFileNameText + @"\z";
 
     [GeneratedRegex(@"\A" + SlugSegment + @"\z")]
     private static partial Regex SlugPattern();
@@ -268,6 +286,22 @@ internal static partial class CatalogIndexValidator
             return EntryValidationOutcome.Reject;
         }
 
+        // ONE-DIRECTORY INVARIANT (genwave-catalog#33): an entry's manifest and meta (and assets,
+        // below) all sit in the SAME directory. Under the flat layout the patterns alone pinned this
+        // (both could only ever match entries/<slug>/); with the optional kind folder they no longer
+        // do — MetaPathPattern accepts ANY kind folder, so a persona's meta could otherwise sit under
+        // entries/shows/<slug>/ while its manifest sits under entries/personas/<slug>/. Beyond the
+        // shape lie, this is what keeps an entry's bare FILENAMES unique whenever its full paths are
+        // (the asset dedup below and CatalogProxyService's filename-keyed asset lookup both lean on
+        // that), so it is enforced as a hard reject, same as the slug-ownership check inside
+        // TryValidateFileRef.
+        var entryDirectory = DirectoryOf(manifest.Path);
+        if (!string.Equals(entryDirectory, DirectoryOf(meta.Path), StringComparison.Ordinal))
+        {
+            reason = $"entry '{slug}' meta path '{meta.Path}' does not sit in its manifest's own directory";
+            return EntryValidationOutcome.Reject;
+        }
+
         // F104.1: only a font entry carries assets[] at all — persona/theme entries always resolve
         // to the empty list (CatalogEntrySummary.Assets's own "absent means empty" remarks). A font
         // entry whose assets[] is missing, empty, or contains anything malformed is skipped OUTRIGHT
@@ -276,7 +310,7 @@ internal static partial class CatalogIndexValidator
         IReadOnlyList<CatalogAssetRef> assets;
         if (kind == CatalogEntryKind.Font)
         {
-            if (!TryValidateAssets(raw.Assets, slug, directory, out var fontAssets))
+            if (!TryValidateAssets(raw.Assets, slug, entryDirectory, directory, out var fontAssets))
                 return EntryValidationOutcome.Skip;
 
             assets = fontAssets;
@@ -447,7 +481,7 @@ internal static partial class CatalogIndexValidator
     /// </para>
     /// </summary>
     static bool TryValidateAssets(
-        JsonElement? raw, string slug, Uri directory,
+        JsonElement? raw, string slug, string entryDirectory, Uri directory,
         [NotNullWhen(true)] out IReadOnlyList<CatalogAssetRef>? assets)
     {
         if (raw is not { ValueKind: JsonValueKind.Array } array)
@@ -460,7 +494,7 @@ internal static partial class CatalogIndexValidator
         var seenPaths = new HashSet<string>(StringComparer.Ordinal);
         foreach (var element in array.EnumerateArray())
         {
-            if (!TryValidateAssetRef(element, slug, directory, out var assetRef))
+            if (!TryValidateAssetRef(element, slug, entryDirectory, directory, out var assetRef))
             {
                 assets = null;
                 return false;
@@ -520,7 +554,8 @@ internal static partial class CatalogIndexValidator
     /// </para>
     /// </summary>
     static bool TryValidateAssetRef(
-        JsonElement element, string slug, Uri directory, [NotNullWhen(true)] out CatalogAssetRef? assetRef)
+        JsonElement element, string slug, string entryDirectory, Uri directory,
+        [NotNullWhen(true)] out CatalogAssetRef? assetRef)
     {
         CatalogAssetJson? raw;
         try
@@ -550,9 +585,23 @@ internal static partial class CatalogIndexValidator
             return false;
         }
 
+        // The ONE-DIRECTORY INVARIANT again (TryValidateEntry's own remarks) — an asset sits
+        // alongside its manifest, never under the OTHER layout's copy of the same slug. Fails only
+        // this asset (⇒ whole-entry skip, TryValidateAssets' all-or-nothing posture), matching every
+        // other malformed-asset shape here.
+        if (!string.Equals(DirectoryOf(fileRef.Path), entryDirectory, StringComparison.Ordinal))
+        {
+            assetRef = null;
+            return false;
+        }
+
         assetRef = new CatalogAssetRef(fileRef.Path, fileRef.Sha256, bytes);
         return true;
     }
+
+    /// <summary>The path up to (excluding) its final <c>/</c> — every caller's path has already
+    /// matched a pattern whose shape guarantees at least one <c>/</c>.</summary>
+    static string DirectoryOf(string path) => path[..path.LastIndexOf('/')];
 
     /// <summary>A missing <c>kind</c> defaults to persona (back-compat, F103.1/AC2); any value other than <c>"persona"</c>/<c>"theme"</c>/<c>"font"</c> is unrecognised.</summary>
     static bool TryResolveKind(string? raw, out CatalogEntryKind kind)
@@ -614,9 +663,11 @@ internal static partial class CatalogIndexValidator
         // finding) — otherwise a manifest/meta could sit under a DIFFERENT entry's directory (still
         // regex-valid, still resolving under the SAME index directory, so the belt-and-braces check
         // below would never catch it) while being advertised under this one's slug/audience/bestFor.
-        // The pattern already guarantees exactly two '/'-delimited segments after "entries/", so
-        // splitting by index is safe.
-        var pathSlug = path.Split('/')[1];
+        // The pattern already guarantees the slug is the SECOND-TO-LAST '/'-delimited segment in
+        // BOTH shelf layouts (entries/<slug>/<file> and entries/<kind-plural>/<slug>/<file>,
+        // genwave-catalog#33), so indexing from the end is safe.
+        var segments = path.Split('/');
+        var pathSlug = segments[^2];
         if (!string.Equals(pathSlug, slug, StringComparison.Ordinal))
         {
             fileRef = null;
