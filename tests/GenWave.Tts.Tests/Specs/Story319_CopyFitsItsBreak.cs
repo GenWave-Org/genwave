@@ -10,27 +10,80 @@
 
 namespace GenWave.Tts.Tests.Specs;
 
+using System.Text.Json;
+using GenWave.Core.Domain;
+using GenWave.Tts.Tests.Fakes;
+
 public static class FeatureCopyFitsItsBreak
 {
+    static SegmentRequest LeadInRequest() =>
+        new(SegmentKind.LeadIn, "af_heart", "GenWave",
+            new MediaItem("m1", "/media/x.mp3", "Astral Plane", default, "Valerie June"),
+            DateTimeOffset.UtcNow, "test-station");
+
+    static LlmCopyWriter BuildWriter(string endpoint, int maxCopyChars) =>
+        new(
+            new TemplateCopyWriter(new PatterTemplateRenderer()),
+            new FakeHttpClientFactory(),
+            new TestOptionsMonitor<LlmOptions>(new LlmOptions
+            {
+                Endpoint = endpoint,
+                Model = "test-model",
+                TimeoutSeconds = 5,
+                MaxCopyChars = maxCopyChars,
+            }),
+            new LlmCopyStatusHolder(),
+            new FakeActivePersonaAccessor(),
+            new CapturingLogger<LlmCopyWriter>(),
+            TimeProvider.System,
+            new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+            new FakeDegradationModeReader());
+
+    static int ExtractMaxTokens(string body)
+    {
+        using var doc = JsonDocument.Parse(body);
+        return doc.RootElement.GetProperty("max_tokens").GetInt32();
+    }
+
     // ── HAPPY PATH ──────────────────────────────────────────────────────────
 
-    public static class ScenarioTheRequestCarriesADerivedGenerationCap
+    public sealed class ScenarioTheRequestCarriesADerivedGenerationCap : IAsyncLifetime
     {
-        [Fact(Skip = "Pending T262 — see docs/PLAN.md")]
-        public static void The_completion_request_body_carries_a_max_token_cap()
+        MockCompletionsServer mock = null!;
+        int smallConfigMaxTokens;
+        int largeConfigMaxTokens;
+
+        public async Task InitializeAsync()
         {
-            // Given Llm:MaxCopyChars is configured
-            // When  the copywriter builds a completion request
-            // Then  the body carries a max-token cap — today the body is {model, messages} only
-            Assert.Fail("pending T262");
+            mock = await MockCompletionsServer.StartAsync();
+
+            // Given Llm:MaxCopyChars is configured — arranged at two different values so the
+            // second Fact can show the cap tracks it rather than a second, independent setting.
+            await BuildWriter(mock.BaseUri.ToString(), maxCopyChars: 60)
+                .WriteAsync(LeadInRequest(), CancellationToken.None);
+            smallConfigMaxTokens = ExtractMaxTokens(mock.Requests[0].Body);
+
+            await BuildWriter(mock.BaseUri.ToString(), maxCopyChars: 900)
+                .WriteAsync(LeadInRequest(), CancellationToken.None);
+            largeConfigMaxTokens = ExtractMaxTokens(mock.Requests[1].Body);
         }
 
-        [Fact(Skip = "Pending T262 — see docs/PLAN.md")]
-        public static void The_cap_is_derived_from_MaxCopyChars_not_a_second_setting()
+        public async Task DisposeAsync() => await mock.DisposeAsync();
+
+        [Fact]
+        public void The_completion_request_body_carries_a_max_token_cap()
+        {
+            // When the copywriter builds a completion request
+            // Then the body carries a max-token cap — today the body is {model, messages} only
+            Assert.True(smallConfigMaxTokens > 0);
+        }
+
+        [Fact]
+        public void The_cap_is_derived_from_MaxCopyChars_not_a_second_setting()
         {
             // One knob: changing MaxCopyChars changes the cap; no new LlmOptions field
             // is read for it.
-            Assert.Fail("pending T262");
+            Assert.True(largeConfigMaxTokens > smallConfigMaxTokens);
         }
     }
 
@@ -113,12 +166,18 @@ public static class FeatureCopyFitsItsBreak
 
     public static class ScenarioADegenerateCapNeverPoisonsTheRequest
     {
-        [Fact(Skip = "Pending T262 — see docs/PLAN.md")]
-        public static void A_tiny_MaxCopyChars_clamps_the_derived_cap_to_a_stated_floor()
+        [Fact]
+        public static async Task A_tiny_MaxCopyChars_clamps_the_derived_cap_to_a_stated_floor()
         {
             // Given a MaxCopyChars so small the derived token cap would be nonsensical
-            // Then the cap clamps and the request remains valid
-            Assert.Fail("pending T262");
+            await using var mock = await MockCompletionsServer.StartAsync();
+            await BuildWriter(mock.BaseUri.ToString(), maxCopyChars: 1)
+                .WriteAsync(LeadInRequest(), CancellationToken.None);
+
+            // Then the cap clamps and the request remains valid — 16 pins the shipped floor value
+            // deliberately (not a re-derivation of it), so a future edit that quietly zeroes the
+            // floor const still fails this fact instead of passing 0 == 0.
+            Assert.Equal(16, ExtractMaxTokens(mock.Requests[0].Body));
         }
     }
 }

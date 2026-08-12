@@ -129,6 +129,41 @@ public sealed class LlmCopyWriter(
     public const long MaxResponseContentBytes = 1_048_576;
 
     /// <summary>
+    /// Chars-per-token divisor used to derive the completion request's <c>max_tokens</c> cap from
+    /// <see cref="LlmOptions.MaxCopyChars"/> (SPEC F123.1, STORY-319, PLAN T262) — one knob, not
+    /// two: an operator only ever sets <c>Llm:MaxCopyChars</c>, and this cap is recomputed from it
+    /// fresh on every call rather than read from a second setting. English averages roughly 4
+    /// chars/token, but dividing by fewer chars/token here is DELIBERATE headroom: the generation
+    /// cap must never be the reason a sentence that would have fit under MaxCopyChars gets cut off
+    /// by the model itself mid-thought — that would leave T263's sentence-trim salvage nothing
+    /// complete to cut at. A smaller divisor over-estimates the token budget, so the cap always
+    /// lands comfortably above what MaxCopyChars alone allows.
+    /// </summary>
+    const int CharsPerTokenDivisor = 3;
+
+    /// <summary>
+    /// Floor for the derived <c>max_tokens</c> cap (SPEC F123.1, STORY-319, PLAN T262): guards a
+    /// degenerate tiny <c>Llm:MaxCopyChars</c> (an operator typo, or the option's own [Range(1, ..)]
+    /// minimum) from deriving a cap of zero or a handful of tokens — some OpenAI-compatible
+    /// backends reject a near-zero <c>max_tokens</c> outright rather than degrading to a short
+    /// reply, which would poison every completion call instead of merely capping it short. 16
+    /// tokens is comfortably enough for a single short clause while staying tiny in absolute terms.
+    /// </summary>
+    const int MinGenerationTokenCap = 16;
+
+    /// <summary>
+    /// Ceiling for the derived <c>max_tokens</c> cap (SPEC F123.1, STORY-319, PLAN T262, review
+    /// finding): the OTHER end of the same poison-every-call risk the floor guards against.
+    /// <see cref="LlmOptions.MaxCopyChars"/> is <c>[Range(1, int.MaxValue)]</c> at the options
+    /// layer — an env-set <c>int.MaxValue</c> would otherwise derive a nonsense <c>max_tokens</c>
+    /// in the hundreds of millions. The admin settings surface (<c>SettingValidator.MaxCopyCharsMax</c>)
+    /// caps an operator's live edit at 10000 chars, which this same formula would derive to ~3333
+    /// tokens — 4096 is a conventional completion-length ceiling that sits comfortably above that
+    /// surface's own maximum while still bounding the raw options layer.
+    /// </summary>
+    const int MaxGenerationTokenCap = 4096;
+
+    /// <summary>
     /// Serializes every backend completion call (SPEC F69.6, gh-#36) — concurrent CPU generations on
     /// the same backend double each other's latency, so at most one <see cref="RequestCompletionAsync"/>
     /// runs at a time, whether it arrived via the on-air path or a persona preview. A queueing wait
@@ -538,6 +573,7 @@ public sealed class LlmCopyWriter(
                     new { role = "system", content = systemPrompt },
                     new { role = "user", content = userPrompt },
                 },
+                max_tokens = DeriveMaxTokens(cfg.MaxCopyChars),
             };
 
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri)
@@ -621,6 +657,17 @@ public sealed class LlmCopyWriter(
         HttpRequestException { StatusCode: { } status } => (LlmCallOutcome.Failed, $"HTTP {(int)status}"),
         _ => (LlmCallOutcome.Failed, ex.GetType().Name),
     };
+
+    /// <summary>
+    /// Derives the completion request's <c>max_tokens</c> cap from <see cref="LlmOptions.MaxCopyChars"/>
+    /// (SPEC F123.1, STORY-319, PLAN T262) — see <see cref="CharsPerTokenDivisor"/>,
+    /// <see cref="MinGenerationTokenCap"/>, and <see cref="MaxGenerationTokenCap"/> for why the
+    /// divisor, floor, and ceiling are what they are. Applied identically to the on-air path and
+    /// the preview path, since both funnel through <see cref="RequestCompletionAsync"/>'s single
+    /// request-builder.
+    /// </summary>
+    static int DeriveMaxTokens(int maxCopyChars) =>
+        Math.Clamp(maxCopyChars / CharsPerTokenDivisor, MinGenerationTokenCap, MaxGenerationTokenCap);
 
     /// <summary>
     /// Copy hygiene (SPEC F34.5): trims, unwraps one layer of wrapping quotes, collapses newlines to
