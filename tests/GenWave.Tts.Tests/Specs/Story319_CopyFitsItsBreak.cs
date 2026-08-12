@@ -77,6 +77,25 @@ public static class FeatureCopyFitsItsBreak
         return doc.RootElement.GetProperty("max_tokens").GetInt32();
     }
 
+    /// <summary>
+    /// Mirrors Story193_PersonaPromptAssemblyAndClock's own ExtractMessageContent idiom (one
+    /// project over): the system prompt this writer actually sent, read back off the captured
+    /// wire body rather than re-derived from <see cref="LlmPromptBuilder.BuildSystemPrompt"/>
+    /// directly — the F123.5 fact below needs the ACTUAL outbound request LlmCopyWriter built
+    /// with its own configured MaxCopyChars, not a second, hand-built call to the builder.
+    /// </summary>
+    static string ExtractSystemPrompt(string body)
+    {
+        using var doc = JsonDocument.Parse(body);
+        foreach (var message in doc.RootElement.GetProperty("messages").EnumerateArray())
+        {
+            if (message.GetProperty("role").GetString() == "system")
+                return message.GetProperty("content").GetString() ?? "";
+        }
+
+        return "";
+    }
+
     // ── HAPPY PATH ──────────────────────────────────────────────────────────
 
     public sealed class ScenarioTheRequestCarriesADerivedGenerationCap : IAsyncLifetime
@@ -314,13 +333,20 @@ public static class FeatureCopyFitsItsBreak
 
     public static class ScenarioThePromptStatesTheWordBudget
     {
-        [Fact(Skip = "Pending T264 — see docs/PLAN.md")]
-        public static void The_length_instruction_carries_a_numeric_word_figure()
+        [Fact]
+        public static async Task The_length_instruction_carries_a_numeric_word_figure()
         {
-            // Given the system prompt is built
-            // Then the instruction is quantified ("at most ~N words"), derived from the
-            // same MaxCopyChars — stated, not enforced; T262's cap is the enforcement.
-            Assert.Fail("pending T264");
+            // Given a configured Llm:MaxCopyChars (300 chars / LlmPromptBuilder's own 6
+            // chars-per-word divisor = 50 words) and a real on-air render...
+            await using var mock = await MockCompletionsServer.StartAsync();
+            await BuildWriter(mock.BaseUri.ToString(), maxCopyChars: 300)
+                .WriteAsync(LeadInRequest(), CancellationToken.None);
+
+            // Then the length instruction carries that derived word figure — stated, not
+            // enforced; T262's max_tokens cap is the enforcement, T263's sentence-trim salvage
+            // the backstop.
+            var systemPrompt = ExtractSystemPrompt(mock.Requests[0].Body);
+            Assert.Contains("~50 words", systemPrompt, StringComparison.Ordinal);
         }
     }
 

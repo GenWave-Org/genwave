@@ -15,7 +15,7 @@ public static class FeatureArtistPronouns
         public static void The_persona_less_prompt_pins_they_them_their_for_artists()
         {
             // Given/When the persona-less system prompt is built
-            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null);
+            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null, maxCopyChars: 450);
 
             // Then the pronoun rule is present
             Assert.Contains("they/them/their", prompt);
@@ -24,7 +24,7 @@ public static class FeatureArtistPronouns
         [Fact]
         public static void The_persona_less_prompt_forbids_inferring_gender_from_a_name()
         {
-            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null);
+            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null, maxCopyChars: 450);
 
             Assert.Contains("never infer gender from a name", prompt);
         }
@@ -33,7 +33,7 @@ public static class FeatureArtistPronouns
         public static void A_persona_voiced_prompt_carries_the_same_rule()
         {
             // Given a system prompt with an active persona section appended
-            var prompt = LlmPromptBuilder.BuildSystemPrompt("Style: bubbly, energetic, expressive");
+            var prompt = LlmPromptBuilder.BuildSystemPrompt("Style: bubbly, energetic, expressive", maxCopyChars: 450);
 
             // Then the pronoun rule rides along unchanged — persona or not
             Assert.Contains("they/them/their", prompt);

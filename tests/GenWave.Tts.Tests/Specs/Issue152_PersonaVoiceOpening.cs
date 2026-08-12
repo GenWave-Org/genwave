@@ -18,7 +18,7 @@ public static class FeaturePersonaVoiceOpening
         public static void The_persona_less_prompt_opens_personality_neutral()
         {
             // Given/When the persona-less system prompt is built
-            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null);
+            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null, maxCopyChars: 450);
 
             // Then the neutral framing is present
             Assert.Contains("personality-neutral", prompt);
@@ -27,7 +27,7 @@ public static class FeaturePersonaVoiceOpening
         [Fact]
         public static void The_persona_less_prompt_never_points_at_a_persona_below()
         {
-            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null);
+            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null, maxCopyChars: 450);
 
             // No persona section exists, so nothing may direct the model at one
             Assert.DoesNotContain("voice of the persona described below", prompt);
@@ -40,7 +40,7 @@ public static class FeaturePersonaVoiceOpening
         public static void A_persona_voiced_prompt_drops_the_neutral_boilerplate()
         {
             // Given a system prompt with an active persona section appended
-            var prompt = LlmPromptBuilder.BuildSystemPrompt(PersonaSection);
+            var prompt = LlmPromptBuilder.BuildSystemPrompt(PersonaSection, maxCopyChars: 450);
 
             // Then the contradiction is gone — neutral framing never rides with a Style line
             Assert.DoesNotContain("personality-neutral", prompt);
@@ -49,7 +49,7 @@ public static class FeaturePersonaVoiceOpening
         [Fact]
         public static void A_persona_voiced_prompt_directs_the_model_at_the_personas_voice()
         {
-            var prompt = LlmPromptBuilder.BuildSystemPrompt(PersonaSection);
+            var prompt = LlmPromptBuilder.BuildSystemPrompt(PersonaSection, maxCopyChars: 450);
 
             Assert.Contains("write every word in the voice of the persona described below", prompt);
             Assert.Contains(PersonaSection, prompt);
