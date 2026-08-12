@@ -31,6 +31,15 @@ import type {
   ThemeCatalogProvenanceDto,
 } from "./types";
 
+/** Plural noun per kind for the per-tab empty state (gh-#372) — matches each kind's own shelf
+ * vocabulary ("font packs", the F104 wording, not bare "fonts"). */
+const KIND_TAB_NOUN: Record<CatalogEntryKind, string> = {
+  persona: "personas",
+  theme: "themes",
+  font: "font packs",
+  show: "shows",
+};
+
 interface PersonaCatalogClientProps {
   /** The index this page's server component already fetched (SPEC F90.2, F90.4). */
   initialIndex: CatalogIndexResponseDto;
@@ -82,6 +91,15 @@ interface PersonaCatalogClientProps {
    * production omits this and gets the browser's local zone — the same SettingsForm/WardrobeClient/
    * PersonasClient idiom, not a bespoke one. */
   timeZone?: string;
+  /**
+   * The kind tab this render shows (gh-#372) — resolved off `?kind=` by the page's own server
+   * component (`PersonaCatalogTabs.resolveCatalogKind`). Filters the GRID (and the inline detail
+   * section under it) alone: every cross-kind input — the soft hire-offer eligibility, the show
+   * review modal, the install-modal guards — keeps reading the FULL index, so an entry being off
+   * the active tab never changes what the shelf KNOWS, only what it currently shows. Defaults to
+   * `"persona"`, the shelf's founding kind and the bare-URL tab.
+   */
+  activeKind?: CatalogEntryKind;
 }
 
 type DetailState =
@@ -130,6 +148,7 @@ export function PersonaCatalogClient({
   importedShowSlugs = [],
   hiredPersonaSlugs = [],
   timeZone,
+  activeKind = "persona",
 }: PersonaCatalogClientProps): ReactNode {
   const router = useRouter();
   const [detail, setDetail] = useState<DetailState>({ kind: "idle" });
@@ -361,6 +380,23 @@ export function PersonaCatalogClient({
   const selectedSlug = detail.kind !== "idle" ? detail.slug : null;
   const selectedEntry = entries.find((entry) => entry.slug === selectedSlug) ?? null;
 
+  // The active tab's own slice of the shelf (gh-#372) — the ONLY place `activeKind` narrows
+  // anything rendered as the grid. `entries` stays the source for every cross-kind lookup above.
+  const visibleEntries = entries.filter((entry) => entry.kind === activeKind);
+
+  // A tab switch keeps this client mounted (only the server component re-renders with a new
+  // `activeKind` prop), so an inline detail panel opened on ANOTHER tab must hide with its grid
+  // rather than dangling under a kind it doesn't belong to — the operator lands back on it intact
+  // by switching back. The overlay modals (show review, install confirms) deliberately do NOT get
+  // this gate: they're blocking flows mid-decision, not tab content. The `reviewingPersonaSlug`
+  // exemption is the same ruling applied to the soft hire offer (SPEC F118.3): accepting it loads a
+  // PERSONA detail while the operator stands on the Shows tab, and its failure path reports through
+  // this very section (T255 review finding F1's inline error) — hiding that would swallow the one
+  // signal the operator gets that the offered persona failed to load.
+  const selectedOnActiveTab =
+    selectedEntry !== null
+    && (selectedEntry.kind === activeKind || (detail.kind !== "idle" && detail.slug === reviewingPersonaSlug));
+
   /** Routes one shelf entry to its kind's own card (review finding, T185): an exhaustive `switch`
    * over `kind`, not a two-way ternary — the SERVER already drops any kind it doesn't recognise
    * (CatalogIndexValidator, F103.1/AC6), but a ternary's `else` branch would silently render an
@@ -463,11 +499,22 @@ export function PersonaCatalogClient({
 
   return (
     <div>
-      <ul aria-label="Community catalog entries" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {entries.map(renderShelfEntry)}
-      </ul>
+      {visibleEntries.length === 0 ? (
+        // This kind's tab is empty while the shelf itself is not (the whole-index empty state
+        // already returned above) — name the kind, no CTA: there is nothing to install and nothing
+        // to configure, the shelf just hasn't stocked this kind yet (gh-#372, the gh-#393
+        // empty-tabs ruling).
+        <EmptyState
+          title={`No ${KIND_TAB_NOUN[activeKind]} on the shelf`}
+          reason="The shelf will stock this kind when the community catalog gains entries for it."
+        />
+      ) : (
+        <ul aria-label="Community catalog entries" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {visibleEntries.map(renderShelfEntry)}
+        </ul>
+      )}
 
-      {detail.kind !== "idle" && (
+      {detail.kind !== "idle" && selectedOnActiveTab && (
         <section
           aria-label={detailSectionAriaLabel(selectedEntry?.kind)}
           className="mt-6 rounded-[6px] border border-line bg-surface p-5"

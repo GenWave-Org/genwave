@@ -25,7 +25,7 @@ jest.mock("next/navigation", () => ({
 }));
 
 import { describe, it, expect, jest, beforeAll, beforeEach, afterEach } from "@jest/globals";
-import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within, act, type RenderResult } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import type { useRouter } from "next/navigation";
 import { Toaster } from "@/components/ui/toast";
@@ -215,11 +215,11 @@ function cardFor(name: string): HTMLElement {
 async function openMorningDriveReview(
   fetchMock: jest.MockedFunction<typeof fetch>,
   props: { entries?: CatalogShelfEntryDto[]; importedShowSlugs?: string[]; hiredPersonaSlugs?: string[] } = {}
-): Promise<void> {
+): Promise<RenderResult> {
   global.fetch = fetchMock;
-  render(
+  const view = render(
     <>
-      <PersonaCatalogClient
+      <PersonaCatalogClient activeKind="show"
         initialIndex={{
           entries: props.entries ?? [SHOW_ENTRY, FLIP_PERSONA_ENTRY],
           fetchedAt: "2026-08-10T00:00:00Z",
@@ -240,14 +240,17 @@ async function openMorningDriveReview(
   // unambiguous.
   await screen.findByRole("dialog");
   await screen.findByText("Wake up right");
+  return view;
 }
 
-/** Carries `openMorningDriveReview` through to a completed show import. */
+/** Carries `openMorningDriveReview` through to a completed show import. Returns the render handle
+ * (gh-#372) so a fact can `rerender` with a different `activeKind` — the same mounted client a real
+ * tab navigation keeps. */
 async function completeMorningDriveImport(
   fetchMock: jest.MockedFunction<typeof fetch>,
   props: { hiredPersonaSlugs?: string[]; entries?: CatalogShelfEntryDto[] } = {}
-): Promise<void> {
-  await openMorningDriveReview(fetchMock, props);
+): Promise<RenderResult> {
+  const view = await openMorningDriveReview(fetchMock, props);
 
   const dialog = within(screen.getByRole("dialog"));
   await act(async () => {
@@ -255,6 +258,7 @@ async function completeMorningDriveImport(
     await Promise.resolve();
   });
   await waitFor(() => expect(screen.queryByText("The full show, exactly as authored. Nothing is imported until you confirm.")).not.toBeInTheDocument());
+  return view;
 }
 
 describe("Feature: The show shelf", () => {
@@ -278,7 +282,7 @@ describe("Feature: The show shelf", () => {
       global.fetch = fetchMock as unknown as typeof fetch;
 
       render(
-        <PersonaCatalogClient
+        <PersonaCatalogClient activeKind="show"
           initialIndex={{ entries: [SHOW_ENTRY], fetchedAt: "2026-08-10T00:00:00Z", unreachable: false }}
         />
       );
@@ -390,17 +394,33 @@ describe("Feature: The show shelf", () => {
       const fetchMock = showFlowFetchMock({
         flipEntry: makeJsonResponse(404, { detail: 'No catalog entry with slug "flip" exists.' }),
       });
-      await completeMorningDriveImport(fetchMock, {
-        entries: [SHOW_ENTRY, FLIP_PERSONA_ENTRY, LENA_PERSONA_ENTRY],
-      });
+      const mixedEntries = [SHOW_ENTRY, FLIP_PERSONA_ENTRY, LENA_PERSONA_ENTRY];
+      const view = await completeMorningDriveImport(fetchMock, { entries: mixedEntries });
 
       const offer = within(await screen.findByRole("dialog"));
       fireEvent.click(offer.getByRole("button", { name: "Review persona" }));
 
       // The failed fetch surfaces as the inline error text in Flip's own (still-open) detail
-      // section — never a dialog of any kind.
+      // section — never a dialog of any kind. gh-#372 note: the shelf now silos kinds by tab and
+      // this whole flow runs on the SHOWS tab, where Flip's persona section only renders through
+      // the offer's own `reviewingPersonaSlug` exemption — this assertion now also pins that
+      // exemption (without it, the failure would be silently invisible).
       await screen.findByText('No catalog entry with slug "flip" exists.');
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      // gh-#372: Lena's card lives on the PERSONAS tab now — switch tabs the way production does,
+      // a new `activeKind` prop on the SAME mounted client (state, including any stale offer arm,
+      // survives exactly as it would live).
+      view.rerender(
+        <>
+          <PersonaCatalogClient activeKind="persona"
+            initialIndex={{ entries: mixedEntries, fetchedAt: "2026-08-10T00:00:00Z", unreachable: false }}
+            importedShowSlugs={[]}
+            hiredPersonaSlugs={[]}
+          />
+          <Toaster />
+        </>
+      );
 
       // Clicking a COMPLETELY different card, whose own fetch succeeds, must never pop the
       // stale, offer-armed review modal open for it (the exact bug: `reviewing` stayed `true`
@@ -421,7 +441,7 @@ describe("Feature: The show shelf", () => {
       global.fetch = fetchMock;
 
       render(
-        <PersonaCatalogClient
+        <PersonaCatalogClient activeKind="show"
           initialIndex={{ entries: [SHOW_ENTRY], fetchedAt: "2026-08-10T00:00:00Z", unreachable: false }}
           importedShowSlugs={["morning-drive"]}
         />
@@ -461,7 +481,7 @@ describe("Feature: The show shelf", () => {
       global.fetch = fetchMock;
 
       render(
-        <PersonaCatalogClient
+        <PersonaCatalogClient activeKind="show"
           initialIndex={{ entries: [SHOW_ENTRY], fetchedAt: "2026-08-10T00:00:00Z", unreachable: false }}
           importedShowSlugs={[]}
         />
@@ -530,7 +550,7 @@ describe("Feature: The show shelf", () => {
       global.fetch = fetchMock;
 
       render(
-        <PersonaCatalogClient
+        <PersonaCatalogClient activeKind="show"
           initialIndex={{ entries: [SHOW_ENTRY], fetchedAt: "2026-08-10T00:00:00Z", unreachable: false }}
         />
       );

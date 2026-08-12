@@ -290,7 +290,7 @@ describe("Feature: packs on the shelf with an honest specimen", () => {
     global.fetch = fetchMock;
     render(
       <>
-        <PersonaCatalogClient
+        <PersonaCatalogClient activeKind="font"
           initialIndex={{ entries: [FONT_ENTRY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }}
           installedFontSlugs={installedFontSlugs}
         />
@@ -313,7 +313,7 @@ describe("Feature: packs on the shelf with an honest specimen", () => {
   describe("Scenario: the shelf card is meta-only", () => {
     it("renders family and byte total from the shelf payload alone (T201, AC1)", () => {
       render(
-        <PersonaCatalogClient
+        <PersonaCatalogClient activeKind="font"
           initialIndex={{ entries: [FONT_ENTRY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }}
         />
       );
@@ -330,7 +330,7 @@ describe("Feature: packs on the shelf with an honest specimen", () => {
       global.fetch = fetchMock as unknown as typeof fetch;
 
       render(
-        <PersonaCatalogClient
+        <PersonaCatalogClient activeKind="font"
           initialIndex={{ entries: [FONT_ENTRY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }}
         />
       );
@@ -343,7 +343,7 @@ describe("Feature: packs on the shelf with an honest specimen", () => {
 
     it("renders the family-collision title exactly once, not a duplicated family line (F1 review finding)", () => {
       render(
-        <PersonaCatalogClient
+        <PersonaCatalogClient activeKind="font"
           initialIndex={{ entries: [COLLISION_FONT_ENTRY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }}
         />
       );
@@ -357,7 +357,7 @@ describe("Feature: packs on the shelf with an honest specimen", () => {
 
     it("falls back to the slug-derived title when fontFamily is null (F1 review finding)", () => {
       render(
-        <PersonaCatalogClient
+        <PersonaCatalogClient activeKind="font"
           initialIndex={{ entries: [FONT_ENTRY_WITHOUT_FAMILY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }}
         />
       );
@@ -368,7 +368,7 @@ describe("Feature: packs on the shelf with an honest specimen", () => {
 
     it("degrades sanely, with no literal \"undefined\" text, when fontFamily/fontByteTotal are omitted from the wire rather than null (F2 review finding)", () => {
       render(
-        <PersonaCatalogClient
+        <PersonaCatalogClient activeKind="font"
           initialIndex={{ entries: [FONT_ENTRY_WITH_UNDEFINED_FIELDS], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }}
         />
       );

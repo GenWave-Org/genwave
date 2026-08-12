@@ -167,7 +167,7 @@ async function openGoldenFrequencyPreview(
   global.fetch = fetchMock;
   render(
     <>
-      <PersonaCatalogClient
+      <PersonaCatalogClient activeKind="theme"
         initialIndex={{ entries: [THEME_ENTRY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }}
         installedThemeProvenance={installedThemeProvenance}
         timeZone="UTC"
@@ -396,7 +396,7 @@ describe("Feature: previewing and installing a catalog theme", () => {
       });
       global.fetch = fetchMock;
 
-      render(<PersonaCatalogClient initialIndex={{ entries: [THEME_ENTRY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }} />);
+      render(<PersonaCatalogClient activeKind="theme" initialIndex={{ entries: [THEME_ENTRY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }} />);
       fireEvent.click(cardFor("Golden Frequency"));
 
       expect(await screen.findByText("Catalog unreachable — try again shortly.")).toBeInTheDocument();
