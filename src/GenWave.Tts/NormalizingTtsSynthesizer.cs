@@ -3,6 +3,7 @@ namespace GenWave.Tts;
 using Microsoft.Extensions.Logging;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Logging;
 
 /// <summary>
 /// The single hand-off point from booth-bound copy to the TTS renderer (SPEC F68.1). Every caller
@@ -22,11 +23,31 @@ using GenWave.Core.Domain;
 /// analogous two-seam registration) so a preview can never drift from what a real render produces,
 /// with no TTS render and no observability side effects.
 ///
-/// Fired-rule observability (SPEC F68.7, STORY-186 AC3): every real render — never a preview —
-/// logs one debug line and increments <see cref="CorrectionsFiredStats"/> per rule that actually
-/// changed the text, read back by <c>GET /api/tts/corrections-stats</c>. <see cref="SpeechCorrectionSet"/>
-/// itself stays pure (it only reports which rules fired via an out parameter); this decorator is
-/// where that report becomes a log line and a counter.
+/// Fired-rule observability (SPEC F68.7 as amended by F97.5/F100.1, STORY-186 AC3): every real
+/// render through <see cref="SynthesizeAsync(TtsRenderContext, CancellationToken)"/> logs one
+/// Information line and increments <see cref="CorrectionsFiredStats"/> per rule that actually
+/// changed the text, read back by <c>GET /api/tts/corrections-stats</c>. F68.7 originally specified
+/// debug; debug never reaches the fleet log store at all, so "is my rule working?" was unanswerable
+/// in the field from the moment it shipped — F97.5 amends every rule-hit fact in this family to
+/// Information on that same ground (PLAN T142).
+///
+/// <b>"Every real render" DELIBERATELY includes the admin AUDIO preview</b>
+/// (<c>POST /api/tts/preview</c>, <c>TtsPreviewController</c>): that endpoint calls the plain
+/// <see cref="SynthesizeAsync(string, string, CancellationToken)"/> overload, which wraps its
+/// arguments into a <see cref="TtsRenderContext"/> and relays through to THIS method — "the same
+/// production hand-off every render path shares" (STORY-186 AC3's own wording) — so a rule that
+/// fires during an admin preview counts and logs at Information exactly like one that fires on
+/// air. Only <see cref="Preview"/> below (the TEXT-only <see cref="ISpeechNormalizationPreview"/>
+/// seam, <c>POST /api/tts/normalize-preview</c> — no synthesis call at all) is excluded from this;
+/// see its own remarks. Contrast <see cref="PronunciationRuleHitReporter"/>: pronunciation-rule
+/// hits ARE excluded from the same admin audio preview (SPEC F97.5, STORY-253 AC6) — the two
+/// families deliberately part ways on this one point, not a drift between them. F97.5's own
+/// preview carve-out is scoped, by its text, to pronunciation rules; it never restates as covering
+/// corrections, and STORY-186 AC3 (which predates F97.5) already pinned the opposite for
+/// corrections.
+///
+/// <see cref="SpeechCorrectionSet"/> itself stays pure (it only reports which rules fired via an out
+/// parameter); this decorator is where that report becomes a log line and a counter.
 ///
 /// <see cref="personaCorrections"/> supplies the card half of the F97.4 merge (STORY-193, amending
 /// F71.7): every real render refreshes it (bounded by its own staleness window — see its class
@@ -80,8 +101,13 @@ public sealed class NormalizingTtsSynthesizer(
     /// Determines which rules fired for THIS render — via <see cref="SpeechText.PrepareForCorrections"/>
     /// and <see cref="SpeechCorrectionSet.Apply"/>'s out parameter, the same pre-corrections text
     /// <see cref="RunNormalize"/> itself matches against — and logs/counts each one. Never called
-    /// from <see cref="Preview"/>: a preview is not a broadcast, so it must not pollute the
-    /// operator-facing fired counters or the debug log with trial runs.
+    /// from <see cref="Preview"/> (the TEXT-only <c>POST /api/tts/normalize-preview</c> seam, which
+    /// performs no synthesis at all): THAT preview is not a broadcast, so it must not pollute the
+    /// operator-facing fired counters or the Information log with trial runs. The admin AUDIO
+    /// preview (<c>POST /api/tts/preview</c>) is different — it reaches this method through the
+    /// plain <see cref="SynthesizeAsync(string, string, CancellationToken)"/> overload exactly like
+    /// any other real render (STORY-186 AC3, deliberate; see the class remarks for the full
+    /// corrections-vs-pronunciation-rules asymmetry).
     /// </summary>
     void ReportFiredCorrections(string text, string voice, SpeechCorrectionSet snapshot)
     {
@@ -91,11 +117,15 @@ public sealed class NormalizingTtsSynthesizer(
         foreach (var from in firedFroms)
         {
             firedStats.RecordFired(from);
-            // Operator-authored rule text and voice id are newline-stripped so they can't
-            // forge additional log entries (CodeQL cs/log-forging).
-            logger.LogDebug(
+            // Operator-authored rule text and voice id are newline-stripped so they can't forge
+            // additional log entries (CodeQL cs/log-forging) — LogSanitize.Strip, converging onto
+            // PronunciationRuleHitReporter's own idiom (PLAN T142 review) rather than this method's
+            // prior ReplaceLineEndings(" "): one sanitizer for the whole rule-hit family. Information,
+            // not debug (SPEC F68.7 as amended by F97.5/F100.1, PLAN T142) — debug never reaches the
+            // fleet log store, so a correction hit was unobservable in the field before this.
+            logger.LogInformation(
                 "TTS correction fired: from={CorrectionFrom} voice={Voice}",
-                from.ReplaceLineEndings(" "), voice.ReplaceLineEndings(" "));
+                LogSanitize.Strip(from), LogSanitize.Strip(voice));
         }
     }
 }

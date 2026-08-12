@@ -22,6 +22,7 @@ namespace GenWave.Tts.Tests.Specs;
 
 using System.Net;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Core.Abstractions;
 using GenWave.Tts.Tests.Fakes;
@@ -175,31 +176,134 @@ public static class FeatureRulesTheOperatorCanTrust
 
     public static class ScenarioAFiringRuleIsVisibleInTheField
     {
-        [Fact(Skip = "Pending T142 — see docs/PLAN.md")]
-        public static void The_line_is_emitted_at_information_not_debug()
+        /// <summary>
+        /// Renders through the REAL KokoroTtsSynthesizer with a rule that actually matches its own
+        /// spoken text (never through TtsSegmentSource — that end-to-end wiring is
+        /// ScenarioRulesRideWithTheRequest's job above; this scenario pins the observability
+        /// contract at the render adapter itself) — a fresh render per fact, mirroring
+        /// ScenarioRulesRideWithTheRequest's own "each fact re-arranges" shape in this file rather
+        /// than a shared IAsyncLifetime fixture.
+        /// </summary>
+        static async Task<(CapturingLogger<PronunciationRuleHitReporter> Logger, PronunciationRuleHitStats Stats)>
+            RenderWithFiringRuleAsync()
+        {
+            var stats = new PronunciationRuleHitStats();
+            var logger = new CapturingLogger<PronunciationRuleHitReporter>();
+            var reporter = new PronunciationRuleHitReporter(stats, logger);
+            var handler = new FakeHttpMessageHandler((_, _) => Task.FromResult(
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) }));
+            var cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            try
+            {
+                var synth = new KokoroTtsSynthesizer(
+                    new HttpClient(handler),
+                    new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
+                    reporter);
+                var context = new TtsRenderContext("Here is MacLeod.", "af_heart", SegmentKind.LeadIn)
+                    with { Rules = [new ContextPronunciationRule("MacLeod", "MacLeod", "/məˈklaʊd/")] };
+
+                await synth.SynthesizeAsync(context, CancellationToken.None);
+            }
+            finally
+            {
+                if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            }
+
+            return (logger, stats);
+        }
+
+        [Fact]
+        public static async Task The_line_is_emitted_at_information_not_debug()
         {
             // The whole point: Debug never reaches Loki, so Debug is indistinguishable
-            // from no logging at all.
-            // Assert.Contains(logger.Entries, e => e.Level == LogLevel.Information);
-            Assert.Fail("pending T142");
+            // from no logging at all (F68.7 as amended by F97.5).
+            var (logger, _) = await RenderWithFiringRuleAsync();
+
+            Assert.Contains(logger.Entries, e => e.Level == LogLevel.Information);
+            Assert.DoesNotContain(logger.Entries, e => e.Level is LogLevel.Debug or LogLevel.Warning);
         }
 
-        [Fact(Skip = "Pending T142 — see docs/PLAN.md")]
-        public static void The_line_names_the_rule_that_fired()
+        [Fact]
+        public static async Task The_line_names_the_rule_that_fired()
         {
-            Assert.Fail("pending T142");
+            var (logger, _) = await RenderWithFiringRuleAsync();
+
+            Assert.Contains(logger.Entries, e =>
+                e.Level == LogLevel.Information && e.Message.Contains("MacLeod", StringComparison.Ordinal));
         }
 
-        [Fact(Skip = "Pending T142 — see docs/PLAN.md")]
-        public static void The_line_names_the_speech_kind()
+        [Fact]
+        public static async Task The_line_names_the_speech_kind()
         {
-            Assert.Fail("pending T142");
+            var (logger, _) = await RenderWithFiringRuleAsync();
+
+            Assert.Contains(logger.Entries, e =>
+                e.Level == LogLevel.Information
+                && e.Message.Contains(nameof(SegmentKind.LeadIn), StringComparison.Ordinal));
         }
 
-        [Fact(Skip = "Pending T142 — see docs/PLAN.md")]
-        public static void That_rules_counter_increments()
+        [Fact]
+        public static async Task That_rules_counter_increments()
         {
-            Assert.Fail("pending T142");
+            var (_, stats) = await RenderWithFiringRuleAsync();
+
+            Assert.Equal(1, Assert.Single(stats.Snapshot()).Fired);
+        }
+    }
+
+    public static class ScenarioAFiredHitIsNeverDoubleCounted
+    {
+        [Fact]
+        public static async Task A_hop_that_succeeds_after_the_primary_fails_counts_the_hit_once()
+        {
+            // Given a primary that fails (500) and a configured Kokoro-kind fallback hop that
+            // succeeds — the SAME rule, on the SAME text, so BOTH engines' KokoroSpeechMarkup pass
+            // finds the identical match. A naive "report at markup-composition time" (the pre-review
+            // ordering) would report from the primary before its own POST ever fails, then report
+            // AGAIN from the hop that actually airs the line — counter=2 for one aired line (the
+            // probe finding this fact pins). Reporting only after EnsureSuccessStatusCode makes the
+            // primary's own report unreachable when it throws, so only the hop that actually spoke
+            // ever counts.
+            var stats = new PronunciationRuleHitStats();
+            var logger = new CapturingLogger<PronunciationRuleHitReporter>();
+            var reporter = new PronunciationRuleHitReporter(stats, logger);
+            var primaryHandler = new FakeHttpMessageHandler(
+                (_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError)));
+            var hopHandler = new FakeHttpMessageHandler((_, _) => Task.FromResult(
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) }));
+            var cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            try
+            {
+                var ttsOptions = new TestOptionsMonitor<TtsOptions>(
+                    new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
+                var primary = new KokoroTtsSynthesizer(new HttpClient(primaryHandler), ttsOptions, reporter);
+                var hop = new KokoroFallbackRenderer(new HttpClient(hopHandler), ttsOptions, reporter);
+                var fallbackOptions = new TestOptionsMonitor<TtsFallbackOptions>(new TtsFallbackOptions
+                {
+                    Profiles =
+                    [
+                        new TtsFallbackProfile
+                        {
+                            Engine = DependencyNames.Kokoro, Endpoint = "http://backup-kokoro:8880", Voice = "",
+                        },
+                    ],
+                });
+                var router = new FallbackTtsSynthesizer(
+                    primary, [hop], new FakeDependencyHealth(), fallbackOptions,
+                    NullLogger<FallbackTtsSynthesizer>.Instance);
+                var context = new TtsRenderContext("Here is MacLeod.", "af_heart", SegmentKind.LeadIn)
+                    with { Rules = [new ContextPronunciationRule("MacLeod", "MacLeod", "/məˈklaʊd/")] };
+
+                await router.SynthesizeAsync(context, CancellationToken.None);
+
+                // Then the one line that actually aired (rendered by the hop, after the primary's
+                // 500) is counted exactly once.
+                Assert.Equal(1, Assert.Single(stats.Snapshot()).Fired);
+            }
+            finally
+            {
+                if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            }
         }
     }
 
@@ -306,6 +410,39 @@ public static class FeatureRulesTheOperatorCanTrust
                 if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
             }
         }
+
+        [Fact]
+        public static async Task The_hop_reports_its_own_fired_rule_hit()
+        {
+            // A kokoro-kind fallback hop, rendered directly (never through the primary or
+            // FallbackTtsSynthesizer) — PronunciationRuleHitReporter.Report must be a REAL call on
+            // this class's own render path, not merely referenced (review finding, PLAN T142: a
+            // mutant that neuters the call to `_ = ruleHits;` was fully green before this fact).
+            var stats = new PronunciationRuleHitStats();
+            var logger = new CapturingLogger<PronunciationRuleHitReporter>();
+            var reporter = new PronunciationRuleHitReporter(stats, logger);
+            var context = new TtsRenderContext("Say MacLeod now.", "af_heart", SegmentKind.BackAnnounce)
+                with { Rules = [new ContextPronunciationRule("MacLeod", "MacLeod", "/məˈklaʊd/")] };
+            var handler = new FakeHttpMessageHandler((_, _) => Task.FromResult(
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) }));
+            var cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            try
+            {
+                var renderer = new KokoroFallbackRenderer(
+                    new HttpClient(handler),
+                    new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
+                    reporter);
+                var profile = new TtsFallbackProfile { Engine = DependencyNames.Kokoro, Endpoint = "http://backup-kokoro:8880", Voice = "" };
+
+                await renderer.RenderAsync(profile, context, CancellationToken.None);
+
+                Assert.Equal(1, Assert.Single(stats.Snapshot()).Fired);
+            }
+            finally
+            {
+                if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            }
+        }
     }
 
     // -------------------------------------------------------------------------------------
@@ -313,18 +450,84 @@ public static class FeatureRulesTheOperatorCanTrust
     // -------------------------------------------------------------------------------------
     public static class ScenarioPreviewsAndMalformedData
     {
-        [Fact(Skip = "Pending T142 — see docs/PLAN.md")]
-        public static void A_preview_never_increments_a_counter()
+        /// <summary>
+        /// Exercises KokoroTtsSynthesizer's CONTEXT-AWARE overload with the REAL admin-preview
+        /// shape — <c>Kind: null</c>, <c>Rules</c> left at its own empty default — rather than the
+        /// plain two-arg overload (review finding, PLAN T142): that plain overload is DEAD on the
+        /// production preview path. <c>TtsPreviewController</c> calls
+        /// <c>NormalizingTtsSynthesizer</c>'s own plain <c>SynthesizeAsync(text, voice, ct)</c>,
+        /// which immediately wraps its arguments into a <c>TtsRenderContext</c> and relays THAT
+        /// context, unchanged in shape, through <c>FallbackTtsSynthesizer</c> down to the primary —
+        /// so a preview request never actually reaches the primary's plain two-arg overload; only
+        /// its context-aware one. Building the context directly here (rather than standing up the
+        /// full <c>NormalizingTtsSynthesizer</c>/<c>FallbackTtsSynthesizer</c> chain) is the
+        /// smallest arrangement that reaches that exact real shape.
+        /// </summary>
+        static async Task<(CapturingLogger<PronunciationRuleHitReporter> Logger, PronunciationRuleHitStats Stats)>
+            PreviewRenderAsync()
+        {
+            var stats = new PronunciationRuleHitStats();
+            var logger = new CapturingLogger<PronunciationRuleHitReporter>();
+            var reporter = new PronunciationRuleHitReporter(stats, logger);
+            var handler = new FakeHttpMessageHandler((_, _) => Task.FromResult(
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) }));
+            var cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            try
+            {
+                var synth = new KokoroTtsSynthesizer(
+                    new HttpClient(handler),
+                    new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
+                    reporter);
+                // Kind: null, Rules at its own default (empty) — exactly what
+                // NormalizingTtsSynthesizer's plain overload constructs for a preview (see remarks).
+                var context = new TtsRenderContext("Here is MacLeod.", "af_heart", Kind: null);
+
+                await synth.SynthesizeAsync(context, CancellationToken.None);
+            }
+            finally
+            {
+                if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            }
+
+            return (logger, stats);
+        }
+
+        [Fact]
+        public static async Task A_preview_never_increments_a_counter()
         {
             // Mirrors the existing F68.7 preview carve-out: previews are operator-explicit
             // and must not pollute on-air observability.
-            Assert.Fail("pending T142");
+            var (_, stats) = await PreviewRenderAsync();
+
+            Assert.Empty(stats.Snapshot());
         }
 
-        [Fact(Skip = "Pending T142 — see docs/PLAN.md")]
-        public static void A_preview_emits_no_information_line()
+        [Fact]
+        public static async Task A_preview_emits_no_information_line()
         {
-            Assert.Fail("pending T142");
+            var (logger, _) = await PreviewRenderAsync();
+
+            Assert.DoesNotContain(logger.Entries, e => e.Level == LogLevel.Information);
+        }
+
+        [Fact]
+        public static void A_pattern_carrying_a_newline_cannot_forge_a_log_line()
+        {
+            // A card-authored rule is imported-card content, the catalog log-forging precedent
+            // (CodeQL cs/log-forging): PronunciationRuleHitReporter.Report must neutralize it before
+            // it ever reaches a log call, not merely happen to look clean today (review finding,
+            // PLAN T142: a mutant that dropped LogSanitize.Strip was fully green before this fact).
+            // Hand-built PronunciationMatch — bypassing PronunciationRuleSet.Match entirely — is the
+            // narrowest way to exercise Report's OWN sanitization independent of whatever the regex
+            // matcher would or wouldn't ever let through a live pattern.
+            var stats = new PronunciationRuleHitStats();
+            var logger = new CapturingLogger<PronunciationRuleHitReporter>();
+            var reporter = new PronunciationRuleHitReporter(stats, logger);
+            var rule = new PronunciationRule("Mac\nLeod", "Mac\nLeod", "/ipa/");
+
+            reporter.Report([new PronunciationMatch(0, rule.Word.Length, rule)], SegmentKind.LeadIn);
+
+            Assert.DoesNotContain(logger.Entries, e => e.Message.Contains('\n'));
         }
 
         [Fact]

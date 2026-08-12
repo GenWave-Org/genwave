@@ -70,14 +70,29 @@ public static class KokoroSpeechMarkup
     /// wrapped as <c>[word](/ipa/)</c> and every <see cref="KokoroPauseMarkup"/> sentence-pause tag
     /// inserted, merged so neither pass can corrupt or lose the other's output (see class
     /// remarks). <paramref name="pauseSeconds"/> &lt;= 0 disables pause insertion, unchanged
-    /// contract.
+    /// contract. Discards which rules fired — see the out-matches overload below for a caller that
+    /// needs to know (SPEC F97.5).
     /// </summary>
-    public static string Render(string text, PronunciationRuleSet rules, double pauseSeconds)
+    public static string Render(string text, PronunciationRuleSet rules, double pauseSeconds) =>
+        Render(text, rules, pauseSeconds, out _);
+
+    /// <summary>
+    /// Same contract as the three-argument overload above, but also reports exactly which rules
+    /// matched via <paramref name="matches"/> — SPEC F97.5's "a rule that fires ... names the rule
+    /// [and] speech kind": mirrors <see cref="SpeechCorrectionSet.Apply"/>'s own out-<c>firedFroms</c>
+    /// shape one seam over, so a caller (<see cref="KokoroTtsSynthesizer"/>,
+    /// <see cref="KokoroFallbackRenderer"/>, via <see cref="PronunciationRuleHitReporter"/>) can
+    /// log/count a fired rule without a second, redundant <see cref="PronunciationRuleSet.Match"/>
+    /// call over the same text — <see cref="PronunciationMatch"/>'s own remarks state exactly this
+    /// intent ("a caller can also log which rule fired ... without a second lookup").
+    /// </summary>
+    public static string Render(
+        string text, PronunciationRuleSet rules, double pauseSeconds, out IReadOnlyList<PronunciationMatch> matches)
     {
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(rules);
 
-        var matches = rules.Match(text);
+        matches = rules.Match(text);
         var pauseOffsets = pauseSeconds <= 0
             ? []
             : SnapOutsideAnnotations(KokoroPauseMarkup.SentencePauseOffsets(text), matches);

@@ -39,7 +39,11 @@ using GenWave.Core.Domain;
 /// </summary>
 public sealed class KokoroFallbackRenderer(
     HttpClient http,
-    IOptionsMonitor<TtsOptions> ttsOptions) : IFallbackProfileRenderer
+    IOptionsMonitor<TtsOptions> ttsOptions,
+    // Optional, defaulted — same "production DI always wires it, no existing test construction site
+    // needs to change" posture as KokoroTtsSynthesizer's own PronunciationRuleHitReporter parameter;
+    // see its remarks for the full rationale.
+    PronunciationRuleHitReporter? ruleHits = null) : IFallbackProfileRenderer
 {
     public string Engine => DependencyNames.Kokoro;
 
@@ -53,8 +57,15 @@ public sealed class KokoroFallbackRenderer(
         // (KokoroTtsSynthesizer), so both Kokoro request paths tag identically — Piper hops
         // (PiperTtsSynthesizer) never do. context.Rules rides in from TtsSegmentSource (SPEC
         // F97.6) exactly like the primary's own context-aware overload reads it — this hop never
-        // resolves a rule set of its own from any provider or ambient accessor.
-        var speech = KokoroSpeechMarkup.Render(context.Text, PronunciationRuleSet.FromContext(context.Rules), cfg.SentencePauseSeconds);
+        // resolves a rule set of its own from any provider or ambient accessor. The out-matches
+        // overload (SPEC F97.5) reports exactly which rules fired, through the same
+        // PronunciationRuleHitReporter the primary uses — NOT identically, though: this hop only
+        // ever runs a render the PRIMARY already failed (FallbackTtsSynthesizer's own routing), so
+        // "identical reporting" cannot mean "both engines report the same fired hit" — it means
+        // each reports its OWN successful render, and only the one that actually airs ever does
+        // (see the ordering note beside the call below).
+        var speech = KokoroSpeechMarkup.Render(
+            context.Text, PronunciationRuleSet.FromContext(context.Rules), cfg.SentencePauseSeconds, out var matches);
         // speed (SPEC F98.1-F98.2, PLAN T140): same field, same already-validated value the primary
         // sends — see this class's own remarks on why no clamping happens here either.
         var body = new { input = speech, voice, response_format = cfg.Format, speed = context.Pace };
@@ -80,6 +91,16 @@ public sealed class KokoroFallbackRenderer(
         }
 
         await File.WriteAllBytesAsync(path, bytes, ct);
+
+        // ONLY now — after THIS hop's own engine accepted the render AND the audio landed on disk
+        // (review finding, PLAN T142; mirrors KokoroTtsSynthesizer's identical ordering note).
+        // Reporting any earlier would double-count the one line that airs: the primary composes the
+        // same markup, reports, THEN its own POST fails and FallbackTtsSynthesizer retries here,
+        // where this hop composes the identical markup again and would report again for the one
+        // line that ultimately airs once. See ScenarioAFiredHitIsNeverDoubleCounted (Story253) for
+        // the probe.
+        ruleHits?.Report(matches, context.Kind);
+
         return path;
     }
 }

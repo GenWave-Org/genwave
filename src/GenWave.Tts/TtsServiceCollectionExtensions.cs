@@ -134,6 +134,14 @@ public static class TtsServiceCollectionExtensions
         // lifetime, incremented by NormalizingTtsSynthesizer and read by GET /api/tts/corrections-stats.
         services.AddSingleton<CorrectionsFiredStats>();
 
+        // Fired-rule observability for pronunciation rules (SPEC F97.5, F100.1, STORY-253 AC4) — the
+        // pronunciation-rule sibling of CorrectionsFiredStats immediately above. PronunciationRuleHitReporter
+        // is resolved automatically as an ordinary constructor dependency by KokoroTtsSynthesizer's and
+        // KokoroFallbackRenderer's own AddHttpClient<T> registrations below — no explicit factory needed
+        // here, only the two singletons themselves.
+        services.AddSingleton<PronunciationRuleHitStats>();
+        services.AddSingleton<PronunciationRuleHitReporter>();
+
         // Dependency health probes (SPEC F70.2, STORY-187): the verdict store lives here — TTS
         // owns the read seam its own render-time fallback logic (T34) will consume — registered
         // concretely once and exposed under IDependencyHealth, mirroring the

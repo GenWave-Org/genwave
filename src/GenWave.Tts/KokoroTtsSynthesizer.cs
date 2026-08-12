@@ -12,10 +12,17 @@ using GenWave.Core.Domain;
 /// call (<see cref="EndpointUri"/>), so a live PUT to <c>Tts:Endpoint</c> applies to the very next
 /// render with no api restart.
 /// </summary>
-public sealed class KokoroTtsSynthesizer(HttpClient http, IOptionsMonitor<TtsOptions> optionsMonitor) : ITtsSynthesizer
+public sealed class KokoroTtsSynthesizer(
+    HttpClient http,
+    IOptionsMonitor<TtsOptions> optionsMonitor,
+    // Optional, defaulted (not a required collaborator): production DI (TtsServiceCollectionExtensions)
+    // always supplies the real PronunciationRuleHitReporter; a null default keeps every existing test
+    // construction site (this class is built directly, with no fake, throughout GenWave.Tts.Tests)
+    // compiling unchanged, mirroring TtsSegmentSource's own IStationEventSink? seam one class over.
+    PronunciationRuleHitReporter? ruleHits = null) : ITtsSynthesizer
 {
     public Task<string> SynthesizeAsync(string text, string voice, CancellationToken ct) =>
-        RenderAsync(text, voice, PronunciationRuleSet.Empty, TtsPace.EngineDefault, ct);
+        RenderAsync(text, voice, PronunciationRuleSet.Empty, TtsPace.EngineDefault, null, ct);
 
     /// <summary>
     /// Context-aware overload (SPEC F70.3, F97.6, F98.2): reads <see cref="TtsRenderContext.Rules"/>
@@ -36,10 +43,12 @@ public sealed class KokoroTtsSynthesizer(HttpClient http, IOptionsMonitor<TtsOpt
     /// engine.
     /// </summary>
     public Task<string> SynthesizeAsync(TtsRenderContext context, CancellationToken ct) =>
-        RenderAsync(context.Text, context.Voice, PronunciationRuleSet.FromContext(context.Rules), context.Pace, ct);
+        RenderAsync(
+            context.Text, context.Voice, PronunciationRuleSet.FromContext(context.Rules), context.Pace,
+            context.Kind, ct);
 
     async Task<string> RenderAsync(
-        string text, string voice, PronunciationRuleSet rules, double pace, CancellationToken ct)
+        string text, string voice, PronunciationRuleSet rules, double pace, SegmentKind? kind, CancellationToken ct)
     {
         var cfg = optionsMonitor.CurrentValue;
 
@@ -47,8 +56,12 @@ public sealed class KokoroTtsSynthesizer(HttpClient http, IOptionsMonitor<TtsOpt
         // KokoroSpeechMarkup): applied HERE, at Kokoro request build — below the
         // NormalizingTtsSynthesizer chokepoint, so normalized text and every upstream cache key
         // stay byte-identical — and never on the Piper path, which would speak either markup form
-        // aloud.
-        var speech = KokoroSpeechMarkup.Render(text, rules, cfg.SentencePauseSeconds);
+        // aloud. The out-matches overload (SPEC F97.5) reports exactly which rules fired, with no
+        // second PronunciationRuleSet.Match call over the same text; ruleHits is null only for a
+        // caller that constructed this class directly with no PronunciationRuleHitReporter (test
+        // fakes throughout GenWave.Tts.Tests), never in production (TtsServiceCollectionExtensions
+        // always wires the real one).
+        var speech = KokoroSpeechMarkup.Render(text, rules, cfg.SentencePauseSeconds, out var matches);
         // speed (SPEC F98.1-F98.2, PLAN T140): kokoro-fastapi's OpenAI-compatible speaking-rate
         // field. Always present, even at the engine default — see
         // Story255_DjsSpeakAtTheirOwnPace's The_default_pace_is_sent_as_the_engine_default.
@@ -75,6 +88,19 @@ public sealed class KokoroTtsSynthesizer(HttpClient http, IOptionsMonitor<TtsOpt
         }
 
         await File.WriteAllBytesAsync(path, bytes, ct);
+
+        // ONLY now — after the engine accepted this render AND the audio actually landed on disk
+        // (review finding, PLAN T142): "fired" means "aired", never merely "the markup composer
+        // found a match" or "the engine returned 2xx". Reporting any earlier double-counts the one
+        // line that actually airs when this primary throws (here or at the write above) and a
+        // fallback hop (KokoroFallbackRenderer) goes on to render the identical text successfully —
+        // both would have reported, one aired — and would count a hit for a render that never airs
+        // at all when the whole chain fails and the segment is dropped, including the narrower
+        // sliver where the engine returns 2xx but the subsequent file write fails. See
+        // ScenarioAFiredHitIsNeverDoubleCounted (Story253) for the failing-primary/succeeding-hop
+        // probe this ordering exists to satisfy.
+        ruleHits?.Report(matches, kind);
+
         return path;
     }
 }
