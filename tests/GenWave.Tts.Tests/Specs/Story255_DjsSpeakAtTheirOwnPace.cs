@@ -204,7 +204,7 @@ public static class FeatureDjsSpeakAtTheirOwnPace
     // -------------------------------------------------------------------------------------
     public static class ScenarioARealRenderChangesRate
     {
-        [Fact(Skip = "Pending T141 — see docs/PLAN.md")]
+        [Fact(Skip = "Manual by design — verified live at T141's wire smoke (speed on the wire at 0.85/1.15, ~25% duration delta; see the T141 evidence commit). A real engine render cannot be a CI fact.")]
         public static void A_slow_persona_renders_longer_audio_than_a_fast_one()
         {
             // Same copy through the production graph at 0.85 and 1.15; compare measured
@@ -212,7 +212,7 @@ public static class FeatureDjsSpeakAtTheirOwnPace
             Assert.Fail("pending T141");
         }
 
-        [Fact(Skip = "Pending T141 — see docs/PLAN.md")]
+        [Fact(Skip = "Manual by design — verified live at T141's wire smoke (speed on the wire at 0.85/1.15, ~25% duration delta; see the T141 evidence commit). A real engine render cannot be a CI fact.")]
         public static void Editing_a_personas_pace_produces_fresh_audio()
         {
             // The regression this guards: serving the cached 1.0 clip after an edit to 1.15.
