@@ -123,16 +123,17 @@ public sealed class PronunciationRuleSet
     {
         ArgumentNullException.ThrowIfNull(rules);
 
+        // The drop predicate below is PronunciationRuleValidator.IsValid itself (T144 review/design:
+        // the rules API needs the SAME filter, field-named via Validate, for a write-time 400 rather
+        // than a silent drop) — reused, not duplicated, so this compile-time filter and the write-path
+        // 400 can never disagree about what compiles. IsValid (not Validate().Count == 0) deliberately
+        // — this runs for every declared rule on every station-settings/card refresh (T144 review
+        // round 2 residual #4), and Validate's own List<PronunciationRuleValidationError> allocation
+        // would otherwise happen here too, for a result this call site never reads.
         var compiled = rules
             .Where(rule => rule is not null)
             .Select(rule => PronunciationRule.Parse(rule.Pattern, rule.Word, CanonicalizeIpa(rule.Ipa)))
-            .Where(rule => !string.IsNullOrWhiteSpace(rule.Pattern)
-                && !string.IsNullOrWhiteSpace(rule.Word)
-                && !string.IsNullOrWhiteSpace(rule.Ipa)
-                && !rule.Ipa.Contains(')')
-                && !rule.Ipa.Contains('[')
-                && !rule.Ipa.Contains(']')
-                && rule.Pattern.Contains(rule.Word, StringComparison.OrdinalIgnoreCase))
+            .Where(rule => PronunciationRuleValidator.IsValid(rule.Pattern, rule.Word, rule.Ipa))
             .Select(rule => (Pattern: CompilePattern(rule), Rule: rule))
             .ToList();
 
@@ -149,8 +150,13 @@ public sealed class PronunciationRuleSet
     /// null-Ipa JSON-deserialization gap (a literal <see langword="null"/> bound into this
     /// non-nullable field) without ever calling <see cref="string.Trim()"/> on it — <see
     /// cref="Create"/>'s blank check right after this call is what actually drops that rule.
+    ///
+    /// <c>internal</c> (not <c>private</c>) so <see cref="PronunciationRuleValidator"/>'s own
+    /// <c>IsValid</c>/<c>Validate</c> — the fast compile-time filter and the write-path 400 seam
+    /// T144's rules API calls, respectively — canonicalize a CANDIDATE rule's Ipa exactly this same
+    /// way before checking it, rather than re-deriving the trim-slash-trim sequence.
     /// </summary>
-    private static string CanonicalizeIpa(string ipa) =>
+    internal static string CanonicalizeIpa(string ipa) =>
         string.IsNullOrEmpty(ipa) ? ipa : ipa.Trim().Trim('/').Trim();
 
     /// <summary>
@@ -197,6 +203,53 @@ public sealed class PronunciationRuleSet
 
         return new PronunciationRuleSet(
             PersonaOverStationMerge.MergeByIdentity(station.rules, card.rules, item => IdentityKey(item.Rule)));
+    }
+
+    /// <summary>
+    /// Projects the SAME persona/station merge <see cref="Merge"/> encodes, but WITH per-rule
+    /// provenance (SPEC F97.3, F97.4; T144's rules API) — <see cref="Merge"/> exists for matching, so
+    /// it returns only the rules actually in play (a shadowed station rule is dropped entirely); this
+    /// exists for DISPLAY, so it returns every compiled rule from BOTH sides, each tagged with which
+    /// source supplied it and whether it is the one currently in effect. A shadowed station rule
+    /// (sharing a card rule's identity) appears here with <see cref="MergedPronunciationRule.InEffect"/>
+    /// <see langword="false"/> rather than vanishing — an operator staring at it needs to see WHY it
+    /// is not the one firing, not have it silently disappear (STORY-254 AC2).
+    ///
+    /// <para>
+    /// Never used for matching — <see cref="Match"/> stays pure — and <see cref="InEffect"/> is
+    /// computed by calling <see cref="Merge"/> ITSELF, then checking whether EACH original entry
+    /// (the exact compiled <c>(Regex, PronunciationRule)</c> pair, not merely its identity string) is
+    /// still present in that output (T144 review finding F5, fixing an earlier draft that instead
+    /// collected the winning IDENTITY STRINGS into a set: when a station rule is shadowed, its
+    /// identity string is still present in the winning set — the card's entry sharing that same
+    /// identity survived — so an identity-only check wrongly marked the shadowed station entry
+    /// InEffect too; comparing the full compiled pair distinguishes "this identity survived" from
+    /// "THIS entry survived"). The result is therefore never a parallel re-statement of
+    /// <see cref="Merge"/>'s precedence — it IS <see cref="Merge"/>'s own compiled output, so the two
+    /// can never disagree about who wins by construction. Deliberately returns the small sibling
+    /// projection <see cref="MergedPronunciationRule"/> rather than widening
+    /// <see cref="PronunciationRule"/> itself with a Source/InEffect field (T144 review guidance) —
+    /// provenance is a fact about THIS READ, at THIS moment's merge, never a property of the rule's
+    /// own stored data.
+    /// </para>
+    /// </summary>
+    public static IReadOnlyList<MergedPronunciationRule> MergeWithProvenance(
+        PronunciationRuleSet station, PronunciationRuleSet card)
+    {
+        ArgumentNullException.ThrowIfNull(station);
+        ArgumentNullException.ThrowIfNull(card);
+
+        var winners = Merge(station, card);
+        // A HashSet, not a per-entry linear Contains over winners.rules (T144 review round 2 residual
+        // #3) — O(n) membership over the combined station+card list instead of O(n²).
+        var winningEntries = new HashSet<(Regex Pattern, PronunciationRule Rule)>(winners.rules);
+
+        var cardRows = card.rules.Select(entry =>
+            new MergedPronunciationRule(entry.Rule, PronunciationRuleSource.Persona, winningEntries.Contains(entry)));
+        var stationRows = station.rules.Select(entry =>
+            new MergedPronunciationRule(entry.Rule, PronunciationRuleSource.Station, winningEntries.Contains(entry)));
+
+        return cardRows.Concat(stationRows).ToList();
     }
 
     /// <summary>

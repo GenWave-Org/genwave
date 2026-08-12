@@ -12,8 +12,11 @@ using ContextPronunciationRule = GenWave.Core.Domain.PronunciationRule;
 /// poll instead of a subscription; see that class's own remarks for the full rationale, not restated
 /// here). <see cref="Current"/> is a plain synchronous read so a caller resolving alongside
 /// <see cref="ActivePersonaCorrectionsCache.Current"/> pays no extra await; <see cref="RefreshIfStaleAsync"/>
-/// is the async half that keeps it warm, called only from the async render path
-/// (<see cref="TtsSegmentSource"/> — never from inside an engine adapter, SPEC F97.6).
+/// is the async half that keeps it warm, called from the async render path
+/// (<see cref="TtsSegmentSource"/> — never from inside an engine adapter, SPEC F97.6) and, since
+/// T144, from the pronunciation rules admin API's GET (a request-scoped read wanting a fresh card,
+/// never mid-render — F97.6's "never ambient inside an adapter" rule is about the render/adapter
+/// boundary specifically, not about every other caller in the process).
 /// </summary>
 public sealed class ActivePersonaPronunciationRulesCache(IActivePersonaAccessor personaAccessor, TimeProvider timeProvider)
 {
