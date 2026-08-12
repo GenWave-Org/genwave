@@ -52,6 +52,15 @@ using Microsoft.Extensions.Options;
 /// </para>
 ///
 /// <para>
+/// Guards <c>Station:Imaging:TimeAnnouncementStaleMinutes</c> (SPEC F124.4, PLAN T269): must be a
+/// positive integer (same "documentation-only <c>[Range(1, int.MaxValue)]</c>, this validator is the
+/// real floor" story as the nested knobs above) — UNLIKE every "0 disables" knob elsewhere in this
+/// validator, 0 here is not a legal off-switch: it would drop every single <c>TimeDate</c> deferral
+/// undrained, silently killing F110.3 rather than disabling anything. <c>SettingValidator</c> mirrors
+/// this same floor (plus an F53.1 ceiling) on the live-edit path.
+/// </para>
+///
+/// <para>
 /// Registered as a singleton and triggered by <c>ValidateOnStart()</c> in
 /// <c>Program.cs</c>.
 /// </para>
@@ -115,6 +124,11 @@ public sealed class StationOptionsValidator(ILogger<StationOptionsValidator> log
             return ValidateOptionsResult.Fail(
                 "Station:Shows:PatterCadenceMinutes must be non-negative " +
                 "(0 disables the show-flavor line).");
+
+        if (options.Imaging.TimeAnnouncementStaleMinutes < 1)
+            return ValidateOptionsResult.Fail(
+                "Station:Imaging:TimeAnnouncementStaleMinutes must be a positive integer " +
+                "(0 would drop every TimeDate deferral, not disable the feature).");
 
         if (options.SafeScope.LibraryIds.Count == 0)
         {

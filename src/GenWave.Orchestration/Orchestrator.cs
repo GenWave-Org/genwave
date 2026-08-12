@@ -158,6 +158,17 @@ using GenWave.Core.Events;
 /// </para>
 ///
 /// <para>
+/// <b>TimeDate elapsed-due expiry (SPEC F124.4, PLAN T269).</b> Before the drain above ever reaches a
+/// <see cref="SpeechDeferralKind.TimeDate"/> deferral, <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s
+/// own expiry check may already have dropped it undrained — a drain landing too far past the armed hour
+/// (the live <c>Station:Imaging:TimeAnnouncementStaleMinutes</c> budget, read fresh once per unit
+/// through <paramref name="imagingSettings"/>) speaks no hour at all rather than an invented one (the
+/// F71.8 class). <see cref="LogTimeDateExpiry"/> is that check's <c>onExpired</c> callback, logging the
+/// SPEC F124.4 WARN. StationId (idents) are exempt by design — an equally late ident still drains and
+/// airs normally.
+/// </para>
+///
+/// <para>
 /// <b>Show idents (SPEC F117.1/F117.2, STORY-309, PLAN T250):</b> the SAME
 /// <see cref="SpeechDeferralKind.StationId"/> drain above additionally reads the on-air show (via
 /// <paramref name="scheduleResolver"/>'s synchronous <c>TryGetCurrent()</c> snapshot, the T241
@@ -191,7 +202,8 @@ public sealed class Orchestrator(
     IStationClockProvider? stationClock = null,
     IPatterDurationEstimator? patterEstimator = null,
     IContextSettingsProvider? contextSettings = null,
-    IMediaCatalog? catalog = null) : INextItemProvider, IBoundaryFitLog
+    IMediaCatalog? catalog = null,
+    IStationImagingSettingsProvider? imagingSettings = null) : INextItemProvider, IBoundaryFitLog
 {
     // gh-#254 — how far from the boundary a candidate may land and still count as a WIN ("±30s of
     // the boundary is a win"), widened as the gh-#253 estimate's confidence tier drops: the fit's
@@ -265,6 +277,12 @@ public sealed class Orchestrator(
     // test) reads back "no explicit persona configured for any key", which the drain arm's own
     // resolution degrades to the on-air DJ — never a null-check, never a stall.
     readonly IContextSettingsProvider contextSettings = contextSettings ?? NoOpContextSettingsProvider.Instance;
+
+    // SPEC F124.4 (PLAN T269): same null-coalesced-default idiom as contextSettings immediately
+    // above. A host that has not yet wired the real IOptionsMonitor-backed implementation (every
+    // pre-T269 construction site, including every unit test) reads back NoOpStationImagingSettingsProvider's
+    // both-false/5-minute answer — the shipped SPEC F124.4 default — never a null-check, never a stall.
+    readonly IStationImagingSettingsProvider imagingSettings = imagingSettings ?? NoOpStationImagingSettingsProvider.Instance;
 
     readonly Queue<MediaItem> buffer = new();
     MediaItem? previousTrack;
@@ -492,7 +510,9 @@ public sealed class Orchestrator(
             }
         }
 
-        await EnqueuePatterAsync(previousTrack, track, unitDjName, cadence, identity, ct, drainAsOf, hold);
+        await EnqueuePatterAsync(
+            previousTrack, track, unitDjName, cadence, identity, ct, drainAsOf, hold,
+            queuedAhead: TimeSpan.FromMilliseconds(ctx.QueuedAheadMs ?? 0));
 
         buffer.Enqueue(track);
 
@@ -784,7 +804,9 @@ public sealed class Orchestrator(
             hold = HoldSignOnAtStraddle;
         }
 
-        await EnqueuePatterAsync(previousTrack, next: null, unitDjName, cadence, identity, ct, boundary, hold);
+        await EnqueuePatterAsync(
+            previousTrack, next: null, unitDjName, cadence, identity, ct, boundary, hold,
+            queuedAhead: fit.QueuedAhead);
 
         return buffer.Count > 0 ? buffer.Dequeue() : null;
     }
@@ -875,15 +897,34 @@ public sealed class Orchestrator(
     /// see that method's own remarks. <see langword="null"/> (nothing held) for every caller except the
     /// straddle branch.
     /// </param>
+    /// <param name="queuedAhead">
+    /// SPEC F124.4 (PLAN T269) — forwarded verbatim to <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s
+    /// own TimeDate elapsed-due expiry math (air-time lateness, never wall-clock-vs-Due alone — see
+    /// that method's own remarks). <see cref="GetNextAsync"/>'s ordinary unit path passes
+    /// <c>PlayoutContext.QueuedAheadMs</c> (coalesced null-to-zero); <see cref="TryServeCeremonyOnlyUnitAsync"/>
+    /// passes the SAME <c>fit.QueuedAhead</c> its own drain-instant arithmetic reads — the feeder's raw,
+    /// UNCLAMPED estimate in both cases, never the window-clamped local either method may compute for
+    /// its own, separate purpose. Defaults to <see langword="default"/> (zero), harmless on its own —
+    /// the expiry math never runs unless a non-null budget is also in play (see
+    /// <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s own remarks).
+    /// </param>
     async Task EnqueuePatterAsync(
         MediaItem? prev, MediaItem? next, string? unitDjName, CadenceConfig cadence, StationIdentity identity,
-        CancellationToken ct, DateTimeOffset? drainAsOf = null, IReadOnlySet<SpeechDeferralKind>? hold = null)
+        CancellationToken ct, DateTimeOffset? drainAsOf = null, IReadOnlySet<SpeechDeferralKind>? hold = null,
+        TimeSpan queuedAhead = default)
     {
         // Read the render budget ONCE per unit, up front (SPEC F44.2, gitea-#197) — the same
         // per-unit-snapshot discipline cadence/identity arrive under (see the params above): a
         // live Tts:RenderBudgetSeconds edit must not straddle a single unit's renders. Never read
         // renderBudgetProvider.Current again below this line.
         var renderBudget = renderBudgetProvider.Current;
+
+        // SPEC F124.4 (PLAN T269) — the SAME per-unit-snapshot discipline applied to the live
+        // TimeDate elapsed-due expiry budget: a live Station:Imaging:TimeAnnouncementStaleMinutes edit
+        // must not straddle a single unit's drain. Converted to a TimeSpan here, at the point of use —
+        // GenWave.Orchestration references only GenWave.Core/GenWave.Abstractions and stays
+        // options/config-agnostic, so SpeechDeferralQueue itself never sees the raw minutes shape.
+        var timeDateStaleBudget = TimeSpan.FromMinutes(imagingSettings.Current.TimeAnnouncementStaleMinutes);
 
         // Each segment's voice+persona-name pair is resolved (a fast, local accessor call — SPEC
         // F35.3, F39.1) immediately before that segment's SegmentRequest is built, so the actual TTS
@@ -977,7 +1018,9 @@ public sealed class Orchestrator(
         // same instant the dequeue decision itself was made against, rather than a second, later
         // clock read.
         var drainNow = drainAsOf ?? timeProvider.GetUtcNow();
-        foreach (var deferral in deferralQueue.TryDequeueDue(drainNow, hold))
+        foreach (var deferral in deferralQueue.TryDequeueDue(
+            drainNow, hold, queuedAhead, timeDateStaleBudget,
+            onExpired: (expiredDeferral, lateness) => LogTimeDateExpiry(expiredDeferral, lateness, timeDateStaleBudget)))
         {
             switch (deferral.Kind)
             {
@@ -1819,6 +1862,34 @@ public sealed class Orchestrator(
             "Context segment for provider {ProviderKey} dropped ({Cause}) — no context item reaches " +
             "air this boundary; music continues, and the next drain retries (SPEC F107.6).",
             providerKey ?? "(unknown)", cause);
+
+    /// <summary>
+    /// SPEC F124.4 (PLAN T269) — the callback <see cref="EnqueuePatterAsync"/> wires into
+    /// <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s own <c>onExpired</c> parameter (closing over
+    /// the SAME <c>timeDateStaleBudget</c> that call already threaded in — see that local's own
+    /// remarks): the ONE WARN a dropped, elapsed-due <see cref="SpeechDeferralKind.TimeDate"/> deferral
+    /// gets, naming the armed hour and the lateness PAST IT, distinctly from the budget it exceeded
+    /// (round-3 review finding F2 — the original wording mislabeled the lateness figure as "past the
+    /// budget", when it is actually the full lateness past <c>Due</c>; the budget is a SEPARATE
+    /// number, now stated separately rather than conflated with it). <paramref name="deferral"/>'s own
+    /// <see cref="SpeechDeferral.Due"/> is the armed hour — the SAME station-local top-of-hour instant
+    /// <see cref="BuildTimeDateRequest"/> would have spoken had this drain landed in time (see that
+    /// method's own remarks for why <c>Due</c>, never a drain-time clock read, names the hour).
+    /// <paramref name="lateness"/> is the air-time figure <see cref="SpeechDeferralQueue.TryDequeueDue"/>
+    /// already computed (<c>realNow + queuedAhead - Due</c>, never the naive wall-clock-only
+    /// difference); <paramref name="budget"/> is the live value that lateness was judged against. No
+    /// <see cref="events"/> publish and no music impact either way — this drop never blocks the next
+    /// hour's <see cref="SpeechDeferralQueue.EnqueueIfAbsent"/> re-arm (the T230-F1 keep-alive), it
+    /// simply speaks nothing this hour instead of an invented one (F124.4's own "idents are exempt, a
+    /// late time check is not" ruling — this callback only ever fires for
+    /// <see cref="SpeechDeferralKind.TimeDate"/>, by <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s
+    /// own kind-scoped contract).
+    /// </summary>
+    void LogTimeDateExpiry(SpeechDeferral deferral, TimeSpan lateness, TimeSpan budget) =>
+        logger.LogWarning(
+            "TimeDate deferral armed for {ArmedHour:HH:mm} dropped undrained — {LatenessSeconds:F0}s " +
+            "past its armed hour (budget {BudgetSeconds:F0}s); a late time check would invent the hour.",
+            deferral.Due, lateness.TotalSeconds, budget.TotalSeconds);
 
     /// <summary>
     /// gh-#259 — resolves the display name the whole UNIT's items are attributed to (the music

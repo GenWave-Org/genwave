@@ -353,6 +353,38 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     /// held-but-due entry is left exactly where <see cref="Enqueue"/> put it, ready for a later call
     /// (with no hold, or a different one) to pick up.
     /// </param>
+    /// <param name="queuedAhead">
+    /// SPEC F124.4 (PLAN T269) — the feeder's own already-queued-runtime estimate for this pass,
+    /// forwarded verbatim from <c>Orchestrator</c> (mirrors <c>BuildBoundaryFit</c>'s identical
+    /// "feeder measurement, unknown = zero" coalesce — the caller, never this queue, resolves a null
+    /// <c>PlayoutContext.QueuedAheadMs</c> to zero before it ever reaches here). Consulted ONLY by the
+    /// <see cref="SpeechDeferralKind.TimeDate"/> elapsed-due expiry check below; every other kind
+    /// ignores it entirely. Defaults to <see langword="default"/> (zero) — every pre-T269 caller's
+    /// behavior, unaffected, since <paramref name="timeDateStaleBudget"/> being <see langword="null"/>
+    /// already skips the expiry check outright regardless of this value.
+    /// </param>
+    /// <param name="timeDateStaleBudget">
+    /// SPEC F124.4 (PLAN T269) — the live elapsed-due expiry budget: a <see cref="SpeechDeferralKind.TimeDate"/>
+    /// deferral draining more than this far past its own air-time (see the expiry check's own remarks
+    /// below for the exact formula) is dropped undrained rather than airing an hour that has already
+    /// passed. <see langword="null"/> (the default) disables the check entirely — every pre-T269
+    /// caller's behavior, byte-identical, since nothing before T269 ever passed this parameter.
+    /// <c>Orchestrator</c> reads the live <c>Station:Imaging:TimeAnnouncementStaleMinutes</c> setting
+    /// fresh once per unit and forwards the resulting value here, so a live edit governs the very next
+    /// drain with no process restart — the caller's job, not this queue's, exactly like every other
+    /// live-editable knob this project threads through (SPEC F44.2's own precedent).
+    /// </param>
+    /// <param name="onExpired">
+    /// SPEC F124.4 (PLAN T269) — invoked once per <see cref="SpeechDeferralKind.TimeDate"/> deferral
+    /// the expiry check drops, AFTER this method's own lock has been released (never from inside the
+    /// lock — a caller's callback, e.g. a logger call, must never run while this queue is held), with
+    /// the dropped deferral itself (<see cref="SpeechDeferral.Due"/> names the armed hour — the SAME
+    /// instant a successful drain would have spoken, see <c>Orchestrator.BuildTimeDateRequest</c>'s
+    /// own remarks) and the air-time lateness already computed below. <see langword="null"/> (the
+    /// default) is a legal "nobody needs to know" — the drop still happens either way; this is
+    /// notification only, never a veto. <c>Orchestrator</c> is this parameter's one production caller,
+    /// logging the SPEC F124.4 WARN from it.
+    /// </param>
     /// <remarks>
     /// <b><see cref="SpeechDeferral.NotBefore"/> gates against REAL wall-clock time, never
     /// <paramref name="now"/></b> (SPEC F124.1/F124.2, PLAN T267, round-1 review finding F1). A caller
@@ -370,12 +402,11 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     /// hold lasting exactly zero seconds, the round-1 defect this closes.
     ///
     /// <para>
-    /// <b>T269 breadcrumb (not built yet — PLAN T269, TimeDate elapsed-due expiry):</b> a future
-    /// staleness predicate for <see cref="SpeechDeferralKind.TimeDate"/> belongs beside this SAME
-    /// not-before check, and must follow the identical rule — compare against this queue's real clock
-    /// reading, never <paramref name="now"/>. A forced-future <paramref name="now"/> (the ceremony/
-    /// straddle drains above) must never make a perfectly punctual TimeDate read as late merely because
-    /// the CALLER pretended more time had passed than the wall clock agrees has.
+    /// <b><see cref="SpeechDeferralKind.TimeDate"/> elapsed-due expiry (SPEC F124.4, PLAN T269).</b>
+    /// Built beside this SAME not-before check, and follows the identical rule — compared against this
+    /// queue's real clock reading, never <paramref name="now"/>, so a forced-future <paramref name="now"/>
+    /// (the ceremony/straddle drains above) never makes a perfectly punctual TimeDate read as late
+    /// merely because the CALLER pretended more time had passed than the wall clock agrees has.
     ///
     /// <b>Round-2 review finding F8 — the lateness arithmetic itself:</b> air-time lateness is
     /// <c>realNow + queuedAhead − Due</c>, NOT the naive <c>realNow − Due</c> — a predicate that
@@ -384,28 +415,90 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     /// <see cref="Orchestrator.HoldSignOnPastQueuedTail"/>'s own <c>NotBefore</c> arithmetic already
     /// applies to a held SignOn (a piece has not truly "aired late" merely because wall-clock passed its
     /// <c>Due</c> — it airs when the ALREADY-QUEUED audio ahead of it finishes, not one instant sooner)
-    /// must carry over to whatever T269 builds: an expiry check that only ever asks "has real time
-    /// passed <c>Due</c>" would flag a TimeDate deferral stale well before it has actually gone stale on
-    /// air, by exactly however much runtime is still queued ahead of the pull that would otherwise drain
-    /// it.
+    /// carries over here: a bare "has real time passed <c>Due</c>" would flag a TimeDate deferral stale
+    /// well before it has actually gone stale on air, by exactly however much runtime is still queued
+    /// ahead of the pull that would otherwise drain it.
+    ///
+    /// <b>Kind-scoped to TimeDate alone (F124.4's own "idents are deliberately exempt" ruling) — every
+    /// other kind ignores <paramref name="timeDateStaleBudget"/>/<paramref name="queuedAhead"/> entirely,
+    /// regardless of how late it drains.</b> A late ident is fine; a late time check invents the hour
+    /// (the F71.8 never-invent-the-time class this whole seam exists to close).
+    ///
+    /// <b>No NotBefore/expiry cross-product to resolve.</b> A <see cref="SpeechDeferralKind.TimeDate"/>
+    /// deferral never carries a <see cref="SpeechDeferral.NotBefore"/> — <see cref="Orchestrator.HoldSignOnPastQueuedTail"/>
+    /// is that field's one production caller, and it only ever re-arms a <see cref="SpeechDeferralKind.SignOn"/>.
+    /// So a TimeDate can never be simultaneously held and stale; the expiry check below does not need to
+    /// (and does not) handle that combination — belt-and-suspenders anyway, <paramref name="hold"/> is
+    /// applied in the FIRST pass below, before expiry is ever classified for anything, so a held kind is
+    /// never even a candidate the expiry check looks at.
     /// </para>
     /// </remarks>
     public IReadOnlyList<SpeechDeferral> TryDequeueDue(
-        DateTimeOffset now, IReadOnlySet<SpeechDeferralKind>? hold = null)
+        DateTimeOffset now,
+        IReadOnlySet<SpeechDeferralKind>? hold = null,
+        TimeSpan queuedAhead = default,
+        TimeSpan? timeDateStaleBudget = null,
+        Action<SpeechDeferral, TimeSpan>? onExpired = null)
     {
+        IReadOnlyList<SpeechDeferral> due;
+
+        // Dropped-for-staleness entries are collected here (inside the lock, where the expiry
+        // decision is made) and reported to onExpired AFTER the lock is released below — a caller's
+        // callback must never run while this queue is held.
+        List<(SpeechDeferral Deferral, TimeSpan Lateness)>? expired = null;
+
         lock (gate)
         {
             if (pending.Count == 0) return [];
 
             var realNow = timeProvider.GetUtcNow();
-            var due = InDrainOrder(pending.Values.Where(deferral =>
+
+            // Pass 1 (a QUERY, no side effects) — every candidate this drain would otherwise take:
+            // due, NotBefore-satisfied, and NOT held. hold is applied HERE, before expiry is ever
+            // classified for anything (see this method's own remarks) — a held kind can never reach
+            // the expiry pass below. Materialized eagerly (ToList) rather than left lazy specifically
+            // so pass 2's classification below runs exactly once per candidate, ever, regardless of
+            // how this list is later consumed.
+            var candidates = pending.Values.Where(deferral =>
                     deferral.Due <= now
                     && (deferral.NotBefore is not { } notBefore || notBefore <= realNow)
-                    && (hold is null || !hold.Contains(deferral.Kind))))
+                    && (hold is null || !hold.Contains(deferral.Kind)))
                 .ToList();
+
+            // Pass 2 (a COMMAND, explicitly) — classifies each candidate as expired (SPEC F124.4,
+            // TimeDate-only) or genuinely due, via a plain foreach rather than a LINQ predicate: a
+            // side-effecting predicate embedded in a Where (the round-3 review's own CQS finding)
+            // is a landmine the moment anything upstream enumerates the same query twice — e.g. a
+            // future .Any() short-circuit before this method's own .ToList() — which would silently
+            // double-classify (and double-WARN) the same drop. This loop touches each candidate once.
+            var eligible = new List<SpeechDeferral>(candidates.Count);
+            foreach (var deferral in candidates)
+            {
+                if (deferral.Kind == SpeechDeferralKind.TimeDate && timeDateStaleBudget is { } budget)
+                {
+                    var lateness = realNow + queuedAhead - deferral.Due;
+                    if (lateness > budget)
+                    {
+                        (expired ??= []).Add((deferral, lateness));
+                        continue;
+                    }
+                }
+
+                eligible.Add(deferral);
+            }
+
+            due = InDrainOrder(eligible).ToList();
+
             foreach (var deferral in due) pending.Remove((deferral.Kind, deferral.Discriminator));
-            return due;
+            if (expired is not null)
+                foreach (var (deferral, _) in expired) pending.Remove((deferral.Kind, deferral.Discriminator));
         }
+
+        if (expired is not null)
+            foreach (var (deferral, lateness) in expired)
+                onExpired?.Invoke(deferral, lateness);
+
+        return due;
     }
 
     // Shared ordering for PeekNextDue/TryDequeueDue (T223 review, F3): both callers need the SAME
