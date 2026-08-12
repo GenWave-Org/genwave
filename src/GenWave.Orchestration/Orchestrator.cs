@@ -115,7 +115,7 @@ using GenWave.Core.Events;
 /// station-wide) — future-dated, drained by the very same loop on a LATER unit. A
 /// <see langword="null"/> <paramref name="scheduleResolver"/> (no format-clock schedule wired)
 /// makes this producer a permanent no-op — the pre-F91 station shape. See that method's own remarks
-/// for the F92.3 dedupe rules and the explicit <see cref="SpeechDeferralQueue.Clear"/> a boundary
+/// for the F92.3 dedupe rules and the explicit <see cref="SpeechDeferralQueue.ClearStale"/> a boundary
 /// leaving the window triggers.
 /// </para>
 ///
@@ -240,6 +240,10 @@ public sealed class Orchestrator(
     // SPEC F111.2 (PLAN T235) — the straddle seam's drain hold-set: a single-purpose, never-mutated
     // singleton rather than allocating a fresh HashSet per straddle unit, since its one member never
     // varies. See GetNextAsync's own remarks (the straddle branch) for what this actually guards.
+    // SPEC F124.1 (PLAN T267) reuses this SAME set for the queue-crossing decline path
+    // (TryServeCeremonyOnlyUnitAsync) — a second "hold the SignOn" shape, never a second set: both
+    // callers hold the identical one kind for the identical reason (a paired SignOff must not drain
+    // its SignOn ahead of content that has not finished airing).
     static readonly IReadOnlySet<SpeechDeferralKind> HoldSignOnAtStraddle =
         new HashSet<SpeechDeferralKind> { SpeechDeferralKind.SignOn };
 
@@ -583,7 +587,7 @@ public sealed class Orchestrator(
     /// <summary>
     /// gh-#300 — "the last unit before a due ceremony IS the ceremony". True when the room left in
     /// front of the boundary is under <see cref="MusicSelectionPolicy.MusicFloor"/>, via
-    /// <see cref="MusicSelectionPolicy.IsBelowFloor"/> (PLAN T234, T234 review finding F3: the SAME
+    /// <see cref="BoundaryFitPlan.IsBelowFloor"/> (PLAN T234, T234 review finding F3: the SAME
     /// predicate <see cref="MusicSelectionPolicy"/> classifies its own <see cref="BoundaryOutcome.CeremonyOnly"/>
     /// rung against — one predicate, called from both sites, never two hand-written complementary
     /// comparisons), in which case planning one more full track is strictly worse than planning none
@@ -617,37 +621,99 @@ public sealed class Orchestrator(
     /// own drain renders nothing at all (SPEC F92.4 — every piece of the ceremony dropped), it returns
     /// <see langword="null"/>, and <see cref="GetNextAsync"/> falls through to the ordinary
     /// <see cref="MusicSelectionPolicy.SelectMusicCandidateAsync"/> call with the very SAME below-floor
-    /// <see cref="BoundaryFitPlan"/> this method already evaluated — which classifies
-    /// <see cref="BoundaryOutcome.CeremonyOnly"/> off the identical <see cref="MusicSelectionPolicy.IsBelowFloor"/>
-    /// predicate. So <see cref="BoundaryOutcome.CeremonyOnly"/> reaches the log two ways, not one: this
-    /// method's own decline caller (a hard-coded literal, no classification needed — the decline itself
-    /// already proves it), and the policy's off-tolerance classification (both the non-handoff case
-    /// above and this handoff-decline-fell-through case). T235's straddle-assembly implementer should
-    /// not assume <see cref="BoundaryOutcome.CeremonyOnly"/> only ever arrives via the decline branch.
+    /// <see cref="BoundaryFitPlan"/> this method already evaluated — which classifies off
+    /// <see cref="BoundaryFitPlan.ClassifyOffToleranceRung"/>, the SAME classifier
+    /// <see cref="TryServeCeremonyOnlyUnitAsync"/> itself now consults too (PLAN T267):
+    /// <see cref="BoundaryOutcome.CeremonyOnly"/> for a non-queue-crossing fit, or
+    /// <see cref="BoundaryOutcome.Straddle"/> for a queue-crossing one. T235's straddle-assembly
+    /// implementer should not assume <see cref="BoundaryOutcome.CeremonyOnly"/> only ever arrives via
+    /// the decline branch, and should not assume the decline branch only ever logs that one rung either.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>SPEC F124.1 ruling (STORY-320, PLAN T267 — recorded here per the T266 review's request):</b>
+    /// this method's own condition did not need to widen for the queue-crossing case, and does not —
+    /// see <see cref="BoundaryFitPlan.IsBelowFloor"/>'s own remarks for the "crossing implies
+    /// below-floor" argument that makes that true, and <see cref="TryServeCeremonyOnlyUnitAsync"/>'s
+    /// own remarks for what changed instead (and why the rejected alternative — yielding the decline
+    /// into <see cref="GetNextAsync"/>'s straddle assembly — needed a no-new-track guard
+    /// <see cref="MusicSelectionPolicy"/> does not have).
     /// </para>
     /// </summary>
     bool ShouldDeclineFinalUnit(BoundaryFitPlan fit) =>
         fit.Kind is SpeechDeferralKind.SignOff or SpeechDeferralKind.SignOn
-        && MusicSelectionPolicy.IsBelowFloor(fit);
+        && fit.IsBelowFloor(MusicSelectionPolicy.MusicFloor);
 
     /// <summary>
     /// gh-#300 — plans the ceremony as a unit of its own: back-announce (the fit already reserved
     /// it) plus whatever the drain yields, and no music.
     ///
     /// <para>
-    /// <b>The drain runs as-of the BOUNDARY, not "now".</b> A SignOff comes due at
+    /// <b>The drain runs as-of a future instant, never "now".</b> A SignOff comes due at
     /// <c>boundary - SignOffLeadTime</c>, so at the moment this decision is taken it is still a few
     /// seconds in the future and an as-of-now drain would return nothing — which is precisely the
     /// bug: the ceremony then waited for a pull that a freshly-planned three-and-a-half-minute track
-    /// had just pushed past the hour. Draining as-of the boundary also keeps both halves together in
-    /// ONE <see cref="SpeechDeferralQueue.TryDequeueDue"/> call, the shape
-    /// <see cref="SignOffLeadTime"/>'s own remarks describe as the overwhelmingly common case.
+    /// had just pushed past the hour. For a SignOff-headed fit, SPEC F124.3 widens that instant to
+    /// <c>Max(UntilBoundary, QueuedAhead)</c> when the queue crosses (a non-crossing fit's QueuedAhead
+    /// is always &lt; UntilBoundary, so this degrades to exactly UntilBoundary — byte-identical to
+    /// pre-F124) — clamped against <see cref="IBoundaryBiasProvider.Current"/> (round-1 review finding
+    /// F5): the pending-air queue can legally hold hours under a backlog (SPEC F124.6's own watch
+    /// item), and chasing an unbounded estimate would push this instant arbitrarily far past the
+    /// lookahead window this whole fit was built inside of, for no benefit — anything past the window
+    /// drains at a LATER unit's own forced instant instead, never lost. A SignOn-headed fit (the held
+    /// SignOn itself, back on a later pull as the peeked fit) does NOT chase <c>QueuedAhead</c> at all
+    /// — round-1's own defect (see below) — it clamps to its own <c>UntilBoundary</c>, full stop:
+    /// nothing here needs this instant to reach any further, since what actually keeps the SignOn from
+    /// airing early is <see cref="SpeechDeferral.NotBefore"/> below, not this clamp — the clamp is
+    /// honesty (this instant should not overstate how far "as of" this pull is willing to pretend),
+    /// the gate is what structurally holds.
     /// </para>
     ///
     /// <para>
-    /// <b>Planning early is not airing early.</b> The ceremony is appended behind
-    /// <c>QueuedAheadMs</c> of audio that is still draining, so it reaches air roughly when that
-    /// audio runs out — at the boundary. Never-silent (F6.3) is untouched either way: this method
+    /// <b>T269 breadcrumb (not built yet):</b> a future <c>TimeDate</c> elapsed-due expiry (PLAN T269)
+    /// reads beside this same drain — see <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s own remarks
+    /// for why that predicate must compare against REAL wall-clock time, never the forced instant
+    /// computed here.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>SPEC F124.1 — a queue-crossing SignOff holds its own SignOn.</b> This method is reached only
+    /// once <see cref="ShouldDeclineFinalUnit"/> has already proved the peeked fit below-floor — which
+    /// a queue crossing the boundary ALWAYS also proves for a handoff kind (see
+    /// <see cref="BoundaryFitPlan.IsBelowFloor"/>'s own remarks for the argument), so
+    /// <see cref="ShouldDeclineFinalUnit"/>'s condition never needed to widen. What changes here is
+    /// what this method DOES once one arrives: it consults the SAME
+    /// <see cref="BoundaryFitPlan.ClassifyOffToleranceRung"/> <see cref="MusicSelectionPolicy"/>'s own
+    /// ladder would apply to this identical fit — never a second, hand-written crossing check — and on
+    /// a fit already proven below-floor, that classifier's Straddle verdict can only mean one thing:
+    /// the queue itself is what crosses. A Straddle verdict on a <see cref="SpeechDeferralKind.SignOff"/>
+    /// hands its paired SignOn to <see cref="HoldSignOnPastQueuedTail"/> — the SAME
+    /// <see cref="HoldSignOnAtStraddle"/> hold-set <see cref="GetNextAsync"/>'s own straddle branch
+    /// uses (SPEC F111.2) EXCLUDES it from this same call, and <see cref="SpeechDeferral.NotBefore"/>
+    /// (round-1 review finding F1 — see that method's own remarks) keeps it excluded from every LATER
+    /// call too, until the queued tail it is held behind has actually had time to drain. A
+    /// SignOn-headed fit (the held SignOn itself, back for its own later seam) has no OTHER piece to
+    /// hold and drains here ordinarily once its own gates open. A CeremonyOnly verdict — below floor,
+    /// not crossing — takes the ordinary unforced path: both due pieces drain together.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Candidate (i) vs (ii), the T266 review's ruling (recorded here at the review's request).</b>
+    /// The alternative shape — yielding the decline into <see cref="GetNextAsync"/>'s own straddle
+    /// assembly, so a full track plans in front of an already-overshot boundary — was rejected: every
+    /// rung of <see cref="MusicSelectionPolicy.SelectMusicCandidateAsync"/>'s ladder still returns SOME
+    /// candidate short of a genuine catalog drain, so that path needs a no-new-track guard the policy
+    /// does not have, and planning one more full track when the queue is ALREADY past the boundary only
+    /// deepens the SPEC F124.6 buildup the review flagged. Keeping this method's own ceremony-only shape
+    /// and widening what it holds was the smaller, honest fix — this method's own doc above is that fix.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Planning early is not airing early.</b> The ceremony is appended behind whatever audio is
+    /// still draining, so it reaches air roughly when that audio runs out — the boundary in the common
+    /// case, or the queued-tail estimate itself when that runs later (SPEC F124.5's accepted
+    /// consequence: the spectator <c>dj</c> plan-time skew is now bounded by the ACTUAL drain, not a
+    /// mis-aired ceremony stretched over it). Never-silent (F6.3) is untouched either way: this method
     /// only ever ADDS segments, and a unit that renders nothing at all returns
     /// <see langword="null"/> so the caller plans an ordinary music unit instead, exactly as if the
     /// decline had never fired.
@@ -658,25 +724,67 @@ public sealed class Orchestrator(
     /// music played, so the next unit's back-announce still refers to the track that really did,
     /// and the station-ID cadence still counts music units rather than being nudged by a ceremony.
     /// </para>
+    ///
+    /// <para>
+    /// <b>T270 evidence note (round-2 review finding F9).</b> Before <see cref="SpeechDeferralQueue.PeekNextDue"/>
+    /// learned to skip a <see cref="SpeechDeferral.NotBefore"/>-gated entry (SPEC F124.1/F124.2, PLAN
+    /// T267, round-2 review findings F1/F2), a live hold's blind peek could make THIS method run again
+    /// on every single pull for as long as the hold lasted — logging this SAME
+    /// <c>"declined … rung=Straddle"</c> line once per pull, with no corresponding ceremony piece ever
+    /// re-airing (<see cref="SpeechDeferralQueue.TryDequeueDue"/>'s own gate correctly refused to
+    /// release the held entry every time). Anyone reading T270's log evidence and finding that exact
+    /// repeating shape — many identical "declined" lines, one held SignOn, no matching new SignOn
+    /// airing between them — is looking at that now-fixed signature, not a new defect to chase; see
+    /// <see cref="SpeechDeferralQueue.PeekNextDue"/>'s own remarks for the fix.
+    /// </para>
     /// </summary>
     async Task<MediaItem?> TryServeCeremonyOnlyUnitAsync(
         BoundaryFitPlan fit, string? unitDjName, CadenceConfig cadence, StationIdentity identity,
         CancellationToken ct)
     {
+        // The SAME classifier MusicSelectionPolicy.SelectMusicCandidateAsync would apply to this
+        // identical fit, consulted directly rather than duplicated by hand — see this method's own
+        // remarks for why a Straddle verdict here can only mean the queue crosses.
+        var rung = fit.ClassifyOffToleranceRung(MusicSelectionPolicy.MusicFloor);
+
         // ONE line, not two: the fit line already carries every term (desired, queuedAhead, the
         // lot), so a second human-readable "declining because…" would restate it. The floor is the
-        // only fact the fit itself does not know, so it rides the outcome. This IS the SPEC F111.1
-        // CeremonyOnly rung by construction — ShouldDeclineFinalUnit only ever reaches this method
-        // once it has already found room below MusicSelectionPolicy.MusicFloor.
+        // only fact the fit itself does not know, so it rides the outcome. "outcome=declined" stays
+        // the greppable signature for T270's evidence regardless of which rung follows it (SPEC
+        // F124.1) — only the rung token tells a queue-crossing decline (Straddle) from an ordinary
+        // one (CeremonyOnly).
         LogBoundaryFit(
             fit,
             $"declined (floor={MusicSelectionPolicy.MusicFloor.TotalSeconds.ToString("F0", CultureInfo.InvariantCulture)}s)",
-            BoundaryOutcome.CeremonyOnly,
+            rung,
             sampled: [],
             chosenDiff: null);
 
-        var boundary = timeProvider.GetUtcNow() + fit.UntilBoundary;
-        await EnqueuePatterAsync(previousTrack, next: null, unitDjName, cadence, identity, ct, boundary);
+        // The forced drain instant — see this method's own remarks for the SignOff-headed chase
+        // (clamped against the F74.3 lookahead window, round-1 review finding F5) versus the
+        // SignOn-headed clamp to its own boundary alone (round-1 review finding F1: chasing QueuedAhead
+        // here too is exactly what let a held SignOn's own re-evaluation drain it in the very next
+        // call). fit.QueuedTailCrossesBoundary reuses the SAME crossing predicate the classifier above
+        // just consulted (round-1 review finding F4 — no second, differently-spelled comparison).
+        var chasedQueuedAhead = fit.QueuedAhead < boundaryBiasProvider.Current
+            ? fit.QueuedAhead
+            : boundaryBiasProvider.Current;
+        var drainDelay = fit.Kind == SpeechDeferralKind.SignOff && fit.QueuedTailCrossesBoundary
+            ? chasedQueuedAhead
+            : fit.UntilBoundary;
+        var boundary = timeProvider.GetUtcNow() + drainDelay;
+
+        // Only a queue-crossing SignOff holds its paired SignOn — see this method's own remarks.
+        // Everything else (a SignOn-headed fit already back for its own seam, or a non-crossing
+        // CeremonyOnly fit) takes the ordinary unforced drain, hold: null.
+        IReadOnlySet<SpeechDeferralKind>? hold = null;
+        if (rung == BoundaryOutcome.Straddle && fit.Kind == SpeechDeferralKind.SignOff)
+        {
+            HoldSignOnPastQueuedTail(fit.QueuedAhead);
+            hold = HoldSignOnAtStraddle;
+        }
+
+        await EnqueuePatterAsync(previousTrack, next: null, unitDjName, cadence, identity, ct, boundary, hold);
 
         return buffer.Count > 0 ? buffer.Dequeue() : null;
     }
@@ -1150,6 +1258,17 @@ public sealed class Orchestrator(
     /// <see cref="SpeechDeferralQueue"/> itself enforces that; it is an Orchestrator-side invariant
     /// (single-writer-thread), not a queue-side guarantee.
     /// </para>
+    ///
+    /// <para>
+    /// <b><see cref="SpeechDeferral.NotBefore"/> rides along unchanged (round-2 review finding F6).</b>
+    /// This re-Enqueue is the SAME supersede-by-key path every other caller uses — an omitted
+    /// <c>notBefore:</c> argument defaults to <see langword="null"/> and would silently drop any gate
+    /// already sitting on the peeked <paramref name="signOn"/>. Not reachable with a non-null gate
+    /// TODAY (<see cref="GetNextAsync"/>'s own straddle branch calls this BEFORE
+    /// <see cref="HoldSignOnPastQueuedTail"/> ever runs on this same slot — the two straddle/decline
+    /// paths never interleave on one SignOn), but passing it through costs nothing and removes a
+    /// landmine for whichever future call ordering changes that invariant.
+    /// </para>
     /// </summary>
     void CaptureCrossingTrackForHeldSignOn(MediaItem crossingTrack)
     {
@@ -1160,7 +1279,82 @@ public sealed class Orchestrator(
             SpeechDeferralKind.SignOn,
             signOn.Reason,
             signOn.Due,
-            handoff with { CrossingTrackTitle = crossingTrack.Title, CrossingTrackArtist = crossingTrack.Artist });
+            handoff with { CrossingTrackTitle = crossingTrack.Title, CrossingTrackArtist = crossingTrack.Artist },
+            notBefore: signOn.NotBefore);
+    }
+
+    /// <summary>
+    /// SPEC F124.1/F124.2 — arms a held SignOn's <see cref="SpeechDeferral.NotBefore"/> gate at
+    /// <c>max(existing NotBefore, now + queuedAhead)</c>: <see cref="HoldSignOnAtStraddle"/> only ever
+    /// excludes a deferral from a SINGLE <see cref="SpeechDeferralQueue.TryDequeueDue"/> call, which a
+    /// queued tail spanning several units (SPEC F124.6's own watch item — 230s queued at T-64s, several
+    /// tracks' worth) outruns — without a gate that survives past that one call, the SAME SignOn would
+    /// simply become the peeked fit on the very next pull and drain right back out through the
+    /// ORDINARY (unforced) due comparison, the hold having bought it nothing (round-1 review finding
+    /// F1: this is exactly what re-stamping <see cref="SpeechDeferral.Due"/> instead of arming a
+    /// separate gate failed to prevent — a SignOn-headed fit's own <c>UntilBoundary</c> IS <c>Due -
+    /// now</c>, so ANY drain instant this method's own caller computes for that later pull already
+    /// reaches at least <c>Due</c>, hold-set or not).
+    ///
+    /// <para>
+    /// <b><see cref="SpeechDeferral.Due"/> is deliberately left untouched.</b> It keeps meaning "the
+    /// boundary this deferral belongs to" — <see cref="EnqueueHandoffCeremonyAsync"/>'s own
+    /// reconcile/window-exit logic (SPEC F124's round-1 review finding F2) reads it as exactly that,
+    /// and a re-stamped Due would have made a live-held SignOn indistinguishable from one whose own
+    /// boundary genuinely moved. <see cref="SpeechDeferral.NotBefore"/> alone carries "not before REAL
+    /// wall-clock time reaches this instant" — see <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s
+    /// own remarks for why that must never be satisfiable by a forced-forward "as of" instant the way
+    /// <c>Due</c> legitimately is.
+    /// </para>
+    ///
+    /// <para>
+    /// <paramref name="queuedAhead"/> is an HONEST FLOOR (SPEC F124.2 — the feeder's own measurement at
+    /// THIS pass, deliberately not a forecast of anything a later unit might still add), and drains
+    /// only ever happen at a seam, so the SignOn lands at the first seam AT-OR-AFTER the estimate
+    /// rather than exactly on it. <c>max</c>, never a blind overwrite: a gate already later than
+    /// <c>now + queuedAhead</c> is left exactly where it was, the same "never move a pending deferral
+    /// earlier" posture <see cref="EnqueueIfAbsent"/> already keeps for its own callers.
+    /// </para>
+    ///
+    /// <para>
+    /// Peek then Enqueue — the SAME two-lock-acquisition pattern
+    /// <see cref="CaptureCrossingTrackForHeldSignOn"/> documents (T235 review finding F6), safe here
+    /// for the identical reason: the SignOn slot's only OTHER writer is
+    /// <see cref="EnqueueHandoffCeremonyAsync"/>, and both run on the single feeder thread this class's
+    /// whole straddle/decline machinery assumes (see that method's own remarks). A no-op when nothing
+    /// is pending — a one-sided SignOff-only decline (SPEC F92.3) has no SignOn to hold.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The GATE is clamped to <see cref="IBoundaryBiasProvider.Current"/>, not just
+    /// <see cref="TryServeCeremonyOnlyUnitAsync"/>'s own drain instant (SPEC F124.1, round-2 review
+    /// finding F5).</b> <paramref name="queuedAhead"/> arrives here as the feeder's RAW measurement —
+    /// <see cref="TryServeCeremonyOnlyUnitAsync"/>'s own <c>chasedQueuedAhead</c> local clamps a
+    /// SEPARATE copy for that method's own drain-instant arithmetic, but hands this method the
+    /// unclamped <c>fit.QueuedAhead</c> (SPEC F124.6's own watch item: <c>pendingAirQueue</c> can
+    /// legally hold HOURS under a genuine backlog). Clamping only the drain instant and not this gate
+    /// would let a multi-hour queued tail arm a NotBefore floor arbitrarily far past the SAME F74.3
+    /// lookahead window every fit in this class is built inside of — a hold that could never be
+    /// reasoned about by the very machinery (<see cref="PeekNextDue"/>'s window check, one call up in
+    /// <see cref="GetNextAsync"/>) that decides whether a boundary is even "coming soon" at all. Capping
+    /// at the window bound, exactly like <c>chasedQueuedAhead</c>'s own clamp one call site over, keeps
+    /// this gate honest about how far forward THIS pass is willing to reason, never a promise about
+    /// when the tail will ACTUALLY finish draining hours from now — a later straddle/decline unit, once
+    /// the SignOn is peeked again as the earliest UN-GATED entry, re-evaluates and re-arms exactly as
+    /// today's un-clamped estimate always could, just one hold-call at a time instead of one giant leap.
+    /// </para>
+    /// </summary>
+    void HoldSignOnPastQueuedTail(TimeSpan queuedAhead)
+    {
+        if (deferralQueue.Peek(SpeechDeferralKind.SignOn) is not { } signOn)
+            return; // one-sided decline (SignOff only, F92.3) — no SignOn to hold
+
+        var clampedQueuedAhead = queuedAhead < boundaryBiasProvider.Current ? queuedAhead : boundaryBiasProvider.Current;
+        var estimatedDrain = timeProvider.GetUtcNow() + clampedQueuedAhead;
+        var notBefore = signOn.NotBefore is { } existing && existing > estimatedDrain ? existing : estimatedDrain;
+
+        deferralQueue.Enqueue(
+            SpeechDeferralKind.SignOn, signOn.Reason, signOn.Due, signOn.Handoff, notBefore: notBefore);
     }
 
     /// <summary>
@@ -1374,10 +1568,24 @@ public sealed class Orchestrator(
         // Clears both SignOff/SignOn (SPEC F92.1 revisit) — the one action every "no ceremony airs"
         // branch below shares, so the dedupe matrix in this method's own remarks reads as a matrix of
         // conditions rather than five repeated two-line clear blocks (T124 review simplify).
+        //
+        // ClearStale, never the blind Clear (round-1 review finding F2): every call site below is this
+        // producer concluding "no ceremony belongs here any more" off the SCHEDULE's current state,
+        // which says nothing about whether a queue-crossing SignOff already handed its paired SignOn to
+        // this class's own HoldSignOnPastQueuedTail (SPEC F124.1) and is still waiting on that tail to
+        // drain. A held-but-not-yet-airable SignOn (NotBefore in the future) is LIVE, not stale —
+        // this producer re-evaluates every unit (by design, a schedule write must be noticed promptly),
+        // so the window-exit branch below fires the very first unit real wall-clock time crosses the
+        // boundary, typically well before a multi-minute queued tail has actually finished airing;
+        // wiping the hold there destroyed the sign-on outright (round-1's reproduced F2 defect: it
+        // survives past the boundary, then this exact call silently erases it, and the incoming DJ
+        // never signs on). SignOff is never held (only a SignOn ever gets a NotBefore), so this is a
+        // no-op difference for every SignOff clear below — always "stale," exactly what Clear already
+        // removed.
         void ClearCeremony()
         {
-            deferralQueue.Clear(SpeechDeferralKind.SignOff);
-            deferralQueue.Clear(SpeechDeferralKind.SignOn);
+            deferralQueue.ClearStale(SpeechDeferralKind.SignOff);
+            deferralQueue.ClearStale(SpeechDeferralKind.SignOn);
         }
 
         var onAir = await scheduleResolver.ResolveAsync(ct);
@@ -1437,10 +1645,18 @@ public sealed class Orchestrator(
             var transitionPersona = await ResolveHandoffPersonaAsync(incomingId, stationVoice, ct);
             if (transitionPersona is null || boundaryAt.Value <= now)
             {
-                deferralQueue.Clear(SpeechDeferralKind.SignOn);
+                // Round-2 review finding F3: ClearStale, never the blind Clear — the SAME reasoning
+                // ClearCeremony's own remarks give (a live-held SignOn's NotBefore gate has not opened
+                // against REAL wall-clock time, so it is not stale merely because THIS producer has
+                // concluded nothing new belongs in this slot).
+                deferralQueue.ClearStale(SpeechDeferralKind.SignOn);
             }
             else
             {
+                // Round-2 review finding F4: a live hold on the SignOn slot must survive being
+                // overwritten here — see this branch's sibling below (the two-DJ handoff re-arm) for
+                // the full ruling; both call sites share the identical carry-forward.
+                var heldNotBefore = deferralQueue.Peek(SpeechDeferralKind.SignOn)?.NotBefore;
                 deferralQueue.Enqueue(
                     SpeechDeferralKind.SignOn,
                     "handoff: same-persona show transition (SPEC F116.2)",
@@ -1450,7 +1666,8 @@ public sealed class Orchestrator(
                         transitionPersona.Value.Name,
                         CounterpartName: null, // no OTHER DJ to name — it is the same persona
                         ShowName: onAir.NextSegment?.Show?.Name,
-                        ShowFlavor: onAir.NextSegment?.Show?.Flavor));
+                        ShowFlavor: onAir.NextSegment?.Show?.Flavor),
+                    notBefore: heldNotBefore);
             }
 
             return;
@@ -1481,10 +1698,34 @@ public sealed class Orchestrator(
 
         if (incoming is null || boundaryAt.Value <= now)
         {
-            deferralQueue.Clear(SpeechDeferralKind.SignOn);
+            // Round-2 review finding F3: ClearStale, never the blind Clear — identical reasoning to
+            // ClearCeremony's own remarks and this method's same-persona-transition branch above.
+            deferralQueue.ClearStale(SpeechDeferralKind.SignOn);
         }
         else
         {
+            // Round-2 review finding F4: a live hold on the CURRENT SignOn slot —
+            // HoldSignOnPastQueuedTail's own NotBefore gate, still waiting on a queued tail to drain —
+            // must SURVIVE being overwritten by a re-arm for what this evaluation just decided is a
+            // genuinely different boundary/persona pair (a schedule write, or simply the resolver's own
+            // "current" segment rolling forward once real wall-clock time finally reaches the OLD
+            // boundary while the hold is still open). Chosen over the alternative (refuse to re-arm at
+            // all while a hold is live): refusing would leave the STALE, now-WRONG persona/boundary
+            // content sitting in this slot until the old hold finally opens — audibly worse than airing
+            // the CORRECT content a few seconds later than the bare gate alone would allow, since the
+            // gate we DO carry forward still enforces "not before the already-queued tail finishes,"
+            // exactly the same physical constraint that queued tail always represented, regardless of
+            // which ceremony's content ends up occupying this slot. Peek-then-Enqueue is racy only in
+            // theory here — same single-feeder-thread invariant <see cref="HoldSignOnPastQueuedTail"/>
+            // and <see cref="CaptureCrossingTrackForHeldSignOn"/> already document.
+            //
+            // This never disturbs the F2 reconcile guard's own Due-equality semantics
+            // (<see cref="GetNextAsync"/>'s straddle branch, "reconciledSignOff.Due == pending.Due"):
+            // that check reads the SignOff half only, which this branch's SignOff arm (above) still
+            // stamps with the fresh, correctly-computed Due for whatever boundary this evaluation
+            // resolved — carrying NotBefore forward on the SignOn half changes nothing about what Due
+            // that guard ever sees.
+            var heldNotBefore = deferralQueue.Peek(SpeechDeferralKind.SignOn)?.NotBefore;
             deferralQueue.Enqueue(
                 SpeechDeferralKind.SignOn,
                 "handoff: boundary entered the F74.3 window",
@@ -1492,7 +1733,8 @@ public sealed class Orchestrator(
                 new HandoffContext(
                     incoming.Value.Voice, incoming.Value.Name, outgoing?.Name,
                     ShowName: onAir.NextSegment?.Show?.Name,
-                    ShowFlavor: onAir.NextSegment?.Show?.Flavor));
+                    ShowFlavor: onAir.NextSegment?.Show?.Flavor),
+                notBefore: heldNotBefore);
         }
     }
 

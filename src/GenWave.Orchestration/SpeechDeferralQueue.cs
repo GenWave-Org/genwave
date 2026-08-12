@@ -59,6 +59,22 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     /// <see langword="null"/> when nothing is pending. Read-only — never consumes. Exposed for
     /// boundary-aware track selection (SPEC F74.3, PLAN T43) to bias toward tracks ending near
     /// this instant.
+    ///
+    /// <para>
+    /// <b>Deliberately NOT gate-filtered (round-3 review finding, SPEC F124.1/F124.2), unlike
+    /// <see cref="PeekNextDue"/>.</b> This member never reads a <see cref="SpeechDeferral.NotBefore"/>
+    /// at all — a held (gated) entry's raw <see cref="SpeechDeferral.Due"/> counts here exactly the same
+    /// as an ungated one's. That is safe only because this member is NOT on
+    /// <see cref="Orchestrator.GetNextAsync"/>'s own planning path — it never decides whether a
+    /// <c>BoundaryFitPlan</c> gets built, never feeds <see cref="Orchestrator.ShouldDeclineFinalUnit"/>,
+    /// and no production caller consults it today (<c>ClockAnchoredImagingProducer</c>'s own doc
+    /// mentions it only in passing; every actual reader is a test asserting queue state directly). The
+    /// planner reads <see cref="PeekNextDue"/> exclusively for exactly the reason this member must NOT
+    /// be repurposed for that role without first teaching it the same gate: a held SignOn's raw
+    /// <see cref="SpeechDeferral.Due"/> is stale-but-not-yet-airable, and reporting it here as "the next
+    /// due instant" would silently reintroduce the round-2 blind-peek defect the moment some future
+    /// caller wired this property into a planning decision instead of <see cref="PeekNextDue"/>.
+    /// </para>
     /// </summary>
     public DateTimeOffset? NextDue
     {
@@ -72,19 +88,59 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     }
 
     /// <summary>
-    /// The full deferral behind <see cref="NextDue"/> (gh-#254): the earliest-due pending entry,
-    /// ordered by <see cref="SpeechDeferral.Due"/> ascending with the SAME kind/discriminator
+    /// The full deferral behind <see cref="NextDue"/> (gh-#254): the earliest-due, UN-GATED pending
+    /// entry, ordered by <see cref="SpeechDeferral.Due"/> ascending with the SAME kind/discriminator
     /// tiebreak <see cref="TryDequeueDue"/> contracts (declaration order — SignOff before SignOn —
-    /// then discriminator, ordinal), or <see langword="null"/> when nothing is pending. Read-only —
-    /// never consumes. Exposed so boundary-fit selection can see WHAT is coming (kind + handoff
-    /// context feed the patter estimates), not merely when; <see cref="NextDue"/> stays for callers
-    /// that only need the instant.
+    /// then discriminator, ordinal), or <see langword="null"/> when nothing UN-GATED is pending.
+    /// Read-only — never consumes.
+    ///
+    /// <para>
+    /// <b>Skips a held (<see cref="SpeechDeferral.NotBefore"/>-gated) entry entirely (SPEC
+    /// F124.1/F124.2, PLAN T267, round-2 review findings F1/F2 — the "gate at the drain, blind at the
+    /// peek" defect).</b> Checked against REAL wall-clock time, the SAME <see cref="TimeProvider"/>
+    /// reading <see cref="TryDequeueDue"/> gates against — never the caller's own due-time arithmetic —
+    /// so a held entry is exactly as invisible to the PLANNER (<c>Orchestrator.GetNextAsync</c>'s own
+    /// peek, which decides whether a boundary fit exists at all) as it already was to the DRAIN. Before
+    /// this fix, a peek blind to the gate kept reporting a held-but-not-yet-airable SignOn as "next up"
+    /// for as long as its hold lasted: <c>Orchestrator.GetNextAsync</c> kept building a fresh
+    /// <c>BoundaryFitPlan</c> for it, <c>ShouldDeclineFinalUnit</c> kept declining (the SAME below-floor
+    /// numbers every repeat), and — with the default cadence (<c>BackAnnounceAfterEachTrack</c>) on —
+    /// <c>TryServeCeremonyOnlyUnitAsync</c> kept rendering a FRESH back-announce every single pull,
+    /// since that was the one piece its own drain could still Kick while the SignOn itself stayed
+    /// blocked by <see cref="TryDequeueDue"/>'s own (already-correct) gate check — a repeated-back-
+    /// announce loop strictly worse than the incident this whole seam exists to fix. Once <c>now</c>
+    /// itself passed the held entry's stale <see cref="SpeechDeferral.Due"/>, the SAME blindness flipped
+    /// to the opposite failure: <c>untilDue</c> went negative, <c>GetNextAsync</c>'s own <c>untilDue &gt;
+    /// TimeSpan.Zero</c> guard refused to build ANY fit at all, for ANY kind — not just the held one —
+    /// for the remainder of the hold, since the held entry kept winning the earliest-due comparison
+    /// against every other, perfectly eligible pending deferral. Skipping a gated entry here restores
+    /// both: the loop stops (nothing left to re-decline once the held entry is invisible), and whichever
+    /// UN-GATED deferral is next in line (or none) heads the fit exactly as if the held entry were not
+    /// pending at all — F74.3 bias, a gh-#300 decline, a fresh boundary's own SignOff, all stay live
+    /// throughout the hold.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Interaction with sort order and <see cref="EnqueueIfAbsent"/>.</b> The gate is applied as a
+    /// pre-filter, BEFORE <see cref="InDrainOrder"/>'s own Due/Kind/Discriminator ordering runs — never
+    /// a post-hoc skip over an already-sorted sequence — so a held entry never "uses up" or shifts the
+    /// tiebreak among the entries that remain: the SAME stable order <see cref="TryDequeueDue"/> would
+    /// eventually drain them in is exactly what this method reports among whatever is left after gated
+    /// entries are removed. <see cref="EnqueueIfAbsent"/> is unaffected — it never reads a <c>NotBefore</c>
+    /// at all, so a producer re-arming the identical due instant on every tick (its own no-op re-arm
+    /// contract, unrelated to this gate) behaves exactly as it always has, held entry or not.
+    /// </para>
     /// </summary>
     public SpeechDeferral? PeekNextDue()
     {
         lock (gate)
         {
-            return pending.Count == 0 ? null : InDrainOrder(pending.Values).First();
+            if (pending.Count == 0) return null;
+
+            var realNow = timeProvider.GetUtcNow();
+            return InDrainOrder(pending.Values.Where(deferral =>
+                    deferral.NotBefore is not { } notBefore || notBefore <= realNow))
+                .FirstOrDefault();
         }
     }
 
@@ -134,16 +190,22 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     /// <see cref="ContextContent"/> <c>ContextPipeline.TickAsync</c> just handed it. Every pre-F107
     /// kind leaves this <see langword="null"/>, unchanged.
     /// </param>
+    /// <param name="notBefore">
+    /// Additive (SPEC F124.1/F124.2, PLAN T267, round-1 review findings F1/F2) — see
+    /// <see cref="SpeechDeferral.NotBefore"/>. <see langword="null"/> (the default) for every caller
+    /// except <c>Orchestrator.HoldSignOnPastQueuedTail</c>.
+    /// </param>
     public void Enqueue(
         SpeechDeferralKind kind,
         string reason,
         DateTimeOffset? due = null,
         HandoffContext? handoff = null,
         string? discriminator = null,
-        ContextContent? context = null)
+        ContextContent? context = null,
+        DateTimeOffset? notBefore = null)
     {
         var deferral = new SpeechDeferral(
-            kind, due ?? timeProvider.GetUtcNow(), reason, handoff, discriminator, context);
+            kind, due ?? timeProvider.GetUtcNow(), reason, handoff, discriminator, context, notBefore);
         lock (gate)
         {
             pending[(kind, discriminator)] = deferral;
@@ -229,6 +291,34 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     }
 
     /// <summary>
+    /// Like <see cref="Clear"/>, but leaves a HELD entry — one whose <see cref="SpeechDeferral.NotBefore"/>
+    /// gate has not yet opened against REAL wall-clock time — exactly where it is (SPEC F124.1/F124.2,
+    /// PLAN T267, round-1 review finding F2). A pending deferral still waiting on its own not-before
+    /// floor is LIVE, not stale, even when whatever prompted this call has concluded that nothing of
+    /// <paramref name="kind"/> belongs here any more: it is waiting on the tail it was deliberately
+    /// queued behind to finish draining, a fact this call's own reason for clearing (a schedule
+    /// re-evaluation, typically) knows nothing about. <c>Orchestrator</c>'s own <c>ClearCeremony</c>
+    /// local — the handoff-ceremony producer's window-exit/gap-to-gap/self-handoff retraction — is the
+    /// one caller; see that method's own remarks for why silently destroying a held-but-not-yet-airable
+    /// SignOn there was the F2 defect this closes. An entry with no <see cref="SpeechDeferral.NotBefore"/>
+    /// at all (every kind except a held SignOn) is unaffected — always stale by this definition, exactly
+    /// what <see cref="Clear"/> already removed.
+    /// </summary>
+    public void ClearStale(SpeechDeferralKind kind)
+    {
+        lock (gate)
+        {
+            var now = timeProvider.GetUtcNow();
+            var keys = pending
+                .Where(entry => entry.Key.Kind == kind
+                    && (entry.Value.NotBefore is not { } notBefore || notBefore <= now))
+                .Select(entry => entry.Key)
+                .ToList();
+            foreach (var key in keys) pending.Remove(key);
+        }
+    }
+
+    /// <summary>
     /// Removes and returns every deferral due at or before <paramref name="now"/>, ordered by
     /// <see cref="SpeechDeferral.Due"/> ascending with <see cref="SpeechDeferralKind"/>'s own
     /// declaration order (<see cref="SpeechDeferralKind.SignOff"/> before
@@ -263,6 +353,43 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     /// held-but-due entry is left exactly where <see cref="Enqueue"/> put it, ready for a later call
     /// (with no hold, or a different one) to pick up.
     /// </param>
+    /// <remarks>
+    /// <b><see cref="SpeechDeferral.NotBefore"/> gates against REAL wall-clock time, never
+    /// <paramref name="now"/></b> (SPEC F124.1/F124.2, PLAN T267, round-1 review finding F1). A caller
+    /// may legitimately pass a <paramref name="now"/> far ahead of the real clock — the ceremony-only
+    /// and straddle drains both do, deliberately, to reach a piece whose <see cref="SpeechDeferral.Due"/>
+    /// has not technically arrived yet but effectively has once queued audio is accounted for — and
+    /// <see cref="SpeechDeferral.Due"/> is right to honor that forced instant: it names the boundary a
+    /// deferral belongs to, and a forced-forward "as of" reasonably advances past it.
+    /// <see cref="SpeechDeferral.NotBefore"/> means something categorically different — "this may not
+    /// leave the queue before wall-clock time genuinely reaches this instant" — so it is checked against
+    /// this queue's own <see cref="TimeProvider"/> reading, taken fresh on every call, regardless of what
+    /// <paramref name="now"/> the caller supplied. Without this split, the SAME forced-forward instant
+    /// that correctly satisfies a held SignOff's <c>Due</c> would just as incorrectly satisfy its paired
+    /// SignOn's re-armed eligibility the very next time that SAME SignOn became the peeked fit — the
+    /// hold lasting exactly zero seconds, the round-1 defect this closes.
+    ///
+    /// <para>
+    /// <b>T269 breadcrumb (not built yet — PLAN T269, TimeDate elapsed-due expiry):</b> a future
+    /// staleness predicate for <see cref="SpeechDeferralKind.TimeDate"/> belongs beside this SAME
+    /// not-before check, and must follow the identical rule — compare against this queue's real clock
+    /// reading, never <paramref name="now"/>. A forced-future <paramref name="now"/> (the ceremony/
+    /// straddle drains above) must never make a perfectly punctual TimeDate read as late merely because
+    /// the CALLER pretended more time had passed than the wall clock agrees has.
+    ///
+    /// <b>Round-2 review finding F8 — the lateness arithmetic itself:</b> air-time lateness is
+    /// <c>realNow + queuedAhead − Due</c>, NOT the naive <c>realNow − Due</c> — a predicate that
+    /// compares only wall-clock "now" against <c>Due</c>, with no <c>queuedAhead</c> term, under-counts
+    /// lateness by exactly the queued tail still ahead of this pass. The SAME reasoning
+    /// <see cref="Orchestrator.HoldSignOnPastQueuedTail"/>'s own <c>NotBefore</c> arithmetic already
+    /// applies to a held SignOn (a piece has not truly "aired late" merely because wall-clock passed its
+    /// <c>Due</c> — it airs when the ALREADY-QUEUED audio ahead of it finishes, not one instant sooner)
+    /// must carry over to whatever T269 builds: an expiry check that only ever asks "has real time
+    /// passed <c>Due</c>" would flag a TimeDate deferral stale well before it has actually gone stale on
+    /// air, by exactly however much runtime is still queued ahead of the pull that would otherwise drain
+    /// it.
+    /// </para>
+    /// </remarks>
     public IReadOnlyList<SpeechDeferral> TryDequeueDue(
         DateTimeOffset now, IReadOnlySet<SpeechDeferralKind>? hold = null)
     {
@@ -270,8 +397,11 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
         {
             if (pending.Count == 0) return [];
 
+            var realNow = timeProvider.GetUtcNow();
             var due = InDrainOrder(pending.Values.Where(deferral =>
-                    deferral.Due <= now && (hold is null || !hold.Contains(deferral.Kind))))
+                    deferral.Due <= now
+                    && (deferral.NotBefore is not { } notBefore || notBefore <= realNow)
+                    && (hold is null || !hold.Contains(deferral.Kind))))
                 .ToList();
             foreach (var deferral in due) pending.Remove((deferral.Kind, deferral.Discriminator));
             return due;

@@ -28,6 +28,12 @@ sealed class FakePersonaStore : IPersonaStore
 
     public void Add(Persona persona) => personas[persona.Id] = persona;
 
+    /// <summary>Round-3 review addition — simulates a persona "deleted out of band" mid-test
+    /// (<c>Orchestrator.ResolveHandoffPersonaAsync</c>'s own remarks): a previously-<see cref="Add"/>ed
+    /// persona that a LATER lookup must now miss, distinct from <see cref="ThrowOnGetById"/>'s "the
+    /// store itself faulted" shape.</summary>
+    public void Remove(long id) => personas.Remove(id);
+
     public void AddCard(long personaId, PersonaCard card) => cards[personaId] = card;
 
     public Task<Persona?> GetByIdAsync(long id, CancellationToken ct)

@@ -139,18 +139,14 @@ public sealed class MusicSelectionPolicy(
     /// <para>
     /// <b>SPEC F111.1 (gh-#320, PLAN T234):</b> the return value's <see cref="BoundaryOutcome"/> names
     /// which rung of the ladder this pick resolved to — <see cref="BoundaryOutcome.Fit"/> when a
-    /// sample lands within tolerance (the win rule below, unchanged since gh-#254); otherwise
-    /// <see cref="BoundaryOutcome.Straddle"/> when <see cref="BoundaryFitPlan.DesiredEffectiveLength"/>
-    /// still clears <see cref="MusicFloor"/>, or <see cref="BoundaryOutcome.CeremonyOnly"/> when it
-    /// does not — the SAME floor <c>Orchestrator.ShouldDeclineFinalUnit</c> already gates its own
-    /// pre-emptive decline on. <b>SPEC F124.1 (STORY-320, PLAN T266) ended the one-authority
-    /// guarantee for this comparison:</b> <see cref="ClassifyOffToleranceRung"/> now ALSO checks
-    /// <see cref="QueuedTailCrossesBoundary"/> ahead of the floor, so this method and
-    /// <c>ShouldDeclineFinalUnit</c> can resolve DIFFERENT rungs for the identical fit — a
-    /// queue-crossing SignOff/SignOn fit classifies <see cref="BoundaryOutcome.Straddle"/> here while
-    /// <c>ShouldDeclineFinalUnit</c> (still floor-only, unaware of the queue) declines it, hard-coding
-    /// <see cref="BoundaryOutcome.CeremonyOnly"/> before this method is ever consulted (PLAN T267 owns
-    /// closing that gap). Reported here, and read by
+    /// sample lands within tolerance (the win rule below, unchanged since gh-#254); otherwise whatever
+    /// <see cref="BoundaryFitPlan.ClassifyOffToleranceRung"/> resolves against <see cref="MusicFloor"/>
+    /// (SPEC F124.1 widens that classifier to treat a queue crossing the boundary as
+    /// <see cref="BoundaryOutcome.Straddle"/> too — see <see cref="BoundaryFitPlan.IsBelowFloor"/>'s own
+    /// remarks for why <c>Orchestrator.ShouldDeclineFinalUnit</c> never needed to widen its OWN,
+    /// floor-only condition to match, and <c>Orchestrator.TryServeCeremonyOnlyUnitAsync</c>'s remarks
+    /// for how its decline path stays in agreement with this same classifier without this method ever
+    /// running for a queue-crossing handoff fit). Reported here, and read by
     /// <c>Orchestrator.GetNextAsync</c>'s straddle branch as of PLAN T235 — but
     /// <see cref="BoundaryOutcome.Straddle"/> ALONE never forces anything there (T235 review findings
     /// F1/F5): <see cref="MusicSelectionResult.CrossesBoundary"/>, computed alongside this outcome, is
@@ -268,9 +264,9 @@ public sealed class MusicSelectionPolicy(
                     // SPEC F124.1 (PLAN T266): CrossesBoundary is not hard-false here just because
                     // nothing NEW was sampled — a queued tail that alone already spans the boundary
                     // crosses regardless, the same union computed below for the off-tolerance branch.
-                    var drainedRung = ClassifyOffToleranceRung(fit);
+                    var drainedRung = fit.ClassifyOffToleranceRung(MusicFloor);
                     log.Log(fit, "drained", drainedRung, sampled, chosenDiff: null);
-                    return new MusicSelectionResult(null, drainedRung, QueuedTailCrossesBoundary(fit));
+                    return new MusicSelectionResult(null, drainedRung, fit.QueuedTailCrossesBoundary);
                 }
 
                 break; // the pool emptied mid-sample; keep whatever was already sampled.
@@ -311,9 +307,9 @@ public sealed class MusicSelectionPolicy(
         // the last-resort duration-less candidate that carried no score at all (F74.3 keeps it
         // eligible — an un-enriched row is never penalized for enrichment lag). Either way the ladder
         // rung is decided the SAME way (SPEC F111.1, widened by SPEC F124.1 — see
-        // ClassifyOffToleranceRung's own remarks): Straddle with room to spare OR a queued tail that
-        // alone already spans the boundary, CeremonyOnly with neither.
-        var offToleranceRung = ClassifyOffToleranceRung(fit);
+        // BoundaryFitPlan.ClassifyOffToleranceRung's own remarks): Straddle with room to spare OR a
+        // queued tail that alone already spans the boundary, CeremonyOnly with neither.
+        var offToleranceRung = fit.ClassifyOffToleranceRung(MusicFloor);
 
         // T235 review findings F1/F5 — "off tolerance, above the floor" (Straddle) says nothing on
         // its own about whether THIS pick actually crosses the boundary: a "least-late" candidate can
@@ -328,86 +324,20 @@ public sealed class MusicSelectionPolicy(
         // unit crosses — the picked candidate can be short (or even unmeasured, the firstUnscored
         // case) and the unit still crosses because of what is ALREADY queued ahead of it. Checked
         // first since it needs no duration comparison at all.
-        var crossesBoundary = QueuedTailCrossesBoundary(fit)
+        var crossesBoundary = fit.QueuedTailCrossesBoundary
             || (bestEffective is { } effectiveLength && effectiveLength >= fit.UntilBoundary);
 
         log.Log(fit, best is not null ? "least-late" : "unscored", offToleranceRung, sampled, bestDiff);
         return new MusicSelectionResult(best ?? firstUnscored, offToleranceRung, crossesBoundary);
     }
 
-    /// <summary>
-    /// SPEC F111.1 (gh-#320, PLAN T234) — the ladder's rung once a pick has already missed tolerance:
-    /// <see cref="BoundaryOutcome.Straddle"/> while <see cref="BoundaryFitPlan.DesiredEffectiveLength"/>
-    /// still clears <see cref="MusicFloor"/>, else <see cref="BoundaryOutcome.CeremonyOnly"/> — reads
-    /// <see cref="IsBelowFloor"/> (T234 review finding F3) rather than comparing
-    /// <see cref="BoundaryFitPlan.DesiredEffectiveLength"/> against <see cref="MusicFloor"/> a second
-    /// time by hand.
-    ///
-    /// <para>
-    /// <b>SPEC F124.1 (STORY-320, PLAN T266):</b> <see cref="QueuedTailCrossesBoundary"/> is checked
-    /// FIRST, ahead of the floor — a queue that alone already spans the boundary settles Straddle
-    /// regardless of how far below <see cref="MusicFloor"/> the desired room for a NEW candidate
-    /// falls, since the crossing content in that shape is the already-queued tail itself, not
-    /// anything this pick samples. This is what THIS classifier requires; it is not yet what the
-    /// system as a whole delivers — <c>Orchestrator.ShouldDeclineFinalUnit</c> still declines a
-    /// SignOff/SignOn fit before this method ever runs, hard-coding CeremonyOnly and playing a sign-on
-    /// ahead of buffered outgoing content that has not finished draining. PLAN T267 wires the decline
-    /// gate to respect this classification; until then this method's own widening only ever reaches
-    /// non-handoff kinds (StationId/TimeDate), which <c>ShouldDeclineFinalUnit</c> never declines.
-    /// </para>
-    /// </summary>
-    static BoundaryOutcome ClassifyOffToleranceRung(BoundaryFitPlan fit) =>
-        QueuedTailCrossesBoundary(fit) || !IsBelowFloor(fit) ? BoundaryOutcome.Straddle : BoundaryOutcome.CeremonyOnly;
-
-    /// <summary>
-    /// T234 review finding F3 — the ONE place <see cref="BoundaryFitPlan.DesiredEffectiveLength"/> is
-    /// ever compared against <see cref="MusicFloor"/>. Before this method existed,
-    /// <see cref="ClassifyOffToleranceRung"/> (<c>&gt;= MusicFloor ? Straddle : CeremonyOnly</c>) and
-    /// <c>Orchestrator.ShouldDeclineFinalUnit</c> (<c>&lt; MusicSelectionPolicy.MusicFloor</c>) each
-    /// hand-wrote what was supposed to be the SAME comparison as its own complement — two call sites a
-    /// future edit to either one could silently drift out of sync with the other, exactly the drift
-    /// the doc comment on the old <see cref="ClassifyOffToleranceRung"/> claimed could not happen.
-    /// Both call sites still call this floor comparison unchanged — <c>&gt;=</c> is the floor's own
-    /// edge convention (SPEC F112.3): exactly at the floor is NOT below it, so a fit landing exactly
-    /// on <see cref="MusicFloor"/> straddles rather than declines — pinned by
-    /// <c>Story303_StraddleHandoff</c>'s own exact-floor fact.
-    ///
-    /// <para>
-    /// <b>SPEC F124.1 (STORY-320, PLAN T266) narrowed the drift-guard this method buys.</b> Sharing
-    /// this ONE floor predicate still keeps the FLOOR comparison itself from drifting between the two
-    /// call sites, but it no longer makes them agree on the final rung: <see cref="ClassifyOffToleranceRung"/>
-    /// now ALSO consults <see cref="QueuedTailCrossesBoundary"/> ahead of this predicate, while
-    /// <c>ShouldDeclineFinalUnit</c> still reads this predicate alone. A queue-crossing SignOff/SignOn
-    /// fit is therefore <see cref="BoundaryOutcome.CeremonyOnly"/> below (unchanged) and would
-    /// classify <see cref="BoundaryOutcome.Straddle"/> if it ever reached
-    /// <see cref="ClassifyOffToleranceRung"/> — it does not yet, for those two kinds, until PLAN T267
-    /// wires the decline gate to match.
-    /// </para>
-    /// </summary>
-    internal static bool IsBelowFloor(BoundaryFitPlan fit) => fit.DesiredEffectiveLength < MusicFloor;
-
-    /// <summary>
-    /// SPEC F124.1 (STORY-320, PLAN T266) — true when the feeder's own already-queued runtime alone
-    /// reaches or passes the boundary before this pick's candidate even starts: the crossing content
-    /// IS that queued tail, not anything <see cref="SelectMusicCandidateAsync"/> samples. Read by
-    /// <see cref="ClassifyOffToleranceRung"/> (never <see cref="BoundaryOutcome.CeremonyOnly"/> once
-    /// this fires) and by the <c>CrossesBoundary</c> union both return sites of
-    /// <see cref="SelectMusicCandidateAsync"/> compute.
-    ///
-    /// <para>
-    /// <b>The null-estimate degrade (STORY-320 AC4) falls out for free, not as a special case.</b>
-    /// <c>Orchestrator.BuildBoundaryFit</c> coalesces an unknown feeder estimate
-    /// (<c>queuedAheadMs ?? 0</c>) before it ever reaches <see cref="BoundaryFitPlan.QueuedAhead"/> —
-    /// this predicate never sees the null itself, only the coalesced zero. A
-    /// <see cref="BoundaryFitPlan"/> is only ever built when <c>untilDue &gt; TimeSpan.Zero</c>
-    /// (<c>Orchestrator.GetNextAsync</c>'s own guard), so <see cref="BoundaryFitPlan.UntilBoundary"/>
-    /// is always strictly positive for every fit this method is ever asked about — zero can never
-    /// reach or pass a strictly positive boundary. An unknown estimate therefore ALWAYS takes the
-    /// exact pre-F124 path: this predicate is false, and <see cref="IsBelowFloor"/> alone decides the
-    /// rung, byte-identical to the shipped gh-#320 ladder.
-    /// </para>
-    /// </summary>
-    static bool QueuedTailCrossesBoundary(BoundaryFitPlan fit) => fit.QueuedAhead >= fit.UntilBoundary;
+    // Round-1 review finding F4 (PLAN T267): the off-tolerance classification (ClassifyOffToleranceRung),
+    // the floor comparison it reads (IsBelowFloor), and the queue-crossing predicate ahead of it
+    // (QueuedTailCrossesBoundary) all moved onto BoundaryFitPlan itself — pure functions of that
+    // record's own fields, called as fit.ClassifyOffToleranceRung(MusicFloor) below, never duplicated
+    // by hand here or at Orchestrator's own decline path. See BoundaryFitPlan's own remarks for the
+    // full ruling (including the STORY-320 AC4 null-estimate degrade and why Orchestrator.ShouldDeclineFinalUnit
+    // never needed to widen its own floor-only condition to match).
 
     /// <summary>
     /// The envelope-aware pick seam (SPEC F81.2/F81.5/F81.6, STORY-212 T62) — every call site that

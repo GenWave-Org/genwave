@@ -44,15 +44,11 @@ internal enum BoundaryOutcome
     /// last-resort: no music unit belongs in front of the boundary at all.
     ///
     /// <para>
-    /// SPEC F124.1 (STORY-320, PLAN T266) — the CLASSIFIER (<c>MusicSelectionPolicy.ClassifyOffToleranceRung</c>)
-    /// no longer claims one shape: a <see cref="BoundaryFitPlan.QueuedAhead"/> that alone already spans
-    /// the boundary now classifies <see cref="Straddle"/> there instead. The DECLINE path
-    /// (<c>Orchestrator.ShouldDeclineFinalUnit</c> / <c>TryServeCeremonyOnlyUnitAsync</c>) still claims
-    /// it for SignOff/SignOn, unchanged — it hard-codes this literal before the classifier above is
-    /// ever consulted, which is exactly what produced the first-night incident's
-    /// <c>rung=CeremonyOnly</c> Loki line and still reproduces it today. PLAN T267 owns closing that
-    /// gap; until it lands, this rung still airs a sign-on ahead of buffered outgoing content that has
-    /// not finished draining, for those two kinds only.
+    /// SPEC F124.1 (STORY-320, PLAN T266/T267) — a <see cref="BoundaryFitPlan.QueuedAhead"/> that
+    /// alone already spans the boundary classifies <see cref="Straddle"/> instead, even for the
+    /// decline path: <c>Orchestrator.TryServeCeremonyOnlyUnitAsync</c> consults
+    /// <see cref="BoundaryFitPlan.ClassifyOffToleranceRung"/> directly rather than hard-coding this
+    /// literal — see that method's own remarks for the ruling and its round-1-review follow-up fix.
     /// </para>
     /// </summary>
     CeremonyOnly,
