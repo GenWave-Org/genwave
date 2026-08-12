@@ -160,6 +160,42 @@ public static class FeatureCatalogKindDiscriminator
         }
     }
 
+    public sealed class ScenarioAPerKindFolderLayoutIsAdmitted
+    {
+        [Fact]
+        public void BothLayoutsCoexistInOneIndex()
+        {
+            // Given an index mid-migration to the per-kind shelf layout (genwave-catalog#33) — a
+            // persona and a show already moved under entries/personas/ and entries/shows/, while a
+            // theme still sits at the flat entries/<slug>/,
+            // When the index is parsed,
+            // Then all three entries are admitted with their recorded paths intact — the kind
+            //      folder is an accepted alternative, not a new mandatory shape.
+            var index = """
+                { "generatedAt": "2026-08-12", "entries": [
+                  { "slug": "valid-dj", "kind": "persona", "audience": "everyone",
+                    "manifest": { "path": "entries/personas/valid-dj/valid-dj.persona.json", "sha256": "SHA" },
+                    "meta": { "path": "entries/personas/valid-dj/valid-dj.meta.json", "sha256": "SHA" } },
+                  { "slug": "late-shift", "kind": "show", "audience": "everyone",
+                    "manifest": { "path": "entries/shows/late-shift/late-shift.show.json", "sha256": "SHA" },
+                    "meta": { "path": "entries/shows/late-shift/late-shift.meta.json", "sha256": "SHA" } },
+                  { "slug": "gilded-static", "kind": "theme", "audience": "everyone",
+                    "manifest": { "path": "entries/gilded-static/gilded-static.theme.json", "sha256": "SHA" },
+                    "meta": { "path": "entries/gilded-static/gilded-static.meta.json", "sha256": "SHA" } } ] }
+                """.Replace("SHA", Sha256Placeholder);
+            var success = TryValidate(index, out var entries, out _);
+            Assert.True(success);
+
+            Assert.Equal(
+                [
+                    "entries/personas/valid-dj/valid-dj.persona.json",
+                    "entries/shows/late-shift/late-shift.show.json",
+                    "entries/gilded-static/gilded-static.theme.json",
+                ],
+                entries!.Select(e => e.Manifest.Path));
+        }
+    }
+
     public sealed class ScenarioTheGoldenThemeFixtureRoundTrips
     {
         [Fact]
@@ -222,6 +258,77 @@ public static class FeatureCatalogKindDiscriminator
                   { "slug": "valid-dj", "kind": "persona", "audience": "not-a-real-audience",
                     "manifest": { "path": "entries/valid-dj/valid-dj.persona.json", "sha256": "SHA" },
                     "meta": { "path": "entries/valid-dj/valid-dj.meta.json", "sha256": "SHA" } } ] }
+                """.Replace("SHA", Sha256Placeholder);
+
+            var success = TryValidate(index, out _, out _);
+
+            Assert.False(success);
+        }
+    }
+
+    public sealed class ScenarioAManifestUnderTheWrongKindFolderRejectsTheIndex
+    {
+        [Fact]
+        public void TheWholeIndexIsRejected()
+        {
+            // Given a persona entry whose manifest sits under entries/shows/ (genwave-catalog#33) —
+            // a kind folder that lies about what the file is, not an alternative layout,
+            // When the index is parsed,
+            // Then the whole index is rejected — the per-kind path pattern pins the folder, when
+            //      present, to the entry's own kind.
+            var index = """
+                { "generatedAt": "2026-08-12", "entries": [
+                  { "slug": "valid-dj", "kind": "persona", "audience": "everyone",
+                    "manifest": { "path": "entries/shows/valid-dj/valid-dj.persona.json", "sha256": "SHA" },
+                    "meta": { "path": "entries/shows/valid-dj/valid-dj.meta.json", "sha256": "SHA" } } ] }
+                """.Replace("SHA", Sha256Placeholder);
+
+            var success = TryValidate(index, out _, out _);
+
+            Assert.False(success);
+        }
+    }
+
+    public sealed class ScenarioANestedPathStillBelongsToItsOwnSlug
+    {
+        [Fact]
+        public void ASlugSquattingUnderAnotherEntrysNestedDirectoryIsRejected()
+        {
+            // Given a nested-layout persona entry whose manifest sits under ANOTHER entry's
+            // directory (the slug segment is the second-to-last in BOTH layouts — this pins the
+            // ownership check survived the genwave-catalog#33 widening; a naive first-segment read
+            // would compare against "personas" instead),
+            // When the index is parsed,
+            // Then the whole index is rejected.
+            var index = """
+                { "generatedAt": "2026-08-12", "entries": [
+                  { "slug": "valid-dj", "kind": "persona", "audience": "everyone",
+                    "manifest": { "path": "entries/personas/other-dj/valid-dj.persona.json", "sha256": "SHA" },
+                    "meta": { "path": "entries/personas/valid-dj/valid-dj.meta.json", "sha256": "SHA" } } ] }
+                """.Replace("SHA", Sha256Placeholder);
+
+            var success = TryValidate(index, out _, out _);
+
+            Assert.False(success);
+        }
+    }
+
+    public sealed class ScenarioAMetaStrayingFromItsManifestDirectoryRejectsTheIndex
+    {
+        [Fact]
+        public void TheWholeIndexIsRejected()
+        {
+            // Given an entry whose manifest sits at the flat entries/<slug>/ while its meta sits
+            // under the nested entries/personas/<slug>/ — each path valid in isolation now that
+            // both layouts are admitted (genwave-catalog#33),
+            // When the index is parsed,
+            // Then the whole index is rejected — an entry's files all sit in ONE directory (the
+            //      one-directory invariant; it is also what keeps an entry's bare filenames unique).
+            var index = """
+                { "generatedAt": "2026-08-12", "entries": [
+                  { "slug": "valid-dj", "kind": "persona", "audience": "everyone",
+                    "manifest": { "path": "entries/valid-dj/valid-dj.persona.json", "sha256": "SHA" },
+                    "meta": { "path": "entries/personas/valid-dj/valid-dj.meta.json", "sha256": "SHA" } } ] }
                 """.Replace("SHA", Sha256Placeholder);
 
             var success = TryValidate(index, out _, out _);
