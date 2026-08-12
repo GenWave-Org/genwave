@@ -1,5 +1,6 @@
 namespace GenWave.Tts;
 
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.RegularExpressions;
@@ -42,9 +43,11 @@ using GenWave.Core.Domain;
 ///
 /// <para>
 /// Every backend completion call — on-air (<see cref="WriteAsync"/>) and preview
-/// (<see cref="WritePreviewAsync"/>) alike — is serialized single-flight through
-/// <see cref="RequestCompletionAsync"/> (SPEC F69.6, gh-#36): two concurrent renders on the same
-/// backend double each other's latency, so this writer (a DI singleton, see
+/// (<see cref="WritePreviewAsync"/>) alike — funnels through the single seam
+/// <see cref="RequestCleanedCompletionAsync"/>: not a bare HTTP request, but the request PLUS the
+/// F123.2-F123.4 hygiene/salvage pass (<see cref="CleanCopy"/>) PLUS the one <see cref="LlmCallRing"/>
+/// recording point, all under the same single-flight gate (SPEC F69.6, gh-#36) — two concurrent
+/// renders on the same backend double each other's latency, so this writer (a DI singleton, see
 /// <c>TtsServiceCollectionExtensions</c>) holds the one gate both seams share.
 /// </para>
 ///
@@ -69,12 +72,12 @@ using GenWave.Core.Domain;
 /// narrative bits/jokes that this writer never touches today; reaching for it here would be new
 /// architecture wired in for one prompt marker, not reuse.
 ///
-/// Both the read and the write live INSIDE <see cref="RequestCompletionAsync"/>'s own single-flight
+/// Both the read and the write live INSIDE <see cref="RequestCleanedCompletionAsync"/>'s own single-flight
 /// critical section, not around it (T65 review finding): <c>Orchestrator.EnqueuePatterAsync</c>
 /// starts one unit's BackAnnounce and LeadIn renders concurrently — both TTS renders are kicked off
 /// before either is awaited — so a read/write pair taken OUTSIDE the gate could have the second
 /// render capture the snapshot from before the first render's own write ever lands, and the two
-/// would never compare against each other. Doing both only once <see cref="RequestCompletionAsync"/>
+/// would never compare against each other. Doing both only once <see cref="RequestCleanedCompletionAsync"/>
 /// actually holds <see cref="singleFlight"/> guarantees the second of any concurrent pair always
 /// sees the first's freshly-written notes. Read only, and written only, when the call originates
 /// from <see cref="WriteAsync"/> (<c>updateTasteMemory: true</c>) — <see cref="WritePreviewAsync"/>
@@ -165,7 +168,7 @@ public sealed class LlmCopyWriter(
 
     /// <summary>
     /// Serializes every backend completion call (SPEC F69.6, gh-#36) — concurrent CPU generations on
-    /// the same backend double each other's latency, so at most one <see cref="RequestCompletionAsync"/>
+    /// the same backend double each other's latency, so at most one <see cref="RequestCleanedCompletionAsync"/>
     /// runs at a time, whether it arrived via the on-air path or a persona preview. A queueing wait
     /// (<c>WaitAsync(ct)</c>), not a skip-if-busy latch (contrast
     /// <c>GenWave.MediaLibrary.Scan.ScanService</c>'s own single-flight semaphore): a caller waits its
@@ -178,7 +181,7 @@ public sealed class LlmCopyWriter(
     /// <summary>
     /// SPEC F83.1 (STORY-214, PLAN T65) — the previous ON-AIR break's fired-rule descriptions (see
     /// <see cref="LlmPromptBuilder.DescribeFiredRules"/>). Read and written EXCLUSIVELY inside
-    /// <see cref="RequestCompletionAsync"/>'s own single-flight critical section (T65 review
+    /// <see cref="RequestCleanedCompletionAsync"/>'s own single-flight critical section (T65 review
     /// finding) — never out here in <see cref="WriteAsync"/> — see the class remarks above for why:
     /// two renders belonging to the same unit are started concurrently, so a read/write pair taken
     /// outside <see cref="singleFlight"/>'s gate would race. Only touched when that call's
@@ -206,6 +209,27 @@ public sealed class LlmCopyWriter(
     static readonly Regex PreambleMetaWordPattern = new(
         @"(?i)\b(here[’']?s?|copy|response|sure|certainly|okay|lead[- ]in|back[- ]announce|announcement)\b",
         RegexOptions.Compiled);
+
+    // SPEC F123.2 (STORY-319, PLAN T263) — a sentence boundary, kept deliberately simple: a
+    // terminator, one optional closing quote mark, then whitespace or end-of-text. The regex is
+    // ONLY the candidate finder; whether a `.` candidate is actually a sentence's end (and not an
+    // abbreviation's period) is decided per-candidate by IsAbbreviationBoundary below — see that
+    // method's own remarks (F123.2 review finding, gh-#277 follow-up: "from St." airing for St.
+    // Vincent) for why that check lives in code rather than growing this pattern.
+    static readonly Regex SentenceBoundaryPattern = new(@"[.!?][""'”’]?(?=\s|$)", RegexOptions.Compiled);
+
+    // Abbreviations whose trailing period is never a sentence's end (SPEC F123.2 review finding):
+    // "St. Vincent", "Dr. Dre", "Mt. Joy" all read the period as mid-title, not a boundary to cut
+    // at. Checked case-insensitively against the word immediately before the candidate period —
+    // see IsAbbreviationBoundary. Deliberately a short, curated list (not a general abbreviation
+    // dictionary): each entry is a real title-adjacent abbreviation this station's copy has
+    // actually produced, and the bias throughout this salvage is toward OVER-rejecting a boundary
+    // (a shorter blurb beats airing a chopped abbreviation) rather than exhaustively cataloging
+    // every abbreviation in English.
+    static readonly HashSet<string> KnownAbbreviations = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Dr", "Mr", "Mrs", "Ms", "St", "Mt", "Sgt", "Jr", "Sr", "Ft", "Bros", "vs", "etc", "approx", "feat",
+    };
 
     /// <summary>
     /// Single source of truth for exactly which <see cref="SegmentKind"/> values this writer calls
@@ -264,7 +288,7 @@ public sealed class LlmCopyWriter(
             // SPEC F107.5 (STORY-298, PLAN T225) — the ONE place in this writer that may consume the
             // patter lane's due fact; see TakeDuePatterFactForOnAirRender's own remarks for why this
             // call lives HERE, in WriteAsync's own body, rather than inside the shared
-            // RequestCompletionAsync below (which WritePreviewAsync also calls).
+            // RequestCleanedCompletionAsync below (which WritePreviewAsync also calls).
             var patterFact = TakeDuePatterFactForOnAirRender(request.Kind);
             // SPEC F116.3 (STORY-308, PLAN T249) — the show-flavor line's own pull point, ONLY
             // consulted when patterFact above is null; see TakeDueShowFlavorLineForOnAirRender's own
@@ -274,13 +298,13 @@ public sealed class LlmCopyWriter(
                 ? TakeDueShowFlavorLineForOnAirRender(request.Kind)
                 : null;
             // updateTasteMemory: true — this is an on-air call, so previousBreakTasteNotes is both
-            // read and (on success) overwritten INSIDE RequestCompletionAsync's own single-flight
+            // read and (on success) overwritten INSIDE RequestCleanedCompletionAsync's own single-flight
             // critical section (SPEC F83.1, T65 review finding); see that method's own remarks for
             // why the field can no longer be touched out here.
-            var raw = await RequestCompletionAsync(
+            var cleanup = await RequestCleanedCompletionAsync(
                 cfg, request, persona, card, updateTasteMemory: true, patterFact, showFlavorFact,
                 queueWaitBudget: null, ct);
-            var cleaned = CleanCopy(raw, cfg.MaxCopyChars);
+            var cleaned = TextOf(cleanup);
             if (cleaned is null)
             {
                 statusHolder.Record(LlmAttemptOutcome.Failed, attemptedAt);
@@ -289,6 +313,12 @@ public sealed class LlmCopyWriter(
                 return await fallback.WriteAsync(request, ct);
             }
 
+            // A sentence-boundary salvage (SPEC F123.2-F123.4, STORY-319, PLAN T263) is a SUCCESS at
+            // this coarse Ok/Failed grain — the copy airs either way. LlmCallRing's own
+            // LlmCallOutcome.Trimmed (recorded inside RequestCleanedCompletionAsync above) is where the
+            // salvage stays visible as its own outcome, for the /api/llm-calls debug lens alone; this
+            // holder feeds GET /api/status and the F72 degradation walk-down, neither of which should
+            // ever treat "aired, slightly shorter" as a failure.
             statusHolder.Record(LlmAttemptOutcome.Ok, attemptedAt);
             // Only genuinely LLM-authored copy is fresh-per-airing (F34.6) — every fallback path
             // above returns the template writer's own SegmentCopy (FreshPerAiring: false) unchanged.
@@ -314,14 +344,14 @@ public sealed class LlmCopyWriter(
 
     /// <summary>
     /// <see cref="IPersonaPreviewWriter"/> (SPEC F35.6, STORY-123) — reuses
-    /// <see cref="RequestCompletionAsync"/> (identical prompt composition) and
+    /// <see cref="RequestCleanedCompletionAsync"/> (identical prompt composition) and
     /// <see cref="CleanCopy"/> (identical hygiene) so the previewed text is provably what the
     /// on-air <see cref="WriteAsync"/> path would have produced for the same request/persona.
     /// Deliberate differences: NOTHING here degrades to <paramref name="fallback"/> on an LLM miss
     /// for LeadIn/BackAnnounce/SignOff/SignOn — that would misrepresent the persona being auditioned — this method
     /// never records to <see cref="LlmCopyStatusHolder"/> (that holder tracks on-air attempts for
     /// <c>GET /api/status</c>; preview activity never airs and must not appear there), and it always
-    /// passes <c>updateTasteMemory: false</c> to <see cref="RequestCompletionAsync"/> (SPEC F83.1,
+    /// passes <c>updateTasteMemory: false</c> to <see cref="RequestCleanedCompletionAsync"/> (SPEC F83.1,
     /// T65) — auditioning a card is not a real on-air break, so it neither reads nor perturbs
     /// <see cref="previousBreakTasteNotes"/>.
     /// </summary>
@@ -356,10 +386,10 @@ public sealed class LlmCopyWriter(
             // full stop, so there is nothing here to pass even by mistake; see those methods' own
             // remarks for why a preview must never be ABLE to consume either break-scoped slot, not
             // merely configured not to.
-            var raw = await RequestCompletionAsync(
+            var cleanup = await RequestCleanedCompletionAsync(
                 cfg, request, personaOverride, card: null, updateTasteMemory: false, patterFact: null,
                 showFlavorFact: null, queueWaitBudget: TimeSpan.FromSeconds(cfg.PreviewQueueWaitSeconds), ct);
-            var cleaned = CleanCopy(raw, cfg.MaxCopyChars);
+            var cleaned = TextOf(cleanup);
             return cleaned is null
                 ? new PersonaPreviewResult.Failed("The LLM returned empty or over-length copy.")
                 : new PersonaPreviewResult.Success(cleaned);
@@ -476,7 +506,7 @@ public sealed class LlmCopyWriter(
             ? (showFlavorLineSource ?? NoOpShowFlavorLineSource.Instance).TryTakeDueShowLine()
             : null;
 
-    async Task<string> RequestCompletionAsync(
+    async Task<LlmCopyCleanupResult> RequestCleanedCompletionAsync(
         LlmOptions cfg, SegmentRequest request, Persona? persona, PersonaCard? card,
         bool updateTasteMemory, ContextPatterFact? patterFact, ShowFlavorFact? showFlavorFact,
         TimeSpan? queueWaitBudget, CancellationToken ct)
@@ -603,13 +633,35 @@ public sealed class LlmCopyWriter(
             if (updateTasteMemory)
                 previousBreakTasteNotes = LlmPromptBuilder.DescribeFiredRules(request.Track?.PersonaPick?.FiredRules ?? []);
 
-            // Ok records the RAW reply (SPEC F73.1) — a later CleanCopy rejection (empty/over-length)
-            // is a hygiene decision the caller makes, not a fact about whether the call itself
-            // succeeded; see LlmCallOutcome.Ok's own remarks.
+            // Hygiene + the F123.2 sentence-boundary salvage run HERE, inside the one ring-recording
+            // point (SPEC F123.2-F123.4, STORY-319, PLAN T263), so a trim is visible to the ring as
+            // its own outcome instead of only discoverable by re-reading Response after the fact.
+            var cleanup = CleanCopy(text, cfg.MaxCopyChars);
+            if (cleanup is LlmCopyCleanupResult.Trimmed trimmed)
+            {
+                // One INFORMATION line (F123.4) — a trim is discipline, not an outage, so it gets its
+                // own quiet lane rather than promoting to LogFailure's WARN.
+                logger.LogInformation(
+                    "LLM copy for {Kind} trimmed to the last complete sentence under Llm:MaxCopyChars " +
+                    "(persona: {PersonaName}): {CharsBefore} -> {CharsAfter} chars",
+                    request.Kind, (personaName ?? "none").ReplaceLineEndings(" "), trimmed.CharsBeforeTrim,
+                    trimmed.Text.Length);
+            }
+
+            // Ok still records the RAW reply (SPEC F73.1) regardless of outcome — a full reject
+            // (empty/no-sentence-fits) stays Ok exactly as before T263 (a hygiene decision the caller
+            // makes, not a fact about whether the call itself succeeded; see LlmCallOutcome.Ok's own
+            // remarks); a trim gets its own finer-grained outcome instead (LlmCallOutcome.Trimmed).
+            var ringOutcome = cleanup switch
+            {
+                LlmCopyCleanupResult.Trimmed => LlmCallOutcome.Trimmed,
+                LlmCopyCleanupResult.Fits or LlmCopyCleanupResult.Rejected => LlmCallOutcome.Ok,
+                _ => throw new UnreachableException($"Unhandled {nameof(LlmCopyCleanupResult)} case."),
+            };
             callRing.Record(
                 personaName, systemPrompt, userPrompt, text, startedAt, ElapsedMs(startedAt),
-                LlmCallOutcome.Ok, statusDetail: null, mode);
-            return text;
+                ringOutcome, statusDetail: null, mode);
+            return cleanup;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -644,7 +696,7 @@ public sealed class LlmCopyWriter(
     /// <summary>
     /// Classifies a completion fault for <see cref="LlmCallRing"/> (SPEC F73.1): the ONE other
     /// <see cref="OperationCanceledException"/> source reaching this catch-all (the caller's own
-    /// cancellation is already filtered out by the clause above) is <c>RequestCompletionAsync</c>'s
+    /// cancellation is already filtered out by the clause above) is <c>RequestCleanedCompletionAsync</c>'s
     /// own <c>timeoutCts</c> firing — <see cref="LlmCallOutcome.Timeout"/>, distinct from a generic
     /// <see cref="LlmCallOutcome.Failed"/>. Deliberately independent of <see cref="LogFailure"/>'s
     /// own <c>detail</c> switch (SPEC F69.7) — that one feeds a WARN line and has no need to split
@@ -663,19 +715,40 @@ public sealed class LlmCopyWriter(
     /// (SPEC F123.1, STORY-319, PLAN T262) — see <see cref="CharsPerTokenDivisor"/>,
     /// <see cref="MinGenerationTokenCap"/>, and <see cref="MaxGenerationTokenCap"/> for why the
     /// divisor, floor, and ceiling are what they are. Applied identically to the on-air path and
-    /// the preview path, since both funnel through <see cref="RequestCompletionAsync"/>'s single
+    /// the preview path, since both funnel through <see cref="RequestCleanedCompletionAsync"/>'s single
     /// request-builder.
     /// </summary>
     static int DeriveMaxTokens(int maxCopyChars) =>
         Math.Clamp(maxCopyChars / CharsPerTokenDivisor, MinGenerationTokenCap, MaxGenerationTokenCap);
 
     /// <summary>
-    /// Copy hygiene (SPEC F34.5): trims, unwraps one layer of wrapping quotes, collapses newlines to
-    /// spaces, and strips stage directions and markdown emphasis markers. Returns null when the
-    /// result is empty or still exceeds <paramref name="maxChars"/> after cleanup — the caller
-    /// rejects to the fallback rather than truncate mid-sentence.
+    /// Extracts the airable/previewable text from a <see cref="LlmCopyCleanupResult"/> (SPEC
+    /// F123.2): an exact fit and a salvaged trim both hand back real copy — the caller cannot tell
+    /// (and does not need to) which one it got, since both are genuinely LLM-authored — and only a
+    /// full reject hands back null, so the caller degrades exactly as it did before T263. Shared by
+    /// <see cref="WriteAsync"/> and <see cref="WritePreviewAsync"/> so the two can never read the
+    /// closed hierarchy differently.
     /// </summary>
-    static string? CleanCopy(string raw, int maxChars)
+    static string? TextOf(LlmCopyCleanupResult cleanup) => cleanup switch
+    {
+        LlmCopyCleanupResult.Fits fits => fits.Text,
+        LlmCopyCleanupResult.Trimmed trimmed => trimmed.Text,
+        LlmCopyCleanupResult.Rejected => null,
+        _ => throw new UnreachableException($"Unhandled {nameof(LlmCopyCleanupResult)} case."),
+    };
+
+    /// <summary>
+    /// Copy hygiene (SPEC F34.5) plus the F123.2 sentence-boundary salvage (STORY-319, PLAN T263):
+    /// trims, unwraps one layer of wrapping quotes, collapses newlines to spaces, and strips stage
+    /// directions and markdown emphasis markers. A result that still exceeds <paramref name="maxChars"/>
+    /// after that hygiene is no longer an automatic reject — it is cut at the LAST complete sentence
+    /// that fits under the cap (see <see cref="TrimToLastCompleteSentence"/>), never mid-sentence,
+    /// and never at an abbreviation's own period (see that method's own remarks).
+    /// <see cref="LlmCopyCleanupResult.Rejected"/> is reserved for the cases nothing salvages:
+    /// hygiene left an empty string, or nothing complete under the cap survives that filter — no
+    /// candidate at all, or every candidate under the cap was an abbreviation/lone-initial period.
+    /// </summary>
+    static LlmCopyCleanupResult CleanCopy(string raw, int maxChars)
     {
         var text = StripChatPreamble(raw.Trim());   // gh-#186 — must run BEFORE quote unwrapping
         text = StripWrappingQuotes(text);
@@ -686,10 +759,87 @@ public sealed class LlmCopyWriter(
         text = RepeatedWhitespacePattern.Replace(text, " ").Trim();
 
         if (text.Length == 0)
-            return null;
+            return new LlmCopyCleanupResult.Rejected();
 
-        return text.Length > maxChars ? null : text;
+        if (text.Length <= maxChars)
+            return new LlmCopyCleanupResult.Fits(text);
+
+        var salvaged = TrimToLastCompleteSentence(text, maxChars);
+        return salvaged is null
+            ? new LlmCopyCleanupResult.Rejected()
+            : new LlmCopyCleanupResult.Trimmed(salvaged, CharsBeforeTrim: text.Length);
     }
+
+    /// <summary>
+    /// SPEC F123.2 (STORY-319, PLAN T263) — salvages over-length copy by cutting at the LAST complete
+    /// sentence that still fits under <paramref name="maxChars"/>, never mid-sentence: every candidate
+    /// cut point comes from <see cref="SentenceBoundaryPattern"/>, so the returned text always ends
+    /// exactly at a terminator (plus its optional closing quote), by construction. A candidate whose
+    /// period is an abbreviation's or a lone initial's (see <see cref="IsAbbreviationBoundary"/>) is
+    /// skipped — not treated as a reject-everything signal — so the cut FALLS THROUGH to whichever
+    /// earlier candidate already fit (review finding: the "St. Vincent" shape has a genuine sentence
+    /// boundary before the abbreviation period, and discarding it in favor of the later, wrong one
+    /// is exactly the bug this guards against). Returns null when nothing survives that filter under
+    /// the cap — either no candidate at all, or every candidate under the cap was rejected — so the
+    /// caller falls back to the pre-F123 reject.
+    /// </summary>
+    static string? TrimToLastCompleteSentence(string text, int maxChars)
+    {
+        string? lastFit = null;
+        foreach (Match match in SentenceBoundaryPattern.Matches(text))
+        {
+            var cutAt = match.Index + match.Length;
+            if (cutAt > maxChars)
+                break;   // matches occur in text order — every later one only extends further
+
+            if (IsAbbreviationBoundary(text, match.Index))
+                continue;   // not a real sentence end — keep whatever earlier candidate already fit
+
+            lastFit = text[..cutAt];
+        }
+
+        return lastFit;
+    }
+
+    /// <summary>
+    /// Rejects a candidate boundary whose terminator is an abbreviation's or a lone initial's period
+    /// (SPEC F123.2 review finding) — <c>!</c>/<c>?</c> never carry this ambiguity and are never
+    /// rejected here. Two shapes are checked against the word immediately before the period (the
+    /// maximal run of letters scanning backward, stopping at the first non-letter — this is exactly
+    /// the "S" in "U.S." too, since the internal period between "U" and "S" is itself a non-letter):
+    /// a known abbreviation (<see cref="KnownAbbreviations"/>, case-insensitive — "St.", "Dr."), or a
+    /// LONE INITIAL — a single letter whose own preceding character is neither a letter nor an
+    /// apostrophe. That apostrophe exclusion is deliberate: without it, a contraction's own final
+    /// letter ("don't.", "isn't.") would misread as a one-letter "initial", since the character
+    /// immediately before it is punctuation, not a letter — the apostrophe is what tells the two
+    /// shapes apart. "U.S." falls out of the SAME lone-initial check with no separate rule: the
+    /// character before the "S" is the internal period, which is neither a letter nor an apostrophe.
+    /// </summary>
+    static bool IsAbbreviationBoundary(string text, int terminatorIndex)
+    {
+        if (text[terminatorIndex] != '.')
+            return false;
+
+        var wordEnd = terminatorIndex;
+        var wordStart = wordEnd;
+        while (wordStart > 0 && char.IsLetter(text[wordStart - 1]))
+            wordStart--;
+
+        if (wordStart == wordEnd)
+            return false;   // nothing letter-like immediately precedes the period at all
+
+        var word = text[wordStart..wordEnd];
+        if (KnownAbbreviations.Contains(word))
+            return true;
+
+        if (word.Length != 1)
+            return false;
+
+        var beforeWordIndex = wordStart - 1;
+        return beforeWordIndex < 0 || !IsApostrophe(text[beforeWordIndex]);
+    }
+
+    static bool IsApostrophe(char c) => c is '\'' or '’';
 
     /// <summary>
     /// gh-#186, widened by gh-#430: drops a chat preamble in front of the copy — observed live

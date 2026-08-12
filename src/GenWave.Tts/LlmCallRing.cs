@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 /// The LLM call inspector's in-memory ring (SPEC F73.1-F73.4, STORY-196, T41) — a DEBUG LENS, NOT
 /// AN AUDIT TRAIL. Keeps the last <see cref="LlmOptions.CallRingCapacity"/> (default ~50) completed
 /// LLM calls, newest first: on-air renders, Soft-cadence attempts, and operator previews alike —
-/// every call that reaches <see cref="LlmCopyWriter.RequestCompletionAsync"/>, whichever of
+/// every call that reaches <see cref="LlmCopyWriter.RequestCleanedCompletionAsync"/>, whichever of
 /// <see cref="LlmCopyWriter.WriteAsync"/>/<see cref="LlmCopyWriter.WritePreviewAsync"/> it arrived
 /// through. Registered as a SINGLETON with NO persistence dependency of any kind (F73.3, T41 AC3):
 /// this class's only constructor dependency is <see cref="IOptionsMonitor{LlmOptions}"/> for its own
@@ -34,7 +34,7 @@ public sealed class LlmCallRing(IOptionsMonitor<LlmOptions> options)
 
     /// <summary>
     /// Records one completed call, success or failure — the single recording point every caller
-    /// (<see cref="LlmCopyWriter.RequestCompletionAsync"/>, on behalf of both
+    /// (<see cref="LlmCopyWriter.RequestCleanedCompletionAsync"/>, on behalf of both
     /// <see cref="LlmCopyWriter.WriteAsync"/> and <see cref="LlmCopyWriter.WritePreviewAsync"/>)
     /// funnels through, so on-air renders, Soft-cadence attempts, and previews are all captured by
     /// construction rather than needing three separate call sites to stay in sync. Capacity is read

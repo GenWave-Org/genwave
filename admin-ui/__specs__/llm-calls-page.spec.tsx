@@ -155,6 +155,20 @@ describe("Feature: LLM call inspector", () => {
 
       expect(screen.getByText("HTTP 500")).toBeInTheDocument();
     });
+
+    // SPEC F123.2-F123.4: a trim is discipline, not an outage — the segment still aired, just
+    // shorter — so its chip reads "Trimmed" in the same quiet "system note" tone as a Soft mode
+    // chip, never the danger tone a real failed/timeout call gets.
+    it("shows a Trimmed status chip in the non-danger brass tone, not the danger tone of a real miss", async () => {
+      installFetchMock(ok([makeEntry({ status: "trimmed" })]));
+
+      render(<LlmCallsView timeZone="UTC" />);
+      await flush();
+
+      const chip = screen.getByText("Trimmed");
+      expect(chip.className).toContain("text-accent-2");
+      expect(chip.className).not.toContain("text-danger");
+    });
   });
 
   // gh-#429: personas now author the copy this table exists to triage, so each row names who
