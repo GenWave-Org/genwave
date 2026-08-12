@@ -95,6 +95,8 @@ public static class FeatureAcceptanceGate02LevelMatchingRealKokoro
             NullLogger<PronunciationRuleProvider>.Instance);
         var personaPronunciationCache = new ActivePersonaPronunciationRulesCache(
             new FakeActivePersonaAccessor(), TimeProvider.System);
+        var personaPaceCache = new ActivePersonaPaceCache(
+            new FakeActivePersonaAccessor(), TimeProvider.System, NullLogger<ActivePersonaPaceCache>.Instance);
 
         var source = new TtsSegmentSource(
             new TemplateCopyWriter(new PatterTemplateRenderer()),
@@ -105,6 +107,7 @@ public static class FeatureAcceptanceGate02LevelMatchingRealKokoro
             personaCorrectionsCache,
             pronunciationProvider,
             personaPronunciationCache,
+            personaPaceCache,
             ttsOptsMonitor,
             NullLogger<TtsSegmentSource>.Instance);
 

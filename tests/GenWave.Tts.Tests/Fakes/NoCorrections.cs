@@ -51,4 +51,14 @@ public static class NoCorrections
     /// </summary>
     public static ActivePersonaPronunciationRulesCache PersonaPronunciationCache() =>
         new(new FakeActivePersonaAccessor(), TimeProvider.System);
+
+    /// <summary>
+    /// Sibling of <see cref="PersonaCache"/>/<see cref="PersonaPronunciationCache"/> for the
+    /// speaking-pace half of SPEC F98.1-F98.3: a real <see cref="ActivePersonaPaceCache"/> over an
+    /// accessor with no active persona at all — what every render/cache spec that isn't itself
+    /// exercising the persona-card pace cache needs just to satisfy <see cref="TtsSegmentSource"/>'s
+    /// constructor (its cache key also folds in <see cref="ActivePersonaPaceCache.Current"/>).
+    /// </summary>
+    public static ActivePersonaPaceCache PersonaPaceCache() =>
+        new(new FakeActivePersonaAccessor(), TimeProvider.System, NullLogger<ActivePersonaPaceCache>.Instance);
 }

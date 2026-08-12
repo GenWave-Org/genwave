@@ -1,6 +1,7 @@
 namespace GenWave.Tts;
 
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging;
@@ -19,6 +20,7 @@ public sealed class TtsSegmentSource(
     ActivePersonaCorrectionsCache personaCorrections,
     PronunciationRuleProvider pronunciations,
     ActivePersonaPronunciationRulesCache personaPronunciations,
+    ActivePersonaPaceCache personaPace,
     IOptionsMonitor<TtsOptions> options,
     ILogger<TtsSegmentSource> logger,
     IStationEventSink? events = null) : ITtsSegmentSource
@@ -159,9 +161,18 @@ public sealed class TtsSegmentSource(
             var mergedRules = PronunciationRuleProvider.BuildMerged(pronunciations.Current, personaPronunciations.Current);
             var contextRules = ToContextRules(mergedRules);
 
+            // Speaking pace (SPEC F98.1-F98.3, PLAN T140): resolved via the SAME "one
+            // ambient-persona read" discipline Rules just used above — never re-read from an
+            // ambient accessor deeper in the pipeline (ARCHITECTURE.md "Carrying persona facts to
+            // the engine"). personaPace.Current is already validated (TtsPace.Clamp, run inside
+            // ActivePersonaPaceCache's own refresh) — safe to fold into the cache key and safe to
+            // send to Kokoro as-is, with no further checking here.
+            await personaPace.RefreshIfStaleAsync(ct);
+            var pace = personaPace.Current;
+
             var hash = ComputeHash(
                 copy.Text, request.Voice, request.StationId, corrections.ContentHash, personaCorrections.ContentHash,
-                pronunciations.ContentHash, personaPronunciations.ContentHash, MergePolicyVersion);
+                pronunciations.ContentHash, personaPronunciations.ContentHash, MergePolicyVersion, pace);
             var stationDir = Path.Combine(cfg.CacheRoot, request.StationId);
             // Plain FreshPerAiring is the whole test again (F34.6): the guard above already sent a
             // non-fresh SignOff/SignOn render home before this line, so nothing reaching here needs a
@@ -177,10 +188,11 @@ public sealed class TtsSegmentSource(
                 Directory.CreateDirectory(targetDir);
                 // Kind-aware overload (SPEC F70.3, STORY-191): this is the one caller that knows a
                 // real SegmentKind — FallbackTtsSynthesizer reads it to consult Tts:EngineByKind.
-                // Rules carries the merged pronunciation set resolved above (SPEC F97.6) — Pace
-                // stays the TtsRenderContext default (carried-but-unconsumed until T140).
+                // Rules carries the merged pronunciation set resolved above (SPEC F97.6); Pace
+                // carries the validated persona rate resolved just above (SPEC F98.2, T140).
                 var synthPath = await synthesizer.SynthesizeAsync(
-                    new TtsRenderContext(copy.Text, request.Voice, request.Kind) { Rules = contextRules }, ct);
+                    new TtsRenderContext(copy.Text, request.Voice, request.Kind) { Rules = contextRules, Pace = pace },
+                    ct);
                 // A failed Move (destination directory vanished mid-render, a lost race with a
                 // concurrent sweep, disk pressure) must never leave the engine's transient write
                 // behind as a permanent orphan under CacheRoot's top level, where nothing ever
@@ -325,13 +337,22 @@ public sealed class TtsSegmentSource(
     static IReadOnlyList<ContextPronunciationRule> ToContextRules(PronunciationRuleSet rules) =>
         [.. rules.Rules.Select(rule => new ContextPronunciationRule(rule.Pattern, rule.Word, rule.Ipa))];
 
+    // pace (SPEC F98.2, PLAN T140) is the ACTUAL value, not a fingerprint of it — unlike the four
+    // rule-set hashes above, there is no separate collection to canonicalize; the already-validated
+    // double IS the term, formatted deterministically (invariant culture, so a comma-decimal host
+    // locale can never split this into a different key than an equivalent dot-decimal one — same
+    // discipline as KokoroPauseMarkup's own pause-tag formatting). Audio rendered at 0.85 is not
+    // audio rendered at 1.0, and pace is invisible in copy.Text, so without this term a persona's
+    // edited rate would keep serving its old cached clip forever, exactly the class of bug the four
+    // rule-content hashes above already guard against for corrections/pronunciations.
     static string ComputeHash(
         string text, string voice, string stationId, string correctionsContentHash, string personaCorrectionsContentHash,
-        string pronunciationsContentHash, string personaPronunciationsContentHash, string mergePolicyVersion) =>
+        string pronunciationsContentHash, string personaPronunciationsContentHash, string mergePolicyVersion, double pace) =>
         Convert.ToHexString(SHA256.HashData(
             Encoding.UTF8.GetBytes(
                 text + "|" + voice + "|" + stationId + "|" + correctionsContentHash + "|" + personaCorrectionsContentHash +
-                "|" + pronunciationsContentHash + "|" + personaPronunciationsContentHash + "|" + mergePolicyVersion)));
+                "|" + pronunciationsContentHash + "|" + personaPronunciationsContentHash + "|" + mergePolicyVersion +
+                "|" + pace.ToString("0.####", CultureInfo.InvariantCulture))));
 
     // Best-effort cleanup of a transient render file a failed File.Move left behind. IOException
     // AND UnauthorizedAccessException both swallowed — the TtsPreviewController.DeletePreviewArtifact

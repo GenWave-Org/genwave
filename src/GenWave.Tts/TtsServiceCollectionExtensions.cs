@@ -125,6 +125,11 @@ public static class TtsServiceCollectionExtensions
         // of ActivePersonaCorrectionsCache just above, same TTL mechanism, same accessor seam.
         services.AddSingleton<ActivePersonaPronunciationRulesCache>();
 
+        // Card speaking-pace seam (SPEC F98.1-F98.3, STORY-255, PLAN T140) — the third sibling in
+        // this trio, same TTL mechanism, same accessor seam; validates VoiceSpec.Pace at refresh
+        // time (TtsPace.Clamp, WarnOnce-latched) rather than at the engine.
+        services.AddSingleton<ActivePersonaPaceCache>();
+
         // Fired-rule observability (SPEC F68.7, STORY-186 AC3) — one counter set for the process
         // lifetime, incremented by NormalizingTtsSynthesizer and read by GET /api/tts/corrections-stats.
         services.AddSingleton<CorrectionsFiredStats>();

@@ -57,6 +57,9 @@ public static class FeatureKokoroSentencePauses
     static string InputOf(string requestBody) =>
         JsonDocument.Parse(requestBody).RootElement.GetProperty("input").GetString() ?? "";
 
+    static double SpeedOf(string requestBody) =>
+        JsonDocument.Parse(requestBody).RootElement.GetProperty("speed").GetDouble();
+
     // ------------------------------------------------------------------
     // HAPPY PATH — the insertion heuristic itself
     // ------------------------------------------------------------------
@@ -252,6 +255,31 @@ public static class FeatureKokoroSentencePauses
         }
 
         [Fact]
+        public static async Task A_kokoro_kind_fallback_hop_carries_the_same_pace()
+        {
+            // T140 precondition (T134 review): the same primary/fallback divergence T137 closed
+            // for Rules — IFallbackProfileRenderer.RenderAsync carries the full TtsRenderContext
+            // (T137), so a kokoro-kind hop can read Pace the identical way the primary's own
+            // context-aware overload does; without this, a persona would render at the wrong rate
+            // any time its line failed over to a fallback hop.
+            var cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            try
+            {
+                var (http, bodies) = WireCapture();
+                var renderer = new KokoroFallbackRenderer(http, Options(cacheRoot));
+                var context = new TtsRenderContext(Copy, "af_heart", Kind: null) { Pace = 0.85 };
+
+                await renderer.RenderAsync(KokoroHop(), context, CancellationToken.None);
+
+                Assert.Equal(0.85, SpeedOf(Assert.Single(bodies)));
+            }
+            finally
+            {
+                if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            }
+        }
+
+        [Fact]
         public static async Task A_piper_hop_receives_the_clean_text_verbatim_never_a_tag()
         {
             // piper-tts has no pause mechanism — a tag reaching Piper is SPOKEN ALOUD (gh-#116).
@@ -360,6 +388,7 @@ public static class FeatureKokoroSentencePauses
                     NoCorrections.PersonaCache(),
                     NoCorrections.PronunciationProvider(),
                     NoCorrections.PersonaPronunciationCache(),
+                    NoCorrections.PersonaPaceCache(),
                     Options(cacheRoot),
                     NullLogger<TtsSegmentSource>.Instance);
                 var request = new SegmentRequest(

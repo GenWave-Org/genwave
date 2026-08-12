@@ -40,6 +40,7 @@ public static class FeatureBlurbAudioGc
             NoCorrections.PersonaCache(),
             NoCorrections.PronunciationProvider(),
             NoCorrections.PersonaPronunciationCache(),
+            NoCorrections.PersonaPaceCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions
             {
                 CacheRoot = cacheRoot,

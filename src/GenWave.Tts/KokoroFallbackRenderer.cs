@@ -31,9 +31,11 @@ using GenWave.Core.Domain;
 /// <c>(text, requestVoice)</c> pair): a kokoro-kind hop reads <see cref="TtsRenderContext.Rules"/>
 /// the identical way <see cref="KokoroTtsSynthesizer"/>'s own context-aware overload does (SPEC
 /// F97.6), so the same DJ line carries the same pronunciation whichever Kokoro-kind renderer
-/// actually renders it — primary or fallback hop. This hop still never reads
-/// <see cref="TtsRenderContext.Pace"/>: that field's consumption is T140's job, not this one's — see
-/// <c>docs/PLAN.md</c> T140.
+/// actually renders it — primary or fallback hop. As of T140 (SPEC F98.2) this hop ALSO reads
+/// <see cref="TtsRenderContext.Pace"/> the same way, so a fallback hop never renders a persona's
+/// line at the wrong rate (the same class of primary/fallback parity gap T137 closed for
+/// pronunciation). <see cref="TtsSegmentSource"/> has already validated the value before it ever
+/// reaches this context (<see cref="TtsPace.Clamp"/>), so it is sent on the wire unchanged.
 /// </summary>
 public sealed class KokoroFallbackRenderer(
     HttpClient http,
@@ -53,8 +55,9 @@ public sealed class KokoroFallbackRenderer(
         // F97.6) exactly like the primary's own context-aware overload reads it — this hop never
         // resolves a rule set of its own from any provider or ambient accessor.
         var speech = KokoroSpeechMarkup.Render(context.Text, PronunciationRuleSet.FromContext(context.Rules), cfg.SentencePauseSeconds);
-        // No `speed` field: this hop never reads TtsRenderContext.Pace (T140's job).
-        var body = new { input = speech, voice, response_format = cfg.Format };
+        // speed (SPEC F98.1-F98.2, PLAN T140): same field, same already-validated value the primary
+        // sends — see this class's own remarks on why no clamping happens here either.
+        var body = new { input = speech, voice, response_format = cfg.Format, speed = context.Pace };
         using var content = new StringContent(
             JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 

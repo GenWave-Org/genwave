@@ -192,8 +192,8 @@ public static class FeatureTransientRenderFileNamingIsCollisionSafe
                 var source = new TtsSegmentSource(
                     new TemplateCopyWriter(new PatterTemplateRenderer()), synth, new FakeLoudnessAnalyzer(),
                     new FakeCueAnalyzer(), NoCorrections.Provider(), NoCorrections.PersonaCache(),
-                    NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(), opts,
-                    NullLogger<TtsSegmentSource>.Instance);
+                    NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(),
+                    NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance);
                 var request = StationIdRequest();
 
                 // A first render discovers the deterministic destination path for this exact

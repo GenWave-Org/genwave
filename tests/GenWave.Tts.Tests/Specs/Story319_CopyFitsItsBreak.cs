@@ -245,7 +245,8 @@ public static class FeatureCopyFitsItsBreak
             var source = new TtsSegmentSource(
                 writer, synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(),
                 NoCorrections.Provider(), NoCorrections.PersonaCache(), NoCorrections.PronunciationProvider(),
-                NoCorrections.PersonaPronunciationCache(), opts, NullLogger<TtsSegmentSource>.Instance);
+                NoCorrections.PersonaPronunciationCache(), NoCorrections.PersonaPaceCache(), opts,
+                NullLogger<TtsSegmentSource>.Instance);
 
             // When the segment is rendered end-to-end (copywriter -> hygiene+salvage -> TtsSegmentSource's
             // own SignOff/SignOn/ContextSegment drop guard)...

@@ -724,6 +724,7 @@ public static class FeatureHeteronymsSaidRight
                             new TtsPronunciationsOptions { Pronunciations = StationRuleJson }),
                         NullLogger<PronunciationRuleProvider>.Instance),
                     NoCorrections.PersonaPronunciationCache(),
+                    NoCorrections.PersonaPaceCache(),
                     opts,
                     NullLogger<TtsSegmentSource>.Instance);
                 var request = new SegmentRequest(
@@ -825,6 +826,7 @@ public static class FeatureHeteronymsSaidRight
                             new TtsPronunciationsOptions { Pronunciations = StationRuleJson }),
                         NullLogger<PronunciationRuleProvider>.Instance),
                     NoCorrections.PersonaPronunciationCache(),
+                    NoCorrections.PersonaPaceCache(),
                     opts,
                     NullLogger<TtsSegmentSource>.Instance);
                 var request = new SegmentRequest(
