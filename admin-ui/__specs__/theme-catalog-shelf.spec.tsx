@@ -97,10 +97,25 @@ describe("Feature: the catalog shelf lists themes beside personas", () => {
 
   // ── HAPPY PATH ──────────────────────────────────────────────────────────
 
-  describe("Scenario: both kinds appear on one shelf", () => {
-    it("lists a theme entry and a persona entry, each routed by its kind (T185, AC1)", () => {
+  describe("Scenario: each kind holds its own tab", () => {
+    // Was "both kinds appear on one shelf" (T185, AC1) — gh-#372 replaces the one mixed grid with
+    // a tab per kind, so the routed-by-kind guarantee is now asserted per tab: the active kind's
+    // entries render (through their own card component), every other kind's stay off the grid.
+    it("the themes tab lists the theme entry and not the persona entry (gh-#372)", () => {
       render(
-        <PersonaCatalogClient
+        <PersonaCatalogClient activeKind="theme"
+          initialIndex={{ entries: [PERSONA_ENTRY, THEME_ENTRY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }}
+        />
+      );
+
+      const grid = screen.getByRole("list", { name: "Community catalog entries" });
+      expect(within(grid).getByText("Golden Frequency")).toBeInTheDocument();
+      expect(within(grid).queryByRole("button", { name: /Late Night Lena/ })).toBeNull();
+    });
+
+    it("the personas tab lists the persona entry and not the theme entry (gh-#372)", () => {
+      render(
+        <PersonaCatalogClient activeKind="persona"
           initialIndex={{ entries: [PERSONA_ENTRY, THEME_ENTRY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }}
         />
       );
@@ -108,14 +123,13 @@ describe("Feature: the catalog shelf lists themes beside personas", () => {
       const grid = screen.getByRole("list", { name: "Community catalog entries" });
       // The persona entry keeps its existing interactive card (a <button>, click-through detail).
       expect(within(grid).getByRole("button", { name: /Late Night Lena/ })).toBeInTheDocument();
-      // The theme entry renders too, under the SAME shelf grid.
-      expect(within(grid).getByText("Golden Frequency")).toBeInTheDocument();
+      expect(within(grid).queryByText("Golden Frequency")).toBeNull();
     });
   });
 
   describe("Scenario: a theme card previews cheaply from meta", () => {
     it("renders colour swatch chips from the entry's meta preview swatches (T185, AC2)", () => {
-      render(<PersonaCatalogClient initialIndex={{ entries: [THEME_ENTRY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }} />);
+      render(<PersonaCatalogClient activeKind="theme" initialIndex={{ entries: [THEME_ENTRY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }} />);
 
       // `data-testid`, not a role/name query (review finding, N2): the chip row is `aria-hidden`
       // (decorative — the theme name carries the semantics), so it — and its `<li>`s — are outside
@@ -133,7 +147,7 @@ describe("Feature: the catalog shelf lists themes beside personas", () => {
 
     it("renders no swatch chips when the entry carries no preview, not an error", () => {
       render(
-        <PersonaCatalogClient
+        <PersonaCatalogClient activeKind="theme"
           initialIndex={{ entries: [THEME_ENTRY_WITHOUT_PREVIEW], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }}
         />
       );
@@ -144,7 +158,7 @@ describe("Feature: the catalog shelf lists themes beside personas", () => {
 
     it("renders no swatch chips, and does not crash, when preview is undefined rather than null (F3)", () => {
       render(
-        <PersonaCatalogClient
+        <PersonaCatalogClient activeKind="theme"
           initialIndex={{ entries: [THEME_ENTRY_WITH_UNDEFINED_PREVIEW], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }}
         />
       );
@@ -158,7 +172,7 @@ describe("Feature: the catalog shelf lists themes beside personas", () => {
       global.fetch = fetchMock as unknown as typeof fetch;
 
       render(
-        <PersonaCatalogClient
+        <PersonaCatalogClient activeKind="theme"
           initialIndex={{ entries: [PERSONA_ENTRY, THEME_ENTRY], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }}
         />
       );
@@ -174,7 +188,7 @@ describe("Feature: the catalog shelf lists themes beside personas", () => {
 
   describe("Scenario: the shelf survives the catalog being disabled", () => {
     it("shows the not-available state, not an error, when Community:CatalogIndexUrl is empty (T185, AC4)", () => {
-      render(<PersonaCatalogClient initialIndex={{ entries: null, fetchedAt: null, unreachable: true }} />);
+      render(<PersonaCatalogClient activeKind="theme" initialIndex={{ entries: null, fetchedAt: null, unreachable: true }} />);
 
       expect(screen.getByText("Catalog unreachable")).toBeInTheDocument();
     });
@@ -194,7 +208,7 @@ describe("Feature: the catalog shelf lists themes beside personas", () => {
       } as unknown as CatalogShelfEntryDto;
 
       render(
-        <PersonaCatalogClient
+        <PersonaCatalogClient activeKind="theme"
           initialIndex={{ entries: [unknownKindEntry], fetchedAt: "2026-08-05T00:00:00Z", unreachable: false }}
         />
       );

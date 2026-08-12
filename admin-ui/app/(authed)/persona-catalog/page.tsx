@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { apiGet } from "@/lib/api";
 import { PersonaCatalogClient } from "./PersonaCatalogClient";
+import { PersonaCatalogTabs, resolveCatalogKind } from "./PersonaCatalogTabs";
 import type { CatalogIndexResponseDto, ThemeCatalogProvenanceDto } from "./types";
 
 // The underlying Community:CatalogIndexUrl setting is live-editable from Settings (SPEC F90.1),
@@ -172,7 +173,14 @@ async function fetchInstalledThemeProvenance(cookieHeader: string): Promise<Them
   }
 }
 
-export default async function PersonaCatalogPage(): Promise<ReactNode> {
+interface PersonaCatalogPageProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+export default async function PersonaCatalogPage({ searchParams }: PersonaCatalogPageProps): Promise<ReactNode> {
+  const sp = await searchParams;
+  // gh-#372 — which kind tab this render shows; anything unrecognised falls back to personas.
+  const activeKind = resolveCatalogKind(sp.kind);
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
   const [response, installedFontSlugs, installedThemeProvenance, importedShowSlugs, hiredPersonaSlugs] =
@@ -213,12 +221,16 @@ export default async function PersonaCatalogPage(): Promise<ReactNode> {
     <main>
       <h1 className="font-display text-[1.35rem] font-semibold text-ink">Community Catalog</h1>
       <div className="mt-4">
+        <PersonaCatalogTabs activeKind={activeKind} />
+      </div>
+      <div className="mt-6">
         <PersonaCatalogClient
           initialIndex={index}
           installedFontSlugs={installedFontSlugs}
           installedThemeProvenance={installedThemeProvenance}
           importedShowSlugs={importedShowSlugs}
           hiredPersonaSlugs={hiredPersonaSlugs}
+          activeKind={activeKind}
         />
       </div>
     </main>

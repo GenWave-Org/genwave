@@ -500,7 +500,7 @@ describe("Feature: The Persona Catalog server page", () => {
         .mockResolvedValue(makeJsonResponse(200, indexBody)) as unknown as typeof fetch;
 
       const { default: PersonaCatalogPage } = await import("../app/(authed)/persona-catalog/page");
-      const node = await PersonaCatalogPage();
+      const node = await PersonaCatalogPage({ searchParams: Promise.resolve({}) });
 
       const clientEl = findElementByType(node, PersonaCatalogClient);
       expect(clientEl?.props["initialIndex"]).toEqual(indexBody);
@@ -523,7 +523,7 @@ describe("Feature: The Persona Catalog server page", () => {
       }) as unknown as typeof fetch;
 
       const { default: PersonaCatalogPage } = await import("../app/(authed)/persona-catalog/page");
-      const node = await PersonaCatalogPage();
+      const node = await PersonaCatalogPage({ searchParams: Promise.resolve({}) });
 
       const clientEl = findElementByType(node, PersonaCatalogClient);
       expect(clientEl?.props["installedFontSlugs"]).toEqual(["space-grotesk", "libre-grotesk"]);
@@ -538,7 +538,7 @@ describe("Feature: The Persona Catalog server page", () => {
       }) as unknown as typeof fetch;
 
       const { default: PersonaCatalogPage } = await import("../app/(authed)/persona-catalog/page");
-      const node = await PersonaCatalogPage();
+      const node = await PersonaCatalogPage({ searchParams: Promise.resolve({}) });
 
       const clientEl = findElementByType(node, PersonaCatalogClient);
       expect(clientEl?.props["installedFontSlugs"]).toEqual([]);
@@ -585,7 +585,7 @@ describe("Feature: The Persona Catalog server page", () => {
       }) as unknown as typeof fetch;
 
       const { default: PersonaCatalogPage } = await import("../app/(authed)/persona-catalog/page");
-      const node = await PersonaCatalogPage();
+      const node = await PersonaCatalogPage({ searchParams: Promise.resolve({}) });
 
       const clientEl = findElementByType(node, PersonaCatalogClient);
       // Every choice carrying provenance rides through — a shipped default (no importedFrom) does
@@ -607,7 +607,7 @@ describe("Feature: The Persona Catalog server page", () => {
       }) as unknown as typeof fetch;
 
       const { default: PersonaCatalogPage } = await import("../app/(authed)/persona-catalog/page");
-      const node = await PersonaCatalogPage();
+      const node = await PersonaCatalogPage({ searchParams: Promise.resolve({}) });
 
       const clientEl = findElementByType(node, PersonaCatalogClient);
       expect(clientEl?.props["installedThemeProvenance"]).toEqual([]);
@@ -621,7 +621,7 @@ describe("Feature: The Persona Catalog server page", () => {
         .mockResolvedValue(makeJsonResponse(404, {})) as unknown as typeof fetch;
 
       const { default: PersonaCatalogPage } = await import("../app/(authed)/persona-catalog/page");
-      const node = await PersonaCatalogPage();
+      const node = await PersonaCatalogPage({ searchParams: Promise.resolve({}) });
 
       expect(treeContains(node, "Not found")).toBe(true);
     });
