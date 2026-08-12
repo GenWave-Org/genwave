@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Events;
+using GenWave.Core.Logging;
 using ContextPronunciationRule = GenWave.Core.Domain.PronunciationRule;
 
 public sealed class TtsSegmentSource(
@@ -34,6 +35,13 @@ public sealed class TtsSegmentSource(
     // path is even chosen — so by the time isBlurb is computed, copy.FreshPerAiring is the single
     // correct test for every kind reaching this point, handoff kinds included.
     const string BlurbsDirName = "blurbs";
+
+    // SPEC F100.2 (STORY-258, PLAN T143): the render-outcome fact's own field values, shared by
+    // both LogRenderOutcome call sites below so the two can never drift into different spellings
+    // of the same concept.
+    const string OutcomeSuccess = "success";
+    const string OutcomeFailure = "failure";
+    const string NoCause = "n/a";
 
     readonly ConcurrentDictionary<string, CuePoints?> cueCache = new();
 
@@ -262,20 +270,84 @@ public sealed class TtsSegmentSource(
             // SegmentKind (SPEC F113.1, PLAN T220): stamped from this exact render's own request.Kind —
             // the demo-hour instrument reads it back off the AIRED track, never re-derived, so a render
             // that never reaches air (budget-dropped) never carries it into a track-started row at all.
+            LogRenderOutcome(request, OutcomeSuccess, NoCause);
             return new MediaItem(
                 $"tts:{hash}", path, request.StationName, loudness,
                 Artist: request.PersonaName ?? request.StationName, Cue: cuePoints, DurationMs: durationMs,
                 DjName: request.PersonaName, SegmentKind: request.Kind);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            // Genuine caller cancellation — not a completed render either way — there is no
+            // outcome to attribute a rate to, so LogRenderOutcome is deliberately not called here
+            // (SPEC F100.2). Guarded so this arm no longer catches every OperationCanceledException
+            // unconditionally (F1 review finding, PLAN T143 re-review): an unguarded catch here
+            // swallowed a Kokoro HttpClient timeout — which throws TaskCanceledException with the
+            // CALLER's ct left uncancelled — as a silent null, no WARN, no outcome line, so a hung
+            // engine vanished from the render-outcome rate while genuinely failing. Mirrors
+            // FallbackTtsSynthesizer.RenderHopAsync's own `when (!ct.IsCancellationRequested)`
+            // discriminator for the identical "budget elapsed vs. real cancellation" distinction,
+            // inverted here because THIS arm is the one claiming the cancellation, not the one
+            // reclassifying it. When the guard fails, control falls through to catch (Exception ex)
+            // below — TaskCanceledException derives from OperationCanceledException derives from
+            // Exception — so an uncancelled-token OCE is treated as an ordinary render failure.
             return null;
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "TTS render failed for {Kind}/{Voice}", request.Kind, request.Voice);
+            LogRenderOutcome(request, OutcomeFailure, ex.GetType().Name);
             return null;
         }
+    }
+
+    /// <summary>
+    /// SPEC F100.2 (STORY-258, PLAN T143): one Information line per completed render — success and
+    /// failure alike, not failure alone — naming the PERSONA, not merely the voice the WARN above
+    /// already names, so a failure RATE becomes computable per DJ rather than a raw failure count
+    /// that says nothing about whether a DJ is actually worse or merely on air more often. One line
+    /// per render, not per stage — mirrors <see cref="PronunciationRuleHitReporter"/> and
+    /// <see cref="NormalizingTtsSynthesizer.ReportFiredCorrections"/>'s own Information-not-Debug
+    /// ground (SPEC F97.5/F100.1, PLAN T142): debug never reaches the fleet log store, so a fact
+    /// that exists only there does not exist in the field.
+    ///
+    /// <paramref name="outcome"/> and <paramref name="cause"/> always ride the SAME message
+    /// template regardless of which arm called this — never a different template per outcome — so
+    /// success vs. failure is a field value to filter/aggregate on, never something inferred from
+    /// which line fired (STORY-258, "the outcome itself is on the line"). <paramref name="cause"/>
+    /// is <see cref="NoCause"/> on a success; on a failure it is the exception's own type name
+    /// (the "cause class"), read directly off the same exception the WARN above already logs in
+    /// full.
+    ///
+    /// <see cref="SegmentRequest.PersonaName"/> rides through unchanged — never re-derived — the
+    /// SAME field the Orchestrator already stamps from its one <c>IActivePersonaAccessor</c> read
+    /// (SPEC F39.1). <see langword="null"/> means no persona was active for this segment (station
+    /// imaging, gh-#96, is deliberately persona-less): logged as the literal <c>"none"</c> rather
+    /// than omitted, so the absence reads as a fact rather than a logging bug (STORY-258 sad path).
+    /// Persona-card-authored text is newline-stripped (<see cref="LogSanitize.Strip"/>, the
+    /// pronunciation/correction rule-hit family's converged idiom, PLAN T142 — <c>LlmCopyWriter</c>'s
+    /// own WARN line is a separate family and still spells this <c>ReplaceLineEndings</c>, untouched
+    /// here) so a crafted persona name cannot forge additional log lines (CodeQL
+    /// <c>cs/log-forging</c>). Quoted (<c>persona="{PersonaName}"</c>) — unlike <c>Kind</c>/
+    /// <c>Outcome</c>/<c>Cause</c>, which are always single tokens — because a persona display name
+    /// may legitimately contain spaces ("Rusty Strings"); <c>observability/LABELS.md</c> names
+    /// <c>| logfmt</c> as an intended query path, and unquoted logfmt truncates a value at its first
+    /// space (F2 review finding, PLAN T143 re-review). Embedded double quotes in the name itself
+    /// (e.g. <c>Rusty "The Riff" Strings</c>) are backslash-escaped AFTER <see cref="LogSanitize.Strip"/>
+    /// runs, at this call site (round-2 F2 review finding) — a raw embedded quote would close the
+    /// wrapping pair early, so a logfmt reader would extract only <c>Rusty </c> and treat
+    /// <c>The Riff" Strings</c> as stray, unparsed content. Escaping (not stripping) is deliberate:
+    /// it preserves the operator's actual persona name in full rather than silently losing the
+    /// quoted portion.
+    /// </summary>
+    void LogRenderOutcome(SegmentRequest request, string outcome, string cause)
+    {
+        var personaName = request.PersonaName is { } name
+            ? LogSanitize.Strip(name).Replace("\"", "\\\"", StringComparison.Ordinal)
+            : "none";
+        logger.LogInformation(
+            "TTS render outcome: kind={Kind} persona=\"{PersonaName}\" outcome={Outcome} cause={Cause}",
+            request.Kind, personaName, outcome, cause);
     }
 
     /// <summary>
