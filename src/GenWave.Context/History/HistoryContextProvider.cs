@@ -9,8 +9,10 @@ using GenWave.Core.Domain;
 using GenWave.Core.Http;
 
 /// <summary>
-/// The F109 <see cref="IContextProvider"/>: 2-4 curated On-This-Day facts from Wikimedia's REST feed
-/// (keyless, no API key ever touches this class), day-file cached under
+/// The F109 <see cref="IContextProvider"/>: curated On-This-Day facts from Wikimedia's REST feed
+/// (keyless, no API key ever touches this class) — the pipeline's own segment window trims any one
+/// vend to 2-4 of them (SPEC F109.1/F125.3), but every airable entry this fetch found reaches
+/// <see cref="ContextContent"/>, day-file cached under
 /// <c>{CacheRoot}/context/history/{MM-dd}.json</c> so a short Wikimedia outage — or a restart — still
 /// serves. <see cref="WikimediaBaseAddress"/> is a fixed host baked into the DI registration, never a
 /// caller- or config-supplied URL (the same T221 review SSRF-safe framing <c>WeatherContextProvider</c>
@@ -95,21 +97,31 @@ using GenWave.Core.Http;
 ///
 /// <para>
 /// <b>Facts are single-line, plain text — sanitized by the pipeline, not here.</b> This class never
-/// calls <see cref="ContextFactSanitizer"/> itself: <see cref="ContextContent.SegmentFacts"/>/
-/// <see cref="ContextContent.PatterFact"/> carry the raw (Wikimedia-authored, hence untrusted) text
-/// straight through — <see cref="ContextPipeline.EnsureFetchedAsync"/> is the ONE chokepoint every
-/// provider's content passes through before being cached or vended (see
-/// <see cref="ContextFactSanitizer"/>'s own remarks for why that call site, not this one).
+/// calls <see cref="ContextFactSanitizer"/> itself: <see cref="ContextContent.Facts"/> carries the raw
+/// (Wikimedia-authored, hence untrusted) text straight through —
+/// <see cref="ContextPipeline.EnsureFetchedAsync"/> is the ONE chokepoint every provider's content
+/// passes through before being cached or vended (see <see cref="ContextFactSanitizer"/>'s own remarks
+/// for why that call site, not this one).
 /// </para>
 ///
 /// <para>
 /// <b>Airability gate at vend time (gh-#433).</b> Between the day file and <see cref="ContextContent"/>
 /// sits <see cref="HistoryFactHygiene"/>: wiki-markup residue is stripped and somber facts (violent
-/// death / disaster / atrocity vocabulary) never air — in EITHER lane, since segment facts and the
-/// patter fact both derive from the same filtered list. Applied when vending, never when caching, so
-/// day files written before the gate existed get the same screen. An all-somber day (the real
-/// <c>selected</c> reply skews grim) is an ordinary F107.6 skip: one Information line, no segment,
-/// never silence.
+/// death / disaster / atrocity vocabulary) never air — in EITHER lane, since both the segment window
+/// and the patter pick draw from the SAME filtered <see cref="ContextContent.Facts"/> list (SPEC
+/// F125.2). Applied when vending, never when caching, so day files written before the gate existed get
+/// the same screen. An all-somber day (the real <c>selected</c> reply skews grim) is an ordinary
+/// F107.6 skip: one Information line, no segment, never silence.
+/// </para>
+///
+/// <para>
+/// <b>No segment/patter split, no truncation, no pre-choice (SPEC F125.2, gh-#468).</b> Every airable
+/// entry — not just the first few — reaches <see cref="ContextContent.Facts"/>, in Wikimedia's own
+/// order: this class used to trim to <c>MaxSegmentEntries</c> and always patter-vend the first
+/// resulting entry, so the same few facts (often just one) aired all day regardless of how many
+/// curated entries Wikimedia actually returned. <c>GenWave.Context.ContextPipeline</c> now owns both
+/// the segment lane's window size and the patter lane's single-fact pick, selected fresh at vend time
+/// against a per-provider aired-set — see that class's own remarks and <see cref="ContextContent"/>'s.
 /// </para>
 ///
 /// <para>
@@ -156,17 +168,6 @@ public sealed class HistoryContextProvider(
     /// pre-fetch" window that must always survive, well below the 365-day span before a filename
     /// recurs.</summary>
     static readonly TimeSpan RetentionHorizon = TimeSpan.FromDays(7);
-
-    /// <summary>SPEC F109.1's stated segment shape: 2-4 curated entries. A day's entry list with fewer
-    /// than this many (down to a legal single entry — only a truly EMPTY list is "nothing to say", per
-    /// F109.1) is used in full; a longer list (Wikimedia's real <c>selected</c> reply carries ~20) is
-    /// trimmed to this many, in the order Wikimedia returned them.</summary>
-    const int MaxSegmentEntries = 4;
-
-    /// <summary>Joins multiple facts into one <see cref="ContextContent.SegmentFacts"/> string — never
-    /// a newline (SPEC F109.2's own explicit requirement; also enforced structurally by the pipeline's
-    /// own <see cref="ContextFactSanitizer"/>, this is belt-and-suspenders at the source).</summary>
-    const string FactSeparator = " · ";
 
     /// <summary>SPEC F109.1's stated shipped defaults for this provider — the C# home
     /// <c>appsettings.json</c>'s <c>Context:History:*</c> seed literals pin against
@@ -474,16 +475,12 @@ public sealed class HistoryContextProvider(
         "feed/v1/wikipedia/en/onthisday/selected/" +
         $"{date.ToString("MM", CultureInfo.InvariantCulture)}/{date.ToString("dd", CultureInfo.InvariantCulture)}";
 
-    static ContextContent BuildContent(IReadOnlyList<HistoryDayCacheEntry> entries, DateTimeOffset freshUntil)
-    {
-        var chosen = entries.Take(MaxSegmentEntries).ToList();
-        var segmentFacts = string.Join(FactSeparator, chosen.Select(FormatEntry));
-        // One entry, compact (SPEC F109.1) — the first curated entry Wikimedia returned, same
-        // formatting as a segment fact.
-        var patterFact = FormatEntry(chosen[0]);
-
-        return new ContextContent(segmentFacts, patterFact, freshUntil);
-    }
+    /// <summary>Every airable entry, formatted and in Wikimedia's own order — no truncation, no
+    /// pre-choice (SPEC F125.2): <c>GenWave.Context.ContextPipeline</c> owns both the segment lane's
+    /// window size and the patter lane's single-fact pick now, selected fresh at vend time from this
+    /// full list (see this class's own remarks).</summary>
+    static ContextContent BuildContent(IReadOnlyList<HistoryDayCacheEntry> entries, DateTimeOffset freshUntil) =>
+        new(entries.Select(FormatEntry).ToList(), freshUntil);
 
     static string FormatEntry(HistoryDayCacheEntry entry) =>
         $"{entry.Year.ToString(CultureInfo.InvariantCulture)}: {entry.Text}";

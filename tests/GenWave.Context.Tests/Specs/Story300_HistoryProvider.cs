@@ -100,24 +100,25 @@ public static class FeatureHistoryProvider
             Build((_, _) => RespondWith(RealShapeFixture));
 
         [Fact]
-        public async Task SegmentFactsDeriveFromTheFetchedPayload()
+        public async Task EveryAirableEntryReachesTheFactsListUntrimmedAndUnjoined()
         {
-            // Every fact in ContextContent traces to a payload entry (year + text, verbatim) — no
-            // synthesized events. Trimmed to the first 4 of the 5 fixture entries (SPEC F109.1's 2-4
-            // segment cap); the patter fact is the single first entry, compact.
+            // Every fact traces to a payload entry (year + text, verbatim) — no synthesized events.
+            // F125.2: this provider no longer trims to a segment cap or pre-chooses a patter fact —
+            // ALL 5 fixture entries reach ContextContent.Facts, in Wikimedia's own order; selecting a
+            // segment window (up to 4) and a patter pick is ContextPipeline's job now, not this
+            // provider's (proven separately against the real pipeline in Story296/Story322).
             var content = await build.Provider.FetchAsync(CancellationToken.None);
 
             Assert.NotNull(content);
-            const string Expected =
-                "1969: The Beatles played their final rooftop concert in London. · " +
-                "1926: The first transatlantic radio broadcast reached listeners in both hemispheres. · " +
-                "1989: Voyager 2 transmitted the first close-up images of Neptune. · " +
-                "1875: The metric system was adopted as the international standard of measurement.";
-            Assert.Equal(Expected, content.SegmentFacts);
             Assert.Equal(
-                "1969: The Beatles played their final rooftop concert in London.",
-                content.PatterFact);
-            Assert.DoesNotContain("Linux", content.SegmentFacts); // The 5th entry never made the cut.
+                [
+                    "1969: The Beatles played their final rooftop concert in London.",
+                    "1926: The first transatlantic radio broadcast reached listeners in both hemispheres.",
+                    "1989: Voyager 2 transmitted the first close-up images of Neptune.",
+                    "1875: The metric system was adopted as the international standard of measurement.",
+                    "1991: A young programmer released the first version of the Linux kernel.",
+                ],
+                content.Facts);
         }
 
         public void Dispose() => Directory.Delete(build.CacheRoot, recursive: true);
@@ -231,18 +232,18 @@ public static class FeatureHistoryProvider
         }
 
         [Fact]
-        public async Task ASomberFactNeverReachesEitherLane()
+        public async Task ASomberFactNeverReachesTheAirableList()
         {
             var build = NewBuild((_, _) => RespondWith(SomberMixFixture));
 
             var content = await build.Provider.FetchAsync(CancellationToken.None);
 
             Assert.NotNull(content);
-            Assert.DoesNotContain("Voepass", content.SegmentFacts);
-            Assert.DoesNotContain("crashed", content.SegmentFacts);
-            Assert.DoesNotContain("Voepass", content.PatterFact);
-            // The patter fact is the first AIRABLE entry, not the first entry.
-            Assert.Equal("1914: The first electric traffic signal was installed in Cleveland, Ohio.", content.PatterFact);
+            Assert.DoesNotContain(content.Facts, fact => fact.Contains("Voepass", StringComparison.Ordinal));
+            Assert.DoesNotContain(content.Facts, fact => fact.Contains("crashed", StringComparison.Ordinal));
+            // The somber first entry is gone entirely — the surviving list starts with the first
+            // AIRABLE entry, not the first entry Wikimedia returned (either lane would draw on it).
+            Assert.Equal("1914: The first electric traffic signal was installed in Cleveland, Ohio.", content.Facts[0]);
         }
 
         [Fact]
@@ -253,8 +254,8 @@ public static class FeatureHistoryProvider
             var content = await build.Provider.FetchAsync(CancellationToken.None);
 
             Assert.NotNull(content);
-            Assert.DoesNotContain("]", content.SegmentFacts);
-            Assert.Contains("traffic signal was installed", content.SegmentFacts);
+            Assert.DoesNotContain(content.Facts, fact => fact.Contains(']'));
+            Assert.Contains(content.Facts, fact => fact.Contains("traffic signal was installed", StringComparison.Ordinal));
         }
 
         [Fact]
@@ -292,8 +293,7 @@ public static class FeatureHistoryProvider
             var content = await build.Provider.FetchAsync(CancellationToken.None);
 
             Assert.NotNull(content);
-            Assert.Equal("1969: The first cash-dispensing ATM opened.", content.SegmentFacts);
-            Assert.Equal("1969: The first cash-dispensing ATM opened.", content.PatterFact);
+            Assert.Equal(["1969: The first cash-dispensing ATM opened."], content.Facts);
         }
 
         [Fact]
@@ -420,7 +420,7 @@ public static class FeatureHistoryProvider
             var content = await build.Provider.FetchAsync(CancellationToken.None);
 
             Assert.NotNull(content);
-            Assert.Equal("1969: The first cash-dispensing ATM opened.", content.SegmentFacts);
+            Assert.Equal(["1969: The first cash-dispensing ATM opened."], content.Facts);
         }
 
         [Fact]
