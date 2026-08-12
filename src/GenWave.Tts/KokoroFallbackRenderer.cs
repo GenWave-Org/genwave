@@ -1,6 +1,5 @@
 namespace GenWave.Tts;
 
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
@@ -17,11 +16,11 @@ using GenWave.Core.Domain;
 /// per-request voice for this hop; empty forwards the caller's voice unchanged. Contrast
 /// <see cref="PiperTtsSynthesizer"/>, where the profile voice is display-only by upstream design.
 ///
-/// The cache path carries the hop endpoint in its hash (unlike the primary's formula): a hop and
-/// the primary — or two kokoro-kind hops — can render the same (text, voice) pair concurrently as
-/// different audio and must never collide on a transient file. The file is transient either way:
-/// <see cref="TtsSegmentSource"/> moves it into its own final cache location (F70.4's identical
-/// normalize → measure → cache pipeline).
+/// The transient write path (see <see cref="TransientRenderPath"/> for the shared helper and the
+/// full root cause) is a fresh Guid per call under a <c>"fallback-kokoro"</c> subfolder — a hop
+/// and the primary, or two kokoro-kind hops, must never collide on a transient file's name. The
+/// file is transient either way: <see cref="TtsSegmentSource"/> moves it into its own final cache
+/// location (F70.4's identical normalize → measure → cache pipeline).
 ///
 /// No boot-frozen <see cref="HttpClient.BaseAddress"/>, same discipline as every other engine
 /// client (SPEC F36.1–F36.2): the endpoint comes from the profile per call, itself resolved from
@@ -64,10 +63,9 @@ public sealed class KokoroFallbackRenderer(
         response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx
 
         var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-        // Tagged speech in the hash, mirroring KokoroTtsSynthesizer: what was rendered is what
-        // names the transient file (see that class's remark; the file is moved or deleted by the
-        // caller either way).
-        var path = GetCachePath(speech, voice, profile.Endpoint, cfg);
+        // See TransientRenderPath's remarks for the full root cause and why this is never
+        // content-addressed.
+        var path = TransientRenderPath.For(cfg, subfolder: "fallback-kokoro");
 
         // Path.GetDirectoryName always returns a non-null string when the path is produced
         // by Path.Combine with a non-empty CacheRoot; the guard below satisfies the compiler
@@ -80,15 +78,5 @@ public sealed class KokoroFallbackRenderer(
 
         await File.WriteAllBytesAsync(path, bytes, ct);
         return path;
-    }
-
-    // No pace term: this hop never resolves a real pace value to fold in (see the class remarks)
-    // — every render here is the same "engine default" constant, so adding it would be a no-op
-    // key change, not a correctness fix. T140 is where that stops being true on the PRIMARY path.
-    static string GetCachePath(string text, string voice, string endpoint, TtsOptions cfg)
-    {
-        var hash = Convert.ToHexString(
-            SHA256.HashData(Encoding.UTF8.GetBytes(text + "|" + voice + "|" + endpoint)));
-        return Path.Combine(cfg.CacheRoot, "fallback-kokoro", $"{hash}.{cfg.Format}");
     }
 }

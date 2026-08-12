@@ -1,6 +1,5 @@
 namespace GenWave.Tts;
 
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
@@ -29,9 +28,12 @@ public sealed class KokoroTtsSynthesizer(HttpClient http, IOptionsMonitor<TtsOpt
     /// the dormant seam an earlier revision of this comment described.
     ///
     /// <see cref="TtsRenderContext.Pace"/> also rides the context (T134) but is deliberately NOT
-    /// read here: folding it into the Kokoro <c>speed</c> field and both cache keys (the engine
-    /// file cache below and <see cref="TtsSegmentSource"/>'s segment cache) is T140's job, not
-    /// this override's — see <c>docs/PLAN.md</c> T140.
+    /// read here: folding it into the Kokoro <c>speed</c> field and <see cref="TtsSegmentSource"/>'s
+    /// own segment cache key is T140's job, not this override's — see <c>docs/PLAN.md</c> T140.
+    /// There is no second cache key to fold it into: the transient write below
+    /// (<see cref="TransientRenderPath"/>) is retired scratch space, never a cache (SPEC F98.2, as
+    /// amended — see that type's remarks for the ruling and the full root cause) — T140's whole
+    /// obligation is the ONE segment cache, <see cref="TtsSegmentSource"/>'s own.
     /// </summary>
     public Task<string> SynthesizeAsync(TtsRenderContext context, CancellationToken ct) =>
         RenderAsync(context.Text, context.Voice, PronunciationRuleSet.FromContext(context.Rules), ct);
@@ -56,12 +58,9 @@ public sealed class KokoroTtsSynthesizer(HttpClient http, IOptionsMonitor<TtsOpt
         response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx
 
         var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-        // Hashing the TAGGED speech (what was actually rendered), not the caller's text: two
-        // renders under different pause settings are different audio and must never collide on a
-        // transient file. Transient either way — TtsSegmentSource moves this file into its own
-        // final cache slot (keyed on pre-synthesis copy text, tag-free), and TtsPreviewController
-        // deletes it after streaming the bytes.
-        var path = GetCachePath(speech, voice, cfg);
+        // See TransientRenderPath's remarks for the full root cause and why this is never
+        // content-addressed.
+        var path = TransientRenderPath.For(cfg);
 
         // Path.GetDirectoryName always returns a non-null string when the path is produced
         // by Path.Combine with a non-empty CacheRoot; the guard below satisfies the compiler
@@ -74,12 +73,5 @@ public sealed class KokoroTtsSynthesizer(HttpClient http, IOptionsMonitor<TtsOpt
 
         await File.WriteAllBytesAsync(path, bytes, ct);
         return path;
-    }
-
-    static string GetCachePath(string text, string voice, TtsOptions cfg)
-    {
-        var hash = Convert.ToHexString(
-            SHA256.HashData(Encoding.UTF8.GetBytes(text + "|" + voice)));
-        return Path.Combine(cfg.CacheRoot, $"{hash}.{cfg.Format}");
     }
 }

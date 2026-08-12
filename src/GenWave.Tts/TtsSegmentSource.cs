@@ -181,7 +181,22 @@ public sealed class TtsSegmentSource(
                 // stays the TtsRenderContext default (carried-but-unconsumed until T140).
                 var synthPath = await synthesizer.SynthesizeAsync(
                     new TtsRenderContext(copy.Text, request.Voice, request.Kind) { Rules = contextRules }, ct);
-                File.Move(synthPath, path, overwrite: true);
+                // A failed Move (destination directory vanished mid-render, a lost race with a
+                // concurrent sweep, disk pressure) must never leave the engine's transient write
+                // behind as a permanent orphan under CacheRoot's top level, where nothing ever
+                // sweeps it — mirrors SafeSegmentAuthor's own all-or-nothing cleanup discipline.
+                // The Move failure itself still propagates unchanged to the catch below (WARN +
+                // null, F92.4's never-silent posture); this only ensures it never leaves a second,
+                // silent failure (an orphaned file) behind it.
+                try
+                {
+                    File.Move(synthPath, path, overwrite: true);
+                }
+                catch
+                {
+                    DeleteIfExists(synthPath);
+                    throw;
+                }
             }
 
             var loudness = await analyzer.AnalyzeAsync(path, ct);
@@ -317,4 +332,26 @@ public sealed class TtsSegmentSource(
             Encoding.UTF8.GetBytes(
                 text + "|" + voice + "|" + stationId + "|" + correctionsContentHash + "|" + personaCorrectionsContentHash +
                 "|" + pronunciationsContentHash + "|" + personaPronunciationsContentHash + "|" + mergePolicyVersion)));
+
+    // Best-effort cleanup of a transient render file a failed File.Move left behind. IOException
+    // AND UnauthorizedAccessException both swallowed — the TtsPreviewController.DeletePreviewArtifact
+    // precedent (a locked file and a permission-denied delete are equally plausible causes a failed
+    // Move can leave behind) — so a delete failure here never REPLACES the real Move exception the
+    // caller is already rethrowing; this cleanup's own success was never the point.
+    static void DeleteIfExists(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch (IOException)
+        {
+            // Best-effort; the Move failure the caller rethrows is the one that matters.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Best-effort; the Move failure the caller rethrows is the one that matters.
+        }
+    }
 }

@@ -115,8 +115,10 @@ public static class FeatureRulesTheOperatorCanTrust
             // When the two sources merge
             var merged = PronunciationRuleSet.Merge(station, card);
 
-            // Then the card's phoneme is the one that fires
-            Assert.Equal("/cardIpa/", Assert.Single(merged.Match("Say MacLeod now.")).Rule.Ipa);
+            // Then the card's phoneme is the one that fires — canonical (slash-free) form: Create
+            // canonicalizes Ipa before compiling (T138 review), and the operator-authored
+            // "/cardIpa/" above canonicalizes to "cardIpa".
+            Assert.Equal("cardIpa", Assert.Single(merged.Match("Say MacLeod now.")).Rule.Ipa);
         }
 
         [Fact]
@@ -149,8 +151,9 @@ public static class FeatureRulesTheOperatorCanTrust
 
             var merged = PronunciationRuleSet.Merge(station, card);
 
-            // Then the card's phoneme wins where its more specific pattern also matches
-            Assert.Equal("/card/", Assert.Single(merged.Match("I have read it.")).Rule.Ipa);
+            // Then the card's phoneme wins where its more specific pattern also matches —
+            // canonical form (see the sibling fact above for why).
+            Assert.Equal("card", Assert.Single(merged.Match("I have read it.")).Rule.Ipa);
         }
 
         [Fact]

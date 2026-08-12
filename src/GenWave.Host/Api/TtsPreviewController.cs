@@ -15,15 +15,17 @@ namespace GenWave.Host.Api;
 /// mirroring <c>SafeSegmentsController</c>'s render-budget/502 shape.
 ///
 /// PERSISTENCE (SPEC F35.6 "not persisted"): <see cref="ITtsSynthesizer.SynthesizeAsync"/> writes
-/// its result to a content-addressed file under <c>Tts:CacheRoot</c> as an unavoidable side effect
-/// of synthesizing — that write is the synthesizer's own production contract (the same file
-/// <c>TtsSegmentSource</c> would move into the station's forever-cache on a real render), not
-/// something a caller can suppress without a second synth overload. This endpoint reads the bytes
-/// into memory for the response and then deletes the file it just caused to be written
-/// (best-effort — a failed delete only leaves an orphan; that path's cache key is the synthesizer's
-/// own (text,voice) hash, not <c>TtsSegmentSource</c>'s station-scoped hash, so no selection path
-/// ever looks there). Nothing is measured, cued, wrapped in a <c>MediaItem</c>, or written to
-/// <c>library.media</c> — there is no reachable path from this call into rotation.
+/// its result to a transient, Guid-named file under <c>Tts:CacheRoot</c> as an unavoidable side
+/// effect of synthesizing (<c>GenWave.Tts.TransientRenderPath</c> — never content-addressed, SPEC
+/// F98.2 as amended: there is no "engine file cache", only scratch space one write wide) — that
+/// write is the synthesizer's own production contract (the same file <c>TtsSegmentSource</c> would
+/// move into the station's forever-cache on a real render), not something a caller can suppress
+/// without a second synth overload. This endpoint reads the bytes into memory for the response and
+/// then deletes the file it just caused to be written (best-effort — a failed delete only leaves an
+/// orphan; the path is unique to THIS call, never a hash any other render could ever compute or
+/// collide with, so an orphan here is inert — no selection path ever looks for it). Nothing is
+/// measured, cued, wrapped in a <c>MediaItem</c>, or written to <c>library.media</c> — there is no
+/// reachable path from this call into rotation.
 /// </summary>
 [ApiController]
 [Route("api/tts")]
