@@ -8,6 +8,8 @@
 // One assertion per Fact; happy first; sad segregated. T273's wire acceptance (distinct
 // facts audible over 3+ slots on a running stack) is a production check, not here.
 
+using GenWave.Context.History;
+
 namespace GenWave.Context.Tests.Specs;
 
 public static class FeatureStormsSomberFactsRotate
@@ -16,26 +18,37 @@ public static class FeatureStormsSomberFactsRotate
 
     public static class ScenarioTheWindStormFamilyIsSomber
     {
-        [Fact(Skip = "Pending T271 — see docs/PLAN.md")]
+        [Fact]
         public static void A_tornado_fact_is_filtered()
         {
             // Given a fact containing "tornado" with no casualty words
             // When  the tone gate runs
             // Then  the fact is filtered — the gh-#468 sighting can not recur
-            Assert.Fail("pending T271");
+            Assert.True(HistoryFactHygiene.IsSomber(
+                "1974: A tornado tore through the Midwest, flattening entire neighborhoods."));
         }
 
-        [Fact(Skip = "Pending T271 — see docs/PLAN.md")]
+        [Fact]
         public static void Hurricane_cyclone_typhoon_and_blizzard_are_filtered_including_plurals()
         {
-            Assert.Fail("pending T271");
+            Assert.True(HistoryFactHygiene.IsSomber("Hurricane Katrina made landfall near New Orleans."));
+            Assert.True(HistoryFactHygiene.IsSomber("Two hurricanes formed in the Atlantic within the same week."));
+            Assert.True(HistoryFactHygiene.IsSomber("A cyclone made landfall on the eastern coastline."));
+            Assert.True(HistoryFactHygiene.IsSomber("Tropical cyclones are tracked closely each storm season."));
+            Assert.True(HistoryFactHygiene.IsSomber("A typhoon swept across the Philippines overnight."));
+            Assert.True(HistoryFactHygiene.IsSomber("Two typhoons formed in the Pacific within the same week."));
+            Assert.True(HistoryFactHygiene.IsSomber("A blizzard buried the region under three feet of snow."));
+            Assert.True(HistoryFactHygiene.IsSomber("Back-to-back blizzards closed the interstate for days."));
         }
 
-        [Fact(Skip = "Pending T271 — see docs/PLAN.md")]
+        [Fact]
         public static void The_match_stays_word_boundary_anchored()
         {
-            // "blizzardry" (or any embedding) does not match — the existing posture.
-            Assert.Fail("pending T271");
+            // "blizzardry" (or any embedding) does not match — the existing posture. "blizzardry"
+            // contains "blizzard" as a substring immediately followed by a word character ("...ard" +
+            // "ry"), so there is no \b at that point — the anchored \b(?:...)\b group must not fire.
+            Assert.False(HistoryFactHygiene.IsSomber(
+                "The blizzardry forecast graphic went viral for its retro design."));
         }
     }
 
