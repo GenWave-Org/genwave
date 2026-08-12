@@ -123,6 +123,37 @@ public sealed class FeatureFontKindAssets
                 },
                 entry.Assets);
         }
+
+        [Fact]
+        public void AFontEntryUnderThePerKindFolderLayoutIsAdmittedWithItsAssets()
+        {
+            // Given the same well-formed pack sitting under the nested entries/fonts/<slug>/ layout
+            // (genwave-catalog#33) — manifest, meta, and both assets all in the one directory,
+            var index = $$"""
+                { "generatedAt": "2026-08-12", "entries": [
+                  { "slug": "sample-pack", "kind": "font", "audience": "everyone",
+                    "manifest": { "path": "entries/fonts/sample-pack/sample-pack.font.json", "sha256": "{{RefPlaceholder}}" },
+                    "meta": { "path": "entries/fonts/sample-pack/sample-pack.meta.json", "sha256": "{{RefPlaceholder}}" },
+                    "assets": [
+                      { "path": "entries/fonts/sample-pack/sample-pack-variable-latin.woff2", "sha256": "{{WoffSha256}}", "bytes": 12345 },
+                      { "path": "entries/fonts/sample-pack/OFL.txt", "sha256": "{{LicenceSha256}}", "bytes": 4523 }
+                    ] } ] }
+                """;
+
+            // When the index is parsed,
+            var success = TryValidate(index, out var entries);
+            Assert.True(success);
+            var entry = Assert.Single(entries!);
+
+            // Then the entry is admitted with its nested asset references intact.
+            Assert.Equal(
+                new[]
+                {
+                    new CatalogAssetRef("entries/fonts/sample-pack/sample-pack-variable-latin.woff2", WoffSha256, 12345),
+                    new CatalogAssetRef("entries/fonts/sample-pack/OFL.txt", LicenceSha256, 4523),
+                },
+                entry.Assets);
+        }
     }
 
     // T194 (STORY-279 AC2): the asset transport — CatalogProxyService.GetAssetAsync + CatalogController's
@@ -429,6 +460,38 @@ public sealed class FeatureFontKindAssets
 
             // Then the index still loads (the shelf survives) and only the persona entry survives —
             // the over-cap pack is simply absent, never a whole-index rejection.
+            Assert.True(success);
+            Assert.Equal("valid-dj", Assert.Single(entries!).Slug);
+        }
+
+        [Fact]
+        public void AFontEntryWhoseAssetStraysFromItsManifestDirectorySkipsOnlyItself()
+        {
+            // genwave-catalog#33: with BOTH shelf layouts admitted, the flat entries/broken-pack/
+            // and the nested entries/fonts/broken-pack/ are DISTINCT directories sharing a slug —
+            // an asset under one while the manifest sits under the other passes every per-path
+            // check (shape, slug ownership, containment) yet breaks the one-directory invariant
+            // (and with it the bare-filename uniqueness CatalogProxyService's filename-keyed asset
+            // lookup leans on). Alongside a valid persona entry,
+            const string Sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+            var index = $$"""
+                { "generatedAt": "2026-08-12", "entries": [
+                  { "slug": "valid-dj", "audience": "everyone",
+                    "card": { "path": "entries/valid-dj/valid-dj.persona.json", "sha256": "{{Sha}}" },
+                    "meta": { "path": "entries/valid-dj/valid-dj.meta.json", "sha256": "{{Sha}}" } },
+                  { "slug": "broken-pack", "kind": "font", "audience": "everyone",
+                    "manifest": { "path": "entries/fonts/broken-pack/broken-pack.font.json", "sha256": "{{Sha}}" },
+                    "meta": { "path": "entries/fonts/broken-pack/broken-pack.meta.json", "sha256": "{{Sha}}" },
+                    "assets": [
+                      { "path": "entries/broken-pack/broken-pack-variable-latin.woff2", "sha256": "{{Sha}}", "bytes": 100 }
+                    ] } ] }
+                """;
+
+            // When the index is parsed,
+            var success = TryValidate(index, out var entries);
+
+            // Then the index still loads and only the persona entry survives — the straying pack is
+            // simply absent, the same posture every other malformed-asset shape gets.
             Assert.True(success);
             Assert.Equal("valid-dj", Assert.Single(entries!).Slug);
         }
