@@ -28,3 +28,24 @@ export interface FontLibraryPackDto {
   importedFrom: string;
   importedAt: string;
 }
+
+/**
+ * One installed entry on a non-font wardrobe tab (gh-#393) — the kind-neutral projection the
+ * Personas/Themes/Shows tabs share: a display name, an optional secondary line (a show's tagline;
+ * personas/themes have none), and the db/25 provenance pair. Projected server-side in
+ * `wardrobe/page.tsx` from each kind's own listing (`GET /api/personas` / `Station:Theme` choices
+ * off `GET /api/settings` / `GET /api/shows`), admitting only genuinely-imported rows
+ * (`importedFrom != null` — the same two-provenance-class rule `persona-catalog/page.tsx`'s own
+ * fetchers follow): the Wardrobe lists what came off the catalog shelf, never what was authored in
+ * place (authored personas/shows have their own pages).
+ *
+ * `name`/`detail` are free-form prose — rendered as plain React text nodes ONLY, the same
+ * obligation `FontLibraryPackDto`'s own remarks pin for family/style.
+ */
+export interface InstalledEntryRow {
+  slug: string;
+  name: string;
+  detail: string | null;
+  importedFrom: string;
+  importedAt: string;
+}
