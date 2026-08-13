@@ -88,7 +88,7 @@ public static class FeatureCopyWriterSeam
             var source = new TtsSegmentSource(
                 copyWriter, synth, analyzer, new FakeCueAnalyzer(), NoCorrections.Provider(),
                 NoCorrections.PersonaCache(), NoCorrections.PronunciationProvider(),
-                NoCorrections.PersonaPronunciationCache(), opts,
+                NoCorrections.PersonaPronunciationCache(), NoCorrections.PersonaPaceCache(), opts,
                 NullLogger<TtsSegmentSource>.Instance);
 
             await source.RenderAsync(StationIdRequest(), CancellationToken.None);

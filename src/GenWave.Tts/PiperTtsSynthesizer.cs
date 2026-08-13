@@ -1,6 +1,5 @@
 namespace GenWave.Tts;
 
-using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Domain;
@@ -21,7 +20,7 @@ using GenWave.Core.Domain;
 ///
 /// No per-request voice selector exists on that wrapper — exactly one voice model is baked into
 /// the running container at start (compose.yaml's <c>MODEL_DOWNLOAD_LINK</c>) — so neither the
-/// caller's <paramref name="requestVoice"/> nor the hop's display-only
+/// caller's <see cref="TtsRenderContext.Voice"/> nor the hop's display-only
 /// <see cref="TtsFallbackProfile.Voice"/> is ever put on the wire; see that property's
 /// schema-level remarks (gh-#147's honest-labeling contract).
 ///
@@ -40,7 +39,6 @@ public sealed class PiperTtsSynthesizer(
     public async Task<string> RenderAsync(TtsFallbackProfile profile, TtsRenderContext context, CancellationToken ct)
     {
         var ttsCfg = ttsOptions.CurrentValue;
-        var requestVoice = context.Voice;
 
         // Defense-in-depth strip guard (F96.3): piper-tts speaks any [...]-shaped token aloud
         // (a pause tag, a pronunciation override, or any other bracket-shaped form), and an
@@ -79,7 +77,9 @@ public sealed class PiperTtsSynthesizer(
         response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx
 
         var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-        var path = GetCachePath(speech, requestVoice, ttsCfg);
+        // See TransientRenderPath's remarks for the full root cause and why this is never
+        // content-addressed.
+        var path = TransientRenderPath.For(ttsCfg, subfolder: "piper");
 
         // Path.GetDirectoryName always returns a non-null string when the path is produced
         // by Path.Combine with a non-empty CacheRoot; the guard below satisfies the compiler
@@ -92,25 +92,5 @@ public sealed class PiperTtsSynthesizer(
 
         await File.WriteAllBytesAsync(path, bytes, ct);
         return path;
-    }
-
-    /// <summary>
-    /// Shares <see cref="KokoroTtsSynthesizer"/>'s own (text, voice) hash formula and
-    /// <see cref="TtsOptions.CacheRoot"/>/<see cref="TtsOptions.Format"/>, under a "piper/"
-    /// subfolder — the ONLY thing that keeps a Piper-rendered temp file from ever colliding with a
-    /// concurrent Kokoro one for the exact same (text, voice) pair. The caller's request voice
-    /// (not the profile's display-only voice) feeds the hash — unchanged from the pre-gh-#147
-    /// formula, so upgrade never orphans or double-renders a cached temp file. <paramref
-    /// name="text"/> is the FINAL (post-<see cref="PiperSpeechMarkup.Strip"/>) text — what was
-    /// actually sent — mirroring <see cref="KokoroTtsSynthesizer"/>'s own tagged-speech hash.
-    /// Both files are transient either way — <see cref="TtsSegmentSource"/> moves this path to
-    /// its own final cache location (SPEC F70.4: the identical downstream measure/cue/cache
-    /// pipeline), and <see cref="SafeSegmentAuthor"/> deletes it once the mixed artifact exists.
-    /// </summary>
-    static string GetCachePath(string text, string voice, TtsOptions cfg)
-    {
-        var hash = Convert.ToHexString(
-            SHA256.HashData(Encoding.UTF8.GetBytes(text + "|" + voice)));
-        return Path.Combine(cfg.CacheRoot, "piper", $"{hash}.{cfg.Format}");
     }
 }

@@ -31,6 +31,7 @@ public static class FeatureTtsPatterDuration
             NoCorrections.PersonaCache(),
             NoCorrections.PronunciationProvider(),
             NoCorrections.PersonaPronunciationCache(),
+            NoCorrections.PersonaPaceCache(),
             opts,
             NullLogger<TtsSegmentSource>.Instance);
     }

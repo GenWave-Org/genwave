@@ -101,6 +101,23 @@ public sealed class PronunciationRuleSet
     /// can tell a rule never compiled (F97.5) without this set doing any logging of its own
     /// (F68.6). A null element in <paramref name="rules"/> itself — the same JSON-array degenerate
     /// case <see cref="SpeechCorrectionSet.Create"/> documents — is skipped the same way.
+    ///
+    /// <para>
+    /// <b>Ipa is canonicalized HERE, before it is ever validated (T138 review findings 2+3):</b>
+    /// <see cref="CanonicalizeIpa"/> trims stray whitespace, then any slash delimiters an operator
+    /// pasted (some copy the bare phonemes, some copy the slash-delimited notation IPA references
+    /// typically show them in — <c>"/məˈklaʊd/"</c> and <c>" məˈklaʊd "</c> and
+    /// <c>" /məˈklaʊd/ "</c> all converge on the one canonical <c>"məˈklaʊd"</c>), then whitespace
+    /// again (a slash-trimmed <c>"/ ipa /"</c> leaves <c>" ipa "</c> behind). Canonicalizing BEFORE
+    /// the blank/bracket checks below means a rule whose Ipa canonicalizes to blank — an operator
+    /// who saved bare slashes with nothing between them, <c>"/"</c>, <c>"//"</c>, <c>"///"</c> — is
+    /// exactly as invalid as one that arrived blank: dropped here, surfacing in the declared-N-
+    /// compiled-M WARN above (F97.5), never reaching <see cref="KokoroSpeechMarkup"/> to render a
+    /// hollow <c>[word](//)</c> token on the wire. Every compiled <see cref="PronunciationMatch.Rule"/>
+    /// this set ever hands out therefore already carries a canonical, slash-free Ipa — the ONE
+    /// normalization site every rule passes through, so a downstream renderer can trust the shape
+    /// without re-normalizing it itself (see <see cref="KokoroSpeechMarkup"/>'s own remarks).
+    /// </para>
     /// </summary>
     public static PronunciationRuleSet Create(IEnumerable<PronunciationRule> rules)
     {
@@ -108,7 +125,7 @@ public sealed class PronunciationRuleSet
 
         var compiled = rules
             .Where(rule => rule is not null)
-            .Select(rule => PronunciationRule.Parse(rule.Pattern, rule.Word, rule.Ipa))
+            .Select(rule => PronunciationRule.Parse(rule.Pattern, rule.Word, CanonicalizeIpa(rule.Ipa)))
             .Where(rule => !string.IsNullOrWhiteSpace(rule.Pattern)
                 && !string.IsNullOrWhiteSpace(rule.Word)
                 && !string.IsNullOrWhiteSpace(rule.Ipa)
@@ -121,6 +138,20 @@ public sealed class PronunciationRuleSet
 
         return new PronunciationRuleSet(compiled);
     }
+
+    /// <summary>
+    /// Canonicalizes an operator/card-authored Ipa field to the bare phoneme string
+    /// <see cref="KokoroSpeechMarkup"/> wraps in slashes for the wire (<c>[word](/ipa/)</c>, SPEC
+    /// F96.2): trim whitespace, trim slash delimiters, trim whitespace again — see <see
+    /// cref="Create"/>'s own remarks for why this runs BEFORE validation and what a canonicalize-
+    /// to-blank result means. Declared non-nullable, matching <see cref="PronunciationRule.Ipa"/>'s
+    /// own declared type; <see cref="string.IsNullOrEmpty(string?)"/> guards the T133/T137
+    /// null-Ipa JSON-deserialization gap (a literal <see langword="null"/> bound into this
+    /// non-nullable field) without ever calling <see cref="string.Trim()"/> on it — <see
+    /// cref="Create"/>'s blank check right after this call is what actually drops that rule.
+    /// </summary>
+    private static string CanonicalizeIpa(string ipa) =>
+        string.IsNullOrEmpty(ipa) ? ipa : ipa.Trim().Trim('/').Trim();
 
     /// <summary>
     /// Builds a compiled rule set directly from the resolved <see cref="ContextPronunciationRule"/>
@@ -175,12 +206,15 @@ public sealed class PronunciationRuleSet
     /// Exists to exercise <see cref="Match"/>'s per-rule match timeout deterministically — a
     /// pathological pattern cannot be produced through the escaped, public path. Mirrors <see
     /// cref="SpeechCorrectionSet.FromRawPattern"/>. Production code must always go through <see
-    /// cref="Create"/>.
+    /// cref="Create"/>. Still runs <paramref name="ipa"/> through <see cref="CanonicalizeIpa"/> —
+    /// <see cref="Create"/> is genuinely the ONE canonicalization site (not "the one PRODUCTION
+    /// site, plus this test seam left raw"), so a raw-pattern rule's compiled Ipa is exactly as
+    /// wire-ready as any other.
     /// </summary>
     internal static PronunciationRuleSet FromRawPattern(string rawPattern, string ipa)
     {
         var regex = LiteralRegexPosture.Compile($"(?<word>{rawPattern})");
-        return new PronunciationRuleSet([(regex, new PronunciationRule(rawPattern, rawPattern, ipa))]);
+        return new PronunciationRuleSet([(regex, new PronunciationRule(rawPattern, rawPattern, CanonicalizeIpa(ipa)))]);
     }
 
     /// <summary>

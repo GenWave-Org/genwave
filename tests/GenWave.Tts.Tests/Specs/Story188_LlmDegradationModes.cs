@@ -121,7 +121,7 @@ public static class FeatureLlmDegradationModes
                         gated, synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(),
                         NoCorrections.Provider(), NoCorrections.PersonaCache(),
                         NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(),
-                        ttsOptions, new CapturingLogger<TtsSegmentSource>());
+                        NoCorrections.PersonaPaceCache(), ttsOptions, new CapturingLogger<TtsSegmentSource>());
 
                     try
                     {

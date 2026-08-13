@@ -16,13 +16,15 @@ namespace GenWave.Tts.Tests.Specs;
 
 using System.Net;
 using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Tts.Tests.Fakes;
 // GenWave.Tts.PronunciationRule (this file's ambient, unqualified `PronunciationRule` throughout)
 // and GenWave.Core.Domain.PronunciationRule are two distinct mirrored types — see the mirror's own
 // remarks — so a blanket `using GenWave.Core.Domain;` would silently rebind every existing
-// unqualified `PronunciationRule` reference below to the wrong one. Aliasing only the three names
-// this new scenario needs keeps the rest of the file's resolution untouched.
+// unqualified `PronunciationRule` reference below to the wrong one. Aliasing only the names this
+// file's scenarios need keeps the rest of the file's resolution untouched.
 using TtsRenderContext = GenWave.Core.Domain.TtsRenderContext;
+using SegmentRequest = GenWave.Core.Domain.SegmentRequest;
 using SegmentKind = GenWave.Core.Domain.SegmentKind;
 using ContextPronunciationRule = GenWave.Core.Domain.PronunciationRule;
 
@@ -177,9 +179,12 @@ public static class FeatureHeteronymsSaidRight
         // renderer (KokoroSpeechMarkup.Render) doesn't exist yet — T133 — so these specs assert
         // the equivalent fact one layer down, at the matcher: it locates the right occurrence of
         // "wind" with the right phonemes, which is exactly what T133's renderer will wrap in
-        // [word](/ipa/).
-        const string VerbIpa = "/wˈaɪnd/";
-        const string NounIpa = "/wˈɪnd/";
+        // [word](/ipa/). Ipa is authored already-canonical here — PronunciationRuleSet.Create
+        // canonicalizes before compiling (T138 review), so m.Rule.Ipa is compared against the
+        // SAME canonical form the rule was authored with; slash-stripping itself is pinned in
+        // ScenarioIpaCanonicalization below, not at this layer.
+        const string VerbIpa = "wˈaɪnd";
+        const string NounIpa = "wˈɪnd";
         static readonly PronunciationRule WindDownRule = new("wind down", "wind", VerbIpa);
         static readonly PronunciationRule TheWindRule = new("the wind", "wind", NounIpa);
         static readonly PronunciationRuleSet BothWindRules =
@@ -235,9 +240,10 @@ public static class FeatureHeteronymsSaidRight
         // outright — the later rule's overlapping occurrence never survives to be emitted
         // alongside it. Emitting both is the one option that cannot work: T133's renderer would
         // have to double-annotate one span. This mirrors SpeechCorrectionSet's compose-by-order
-        // behaviour even though this type never rewrites text.
-        const string VerbIpa = "/wˈaɪnd/";
-        const string GeneralIpa = "/wˈɪnd/";
+        // behaviour even though this type never rewrites text. Ipa is authored already-canonical
+        // here (see ScenarioThePatternWordSplitDisambiguates's own remark on why).
+        const string VerbIpa = "wˈaɪnd";
+        const string GeneralIpa = "wˈɪnd";
         static readonly PronunciationRule WindDownRule = new("wind down", "wind", VerbIpa);
         static readonly PronunciationRule GeneralWindRule = new("wind", "wind", GeneralIpa);
         static readonly PronunciationRuleSet Rules =
@@ -311,8 +317,12 @@ public static class FeatureHeteronymsSaidRight
         {
             // This set stays pure — no logging here (F68.6) — but a caller answering "did my
             // rule compile?" (T142's rule-hit counters, T144's rules API) needs to see the gap
-            // rather than have it vanish with no observability at all (F97.5).
-            var good = new PronunciationRule("wind down", "wind", "/wˈaɪnd/");
+            // rather than have it vanish with no observability at all (F97.5). Ipa is authored
+            // already-canonical (no slashes) here so `good` equals the compiled record exactly —
+            // Create canonicalizes before compiling (T138 review), so an already-canonical Ipa is
+            // an identity transform and record equality holds; slash-stripping itself is pinned in
+            // ScenarioIpaCanonicalization below, not here.
+            var good = new PronunciationRule("wind down", "wind", "wˈaɪnd");
             var malformed = new PronunciationRule("wind down", "gust", "/xxx/");
 
             var compiled = PronunciationRuleSet.Create([good, malformed]);
@@ -445,6 +455,70 @@ public static class FeatureHeteronymsSaidRight
             // The rule never compiled, so the text renders unannotated — never a
             // "[MacLeod](/məklaʊd]/)" token that could seed a literal [pause:Ns] directive on the wire.
             Assert.Equal("Here is MacLeod.", speech);
+        }
+    }
+
+    // T138 review findings 2+3: canonicalization moved UP into PronunciationRuleSet.Create — every
+    // rule is canonicalized (trim whitespace, trim "/", trim whitespace again) BEFORE the
+    // blank/bracket validation runs, so a canonicalize-to-blank Ipa is exactly as invalid as one
+    // that arrived blank outright, and every surviving rule's compiled Ipa is already the bare
+    // wire-ready form KokoroSpeechMarkup wraps directly (no second Trim downstream).
+    public static class ScenarioIpaCanonicalization
+    {
+        [Theory]
+        [InlineData("/məˈklaʊd/")]
+        [InlineData(" /məˈklaʊd/ ")]
+        [InlineData("/məˈklaʊd/ ")]
+        [InlineData(" məˈklaʊd ")]
+        [InlineData("məˈklaʊd")]
+        public static void Every_authored_form_converges_on_the_same_wire_shape(string authoredIpa)
+        {
+            // Slash delimiters, surrounding whitespace, or both — however an operator pastes the
+            // phoneme string — all canonicalize to the identical composed wire token.
+            var rule = new PronunciationRule("MacLeod", "MacLeod", authoredIpa);
+
+            var speech = KokoroSpeechMarkup.Render(
+                "Here is MacLeod.", PronunciationRuleSet.Create([rule]), pauseSeconds: 0);
+
+            Assert.Equal("Here is [MacLeod](/məˈklaʊd/).", speech);
+        }
+
+        [Theory]
+        [InlineData("/")]
+        [InlineData("//")]
+        [InlineData("///")]
+        public static void A_rule_whose_ipa_canonicalizes_to_blank_is_dropped_rather_than_reaching_the_matcher(
+            string blankIpa)
+        {
+            // A bare slash or run of slashes carries no phoneme content once the delimiters are
+            // trimmed away — exactly as invalid as an Ipa that arrived blank outright (F97.1);
+            // never a hollow "[MacLeod](//)" token on the wire.
+            var rule = new PronunciationRule("MacLeod", "MacLeod", blankIpa);
+
+            var matches = PronunciationRuleSet.Create([rule]).Match("Here is MacLeod.");
+
+            Assert.Empty(matches);
+        }
+
+        [Theory]
+        [InlineData("/")]
+        [InlineData("//")]
+        [InlineData("///")]
+        public static void A_rule_whose_ipa_canonicalizes_to_blank_fires_the_declared_vs_compiled_warn(
+            string blankIpa)
+        {
+            // F97.5: the ONE place a station rule that silently failed to compile becomes visible
+            // to an operator — proven through the real ingest path (PronunciationRuleProvider),
+            // not just PronunciationRuleSet.Create directly.
+            var json = $"[{{\"pattern\":\"MacLeod\",\"word\":\"MacLeod\",\"ipa\":\"{blankIpa}\"}}]";
+            var logger = new CapturingLogger<PronunciationRuleProvider>();
+
+            _ = new PronunciationRuleProvider(
+                new TestOptionsMonitor<TtsPronunciationsOptions>(new TtsPronunciationsOptions { Pronunciations = json }),
+                logger);
+
+            Assert.Contains(
+                logger.Warnings, w => w.Contains("declared 1 rule(s) but only 0 compiled", StringComparison.Ordinal));
         }
     }
 
@@ -605,23 +679,167 @@ public static class FeatureHeteronymsSaidRight
     }
 
     // -------------------------------------------------------------------------------------
-    // ENTRY POINT — the production render path (F96.1). A unit-seam spec cannot prove the
-    // markup is applied BELOW the chokepoint and the router; only a real render can.
+    // ENTRY POINT — the production render path (F96.1, T138). A unit-seam spec cannot prove the
+    // markup is applied BELOW the chokepoint and the router; only a real render can. Both specs
+    // below author the station rule's Ipa WITHOUT slashes ("məˈklaʊd", not "/məˈklaʊd/") —
+    // verbatim the shape the live wire smoke (T138) found an operator had actually configured —
+    // so the Kokoro spec doubles as the regression pin for Finding 1 (the composed wire form was
+    // missing its slashes) at the one seam that matters: what a real render puts on the wire.
     // -------------------------------------------------------------------------------------
     public static class ScenarioARealRenderCarriesTheMarkup
     {
-        [Fact(Skip = "Pending T138 — see docs/PLAN.md")]
-        public static void The_kokoro_request_body_carries_the_phonemes()
+        const string StationRuleJson = """[{"pattern":"MacLeod","word":"MacLeod","ipa":"məˈklaʊd"}]""";
+        const string Copy = "That was MacLeod spinning something special for us.";
+
+        static string InputOf(string requestBody) =>
+            JsonDocument.Parse(requestBody).RootElement.GetProperty("input").GetString() ?? "";
+
+        [Fact]
+        public static async Task The_kokoro_request_body_carries_the_phonemes()
         {
             // Drive TtsSegmentSource through the composed production graph with a capturing
             // Kokoro handler; assert on what actually went out on the wire.
-            Assert.Fail("pending T138");
+            var requests = new List<string>();
+            var handler = new FakeHttpMessageHandler(async (request, ct) =>
+            {
+                requests.Add(request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct));
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent([1, 2, 3, 4]),
+                };
+            });
+            var cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            try
+            {
+                var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
+                var source = new TtsSegmentSource(
+                    new FakeSegmentCopyWriter(Copy),
+                    new KokoroTtsSynthesizer(new HttpClient(handler), opts),
+                    new FakeLoudnessAnalyzer(),
+                    new FakeCueAnalyzer(),
+                    NoCorrections.Provider(),
+                    NoCorrections.PersonaCache(),
+                    new PronunciationRuleProvider(
+                        new TestOptionsMonitor<TtsPronunciationsOptions>(
+                            new TtsPronunciationsOptions { Pronunciations = StationRuleJson }),
+                        NullLogger<PronunciationRuleProvider>.Instance),
+                    NoCorrections.PersonaPronunciationCache(),
+                    NoCorrections.PersonaPaceCache(),
+                    opts,
+                    NullLogger<TtsSegmentSource>.Instance);
+                var request = new SegmentRequest(
+                    SegmentKind.LeadIn, "af_nova", "GenWave", null, DateTimeOffset.UtcNow, "test-station");
+
+                await source.RenderAsync(request, CancellationToken.None);
+
+                // The station rule's own Ipa field carries no slashes — the composer adds them
+                // (Finding 1); an operator who instead pasted the already-slashed form gets the
+                // identical wire shape (ScenarioKokoroReceivesBothMarkupForms above pins that).
+                Assert.Contains("[MacLeod](/məˈklaʊd/)", InputOf(Assert.Single(requests)), StringComparison.Ordinal);
+            }
+            finally
+            {
+                if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            }
         }
 
-        [Fact(Skip = "Pending T138 — see docs/PLAN.md")]
-        public static void The_same_copy_routed_to_piper_carries_none()
+        [Fact]
+        public static async Task The_same_copy_routed_to_piper_carries_none()
         {
-            Assert.Fail("pending T138");
+            // Entry-point altitude, review finding 4: TtsSegmentSource -> NormalizingTtsSynthesizer
+            // -> FallbackTtsSynthesizer, the exact composed graph a real render uses — not
+            // PiperTtsSynthesizer driven directly. PiperTtsSynthesizer never calls
+            // KokoroSpeechMarkup — a structural fact, not a per-request strip — so the SAME station
+            // rule that annotated the Kokoro wire above (ScenarioARealRenderCarriesTheMarkup's own
+            // pronunciation provider, reused verbatim) reaches Piper's context but is never
+            // composed into the wire body: only PiperSpeechMarkup.Strip's defense-in-depth pass
+            // runs, over plain, never-annotated text. The single assertion below (finding 5) is the
+            // strongest one available — the wire body IS the copy, byte for byte — so no markup, no
+            // truncation, no drift can hide behind a weaker Contains/DoesNotContain pair. Whether
+            // the primary was genuinely skipped (not just "harmless if it ran") is a separate,
+            // sibling assertion below (review finding A).
+            var (piperRequests, _) = await RunThroughPiperFallbackAsync();
+
+            Assert.Equal(Copy, Assert.Single(piperRequests));
+        }
+
+        [Fact]
+        public static async Task The_primary_is_never_attempted_when_its_cached_verdict_is_unhealthy()
+        {
+            // Review finding A: a handler that only THROWS if called is not, by itself, proof the
+            // primary was never attempted — FallbackTtsSynthesizer catches ANY primary exception
+            // and falls through to the next hop, so the render stays green whether Kokoro was
+            // skipped outright or attempted-and-threw. Counting real invocations is what actually
+            // makes the unhealthy-verdict routing claim testable; the throw stays as a loud defense
+            // (a stray attempt fails obviously in the log) but the count below is the assertion
+            // that reds if routing regresses to trying the primary first.
+            var (_, kokoroAttempts) = await RunThroughPiperFallbackAsync();
+
+            Assert.Equal(0, kokoroAttempts);
+        }
+
+        static async Task<(IReadOnlyList<string> PiperRequests, int KokoroAttempts)> RunThroughPiperFallbackAsync()
+        {
+            var piperRequests = new List<string>();
+            var piperHandler = new FakeHttpMessageHandler(async (request, ct) =>
+            {
+                piperRequests.Add(request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct));
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent([1, 2, 3, 4]),
+                };
+            });
+            var kokoroAttempts = 0;
+            var kokoroHandler = new FakeHttpMessageHandler((_, _) =>
+            {
+                kokoroAttempts++;
+                throw new InvalidOperationException(
+                    "primary must not be attempted when its cached verdict is unhealthy");
+            });
+            var cacheRoot = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            try
+            {
+                var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
+                var health = new FakeDependencyHealth();
+                health.Set(new DependencyHealthVerdict(
+                    DependencyNames.Kokoro, Healthy: false, DateTimeOffset.UtcNow, "unhealthy", ConsecutiveFailureCount: 3));
+                var piper = new PiperTtsSynthesizer(new HttpClient(piperHandler), opts);
+                var fallbackOptions = new TestOptionsMonitor<TtsFallbackOptions>(new TtsFallbackOptions
+                {
+                    Profiles = [new TtsFallbackProfile { Engine = DependencyNames.Piper, Endpoint = "http://piper:5000", Voice = "" }],
+                });
+                var kokoro = new KokoroTtsSynthesizer(new HttpClient(kokoroHandler), opts);
+                var fallback = new FallbackTtsSynthesizer(
+                    kokoro, [piper], health, fallbackOptions, NullLogger<FallbackTtsSynthesizer>.Instance);
+                var normalizing = new NormalizingTtsSynthesizer(
+                    fallback, NoCorrections.Provider(), NoCorrections.PersonaCache(), new CorrectionsFiredStats(),
+                    NullLogger<NormalizingTtsSynthesizer>.Instance);
+                var source = new TtsSegmentSource(
+                    new FakeSegmentCopyWriter(Copy),
+                    normalizing,
+                    new FakeLoudnessAnalyzer(),
+                    new FakeCueAnalyzer(),
+                    NoCorrections.Provider(),
+                    NoCorrections.PersonaCache(),
+                    new PronunciationRuleProvider(
+                        new TestOptionsMonitor<TtsPronunciationsOptions>(
+                            new TtsPronunciationsOptions { Pronunciations = StationRuleJson }),
+                        NullLogger<PronunciationRuleProvider>.Instance),
+                    NoCorrections.PersonaPronunciationCache(),
+                    NoCorrections.PersonaPaceCache(),
+                    opts,
+                    NullLogger<TtsSegmentSource>.Instance);
+                var request = new SegmentRequest(
+                    SegmentKind.LeadIn, "af_nova", "GenWave", null, DateTimeOffset.UtcNow, "test-station");
+
+                await source.RenderAsync(request, CancellationToken.None);
+
+                return (piperRequests, kokoroAttempts);
+            }
+            finally
+            {
+                if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+            }
         }
     }
 

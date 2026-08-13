@@ -53,6 +53,7 @@ public static class FeatureTtsFallbackEngine
             NoCorrections.PersonaCache(),
             NoCorrections.PronunciationProvider(),
             NoCorrections.PersonaPronunciationCache(),
+            NoCorrections.PersonaPaceCache(),
             new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
             logger ?? NullLogger<TtsSegmentSource>.Instance);
 

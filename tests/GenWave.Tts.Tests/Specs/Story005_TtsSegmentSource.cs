@@ -2,6 +2,7 @@
 
 namespace GenWave.Tts.Tests.Specs;
 
+using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -40,6 +41,7 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             personaCache ?? NoCorrections.PersonaCache(),
             NoCorrections.PronunciationProvider(),
             NoCorrections.PersonaPronunciationCache(),
+            NoCorrections.PersonaPaceCache(),
             opts,
             NullLogger<TtsSegmentSource>.Instance);
     }
@@ -279,8 +281,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Coming up, a deep cut from MacLeod."),
                 normalizingSynth, analyzer, new FakeCueAnalyzer(), corrections, personaCache,
-                NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(), opts,
-                NullLogger<TtsSegmentSource>.Instance);
+                NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(),
+                NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance);
             var request = StationIdRequest();
 
             var first = await source.RenderAsync(request, CancellationToken.None);
@@ -352,8 +354,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter(CorrectedText),
                 normalizingSynth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), provider, personaCache,
-                NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(), opts,
-                NullLogger<TtsSegmentSource>.Instance);
+                NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(),
+                NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance);
 
             return (source, innerSynth);
         }
@@ -439,19 +441,22 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var personaCache = NoCorrections.PersonaCache();
             var pronunciations = NoCorrections.PronunciationProvider();
             var personaPronunciationCache = NoCorrections.PersonaPronunciationCache();
+            var personaPaceCache = NoCorrections.PersonaPaceCache();
             var opts = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" });
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter(text), synth, analyzer, new FakeCueAnalyzer(),
-                corrections, personaCache, pronunciations, personaPronunciationCache, opts,
+                corrections, personaCache, pronunciations, personaPronunciationCache, personaPaceCache, opts,
                 NullLogger<TtsSegmentSource>.Instance);
             var request = StationIdRequest();
 
             var item = await source.RenderAsync(request, CancellationToken.None);
 
+            await personaPaceCache.RefreshIfStaleAsync(CancellationToken.None);
             var expectedHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
                 text + "|" + request.Voice + "|" + request.StationId + "|" + corrections.ContentHash + "|" +
                 personaCache.ContentHash + "|" + pronunciations.ContentHash + "|" +
-                personaPronunciationCache.ContentHash + "|" + TtsSegmentSource.MergePolicyVersion)));
+                personaPronunciationCache.ContentHash + "|" + TtsSegmentSource.MergePolicyVersion + "|" +
+                personaPaceCache.Current.ToString("0.####", CultureInfo.InvariantCulture))));
 
             Assert.Equal($"tts:{expectedHash}", item!.MediaId);
         }
@@ -491,8 +496,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Coming up, a deep cut from MacLeod."),
                 normalizingSynth, analyzer, new FakeCueAnalyzer(), NoCorrections.Provider(), personaCache,
-                NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(), opts,
-                NullLogger<TtsSegmentSource>.Instance);
+                NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(),
+                NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance);
             var request = StationIdRequest();
 
             var first = await source.RenderAsync(request, CancellationToken.None);
@@ -544,8 +549,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Coming up, a deep cut from MacLeod."),
                 normalizingSynth, analyzer, new FakeCueAnalyzer(), NoCorrections.Provider(), personaCache,
-                NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(), opts,
-                NullLogger<TtsSegmentSource>.Instance);
+                NoCorrections.PronunciationProvider(), NoCorrections.PersonaPronunciationCache(),
+                NoCorrections.PersonaPaceCache(), opts, NullLogger<TtsSegmentSource>.Instance);
             var request = StationIdRequest();
 
             var first = await source.RenderAsync(request, CancellationToken.None);
@@ -611,7 +616,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Say MacLeod now."),
                 synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), NoCorrections.Provider(), NoCorrections.PersonaCache(),
-                pronunciations, NoCorrections.PersonaPronunciationCache(), opts, NullLogger<TtsSegmentSource>.Instance);
+                pronunciations, NoCorrections.PersonaPronunciationCache(), NoCorrections.PersonaPaceCache(), opts,
+                NullLogger<TtsSegmentSource>.Instance);
             var request = StationIdRequest();
 
             var first = await source.RenderAsync(request, CancellationToken.None);
@@ -670,7 +676,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Say MacLeod now."),
                 synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), NoCorrections.Provider(), NoCorrections.PersonaCache(),
-                NoCorrections.PronunciationProvider(), personaPronunciationCache, opts, NullLogger<TtsSegmentSource>.Instance);
+                NoCorrections.PronunciationProvider(), personaPronunciationCache, NoCorrections.PersonaPaceCache(), opts,
+                NullLogger<TtsSegmentSource>.Instance);
             var request = StationIdRequest();
 
             var first = await source.RenderAsync(request, CancellationToken.None);
@@ -725,7 +732,8 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
             var source = new TtsSegmentSource(
                 new FakeSegmentCopyWriter("Say MacLeod now."),
                 synth, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), NoCorrections.Provider(), NoCorrections.PersonaCache(),
-                NoCorrections.PronunciationProvider(), personaPronunciationCache, opts, NullLogger<TtsSegmentSource>.Instance);
+                NoCorrections.PronunciationProvider(), personaPronunciationCache, NoCorrections.PersonaPaceCache(), opts,
+                NullLogger<TtsSegmentSource>.Instance);
             var request = StationIdRequest();
 
             var first = await source.RenderAsync(request, CancellationToken.None);

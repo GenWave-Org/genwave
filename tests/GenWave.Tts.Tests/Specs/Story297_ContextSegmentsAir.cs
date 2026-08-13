@@ -158,6 +158,7 @@ public static class FeatureContextSegmentsAir
                 NoCorrections.PersonaCache(),
                 NoCorrections.PronunciationProvider(),
                 NoCorrections.PersonaPronunciationCache(),
+                NoCorrections.PersonaPaceCache(),
                 new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
                 NullLogger<TtsSegmentSource>.Instance);
 
@@ -205,6 +206,7 @@ public static class FeatureContextSegmentsAir
                 NoCorrections.PersonaCache(),
                 NoCorrections.PronunciationProvider(),
                 NoCorrections.PersonaPronunciationCache(),
+                NoCorrections.PersonaPaceCache(),
                 new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
                 logger ?? NullLogger<TtsSegmentSource>.Instance);
 
@@ -295,6 +297,7 @@ public static class FeatureContextSegmentsAir
                 NoCorrections.PersonaCache(),
                 NoCorrections.PronunciationProvider(),
                 NoCorrections.PersonaPronunciationCache(),
+                NoCorrections.PersonaPaceCache(),
                 new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, Format = "wav" }),
                 NullLogger<TtsSegmentSource>.Instance);
 

@@ -125,9 +125,22 @@ public static class TtsServiceCollectionExtensions
         // of ActivePersonaCorrectionsCache just above, same TTL mechanism, same accessor seam.
         services.AddSingleton<ActivePersonaPronunciationRulesCache>();
 
+        // Card speaking-pace seam (SPEC F98.1-F98.3, STORY-255, PLAN T140) — the third sibling in
+        // this trio, same TTL mechanism, same accessor seam; validates VoiceSpec.Pace at refresh
+        // time (TtsPace.Clamp, WarnOnce-latched) rather than at the engine.
+        services.AddSingleton<ActivePersonaPaceCache>();
+
         // Fired-rule observability (SPEC F68.7, STORY-186 AC3) — one counter set for the process
         // lifetime, incremented by NormalizingTtsSynthesizer and read by GET /api/tts/corrections-stats.
         services.AddSingleton<CorrectionsFiredStats>();
+
+        // Fired-rule observability for pronunciation rules (SPEC F97.5, F100.1, STORY-253 AC4) — the
+        // pronunciation-rule sibling of CorrectionsFiredStats immediately above. PronunciationRuleHitReporter
+        // is resolved automatically as an ordinary constructor dependency by KokoroTtsSynthesizer's and
+        // KokoroFallbackRenderer's own AddHttpClient<T> registrations below — no explicit factory needed
+        // here, only the two singletons themselves.
+        services.AddSingleton<PronunciationRuleHitStats>();
+        services.AddSingleton<PronunciationRuleHitReporter>();
 
         // Dependency health probes (SPEC F70.2, STORY-187): the verdict store lives here — TTS
         // owns the read seam its own render-time fallback logic (T34) will consume — registered

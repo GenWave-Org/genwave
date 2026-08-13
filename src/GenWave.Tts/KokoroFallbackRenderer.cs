@@ -1,6 +1,5 @@
 namespace GenWave.Tts;
 
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
@@ -17,11 +16,11 @@ using GenWave.Core.Domain;
 /// per-request voice for this hop; empty forwards the caller's voice unchanged. Contrast
 /// <see cref="PiperTtsSynthesizer"/>, where the profile voice is display-only by upstream design.
 ///
-/// The cache path carries the hop endpoint in its hash (unlike the primary's formula): a hop and
-/// the primary — or two kokoro-kind hops — can render the same (text, voice) pair concurrently as
-/// different audio and must never collide on a transient file. The file is transient either way:
-/// <see cref="TtsSegmentSource"/> moves it into its own final cache location (F70.4's identical
-/// normalize → measure → cache pipeline).
+/// The transient write path (see <see cref="TransientRenderPath"/> for the shared helper and the
+/// full root cause) is a fresh Guid per call under a <c>"fallback-kokoro"</c> subfolder — a hop
+/// and the primary, or two kokoro-kind hops, must never collide on a transient file's name. The
+/// file is transient either way: <see cref="TtsSegmentSource"/> moves it into its own final cache
+/// location (F70.4's identical normalize → measure → cache pipeline).
 ///
 /// No boot-frozen <see cref="HttpClient.BaseAddress"/>, same discipline as every other engine
 /// client (SPEC F36.1–F36.2): the endpoint comes from the profile per call, itself resolved from
@@ -32,13 +31,19 @@ using GenWave.Core.Domain;
 /// <c>(text, requestVoice)</c> pair): a kokoro-kind hop reads <see cref="TtsRenderContext.Rules"/>
 /// the identical way <see cref="KokoroTtsSynthesizer"/>'s own context-aware overload does (SPEC
 /// F97.6), so the same DJ line carries the same pronunciation whichever Kokoro-kind renderer
-/// actually renders it — primary or fallback hop. This hop still never reads
-/// <see cref="TtsRenderContext.Pace"/>: that field's consumption is T140's job, not this one's — see
-/// <c>docs/PLAN.md</c> T140.
+/// actually renders it — primary or fallback hop. As of T140 (SPEC F98.2) this hop ALSO reads
+/// <see cref="TtsRenderContext.Pace"/> the same way, so a fallback hop never renders a persona's
+/// line at the wrong rate (the same class of primary/fallback parity gap T137 closed for
+/// pronunciation). <see cref="TtsSegmentSource"/> has already validated the value before it ever
+/// reaches this context (<see cref="TtsPace.Clamp"/>), so it is sent on the wire unchanged.
 /// </summary>
 public sealed class KokoroFallbackRenderer(
     HttpClient http,
-    IOptionsMonitor<TtsOptions> ttsOptions) : IFallbackProfileRenderer
+    IOptionsMonitor<TtsOptions> ttsOptions,
+    // Optional, defaulted — same "production DI always wires it, no existing test construction site
+    // needs to change" posture as KokoroTtsSynthesizer's own PronunciationRuleHitReporter parameter;
+    // see its remarks for the full rationale.
+    PronunciationRuleHitReporter? ruleHits = null) : IFallbackProfileRenderer
 {
     public string Engine => DependencyNames.Kokoro;
 
@@ -52,10 +57,18 @@ public sealed class KokoroFallbackRenderer(
         // (KokoroTtsSynthesizer), so both Kokoro request paths tag identically — Piper hops
         // (PiperTtsSynthesizer) never do. context.Rules rides in from TtsSegmentSource (SPEC
         // F97.6) exactly like the primary's own context-aware overload reads it — this hop never
-        // resolves a rule set of its own from any provider or ambient accessor.
-        var speech = KokoroSpeechMarkup.Render(context.Text, PronunciationRuleSet.FromContext(context.Rules), cfg.SentencePauseSeconds);
-        // No `speed` field: this hop never reads TtsRenderContext.Pace (T140's job).
-        var body = new { input = speech, voice, response_format = cfg.Format };
+        // resolves a rule set of its own from any provider or ambient accessor. The out-matches
+        // overload (SPEC F97.5) reports exactly which rules fired, through the same
+        // PronunciationRuleHitReporter the primary uses — NOT identically, though: this hop only
+        // ever runs a render the PRIMARY already failed (FallbackTtsSynthesizer's own routing), so
+        // "identical reporting" cannot mean "both engines report the same fired hit" — it means
+        // each reports its OWN successful render, and only the one that actually airs ever does
+        // (see the ordering note beside the call below).
+        var speech = KokoroSpeechMarkup.Render(
+            context.Text, PronunciationRuleSet.FromContext(context.Rules), cfg.SentencePauseSeconds, out var matches);
+        // speed (SPEC F98.1-F98.2, PLAN T140): same field, same already-validated value the primary
+        // sends — see this class's own remarks on why no clamping happens here either.
+        var body = new { input = speech, voice, response_format = cfg.Format, speed = context.Pace };
         using var content = new StringContent(
             JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 
@@ -64,10 +77,9 @@ public sealed class KokoroFallbackRenderer(
         response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx
 
         var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-        // Tagged speech in the hash, mirroring KokoroTtsSynthesizer: what was rendered is what
-        // names the transient file (see that class's remark; the file is moved or deleted by the
-        // caller either way).
-        var path = GetCachePath(speech, voice, profile.Endpoint, cfg);
+        // See TransientRenderPath's remarks for the full root cause and why this is never
+        // content-addressed.
+        var path = TransientRenderPath.For(cfg, subfolder: "fallback-kokoro");
 
         // Path.GetDirectoryName always returns a non-null string when the path is produced
         // by Path.Combine with a non-empty CacheRoot; the guard below satisfies the compiler
@@ -79,16 +91,16 @@ public sealed class KokoroFallbackRenderer(
         }
 
         await File.WriteAllBytesAsync(path, bytes, ct);
-        return path;
-    }
 
-    // No pace term: this hop never resolves a real pace value to fold in (see the class remarks)
-    // — every render here is the same "engine default" constant, so adding it would be a no-op
-    // key change, not a correctness fix. T140 is where that stops being true on the PRIMARY path.
-    static string GetCachePath(string text, string voice, string endpoint, TtsOptions cfg)
-    {
-        var hash = Convert.ToHexString(
-            SHA256.HashData(Encoding.UTF8.GetBytes(text + "|" + voice + "|" + endpoint)));
-        return Path.Combine(cfg.CacheRoot, "fallback-kokoro", $"{hash}.{cfg.Format}");
+        // ONLY now — after THIS hop's own engine accepted the render AND the audio landed on disk
+        // (review finding, PLAN T142; mirrors KokoroTtsSynthesizer's identical ordering note).
+        // Reporting any earlier would double-count the one line that airs: the primary composes the
+        // same markup, reports, THEN its own POST fails and FallbackTtsSynthesizer retries here,
+        // where this hop composes the identical markup again and would report again for the one
+        // line that ultimately airs once. See ScenarioAFiredHitIsNeverDoubleCounted (Story253) for
+        // the probe.
+        ruleHits?.Report(matches, context.Kind);
+
+        return path;
     }
 }

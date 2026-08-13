@@ -67,17 +67,32 @@ public static class KokoroSpeechMarkup
 {
     /// <summary>
     /// Returns <paramref name="text"/> with every non-overlapping <paramref name="rules"/> match
-    /// wrapped as <c>[word](ipa)</c> and every <see cref="KokoroPauseMarkup"/> sentence-pause tag
+    /// wrapped as <c>[word](/ipa/)</c> and every <see cref="KokoroPauseMarkup"/> sentence-pause tag
     /// inserted, merged so neither pass can corrupt or lose the other's output (see class
     /// remarks). <paramref name="pauseSeconds"/> &lt;= 0 disables pause insertion, unchanged
-    /// contract.
+    /// contract. Discards which rules fired — see the out-matches overload below for a caller that
+    /// needs to know (SPEC F97.5).
     /// </summary>
-    public static string Render(string text, PronunciationRuleSet rules, double pauseSeconds)
+    public static string Render(string text, PronunciationRuleSet rules, double pauseSeconds) =>
+        Render(text, rules, pauseSeconds, out _);
+
+    /// <summary>
+    /// Same contract as the three-argument overload above, but also reports exactly which rules
+    /// matched via <paramref name="matches"/> — SPEC F97.5's "a rule that fires ... names the rule
+    /// [and] speech kind": mirrors <see cref="SpeechCorrectionSet.Apply"/>'s own out-<c>firedFroms</c>
+    /// shape one seam over, so a caller (<see cref="KokoroTtsSynthesizer"/>,
+    /// <see cref="KokoroFallbackRenderer"/>, via <see cref="PronunciationRuleHitReporter"/>) can
+    /// log/count a fired rule without a second, redundant <see cref="PronunciationRuleSet.Match"/>
+    /// call over the same text — <see cref="PronunciationMatch"/>'s own remarks state exactly this
+    /// intent ("a caller can also log which rule fired ... without a second lookup").
+    /// </summary>
+    public static string Render(
+        string text, PronunciationRuleSet rules, double pauseSeconds, out IReadOnlyList<PronunciationMatch> matches)
     {
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(rules);
 
-        var matches = rules.Match(text);
+        matches = rules.Match(text);
         var pauseOffsets = pauseSeconds <= 0
             ? []
             : SnapOutsideAnnotations(KokoroPauseMarkup.SentencePauseOffsets(text), matches);
@@ -97,7 +112,13 @@ public static class KokoroSpeechMarkup
         string text, IReadOnlyList<PronunciationMatch> matches, IReadOnlyList<int> pauseOffsets, double pauseSeconds) =>
         KokoroPauseMarkup.Splice(SpliceMatches(text, matches), ShiftForAnnotations(pauseOffsets, matches), pauseSeconds);
 
-    // The spoken word keeps the TEXT's own casing; only the phonemes come from the rule.
+    // The spoken word keeps the TEXT's own casing; only the phonemes come from the rule. Wrapped
+    // directly, no normalization here (T138 review findings 2+3): PronunciationRuleSet.Create is
+    // the ONE canonicalization site every rule passes through before it can ever compile into a
+    // Match — see its own remarks — so match.Rule.Ipa is already the bare, slash-free, non-blank
+    // phoneme string by the time this type ever sees it. A second Trim here would silently redo
+    // already-correct work and give the two sites a chance to drift; removed rather than kept as
+    // depth-2 defense.
     private static string SpliceMatches(string text, IReadOnlyList<PronunciationMatch> matches)
     {
         if (matches.Count == 0)
@@ -109,7 +130,7 @@ public static class KokoroSpeechMarkup
         {
             builder.Append(text, cursor, match.Index - cursor)
                 .Append('[').Append(text, match.Index, match.Length)
-                .Append("](").Append(match.Rule.Ipa).Append(')');
+                .Append("](/").Append(match.Rule.Ipa).Append("/)");
             cursor = match.Index + match.Length;
         }
 
@@ -119,11 +140,12 @@ public static class KokoroSpeechMarkup
 
     // Re-expresses each ORIGINAL-text pause offset in the annotated text SpliceMatches just built:
     // every match that (after SnapOutsideAnnotations) ends at or before the offset already grew the
-    // text by "[" + "](" + ipa + ")" — 4 characters plus the ipa string — ahead of that point.
-    // offsets and matches are both ascending, so this is one linear pass, not a search per offset.
-    // On the tie where an offset lands exactly at a match's own start (the pause belongs to
-    // whatever preceded that position, never to the word about to start there — see Render), that
-    // match's growth correctly is NOT yet applied, because its end is still ahead of the offset.
+    // text by "[" + "](/" + ipa + "/)" — 6 characters plus the (already-canonical) ipa string's
+    // length — ahead of that point. offsets and matches are both ascending, so this is one linear
+    // pass, not a search per offset. On the tie where an offset lands exactly at a match's own
+    // start (the pause belongs to whatever preceded that position, never to the word about to
+    // start there — see Render), that match's growth correctly is NOT yet applied, because its end
+    // is still ahead of the offset.
     private static IReadOnlyList<int> ShiftForAnnotations(IReadOnlyList<int> offsets, IReadOnlyList<PronunciationMatch> matches)
     {
         if (offsets.Count == 0 || matches.Count == 0)
@@ -136,7 +158,7 @@ public static class KokoroSpeechMarkup
         {
             while (matchIndex < matches.Count && matches[matchIndex].Index + matches[matchIndex].Length <= offset)
             {
-                shift += 4 + matches[matchIndex].Rule.Ipa.Length;
+                shift += 6 + matches[matchIndex].Rule.Ipa.Length;
                 matchIndex++;
             }
 
