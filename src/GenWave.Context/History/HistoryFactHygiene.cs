@@ -49,6 +49,16 @@ using System.Text.RegularExpressions;
 /// itself carried no impact verb at all; the nouns are the coverage. The <c>events</c>-feed widening
 /// above is the correct lever if coverage keeps thinning; verb widening isn't.
 /// </para>
+///
+/// <para>
+/// <b>gh-#479: the other 13 disaster nouns had the same singular-only gap.</b> T271 gave every
+/// wind-storm noun its plural but left the pre-existing vocabulary singular-only — "two
+/// earthquakes struck…" passed the gate. <c>earthquake</c>, <c>tsunami</c>, <c>wildfire</c>,
+/// <c>avalanche</c>, <c>landslide</c>, <c>mudslide</c>, <c>epidemic</c>, <c>eruption</c>,
+/// <c>massacre</c>, <c>shipwreck</c>, <c>famine</c>, <c>genocide</c>, and <c>plague</c> all
+/// pluralize with a bare <c>-s</c> (no irregular form like <c>tornado/tornadoes</c>), so each
+/// gained one explicit plural beside its singular — same idiom as F125.1, no new posture.
+/// </para>
 /// </summary>
 static partial class HistoryFactHygiene
 {
@@ -73,16 +83,17 @@ static partial class HistoryFactHygiene
     public static bool IsSomber(string text) => SomberTermRx().IsMatch(text);
 
     [GeneratedRegex(
-        @"\b(?:assassinated|assassination|assassinations|avalanche|blizzard|blizzards|bombed|bombing" +
-        @"|bombings|bomb|bombs|casualties|collided|collision|collisions|crash|crashed|crashes|cyclone" +
-        @"|cyclones|dead|death|deaths|derailed|derailment|died|dies|disaster|disasters|drowned" +
-        @"|earthquake|epidemic|eruption|executed|execution|executions|exploded|explosion|famine|fatal" +
-        @"|fatalities|fatally|fire|fires|flood|flooding|floods|genocide|hanged|hijack|hijacked" +
-        @"|hijacking|hostage|hostages|hurricane|hurricanes|invaded|invasion|killed|killing|kills" +
-        @"|landslide|lynching|massacre|mudslide|murder|murdered|murders|pandemic|perished|plague|raid" +
-        @"|raided|raids|riot|riots|sank|shipwreck|shooting|shootings|shot|slain|suicide|terror" +
-        @"|terrorism|terrorist|terrorists|tornado|tornadoes|tornados|tsunami|typhoon|typhoons|war" +
-        @"|warfare|wars|wildfire|wounded)\b",
+        @"\b(?:assassinated|assassination|assassinations|avalanche|avalanches|blizzard|blizzards" +
+        @"|bombed|bombing|bombings|bomb|bombs|casualties|collided|collision|collisions|crash|crashed" +
+        @"|crashes|cyclone|cyclones|dead|death|deaths|derailed|derailment|died|dies|disaster" +
+        @"|disasters|drowned|earthquake|earthquakes|epidemic|epidemics|eruption|eruptions|executed" +
+        @"|execution|executions|exploded|explosion|famine|famines|fatal|fatalities|fatally|fire|fires" +
+        @"|flood|flooding|floods|genocide|genocides|hanged|hijack|hijacked|hijacking|hostage|hostages" +
+        @"|hurricane|hurricanes|invaded|invasion|killed|killing|kills|landslide|landslides|lynching" +
+        @"|massacre|massacres|mudslide|mudslides|murder|murdered|murders|pandemic|perished|plague" +
+        @"|plagues|raid|raided|raids|riot|riots|sank|shipwreck|shipwrecks|shooting|shootings|shot" +
+        @"|slain|suicide|terror|terrorism|terrorist|terrorists|tornado|tornadoes|tornados|tsunami" +
+        @"|tsunamis|typhoon|typhoons|war|warfare|wars|wildfire|wildfires|wounded)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SomberTermRx();
 
