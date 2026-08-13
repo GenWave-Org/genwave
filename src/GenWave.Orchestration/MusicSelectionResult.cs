@@ -14,17 +14,28 @@ using GenWave.Core.Domain;
 /// <param name="Candidate">The picked candidate, or <see langword="null"/> only on a genuine drain (SPEC F41.2).</param>
 /// <param name="Outcome">Which rung of the SPEC F111.1 ladder this pick resolved to.</param>
 /// <param name="CrossesBoundary">
-/// T235 review findings F1/F5 — true only when <see cref="Candidate"/> carries a measured duration
-/// AND its effective length (post-crossfade-trim) reaches or exceeds
-/// <see cref="BoundaryFitPlan.UntilBoundary"/>: this pick will genuinely still be airing when the
-/// boundary itself arrives. Computed HERE, in <see cref="MusicSelectionPolicy"/>, never re-derived by
-/// <see cref="Orchestrator"/> — this class is the only component that ever sees the candidate's own
-/// effective length alongside the fit it was measured against (F5: "fix at the source"). A
-/// duration-less pick NEVER claims crossing — there is no measured length to compare against the
-/// boundary at all — and every <see cref="BoundaryOutcome.None"/>/<see cref="BoundaryOutcome.Fit"/>
-/// result reports <see langword="false"/> unconditionally: the fact has exactly one consumer
+/// T235 review findings F1/F5 — true when <see cref="Candidate"/> carries a measured duration AND its
+/// effective length (post-crossfade-trim) reaches or exceeds <see cref="BoundaryFitPlan.UntilBoundary"/>:
+/// this pick will genuinely still be airing when the boundary itself arrives. Computed HERE, in
+/// <see cref="MusicSelectionPolicy"/>, never re-derived by <see cref="Orchestrator"/> — this class is
+/// the only component that ever sees the candidate's own effective length alongside the fit it was
+/// measured against (F5: "fix at the source"). A duration-less pick never claims crossing on its OWN
+/// length — there is no measured length to compare against the boundary at all — and every
+/// <see cref="BoundaryOutcome.None"/>/<see cref="BoundaryOutcome.Fit"/> result reports
+/// <see langword="false"/> unconditionally: the fact has exactly one consumer
 /// (<c>Orchestrator.GetNextAsync</c>'s straddle branch), and that branch only ever reads it when
 /// <see cref="Outcome"/> is <see cref="BoundaryOutcome.Straddle"/>.
+///
+/// <para>
+/// <b>SPEC F124.1 (STORY-320, PLAN T266) widens this to a UNION, never a replacement:</b> the
+/// already-queued tail alone spanning the boundary is a SECOND, independent way a unit crosses — a
+/// short (or even duration-less) candidate whose own length falls well short of the boundary still
+/// reports <see langword="true"/> when the feeder's backlog alone already reaches it, because the
+/// crossing content in that shape is the queued tail itself, not the candidate. This is also why a
+/// genuine drain (<see cref="Candidate"/> is <see langword="null"/>, SPEC F41.2) no longer reports
+/// <see langword="false"/> unconditionally either — the queued-tail half of the union does not depend
+/// on a candidate having been sampled at all.
+/// </para>
 ///
 /// <para>
 /// Corrects the pre-T235 shape (F1), where <see cref="BoundaryOutcome.Straddle"/> alone forced a

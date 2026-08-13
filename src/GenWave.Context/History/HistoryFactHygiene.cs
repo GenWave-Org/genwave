@@ -30,6 +30,25 @@ using System.Text.RegularExpressions;
 /// ~60 entries instead of ~20 — a curation-posture change that needs its own ruling, not a bigger
 /// word list.
 /// </para>
+///
+/// <para>
+/// <b>F125.1 (gh-#468, T271): wind-storm nouns, no bare impact verbs.</b> A tornado touchdown aired
+/// as patter color because no wind-storm noun existed — <c>tornado/tornadoes/tornados</c> (the
+/// Merriam-Webster-accepted variant plural, same bug class this task exists to fix),
+/// <c>hurricane/hurricanes</c>, <c>cyclone/cyclones</c>, <c>typhoon/typhoons</c>, and
+/// <c>blizzard/blizzards</c> closed that specific gap. gh-#468's own fix-shape also proposed four
+/// impact verbs — <c>devastated</c>, <c>destroyed</c>, <c>leveled</c>, and <c>struck</c> — and all
+/// four were weighed and rejected as a set, not just <c>struck</c>: each is a general-purpose
+/// intensity verb outside this gate's own "violent-death / disaster / atrocity" vocabulary charter
+/// above, and each collides with ordinary On-This-Day fact prose — sporting blowouts ("devastated
+/// their rivals 6-0"), a stadium/library "destroyed the record" or "destroyed in a fire" (the fire
+/// case already caught by <c>fire</c> itself), impeachments/indictments ("charges were leveled
+/// against…"), and treaties/coinage/discoveries ("a trade agreement was struck…") alike. With the
+/// gate already removing 33–46% of a day's facts and no noun-based redundancy to fall back on for
+/// these verbs, the finite pool doesn't afford that collision surface — and the gh-#468 sighting
+/// itself carried no impact verb at all; the nouns are the coverage. The <c>events</c>-feed widening
+/// above is the correct lever if coverage keeps thinning; verb widening isn't.
+/// </para>
 /// </summary>
 static partial class HistoryFactHygiene
 {
@@ -54,14 +73,16 @@ static partial class HistoryFactHygiene
     public static bool IsSomber(string text) => SomberTermRx().IsMatch(text);
 
     [GeneratedRegex(
-        @"\b(?:assassinated|assassination|assassinations|avalanche|bombed|bombing|bombings|bomb|bombs" +
-        @"|casualties|collided|collision|collisions|crash|crashed|crashes|dead|death|deaths|derailed" +
-        @"|derailment|died|dies|disaster|disasters|drowned|earthquake|epidemic|eruption|executed" +
-        @"|execution|executions|exploded|explosion|famine|fatal|fatalities|fatally|fire|fires|flood" +
-        @"|flooding|floods|genocide|hanged|hijack|hijacked|hijacking|hostage|hostages|invaded|invasion" +
-        @"|killed|killing|kills|landslide|lynching|massacre|mudslide|murder|murdered|murders|pandemic" +
-        @"|perished|plague|raid|raided|raids|riot|riots|sank|shipwreck|shooting|shootings|shot|slain" +
-        @"|suicide|terror|terrorism|terrorist|terrorists|tsunami|war|warfare|wars|wildfire|wounded)\b",
+        @"\b(?:assassinated|assassination|assassinations|avalanche|blizzard|blizzards|bombed|bombing" +
+        @"|bombings|bomb|bombs|casualties|collided|collision|collisions|crash|crashed|crashes|cyclone" +
+        @"|cyclones|dead|death|deaths|derailed|derailment|died|dies|disaster|disasters|drowned" +
+        @"|earthquake|epidemic|eruption|executed|execution|executions|exploded|explosion|famine|fatal" +
+        @"|fatalities|fatally|fire|fires|flood|flooding|floods|genocide|hanged|hijack|hijacked" +
+        @"|hijacking|hostage|hostages|hurricane|hurricanes|invaded|invasion|killed|killing|kills" +
+        @"|landslide|lynching|massacre|mudslide|murder|murdered|murders|pandemic|perished|plague|raid" +
+        @"|raided|raids|riot|riots|sank|shipwreck|shooting|shootings|shot|slain|suicide|terror" +
+        @"|terrorism|terrorist|terrorists|tornado|tornadoes|tornados|tsunami|typhoon|typhoons|war" +
+        @"|warfare|wars|wildfire|wounded)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SomberTermRx();
 

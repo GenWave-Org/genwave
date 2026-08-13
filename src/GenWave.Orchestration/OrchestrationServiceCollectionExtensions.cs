@@ -93,7 +93,9 @@ public static class OrchestrationServiceCollectionExtensions
         // ClockAnchoredImagingProducer reads — both-false is the correct fail-closed default (T230
         // acceptance), not merely a placeholder. TryAdd so the Host's
         // OptionsMonitorStationImagingProvider wins once registered — mirrors GenWave.Context's own
-        // IStationLocationProvider default one project over.
+        // IStationLocationProvider default one project over. SPEC F124.4 (PLAN T269) widens this
+        // seam's OTHER reader to Orchestrator's own optional constructor parameter — the SAME
+        // registration, read fresh once per unit for the live TimeAnnouncementStaleMinutes budget.
         services.TryAddSingleton<IStationImagingSettingsProvider>(NoOpStationImagingSettingsProvider.Instance);
 
         // The top-of-hour producer itself: no NoOp-replacement semantics — nothing else ever needs a

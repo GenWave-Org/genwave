@@ -42,24 +42,46 @@ using GenWave.Core.Domain;
 ///
 /// <para>
 /// <b>Spoken-vs-precise split (F108.3).</b> <see cref="StationLocation.SpokenName"/> is the ONLY
-/// location string that ever reaches <see cref="ContextContent.SegmentFacts"/>/
-/// <see cref="ContextContent.PatterFact"/> — latitude/longitude are used solely to build the
-/// outbound Open-Meteo request URL and never appear in any produced string. A blank
-/// <see cref="StationLocation.SpokenName"/> means the facts carry conditions with no place name at
-/// all (no fallback to the coordinates, no generic "the station" filler).
+/// location string that ever reaches <see cref="ContextContent.Facts"/> — latitude/longitude are used
+/// solely to build the outbound Open-Meteo request URL and never appear in any produced string. A
+/// blank <see cref="StationLocation.SpokenName"/> means the fact carries conditions with no place name
+/// at all (no fallback to the coordinates, no generic "the station" filler).
 /// </para>
 ///
 /// <para>
-/// <b>Facts are single-line, plain text.</b> <see cref="ContextContent.SegmentFacts"/> and
-/// <see cref="ContextContent.PatterFact"/> never contain a newline — a multi-line fact is a
-/// prompt-forging hazard (the carry-forward this class's own SPEC section calls out) — every field
-/// this class joins into a fact is either already newline-free (a place name, a WMO condition
-/// phrase, a formatted number) or is rejected upstream by <see cref="TryParseCoordinates"/> before
-/// it ever reaches text. This is true BY CONSTRUCTION, not by trusting Open-Meteo's reply (F1 fix,
-/// T227 review): the unit strings that follow every number (<c>°C</c>, <c>km/h</c>) are this class's
-/// OWN <see cref="TemperatureUnit"/>/<see cref="WindUnit"/> literals — the exact units this class's
-/// own <see cref="BuildRequestUri"/> already pins on the request
-/// (<c>temperature_unit=celsius&amp;wind_speed_unit=kmh</c>) — never the reply body's own
+/// <b>One fact, not a split segment/patter shape (SPEC F125.2).</b> This class has exactly one
+/// current-conditions fact to offer per fetch, so <see cref="ContextContent.Facts"/> is always a
+/// one-element list. The two lanes then behave DIFFERENTLY, on purpose (see
+/// <see cref="ContextContent"/>'s own remarks for the general rule): the segment lane's window
+/// degenerates cleanly to "always this one fact," every vend — the exact pre-F125 shape. The patter
+/// lane does NOT repeat it every slot any more; it airs the fact exactly once per content generation
+/// (this class's own <see cref="Freshness"/> horizon) and then skips until the next fetch. Earlier
+/// shapes of this class produced a separate, shorter patter-only rendering (condition and temperature
+/// only, no wind/forecast); that split lived entirely in this class's own <c>BuildContent</c> and is
+/// gone now that selection — not formatting — is the pipeline's job, not this provider's.
+/// </para>
+///
+/// <para>
+/// <b>RULED (F125 resumption): the one fact IS the detailed rendering, deliberately (SPEC F125.2).</b>
+/// One string must now serve both lanes under the list model — there is no longer a place to hang a
+/// second, shorter rendering. The detailed text (wind/forecast clauses included, ~67 characters for a
+/// typical fixture reply) was chosen over reviving the old compact form: it sits comfortably inside
+/// the F107.5 one-line patter slot's practical budget, and F123's own output-length discipline
+/// (generation cap derived from <c>Llm:MaxCopyChars</c>, trim-to-last-complete-sentence salvage) now
+/// bounds the completion side of a copy, not the raw fact material handed to the prompt. The compact
+/// rendering's deletion is intentional, not an oversight this class should someday restore.
+/// </para>
+///
+/// <para>
+/// <b>Facts are single-line, plain text.</b> <see cref="ContextContent.Facts"/>' one element never
+/// contains a newline — a multi-line fact is a prompt-forging hazard (the carry-forward this class's
+/// own SPEC section calls out) — every field this class joins into it is either already newline-free
+/// (a place name, a WMO condition phrase, a formatted number) or is rejected upstream by
+/// <see cref="TryParseCoordinates"/> before it ever reaches text. This is true BY CONSTRUCTION, not by
+/// trusting Open-Meteo's reply (F1 fix, T227 review): the unit strings that follow every number
+/// (<c>°C</c>, <c>km/h</c>) are this class's OWN <see cref="TemperatureUnit"/>/<see cref="WindUnit"/>
+/// literals — the exact units this class's own <see cref="BuildRequestUri"/> already pins on the
+/// request (<c>temperature_unit=celsius&amp;wind_speed_unit=kmh</c>) — never the reply body's own
 /// <c>current_units</c> section, which is unvalidated third-party text a crafted response could fill
 /// with a newline or a colon to forge this invariant. <see cref="OpenMeteoResponse"/> consequently
 /// has no <c>CurrentUnits</c> property to deserialize that section into at all.
@@ -262,12 +284,13 @@ public sealed class WeatherContextProvider(
     }
 
     /// <summary>
-    /// Renders the fetched payload into single-line, coordinate-free facts (F108.3). The place-name
-    /// prefix ("SpokenName: ") is the ONLY spot a colon appears in either produced string — a blank
-    /// <paramref name="spokenName"/> therefore produces a fact with no colon at all, the concrete
-    /// signal that no place name is being spoken. Unit symbols are <see cref="TemperatureUnit"/>/
-    /// <see cref="WindUnit"/> — this class's own literals, never anything read out of
-    /// <paramref name="payload"/> (F1 fix, see this class's own remarks).
+    /// Renders the fetched payload into a single-line, coordinate-free fact (F108.3, F125.2 — a
+    /// one-element <see cref="ContextContent.Facts"/> list). The place-name prefix ("SpokenName: ") is
+    /// the ONLY spot a colon appears in the produced string — a blank <paramref name="spokenName"/>
+    /// therefore produces a fact with no colon at all, the concrete signal that no place name is being
+    /// spoken. Unit symbols are <see cref="TemperatureUnit"/>/<see cref="WindUnit"/> — this class's own
+    /// literals, never anything read out of <paramref name="payload"/> (F1 fix, see this class's own
+    /// remarks).
     /// </summary>
     static ContextContent BuildContent(
         OpenMeteoResponse payload, double temperature, int weatherCode, string spokenName, DateTimeOffset now)
@@ -279,10 +302,9 @@ public sealed class WeatherContextProvider(
         var windClause = BuildWindClause(payload.Current?.WindSpeed10m);
         var forecastClause = BuildForecastClause(payload.Daily);
 
-        var segmentFacts = $"{namePrefix}{condition}, {roundedTemp}{TemperatureUnit}{windClause}.{forecastClause}";
-        var patterFact = $"{namePrefix}{condition}, {roundedTemp}{TemperatureUnit}.";
+        var fact = $"{namePrefix}{condition}, {roundedTemp}{TemperatureUnit}{windClause}.{forecastClause}";
 
-        return new ContextContent(segmentFacts, patterFact, now + Freshness);
+        return new ContextContent([fact], now + Freshness);
     }
 
     static string BuildWindClause(double? windSpeedKmh)

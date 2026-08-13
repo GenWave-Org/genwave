@@ -16,4 +16,15 @@ namespace GenWave.Core.Domain;
 /// future-dated <c>TimeDate</c> deferral, due at the SAME instant as <see cref="ClockAnchoredIdents"/>'s
 /// own trigger.
 /// </param>
-public sealed record StationImagingSettings(bool ClockAnchoredIdents, bool TimeAnnouncements);
+/// <param name="TimeAnnouncementStaleMinutes">
+/// <c>Station:Imaging:TimeAnnouncementStaleMinutes</c> (SPEC F124.4, PLAN T269) — the elapsed-due
+/// expiry budget: a <c>TimeDate</c> deferral draining more than this many minutes past its own
+/// air-time is dropped undrained rather than airing an hour that has already passed (SpeechDeferralQueue's
+/// own <c>TryDequeueDue</c> remarks carry the exact air-time-lateness formula). Live-editable;
+/// defaults to 5 — the shipped SPEC F124.4 budget, held here as a plain compile-time constant (unlike
+/// <see cref="ClockAnchoredIdents"/>/<see cref="TimeAnnouncements"/>, this one has an honest non-off
+/// default: idents are exempt by design, so this budget matters only once an operator opts
+/// <see cref="TimeAnnouncements"/> in — see that param's own remarks).
+/// </param>
+public sealed record StationImagingSettings(
+    bool ClockAnchoredIdents, bool TimeAnnouncements, int TimeAnnouncementStaleMinutes = 5);
