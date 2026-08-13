@@ -3,7 +3,7 @@ namespace GenWave.Core.Domain;
 /// <summary>
 /// One row of the dated-specials tail (SPEC F120.1, db/36, STORY-317, PLAN T258) — a persona/show/
 /// envelope assignment for a single CALENDAR DATE's half-hour range, rather than a day-of-week's.
-/// <see cref="ScheduleResolver"/>'s specials-first rung (SPEC F120.2) shadows
+/// <c>ScheduleResolver</c>'s specials-first rung (SPEC F120.2) shadows
 /// <see cref="ScheduleSegment"/>'s weekly grid for exactly this span on <see cref="OnDate"/> — every
 /// other day this same wall-clock span still resolves through the weekly grid untouched.
 ///

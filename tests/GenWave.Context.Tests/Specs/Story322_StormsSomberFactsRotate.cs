@@ -69,6 +69,40 @@ public static class FeatureStormsSomberFactsRotate
         }
     }
 
+    // gh-#479 — T271 gave every wind-storm noun its plural but left the 13 pre-existing disaster
+    // nouns singular-only, so "Two earthquakes struck…" passed the gate. Same idiom as the storm
+    // family above: each family's plural form proven caught, grouped the same way.
+    public static class ScenarioThePreExistingDisasterVocabularyIsSomberIncludingPlurals
+    {
+        [Fact]
+        public static void Earthquake_tsunami_wildfire_avalanche_and_landslide_plurals_are_filtered()
+        {
+            Assert.True(HistoryFactHygiene.IsSomber("Two earthquakes struck the region within a week."));
+            Assert.True(HistoryFactHygiene.IsSomber("Deadly tsunamis followed the offshore quake."));
+            Assert.True(HistoryFactHygiene.IsSomber("Wildfires spread rapidly across the dry hillside."));
+            Assert.True(HistoryFactHygiene.IsSomber("Avalanches swept down the mountainside after the storm."));
+            Assert.True(HistoryFactHygiene.IsSomber("Landslides buried several homes on the hillside."));
+        }
+
+        [Fact]
+        public static void Mudslide_epidemic_eruption_massacre_and_shipwreck_plurals_are_filtered()
+        {
+            Assert.True(HistoryFactHygiene.IsSomber("Mudslides closed the mountain highway for days."));
+            Assert.True(HistoryFactHygiene.IsSomber("Epidemics swept through the crowded refugee camps."));
+            Assert.True(HistoryFactHygiene.IsSomber("Volcanic eruptions forced thousands to evacuate."));
+            Assert.True(HistoryFactHygiene.IsSomber("Massacres were reported in the border villages."));
+            Assert.True(HistoryFactHygiene.IsSomber("Shipwrecks were discovered off the northern coast."));
+        }
+
+        [Fact]
+        public static void Famine_genocide_and_plague_plurals_are_filtered()
+        {
+            Assert.True(HistoryFactHygiene.IsSomber("Famines gripped the region for successive years."));
+            Assert.True(HistoryFactHygiene.IsSomber("Genocides were documented by international observers."));
+            Assert.True(HistoryFactHygiene.IsSomber("Plagues swept across medieval Europe."));
+        }
+    }
+
     public static class ScenarioThePatterLaneRotatesThroughTheAirableList
     {
         [Fact]

@@ -7,6 +7,9 @@ namespace GenWave.Core.Domain;
 /// </summary>
 public enum VoteDirection
 {
+    /// <summary>Raises the track's score.</summary>
     Up,
+
+    /// <summary>Lowers the track's score.</summary>
     Down,
 }

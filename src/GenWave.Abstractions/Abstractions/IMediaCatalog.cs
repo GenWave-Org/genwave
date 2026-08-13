@@ -18,14 +18,14 @@ namespace GenWave.Core.Abstractions;
 /// <c>false</c> apply no filter. SPEC F33.10 only requires the <c>?never-play=true</c> case, and
 /// a track must never become unreachable once flagged (X is not a one-way door) — collapsing
 /// <c>false</c> into "no filter" avoids inventing an "only unflagged" query nobody asked for.
-/// Browse-only: <see cref="IAdminMediaQuery.ListAdminAsync"/> is the sole consumer — bulk write
+/// Browse-only: <c>IAdminMediaQuery.ListAdminAsync</c> is the sole consumer — bulk write
 /// paths (eligibility, reassignment, re-enrichment) that share this record's WHERE-builder never
 /// read this field.
 /// </para>
 /// <para>
 /// <c>Year</c>/<c>Decade</c>/<c>YearMissing</c> (SPEC F49.1) are the three ways <c>GET
 /// /api/media</c> narrows by release year; the controller rejects (400) naming more than one of
-/// them before this record is even built, so a caller of <see cref="IAdminMediaQuery.ListAdminAsync"/>
+/// them before this record is even built, so a caller of <c>IAdminMediaQuery.ListAdminAsync</c>
 /// (or the bulk write paths, which share the same WHERE-builder) can freely combine at most one
 /// with the rest of the filter set. <c>Year</c> is an exact match; <c>Decade</c> is the decade's
 /// start year and expands to <c>year BETWEEN Decade AND Decade+9</c> — alignment (divisible by 10)
@@ -45,7 +45,7 @@ namespace GenWave.Core.Abstractions;
 /// <c>GenresExact</c> is a list because genre curation is naturally multi-value — its entries
 /// OR-match (any listed genre, case-insensitively); a <c>null</c> or empty list applies no filter.
 /// All three are folded into the <c>MediaLibrary</c> repository's shared WHERE-builder (unlike
-/// <c>NeverPlay</c>) so <see cref="IAdminMediaQuery.ListAdminAsync"/> and every bulk write path
+/// <c>NeverPlay</c>) so <c>IAdminMediaQuery.ListAdminAsync</c> and every bulk write path
 /// (<c>SetEligibilityAsync</c>, <c>BulkReassignAsync</c>, <c>ScheduleBulkAsync</c>) inherit them.
 /// </para>
 /// <para>
@@ -63,10 +63,10 @@ namespace GenWave.Core.Abstractions;
 /// dead rows), and only <c>true</c> reveals them again. An explicit <c>State</c> filter also
 /// disables the hiding — <c>state=unavailable</c> would otherwise always match nothing — which
 /// <see cref="HidesUnavailable"/> encodes as the single shared rule. Browse-only, exactly like
-/// <c>NeverPlay</c>: <see cref="IAdminMediaQuery.ListAdminAsync"/> is the sole consumer — the bulk
+/// <c>NeverPlay</c>: <c>IAdminMediaQuery.ListAdminAsync</c> is the sole consumer — the bulk
 /// write paths that share this record's WHERE-builder never read this field, so a filtered sweep
 /// still reaches unavailable rows the way it always has (the browse/bulk asymmetry is documented
-/// on <see cref="IAdminMediaQuery"/>).
+/// on <c>IAdminMediaQuery</c>).
 /// </para>
 /// </summary>
 public sealed record MediaQuery(
@@ -329,7 +329,7 @@ public interface IMediaCatalog
     /// <see cref="FacetValue.Value"/> case-insensitively. No pagination: the response is bounded by
     /// catalog cardinality at single-operator scale (hundreds of distinct values at 10k tracks).
     /// <para>
-    /// Scoping is identical to <see cref="IAdminMediaQuery.ListAdminAsync"/>'s browse scope
+    /// Scoping is identical to <c>IAdminMediaQuery.ListAdminAsync</c>'s browse scope
     /// (<c>library_id = any(@libraryIds)</c>); an empty <paramref name="scope"/> short-circuits to an
     /// empty list without touching the database (default-deny, SPEC F52.2). Counts include every row
     /// in scope regardless of state/eligibility — they answer "how many rows would this exact filter

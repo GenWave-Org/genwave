@@ -13,6 +13,12 @@
 // expression at the REAL SQL layer, not merely against GenWave.Host.Tests' FakeThemeStore double — a
 // null importedFrom (the save-as-own write) must leave imported_at null too, the OwnerTheme invariant
 // this file's other Scenario already proves the NON-null half of.
+//
+// gh-#394 addition: ScenarioSavingAsOwn proves SaveAsOwnAsync's own conditional ON CONFLICT ... WHERE
+// clause at the REAL SQL layer — the fix for the read-then-write TOCTOU
+// ThemesSaveAsOwnController/Story287_SaveAsOwn.cs's own remarks describe. Proven here against the real
+// repository (no controller, no FakeThemeStore double in the loop) so the refusal is provably the
+// REPOSITORY'S OWN doing, not merely a pre-check some caller happens to still run.
 
 using Dapper;
 using GenWave.MediaLibrary.Station;
@@ -172,6 +178,87 @@ public static class FeatureThemeRepository
             await using var conn = await db.StationDataSource.OpenConnectionAsync();
             var count = await conn.ExecuteScalarAsync<int>("select count(*)::int from station.theme");
             Assert.Equal(1, count);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — SaveAsOwnAsync succeeds on a fresh slug and on a slug this same write path
+    // authored before (gh-#394; SPEC F104.13)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioSavingAsOwnOntoAFreshOrAuthoredSlug(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AFreshSlugIsInsertedWithNullProvenance()
+        {
+            await db.ResetThemeAsync();
+            var repo = Repo(db);
+
+            var saved = await repo.SaveAsOwnAsync("midnight-drive", Definition, CancellationToken.None);
+            var theme = await repo.GetBySlugAsync("midnight-drive", CancellationToken.None)
+                ?? throw new InvalidOperationException("test arrange: theme not found immediately after save");
+
+            Assert.Equal(
+                (Saved: true, DefinitionMatches: true, ImportedFrom: (string?)null, ImportedAt: (DateTime?)null),
+                (Saved: saved, DefinitionMatches: JsonEquivalent(Definition, theme.Definition), ImportedFrom: theme.ImportedFrom, ImportedAt: theme.ImportedAt));
+        }
+
+        [Fact]
+        public async Task ASlugAlreadyHoldingAnAuthoredThemeIsUpdated()
+        {
+            // Given a slug this same write path already authored (imported_from already null — the
+            // OTHER half of the WHERE clause's guard, ordinary re-save iteration),
+            await db.ResetThemeAsync();
+            var repo = Repo(db);
+            await repo.SaveAsOwnAsync("midnight-drive", Definition, CancellationToken.None);
+
+            // When it is saved-as-own again with a new definition,
+            const string updatedDefinition = """{"slug":"midnight-drive","name":"Midnight Drive (v2)"}""";
+            var saved = await repo.SaveAsOwnAsync("midnight-drive", updatedDefinition, CancellationToken.None);
+
+            // Then the write succeeds and the definition is replaced, provenance still null.
+            var theme = await repo.GetBySlugAsync("midnight-drive", CancellationToken.None)
+                ?? throw new InvalidOperationException("test arrange: theme not found immediately after re-save");
+            Assert.Equal(
+                (Saved: true, DefinitionMatches: true, ImportedFrom: (string?)null),
+                (Saved: saved, DefinitionMatches: JsonEquivalent(updatedDefinition, theme.Definition), ImportedFrom: theme.ImportedFrom));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // SAD PATH — SaveAsOwnAsync refuses (atomically, no pre-check) onto a slug holding an IMPORTED
+    // theme (gh-#394; SPEC F104.13, PLAN T207 review finding F2)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioSavingAsOwnOntoAnImportedSlug(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task TheWriteIsRefusedAndTheImportedRowSurvivesByteForByte()
+        {
+            // Given a slug already holding an IMPORTED theme (non-null imported_from) — committed
+            // through the plain UpsertAsync path, standing in for a concurrent import that landed
+            // between a save-as-own's own read and write in the pre-gh-#394 world,
+            await db.ResetThemeAsync();
+            var repo = Repo(db);
+            await repo.UpsertAsync("midnight-drive", Definition, "midnight-drive-catalog-entry", CancellationToken.None);
+            var seeded = await repo.GetBySlugAsync("midnight-drive", CancellationToken.None);
+
+            // When SaveAsOwnAsync is called onto that SAME slug — no pre-check GetBySlugAsync call
+            // anywhere in this Fact, so a false return here is provably the conditional upsert's OWN
+            // WHERE clause refusing, not a caller-side check this test happened to also run,
+            var saved = await repo.SaveAsOwnAsync("midnight-drive", "{\"slug\":\"midnight-drive\",\"name\":\"Clobbered\"}", CancellationToken.None);
+
+            // Then the write reports refusal, and the row is byte-for-byte untouched — the exact
+            // "never NULL another theme's own provenance" guarantee SPEC F104.13 makes, now enforced by
+            // the WHERE clause itself rather than a read this Fact deliberately never performs first.
+            var stillStored = await repo.GetBySlugAsync("midnight-drive", CancellationToken.None);
+            Assert.Equal(
+                (Saved: false, RowUnchanged: true),
+                (Saved: saved, RowUnchanged: seeded == stillStored));
         }
     }
 

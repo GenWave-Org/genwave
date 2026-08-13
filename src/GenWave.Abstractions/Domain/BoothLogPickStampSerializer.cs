@@ -17,8 +17,11 @@ public static class BoothLogPickStampSerializer
         WriteIndented = false,
     };
 
+    /// <summary>Serializes <paramref name="stamp"/> to the canonical camelCase JSON wire shape.</summary>
     public static string Serialize(BoothLogPickStamp stamp) => JsonSerializer.Serialize(stamp, Options);
 
+    /// <summary>Deserializes <paramref name="json"/> back into a <see cref="BoothLogPickStamp"/>, or
+    /// <see langword="null"/> when <paramref name="json"/> is the JSON literal <c>null</c>.</summary>
     public static BoothLogPickStamp? Deserialize(string json) =>
         JsonSerializer.Deserialize<BoothLogPickStamp>(json, Options);
 }
