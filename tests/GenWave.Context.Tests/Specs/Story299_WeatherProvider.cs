@@ -48,16 +48,20 @@ public static class FeatureWeatherProvider
     public sealed class ScenarioConditionsOnCadence
     {
         [Fact]
-        public async Task ValidCoordinatesYieldSegmentFactsAndAPatterFact()
+        public async Task ValidCoordinatesYieldOneFullyDetailedFact()
         {
+            // F125.2: this provider has exactly one current-conditions fact to offer per fetch, so
+            // ContextContent.Facts is always a one-element list — the pipeline's vend-time selection
+            // degenerates cleanly to "always this one fact" for both the segment and patter lanes (see
+            // ContextContent's own remarks).
             var (provider, _, location, _) = Build(RealShapeFixture);
             location.Location = new StationLocation("51.05", "-114.07", "Calgary");
 
             var content = await provider.FetchAsync(CancellationToken.None);
 
             Assert.NotNull(content);
-            Assert.Equal("Calgary: overcast, 23°C. Today's high 25°C, low 12°C.", content.SegmentFacts);
-            Assert.Equal("Calgary: overcast, 23°C.", content.PatterFact);
+            var fact = Assert.Single(content.Facts);
+            Assert.Equal("Calgary: overcast, 23°C. Today's high 25°C, low 12°C.", fact);
         }
 
         [Fact]
@@ -71,14 +75,12 @@ public static class FeatureWeatherProvider
             var content = await provider.FetchAsync(CancellationToken.None);
 
             Assert.NotNull(content);
-            Assert.Contains("Testville", content.SegmentFacts);
+            var fact = Assert.Single(content.Facts);
+            Assert.Contains("Testville", fact);
 
-            // Coordinates never appear in any produced string — facts, patter fact, or a log line —
-            // even though they went into the outbound request itself (F108.3).
-            var allProducedText = string.Join(
-                '\n',
-                new[] { content.SegmentFacts, content.PatterFact ?? string.Empty }
-                    .Concat(logger.Entries.Select(entry => entry.Message)));
+            // Coordinates never appear in any produced string — the fact or a log line — even though
+            // they went into the outbound request itself (F108.3).
+            var allProducedText = string.Join('\n', new[] { fact }.Concat(logger.Entries.Select(entry => entry.Message)));
 
             Assert.DoesNotContain(latitude, allProducedText);
             Assert.DoesNotContain(longitude, allProducedText);
@@ -93,12 +95,12 @@ public static class FeatureWeatherProvider
             var content = await provider.FetchAsync(CancellationToken.None);
 
             Assert.NotNull(content);
-            // A place-name prefix is the only place a colon appears in either produced string (see
+            var fact = Assert.Single(content.Facts);
+            // A place-name prefix is the only place a colon appears in the produced fact (see
             // WeatherContextProvider.BuildContent's own remarks) — its absence is the concrete signal
             // that no place name was spoken.
-            Assert.DoesNotContain(':', content.SegmentFacts);
-            Assert.DoesNotContain(':', content.PatterFact ?? string.Empty);
-            Assert.Equal("overcast, 23°C. Today's high 25°C, low 12°C.", content.SegmentFacts);
+            Assert.DoesNotContain(':', fact);
+            Assert.Equal("overcast, 23°C. Today's high 25°C, low 12°C.", fact);
         }
 
         [Fact]
@@ -115,8 +117,9 @@ public static class FeatureWeatherProvider
             var content = await provider.FetchAsync(CancellationToken.None);
 
             Assert.NotNull(content);
-            Assert.DoesNotContain("-0°C", content.SegmentFacts);
-            Assert.Contains("0°C", content.SegmentFacts);
+            var fact = Assert.Single(content.Facts);
+            Assert.DoesNotContain("-0°C", fact);
+            Assert.Contains("0°C", fact);
         }
 
         [Fact]
@@ -225,10 +228,11 @@ public static class FeatureWeatherProvider
             var content = await provider.FetchAsync(CancellationToken.None);
 
             Assert.NotNull(content);
-            Assert.DoesNotContain("rogue", content.SegmentFacts);
-            Assert.DoesNotContain("evil", content.SegmentFacts);
-            Assert.DoesNotContain('\n', content.SegmentFacts);
-            Assert.Equal("Calgary: overcast, 23°C, wind 25 km/h. Today's high 25°C, low 12°C.", content.SegmentFacts);
+            var fact = Assert.Single(content.Facts);
+            Assert.DoesNotContain("rogue", fact);
+            Assert.DoesNotContain("evil", fact);
+            Assert.DoesNotContain('\n', fact);
+            Assert.Equal("Calgary: overcast, 23°C, wind 25 km/h. Today's high 25°C, low 12°C.", fact);
         }
     }
 
@@ -273,7 +277,10 @@ public static class FeatureWeatherProvider
                 time.Advance(TimeSpan.FromMinutes(10));
             }
 
-            Assert.DoesNotContain(pipelineLogger.Entries, entry => entry.Level == LogLevel.Information);
+            // No skip-never-silence cause lines (F107.6 — "produced no output..."). F125.5's own
+            // vend-observability Information lines are a separate, intentional shape (named "vended",
+            // never "produced no output") and are EXPECTED on every healthy segment vend here.
+            Assert.DoesNotContain(pipelineLogger.Entries, entry => entry.Message.Contains("produced no output"));
             Assert.Empty(providerLogger.Entries);
         }
 
@@ -292,6 +299,26 @@ public static class FeatureWeatherProvider
 
             Assert.Empty(handler.Requests); // Zero fetch attempts the whole run, not just zero logs.
             Assert.Single(pipelineLogger.Entries, entry => entry.Level == LogLevel.Information);
+        }
+
+        [Fact]
+        public async Task TheDetailedFactIsWhatThePatterLaneActuallyVends()
+        {
+            // RULED (F125 resumption, WeatherContextProvider's own remarks): the one-element Facts
+            // list has no room left for a separate, shorter patter-only rendering under the list
+            // model, so the patter lane's vended text is the SAME detailed rendering the segment lane
+            // gets — pinned here through the REAL pipeline, not just this provider's own FetchAsync
+            // (ValidCoordinatesYieldOneFullyDetailedFact, above, pins the provider's own output; this
+            // is the patter lane's own seam, which had no pin at all before this fact).
+            var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 8, 0, 0, 0, TimeSpan.Zero));
+            var (_, _, location, _, pipeline, _) = BuildHarness(RealShapeFixture, time);
+            location.Location = new StationLocation("51.05", "-114.07", "Calgary");
+
+            await pipeline.TickAsync(CancellationToken.None); // Fetches and vends the segment window.
+            var fact = pipeline.TryTakeDuePatterFact();
+
+            Assert.NotNull(fact);
+            Assert.Equal("Calgary: overcast, 23°C. Today's high 25°C, low 12°C.", fact.Fact);
         }
 
         [Fact]

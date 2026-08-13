@@ -1433,7 +1433,7 @@ public sealed class Orchestrator(
     /// <see cref="SpeechDeferralKind.Context"/> <paramref name="deferral"/> (SPEC
     /// F107.3/F107.6/F107.7, STORY-297, PLAN T224), or <see langword="null"/> when the drain-time
     /// re-check finds nothing to build from — no captured content, a stale
-    /// <see cref="ContextContent.FreshUntil"/>, or blank <see cref="ContextContent.SegmentFacts"/> —
+    /// <see cref="ContextSegmentFacts.FreshUntil"/>, or blank <see cref="ContextSegmentFacts.SegmentFacts"/> —
     /// each logged at Information, naming the provider and cause (T224 review finding), never echoing
     /// the provider's own facts (F108.3).
     /// </summary>
@@ -1463,9 +1463,10 @@ public sealed class Orchestrator(
             return null;
         }
 
-        // T222 ruling: blank SegmentFacts means "no segment lane this fetch" even though the fetch
-        // itself succeeded (e.g. a PatterFact-only update) — not a failure, but still nothing this
-        // drain arm can build a segment from.
+        // T222 ruling (F125.2 keeps it honest): a blank SegmentFacts should never actually reach
+        // here — ContextPipeline only ever constructs a ContextSegmentFacts from a non-empty window
+        // join — but the type itself guarantees nothing at construction time, so this stays a
+        // defense-in-depth guard rather than an assumed invariant.
         if (string.IsNullOrWhiteSpace(content.SegmentFacts))
         {
             logger.LogInformation(

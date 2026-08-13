@@ -30,15 +30,16 @@ using GenWave.Core.Domain;
 /// matching pipeline content by key.
 /// </param>
 /// <param name="Context">
-/// Additive, optional (SPEC F107.3, STORY-297, PLAN T224): the immutable payload a
-/// <see cref="SpeechDeferralKind.Context"/> deferral needs to drain — <c>GenWave.Context</c>'s own
-/// <c>ContextPipeline.TickAsync</c> result, captured by the T226 Host ticker at ENQUEUE time and
-/// carried verbatim to the drain (the same "capture, never re-fetch" posture <see cref="Handoff"/>
-/// established one field up — see that param's own remarks). The drain arm re-checks freshness
-/// against <see cref="ContextContent.FreshUntil"/> at DRAIN time regardless (a unit boundary can
-/// land well after this deferral was enqueued), so capturing the content early never risks airing
-/// stale facts. <see langword="null"/> for every other kind, and defensively tolerated (skip, not
-/// throw) should a <see cref="SpeechDeferralKind.Context"/> deferral ever somehow arrive without one.
+/// Additive, optional (SPEC F107.3, STORY-297, PLAN T224; reshaped F125.2/F125.3): the immutable
+/// payload a <see cref="SpeechDeferralKind.Context"/> deferral needs to drain —
+/// <c>GenWave.Context</c>'s own <c>ContextPipeline.TickAsync</c> result for the due provider, already
+/// selected and joined at vend time, captured by the T226 Host ticker at ENQUEUE time and carried
+/// verbatim to the drain (the same "capture, never re-fetch" posture <see cref="Handoff"/> established
+/// one field up — see that param's own remarks). The drain arm re-checks freshness against
+/// <see cref="ContextSegmentFacts.FreshUntil"/> at DRAIN time regardless (a unit boundary can land
+/// well after this deferral was enqueued), so capturing the content early never risks airing stale
+/// facts. <see langword="null"/> for every other kind, and defensively tolerated (skip, not throw)
+/// should a <see cref="SpeechDeferralKind.Context"/> deferral ever somehow arrive without one.
 /// </param>
 /// <param name="NotBefore">
 /// Additive, optional (SPEC F124.1/F124.2, PLAN T267, round-1 review findings F1/F2) — a floor on
@@ -57,5 +58,5 @@ public sealed record SpeechDeferral(
     string Reason,
     HandoffContext? Handoff = null,
     string? Discriminator = null,
-    ContextContent? Context = null,
+    ContextSegmentFacts? Context = null,
     DateTimeOffset? NotBefore = null);

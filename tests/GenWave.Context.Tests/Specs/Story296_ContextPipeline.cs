@@ -36,7 +36,7 @@ public static class FeatureContextPipeline
             var time = NewTime();
             var provider = new FakeContextProvider("weather")
             {
-                NextResult = () => new ContextContent("facts", "fact", time.GetUtcNow().AddHours(1)),
+                NextResult = () => new ContextContent(["facts"], time.GetUtcNow().AddHours(1)),
             };
             var pipeline = new ContextPipeline(
                 [provider], EnabledSettings("weather", 60, 60), time, new CapturingLogger<ContextPipeline>());
@@ -54,7 +54,7 @@ public static class FeatureContextPipeline
             var time = NewTime();
             var provider = new FakeContextProvider("weather")
             {
-                NextResult = () => new ContextContent("facts", "fact", time.GetUtcNow().AddHours(1)),
+                NextResult = () => new ContextContent(["facts"], time.GetUtcNow().AddHours(1)),
             };
             var pipeline = new ContextPipeline(
                 [provider], EnabledSettings("weather", 60, 60), time, new CapturingLogger<ContextPipeline>());
@@ -72,7 +72,7 @@ public static class FeatureContextPipeline
             var time = NewTime();
             var provider = new FakeContextProvider("weather")
             {
-                NextResult = () => new ContextContent("facts", "a compact fact", time.GetUtcNow().AddHours(2)),
+                NextResult = () => new ContextContent(["a compact fact"], time.GetUtcNow().AddHours(2)),
             };
             var pipeline = new ContextPipeline(
                 [provider], EnabledSettings("weather", 60, 60), time, new CapturingLogger<ContextPipeline>());
@@ -103,7 +103,7 @@ public static class FeatureContextPipeline
             var time = NewTime();
             var provider = new FakeContextProvider("weather")
             {
-                NextResult = () => new ContextContent("facts", "fact", time.GetUtcNow().AddHours(1)),
+                NextResult = () => new ContextContent(["facts"], time.GetUtcNow().AddHours(1)),
             };
             // Never Set — every key resolves to FakeContextSettingsProvider.Disabled.
             var pipeline = new ContextPipeline(
@@ -122,7 +122,7 @@ public static class FeatureContextPipeline
             var time = NewTime();
             var provider = new FakeContextProvider("weather")
             {
-                NextResult = () => new ContextContent("facts", "fact", time.GetUtcNow().AddHours(1)),
+                NextResult = () => new ContextContent(["facts"], time.GetUtcNow().AddHours(1)),
             };
             // Never Set — every key resolves to FakeContextSettingsProvider.Disabled, whose
             // SegmentCadenceMinutes (0) clamps to a one-minute cadence slot (F7 regression pin): the
@@ -184,18 +184,19 @@ public static class FeatureContextPipeline
         }
 
         [Fact]
-        public async Task AHostileProviderWithNullSegmentFactsProducesNoOutputAndNoError()
+        public async Task AHostileProviderWithNullFactsProducesNoOutputAndNoError()
         {
-            // F4 fix, T228 review: ContextContent.SegmentFacts is declared `string` (never `string?`)
-            // but the record itself validates nothing at runtime — a broken/hostile third-party
-            // provider can still hand back one whose SegmentFacts is null despite that compile-time
-            // contract. Sanitizing that must degrade to skip-never-silence exactly like a thrown
-            // FetchAsync, never escape TickAsync as an uncaught ArgumentNullException. `null!`
-            // deliberately violates the contract to prove the guard — never legal production input.
+            // F4 fix, T228 review (still applies post-F125.2): ContextContent.Facts is declared
+            // `IReadOnlyList<string>` (never nullable) but the record itself validates nothing at
+            // runtime — a broken/hostile third-party provider can still hand back one whose Facts is
+            // null despite that compile-time contract. Sanitizing that must degrade to skip-never-
+            // silence exactly like a thrown FetchAsync, never escape TickAsync as an uncaught
+            // exception. `null!` deliberately violates the contract to prove the guard — never legal
+            // production input.
             var time = NewTime();
             var provider = new FakeContextProvider("weather")
             {
-                NextResult = () => new ContextContent(null!, null, time.GetUtcNow().AddHours(1)),
+                NextResult = () => new ContextContent(null!, time.GetUtcNow().AddHours(1)),
             };
             var logger = new CapturingLogger<ContextPipeline>();
             var pipeline = new ContextPipeline([provider], EnabledSettings("weather", 60, 60), time, logger);
@@ -215,7 +216,7 @@ public static class FeatureContextPipeline
             // the NEXT slot (fetch-once-per-slot), so once it goes stale it must simply stop serving.
             var provider = new FakeContextProvider("weather")
             {
-                NextResult = () => new ContextContent("facts", "fact", time.GetUtcNow().AddMinutes(10)),
+                NextResult = () => new ContextContent(["facts"], time.GetUtcNow().AddMinutes(10)),
             };
             var pipeline = new ContextPipeline(
                 [provider], EnabledSettings("weather", 60, 60), time, new CapturingLogger<ContextPipeline>());

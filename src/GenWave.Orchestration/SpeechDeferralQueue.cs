@@ -185,10 +185,11 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     /// <see cref="SpeechDeferralKind.Context"/> callers pass a non-null value (the provider key).
     /// </param>
     /// <param name="context">
-    /// Additive (SPEC F107.3, STORY-297, PLAN T224) — see <see cref="SpeechDeferral.Context"/>. The
-    /// T226 Host ticker is this parameter's one production caller, passing the very
-    /// <see cref="ContextContent"/> <c>ContextPipeline.TickAsync</c> just handed it. Every pre-F107
-    /// kind leaves this <see langword="null"/>, unchanged.
+    /// Additive (SPEC F107.3, STORY-297, PLAN T224; reshaped F125.2/F125.3) — see
+    /// <see cref="SpeechDeferral.Context"/>. The T226 Host ticker is this parameter's one production
+    /// caller, passing the very <see cref="ContextSegmentFacts"/> <c>ContextPipeline.TickAsync</c> just
+    /// handed it for the due provider. Every pre-F107 kind leaves this <see langword="null"/>,
+    /// unchanged.
     /// </param>
     /// <param name="notBefore">
     /// Additive (SPEC F124.1/F124.2, PLAN T267, round-1 review findings F1/F2) — see
@@ -201,7 +202,7 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
         DateTimeOffset? due = null,
         HandoffContext? handoff = null,
         string? discriminator = null,
-        ContextContent? context = null,
+        ContextSegmentFacts? context = null,
         DateTimeOffset? notBefore = null)
     {
         var deferral = new SpeechDeferral(
