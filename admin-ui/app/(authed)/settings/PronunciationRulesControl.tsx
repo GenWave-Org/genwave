@@ -62,13 +62,30 @@ async function fetchRows(): Promise<PronunciationRuleRow[]> {
 
 /** The outcomes a POST/PUT/DELETE against `/api/pronunciations` resolves to — named per the
  * status code so a caller's UI treatment (inline field / row message / toast) reads directly off
- * the kind rather than re-inspecting a status number. */
+ * the kind rather than re-inspecting a status number. `ok` carries the write's advisory
+ * `warnings` (gh-#491: the rules-over-corrections collision notice) — empty for a DELETE, whose
+ * 204 has no body to carry one. */
 type WriteOutcome =
-  | { kind: "ok" }
+  | { kind: "ok"; warnings: string[] }
   | { kind: "invalid"; fieldErrors: Record<string, string[]> }
   | { kind: "conflict"; message: string }
   | { kind: "stale"; message: string }
   | { kind: "error"; message: string };
+
+/** Reads a POST/PUT success body's `warnings` (gh-#491, `PronunciationRuleWriteResponse`) —
+ * tolerant of an absent/malformed body (an older api, a proxy hiccup): a lost warning must never
+ * fail a write that already committed, so anything unreadable folds to "no warnings". */
+async function readWriteWarnings(resp: Response): Promise<string[]> {
+  try {
+    const raw: unknown = await resp.json();
+    if (typeof raw !== "object" || raw === null) return [];
+    const warnings = (raw as { warnings?: unknown }).warnings;
+    if (!Array.isArray(warnings)) return [];
+    return warnings.filter((w): w is string => typeof w === "string");
+  } catch {
+    return [];
+  }
+}
 
 /** `readErrorMessage` (`@/lib/problem-details`) is the house `ProblemDetails.detail` reader
  * (T102 review) — reused here for the 409 layer and the generic fallback rather than a
@@ -104,7 +121,7 @@ async function postRule(pattern: string, word: string, ipa: string): Promise<Wri
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(writeBody(pattern, word, ipa)),
     });
-    return resp.ok ? { kind: "ok" } : await interpretWriteFailure(resp);
+    return resp.ok ? { kind: "ok", warnings: await readWriteWarnings(resp) } : await interpretWriteFailure(resp);
   } catch {
     return { kind: "error", message: "Network error — check your connection." };
   }
@@ -124,7 +141,7 @@ async function putRule(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(writeBody(pattern, word, ipa)),
     });
-    return resp.ok ? { kind: "ok" } : await interpretWriteFailure(resp);
+    return resp.ok ? { kind: "ok", warnings: await readWriteWarnings(resp) } : await interpretWriteFailure(resp);
   } catch {
     return { kind: "error", message: "Network error — check your connection." };
   }
@@ -133,7 +150,7 @@ async function putRule(
 async function deleteRule(pattern: string, word: string): Promise<WriteOutcome> {
   try {
     const resp = await fetch(ruleUrl(pattern, word), { method: "DELETE", credentials: "include" });
-    return resp.ok ? { kind: "ok" } : await interpretWriteFailure(resp);
+    return resp.ok ? { kind: "ok", warnings: [] } : await interpretWriteFailure(resp);
   } catch {
     return { kind: "error", message: "Network error — check your connection." };
   }
@@ -466,6 +483,9 @@ export function PronunciationRulesControl(): ReactNode {
       // of this mount ({@link RespellAssistState}'s own doc).
       setRespellAssist((prev) => (prev.kind === "hidden" ? prev : { kind: "available" }));
       toast.success("Pronunciation rule added.");
+      // gh-#491: the write's advisory collision notices (an existing speech correction this rule
+      // now suppresses) — one warning toast each, after the success acknowledgement.
+      outcome.warnings.forEach(toast.warning);
       await refresh();
       return;
     }
@@ -544,6 +564,8 @@ export function PronunciationRulesControl(): ReactNode {
 
     if (outcome.kind === "ok") {
       toast.success("Pronunciation rule updated.");
+      // gh-#491: same advisory collision notices the add path surfaces.
+      outcome.warnings.forEach(toast.warning);
       setEditing({ kind: "idle" });
       await refresh();
       return;
