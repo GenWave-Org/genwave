@@ -113,6 +113,38 @@ public sealed class SpeechCorrectionSet
     internal IEnumerable<SpeechCorrection> Rules => rules.Select(rule => rule.Rule);
 
     /// <summary>
+    /// Returns this set minus every rule <paramref name="drop"/> selects, reporting the removed
+    /// rules (in set order) via <paramref name="removed"/> — the seam
+    /// <see cref="RuleOverCorrectionPrecedence.SuppressFor"/> filters through (gh-#491). Compiled
+    /// entries are carried over, never recompiled, exactly as <see cref="Merge"/> already
+    /// constructs from existing compiled pairs; when nothing is dropped, THIS instance is returned
+    /// and no new set is allocated (the common no-collision render).
+    /// </summary>
+    internal SpeechCorrectionSet Without(
+        Func<SpeechCorrection, bool> drop, out IReadOnlyList<SpeechCorrection> removed)
+    {
+        List<SpeechCorrection>? dropped = null;
+        List<(Regex Pattern, SpeechCorrection Rule)>? kept = null;
+
+        for (var i = 0; i < rules.Count; i++)
+        {
+            if (drop(rules[i].Rule))
+            {
+                // First drop: materialize the kept-so-far prefix once, lazily — see the summary's
+                // no-allocation contract for the no-collision path.
+                kept ??= [.. rules.Take(i)];
+                (dropped ??= []).Add(rules[i].Rule);
+                continue;
+            }
+
+            kept?.Add(rules[i]);
+        }
+
+        removed = dropped ?? (IReadOnlyList<SpeechCorrection>)[];
+        return dropped is null ? this : new SpeechCorrectionSet(kept!);
+    }
+
+    /// <summary>
     /// Test-only seam: compiles a single rule from a raw regular expression pattern, bypassing the
     /// <see cref="Regex.Escape"/> step <see cref="Create"/> always applies to operator text. Exists
     /// to exercise the per-rule match timeout deterministically — a pathological pattern cannot be

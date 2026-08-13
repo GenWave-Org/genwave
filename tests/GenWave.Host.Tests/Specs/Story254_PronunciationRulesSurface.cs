@@ -130,6 +130,10 @@ file sealed class PronunciationsWebFactory(PersonaCard? activeCard = null) : Web
 file sealed record PronunciationRuleRow(
     string Pattern, string Word, string Ipa, string Source, bool InEffect, long? HitCount, string? Reason);
 
+/// <summary>Wire shape of a successful <c>POST</c>/<c>PUT /api/pronunciations</c> body (gh-#491) —
+/// mirrors GenWave.Host.Api.PronunciationRuleWriteResponse without depending on it directly.</summary>
+file sealed record PronunciationRuleWriteResponseBody(PronunciationRuleRow Rule, List<string> Warnings);
+
 public static class FeaturePronunciationRulesSurface
 {
     // Widened to the base WebApplicationFactory<Program> type: a file-local type (PronunciationsWebFactory)
@@ -466,6 +470,71 @@ public static class FeaturePronunciationRulesSurface
         public static void The_offending_field_is_highlighted_in_place()
         {
             Assert.Fail("pending T145");
+        }
+    }
+
+    public static class ScenarioAuthoringWarnsAboutCollidingCorrections
+    {
+        /// <summary>Seeds <c>Tts:Corrections</c> through the raw settings API, the same live-key
+        /// route <see cref="SeedRawStationRulesAsync"/> already uses for the rules key — the exact
+        /// state gh-#491 found in the field (a legacy correction the operator forgot).</summary>
+        static async Task SeedCorrectionsAsync(HttpClient client, string json)
+        {
+            var response = await client.PutAsJsonAsync("/api/settings", new[]
+            {
+                new { key = "Tts:Corrections", value = json },
+            });
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public static async Task Creating_a_rule_over_an_existing_correction_returns_the_collision_warning()
+        {
+            // gh-#491: the write succeeds (the collision is legitimate mid-migration state — never
+            // a 400) but the operator is told which correction the new rule now suppresses.
+            await using var factory = new PronunciationsWebFactory();
+            var client = await LoggedInClientAsync(factory);
+            await SeedCorrectionsAsync(client, """[{"from":"MacLeod","to":"Maa-cloud"}]""");
+
+            var response = await client.PostAsJsonAsync("/api/pronunciations", RuleBody("MacLeod", "/x/"));
+
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<PronunciationRuleWriteResponseBody>();
+            var warning = Assert.Single(body!.Warnings);
+            Assert.Contains("MacLeod", warning, StringComparison.Ordinal);
+            Assert.Contains("Maa-cloud", warning, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public static async Task Editing_a_rule_over_an_existing_correction_warns_too()
+        {
+            // The tweak-an-existing-rule path (gh-#491 ruling): the operator iterating IPA against
+            // a corrected word hits PUT, not POST — the warning must ride both.
+            await using var factory = new PronunciationsWebFactory();
+            var client = await LoggedInClientAsync(factory);
+            await SeedCorrectionsAsync(client, """[{"from":"MacLeod","to":"Maa-cloud"}]""");
+            await client.PostAsJsonAsync("/api/pronunciations", RuleBody("MacLeod", "/old/"));
+
+            var response = await client.PutAsJsonAsync(RuleRoute("MacLeod", "MacLeod"), RuleBody("MacLeod", "/new/"));
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<PronunciationRuleWriteResponseBody>();
+            Assert.Single(body!.Warnings);
+        }
+
+        [Fact]
+        public static async Task A_rule_with_no_colliding_correction_writes_with_no_warnings()
+        {
+            await using var factory = new PronunciationsWebFactory();
+            var client = await LoggedInClientAsync(factory);
+            await SeedCorrectionsAsync(client, """[{"from":"GWAV","to":"Gee-Wave"}]""");
+
+            var response = await client.PostAsJsonAsync("/api/pronunciations", RuleBody("MacLeod", "/x/"));
+
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<PronunciationRuleWriteResponseBody>();
+            Assert.Empty(body!.Warnings);
+            Assert.Equal("MacLeod", body.Rule.Pattern);
         }
     }
 }

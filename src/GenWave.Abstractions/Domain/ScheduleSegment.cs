@@ -8,7 +8,7 @@ namespace GenWave.Core.Domain;
 ///
 /// <para>
 /// <see cref="Id"/> is <see langword="null"/> for a not-yet-persisted row — e.g. one entry of a
-/// week document a caller is about to hand to <see cref="Abstractions.IScheduleStore.ReplaceWeekAsync"/>,
+/// week document a caller is about to hand to <c>IScheduleStore.ReplaceWeekAsync</c>,
 /// before the store assigns it a fresh id. <see cref="PersonaId"/> null means music-only (F91.1);
 /// <see cref="Genres"/>/<see cref="EnergyMin"/>/<see cref="EnergyMax"/> null means "use the
 /// station-default envelope" (F91.4) — each is independently nullable, so a segment may override only
@@ -30,7 +30,7 @@ namespace GenWave.Core.Domain;
 /// <b>PLAN T243 — <see cref="ShowId"/> is the write-authoritative field; <see cref="Show"/> stays the
 /// load-time projection.</b> A caller building a segment to WRITE (the PUT wire's
 /// <c>ScheduleController.ToSegment</c>, or any future caller of
-/// <see cref="Abstractions.IScheduleStore.ReplaceWeekAsync"/>) sets only <see cref="ShowId"/> — the
+/// <c>IScheduleStore.ReplaceWeekAsync</c>) sets only <see cref="ShowId"/> — the
 /// bare foreign key <c>segment_schedule.show_id</c> actually stores — never fabricates a
 /// <see cref="ShowSummary"/> with invented <c>Name</c>/<c>Tagline</c>/<c>Flavor</c> just to carry an id
 /// through. <c>ScheduleRepository</c>'s own load path sets BOTH fields from the same row (so a loaded

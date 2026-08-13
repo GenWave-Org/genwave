@@ -20,6 +20,9 @@ namespace GenWave.Core.Domain;
 /// </summary>
 public enum AudiencePosture
 {
+    /// <summary>The default, safe-for-everyone posture: excludes <c>explicit = true</c> rows from every candidate pool.</summary>
     Everyone,
+
+    /// <summary>Plays everything, unmasked — including rows classified <c>explicit = true</c>.</summary>
     Mature,
 }

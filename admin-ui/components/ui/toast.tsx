@@ -26,6 +26,13 @@ const TOAST_TOKEN_VARS = {
   "--error-bg": "var(--surface)",
   "--error-border": "var(--danger)",
   "--error-text": "var(--danger)",
+  // Warnings ride --accent (rust — the system's attention color) rather than a new token:
+  // Wireless has no dedicated warn swatch, --danger stays reserved for failures, and a
+  // succeeded-with-a-caveat outcome (gh-#491's collision notice) is exactly what the primary
+  // attention color is for.
+  "--warning-bg": "var(--surface)",
+  "--warning-border": "var(--accent)",
+  "--warning-text": "var(--accent)",
 } as CSSProperties;
 
 const SUCCESS_DURATION_MS = 4000;
@@ -39,6 +46,11 @@ export const toast = {
   },
   error(message: string): void {
     sonnerToast.error(message, { duration: ERROR_DURATION_MS });
+  },
+  // The write succeeded but carries a caveat the operator should read (first user: gh-#491's
+  // rules-over-corrections collision notice) — error-tier duration for the same read-time reason.
+  warning(message: string): void {
+    sonnerToast.warning(message, { duration: ERROR_DURATION_MS });
   },
 };
 
