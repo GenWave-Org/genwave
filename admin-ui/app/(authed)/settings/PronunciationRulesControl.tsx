@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -154,6 +154,99 @@ function toastMessageFor(outcome: WriteOutcome): string {
       return outcome.message;
     case "error":
       return outcome.message;
+  }
+}
+
+/** One `candidateRules[0]` entry for an audition POST (SPEC F126.1, PLAN T275). */
+interface AuditionCandidate {
+  pattern: string;
+  word: string;
+  ipa: string;
+}
+
+/** Builds an {@link AuditionCandidate} from a row's or the add-draft's own fields — trims each
+ * field the same way {@link writeBody} does for a save. A blank `word` is sent as-is, deliberately
+ * NOT defaulted to the pattern here: `POST /api/tts/preview`'s candidate layer resolves through
+ * `PronunciationRuleResolver.ResolveForRender` → `PronunciationRuleSet.Create`, the SAME compile
+ * step that calls `PronunciationRule.Parse` (and therefore applies its blank-word-defaults-to-
+ * pattern rule) for every declared rule, candidates included — there is no server-side asymmetry
+ * to work around client-side; a client default here would be redundant, not protective. */
+function auditionCandidate(pattern: string, word: string, ipa: string): AuditionCandidate {
+  return { pattern: pattern.trim(), word: word.trim(), ipa };
+}
+
+/** True once a candidate has enough to possibly compile — the same non-blank pattern/ipa gate
+ * {@link canAddRow} already applies to the Add button, reused here so "Hear it" never fires a
+ * request `PronunciationRuleValidator` is certain to reject with a 400 the button already knows
+ * about. */
+function canAudition(pattern: string, ipa: string): boolean {
+  return pattern.trim() !== "" && ipa.trim() !== "";
+}
+
+/** The fixed audition phrase (SPEC F126.1, PLAN T275 ruling): always repeats the candidate's own
+ * `pattern` back verbatim, since `PronunciationRuleSet` matches `Pattern` as a literal, word-
+ * boundary-anchored phrase — any phrase that paraphrased it would never trigger the rule at all. */
+function auditionPhrase(pattern: string): string {
+  return `Now playing: ${pattern}.`;
+}
+
+type AuditionOutcome = { kind: "ok"; blob: Blob } | { kind: "error"; message: string };
+
+/** Flattens a `ValidationProblemDetails.errors` dict into one string — the audition surfaces its
+ * 400 as a single toast rather than the write-path form's per-field inline slots, so every failing
+ * field's every message still has to reach the operator through that one line. */
+function flattenFieldErrors(errors: Record<string, string[]>): string {
+  return Object.values(errors).flat().join(" ");
+}
+
+/**
+ * Reads a `POST /api/tts/preview` failure into one toast-ready message. A 400 here is a
+ * field-named `ValidationProblemDetails` from a rejected candidate
+ * (`TtsPreviewController.ValidateCandidates`) — the SAME shape {@link interpretWriteFailure} already
+ * reads for the write path's inline field errors — so this reuses {@link isValidationProblemDetails}
+ * and flattens its `errors` the same way, rather than falling through to {@link readErrorMessage}'s
+ * generic `detail`-only reading and losing the exact field message an operator needs (e.g. "Ipa must
+ * not contain ')', '[', or ']'."). A blank-text 400 (the endpoint's other 400 shape, unreachable from
+ * this button since {@link canAudition} never lets a blank pattern reach it, but still a legal
+ * response) is a plain `ProblemDetails` with `detail` instead — checked next from the SAME parsed
+ * body, since a `Response` can only be read once. Any other status defers entirely to
+ * {@link readErrorMessage}'s own single `resp.json()` call.
+ */
+async function readAuditionFailureMessage(resp: Response): Promise<string> {
+  if (resp.status !== 400) return readErrorMessage(resp);
+  try {
+    const raw: unknown = await resp.json();
+    if (isValidationProblemDetails(raw)) return flattenFieldErrors(raw.errors);
+    if (typeof raw === "object" && raw !== null) {
+      const detail = (raw as { detail?: unknown }).detail;
+      if (typeof detail === "string" && detail !== "") return detail;
+    }
+  } catch {
+    // malformed body — fall through to the generic message
+  }
+  return `Unexpected error (${resp.status})`;
+}
+
+/**
+ * `POST /api/tts/preview` (T274, SPEC F126.1) with exactly one candidate rule layered over the
+ * resolved station∪persona merge for this render only. `voice` is deliberately omitted (PLAN T275
+ * ruling): the endpoint defaults an omitted voice to `Station:Voice`, and this editor has no
+ * persona-voice context of its own to send instead — the rules it edits are station rules, so the
+ * station voice is the honest audition, not a stand-in for whichever persona happens to be active
+ * right now.
+ */
+async function requestAudition(candidate: AuditionCandidate): Promise<AuditionOutcome> {
+  try {
+    const resp = await fetch("/api/tts/preview", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: auditionPhrase(candidate.pattern), candidateRules: [candidate] }),
+    });
+    if (!resp.ok) return { kind: "error", message: await readAuditionFailureMessage(resp) };
+    return { kind: "ok", blob: await resp.blob() };
+  } catch {
+    return { kind: "error", message: "Network error — check your connection." };
   }
 }
 
@@ -572,6 +665,10 @@ export function PronunciationRulesControl(): ReactNode {
               </span>
             )}
           </div>
+          {/* Audition the draft BEFORE saving (SPEC F126.1, STORY-323, PLAN T275) — this is the
+              editor's core "hear the rule being authored" moment, arguably more valuable than the
+              per-row button below since nothing has been persisted yet to fall back on. */}
+          <AuditionButton pattern={draftPattern} word={draftWord} ipa={draftIpa} audioLabel="Draft rule audition audio" />
           <Button
             type="button"
             variant="secondary"
@@ -739,6 +836,13 @@ function PronunciationRuleTableRow({
                 <Button type="button" variant="secondary" disabled={savePending} onClick={onCancelEdit}>
                   Cancel
                 </Button>
+                <AuditionButton
+                  pattern={editableDraft.pattern}
+                  word={editableDraft.word}
+                  ipa={editableDraft.ipa}
+                  buttonAriaLabel={`Hear it for ${identityLabel}`}
+                  audioLabel={`Audition audio for ${identityLabel}`}
+                />
               </>
             ) : (
               <>
@@ -759,6 +863,13 @@ function PronunciationRuleTableRow({
                 >
                   {isDeleting ? "Deleting…" : "Delete"}
                 </Button>
+                <AuditionButton
+                  pattern={row.pattern}
+                  word={row.word}
+                  ipa={row.ipa}
+                  buttonAriaLabel={`Hear it for ${identityLabel}`}
+                  audioLabel={`Audition audio for ${identityLabel}`}
+                />
               </>
             )}
           </div>
@@ -773,6 +884,88 @@ function PronunciationRuleTableRow({
           </td>
         </tr>
       )}
+    </>
+  );
+}
+
+type AuditionState = { kind: "idle" } | { kind: "loading" } | { kind: "ready"; url: string };
+
+interface AuditionButtonProps {
+  pattern: string;
+  word: string;
+  ipa: string;
+  /** Overrides the button's own accessible name (`Hear it for "Big Sur"`, {@link ruleIdentityLabel}'s
+   * own convention) — omitted for the add form, where the visible "Hear it" text is already
+   * unambiguous on its own (there is only ever one). */
+  buttonAriaLabel?: string;
+  /** Names this instance's own `<audio>` element (multiple station rows, plus the add form, can
+   * each have a "ready" player live at once — every one needs its own accessible name, the same
+   * reason every row already carries its own {@link ruleIdentityLabel}). */
+  audioLabel: string;
+}
+
+/**
+ * "Hear it" — auditions a candidate pronunciation rule against a fixed phrase before it is ever
+ * saved (SPEC F126.1, STORY-323, PLAN T275): posts `{text, candidateRules: [{pattern, word, ipa}]}`
+ * to `POST /api/tts/preview` and plays the returned wav via a blob URL — the exact `fetch` → `blob`
+ * → `URL.createObjectURL` → `<audio controls src>` idiom {@link PersonaPreview} already established
+ * for this same endpoint (`admin-ui/app/(authed)/personas/PersonaPreview.tsx`), reused rather than
+ * reinvented. Self-contained: owns its own loading/blob-url state so one row's audition never
+ * touches another's, the same one-player-per-mounted-instance shape that source already has. No
+ * autoplay: the `<audio>` element only ever renders with a `controls` attribute, never `autoPlay` —
+ * a "ready" player is exactly one more explicit click away from actually playing, never a surprise
+ * the fetch itself triggers.
+ *
+ * `disabled` covers both an in-flight request and a pattern/ipa that cannot possibly compile
+ * ({@link canAudition}) — greying the button out is cheaper feedback than a guaranteed-400 round
+ * trip for e.g. a still-blank add-form draft.
+ */
+function AuditionButton({ pattern, word, ipa, buttonAriaLabel, audioLabel }: AuditionButtonProps): ReactNode {
+  const [state, setState] = useState<AuditionState>({ kind: "idle" });
+  const audioUrlRef = useRef<string | null>(null);
+
+  // Revoke whatever blob URL this instance is holding on unmount so a closed panel doesn't leak a
+  // blob for the lifetime of the page (the PersonaPreview idiom).
+  useEffect(
+    () => () => {
+      if (audioUrlRef.current !== null) URL.revokeObjectURL(audioUrlRef.current);
+    },
+    []
+  );
+
+  async function handleClick(): Promise<void> {
+    setState({ kind: "loading" });
+    if (audioUrlRef.current !== null) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+
+    const outcome = await requestAudition(auditionCandidate(pattern, word, ipa));
+    if (outcome.kind === "error") {
+      setState({ kind: "idle" });
+      toast.error(outcome.message);
+      return;
+    }
+
+    const url = URL.createObjectURL(outcome.blob);
+    audioUrlRef.current = url;
+    setState({ kind: "ready", url });
+  }
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant="secondary"
+        aria-label={buttonAriaLabel}
+        disabled={state.kind === "loading" || !canAudition(pattern, ipa)}
+        onClick={() => {
+          void handleClick();
+        }}
+      >
+        {state.kind === "loading" ? "Rendering…" : "Hear it"}
+      </Button>
+      {state.kind === "ready" && <audio controls src={state.url} aria-label={audioLabel} />}
     </>
   );
 }
