@@ -15,9 +15,9 @@ namespace GenWave.Core.Domain;
 /// </param>
 /// <param name="PatterCadenceMinutes">
 /// The separate cadence (F107.5) the patter lane offers this provider's already-fetched
-/// <see cref="ContextContent.PatterFact"/> — at most once per this many minutes. Independent of
-/// <see cref="SegmentCadenceMinutes"/>: it gates when the SAME fetched content is next surfaced for
-/// patter, not a second fetch.
+/// <see cref="ContextContent.Facts"/> — a rotated pick surfaces at most once per this many minutes
+/// (SPEC F125.3). Independent of <see cref="SegmentCadenceMinutes"/>: it gates when the SAME fetched
+/// content is next surfaced for patter, not a second fetch.
 /// </param>
 /// <param name="PersonaId">
 /// Which persona voices this provider's aired content (F107.7, <c>Context:{Key}:PersonaId</c>). Read

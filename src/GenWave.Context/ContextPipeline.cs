@@ -80,6 +80,20 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
     [GeneratedRegex("^[a-z0-9-]+\\z")]
     private static partial Regex KeyPattern();
 
+    /// <summary>SPEC F125.3's segment window size — at most this many facts joined per segment vend.
+    /// A provider whose airable <see cref="ContextContent.Facts"/> is no longer than this (History's
+    /// typical 2-4 curated entries) sees a window that always covers the whole list, in order, every
+    /// vend — the pre-F125 shape, now expressed as this algorithm's degenerate case rather than a
+    /// separate code path. Was <c>HistoryContextProvider.MaxSegmentEntries</c> before F125.2 moved
+    /// segment selection from the provider to this pipeline.</summary>
+    const int SegmentWindowFacts = 4;
+
+    /// <summary>Joins a segment window's facts into one string — never a newline (SPEC F109.2's own
+    /// explicit requirement; also enforced structurally by <see cref="ContextFactSanitizer"/> upstream
+    /// of this join, belt-and-suspenders). Was <c>HistoryContextProvider.FactSeparator</c> before
+    /// F125.2 moved the join here so it could rotate.</summary>
+    const string FactSeparator = " · ";
+
     readonly IReadOnlyList<IContextProvider> providers;
     readonly IContextSettingsProvider settingsProvider;
     readonly TimeProvider timeProvider;
@@ -130,9 +144,11 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
     /// <summary>
     /// Advances every registered provider by one tick: fetches whichever providers just entered a
     /// new cadence slot (at most once each, per the class remarks), then returns every provider whose
-    /// cached content is fresh, carries non-blank <see cref="ContextContent.SegmentFacts"/>, and has
-    /// not already been handed off for its current slot. Safe to call more often than any provider's
-    /// cadence — the T226 Host ticker is the one, dumb, fixed-interval caller.
+    /// cached content is fresh, carries at least one airable <see cref="ContextContent.Facts"/> entry,
+    /// and has not already been handed off for its current slot. A handed-off provider's segment text
+    /// is selected HERE, at vend time (SPEC F125.2/F125.3): a rotating window through its airable
+    /// list, joined and returned as the due <see cref="DueContextSegment"/>. Safe to call more often
+    /// than any provider's cadence — the T226 Host ticker is the one, dumb, fixed-interval caller.
     /// </summary>
     public async Task<IReadOnlyList<DueContextSegment>> TickAsync(CancellationToken ct)
     {
@@ -209,13 +225,30 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
                 continue;
             }
 
-            if (string.IsNullOrWhiteSpace(content.SegmentFacts))
-                continue; // "no segment lane this fetch" (ContextContent's own doc) — not a failure, no log.
+            if (content.Facts.Count == 0)
+                continue; // "nothing to say this fetch" (ContextContent's own doc) — not a failure, no log.
 
             if (!state.TryMarkSegmentDelivered(slot))
                 continue; // Already handed off this slot — never enqueue the same content twice.
 
-            due.Add(new DueContextSegment(provider.Key, content));
+            // F125.2/F125.3 vend-time selection: a rotating window through the airable list, joined
+            // here — the provider no longer pre-joins (see ContextContent's own remarks). Gated behind
+            // TryMarkSegmentDelivered above, not before it, so two calls landing in the same slot can
+            // never both advance the rotation cursor for content only one of them actually enqueues.
+            // Never null in practice — content.Facts.Count == 0 already continued above, and
+            // TakeSegmentWindow only returns null for an empty list — but degrades to a silent skip
+            // rather than a thrown exception if that invariant is ever violated.
+            if (state.TakeSegmentWindow(content.Facts, SegmentWindowFacts, FactSeparator) is not { } window)
+                continue;
+
+            // F125.5: names the chosen window and the aired-set size, never the facts' own text
+            // (F108.3 forbids echoing a provider's own content into a log line).
+            logger.LogInformation(
+                "Context provider {ProviderKey} vended segment facts starting at index {WindowStart} " +
+                "(aired-set size {AiredSetSize} of {TotalFacts}).",
+                provider.Key, window.WindowStart, window.AiredSetSize, content.Facts.Count);
+
+            due.Add(new DueContextSegment(provider.Key, new ContextSegmentFacts(window.Joined, content.FreshUntil)));
         }
 
         return due;
@@ -223,11 +256,14 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
 
     /// <summary>
     /// The patter lane's pull (SPEC F107.5, STORY-298): the first enabled provider whose cached
-    /// content is fresh, carries a non-blank <see cref="ContextContent.PatterFact"/>, and has not
-    /// already been vended for its current patter-cadence slot — at most one, since a break's prompt
-    /// carries at most one context line. Never fetches; it only reads whatever <see cref="TickAsync"/>
-    /// has already cached, so it costs no I/O and is safe to call from a synchronous prompt-assembly
-    /// path.
+    /// content is fresh, carries at least one airable <see cref="ContextContent.Facts"/> entry not
+    /// yet vended to patter today, and has not already been vended for its current patter-cadence slot
+    /// — at most one, since a break's prompt carries at most one context line. The returned fact is
+    /// selected HERE, at vend time (SPEC F125.2/F125.3): the first not-yet-aired fact, in list order —
+    /// once every fact has aired, this provider is skipped rather than repeating one (patter is
+    /// optional color; a repeat is the exact gh-#468 complaint). Never fetches; it only reads whatever
+    /// <see cref="TickAsync"/> has already cached, so it costs no I/O and is safe to call from a
+    /// synchronous prompt-assembly path.
     ///
     /// <para>
     /// Named <c>TryTake</c>, not a bare getter (F3 fix, T222 review): despite the "current" framing,
@@ -260,14 +296,28 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
             if (state.Content is not { } content || content.FreshUntil <= now)
                 continue;
 
-            if (content.PatterFact is not { } fact || string.IsNullOrWhiteSpace(fact))
-                continue;
+            if (content.Facts.Count == 0)
+                continue; // "nothing to say this fetch" (ContextContent's own doc).
 
             var patterSlot = ComputeSlot(now, settings.PatterCadenceMinutes);
             if (!state.TryMarkPatterDelivered(patterSlot))
                 continue;
 
-            return new ContextPatterFact(provider.Key, fact);
+            // F125.2/F125.3 vend-time selection: the first not-yet-aired fact, in list order. Gated
+            // behind TryMarkPatterDelivered above, not before it (see ProviderState.TryTakePatterFact's
+            // own remarks) — a concurrent duplicate call landing in the same slot can never consume a
+            // rotation pick for a fact only one of them actually returns.
+            if (state.TryTakePatterFact(content.Facts) is not { } picked)
+                continue; // Exhausted (F125.3) — the slot is skipped, never forced to repeat.
+
+            // F125.5: names the chosen fact's index and the aired-set size, never the fact's own text
+            // (F108.3 forbids echoing a provider's own content into a log line).
+            logger.LogInformation(
+                "Context provider {ProviderKey} vended patter fact index {FactIndex} " +
+                "(aired-set size {AiredSetSize} of {TotalFacts}).",
+                provider.Key, picked.Index, picked.AiredSetSize, content.Facts.Count);
+
+            return new ContextPatterFact(provider.Key, picked.Fact);
         }
 
         return null;
@@ -299,8 +349,8 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
             //
             // Deliberately INSIDE this same try (F4 fix, T227/T228 review): ContextContent validates
             // nothing at construction time, so a hostile/broken provider handing back a null
-            // SegmentFacts — despite its own `string`, never `string?`, contract — makes Sanitize
-            // throw ArgumentNullException. That must degrade to skip-never-silence exactly like a
+            // Facts list — despite its own `IReadOnlyList<string>`, never `IReadOnlyList<string>?`,
+            // contract — makes Sanitize throw. That must degrade to skip-never-silence exactly like a
             // thrown FetchAsync (the catch below), never escape TickAsync/TryTakeDuePatterFact
             // uncaught — moving this call outside the guard, as it stood before this fix, is exactly
             // what let it.
@@ -320,13 +370,18 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
         }
     }
 
-    /// <summary>Applies <see cref="ContextFactSanitizer.Sanitize"/> to every fact string a provider's
-    /// <see cref="ContextContent"/> carries — <see cref="ContextContent.PatterFact"/> is nullable and
-    /// preserved as null rather than sanitized into a spurious empty string.</summary>
+    /// <summary>Applies <see cref="ContextFactSanitizer.Sanitize"/> to every fact a provider's
+    /// <see cref="ContextContent"/> carries, in order, dropping any fact that sanitizes down to blank.
+    /// A fact that is nothing but control characters/whitespace is "nothing to say" for THAT fact —
+    /// the same shape <see cref="ContextContent"/>'s own contract already treats an empty list as —
+    /// surviving as a phantom blank list entry would otherwise show up as a stray separator in the
+    /// segment lane's own vend-time join (<see cref="FactSeparator"/>).</summary>
     static ContextContent Sanitize(ContextContent content) => content with
     {
-        SegmentFacts = ContextFactSanitizer.Sanitize(content.SegmentFacts),
-        PatterFact = content.PatterFact is { } fact ? ContextFactSanitizer.Sanitize(fact) : null,
+        Facts = content.Facts
+            .Select(ContextFactSanitizer.Sanitize)
+            .Where(fact => !string.IsNullOrWhiteSpace(fact))
+            .ToList(),
     };
 
     /// <summary>Logs at most one Information line per (provider, cadence slot) — the first cause
@@ -391,6 +446,59 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
         /// "disabled" and "misconfigured" edges never share or clobber one another's state.</summary>
         bool unavailableLogged;
 
+        /// <summary>Indices into the current <see cref="content"/>'s <see cref="ContextContent.Facts"/>
+        /// already vended to the patter lane (SPEC F125.3/F125.4) — reset whenever content is
+        /// (re)committed or cleared, so a fresh fetch starts patter rotation over from the top, and a
+        /// restart forgets it entirely (F125.4's day-scoped, in-memory ruling).</summary>
+        HashSet<int> patterAired = [];
+
+        /// <summary>Every distinct index that has appeared in at least one segment window so far this
+        /// content generation — observability only (F125.5's "aired-set size" for the segment lane's
+        /// own vend log line). The segment lane's actual selection is driven by
+        /// <see cref="segmentWindowCursor"/> alone and is never gated by this set: SPEC F125.3 has the
+        /// segment lane WRAP rather than exhaust, so unlike <see cref="patterAired"/> this set does not
+        /// block a re-selection once it covers every index.</summary>
+        HashSet<int> segmentAired = [];
+
+        /// <summary>The next segment window's starting index into <see cref="content"/>'s
+        /// <see cref="ContextContent.Facts"/> (SPEC F125.3) — advances by the window's own size after
+        /// every vend, wrapping modulo the list's length, and resets to zero on the same edges as
+        /// <see cref="patterAired"/>.</summary>
+        int segmentWindowCursor;
+
+        /// <summary>The <see cref="ContextContent.FreshUntil"/> of the last content this instance
+        /// actually COMMITTED (SPEC F125.4's "FreshUntil roll" reset trigger) — tracked separately
+        /// from <see cref="content"/> itself because <see cref="TryBeginFetch"/> nulls
+        /// <see cref="content"/> out at the START of every new slot's fetch attempt, before
+        /// <see cref="CommitContent"/> ever runs; comparing against a null <see cref="content"/> there
+        /// would make every single commit look like the first one ever, resetting rotation on every
+        /// re-fetch regardless of whether the content actually changed. <see langword="null"/> only
+        /// before this provider's first-ever successful commit.</summary>
+        DateTimeOffset? lastCommittedFreshUntil;
+
+        /// <summary>The <see cref="ContextContent.Facts"/> count of the last content this instance
+        /// actually committed — a SECOND, independent reset trigger alongside
+        /// <see cref="lastCommittedFreshUntil"/> (review finding, O1): a provider is free to keep the
+        /// SAME <see cref="ContextContent.FreshUntil"/> across a fetch whose airable list nonetheless
+        /// shrank or grew (e.g. the tone gate removing a different count of facts on a re-fetch that
+        /// otherwise reused the day's cached FreshUntil). Without this, <see cref="segmentAired"/>/
+        /// <see cref="patterAired"/> could keep indices from the OLD, longer list around after the
+        /// list shrank — never a crash (every selection already indexes modulo the CURRENT list's
+        /// length), but <see cref="segmentAired"/>'s own count could then exceed the current list's
+        /// count, making the F125.5 "aired-set size" log line report something larger than the total
+        /// facts count it is reported alongside. Treating a shape change as its own new generation,
+        /// the same way a FreshUntil roll is, keeps that count always bounded by the current list — a
+        /// stronger fix than clamping the log line alone, which would leave the stale indices sitting
+        /// in the sets even though they no longer correspond to anything. What this trigger does NOT
+        /// catch: a same-COUNT content swap (the FreshUntil unchanged, N facts replaced by a
+        /// DIFFERENT N facts) silently remaps aired indices onto the new facts, which can skip or
+        /// repeat one fact for at most one generation — accepted, since it is unreachable for both
+        /// shipped providers (Weather re-rolls FreshUntil on every single fetch; History's day file is
+        /// a cache hit for the entire day, so its content is byte-identical, not merely same-sized,
+        /// across every re-fetch) and smaller in impact than the restart-forgets imprecision F125.4
+        /// already ratifies.</summary>
+        int? lastCommittedFactCount;
+
         /// <summary>The most recently committed fetch content, or <see langword="null"/> if this
         /// slot's attempt has not yet succeeded (or has not been attempted). Freshness against
         /// <see cref="ContextContent.FreshUntil"/> is the caller's own comparison — the record itself
@@ -418,12 +526,35 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
             }
         }
 
-        /// <summary>Commits a successful fetch's result. Call only after <see cref="TryBeginFetch"/>
-        /// returned <see langword="true"/> for the same slot.</summary>
+        /// <summary>Commits a successful fetch's result. Resets rotation only on a genuine new content
+        /// GENERATION — either the <see cref="ContextContent.FreshUntil"/> ROLLING forward (SPEC
+        /// F125.4's own wording) or the airable list's own COUNT changing (O1) — NOT on every call. A
+        /// provider whose fetch cadence is narrower than its own content's shelf life
+        /// (<c>HistoryContextProvider</c>'s 4-hour default cadence against an all-day
+        /// <see cref="ContextContent.FreshUntil"/>) re-fetches the SAME cached day's content many
+        /// times before it ever rolls over — the day file is unchanged, so the fetch returns the same
+        /// facts with the same <see cref="ContextContent.FreshUntil"/> every time. Resetting on every
+        /// one of those re-fetches would make rotation start over before it ever had a chance to vary
+        /// within the day, defeating the whole point of F125.2. Any fetch whose FreshUntil differs
+        /// from what was cached before it (later, the ordinary "the day rolled over" case; or,
+        /// defensively, earlier) is treated as a new content generation and resets — and so is any
+        /// fetch whose Facts count differs from before, even when FreshUntil happens to stay the same
+        /// (see <see cref="lastCommittedFactCount"/>'s own remarks). Call only after
+        /// <see cref="TryBeginFetch"/> returned <see langword="true"/> for the same slot.</summary>
         public void CommitContent(ContextContent fetchedContent)
         {
             lock (gate)
             {
+                var isNewGeneration =
+                    lastCommittedFreshUntil is null
+                    || fetchedContent.FreshUntil != lastCommittedFreshUntil
+                    || fetchedContent.Facts.Count != lastCommittedFactCount;
+
+                if (isNewGeneration)
+                    ResetRotation();
+
+                lastCommittedFreshUntil = fetchedContent.FreshUntil;
+                lastCommittedFactCount = fetchedContent.Facts.Count;
                 content = fetchedContent;
             }
         }
@@ -433,12 +564,84 @@ public sealed partial class ContextPipeline : IContextPatterFactSource
         /// the moment a provider's last-fetched content stops being trustworthy. Nothing repopulates
         /// content while a provider stays unavailable (<c>EnsureFetchedAsync</c> is never reached for
         /// it), so clearing once, on the edge, is enough for the whole unavailable streak — there is
-        /// no need to call this again on every subsequent unavailable tick.</summary>
+        /// no need to call this again on every subsequent unavailable tick. Rotation resets alongside
+        /// content for the same reason (SPEC F125.4): the content this provider serves once it comes
+        /// back is untrusted as a continuation of whatever rotation was mid-cycle before it went dark,
+        /// so this forces the NEXT successful <see cref="CommitContent"/> to treat itself as a new
+        /// generation even in the vanishingly unlikely case its FreshUntil happens to coincide with
+        /// what was cached before the outage.</summary>
         public void ClearContent()
         {
             lock (gate)
             {
                 content = null;
+                lastCommittedFreshUntil = null;
+                lastCommittedFactCount = null;
+                ResetRotation();
+            }
+        }
+
+        /// <summary>Call only from inside <see cref="gate"/> (see <see cref="CommitContent"/>/
+        /// <see cref="ClearContent"/>, its only two callers).</summary>
+        void ResetRotation()
+        {
+            patterAired = [];
+            segmentAired = [];
+            segmentWindowCursor = 0;
+        }
+
+        /// <summary>Patter's vend-time pick (SPEC F125.3): the first entry in <paramref name="facts"/>
+        /// not yet aired this content generation, in list order — never repeats. Returns
+        /// <see langword="null"/> once every fact has aired. Mutates <see cref="patterAired"/> only
+        /// when a fact is actually returned, so a caller that ends up discarding the result (e.g. the
+        /// slot-delivery gate rejecting a concurrent duplicate call one layer up) never burns a pick
+        /// for content nobody receives.</summary>
+        public (int Index, string Fact, int AiredSetSize)? TryTakePatterFact(IReadOnlyList<string> facts)
+        {
+            lock (gate)
+            {
+                for (var index = 0; index < facts.Count; index++)
+                {
+                    if (patterAired.Contains(index))
+                        continue;
+
+                    patterAired.Add(index);
+                    return (index, facts[index], patterAired.Count);
+                }
+
+                return null;
+            }
+        }
+
+        /// <summary>Segment's vend-time pick (SPEC F125.3): up to <paramref name="windowSize"/>
+        /// consecutive facts starting at <see cref="segmentWindowCursor"/>, wrapping modulo
+        /// <paramref name="facts"/>'s own length — never exhausts, so this only returns
+        /// <see langword="null"/> when <paramref name="facts"/> itself is empty. Joins the window with
+        /// <paramref name="separator"/>, advances the cursor by the window's own size (mod the list's
+        /// length) so the NEXT vend continues where this one left off, and folds every included index
+        /// into <see cref="segmentAired"/> (observability only — see that field's own remarks).</summary>
+        public (string Joined, int WindowStart, int AiredSetSize)? TakeSegmentWindow(
+            IReadOnlyList<string> facts, int windowSize, string separator)
+        {
+            lock (gate)
+            {
+                if (facts.Count == 0)
+                    return null;
+
+                var actualWindowSize = Math.Min(windowSize, facts.Count);
+                var windowStart = segmentWindowCursor;
+                var chosen = new List<string>(actualWindowSize);
+
+                for (var offset = 0; offset < actualWindowSize; offset++)
+                {
+                    var index = (windowStart + offset) % facts.Count;
+                    chosen.Add(facts[index]);
+                    segmentAired.Add(index);
+                }
+
+                segmentWindowCursor = (windowStart + actualWindowSize) % facts.Count;
+
+                return (string.Join(separator, chosen), windowStart, segmentAired.Count);
             }
         }
 

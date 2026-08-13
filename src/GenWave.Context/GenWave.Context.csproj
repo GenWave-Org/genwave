@@ -27,4 +27,10 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- HistoryFactHygiene's tone-gate regex (internal, T271) is driven directly by its own spec
+         rather than only through HistoryContextProvider's public surface. -->
+    <InternalsVisibleTo Include="GenWave.Context.Tests" />
+  </ItemGroup>
+
 </Project>

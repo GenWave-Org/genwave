@@ -93,7 +93,7 @@ sealed class ContextTickerService(
                 // (F107.4) — a due weather fact and a due history fact coexist instead of one
                 // silently discarding the other. Content is captured now, at enqueue time, and
                 // carried verbatim to drain (SpeechDeferral.Context's own remarks) — the Orchestrator
-                // re-checks freshness against ContextContent.FreshUntil at drain time regardless.
+                // re-checks freshness against ContextSegmentFacts.FreshUntil at drain time regardless.
                 deferralQueue.Enqueue(
                     SpeechDeferralKind.Context,
                     reason: $"context: {segment.Key} came due",
