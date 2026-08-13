@@ -21,17 +21,22 @@ using GenWave.Core.Logging;
 /// that corrections observability already sits at.
 ///
 /// <para>
-/// <b>PREVIEWS EXCLUDED BY CONSTRUCTION</b> (SPEC F97.5, STORY-253 AC6): <see cref="TtsRenderContext.Rules"/>
-/// is populated ONLY by <see cref="TtsSegmentSource"/>, the real on-air render path (SPEC F97.6) —
-/// every preview caller (<c>TtsPreviewController</c>'s plain <c>SynthesizeAsync(text, voice, ct)</c>
-/// overload, relayed through <see cref="NormalizingTtsSynthesizer"/>) constructs a context whose
-/// <c>Rules</c> defaults to empty, so <see cref="PronunciationRuleSet.Match"/> can never return a
-/// hit for a preview render; <see cref="KokoroTtsSynthesizer"/>'s own plain overload hardcodes
-/// <see cref="PronunciationRuleSet.Empty"/> even before a context exists at all, for the identical
-/// reason. No separate "is this a preview" flag exists or is needed — the same "resolved once,
-/// upstream, only for a real render" boundary that already makes F97.6 hold does this exclusion's
-/// whole job, so <see cref="Report"/> itself stays unconditional: it is simply never handed a
-/// non-empty <c>matches</c> list on a preview render.
+/// <b>PREVIEWS EXCLUDED — BY FLAG, NOT BY CONSTRUCTION</b> (SPEC F97.5, F126.1; STORY-253 AC6,
+/// STORY-323). Before PLAN T274, <see cref="TtsRenderContext.Rules"/> was populated ONLY by
+/// <see cref="TtsSegmentSource"/>, the real on-air render path (SPEC F97.6) — every preview caller
+/// (<c>TtsPreviewController</c>) constructed a context whose <c>Rules</c> defaulted to empty, so
+/// <see cref="PronunciationRuleSet.Match"/> could never return a hit for a preview render at all,
+/// and no separate "is this a preview" flag was needed. PLAN T274 breaks that: the admin preview now
+/// resolves the SAME station∪persona merge the air chain uses (an audition that ignored rules would
+/// make the rules editor lie), so <c>matches</c> reaching this method is no longer proof of an
+/// on-air render. <see cref="TtsRenderContext.IsAudition"/> now carries that distinction explicitly
+/// — <see cref="Report"/> is the ONE seam that reads it, skipping BOTH the counter and the log line
+/// for a render that carries it. <b>F126.5 ruling:</b> "rule hits ... log at Information" names the
+/// PER-RULE HIT fact this method emits when a render is NOT an audition — it is not a demand that an
+/// audition itself go unlogged; the AUDITION event (the preview request itself) DOES log its own
+/// Information line, unconditionally, at <c>TtsPreviewController.Preview</c> (naming voice and
+/// candidate count, never rule text) — that is simply a different fact from a rule-hit count, and
+/// the two must never be conflated by sharing one counter/log line.
 /// </para>
 /// </summary>
 public sealed class PronunciationRuleHitReporter(
@@ -45,9 +50,21 @@ public sealed class PronunciationRuleHitReporter(
     /// <see cref="TtsRenderContext"/> itself uses. Operator/persona-card-authored pattern/word text
     /// is newline-stripped before it reaches the log line (CodeQL <c>cs/log-forging</c>), mirroring
     /// <see cref="NormalizingTtsSynthesizer.ReportFiredCorrections"/>.
+    ///
+    /// <paramref name="isAudition"/> (SPEC F97.5, F126.1; PLAN T274) is the ONE gate on both effects
+    /// below — <see langword="true"/> means this render is an operator proving a rule/pace before it
+    /// airs (see <see cref="TtsRenderContext.IsAudition"/>'s own remarks for the full ruling,
+    /// including the T276 sibling posture for authoring) and neither the counter nor the log line
+    /// fires. Deliberately REQUIRED, no default (T274 review finding F6): a defaulted
+    /// <see langword="false"/> would let a future renderer silently opt INTO counting simply by
+    /// forgetting the argument — every caller states its posture explicitly, so a new call site that
+    /// never considered this question fails to compile instead of quietly counting.
     /// </summary>
-    public void Report(IReadOnlyList<PronunciationMatch> matches, SegmentKind? kind)
+    public void Report(IReadOnlyList<PronunciationMatch> matches, SegmentKind? kind, bool isAudition)
     {
+        if (isAudition)
+            return;
+
         foreach (var match in matches)
         {
             stats.RecordFired(match.Rule.Pattern, match.Rule.Word);

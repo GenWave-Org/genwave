@@ -347,8 +347,9 @@ public sealed class PronunciationsController(
             Status = StatusCodes.Status400BadRequest,
             Title = "One or more pronunciation rule fields are invalid.",
         };
-        foreach (var group in errors.GroupBy(e => e.Field, StringComparer.OrdinalIgnoreCase))
-            problem.Errors[group.Key] = group.Select(e => e.Message).ToArray();
+        // T274 review finding F4: the field-naming shape shared with TtsPreviewController's
+        // multi-candidate audition path.
+        PronunciationRuleProblemDetails.AddErrors(problem, errors);
 
         return problem;
     }

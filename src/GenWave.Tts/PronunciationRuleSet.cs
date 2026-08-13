@@ -232,6 +232,18 @@ public sealed class PronunciationRuleSet
     /// provenance is a fact about THIS READ, at THIS moment's merge, never a property of the rule's
     /// own stored data.
     /// </para>
+    ///
+    /// <para>
+    /// <b>T274 review finding F3:</b> a draft of the admin preview endpoint briefly called this
+    /// method as a render-time resolve seam (layering an unsaved candidate rule as this method's
+    /// <c>card</c> argument) — which made "never used for matching" above false, and mislabeled the
+    /// resolved station∪persona merge as <c>Source: Station</c> regardless of which side actually
+    /// supplied a rule, since it was occupying this method's <c>station</c> argument position rather
+    /// than either of its two REAL sources. Reverted: <see cref="PronunciationRuleResolver.ResolveForRender"/>
+    /// is the render/audition seam now — this method stays what its name says, a display-purposed
+    /// projection with no caller outside <c>PronunciationsController.BuildRows</c>. Do not reuse it
+    /// as a resolve seam again.
+    /// </para>
     /// </summary>
     public static IReadOnlyList<MergedPronunciationRule> MergeWithProvenance(
         PronunciationRuleSet station, PronunciationRuleSet card)
