@@ -14,6 +14,11 @@ namespace GenWave.Core.Domain;
 /// </summary>
 public static class AudiencePostureParser
 {
+    /// <summary>
+    /// Parses <paramref name="value"/> into an <see cref="AudiencePosture"/>. Total and fail-closed:
+    /// unrecognized text, empty/whitespace, or <see langword="null"/> all collapse to
+    /// <see cref="AudiencePosture.Everyone"/> rather than throwing.
+    /// </summary>
     public static AudiencePosture Parse(string? value) => value?.Trim().ToLowerInvariant() switch
     {
         "mature" => AudiencePosture.Mature,

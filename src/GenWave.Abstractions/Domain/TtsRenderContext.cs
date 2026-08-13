@@ -63,11 +63,11 @@ public sealed record TtsRenderContext(string Text, string Voice, SegmentKind? Ki
     /// <para>
     /// Until PLAN T274, <c>Rules</c> above was ALWAYS empty for the admin preview
     /// (<c>POST /api/tts/preview</c>) by construction — no separate exclusion flag existed because
-    /// none was needed (see <see cref="GenWave.Tts.PronunciationRuleHitReporter"/>'s pre-T274
+    /// none was needed (see <c>GenWave.Tts.PronunciationRuleHitReporter</c>'s pre-T274
     /// history). T274 resolves real rules onto a preview's context (the audition must sound like
     /// air), which makes that construction-based exclusion false — <see cref="IsAudition"/> is the
     /// flag that now carries the SAME "never counts, never logs a hit" posture explicitly.
-    /// <see cref="GenWave.Tts.PronunciationRuleHitReporter"/> is the ONE seam that reads it: it
+    /// <c>GenWave.Tts.PronunciationRuleHitReporter</c> is the ONE seam that reads it: it
     /// counts and logs a rule hit for every render EXCEPT one that carries
     /// <see cref="IsAudition"/> = <see langword="true"/>.
     /// </para>

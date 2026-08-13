@@ -2,7 +2,7 @@ namespace GenWave.Core.Domain;
 
 /// <summary>
 /// Outcome of <see cref="Abstractions.IPersonaPreviewWriter.WritePreviewAsync"/> (SPEC F35.6).
-/// Mirrors <see cref="PersonaWriteResult"/>'s closed-hierarchy shape. Unlike
+/// Mirrors <c>PersonaWriteResult</c>'s closed-hierarchy shape. Unlike
 /// <see cref="Abstractions.ISegmentCopyWriter"/>'s always-succeeds contract, a preview NEVER
 /// substitutes template copy for a failed LLM call — that would misrepresent the persona being
 /// previewed — so an LLM miss is <see cref="Failed"/>, not a quiet template <see cref="Success"/>.

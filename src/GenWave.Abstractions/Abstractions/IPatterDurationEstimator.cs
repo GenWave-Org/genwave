@@ -16,8 +16,8 @@ namespace GenWave.Core.Abstractions;
 /// </para>
 ///
 /// <para>
-/// Both members must be cheap and non-blocking (in-memory only, no I/O): <see cref="Estimate"/> is
-/// called from the music-pick hot path, and <see cref="ObserveRendered"/> from the per-unit render
+/// Both members must be cheap and non-blocking (in-memory only, no I/O): <see cref="Estimate(SegmentKind,string?,string)"/> is
+/// called from the music-pick hot path, and <see cref="ObserveRendered(SegmentKind,string?,string,TimeSpan)"/> from the per-unit render
 /// loop. Implementations must be thread-safe — the feeder tick and any future producer may overlap.
 /// </para>
 /// </summary>

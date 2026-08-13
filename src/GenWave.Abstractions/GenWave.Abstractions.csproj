@@ -5,6 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- gh-#417: this is the published MIT contract surface — the .xml doc file must land in the
+         nupkg so NuGet consumers get IntelliSense on every seam. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <!-- The SDK contract package (gitea-#251, ADR-0001 D3): the migration is the freeze trigger, so
          this project ships to nuget.org as GenWave.Abstractions. Zero dependencies — SDK-clean
          seams only; leaky contracts (ILiquidsoapControl, xmin write contracts, filesystem-typed
