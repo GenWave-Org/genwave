@@ -604,6 +604,69 @@ public static class FeaturePersonaCardImport
     }
 
     // ---------------------------------------------------------------------
+    // Pace range — the card authors a VoiceSpec.Pace outside this engine's [0.5, 2.0] window
+    // (gh-#483, PLAN T140 follow-up: the render-time clamp stays silent by design, so import/save
+    // is where the operator gets told)
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioOutOfRangePace
+    {
+        static PersonaCard CardWithPace(double pace)
+        {
+            var card = PersonaImportFixture.BuildCard();
+            return card with { Voice = card.Voice with { Pace = pace } };
+        }
+
+        [Fact]
+        public async Task ImportStillSucceeds()
+        {
+            var store = new FakePersonaImportStore();
+            var voiceLister = new FakeTtsVoiceLister { Voices = ["af_heart"] };
+            await using var factory = new PersonaImportWebFactory(store, voiceLister);
+            var client = await LoggedInClientAsync(factory);
+
+            var response = await PostCardAsync(client, "dj-fast", CardWithPace(3.0));
+
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+            Assert.Equal(3.0, store.BySlug["dj-fast"].Card.Voice.Pace); // the card is stored AS AUTHORED — never silently rewritten
+        }
+
+        [Fact]
+        public async Task AVisibleWarningNamesTheAuthoredPaceAndTheBoundItWillRenderAt()
+        {
+            var store = new FakePersonaImportStore();
+            var voiceLister = new FakeTtsVoiceLister { Voices = ["af_heart"] };
+            await using var factory = new PersonaImportWebFactory(store, voiceLister);
+            var client = await LoggedInClientAsync(factory);
+
+            var response = await PostCardAsync(client, "dj-fast", CardWithPace(3.0));
+            var body = await response.Content.ReadFromJsonAsync<PersonaImportResponse>();
+
+            Assert.NotNull(body);
+            Assert.Contains(body.Warnings, w =>
+                w.Contains("3.0", StringComparison.Ordinal) &&
+                w.Contains("0.5", StringComparison.Ordinal) &&
+                w.Contains("2.0", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task AnInRangePaceProducesNoWarning()
+        {
+            var store = new FakePersonaImportStore();
+            var voiceLister = new FakeTtsVoiceLister { Voices = ["af_heart"] };
+            await using var factory = new PersonaImportWebFactory(store, voiceLister);
+            var client = await LoggedInClientAsync(factory);
+
+            var response = await PostCardAsync(client, "dj-steady", CardWithPace(1.2));
+            var body = await response.Content.ReadFromJsonAsync<PersonaImportResponse>();
+
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+            Assert.NotNull(body);
+            Assert.Empty(body.Warnings);
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // SAD PATH — fail-closed validation, each gate ahead of the transactional write
     // ---------------------------------------------------------------------
 

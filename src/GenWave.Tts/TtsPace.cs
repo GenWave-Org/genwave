@@ -30,8 +30,17 @@ namespace GenWave.Tts;
 /// repeating — belongs to the STATEFUL caller, not this pure classifier; see
 /// <see cref="ActivePersonaPaceCache"/>'s own remarks.
 /// </para>
+///
+/// <para>
+/// PUBLIC (gh-#483): <see cref="MinSpeed"/>/<see cref="MaxSpeed"/>/<see cref="Clamp"/> are also the
+/// bounds a persona IMPORT/SAVE checks against, once, at write time — the operator-visible sibling
+/// of this same clamp, surfaced through <c>PersonaImportResponse.Warnings</c> instead of a
+/// render-time log line that would repeat every 30s poll. Exposing the same constants rather than a
+/// second copy keeps the two checks — "what does this render at" and "should the operator be told"
+/// — from ever drifting apart.
+/// </para>
 /// </summary>
-static class TtsPace
+public static class TtsPace
 {
     /// <summary>
     /// kokoro-fastapi's own documented <c>speed</c> window for <c>POST /v1/audio/speech</c> —
