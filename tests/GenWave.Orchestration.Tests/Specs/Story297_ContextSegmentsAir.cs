@@ -85,8 +85,8 @@ public static class FeatureContextSegmentsAirAtBoundaries
             var tts = new FakeTtsSegmentSource();
             var orchestrator = BuildOrchestrator(queue, clock, tts);
 
-            var content = new ContextContent(
-                "Sunny and seventy-two degrees.", "It's sunny out there.", clock.GetUtcNow().AddHours(1));
+            var content = new ContextSegmentFacts(
+                "Sunny and seventy-two degrees.", clock.GetUtcNow().AddHours(1));
             queue.Enqueue(SpeechDeferralKind.Context, "cadence elapsed", discriminator: "weather", context: content);
 
             // The first pull drains the due context deferral — it lands in the buffer AHEAD of the
@@ -109,7 +109,7 @@ public static class FeatureContextSegmentsAirAtBoundaries
             var orchestrator = BuildOrchestrator(queue, clock, tts);
 
             const string Facts = "Sunny and seventy-two degrees, light breeze from the west.";
-            var content = new ContextContent(Facts, "It's sunny.", clock.GetUtcNow().AddHours(1));
+            var content = new ContextSegmentFacts(Facts, clock.GetUtcNow().AddHours(1));
             queue.Enqueue(SpeechDeferralKind.Context, "cadence elapsed", discriminator: "weather", context: content);
 
             await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
@@ -137,7 +137,7 @@ public static class FeatureContextSegmentsAirAtBoundaries
             var orchestrator = BuildOrchestrator(
                 queue, clock, tts, personaAccessor: accessor, contextSettings: contextSettings);
 
-            var content = new ContextContent("Sunny.", null, clock.GetUtcNow().AddHours(1));
+            var content = new ContextSegmentFacts("Sunny.", clock.GetUtcNow().AddHours(1));
             queue.Enqueue(SpeechDeferralKind.Context, "cadence elapsed", discriminator: "weather", context: content);
 
             await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
@@ -158,7 +158,7 @@ public static class FeatureContextSegmentsAirAtBoundaries
             // No accessor persona set (defaults null) — the music-only-segment-or-gap shape (F107.7).
             var orchestrator = BuildOrchestrator(queue, clock, tts, contextSettings: contextSettings);
 
-            var content = new ContextContent("Sunny.", null, clock.GetUtcNow().AddHours(1));
+            var content = new ContextSegmentFacts("Sunny.", clock.GetUtcNow().AddHours(1));
             queue.Enqueue(SpeechDeferralKind.Context, "cadence elapsed", discriminator: "weather", context: content);
 
             await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
@@ -184,7 +184,7 @@ public static class FeatureContextSegmentsAirAtBoundaries
             var orchestrator = BuildOrchestrator(
                 queue, clock, tts, contextSettings: contextSettings, personaStore: store);
 
-            var content = new ContextContent("Sunny.", null, clock.GetUtcNow().AddHours(1));
+            var content = new ContextSegmentFacts("Sunny.", clock.GetUtcNow().AddHours(1));
             queue.Enqueue(SpeechDeferralKind.Context, "cadence elapsed", discriminator: "weather", context: content);
 
             await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
@@ -275,7 +275,7 @@ public static class FeatureContextSegmentsAirAtBoundaries
             var logger = new CapturingLogger<Orchestrator>();
             var orchestrator = BuildOrchestrator(queue, clock, tts, logger: logger);
 
-            var content = new ContextContent("Sunny.", null, clock.GetUtcNow().AddHours(1));
+            var content = new ContextSegmentFacts("Sunny.", clock.GetUtcNow().AddHours(1));
             queue.Enqueue(SpeechDeferralKind.Context, "cadence elapsed", discriminator: "weather", context: content);
 
             var item = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
@@ -316,7 +316,7 @@ public static class FeatureContextSegmentsAirAtBoundaries
             // FreshUntil already in the past AT ENQUEUE TIME — the drain-time re-check (SPEC
             // F107.3/F107.6, Orchestrator.cs's own "content.FreshUntil <= drainNow" guard) must
             // catch this itself; nothing upstream filters it out before the drain loop sees it.
-            var content = new ContextContent("Sunny.", null, clock.GetUtcNow().AddMinutes(-1));
+            var content = new ContextSegmentFacts("Sunny.", clock.GetUtcNow().AddMinutes(-1));
             queue.Enqueue(SpeechDeferralKind.Context, "cadence elapsed", discriminator: "weather", context: content);
 
             var item = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
@@ -348,7 +348,7 @@ public static class FeatureContextSegmentsAirAtBoundaries
             // A successful fetch that produced no SegmentFacts (T222 ruling: "no segment lane this
             // fetch", not a failure) — the drain-time "string.IsNullOrWhiteSpace(content.SegmentFacts)"
             // guard must catch this itself, independent of the freshness guard right above it.
-            var content = new ContextContent("   ", null, clock.GetUtcNow().AddHours(1));
+            var content = new ContextSegmentFacts("   ", clock.GetUtcNow().AddHours(1));
             queue.Enqueue(SpeechDeferralKind.Context, "cadence elapsed", discriminator: "weather", context: content);
 
             var item = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);

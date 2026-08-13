@@ -380,6 +380,10 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "count. Off by default.",
   "Station:Imaging:TimeAnnouncements":
     "When on, a spoken time announcement airs at the top of every hour. Off by default.",
+  "Station:Imaging:TimeAnnouncementStaleMinutes":
+    "A time announcement that drains more than this many minutes late (accounting for whatever is " +
+    "already queued ahead of it) is dropped instead of airing a stale hour — a late ident is fine, " +
+    "a late time check is not. Accepted range: 1–1440. Defaults to 5.",
 
   // ── Show-flavor patter line (SPEC F116.3) ───────────────────────────────────────────────────
   "Station:Shows:PatterCadenceMinutes":

@@ -35,7 +35,8 @@ using System.Text;
 /// glued into one word) rather than <c>"line oneline two"</c>. Runs of whitespace — original
 /// spaces/tabs and control-character replacements alike — collapse to a single space, and the result
 /// is trimmed, so a crafted fact cannot pad itself into faking a delimiter this pipeline or its
-/// consumers rely on (this class's own <c>" · "</c> join, a prompt's line boundaries, ...).
+/// consumers rely on (<see cref="ContextPipeline"/>'s own <c>" · "</c> segment-window join, a
+/// prompt's line boundaries, ...).
 /// </para>
 ///
 /// <para>
@@ -62,9 +63,9 @@ public static class ContextFactSanitizer
     /// the result can never contain a raw control character, a collapsible run of whitespace, or three
     /// identical angle brackets in a row ("&lt;&lt;&lt;"/"&gt;&gt;&gt;"). Never throws on adversarial
     /// input — an all-control-character <paramref name="value"/> collapses to
-    /// <see cref="string.Empty"/>, the same "nothing to say" shape
-    /// <see cref="Core.Domain.ContextContent.SegmentFacts"/>'s own contract already treats as
-    /// legal.</summary>
+    /// <see cref="string.Empty"/>, the same "nothing to say" shape a blank fact gets: dropped from the
+    /// list entirely by <see cref="ContextPipeline"/>'s own call site rather than surviving as a
+    /// phantom entry (see that call site's own remarks).</summary>
     public static string Sanitize(string value)
     {
         ArgumentNullException.ThrowIfNull(value);

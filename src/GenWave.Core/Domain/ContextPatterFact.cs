@@ -13,6 +13,8 @@ namespace GenWave.Core.Domain;
 /// <param name="Key">The originating provider's <c>IContextProvider.Key</c>
 /// (<c>GenWave.Abstractions</c>), for diagnostics only — the patter prompt itself carries only
 /// <see cref="Fact"/>.</param>
-/// <param name="Fact">The compact, ready-to-read fact text — <see cref="ContextContent.PatterFact"/>
-/// verbatim, never re-derived.</param>
+/// <param name="Fact">The compact, ready-to-read fact text — one entry of the originating provider's
+/// <see cref="ContextContent.Facts"/>, chosen at vend time by
+/// <c>GenWave.Context.ContextPipeline</c>'s own rotation (SPEC F125.2/F125.3), verbatim and never
+/// re-derived.</param>
 public sealed record ContextPatterFact(string Key, string Fact);

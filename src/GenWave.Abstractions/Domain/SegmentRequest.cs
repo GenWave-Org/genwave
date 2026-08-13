@@ -34,7 +34,9 @@ namespace GenWave.Core.Domain;
 /// </param>
 /// <param name="ContextFacts">
 /// Plain-text facts for a <see cref="SegmentKind.ContextSegment"/> render (SPEC F107.3, STORY-297,
-/// PLAN T224) — <c>GenWave.Core.Domain.ContextContent.SegmentFacts</c> verbatim, never re-derived.
+/// PLAN T224) — <c>GenWave.Core.Domain.ContextSegmentFacts.SegmentFacts</c> verbatim, never
+/// re-derived: the pipeline's own vend-time window join over the provider's airable
+/// <c>ContextContent.Facts</c> (SPEC F125.2/F125.3).
 /// The copywriter prompt renders these under the news posture ("read these facts, do not add
 /// facts") rather than inventing content of its own. <see langword="null"/> for every other kind —
 /// additive and optional (default <see langword="null"/>) so every existing caller is diff-free; the

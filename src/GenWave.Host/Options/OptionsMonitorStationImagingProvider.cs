@@ -23,7 +23,8 @@ sealed class OptionsMonitorStationImagingProvider(IOptionsMonitor<StationOptions
         get
         {
             var imaging = stationMonitor.CurrentValue.Imaging;
-            return new StationImagingSettings(imaging.ClockAnchoredIdents, imaging.TimeAnnouncements);
+            return new StationImagingSettings(
+                imaging.ClockAnchoredIdents, imaging.TimeAnnouncements, imaging.TimeAnnouncementStaleMinutes);
         }
     }
 }

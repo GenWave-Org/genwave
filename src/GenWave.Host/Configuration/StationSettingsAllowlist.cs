@@ -377,6 +377,12 @@ public static class StationSettingsAllowlist
         // property + allowlist entry land before the first consumer).
         new("Station:Imaging:ClockAnchoredIdents",            SettingApplyMode.Live,          SettingKind.Boolean,    ""),
         new("Station:Imaging:TimeAnnouncements",              SettingApplyMode.Live,          SettingKind.Boolean,    ""),
+        // TimeDate elapsed-due expiry budget (SPEC F124.4, gh-#469, PLAN T269) — read live through
+        // IStationImagingSettingsProvider by SpeechDeferralQueue.TryDequeueDue's own expiry check
+        // (Orchestrator forwards the value fresh once per unit), so a PUT here reaches the very next
+        // drain with no api restart. Defaults to 5 minutes; StationId (idents) are exempt by design —
+        // this budget governs TimeDate only.
+        new("Station:Imaging:TimeAnnouncementStaleMinutes",   SettingApplyMode.Live,          SettingKind.Number,     "minutes"),
 
         // Show-flavor patter line (SPEC F116.3, STORY-308, PLAN T249) — an ordinary LeadIn/BackAnnounce
         // break during a show may carry the show's flavor as spoken color, sharing F107.5's own single
