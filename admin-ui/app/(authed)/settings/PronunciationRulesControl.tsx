@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -289,8 +289,7 @@ export function PronunciationRulesControl(): ReactNode {
     void refresh();
   }, [refresh]);
 
-  async function handleAdd(e: FormEvent<HTMLFormElement>): Promise<void> {
-    e.preventDefault();
+  async function handleAdd(): Promise<void> {
     setAddPending(true);
     setAddFieldErrors({});
     const outcome = await postRule(draftPattern, draftWord, draftIpa);
@@ -406,6 +405,16 @@ export function PronunciationRulesControl(): ReactNode {
     }
   }
 
+  const canAddRow = !addPending && draftPattern.trim() !== "" && draftIpa.trim() !== "";
+
+  /** Enter-to-submit ergonomics for the add row (T145 review round 3) — there is deliberately no
+   * `<form>` here for this to ride natively; see the render below for why. */
+  function handleAddKeyDown(e: KeyboardEvent<HTMLInputElement>): void {
+    if (e.key !== "Enter" || !canAddRow) return;
+    e.preventDefault();
+    void handleAdd();
+  }
+
   return (
     <section aria-label="Pronunciation rules" className="rounded-[6px] border border-line bg-surface p-5">
       <h2 className="font-display text-[1.1rem] text-ink">Pronunciation rules</h2>
@@ -494,12 +503,16 @@ export function PronunciationRulesControl(): ReactNode {
           </div>
         )}
 
-        <form
-          onSubmit={(e) => {
-            void handleAdd(e);
-          }}
-          className="flex flex-wrap items-end gap-2 border-t border-line pt-3"
-        >
+        {/* T145 review round 3 — deliberately a <div>, never a <form>: this control is mounted
+            inside SettingsForm's own page-wide <form> (via ttsTabExtra). A <form> nested inside
+            another <form> is invalid HTML — a real browser silently STRIPS the inner element, so
+            an onSubmit handler here would never bind, and a type="submit" button would instead
+            submit the OUTER SettingsForm natively (a full navigation to bare /settings, no POST
+            ever sent, no rule ever created — observed live against the running stack; jsdom
+            tolerates the nesting, which is exactly why a jsdom-only suite couldn't catch this).
+            Add is a plain type="button" + onClick; onKeyDown below restores Enter-to-submit on
+            each field since there is no <form> to provide it natively. */}
+        <div className="flex flex-wrap items-end gap-2 border-t border-line pt-3">
           <div className="flex flex-col gap-1">
             <label htmlFor="pronunciation-add-pattern" className="text-[0.78rem] font-semibold text-mute">
               Pattern
@@ -509,6 +522,7 @@ export function PronunciationRulesControl(): ReactNode {
               type="text"
               value={draftPattern}
               onChange={(e) => setDraftPattern(e.currentTarget.value)}
+              onKeyDown={handleAddKeyDown}
               disabled={addPending}
               className={CELL_INPUT_CLASSES}
             />
@@ -528,6 +542,7 @@ export function PronunciationRulesControl(): ReactNode {
               placeholder="defaults to Pattern"
               value={draftWord}
               onChange={(e) => setDraftWord(e.currentTarget.value)}
+              onKeyDown={handleAddKeyDown}
               disabled={addPending}
               className={CELL_INPUT_CLASSES}
             />
@@ -547,6 +562,7 @@ export function PronunciationRulesControl(): ReactNode {
               placeholder="/ˈreɪkjaviːk/"
               value={draftIpa}
               onChange={(e) => setDraftIpa(e.currentTarget.value)}
+              onKeyDown={handleAddKeyDown}
               disabled={addPending}
               className={CELL_INPUT_CLASSES}
             />
@@ -557,13 +573,19 @@ export function PronunciationRulesControl(): ReactNode {
             )}
           </div>
           <Button
-            type="submit"
+            type="button"
             variant="secondary"
-            disabled={addPending || draftPattern.trim() === "" || draftIpa.trim() === ""}
+            disabled={!canAddRow}
+            onClick={() => {
+              void handleAdd();
+            }}
           >
-            {addPending ? "Adding…" : "Add rule"}
+            {/* "Add pronunciation" rather than "Add rule" (T145 review round 2 note): this tab
+                already has CorrectionsSettingControl's own "Add rule" button (Tts:Corrections) —
+                two same-named buttons in one tabpanel is an a11y wart this one-word swap avoids. */}
+            {addPending ? "Adding…" : "Add pronunciation"}
           </Button>
-        </form>
+        </div>
       </div>
     </section>
   );

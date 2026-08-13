@@ -394,7 +394,10 @@ describe("Feature: adding a pronunciation rule", () => {
     fireEvent.change(screen.getByLabelText("Word (optional)"), { target: { value: word } });
     fireEvent.change(screen.getByLabelText("IPA"), { target: { value: ipa } });
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /add rule/i }));
+      // "Add pronunciation", not "Add rule" (T145 review round 2 note) — this tab already has
+      // CorrectionsSettingControl's own "Add rule" button; the rename avoids two same-named
+      // buttons in one tabpanel.
+      fireEvent.click(screen.getByRole("button", { name: /add pronunciation/i }));
     });
   }
 
@@ -853,6 +856,43 @@ describe("Feature: content-addressed PUT/DELETE encode URL-hostile pattern/word 
       await deleteRow();
 
       expect(requestMethod(mockFetch, 1)).toBe("DELETE");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature: the add UI is never a <form> (T145 review round 3 — the nested-form browser defect)
+// ---------------------------------------------------------------------------
+//
+// This control is mounted inside SettingsForm's own page-wide <form> (via ttsTabExtra). A <form>
+// nested inside another <form> is invalid HTML: real browsers silently STRIP the inner <form>
+// element entirely, so an onSubmit handler on it never binds, and a type="submit" button inside
+// it instead submits the OUTER SettingsForm natively — observed live against the running stack as
+// a full navigation to bare /settings with no POST to /api/pronunciations ever sent, no rule ever
+// created. jsdom tolerates the nesting and happily fires a nested <form>'s own onSubmit, which is
+// exactly why the rest of this suite passed 43/43 while the real browser did not. This guard is
+// the one jsdom CAN see: if the Add control is ever rebuilt with a <form> wrapper again, this
+// fails immediately instead of waiting for the next live/Playwright pass to notice. Do not "fix"
+// this back to a <form> — see PronunciationRulesControl's own render-time comment for the reason.
+describe("Feature: the add UI is never a <form> (nested-form browser defect)", () => {
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.clearAllMocks();
+  });
+
+  describe("Scenario: the control renders inside another page's own <form>", () => {
+    it("mounts no <form> element of its own", async () => {
+      makeFetchMock(getRow(200, [STATION_ROW]));
+      const { container } = renderControl();
+      await waitForLoaded();
+
+      expect(container.querySelector("form")).toBeNull();
     });
   });
 });
