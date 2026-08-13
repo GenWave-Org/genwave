@@ -40,9 +40,29 @@ using LoudnessMeasurement = GenWave.Core.Domain.Loudness;
 /// STORY-095). Both triggers used to resolve this token independently (only the boot seed did, the
 /// endpoint never did at all — the hole gitea-#184 shipped through); centralizing it here means every future
 /// caller of <see cref="AuthorAsync"/> gets expansion for free with no per-caller opt-in.
+///
+/// <b>The safe loop wears station rules</b> (SPEC F126.3, STORY-325, PLAN T276): the render below
+/// goes through <see cref="ITtsSynthesizer"/>'s context overload, carrying the STATION's resolved
+/// pronunciation rules — <see cref="PronunciationRuleResolver.ResolveForRender"/> with an EMPTY card
+/// layer and no candidates, never <see cref="ActivePersonaPronunciationRulesCache"/>: the safe loop
+/// is the station's own voice, not any persona's, so persona rules must never reach it. Pace is left
+/// at <see cref="TtsRenderContext"/>'s own default (<c>1.0</c>) — there is no <c>VoiceSpec</c> to
+/// resolve a rate from here, unlike a persona-voiced render. <see cref="TtsRenderContext.IsAudition"/>
+/// is set <see langword="true"/> on every render this class performs — reusing the SAME flag
+/// <c>TtsPreviewController</c> sets for the exact same reason (see that flag's own remarks, the T274
+/// ruling for this sibling): authoring is not airing, so an authored clip's rule matches must never
+/// count toward <see cref="PronunciationRuleHitReporter"/>'s on-air observability.
+///
+/// <c>PronunciationRuleProvider</c> is the SAME singleton the on-air render path
+/// (<see cref="TtsSegmentSource"/>) reads its station half from — resolved fresh on every call
+/// (<see cref="PronunciationRuleProvider.Current"/> is a live snapshot, not a boot-frozen read), so a
+/// rule saved through <c>PUT /api/settings</c> reaches the very next authored clip with no api
+/// restart. The re-author posture for an already-persisted clip is stated once, at
+/// <c>SafeSegmentsController</c> — not restated here.
 /// </summary>
 public sealed class SafeSegmentAuthor(
     ITtsSynthesizer synthesizer,
+    PronunciationRuleProvider pronunciations,
     IAudioMixer mixer,
     ILoudnessAnalyzer loudnessAnalyzer,
     ICueAnalyzer cueAnalyzer,
@@ -61,10 +81,17 @@ public sealed class SafeSegmentAuthor(
         var voice = request.Voice ?? request.DefaultVoice;
         var tags = new AudioTags(request.StationName, request.Title ?? DefaultTitle);
 
+        // SPEC F126.3, STORY-325, PLAN T276: the context overload, carrying the STATION's resolved
+        // pronunciation rules (no persona layer — the safe loop is the station's own voice) and
+        // IsAudition = true (authoring is not airing — see the class remarks for the full ruling).
+        var contextRules = PronunciationRuleResolver.ResolveForRender(
+            pronunciations.Current, cardRules: [], candidates: null);
+        var context = new TtsRenderContext(text, voice, Kind: null) { Rules = contextRules, IsAudition = true };
+
         string synthPath;
         try
         {
-            synthPath = await synthesizer.SynthesizeAsync(text, voice, ct);
+            synthPath = await synthesizer.SynthesizeAsync(context, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

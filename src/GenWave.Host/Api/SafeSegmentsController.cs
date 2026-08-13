@@ -30,6 +30,16 @@ namespace GenWave.Host.Api;
 /// A synthesis/mix/measurement/insert failure reported by <see cref="ISafeSegmentAuthor"/>, or the
 /// render exceeding <c>Tts:RenderBudgetSeconds</c>, returns 502 ProblemDetails with no internals
 /// leaked (the underlying reason/detail is logged, never echoed to the caller).
+///
+/// <b>Re-authoring posture</b> (SPEC F126.3, STORY-325 AC3, PLAN T276): a safe clip renders through
+/// the station's pronunciation rules AT THE MOMENT this endpoint is called — <c>ISafeSegmentAuthor</c>
+/// resolves them fresh, per <see cref="GenWave.Tts.PronunciationRuleProvider.Current"/>'s own live-read
+/// contract. The clip this endpoint creates is a persisted catalog row, not a live render: a rule
+/// saved AFTER this call (through <c>PUT /api/settings</c>) never reaches an already-authored clip —
+/// the same "a persisted artifact does not retroactively pick up a later config change" posture
+/// already accepted elsewhere in this pipeline (the enricher's own stale-cue precedent). There is no
+/// in-place re-render; the fix is to author again through this same endpoint, which creates a fresh
+/// row under the newly current rules.
 /// </summary>
 [ApiController]
 [Route("api/safe-segments")]
