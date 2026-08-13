@@ -9,6 +9,7 @@ namespace GenWave.Core.Domain;
 /// <exception cref="ArgumentException">Thrown when <paramref name="CueInSec"/> exceeds <paramref name="CueOutSec"/>.</exception>
 public sealed record CuePoints(double CueInSec, double CueOutSec)
 {
+    /// <summary>Seconds from the start of the file at which audio begins.</summary>
     public double CueInSec { get; init; } = CueInSec <= CueOutSec
         ? CueInSec
         : throw new ArgumentException(

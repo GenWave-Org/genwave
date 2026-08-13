@@ -5,7 +5,7 @@ namespace GenWave.Core.Events;
 /// carries NO payload beyond <see cref="StationEvent.OccurredAt"/> — no wish text, no row id, no
 /// caller IP — so the wish can never leak through the booth-log narrative pipeline even by
 /// accident: F87.7's "never voiced, quoted, or echoed downstream" discipline extends to this
-/// event's very shape, not just to how <see cref="Abstractions.IBoothLogEventConsumer"/> happens to
+/// event's very shape, not just to how <c>IBoothLogEventConsumer</c> happens to
 /// summarize it today.
 /// </summary>
 public sealed record RequestReceived : StationEvent;

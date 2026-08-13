@@ -5,6 +5,14 @@ namespace GenWave.Core.Domain;
 /// orchestrator task blends into TTS patter. <see cref="Voice"/> of <c>""</c> is a deliberate
 /// sentinel meaning "use the station's own default voice" (<c>Station:Voice</c>), not "unset".
 /// </summary>
+/// <param name="Id">The persona's stable row id (<c>station.persona.id</c>).</param>
+/// <param name="Name">Display name (SPEC F35.1) — also the source a fresh <see cref="Slug"/> is derived from.</param>
+/// <param name="Backstory">Free-text backstory blended into TTS patter.</param>
+/// <param name="Style">Free-text speaking style blended into TTS patter.</param>
+/// <param name="Voice">TTS voice identifier, or <c>""</c> to use the station's own default voice
+/// (<c>Station:Voice</c>) — a deliberate sentinel, not "unset".</param>
+/// <param name="CreatedAt">When this persona row was first created.</param>
+/// <param name="UpdatedAt">When this persona row was last edited.</param>
 /// <param name="ImportedFrom">
 /// Provenance stamp (SPEC F90.7, STORY-237): <c>null</c> for a persona authored in place via the
 /// CRUD endpoints, <c>"file"</c> for a file-uploaded import, or the catalog entry's slug for a
