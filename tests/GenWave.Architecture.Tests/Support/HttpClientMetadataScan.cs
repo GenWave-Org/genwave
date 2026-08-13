@@ -1,4 +1,3 @@
-using System.Reflection.Emit;
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
 using System.Reflection.PortableExecutable;
@@ -78,7 +77,7 @@ internal static class HttpClientMetadataScan
         {
             var forbiddenName = FindForbiddenNameUsedBy(reader, peReader, typeHandle, decoder, forbiddenNamesByHandle);
             if (forbiddenName is not null)
-                results.Add((OutermostDeclaringTypeFullName(reader, typeHandle), forbiddenName));
+                results.Add((IlTokenWalker.OutermostDeclaringTypeFullName(reader, typeHandle), forbiddenName));
         }
 
         // One violation per outermost type even when several of its compiler-generated nested types
@@ -166,86 +165,11 @@ internal static class HttpClientMetadataScan
                     return localsHit;
             }
 
-            var ilHit = ScanIlTokens(body.GetILReader(), forbiddenNamesByHandle);
+            var ilHit = IlTokenWalker.ResolveTokens(body.GetILReader(), forbiddenNamesByHandle).FirstOrDefault();
             if (ilHit is not null)
                 return ilHit;
         }
 
         return null;
-    }
-
-    /// <summary>Walks a method body's raw IL, decoding just enough of each instruction (via the
-    /// operand-size table <see cref="IlOperandTable"/> builds from .NET's own <see cref="OpCodes"/> —
-    /// no hand-copied opcode list to fall out of sync) to reach the 4-byte metadata token every
-    /// type/field/method/token operand carries, and checks it against the forbidden set.</summary>
-    private static string? ScanIlTokens(BlobReader il, IReadOnlyDictionary<EntityHandle, string> forbiddenNamesByHandle)
-    {
-        while (il.RemainingBytes > 0)
-        {
-            var opByte = il.ReadByte();
-            var opCode = opByte == 0xFE ? (short)(0xFE00 | il.ReadByte()) : opByte;
-
-            if (!IlOperandTable.OperandTypeByOpCode.TryGetValue(opCode, out var operandType))
-            {
-                throw new InvalidOperationException(
-                    $"Unrecognized IL opcode 0x{opCode:X4} — the operand table (built from " +
-                    "System.Reflection.Emit.OpCodes) is out of date for this runtime.");
-            }
-
-            switch (operandType)
-            {
-                case OperandType.InlineNone:
-                    break;
-                case OperandType.ShortInlineBrTarget or OperandType.ShortInlineI or OperandType.ShortInlineVar:
-                    il.ReadByte();
-                    break;
-                case OperandType.InlineVar:
-                    il.ReadInt16();
-                    break;
-                case OperandType.InlineBrTarget or OperandType.InlineI or OperandType.ShortInlineR
-                    or OperandType.InlineString or OperandType.InlineSig:
-                    il.ReadInt32();
-                    break;
-                case OperandType.InlineI8 or OperandType.InlineR:
-                    il.ReadInt64();
-                    break;
-                case OperandType.InlineSwitch:
-                    var targetCount = il.ReadInt32();
-                    for (var i = 0; i < targetCount; i++)
-                        il.ReadInt32();
-                    break;
-                case OperandType.InlineField or OperandType.InlineMethod or OperandType.InlineTok or OperandType.InlineType:
-                    var token = il.ReadInt32();
-                    var entity = MetadataTokens.EntityHandle(token);
-                    if (forbiddenNamesByHandle.TryGetValue(entity, out var name))
-                        return name;
-                    break;
-                default:
-                    throw new InvalidOperationException($"Unhandled IL operand type {operandType}.");
-            }
-        }
-
-        return null;
-    }
-
-    private static string OutermostDeclaringTypeFullName(MetadataReader reader, TypeDefinitionHandle typeHandle)
-    {
-        var current = typeHandle;
-        var declaringType = reader.GetTypeDefinition(current).GetDeclaringType();
-        while (!declaringType.IsNil)
-        {
-            current = declaringType;
-            declaringType = reader.GetTypeDefinition(current).GetDeclaringType();
-        }
-
-        var outer = reader.GetTypeDefinition(current);
-        var ns = reader.GetString(outer.Namespace);
-        var name = reader.GetString(outer.Name);
-
-        // Top-level-statement Program.cs compiles to a bare "Program" type in the GLOBAL namespace
-        // (C# forbids wrapping top-level statements in a namespace block) — reader.GetString on an
-        // empty NamespaceDefinitionHandle yields "", which a naive "ns + "." + name" would render as
-        // the wrong ".Program".
-        return ns.Length == 0 ? name : $"{ns}.{name}";
     }
 }

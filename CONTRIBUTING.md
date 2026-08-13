@@ -4,7 +4,7 @@ Thanks for wanting to make GenWave better. Bug reports, fixes, and features are 
 
 ## 🏛️ Architecture governance
 
-Six laws, seven ids (L4 has two halves), enforced as fitness tests in `tests/GenWave.Architecture.Tests` (they run inside the normal `dotnet test GenWave.sln` — no separate CI lane). Full rationale for each: the per-law XML doc comments in that project (start at `Support/LawId.cs`) — the maintainer's own design notes cover the same ground (gh-#398) but live outside this shipped repo (`docs/` is gitignored).
+Eight laws, nine ids (L4 has two halves), enforced as fitness tests in `tests/GenWave.Architecture.Tests` (they run inside the normal `dotnet test GenWave.sln` — no separate CI lane). Full rationale for each: the per-law XML doc comments in that project (start at `Support/LawId.cs`) — the maintainer's own design notes cover the same ground (gh-#398) but live outside this shipped repo (`docs/` is gitignored).
 
 | Law | Rule | Why |
 |---|---|---|
@@ -15,12 +15,14 @@ Six laws, seven ids (L4 has two halves), enforced as fitness tests in `tests/Gen
 | `L4-immutability` | Every public type in `GenWave.Abstractions` carries no mutable public state (`init`-only properties and `readonly`/`const` fields are fine) | Same contract boundary — a settable property is an accidental behavior promise |
 | `L5` | `GenWave.Host` contains no namespace from the reserved/graduated subsystem list | The Host graduation rule's tripwire (gh-#399) — a forgotten graduation is a red test, not a review catch |
 | `L6` | `GenWave.Abstractions` never references `GenWave.Core` | Misplaced seams are accidental API commitments |
+| `L7` | No production type outside the two named relays (`NormalizingTtsSynthesizer`, `FallbackTtsSynthesizer`) references `ITtsSynthesizer`'s context-less `SynthesizeAsync(string, string, CancellationToken)` overload directly | Every other caller must carry kind/rules/pace through `TtsRenderContext`, never silently drop them |
+| `L8` | Outside `GenWave.Tts`, no production code calls `PronunciationRuleSet.Merge`/`MergeWithProvenance` or `PronunciationRuleProvider.BuildMerged` directly — `PronunciationsController`'s own `MergeWithProvenance` call (its display-only rules-table projection, never a render) is the one *designed* exemption | `PronunciationRuleResolver.ResolveForRender` is the one resolve seam for air and audition — parity is structural, not a coincidence two call sites agree on today |
 
 Adoption is honest: violations that predate a law are named and dated in the suite's exemption baseline (gh-#406) and the laws fail on NEW violations only — never add a baseline entry to make your own change green.
 
 **Seam placement** (gh-#400): "Does a third-party module need to implement or consume this? → `GenWave.Abstractions`. Else → `GenWave.Core/Abstractions`." Need means *demonstrated* need — a plausible future module is not a demonstrated need. Promotion on demonstrated need is cheap; demotion is a breaking change.
 
-L3's designated seams are a named constant, not a list here: `HttpClientSeams.DesignatedSeams`.
+L3's designated seams are a named constant, not a list here: `HttpClientSeams.DesignatedSeams`. Likewise L7's relays and L8's exemption: `TtsSynthesizeContextSeam.DesignatedRelays` and `PronunciationResolveSeam.DesignatedExemptions`.
 
 **Check `SEAMS.md`** before adding a new seam — extend or decorate an existing port over minting a near-duplicate; regenerate with `dotnet run --project tools/SeamIndexGenerator` (CI byte-diffs it against committed, SPEC F105.6).
 

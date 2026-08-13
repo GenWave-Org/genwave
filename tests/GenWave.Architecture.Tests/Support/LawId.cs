@@ -11,11 +11,12 @@ namespace GenWave.Architecture.Tests.Support;
 internal static class LawId
 {
     /// <summary>The shape every law id above takes — <c>L</c>, one or more digits, optionally a
-    /// lowercase <c>-word</c> suffix (<c>L1</c>...<c>L6</c>, <c>L4-references</c>,
-    /// <c>L4-immutability</c>) — owned here, once, so <see cref="All"/>'s own const-filter (below)
-    /// and <see cref="ContributingLawTable"/>'s doc-parser both consume the SAME shape definition
-    /// instead of each hand-rolling their own copy that could quietly drift apart (STORY-293
-    /// review). <c>L\d+</c>, not <c>L\d</c>: a tenth law (<c>L10</c>) must still match.</summary>
+    /// lowercase <c>-word</c> suffix (bare numeric ids like <c>L1</c> or <c>L7</c>, plus the
+    /// two-part <c>L4-references</c>/<c>L4-immutability</c> split) — owned here, once, so
+    /// <see cref="All"/>'s own const-filter (below) and <see cref="ContributingLawTable"/>'s
+    /// doc-parser both consume the SAME shape definition instead of each hand-rolling their own copy
+    /// that could quietly drift apart (STORY-293 review). <c>L\d+</c>, not <c>L\d</c>: a tenth law
+    /// (<c>L10</c>) must still match.</summary>
     public const string IdPattern = @"^L\d+(-[a-z]+)?$";
 
     /// <summary>Inner projects (Core, Orchestration, Tts, Loudness) reference no ASP.NET, Npgsql,
@@ -50,18 +51,32 @@ internal static class LawId
     /// <c>GenWave.Core</c> type — the encodable half of the gh-#400 seam-placement criterion.</summary>
     public const string L6 = "L6";
 
+    /// <summary>Context-render confinement (SPEC F126.4, STORY-323): <c>ITtsSynthesizer</c>'s
+    /// context-less <c>SynthesizeAsync(string, string, CancellationToken)</c> overload is invoked only
+    /// by its two named relay implementations (<see cref="TtsSynthesizeContextSeam"/>) — every other
+    /// production call site must build a <c>TtsRenderContext</c> and go through the kind/rules/pace-
+    /// aware overload instead of silently discarding them.</summary>
+    public const string L7 = "L7";
+
+    /// <summary>Pronunciation resolve-seam confinement (SPEC F126.4, STORY-323, T274 review rider):
+    /// outside <c>GenWave.Tts</c>, no production code calls <c>PronunciationRuleSet.Merge</c>,
+    /// <c>PronunciationRuleSet.MergeWithProvenance</c>, or <c>PronunciationRuleProvider.BuildMerged</c>
+    /// directly — <c>PronunciationRuleResolver.ResolveForRender</c> is the one resolve seam for air and
+    /// audition (<see cref="PronunciationResolveSeam"/>).</summary>
+    public const string L8 = "L8";
+
     /// <summary>Every law id above, discovered by reflection over this type's own <c>public const
     /// string</c> fields rather than hand-listed a second time anywhere. STORY-293's carry-forward
     /// (PLAN T215): this is now the SINGLE source both Story290_DependencyLaws.cs's exemption-id
-    /// whitelist and the suite↔doc parity test (<see cref="LawParity"/>) derive from — adding an
-    /// eighth law const above is enough, on its own, to keep both in sync; neither keeps its own copy
-    /// of the id list to forget to update.
+    /// whitelist and the suite↔doc parity test (<see cref="LawParity"/>) derive from — adding another
+    /// law const above (L7 and L8 joined this way at T277) is enough, on its own, to keep both in
+    /// sync; neither keeps its own copy of the id list to forget to update.
     ///
     /// The filter is two-layered so it stays honest even as this class grows: <see cref="IdPattern"/>
     /// itself is excluded by name (it is a <c>public const string</c> too, but it names a SHAPE, not a
     /// law), and every surviving candidate is additionally required to actually MATCH
     /// <see cref="IdPattern"/> — so a future, unrelated <c>public const string</c> added to this class
-    /// for some other reason can never silently masquerade as an eighth law id.</summary>
+    /// for some other reason can never silently masquerade as a real law id.</summary>
     public static IReadOnlyList<string> All { get; } = typeof(LawId)
         .GetFields(BindingFlags.Public | BindingFlags.Static)
         .Where(field => field.IsLiteral && field.FieldType == typeof(string) && field.Name != nameof(IdPattern))
