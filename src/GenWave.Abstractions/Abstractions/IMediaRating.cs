@@ -48,8 +48,8 @@ public interface IMediaRating
     /// clamped to <c>[0,100]</c>, to every <c>library.media</c> row matching <paramref name="filter"/>
     /// within <paramref name="scope"/> — an unrated row is created at the default 50 first, exactly the
     /// per-row lazy-upsert semantics, just fanned out to a matched set in one statement. The matched
-    /// set is resolved by the same admin WHERE builder <see cref="IAdminMediaQuery.ListAdminAsync"/> and
-    /// <see cref="IAdminMediaWrite.SetEligibilityAsync"/> use, so a bulk vote affects exactly the rows the
+    /// set is resolved by the same admin WHERE builder <c>IAdminMediaQuery.ListAdminAsync</c> and
+    /// <c>IAdminMediaWrite.SetEligibilityAsync</c> use, so a bulk vote affects exactly the rows the
     /// operator previewed on browse (F61.1's "one shared WHERE builder"). Writes touch
     /// <c>library.media_rating</c> ONLY — <c>library.media.xmin</c> never bumps (F33.1 stands).
     /// </summary>

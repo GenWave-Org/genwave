@@ -68,6 +68,8 @@ public sealed class PronunciationsController(
     IStationSettingsStore store,
     ActivePersonaPronunciationRulesCache activePersonaPronunciations,
     PronunciationRuleHitStats hitStats,
+    SpeechCorrectionProvider corrections,
+    ActivePersonaCorrectionsCache personaCorrections,
     ILogger<PronunciationsController> logger) : ControllerBase
 {
     const string SettingKey = "Tts:Pronunciations";
@@ -212,8 +214,10 @@ public sealed class PronunciationsController(
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Re-reads the just-written state and returns the ONE response for a POST/PUT — the row whose
-    /// resolved (Pattern, Word) identity is <paramref name="resolved"/>. Uniqueness is enforced before
+    /// Re-reads the just-written state and returns the ONE response for a POST/PUT — a
+    /// <see cref="PronunciationRuleWriteResponse"/> carrying the row whose resolved (Pattern, Word)
+    /// identity is <paramref name="resolved"/>, plus any rules-over-corrections collision warnings
+    /// (gh-#491, see <see cref="BuildCollisionWarningsAsync"/>). Uniqueness is enforced before
     /// either caller ever writes, so this row always exists after a successful write; the 500 branch
     /// is an unreached defensive floor, not a designed outcome.
     /// </summary>
@@ -228,7 +232,31 @@ public sealed class PronunciationsController(
         if (row is null)
             return StatusCode(StatusCodes.Status500InternalServerError);
 
-        return created ? StatusCode(StatusCodes.Status201Created, row) : Ok(row);
+        var response = new PronunciationRuleWriteResponse(row, await BuildCollisionWarningsAsync(resolved, ct));
+        return created ? StatusCode(StatusCodes.Status201Created, response) : Ok(response);
+    }
+
+    /// <summary>
+    /// The authoring-time face of the gh-#491 rules-over-corrections invariant: one warning per
+    /// speech correction the just-written rule now suppresses, worded for the operator who may not
+    /// remember the correction exists (that forgetting IS gh-#491). Scans the SAME station∪persona
+    /// merge the render path suppresses against — via
+    /// <see cref="RuleOverCorrectionPrecedence.CollidingWith"/>, the shared predicate, so this
+    /// warning and the render's behavior can never disagree — with the persona cache refreshed
+    /// first, exactly the once-per-request read <see cref="List"/> already does for rules. Advisory
+    /// only, never a 400: the collision is legitimate mid-migration state (see
+    /// <see cref="PronunciationRuleWriteResponse"/>'s remarks).
+    /// </summary>
+    async Task<IReadOnlyList<string>> BuildCollisionWarningsAsync(PronunciationRule resolved, CancellationToken ct)
+    {
+        await personaCorrections.RefreshIfStaleAsync(ct);
+        var merged = SpeechCorrectionProvider.BuildMerged(corrections.Current, personaCorrections.Current);
+        var colliding = RuleOverCorrectionPrecedence.CollidingWith(merged, resolved.Pattern);
+
+        return [.. colliding.Select(correction =>
+            $"A speech correction ('{correction.From}' → '{correction.To}') targets the same word. " +
+            "Pronunciation rules take precedence: that correction is suppressed on every render where " +
+            "this rule is in play. Delete the correction if it is now redundant.")];
     }
 
     /// <summary>
