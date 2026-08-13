@@ -4,8 +4,14 @@
 //
 // Runner: Jest (node) — pure formatting logic, no DOM needed.
 
-import { describe, it, expect } from "@jest/globals";
-import { formatClockTime, formatDuration, formatDurationCell, formatElapsedMs } from "../lib/format-clock";
+import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
+import {
+  formatClockTime,
+  formatDuration,
+  formatDurationCell,
+  formatElapsedMs,
+  formatRelativeAgo,
+} from "../lib/format-clock";
 
 describe("Feature: Clock formatting", () => {
   describe("Scenario: 24-hour formatting never renders the midnight-as-24:00 artifact", () => {
@@ -88,6 +94,44 @@ describe("Feature: Clock formatting", () => {
 
     it("renders blank (not an em-dash) for undefined", () => {
       expect(formatDurationCell(undefined)).toBe("");
+    });
+  });
+
+  // gh-#490 — the Health page's restart-recency readout: a coarse "how long ago" phrase, rounded
+  // down to the single largest whole unit.
+  describe("Scenario: relative-ago formatting rounds down to the largest whole unit", () => {
+    const ISO_NOW = "2026-08-13T12:00:00.000Z";
+
+    beforeEach(() => {
+      jest.useFakeTimers({ now: new Date(ISO_NOW) });
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it("reads 'just now' inside the first minute", () => {
+      expect(formatRelativeAgo("2026-08-13T11:59:30.000Z")).toBe("just now");
+    });
+
+    it("renders whole minutes under an hour", () => {
+      expect(formatRelativeAgo("2026-08-13T11:48:00.000Z")).toBe("12m ago");
+    });
+
+    it("renders whole hours under a day", () => {
+      expect(formatRelativeAgo("2026-08-13T09:00:00.000Z")).toBe("3h ago");
+    });
+
+    it("renders whole days at a day or more — the gh-#490 demo-box case (4 days)", () => {
+      expect(formatRelativeAgo("2026-08-09T08:00:00.000Z")).toBe("4d ago");
+    });
+
+    it("reads 'unknown' for a null timestamp rather than fabricating an age", () => {
+      expect(formatRelativeAgo(null)).toBe("unknown");
+    });
+
+    it("reads 'unknown' for an unparseable timestamp rather than fabricating an age", () => {
+      expect(formatRelativeAgo("not-a-date")).toBe("unknown");
     });
   });
 });

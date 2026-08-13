@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePoll } from "@/lib/use-poll";
 import { cn } from "@/lib/utils";
+import { formatRelativeAgo } from "@/lib/format-clock";
 import { fetchContainerStats, type ContainerStat } from "@/lib/container-stats-api";
 
 /** Within the plan's 10-15s guidance (gh-#148) — same poll family as the booth log's 12s
@@ -15,6 +16,23 @@ const HEALTH_POLL_INTERVAL_MS = 12000;
 /** Memory-bar fill switches from quiet brass to the danger token at this fraction of the limit —
  * the same "state colors are semantics, not decoration" rule as the dashboard tiles. */
 const MEMORY_WARN_FRACTION = 0.9;
+
+/** A restart within this window still reads as a live incident (danger styling); anything older
+ * is historical — muted, count-and-recency only (gh-#490). `RestartCount` is monotonic and never
+ * decays on its own, so without a window a days-old crash loop reads exactly like one still
+ * unfolding. 24h: long enough that a slow-burning restart loop still reads red on a glance made
+ * hours later, short enough that the gh-#490 demo-box case (restarts=10, last restart 4+ days
+ * ago) reads calm rather than alarming. */
+const RECENT_RESTART_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** True when `startedAt` falls inside the recent-restart window above; a missing or unparseable
+ * timestamp is never treated as recent — an unknown age must not manufacture an alarm. */
+function isRecentRestart(startedAt: string | null): boolean {
+  if (startedAt === null) return false;
+  const date = new Date(startedAt);
+  if (Number.isNaN(date.getTime())) return false;
+  return Date.now() - date.getTime() < RECENT_RESTART_WINDOW_MS;
+}
 
 type ChipVariant = "ok" | "warning" | "muted";
 
@@ -114,8 +132,15 @@ function ContainerCard({ container }: { container: ContainerStat }): ReactNode {
         </div>
 
         {container.restartCount !== null && container.restartCount > 0 && (
-          <p className="text-[0.75rem] font-semibold text-danger">
+          <p
+            className={cn(
+              "text-[0.75rem] font-semibold",
+              isRecentRestart(container.startedAt) ? "text-danger" : "text-mute"
+            )}
+          >
             {container.restartCount === 1 ? "1 restart" : `${container.restartCount} restarts`}
+            {" · last "}
+            {formatRelativeAgo(container.startedAt)}
           </p>
         )}
       </div>

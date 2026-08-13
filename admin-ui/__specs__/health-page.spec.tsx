@@ -1,11 +1,13 @@
 // @jest-environment jsdom
 // gh-#148 — Admin UI: Health page — container-level view of the running stack
+// gh-#490 — restart count paired with recency (a historical restart storm must not read as live)
 //
 // Runner: Jest (jsdom) + @testing-library/react. Drives HealthView (the client component the
 // Health page renders) with a mocked global.fetch — mirrors llm-calls-page.spec.tsx's
-// installFetchMock style (one endpoint, no paging). Fake timers throughout for the 12s poll
-// cadence. The chip/formatting helpers (stateChip, formatBytes) are covered directly at the
-// bottom — pure functions, no render needed.
+// installFetchMock style (one endpoint, no paging). Fake timers pinned to ISO_NOW throughout —
+// the 12s poll cadence and the gh-#490 restart-recency math both need a fixed "now". The
+// chip/formatting helpers (stateChip, formatBytes) are covered directly at the bottom — pure
+// functions, no render needed.
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, within, act } from "@testing-library/react";
@@ -17,6 +19,10 @@ import type { ContainerStat, ContainerStatsReport } from "@/lib/container-stats-
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Anchors every "ago" computation below — the demo-box case gh-#490 describes: a restart storm
+// on 2026-08-09 read against a "now" of 2026-08-13 (4 days later).
+const ISO_NOW = "2026-08-13T12:00:00.000Z";
+
 function makeContainer(overrides: Partial<ContainerStat> = {}): ContainerStat {
   return {
     name: "api",
@@ -26,6 +32,7 @@ function makeContainer(overrides: Partial<ContainerStat> = {}): ContainerStat {
     memoryUsedBytes: 400 * 1024 * 1024,
     memoryLimitBytes: 3 * 1024 * 1024 * 1024,
     restartCount: 0,
+    startedAt: null,
     ...overrides,
   };
 }
@@ -80,7 +87,7 @@ async function advance(ms: number): Promise<void> {
 }
 
 beforeEach(() => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ now: new Date(ISO_NOW) });
 });
 
 afterEach(() => {
@@ -125,19 +132,60 @@ describe("Feature: Health page container cards (gh-#148)", () => {
       expect(within(card).queryByText("0.0%")).not.toBeInTheDocument();
     });
 
-    it("surfaces a non-zero restart count and hides a zero one", async () => {
+    it("hides the restart line entirely for a zero count — today's behavior, unchanged", async () => {
+      installFetchMock(ok(makeReport([makeContainer({ name: "api", restartCount: 0, startedAt: null })])));
+      render(<HealthView />);
+      await flush();
+
+      expect(within(screen.getByRole("group", { name: "api" })).queryByText(/restart/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Scenario: a restart count pairs with recency, not a bare number (gh-#490)", () => {
+    it("a restart inside the last 24h reads as a live alarm, with the recency text", async () => {
+      // Given a restart 1 hour before "now" — well inside the recent window
       installFetchMock(
         ok(
           makeReport([
-            makeContainer({ name: "kokoro", restartCount: 3 }),
-            makeContainer({ name: "api", restartCount: 0 }),
+            makeContainer({ name: "kokoro", restartCount: 3, startedAt: "2026-08-13T11:00:00.000Z" }),
           ])
         )
       );
       render(<HealthView />);
       await flush();
 
-      expect(within(screen.getByRole("group", { name: "kokoro" })).getByText("3 restarts")).toBeInTheDocument();
+      const restartLine = within(screen.getByRole("group", { name: "kokoro" })).getByText(
+        "3 restarts · last 1h ago"
+      );
+      expect(restartLine).toBeInTheDocument();
+      expect(restartLine).toHaveClass("text-danger");
+    });
+
+    it("a restart days old reads muted, with the recency text — never a live alarm", async () => {
+      // Given the gh-#490 demo-box case: restarts=10, last restart 2026-08-09 against "now" 08-13
+      installFetchMock(
+        ok(
+          makeReport([
+            makeContainer({ name: "db", restartCount: 10, startedAt: "2026-08-09T08:00:00.000Z" }),
+          ])
+        )
+      );
+      render(<HealthView />);
+      await flush();
+
+      const restartLine = within(screen.getByRole("group", { name: "db" })).getByText("10 restarts · last 4d ago");
+      expect(restartLine).toBeInTheDocument();
+      expect(restartLine).toHaveClass("text-mute");
+      expect(restartLine).not.toHaveClass("text-danger");
+    });
+
+    it("zero restarts renders no restart line at all, regardless of startedAt", async () => {
+      installFetchMock(
+        ok(makeReport([makeContainer({ name: "api", restartCount: 0, startedAt: "2026-08-09T08:00:00.000Z" })]))
+      );
+      render(<HealthView />);
+      await flush();
+
       expect(within(screen.getByRole("group", { name: "api" })).queryByText(/restart/)).not.toBeInTheDocument();
     });
   });
