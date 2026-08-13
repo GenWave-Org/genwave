@@ -81,12 +81,38 @@ public sealed class NormalizingTtsSynthesizer(
         // ActivePersonaCorrectionsCache's own remarks on the two paths' different staleness bounds).
         await personaCorrections.RefreshIfStaleAsync(ct);
         var snapshot = SpeechCorrectionProvider.BuildMerged(corrections.Current, personaCorrections.Current);
+
+        // Rules-over-corrections precedence (gh-#491): a correction whose From names the same word
+        // as a resolved pronunciation rule's Pattern is dropped from THIS render's snapshot before
+        // it can rewrite the rule's word out of the text — see RuleOverCorrectionPrecedence's own
+        // remarks for the whole invariant (predicate, engine caveat, why here). Logged per
+        // suppressed rule at Information, the same never-silent bar every other line in this
+        // family meets: an operator asking "why did my correction stop applying?" gets the answer
+        // in the fleet log store, not a shrug. ReportFiredCorrections below reads the SAME filtered
+        // snapshot, so a suppressed correction is never counted or logged as fired.
+        snapshot = RuleOverCorrectionPrecedence.SuppressFor(snapshot, context.Rules, out var suppressedFroms);
+        foreach (var from in suppressedFroms)
+        {
+            logger.LogInformation(
+                "TTS correction suppressed by pronunciation rule: from={CorrectionFrom} voice={Voice}",
+                LogSanitize.Strip(from), LogSanitize.Strip(context.Voice));
+        }
+
         var normalized = RunNormalize(context.Text, snapshot);
         ReportFiredCorrections(context.Text, context.Voice, snapshot);
         return await inner.SynthesizeAsync(context with { Text = normalized }, ct);
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// No rules-over-corrections suppression here (gh-#491): this TEXT-only seam previews what the
+    /// corrections themselves do to copy, and carries no <see cref="TtsRenderContext.Rules"/> to
+    /// suppress against — suppression is a fact about ONE render's resolved rule context, not about
+    /// the corrections in storage. A real render whose rules collide with a correction can
+    /// therefore normalize differently than this preview shows for exactly that word; the
+    /// suppression's own Information log line and the rules API's authoring-time warning are where
+    /// that divergence is surfaced, by design.
+    /// </remarks>
     public string Preview(string text) =>
         RunNormalize(text, SpeechCorrectionProvider.BuildMerged(corrections.Current, personaCorrections.Current));
 
