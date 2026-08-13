@@ -52,6 +52,40 @@ sealed class ThemeRepository(Lazy<NpgsqlDataSource> dataSource) : IThemeStore
             cancellationToken: ct));
     }
 
+    /// <summary>
+    /// The save-as-own write's own ATOMIC conditional upsert (SPEC F104.13, PLAN T207 review finding
+    /// F2, gh-#394's fix — see this method's own <see cref="IThemeStore.SaveAsOwnAsync"/> contract
+    /// remarks for why it is a separate method rather than a branch inside <see cref="UpsertAsync"/>,
+    /// and mirrors <c>ShowRepository.ImportAsync</c>'s own conditional-write shape). The <c>WHERE</c>
+    /// clause gates the <c>DO UPDATE</c> arm only — a fresh slug always takes the plain <c>INSERT</c>
+    /// branch, never touching the clause at all. On a conflict with a row whose own
+    /// <c>imported_from</c> is already <see langword="null"/> (re-saving over a theme THIS write path
+    /// authored before) the clause evaluates true and the update applies normally. On a conflict with a
+    /// row holding real provenance (an IMPORTED theme) the clause evaluates false, so Postgres performs
+    /// neither the update nor an insert — zero rows affected, exactly the signal this method turns into
+    /// <see langword="false"/>. This closes the exact race a prior read-then-write pair
+    /// (<c>ThemesSaveAsOwnController</c>'s own former <c>GetBySlugAsync</c>-then-<c>UpsertAsync</c>)
+    /// left open: an import committing between the read and the write could no longer slip past the
+    /// guard, because there is no longer a gap between the read and the write for it to slip through.
+    /// </summary>
+    public async Task<bool> SaveAsOwnAsync(string slug, string definition, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var affected = await conn.ExecuteAsync(new CommandDefinition(
+            """
+            insert into station.theme (slug, definition, imported_from, imported_at)
+            values (@Slug, @Definition::jsonb, null, null)
+            on conflict (slug) do update
+              set definition = @Definition::jsonb,
+                  imported_from = null,
+                  imported_at = null
+              where station.theme.imported_from is null
+            """,
+            new { Slug = slug, Definition = definition },
+            cancellationToken: ct));
+        return affected == 1;
+    }
+
     public async Task<IReadOnlyList<OwnerTheme>> GetAllAsync(CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
