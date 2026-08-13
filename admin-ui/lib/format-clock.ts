@@ -101,6 +101,29 @@ export function formatDurationCell(durationMs: number | null | undefined): strin
 }
 
 /**
+ * Coarse "how long ago" phrase ("just now", "12m ago", "3h ago", "4d ago") for the Health page's
+ * restart-recency readout (gh-#490): the reader needs to place an event in time at a glance, not
+ * read a precise duration, so this rounds down to the single largest whole unit and never goes
+ * finer than minutes. `null` or an unparseable timestamp reads "unknown" rather than fabricating
+ * an age — same "never fabricated" discipline as the container stats' null measurements.
+ */
+export function formatRelativeAgo(iso: string | null): string {
+  if (iso === null) return "unknown";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "unknown";
+
+  const elapsedMs = Math.max(0, Date.now() - date.getTime());
+  const minuteMs = 60_000;
+  const hourMs = 60 * minuteMs;
+  const dayMs = 24 * hourMs;
+
+  if (elapsedMs < minuteMs) return "just now";
+  if (elapsedMs < hourMs) return `${Math.floor(elapsedMs / minuteMs)}m ago`;
+  if (elapsedMs < dayMs) return `${Math.floor(elapsedMs / hourMs)}h ago`;
+  return `${Math.floor(elapsedMs / dayMs)}d ago`;
+}
+
+/**
  * Humanizes a measured elapsed time (gh-#141, formats tightened by gh-#210 — the LLM call
  * inspector's ELAPSED column): sub-second stays in raw milliseconds ("842ms" — the precision is
  * the information there), everything from one second up reads in seconds with one decimal
