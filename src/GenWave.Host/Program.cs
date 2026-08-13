@@ -8,6 +8,7 @@ using GenWave.Host.Enrichment;
 using GenWave.Host.Health;
 using GenWave.Host.Options;
 using GenWave.Host.Playout;
+using GenWave.Host.Pronunciations;
 using GenWave.Host.Requests;
 using GenWave.Host.Seeding;
 using GenWave.Host.Stats;
@@ -198,6 +199,16 @@ builder.Services
     .ValidateDataAnnotations()
     .ValidateOnStart();
 builder.Services.AddSingleton<ArtworkService>();
+
+// Respell→IPA assist for the pronunciation rules editor (SPEC F126.2, STORY-324, PLAN T278): the
+// espeak-ng Process.Start adapter behind PronunciationDerivationController — a singleton so its
+// IsAvailable latch (absent-until-restart, see EspeakRespellOracle's own remarks) is shared across
+// every request rather than re-discovered per call. Registered directly here, not inside any
+// AddGenWave* extension: this is an endpoint-only Host adapter (IRespellOracle lives in
+// GenWave.Host.Pronunciations, not Abstractions/Core), deliberately never wired into
+// AddGenWaveOrchestration/AddGenWavePlayout's own render-path graph above — see
+// Story324_RespellOracle's DI-closure fact for the structural pin.
+builder.Services.AddSingleton<IRespellOracle, EspeakRespellOracle>();
 
 // Listener-request throttle knobs (SPEC F87, STORY-224, PLAN T86): env/compose-only, deliberately
 // absent from StationSettingsAllowlist — an operator-tuned deployment setting, not a live PUT (the

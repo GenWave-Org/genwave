@@ -37,8 +37,15 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 # curl is required by the compose healthcheck (`curl -fsS .../health`) — the aspnet runtime image
 # ships with neither curl nor wget, and its /bin/sh is dash (no /dev/tcp), so there is no
 # zero-dependency probe alternative.
+# espeak-ng supplies the `espeak-ng` CLI EspeakRespellOracle shells out to for the pronunciation
+# rules editor's respell→IPA assist (SPEC F126.2, STORY-324, PLAN T278) — small (no audio backend
+# is pulled in; -q never opens a sound device), so it rides the same runtime-stage apt-get pass as
+# ffmpeg/aubio-tools rather than earning its own RUN layer.
+# None of these four carry an explicit =<version> pin: the house posture is the base image's own
+# fixed OS release (its apt sources point at ONE frozen snapshot, currently Ubuntu noble/universe)
+# is the pin — reproducible because the FROM tag above is, not because this line names a version.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg aubio-tools curl \
+ && apt-get install -y --no-install-recommends ffmpeg aubio-tools espeak-ng curl \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

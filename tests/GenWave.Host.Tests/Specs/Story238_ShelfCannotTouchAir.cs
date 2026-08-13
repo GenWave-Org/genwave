@@ -27,6 +27,7 @@ using GenWave.Host.Api;
 using GenWave.Host.Options;
 using GenWave.Host.Playout;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 using GenWave.Orchestration;
 
 using CoreLoudness = GenWave.Core.Domain.Loudness;
@@ -250,16 +251,19 @@ public static class FeatureShelfCannotTouchAir
             // PlayoutClosureWebFactory with Community:CatalogIndexUrl pointed at an unreachable
             // origin), walked outward from the two real tick-path types — PlayoutFeederService and
             // PlayoutSupervisor — through every constructor parameter, resolved via the SAME live
-            // container, recursively. No GenWave.Host.Catalog.* type or CommunityCatalogAccessor may
-            // appear anywhere in that closure. This is what actually catches a catalog fetch spliced
-            // into PlayoutFeederService.ExecuteAsync's tick loop (whether via a new typed constructor
-            // parameter or a resolved dependency further down the graph) — a same-assembly wiring
-            // change the reference-direction check above cannot see.
+            // container, recursively (the shared walk: <see cref="PlayoutDependencyClosure"/>, moved
+            // out of this file at review round 2 finding F6 — it and Story324_RespellOracle's own
+            // fact were byte-identical copies of the same walk). No GenWave.Host.Catalog.* type or
+            // CommunityCatalogAccessor may appear anywhere in that closure. This is what actually
+            // catches a catalog fetch spliced into PlayoutFeederService.ExecuteAsync's tick loop
+            // (whether via a new typed constructor parameter or a resolved dependency further down
+            // the graph) — a same-assembly wiring change the reference-direction check above cannot
+            // see.
             await using var factory = new PlayoutClosureWebFactory(
                 catalogIndexUrl: "https://catalog.test/unreachable/index.json");
             var services = factory.Services;
 
-            var closure = CollectPlayoutDependencyClosure(services);
+            var closure = PlayoutDependencyClosure.Collect(services);
 
             var offenders = closure
                 .Where(type => type == typeof(CommunityCatalogAccessor)
@@ -271,66 +275,6 @@ public static class FeatureShelfCannotTouchAir
             // graph that would trivially pass the assertion above for the wrong reason.
             Assert.Contains(closure, type => type == typeof(PlayoutFeeder));
             Assert.Contains(closure, type => type == typeof(Orchestrator));
-        }
-
-        /// <summary>
-        /// Breadth-first walk from <see cref="PlayoutFeederService"/>/<see cref="PlayoutSupervisor"/>
-        /// through every constructor parameter type, resolving each one through <paramref name="services"/>
-        /// (the REAL, live container) to discover its actual concrete runtime type, then recursing into
-        /// THAT type's own constructor. Only types in a <c>GenWave.*</c> namespace are followed further
-        /// (framework/BCL plumbing — <c>ILogger&lt;T&gt;</c>, <c>IOptions&lt;T&gt;</c>, etc. — are dead
-        /// ends here by design: nothing catalog-shaped lives there). <c>IEnumerable&lt;T&gt;</c>-shaped
-        /// parameters (e.g. <c>IStationEventSink</c>'s sink list) fan out through every registered
-        /// implementation of <c>T</c>, not just one.
-        /// </summary>
-        static HashSet<Type> CollectPlayoutDependencyClosure(IServiceProvider services)
-        {
-            var visited = new HashSet<Type>();
-            var queue = new Queue<Type>();
-            queue.Enqueue(typeof(PlayoutFeederService));
-            queue.Enqueue(typeof(PlayoutSupervisor));
-
-            while (queue.TryDequeue(out var type))
-            {
-                if (!visited.Add(type)) continue;
-
-                var constructor = type.GetConstructors()
-                    .OrderByDescending(c => c.GetParameters().Length)
-                    .FirstOrDefault();
-                if (constructor is null) continue;
-
-                foreach (var parameter in constructor.GetParameters())
-                    foreach (var concreteType in ResolveConcreteTypes(services, parameter.ParameterType))
-                        if ((concreteType.Namespace ?? "").StartsWith("GenWave.", StringComparison.Ordinal))
-                            queue.Enqueue(concreteType);
-            }
-
-            return visited;
-        }
-
-        static IEnumerable<Type> ResolveConcreteTypes(IServiceProvider services, Type parameterType)
-        {
-            if (parameterType.IsGenericType)
-            {
-                var openGeneric = parameterType.GetGenericTypeDefinition();
-                if (openGeneric == typeof(IEnumerable<>) || openGeneric == typeof(IReadOnlyList<>)
-                    || openGeneric == typeof(IReadOnlyCollection<>) || openGeneric == typeof(IList<>))
-                {
-                    var elementType = parameterType.GetGenericArguments()[0];
-                    return services.GetServices(elementType)
-                        .Where(instance => instance is not null)
-                        .Select(instance => instance!.GetType());
-                }
-            }
-
-            var resolved = TryResolve(services, parameterType);
-            return [resolved?.GetType() ?? parameterType];
-        }
-
-        static object? TryResolve(IServiceProvider services, Type type)
-        {
-            try { return services.GetService(type); }
-            catch { return null; } // an unresolvable/open-generic parameter is a dead end, not a fact failure
         }
     }
 
