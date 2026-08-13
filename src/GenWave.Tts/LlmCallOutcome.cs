@@ -30,4 +30,15 @@ public enum LlmCallOutcome
     /// <c>Llm:TimeoutSeconds</c> rather than investigating the endpoint itself.
     /// </summary>
     Timeout,
+
+    /// <summary>
+    /// The completions endpoint returned 2xx, but the cleaned reply exceeded <c>Llm:MaxCopyChars</c>
+    /// and was salvaged by cutting at the last complete sentence that fit (SPEC F123.2-F123.4,
+    /// STORY-319, PLAN T263) — split out from <see cref="Ok"/> because this ring is exactly the
+    /// diagnostic surface gh-#277's over-length-copy investigation leans on: an operator watching the
+    /// inspector should be able to spot which persona/kind trims often without re-deriving it by
+    /// comparing <see cref="LlmCallRecord.Response"/> lengths by hand. Discipline, not an outage — the
+    /// segment still airs the trimmed copy (see <see cref="LlmCopyWriter.CleanCopy"/>'s own remarks).
+    /// </summary>
+    Trimmed,
 }

@@ -32,7 +32,7 @@ public static class FeatureCommaDiscipline
         public static void The_personaless_prompt_carries_the_comma_rule()
         {
             // Given/When the neutral system prompt is built
-            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null);
+            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null, maxCopyChars: 450);
 
             // Then the rule is present
             Assert.Contains(CommaRule, prompt, StringComparison.Ordinal);
@@ -41,7 +41,7 @@ public static class FeatureCommaDiscipline
         [Fact]
         public static void The_persona_voiced_prompt_carries_the_same_rule()
         {
-            var prompt = LlmPromptBuilder.BuildSystemPrompt(PersonaSection);
+            var prompt = LlmPromptBuilder.BuildSystemPrompt(PersonaSection, maxCopyChars: 450);
 
             Assert.Contains(CommaRule, prompt, StringComparison.Ordinal);
         }
@@ -49,7 +49,7 @@ public static class FeatureCommaDiscipline
         [Fact]
         public static void The_one_or_two_sentence_cap_survives_alongside_it()
         {
-            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null);
+            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null, maxCopyChars: 450);
 
             Assert.Contains("exactly one or two sentences", prompt, StringComparison.Ordinal);
         }
@@ -60,7 +60,7 @@ public static class FeatureCommaDiscipline
         [Fact]
         public static void A_real_clause_break_is_sent_to_a_new_sentence()
         {
-            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null);
+            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null, maxCopyChars: 450);
 
             Assert.Contains(
                 "When two ideas need separating end the sentence and start a new one",
@@ -71,7 +71,7 @@ public static class FeatureCommaDiscipline
         public static void A_run_together_phrase_just_loses_the_comma()
         {
             // The gh-#292 vocative case: "take off your hats folks" must NOT become two sentences
-            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null);
+            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null, maxCopyChars: 450);
 
             Assert.Contains(
                 "When the words should run together leave the comma out entirely",

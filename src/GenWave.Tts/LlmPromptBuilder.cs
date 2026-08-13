@@ -26,6 +26,24 @@ static class LlmPromptBuilder
     const int MaxSampledQuirks = 3;
 
     /// <summary>
+    /// Chars-per-word divisor used to derive the system prompt's stated word budget from
+    /// <see cref="LlmOptions.MaxCopyChars"/> (SPEC F123.5, STORY-319, PLAN T264) — the SAME
+    /// setting <c>LlmCopyWriter.CharsPerTokenDivisor</c> already derives the completion
+    /// request's <c>max_tokens</c> cap from, one knob rather than a second per-prompt budget.
+    /// Average English word length is ~5 letters plus the trailing space that separates it
+    /// from the next word, so 6 chars/word is the natural divisor for a WORD estimate — a
+    /// smaller divisor than <c>CharsPerTokenDivisor</c>'s 3, which deliberately over-estimates
+    /// a TOKEN budget for headroom (see that constant's own remarks); this figure has the
+    /// opposite bias concern: it is prose the model reads as a target, not a hard request
+    /// parameter, so there is no enforcement risk in dividing by the true average instead of
+    /// padding it. STATED, not enforced — T262's max_tokens cap is what actually bounds
+    /// generation, and T263's sentence-trim salvage is the backstop for whatever slips past
+    /// it; this word figure only gives the model a concrete target to write toward, the same
+    /// way "exactly one or two sentences" already does.
+    /// </summary>
+    const int CharsPerWordDivisor = 6;
+
+    /// <summary>
     /// gh-#188 — appended directly under the Quirks line (and only then): tells the model a
     /// quirk's inline example ("item four-seven-one-two") demonstrates the bit's SHAPE, not a
     /// value to read on air. Public so a spec pins the exact wording next to where it is emitted.
@@ -41,8 +59,17 @@ static class LlmPromptBuilder
     /// write-in-this-voice directive (gh-#152); null/empty (no active persona, or one with nothing
     /// to show) keeps the personality-neutral opening — blurbs work persona-less exactly as
     /// before T6.
+    ///
+    /// <paramref name="maxCopyChars"/> (SPEC F123.5, STORY-319, PLAN T264) is
+    /// <see cref="LlmOptions.MaxCopyChars"/> — the SAME setting <c>LlmCopyWriter</c> derives the
+    /// completion request's <c>max_tokens</c> cap from (PLAN T262) — threaded in as a plain
+    /// parameter rather than a new config dependency on this otherwise pure builder (every other
+    /// member here stays a free function of its arguments; see the class remarks). It quantifies
+    /// the length instruction with a numeric word figure (see <see cref="CharsPerWordDivisor"/>):
+    /// stated, not enforced — the model reads this as a target, while T262's max_tokens cap and
+    /// T263's sentence-trim salvage are what actually bound and clean up the reply.
     /// </summary>
-    public static string BuildSystemPrompt(string? personaSection)
+    public static string BuildSystemPrompt(string? personaSection, int maxCopyChars)
     {
         // gh-#152: "personality-neutral" and a persona section's "Style: bubbly, energetic,
         // expressive" cancelled each other inside the SAME prompt. The neutral framing now applies
@@ -72,8 +99,19 @@ static class LlmPromptBuilder
         // — a real clause break becomes a SENTENCE (which gh-#116 then renders as true 0.6s
         // silence on the Kokoro path), while a run-together phrase just loses the comma. Turning
         // every comma into a sentence would trade a 0.2s stumble for a 0.6s gap and read worse.
-        const string ScaffoldBody =
+        //
+        // SPEC F123.5 (STORY-319, PLAN T264): the word figure below is derived from the SAME
+        // Llm:MaxCopyChars T262's max_tokens cap already derives from — never a second,
+        // independently-set budget. Floored at 1 (Math.Max) purely so a degenerate near-zero
+        // MaxCopyChars (an operator typo, or the option's own [Range(1, ..)] minimum) can never
+        // read back as the nonsensical "at most ~0 words" — this is prose for the model, not a
+        // hard limit, so there is no equivalent to CharsPerTokenDivisor's own MinGenerationTokenCap
+        // ceiling-side risk to guard against here.
+        var wordBudget = Math.Max(1, maxCopyChars / CharsPerWordDivisor);
+
+        var scaffoldBody =
             "Write exactly one or two sentences of spoken copy to be read aloud on air. " +
+            $"At most ~{wordBudget} words total. " +
             "Keep each sentence short. Do not use commas. A comma makes the voice stumble " +
             "mid-line. When two ideas need separating end the sentence and start a new one. " +
             "When the words should run together leave the comma out entirely. " +
@@ -86,8 +124,8 @@ static class LlmPromptBuilder
             "gender from a name.";
 
         return string.IsNullOrEmpty(personaSection)
-            ? $"{NeutralOpening} {ScaffoldBody}"
-            : $"{PersonaOpening} {ScaffoldBody}\n\n{personaSection}";
+            ? $"{NeutralOpening} {scaffoldBody}"
+            : $"{PersonaOpening} {scaffoldBody}\n\n{personaSection}";
     }
 
     /// <summary>

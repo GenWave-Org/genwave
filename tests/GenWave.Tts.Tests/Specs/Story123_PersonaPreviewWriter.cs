@@ -102,6 +102,24 @@ public static class FeaturePersonaPreviewWriter
 
             Assert.Null(holder.Last);
         }
+
+        [Fact]
+        public async Task OverLongCopyWhoseFirstSentenceFitsYieldsSuccessWithTrimmedCopy()
+        {
+            // Given the F123.2 sentence-boundary salvage (STORY-319, PLAN T263) reached through the
+            // SAME RequestCleanedCompletionAsync seam WriteAsync uses: a two-sentence over-length
+            // reply whose FIRST sentence fits the cap airs a TRIM on-air rather than falling back, so
+            // the preview's own "provably what airs" posture (F35.6) reports that same trimmed text
+            // as a Success — never Failed, which would misrepresent what the on-air render actually
+            // produces for identical input.
+            mock.ReplyContent = "Great tune coming up. Stick around for plenty more where that came from tonight.";
+            var (writer, _) = BuildWriter(mock.BaseUri.ToString(), maxCopyChars: 30);
+
+            var result = await writer.WritePreviewAsync(LeadInRequest(), null, CancellationToken.None);
+
+            var success = Assert.IsType<PersonaPreviewResult.Success>(result);
+            Assert.Equal("Great tune coming up.", success.Text);
+        }
     }
 
     public sealed class ScenarioTemplatedKindsRouteToTemplate : IAsyncLifetime
@@ -175,8 +193,14 @@ public static class FeaturePersonaPreviewWriter
         }
 
         [Fact]
-        public async Task OverLongCopyYieldsFailedNeverTruncated()
+        public async Task OverLongCopyWithNoSentenceThatFitsYieldsFailed()
         {
+            // Given cleaned copy whose FIRST sentence already exceeds the cap — one long sentence,
+            // no earlier terminator for the F123.2 salvage to cut at — nothing complete survives to
+            // air. This is NOT "over-length copy is always Failed": see
+            // OverLongCopyWhoseFirstSentenceFitsYieldsSuccessWithTrimmedCopy above for the salvaged
+            // case, which correctly reports Success. This fact is the narrower "nothing salvages"
+            // case, mirroring FeatureCopyFitsItsBreak's own ScenarioNoCompleteSentenceFits.
             mock.ReplyContent = "This completion is intentionally far longer than the configured limit.";
             var (writer, _) = BuildWriter(mock.BaseUri.ToString(), maxCopyChars: 10);
 

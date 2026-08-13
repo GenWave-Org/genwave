@@ -30,11 +30,15 @@ namespace GenWave.Tts;
 /// The RAW completion text exactly as the endpoint returned it — BEFORE
 /// <c>LlmCopyWriter.CleanCopy</c> hygiene — or <see langword="null"/> for
 /// <see cref="LlmCallOutcome.Failed"/>/<see cref="LlmCallOutcome.Timeout"/>, which never received one.
+/// <see cref="LlmCallOutcome.Trimmed"/> (SPEC F123.2-F123.4, STORY-319, PLAN T263) carries the RAW
+/// reply here exactly like <see cref="LlmCallOutcome.Ok"/> does — the salvaged (shorter) text that
+/// actually aired is never stored on this record at all; it exists only as
+/// <c>LlmCopyWriter</c>.<c>CleanCopy</c>'s own return value at render time.
 /// </param>
 /// <param name="StartedAt">When this call was dispatched (includes any single-flight queueing wait — mirrors <see cref="LlmCopyStatusHolder"/>'s own attemptedAt semantics).</param>
 /// <param name="ElapsedMs">Wall-clock duration from <see cref="StartedAt"/> to completion (success or failure).</param>
-/// <param name="Outcome">ok/failed/timeout (SPEC F73.1).</param>
-/// <param name="StatusDetail">The HTTP status or exception type name for a non-<see cref="LlmCallOutcome.Ok"/> outcome; <see langword="null"/> for Ok.</param>
+/// <param name="Outcome">ok/failed/timeout/trimmed (SPEC F73.1, F123.2-F123.4).</param>
+/// <param name="StatusDetail">The HTTP status or exception type name for a non-<see cref="LlmCallOutcome.Ok"/> outcome; <see langword="null"/> for Ok and for <see cref="LlmCallOutcome.Trimmed"/> alike — a trim is not a fault, so it carries no fault detail either.</param>
 /// <param name="Mode">The degradation mode active at call time (SPEC F73.1, F69.1) — Normal/Soft/Hard.</param>
 public sealed record LlmCallRecord(
     long Seq,

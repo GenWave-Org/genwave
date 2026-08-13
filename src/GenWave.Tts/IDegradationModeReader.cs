@@ -18,7 +18,7 @@ public interface IDegradationModeReader
     /// <summary>
     /// The currently applied degradation mode, with NO side effects — never derives or applies a
     /// new transition (contrast <see cref="DegradationController.Evaluate"/>). Safe to read from
-    /// any thread at any time, including from inside <see cref="LlmCopyWriter.RequestCompletionAsync"/>'s
+    /// any thread at any time, including from inside <see cref="LlmCopyWriter.RequestCleanedCompletionAsync"/>'s
     /// own single-flight section: this can never itself force a transition, so there is no lock
     /// ordering to worry about between the two classes' independent locks.
     /// </summary>

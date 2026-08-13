@@ -37,7 +37,7 @@ public static class FeaturePromptGuardrails
         public static void The_scaffold_forbids_unprovided_facts_and_name_alterations()
         {
             // Given/When the persona-less system prompt is built
-            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null);
+            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null, maxCopyChars: 450);
 
             // Then the guarded license is present
             Assert.Contains("never state specific facts about the artist or track", prompt);
@@ -47,7 +47,7 @@ public static class FeaturePromptGuardrails
         [Fact]
         public static void The_open_ended_genuine_knowledge_license_is_gone()
         {
-            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null);
+            var prompt = LlmPromptBuilder.BuildSystemPrompt(personaSection: null, maxCopyChars: 450);
 
             // The pre-gh-#188 sentence invited fabrication — it must not resurface
             Assert.DoesNotContain("genuine knowledge", prompt);

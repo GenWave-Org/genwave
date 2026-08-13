@@ -15,7 +15,7 @@ interface LlmCallsFeedProps {
   timeZone?: string;
 }
 
-const STATUS_LABELS: Record<string, string> = { ok: "Ok", failed: "Failed", timeout: "Timeout" };
+const STATUS_LABELS: Record<string, string> = { ok: "Ok", failed: "Failed", timeout: "Timeout", trimmed: "Trimmed" };
 const MODE_LABELS: Record<string, string> = { normal: "Normal", soft: "Soft", hard: "Hard" };
 
 /** gh-#142: the MODE column is the F69/F70 degradation ladder, which nothing on the page said —
@@ -59,10 +59,13 @@ function Chip({ tone, children }: { tone: ChipTone; children: ReactNode }): Reac
   );
 }
 
-/** ok -> success, failed/timeout -> danger — both misses read the same "something's wrong" tone;
- * the label text (STATUS_LABELS) is what tells them apart. */
+/** ok -> success, trimmed -> brass (the same "system note, not a fault" tone modeTone uses for
+ * soft — a trim airs shorter copy, it did not fail), failed/timeout -> danger — both real misses
+ * read the same "something's wrong" tone; the label text (STATUS_LABELS) is what tells them apart. */
 function statusTone(status: string): ChipTone {
-  return status === "ok" ? "success" : "danger";
+  if (status === "ok") return "success";
+  if (status === "trimmed") return "brass";
+  return "danger";
 }
 
 /** normal -> success (full path), soft -> brass (the same quiet "system note" treatment
