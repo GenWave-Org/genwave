@@ -200,6 +200,9 @@ file sealed class ThrowingThemeStore : IThemeStore
     public Task UpsertAsync(string slug, string definition, string? importedFrom, CancellationToken ct) =>
         throw new InvalidOperationException("simulated DB failure");
 
+    public Task<bool> SaveAsOwnAsync(string slug, string definition, CancellationToken ct) =>
+        throw new InvalidOperationException("simulated DB failure");
+
     public Task<IReadOnlyList<OwnerTheme>> GetAllAsync(CancellationToken ct) =>
         throw new InvalidOperationException("simulated DB failure");
 
