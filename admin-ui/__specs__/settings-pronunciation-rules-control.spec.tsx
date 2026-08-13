@@ -218,7 +218,7 @@ describe("Feature: pronunciation rules render as rows (STORY-254)", () => {
 
   describe("Scenario: an in-effect station row", () => {
     it("renders its pattern", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]));
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -226,7 +226,7 @@ describe("Feature: pronunciation rules render as rows (STORY-254)", () => {
     });
 
     it("renders its word", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]));
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -234,7 +234,7 @@ describe("Feature: pronunciation rules render as rows (STORY-254)", () => {
     });
 
     it("renders its ipa", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]));
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -242,7 +242,7 @@ describe("Feature: pronunciation rules render as rows (STORY-254)", () => {
     });
 
     it("renders a brass Station source chip", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]));
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -250,7 +250,7 @@ describe("Feature: pronunciation rules render as rows (STORY-254)", () => {
     });
 
     it("renders its hit count", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]));
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -258,7 +258,7 @@ describe("Feature: pronunciation rules render as rows (STORY-254)", () => {
     });
 
     it("renders 0 for an in-effect rule that has never fired, rather than a dash", async () => {
-      makeFetchMock(getRow(200, [UNFIRED_ROW]));
+      makeFetchMock(getRow(200, [UNFIRED_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -266,7 +266,7 @@ describe("Feature: pronunciation rules render as rows (STORY-254)", () => {
     });
 
     it("names the rule's own pattern in the Edit button's aria-label, not a positional index (review F4)", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]));
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -276,7 +276,7 @@ describe("Feature: pronunciation rules render as rows (STORY-254)", () => {
 
   describe("Scenario: a persona row is card-owned", () => {
     it("renders the Persona source chip", async () => {
-      makeFetchMock(getRow(200, [PERSONA_ROW]));
+      makeFetchMock(getRow(200, [PERSONA_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -284,7 +284,7 @@ describe("Feature: pronunciation rules render as rows (STORY-254)", () => {
     });
 
     it("renders no Edit affordance", async () => {
-      makeFetchMock(getRow(200, [PERSONA_ROW]));
+      makeFetchMock(getRow(200, [PERSONA_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -292,7 +292,7 @@ describe("Feature: pronunciation rules render as rows (STORY-254)", () => {
     });
 
     it("renders no Delete affordance", async () => {
-      makeFetchMock(getRow(200, [PERSONA_ROW]));
+      makeFetchMock(getRow(200, [PERSONA_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -300,7 +300,7 @@ describe("Feature: pronunciation rules render as rows (STORY-254)", () => {
     });
 
     it("names the card as the edit path in the UI's own language", async () => {
-      makeFetchMock(getRow(200, [PERSONA_ROW]));
+      makeFetchMock(getRow(200, [PERSONA_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -310,7 +310,7 @@ describe("Feature: pronunciation rules render as rows (STORY-254)", () => {
 
   describe("Scenario: a shadowed station row", () => {
     it("is visibly marked not in effect", async () => {
-      makeFetchMock(getRow(200, [SHADOWED_ROW]));
+      makeFetchMock(getRow(200, [SHADOWED_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -318,7 +318,7 @@ describe("Feature: pronunciation rules render as rows (STORY-254)", () => {
     });
 
     it("renders no hit count — a shadowed row carries none (T142 review ruling)", async () => {
-      makeFetchMock(getRow(200, [SHADOWED_ROW]));
+      makeFetchMock(getRow(200, [SHADOWED_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -328,7 +328,7 @@ describe("Feature: pronunciation rules render as rows (STORY-254)", () => {
 
   describe("Scenario: a station row that never compiled", () => {
     it("shows its dropped reason in place of the not-in-effect note", async () => {
-      makeFetchMock(getRow(200, [DEAD_ROW]));
+      makeFetchMock(getRow(200, [DEAD_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -338,13 +338,13 @@ describe("Feature: pronunciation rules render as rows (STORY-254)", () => {
     });
 
     it("stays addressable — still deletable by its blank identity", async () => {
-      const mockFetch = makeFetchMock(getRow(200, [DEAD_ROW]), { status: 204 }, getRow(200, []));
+      const mockFetch = makeFetchMock(getRow(200, [DEAD_ROW]), probeAvailable(), { status: 204 }, getRow(200, []));
       renderControl();
       await waitForLoaded();
 
       await deleteRow();
 
-      expect(requestUrl(mockFetch, 1)).toBe("/api/pronunciations?pattern=&word=");
+      expect(requestUrl(mockFetch, 2)).toBe("/api/pronunciations?pattern=&word=");
     });
   });
 
@@ -361,6 +361,7 @@ describe("Feature: pronunciation rules render as rows (STORY-254)", () => {
       const fn = jest
         .fn<typeof fetch>()
         .mockRejectedValueOnce(new Error("network down"))
+        .mockResolvedValueOnce(toResponse(probeAvailable()))
         .mockResolvedValueOnce(toResponse(getRow(200, [STATION_ROW])));
       global.fetch = fn as unknown as typeof fetch;
       renderControl();
@@ -403,17 +404,22 @@ describe("Feature: adding a pronunciation rule", () => {
 
   describe("Scenario: the rule is accepted", () => {
     it("POSTs the trimmed pattern/word/ipa", async () => {
-      const mockFetch = makeFetchMock(getRow(200, []), { status: 201, body: {} }, getRow(200, [STATION_ROW]));
+      const mockFetch = makeFetchMock(
+        getRow(200, []),
+        probeAvailable(),
+        { status: 201, body: {} },
+        getRow(200, [STATION_ROW])
+      );
       renderControl();
       await waitForLoaded();
 
       await fillAndSubmitAdd("Big Sur", "Sur", "/sɜːr/");
 
-      expect(requestBody(mockFetch, 1)).toEqual({ pattern: "Big Sur", word: "Sur", ipa: "/sɜːr/" });
+      expect(requestBody(mockFetch, 2)).toEqual({ pattern: "Big Sur", word: "Sur", ipa: "/sɜːr/" });
     });
 
     it("refreshes the list with the new row", async () => {
-      makeFetchMock(getRow(200, []), { status: 201, body: {} }, getRow(200, [STATION_ROW]));
+      makeFetchMock(getRow(200, []), probeAvailable(), { status: 201, body: {} }, getRow(200, [STATION_ROW]));
       renderControl();
       await waitForLoaded();
 
@@ -423,7 +429,7 @@ describe("Feature: adding a pronunciation rule", () => {
     });
 
     it("toasts the outcome", async () => {
-      makeFetchMock(getRow(200, []), { status: 201, body: {} }, getRow(200, [STATION_ROW]));
+      makeFetchMock(getRow(200, []), probeAvailable(), { status: 201, body: {} }, getRow(200, [STATION_ROW]));
       renderControl();
       await waitForLoaded();
 
@@ -433,13 +439,13 @@ describe("Feature: adding a pronunciation rule", () => {
     });
 
     it("sends a null word when the word field is left blank", async () => {
-      const mockFetch = makeFetchMock(getRow(200, []), { status: 201, body: {} }, getRow(200, []));
+      const mockFetch = makeFetchMock(getRow(200, []), probeAvailable(), { status: 201, body: {} }, getRow(200, []));
       renderControl();
       await waitForLoaded();
 
       await fillAndSubmitAdd("MacLeod", "", "/x/");
 
-      expect(requestBody(mockFetch, 1)).toEqual({ pattern: "MacLeod", word: null, ipa: "/x/" });
+      expect(requestBody(mockFetch, 2)).toEqual({ pattern: "MacLeod", word: null, ipa: "/x/" });
     });
   });
 
@@ -452,6 +458,7 @@ describe("Feature: adding a pronunciation rule", () => {
     it("toasts the write's collision warning alongside the success toast", async () => {
       makeFetchMock(
         getRow(200, []),
+        probeAvailable(),
         { status: 201, body: { rule: STATION_ROW, warnings: [COLLISION_WARNING] } },
         getRow(200, [STATION_ROW])
       );
@@ -467,6 +474,7 @@ describe("Feature: adding a pronunciation rule", () => {
     it("toasts nothing extra when the write carries no warnings", async () => {
       makeFetchMock(
         getRow(200, []),
+        probeAvailable(),
         { status: 201, body: { rule: STATION_ROW, warnings: [] } },
         getRow(200, [STATION_ROW])
       );
@@ -482,7 +490,7 @@ describe("Feature: adding a pronunciation rule", () => {
 
   describe("Scenario (sad path): the rule is rejected in place", () => {
     it("surfaces the 400's field message under the offending field, not as a toast", async () => {
-      makeFetchMock(getRow(200, []), {
+      makeFetchMock(getRow(200, []), probeAvailable(), {
         status: 400,
         body: { errors: { ipa: ["Ipa must not contain ')', '[', or ']'."] } },
       });
@@ -495,7 +503,7 @@ describe("Feature: adding a pronunciation rule", () => {
     });
 
     it("never re-fetches the list on a rejected add (review F2: a real invalid rule, not a client-blocked one)", async () => {
-      const mockFetch = makeFetchMock(getRow(200, []), {
+      const mockFetch = makeFetchMock(getRow(200, []), probeAvailable(), {
         status: 400,
         body: { errors: { ipa: ["Ipa must not contain ')', '[', or ']'."] } },
       });
@@ -506,13 +514,13 @@ describe("Feature: adding a pronunciation rule", () => {
       // fires; the server, not the client, is what rejects this malformed ipa.
       await fillAndSubmitAdd("MacLeod", "", "/x)/");
 
-      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(mockFetch).toHaveBeenCalledTimes(3);
     });
   });
 
   describe("Scenario (sad path): the identity collides with an existing station rule", () => {
     it("shows the 409's detail as a row-level message, not a toast", async () => {
-      makeFetchMock(getRow(200, []), {
+      makeFetchMock(getRow(200, []), probeAvailable(), {
         status: 409,
         body: { detail: "An existing station rule already matches pattern 'MacLeod' word 'MacLeod'." },
       });
@@ -548,6 +556,7 @@ describe("Feature: editing a pronunciation rule in place", () => {
     it("PUTs to the original identity's query-string address", async () => {
       const mockFetch = makeFetchMock(
         getRow(200, [STATION_ROW]),
+        probeAvailable(),
         { status: 200, body: {} },
         getRow(200, [STATION_ROW])
       );
@@ -560,12 +569,13 @@ describe("Feature: editing a pronunciation rule in place", () => {
         fireEvent.click(screen.getByRole("button", { name: /save/i }));
       });
 
-      expect(requestUrl(mockFetch, 1)).toBe("/api/pronunciations?pattern=Big%20Sur&word=Sur");
+      expect(requestUrl(mockFetch, 2)).toBe("/api/pronunciations?pattern=Big%20Sur&word=Sur");
     });
 
     it("PUTs with the edited body", async () => {
       const mockFetch = makeFetchMock(
         getRow(200, [STATION_ROW]),
+        probeAvailable(),
         { status: 200, body: {} },
         getRow(200, [STATION_ROW])
       );
@@ -578,11 +588,11 @@ describe("Feature: editing a pronunciation rule in place", () => {
         fireEvent.click(screen.getByRole("button", { name: /save/i }));
       });
 
-      expect(requestBody(mockFetch, 1)).toEqual({ pattern: "Big Sur", word: "Sur", ipa: "/newIpa/" });
+      expect(requestBody(mockFetch, 2)).toEqual({ pattern: "Big Sur", word: "Sur", ipa: "/newIpa/" });
     });
 
     it("returns to Edit/Delete once saved", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]), { status: 200, body: {} }, getRow(200, [STATION_ROW]));
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable(), { status: 200, body: {} }, getRow(200, [STATION_ROW]));
       renderControl();
       await waitForLoaded();
 
@@ -595,7 +605,7 @@ describe("Feature: editing a pronunciation rule in place", () => {
     });
 
     it("shows plain 'Save' as the button's visible text — identity lives only in aria-label (review F4)", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]));
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -607,7 +617,7 @@ describe("Feature: editing a pronunciation rule in place", () => {
 
   describe("Scenario: a shadowed pair shares one (pattern, word) identity (review F1, AC2)", () => {
     it("editing the station row leaves the persona row read-only, still showing its own ipa", async () => {
-      makeFetchMock(getRow(200, [SHADOWED_STATION_MACLEOD, PERSONA_MACLEOD]));
+      makeFetchMock(getRow(200, [SHADOWED_STATION_MACLEOD, PERSONA_MACLEOD]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -624,7 +634,7 @@ describe("Feature: editing a pronunciation rule in place", () => {
 
   describe("Scenario (sad path): the edited rule is rejected in place", () => {
     it("surfaces the field message inline on the row, still editing", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]), {
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable(), {
         status: 400,
         body: { errors: { ipa: ["Ipa must not be blank after trimming slash delimiters and whitespace."] } },
       });
@@ -645,7 +655,7 @@ describe("Feature: editing a pronunciation rule in place", () => {
 
   describe("Scenario (sad path): the new identity collides with a different rule", () => {
     it("shows the collision as a row-level message", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]), {
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable(), {
         status: 409,
         body: { detail: "An existing station rule already matches pattern 'Alpha' word 'Alpha'." },
       });
@@ -668,6 +678,7 @@ describe("Feature: editing a pronunciation rule in place", () => {
     it("toasts the outcome", async () => {
       makeFetchMock(
         getRow(200, [STATION_ROW]),
+        probeAvailable(),
         {
           status: 404,
           body: { detail: "No station pronunciation rule matches pattern 'Big Sur' word 'Sur'." },
@@ -690,6 +701,7 @@ describe("Feature: editing a pronunciation rule in place", () => {
     it("refreshes the list", async () => {
       const mockFetch = makeFetchMock(
         getRow(200, [STATION_ROW]),
+        probeAvailable(),
         {
           status: 404,
           body: { detail: "No station pronunciation rule matches pattern 'Big Sur' word 'Sur'." },
@@ -704,7 +716,7 @@ describe("Feature: editing a pronunciation rule in place", () => {
         fireEvent.click(screen.getByRole("button", { name: /save/i }));
       });
 
-      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(4));
     });
   });
 });
@@ -727,17 +739,17 @@ describe("Feature: deleting a pronunciation rule", () => {
 
   describe("Scenario: the rule is removed", () => {
     it("DELETEs the row's own identity", async () => {
-      const mockFetch = makeFetchMock(getRow(200, [STATION_ROW]), { status: 204 }, getRow(200, []));
+      const mockFetch = makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable(), { status: 204 }, getRow(200, []));
       renderControl();
       await waitForLoaded();
 
       await deleteRow();
 
-      expect(requestUrl(mockFetch, 1)).toBe("/api/pronunciations?pattern=Big%20Sur&word=Sur");
+      expect(requestUrl(mockFetch, 2)).toBe("/api/pronunciations?pattern=Big%20Sur&word=Sur");
     });
 
     it("toasts the outcome", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]), { status: 204 }, getRow(200, []));
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable(), { status: 204 }, getRow(200, []));
       renderControl();
       await waitForLoaded();
 
@@ -751,6 +763,7 @@ describe("Feature: deleting a pronunciation rule", () => {
     it("toasts the outcome", async () => {
       makeFetchMock(
         getRow(200, [STATION_ROW]),
+        probeAvailable(),
         { status: 404, body: { detail: "No station pronunciation rule matches pattern 'Big Sur' word 'Sur'." } },
         getRow(200, [])
       );
@@ -765,6 +778,7 @@ describe("Feature: deleting a pronunciation rule", () => {
     it("refreshes the list", async () => {
       const mockFetch = makeFetchMock(
         getRow(200, [STATION_ROW]),
+        probeAvailable(),
         { status: 404, body: { detail: "No station pronunciation rule matches pattern 'Big Sur' word 'Sur'." } },
         getRow(200, [])
       );
@@ -773,13 +787,13 @@ describe("Feature: deleting a pronunciation rule", () => {
 
       await deleteRow();
 
-      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(4));
     });
   });
 
   describe("Scenario: delete requires confirmation (review F5)", () => {
     it("opens a confirm dialog naming the consequence before any DELETE fires", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]));
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -791,7 +805,7 @@ describe("Feature: deleting a pronunciation rule", () => {
     });
 
     it("cancelling the dialog leaves the rule intact — no DELETE fires", async () => {
-      const mockFetch = makeFetchMock(getRow(200, [STATION_ROW]));
+      const mockFetch = makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -802,7 +816,7 @@ describe("Feature: deleting a pronunciation rule", () => {
         await Promise.resolve();
       });
 
-      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -815,6 +829,7 @@ describe("Feature: deleting a pronunciation rule", () => {
       const fn = jest
         .fn<typeof fetch>()
         .mockResolvedValueOnce(toResponse(getRow(200, [STATION_ROW])))
+        .mockResolvedValueOnce(toResponse(probeAvailable()))
         .mockImplementationOnce(() => deletePromise)
         .mockResolvedValueOnce(toResponse(getRow(200, [])));
       global.fetch = fn as unknown as typeof fetch;
@@ -829,7 +844,7 @@ describe("Feature: deleting a pronunciation rule", () => {
         resolveDelete(toResponse({ status: 204 }));
         await Promise.resolve();
       });
-      await waitFor(() => expect(fn).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(fn).toHaveBeenCalledTimes(4));
     });
   });
 });
@@ -855,6 +870,7 @@ describe("Feature: content-addressed PUT/DELETE encode URL-hostile pattern/word 
     it("percent-encodes the query string on PUT", async () => {
       const mockFetch = makeFetchMock(
         getRow(200, [HOSTILE_ROW]),
+        probeAvailable(),
         { status: 200, body: {} },
         getRow(200, [HOSTILE_ROW])
       );
@@ -866,7 +882,7 @@ describe("Feature: content-addressed PUT/DELETE encode URL-hostile pattern/word 
         fireEvent.click(screen.getByRole("button", { name: /save/i }));
       });
 
-      expect(requestUrl(mockFetch, 1)).toBe(
+      expect(requestUrl(mockFetch, 2)).toBe(
         `/api/pronunciations?pattern=${encodeURIComponent("Rock & Roll / R&B")}&word=${encodeURIComponent("R&B")}`
       );
     });
@@ -874,25 +890,25 @@ describe("Feature: content-addressed PUT/DELETE encode URL-hostile pattern/word 
 
   describe("Scenario: deleting a row whose identity carries spaces, ampersands, and slashes", () => {
     it("percent-encodes the query string on DELETE", async () => {
-      const mockFetch = makeFetchMock(getRow(200, [HOSTILE_ROW]), { status: 204 }, getRow(200, []));
+      const mockFetch = makeFetchMock(getRow(200, [HOSTILE_ROW]), probeAvailable(), { status: 204 }, getRow(200, []));
       renderControl();
       await waitForLoaded();
 
       await deleteRow();
 
-      expect(requestUrl(mockFetch, 1)).toBe(
+      expect(requestUrl(mockFetch, 2)).toBe(
         `/api/pronunciations?pattern=${encodeURIComponent("Rock & Roll / R&B")}&word=${encodeURIComponent("R&B")}`
       );
     });
 
     it("uses DELETE as the method", async () => {
-      const mockFetch = makeFetchMock(getRow(200, [HOSTILE_ROW]), { status: 204 }, getRow(200, []));
+      const mockFetch = makeFetchMock(getRow(200, [HOSTILE_ROW]), probeAvailable(), { status: 204 }, getRow(200, []));
       renderControl();
       await waitForLoaded();
 
       await deleteRow();
 
-      expect(requestMethod(mockFetch, 1)).toBe("DELETE");
+      expect(requestMethod(mockFetch, 2)).toBe("DELETE");
     });
   });
 });
@@ -925,7 +941,7 @@ describe("Feature: the add UI is never a <form> (nested-form browser defect)", (
 
   describe("Scenario: the control renders inside another page's own <form>", () => {
     it("mounts no <form> element of its own", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]));
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable());
       const { container } = renderControl();
       await waitForLoaded();
 
@@ -940,4 +956,12 @@ describe("Feature: the add UI is never a <form> (nested-form browser defect)", (
 
 function getRow(status: number, rows: RuleRowFixture[]): MockResponseSpec {
   return { status, body: rows };
+}
+
+/** The mount-time `GET /api/pronunciations/derive/available` probe (gh-#487) — every render now
+ * fires this alongside the initial rows load, so every `makeFetchMock` queue in this file stubs it
+ * too (`available: true`; this suite's own scenarios never exercise the probe's absent/error
+ * paths — that lives in settings-pronunciation-rules-control-respell.spec.tsx). */
+function probeAvailable(): MockResponseSpec {
+  return { status: 200, body: { available: true } };
 }

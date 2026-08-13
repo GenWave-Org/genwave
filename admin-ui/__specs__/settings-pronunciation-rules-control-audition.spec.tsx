@@ -92,6 +92,14 @@ function getRow(status: number, rows: RuleRowFixture[]): MockResponseSpec {
   return { status, body: rows };
 }
 
+/** The mount-time `GET /api/pronunciations/derive/available` probe (gh-#487) — every render now
+ * fires this alongside the initial rows load, so every queue in this file stubs it too
+ * (`available: true`; this suite's own scenarios never exercise the probe's absent/error paths —
+ * that lives in settings-pronunciation-rules-control-respell.spec.tsx). */
+function probeAvailable(): MockResponseSpec {
+  return { status: 200, body: { available: true } };
+}
+
 function renderControl(): ReturnType<typeof render> {
   return render(
     <ConfirmDialogProvider>
@@ -147,36 +155,48 @@ afterEach(() => {
 describe("Feature: auditioning a station row (SPEC F126.1, STORY-323)", () => {
   describe("Scenario: the operator asks to hear the row's own rule", () => {
     it("posts the row's own pattern/word/ipa as the single candidate rule", async () => {
-      const mockFetch = makeFetchMock(getRow(200, [STATION_ROW]), { status: 200, blob: new Blob(["wav"]) });
+      const mockFetch = makeFetchMock(
+        getRow(200, [STATION_ROW]),
+        probeAvailable(),
+        { status: 200, blob: new Blob(["wav"]) }
+      );
       renderControl();
       await waitForLoaded();
 
       await clickHearIt(dataRow(/Reykjavík/));
 
-      expect(requestBody(mockFetch, 1)).toMatchObject({
+      expect(requestBody(mockFetch, 2)).toMatchObject({
         candidateRules: [{ pattern: "Reykjavík", word: "Reykjavík", ipa: "/ˈreɪkjaviːk/" }],
       });
     });
 
     it("posts a phrase that contains the row's own pattern verbatim, so the rule actually fires", async () => {
-      const mockFetch = makeFetchMock(getRow(200, [STATION_ROW]), { status: 200, blob: new Blob(["wav"]) });
+      const mockFetch = makeFetchMock(
+        getRow(200, [STATION_ROW]),
+        probeAvailable(),
+        { status: 200, blob: new Blob(["wav"]) }
+      );
       renderControl();
       await waitForLoaded();
 
       await clickHearIt(dataRow(/Reykjavík/));
 
-      const body = requestBody(mockFetch, 1) as { text: string };
+      const body = requestBody(mockFetch, 2) as { text: string };
       expect(body.text).toContain("Reykjavík");
     });
 
     it("posts to POST /api/tts/preview", async () => {
-      const mockFetch = makeFetchMock(getRow(200, [STATION_ROW]), { status: 200, blob: new Blob(["wav"]) });
+      const mockFetch = makeFetchMock(
+        getRow(200, [STATION_ROW]),
+        probeAvailable(),
+        { status: 200, blob: new Blob(["wav"]) }
+      );
       renderControl();
       await waitForLoaded();
 
       await clickHearIt(dataRow(/Reykjavík/));
 
-      const call = mockFetch.mock.calls[1] as unknown as [string, RequestInit];
+      const call = mockFetch.mock.calls[2] as unknown as [string, RequestInit];
       expect(call[0]).toBe("/api/tts/preview");
       expect(call[1].method).toBe("POST");
     });
@@ -189,6 +209,7 @@ describe("Feature: auditioning a station row (SPEC F126.1, STORY-323)", () => {
       const fn = jest
         .fn<typeof fetch>()
         .mockResolvedValueOnce(toResponse(getRow(200, [STATION_ROW])))
+        .mockResolvedValueOnce(toResponse(probeAvailable()))
         .mockImplementationOnce(() => previewPromise);
       global.fetch = fn as unknown as typeof fetch;
       renderControl();
@@ -214,7 +235,11 @@ describe("Feature: auditioning a station row (SPEC F126.1, STORY-323)", () => {
     });
 
     it("plays the returned audio on 200", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]), { status: 200, blob: new Blob(["wav-bytes"], { type: "audio/wav" }) });
+      makeFetchMock(
+        getRow(200, [STATION_ROW]),
+        probeAvailable(),
+        { status: 200, blob: new Blob(["wav-bytes"], { type: "audio/wav" }) }
+      );
       renderControl();
       await waitForLoaded();
 
@@ -226,7 +251,7 @@ describe("Feature: auditioning a station row (SPEC F126.1, STORY-323)", () => {
 
     it("toasts the field-named message on a 400 — the real shape is a ValidationProblemDetails "
       + "with no `detail`, so the button reads its `errors` dict directly, same as the write path", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]), {
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable(), {
         status: 400,
         body: { errors: { "candidateRules[0].ipa": ["Ipa must not contain ')', '[', or ']'."] } },
       });
@@ -239,7 +264,7 @@ describe("Feature: auditioning a station row (SPEC F126.1, STORY-323)", () => {
     });
 
     it("toasts a message on a 500", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]), { status: 500, body: {} });
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable(), { status: 500, body: {} });
       renderControl();
       await waitForLoaded();
 
@@ -249,7 +274,7 @@ describe("Feature: auditioning a station row (SPEC F126.1, STORY-323)", () => {
     });
 
     it("never renders an <audio> element after a failed request", async () => {
-      makeFetchMock(getRow(200, [STATION_ROW]), { status: 500, body: {} });
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable(), { status: 500, body: {} });
       renderControl();
       await waitForLoaded();
 
@@ -268,7 +293,7 @@ describe("Feature: auditioning a station row (SPEC F126.1, STORY-323)", () => {
 describe("Feature: a persona row carries no audition affordance (STORY-323 ruling)", () => {
   describe("Scenario: the merged list includes a card-owned persona rule", () => {
     it("renders no Hear it button on the persona row", async () => {
-      makeFetchMock(getRow(200, [PERSONA_ROW]));
+      makeFetchMock(getRow(200, [PERSONA_ROW]), probeAvailable());
       renderControl();
       await waitForLoaded();
 
@@ -290,7 +315,7 @@ describe("Feature: auditioning the add form's draft rule (STORY-323 core value)"
 
   describe("Scenario: the operator has typed a pattern/ipa but not yet saved", () => {
     it("posts the typed draft as the candidate rule, never a saved row", async () => {
-      const mockFetch = makeFetchMock(getRow(200, []), { status: 200, blob: new Blob(["wav"]) });
+      const mockFetch = makeFetchMock(getRow(200, []), probeAvailable(), { status: 200, blob: new Blob(["wav"]) });
       renderControl();
       await waitForLoaded();
       fillDraft("Big Sur", "Sur", "/sɜːr/");
@@ -300,7 +325,7 @@ describe("Feature: auditioning the add form's draft rule (STORY-323 core value)"
         await Promise.resolve();
       });
 
-      expect(requestBody(mockFetch, 1)).toMatchObject({
+      expect(requestBody(mockFetch, 2)).toMatchObject({
         candidateRules: [{ pattern: "Big Sur", word: "Sur", ipa: "/sɜːr/" }],
       });
     });
@@ -308,7 +333,7 @@ describe("Feature: auditioning the add form's draft rule (STORY-323 core value)"
     it("sends a blank draft word as-is, not defaulted to the pattern client-side — "
       + "PronunciationRuleResolver.ResolveForRender's own PronunciationRuleSet.Create→PronunciationRule.Parse "
       + "chain applies that default server-side, the same one the write path relies on", async () => {
-      const mockFetch = makeFetchMock(getRow(200, []), { status: 200, blob: new Blob(["wav"]) });
+      const mockFetch = makeFetchMock(getRow(200, []), probeAvailable(), { status: 200, blob: new Blob(["wav"]) });
       renderControl();
       await waitForLoaded();
       fillDraft("Big Sur", "", "/sɜːr/");
@@ -318,12 +343,16 @@ describe("Feature: auditioning the add form's draft rule (STORY-323 core value)"
         await Promise.resolve();
       });
 
-      const body = requestBody(mockFetch, 1) as { candidateRules: [{ word: string }] };
+      const body = requestBody(mockFetch, 2) as { candidateRules: [{ word: string }] };
       expect(body.candidateRules[0].word).toBe("");
     });
 
     it("plays the returned audio on 200", async () => {
-      makeFetchMock(getRow(200, []), { status: 200, blob: new Blob(["wav-bytes"], { type: "audio/wav" }) });
+      makeFetchMock(
+        getRow(200, []),
+        probeAvailable(),
+        { status: 200, blob: new Blob(["wav-bytes"], { type: "audio/wav" }) }
+      );
       renderControl();
       await waitForLoaded();
       fillDraft("Big Sur", "Sur", "/sɜːr/");
@@ -338,7 +367,7 @@ describe("Feature: auditioning the add form's draft rule (STORY-323 core value)"
     });
 
     it("never POSTs the add draft to /api/pronunciations — auditioning never saves anything", async () => {
-      const mockFetch = makeFetchMock(getRow(200, []), { status: 200, blob: new Blob(["wav"]) });
+      const mockFetch = makeFetchMock(getRow(200, []), probeAvailable(), { status: 200, blob: new Blob(["wav"]) });
       renderControl();
       await waitForLoaded();
       fillDraft("Big Sur", "Sur", "/sɜːr/");
@@ -358,7 +387,7 @@ describe("Feature: auditioning the add form's draft rule (STORY-323 core value)"
 
   describe("Scenario: the draft has no pattern or ipa yet", () => {
     it("disables the Hear it button until the draft could possibly compile", async () => {
-      makeFetchMock(getRow(200, []));
+      makeFetchMock(getRow(200, []), probeAvailable());
       renderControl();
       await waitForLoaded();
 

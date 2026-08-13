@@ -182,6 +182,11 @@ file sealed class RequiresRealEspeakNgAttribute : FactAttribute
 /// established idiom for this suite).</summary>
 file sealed record RespellDeriveResponseBody(string Ipa);
 
+/// <summary>Wire shape of <c>GET /api/pronunciations/derive/available</c>'s body (gh-#487) — mirrors
+/// GenWave.Host.Api.RespellAvailabilityResponse without depending on it directly (this suite's own
+/// established idiom, see <see cref="RespellDeriveResponseBody"/> immediately above).</summary>
+file sealed record RespellAvailabilityResponseBody(bool Available);
+
 public static class FeatureRespellOracle
 {
     // Widened to the base WebApplicationFactory<Program> type: a file-local type
@@ -245,6 +250,72 @@ public static class FeatureRespellOracle
             var client = factory.CreateClient(); // no login
 
             var response = await client.PostAsJsonAsync("/api/pronunciations/derive", new { respelling = "muh-KLOWD" });
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+    }
+
+    // ── CAPABILITY PROBE (gh-#487) ───────────────────────────────────────────
+
+    public sealed class ScenarioTheAvailabilityProbeMirrorsTheLatch
+    {
+        [Fact]
+        public async Task The_probe_reports_true_when_the_oracle_is_available()
+        {
+            var oracle = new FakeRespellOracle(available: true);
+            await using var factory = new RespellOracleWebFactory(oracle);
+            var client = await LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync("/api/pronunciations/derive/available");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<RespellAvailabilityResponseBody>();
+            Assert.NotNull(body);
+            Assert.True(body!.Available);
+        }
+
+        [Fact]
+        public async Task The_probe_reports_false_when_the_oracle_has_latched_unavailable()
+        {
+            var oracle = new FakeRespellOracle(available: false);
+            await using var factory = new RespellOracleWebFactory(oracle);
+            var client = await LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync("/api/pronunciations/derive/available");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<RespellAvailabilityResponseBody>();
+            Assert.NotNull(body);
+            Assert.False(body!.Available);
+        }
+
+        [Fact]
+        public async Task The_probe_never_spawns_a_process_either_way()
+        {
+            // The whole point of gh-#487: this is cheap enough for a per-mount probe precisely
+            // because it never reaches DeriveAsync — the oracle's own spawn-counting fake proves
+            // it wasn't called, for both the available and unavailable latch states.
+            var availableOracle = new FakeRespellOracle(available: true);
+            await using var availableFactory = new RespellOracleWebFactory(availableOracle);
+            var availableClient = await LoggedInClientAsync(availableFactory);
+            var unavailableOracle = new FakeRespellOracle(available: false);
+            await using var unavailableFactory = new RespellOracleWebFactory(unavailableOracle);
+            var unavailableClient = await LoggedInClientAsync(unavailableFactory);
+
+            await availableClient.GetAsync("/api/pronunciations/derive/available");
+            await unavailableClient.GetAsync("/api/pronunciations/derive/available");
+
+            Assert.Equal(0, availableOracle.DeriveCallCount);
+            Assert.Equal(0, unavailableOracle.DeriveCallCount);
+        }
+
+        [Fact]
+        public async Task The_probe_is_owner_only_same_as_the_derive_endpoint()
+        {
+            await using var factory = new RespellOracleWebFactory(new FakeRespellOracle());
+            var client = factory.CreateClient(); // no login
+
+            var response = await client.GetAsync("/api/pronunciations/derive/available");
 
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }

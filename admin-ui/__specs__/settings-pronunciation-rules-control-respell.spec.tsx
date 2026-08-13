@@ -10,11 +10,18 @@
 // "Get IPA" posts { respelling } to POST /api/pronunciations/derive and writes the returned `ipa`
 // straight into the add form's own IPA field — the operator then adjusts/auditions (T275's "Hear
 // it") before ever saving. Add-form only (PLAN T279 ruling): the primary authoring surface; the
-// T145-review-flagged tighter edit row is deferred, not built here. There is no availability-probe
-// endpoint (T278 didn't ship one — PLAN T279 ruling): the assist is present until the FIRST attempt
-// proves it absent with a 501, at which point it hides itself for the rest of this mount
-// (attempt-and-hide, no new endpoint). The respelling itself is a scratch field: it is never part
-// of a saved rule and never reaches POST /api/pronunciations's own body.
+// T145-review-flagged tighter edit row is deferred, not built here. The respelling itself is a
+// scratch field: it is never part of a saved rule and never reaches POST /api/pronunciations's own
+// body.
+//
+// gh-#487: the control now also probes GET /api/pronunciations/derive/available once on mount, off
+// the SAME server-side IRespellOracle.IsAvailable latch the 501 path reads, so an espeak-less image
+// hides the assist BEFORE the operator's first click rather than after one dead-end 501 (the old
+// PLAN T279 "no availability probe" ruling this supersedes). Every scenario below now stubs that
+// mount-time GET alongside the initial GET /api/pronunciations list load; the "Feature: the mount
+// capability probe" block at the end of this file covers the probe's own true/false/network-fail
+// outcomes directly. The 501 attempt-and-hide fallback stays covered above unchanged — it is still
+// reachable whenever the probe itself couldn't catch an absent binary.
 
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
@@ -56,6 +63,14 @@ function makeFetchMock(...specs: MockResponseSpec[]): jest.MockedFunction<typeof
  * since this suite's own scenarios don't need any saved rows. */
 function getRows(rows: unknown[] = []): MockResponseSpec {
   return { status: 200, body: rows };
+}
+
+/** The mount-time `GET /api/pronunciations/derive/available` probe (gh-#487) every render also
+ * now triggers, alongside {@link getRows} — `available: true` unless a scenario is specifically
+ * exercising the probe's own false/absent behavior, so every OTHER scenario in this file (written
+ * before the probe existed) keeps seeing the assist exactly as it did before. */
+function probeAvailable(available = true): MockResponseSpec {
+  return { status: 200, body: { available } };
 }
 
 function renderControl(): ReturnType<typeof render> {
@@ -119,32 +134,32 @@ afterEach(() => {
 describe("Feature: the add form's respell assist (SPEC F126.2, STORY-324)", () => {
   describe("Scenario: the operator asks to derive IPA from a respelling", () => {
     it("posts to POST /api/pronunciations/derive", async () => {
-      const mockFetch = makeFetchMock(getRows(), { status: 200, body: { ipa: "/məˈklaʊd/" } });
+      const mockFetch = makeFetchMock(getRows(), probeAvailable(), { status: 200, body: { ipa: "/məˈklaʊd/" } });
       renderControl();
       await waitForLoaded();
       fillRespelling("muh-KLOWD");
 
       await clickGetIpa();
 
-      expect({ url: requestUrl(mockFetch, 1), method: requestMethod(mockFetch, 1) }).toEqual({
+      expect({ url: requestUrl(mockFetch, 2), method: requestMethod(mockFetch, 2) }).toEqual({
         url: "/api/pronunciations/derive",
         method: "POST",
       });
     });
 
     it("posts the typed respelling as the request body", async () => {
-      const mockFetch = makeFetchMock(getRows(), { status: 200, body: { ipa: "/məˈklaʊd/" } });
+      const mockFetch = makeFetchMock(getRows(), probeAvailable(), { status: 200, body: { ipa: "/məˈklaʊd/" } });
       renderControl();
       await waitForLoaded();
       fillRespelling("muh-KLOWD");
 
       await clickGetIpa();
 
-      expect(requestBody(mockFetch, 1)).toEqual({ respelling: "muh-KLOWD" });
+      expect(requestBody(mockFetch, 2)).toEqual({ respelling: "muh-KLOWD" });
     });
 
     it("writes the returned ipa into the IPA field on 200", async () => {
-      makeFetchMock(getRows(), { status: 200, body: { ipa: "/məˈklaʊd/" } });
+      makeFetchMock(getRows(), probeAvailable(), { status: 200, body: { ipa: "/məˈklaʊd/" } });
       renderControl();
       await waitForLoaded();
       fillRespelling("muh-KLOWD");
@@ -157,7 +172,7 @@ describe("Feature: the add form's respell assist (SPEC F126.2, STORY-324)", () =
 
   describe("Scenario (sad path): the respelling is rejected", () => {
     it("surfaces the 400's message in place, next to the respelling field", async () => {
-      makeFetchMock(getRows(), {
+      makeFetchMock(getRows(), probeAvailable(), {
         status: 400,
         body: { detail: "respelling must not exceed 200 characters." },
       });
@@ -171,7 +186,7 @@ describe("Feature: the add form's respell assist (SPEC F126.2, STORY-324)", () =
     });
 
     it("does not toast the rejection — it is an inline field message, not a mutation-outcome toast", async () => {
-      makeFetchMock(getRows(), {
+      makeFetchMock(getRows(), probeAvailable(), {
         status: 400,
         body: { detail: "respelling must not exceed 200 characters." },
       });
@@ -188,6 +203,7 @@ describe("Feature: the add form's respell assist (SPEC F126.2, STORY-324)", () =
     it("clears the stale rejection message once the operator fixes the IPA by hand and adds the rule", async () => {
       const mockFetch = makeFetchMock(
         getRows(),
+        probeAvailable(),
         { status: 400, body: { detail: "respelling must not exceed 200 characters." } },
         { status: 201, body: {} },
         getRows()
@@ -203,7 +219,7 @@ describe("Feature: the add form's respell assist (SPEC F126.2, STORY-324)", () =
       await act(async () => {
         fireEvent.click(screen.getByRole("button", { name: /add pronunciation/i }));
       });
-      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(4));
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(5));
 
       expect(screen.queryByText("respelling must not exceed 200 characters.")).not.toBeInTheDocument();
     });
@@ -211,7 +227,7 @@ describe("Feature: the add form's respell assist (SPEC F126.2, STORY-324)", () =
 
   describe("Scenario (sad path): espeak-ng is absent from this image (501)", () => {
     it("hides the Get IPA button", async () => {
-      makeFetchMock(getRows(), { status: 501, body: {} });
+      makeFetchMock(getRows(), probeAvailable(), { status: 501, body: {} });
       renderControl();
       await waitForLoaded();
       fillRespelling("muh-KLOWD");
@@ -222,7 +238,7 @@ describe("Feature: the add form's respell assist (SPEC F126.2, STORY-324)", () =
     });
 
     it("hides the respelling input itself, not just the button", async () => {
-      makeFetchMock(getRows(), { status: 501, body: {} });
+      makeFetchMock(getRows(), probeAvailable(), { status: 501, body: {} });
       renderControl();
       await waitForLoaded();
       fillRespelling("muh-KLOWD");
@@ -233,7 +249,7 @@ describe("Feature: the add form's respell assist (SPEC F126.2, STORY-324)", () =
     });
 
     it("stays hidden through later interaction — the 501 latches for the rest of this mount", async () => {
-      makeFetchMock(getRows(), { status: 501, body: {} });
+      makeFetchMock(getRows(), probeAvailable(), { status: 501, body: {} });
       renderControl();
       await waitForLoaded();
       fillRespelling("muh-KLOWD");
@@ -253,7 +269,7 @@ describe("Feature: the add form's respell assist (SPEC F126.2, STORY-324)", () =
 describe("Feature: the respelling never reaches a saved rule (STORY-324 ruling)", () => {
   describe("Scenario: the operator types a respelling, then saves the rule by hand", () => {
     it("never includes the respelling in POST /api/pronunciations's own body", async () => {
-      const mockFetch = makeFetchMock(getRows(), { status: 201, body: {} }, getRows());
+      const mockFetch = makeFetchMock(getRows(), probeAvailable(), { status: 201, body: {} }, getRows());
       renderControl();
       await waitForLoaded();
       fireEvent.change(screen.getByLabelText("Pattern"), { target: { value: "Big Sur" } });
@@ -265,7 +281,66 @@ describe("Feature: the respelling never reaches a saved rule (STORY-324 ruling)"
         fireEvent.click(screen.getByRole("button", { name: /add pronunciation/i }));
       });
 
-      expect(requestBody(mockFetch, 1)).toEqual({ pattern: "Big Sur", word: "Sur", ipa: "/sɜːr/" });
+      expect(requestBody(mockFetch, 2)).toEqual({ pattern: "Big Sur", word: "Sur", ipa: "/sɜːr/" });
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature: the mount capability probe (gh-#487)
+// ---------------------------------------------------------------------------
+
+describe("Feature: the mount capability probe (gh-#487)", () => {
+  describe("Scenario: the probe reports the assist unavailable", () => {
+    it("never renders the Get IPA button", async () => {
+      makeFetchMock(getRows(), probeAvailable(false));
+      renderControl();
+      await waitForLoaded();
+
+      await waitFor(() => expect(screen.queryByRole("button", { name: /get ipa/i })).not.toBeInTheDocument());
+    });
+
+    it("never renders the respelling input either", async () => {
+      makeFetchMock(getRows(), probeAvailable(false));
+      renderControl();
+      await waitForLoaded();
+
+      await waitFor(() => expect(screen.queryByLabelText(/respelling/i)).not.toBeInTheDocument());
+    });
+
+    it("never fires a derive call, since there is nothing left to click", async () => {
+      const mockFetch = makeFetchMock(getRows(), probeAvailable(false));
+      renderControl();
+      await waitForLoaded();
+      await waitFor(() => expect(screen.queryByRole("button", { name: /get ipa/i })).not.toBeInTheDocument());
+
+      // Exactly the two mount-time calls (rows + probe) — no third call, since there is no button
+      // left for a click to reach POST /api/pronunciations/derive through.
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("Scenario: the probe reports the assist available", () => {
+    it("renders the Get IPA button, same as before this probe existed", async () => {
+      makeFetchMock(getRows(), probeAvailable(true));
+      renderControl();
+      await waitForLoaded();
+
+      expect(await screen.findByRole("button", { name: /get ipa/i })).toBeInTheDocument();
+    });
+  });
+
+  describe("Scenario (sad path): the probe itself fails over the network", () => {
+    it("still renders the assist — a transient probe failure assumes available, not hidden", async () => {
+      const fn = jest
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(toResponse(getRows()))
+        .mockRejectedValueOnce(new Error("network down"));
+      global.fetch = fn as unknown as typeof fetch;
+      renderControl();
+      await waitForLoaded();
+
+      expect(await screen.findByRole("button", { name: /get ipa/i })).toBeInTheDocument();
     });
   });
 });
