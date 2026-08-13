@@ -250,6 +250,71 @@ async function requestAudition(candidate: AuditionCandidate): Promise<AuditionOu
   }
 }
 
+/** `POST /api/pronunciations/derive`'s success body (T278, SPEC F126.2) — the one field this
+ * control ever reads. */
+function isRespellDeriveResponse(raw: unknown): raw is { ipa: string } {
+  return typeof raw === "object" && raw !== null && typeof (raw as Record<string, unknown>)["ipa"] === "string";
+}
+
+/** The outcomes `POST /api/pronunciations/derive` resolves to for the add form's respell assist
+ * (T279, SPEC F126.2). Named per the endpoint's own failure modes: `rejected` is a 400 the operator
+ * can fix in place (a bad respelling — blank, too long, a control character, a leading `-`);
+ * `unavailable` is the 501 that hides the whole affordance for the rest of this mount
+ * (`PronunciationDerivationController`'s own `IRespellOracle.IsAvailable` latch — once false,
+ * permanently false for the server process, so there is no value in this client ever re-probing
+ * after the first 501); `error` covers everything else (502 derivation failure, other 5xx, network)
+ * as a toast, the same tier {@link postRule}'s own `error` kind uses. */
+type DeriveOutcome =
+  | { kind: "ok"; ipa: string }
+  | { kind: "rejected"; message: string }
+  | { kind: "unavailable" }
+  | { kind: "error"; message: string };
+
+/**
+ * `POST /api/pronunciations/derive` (T278, SPEC F126.2) — the respell→IPA assist. A 400 is read
+ * the SAME way {@link readAuditionFailureMessage} already reads `POST /api/tts/preview`'s own 400
+ * (a `ValidationProblemDetails.errors` dict if present, else a plain `ProblemDetails.detail`) —
+ * reused here rather than re-implemented, since this endpoint's 400 is always about its one field
+ * (`respelling`) and either shape resolves to a single message worth showing right there.
+ *
+ * <b>No availability probe</b> (PLAN T279 ruling): T278 shipped no `GET .../derive/available`-style
+ * endpoint, so there is nothing to check before the operator's first attempt. The assist stays
+ * present until PROVEN absent by an actual 501 (matching T278's own "hide the assist" language,
+ * which reads as reactive, not a precondition) — the caller latches to `unavailable` on that
+ * response and never calls this again for the rest of the mount. A box that has never had espeak-ng
+ * (e.g. a piper-only deployment) therefore still shows the assist until the operator's first click
+ * proves it absent; hiding it up front would need T278 to grow that probe endpoint — a backend
+ * follow-up, not built here.
+ */
+async function deriveIpa(respelling: string): Promise<DeriveOutcome> {
+  try {
+    const resp = await fetch("/api/pronunciations/derive", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ respelling }),
+    });
+    if (resp.status === 501) return { kind: "unavailable" };
+    if (resp.status === 400) return { kind: "rejected", message: await readAuditionFailureMessage(resp) };
+    if (!resp.ok) return { kind: "error", message: await readErrorMessage(resp) };
+    const raw: unknown = await resp.json();
+    if (!isRespellDeriveResponse(raw)) return { kind: "error", message: "Unexpected response shape." };
+    return { kind: "ok", ipa: raw.ipa };
+  } catch {
+    return { kind: "error", message: "Network error — check your connection." };
+  }
+}
+
+/** The add form's own respell-assist affordance state (T279, SPEC F126.2). `available` is the
+ * default (see {@link deriveIpa}'s own doc for why there is no up-front probe). `hidden` is
+ * permanent for the remainder of this mount once reached — there is no path back to `available`,
+ * mirroring the server's own `IRespellOracle.IsAvailable` latch. */
+type RespellAssistState =
+  | { kind: "available" }
+  | { kind: "deriving" }
+  | { kind: "rejected"; message: string }
+  | { kind: "hidden" };
+
 type ListState =
   | { kind: "loading" }
   | { kind: "loaded"; rows: PronunciationRuleRow[] }
@@ -364,6 +429,8 @@ export function PronunciationRulesControl(): ReactNode {
   const [draftPattern, setDraftPattern] = useState("");
   const [draftWord, setDraftWord] = useState("");
   const [draftIpa, setDraftIpa] = useState("");
+  const [draftRespelling, setDraftRespelling] = useState("");
+  const [respellAssist, setRespellAssist] = useState<RespellAssistState>({ kind: "available" });
   const [addFieldErrors, setAddFieldErrors] = useState<Record<string, string[]>>({});
   const [addPending, setAddPending] = useState(false);
   const [editing, setEditing] = useState<EditingState>({ kind: "idle" });
@@ -392,6 +459,12 @@ export function PronunciationRulesControl(): ReactNode {
       setDraftPattern("");
       setDraftWord("");
       setDraftIpa("");
+      setDraftRespelling("");
+      // Clears a stale `rejected` message left over from an earlier failed derive attempt (the
+      // operator may have fixed the IPA by hand instead of retrying) — but never resurrects a
+      // `hidden` affordance: once a 501 has proven the assist absent, it stays absent for the rest
+      // of this mount ({@link RespellAssistState}'s own doc).
+      setRespellAssist((prev) => (prev.kind === "hidden" ? prev : { kind: "available" }));
       toast.success("Pronunciation rule added.");
       await refresh();
       return;
@@ -411,6 +484,31 @@ export function PronunciationRulesControl(): ReactNode {
       return;
     }
     toast.error(outcome.message);
+  }
+
+  /** "Get IPA" (T279, SPEC F126.2): derives candidate IPA from the scratch respelling field and
+   * writes it straight into `draftIpa` — the operator then adjusts/auditions (T275's "Hear it")
+   * before ever saving. On a 501 the whole affordance latches to `hidden` for the rest of this
+   * mount ({@link RespellAssistState}'s own doc). */
+  async function handleDeriveIpa(): Promise<void> {
+    setRespellAssist({ kind: "deriving" });
+    const outcome = await deriveIpa(draftRespelling);
+
+    if (outcome.kind === "ok") {
+      setDraftIpa(outcome.ipa);
+      setRespellAssist({ kind: "available" });
+      return;
+    }
+    if (outcome.kind === "rejected") {
+      setRespellAssist({ kind: "rejected", message: outcome.message });
+      return;
+    }
+    if (outcome.kind === "unavailable") {
+      setRespellAssist({ kind: "hidden" });
+      return;
+    }
+    toast.error(outcome.message);
+    setRespellAssist({ kind: "available" });
   }
 
   function startEditing(row: PronunciationRuleRow): void {
@@ -499,6 +597,7 @@ export function PronunciationRulesControl(): ReactNode {
   }
 
   const canAddRow = !addPending && draftPattern.trim() !== "" && draftIpa.trim() !== "";
+  const canDerive = respellAssist.kind !== "deriving" && draftRespelling.trim() !== "";
 
   /** Enter-to-submit ergonomics for the add row (T145 review round 3) — there is deliberately no
    * `<form>` here for this to ride natively; see the render below for why. */
@@ -665,6 +764,46 @@ export function PronunciationRulesControl(): ReactNode {
               </span>
             )}
           </div>
+          {/* Respell assist (T279, SPEC F126.2, STORY-324): sits beside the IPA field, the add
+              form only — this is the primary authoring surface; the per-row edit inputs are the
+              tighter space the T145 review already flagged, so a second copy of this affordance
+              there is deferred rather than built speculatively. The respelling itself is a scratch
+              field: it never joins `writeBody`'s POST body, only the derived `ipa` it writes into
+              `draftIpa` does. */}
+          {respellAssist.kind !== "hidden" ? (
+            <div className="flex flex-col gap-1">
+              <label htmlFor="pronunciation-add-respelling" className="text-[0.78rem] font-semibold text-mute">
+                Respelling (e.g. muh-KLOWD)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  id="pronunciation-add-respelling"
+                  type="text"
+                  value={draftRespelling}
+                  onChange={(e) => setDraftRespelling(e.currentTarget.value)}
+                  disabled={respellAssist.kind === "deriving" || addPending}
+                  className={CELL_INPUT_CLASSES}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={!canDerive || addPending}
+                  onClick={() => {
+                    void handleDeriveIpa();
+                  }}
+                >
+                  {respellAssist.kind === "deriving" ? "Deriving…" : "Get IPA"}
+                </Button>
+              </div>
+              {respellAssist.kind === "rejected" && (
+                <span role="alert" className={FIELD_ERROR_CLASSES}>
+                  {respellAssist.message}
+                </span>
+              )}
+            </div>
+          ) : (
+            <p className="text-[0.78rem] text-mute">Respelling assist isn&rsquo;t available on this deployment.</p>
+          )}
           {/* Audition the draft BEFORE saving (SPEC F126.1, STORY-323, PLAN T275) — this is the
               editor's core "hear the rule being authored" moment, arguably more valuable than the
               per-row button below since nothing has been persisted yet to fall back on. */}
