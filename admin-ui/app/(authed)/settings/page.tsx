@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { apiGet } from "@/lib/api";
 import type { LibraryDto } from "@/lib/library";
+import { PronunciationRulesControl } from "./PronunciationRulesControl";
 import { SettingsForm } from "./SettingsForm";
 import type { SettingDto } from "./SettingsForm";
 
@@ -55,7 +56,18 @@ export default async function SettingsPage(
     <main>
       <h1 className="font-display text-[1.35rem] font-semibold text-ink">Settings</h1>
       <div className="mt-4">
-        <SettingsForm settings={settings} libraries={libraries} />
+        {/* T145 (SPEC F97, F100.3, STORY-254, review F3) — PronunciationRulesControl is a
+            dedicated-API surface (reads a merged station∪persona view no settings key carries;
+            writes immediately, never the page-wide Save batch), so it can't register in
+            SettingsForm's per-key SETTING_CONTROL_REGISTRY. Threaded in via `ttsTabExtra` rather
+            than SettingsForm importing it directly: it lands inside the TTS tabpanel (AC1's "TTS
+            surface", beside the raw Tts:Pronunciations field), while every other SettingsForm
+            consumer — including its own jsdom spec suite — stays unaware this component exists. */}
+        <SettingsForm
+          settings={settings}
+          libraries={libraries}
+          ttsTabExtra={<PronunciationRulesControl />}
+        />
       </div>
     </main>
   );
