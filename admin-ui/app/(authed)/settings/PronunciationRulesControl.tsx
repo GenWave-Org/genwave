@@ -256,6 +256,35 @@ function isRespellDeriveResponse(raw: unknown): raw is { ipa: string } {
   return typeof raw === "object" && raw !== null && typeof (raw as Record<string, unknown>)["ipa"] === "string";
 }
 
+/** `GET /api/pronunciations/derive/available`'s body (gh-#487) — the one field this control reads. */
+function isRespellAvailabilityResponse(raw: unknown): raw is { available: boolean } {
+  return typeof raw === "object" && raw !== null && typeof (raw as Record<string, unknown>)["available"] === "boolean";
+}
+
+/**
+ * `GET /api/pronunciations/derive/available` (gh-#487) — the respell assist's mount-time
+ * capability probe. Reads the exact same latched `IRespellOracle.IsAvailable`
+ * `PronunciationDerivationController`'s `POST` pre-checks, so the add form can hide the assist
+ * BEFORE the operator's first click on an espeak-less image, rather than learning it only after
+ * one dead-end 501 ({@link deriveIpa}'s own doc covers that fallback, which still exists for
+ * whatever this probe itself cannot catch).
+ *
+ * A failed/errored probe (network blip, non-2xx, an unreadable body) resolves `true` — "assume
+ * available" — deliberately: a transient hiccup HERE must never hide a working assist, since there
+ * is no way back from `hidden` short of remounting. The 501 latch on an actual first click is still
+ * there to catch a genuinely absent binary that this probe, for whatever reason, didn't.
+ */
+async function probeRespellAvailability(): Promise<boolean> {
+  try {
+    const resp = await fetch("/api/pronunciations/derive/available", { credentials: "include", cache: "no-store" });
+    if (!resp.ok) return true;
+    const raw: unknown = await resp.json();
+    return isRespellAvailabilityResponse(raw) ? raw.available : true;
+  } catch {
+    return true;
+  }
+}
+
 /** The outcomes `POST /api/pronunciations/derive` resolves to for the add form's respell assist
  * (T279, SPEC F126.2). Named per the endpoint's own failure modes: `rejected` is a 400 the operator
  * can fix in place (a bad respelling — blank, too long, a control character, a leading `-`);
@@ -277,14 +306,17 @@ type DeriveOutcome =
  * reused here rather than re-implemented, since this endpoint's 400 is always about its one field
  * (`respelling`) and either shape resolves to a single message worth showing right there.
  *
- * <b>No availability probe</b> (PLAN T279 ruling): T278 shipped no `GET .../derive/available`-style
- * endpoint, so there is nothing to check before the operator's first attempt. The assist stays
- * present until PROVEN absent by an actual 501 (matching T278's own "hide the assist" language,
- * which reads as reactive, not a precondition) — the caller latches to `unavailable` on that
- * response and never calls this again for the rest of the mount. A box that has never had espeak-ng
- * (e.g. a piper-only deployment) therefore still shows the assist until the operator's first click
- * proves it absent; hiding it up front would need T278 to grow that probe endpoint — a backend
- * follow-up, not built here.
+ * <b>The mount probe supersedes the old PLAN T279 ruling</b> (gh-#487): T278 originally shipped no
+ * `GET .../derive/available`-style endpoint, so the assist stayed present until PROVEN absent by an
+ * actual 501 — a piper-only box with no espeak-ng showed the assist until the operator's first
+ * click proved it absent, one dead-end click short of ideal. {@link probeRespellAvailability} now
+ * runs once on mount and hides the assist up front when it reports unavailable, so this 501 path is
+ * a FALLBACK now, not the primary signal: it still exists for whatever the probe itself cannot
+ * catch (a probe call that failed/errored assumes available, per that function's own doc, so a
+ * genuinely absent binary is still caught right here, on the first real attempt) and for the race
+ * where the probe read the latch's optimistic starting `true` before this very endpoint's own
+ * `IRespellOracle.IsAvailable` pre-check has ever had a chance to flip it false server-side. The
+ * caller latches to `unavailable` on this response either way, exactly as before.
  */
 async function deriveIpa(respelling: string): Promise<DeriveOutcome> {
   try {
@@ -305,10 +337,11 @@ async function deriveIpa(respelling: string): Promise<DeriveOutcome> {
   }
 }
 
-/** The add form's own respell-assist affordance state (T279, SPEC F126.2). `available` is the
- * default (see {@link deriveIpa}'s own doc for why there is no up-front probe). `hidden` is
- * permanent for the remainder of this mount once reached — there is no path back to `available`,
- * mirroring the server's own `IRespellOracle.IsAvailable` latch. */
+/** The add form's own respell-assist affordance state (T279, SPEC F126.2; gh-#487 added the mount
+ * probe). `available` is the initial value, flipped to `hidden` as soon as EITHER the mount probe
+ * ({@link probeRespellAvailability}) or a first 501 ({@link deriveIpa}) proves the assist absent —
+ * whichever lands first. `hidden` is permanent for the remainder of this mount once reached — there
+ * is no path back to `available`, mirroring the server's own `IRespellOracle.IsAvailable` latch. */
 type RespellAssistState =
   | { kind: "available" }
   | { kind: "deriving" }
@@ -448,6 +481,24 @@ export function PronunciationRulesControl(): ReactNode {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  /** The mount-time capability probe (gh-#487) — runs once, independent of {@link refresh}'s own
+   * `GET /api/pronunciations` list load. Only ever moves `respellAssist` FROM `available` TO
+   * `hidden`: the functional-update guard leaves `deriving`/`rejected`/`hidden` alone so a real
+   * click that raced ahead of this probe's own response is never clobbered back to an earlier
+   * state, and a probe reporting available never resurrects an assist a first click already
+   * proved absent. */
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const available = await probeRespellAvailability();
+      if (cancelled || available) return;
+      setRespellAssist((prev) => (prev.kind === "available" ? { kind: "hidden" } : prev));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleAdd(): Promise<void> {
     setAddPending(true);

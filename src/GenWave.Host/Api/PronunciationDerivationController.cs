@@ -11,7 +11,11 @@ namespace GenWave.Host.Api;
 /// back candidate IPA RAW, for the operator to audition (<c>POST /api/tts/preview</c>,
 /// <see cref="TtsPreviewController"/>, STORY-323) and adjust before ever saving it as a
 /// <see cref="PronunciationsController"/> row. T279's editor half wires a "Derive" button to this
-/// call and hides it the first time it 501s.
+/// call and, ORIGINALLY, hid it only the first time it 501s (attempt-and-hide) — gh-#487 replaced
+/// that with <see cref="Available"/> below, a pre-flight probe the editor calls once on mount, so an
+/// espeak-less image hides the assist BEFORE the operator's first click rather than after one dead-
+/// end 501. The 501 path here still exists as the fallback for whatever that probe itself cannot
+/// catch (see <see cref="Available"/>'s own remarks).
 ///
 /// <para>
 /// <b>A SEPARATE controller from <see cref="PronunciationsController"/></b>, sharing its
@@ -28,6 +32,16 @@ namespace GenWave.Host.Api;
 /// re-probes — BEFORE ever calling <see cref="IRespellOracle.DeriveAsync"/>, so an image built
 /// without the package degrades to a cheap, permanent 501 for the rest of this process's life. Raw-
 /// IPA authoring and the STORY-323 audition loop stand alone without this assist.
+/// </para>
+///
+/// <para>
+/// <b>The capability probe (gh-#487):</b> <see cref="Available"/> reads the exact same
+/// <see cref="IRespellOracle.IsAvailable"/> latch this 501 check reads — no process spawn, cheap
+/// enough for the editor to call once per mount — so an operator on an espeak-less image never has
+/// to spend a dead-end click discovering that before ever seeing the assist at all. A probe result
+/// is a snapshot, not a subscription: the latch can only ever flip true→false within one process
+/// lifetime (never back), so a probe taken before that flip and a POST attempted after it would
+/// still correctly land here, in the very code path this paragraph documents.
 /// </para>
 ///
 /// <para>
@@ -115,6 +129,18 @@ public sealed class PronunciationDerivationController(
 
         return Ok(new RespellDeriveResponse(ipa));
     }
+
+    /// <summary>
+    /// GET /api/pronunciations/derive/available (gh-#487) — a cheap pre-flight capability probe the
+    /// editor calls once on mount, before the operator's first click, so an espeak-less image can
+    /// hide the "Derive" assist up front instead of learning it only after one dead-end 501
+    /// (T279's original attempt-and-hide). Reads the SAME latched
+    /// <see cref="IRespellOracle.IsAvailable"/> the <see cref="Derive"/> action above pre-checks —
+    /// no process is ever spawned to answer this, so it costs nothing to call on every mount of the
+    /// pronunciation rules editor.
+    /// </summary>
+    [HttpGet("derive/available")]
+    public IActionResult Available() => Ok(new RespellAvailabilityResponse(oracle.IsAvailable));
 
     // Not named "ValidationProblem": ControllerBase already declares an instance method by that
     // exact name (review round 2 finding F7) — a same-named static helper here compiles but hides
