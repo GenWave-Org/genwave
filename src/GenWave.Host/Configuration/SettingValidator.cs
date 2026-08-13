@@ -172,6 +172,15 @@ public sealed class SettingValidator
     internal const int ShowsPatterCadenceMinutesMin = 0;
     internal const int ShowsPatterCadenceMinutesMax = 1440;
 
+    // Station:Imaging:TimeAnnouncementStaleMinutes (SPEC F124.4, gh-#469, STORY-321, PLAN T269) —
+    // StationImagingOptions' own documentation-only [Range] (StationOptionsValidator is the real boot
+    // floor, the StationCadenceOptions precedent). Floor is 1, not 0 — unlike the "0 = off" cadence
+    // knobs above, 0 has no honest meaning here (a TimeDate is never NOT stale at 0 minutes, which
+    // would drop every single one undrained — that is not what a live-editable budget is for). Ceiling
+    // is the same generic 1440-minute (24h) F53.1 cap every other "minutes" knob on this list uses.
+    internal const int TimeAnnouncementStaleMinutesMin = 1;
+    internal const int TimeAnnouncementStaleMinutesMax = 1440;
+
     // Context:{Key}:PersonaId (SPEC F107.7, PLAN T226) — ContextProviderSettings' own remarks: null,
     // 0, and any negative value all mean "the on-air DJ"; only a positive value names an explicit
     // persona. The floor here is a fat-finger guard (F53.1's own ethos), not a domain requirement —
@@ -389,6 +398,10 @@ public sealed class SettingValidator
             // kill switches, no consumer reads them yet (Station:Audience's own T111 precedent).
             ["Station:Imaging:ClockAnchoredIdents"] = IsBool,
             ["Station:Imaging:TimeAnnouncements"] = IsBool,
+            // TimeDate elapsed-due expiry budget (SPEC F124.4, gh-#469, STORY-321, PLAN T269) — same
+            // "1 minimum, 1440 ceiling" shape as Context:{Key}:SegmentCadenceMinutes above.
+            ["Station:Imaging:TimeAnnouncementStaleMinutes"] =
+                v => IsIntInRange(v, TimeAnnouncementStaleMinutesMin, TimeAnnouncementStaleMinutesMax),
 
             // Show-flavor patter line cadence (SPEC F116.3, STORY-308, PLAN T249) — same
             // "0 = off, 1440 ceiling" shape as Context:{Key}:PatterCadenceMinutes above.

@@ -136,16 +136,22 @@ public static class FeatureStraddleHandoff
                 logger.Entries, entry => entry.Message.Contains("rung=Fit", StringComparison.Ordinal));
         }
 
-        [Fact]
-        public async Task BelowTheFloorDeclinePathHardCodesCeremonyOnly()
+        // SUPERSEDES this scenario's own pre-F124 name and assertion ("hard-codes CeremonyOnly") —
+        // SPEC F124.1 (STORY-320, PLAN T267). T234 review finding F2 originally pinned the DECLINE
+        // path's own hard-coded CeremonyOnly literal here; T266 widened MusicSelectionPolicy's own
+        // classifier to call this exact shape (200s already queued ahead of a boundary 45s out) a
+        // Straddle instead, and T267 wired TryServeCeremonyOnlyUnitAsync to consult that SAME
+        // classifier rather than hard-coding — see that method's own remarks for why
+        // ShouldDeclineFinalUnit's condition never needed to change (crossing already implies
+        // below-floor for a handoff kind). The DECLINE still fires and the ceremony still airs instead
+        // of a new track (nothing about THAT changed) — but the log line now reports the honest rung,
+        // and the paired SignOn is held rather than drained in this same call. See
+        // BelowFloorNotDeclinedStillClassifiesCeremonyOnlyViaPolicy for the StationId/TimeDate sibling
+        // (never decline-eligible), unaffected by this change. Round-1 review finding F7 — split one
+        // assertion per fact, sharing this one arrange/act.
+        static async Task<(MediaItem? Next, CapturingLogger<Orchestrator> Logger, FakeTtsSegmentSource Tts)>
+            RunQueueCrossingDeclineAsync()
         {
-            // T234 review finding F2: this fact pins the DECLINE path's own hard-coded CeremonyOnly
-            // literal (TryServeCeremonyOnlyUnitAsync's LogBoundaryFit call) — ShouldDeclineFinalUnit
-            // fires (deeply negative room: 200s already queued ahead of a boundary 45s out), the
-            // ceremony airs, and the log line never reaches MusicSelectionPolicy.ClassifyOffToleranceRung
-            // at all. It does NOT exercise the policy's own classifier arm — see
-            // BelowFloorNotDeclinedStillClassifiesCeremonyOnlyViaPolicy for that coverage (F2 found the
-            // classifier arm had none: mutating it to always return Straddle left this fact green).
             var clock = new FakeTimeProvider(ClockStart);
             var queue = new SpeechDeferralQueue(clock);
             queue.Enqueue(
@@ -157,16 +163,59 @@ public static class FeatureStraddleHandoff
 
             var catalog = FakeMediaCatalog.WithPool([MakeTrack("full-length", TimeSpan.FromMinutes(3.5))]);
             var logger = new CapturingLogger<Orchestrator>();
-            var orchestrator = BuildOrchestrator(catalog, queue, clock, logger);
+            var tts = new FakeTtsSegmentSource();
+            var orchestrator = BuildOrchestrator(catalog, queue, clock, logger, tts);
 
             var next = await orchestrator.GetNextAsync(
                 new PlayoutContext([], QueuedAheadMs: 200_000), CancellationToken.None);
 
-            // The ceremony airs instead of music — no candidate was even sampled.
+            return (next, logger, tts);
+        }
+
+        [Fact]
+        public async Task QueueCrossingDeclineStillAirsTheCeremonyNotMusic()
+        {
+            var (next, _, _) = await RunQueueCrossingDeclineAsync();
+
             Assert.NotNull(next);
             Assert.StartsWith("tts:", next.MediaId, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task QueueCrossingDeclineLogsOutcomeDeclined()
+        {
+            var (_, logger, _) = await RunQueueCrossingDeclineAsync();
+
             Assert.Contains(
+                logger.Entries, entry => entry.Message.Contains("outcome=declined", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task QueueCrossingDeclineLogsRungStraddle()
+        {
+            var (_, logger, _) = await RunQueueCrossingDeclineAsync();
+
+            Assert.Contains(
+                logger.Entries, entry => entry.Message.Contains("rung=Straddle", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task QueueCrossingDeclineNeverLogsRungCeremonyOnly()
+        {
+            var (_, logger, _) = await RunQueueCrossingDeclineAsync();
+
+            Assert.DoesNotContain(
                 logger.Entries, entry => entry.Message.Contains("rung=CeremonyOnly", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task QueueCrossingDeclineHoldsThePairedSignOn()
+        {
+            // The paired SignOn is HELD, not drained in this same unit (SPEC F124.1's fix to the
+            // pre-F124 inversion).
+            var (_, _, tts) = await RunQueueCrossingDeclineAsync();
+
+            Assert.DoesNotContain(tts.Requests, r => r.Kind == SegmentKind.SignOn);
         }
 
         [Fact]
@@ -213,7 +262,7 @@ public static class FeatureStraddleHandoff
         public async Task DesiredExactlyAtFloorIsStraddleAndNotDeclined()
         {
             // T234 review finding F5 — pins the 90s edge at BOTH sites the floor is compared against
-            // (MusicSelectionPolicy.IsBelowFloor, called from ClassifyOffToleranceRung AND
+            // (BoundaryFitPlan.IsBelowFloor, called from ClassifyOffToleranceRung AND
             // Orchestrator.ShouldDeclineFinalUnit as of F3's fix) in ONE fact, since F3 found those two
             // comparisons hand-written as complements rather than sharing one predicate. A SignOn due
             // in 200s with 110s already queued ahead leaves exactly 90s of desired room — the floor
@@ -462,6 +511,58 @@ public static class FeatureStraddleHandoff
     }
 
     // ---------------------------------------------------------------------
+    // Round-3 review — CaptureCrossingTrackForHeldSignOn's own notBefore carry
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioCaptureCrossingTrackPreservesALiveHold
+    {
+        [Fact]
+        public async Task TheGateSurvivesEnrichmentOfAPreviouslyHeldSignOn()
+        {
+            // Round-3 review — pins CaptureCrossingTrackForHeldSignOn's own
+            // "notBefore: signOn.NotBefore" carry (Orchestrator.cs), now reachable: a SignOn already
+            // HELD by an EARLIER, unrelated ceremony sits in the queue while a fresh, UNGATED SignOff
+            // (a different, later boundary) heads an ordinary — never declined — straddle.
+            // GetNextAsync's straddle branch enriches that SAME SignOn slot with the crossing track's
+            // title/artist (SPEC F111.3); the PRE-EXISTING hold on it must survive that enrichment
+            // untouched. Only reachable at all because PeekNextDue (the round-2 nucleus fix) correctly
+            // skips the held entry and reports the fresh SignOff as "next up" instead — proof the two
+            // fixes cooperate.
+            var clock = new FakeTimeProvider(ClockStart);
+            var queue = new SpeechDeferralQueue(clock);
+
+            // A SignOn already held from some earlier, unrelated ceremony — gated 5 minutes out. Its
+            // own raw Due (1 minute) is EARLIER than the fresh SignOff below, but the gate keeps
+            // PeekNextDue from ever reporting it.
+            queue.Enqueue(
+                SpeechDeferralKind.SignOn, "test: previously held", clock.GetUtcNow() + TimeSpan.FromMinutes(1), Handoff,
+                notBefore: clock.GetUtcNow() + TimeSpan.FromMinutes(5));
+
+            // A fresh, UNGATED SignOff for a LATER, unrelated boundary — mirrors ArmStraddleCeremony's
+            // own numbers (6 minutes out, comfortably above the music floor on its own) so this is an
+            // ORDINARY straddle, never a decline — the straddle branch, not TryServeCeremonyOnlyUnitAsync,
+            // is what calls CaptureCrossingTrackForHeldSignOn.
+            queue.Enqueue(
+                SpeechDeferralKind.SignOff, "test: fresh ceremony", clock.GetUtcNow() + TimeSpan.FromMinutes(6), Handoff);
+
+            var crossing = MakeTrack("crossing", TimeSpan.FromMinutes(9)); // 535s effective — crosses the 6-minute boundary
+            var catalog = FakeMediaCatalog.WithPool([crossing]);
+            var orchestrator = BuildOrchestrator(catalog, queue, clock, new CapturingLogger<Orchestrator>());
+
+            await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            var enriched = queue.Peek(SpeechDeferralKind.SignOn);
+            Assert.NotNull(enriched);
+
+            // The content enriched — proof CaptureCrossingTrackForHeldSignOn actually ran on this slot.
+            Assert.Equal(crossing.Title, enriched.Handoff?.CrossingTrackTitle);
+
+            // The PRE-EXISTING hold survived the enrichment untouched.
+            Assert.Equal(ClockStart + TimeSpan.FromMinutes(5), enriched.NotBefore);
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // T235 review findings F2/F3 — the straddle branch's own reconciliation
     // ---------------------------------------------------------------------
 
@@ -497,8 +598,59 @@ public static class FeatureStraddleHandoff
             return store;
         }
 
+        // Round-2 review finding F4's own fact needs a THIRD persona (Beta's own boundary, once the
+        // resolver's "current" rolls forward off Alpha, must have somewhere real to hand off to) —
+        // ThreeDjSchedule/ThreeDjStore below, additive, every TwoDj* fact above untouched.
+        static ScheduleWeekSnapshot ThreeDjSchedule(int betaStartMinute, int gammaStartMinute) => new(
+        [
+            new ScheduleSegment(Id: 1, Day: Monday, StartMinute: 0, EndMinute: betaStartMinute, PersonaId: 10, Genres: null, EnergyMin: null, EnergyMax: null),
+            new ScheduleSegment(Id: 2, Day: Monday, StartMinute: betaStartMinute, EndMinute: gammaStartMinute, PersonaId: 20, Genres: null, EnergyMin: null, EnergyMax: null),
+            new ScheduleSegment(Id: 3, Day: Monday, StartMinute: gammaStartMinute, EndMinute: 1440, PersonaId: 30, Genres: null, EnergyMin: null, EnergyMax: null),
+        ]);
+
+        static FakePersonaStore ThreeDjStore()
+        {
+            var now = DateTime.UnixEpoch;
+            var store = new FakePersonaStore();
+            store.Add(new Persona(10, "DJ Alpha", "", "", "af_alpha", now, now));
+            store.Add(new Persona(20, "DJ Beta", "", "", "af_beta", now, now));
+            store.Add(new Persona(30, "DJ Gamma", "", "", "af_gamma", now, now));
+            return store;
+        }
+
+        // Round-3 review — the two per-half SignOn ClearStale sites (Orchestrator.EnqueueHandoffCeremonyAsync)
+        // each need their OWN reachable shape with a live hold already sitting in the slot:
+        //
+        //   - the GENERAL branch's ClearStale fires on "incoming is null" — a real persona-less next
+        //     block (SPEC F91.1: PersonaId null = music-only), the literal fixture below.
+        //   - the SAME-PERSONA/DIFFERENT-SHOW branch's ClearStale fires only on an UNRESOLVABLE incoming
+        //     persona (boundaryAt.Value <= now is provably unreachable there — the outer window-exit
+        //     check already excludes it under the SAME now/boundaryAt this branch reads) — reached below
+        //     by removing the persona from the store mid-test (FakePersonaStore.Remove), the same
+        //     "deleted out of band" shape ResolveHandoffPersonaAsync's own remarks already name.
+        //
+        // Reuses TwoDjStore (personas 10/20) for both — nothing here needs Gamma.
+
+        static ScheduleWeekSnapshot NullPersonaNextBlockSchedule() => new(
+        [
+            new ScheduleSegment(Id: 1, Day: Monday, StartMinute: 0, EndMinute: 720, PersonaId: 10, Genres: null, EnergyMin: null, EnergyMax: null),
+            new ScheduleSegment(Id: 2, Day: Monday, StartMinute: 720, EndMinute: 725, PersonaId: 20, Genres: null, EnergyMin: null, EnergyMax: null),
+            new ScheduleSegment(Id: 3, Day: Monday, StartMinute: 725, EndMinute: 1440, PersonaId: null, Genres: null, EnergyMin: null, EnergyMax: null),
+        ]);
+
+        static ScheduleWeekSnapshot SamePersonaDifferentShowSchedule() => new(
+        [
+            new ScheduleSegment(Id: 1, Day: Monday, StartMinute: 0, EndMinute: 720, PersonaId: 10, Genres: null, EnergyMin: null, EnergyMax: null),
+            new ScheduleSegment(Id: 2, Day: Monday, StartMinute: 720, EndMinute: 723, PersonaId: 20, Genres: null, EnergyMin: null, EnergyMax: null, ShowId: 100),
+            new ScheduleSegment(Id: 3, Day: Monday, StartMinute: 723, EndMinute: 1440, PersonaId: 20, Genres: null, EnergyMin: null, EnergyMax: null, ShowId: 200),
+        ]);
+
+        /// <paramref name="personaStore"/> defaults to <see cref="TwoDjStore"/> (every pre-round-2
+        /// caller) — the R2-F4 fact below is the one caller that passes <see cref="ThreeDjStore"/>
+        /// instead, since a re-arm-during-a-live-hold repro needs a THIRD persona for the resolver's
+        /// own "current" to roll forward onto once real wall-clock time passes the FIRST boundary.
         static (Orchestrator Orchestrator, FakeScheduleStore ScheduleStore, FakeTimeProvider Time, SpeechDeferralQueue Queue)
-            BuildChain(FakeMediaCatalog catalog, ScheduleWeekSnapshot snapshot)
+            BuildChain(FakeMediaCatalog catalog, ScheduleWeekSnapshot snapshot, FakePersonaStore? personaStore = null)
         {
             var time = new FakeTimeProvider(JustBeforeNoon);
             var scheduleStore = new FakeScheduleStore(snapshot);
@@ -519,7 +671,7 @@ public static class FeatureStraddleHandoff
                 time,
                 new FakeBoundaryBiasProvider(TimeSpan.FromMinutes(10)),
                 scheduleResolver: caching,
-                personaStore: TwoDjStore());
+                personaStore: personaStore ?? TwoDjStore());
 
             return (orchestrator, scheduleStore, time, queue);
         }
@@ -593,6 +745,250 @@ public static class FeatureStraddleHandoff
             Assert.Equal(crossing.MediaId, next.MediaId);
             Assert.Null(queue.Peek(SpeechDeferralKind.SignOff));
             Assert.Null(queue.Peek(SpeechDeferralKind.SignOn));
+        }
+
+        [Fact]
+        public async Task AHeldSignOnSurvivesTheBoundaryAndAirsAfterTheQueuedTailDrains()
+        {
+            // Round-1 review finding F2's own reproduction, on the REAL CachingScheduleResolver chain
+            // (this class's own harness, not ArmStraddleCeremony's manually-seeded queue — the defect
+            // lives in EnqueueHandoffCeremonyAsync's window-exit branch, which only ever runs off a
+            // genuine schedule resolve). A queued tail requested LARGER than the F74.3 lookahead window
+            // (20 minutes queued, 10-minute window) — round-2 review finding F5 clamps
+            // HoldSignOnPastQueuedTail's own GATE to that SAME window (SPEC F124.6's own watch item: a
+            // multi-hour backlog must never arm a hold arbitrarily far past the one window this class's
+            // whole fit machinery reasons inside of), so the actual hold lands at 11:55 + 10min = 12:05,
+            // not the raw 12:15 a naive "now + queuedAhead" would have used. The pre-fix (round-1) defect
+            // this fact still reproduces: the SignOn survives past the boundary (real "now" > noon), the
+            // resolver's own "current" flips to DJ Beta, EnqueueHandoffCeremonyAsync's window-exit fires
+            // (Beta's own boundary — midnight — is nowhere near the 10-minute window), and its
+            // ClearCeremony wipes the still-held, not-yet-airable SignOn outright: the incoming DJ never
+            // signs on. The fix: a held deferral (NotBefore in the future) is LIVE, not stale, so it
+            // survives that clear — and drains, ordinarily, once real wall-clock time actually reaches
+            // the (now window-clamped) estimated drain instant.
+            var tail = MakeTrack("tail-content", TimeSpan.FromMinutes(9));
+            var catalog = FakeMediaCatalog.WithPool([tail]);
+            var (orchestrator, _, time, queue) = BuildChain(catalog, TwoDjSchedule(betaStartMinute: 720)); // noon
+
+            // Unit 1: nothing pending yet — arms the ceremony for noon (SignOff due 11:59:45, SignOn
+            // due 12:00:00).
+            await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+            Assert.NotNull(queue.Peek(SpeechDeferralKind.SignOff));
+
+            // Unit 2: 20 minutes already queued ahead — comfortably crosses the 300s-out boundary, and
+            // comfortably exceeds the 10-minute F74.3 window. The SignOff declines and airs; the paired
+            // SignOn is held, its gate CLAMPED to the window bound (NotBefore = 11:55 + 10min = 12:05 —
+            // never the raw 12:15 the unclamped 20-minute estimate would have produced).
+            await orchestrator.GetNextAsync(
+                new PlayoutContext([], QueuedAheadMs: (int)TimeSpan.FromMinutes(20).TotalMilliseconds), CancellationToken.None);
+            var held = queue.Peek(SpeechDeferralKind.SignOn);
+            Assert.NotNull(held);
+            Assert.Equal(JustBeforeNoon + TimeSpan.FromMinutes(10), held.NotBefore);
+
+            // Real wall-clock time now crosses noon — well before the CLAMPED held estimate (12:05) —
+            // while the queued tail is still nowhere near drained. The resolver's own "current" flips to
+            // DJ Beta (running to midnight), pushing the next boundary far outside the window: this
+            // unit's own step 2.5 fires EnqueueHandoffCeremonyAsync's window-exit branch, the exact call
+            // round-1 wiped the held SignOn from.
+            time.Advance(TimeSpan.FromMinutes(7)); // 11:55 -> 12:02 (past noon, still short of 12:05)
+            await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            Assert.NotNull(queue.Peek(SpeechDeferralKind.SignOn));
+
+            // Real wall-clock time now reaches the (clamped) held estimate (12:05) — the SignOn is no
+            // longer held back by anything, and the very next pull's ordinary (unforced) drain airs it.
+            time.Advance(TimeSpan.FromMinutes(4)); // 12:02 -> 12:06
+            var afterHold = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            Assert.NotNull(afterHold);
+            Assert.Equal(SegmentKind.SignOn, afterHold.SegmentKind);
+        }
+
+        [Fact]
+        public async Task ARearmDuringALiveHoldPreservesTheGateRatherThanBypassingIt()
+        {
+            // SPEC F124.1/F124.2 round-2 review finding F4 — EnqueueHandoffCeremonyAsync's own SignOn
+            // re-arm (the ordinary "boundary entered the F74.3 window" Enqueue call) must not silently
+            // drop a LIVE hold already sitting on that queue slot. This reproduces the natural way a
+            // re-arm lands mid-hold with no admin schedule edit at all: once real wall-clock time passes
+            // the OLD (Alpha->Beta) boundary while the paired SignOn is still held behind a long queued
+            // tail, the resolver's own "current" segment rolls forward to Beta — and once Beta's OWN
+            // next boundary (Beta->Gamma) is itself inside the F74.3 window, this producer re-evaluates
+            // and arms a FRESH Beta->Gamma ceremony, reusing the EXACT SAME (SignOn, null) queue slot
+            // the still-held Alpha->Beta SignOn occupies.
+            var crossing = MakeTrack("crossing", TimeSpan.FromMinutes(3));
+            var catalog = FakeMediaCatalog.WithPool([crossing]);
+            var (orchestrator, _, time, queue) = BuildChain(
+                catalog, ThreeDjSchedule(betaStartMinute: 720, gammaStartMinute: 723), ThreeDjStore()); // noon, 12:03
+
+            // Unit 1: arms the Alpha->Beta ceremony for noon.
+            await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+            Assert.NotNull(queue.Peek(SpeechDeferralKind.SignOff));
+
+            // Unit 2: 20 minutes already queued ahead — crosses. The SignOff declines and airs; the
+            // paired (Beta) SignOn is held, gated to the F74.3 window bound: NotBefore = 11:55 + 10min =
+            // 12:05 (SPEC F124.1's round-2 F5 clamp).
+            await orchestrator.GetNextAsync(
+                new PlayoutContext([], QueuedAheadMs: (int)TimeSpan.FromMinutes(20).TotalMilliseconds), CancellationToken.None);
+            var held = queue.Peek(SpeechDeferralKind.SignOn);
+            Assert.NotNull(held);
+            Assert.Equal(JustBeforeNoon + TimeSpan.FromMinutes(10), held.NotBefore);
+
+            // Real wall-clock time now crosses noon — still short of the held estimate (12:05) — and
+            // Beta's OWN next boundary (12:03) is now inside the 10-minute window: this unit's own step
+            // 2.5 re-arms a FRESH Beta->Gamma ceremony over the SAME SignOn slot.
+            time.Advance(TimeSpan.FromMinutes(6)); // 11:55 -> 12:01
+            await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            var reArmed = queue.Peek(SpeechDeferralKind.SignOn);
+            Assert.NotNull(reArmed);
+
+            // The CONTENT correctly refreshed to the new, real boundary (Beta->Gamma, due 12:03) — this
+            // is deliberately NOT "refuse to re-arm at all" (the rejected alternative): the fresh
+            // content is correct and gets its own fair shot at airing.
+            Assert.Equal(JustBeforeNoon + TimeSpan.FromMinutes(8), reArmed.Due);
+
+            // But the GATE survived the re-arm — the still-draining Alpha->Beta tail's own hold (12:05)
+            // is not silently bypassed just because a different ceremony's content now occupies this
+            // slot; airing the Beta->Gamma sign-on a few seconds after 12:05 is still correct, airing it
+            // the instant real time reaches its own (unguarded) Due of 12:03 — cutting over the
+            // still-draining Alpha->Beta tail — would not have been.
+            Assert.Equal(JustBeforeNoon + TimeSpan.FromMinutes(10), reArmed.NotBefore);
+        }
+
+        [Fact]
+        public async Task TheGeneralBranchesClearStaleNeverErasesALiveHold()
+        {
+            // Round-3 review — pins the GENERAL branch's ClearStale (not the shared window-exit
+            // ClearCeremony call, and not the same-persona-transition branch's own sibling below):
+            // reached when EnqueueHandoffCeremonyAsync's "incoming is null" arm fires for a genuine
+            // persona-less next block (SPEC F91.1). Reverting this ONE call site back to the blind
+            // Clear must turn this fact red — the shared ClearCeremony call at window-exit is
+            // deliberately never exercised here (Beta's own next block still resolves within the
+            // window, so the outer gap check never short-circuits first).
+            var tail = MakeTrack("tail-content", TimeSpan.FromMinutes(9));
+            var catalog = FakeMediaCatalog.WithPool([tail]);
+            var (orchestrator, _, time, queue) = BuildChain(catalog, NullPersonaNextBlockSchedule()); // noon, 12:05
+
+            // Unit 1: arms the Alpha->Beta ceremony for noon.
+            await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+            Assert.NotNull(queue.Peek(SpeechDeferralKind.SignOff));
+
+            // Unit 2: 20 minutes already queued ahead — crosses. The SignOff declines and airs; the
+            // paired (Beta) SignOn is held, gated to the window bound: NotBefore = 11:55 + 10min = 12:05.
+            await orchestrator.GetNextAsync(
+                new PlayoutContext([], QueuedAheadMs: (int)TimeSpan.FromMinutes(20).TotalMilliseconds), CancellationToken.None);
+            var held = queue.Peek(SpeechDeferralKind.SignOn);
+            Assert.NotNull(held);
+            Assert.Equal(JustBeforeNoon + TimeSpan.FromMinutes(10), held.NotBefore);
+
+            // Real wall-clock time now crosses noon — still short of the held estimate (12:05). The
+            // resolver's own "current" flips to Beta, whose OWN next block (the persona-less segment) is
+            // itself inside the window: this producer's GENERAL branch re-evaluates, resolves a null
+            // incoming persona, and calls ClearStale on the SAME (SignOn, null) slot the still-held Beta
+            // sign-on occupies.
+            time.Advance(TimeSpan.FromMinutes(6)); // 11:55 -> 12:01
+            await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            Assert.NotNull(queue.Peek(SpeechDeferralKind.SignOn));
+
+            // Real wall-clock time now reaches the held estimate (12:05) — the sign-on still airs.
+            time.Advance(TimeSpan.FromMinutes(5)); // 12:01 -> 12:06
+            var afterHold = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            Assert.NotNull(afterHold);
+            Assert.Equal(SegmentKind.SignOn, afterHold.SegmentKind);
+        }
+
+        [Fact]
+        public async Task TheSamePersonaBranchesClearStaleNeverErasesALiveHold()
+        {
+            // Round-3 review — pins the SAME-PERSONA/DIFFERENT-SHOW branch's OWN ClearStale (the
+            // sibling of the general-branch fact above, a genuinely different call site). Reachable
+            // ONLY via an unresolvable incoming persona (boundaryAt.Value <= now is provably dead code
+            // here — the outer window-exit check already excludes it under the identical now/boundaryAt
+            // this branch reads) — modeled the same way ResolveHandoffPersonaAsync's own remarks
+            // describe: "deleted out of band" mid-test, via FakePersonaStore.Remove.
+            var store = TwoDjStore();
+            var tail = MakeTrack("tail-content", TimeSpan.FromMinutes(9));
+            var catalog = FakeMediaCatalog.WithPool([tail]);
+            var (orchestrator, _, time, queue) = BuildChain(catalog, SamePersonaDifferentShowSchedule(), store); // noon, 12:03
+
+            // Unit 1: arms the Alpha->Beta ceremony for noon (Beta still resolvable at this point).
+            await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+            Assert.NotNull(queue.Peek(SpeechDeferralKind.SignOff));
+
+            // Unit 2: 20 minutes already queued ahead — crosses. The SignOff declines and airs; the
+            // paired (Beta) SignOn is held, gated to the window bound: NotBefore = 11:55 + 10min = 12:05.
+            await orchestrator.GetNextAsync(
+                new PlayoutContext([], QueuedAheadMs: (int)TimeSpan.FromMinutes(20).TotalMilliseconds), CancellationToken.None);
+            var held = queue.Peek(SpeechDeferralKind.SignOn);
+            Assert.NotNull(held);
+            Assert.Equal(JustBeforeNoon + TimeSpan.FromMinutes(10), held.NotBefore);
+
+            // Beta persona deleted out of band — the NEXT same-persona-different-show evaluation cannot
+            // resolve the incoming half any more.
+            store.Remove(20);
+
+            // Real wall-clock time now crosses noon — still short of the held estimate (12:05). The
+            // resolver's own "current" flips to Beta/show-A, whose OWN next block is Beta/show-B (SAME
+            // persona, DIFFERENT show — the F116.2 transition branch) inside the window: this producer's
+            // SAME-PERSONA branch re-evaluates, fails to resolve the now-deleted incoming persona, and
+            // calls ClearStale on the SAME (SignOn, null) slot the still-held sign-on occupies.
+            time.Advance(TimeSpan.FromMinutes(6)); // 11:55 -> 12:01
+            await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            Assert.NotNull(queue.Peek(SpeechDeferralKind.SignOn));
+
+            // Real wall-clock time now reaches the held estimate (12:05) — the sign-on still airs.
+            time.Advance(TimeSpan.FromMinutes(5)); // 12:01 -> 12:06
+            var afterHold = await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            Assert.NotNull(afterHold);
+            Assert.Equal(SegmentKind.SignOn, afterHold.SegmentKind);
+        }
+
+        [Fact]
+        public async Task TheSamePersonaBranchesReArmPreservesTheGateRatherThanBypassingIt()
+        {
+            // Round-3 review — sibling of ARearmDuringALiveHoldPreservesTheGateRatherThanBypassingIt
+            // above, pinning the SAME-PERSONA/DIFFERENT-SHOW branch's OWN notBefore carry-forward (a
+            // genuinely different call site from the general branch's own re-arm) rather than its
+            // ClearStale twin — Beta stays resolvable throughout here, so the ELSE (Enqueue) arm fires
+            // instead of ClearStale.
+            var crossing = MakeTrack("crossing", TimeSpan.FromMinutes(3));
+            var catalog = FakeMediaCatalog.WithPool([crossing]);
+            var (orchestrator, _, time, queue) = BuildChain(catalog, SamePersonaDifferentShowSchedule()); // noon, 12:03
+
+            // Unit 1: arms the Alpha->Beta ceremony for noon.
+            await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+            Assert.NotNull(queue.Peek(SpeechDeferralKind.SignOff));
+
+            // Unit 2: 20 minutes already queued ahead — crosses. The SignOff declines and airs; the
+            // paired (Beta) SignOn is held, gated to the window bound: NotBefore = 11:55 + 10min = 12:05.
+            await orchestrator.GetNextAsync(
+                new PlayoutContext([], QueuedAheadMs: (int)TimeSpan.FromMinutes(20).TotalMilliseconds), CancellationToken.None);
+            var held = queue.Peek(SpeechDeferralKind.SignOn);
+            Assert.NotNull(held);
+            Assert.Equal(JustBeforeNoon + TimeSpan.FromMinutes(10), held.NotBefore);
+
+            // Real wall-clock time now crosses noon — still short of the held estimate (12:05). The
+            // resolver's own "current" flips to Beta/show-A, whose OWN next block is Beta/show-B (SAME
+            // persona, resolvable, DIFFERENT show) inside the window: this producer's SAME-PERSONA
+            // branch re-evaluates and re-arms a FRESH show-transition sign-on over the SAME slot.
+            time.Advance(TimeSpan.FromMinutes(6)); // 11:55 -> 12:01
+            await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            var reArmed = queue.Peek(SpeechDeferralKind.SignOn);
+            Assert.NotNull(reArmed);
+
+            // The CONTENT correctly refreshed to the new, real boundary (show-A -> show-B, due 12:03).
+            Assert.Equal(JustBeforeNoon + TimeSpan.FromMinutes(8), reArmed.Due);
+
+            // But the GATE survived the re-arm — the still-draining Alpha->Beta tail's own hold (12:05)
+            // is not silently bypassed just because a different ceremony's content now occupies this
+            // slot.
+            Assert.Equal(JustBeforeNoon + TimeSpan.FromMinutes(10), reArmed.NotBefore);
         }
     }
 }

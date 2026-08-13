@@ -41,10 +41,22 @@ using GenWave.Core.Domain;
 /// facts. <see langword="null"/> for every other kind, and defensively tolerated (skip, not throw)
 /// should a <see cref="SpeechDeferralKind.Context"/> deferral ever somehow arrive without one.
 /// </param>
+/// <param name="NotBefore">
+/// Additive, optional (SPEC F124.1/F124.2, PLAN T267, round-1 review findings F1/F2) — a floor on
+/// REAL wall-clock time, honored by <see cref="SpeechDeferralQueue.TryDequeueDue"/> regardless of
+/// whatever as-of instant a caller supplies for the ordinary <see cref="Due"/> comparison. Unlike
+/// <see cref="Due"/> (which names the boundary this deferral belongs to, and which a forced-forward
+/// drain-as-of instant may legitimately advance past — see <see cref="SpeechDeferralQueue"/>'s own
+/// remarks), this is never "the boundary," only "not yet, no matter what instant you pretend it is" —
+/// the held-sign-on-past-a-queue-crossing-tail seam is this field's one producer today
+/// (<c>Orchestrator.HoldSignOnPastQueuedTail</c>). <see langword="null"/> for every other kind/shape —
+/// no not-before floor at all, the ordinary <see cref="Due"/>-only gate every pre-F124 deferral used.
+/// </param>
 public sealed record SpeechDeferral(
     SpeechDeferralKind Kind,
     DateTimeOffset Due,
     string Reason,
     HandoffContext? Handoff = null,
     string? Discriminator = null,
-    ContextSegmentFacts? Context = null);
+    ContextSegmentFacts? Context = null,
+    DateTimeOffset? NotBefore = null);
