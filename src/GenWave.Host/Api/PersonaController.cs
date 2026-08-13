@@ -8,6 +8,7 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Logging;
 using GenWave.Host.Options;
+using GenWave.Tts;
 
 namespace GenWave.Host.Api;
 
@@ -349,6 +350,16 @@ public sealed partial class PersonaController(
     /// only failure mode, a name collision, maps to 409 — the same status every other write action on
     /// this controller already uses for <see cref="PersonaWriteResult.NameConflict"/>.
     ///
+    /// <para>
+    /// Pace range (gh-#483, PLAN T140 follow-up, <see cref="PaceWarning"/>): <see cref="TtsPace"/>'s
+    /// render-time clamp already keeps an out-of-range <c>card.Voice.Pace</c> (e.g. <c>3.0</c>) safe
+    /// to send to the engine, silently — ruled right there, since <see cref="ActivePersonaPaceCache"/>'s
+    /// 30s poll would otherwise re-log the same standing value forever. That silence leaves the
+    /// operator with no signal ANYWHERE, so the check runs a second time here, once, at import/save —
+    /// never refusing the write, only appending a warning to the same <see cref="PersonaImportResponse.Warnings"/>
+    /// channel <see cref="ResolveVoiceAsync"/>'s own unresolved-voice case already uses.
+    /// </para>
+    ///
     /// <paramref name="catalogSlug"/> (SPEC F90.7, STORY-237, PLAN T98, T103) is the ONLY provenance
     /// signal this action passes to the store: present and valid ⇒
     /// <see cref="PersonaImportRequest.ImportedFrom"/> is the catalog entry's own slug; absent ⇒ the
@@ -402,7 +413,10 @@ public sealed partial class PersonaController(
         if (card.SchemaVersion > PersonaCard.CurrentSchemaVersion)
             return BadRequest(NewerSchemaProblem(card.SchemaVersion));
 
-        var (legacyVoice, warnings) = await ResolveVoiceAsync(card.Voice, ct);
+        var (legacyVoice, voiceWarnings) = await ResolveVoiceAsync(card.Voice, ct);
+        IReadOnlyList<string> warnings = PaceWarning(card.Voice.Pace) is { } paceWarning
+            ? [.. voiceWarnings, paceWarning]
+            : voiceWarnings;
 
         var importedFrom = string.IsNullOrEmpty(catalogSlug) ? PersonaImportRequest.FileSource : catalogSlug;
         var outcome = await personaImportStore.ImportAsync(
@@ -470,6 +484,34 @@ public sealed partial class PersonaController(
 
         return (string.Empty,
             [$"Voice \"{voice.VoiceId}\" is not available on this station; using the station default voice instead."]);
+    }
+
+    /// <summary>
+    /// The operator-visible sibling of <see cref="TtsPace"/>'s own render-time clamp (gh-#483, PLAN
+    /// T140 follow-up): a finite <paramref name="pace"/> outside <see cref="TtsPace.MinSpeed"/>/
+    /// <see cref="TtsPace.MaxSpeed"/> still renders fine (T140's clamp handles that), but silently —
+    /// this names the authored value AND the bound it will actually render at, once, here, rather than
+    /// leaving the operator to notice only by ear. Uses <see cref="TtsPace.Clamp"/> itself for "is this
+    /// in range", never a duplicated <c>[0.5, 2.0]</c> literal.
+    ///
+    /// A <see cref="TtsPace.IsDegenerate"/> value (<c>NaN</c>/<c>Infinity</c>/zero/negative) is
+    /// deliberately OUT of scope here: T140's own <see cref="ActivePersonaPaceCache"/> already WARNs
+    /// (latched, so it never repeats) the first time a persona with that value goes live — this method
+    /// only covers the honest-but-out-of-range case this issue names (e.g. <c>3.0</c>), which that
+    /// latch does not cover at all.
+    /// </summary>
+    static string? PaceWarning(double pace)
+    {
+        if (TtsPace.IsDegenerate(pace))
+            return null;
+
+        var clamped = TtsPace.Clamp(pace);
+        if (clamped == pace)
+            return null;
+
+        return
+            $"Pace {pace:0.0###} is outside this engine's [{TtsPace.MinSpeed:0.0###}, {TtsPace.MaxSpeed:0.0###}] " +
+            $"window and will render at {clamped:0.0###}.";
     }
 
     // Mirrors LegacyPersonaCardMapper.Slugify's own character class (lowercase letters, digits,
