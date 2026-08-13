@@ -458,6 +458,7 @@ describe("Feature: adding a pronunciation rule", () => {
     it("toasts the write's collision warning alongside the success toast", async () => {
       makeFetchMock(
         getRow(200, []),
+        probeAvailable(),
         { status: 201, body: { rule: STATION_ROW, warnings: [COLLISION_WARNING] } },
         getRow(200, [STATION_ROW])
       );
@@ -473,6 +474,7 @@ describe("Feature: adding a pronunciation rule", () => {
     it("toasts nothing extra when the write carries no warnings", async () => {
       makeFetchMock(
         getRow(200, []),
+        probeAvailable(),
         { status: 201, body: { rule: STATION_ROW, warnings: [] } },
         getRow(200, [STATION_ROW])
       );
