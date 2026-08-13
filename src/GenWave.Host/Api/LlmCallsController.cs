@@ -10,7 +10,7 @@ namespace GenWave.Host.Api;
 /// ~<see cref="LlmOptions.CallRingCapacity"/> calls — on-air renders, Soft-cadence attempts, and
 /// operator previews alike), newest first, full prompt/response text included. Never persisted
 /// (F73.3): this endpoint only ever reads the one in-memory singleton
-/// <c>LlmCopyWriter.RequestCompletionAsync</c> records into — nothing here ever touches disk or a
+/// <c>LlmCopyWriter.RequestCleanedCompletionAsync</c> records into — nothing here ever touches disk or a
 /// database, so a process restart clears it with no explicit "clear" step to forget. Deny-by-default
 /// like every other admin route: no <see cref="SpectatorSurfaceAttribute"/>, no public reachability
 /// (F73.2).
