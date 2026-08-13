@@ -75,7 +75,7 @@ public static class FeatureContainerStatsSource
         {
           "Id": "ce23d1e36dea0be43b7a272fd82e283cf647ca7392d2bebc11cf0548bd493514",
           "RestartCount": 3,
-          "State": { "Status": "running", "Health": { "Status": "healthy" } }
+          "State": { "Status": "running", "Health": { "Status": "healthy" }, "StartedAt": "2026-07-29T17:00:00.000000000Z" }
         }
         """;
 
@@ -84,7 +84,7 @@ public static class FeatureContainerStatsSource
         {
           "Id": "dacbd6262dc9b965d5b57710c753c1d9acf06d80e9c767836181fc0fe73aec28",
           "RestartCount": 0,
-          "State": { "Status": "exited" }
+          "State": { "Status": "exited", "StartedAt": "2026-07-29T15:00:00.000000000Z" }
         }
         """;
 
@@ -133,6 +133,7 @@ public static class FeatureContainerStatsSource
             Assert.Equal(400_000_000, api.MemoryUsedBytes);
             Assert.Equal(2_000_000_000, api.MemoryLimitBytes);
             Assert.Equal(3, api.RestartCount);
+            Assert.Equal("2026-07-29T17:00:00.000000000Z", api.StartedAt);
         }
 
         [Fact]
@@ -153,6 +154,7 @@ public static class FeatureContainerStatsSource
             Assert.Null(exited.CpuPercent);
             Assert.Null(exited.MemoryUsedBytes);
             Assert.Equal(0, exited.RestartCount);
+            Assert.Equal("2026-07-29T15:00:00.000000000Z", exited.StartedAt);
             Assert.DoesNotContain(handler.Requests, request =>
                 (request.RequestUri?.PathAndQuery ?? "").Contains("dacbd6262dc9") &&
                 (request.RequestUri?.PathAndQuery ?? "").Contains("stats"));
@@ -231,6 +233,7 @@ public static class FeatureContainerStatsSource
             Assert.Null(api.MemoryUsedBytes);
             Assert.Null(api.Health);
             Assert.Null(api.RestartCount);
+            Assert.Null(api.StartedAt);
         }
     }
 

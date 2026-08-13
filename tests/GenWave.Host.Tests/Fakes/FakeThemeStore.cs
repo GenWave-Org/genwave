@@ -29,6 +29,27 @@ sealed class FakeThemeStore : IThemeStore
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Mirrors <c>ThemeRepository.SaveAsOwnAsync</c>'s own conditional-upsert contract (gh-#394) — an
+    /// in-memory dictionary has no real concurrent-writer race to close, but the double still enforces
+    /// the SAME refusal rule the real SQL's <c>WHERE</c> clause does, so a save-as-own Fact driven
+    /// against this fake proves the identical outcome a real-Postgres Fact would.
+    /// </summary>
+    public Task<bool> SaveAsOwnAsync(string slug, string definition, CancellationToken ct)
+    {
+        if (bySlug.TryGetValue(slug, out var existing))
+        {
+            if (existing.ImportedFrom is not null)
+                return Task.FromResult(false);
+
+            bySlug[slug] = existing with { Definition = definition };
+            return Task.FromResult(true);
+        }
+
+        bySlug[slug] = new OwnerTheme(slug, definition, null, null, DateTime.UtcNow);
+        return Task.FromResult(true);
+    }
+
     public Task<IReadOnlyList<OwnerTheme>> GetAllAsync(CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<OwnerTheme>>(bySlug.Values.ToList());
 

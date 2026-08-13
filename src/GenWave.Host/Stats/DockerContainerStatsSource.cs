@@ -12,8 +12,8 @@ using GenWave.Host.Options;
 /// <c>GET /containers/json?all=true</c> for the roster, then per running container one one-shot
 /// <c>GET /containers/{id}/stats?stream=false</c> (cpu + memory — see
 /// <see cref="DockerCpuCalculator"/> for the percentage math) and one
-/// <c>GET /containers/{id}/json</c> (health verdict + restart count). All three paths sit behind
-/// the proxy's single <c>CONTAINERS=1</c> grant.
+/// <c>GET /containers/{id}/json</c> (health verdict + restart count + last-start time). All three
+/// paths sit behind the proxy's single <c>CONTAINERS=1</c> grant.
 /// <para>
 /// Fail-safe throughout, the <see cref="IcecastListenerStatsSource"/> discipline: an unreachable
 /// sidecar (or an empty <c>BaseUrl</c>) degrades to a well-formed
@@ -110,7 +110,8 @@ public sealed class DockerContainerStatsSource(
             stats is null ? null : DockerCpuCalculator.CpuPercent(stats.CpuStats, stats.PreCpuStats),
             MemoryUsedBytes(stats?.MemoryStats),
             stats?.MemoryStats?.Limit,
-            inspect?.RestartCount);
+            inspect?.RestartCount,
+            inspect?.State?.StartedAt);
     }
 
     async Task<DockerContainerStats?> TryGetStatsAsync(string baseUrl, string id, CancellationToken ct)

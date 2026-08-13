@@ -19,6 +19,7 @@ namespace GenWave.Core.Domain;
 /// </exception>
 public sealed record TasteRule(TastePredicate Predicate, TasteContext Context, double Weight)
 {
+    /// <summary>Bias strength in <c>[-1, 1]</c>; negative is a dislike, positive a like.</summary>
     public double Weight { get; init; } = Weight is >= -1.0 and <= 1.0
         ? Weight
         : throw new ArgumentOutOfRangeException(nameof(Weight), Weight, "Weight must be within [-1, 1] (SPEC F82.1).");

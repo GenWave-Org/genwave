@@ -53,7 +53,7 @@ namespace GenWave.Core.Domain;
 /// <param name="SegmentKind">
 /// SPEC F113.1 (STORY-304, PLAN T220) — the demo-hour observability instrument's own token:
 /// <see langword="null"/> for every music/audio row (the only caller is
-/// <see cref="MediaReferenceExtensions.ToMediaItem"/>, which never sets this), the segment's own
+/// <c>MediaReferenceExtensions.ToMediaItem</c>, which never sets this), the segment's own
 /// <see cref="SegmentRequest.Kind"/> for a TTS render (<c>TtsSegmentSource.RenderAsync</c> stamps
 /// it verbatim). Rides through <c>PlayoutFeeder</c>'s push-time metadata into
 /// <see cref="GenWave.Core.Events.TrackAired.SegmentKind"/> the same way <see cref="DjName"/> does,

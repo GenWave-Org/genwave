@@ -23,7 +23,10 @@ public static class PersonaCardSerializer
         WriteIndented = false,
     };
 
+    /// <summary>Serializes <paramref name="card"/> to the canonical byte-stable camelCase JSON shape.</summary>
     public static string Serialize(PersonaCard card) => JsonSerializer.Serialize(card, Options);
 
+    /// <summary>Deserializes <paramref name="json"/> back into a <see cref="PersonaCard"/>, or
+    /// <see langword="null"/> when <paramref name="json"/> is the JSON literal <c>null</c>.</summary>
     public static PersonaCard? Deserialize(string json) => JsonSerializer.Deserialize<PersonaCard>(json, Options);
 }

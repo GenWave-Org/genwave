@@ -22,7 +22,13 @@ export interface ContainerStat {
   cpuPercent: number | null;
   memoryUsedBytes: number | null;
   memoryLimitBytes: number | null;
+  /** Docker's restart counter. Monotonic — never decays on its own, only a container recreation
+   * resets it — so pair it with `startedAt` before reading it as a live incident (gh-#490). */
   restartCount: number | null;
+  /** ISO 8601: when the current container instance last started, i.e. Docker's proxy for "when
+   * did the last restart happen". `null` when inspect degraded. Lets the Health page tell a
+   * historical restart storm from a current one. */
+  startedAt: string | null;
 }
 
 /**

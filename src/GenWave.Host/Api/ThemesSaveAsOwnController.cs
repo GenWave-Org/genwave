@@ -33,30 +33,38 @@ namespace GenWave.Host.Api;
 /// <b>Gate order.</b> <see cref="ThemeWriteGate.RunAsync"/>'s own shared pipeline (route slug format
 /// 400 → shipped-slug reservation 409, F103.8 → bounded body read 413 → schema-major 400 →
 /// deserialize-as-validation 400 → curated-font provenance/byte-ceiling 400, F103.10/F104.9) → THIS
-/// route's own imported-theme overwrite refusal (409, SPEC F104.13, PLAN T207 review finding F2 — see
-/// this controller's own "Fail-closed overwrite" remarks below) → upsert with
-/// <c>imported_from = null</c> + catalog rebuild (F103.7's "no restart" contract, same rebuild hook
+/// route's own conditional upsert with <c>imported_from = null</c> (409 on conflict with an imported
+/// row, SPEC F104.13, PLAN T207 review finding F2 / gh-#394 — see this controller's own "Fail-closed
+/// overwrite" remarks below) → catalog rebuild (F103.7's "no restart" contract, same rebuild hook
 /// import uses).
 /// </para>
 ///
 /// <para>
 /// <b>Fail-closed overwrite (SPEC F104.13, PLAN T207 review finding F2 — Dean's standing fail-closed
-/// preference, 2026-08-05).</b> A save targeting a slug that already holds an IMPORTED theme (a
-/// <see cref="OwnerTheme.ImportedFrom"/> that is non-null) is REFUSED with 409
-/// (<see cref="ImportProblems.SlugHoldsAnImportedTheme"/>) — an authored save must never silently
-/// destroy another theme's own imported provenance, which an unconditional upsert would do (the target
-/// row's <c>imported_from</c>/<c>imported_at</c> would both be NULLed, <see cref="ThemeRepository.UpsertAsync"/>'s
-/// own CASE expression, with no trace the theme was ever imported at all). Authored-OVER-authored — the
-/// operator re-saving onto a slug that already holds THEIR OWN previously-saved theme (imported_from
-/// already <see langword="null"/>) — stays ALLOWED: that is ordinary iteration on a theme this route
-/// itself created, the exact "re-save under the same name replaces rather than duplicates" contract
-/// <c>EditorClient.tsx</c>'s own <c>handleSaved</c> remarks already promise. A slug with NO existing row
-/// at all is, naturally, also allowed (a fresh insert, nothing to overwrite). Checked AFTER the shared
-/// gate pipeline has already produced a valid, law-passing manifest — a doomed-on-content request still
-/// fails on ITS OWN defect first, never masked by an overwrite refusal it would have hit regardless —
-/// and BEFORE the upsert, an extra <see cref="IThemeStore.GetBySlugAsync"/> read only this route pays
-/// for, never <see cref="ThemesImportController.Import"/> (which has no such refusal at all — a
-/// re-import of an existing owner slug is always a plain update, that class's own remarks).
+/// preference, 2026-08-05; gh-#394 closed the race this paragraph used to leave open).</b> A save
+/// targeting a slug that already holds an IMPORTED theme (a <see cref="OwnerTheme.ImportedFrom"/> that
+/// is non-null) is REFUSED with 409 (<see cref="ImportProblems.SlugHoldsAnImportedTheme"/>) — an
+/// authored save must never silently destroy another theme's own imported provenance, which an
+/// unconditional upsert would do (the target row's <c>imported_from</c>/<c>imported_at</c> would both
+/// be NULLed). Authored-OVER-authored — the operator re-saving onto a slug that already holds THEIR OWN
+/// previously-saved theme (imported_from already <see langword="null"/>) — stays ALLOWED: that is
+/// ordinary iteration on a theme this route itself created, the exact "re-save under the same name
+/// replaces rather than duplicates" contract <c>EditorClient.tsx</c>'s own <c>handleSaved</c> remarks
+/// already promise. A slug with NO existing row at all is, naturally, also allowed (a fresh insert,
+/// nothing to overwrite). Checked AFTER the shared gate pipeline has already produced a valid,
+/// law-passing manifest — a doomed-on-content request still fails on ITS OWN defect first, never masked
+/// by an overwrite refusal it would have hit regardless.
+/// </para>
+///
+/// <para>
+/// gh-#394 — this guard used to be a read (<see cref="IThemeStore.GetBySlugAsync"/>) followed by a
+/// separate write (<see cref="IThemeStore.UpsertAsync"/>), a TOCTOU window an import committing to the
+/// same slug between the two calls could race: the read would see "no row / authored row", and the
+/// unconditional write that followed would still clobber whatever the import had just committed. There
+/// is no pre-check read anymore — <see cref="IThemeStore.SaveAsOwnAsync"/> IS the check, a single
+/// atomic <c>INSERT … ON CONFLICT … DO UPDATE … WHERE</c> statement that refuses (returns
+/// <see langword="false"/>, zero rows affected) in the exact same case the old pre-check refused, with
+/// no gap between "look" and "leap" for a concurrent import to land in.
 /// </para>
 ///
 /// <para>
@@ -74,16 +82,16 @@ namespace GenWave.Host.Api;
 /// <b><c>imported_from</c> is ALWAYS <see langword="null"/> here — never a parameter, never derived
 /// from anything the request carries.</b> Unlike <see cref="ThemesImportController.Import"/>'s
 /// <c>catalogSlug</c>-or-"file" branch, this route has no provenance INPUT to branch on: SPEC F104.13
-/// names <see langword="null"/> as the one value a save-as-own row is ever stamped with, so the upsert
-/// call below passes the literal <see langword="null"/> — see
-/// <see cref="GenWave.MediaLibrary.Station.ThemeRepository.UpsertAsync"/>'s own remarks for how the
+/// names <see langword="null"/> as the one value a save-as-own row is ever stamped with, so
+/// <see cref="IThemeStore.SaveAsOwnAsync"/> below has no provenance parameter to accept at all — see
+/// <see cref="GenWave.MediaLibrary.Station.ThemeRepository.SaveAsOwnAsync"/>'s own remarks for how the
 /// store honours <see cref="Core.Domain.OwnerTheme"/>'s "<c>ImportedAt</c> is <see langword="null"/>
 /// exactly when <c>ImportedFrom</c> is" invariant on this path.
 /// </para>
 ///
 /// <para>
 /// <b>Base theme untouched (SPEC F104.13, STORY-287 AC2) — true by construction, not by a check this
-/// route performs.</b> <see cref="IThemeStore.UpsertAsync"/> writes exactly one row, keyed by
+/// route performs.</b> <see cref="IThemeStore.SaveAsOwnAsync"/> writes exactly one row, keyed by
 /// <paramref name="slug"/> — the route slug the operator chose for the NEW theme, distinct from
 /// whichever base theme's slug the remix was mixed from. This route never reads, let alone writes, any
 /// slug other than <paramref name="slug"/> itself, so the base theme it was mixed from resolves
@@ -119,17 +127,14 @@ public sealed class ThemesSaveAsOwnController(
         if (manifestOrNull is not { } normalized)
             throw new UnreachableException($"{nameof(ThemeWriteGate)}.{nameof(ThemeWriteGate.RunAsync)} returned neither a refusal nor a manifest.");
 
-        // Fail-closed overwrite refusal (SPEC F104.13, PLAN T207 review finding F2) — see this
-        // controller's own "Fail-closed overwrite" remarks for the full ruling. Only an IMPORTED
-        // existing row (non-null ImportedFrom) is refused; no row at all, or a row this route itself
-        // authored before (ImportedFrom already null), both fall through to the upsert below.
-        var existing = await themeStore.GetBySlugAsync(slug, ct);
-        if (existing is { ImportedFrom: not null })
+        // Fail-closed overwrite refusal (SPEC F104.13, PLAN T207 review finding F2, gh-#394) — see
+        // this controller's own "Fail-closed overwrite" remarks for the full ruling. The write below IS
+        // the check (an atomic conditional upsert, no separate pre-check read): it refuses (false, no
+        // row touched) only when the slug already holds an IMPORTED row (non-null ImportedFrom); no row
+        // at all, or a row this route itself authored before (ImportedFrom already null), both succeed.
+        var saved = await themeStore.SaveAsOwnAsync(slug, ThemeManifestSerializer.Serialize(normalized), ct);
+        if (!saved)
             return Conflict(ImportProblems.SlugHoldsAnImportedTheme(slug));
-
-        // imported_from is ALWAYS null on this path (SPEC F104.13) — see this controller's own remarks
-        // ("imported_from is ALWAYS null here") for why there is no branch to take.
-        await themeStore.UpsertAsync(slug, ThemeManifestSerializer.Serialize(normalized), importedFrom: null, ct);
 
         // CancellationToken.None, deliberately — mirrors ThemesImportController.Import's own "Rebuild
         // after write" remarks: the write above has already committed, so the rebuild is no longer this

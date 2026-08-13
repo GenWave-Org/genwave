@@ -9,10 +9,17 @@ namespace GenWave.Core.Events;
 /// <c>tts:*</c> patter's measured cue-derived duration (SPEC F66.1); it is null only for an
 /// engine-initiated advance, which the Host rehydrates from the catalog after publish (SPEC F66.2).
 /// </summary>
+/// <param name="MediaId">The catalog id of the item now on-air.</param>
+/// <param name="Title">The item's title, when known.</param>
+/// <param name="Artist">The item's artist, when known.</param>
+/// <param name="GainDb">The loudness-match gain applied for this airing.</param>
+/// <param name="StartedAt">The genuine air-time instant this event was published.</param>
+/// <param name="DurationMs">The item's measured cue-derived duration, or <see langword="null"/> for
+/// an engine-initiated advance (see the type-level remarks).</param>
 /// <param name="PersonaPick">
 /// SPEC F82.6, F83.1, F86.1 (STORY-217, PLAN T73) — the SAME <see cref="PersonaPickDiagnostics"/> the
 /// copywriter reads off <c>MediaItem.PersonaPick</c> (no re-derivation), carried straight from
-/// <see cref="GenWave.Core.Playout.PlayoutFeeder"/>'s own pushed-item metadata at the instant this
+/// <c>GenWave.Core.Playout.PlayoutFeeder</c>'s own pushed-item metadata at the instant this
 /// event is published — one source of truth for both consumers. <see langword="null"/> for every
 /// engine-initiated advance (the feeder never pushed this id, so it never held a pick) and for the
 /// common persona-off case. The booth log's own event consumer stamps <c>station.booth_log.pick</c>
