@@ -230,6 +230,16 @@ file static class PreviewControllerFactory
             synthesizer,
             new FakeOptionsMonitor<StationOptions>(stationOptions ?? DefaultStationOptions()),
             new FakeOptionsMonitor<TtsOptions>(ttsOptions ?? new TtsOptions()),
+            // T274 (SPEC F126.1): the preview now resolves rules/pace through these same three
+            // real, cheap-to-construct DI seams TtsSegmentSource uses — no station/card rules
+            // configured here reproduces this suite's pre-T274 "empty rules" shape exactly (an
+            // empty PronunciationRuleSet/no active card resolve to no rules either way).
+            new PronunciationRuleProvider(
+                new FakeOptionsMonitor<TtsPronunciationsOptions>(new TtsPronunciationsOptions()),
+                NullLogger<PronunciationRuleProvider>.Instance),
+            new ActivePersonaPronunciationRulesCache(new FakeActivePersonaAccessor(), TimeProvider.System),
+            new ActivePersonaPaceCache(
+                new FakeActivePersonaAccessor(), TimeProvider.System, NullLogger<ActivePersonaPaceCache>.Instance),
             NullLogger<TtsPreviewController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

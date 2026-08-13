@@ -22,7 +22,7 @@ public sealed class KokoroTtsSynthesizer(
     PronunciationRuleHitReporter? ruleHits = null) : ITtsSynthesizer
 {
     public Task<string> SynthesizeAsync(string text, string voice, CancellationToken ct) =>
-        RenderAsync(text, voice, PronunciationRuleSet.Empty, TtsPace.EngineDefault, null, ct);
+        RenderAsync(text, voice, PronunciationRuleSet.Empty, TtsPace.EngineDefault, null, isAudition: false, ct);
 
     /// <summary>
     /// Context-aware overload (SPEC F70.3, F97.6, F98.2): reads <see cref="TtsRenderContext.Rules"/>
@@ -45,10 +45,11 @@ public sealed class KokoroTtsSynthesizer(
     public Task<string> SynthesizeAsync(TtsRenderContext context, CancellationToken ct) =>
         RenderAsync(
             context.Text, context.Voice, PronunciationRuleSet.FromContext(context.Rules), context.Pace,
-            context.Kind, ct);
+            context.Kind, context.IsAudition, ct);
 
     async Task<string> RenderAsync(
-        string text, string voice, PronunciationRuleSet rules, double pace, SegmentKind? kind, CancellationToken ct)
+        string text, string voice, PronunciationRuleSet rules, double pace, SegmentKind? kind, bool isAudition,
+        CancellationToken ct)
     {
         var cfg = optionsMonitor.CurrentValue;
 
@@ -98,8 +99,10 @@ public sealed class KokoroTtsSynthesizer(
         // at all when the whole chain fails and the segment is dropped, including the narrower
         // sliver where the engine returns 2xx but the subsequent file write fails. See
         // ScenarioAFiredHitIsNeverDoubleCounted (Story253) for the failing-primary/succeeding-hop
-        // probe this ordering exists to satisfy.
-        ruleHits?.Report(matches, kind);
+        // probe this ordering exists to satisfy. isAudition (PLAN T274) still gates the report even
+        // though this render genuinely landed on disk — an audition clip existing on disk briefly
+        // is not the same fact as a rule airing (SPEC F97.5, F126.1).
+        ruleHits?.Report(matches, kind, isAudition);
 
         return path;
     }

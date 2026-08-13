@@ -51,4 +51,35 @@ public sealed record TtsRenderContext(string Text, string Voice, SegmentKind? Ki
     /// later task's job (STORY-253); this type only carries the value forward.
     /// </summary>
     public IReadOnlyList<PronunciationRule> Rules { get; init; } = [];
+
+    /// <summary>
+    /// True when this render is an AUDITION — an operator proving a rule/persona/pace before it
+    /// ever airs — rather than a real on-air render (SPEC F97.5, F126.1, F126.3; STORY-253 AC6,
+    /// STORY-323, STORY-325). Defaults to <see langword="false"/>: every existing construction site
+    /// (<c>TtsSegmentSource</c>'s on-air render, and — until it is widened onto this same context
+    /// overload — <c>SafeSegmentAuthor</c>'s authoring, which today still uses the context-less
+    /// overload entirely) keeps counting exactly as it always has.
+    ///
+    /// <para>
+    /// Until PLAN T274, <c>Rules</c> above was ALWAYS empty for the admin preview
+    /// (<c>POST /api/tts/preview</c>) by construction — no separate exclusion flag existed because
+    /// none was needed (see <see cref="GenWave.Tts.PronunciationRuleHitReporter"/>'s pre-T274
+    /// history). T274 resolves real rules onto a preview's context (the audition must sound like
+    /// air), which makes that construction-based exclusion false — <see cref="IsAudition"/> is the
+    /// flag that now carries the SAME "never counts, never logs a hit" posture explicitly.
+    /// <see cref="GenWave.Tts.PronunciationRuleHitReporter"/> is the ONE seam that reads it: it
+    /// counts and logs a rule hit for every render EXCEPT one that carries
+    /// <see cref="IsAudition"/> = <see langword="true"/>.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Ruling (T274, for T276's authoring task):</b> the identical posture applies to
+    /// <c>SafeSegmentAuthor</c> once it is widened onto this context overload — authoring is not
+    /// airing, the same "fired means aired" principle SPEC F97.5/PLAN T142 already settled for the
+    /// on-air render path. Whichever task widens <c>SafeSegmentAuthor</c> onto the context overload
+    /// must set <see cref="IsAudition"/> = <see langword="true"/> there too, reusing this SAME flag
+    /// rather than inventing a second exclusion mechanism.
+    /// </para>
+    /// </summary>
+    public bool IsAudition { get; init; }
 }

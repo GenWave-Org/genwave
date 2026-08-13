@@ -74,3 +74,21 @@ export interface SettingControlProps {
    */
   choices?: readonly SettingChoice[];
 }
+
+/**
+ * Shape of ASP.NET Core `ValidationProblemDetails` returned on a 400 — every field-naming write
+ * failure on this page reads the SAME shape, whether it's `PUT /api/settings`'s batch response
+ * (`SettingsForm`) or a dedicated-API control's own single-rule write (`PronunciationRulesControl`,
+ * PLAN T145 review should-fix). One shared type here instead of a per-control copy.
+ */
+export interface ValidationProblemDetails {
+  errors: Record<string, string[]>;
+  title?: string;
+  status?: number;
+}
+
+export function isValidationProblemDetails(raw: unknown): raw is ValidationProblemDetails {
+  if (typeof raw !== "object" || raw === null) return false;
+  const obj = raw as Record<string, unknown>;
+  return typeof obj["errors"] === "object" && obj["errors"] !== null;
+}

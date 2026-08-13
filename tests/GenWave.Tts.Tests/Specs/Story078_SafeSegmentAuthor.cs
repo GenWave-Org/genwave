@@ -28,7 +28,8 @@ public static class FeatureSafeSegmentAuthor
     {
         var opts = Options.Create(new TtsOptions { Format = "wav" });
         return new SafeSegmentAuthor(
-            synth, mixer, loudness, cue, energy, writer, opts, NullLogger<SafeSegmentAuthor>.Instance);
+            synth, NoCorrections.PronunciationProvider(), mixer, loudness, cue, energy, writer, opts,
+            NullLogger<SafeSegmentAuthor>.Instance);
     }
 
     static SafeSegmentRequest Request(

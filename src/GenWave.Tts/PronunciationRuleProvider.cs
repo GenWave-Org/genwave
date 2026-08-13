@@ -1,6 +1,5 @@
 namespace GenWave.Tts;
 
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -22,11 +21,6 @@ public sealed class PronunciationRuleProvider : IDisposable
     // Sentinel for "no rules configured" — distinct from ActivePersonaPronunciationRulesCache's own
     // "no-card-pronunciations" sentinel so the two independent "no rules" cases can never collide.
     const string EmptyContentHash = "no-pronunciations";
-
-    static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
 
     readonly ILogger<PronunciationRuleProvider> logger;
     readonly IDisposable? subscription;
@@ -72,48 +66,45 @@ public sealed class PronunciationRuleProvider : IDisposable
         PronunciationRuleSet stationSet, IReadOnlyList<PronunciationRule> cardRules) =>
         PronunciationRuleSet.Merge(stationSet, PronunciationRuleSet.Create(cardRules));
 
+    // Deserialization itself now runs through PronunciationRuleJson.ParseDeclared (T144 review F4)
+    // — the ONE seam shared with the rules API controller, so "what counts as malformed" can never
+    // drift between the render path and the write path.
     static Snapshot Build(TtsPronunciationsOptions options, ILogger logger)
     {
-        if (string.IsNullOrWhiteSpace(options.Pronunciations))
-            return new Snapshot(PronunciationRuleSet.Empty, EmptyContentHash);
-
-        try
+        var (declared, fault) = PronunciationRuleJson.ParseDeclared(options.Pronunciations);
+        if (fault is not null)
         {
-            var rules = JsonSerializer.Deserialize<List<PronunciationRule>>(options.Pronunciations, JsonOptions);
-            if (rules is null)
-                return new Snapshot(PronunciationRuleSet.Empty, EmptyContentHash);
-
-            var set = PronunciationRuleSet.Create(rules);
-            var compiledCount = set.Rules.Count();
-            if (compiledCount < rules.Count)
-            {
-                // SPEC F97.5 review finding: SettingValidator only guards Tts:Pronunciations' JSON
-                // shape (Story253_PronunciationsSettingShape), never whether a rule actually compiles
-                // — a rule that PronunciationRuleSet.Create dropped (blank pattern/word/ipa, an ipa
-                // carrying ')'/'['/']', a word not found inside its own pattern, or a null array
-                // element) would otherwise never fire and never be logged anywhere. T142's rule-HIT
-                // counters can never surface this either: a dropped rule never reaches Match, so it
-                // never hits. One WARN here, at construction/every rebuild, is the earliest and only
-                // place every station rule passes through that can compare "declared" against
-                // "compiled" and say so.
-                logger.LogWarning(
-                    "Tts:Pronunciations declared {DeclaredCount} rule(s) but only {CompiledCount} compiled — " +
-                    "the rest were dropped (blank pattern/word/ipa, an ipa containing ')'/'['/']', or a word " +
-                    "not found inside its own pattern) and will never fire",
-                    rules.Count, compiledCount);
-            }
-            return new Snapshot(set, ComputeContentHash(set));
-        }
-        catch (Exception ex)
-        {
-            // Deliberately broad (not just JsonException): Tts:Pronunciations is operator-authored
-            // data, never trusted deployment topology, so ANY deserialization surprise — malformed
-            // JSON, or a null array element STJ happily produces from e.g. "[null]" — must degrade to
-            // no rules with one WARN rather than escape the constructor and take the api down.
+            // Deliberately broad catch inside ParseDeclared (not just JsonException): Tts:Pronunciations
+            // is operator-authored data, never trusted deployment topology, so ANY deserialization
+            // surprise — malformed JSON, or a null array element STJ happily produces from e.g.
+            // "[null]" — must degrade to no rules with one WARN rather than escape the constructor and
+            // take the api down.
             logger.LogWarning(
-                ex, "Tts:Pronunciations could not be parsed; no station pronunciation rules applied until it is fixed");
+                fault, "Tts:Pronunciations could not be parsed; no station pronunciation rules applied until it is fixed");
             return new Snapshot(PronunciationRuleSet.Empty, EmptyContentHash);
         }
+
+        var set = PronunciationRuleSet.Create(declared);
+        var compiledCount = set.Rules.Count();
+        if (compiledCount < declared.Count)
+        {
+            // SPEC F97.5 review finding: SettingValidator only guards Tts:Pronunciations' JSON
+            // shape (Story253_PronunciationsSettingShape), never whether a rule actually compiles
+            // — a rule that PronunciationRuleSet.Create dropped (blank pattern/word/ipa, an ipa
+            // carrying ')'/'['/']', a word not found inside its own pattern, or a null array
+            // element) would otherwise never fire and never be logged anywhere. T142's rule-HIT
+            // counters can never surface this either: a dropped rule never reaches Match, so it
+            // never hits. One WARN here, at construction/every rebuild, is the earliest and only
+            // place every station rule passes through that can compare "declared" against
+            // "compiled" and say so. (T144's rules API additionally surfaces each dropped rule as
+            // its own visible, deletable row — see PronunciationsController.BuildRows.)
+            logger.LogWarning(
+                "Tts:Pronunciations declared {DeclaredCount} rule(s) but only {CompiledCount} compiled — " +
+                "the rest were dropped (blank pattern/word/ipa, an ipa containing ')'/'['/']', or a word " +
+                "not found inside its own pattern) and will never fire",
+                declared.Count, compiledCount);
+        }
+        return new Snapshot(set, ComputeContentHash(set));
     }
 
     static string ComputeContentHash(PronunciationRuleSet set) =>

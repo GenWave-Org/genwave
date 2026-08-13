@@ -167,7 +167,8 @@ public static class FeaturePersonaPromptSections
             var writer = new FakeAuthoredCatalogWriter();
             var opts = Microsoft.Extensions.Options.Options.Create(new TtsOptions { Format = "wav" });
             var author = new SafeSegmentAuthor(
-                synth, mixer, loudness, cue, energy, writer, opts, NullLogger<SafeSegmentAuthor>.Instance);
+                synth, NoCorrections.PronunciationProvider(), mixer, loudness, cue, energy, writer, opts,
+                NullLogger<SafeSegmentAuthor>.Instance);
 
             try
             {

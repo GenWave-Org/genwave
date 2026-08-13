@@ -7,7 +7,9 @@ using System.Collections.Concurrent;
 /// how many times each (<see cref="PronunciationRule.Pattern"/>, <see cref="PronunciationRule.Word"/>)
 /// identity has actually annotated booth-bound text since this process started. Incremented by
 /// <see cref="PronunciationRuleHitReporter"/> immediately after a REAL render's markup composition
-/// finds a match — never a preview, see that class's own remarks for the exact mechanism — and read
+/// finds a match — never an audition (the admin TTS preview, PLAN T274; see
+/// <see cref="PronunciationRuleHitReporter"/>'s own remarks for the exact <c>IsAudition</c>-gated
+/// mechanism that now enforces this, replacing the earlier construction-only exclusion) — and read
 /// by a future rules API (T144, PLAN.md) so an operator can confirm a saved rule is actually firing
 /// on-air. In-memory only, mirroring <see cref="CorrectionsFiredStats"/>' own no-persistence
 /// contract — restarting the api resets every count to zero: counts since boot are the honest

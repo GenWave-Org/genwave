@@ -10,7 +10,6 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Events;
 using GenWave.Core.Logging;
-using ContextPronunciationRule = GenWave.Core.Domain.PronunciationRule;
 
 public sealed class TtsSegmentSource(
     ISegmentCopyWriter copyWriter,
@@ -166,8 +165,11 @@ public sealed class TtsSegmentSource(
             // like the corrections pair above and for the identical reason: an edited rule must
             // re-key an evergreen cached clip rather than let it keep airing the old pronunciation.
             await personaPronunciations.RefreshIfStaleAsync(ct);
-            var mergedRules = PronunciationRuleProvider.BuildMerged(pronunciations.Current, personaPronunciations.Current);
-            var contextRules = ToContextRules(mergedRules);
+            // PronunciationRuleResolver.ResolveForRender (T274 review finding F3) is the ONE seam
+            // both this render and the admin preview (TtsPreviewController) call — no candidate
+            // layer here (that is a preview-only concept), so this is exactly the plain
+            // station∪persona merge, byte-identical to before that seam existed.
+            var contextRules = PronunciationRuleResolver.ResolveForRender(pronunciations.Current, personaPronunciations.Current);
 
             // Speaking pace (SPEC F98.1-F98.3, PLAN T140): resolved via the SAME "one
             // ambient-persona read" discipline Rules just used above — never re-read from an
@@ -400,14 +402,6 @@ public sealed class TtsSegmentSource(
             return null;
         }
     }
-
-    // The resolved-rule shape riding on TtsRenderContext.Rules (GenWave.Core.Domain.PronunciationRule)
-    // is not the same type PronunciationRuleSet compiles — see that mirror type's own remarks for
-    // why GenWave.Core.Domain (the zero-dependency contract project) cannot share it with
-    // GenWave.Tts. The opposite direction is PronunciationRuleSet.FromContext, the single seam
-    // both Kokoro request builders share (T137 consolidated two duplicate copies into it).
-    static IReadOnlyList<ContextPronunciationRule> ToContextRules(PronunciationRuleSet rules) =>
-        [.. rules.Rules.Select(rule => new ContextPronunciationRule(rule.Pattern, rule.Word, rule.Ipa))];
 
     // pace (SPEC F98.2, PLAN T140) is the ACTUAL value, not a fingerprint of it — unlike the four
     // rule-set hashes above, there is no separate collection to canonicalize; the already-validated

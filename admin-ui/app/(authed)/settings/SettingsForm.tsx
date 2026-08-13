@@ -25,17 +25,15 @@ import { SettingHelpFlyover } from "./SettingHelpFlyover";
 import type { SettingsHelpKey } from "./settings-help-keys";
 import { groupSettingsBySection } from "./settings-sections";
 import { groupSettingsByTab, type SettingsAreaTab } from "./settings-tabs";
-import type { SettingChoice, SettingControlProps, SettingDto } from "./settings-types";
+import {
+  isValidationProblemDetails,
+  type SettingChoice,
+  type SettingControlProps,
+  type SettingDto,
+} from "./settings-types";
 import { VoiceSettingControl } from "./VoiceSettingControl";
 
 export type { SettingDto } from "./settings-types";
-
-/** Shape of ASP.NET Core ValidationProblemDetails returned on 400. */
-interface ValidationProblemDetails {
-  errors: Record<string, string[]>;
-  title?: string;
-  status?: number;
-}
 
 interface SettingsFormProps {
   settings: SettingDto[];
@@ -50,6 +48,16 @@ interface SettingsFormProps {
    * same StatusTiles/BoothLogFeed/LlmCallsFeed/PlayHistoryTable/`PersonasClient` idiom, not a
    * bespoke one. */
   timeZone?: string;
+  /**
+   * Extra content mounted at the end of the TTS tabpanel, after its own section cards (PLAN T145
+   * review F3) — the escape hatch for a dedicated-API surface (`PronunciationRulesControl`) whose
+   * read/write shape cannot fit the per-key `SETTING_CONTROL_REGISTRY` (see that component's own
+   * remarks: it reads a merged view no settings key carries and writes immediately, never through
+   * the page-wide Save batch). `SettingsForm` stays ignorant of any specific dedicated-API
+   * surface — `page.tsx` supplies the element — so a caller that omits this prop (every existing
+   * spec) renders byte-identical to before, the same injection-point idiom as {@link timeZone}.
+   */
+  ttsTabExtra?: ReactNode;
 }
 
 type SaveStatus = { kind: "idle" } | { kind: "saving" } | { kind: "noChanges" };
@@ -59,6 +67,9 @@ const MAIN_SCOPE_KEY = "Station:Scope:LibraryIds";
 const RECENT_WINDOW_KEY = "Station:Rotation:RecentWindow";
 const ARTIST_SEPARATION_KEY = "Station:Rotation:ArtistSeparation";
 const THEME_KEY = "Station:Theme";
+/** {@link SettingsAreaTab.prefix} value `ttsTabExtra` (PLAN T145 review F3) mounts under —
+ * `tabPrefixForKey`'s verbatim prefix for every `Tts:*` key, not the lowercased tab id. */
+const TTS_TAB_PREFIX = "Tts";
 const EMPTY_MAIN_SCOPE_ERROR =
   "Main rotation scope cannot be empty — the station would go silent.";
 const SAFE_SCOPE_EMPTY_CONFIRM_TITLE = "Save empty Station Imaging scope";
@@ -432,12 +443,6 @@ function sourceLabel(source: SettingDto["source"]): string {
   return source === "override" ? "override" : "default";
 }
 
-function isValidationProblemDetails(raw: unknown): raw is ValidationProblemDetails {
-  if (typeof raw !== "object" || raw === null) return false;
-  const obj = raw as Record<string, unknown>;
-  return typeof obj["errors"] === "object" && obj["errors"] !== null;
-}
-
 /** Build the initial values map from the loaded settings. */
 function initialValuesFrom(settings: SettingDto[]): Record<string, string> {
   return Object.fromEntries(settings.map((s) => [s.key, s.value]));
@@ -506,7 +511,12 @@ function settingsTabPanelId(tabId: string): string {
   return `settings-tabpanel-${tabId}`;
 }
 
-export function SettingsForm({ settings, libraries = [], timeZone }: SettingsFormProps): ReactNode {
+export function SettingsForm({
+  settings,
+  libraries = [],
+  timeZone,
+  ttsTabExtra,
+}: SettingsFormProps): ReactNode {
   const confirm = useConfirm();
   /**
    * The last-SAVED value per key — the baseline `changedEntries` diffs against. Seeded from the
@@ -893,6 +903,12 @@ export function SettingsForm({ settings, libraries = [], timeZone }: SettingsFor
               ))}
             </SectionCard>
           ))}
+
+          {/* T145 review F3 — mounted INSIDE the TTS tabpanel (not a page-level sibling below the
+              Save button): AC1 calls for a TTS surface, and this keeps SettingsForm agnostic of
+              which dedicated-API surface a page wants (the timeZone injection precedent) rather
+              than importing PronunciationRulesControl directly. */}
+          {tab.prefix === TTS_TAB_PREFIX && ttsTabExtra}
         </div>
       ))}
 

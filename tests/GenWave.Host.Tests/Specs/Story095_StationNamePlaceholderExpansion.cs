@@ -110,8 +110,12 @@ file static class RealAuthorFactory
     {
         var synth = new RecordingTtsSynthesizer(Path.Combine(authoredRoot, "synth"));
         var writer = new RecordingCatalogWriter();
+        var pronunciations = new PronunciationRuleProvider(
+            new FakeOptionsMonitor<TtsPronunciationsOptions>(new TtsPronunciationsOptions()),
+            NullLogger<PronunciationRuleProvider>.Instance);
         var author = new SafeSegmentAuthor(
             synth,
+            pronunciations,
             new NoOpAudioMixer(),
             new FixedLoudnessAnalyzer(),
             new NullCueAnalyzer(),

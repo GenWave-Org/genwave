@@ -29,7 +29,8 @@ public static class FeatureImagingKindAuthoring
     {
         var opts = Options.Create(new TtsOptions { Format = "wav" });
         return new SafeSegmentAuthor(
-            synth, mixer, loudness, cue, energy, writer, opts, NullLogger<SafeSegmentAuthor>.Instance);
+            synth, NoCorrections.PronunciationProvider(), mixer, loudness, cue, energy, writer, opts,
+            NullLogger<SafeSegmentAuthor>.Instance);
     }
 
     static SafeSegmentRequest Request(string authoredRoot, ImagingKind? kind = null) =>

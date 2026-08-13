@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { CELL_INPUT_CLASSES, HEADER_CELL } from "./rule-table-styles";
 import type { SettingControlProps } from "./settings-types";
 
 /**
@@ -108,11 +109,6 @@ function serializeCorrections(rows: CorrectionRow[]): string {
     }))
   );
 }
-
-const CELL_INPUT_CLASSES =
-  "h-9 w-full rounded-[6px] border border-line bg-surface px-2 text-[0.85rem] text-ink disabled:opacity-50";
-const HEADER_CELL =
-  "py-2 pr-3 pl-3 text-left text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2";
 
 /**
  * `Tts:Corrections` table editor (SPEC F68.5–F68.7, STORY-186; registered in SettingsForm's

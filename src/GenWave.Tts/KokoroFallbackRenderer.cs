@@ -98,8 +98,12 @@ public sealed class KokoroFallbackRenderer(
         // same markup, reports, THEN its own POST fails and FallbackTtsSynthesizer retries here,
         // where this hop composes the identical markup again and would report again for the one
         // line that ultimately airs once. See ScenarioAFiredHitIsNeverDoubleCounted (Story253) for
-        // the probe.
-        ruleHits?.Report(matches, context.Kind);
+        // the probe. context.IsAudition (PLAN T274) rides through unchanged, same parity discipline
+        // as context.Rules (T137) and context.Pace (T140): an audition that falls over onto a
+        // fallback hop must never count a hit here either — a preview reaches THIS renderer whenever
+        // the primary fails mid-audition, and without this the fallback hop would silently re-enable
+        // the exact counting KokoroTtsSynthesizer's own isAudition gate just excluded.
+        ruleHits?.Report(matches, context.Kind, context.IsAudition);
 
         return path;
     }

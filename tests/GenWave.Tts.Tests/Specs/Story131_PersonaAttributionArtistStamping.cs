@@ -180,7 +180,7 @@ public static class FeaturePersonaAttributionArtistStamping
             var energy = new FakeEnergyAnalyzer();
             var writer = new FakeAuthoredCatalogWriter();
             var author = new SafeSegmentAuthor(
-                authorSynth, mixer, loudness, cue, energy, writer,
+                authorSynth, NoCorrections.PronunciationProvider(), mixer, loudness, cue, energy, writer,
                 Options.Create(new TtsOptions { Format = "wav" }), NullLogger<SafeSegmentAuthor>.Instance);
             var request = new SafeSegmentRequest(
                 "Please stand by.", LibraryId: 1, StationName: "GenWave", DefaultVoice: "af_heart",

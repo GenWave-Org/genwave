@@ -174,6 +174,44 @@ public static class FeatureRulesTheOperatorCanTrust
         }
     }
 
+    // T274 round-2 review finding R2: PronunciationRuleResolver.ResolveForRender (GenWave.Tts) is
+    // its OWN seam — the ONE place both TtsSegmentSource's on-air render and the admin preview
+    // resolve rules through — and an inverted-precedence mutation planted INSIDE it (station/card
+    // swapped at its own BuildMerged call) left the whole solution green: every existing fact
+    // above pins PronunciationRuleSet.Merge directly, never the resolver's own composition of it.
+    // These pin the resolver's OUTPUT, not the lower-level Merge it delegates to.
+    public static class ScenarioTheResolverComposesThePersonaOverStationPrecedence
+    {
+        [Fact]
+        public static void An_identity_colliding_card_rule_wins_the_resolved_output()
+        {
+            var station = PronunciationRuleSet.Create([new PronunciationRule("MacLeod", "MacLeod", "/stationIpa/")]);
+            var card = new List<PronunciationRule> { new("MacLeod", "MacLeod", "/cardIpa/") };
+
+            var resolved = PronunciationRuleResolver.ResolveForRender(station, card);
+
+            // Canonical (slash-free) form: PronunciationRuleSet.Create canonicalizes Ipa before
+            // compiling (T138 review) — the resolver's output carries that same canonical form.
+            Assert.Equal("cardIpa", Assert.Single(resolved).Ipa);
+        }
+
+        [Fact]
+        public static void A_card_rule_sorts_ahead_of_a_station_rule_in_the_resolved_output()
+        {
+            // Non-colliding rules — both survive — so ordering (not identity) is what this pins:
+            // PronunciationRuleSet.Match's first-rule-claims-the-span overlap policy (F97.3) means
+            // this ORDER, not merely presence, is what decides an overlapping-span contest one
+            // layer down (KokoroSpeechMarkup/KokoroFallbackRenderer), so a resolver-level ordering
+            // bug is invisible to every fact that only checks set membership.
+            var station = PronunciationRuleSet.Create([new PronunciationRule("Zenith", "Zenith", "/stationIpa/")]);
+            var card = new List<PronunciationRule> { new("Nova", "Nova", "/cardIpa/") };
+
+            var resolved = PronunciationRuleResolver.ResolveForRender(station, card);
+
+            Assert.Equal("Nova", resolved[0].Pattern);
+        }
+    }
+
     public static class ScenarioAFiringRuleIsVisibleInTheField
     {
         /// <summary>
@@ -525,7 +563,7 @@ public static class FeatureRulesTheOperatorCanTrust
             var reporter = new PronunciationRuleHitReporter(stats, logger);
             var rule = new PronunciationRule("Mac\nLeod", "Mac\nLeod", "/ipa/");
 
-            reporter.Report([new PronunciationMatch(0, rule.Word.Length, rule)], SegmentKind.LeadIn);
+            reporter.Report([new PronunciationMatch(0, rule.Word.Length, rule)], SegmentKind.LeadIn, isAudition: false);
 
             Assert.DoesNotContain(logger.Entries, e => e.Message.Contains('\n'));
         }

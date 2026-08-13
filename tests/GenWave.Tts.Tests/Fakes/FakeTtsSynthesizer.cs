@@ -3,6 +3,7 @@ namespace GenWave.Tts.Tests.Fakes;
 using System.Security.Cryptography;
 using System.Text;
 using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
 
 public sealed class FakeTtsSynthesizer : ITtsSynthesizer
 {
@@ -11,6 +12,14 @@ public sealed class FakeTtsSynthesizer : ITtsSynthesizer
     public string? LastText { get; private set; }
     public string? LastVoice { get; private set; }
 
+    /// <summary>
+    /// The <see cref="TtsRenderContext"/> the most recent context-overload call carried — null when
+    /// the caller only ever used the plain <c>(text, voice, ct)</c> overload. Lets a spec assert on
+    /// <see cref="TtsRenderContext.Rules"/>/<see cref="TtsRenderContext.Pace"/>/
+    /// <see cref="TtsRenderContext.IsAudition"/> without standing up a second, capturing fake.
+    /// </summary>
+    public TtsRenderContext? LastContext { get; private set; }
+
     /// <summary>When non-null, the next call to SynthesizeAsync will throw this exception.</summary>
     public Exception? ThrowOnNextCall { get; set; }
 
@@ -18,6 +27,17 @@ public sealed class FakeTtsSynthesizer : ITtsSynthesizer
     public string OutputDirectory { get; set; } = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
 
     public void ResetCallCount() => CallCount = 0;
+
+    /// <summary>
+    /// Captures <paramref name="context"/> into <see cref="LastContext"/>, then relays to the plain
+    /// overload below so every existing (text, voice)-based assertion keeps working unchanged —
+    /// mirrors <see cref="ITtsSynthesizer"/>'s own default-interface-member relay shape.
+    /// </summary>
+    public Task<string> SynthesizeAsync(TtsRenderContext context, CancellationToken ct)
+    {
+        LastContext = context;
+        return SynthesizeAsync(context.Text, context.Voice, ct);
+    }
 
     public Task<string> SynthesizeAsync(string text, string voice, CancellationToken ct)
     {
