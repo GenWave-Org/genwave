@@ -8,7 +8,7 @@ namespace GenWave.Core.Abstractions;
 /// / <c>StationOptions</c>) and the Host's live configuration. Mirrors <see cref="ICadenceProvider"/>/
 /// <see cref="IStationScopeProvider"/> one seam over: <c>Station:Rotation:*</c> is advertised
 /// <c>Live</c> in the settings allowlist, so a boot-frozen <see cref="RotationSettings"/> on
-/// <see cref="Core.Playout.PlayoutFeeder"/> or the Orchestrator would be the same class of bug F30/gitea-#211
+/// <c>GenWave.Core.Playout.PlayoutFeeder</c> or the Orchestrator would be the same class of bug F30/gitea-#211
 /// fixed for scope and cadence.
 ///
 /// <para>

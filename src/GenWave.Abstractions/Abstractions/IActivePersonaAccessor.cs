@@ -5,7 +5,7 @@ namespace GenWave.Core.Abstractions;
 /// <summary>
 /// SEAM (SPEC F35.2, F35.5, F121.1) — the thin Core-visible ON-AIR IDENTITY accessor between
 /// <c>GenWave.Orchestration</c> (which cannot see the Host's <c>IOptionsMonitor&lt;StationOptions&gt;</c>
-/// or <see cref="IPersonaStore"/> directly) and the Host's live station configuration + persona
+/// or <c>IPersonaStore</c> directly) and the Host's live station configuration + persona
 /// storage. Mirrors <see cref="IStationScopeProvider"/>'s seam shape one level up: both sides of the
 /// boundary depend on this one interface instead of inventing separate idioms.
 ///

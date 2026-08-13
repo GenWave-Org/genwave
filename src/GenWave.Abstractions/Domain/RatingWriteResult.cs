@@ -2,7 +2,7 @@ namespace GenWave.Core.Domain;
 
 /// <summary>
 /// Shared outcome of a single-row rating write (SPEC F33.3, F33.4; STORY-109). Deliberately smaller
-/// than <see cref="MediaWriteResult"/>: <see cref="Abstractions.IMediaRating"/> writes are never
+/// than <c>MediaWriteResult</c>: <see cref="Abstractions.IMediaRating"/> writes are never
 /// MAIN-scope-gated (F33.5) and carry no <c>expectedVersion</c> to conflict on (no <c>If-Match</c>
 /// anywhere in this seam), so a vote or never-play set can only fail on a missing row — or, since
 /// gh-#99, on targeting safe-scope content.

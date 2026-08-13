@@ -194,7 +194,7 @@ public static class FeatureLlmCallInspector
             await LoginAsync(client, LlmCallInspectorWebFactory.Password);
 
             // When the preview endpoint is driven — the exact production hand-off
-            // (IPersonaPreviewWriter -> the real LlmCopyWriter -> RequestCompletionAsync) every
+            // (IPersonaPreviewWriter -> the real LlmCopyWriter -> RequestCleanedCompletionAsync) every
             // operator preview shares (SPEC F35.6)...
             var preview = await client.PostAsJsonAsync("/api/personas/preview", DraftPreviewBody());
             Assert.Equal(HttpStatusCode.OK, preview.StatusCode);

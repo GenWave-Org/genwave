@@ -24,7 +24,7 @@ using GenWave.MediaLibrary.Options;
 /// <see cref="IOptionsMonitor{TOptions}.CurrentValue"/> fresh on every call. The per-request timeout
 /// is a <see cref="CancellationTokenSource"/> linked to the caller's token (NOT
 /// <see cref="HttpClient.Timeout"/>) — testable and scoped to this one call, mirroring
-/// <c>LlmCopyWriter.RequestCompletionAsync</c>.
+/// <c>LlmCopyWriter.RequestCleanedCompletionAsync</c>.
 ///
 /// Never throws past this boundary (F48.1-F48.2): any HTTP error, non-2xx status, malformed JSON, or
 /// the internal timeout firing all collapse to <see langword="null"/> — the legal "no confident match"

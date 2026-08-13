@@ -443,6 +443,43 @@ describe("Feature: adding a pronunciation rule", () => {
     });
   });
 
+  describe("Scenario: the rule is accepted but collides with a speech correction (gh-#491)", () => {
+    const COLLISION_WARNING =
+      "A speech correction ('MacLeod' → 'Maa-cloud') targets the same word. Pronunciation rules " +
+      "take precedence: that correction is suppressed on every render where this rule is in play. " +
+      "Delete the correction if it is now redundant.";
+
+    it("toasts the write's collision warning alongside the success toast", async () => {
+      makeFetchMock(
+        getRow(200, []),
+        { status: 201, body: { rule: STATION_ROW, warnings: [COLLISION_WARNING] } },
+        getRow(200, [STATION_ROW])
+      );
+      renderControl();
+      await waitForLoaded();
+
+      await fillAndSubmitAdd("MacLeod", "", "/x/");
+
+      expect(await screen.findByText("Pronunciation rule added.")).toBeInTheDocument();
+      expect(await screen.findByText(/suppressed on every render/)).toBeInTheDocument();
+    });
+
+    it("toasts nothing extra when the write carries no warnings", async () => {
+      makeFetchMock(
+        getRow(200, []),
+        { status: 201, body: { rule: STATION_ROW, warnings: [] } },
+        getRow(200, [STATION_ROW])
+      );
+      renderControl();
+      await waitForLoaded();
+
+      await fillAndSubmitAdd("Big Sur", "Sur", "/sɜːr/");
+
+      expect(await screen.findByText("Pronunciation rule added.")).toBeInTheDocument();
+      expect(screen.queryByText(/suppressed on every render/)).not.toBeInTheDocument();
+    });
+  });
+
   describe("Scenario (sad path): the rule is rejected in place", () => {
     it("surfaces the 400's field message under the offending field, not as a toast", async () => {
       makeFetchMock(getRow(200, []), {

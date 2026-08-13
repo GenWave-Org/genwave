@@ -8,7 +8,12 @@ namespace GenWave.Core.Domain;
 /// </summary>
 public enum FacetField
 {
+    /// <summary>The <c>library.media.artist</c> column.</summary>
     Artist,
+
+    /// <summary>The <c>library.media.album</c> column.</summary>
     Album,
+
+    /// <summary>The <c>library.media.genre</c> column.</summary>
     Genre,
 }

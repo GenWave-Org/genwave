@@ -152,7 +152,7 @@ public static class FeatureTasteBecomesAudible
             var leadInTask = writer.WriteAsync(LeadInRequest(samePick), CancellationToken.None);
             await Task.WhenAll(backAnnounceTask, leadInTask);
 
-            // previousBreakTasteNotes is now read AND written inside RequestCompletionAsync's own
+            // previousBreakTasteNotes is now read AND written inside RequestCleanedCompletionAsync's own
             // single-flight critical section, so the mock's arrival order IS the critical-section
             // acquisition order: whichever call reaches the gate first can never see a marker (there
             // is nothing to compare against yet), and whichever reaches it second is guaranteed to
