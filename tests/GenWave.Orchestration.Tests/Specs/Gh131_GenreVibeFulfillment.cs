@@ -9,8 +9,8 @@
 // is Host.Tests' Gh131_GenreRequestPredicates.cs — same three-file split STORY-226/227 established.
 
 using GenWave.Abstractions.Playout;
+using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
-using GenWave.Core.Events;
 using GenWave.Orchestration.Tests.Fakes;
 
 namespace GenWave.Orchestration.Tests.Specs;
