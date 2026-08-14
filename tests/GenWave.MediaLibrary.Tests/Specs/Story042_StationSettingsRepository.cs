@@ -8,6 +8,15 @@
 // allowlist-filtered/degrade-on-DB-down behavior stays GenWave.Host.Tests' own coverage
 // (Story042_StationSettingsOverlayProvider.cs, FeatureStationSettingsOverlayProvider) — this
 // repository deliberately returns every row unfiltered and lets failures propagate.
+//
+// gh-#406 slice 4 added ExistsAsync (single-key existence probe) for
+// GenWave.Host.Seeding.SafeLoopSeedMarkerStore's boot-seed marker check (F27.10) — its own
+// coverage is the FeatureExistsAsync section below.
+//
+// gh-#406 slice 5 added ReadAllForBoot (the sync exception, SQL byte-identical to ReadAllAsync)
+// for GenWave.Host.Configuration.StationSettingsConfigurationProvider.Load(), the synchronous
+// IConfigurationProvider contract member — its own coverage is the ScenarioReadAllForBoot section
+// below.
 
 using System.Text.Json;
 using Dapper;
@@ -244,6 +253,113 @@ public static class FeatureStationSettingsRepository
             // Then the database itself rejects it — regardless of what the repository would ever write.
             await Assert.ThrowsAsync<PostgresException>(() => conn.ExecuteAsync(
                 "insert into station.settings (key, value) values (null, '\"x\"'::jsonb)"));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — ExistsAsync (gh-#406 slice 4)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioExists(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AMissingKeyReportsFalse()
+        {
+            // Given no row for this key...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+
+            // When its existence is probed...
+            var exists = await repo.ExistsAsync("Internal:BootSeed:SafeLoopCompletedAt", CancellationToken.None);
+
+            // Then it reports absent.
+            Assert.False(exists);
+        }
+
+        [Fact]
+        public async Task AWrittenKeyReportsTrue()
+        {
+            // Given a row written under this key...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+            await repo.WriteAsync("Internal:BootSeed:SafeLoopCompletedAt", DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // When its existence is probed...
+            var exists = await repo.ExistsAsync("Internal:BootSeed:SafeLoopCompletedAt", CancellationToken.None);
+
+            // Then it reports present.
+            Assert.True(exists);
+        }
+
+        [Fact]
+        public async Task ItOnlyReportsTheExactKeyProbedNotOtherRows()
+        {
+            // Given a row written under a different key...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+            await repo.WriteAsync("Loudness:TargetLufs", -14.0, CancellationToken.None);
+
+            // When a different key's existence is probed...
+            var exists = await repo.ExistsAsync("Internal:BootSeed:SafeLoopCompletedAt", CancellationToken.None);
+
+            // Then it reports absent.
+            Assert.False(exists);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — ReadAllForBoot, the sync exception (gh-#406 slice 5)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioReadAllForBoot(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AnEmptyTableReadsAsAnEmptyDictionary()
+        {
+            // Given no rows at all...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+
+            // When every row is read synchronously...
+            var rows = repo.ReadAllForBoot();
+
+            // Then nothing comes back.
+            Assert.Empty(rows);
+        }
+
+        [Fact]
+        public async Task AWrittenValueIsReadBackSynchronously()
+        {
+            // Given a value written through the async side...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+            await repo.WriteAsync("Loudness:TargetLufs", -14.0, CancellationToken.None);
+
+            // When every row is read synchronously...
+            var rows = repo.ReadAllForBoot();
+
+            // Then the written value comes back exactly, same shape ReadAllAsync would return.
+            Assert.Equal(JsonSerializer.Serialize(-14.0), rows["Loudness:TargetLufs"]);
+        }
+
+        [Fact]
+        public async Task KeysAreLookedUpCaseInsensitivelyJustLikeReadAllAsync()
+        {
+            // Given a row stored under its canonical casing...
+            await db.ResetSettingsAsync();
+            await InsertRawRowAsync(db, "Station:Theme", "\"midnight\"");
+            var repo = Repo(db);
+
+            // When every row is read synchronously...
+            var rows = repo.ReadAllForBoot();
+
+            // Then a differently-cased lookup still finds it.
+            Assert.True(rows.TryGetValue("station:theme", out var value));
+            Assert.Equal("\"midnight\"", value);
         }
     }
 }

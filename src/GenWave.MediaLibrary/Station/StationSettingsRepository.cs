@@ -81,4 +81,56 @@ public sealed class StationSettingsRepository(string connectionString)
 
         return result;
     }
+
+    /// <summary>
+    /// True if a row for <paramref name="key"/> exists in <c>station.settings</c> — added for gh-#406
+    /// slice 4: <c>GenWave.Host.Seeding.SafeLoopSeedMarkerStore</c>'s one-shot boot-seed marker check
+    /// (F27.10) needs a single-key existence probe, not the full unfiltered <see cref="ReadAllAsync"/>
+    /// scan. Any failure (including a <see cref="Npgsql.NpgsqlException"/>) propagates to the caller —
+    /// same posture as <see cref="ReadAllAsync"/>, degrade policy is a caller concern, not this
+    /// repository's.
+    /// </summary>
+    public async Task<bool> ExistsAsync(string key, CancellationToken ct)
+    {
+        await using var conn = new NpgsqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT 1 FROM station.settings WHERE key = @key";
+        cmd.Parameters.AddWithValue("key", key);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct);
+    }
+
+    /// <summary>
+    /// SYNCHRONOUS read of every row in <c>station.settings</c> — the one deliberate sync exception
+    /// in this otherwise async-only repository, added for gh-#406 slice 5.
+    /// <c>GenWave.Host.Configuration.StationSettingsConfigurationProvider.Load()</c> implements
+    /// <see cref="Microsoft.Extensions.Configuration.IConfigurationProvider.Load"/>, a synchronous
+    /// contract member the configuration system calls while
+    /// <see cref="Microsoft.Extensions.Configuration.IConfigurationBuilder"/> itself is still being
+    /// built — the same pre-DI boot path this class's plain-connection-string ctor exists for — and
+    /// has no async entry point available there to await <see cref="ReadAllAsync"/> from. SQL is
+    /// byte-identical to <see cref="ReadAllAsync"/>'s; only the sync/async shape differs. Any failure
+    /// (including a <see cref="Npgsql.NpgsqlException"/>) propagates to the caller — same posture as
+    /// <see cref="ReadAllAsync"/>/<see cref="ExistsAsync"/>, degrade policy is a caller concern, not
+    /// this repository's.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> ReadAllForBoot()
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        using var conn = new NpgsqlConnection(connectionString);
+        conn.Open();
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT key, value FROM station.settings";
+
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            result[reader.GetString(0)] = reader.GetString(1);
+
+        return result;
+    }
 }

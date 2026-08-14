@@ -2,13 +2,13 @@ namespace GenWave.Architecture.Tests.Support;
 
 /// <summary>
 /// The F105.2 adoption baseline (PLAN T211): every pre-existing law violation found when this
-/// suite went live, named, dated, and reasoned. Two of the seven L2 entries are the law's own
-/// designed exemption (constructing <c>NpgsqlDataSource</c> is composition-root wiring, not
-/// querying — ARCHITECTURE.md "Architecture governance"); the other five are pre-existing debt that
-/// was not trivial to fix in this diff (moving working, already-tested Host code into
-/// MediaLibrary's repository layer is a real refactor, not a using-swap) — tracked as gh-#406.
-/// A violation whose member is not on this list still fails (STORY-290 AC6) — see
-/// <see cref="DependencyLawAssert"/>.
+/// suite went live, named, dated, and reasoned. The two entries here are the law's own designed
+/// exemption (constructing <c>NpgsqlDataSource</c> is composition-root wiring, not querying —
+/// ARCHITECTURE.md "Architecture governance"); the five 2026-08-07 debt rows that once sat
+/// alongside them were burned down via gh-#406 (2026-08-13) — every one of those types now reaches
+/// Postgres through a <c>GenWave.MediaLibrary.Station</c> repository instead of opening a raw
+/// <c>NpgsqlConnection</c> itself. A violation whose member is not on this list still fails
+/// (STORY-290 AC6) — see <see cref="DependencyLawAssert"/>.
 /// </summary>
 internal static class ExemptionBaseline
 {
@@ -30,21 +30,5 @@ internal static class ExemptionBaseline
             "MediaLibrary's own module composition root (AddMediaLibrary): builds the library_svc " +
             "NpgsqlDataSource and sets Dapper's static DefaultTypeMap — wiring/global config, never a " +
             "query, same wiring-not-querying exemption as the Host composition root."),
-
-        // ── Pre-existing debt: genuine querying/exception-coupling outside the repository layer,
-        //    found at T211 adoption, not trivial to fix in this diff (follow-up filed as gh-#406).
-        new ArchitectureExemption(
-            LawId.L2,
-            "GenWave.Host.Configuration.StationSettingsConfigurationProvider",
-            "2026-08-07",
-            "IConfigurationProvider.Load() queries station.settings directly via NpgsqlConnection at " +
-            "boot, before the DI container (and any MediaLibrary repository) exists to inject. " +
-            "Pre-existing (STORY-042); not trivial to fix in this diff — follow-up gh-#406."),
-        new ArchitectureExemption(
-            LawId.L2,
-            "GenWave.Host.Seeding.SafeLoopSeedMarkerStore",
-            "2026-08-07",
-            "Reads/writes the boot-seed marker directly via NpgsqlConnection on the station.settings " +
-            "table (F27.10). Pre-existing; not trivial to fix in this diff — follow-up gh-#406."),
     };
 }
