@@ -102,4 +102,35 @@ public sealed class StationSettingsRepository(string connectionString)
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct);
     }
+
+    /// <summary>
+    /// SYNCHRONOUS read of every row in <c>station.settings</c> — the one deliberate sync exception
+    /// in this otherwise async-only repository, added for gh-#406 slice 5.
+    /// <c>GenWave.Host.Configuration.StationSettingsConfigurationProvider.Load()</c> implements
+    /// <see cref="Microsoft.Extensions.Configuration.IConfigurationProvider.Load"/>, a synchronous
+    /// contract member the configuration system calls while
+    /// <see cref="Microsoft.Extensions.Configuration.IConfigurationBuilder"/> itself is still being
+    /// built — the same pre-DI boot path this class's plain-connection-string ctor exists for — and
+    /// has no async entry point available there to await <see cref="ReadAllAsync"/> from. SQL is
+    /// byte-identical to <see cref="ReadAllAsync"/>'s; only the sync/async shape differs. Any failure
+    /// (including a <see cref="Npgsql.NpgsqlException"/>) propagates to the caller — same posture as
+    /// <see cref="ReadAllAsync"/>/<see cref="ExistsAsync"/>, degrade policy is a caller concern, not
+    /// this repository's.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> ReadAllForBoot()
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        using var conn = new NpgsqlConnection(connectionString);
+        conn.Open();
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT key, value FROM station.settings";
+
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            result[reader.GetString(0)] = reader.GetString(1);
+
+        return result;
+    }
 }

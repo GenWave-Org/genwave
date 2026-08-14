@@ -12,6 +12,11 @@
 // gh-#406 slice 4 added ExistsAsync (single-key existence probe) for
 // GenWave.Host.Seeding.SafeLoopSeedMarkerStore's boot-seed marker check (F27.10) — its own
 // coverage is the FeatureExistsAsync section below.
+//
+// gh-#406 slice 5 added ReadAllForBoot (the sync exception, SQL byte-identical to ReadAllAsync)
+// for GenWave.Host.Configuration.StationSettingsConfigurationProvider.Load(), the synchronous
+// IConfigurationProvider contract member — its own coverage is the ScenarioReadAllForBoot section
+// below.
 
 using System.Text.Json;
 using Dapper;
@@ -301,6 +306,60 @@ public static class FeatureStationSettingsRepository
 
             // Then it reports absent.
             Assert.False(exists);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — ReadAllForBoot, the sync exception (gh-#406 slice 5)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioReadAllForBoot(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AnEmptyTableReadsAsAnEmptyDictionary()
+        {
+            // Given no rows at all...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+
+            // When every row is read synchronously...
+            var rows = repo.ReadAllForBoot();
+
+            // Then nothing comes back.
+            Assert.Empty(rows);
+        }
+
+        [Fact]
+        public async Task AWrittenValueIsReadBackSynchronously()
+        {
+            // Given a value written through the async side...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+            await repo.WriteAsync("Loudness:TargetLufs", -14.0, CancellationToken.None);
+
+            // When every row is read synchronously...
+            var rows = repo.ReadAllForBoot();
+
+            // Then the written value comes back exactly, same shape ReadAllAsync would return.
+            Assert.Equal(JsonSerializer.Serialize(-14.0), rows["Loudness:TargetLufs"]);
+        }
+
+        [Fact]
+        public async Task KeysAreLookedUpCaseInsensitivelyJustLikeReadAllAsync()
+        {
+            // Given a row stored under its canonical casing...
+            await db.ResetSettingsAsync();
+            await InsertRawRowAsync(db, "Station:Theme", "\"midnight\"");
+            var repo = Repo(db);
+
+            // When every row is read synchronously...
+            var rows = repo.ReadAllForBoot();
+
+            // Then a differently-cased lookup still finds it.
+            Assert.True(rows.TryGetValue("station:theme", out var value));
+            Assert.Equal("\"midnight\"", value);
         }
     }
 }
