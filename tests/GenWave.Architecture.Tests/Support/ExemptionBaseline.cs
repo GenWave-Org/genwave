@@ -59,12 +59,5 @@ internal static class ExemptionBaseline
             "Catches Npgsql.PostgresException directly to translate a unique_violation into a 409 " +
             "(documented house idiom, no Npgsql.PostgresErrorCodes dependency). Pre-existing; not " +
             "trivial to fix in this diff — follow-up gh-#406."),
-        new ArchitectureExemption(
-            LawId.L2,
-            "GenWave.Host.Api.ScheduleController",
-            "2026-08-07",
-            "Catches Npgsql.PostgresException directly to detect the persona-deleted-mid-write race " +
-            "(gh-#255, documented house idiom). Pre-existing; not trivial to fix in this diff — " +
-            "follow-up gh-#406."),
     };
 }

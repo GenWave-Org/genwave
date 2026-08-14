@@ -11,6 +11,7 @@
 using Dapper;
 using GenWave.Core.Domain;
 using GenWave.MediaLibrary.Station;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 
 namespace GenWave.MediaLibrary.Tests.Specs;
@@ -42,7 +43,8 @@ public static class FeatureScheduleStore
     {
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "33-show-and-segment-kind-migration.sh"));
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "35-show-identity-migration.sh"));
-        return new ScheduleRepository(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+        return new ScheduleRepository(
+            new Lazy<NpgsqlDataSource>(() => db.StationDataSource), NullLogger<ScheduleRepository>.Instance);
     }
 
     static ScheduleSegment MusicOnly(DayOfWeek day, int start, int end) =>
@@ -433,6 +435,63 @@ public static class FeatureScheduleStore
 
             var snapshot = await repo.LoadWeekAsync(CancellationToken.None);
             Assert.Equal(DayOfWeek.Monday, Assert.Single(snapshot.Segments).Day);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // SAD PATH — gh-#406 slice 1: ReplaceWeekAsync's own 23503 race-backstop catch (moved down from
+    // ScheduleController, which used to catch Npgsql.PostgresException directly — an L2
+    // Postgres-confinement violation) maps a foreign-key violation raised by the INSERT itself to
+    // ScheduleReplaceResult.PersonaVanished.
+    //
+    // The GENUINE race this catch exists for (SPEC F91.1/PersonaVanished's own remarks: a persona a
+    // validated row names is deleted, on a SEPARATE connection, between ValidateAsync's existence
+    // check and this transaction's own INSERT) is not independently reproducible here without a
+    // test-only hook into the repository — mirrors Story118_PersonaStorage.cs's own
+    // ScenarioDeleteFkGuard header note that PersonaRepository.DeleteAsync's identically-shaped
+    // query-then-delete race backstop carries no such coverage either, for the same reason; that
+    // file's own ScenarioDeleteFkGuard facts (and this file's own ScenarioPersonaForeignKeyHasTeeth,
+    // directly below) already prove the schema's FK constraints fire given a direct conflicting row.
+    //
+    // What IS deterministically reproducible on a single connection: ValidateAsync (this file's own
+    // ScenarioRejectingInvalidWeeks, directly above) checks a submitted row's PersonaId against
+    // station.persona before ever reaching the database, but has no equivalent check for ShowId
+    // (PLAN T243's own remarks: ReplaceWeekAsync writes ShowId straight through, unvalidated) — so a
+    // week naming an unknown ShowId reaches the INSERT unrejected and trips
+    // segment_schedule.show_id's own FK (db/06, db/33; ON DELETE RESTRICT) there instead. This is the
+    // exact same 23503 foreign_key_violation SQLSTATE the persona race raises — the catch itself
+    // matches on SqlState alone, never which column's FK fired — so it exercises the identical
+    // catch/mapping code path deterministically, without needing genuine cross-connection concurrency.
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioForeignKeyViolationMapsToPersonaVanished(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AnUnknownShowIdTripsTheInsertsOwnForeignKeyAndMapsToPersonaVanished()
+        {
+            await db.ResetScheduleAsync();
+            var repo = Repo(db);
+
+            var week = new[] { MusicOnly(DayOfWeek.Monday, 0, 600) with { ShowId = 999_999 } };
+            var result = await repo.ReplaceWeekAsync(week, expectedVersion: null, CancellationToken.None);
+
+            Assert.IsType<ScheduleReplaceResult.PersonaVanished>(result);
+        }
+
+        [Fact]
+        public async Task TheRejectionLeavesTheStoredWeekUnchanged()
+        {
+            await db.ResetScheduleAsync();
+            var repo = Repo(db);
+            await repo.ReplaceWeekAsync([MusicOnly(DayOfWeek.Tuesday, 0, 600)], expectedVersion: null, CancellationToken.None);
+
+            var week = new[] { MusicOnly(DayOfWeek.Monday, 0, 600) with { ShowId = 999_999 } };
+            await repo.ReplaceWeekAsync(week, expectedVersion: null, CancellationToken.None);
+
+            var snapshot = await repo.LoadWeekAsync(CancellationToken.None);
+            Assert.Equal(DayOfWeek.Tuesday, Assert.Single(snapshot.Segments).Day);
         }
     }
 

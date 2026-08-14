@@ -29,10 +29,11 @@ public interface IScheduleStore
     /// unchanged. The database's own CHECK/EXCLUDE/FK constraints (SPEC F91.1) remain the last line of
     /// defense, never the first — but that line can still fire: a persona named by a validated row can
     /// be deleted by a concurrent caller between this method's validation query and its insert, in
-    /// which case the FK raises and this method throws <c>Npgsql.PostgresException</c> rather than
-    /// returning <see cref="ScheduleReplaceResult.ValidationFailed"/>. Callers (T122's
-    /// <c>PUT /api/schedule</c> handler) must treat that as an unexpected-error response and never echo
-    /// the raw Postgres message to the client.
+    /// which case the FK raises and this method returns <see cref="ScheduleReplaceResult.PersonaVanished"/>
+    /// rather than <see cref="ScheduleReplaceResult.ValidationFailed"/> (gh-#406 slice 1: the
+    /// implementation itself catches the raw SQLSTATE and never lets it escape as a raw exception — see
+    /// that case's own remarks). Callers (T122's <c>PUT /api/schedule</c> handler) must treat that as a
+    /// conflict response and never echo the raw Postgres message to the client.
     ///
     /// <para>
     /// <paramref name="expectedVersion"/> (gh-#255): the <see cref="ScheduleWeekVersion"/> fingerprint

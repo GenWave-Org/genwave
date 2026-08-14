@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using GenWave.Core.Abstractions;
 using Npgsql;
 
@@ -31,5 +32,7 @@ public static class ScheduleServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddScheduleStore(this IServiceCollection services, string connectionString) =>
         services.AddSingleton<IScheduleStore>(
-            _ => new ScheduleRepository(new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build())));
+            sp => new ScheduleRepository(
+                new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build()),
+                sp.GetRequiredService<ILogger<ScheduleRepository>>()));
 }

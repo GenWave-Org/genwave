@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
-using Npgsql;
 
 namespace GenWave.Host.Api;
 
@@ -24,17 +23,19 @@ namespace GenWave.Host.Api;
 /// <para>
 /// <see cref="IScheduleStore.ReplaceWeekAsync"/>'s own documented contract: a persona named by a
 /// validated row can be deleted by a concurrent caller between this method's validation query and
-/// its insert, in which case the store's FK raises and <c>ReplaceWeekAsync</c> throws
-/// <see cref="PostgresException"/> rather than returning
-/// <see cref="ScheduleReplaceResult.ValidationFailed"/>. This action maps ONLY that specific
-/// SQLSTATE (23503, foreign-key violation — the house idiom, e.g. <c>MediaRatingRepository</c>) to a
-/// generic 409 — never the raw Postgres message — and asks the caller to reload and retry: by the
-/// time this fires the submission that was validated is already stale, which is exactly what 409
-/// Conflict means, and reloading gets a caller a document IScheduleStore.ReplaceWeekAsync will
-/// accept. Every OTHER <see cref="PostgresException"/> (permission errors, disk full, a CHECK/EXCLUDE
-/// violation that means a real validation bug) is NOT the persona race and is left to propagate to
-/// the generic 500 — folding it into "reload and try again" would hide a fault that reloading can't
-/// fix.
+/// its insert, in which case the store's FK raises and <c>ReplaceWeekAsync</c> returns
+/// <see cref="ScheduleReplaceResult.PersonaVanished"/> rather than
+/// <see cref="ScheduleReplaceResult.ValidationFailed"/>. This action maps that case to a generic 409 —
+/// never the raw Postgres message — and asks the caller to reload and retry: by the time this fires
+/// the submission that was validated is already stale, which is exactly what 409 Conflict means, and
+/// reloading gets a caller a document IScheduleStore.ReplaceWeekAsync will accept.
+/// <b>gh-#406 slice 1:</b> this action used to catch <c>Npgsql.PostgresException</c> directly (an L2
+/// Postgres-confinement violation) and narrow the catch to SQLSTATE 23503 itself, leaving every OTHER
+/// <c>PostgresException</c> to propagate to the generic 500; that narrowing now lives in
+/// <c>GenWave.MediaLibrary.Station.ScheduleRepository.ReplaceWeekAsync</c> (mirrors
+/// <c>PersonaRepository.DeleteAsync</c>'s own race-backstop idiom), so this controller never
+/// references Npgsql at all — a store-thrown exception that ISN'T this race still propagates to the
+/// generic 500 exactly as before, just from one layer down.
 /// </para>
 ///
 /// <para>
@@ -59,10 +60,6 @@ namespace GenWave.Host.Api;
 [Authorize(Policy = AuthorizationPolicies.Settings)]
 public sealed class ScheduleController(IScheduleStore scheduleStore, ILogger<ScheduleController> logger) : ControllerBase
 {
-    // Postgres SQLSTATE — well-known constant; no Npgsql.PostgresErrorCodes dependency (house idiom,
-    // e.g. MediaRatingRepository.cs).
-    const string ForeignKeyViolation = "23503";
-
     /// <summary>GET /api/schedule — the whole week, ordered by day then start minute (F91.1, F91.3).</summary>
     [HttpGet("schedule")]
     public async Task<IActionResult> Get(CancellationToken ct)
@@ -83,22 +80,7 @@ public sealed class ScheduleController(IScheduleStore scheduleStore, ILogger<Sch
     {
         var week = request.Segments.Select(ToSegment).ToList();
 
-        ScheduleReplaceResult result;
-        try
-        {
-            result = await scheduleStore.ReplaceWeekAsync(week, request.BaseVersion, ct);
-        }
-        catch (PostgresException ex) when (ex.SqlState == ForeignKeyViolation)
-        {
-            // See this class's own remarks: a validated persona id can be deleted out from under a
-            // concurrent PUT between validation and insert. Logged with full detail server-side;
-            // the client gets a generic conflict, never the raw SQLSTATE/message. Any OTHER
-            // PostgresException (wrong SQLSTATE) is NOT this race and is left to propagate to the
-            // generic 500 below.
-            logger.LogWarning(ex,
-                "Schedule replace raced a concurrent write (likely a persona deleted mid-validation)");
-            return Conflict(RaceConflictProblem());
-        }
+        var result = await scheduleStore.ReplaceWeekAsync(week, request.BaseVersion, ct);
 
         if (result is ScheduleReplaceResult.Replaced replaced)
             logger.LogInformation(
@@ -109,6 +91,12 @@ public sealed class ScheduleController(IScheduleStore scheduleStore, ILogger<Sch
             ScheduleReplaceResult.Replaced r => Ok(ToDto(r.Snapshot)),
             ScheduleReplaceResult.ValidationFailed failed => BadRequest(ValidationProblem(failed.Errors)),
             ScheduleReplaceResult.VersionConflict => Conflict(StaleWeekProblem()),
+            // See this class's own remarks: a validated persona id can be deleted out from under a
+            // concurrent PUT between validation and insert. GenWave.MediaLibrary.Station.ScheduleRepository
+            // logs the raced Postgres exception with full detail server-side (gh-#406 slice 1); this
+            // controller never sees it and answers only the generic conflict, never the raw
+            // SQLSTATE/message.
+            ScheduleReplaceResult.PersonaVanished => Conflict(RaceConflictProblem()),
             _ => StatusCode(StatusCodes.Status500InternalServerError),
         };
     }
