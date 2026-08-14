@@ -4,7 +4,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
-using GenWave.Core.Events;
 using GenWave.Loudness;
 
 namespace GenWave.Tts;

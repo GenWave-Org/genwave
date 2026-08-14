@@ -46,11 +46,15 @@ static class ProductionChainHarness
     /// <see cref="FakeMediaCatalog"/> instance backs both here (one script surface, matching how a
     /// real <c>MediaRepository</c> is one object implementing both call shapes) unless a caller wants
     /// them to differ. Defaults to a single-track pool when omitted — every caller that never asserts
-    /// on imaging-pool behavior can ignore this parameter entirely.
+    /// on imaging-pool behavior can ignore this parameter entirely. <paramref name="patterEstimator"/>
+    /// (gh-#463) is Orchestrator's own patterEstimator seam, passed through unchanged — the default
+    /// <see langword="null"/> falls back to Orchestrator's own fresh <c>RollingPatterDurationEstimator</c>,
+    /// same as every other caller that never wires one.
     /// </summary>
     public static ProductionChain BuildProductionChain(
         FakePersonaStore personaStore, ScheduleWeekSnapshot snapshot, DateTimeOffset now, TimeSpan lookahead,
-        CadenceConfig? cadence = null, TimeSpan? renderBudget = null, FakeMediaCatalog? catalog = null)
+        CadenceConfig? cadence = null, TimeSpan? renderBudget = null, FakeMediaCatalog? catalog = null,
+        IPatterDurationEstimator? patterEstimator = null)
     {
         var time = new FakeTimeProvider(now);
         var scheduleStore = new FakeScheduleStore(snapshot);
@@ -84,7 +88,8 @@ static class ProductionChainHarness
             scheduleResolver: caching,
             personaStore: personaStore,
             events: events,
-            catalog: mediaCatalog);
+            catalog: mediaCatalog,
+            patterEstimator: patterEstimator);
 
         return new ProductionChain(orchestrator, queue, time, scheduleStore, tts, events, logger, mediaCatalog);
     }
