@@ -10,13 +10,13 @@
 
 import { describe, it, expect } from "@jest/globals";
 import { render, screen } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { NowPlayingCard } from "../app/(authed)/_components/NowPlayingCard";
 import type { NowPlayingState } from "../lib/broadcast-api";
 
 const ISO_STARTED = "2026-07-28T20:54:45.000Z";
 
-function patterState(): NowPlayingState {
+function patterState(): Extract<NowPlayingState, { kind: "patter" }> {
   return {
     kind: "patter",
     stationId: "1",

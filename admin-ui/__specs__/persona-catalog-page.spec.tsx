@@ -13,17 +13,17 @@
 // card text and catalogSlug reach the modal, and where a successful import lands.
 
 jest.mock("next/headers", () => ({
-  cookies: jest.fn().mockResolvedValue({ toString: () => "session=test-cookie" }),
+  cookies: jest.fn<() => Promise<{ toString: () => string }>>().mockResolvedValue({ toString: () => "session=test-cookie" }),
 }));
 
 jest.mock("next/navigation", () => ({
-  ...jest.requireActual("next/navigation"),
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
   useRouter: jest.fn(),
 }));
 
 import { describe, it, expect, jest, beforeAll, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { ReactNode } from "react";
 import type { useRouter } from "next/navigation";
 import { Toaster } from "@/components/ui/toast";
@@ -62,6 +62,8 @@ const EVERYONE_ENTRY: CatalogShelfEntryDto = {
   audience: "everyone",
   bestFor: ["late-night", "chill"],
   preview: null,
+  fontFamily: null,
+  fontByteTotal: null,
 };
 
 const MATURE_ENTRY: CatalogShelfEntryDto = {
@@ -70,6 +72,8 @@ const MATURE_ENTRY: CatalogShelfEntryDto = {
   audience: "mature",
   bestFor: [],
   preview: null,
+  fontFamily: null,
+  fontByteTotal: null,
 };
 
 /** A minimal-but-real card behind Lena's entry (SPEC F90.5's "Entry = unchanged F79 card"
@@ -98,6 +102,13 @@ const LENA_DETAIL: CatalogEntryDetailDto = {
   author: "Test Author",
   description: "A warm late-night voice.",
   samplePatter: ["Line one.", "Line two."],
+  fontFamily: null,
+  fontByteTotal: null,
+  fontSpecimenFile: null,
+  fontLicense: null,
+  fontVersion: null,
+  fontSubset: null,
+  suggestedPersona: null,
 };
 
 const GARY_DETAIL: CatalogEntryDetailDto = {
@@ -110,6 +121,13 @@ const GARY_DETAIL: CatalogEntryDetailDto = {
   author: "Gary Author",
   description: "Gritty Gary's bio.",
   samplePatter: ["Gary's line."],
+  fontFamily: null,
+  fontByteTotal: null,
+  fontSpecimenFile: null,
+  fontLicense: null,
+  fontVersion: null,
+  fontSubset: null,
+  suggestedPersona: null,
 };
 
 function makeJsonResponse(status: number, body: unknown): Response {

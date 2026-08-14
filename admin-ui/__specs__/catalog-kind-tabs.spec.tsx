@@ -7,13 +7,13 @@
 // covers the strip, the `?kind=` resolver, and the per-kind empty state.
 
 jest.mock("next/navigation", () => ({
-  ...jest.requireActual("next/navigation"),
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
   useRouter: jest.fn(),
 }));
 
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { render, screen, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { useRouter } from "next/navigation";
 import { PersonaCatalogTabs, resolveCatalogKind } from "../app/(authed)/persona-catalog/PersonaCatalogTabs";
 import type { CatalogShelfEntryDto } from "../app/(authed)/persona-catalog/types";

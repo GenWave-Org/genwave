@@ -28,6 +28,9 @@ function parseCSharpMoodTerms(source: string): string[] {
     throw new Error("MoodVocabulary.cs: could not locate the `Terms = [...]` array literal.");
   }
   const [, arrayBody] = arrayMatch;
+  if (arrayBody === undefined) {
+    throw new Error("MoodVocabulary.cs: `Terms = [...]` array literal had no captured body.");
+  }
   const terms: string[] = [];
   for (const entryMatch of arrayBody.matchAll(/"([a-z]+)"/g)) {
     const [, term] = entryMatch;

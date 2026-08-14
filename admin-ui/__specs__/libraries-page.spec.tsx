@@ -8,7 +8,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { LibrariesTab } from "../app/(authed)/catalog/LibrariesTab";
 import type { LibraryDto } from "../app/(authed)/catalog/LibrariesTab";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";

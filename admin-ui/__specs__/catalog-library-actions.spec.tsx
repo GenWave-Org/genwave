@@ -17,7 +17,7 @@
 // imports ahead of jest.mock(), unlike babel-jest).
 
 jest.mock("next/navigation", () => ({
-  ...jest.requireActual("next/navigation"),
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
   useRouter: jest.fn(),
 }));
 
@@ -30,7 +30,7 @@ import {
   jest,
 } from "@jest/globals";
 import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { ComponentProps } from "react";
 import type { useRouter } from "next/navigation";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
