@@ -9,6 +9,8 @@
 // the list emptied, on the production binary) is a production check, not represented
 // here. ⛔ T287 carries the Orchestrator drain-region serialization flag.
 
+using GenWave.Core.Domain;
+
 namespace GenWave.Orchestration.Tests.Specs;
 
 public static class FeatureBanterOnTheAir
@@ -17,12 +19,16 @@ public static class FeatureBanterOnTheAir
 
     public static class ScenarioANewKindAtAMidBlockSeam
     {
-        [Fact(Skip = "Pending T281 — see docs/PLAN.md")]
+        [Fact]
         public static void SegmentKind_Crosstalk_exists_as_an_additive_member()
         {
-            // The published Abstractions contract grows by one enum member —
-            // minor version, no binary break.
-            Assert.Fail("pending T281");
+            // The published Abstractions contract grows by one enum member — minor version, no
+            // binary break. One assertion: the full ordered underlying-value sequence, so
+            // "Crosstalk is additive" (appended last) and "every pre-existing member keeps its
+            // original value" are pinned together, not as separate facts.
+            Assert.Equal(
+                [0, 1, 2, 3, 4, 5, 6, 7],
+                Enum.GetValues<SegmentKind>().Select(kind => (int)kind));
         }
 
         [Fact(Skip = "Pending T287 — see docs/PLAN.md")]

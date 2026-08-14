@@ -14,9 +14,11 @@ using GenWave.Core.Domain;
 /// copy for exactly the kinds <see cref="IsLlmAuthored"/> reports true for — <see cref="SegmentKind.LeadIn"/>,
 /// <see cref="SegmentKind.BackAnnounce"/>, <see cref="SegmentKind.SignOff"/>,
 /// <see cref="SegmentKind.SignOn"/>, and, as of T224, <see cref="SegmentKind.ContextSegment"/> —
-/// from an OpenAI-compatible chat-completions endpoint. <see cref="SegmentKind.StationId"/> and
-/// <see cref="SegmentKind.TimeDate"/> always delegate straight to <paramref name="fallback"/> with
-/// zero HTTP — brand/time copy stays fixed and forever-cached.
+/// from an OpenAI-compatible chat-completions endpoint. <see cref="SegmentKind.StationId"/>,
+/// <see cref="SegmentKind.TimeDate"/>, and <see cref="SegmentKind.Crosstalk"/> always delegate
+/// straight to <paramref name="fallback"/> with zero HTTP — brand/time copy stays fixed and
+/// forever-cached, and Crosstalk's real copy arrives via its own ahead-of-air script writer
+/// (T282, SPEC F127.3) rather than this seam.
 /// Enabled-ness and every other option are read from <paramref name="optionsMonitor"/> fresh on each
 /// call (F36.2) — an empty <c>Llm:Endpoint</c> means disabled. Any failure (disabled, timeout,
 /// non-2xx, connect, empty/over-length copy) degrades to <paramref name="fallback"/>'s template copy
@@ -241,9 +243,9 @@ public sealed class LlmCopyWriter(
     /// non-fresh-copy guard, extended alongside SignOff/SignOn for exactly that reason). Gates both
     /// <see cref="WriteAsync"/> and <see cref="WritePreviewAsync"/> so the two can never drift apart,
     /// and is the fact <see cref="LlmPromptBuilder.BuildSegmentLine"/>'s own exhaustiveness switch
-    /// relies on staying in sync with (see that method's remarks): <see cref="SegmentKind.StationId"/>
-    /// and <see cref="SegmentKind.TimeDate"/> are the only two kinds this reports false for, and they
-    /// never reach a prompt at all.
+    /// relies on staying in sync with (see that method's remarks): <see cref="SegmentKind.StationId"/>,
+    /// <see cref="SegmentKind.TimeDate"/>, and (as of PLAN T281) <see cref="SegmentKind.Crosstalk"/>
+    /// are the three kinds this reports false for today, and none of them ever reach a prompt.
     /// </summary>
     static bool IsLlmAuthored(SegmentKind kind) =>
         kind is SegmentKind.LeadIn or SegmentKind.BackAnnounce or SegmentKind.SignOff or SegmentKind.SignOn
@@ -252,8 +254,11 @@ public sealed class LlmCopyWriter(
     public async Task<SegmentCopy> WriteAsync(SegmentRequest request, CancellationToken ct)
     {
         // StationId/TimeDate stay templated — brand/time copy must be crisp, consistent, and
-        // forever-cacheable; the two track-anchored kinds (F34.2) and the two handoff kinds (F92.2,
-        // F92.5) are the ones worth an LLM's while (see IsLlmAuthored, the single source of truth).
+        // forever-cacheable. Crosstalk (PLAN T281) also stays templated here, for a different
+        // reason: its real copy arrives via its own ahead-of-air script writer (T282, SPEC F127.3),
+        // not this seam, so this writer is template-class for it by design, not degrading. The two
+        // track-anchored kinds (F34.2) and the two handoff kinds (F92.2, F92.5) are the ones worth an
+        // LLM's while (see IsLlmAuthored, the single source of truth).
         if (!IsLlmAuthored(request.Kind))
             return await fallback.WriteAsync(request, ct);
 
@@ -358,9 +363,11 @@ public sealed class LlmCopyWriter(
     public async Task<PersonaPreviewResult> WritePreviewAsync(
         SegmentRequest request, Persona? personaOverride, CancellationToken ct)
     {
-        // StationId/TimeDate route straight to the template rung — mirrors WriteAsync's own
-        // kind-based routing (F34.2, IsLlmAuthored). This is not a fallback: those two kinds never
-        // call the LLM on-air either, so template text IS the correct preview for them.
+        // StationId/TimeDate/Crosstalk route straight to the template rung — mirrors WriteAsync's
+        // own kind-based routing (F34.2, IsLlmAuthored; see that method's own comment for why
+        // Crosstalk joins the two — its real copy arrives via its own ahead-of-air script writer,
+        // T282, SPEC F127.3, not this seam). This is not a fallback: none of the three call the LLM
+        // on-air either, so template text IS the correct preview for them.
         if (!IsLlmAuthored(request.Kind))
         {
             var templated = await fallback.WriteAsync(request, ct);

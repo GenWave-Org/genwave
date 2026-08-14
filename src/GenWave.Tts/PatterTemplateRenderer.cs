@@ -102,8 +102,19 @@ public sealed class PatterTemplateRenderer
         // (T224 review finding): ContextSegment is now one of LlmCopyWriter.IsLlmAuthored's kinds, so
         // WritePreviewAsync never falls through to this template rung on an LLM miss the way it would
         // have under T223 — it returns PersonaPreviewResult.Failed instead (F35.6: a preview never
-        // silently substitutes template copy).
+        // silently substitutes template copy). The sibling Crosstalk arm just below carries no such
+        // guarantee: TtsSegmentSource's own non-LLM-authored drop guard (`SignOff or SignOn or
+        // ContextSegment`, TtsSegmentSource.cs:93) does not list Crosstalk, so if a future producer
+        // (T287) ever routes a Crosstalk render through this template rung, "Two voices, one moment."
+        // would become airable filler unless that guard is extended first — the wiring task's call.
         SegmentKind.ContextSegment => "Here's something worth knowing.",
+        // No producer builds a Crosstalk SegmentRequest yet (SPEC F127.1, PLAN T281 — the vend
+        // itself is T287's), so this arm never reaches air today. It exists purely so the switch
+        // below stays total: TemplateCopyWriter's own "never fails for any SegmentRequest" contract,
+        // and POST /api/personas/preview (kind is validated against any real SegmentKind name, see
+        // PersonaController.TryParseKind), both need a correct, non-throwing landing spot for this
+        // kind now that it exists — the same discipline ContextSegment's arm above was added under.
+        SegmentKind.Crosstalk      => "Two voices, one moment.",
         _                          => throw new ArgumentOutOfRangeException(
                                         nameof(request.Kind), request.Kind, message: null),
     };
