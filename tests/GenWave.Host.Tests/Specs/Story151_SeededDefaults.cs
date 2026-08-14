@@ -139,7 +139,11 @@ public static class FeatureSeededDefaults
     /// deliberate, honest "defer to the on-air DJ", not a gap. Station:Location:Latitude/Longitude/
     /// SpokenName (SPEC F108.1, F108.3, PLAN T226) join on PublicStreamUrl's own identical
     /// rationale: blank means "no coordinate/place name configured", the correct fresh-deploy state
-    /// until an operator sets one. Every other allowlisted key's C# default is non-empty.
+    /// until an operator sets one. Tts:Fallback:Endpoint/Voice (SPEC F99.2, F99.3, STORY-257, PLAN
+    /// T148) join the set having MOVED here from <see cref="ComposeApiEnvMirror"/>: TTS failover
+    /// became opt-in — the shipped compose.yaml no longer sets either key, so a fresh deploy's
+    /// effective value really is blank now (an operator opts in with a live PUT /api/settings).
+    /// Every other allowlisted key's C# default is non-empty.
     /// </summary>
     static readonly IReadOnlySet<string> HonestlyBlankKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -150,6 +154,8 @@ public static class FeatureSeededDefaults
         "Tts:Corrections",
         "Tts:Pronunciations",
         "Tts:EngineByKind",
+        "Tts:Fallback:Endpoint",
+        "Tts:Fallback:Voice",
         "Station:Envelope:Genres",
         "Station:Timezone",
         "Station:Theme",
@@ -188,13 +194,11 @@ public static class FeatureSeededDefaults
         // fact is what closes it (F63.1).
         ["Loudness:TargetLufs"] = "-16",
         ["Loudness:CeilingDbtp"] = "-1",
-        // Piper local fallback (SPEC F70.1, STORY-190, PLAN T34): unlike Llm:Endpoint (an honest
-        // blank — Ollama is a demo-only add-on), compose.yaml's base stack deploys a `piper`
-        // sidecar for every topology and points the api at it here, so a genuine fresh deploy has
-        // the fallback enabled out of the box — NOT a HonestlyBlankKeys entry. TtsFallbackOptions'
-        // own C# default stays empty/disabled for a bare (piper-less) deployment or test.
-        ["Tts:Fallback:Endpoint"] = "http://piper:5000",
-        ["Tts:Fallback:Voice"] = "en_US-lessac-medium",
+        // Tts:Fallback:Endpoint/Voice REMOVED here 2026-08-14 (SPEC F99.2, F99.3, STORY-257, PLAN
+        // T148): TTS failover became opt-in — compose.yaml's api service no longer sets either
+        // key (the `piper` sidecar itself moved behind `profiles: ["fallback"]`, off by default),
+        // so a genuine fresh deploy's effective value really is blank now. Moved to
+        // HonestlyBlankKeys above, mirroring Llm:Endpoint's own "an honest blank" rationale.
     };
 
     static IConfiguration FreshDeployConfig() =>

@@ -4,16 +4,29 @@
 // scenarios carry Category=Integration (docker CLI); the launch.sh --dry-run scenarios run in the
 // ordinary suite (no daemon touched, same as Story201).
 //
-// Pins under guard: the DEFAULT render is untouched (kokoro present, api still hard-depends on it,
-// no EngineByKind seed — the gh-#242 constraint that existing boxes never change behaviour on
-// upgrade); the piper-only overlay removes kokoro, resets api's depends_on to db+engine only, and
-// seeds Tts:EngineByKind covering EVERY SegmentKind -> "piper" (asserted against the enum itself,
-// so adding a seventh kind fails here until the overlay learns it); the overlay stacks cleanly on
-// compose.demo.yaml; and launch.sh --piper-only merges the overlay file LAST in both flows.
+// Pins under guard: the DEFAULT render's api service still hard-depends on kokoro; the piper-only
+// overlay removes kokoro and resets api's depends_on to db+engine only; the overlay stacks cleanly
+// on compose.demo.yaml; and launch.sh --piper-only merges the overlay file LAST in both flows.
+//
+// ⚠️ SUPERSEDED IN PART 2026-08-14 (PLAN T148, SPEC F99.2–F99.4, STORY-257): two of this file's
+// original pins described the pre-STORY-257 shape and are no longer true —
+//   * the DEFAULT render no longer carries `piper` at all (F99.3: a station with no fallback
+//     configured does not run the sidecar; `piper` now sits behind `profiles: ["fallback"]`,
+//     off by default) — gh-#242's "existing boxes never change behaviour on upgrade" constraint
+//     is superseded by the newer, explicit ruling that failover opt-in applies to existing
+//     installs too (ARCHITECTURE.md "The deleted default")
+//   * the piper-only overlay no longer seeds `Tts:EngineByKind` (the per-kind pin was a
+//     chain-shaped workaround); it seeds `Tts:PiperPrimaryEndpoint` instead, making Piper the
+//     PRIMARY engine directly (F99.4) — see FeatureFailoverIsAChoice.ScenarioPrimarySelectionWiring
+//     in GenWave.Tts.Tests/Specs/Story257_FailoverIsAChoice.cs for the C#-side routing proof (T148
+//     review finding F1: this pointer used to promise a proof that did not yet exist — that
+//     scenario binds Tts:PiperPrimaryEndpoint through the real configuration binder into
+//     AddGenWaveTts and proves which concrete primary renders, against real stub servers)
+// Scenarios below are UPDATED in place (not left stale) — the gh-#242 constraints that still
+// hold (kokoro depends_on, the overlay's own presence/merge-order pins) are unchanged.
 
 using System.Diagnostics;
 using System.Text.Json;
-using GenWave.Core.Domain;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -91,14 +104,17 @@ public static class FeatureComposePiperOnlyOverride
 
         [Fact]
         [Trait("Category", "Integration")]
-        public static void The_default_render_carries_exactly_todays_service_set_kokoro_included()
+        public static void The_default_render_carries_kokoro_but_not_the_opt_in_fallback_sidecar()
         {
-            // The gh-#242 constraint: kokoro stays on by default for every existing box. The full
-            // set is pinned (not just "kokoro present") so the overlay landing can never have
-            // touched the base file's service roster unnoticed.
+            // The gh-#242 constraint: kokoro stays on by default for every existing box. `piper`
+            // is DELIBERATELY absent (SPEC F99.3, STORY-257, superseding this fact's original
+            // "piper included" pin — see the file header) — a station with no fallback configured
+            // does not run a fallback engine container. The full set is pinned (not just "kokoro
+            // present") so the overlay landing can never have touched the base file's service
+            // roster unnoticed.
             var services = Base.Value.RootElement.GetProperty("services")
                 .EnumerateObject().Select(p => p.Name).Order().ToArray();
-            Assert.Equal(new[] { "api", "db", "dockerproxy", "engine", "icecast", "kokoro", "piper" }, services);
+            Assert.Equal(new[] { "api", "db", "dockerproxy", "engine", "icecast", "kokoro" }, services);
         }
 
         [Fact]
@@ -116,7 +132,8 @@ public static class FeatureComposePiperOnlyOverride
         public static void No_engine_by_kind_seed_leaks_into_the_default_render()
         {
             // Empty/absent Tts:EngineByKind is F70.3's own "byte-identical to pre-feature routing"
-            // default — the overlay's all-piper seed must never reach a box that didn't opt in.
+            // default — no compose topology seeds it (the piper-only overlay no longer does
+            // either, post-STORY-257 — see ScenarioPiperOnlyRender.Piper_is_configured_as_the_primary_engine_not_a_per_kind_pin).
             var env = Base.Value.RootElement.GetProperty("services").GetProperty("api").GetProperty("environment");
             Assert.False(env.TryGetProperty("Tts__EngineByKind", out _));
         }
@@ -150,31 +167,34 @@ public static class FeatureComposePiperOnlyOverride
 
         [Fact]
         [Trait("Category", "Integration")]
-        public static void Engine_by_kind_seed_maps_every_segment_kind_to_piper()
+        public static void Piper_is_configured_as_the_primary_engine_not_a_per_kind_pin()
         {
-            // Asserted against the enum itself, not a copied list: a seventh SegmentKind fails
-            // this spec until the overlay learns it — otherwise the new kind's renders would
-            // take the health-based path chasing a kokoro that doesn't exist.
+            // SPEC F99.4, STORY-257: superseded the pre-existing per-kind Tts:EngineByKind seed
+            // (a chain-shaped workaround pinning every SegmentKind to a piper FALLBACK hop while
+            // the primary stayed Kokoro) with Tts:PiperPrimaryEndpoint — Piper is the PRIMARY
+            // engine directly, so no per-kind map is needed at all.
             var env = BasePiperOnly.Value.RootElement.GetProperty("services").GetProperty("api").GetProperty("environment");
-            using var map = JsonDocument.Parse(env.GetProperty("Tts__EngineByKind").GetString()!);
-            var mapped = map.RootElement.EnumerateObject()
-                .ToDictionary(p => p.Name, p => p.Value.GetString(), StringComparer.Ordinal);
 
-            Assert.Equal(Enum.GetNames<SegmentKind>().Order().ToArray(), mapped.Keys.Order().ToArray());
-            Assert.All(mapped.Values, engine => Assert.Equal("piper", engine));
+            Assert.Equal("http://piper:5000", env.GetProperty("Tts__PiperPrimaryEndpoint").GetString());
+            Assert.False(env.TryGetProperty("Tts__EngineByKind", out _));
         }
 
         [Fact]
         [Trait("Category", "Integration")]
-        public static void The_piper_sidecar_and_its_fallback_endpoint_survive_the_overlay()
+        public static void The_piper_sidecar_runs_unconditionally_with_no_fallback_chain()
         {
-            // Non-empty Tts:Fallback:Endpoint is load-bearing (F70.1): empty means
-            // FallbackTtsSynthesizer is a kokoro-only pass-through and the map above is moot.
+            // The piper-only overlay resets the "fallback" profile gate compose.yaml assigns
+            // `piper` (SPEC F99.3) back to unconditional — on this topology piper is primary, not
+            // an opt-in fallback, so it must always run. And no fallback chain is configured at
+            // all (F99.4 "rather than relying on a chain"): an empty Tts:Fallback:Endpoint means
+            // FallbackTtsSynthesizer would be a kokoro-only pass-through if Kokoro were even
+            // reachable here — moot, since Tts:PiperPrimaryEndpoint above already makes Piper the
+            // primary FallbackTtsSynthesizer resolves in the first place.
             var render = BasePiperOnly.Value;
             Assert.True(render.RootElement.GetProperty("services").TryGetProperty("piper", out _));
-            Assert.Equal("http://piper:5000",
-                render.RootElement.GetProperty("services").GetProperty("api")
-                    .GetProperty("environment").GetProperty("Tts__Fallback__Endpoint").GetString());
+            var env = render.RootElement.GetProperty("services").GetProperty("api").GetProperty("environment");
+            Assert.False(env.TryGetProperty("Tts__Fallback__Endpoint", out _));
+            Assert.False(env.TryGetProperty("Tts__Fallback__Voice", out _));
         }
     }
 
@@ -195,7 +215,7 @@ public static class FeatureComposePiperOnlyOverride
         [Trait("Category", "Integration")]
         public static void The_demo_topology_itself_is_untouched()
         {
-            // caddy still exists and the engine-by-kind seed merged into the demo api env
+            // caddy still exists and the piper-primary seed merged into the demo api env
             // alongside (mapping-key merge) rather than replacing it.
             //
             // ollama used to be asserted present HERE, as part of "untouched". gh-#310 is exactly
@@ -206,7 +226,7 @@ public static class FeatureComposePiperOnlyOverride
             var services = DemoPiperOnly.Value.RootElement.GetProperty("services");
             Assert.True(services.TryGetProperty("caddy", out _));
             var env = services.GetProperty("api").GetProperty("environment");
-            Assert.True(env.TryGetProperty("Tts__EngineByKind", out _));
+            Assert.Equal("http://piper:5000", env.GetProperty("Tts__PiperPrimaryEndpoint").GetString());
             Assert.Equal("false", env.GetProperty("Admin__Enabled").GetString());
         }
     }

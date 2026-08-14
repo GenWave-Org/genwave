@@ -16,21 +16,20 @@
 // REJECTED: it needs a notion of which segments are re-airable, and "the DJ repeated
 // themselves" is its own inhuman artifact.
 //
-// T147 does NOT yet deliver F99.1 on the DEPLOYED path (T147 review finding F2). compose.yaml
-// still ships `Tts__Fallback__Endpoint: http://piper:5000` today, so a live station still
-// legally substitutes Piper on a Kokoro failure — SPEC F99.2's deliberate opt-in substitution.
+// T147 did NOT yet deliver F99.1 on the DEPLOYED path (T147 review finding F2): compose.yaml
+// shipped `Tts__Fallback__Endpoint: http://piper:5000` at the time, so a live station still
+// legally substituted Piper on a Kokoro failure — SPEC F99.2's deliberate opt-in substitution.
 // A structural hop-refusal was considered here and REJECTED: it would break that same opt-in.
-// What T147 actually pins is the structural HALVES that are true regardless of that shipped
+// What T147 actually pinned is the structural HALVES that are true regardless of that shipped
 // default: the null-never-throws render contract (a voice that cannot be produced never fakes
 // one), persona+cause Information logging (F99.5's audit trail), and drop legibility (an
 // operator can tell "the engine is down" from "the DJ has nothing to say"). Every scenario
-// below arranges the ALREADY-legal-today opt-out — no fallback chain configured at all
-// (TtsFallbackChain.Resolve folds absent config to Empty) — which is a real, supported
-// posture, but proves nothing about the SHIPPED default. Facts that would need "no substitute
-// engine is ever asked" to be true of the deployed default (not merely of this opt-out
-// fixture) are marked `Pending T148` below: T148, in this SAME PR, flips the shipped default
-// itself to an empty chain (compose stops shipping the fallback endpoint/sidecar) — at that
-// point those facts describe the real deployed posture and go live.
+// below arranges the opt-out — no fallback chain configured at all (TtsFallbackChain.Resolve
+// folds absent config to Empty). T148 (SAME PR) flips the shipped default itself to an empty
+// chain (compose no longer ships the fallback endpoint/sidecar by default) — the two facts
+// below that needed "no substitute engine is ever asked" to be true of the DEPLOYED default,
+// not merely of this fixture, now describe the real deployed posture and go live (Skip
+// removed).
 
 namespace GenWave.Tts.Tests.Specs;
 
@@ -128,7 +127,7 @@ public static class FeatureNeverSomeoneElsesVoice
             Assert.Null(item);
         }
 
-        [Fact(Skip = "Pending T148 — the shipped-default flip makes this pinnable")]
+        [Fact]
         public async Task No_other_voice_is_ever_asked_to_speak_that_line()
         {
             // The substitute engine must not be CALLED, not merely have its output discarded — but
@@ -136,9 +135,9 @@ public static class FeatureNeverSomeoneElsesVoice
             // loop `substitute` lives in has zero hops to iterate whether or not a short-circuit
             // guard exists ahead of it. A reviewer's mutation test proved this: deleting
             // FallbackTtsSynthesizer's IsEmpty short-circuit left this fact green regardless,
-            // because chain.Hops.Count is 0 either way. It is a fact about THIS FIXTURE, not yet a
-            // pin on production code — it becomes one once T148 flips the SHIPPED default itself to
-            // an empty chain (see file header).
+            // because chain.Hops.Count is 0 either way. T148 flipped the SHIPPED default itself to
+            // an empty chain (see file header), so this fixture now matches the deployed default
+            // and the fact pins production code, not merely this fixture.
             var source = BuildSource(BuildRouter(primary, substitute), cacheRoot);
 
             // When the break comes due
@@ -312,14 +311,12 @@ public static class FeatureNeverSomeoneElsesVoice
             Assert.Equal(request.Voice, primary.LastVoice);
         }
 
-        [Fact(Skip = "Pending T148 — the shipped-default flip makes this pinnable")]
+        [Fact]
         public async Task No_substitute_was_asked()
         {
-            // Same F1 ground as
-            // ScenarioTheBreakIsDropped.No_other_voice_is_ever_asked_to_speak_that_line above:
-            // vacuous under this fixture's empty chain (zero hops to iterate regardless of any
-            // guard) — true of the FIXTURE, not yet of production code, until T148 flips the
-            // shipped default itself.
+            // Same ground as ScenarioTheBreakIsDropped.No_other_voice_is_ever_asked_to_speak_that_line
+            // above: T148 flipped the shipped default to this fixture's empty chain, so this now
+            // pins production code, not merely the fixture.
             var source = BuildSource(BuildRouter(primary, substitute), cacheRoot);
             var request = DjBreakRequest();
             await source.RenderAsync(request, CancellationToken.None);

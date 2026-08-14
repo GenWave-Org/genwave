@@ -44,9 +44,12 @@ public static class TtsServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        // Fallback chain options (SPEC F70.1, STORY-190, gh-#147) — registered unconditionally,
-        // mirroring LlmOptions below: an empty chain (no Tts:Fallback:Profiles, no legacy
-        // Tts:Fallback:Endpoint) just means FallbackTtsSynthesizer stays a pass-through to Kokoro.
+        // Fallback chain options (SPEC F70.1, F99.2, STORY-190, STORY-257, gh-#147) — registered
+        // unconditionally, mirroring LlmOptions below: an empty chain (the shipped default — no
+        // Tts:Fallback:Profiles, no legacy Tts:Fallback:Endpoint) just means FallbackTtsSynthesizer
+        // stays a pass-through to whichever primary was chosen below (Kokoro, or Piper on the
+        // piper-only opt-in) — an operator configures Tts:Fallback:Profiles/Endpoint deliberately
+        // to opt IN to substitution (F99.2).
         // IOptionsMonitor<TtsFallbackOptions> (not IOptions) is what FallbackTtsSynthesizer and
         // PiperHealthProbe read per call, so a live edit to the legacy Endpoint/Voice keys applies
         // without a restart. TtsFallbackOptionsValidator + ValidateOnStart is the gh-#147
@@ -227,6 +230,13 @@ public static class TtsServiceCollectionExtensions
         services.AddHttpClient<KokoroFallbackRenderer>();
         services.AddSingleton<IFallbackProfileRenderer>(sp => sp.GetRequiredService<KokoroFallbackRenderer>());
 
+        // Piper as PRIMARY (SPEC F99.4, STORY-257) — a second typed client alongside
+        // PiperTtsSynthesizer above, sharing its wire mechanics (PiperWireProtocol) but reading a
+        // separate endpoint key (Tts:PiperPrimaryEndpoint). Registered unconditionally; selected
+        // below only when that key is set (the piper-only topology's opt-in), so every other
+        // deployment never resolves it at all.
+        services.AddHttpClient<PiperPrimaryTtsSynthesizer>();
+
         // LlmCopyWriter's HTTP client (SPEC F34.3, F36.2): deliberately no BaseAddress here — the
         // endpoint comes from IOptionsMonitor<LlmOptions>.CurrentValue per render, so a live PUT
         // to Llm:Endpoint takes effect on the next call without an api restart.
@@ -247,22 +257,40 @@ public static class TtsServiceCollectionExtensions
                     sp.GetRequiredService<IOptionsMonitor<TtsOptions>>(),
                     TimeSpan.FromMinutes(5)))
             // FallbackTtsSynthesizer (SPEC F70.1, F70.4, STORY-190, gh-#147) sits BELOW
-            // NormalizingTtsSynthesizer, executing the ordered fallback chain — Kokoro (primary)
-            // first, then each configured hop — see its own remarks for the routing rule.
-            // Registered concretely once; nothing else in this project resolves it directly.
+            // NormalizingTtsSynthesizer, executing the ordered fallback chain — the primary first,
+            // then each configured hop — see its own remarks for the routing rule. The primary is
+            // Kokoro on every topology except the piper-only opt-in (SPEC F99.4, STORY-257),
+            // chosen ONCE here at composition time from Tts:PiperPrimaryEndpoint — never
+            // per-render, since swapping wire protocol mid-render is a deployment decision, not a
+            // live reroute (see TtsOptions.PiperPrimaryEndpoint's own remarks). Registered
+            // concretely once; nothing else in this project resolves it directly.
             .AddSingleton<FallbackTtsSynthesizer>(sp =>
-                new FallbackTtsSynthesizer(
-                    sp.GetRequiredService<KokoroTtsSynthesizer>(),
+            {
+                var piperPrimaryEndpoint = sp.GetRequiredService<IOptions<TtsOptions>>().Value.PiperPrimaryEndpoint;
+                var piperIsPrimary = !string.IsNullOrEmpty(piperPrimaryEndpoint);
+                ITtsSynthesizer primary = piperIsPrimary
+                    ? sp.GetRequiredService<PiperPrimaryTtsSynthesizer>()
+                    : sp.GetRequiredService<KokoroTtsSynthesizer>();
+
+                return new FallbackTtsSynthesizer(
+                    primary,
                     sp.GetServices<IFallbackProfileRenderer>(),
                     sp.GetRequiredService<IDependencyHealth>(),
                     sp.GetRequiredService<IOptionsMonitor<TtsFallbackOptions>>(),
                     sp.GetRequiredService<ILogger<FallbackTtsSynthesizer>>(),
-                    sp.GetRequiredService<TtsEngineByKindProvider>()))
+                    sp.GetRequiredService<TtsEngineByKindProvider>(),
+                    // T148 review finding F3: the primary's own dependency name travels with it —
+                    // a piper-only station's cached-health lookup and log {Engine} slot must read
+                    // Piper's verdict, never absent-Kokoro's (FallbackTtsSynthesizer's own remarks).
+                    piperIsPrimary ? DependencyNames.Piper : DependencyNames.Kokoro);
+            })
             // The typed HttpClient factory registers KokoroTtsSynthesizer as transient; the
             // singleton every caller (TtsSegmentSource, SafeSegmentAuthor, TtsPreviewController)
             // actually resolves is NormalizingTtsSynthesizer (SPEC F68.1, STORY-185) decorating
-            // FallbackTtsSynthesizer (T34) decorating KokoroTtsSynthesizer/PiperTtsSynthesizer —
-            // the single Normalize call site sits here, not in any of those callers, and runs
+            // FallbackTtsSynthesizer (T34) decorating whichever primary was chosen above
+            // (KokoroTtsSynthesizer or, piper-only, PiperPrimaryTtsSynthesizer) plus
+            // PiperTtsSynthesizer's own fallback-hop shape — the single Normalize call site sits
+            // here, not in any of those callers, and runs
             // exactly once whichever engine ultimately renders. Registered concretely ONCE and
             // exposed under BOTH seams it implements (mirrors LlmCopyWriter's
             // ISegmentCopyWriter/IPersonaPreviewWriter split) — the on-air ITtsSynthesizer and the

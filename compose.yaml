@@ -168,11 +168,16 @@ services:
       Tts__Format: "wav"
       Tts__RenderBudgetSeconds: "30"
       Tts__CacheRoot: "/tts"
-      # Piper local fallback (SPEC F70.1, STORY-190): FallbackTtsSynthesizer routes here when
-      # Kokoro is unhealthy or a render throws. Matches the `piper` service's own MODEL_DOWNLOAD_LINK
-      # voice below — Tts__Fallback__Voice is documentation only (never sent on the wire).
-      Tts__Fallback__Endpoint: "http://piper:5000"
-      Tts__Fallback__Voice: "en_US-lessac-medium"
+      # TTS failover is opt-in (SPEC F99.2, F99.3, STORY-257) — the shipped default sets NEITHER
+      # Tts__Fallback__Endpoint nor Tts__Fallback__Voice, so TtsFallbackChain.Resolve folds to
+      # Empty and FallbackTtsSynthesizer is a transparent pass-through to Kokoro (gh-#147's
+      # existing empty-chain semantics, now the default rather than an edge case). An operator who
+      # wants Piper substitution opts in with BOTH halves: `--with fallback` (or
+      # COMPOSE_PROFILES=fallback) to run the `piper` sidecar below (it carries
+      # `profiles: ["fallback"]`, off by default), and a PUT /api/settings for
+      # Tts:Fallback:Endpoint (live-editable, StationSettingsAllowlist — no restart needed). The
+      # piper-only topology (compose.piper-only.yaml) does not use this mechanism at all: there
+      # Piper is the PRIMARY engine (SPEC F99.4), never a fallback hop.
       # Icecast admin-stats listener count (SPEC F62.12 addendum, STORY-179, gitea-#10). Env/compose-
       # only, deliberately absent from StationSettingsAllowlist — Icecast__AdminPassword is a secret
       # (F19.3), never readable or writable through the settings API.
@@ -229,13 +234,25 @@ services:
     # PiperHealthProbe), same MODEL_DOWNLOAD_LINK/SPEAKER env contract, same port 5000. Published
     # multi-arch per release as ghcr.io/genwave-org/genwave-piper (gh-#240 matrix); the demo
     # overlay pins that image like every other repo-built service (gh-#93 posture).
+    #
+    # profiles (SPEC F99.3, STORY-257): off by default — a station with no fallback configured
+    # does not run this container. Same documented-profile-gate idiom compose.piper-only.yaml's
+    # own header explains for kokoro/ollama (plain profile assignment over a service-removal merge
+    # tag, since only attribute-level `!override`/`!reset` is trusted at this repo's Compose
+    # floor). Enable with `--with fallback` (or COMPOSE_PROFILES=fallback) — see the api service's
+    # Tts__Fallback__Endpoint comment above for the second, config half of opting in. The
+    # piper-only overlay resets this back to unconditional (`profiles: !reset []`): there Piper is
+    # the PRIMARY engine (F99.4), not an opt-in fallback, so it must always run on that topology.
+    profiles: ["fallback"]
     build:
       context: ./piper
     networks: [core]                                    # internal only; no host ports
     environment:
       # Downloads this ONNX voice model (+ its .onnx.json config) to /app/models on first boot
       # (persisted in the piper_models volume below) and serves it for the container's lifetime —
-      # matches the api's Tts__Fallback__Voice above (en_US-lessac-medium).
+      # must match whatever Tts:Fallback:Voice (or the piper-only overlay's own posture) an
+      # operator expects this sidecar to be speaking with (en_US-lessac-medium, documentation only
+      # — see TtsFallbackProfile.Voice's schema remarks for why it is never sent on the wire).
       MODEL_DOWNLOAD_LINK: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx?download=true"
       SPEAKER: "0"
     volumes:

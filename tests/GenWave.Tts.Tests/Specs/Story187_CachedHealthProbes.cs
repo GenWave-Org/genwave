@@ -434,7 +434,10 @@ public static class FeatureCachedDependencyHealthProbes
                 throw new InvalidOperationException("must not call out when unconfigured"));
             using var http = new HttpClient(handler);
             var optionsMonitor = new TestOptionsMonitor<TtsFallbackOptions>(new TtsFallbackOptions { Endpoint = "" });
-            var probe = new PiperHealthProbe(http, optionsMonitor);
+            // T148 review finding F4: PiperHealthProbe now also falls back to
+            // Tts:PiperPrimaryEndpoint when the chain carries no piper hop — this fixture leaves
+            // it unset too, so the not-configured posture is unchanged.
+            var probe = new PiperHealthProbe(http, optionsMonitor, new TestOptionsMonitor<TtsOptions>(new TtsOptions()));
 
             // When it is probed
             var healthy = await probe.ProbeAsync(CancellationToken.None);
@@ -454,7 +457,7 @@ public static class FeatureCachedDependencyHealthProbes
                 Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError)));
             using var http = new HttpClient(handler);
             var optionsMonitor = new TestOptionsMonitor<TtsFallbackOptions>(new TtsFallbackOptions { Endpoint = "http://piper:5000" });
-            var probe = new PiperHealthProbe(http, optionsMonitor);
+            var probe = new PiperHealthProbe(http, optionsMonitor, new TestOptionsMonitor<TtsOptions>(new TtsOptions()));
 
             // When it is probed
             var healthy = await probe.ProbeAsync(CancellationToken.None);
@@ -478,7 +481,7 @@ public static class FeatureCachedDependencyHealthProbes
                 Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)));
             using var http = new HttpClient(handler);
             var optionsMonitor = new TestOptionsMonitor<TtsFallbackOptions>(new TtsFallbackOptions { Endpoint = "http://piper:5000" });
-            var probe = new PiperHealthProbe(http, optionsMonitor);
+            var probe = new PiperHealthProbe(http, optionsMonitor, new TestOptionsMonitor<TtsOptions>(new TtsOptions()));
 
             // When it is probed
             await probe.ProbeAsync(CancellationToken.None);
@@ -496,7 +499,7 @@ public static class FeatureCachedDependencyHealthProbes
                 throw new HttpRequestException("connection refused"));
             using var http = new HttpClient(handler);
             var optionsMonitor = new TestOptionsMonitor<TtsFallbackOptions>(new TtsFallbackOptions { Endpoint = "http://piper:5000" });
-            var probe = new PiperHealthProbe(http, optionsMonitor);
+            var probe = new PiperHealthProbe(http, optionsMonitor, new TestOptionsMonitor<TtsOptions>(new TtsOptions()));
 
             // When/Then it throws — the driver, not the probe, decides the verdict's reason text
             await Assert.ThrowsAsync<HttpRequestException>(() => probe.ProbeAsync(CancellationToken.None));

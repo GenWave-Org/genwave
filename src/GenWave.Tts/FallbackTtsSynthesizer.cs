@@ -8,8 +8,9 @@ using GenWave.Core.Domain;
 
 /// <summary>
 /// Executes the ordered TTS fallback resiliency chain (SPEC F70.1, F70.4, STORY-190, gh-#147):
-/// primary (Kokoro) first, then each configured <see cref="TtsFallbackProfile"/> hop in order,
-/// until one renders. Sits BELOW <see cref="NormalizingTtsSynthesizer"/> — that decorator wraps
+/// the primary first (Kokoro on every topology except the piper-only opt-in, where it is Piper —
+/// SPEC F99.4, STORY-257, PLAN T148), then each configured <see cref="TtsFallbackProfile"/> hop in
+/// order, until one renders. Sits BELOW <see cref="NormalizingTtsSynthesizer"/> — that decorator wraps
 /// THIS one, never the other way round — so <see cref="SpeechText.Normalize"/> runs exactly once,
 /// before this decorator ever sees the text: every engine receives identical already-normalized
 /// copy, and every render flows through the exact same <see cref="TtsSegmentSource"/>
@@ -24,9 +25,11 @@ using GenWave.Core.Domain;
 /// This short-circuit runs BEFORE the per-kind lookup below, so an operator cannot pin a kind to
 /// an engine while no chain exists — there is nothing to route to.
 ///
-/// Routing rule (F70.1, F70.2): reads <see cref="IDependencyHealth"/>'s CACHED Kokoro verdict —
-/// never probes here, so a render-time decision costs zero network round trips beyond whichever
-/// synthesis calls it makes (STORY-187 AC2, "no health check executes inside the render window").
+/// Routing rule (F70.1, F70.2): reads <see cref="IDependencyHealth"/>'s CACHED verdict for the
+/// primary's own dependency name (<c>primaryDependencyName</c> below — Kokoro by default, Piper on
+/// the piper-only opt-in; T148 review finding F3) — never probes here, so a render-time decision
+/// costs zero network round trips beyond whichever synthesis calls it makes (STORY-187 AC2, "no
+/// health check executes inside the render window").
 /// A cached <c>unhealthy</c> verdict skips the primary and starts the chain at hop 1; a
 /// <c>healthy</c> verdict, or no verdict yet (the brief startup window before the first probe
 /// cycle completes), tries the primary first and walks the chain on failure. Per hop, an operator
@@ -59,7 +62,15 @@ public sealed class FallbackTtsSynthesizer(
     IDependencyHealth health,
     IOptionsMonitor<TtsFallbackOptions> fallbackOptions,
     ILogger<FallbackTtsSynthesizer> logger,
-    TtsEngineByKindProvider? engineOverrides = null) : ITtsSynthesizer
+    TtsEngineByKindProvider? engineOverrides = null,
+    // T148 review finding F3: the primary's own IDependencyHealth/log-display name travels with
+    // the instance rather than being hardcoded Kokoro — a piper-only station (SPEC F99.4) whose
+    // primary IS Piper must consult Piper's cached verdict, not absent-Kokoro's (which would
+    // always read unhealthy and wrongly gate off a perfectly healthy primary the moment an
+    // operator ALSO configures a fallback chain on that topology). Defaults to Kokoro so every
+    // other topology, and every existing caller of this constructor, is untouched — see
+    // TtsServiceCollectionExtensions for the one call site that passes DependencyNames.Piper.
+    string primaryDependencyName = DependencyNames.Kokoro) : ITtsSynthesizer
 {
     readonly IReadOnlyDictionary<string, IFallbackProfileRenderer> renderers =
         hopRenderers.ToDictionary(r => r.Engine, StringComparer.OrdinalIgnoreCase);
@@ -140,11 +151,12 @@ public sealed class FallbackTtsSynthesizer(
         ExceptionDispatchInfo? lastFailure = null;
         var firstHopIndex = NextHopIndex(chain, fromExclusive: -1, skipHopIndex);
 
-        var verdict = consultPrimaryHealth ? health.GetVerdict(DependencyNames.Kokoro) : null;
+        var verdict = consultPrimaryHealth ? health.GetVerdict(primaryDependencyName) : null;
         if (verdict is { Healthy: false } && firstHopIndex >= 0)
         {
             logger.LogWarning(
-                "Kokoro cached verdict is unhealthy ({Reason}); routing render straight to {Engine} fallback",
+                "{Primary} cached verdict is unhealthy ({Reason}); routing render straight to {Engine} fallback",
+                DisplayName(primaryDependencyName),
                 verdict.Reason,
                 DisplayName(chain.Hops[firstHopIndex].Engine));
         }
@@ -171,7 +183,8 @@ public sealed class FallbackTtsSynthesizer(
                 lastFailure = ExceptionDispatchInfo.Capture(ex);
                 logger.LogWarning(
                     ex,
-                    "Kokoro render failed; retrying once via {Engine} fallback",
+                    "{Primary} render failed; retrying once via {Engine} fallback",
+                    DisplayName(primaryDependencyName),
                     DisplayName(chain.Hops[firstHopIndex].Engine));
             }
         }

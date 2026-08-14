@@ -1,12 +1,14 @@
 // gh-#147 — Tts:Fallback:* as an ordered resiliency chain
 //
-// BDD specification — xUnit (SPEC F70.1, F70.2, F70.3). The HARD requirement is pinned first: the
-// shipped default config — compose.yaml's legacy flat Tts__Fallback__Endpoint/Voice pair;
-// appsettings.json carries no Tts:Fallback section at all — must reproduce EXACTLY the pre-chain
-// behavior (Kokoro primary → one Piper hop). Story190/Story191 keep running against the legacy
-// flat-key shape untouched, so the whole original scenario suite doubles as the behavioral half of
-// that equivalence proof; this file adds the config-resolution half plus the new chain semantics
-// (order, per-hop skip/budget, legacy precedence, voice-on-the-wire, loud validation).
+// BDD specification — xUnit (SPEC F70.1, F70.2, F70.3). The HARD requirement is pinned first:
+// the legacy flat Tts__Fallback__Endpoint/Voice pair — no longer shipped by default since SPEC
+// F99.2/STORY-257 (PLAN T148): failover is opt-in, so a fresh compose.yaml/appsettings.json sets
+// NEITHER key — must still reproduce EXACTLY the pre-chain behavior (Kokoro primary → one Piper
+// hop) for an operator who configures them deliberately. Story190/Story191 keep running against
+// the legacy flat-key shape untouched, so the whole original scenario suite doubles as the
+// behavioral half of that equivalence proof; this file adds the config-resolution half plus the
+// new chain semantics (order, per-hop skip/budget, legacy precedence, voice-on-the-wire, loud
+// validation).
 
 namespace GenWave.Tts.Tests.Specs;
 
@@ -74,8 +76,10 @@ public static class FeatureFallbackResiliencyChain
         [Fact]
         public static void Shipped_compose_keys_resolve_to_exactly_the_legacy_single_piper_hop()
         {
-            // Given exactly the fallback config the shipped compose.yaml deploys (the two legacy
-            // flat env keys, no Profiles) bound through the real configuration binder
+            // Given exactly the fallback config an operator opts into (the two legacy flat env
+            // keys, no Profiles) bound through the real configuration binder — this is no longer
+            // what a fresh compose.yaml deploys by default (SPEC F99.2, STORY-257), but the shape
+            // still means exactly this when an operator sets it deliberately
             var configuration = BuildConfig(new Dictionary<string, string?>
             {
                 ["Tts:Fallback:Endpoint"] = ShippedPiperEndpoint,
