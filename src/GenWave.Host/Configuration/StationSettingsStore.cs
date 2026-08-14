@@ -1,8 +1,8 @@
-using System.Text.Json;
+using System.Data.Common;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Events;
+using GenWave.MediaLibrary.Station;
 using Microsoft.Extensions.Logging.Abstractions;
-using Npgsql;
 
 namespace GenWave.Host.Configuration;
 
@@ -11,11 +11,21 @@ namespace GenWave.Host.Configuration;
 /// <see cref="StationSettingsConfigurationProvider"/> to reload so
 /// <see cref="Microsoft.Extensions.Options.IOptionsMonitor{T}"/> re-binds without restart.
 ///
-/// Registered as a singleton in DI. Thread-safe (Npgsql connections are created per-operation).
+/// Registered as a singleton in DI. Thread-safe (each <see cref="StationSettingsRepository"/> call
+/// opens its own connection per-operation).
+///
+/// gh-#406 slice 3: the raw <c>station.settings</c> row I/O lives in
+/// <see cref="StationSettingsRepository"/> (<c>GenWave.MediaLibrary.Station</c>) now — this class
+/// builds that repository internally from the same <see cref="connectionString"/> it always took
+/// (no DI wiring change; <c>StationSettingsHostingExtensions</c> still constructs this type exactly
+/// as before) and keeps only the concerns that are genuinely this store's own: the write-side
+/// allowlist guard, the live-reload signal, the change event, and the read-side degrade posture
+/// below.
 /// </summary>
 public sealed class StationSettingsStore : IStationSettingsStore
 {
     readonly string connectionString;
+    readonly StationSettingsRepository repository;
     readonly StationSettingsConfigurationSource source;
     readonly IStationEventSink events;
     readonly ILogger<StationSettingsStore> logger;
@@ -27,6 +37,7 @@ public sealed class StationSettingsStore : IStationSettingsStore
         ILogger<StationSettingsStore>? logger = null)
     {
         this.connectionString = connectionString;
+        repository = new StationSettingsRepository(connectionString);
         this.source = source;
         this.events = events ?? NoOpStationEventSink.Instance;
         this.logger = logger ?? NullLogger<StationSettingsStore>.Instance;
@@ -38,23 +49,7 @@ public sealed class StationSettingsStore : IStationSettingsStore
         if (!StationSettingsAllowlist.ByKey.ContainsKey(key))
             throw new ArgumentException($"Key '{key}' is not on the station settings allowlist.", nameof(key));
 
-        var json = JsonSerializer.Serialize(value);
-
-        await using var conn = new NpgsqlConnection(connectionString);
-        await conn.OpenAsync(cancellationToken);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            """
-            INSERT INTO station.settings (key, value, updated_at)
-            VALUES (@key, @value::jsonb, now())
-            ON CONFLICT (key) DO UPDATE
-              SET value      = EXCLUDED.value,
-                  updated_at = EXCLUDED.updated_at
-            """;
-        cmd.Parameters.AddWithValue("key", key);
-        cmd.Parameters.AddWithValue("value", json);
-        await cmd.ExecuteNonQueryAsync(cancellationToken);
+        await repository.WriteAsync(key, value, cancellationToken);
 
         // Signal the provider; IOptionsMonitor listeners will see the new value.
         source.BuiltProvider?.Reload();
@@ -70,45 +65,46 @@ public sealed class StationSettingsStore : IStationSettingsStore
     /// unconfigured — the settings page must still render with defaults while Postgres is briefly
     /// down, mirroring <see cref="StationSettingsConfigurationProvider.Load"/>'s identical
     /// degrade-to-empty-overlay behavior at boot. An empty <see cref="connectionString"/> throws
-    /// <see cref="InvalidOperationException"/> before a <see cref="NpgsqlException"/> is even
-    /// reachable (same guard the provider's <c>Load()</c> documents), so both cases are covered.
+    /// <see cref="InvalidOperationException"/> before a <see cref="DbException"/> is even reachable
+    /// (same guard the provider's <c>Load()</c> documents), so both cases are covered.
+    ///
+    /// Catches <see cref="DbException"/> — the provider-neutral ADO.NET base type
+    /// <see cref="Npgsql.NpgsqlException"/> itself derives from — rather than
+    /// <c>Npgsql.NpgsqlException</c> directly: this class carries no Npgsql reference at all now that
+    /// <see cref="StationSettingsRepository"/> owns the Postgres specifics (gh-#406 slice 3), and
+    /// <see cref="DbException"/> catches every failure the original catch did (and nothing broader —
+    /// it still lets an <see cref="OperationCanceledException"/> from <paramref name="cancellationToken"/>
+    /// propagate untouched, same as before).
     /// </remarks>
     public async Task<IReadOnlyDictionary<string, string>> ReadAllAsync(CancellationToken cancellationToken = default)
     {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
         if (string.IsNullOrWhiteSpace(connectionString))
         {
             logger.LogWarning("No Station connection string; overlay reads as empty");
-            return result;
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
         try
         {
-            await using var conn = new NpgsqlConnection(connectionString);
-            await conn.OpenAsync(cancellationToken);
+            var rows = await repository.ReadAllAsync(cancellationToken);
 
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT key, value FROM station.settings";
-
-            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (key, value) in rows)
             {
-                var key = reader.GetString(0);
                 if (!StationSettingsAllowlist.ByKey.ContainsKey(key))
                     continue;   // never surface a key that slipped through write-path guards
 
-                result[key] = reader.GetString(1);
+                result[key] = value;
             }
+
+            return result;
         }
-        catch (NpgsqlException ex)
+        catch (DbException ex)
         {
             // DB down, wrong password, no station schema yet — none of these should turn
             // GET /api/settings into a 500; the overlay is empty until the DB is reachable again.
             logger.LogWarning(ex, "Overlay read failed; treating as empty");
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
-
-        return result;
     }
 }

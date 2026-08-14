@@ -225,6 +225,20 @@ public sealed class DatabaseFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
+    /// <summary>
+    /// Truncate <c>station.settings</c> (gh-#406 slice 3, STORY-042's original table). No identity
+    /// to restart — <c>key</c> is a bare <c>text</c> primary key, no <c>serial</c>/sequence backs
+    /// it — and no FK references this table, the same "no CASCADE required" reasoning
+    /// <see cref="ResetRequestAsync"/>'s own remarks give.
+    /// </summary>
+    public async Task ResetSettingsAsync()
+    {
+        await using var conn = await StationDataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "truncate table station.settings";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     async Task WaitForSchemaAsync()
     {
         for (var attempt = 0; attempt < 30; attempt++)
