@@ -22,7 +22,7 @@ jest.mock("@/app/login/actions", () => ({
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, act, fireEvent } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { usePathname } from "next/navigation";
 import { BoothLogView } from "../app/(authed)/booth-log/BoothLogView";
 
@@ -87,7 +87,8 @@ function installFetchMock(initial: FetchState) {
   const fn = jest.fn<typeof fetch>().mockImplementation((input) => {
     const url = String(input);
     const beforeMatch = /before=([^&]+)/.exec(url);
-    const result = beforeMatch ? state.pages[decodeURIComponent(beforeMatch[1])] : state.head;
+    const cursor = beforeMatch?.[1];
+    const result = cursor !== undefined ? state.pages[decodeURIComponent(cursor)] : state.head;
 
     if (result === undefined || result.kind === "network-error") {
       return Promise.reject(new Error("network error"));

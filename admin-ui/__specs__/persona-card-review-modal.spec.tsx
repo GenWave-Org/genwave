@@ -9,7 +9,7 @@
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { useState, type ReactNode } from "react";
 import {
   PersonaCardReviewModal,

@@ -16,13 +16,13 @@
 // here only so these read-only listing Facts keep rendering at all.
 
 jest.mock("next/navigation", () => ({
-  ...jest.requireActual("next/navigation"),
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
   useRouter: jest.fn(),
 }));
 
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { render, screen, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { useRouter } from "next/navigation";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import type { FontLibraryPackDto } from "../app/(authed)/wardrobe/types";

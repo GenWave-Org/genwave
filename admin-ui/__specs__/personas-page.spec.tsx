@@ -29,12 +29,12 @@
 // fire-modal.spec.tsx, mirroring how T127 moved the switch's own coverage out of this file.
 
 jest.mock("next/headers", () => ({
-  cookies: jest.fn().mockResolvedValue({ toString: () => "session=test-cookie" }),
+  cookies: jest.fn<() => Promise<{ toString: () => string }>>().mockResolvedValue({ toString: () => "session=test-cookie" }),
 }));
 
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { ReactNode } from "react";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";

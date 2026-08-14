@@ -7,14 +7,14 @@
 // next/navigation useRouter (usePathname is mocked the same way for the Breadcrumbs scenario).
 
 jest.mock("next/navigation", () => ({
-  ...jest.requireActual("next/navigation"),
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
   useRouter: jest.fn(),
   usePathname: jest.fn(),
 }));
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { ComponentProps, ReactElement } from "react";
 import type { useRouter, usePathname } from "next/navigation";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";

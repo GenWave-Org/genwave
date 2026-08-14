@@ -1,6 +1,6 @@
-using GenWave.Core.Abstractions;
+using GenWave.Core.Events;
 
-namespace GenWave.Core.Events;
+namespace GenWave.Core.Abstractions;
 
 /// <summary>
 /// The default <see cref="IStationEventSink"/> binding: events vanish. Exists so publishers never

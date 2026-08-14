@@ -19,8 +19,8 @@ import {
 } from "../app/(authed)/schedule/schedule-grid-model";
 import type { ScheduleWeekDto } from "../app/(authed)/schedule/types";
 
-const GENRES_A = { genres: ["rock"], energyMin: null, energyMax: null };
-const GENRES_B = { genres: ["pop"], energyMin: null, energyMax: null };
+const GENRES_A = { genres: ["rock"], energyMin: null, energyMax: null, showId: null };
+const GENRES_B = { genres: ["pop"], energyMin: null, energyMax: null, showId: null };
 
 function run(day: number, start: number, end: number, brush: ScheduleRun["brush"] = 1): ScheduleRun {
   return { day, start, end, brush };
@@ -129,7 +129,7 @@ describe("Feature: multi-day spans serialize and round-trip (gh-#255)", () => {
   it("a full-week span keeps a block's envelope override through the round trip", () => {
     const cells = paintBand(createEmptyCells(), [0, 1, 2, 3, 4, 5, 6], 20, 24, PERSONA);
     const overrides = new Map([
-      [runKey(3, 20, PERSONA), { end: 24, overrides: { genres: ["jazz"], energyMin: 0.2, energyMax: 0.9 } }],
+      [runKey(3, 20, PERSONA), { end: 24, overrides: { genres: ["jazz"], energyMin: 0.2, energyMax: 0.9, showId: null } }],
     ]);
 
     const body = serializeWeek(cells, overrides);
@@ -141,7 +141,7 @@ describe("Feature: multi-day spans serialize and round-trip (gh-#255)", () => {
     const derived = deriveGridFromWeek(echo(body));
     expect(derived.overrides.get(runKey(3, 20, PERSONA))).toEqual({
       end: 24,
-      overrides: { genres: ["jazz"], energyMin: 0.2, energyMax: 0.9 },
+      overrides: { genres: ["jazz"], energyMin: 0.2, energyMax: 0.9, showId: null },
     });
   });
 

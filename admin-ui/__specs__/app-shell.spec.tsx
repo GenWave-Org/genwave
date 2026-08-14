@@ -36,7 +36,7 @@ jest.mock("@/app/login/actions", () => ({
 }));
 
 import { render, screen, fireEvent } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { ReactNode } from "react";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
@@ -61,11 +61,21 @@ function noSessionCookieStore(): FakeCookieStore {
   return { get: () => undefined };
 }
 
+/** Minimal shape of what jsdom's `matchMedia` fixture returns — only the members the app's
+ * theme-mode resolution actually reads (SPEC F102, dark-mode system-preference detection). */
+interface MockMediaQueryList {
+  matches: boolean;
+  media: string;
+  addEventListener: jest.Mock;
+  removeEventListener: jest.Mock;
+  dispatchEvent: jest.Mock;
+}
+
 function mockMatchMedia(prefersDark: boolean): void {
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     configurable: true,
-    value: jest.fn().mockImplementation((query: string) => ({
+    value: jest.fn<(query: string) => MockMediaQueryList>().mockImplementation((query) => ({
       matches: prefersDark,
       media: query,
       addEventListener: jest.fn(),

@@ -212,21 +212,24 @@ public static class FeaturePatterDurationEstimator
         }
 
         [Fact]
-        public static void TheShowUnawareOverloadNeverAnswersFromAShowBrandedObservationAlone()
+        public static void TheShowAwareOverloadAnswersFromAShowBrandedObservationGivenTheMatchingShow()
         {
             // Given ONLY a show-branded observation for this voice (no plain ident ever measured) —
-            // BuildBoundaryFit's own forward-looking cadence guess calls the OLD 3-arg overload, which
-            // has no show context to offer
+            // BuildBoundaryFit (gh-#463) reads its scheduleResolver's on-air show one expression away
+            // and calls this SAME 4-arg overload with it, rather than the show-blind 3-arg call it used
+            // to make
             var estimator = new RollingPatterDurationEstimator();
             estimator.ObserveRendered(
                 SegmentKind.StationId, personaName: null, "af_heart", TimeSpan.FromSeconds(9), showName: "The Morning Mix");
 
-            // When the show-unaware 3-arg overload estimates the same voice
-            var estimate = estimator.Estimate(SegmentKind.StationId, personaName: null, "af_heart");
+            // When the show-aware 4-arg overload estimates the same voice with the matching show name
+            var estimate = estimator.Estimate(SegmentKind.StationId, personaName: null, "af_heart", showName: "The Morning Mix");
 
-            // Then it never fabricates the show's own Exact duration for a request with no show
-            // context — it degrades honestly (cold, no plain-ident history exists either).
-            Assert.NotEqual(PatterEstimateConfidence.Exact, estimate.Confidence);
+            // Then it answers the show-branded Exact duration — the fit no longer under-estimates by
+            // consulting a different (voice, show) bucket's duration for the airing that will actually
+            // render.
+            Assert.Equal(PatterEstimateConfidence.Exact, estimate.Confidence);
+            Assert.Equal(TimeSpan.FromSeconds(9), estimate.Duration);
         }
     }
 

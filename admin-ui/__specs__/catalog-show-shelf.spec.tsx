@@ -20,13 +20,13 @@
 // REAL next/navigation export first under this project's SWC-based jest transform.
 
 jest.mock("next/navigation", () => ({
-  ...jest.requireActual("next/navigation"),
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
   useRouter: jest.fn(),
 }));
 
 import { describe, it, expect, jest, beforeAll, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, fireEvent, waitFor, within, act, type RenderResult } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { useRouter } from "next/navigation";
 import { Toaster } from "@/components/ui/toast";
 import type { PersonaCatalogClient as PersonaCatalogClientComponent } from "../app/(authed)/persona-catalog/PersonaCatalogClient";
@@ -52,6 +52,8 @@ const SHOW_ENTRY: CatalogShelfEntryDto = {
   audience: "everyone",
   bestFor: ["morning", "upbeat"],
   preview: null,
+  fontFamily: null,
+  fontByteTotal: null,
 };
 
 const SHOW_CARD_JSON = JSON.stringify({
@@ -97,6 +99,8 @@ const FLIP_PERSONA_ENTRY: CatalogShelfEntryDto = {
   audience: "everyone",
   bestFor: [],
   preview: null,
+  fontFamily: null,
+  fontByteTotal: null,
 };
 
 const FLIP_CARD_JSON = JSON.stringify({
@@ -140,6 +144,8 @@ const LENA_PERSONA_ENTRY: CatalogShelfEntryDto = {
   audience: "everyone",
   bestFor: [],
   preview: null,
+  fontFamily: null,
+  fontByteTotal: null,
 };
 
 const LENA_CARD_JSON = JSON.stringify({

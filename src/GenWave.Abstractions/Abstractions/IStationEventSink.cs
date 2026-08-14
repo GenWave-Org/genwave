@@ -6,7 +6,7 @@ namespace GenWave.Core.Abstractions;
 /// The in-process domain-event seam (gitea-#246, gap H2). Publishers at the five choke points (feeder
 /// advance, enricher flip, TTS render, settings write, admin writes) call
 /// <see cref="Publish"/> fire-and-forget; the default binding is
-/// <see cref="Events.NoOpStationEventSink"/>, and an analytics/audit module subscribes by
+/// <see cref="NoOpStationEventSink"/>, and an analytics/audit module subscribes by
 /// replacing or decorating the binding. No bus, no outbox, no persistence.
 /// </summary>
 public interface IStationEventSink

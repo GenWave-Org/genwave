@@ -564,9 +564,19 @@ public sealed class Orchestrator(
     {
         var worstConfidence = PatterEstimateConfidence.Exact;
 
+        // SPEC F117.2 (gh-#463) — the SAME synchronous TryGetCurrent() snapshot the F117.2 drain-side
+        // StationId arm already trusts (this method's own file, the F110.2/F110.3 remarks block), read
+        // ONCE here rather than per Estimate call below: every term this fit reasons about must
+        // describe the SAME on-air show, not two snapshots straddling a boundary flip mid-build. A
+        // null scheduleResolver (no format-clock schedule wired) or no show on the air both degrade to
+        // null, which the estimator's own (voice, show-name-or-null) keying already treats as the
+        // showless bucket — byte-identical to this fit's pre-gh-#463 behavior for every station that
+        // has never assigned a show.
+        var showName = scheduleResolver?.TryGetCurrent()?.Show?.Name;
+
         TimeSpan Estimate(SegmentKind kind, string? personaName, string voice)
         {
-            var estimate = patterEstimator.Estimate(kind, personaName, voice);
+            var estimate = patterEstimator.Estimate(kind, personaName, voice, showName);
             if (estimate.Confidence > worstConfidence) worstConfidence = estimate.Confidence;
             return estimate.Duration;
         }

@@ -17,7 +17,19 @@ public static class FeaturePersonaStorage
     // Helpers
     // ---------------------------------------------------------------------
 
-    static PersonaRepository Repo(DatabaseFixture db) => new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+    /// <summary>
+    /// gh-#462: <see cref="PersonaRepository.DeleteAsync"/> now ALWAYS pre-queries
+    /// <c>station.schedule_special</c> too, alongside <c>station.segment_schedule</c> — so every
+    /// scenario in this file that reaches <c>DeleteAsync</c>, not just the specials-specific ones
+    /// below, now needs db/36's table to exist first. Runs it here (idempotent — CREATE TABLE IF NOT
+    /// EXISTS — mirrors Story317_SpecialsStore.cs's own <c>Repo</c> helper) rather than only in the
+    /// scenario classes that insert a special row.
+    /// </summary>
+    static PersonaRepository Repo(DatabaseFixture db)
+    {
+        db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "36-schedule-special-migration.sh"));
+        return new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+    }
 
     /// <summary>
     /// Returns (data_type, is_nullable, column_default) for the named column on
@@ -364,13 +376,14 @@ public static class FeaturePersonaStorage
     }
 
     // ---------------------------------------------------------------------
-    // SAD PATH — F91.9's FK guard (PLAN T121): DeleteAsync queries station.segment_schedule and
-    // names the offending slots. Not the FK exception path itself — that is a genuine query-then-
-    // delete race (a slot painted between DeleteAsync's own SELECT and its DELETE), which is not
-    // independently reproducible here without a test-only hook into the repository; Story240's own
+    // SAD PATH — F91.9's FK guard (PLAN T121; widened F120.1/gh-#462): DeleteAsync queries BOTH
+    // station.segment_schedule AND station.schedule_special and names the offending slots/specials.
+    // Not the FK exception path itself — that is a genuine query-then-delete race (a slot/special
+    // painted between DeleteAsync's own SELECTs and its DELETE), which is not independently
+    // reproducible here without a test-only hook into the repository; Story240's own
     // ScenarioPersonaForeignKeyHasTeeth already proves the database's ON DELETE RESTRICT fires given
     // a direct conflicting row, and PersonaRepository.DeleteAsync's own remarks document the race
-    // backstop's shape (re-query, possibly empty) in full.
+    // backstop's shape (re-query both tables, possibly both empty) in full.
     // ---------------------------------------------------------------------
 
     [Collection(DatabaseCollection.Name)]
@@ -386,6 +399,19 @@ public static class FeaturePersonaStorage
                 values (@dayOfWeek, @startMinute, @endMinute, @personaId)
                 """,
                 new { dayOfWeek, startMinute, endMinute, personaId });
+        }
+
+        // gh-#462's own db/36 fixture — mirrors InsertSlotAsync just above, one table over.
+        static async Task InsertSpecialAsync(
+            DatabaseFixture db, long personaId, DateOnly onDate, int startMinute, int endMinute)
+        {
+            await using var conn = await db.StationDataSource.OpenConnectionAsync();
+            await conn.ExecuteAsync(
+                """
+                insert into station.schedule_special (on_date, start_minute, end_minute, persona_id)
+                values (@onDate, @startMinute, @endMinute, @personaId)
+                """,
+                new { onDate, startMinute, endMinute, personaId });
         }
 
         [Fact]
@@ -425,6 +451,54 @@ public static class FeaturePersonaStorage
             Assert.Equal(2, scheduled.Slots.Count);
             Assert.Equal(DayOfWeek.Monday, scheduled.Slots[0].Day);
             Assert.Equal(DayOfWeek.Tuesday, scheduled.Slots[1].Day);
+        }
+
+        [Fact]
+        public async Task DeletingAPersonaBlockedOnlyByADatedSpecialReturnsIt()
+        {
+            // gh-#462: a persona referenced ONLY by a dated special (no weekly slot at all) now names
+            // it — DeleteAsync's own pre-query reaches station.schedule_special too, not just
+            // station.segment_schedule, so this no longer falls through to the FK race-backstop path
+            // with nothing to report.
+            await db.ResetStationAsync();
+            await db.ResetScheduleAsync();
+            var repo = Repo(db);
+            await db.ResetSpecialsAsync();
+            var created = Assert.IsType<PersonaWriteResult.Created>(
+                await repo.CreateAsync(Draft("Special-Only DJ"), CancellationToken.None));
+            await InsertSpecialAsync(db, created.Persona.Id, new DateOnly(2026, 8, 20), 540, 720);
+
+            var outcome = await repo.DeleteAsync(created.Persona.Id, CancellationToken.None);
+
+            var scheduled = Assert.IsType<PersonaWriteResult.ScheduledElsewhere>(outcome);
+            Assert.Empty(scheduled.Slots);
+            var special = Assert.Single(scheduled.Specials);
+            Assert.Equal(new DateOnly(2026, 8, 20), special.OnDate);
+            Assert.Equal(540, special.StartMinute);
+            Assert.Equal(720, special.EndMinute);
+        }
+
+        [Fact]
+        public async Task DeletingAPersonaBlockedByBothASlotAndSpecialsReturnsBothCorrectlyOrdered()
+        {
+            await db.ResetStationAsync();
+            await db.ResetScheduleAsync();
+            var repo = Repo(db);
+            await db.ResetSpecialsAsync();
+            var created = Assert.IsType<PersonaWriteResult.Created>(
+                await repo.CreateAsync(Draft("Double-Blocked DJ"), CancellationToken.None));
+            await InsertSlotAsync(db, created.Persona.Id, dayOfWeek: 1, startMinute: 540, endMinute: 720);
+            // Inserted out of order — proves the specials query orders by date/start_minute, not insert order.
+            await InsertSpecialAsync(db, created.Persona.Id, new DateOnly(2026, 9, 1), 600, 660);
+            await InsertSpecialAsync(db, created.Persona.Id, new DateOnly(2026, 8, 20), 540, 720);
+
+            var outcome = await repo.DeleteAsync(created.Persona.Id, CancellationToken.None);
+
+            var scheduled = Assert.IsType<PersonaWriteResult.ScheduledElsewhere>(outcome);
+            Assert.Single(scheduled.Slots);
+            Assert.Equal(2, scheduled.Specials.Count);
+            Assert.Equal(new DateOnly(2026, 8, 20), scheduled.Specials[0].OnDate);
+            Assert.Equal(new DateOnly(2026, 9, 1), scheduled.Specials[1].OnDate);
         }
 
         [Fact]

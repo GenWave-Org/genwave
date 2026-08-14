@@ -11,7 +11,7 @@
 
 import { describe, it, expect } from "@jest/globals";
 import { render, screen, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { InstalledEntriesList } from "../app/(authed)/wardrobe/InstalledEntriesList";
 import { resolveWardrobeTab, WardrobeTabs } from "../app/(authed)/wardrobe/WardrobeTabs";
 import type { InstalledEntryRow } from "../app/(authed)/wardrobe/types";
