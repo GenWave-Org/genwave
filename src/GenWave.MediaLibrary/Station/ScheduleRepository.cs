@@ -1,4 +1,5 @@
 using Dapper;
+using Microsoft.Extensions.Logging;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using Npgsql;
@@ -17,9 +18,22 @@ namespace GenWave.MediaLibrary.Station;
 /// <c>ScheduleResolver</c>) can invalidate itself without re-querying on every 3s feeder tick (SPEC
 /// F91.3) — Postgres, not this instance, is the truth <see cref="LoadWeekAsync"/> always re-derives
 /// from on every call.
+///
+/// <para>
+/// <b>gh-#406 slice 1:</b> <see cref="ReplaceWeekAsync"/> catches its own 23503 foreign-key violation
+/// (mirrors <see cref="PersonaRepository.DeleteAsync"/>'s own race-backstop idiom) instead of letting
+/// <see cref="PostgresException"/> escape to the caller — an L2 Postgres-confinement violation this
+/// class exists specifically to close. <c>ScheduleController</c> used to catch that exception itself;
+/// it now only ever sees the typed <see cref="ScheduleReplaceResult.PersonaVanished"/> case.
+/// </para>
 /// </summary>
-sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleStore
+sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ScheduleRepository> logger) : IScheduleStore
 {
+    // Postgres SQLSTATE for foreign_key_violation — mirrors PersonaRepository's own ForeignKeyViolation
+    // const (no Npgsql.PostgresErrorCodes dependency, house idiom). gh-#406 slice 1: this mapping moved
+    // down from ScheduleController, which used to catch the raw PostgresException itself.
+    const string ForeignKeyViolation = "23503";
+
     public event Action? WeekChanged;
 
     /// <summary>
@@ -84,71 +98,90 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSt
         if (errors.Count > 0)
             return new ScheduleReplaceResult.ValidationFailed(errors);
 
-        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-
-        // Staleness guard (gh-#255): compare the stored week's content fingerprint against what the
-        // caller loaded, INSIDE this same transaction — a mismatch means another writer replaced the
-        // week since then, and honoring this full-replace would silently destroy that writer's work
-        // (observed live: demo Loki 2026-07-28, segmentCount 54 → 48 with no error anywhere). Read
-        // committed leaves a narrow same-instant race two concurrent replaces can still thread; the
-        // guard exists for the real-world case — a stale tab/session minutes-to-hours old — not as a
-        // serializable-isolation substitute.
-        if (expectedVersion is not null)
+        try
         {
-            var stored = await LoadSegmentsAsync(conn, tx, ct);
-            var storedVersion = ScheduleWeekVersion.Compute(stored);
-            if (storedVersion != expectedVersion)
-                return new ScheduleReplaceResult.VersionConflict(storedVersion);
-        }
+            await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+            await using var tx = await conn.BeginTransactionAsync(ct);
 
-        await conn.ExecuteAsync(new CommandDefinition(
-            "delete from station.segment_schedule", transaction: tx, cancellationToken: ct));
+            // Staleness guard (gh-#255): compare the stored week's content fingerprint against what the
+            // caller loaded, INSIDE this same transaction — a mismatch means another writer replaced the
+            // week since then, and honoring this full-replace would silently destroy that writer's work
+            // (observed live: demo Loki 2026-07-28, segmentCount 54 → 48 with no error anywhere). Read
+            // committed leaves a narrow same-instant race two concurrent replaces can still thread; the
+            // guard exists for the real-world case — a stale tab/session minutes-to-hours old — not as a
+            // serializable-isolation substitute.
+            if (expectedVersion is not null)
+            {
+                var stored = await LoadSegmentsAsync(conn, tx, ct);
+                var storedVersion = ScheduleWeekVersion.Compute(stored);
+                if (storedVersion != expectedVersion)
+                    return new ScheduleReplaceResult.VersionConflict(storedVersion);
+            }
 
-        if (week.Count > 0)
-        {
-            // PLAN T243: ScheduleSegment.ShowId (SPEC F116.1, PLAN T241) now rides this insert too —
-            // the bare foreign key, written straight into show_id, never Show's own Name/Tagline/Flavor
-            // (those are station.show's own entity fields, re-resolved by SelectColumns' own LEFT JOIN
-            // on the reload below, never written from here — ScheduleSegment's own remarks on why ShowId,
-            // not Show, is the write-authoritative field). This is deliberately the ONLY way
-            // ReplaceWeekAsync itself changed for T243: whatever ShowId a caller's own ScheduleSegment
-            // already carries survives a whole-week replace instead of being silently dropped — closing
-            // the "load-only" gap this comment used to describe. The Host GET/PUT wire
-            // (ScheduleSegmentDto/ScheduleController) round-trips this same field too (ScheduleController's
-            // own class remarks) — a whole-grid repaint no longer silently erases a show assignment set
-            // through AssignShowAsync's own dedicated endpoint.
             await conn.ExecuteAsync(new CommandDefinition(
-                """
-                insert into station.segment_schedule
-                    (day_of_week, start_minute, end_minute, persona_id, genres, energy_min, energy_max, show_id)
-                values (@Day, @StartMinute, @EndMinute, @PersonaId, @Genres::text[], @EnergyMin, @EnergyMax, @ShowId)
-                """,
-                week.Select(seg => new
-                {
-                    Day = (int)seg.Day,
-                    seg.StartMinute,
-                    seg.EndMinute,
-                    seg.PersonaId,
-                    Genres = seg.Genres?.ToArray(),
-                    seg.EnergyMin,
-                    seg.EnergyMax,
-                    seg.ShowId,
-                }),
-                transaction: tx,
-                cancellationToken: ct));
+                "delete from station.segment_schedule", transaction: tx, cancellationToken: ct));
+
+            if (week.Count > 0)
+            {
+                // PLAN T243: ScheduleSegment.ShowId (SPEC F116.1, PLAN T241) now rides this insert too —
+                // the bare foreign key, written straight into show_id, never Show's own Name/Tagline/Flavor
+                // (those are station.show's own entity fields, re-resolved by SelectColumns' own LEFT JOIN
+                // on the reload below, never written from here — ScheduleSegment's own remarks on why ShowId,
+                // not Show, is the write-authoritative field). This is deliberately the ONLY way
+                // ReplaceWeekAsync itself changed for T243: whatever ShowId a caller's own ScheduleSegment
+                // already carries survives a whole-week replace instead of being silently dropped — closing
+                // the "load-only" gap this comment used to describe. The Host GET/PUT wire
+                // (ScheduleSegmentDto/ScheduleController) round-trips this same field too (ScheduleController's
+                // own class remarks) — a whole-grid repaint no longer silently erases a show assignment set
+                // through AssignShowAsync's own dedicated endpoint.
+                //
+                // Also the FK-race surface (gh-#406 slice 1, this method's own catch below): a
+                // PersonaId a validated row named, or a ShowId ValidateAsync never checks the existence
+                // of at all, can each be missing by the time this statement runs.
+                await conn.ExecuteAsync(new CommandDefinition(
+                    """
+                    insert into station.segment_schedule
+                        (day_of_week, start_minute, end_minute, persona_id, genres, energy_min, energy_max, show_id)
+                    values (@Day, @StartMinute, @EndMinute, @PersonaId, @Genres::text[], @EnergyMin, @EnergyMax, @ShowId)
+                    """,
+                    week.Select(seg => new
+                    {
+                        Day = (int)seg.Day,
+                        seg.StartMinute,
+                        seg.EndMinute,
+                        seg.PersonaId,
+                        Genres = seg.Genres?.ToArray(),
+                        seg.EnergyMin,
+                        seg.EnergyMax,
+                        seg.ShowId,
+                    }),
+                    transaction: tx,
+                    cancellationToken: ct));
+            }
+
+            // Reload the just-written rows INSIDE this same transaction, before commit — the returned
+            // Replaced.Snapshot must reflect exactly what THIS call wrote, never a concurrent writer's
+            // interleaved state that a post-commit reload on a fresh connection could otherwise observe.
+            var segments = await LoadSegmentsAsync(conn, tx, ct);
+
+            await tx.CommitAsync(ct);
+
+            var snapshot = new ScheduleWeekSnapshot(segments);
+            WeekChanged?.Invoke();
+            return new ScheduleReplaceResult.Replaced(snapshot);
         }
-
-        // Reload the just-written rows INSIDE this same transaction, before commit — the returned
-        // Replaced.Snapshot must reflect exactly what THIS call wrote, never a concurrent writer's
-        // interleaved state that a post-commit reload on a fresh connection could otherwise observe.
-        var segments = await LoadSegmentsAsync(conn, tx, ct);
-
-        await tx.CommitAsync(ct);
-
-        var snapshot = new ScheduleWeekSnapshot(segments);
-        WeekChanged?.Invoke();
-        return new ScheduleReplaceResult.Replaced(snapshot);
+        catch (PostgresException ex) when (ex.SqlState == ForeignKeyViolation)
+        {
+            // gh-#406 slice 1: this mapping moved down from ScheduleController, which used to catch
+            // Npgsql.PostgresException directly (an L2 Postgres-confinement violation) — see this
+            // class's own remarks and ScheduleReplaceResult.PersonaVanished's own remarks for the race
+            // itself. Logged with full detail here — the repository is the only layer that still ever
+            // sees the raw exception; every other caller (the controller included) gets only the
+            // generic PersonaVanished case, never the raw SQLSTATE/message.
+            logger.LogWarning(ex,
+                "Schedule replace raced a concurrent write (likely a persona deleted mid-validation)");
+            return new ScheduleReplaceResult.PersonaVanished();
+        }
     }
 
     /// <summary>

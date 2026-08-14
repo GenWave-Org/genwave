@@ -23,4 +23,17 @@ public abstract record ScheduleReplaceResult
     /// (gh-#255's stale-editor silent-wipe guard). <see cref="CurrentVersion"/> is the stored week's
     /// live <see cref="ScheduleWeekVersion"/> fingerprint at rejection time.</summary>
     public sealed record VersionConflict(string CurrentVersion) : ScheduleReplaceResult;
+
+    /// <summary>
+    /// A row this call had already validated named a persona (or, since <c>ValidateAsync</c> never
+    /// checks show-id existence, a show) that a concurrent caller deleted between validation and this
+    /// call's own insert — <c>station.segment_schedule</c>'s FK (<c>persona_id</c> or <c>show_id</c>,
+    /// both <c>ON DELETE RESTRICT</c>) raises where <see cref="ValidationFailed"/> would otherwise have
+    /// caught it. Nothing was written. <c>gh-#406 slice 1</c>: this mapping used to be
+    /// <c>ScheduleController</c> catching <c>Npgsql.PostgresException</c> directly (an L2
+    /// Postgres-confinement violation) — <c>GenWave.MediaLibrary.Station.ScheduleRepository</c> now
+    /// catches the SQLSTATE itself and returns this case instead, so the controller (and everything
+    /// outside the repository layer) never references Npgsql at all.
+    /// </summary>
+    public sealed record PersonaVanished : ScheduleReplaceResult;
 }

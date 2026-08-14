@@ -34,6 +34,7 @@ using Dapper;
 using GenWave.Core.Domain;
 using GenWave.MediaLibrary.Catalog;
 using GenWave.MediaLibrary.Station;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 
 namespace GenWave.MediaLibrary.Tests.Specs;
@@ -140,7 +141,8 @@ public static class FeatureShowRepository
     /// carried zero live-DB coverage before <see cref="ScenarioDeleteFkGuard"/>'s two round-trip
     /// facts below), wired the same "Lazy over the fixture's own StationDataSource" way as
     /// <see cref="Repo"/>; mirrors Story240_ScheduleStore.cs's own identically-shaped helper.</summary>
-    static ScheduleRepository ScheduleRepo(DatabaseFixture db) => new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+    static ScheduleRepository ScheduleRepo(DatabaseFixture db) =>
+        new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource), NullLogger<ScheduleRepository>.Instance);
 
     // ---------------------------------------------------------------------
     // HAPPY PATH — fresh init (db/06's mirror of db/35)

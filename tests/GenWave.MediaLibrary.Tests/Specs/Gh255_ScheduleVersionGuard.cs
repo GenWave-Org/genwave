@@ -10,6 +10,7 @@
 
 using GenWave.Core.Domain;
 using GenWave.MediaLibrary.Station;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 
 namespace GenWave.MediaLibrary.Tests.Specs;
@@ -28,7 +29,7 @@ public static class FeatureScheduleVersionGuard
     {
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "33-show-and-segment-kind-migration.sh"));
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "35-show-identity-migration.sh"));
-        return new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+        return new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource), NullLogger<ScheduleRepository>.Instance);
     }
 
     static ScheduleSegment MusicOnly(DayOfWeek day, int start, int end) =>

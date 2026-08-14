@@ -11,8 +11,9 @@
 // ScheduleSpecialCreateResult-to-409 mapping, scripted via FakeScheduleSpecialStore.NextCreateResult —
 // the store's own typed result, never a raw PostgresException: GenWave.Architecture.Tests' L2 law
 // confines Npgsql to GenWave.MediaLibrary's repository layer, so this controller — and this file's own
-// fakes — never reference it at all, unlike Story240_GridHoldsTheWeek.cs's older, pre-existing
-// PostgresException-scripting idiom for ScheduleController.Put's own grandfathered exemption).
+// fakes — never reference it at all. Story240_GridHoldsTheWeek.cs once scripted PostgresException
+// directly under ScheduleController.Put's grandfathered L2 exemption; gh-#406 slice 1 retired both,
+// and it now scripts ScheduleReplaceResult.PersonaVanished the same typed way as this file).
 //
 // PLAN T259's own honesty note (SpecialsController's class remarks): these Facts prove the store is
 // LIVE (authorable/listable/deletable through the Admin UI's own API surface) — none of them touch

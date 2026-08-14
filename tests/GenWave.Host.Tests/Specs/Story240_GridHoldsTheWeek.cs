@@ -15,13 +15,17 @@
 // ScheduleCellErrorDto unchanged), the 400 shape carrying the store's per-cell errors (under the
 // "cellErrors" key — deliberately not "errors", which collides with ASP.NET Core's own automatic
 // model-binding 400 on this same endpoint+status), auth parity, the 415 content-type CSRF guard
-// (mirrors Story112_RatingEndpoints.cs's own idiom), the 409/500 split on a thrown PostgresException
-// (FakeScheduleStore.NextThrow), and the 200 response shape — driven against FakeScheduleStore
-// (Fakes/FakeScheduleStore.cs), a stateful echo-and-assign-ids double that never judges a
-// submission's validity itself. Sad-path facts SCRIPT the store's rejection
-// (FakeScheduleStore.NextReplaceResult) with realistic errors rather than deriving them, so this
-// file proves the controller maps a real ScheduleReplaceResult.ValidationFailed correctly, without
-// re-deciding what counts as invalid.
+// (mirrors Story112_RatingEndpoints.cs's own idiom), the 409 mapping of a scripted
+// ScheduleReplaceResult.PersonaVanished (FakeScheduleStore.NextReplaceResult; gh-#406 slice 1 — the
+// real 23503-to-PersonaVanished translation lives in GenWave.MediaLibrary.Station.ScheduleRepository
+// now, proven for real against Postgres in Story240_ScheduleStore.cs, never re-derived here), the
+// 500 a store-thrown PostgresException still propagates to (FakeScheduleStore.NextThrow — a store
+// can still throw for anything the repository's own narrowed catch doesn't recognize), and the 200
+// response shape — driven against FakeScheduleStore (Fakes/FakeScheduleStore.cs), a stateful
+// echo-and-assign-ids double that never judges a submission's validity itself. Sad-path facts SCRIPT
+// the store's rejection (FakeScheduleStore.NextReplaceResult) with realistic errors rather than
+// deriving them, so this file proves the controller maps a real ScheduleReplaceResult.ValidationFailed
+// correctly, without re-deciding what counts as invalid.
 
 using System.Net;
 using System.Net.Http.Json;
@@ -509,42 +513,23 @@ public static class FeatureGridHoldsTheWeek
         }
     }
 
-    public sealed class ScenarioStoreThrows
+    public sealed class ScenarioPersonaVanishedRace
     {
-        // ScheduleController's own remarks: IScheduleStore.ReplaceWeekAsync can throw a raw
-        // PostgresException when a persona a validated row names is deleted out from under a
-        // concurrent PUT between validation and insert — a 23503 foreign-key violation. These facts
-        // script that exception via FakeScheduleStore.NextThrow (this project has no Postgres
-        // fixture to raise a real one against) to prove the controller's narrowed catch (PLAN T122
-        // review, F2): only that specific SQLSTATE maps to the generic 409, with no raw Postgres
-        // detail on the wire; every OTHER PostgresException (permission errors, disk full, a real
-        // CHECK/EXCLUDE bug) propagates to the generic 500 instead of being folded into "reload and
-        // try again".
+        // gh-#406 slice 1: the real 23503-to-domain-case translation moved down into
+        // GenWave.MediaLibrary.Station.ScheduleRepository.ReplaceWeekAsync — this controller no longer
+        // catches Npgsql.PostgresException at all (an L2 Postgres-confinement violation, this move's
+        // whole point), so this fact scripts the store's typed answer directly
+        // (FakeScheduleStore.NextReplaceResult) rather than a thrown exception, to prove the
+        // controller's own mapping: ScheduleReplaceResult.PersonaVanished becomes a generic 409, with
+        // no raw Postgres detail on the wire — the real SQLSTATE-to-PersonaVanished translation is
+        // proven for real, against Postgres, in Story240_ScheduleStore.cs.
 
         [Fact]
-        public async Task ForeignKeyViolationDuringReplaceIsA409WithNoRawPostgresDetailOnTheWire()
+        public async Task PersonaVanishedRaceDuringReplaceIsA409WithNoRawPostgresDetailOnTheWire()
         {
             var store = new FakeScheduleStore
             {
-                NextThrow = new PostgresException(
-                    messageText: "insert or update on table \"segment_schedule\" violates foreign key constraint \"segment_schedule_persona_id_fkey\"",
-                    severity: "ERROR",
-                    invariantSeverity: "ERROR",
-                    sqlState: "23503",
-                    detail: null,
-                    hint: null,
-                    position: 0,
-                    internalPosition: 0,
-                    internalQuery: null,
-                    where: null,
-                    schemaName: "station",
-                    tableName: "segment_schedule",
-                    columnName: null,
-                    dataTypeName: null,
-                    constraintName: "segment_schedule_persona_id_fkey",
-                    file: null,
-                    line: null,
-                    routine: null),
+                NextReplaceResult = new ScheduleReplaceResult.PersonaVanished(),
             };
             await using var factory = new ScheduleApiWebFactory(store);
             var client = await ScheduleApiWebFactory.LoggedInClientAsync(factory);
@@ -556,6 +541,18 @@ public static class FeatureGridHoldsTheWeek
             Assert.DoesNotContain("23503", bodyText, StringComparison.Ordinal);
             Assert.DoesNotContain("segment_schedule", bodyText, StringComparison.Ordinal);
         }
+    }
+
+    public sealed class ScenarioStoreThrows
+    {
+        // A store can still throw for anything its own narrowed 23503 catch doesn't recognize
+        // (permission errors, disk full, a real CHECK/EXCLUDE bug) — this controller has no catch of
+        // its own at all anymore (gh-#406 slice 1), so an uncaught exception from IScheduleStore
+        // propagates straight to ASP.NET Core's own default 500 handling, exactly as it always did for
+        // every non-23503 PostgresException. Scripted via FakeScheduleStore.NextThrow (this project has
+        // no Postgres fixture to raise a real one against) — any exception type would prove the same
+        // fact; PostgresException is kept here only because it is the realistic shape a real
+        // ScheduleRepository could still let escape.
 
         [Fact]
         public async Task NonForeignKeyPostgresExceptionDuringReplacePropagatesAsA500()
