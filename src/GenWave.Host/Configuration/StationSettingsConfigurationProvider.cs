@@ -1,7 +1,8 @@
+using System.Data.Common;
 using System.Text.Json;
+using GenWave.MediaLibrary.Station;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Primitives;
-using Npgsql;
 
 namespace GenWave.Host.Configuration;
 
@@ -16,10 +17,18 @@ namespace GenWave.Host.Configuration;
 /// Call <see cref="Reload"/> (or expose via <see cref="IStationSettingsStore.WriteAsync"/>) to
 /// raise the change token and trigger <see cref="Microsoft.Extensions.Options.IOptionsMonitor{T}"/>
 /// re-binding without an API restart.
+///
+/// gh-#406 slice 5: the raw <c>station.settings</c> row I/O this class used to open directly via
+/// <c>NpgsqlConnection</c> now lives in <see cref="StationSettingsRepository"/>
+/// (<see cref="StationSettingsRepository.ReadAllForBoot"/> documents why that method — not
+/// <see cref="StationSettingsRepository.ReadAllAsync"/> — is the one this class calls). Every other
+/// behavior below (allowlist filtering, array expansion, the degrade-to-empty-overlay posture,
+/// stderr diagnostics) stays exactly as it was.
 /// </summary>
 public class StationSettingsConfigurationProvider : IConfigurationProvider, IDisposable
 {
     readonly string connectionString;
+    readonly StationSettingsRepository repository;
 
     // The mutable data bag surfaced to IConfiguration.
     IDictionary<string, string?> data = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
@@ -30,6 +39,14 @@ public class StationSettingsConfigurationProvider : IConfigurationProvider, IDis
     public StationSettingsConfigurationProvider(string connectionString)
     {
         this.connectionString = connectionString;
+
+        // Constructed directly here, not resolved through DI: Load() (below) is called by the
+        // configuration system while Microsoft.Extensions.Configuration.IConfigurationBuilder itself
+        // is being built, before WebApplicationBuilder.Build() ever creates a container capable of
+        // constructing — let alone injecting — a repository. StationSettingsRepository's
+        // plain-connection-string ctor exists precisely for this pre-DI boot path (see that class's
+        // own remarks, gh-#406 slice 3/4/5).
+        repository = new StationSettingsRepository(connectionString);
     }
 
     // ── IConfigurationProvider ─────────────────────────────────────────────
@@ -72,10 +89,10 @@ public class StationSettingsConfigurationProvider : IConfigurationProvider, IDis
         // Treat the same as a DB that is temporarily unreachable: the overlay is empty and
         // env/appsettings defaults apply.  This guard prevents the Npgsql library from throwing
         // InvalidOperationException ("ConnectionString not initialized") before attempting a
-        // TCP connection — an exception type that the NpgsqlException catch below does not cover.
+        // TCP connection — an exception type that the DbException catch below does not cover.
         if (string.IsNullOrWhiteSpace(connectionString))
         {
-            // Match the NpgsqlException catch below: surface the degradation so an accidentally
+            // Match the DbException catch below: surface the degradation so an accidentally
             // empty Station connection string in a real deploy is observable, not silent.
             Console.Error.WriteLine("[station-settings] no Station connection string; using config defaults");
             data = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
@@ -85,18 +102,12 @@ public class StationSettingsConfigurationProvider : IConfigurationProvider, IDis
         var loaded = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            using var conn = new NpgsqlConnection(connectionString);
-            conn.Open();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT key, value FROM station.settings";
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read())
+            var rows = repository.ReadAllForBoot();
+            foreach (var (key, jsonValue) in rows)
             {
-                var key = reader.GetString(0);
                 if (!StationSettingsAllowlist.ByKey.ContainsKey(key))
                     continue;   // paranoid guard: skip anything not on the allowlist
 
-                var jsonValue = reader.GetString(1);
                 var scalar = ExtractScalar(jsonValue);
                 if (scalar is not null)
                     loaded[key] = scalar;
@@ -104,13 +115,19 @@ public class StationSettingsConfigurationProvider : IConfigurationProvider, IDis
                     ExtractArrayItems(loaded, key, jsonValue);
             }
         }
-        catch (NpgsqlException ex)
+        catch (DbException ex)
         {
             // No station schema yet, wrong password, DB down — none of these should prevent boot.
             // Defaults from env/appsettings continue to apply; the overlay is empty until the
             // DB is reachable and station.settings is populated.
             // A logger is not injectable here (provider builds before DI), so we surface the
             // failure via stderr so operators can diagnose without exposing connection secrets.
+            //
+            // Catches System.Data.Common.DbException — the provider-neutral ADO.NET base type
+            // Npgsql.NpgsqlException itself derives from — rather than NpgsqlException directly:
+            // this class carries no Npgsql reference at all now that StationSettingsRepository owns
+            // the Postgres specifics (gh-#406 slice 5), and DbException catches every failure the
+            // original catch did (and nothing broader).
             Console.Error.WriteLine($"[station-settings] overlay load failed; using config defaults: {ex.Message}");
         }
 
