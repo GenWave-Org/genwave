@@ -29,17 +29,20 @@ public abstract record PersonaWriteResult
     public sealed record NameConflict : PersonaWriteResult;
 
     /// <summary>
-    /// The delete was rejected because <c>station.segment_schedule.persona_id</c> still names this
-    /// persona (the FK's own <c>ON DELETE RESTRICT</c>, SPEC F91.9). <see cref="Slots"/> names every
-    /// offending row, in day-then-start-minute order — PLAN T121 replaces the T120 scaffolding's bare
-    /// singleton with this payload so <c>PersonaController.Delete</c>'s 409 body can name the slots
-    /// instead of staying generic. The common path: the store's <c>DeleteAsync</c> queries
-    /// <c>station.segment_schedule</c> BEFORE attempting the delete and returns exactly what it
-    /// found. The race backstop: a slot painted between that query and the DELETE still trips the
-    /// FK (caught <c>foreign_key_violation</c>, SQLSTATE 23503, mirrors <see cref="NameConflict"/>'s
-    /// own unique_violation mapping) — that path re-queries and returns whatever it finds, which may
-    /// be empty if the race closed the other way (the painted slot was itself removed again before
-    /// the re-query). See that method's own remarks for the full rationale.
+    /// The delete was rejected because <c>station.segment_schedule.persona_id</c> and/or
+    /// <c>station.schedule_special.persona_id</c> still name this persona (both FKs share the identical
+    /// <c>ON DELETE RESTRICT</c>, SPEC F91.9, F120.1, db/36). <see cref="Slots"/> names every offending
+    /// weekly row, in day-then-start-minute order; <see cref="Specials"/> (gh-#462, widening PLAN T121's
+    /// own <see cref="ScheduledSlot"/>-only payload) names every offending dated special, in
+    /// date-then-start-minute order — so <c>PersonaController.Delete</c>'s 409 body can name BOTH kinds
+    /// of blocker instead of only ever the weekly grid. The common path: the store's <c>DeleteAsync</c>
+    /// queries BOTH tables BEFORE attempting the delete and returns exactly what it found. The race
+    /// backstop: a slot or special painted between that query and the DELETE still trips one of the two
+    /// FKs (caught <c>foreign_key_violation</c>, SQLSTATE 23503, mirrors <see cref="NameConflict"/>'s
+    /// own unique_violation mapping) — that path re-queries both tables and returns whatever it finds,
+    /// which may leave both lists empty if the race closed the other way (the painted row was itself
+    /// removed again before the re-query). See that method's own remarks for the full rationale.
     /// </summary>
-    public sealed record ScheduledElsewhere(IReadOnlyList<ScheduledSlot> Slots) : PersonaWriteResult;
+    public sealed record ScheduledElsewhere(
+        IReadOnlyList<ScheduledSlot> Slots, IReadOnlyList<ScheduledSpecialSlot> Specials) : PersonaWriteResult;
 }
