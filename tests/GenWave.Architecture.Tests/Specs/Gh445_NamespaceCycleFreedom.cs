@@ -39,7 +39,6 @@ public sealed class FeatureNamespaceCycleFreedom
     static readonly IReadOnlyDictionary<string, string[]> BaselinedCycles = new Dictionary<string, string[]>
     {
         ["GenWave.Core"] = ["Events -> Abstractions"], // NoOpStationEventSink lives in Events; IStationEventSink's signature reaches back
-        ["GenWave.Host"] = ["Api -> Stats"],           // DockerContainerStatsSource returns Api-namespace DTOs (gh-#148 shape)
     };
 
     public sealed class ScenarioNoNamespaceCyclesWithinAnyProject

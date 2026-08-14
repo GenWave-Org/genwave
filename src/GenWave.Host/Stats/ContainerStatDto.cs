@@ -1,4 +1,4 @@
-namespace GenWave.Host.Api;
+namespace GenWave.Host.Stats;
 
 /// <summary>
 /// One container row of <c>GET /api/health/containers</c> (gh-#148). Every measurement is
