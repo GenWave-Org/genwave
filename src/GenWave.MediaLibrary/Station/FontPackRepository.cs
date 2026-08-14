@@ -1,6 +1,7 @@
 using Dapper;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Logging;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 
@@ -119,9 +120,13 @@ sealed class FontPackRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<FontP
     async Task<FontPackUpsertResult> ResolveFileCollisionAsync(
         string slug, IReadOnlyList<FontPackFaceInput> faces, PostgresException ex, CancellationToken ct)
     {
+        // LogSanitize at this seam, not trust in the caller: today's one caller gates slug through
+        // CatalogIndexValidator.SlugSegment long before it gets here, but this repository can't see
+        // that — and the controller-side LogSafeText gate this WARN sat behind pre-gh-#406 didn't
+        // move down with it (Host-internal). CodeQL cs/log-forging flagged exactly that gap.
         logger.LogWarning(ex,
             "Font pack install {Slug} refused: a face file collided with an existing pack (23505 on station.font_pack_face.file)",
-            slug);
+            LogSanitize.Strip(slug));
 
         var installed = await GetAllAsync(ct);
         var ownerSlugByFile = installed
