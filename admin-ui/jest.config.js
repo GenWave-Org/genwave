@@ -37,6 +37,8 @@ const jsdomConfig = {
   testMatch: ["**/__specs__/**/*.spec.tsx"],
   moduleNameMapper: { "^@/(.*)$": "<rootDir>/$1" },
   modulePathIgnorePatterns: ["<rootDir>/.next/"],
+  // jsdom-only: purges sonner's module-global toast store between tests (gh-#516).
+  setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
 };
 
 // createJestConfig wraps an async function; Jest supports async config exports.
