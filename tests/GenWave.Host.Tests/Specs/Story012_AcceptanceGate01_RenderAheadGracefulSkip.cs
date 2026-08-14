@@ -357,7 +357,20 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
         {
             var fakeLs  = new FakeLiquidsoapControl();
             var feeder  = new PlayoutFeeder(fakeLs, orchestrator, new FakeRotationSettingsProvider(new RotationSettings()));
-            var limit   = TimeSpan.FromSeconds(3);
+
+            // gh-#460: a bare 3s budget flaked ~1-in-5 under parallel-suite load (7 test assemblies
+            // + a full Docker stack sharing the box) — up to 5.7s observed, well past the render
+            // budget itself. PlayoutFeeder.TickAsync's ONLY real awaited work is RefillAsync's pull
+            // through the selection seam (ObserveAsync's calls hit FakeLiquidsoapControl, which
+            // returns pre-completed Tasks with no thread-pool scheduling involved), and that pull's
+            // Task.WhenAny(renderTask, Task.Delay(renderBudget)) race lives in Orchestrator — opaque
+            // production code with no seam to separate "the tick's own work" from thread-pool
+            // queueing delay: the starvation happens INSIDE that one awaited call, not around it, so
+            // there is nothing left to trim out (option (c) buys nothing here). Widening instead,
+            // same tolerance shape as NoGetNextAsyncCallBlocksPastTheRenderBudget above. The fact's
+            // point is real elapsed time (FakeTimeProvider is not the fix); this budget stays honest
+            // for an unloaded box and only forgives loaded-box scheduler noise.
+            var limit = RenderBudget + TimeSpan.FromSeconds(10);
 
             for (var i = 0; i < 4; i++)
             {
@@ -367,7 +380,9 @@ public static class FeatureAcceptanceGate01RenderAheadGracefulSkipToMusic
 
                 Assert.True(
                     sw.Elapsed < limit,
-                    $"Feeder tick #{i + 1} took {sw.Elapsed.TotalMilliseconds:F0} ms, expected < {limit.TotalMilliseconds:F0} ms");
+                    $"Feeder tick #{i + 1} took {sw.Elapsed.TotalMilliseconds:F0} ms, expected < {limit.TotalMilliseconds:F0} ms " +
+                    "(budget = render budget + a parallel-suite-load scheduler-starvation allowance, gh-#460 — " +
+                    "check parallel-suite load on the box before suspecting the tick itself)");
             }
         }
     }
