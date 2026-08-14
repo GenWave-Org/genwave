@@ -23,6 +23,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Playout;
+using GenWave.Host.Stats;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
@@ -120,6 +121,15 @@ file sealed class ListenerCountWebFactory(
             services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
+
+            // gh-#348: the loopback round-trip to IcecastStatsStub competes with the rest of the
+            // suite for CPU, and Program.cs's ~2s production timeout (a real resilience budget,
+            // not a test knob) can fire under full-suite load — FetchAsync then honestly returns
+            // null, by design, and the fact throws on GetInt32() rather than the request itself
+            // failing. AddHttpClient composes onto the SAME named client instead of replacing it,
+            // so this action runs after Program's and wins: the test client waits as long as it
+            // takes, closing the race by construction instead of retrying past it.
+            services.AddHttpClient<IcecastListenerStatsSource>(client => client.Timeout = Timeout.InfiniteTimeSpan);
 
             // gh-#106: the memo-window facts pin IcecastListenerStatsSource's clock so a slow CI
             // runner can never expire the window mid-fact. Facts that don't care leave the
