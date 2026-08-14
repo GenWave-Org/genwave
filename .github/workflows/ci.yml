@@ -56,6 +56,10 @@ jobs:
           cache-dependency-path: admin-ui/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
+      # gh-#347: the main tsconfig excludes __specs__ (jest runs specs through next/jest's SWC
+      # transform, which strips types without checking them) — this is the only step that actually
+      # type-checks the spec suite.
+      - run: npm run typecheck:specs
       - run: npx jest
       - run: npm run build
       # T170 guard: the composed theme sheet must override globals.css. Jest can't reproduce Next's

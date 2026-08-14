@@ -12,10 +12,11 @@
 /** Parses `#rrggbb` into 0-255 channel values. */
 function hexToRgb(hex: string): [number, number, number] {
   const match = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/.exec(hex);
-  if (!match) {
+  const [, rHex, gHex, bHex] = match ?? [];
+  if (rHex === undefined || gHex === undefined || bHex === undefined) {
     throw new Error(`not a 6-digit hex color: ${hex}`);
   }
-  return [parseInt(match[1], 16), parseInt(match[2], 16), parseInt(match[3], 16)];
+  return [parseInt(rHex, 16), parseInt(gHex, 16), parseInt(bHex, 16)];
 }
 
 /** WCAG 2.x relative luminance of an sRGB channel value (0-255). */

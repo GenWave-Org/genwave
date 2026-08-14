@@ -16,7 +16,7 @@
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { EditorClient } from "../app/(authed)/editor/EditorClient";
 import type { ThemeSummaryDto } from "../app/(authed)/editor/types";
 

@@ -151,7 +151,11 @@ public static class FeaturePersonaTasteRepository
             var repo = Repo(db);
             await repo.InsertAsync(personaId, SundayZeppelin, PersonaTasteSource.Authored, CancellationToken.None);
 
-            // When the persona itself is deleted, through the FK's owning repository...
+            // When the persona itself is deleted, through the FK's owning repository... gh-#462:
+            // PersonaRepository.DeleteAsync now ALWAYS pre-queries station.schedule_special too, so
+            // db/36's table needs to exist first (idempotent — mirrors Story118_PersonaStorage.cs's
+            // own Repo helper).
+            db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "36-schedule-special-migration.sh"));
             var personaRepo = new PersonaRepository(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
             await personaRepo.DeleteAsync(personaId, CancellationToken.None);
 

@@ -92,7 +92,7 @@ function mediaUrl(mockFetch: jest.MockedFunction<typeof fetch>): string {
 }
 
 jest.mock("next/headers", () => ({
-  cookies: jest.fn().mockResolvedValue({
+  cookies: jest.fn<() => Promise<{ toString: () => string }>>().mockResolvedValue({
     toString: () => "session=test-cookie",
   }),
 }));

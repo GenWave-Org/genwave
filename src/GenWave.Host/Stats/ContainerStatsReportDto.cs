@@ -1,4 +1,4 @@
-namespace GenWave.Host.Api;
+namespace GenWave.Host.Stats;
 
 /// <summary>
 /// The <c>GET /api/health/containers</c> envelope (gh-#148). Always 200: when the docker-stats

@@ -11,7 +11,7 @@
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, act, fireEvent } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { LlmCallsView } from "../app/(authed)/booth-log/LlmCallsView";
 import { BoothLogTabs } from "../app/(authed)/booth-log/BoothLogTabs";
 
@@ -190,7 +190,7 @@ describe("Feature: LLM call inspector", () => {
       await flush();
 
       const rows = screen.getAllByRole("row");
-      expect(rows[1].textContent ?? "").toContain("—");
+      expect(rows[1]?.textContent ?? "").toContain("—");
     });
   });
 
