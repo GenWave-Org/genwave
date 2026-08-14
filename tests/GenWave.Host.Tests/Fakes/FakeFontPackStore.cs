@@ -1,6 +1,5 @@
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
-using Npgsql;
 
 namespace GenWave.Host.Tests.Fakes;
 
@@ -65,12 +64,16 @@ sealed class FakeFontPackStore : IFontPackStore
     /// for is about a READ-side failure post-load, never a write attempt.</summary>
     public bool Broken { get; set; }
 
-    /// <summary>Scripts the NEXT <see cref="UpsertAsync"/> call to throw this
-    /// <see cref="PostgresException"/> instead of writing — proves
-    /// <c>FontPackController</c>'s own 23505-to-409 mapping without a real Postgres fixture (mirrors
-    /// <c>FakeScheduleStore.NextThrow</c>'s own precedent for <c>ScheduleController</c>'s
-    /// PostgresException handling). Cleared after one use.</summary>
-    public PostgresException? NextThrow { get; set; }
+    /// <summary>Scripts the NEXT <see cref="UpsertAsync"/> call to return this
+    /// <see cref="FontPackUpsertResult"/> instead of writing — proves <c>FontPackController</c>'s own
+    /// <see cref="FontPackUpsertResult.FileCollision"/>-to-409 mapping without a real Postgres fixture
+    /// (gh-#406 slice 2: the store now RETURNS the collision case rather than throwing — the real
+    /// 23505-to-<see cref="FontPackUpsertResult.FileCollision"/> mapping is
+    /// <c>FontPackRepository.UpsertAsync</c>'s own concern, proven against real Postgres in
+    /// <c>GenWave.MediaLibrary.Tests/Specs/Story282_FontPackRepository.cs</c>; this fake only proves
+    /// the controller's own response-mapping over an already-resolved case, mirroring this class's own
+    /// header remarks). Cleared after one use.</summary>
+    public FontPackUpsertResult? NextUpsertResult { get; set; }
 
     /// <summary>The number of <see cref="UpsertAsync"/> calls that actually wrote (a scripted throw
     /// does not count) — lets a spec assert the install route reaches the store exactly once per
@@ -93,14 +96,14 @@ sealed class FakeFontPackStore : IFontPackStore
     /// </summary>
     public IReadOnlyList<string> ReferencingThemeSlugs { get; set; } = [];
 
-    public Task UpsertAsync(
+    public Task<FontPackUpsertResult> UpsertAsync(
         string slug, string family, string definition, string importedFrom,
         IReadOnlyList<FontPackFaceInput> faces, CancellationToken ct)
     {
-        if (NextThrow is { } ex)
+        if (NextUpsertResult is { } scripted)
         {
-            NextThrow = null;
-            throw ex;
+            NextUpsertResult = null;
+            return Task.FromResult(scripted);
         }
 
         UpsertCallCount++;
@@ -111,7 +114,7 @@ sealed class FakeFontPackStore : IFontPackStore
         foreach (var face in faces)
             contentByFile[face.File] = new FontPackFaceContent(face.Bytes, face.Sha256);
 
-        return Task.CompletedTask;
+        return Task.FromResult<FontPackUpsertResult>(new FontPackUpsertResult.Upserted());
     }
 
     public Task<IReadOnlyList<FontPack>> GetAllAsync(CancellationToken ct)

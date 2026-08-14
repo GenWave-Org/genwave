@@ -14,9 +14,11 @@
 //
 // ScenarioCrossPackFileCollision and ScenarioTheDdlStaysInSync are the two T198 review-obligation
 // riders this task adds beyond STORY-282's own committed AC4 sad path: the former pins
-// FontPackController's 23505-to-409 mapping (scripted via FakeFontPackStore.NextThrow, mirrors
-// FakeScheduleStore's own precedent for ScheduleController's PostgresException handling — this
-// project has no Postgres fixture to raise a real 23505 against either); the latter is a plain
+// FontPackController's FontPackUpsertResult.FileCollision-to-409 mapping (scripted via
+// FakeFontPackStore.NextUpsertResult — gh-#406 slice 2: the real 23505-to-FileCollision mapping now
+// lives in FontPackRepository.UpsertAsync, proven against real Postgres in
+// GenWave.MediaLibrary.Tests/Specs/Story282_FontPackRepository.cs instead; this fake only proves the
+// controller's own response-mapping over an already-resolved case); the latter is a plain
 // script-content comparison (no DB needed) pinning that db/32's standalone in-place-upgrade DDL and
 // db/06's inline fresh-install DDL never silently diverge on this table's shape. Two more are T199
 // REVIEW riders: ScenarioPackByteCeilingCutsOffEarly (finding N1) pins that the app-side pack-bytes
@@ -44,7 +46,6 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
 using GenWave.Host.Tests.Fakes;
-using Npgsql;
 using Xunit;
 
 namespace GenWave.Host.Tests.Specs;
@@ -217,34 +218,17 @@ public sealed class FeatureFontPackInstall
         {
             // Given a face filename already installed under a DIFFERENT pack's slug
             // (station.font_pack_face.file is globally unique, not scoped per-pack — db/32) — the
-            // real store would raise Postgres 23505 here; FakeFontPackStore.NextThrow scripts that
-            // EXACT exception (mirrors FakeScheduleStore's own precedent for ScheduleController's
-            // PostgresException handling — this project has no Postgres fixture to raise a real one
-            // against),
+            // real repository would raise Postgres 23505 here and map it down to a
+            // FontPackUpsertResult.FileCollision itself (gh-#406 slice 2); FakeFontPackStore.NextUpsertResult
+            // scripts that ALREADY-RESOLVED case directly (this project has no Postgres fixture to
+            // raise a real 23505 against, and the resolution itself is FontPackRepository's own
+            // concern, proven separately against real Postgres),
             var existingFace = new FontPackFace(FontPackInstallFixtures.AssetFile, "normal", 100, "existing-face-sha");
             var otherPack = new FontPack(
                 "other-pack", "Other Family", "{}", "other-pack", DateTime.UtcNow, DateTime.UtcNow, [existingFace]);
             var store = new FakeFontPackStore(otherPack)
             {
-                NextThrow = new PostgresException(
-                    messageText: "duplicate key value violates unique constraint \"font_pack_face_file_key\"",
-                    severity: "ERROR",
-                    invariantSeverity: "ERROR",
-                    sqlState: "23505",
-                    detail: $"Key (file)=({FontPackInstallFixtures.AssetFile}) already exists.",
-                    hint: null,
-                    position: 0,
-                    internalPosition: 0,
-                    internalQuery: null,
-                    where: null,
-                    schemaName: "station",
-                    tableName: "font_pack_face",
-                    columnName: null,
-                    dataTypeName: null,
-                    constraintName: "font_pack_face_file_key",
-                    file: null,
-                    line: null,
-                    routine: null),
+                NextUpsertResult = new FontPackUpsertResult.FileCollision(FontPackInstallFixtures.AssetFile, "other-pack"),
             };
             await using var factory = new FontPackInstallWebFactory(store);
             var client = await FontPackInstallWebFactory.LoggedInClientAsync(factory);

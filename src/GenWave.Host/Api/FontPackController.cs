@@ -7,7 +7,6 @@ using GenWave.Core.Domain;
 using GenWave.Host.Catalog;
 using GenWave.Host.Options;
 using GenWave.Host.Theming;
-using Npgsql;
 
 namespace GenWave.Host.Api;
 
@@ -62,17 +61,23 @@ namespace GenWave.Host.Api;
 /// </para>
 ///
 /// <para>
-/// <b>THE 23505 MAPPING</b> (T198 review obligation). <c>station.font_pack_face.file</c> is UNIQUE
-/// across every installed pack, not scoped per-pack (db/32) — two DIFFERENT catalog packs shipping a
-/// same-named face is a real, if rare, possibility this route must fail closed on rather than 500.
-/// <c>FontPackRepository.UpsertAsync</c>'s own single transaction means a mid-upsert
-/// <see cref="PostgresException"/> has ALREADY rolled back everything (the pack row insert/update
-/// included) by the time this class's own <c>catch</c> runs — never a partial pack. The raw
-/// <see cref="PostgresException.Detail"/> is never echoed to the caller (F15.7's "no internal detail
-/// in a body" posture, mirrors <see cref="CatalogController"/>'s own <c>WithheldProblem</c>); instead
-/// <see cref="ResolveFileCollisionAsync"/> re-reads <see cref="IFontPackStore.GetAllAsync"/> (one
-/// extra query, only ever run on this rare failure path) to name the actual colliding file and its
-/// owning pack slug when that lookup resolves cleanly, falling back to a generic refusal otherwise.
+/// <b>THE 23505 MAPPING</b> (T198 review obligation; moved BEHIND the repository seam at gh-#406
+/// slice 2 — the L2 Postgres-confinement law, ARCHITECTURE.md "Architecture governance"; this class no
+/// longer references Npgsql at all). <c>station.font_pack_face.file</c> is UNIQUE across every
+/// installed pack, not scoped per-pack (db/32) — two DIFFERENT catalog packs shipping a same-named
+/// face is a real, if rare, possibility this route must fail closed on rather than 500.
+/// <c>FontPackRepository.UpsertAsync</c>'s own single transaction means a mid-upsert Postgres
+/// unique-violation has ALREADY rolled back everything (the pack row insert/update included) by the
+/// time that repository's own <c>catch</c> runs — never a partial pack — and this action never sees
+/// that exception, or its own internal detail text, at all: <see cref="IFontPackStore.UpsertAsync"/>
+/// returns a <see cref="FontPackUpsertResult"/> whose <see cref="FontPackUpsertResult.FileCollision"/>
+/// case already carries the actual colliding file and its owning pack slug — the repository's own
+/// re-read of <see cref="IFontPackStore.GetAllAsync"/> (one extra query, only ever run on this rare
+/// failure path), never the raw exception detail (F15.7's "no internal detail in a body" posture,
+/// mirrors <see cref="CatalogController"/>'s own <c>WithheldProblem</c>). This action's own
+/// <see cref="FileCollisionProblem(FontPackUpsertResult.FileCollision)"/> maps that already-sanitized
+/// case straight to 409, falling back to a generic refusal when the repository's own lookup did not
+/// resolve cleanly (<see cref="FontPackUpsertResult.FileCollision"/>'s own remarks).
 /// </para>
 ///
 /// <para>
@@ -82,7 +87,7 @@ namespace GenWave.Host.Api;
 /// <see cref="InstalledFontCatalogLoadHostedService"/> warms at boot — the only way an install reaches
 /// every already-running request handler (the widened <c>GET /fonts/{file}</c> route) with no process
 /// restart. Runs only on the success path, AFTER <see cref="IFontPackStore.UpsertAsync"/> has already
-/// committed (including past the 23505-collision <see langword="catch"/> above, which returns before
+/// committed (including past the 23505-collision <see langword="switch"/> above, which returns before
 /// reaching this line) — the write is no longer this request's to abandon, so passing this method's own
 /// <paramref name="ct"/> here would let a client disconnecting mid-rebuild cancel it for no reason tied
 /// to the write's own correctness: <see cref="InstalledFontCatalog.ReloadAsync"/>'s own
@@ -150,10 +155,6 @@ public sealed partial class FontPackController(
     InstalledFontCatalog installedFontCatalog,
     ILogger<FontPackController> logger) : ControllerBase
 {
-    // Postgres SQLSTATE for unique_violation — house idiom, no Npgsql.PostgresErrorCodes dependency
-    // (e.g. ScheduleController/PersonaImportRepository).
-    const string UniqueViolation = "23505";
-
     /// <summary>
     /// The app-side backstop over what this route actually STORES (T198 review obligation — the
     /// store itself bounds nothing; <c>station.font_pack_face</c> has no CHECK on <c>byte_size</c>).
@@ -224,13 +225,15 @@ public sealed partial class FontPackController(
         if (facesOrNull is not { } faces)
             throw new UnreachableException("BuildFaces returned neither an error nor a face list.");
 
-        try
+        var upsertResult = await fontPackStore.UpsertAsync(slug, manifest.Family, content.ManifestJson, slug, faces, ct);
+        switch (upsertResult)
         {
-            await fontPackStore.UpsertAsync(slug, manifest.Family, content.ManifestJson, slug, faces, ct);
-        }
-        catch (PostgresException ex) when (ex.SqlState == UniqueViolation)
-        {
-            return Conflict(await ResolveFileCollisionAsync(slug, faces, ex, ct));
+            case FontPackUpsertResult.Upserted:
+                break;
+            case FontPackUpsertResult.FileCollision collision:
+                return Conflict(FileCollisionProblem(collision));
+            default:
+                throw new UnreachableException($"Unhandled {nameof(FontPackUpsertResult)} case.");
         }
 
         // CancellationToken.None, deliberately — see this method's own "Rebuild after write" remarks
@@ -596,13 +599,14 @@ public sealed partial class FontPackController(
     ///
     /// <para>
     /// <b>DUPLICATE <c>files[]</c> ENTRY (review finding N2).</b> <c>station.font_pack_face.file</c>
-    /// is UNIQUE (db/32, the same constraint <see cref="ResolveFileCollisionAsync"/>'s own COLLISION
-    /// handling maps to 409 for a CROSS-pack clash) — a manifest that lists the SAME file twice would
-    /// otherwise reach <see cref="IFontPackStore.UpsertAsync"/> and die there too, but as a real
-    /// Postgres 23505 with no OTHER pack actually owning the file: <see cref="ResolveFileCollisionAsync"/>'s
-    /// own lookup would find no owner and fall back to its generic, unhelpful refusal. Caught HERE
-    /// instead, before a single byte reaches the store, with a precise 400 naming the duplicated
-    /// filename.
+    /// is UNIQUE (db/32, the same constraint <c>FontPackRepository.UpsertAsync</c>'s own COLLISION
+    /// handling maps to a <see cref="FontPackUpsertResult.FileCollision"/> for a CROSS-pack clash) — a
+    /// manifest that lists the SAME file twice would otherwise reach
+    /// <see cref="IFontPackStore.UpsertAsync"/> and die there too, but as a real Postgres 23505 with no
+    /// OTHER pack actually owning the file: that repository's own lookup would find no owner and this
+    /// action's own <see cref="FileCollisionProblem(FontPackUpsertResult.FileCollision)"/> would fall
+    /// back to its generic, unhelpful refusal. Caught HERE instead, before a single byte reaches the
+    /// store, with a precise 400 naming the duplicated filename.
     /// </para>
     /// </summary>
     (IActionResult? Error, IReadOnlyList<FontPackFaceInput>? Faces) BuildFaces(
@@ -624,32 +628,17 @@ public sealed partial class FontPackController(
         return (null, faces);
     }
 
-    // ── 23505 mapping (T198 review obligation) ─────────────────────────────
+    // ── 23505 mapping (T198 review obligation; resolution moved to FontPackRepository at gh-#406
+    //    slice 2 — this action only maps the already-sanitized case to a wire response) ────────────
 
-    /// <summary>See this class's own COLLISION remarks.</summary>
-    async Task<ProblemDetails> ResolveFileCollisionAsync(
-        string slug, IReadOnlyList<FontPackFaceInput> faces, PostgresException ex, CancellationToken ct)
-    {
-        logger.LogWarning(ex,
-            "Font pack install {Slug} refused: a face file collided with an existing pack (23505 on station.font_pack_face.file)",
-            LogSafeText.Sanitize(slug));
-
-        var installed = await fontPackStore.GetAllAsync(ct);
-        var ownerSlugByFile = installed
-            .SelectMany(pack => pack.Faces.Select(face => (face.File, pack.Slug)))
-            .ToDictionary(pair => pair.File, pair => pair.Slug, StringComparer.Ordinal);
-
-        foreach (var face in faces)
-        {
-            if (ownerSlugByFile.TryGetValue(face.File, out var ownerSlug))
-                return FileCollisionProblem(face.File, ownerSlug);
-        }
-
-        // The lookup above should always resolve (see this class's own COLLISION remarks on why a
-        // colliding file can only ever belong to a DIFFERENT, already-installed pack) — this is a
-        // defensive fallback for the unexpected case where it does not, never a silently swallowed 500.
-        return GenericFileCollisionProblem();
-    }
+    /// <summary>Dispatches an already-resolved <see cref="FontPackUpsertResult.FileCollision"/> (built
+    /// by <c>FontPackRepository.UpsertAsync</c>'s own <c>catch</c>, see this class's own COLLISION
+    /// remarks) to the naming 409 when both fields resolved cleanly, else the generic fallback —
+    /// mirrors <see cref="FontPackUpsertResult.FileCollision"/>'s own "both null together" remarks.</summary>
+    static ProblemDetails FileCollisionProblem(FontPackUpsertResult.FileCollision collision) =>
+        collision is { File: { } file, OwnerSlug: { } ownerSlug }
+            ? FileCollisionProblem(file, ownerSlug)
+            : GenericFileCollisionProblem();
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 

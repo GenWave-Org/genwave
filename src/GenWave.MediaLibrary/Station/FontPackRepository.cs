@@ -1,6 +1,7 @@
 using Dapper;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 
 namespace GenWave.MediaLibrary.Station;
@@ -18,10 +19,18 @@ namespace GenWave.MediaLibrary.Station;
 /// <paramref name="dataSource"/> is a <see cref="Lazy{T}"/> — mirrors every other station-schema
 /// store in this file's directory: merely resolving <see cref="IFontPackStore"/> from DI must never
 /// be enough to trigger a connection attempt against an empty/dev-mode
-/// <c>ConnectionStrings:Station</c>.
+/// <c>ConnectionStrings:Station</c>. <paramref name="logger"/> is used solely by
+/// <see cref="ResolveFileCollisionAsync"/>'s own rare-failure-path WARN (gh-#406 slice 2, moved down
+/// from <c>FontPackController</c> — no other method on this class logs anything).
 /// </summary>
-sealed class FontPackRepository(Lazy<NpgsqlDataSource> dataSource) : IFontPackStore
+sealed class FontPackRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<FontPackRepository> logger) : IFontPackStore
 {
+    // Postgres SQLSTATE for unique_violation — mirrors PersonaRepository's own NameConflict mapping.
+    // Moved down from FontPackController at gh-#406 slice 2 (L2 Postgres confinement — this repository
+    // is this seam's own repository layer, ARCHITECTURE.md "Architecture governance"; that controller
+    // no longer references Npgsql at all).
+    const string UniqueViolation = "23505";
+
     /// <summary>
     /// Single-transaction upsert (SPEC F104 "Data model"): the pack row's real
     /// <c>UNIQUE(slug)</c> constraint is the ON CONFLICT target, not a pre-check — mirrors
@@ -30,51 +39,105 @@ sealed class FontPackRepository(Lazy<NpgsqlDataSource> dataSource) : IFontPackSt
     /// branch. Every existing face for the resolved pack id is deleted, then every
     /// <paramref name="faces"/> entry is inserted fresh — a re-install's face LIST becomes the
     /// pack's entire face set, never a merge with what was there before.
+    ///
+    /// <para>
+    /// <b>THE 23505 MAPPING</b> (T198 review obligation; moved here at gh-#406 slice 2).
+    /// <c>station.font_pack_face.file</c> is UNIQUE across every installed pack, not scoped per-pack
+    /// (db/32) — two DIFFERENT catalog packs shipping a same-named face is a real, if rare,
+    /// possibility this write must fail closed on rather than throw past this seam. This single
+    /// transaction means a mid-upsert unique-violation has ALREADY rolled back everything (the pack
+    /// row insert/update included) by the time the <see langword="catch"/> below runs — never a
+    /// partial pack. See <see cref="ResolveFileCollisionAsync"/>'s own remarks for how the collision
+    /// is resolved into a <see cref="FontPackUpsertResult.FileCollision"/> without ever handing a
+    /// caller the raw exception or its own detail text (F15.7).
+    /// </para>
     /// </summary>
-    public async Task UpsertAsync(
+    public async Task<FontPackUpsertResult> UpsertAsync(
         string slug, string family, string definition, string importedFrom,
         IReadOnlyList<FontPackFaceInput> faces, CancellationToken ct)
     {
-        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
+        try
+        {
+            await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+            await using var tx = await conn.BeginTransactionAsync(ct);
 
-        var packId = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
-            """
-            insert into station.font_pack (slug, family, definition, imported_from, imported_at)
-            values (@Slug, @Family, @Definition::jsonb, @ImportedFrom, now())
-            on conflict (slug) do update
-              set family = @Family,
-                  definition = @Definition::jsonb,
-                  imported_from = @ImportedFrom,
-                  imported_at = now()
-            returning id
-            """,
-            new { Slug = slug, Family = family, Definition = definition, ImportedFrom = importedFrom },
-            transaction: tx,
-            cancellationToken: ct));
+            var packId = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
+                """
+                insert into station.font_pack (slug, family, definition, imported_from, imported_at)
+                values (@Slug, @Family, @Definition::jsonb, @ImportedFrom, now())
+                on conflict (slug) do update
+                  set family = @Family,
+                      definition = @Definition::jsonb,
+                      imported_from = @ImportedFrom,
+                      imported_at = now()
+                returning id
+                """,
+                new { Slug = slug, Family = family, Definition = definition, ImportedFrom = importedFrom },
+                transaction: tx,
+                cancellationToken: ct));
 
-        await conn.ExecuteAsync(new CommandDefinition(
-            "delete from station.font_pack_face where pack_id = @PackId",
-            new { PackId = packId },
-            transaction: tx,
-            cancellationToken: ct));
+            await conn.ExecuteAsync(new CommandDefinition(
+                "delete from station.font_pack_face where pack_id = @PackId",
+                new { PackId = packId },
+                transaction: tx,
+                cancellationToken: ct));
+
+            foreach (var face in faces)
+            {
+                await conn.ExecuteAsync(new CommandDefinition(
+                    """
+                    insert into station.font_pack_face (pack_id, file, style, bytes, byte_size, sha256)
+                    values (@PackId, @File, @Style, @Bytes, @ByteSize, @Sha256)
+                    """,
+                    new
+                    {
+                        PackId = packId, face.File, face.Style, face.Bytes, face.ByteSize, face.Sha256,
+                    },
+                    transaction: tx,
+                    cancellationToken: ct));
+            }
+
+            await tx.CommitAsync(ct);
+            return new FontPackUpsertResult.Upserted();
+        }
+        catch (PostgresException ex) when (ex.SqlState == UniqueViolation)
+        {
+            return await ResolveFileCollisionAsync(slug, faces, ex, ct);
+        }
+    }
+
+    /// <summary>
+    /// Names the actual colliding file and its owning pack slug for a 23505 <see cref="UpsertAsync"/>
+    /// just caught (gh-#406 slice 2, moved down from <c>FontPackController.ResolveFileCollisionAsync</c>
+    /// verbatim — see this class's own COLLISION remarks on <see cref="UpsertAsync"/>). The exception's
+    /// own <c>ex</c> is logged here (server-side only, F15.7 — never echoed to a caller) purely for its
+    /// stack trace/telemetry value; nothing about ITS detail text is read to build the returned case —
+    /// this method re-reads <see cref="GetAllAsync"/> (one extra query, only ever run on this rare
+    /// failure path) and cross-references it against <paramref name="faces"/>, the SAME faces this
+    /// write attempted, to find the actual owner.
+    /// </summary>
+    async Task<FontPackUpsertResult> ResolveFileCollisionAsync(
+        string slug, IReadOnlyList<FontPackFaceInput> faces, PostgresException ex, CancellationToken ct)
+    {
+        logger.LogWarning(ex,
+            "Font pack install {Slug} refused: a face file collided with an existing pack (23505 on station.font_pack_face.file)",
+            slug);
+
+        var installed = await GetAllAsync(ct);
+        var ownerSlugByFile = installed
+            .SelectMany(pack => pack.Faces.Select(face => (face.File, pack.Slug)))
+            .ToDictionary(pair => pair.File, pair => pair.Slug, StringComparer.Ordinal);
 
         foreach (var face in faces)
         {
-            await conn.ExecuteAsync(new CommandDefinition(
-                """
-                insert into station.font_pack_face (pack_id, file, style, bytes, byte_size, sha256)
-                values (@PackId, @File, @Style, @Bytes, @ByteSize, @Sha256)
-                """,
-                new
-                {
-                    PackId = packId, face.File, face.Style, face.Bytes, face.ByteSize, face.Sha256,
-                },
-                transaction: tx,
-                cancellationToken: ct));
+            if (ownerSlugByFile.TryGetValue(face.File, out var ownerSlug))
+                return new FontPackUpsertResult.FileCollision(face.File, ownerSlug);
         }
 
-        await tx.CommitAsync(ct);
+        // The lookup above should always resolve (a colliding file can only ever belong to a
+        // DIFFERENT, already-installed pack) — this is a defensive fallback for the unexpected case
+        // where it does not, never a silently swallowed failure.
+        return new FontPackUpsertResult.FileCollision(null, null);
     }
 
     /// <summary>
