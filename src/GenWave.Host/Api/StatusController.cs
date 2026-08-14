@@ -23,6 +23,7 @@ public sealed class StatusController(
     IOptionsMonitor<LlmOptions> llmMonitor,
     LlmCopyStatusHolder llmStatusHolder,
     DegradationController degradationController,
+    VoiceHealthReader voiceHealthReader,
     IActivePersonaAccessor personaAccessor,
     ProcessStartTime startTime) : ControllerBase
 {
@@ -31,7 +32,8 @@ public sealed class StatusController(
     /// Admin:Password is set, same as every other <c>/api/*</c> controller). Returns:
     /// <c>{ startedAt, catalog: { ready, enriching, failed, unavailable }, safeScope: { libraryIds, playable },
     /// llm: { enabled, model, activePersona, lastOutcome, lastAttemptAt },
-    /// degradation: { mode, pinned, since, cause } }</c>.
+    /// degradation: { mode, pinned, since, cause },
+    /// voice: { engine, degraded, reason, checkedAt } }</c>.
     ///
     /// <c>Station:SafeScope:LibraryIds</c> is read via <see cref="IOptionsMonitor{TOptions}.CurrentValue"/>
     /// on every call — not a boot-time snapshot — so a live <c>PUT /api/settings</c> edit
@@ -59,6 +61,12 @@ public sealed class StatusController(
     /// performs I/O). <c>mode</c> is lowercase (<c>"normal"</c>/<c>"soft"</c>/<c>"hard"</c>);
     /// <c>pinned</c> is true while <c>Llm:DegradationPin</c> holds <c>mode</c>; <c>since</c> is when
     /// the current mode was entered; <c>cause</c> is the human-readable reason for it.
+    ///
+    /// <c>voice</c> (SPEC F99.5, F100.3, STORY-256 AC4, PLAN T149) comes from
+    /// <see cref="VoiceHealthReader.Evaluate"/> — the primary voice engine's own cached
+    /// <see cref="IDependencyHealth"/> verdict, never a live probe. It answers ONLY "is the engine
+    /// down"; <c>degradation</c> above answers "does the DJ have anything to say" — an operator
+    /// reading both fields on the same response can always tell the two causes of a quiet DJ apart.
     /// </summary>
     [HttpGet("status")]
     public async Task<IActionResult> Get(CancellationToken ct)
@@ -73,6 +81,7 @@ public sealed class StatusController(
         var llmEnabled = !string.IsNullOrEmpty(llmConfig.Endpoint);
         var lastAttempt = llmStatusHolder.Last;
         var degradation = degradationController.Evaluate();
+        var voice = voiceHealthReader.Evaluate();
 
         return Ok(new
         {
@@ -105,6 +114,13 @@ public sealed class StatusController(
                 pinned = degradation.Pinned,
                 since = degradation.Since,
                 cause = degradation.Cause,
+            },
+            voice = new
+            {
+                engine = voice.Engine,
+                degraded = voice.Degraded,
+                reason = voice.Reason,
+                checkedAt = voice.CheckedAt,
             },
         });
     }

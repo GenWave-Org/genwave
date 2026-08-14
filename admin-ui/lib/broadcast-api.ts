@@ -61,6 +61,18 @@ export interface StatusResponse {
     lastOutcome: "ok" | "failed" | null;
     lastAttemptAt: string | null;
   };
+  /**
+   * SPEC F99.5, F100.3, STORY-256 AC4 — the primary voice engine's own cached health verdict.
+   * Answers ONLY "is the engine down"; `llm.lastOutcome === "failed"` above answers "does the DJ
+   * have anything to say" — the two tiles let an operator tell the two causes of a quiet DJ apart
+   * without a log stack.
+   */
+  voice: {
+    engine: string;
+    degraded: boolean;
+    reason: string | null;
+    checkedAt: string | null;
+  };
 }
 
 export interface PlayHistoryEntry {

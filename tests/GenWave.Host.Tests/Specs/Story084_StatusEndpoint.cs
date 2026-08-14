@@ -145,12 +145,19 @@ public static class FeatureStatusEndpoint
             TimeProvider.System,
             NullLogger<DegradationController>.Instance);
 
+        // `voice` (SPEC F99.5, F100.3, PLAN T149) rides the same response — every scenario here is
+        // unrelated to it, so an unprobed (null-verdict) reader is enough to leave the
+        // catalog/safeScope assertions unaffected (mirrors degradationController immediately above).
+        var voiceHealthReader = new VoiceHealthReader(
+            new PrimaryVoiceEngine(DependencyNames.Kokoro), new FakeDependencyHealth());
+
         return new(
             catalog,
             stationMonitor,
             llmOptions,
             statusHolder,
             degradationController,
+            voiceHealthReader,
             new FakeActivePersonaAccessor(),
             new ProcessStartTime(startedAt ?? new DateTimeOffset(2026, 7, 11, 9, 30, 0, TimeSpan.Zero)))
         {

@@ -157,6 +157,18 @@ public static class TtsServiceCollectionExtensions
         services.AddSingleton<DependencyHealthStore>();
         services.AddSingleton<IDependencyHealth>(sp => sp.GetRequiredService<DependencyHealthStore>());
 
+        // Primary voice engine fact (SPEC F99.4, STORY-257, PLAN T149) — computed ONCE from
+        // Tts:PiperPrimaryEndpoint, same deployment-decision timing as the FallbackTtsSynthesizer
+        // registration below that consumes it. Shared as its own singleton (see its own remarks)
+        // so VoiceHealthReader can depend on "which engine is primary" without ever resolving
+        // FallbackTtsSynthesizer's own HTTP-backed primary as a side effect.
+        services.AddSingleton<PrimaryVoiceEngine>(sp =>
+        {
+            var piperPrimaryEndpoint = sp.GetRequiredService<IOptions<TtsOptions>>().Value.PiperPrimaryEndpoint;
+            return new PrimaryVoiceEngine(
+                string.IsNullOrEmpty(piperPrimaryEndpoint) ? DependencyNames.Kokoro : DependencyNames.Piper);
+        });
+
         services.AddHttpClient<OllamaHealthProbe>();
         services.AddSingleton<IDependencyProbe>(sp => sp.GetRequiredService<OllamaHealthProbe>());
 
@@ -266,8 +278,8 @@ public static class TtsServiceCollectionExtensions
             // concretely once; nothing else in this project resolves it directly.
             .AddSingleton<FallbackTtsSynthesizer>(sp =>
             {
-                var piperPrimaryEndpoint = sp.GetRequiredService<IOptions<TtsOptions>>().Value.PiperPrimaryEndpoint;
-                var piperIsPrimary = !string.IsNullOrEmpty(piperPrimaryEndpoint);
+                var primaryEngine = sp.GetRequiredService<PrimaryVoiceEngine>();
+                var piperIsPrimary = primaryEngine.DependencyName == DependencyNames.Piper;
                 ITtsSynthesizer primary = piperIsPrimary
                     ? sp.GetRequiredService<PiperPrimaryTtsSynthesizer>()
                     : sp.GetRequiredService<KokoroTtsSynthesizer>();
@@ -282,8 +294,13 @@ public static class TtsServiceCollectionExtensions
                     // T148 review finding F3: the primary's own dependency name travels with it —
                     // a piper-only station's cached-health lookup and log {Engine} slot must read
                     // Piper's verdict, never absent-Kokoro's (FallbackTtsSynthesizer's own remarks).
-                    piperIsPrimary ? DependencyNames.Piper : DependencyNames.Kokoro);
+                    primaryEngine.DependencyName);
             })
+            // Voice health read model (SPEC F99.5, F100.3, PLAN T149) — GET /api/status
+            // (GenWave.Host) resolves this. Depends on the SAME PrimaryVoiceEngine singleton
+            // FallbackTtsSynthesizer's factory just above reads, never on FallbackTtsSynthesizer
+            // itself (see PrimaryVoiceEngine's own remarks for why that distinction matters).
+            .AddSingleton<VoiceHealthReader>()
             // The typed HttpClient factory registers KokoroTtsSynthesizer as transient; the
             // singleton every caller (TtsSegmentSource, SafeSegmentAuthor, TtsPreviewController)
             // actually resolves is NormalizingTtsSynthesizer (SPEC F68.1, STORY-185) decorating

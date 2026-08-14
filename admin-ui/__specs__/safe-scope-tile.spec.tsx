@@ -26,13 +26,14 @@ interface SafeScopeOverrides {
   playable?: number;
 }
 
-/** Catalog/LLM are fixed benign values — these specs exercise the SafeScope tile only. */
+/** Catalog/LLM/Voice are fixed benign values — these specs exercise the SafeScope tile only. */
 function makeStatus(safeScope: SafeScopeOverrides = {}): StatusResponse {
   return {
     startedAt: "2026-01-01T08:00:00.000Z",
     catalog: { ready: 10, enriching: 0, failed: 0, unavailable: 0 },
     safeScope: { libraryIds: safeScope.libraryIds ?? [7], playable: safeScope.playable ?? 7 },
     llm: { enabled: false, model: null, activePersona: null, lastOutcome: null, lastAttemptAt: null },
+    voice: { engine: "kokoro", degraded: false, reason: null, checkedAt: null },
   };
 }
 

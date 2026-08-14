@@ -258,18 +258,75 @@ public static class FeatureNeverSomeoneElsesVoice
     // -------------------------------------------------------------------------------------
     public static class ScenarioTheHealthSurfaceShowsIt
     {
-        [Fact(Skip = "Pending T149 — see docs/PLAN.md")]
+        /// <summary>
+        /// The real production read model GET /api/status (GenWave.Host) resolves to build its
+        /// <c>voice</c> field (PLAN T149) — VoiceHealthReader has no framework dependency, so it is
+        /// exercised directly here rather than through a hosted endpoint, the same split
+        /// DegradationController's own specs use (unit-tested in this project; the Host-level wire
+        /// is a separate concern). <paramref name="primaryEngine"/> is parameterized (not hardcoded
+        /// to Kokoro) so a mutated reader that always reported "kokoro" regardless of which engine
+        /// is actually primary stays caught — the same F3 discipline T148's review already applied
+        /// to the render-time gate (see <see cref="PrimaryVoiceEngine"/>'s own remarks).
+        /// </summary>
+        static VoiceHealthReader BuildReader(FakeDependencyHealth health, string primaryEngine = DependencyNames.Kokoro) =>
+            new(new PrimaryVoiceEngine(primaryEngine), health);
+
+        [Fact]
         public static void The_degraded_voice_state_is_visible_on_the_health_endpoint()
         {
-            // Drive the real endpoint; an operator with no log stack must still be able to
-            // tell why the DJ is quiet.
-            Assert.Fail("pending T149");
+            // Given a station whose engine is down — the cached probe verdict for the primary
+            // engine (Kokoro on this topology) is unhealthy...
+            var health = new FakeDependencyHealth();
+            health.Set(new DependencyHealthVerdict(
+                DependencyNames.Kokoro, Healthy: false, DateTimeOffset.UtcNow,
+                "connection refused", ConsecutiveFailureCount: 2));
+
+            // When the operator opens the health surface (drives the real read model GET
+            // /api/status resolves)...
+            var voice = BuildReader(health).Evaluate();
+
+            // Then the degraded voice state is visible, naming the engine and the cause — an
+            // operator with no log stack must still be able to tell why the DJ is quiet.
+            Assert.True(voice.Degraded);
+            Assert.Equal(DependencyNames.Kokoro, voice.Engine);
+            Assert.Equal("connection refused", voice.Reason);
         }
 
-        [Fact(Skip = "Pending T149 — see docs/PLAN.md")]
+        [Fact]
         public static void A_healthy_station_reports_no_degraded_voice_state()
         {
-            Assert.Fail("pending T149");
+            // Given the engine's cached verdict is healthy...
+            var health = new FakeDependencyHealth();
+            health.Set(new DependencyHealthVerdict(
+                DependencyNames.Kokoro, Healthy: true, DateTimeOffset.UtcNow,
+                Reason: null, ConsecutiveFailureCount: 0));
+
+            // When the operator opens the health surface...
+            var voice = BuildReader(health).Evaluate();
+
+            // Then no degraded voice state is reported — a healthy engine must never manufacture
+            // an alarm.
+            Assert.False(voice.Degraded);
+            Assert.Null(voice.Reason);
+        }
+
+        [Fact]
+        public static void A_piper_primary_station_reports_piper_as_the_engine()
+        {
+            // Given the piper-only topology (SPEC F99.4, STORY-257) — Piper is primary, and its
+            // own cached verdict is unhealthy...
+            var health = new FakeDependencyHealth();
+            health.Set(new DependencyHealthVerdict(
+                DependencyNames.Piper, Healthy: false, DateTimeOffset.UtcNow,
+                "connection refused", ConsecutiveFailureCount: 2));
+
+            // When the operator opens the health surface on THIS topology...
+            var voice = BuildReader(health, DependencyNames.Piper).Evaluate();
+
+            // Then the engine named is Piper, never a hardcoded "kokoro" — a reader that reported
+            // the wrong engine here would leave an operator chasing the wrong dependency during a
+            // piper-only outage.
+            Assert.Equal(DependencyNames.Piper, voice.Engine);
         }
     }
 
