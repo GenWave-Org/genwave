@@ -20,7 +20,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { ScheduleEditor } from "../app/(authed)/schedule/ScheduleEditor";

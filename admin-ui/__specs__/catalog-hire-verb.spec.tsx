@@ -12,13 +12,13 @@
 // directly via the URL a hire flow POSTs to, in the same test as the success copy.
 
 jest.mock("next/navigation", () => ({
-  ...jest.requireActual("next/navigation"),
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
   useRouter: jest.fn(),
 }));
 
 import { describe, it, expect, jest, beforeAll, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { useRouter } from "next/navigation";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
@@ -51,6 +51,8 @@ const LENA_ENTRY: CatalogShelfEntryDto = {
   audience: "everyone",
   bestFor: [],
   preview: null,
+  fontFamily: null,
+  fontByteTotal: null,
 };
 
 const LENA_CARD_JSON = JSON.stringify({
@@ -76,6 +78,13 @@ const LENA_DETAIL: CatalogEntryDetailDto = {
   author: null,
   description: null,
   samplePatter: [],
+  fontFamily: null,
+  fontByteTotal: null,
+  fontSpecimenFile: null,
+  fontLicense: null,
+  fontVersion: null,
+  fontSubset: null,
+  suggestedPersona: null,
 };
 
 function makeJsonResponse(status: number, body: unknown): Response {

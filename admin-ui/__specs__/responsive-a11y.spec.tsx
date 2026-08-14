@@ -33,7 +33,7 @@ jest.mock("@/app/login/actions", () => ({
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, fireEvent, act } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { usePathname, useRouter } from "next/navigation";
@@ -87,6 +87,8 @@ function makeMedia(): AdminMediaDto[] {
       album: "Test Album",
       genre: "Rock",
       year: 2024,
+      bpm: null,
+      trackEnergy: null,
       integratedLufs: -14,
       truePeakDbtp: -1,
       measurable: true,
@@ -173,10 +175,11 @@ function extractBlock(css: string, selector: string): string {
 
 function hexToRgb(hex: string): [number, number, number] {
   const match = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/.exec(hex);
-  if (!match) {
+  const [, rHex, gHex, bHex] = match ?? [];
+  if (rHex === undefined || gHex === undefined || bHex === undefined) {
     throw new Error(`not a 6-digit hex color: ${hex}`);
   }
-  return [parseInt(match[1], 16), parseInt(match[2], 16), parseInt(match[3], 16)];
+  return [parseInt(rHex, 16), parseInt(gHex, 16), parseInt(bHex, 16)];
 }
 
 function relativeLuminance([r, g, b]: [number, number, number]): number {

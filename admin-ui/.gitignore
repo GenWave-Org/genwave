@@ -10,6 +10,7 @@ build/
 
 # TypeScript incremental build
 tsconfig.tsbuildinfo
+tsconfig.specs.tsbuildinfo
 
 # misc
 *.pem

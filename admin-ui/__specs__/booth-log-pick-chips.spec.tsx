@@ -14,7 +14,7 @@
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, act } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { BoothLogView } from "../app/(authed)/booth-log/BoothLogView";
 import type { BoothLogPick } from "../lib/booth-log-api";
 

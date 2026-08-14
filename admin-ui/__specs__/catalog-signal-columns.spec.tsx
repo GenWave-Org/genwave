@@ -13,19 +13,19 @@
 // too).
 
 jest.mock("next/navigation", () => ({
-  ...jest.requireActual("next/navigation"),
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
   useRouter: jest.fn(),
 }));
 
 jest.mock("next/headers", () => ({
-  cookies: jest.fn().mockResolvedValue({
+  cookies: jest.fn<() => Promise<{ toString: () => string }>>().mockResolvedValue({
     toString: () => "session=test-cookie",
   }),
 }));
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, fireEvent, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { ReactNode } from "react";
 import type { useRouter } from "next/navigation";
 import type { LibraryDto } from "@/lib/library";

@@ -10,7 +10,7 @@
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { NowPlayingCard } from "../app/(authed)/_components/NowPlayingCard";
 import { PlayHistoryTable } from "../app/(authed)/live/PlayHistoryTable";
 import { RecentPlays } from "../app/(authed)/dashboard/RecentPlays";
@@ -148,7 +148,7 @@ describe("Feature: Duration on the air surfaces", () => {
         const row = screen.getByText(title).closest("tr");
         expect(row).not.toBeNull();
         const cells = within(row as HTMLElement).getAllByRole("cell");
-        expect(cells[4].textContent).toBe("");
+        expect(cells[4]?.textContent).toBe("");
       }
     });
   });

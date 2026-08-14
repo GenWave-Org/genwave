@@ -28,13 +28,13 @@
 // occurrence, not two), the `fontFamily: null` fallback, and an omitted-field payload.
 
 jest.mock("next/navigation", () => ({
-  ...jest.requireActual("next/navigation"),
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
   useRouter: jest.fn(),
 }));
 
 import { describe, it, expect, jest, beforeAll, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, within, fireEvent, waitFor, act } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { useRouter } from "next/navigation";
 import { Toaster } from "@/components/ui/toast";
 import type { PersonaCatalogClient as PersonaCatalogClientComponent } from "../app/(authed)/persona-catalog/PersonaCatalogClient";
@@ -140,6 +140,7 @@ const FONT_DETAIL: CatalogEntryDetailDto = {
   fontLicense: "OFL-1.1",
   fontVersion: "2.000",
   fontSubset: "latin",
+  suggestedPersona: null,
 };
 
 // PLAN T204 (Dean's post-v3.1.0 review): "no mention of license anywhere in the panel" — the

@@ -26,18 +26,18 @@
 // to the real module before the mock below registers, same failure mode).
 
 jest.mock("next/navigation", () => ({
-  ...jest.requireActual("next/navigation"),
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
   useRouter: jest.fn(),
 }));
 
 jest.mock("@/lib/use-row-patch", () => {
-  const actual = jest.requireActual("@/lib/use-row-patch");
+  const actual = jest.requireActual<typeof import("@/lib/use-row-patch")>("@/lib/use-row-patch");
   return { ...actual, useRowPatch: jest.fn() };
 });
 
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { ComponentProps } from "react";
 import type { useRouter } from "next/navigation";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
@@ -226,6 +226,8 @@ function makeMedia(): AdminMediaDto[] {
       album: "Test Album",
       genre: "Rock",
       year: 2024,
+      bpm: null,
+      trackEnergy: null,
       integratedLufs: -14,
       truePeakDbtp: -1,
       measurable: true,
@@ -233,6 +235,8 @@ function makeMedia(): AdminMediaDto[] {
       cueOutSec: null,
       eligible: true,
       version: "900",
+      score: 50,
+      neverPlay: false,
     },
   ];
 }

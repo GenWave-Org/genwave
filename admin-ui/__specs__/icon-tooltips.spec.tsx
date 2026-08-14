@@ -36,7 +36,7 @@
 // that entirely while still exercising it through the exact same walker and assertions.
 
 jest.mock("next/navigation", () => ({
-  ...jest.requireActual("next/navigation"),
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
   usePathname: jest.fn(),
   useRouter: jest.fn(),
 }));
@@ -44,14 +44,14 @@ jest.mock("next/navigation", () => ({
 // Server-component fixture (the CatalogPage full-page coverage scenario below) — mirrors
 // catalog-facet-pickers.spec.tsx's mock.
 jest.mock("next/headers", () => ({
-  cookies: jest.fn().mockResolvedValue({
+  cookies: jest.fn<() => Promise<{ toString: () => string }>>().mockResolvedValue({
     toString: () => "session=test-cookie",
   }),
 }));
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, fireEvent, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { ReactNode } from "react";
 import type { usePathname, useRouter } from "next/navigation";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
@@ -196,11 +196,21 @@ function makeCatalogPageFetchMock(): jest.MockedFunction<typeof fetch> {
 /** jsdom has no real `matchMedia` — `ThemeSwitcher`'s mode control calls it to resolve the system
  * default (the app-shell.spec.tsx precedent). Pins it to "prefers light" so the toggle's initial
  * render is deterministic across runs. */
+/** Minimal shape of what jsdom's `matchMedia` fixture returns — only the members the app's
+ * theme-mode resolution actually reads (SPEC F102, dark-mode system-preference detection). */
+interface MockMediaQueryList {
+  matches: boolean;
+  media: string;
+  addEventListener: jest.Mock;
+  removeEventListener: jest.Mock;
+  dispatchEvent: jest.Mock;
+}
+
 function mockMatchMedia(prefersDark: boolean): void {
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     configurable: true,
-    value: jest.fn().mockImplementation((query: string) => ({
+    value: jest.fn<(query: string) => MockMediaQueryList>().mockImplementation((query) => ({
       matches: prefersDark,
       media: query,
       addEventListener: jest.fn(),

@@ -12,7 +12,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { Toaster } from "@/components/ui/toast";
 import { PersonaExportLink } from "../app/(authed)/personas/PersonaExportLink";
 import { PersonaImportPanel } from "../app/(authed)/personas/PersonaImportPanel";
@@ -106,6 +106,9 @@ describe("Feature: Export a persona card", () => {
         slug: "persona-2",
         importedFrom: null,
         importedAt: null,
+        soul: "",
+        quirks: [],
+        lore: [],
       };
       render(<PersonaExportLink persona={novaQ} />);
 

@@ -18,7 +18,7 @@ jest.mock("next/navigation", () => ({
   // `redirect()` is left as the real implementation — it's exercised for real by the
   // "redirects /libraries into the tab" scenario below (it just throws a NEXT_REDIRECT
   // digest error synchronously; no request context is needed to construct that throw).
-  ...jest.requireActual("next/navigation"),
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
   useRouter: jest.fn(),
   usePathname: jest.fn(),
 }));
@@ -29,7 +29,7 @@ jest.mock("@/app/login/actions", () => ({
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { useRouter, usePathname } from "next/navigation";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
@@ -73,6 +73,8 @@ function makeMedia(count: number): AdminMediaDto[] {
     album: "Test Album",
     genre: "Rock",
     year: 2024,
+    bpm: null,
+    trackEnergy: null,
     integratedLufs: -14,
     truePeakDbtp: -1,
     measurable: true,

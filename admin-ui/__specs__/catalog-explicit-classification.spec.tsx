@@ -8,13 +8,13 @@
 // CatalogTable calls useConfirm() unconditionally via CatalogToolbar's descendants.
 
 jest.mock("next/navigation", () => ({
-  ...jest.requireActual("next/navigation"),
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
   useRouter: jest.fn(),
 }));
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { useRouter } from "next/navigation";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
@@ -60,6 +60,8 @@ function makeRow(overrides: RowOverrides = {}): AdminMediaDto {
     album: "Test Album",
     genre: "Rock",
     year: 2024,
+    bpm: null,
+    trackEnergy: null,
     integratedLufs: -14,
     truePeakDbtp: -1,
     measurable: true,

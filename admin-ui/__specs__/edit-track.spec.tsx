@@ -10,13 +10,13 @@
 // mocked next/navigation useRouter (mirrors catalog-selection-toolbar.spec.tsx's pattern).
 
 jest.mock("next/navigation", () => ({
-  ...jest.requireActual("next/navigation"),
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
   useRouter: jest.fn(),
 }));
 
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { useRouter } from "next/navigation";
 import { Toaster } from "@/components/ui/toast";
 import type { EditableTrackFields } from "../app/(authed)/catalog/[mediaId]/EditTrackForm";

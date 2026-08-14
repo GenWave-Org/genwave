@@ -30,7 +30,7 @@ jest.mock("next/headers", () => ({
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { ReactNode } from "react";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -86,11 +86,21 @@ function findElementByType(
   return undefined;
 }
 
+/** Minimal shape of what jsdom's `matchMedia` fixture returns — only the members the app's
+ * theme-mode resolution actually reads (SPEC F102, dark-mode system-preference detection). */
+interface MockMediaQueryList {
+  matches: boolean;
+  media: string;
+  addEventListener: jest.Mock;
+  removeEventListener: jest.Mock;
+  dispatchEvent: jest.Mock;
+}
+
 function mockMatchMedia(prefersDark: boolean): void {
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     configurable: true,
-    value: jest.fn().mockImplementation((query: string) => ({
+    value: jest.fn<(query: string) => MockMediaQueryList>().mockImplementation((query) => ({
       matches: prefersDark,
       media: query,
       addEventListener: jest.fn(),
@@ -200,10 +210,11 @@ function extractSharedTokens(blockBody: string): SharedFallbackTokens {
   const result = {} as SharedFallbackTokens;
   for (const token of SHARED_FALLBACK_TOKENS) {
     const match = new RegExp(`--${token}:\\s*([^;]+);`).exec(blockBody);
-    if (!match) {
+    const value = match?.[1];
+    if (value === undefined) {
       throw new Error(`Token --${token} not found in block`);
     }
-    result[token] = match[1].trim();
+    result[token] = value.trim();
   }
   return result;
 }
