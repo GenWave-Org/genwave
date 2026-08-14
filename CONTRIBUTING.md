@@ -42,7 +42,7 @@ GenWave is built openly with AI assistance — as a force multiplier for the peo
 dotnet build GenWave.sln                                  # build
 dotnet test GenWave.sln --filter "Category!=Integration"  # unit tests (no Docker)
 dotnet test GenWave.sln                                   # full suite (Docker + ffmpeg)
-cd admin-ui && npx tsc --noEmit && npm test && npm run build  # admin UI checks
+cd admin-ui && npx tsc --noEmit && npm run typecheck:specs && npm test && npm run build  # admin UI checks
 ```
 
 See the [README](README.md) for prerequisites and how to run the full stack.
