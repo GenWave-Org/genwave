@@ -81,4 +81,25 @@ public sealed class StationSettingsRepository(string connectionString)
 
         return result;
     }
+
+    /// <summary>
+    /// True if a row for <paramref name="key"/> exists in <c>station.settings</c> — added for gh-#406
+    /// slice 4: <c>GenWave.Host.Seeding.SafeLoopSeedMarkerStore</c>'s one-shot boot-seed marker check
+    /// (F27.10) needs a single-key existence probe, not the full unfiltered <see cref="ReadAllAsync"/>
+    /// scan. Any failure (including a <see cref="Npgsql.NpgsqlException"/>) propagates to the caller —
+    /// same posture as <see cref="ReadAllAsync"/>, degrade policy is a caller concern, not this
+    /// repository's.
+    /// </summary>
+    public async Task<bool> ExistsAsync(string key, CancellationToken ct)
+    {
+        await using var conn = new NpgsqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT 1 FROM station.settings WHERE key = @key";
+        cmd.Parameters.AddWithValue("key", key);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct);
+    }
 }

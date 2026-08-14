@@ -40,11 +40,5 @@ internal static class ExemptionBaseline
             "IConfigurationProvider.Load() queries station.settings directly via NpgsqlConnection at " +
             "boot, before the DI container (and any MediaLibrary repository) exists to inject. " +
             "Pre-existing (STORY-042); not trivial to fix in this diff — follow-up gh-#406."),
-        new ArchitectureExemption(
-            LawId.L2,
-            "GenWave.Host.Seeding.SafeLoopSeedMarkerStore",
-            "2026-08-07",
-            "Reads/writes the boot-seed marker directly via NpgsqlConnection on the station.settings " +
-            "table (F27.10). Pre-existing; not trivial to fix in this diff — follow-up gh-#406."),
     };
 }
