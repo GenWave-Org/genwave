@@ -31,15 +31,14 @@ public sealed class FeatureNamespaceCycleFreedom
 
     /// <summary>
     /// Pre-existing tangles recorded 2026-08-09 (gh-#445, where each carries a fix sketch) — the
-    /// guard's job is stopping NEW cycles while these two are untangled. Shrink-to-fit: fixing a
+    /// guard's job is stopping NEW cycles while these are untangled. Shrink-to-fit: fixing a
     /// cycle makes its row here STALE and the spec fails until the row is deleted, so this
     /// baseline can only ever shrink. Mirrors the F105.2 exemption philosophy (named, dated,
     /// reasoned) without claiming a LawId — law promotion is gh-#445's recorded /design step.
+    /// Both original rows (GenWave.Core Events->Abstractions, GenWave.Host Api->Stats) were
+    /// untangled in the same gh-#445 pass; the baseline is empty until a new cycle earns a row.
     /// </summary>
-    static readonly IReadOnlyDictionary<string, string[]> BaselinedCycles = new Dictionary<string, string[]>
-    {
-        ["GenWave.Core"] = ["Events -> Abstractions"], // NoOpStationEventSink lives in Events; IStationEventSink's signature reaches back
-    };
+    static readonly IReadOnlyDictionary<string, string[]> BaselinedCycles = new Dictionary<string, string[]>();
 
     public sealed class ScenarioNoNamespaceCyclesWithinAnyProject
     {
