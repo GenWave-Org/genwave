@@ -36,9 +36,10 @@ public interface IPersonaStore
     /// Deletes the persona identified by <paramref name="id"/>. Returns
     /// <see cref="PersonaWriteResult.Deleted"/> on success, <see cref="PersonaWriteResult.NotFound"/>
     /// if no such persona exists, or <see cref="PersonaWriteResult.ScheduledElsewhere"/> (naming every
-    /// offending <c>station.segment_schedule</c> row) if the persona still appears in the
-    /// format-clock schedule (SPEC F91.9). PLAN T121: the implementation queries the schedule BEFORE
-    /// attempting the delete; the DB's own FK <c>ON DELETE RESTRICT</c> is the race backstop, not the
+    /// offending <c>station.segment_schedule</c> row AND every offending <c>station.schedule_special</c>
+    /// row, gh-#462) if the persona still appears in the format-clock schedule or a dated special (SPEC
+    /// F91.9, F120.1). PLAN T121/gh-#462: the implementation queries BOTH tables BEFORE attempting the
+    /// delete; the DB's own FK <c>ON DELETE RESTRICT</c> on either table is the race backstop, not the
     /// primary signal.
     /// </summary>
     Task<PersonaWriteResult> DeleteAsync(long id, CancellationToken ct);

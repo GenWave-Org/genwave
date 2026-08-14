@@ -30,8 +30,15 @@ public static class FeatureBoothLogPersonaStamp
         new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource),
             Microsoft.Extensions.Options.Options.Create(new BoothLogOptions()));
 
-    static PersonaRepository PersonaRepo(DatabaseFixture db) =>
-        new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+    // gh-#462: PersonaRepository.DeleteAsync now ALWAYS pre-queries station.schedule_special too —
+    // this file's own ScenarioPersonaDeleted/ScenarioPersonaDeletedBetweenAirAndDrain both reach
+    // DeleteAsync, so db/36's table needs to exist first (idempotent — mirrors
+    // Story118_PersonaStorage.cs's own Repo helper).
+    static PersonaRepository PersonaRepo(DatabaseFixture db)
+    {
+        db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "36-schedule-special-migration.sh"));
+        return new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+    }
 
     static async Task<long> CreatePersonaAsync(DatabaseFixture db, string name)
     {

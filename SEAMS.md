@@ -72,7 +72,7 @@
 | `GenWave.Core.Abstractions.IShowPatterCadenceProvider` | `GenWave.Host.Options.OptionsMonitorShowPatterCadenceProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IStationClockProvider` | `GenWave.Host.Options.OptionsMonitorStationClockProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IStationDefaultEnvelopeSource` | `GenWave.Host.Options.OptionsMonitorStationDefaultEnvelopeSource` | Singleton | — |
-| `GenWave.Core.Abstractions.IStationEventSink` | `GenWave.Host.Playout.CompositeStationEventSink` | Singleton | also registered: `GenWave.Core.Events.NoOpStationEventSink` (GenWave.Abstractions) |
+| `GenWave.Core.Abstractions.IStationEventSink` | `GenWave.Host.Playout.CompositeStationEventSink` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpStationEventSink` (GenWave.Abstractions) |
 | `GenWave.Core.Abstractions.IStationIdentityProvider` | `GenWave.Host.Options.OptionsMonitorStationIdentityProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IStationImagingSettingsProvider` | `GenWave.Host.Options.OptionsMonitorStationImagingProvider` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpStationImagingSettingsProvider` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IStationLocationProvider` | `GenWave.Host.Options.OptionsMonitorStationLocationProvider` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpStationLocationProvider` (GenWave.Core) |
