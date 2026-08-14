@@ -42,12 +42,6 @@ internal static class ExemptionBaseline
             "Pre-existing (STORY-042); not trivial to fix in this diff — follow-up gh-#406."),
         new ArchitectureExemption(
             LawId.L2,
-            "GenWave.Host.Configuration.StationSettingsStore",
-            "2026-08-07",
-            "Reads/writes station.settings directly via NpgsqlConnection (the write side of the " +
-            "settings overlay). Pre-existing (STORY-042); not trivial to fix in this diff — follow-up gh-#406."),
-        new ArchitectureExemption(
-            LawId.L2,
             "GenWave.Host.Seeding.SafeLoopSeedMarkerStore",
             "2026-08-07",
             "Reads/writes the boot-seed marker directly via NpgsqlConnection on the station.settings " +
