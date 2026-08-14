@@ -13,7 +13,7 @@
 
 import { describe, it, expect, jest, afterEach } from "@jest/globals";
 import { render, screen, cleanup } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { StatusTiles } from "../app/(authed)/dashboard/StatusTiles";
 import type { StatusResponse } from "@/lib/broadcast-api";
 
