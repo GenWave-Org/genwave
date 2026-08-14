@@ -122,8 +122,9 @@ dotnet test GenWave.sln
 # §0 on-air acceptance gate (live engine required):
 ./tools/onair_gate.sh
 
-# Admin UI (from admin-ui/): type-check, unit tests, production build — what CI runs:
-npx tsc --noEmit && npm test && npm run build
+# Admin UI (from admin-ui/): type-check (app, then the spec suite's own project), unit tests,
+# production build — what CI runs:
+npx tsc --noEmit && npm run typecheck:specs && npm test && npm run build
 ```
 
 Seven test projects: `Core.Tests`, `Context.Tests`, `Host.Tests`, `MediaLibrary.Tests`, `Orchestration.Tests`, `Tts.Tests`, and `Architecture.Tests` — the last enforces the architecture laws (dependency direction, Postgres/HttpClient confinement, contract immutability, the Host graduation tripwire) as ordinary red-green tests; the laws themselves are summarized front-and-center in [CONTRIBUTING.md](CONTRIBUTING.md). The full suite plus the on-air gate are required before anything merges to `main`.
