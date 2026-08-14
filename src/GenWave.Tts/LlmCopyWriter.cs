@@ -710,7 +710,7 @@ public sealed class LlmCopyWriter(
     /// out timeout, so duplicating this small a classification is simpler than threading a shared
     /// helper through two call sites with different needs.
     /// </summary>
-    static (LlmCallOutcome Outcome, string Detail) ClassifyForRing(Exception ex) => ex switch
+    internal static (LlmCallOutcome Outcome, string Detail) ClassifyForRing(Exception ex) => ex switch
     {
         OperationCanceledException => (LlmCallOutcome.Timeout, "Llm:TimeoutSeconds exceeded"),
         HttpRequestException { StatusCode: { } status } => (LlmCallOutcome.Failed, $"HTTP {(int)status}"),
@@ -723,9 +723,13 @@ public sealed class LlmCopyWriter(
     /// <see cref="MinGenerationTokenCap"/>, and <see cref="MaxGenerationTokenCap"/> for why the
     /// divisor, floor, and ceiling are what they are. Applied identically to the on-air path and
     /// the preview path, since both funnel through <see cref="RequestCleanedCompletionAsync"/>'s single
-    /// request-builder.
+    /// request-builder. Internal (PLAN T282, SPEC F127.3: "the F123.1 derived generation cap applies
+    /// to the whole script") — <see cref="CrosstalkScriptWriter"/> derives its own completion's
+    /// <c>max_tokens</c> through this exact formula rather than a second, independently-tuned one;
+    /// the one-knob discipline (a single <c>Llm:MaxCopyChars</c>) extends to banter with zero new
+    /// generation-cap machinery.
     /// </summary>
-    static int DeriveMaxTokens(int maxCopyChars) =>
+    internal static int DeriveMaxTokens(int maxCopyChars) =>
         Math.Clamp(maxCopyChars / CharsPerTokenDivisor, MinGenerationTokenCap, MaxGenerationTokenCap);
 
     /// <summary>
@@ -745,17 +749,18 @@ public sealed class LlmCopyWriter(
     };
 
     /// <summary>
-    /// Copy hygiene (SPEC F34.5) plus the F123.2 sentence-boundary salvage (STORY-319, PLAN T263):
-    /// trims, unwraps one layer of wrapping quotes, collapses newlines to spaces, and strips stage
-    /// directions and markdown emphasis markers. A result that still exceeds <paramref name="maxChars"/>
-    /// after that hygiene is no longer an automatic reject — it is cut at the LAST complete sentence
-    /// that fits under the cap (see <see cref="TrimToLastCompleteSentence"/>), never mid-sentence,
-    /// and never at an abbreviation's own period (see that method's own remarks).
-    /// <see cref="LlmCopyCleanupResult.Rejected"/> is reserved for the cases nothing salvages:
-    /// hygiene left an empty string, or nothing complete under the cap survives that filter — no
-    /// candidate at all, or every candidate under the cap was an abbreviation/lone-initial period.
+    /// The hygiene pass every LLM-authored line in this project runs through (SPEC F34.5): trims,
+    /// strips a chat preamble, unwraps one layer of wrapping quotes, collapses newlines to spaces,
+    /// and strips stage directions and markdown emphasis markers. Deliberately excludes the F123.2
+    /// sentence-boundary SALVAGE below — that is a length-policy decision <see cref="CleanCopy"/>
+    /// layers on top for the ordinary on-air/preview path, and <see cref="CrosstalkScriptWriter"/>'s
+    /// own per-line validation (SPEC F127.4: cleared, never trimmed) needs the SAME text transform
+    /// with a completely different length policy (reject the whole exchange, never cut a line).
+    /// Internal (PLAN T282 extraction) — a small shared helper rather than a second hand-maintained
+    /// copy of these five steps, with zero change to <see cref="CleanCopy"/>'s own byte-for-byte
+    /// output (a pure extract-method refactor).
     /// </summary>
-    static LlmCopyCleanupResult CleanCopy(string raw, int maxChars)
+    internal static string ApplyCopyHygiene(string raw)
     {
         var text = StripChatPreamble(raw.Trim());   // gh-#186 — must run BEFORE quote unwrapping
         text = StripWrappingQuotes(text);
@@ -763,7 +768,22 @@ public sealed class LlmCopyWriter(
         text = BracketStageDirectionPattern.Replace(text, string.Empty);
         text = AsteriskStageDirectionPattern.Replace(text, string.Empty);
         text = MarkdownEmphasisPattern.Replace(text, string.Empty);
-        text = RepeatedWhitespacePattern.Replace(text, " ").Trim();
+        return RepeatedWhitespacePattern.Replace(text, " ").Trim();
+    }
+
+    /// <summary>
+    /// Copy hygiene (<see cref="ApplyCopyHygiene"/>, SPEC F34.5) plus the F123.2 sentence-boundary
+    /// salvage (STORY-319, PLAN T263): a result that still exceeds <paramref name="maxChars"/> after
+    /// hygiene is no longer an automatic reject — it is cut at the LAST complete sentence that fits
+    /// under the cap (see <see cref="TrimToLastCompleteSentence"/>), never mid-sentence, and never at
+    /// an abbreviation's own period (see that method's own remarks).
+    /// <see cref="LlmCopyCleanupResult.Rejected"/> is reserved for the cases nothing salvages:
+    /// hygiene left an empty string, or nothing complete under the cap survives that filter — no
+    /// candidate at all, or every candidate under the cap was an abbreviation/lone-initial period.
+    /// </summary>
+    static LlmCopyCleanupResult CleanCopy(string raw, int maxChars)
+    {
+        var text = ApplyCopyHygiene(raw);
 
         if (text.Length == 0)
             return new LlmCopyCleanupResult.Rejected();

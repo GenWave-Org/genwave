@@ -41,4 +41,17 @@ public enum LlmCallOutcome
     /// segment still airs the trimmed copy (see <see cref="LlmCopyWriter.CleanCopy"/>'s own remarks).
     /// </summary>
     Trimmed,
+
+    /// <summary>
+    /// The completions endpoint returned 2xx, but the reply failed CONTENT validation — a
+    /// <see cref="CrosstalkScriptWriter"/>-only outcome (SPEC F127.4, PLAN T282): the script didn't
+    /// parse (wrong line count, an unrecognized speaker tag, broken alternation), a line failed
+    /// hygiene or its per-line budget, or the estimated spoken duration exceeded the configured
+    /// target. Split out from <see cref="Failed"/> the same way <see cref="Trimmed"/> split out from
+    /// <see cref="Ok"/> above — a validation reject is a content-quality decision this project made
+    /// on a genuinely successful HTTP call, never a transport/endpoint fault. Unlike
+    /// <see cref="Trimmed"/>, there is no salvage here: F127.4 is skip-only, no trim, no template
+    /// rung — <see cref="LlmCallRecord.StatusDetail"/> carries the discard reason.
+    /// </summary>
+    Rejected,
 }
