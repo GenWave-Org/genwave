@@ -8,7 +8,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { render, screen, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { PersonasClient } from "../app/(authed)/personas/PersonasClient";
@@ -29,6 +29,7 @@ const REX: PersonaDto = {
   backstory: "A grizzled late-night jock who has seen every format come and go.",
   style: "Warm, gravelly, brief.",
   voice: "af_alloy",
+  slug: "radio-rex",
   importedFrom: null,
   importedAt: null,
   soul: "",
@@ -42,6 +43,7 @@ const NOVA: PersonaDto = {
   backstory: "An upbeat morning host.",
   style: "Bright and quick.",
   voice: "",
+  slug: "nova",
   importedFrom: null,
   importedAt: null,
   soul: "",
@@ -55,6 +57,7 @@ const PROFESSOR: PersonaDto = {
   backstory: "Dry wit, deep crates.",
   style: "Deadpan.",
   voice: "",
+  slug: "the-professor",
   importedFrom: null,
   importedAt: null,
   soul: "",

@@ -18,7 +18,7 @@
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, fireEvent, within, act } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { LiveView } from "../app/(authed)/live/LiveView";
 import { Toaster } from "@/components/ui/toast";
 

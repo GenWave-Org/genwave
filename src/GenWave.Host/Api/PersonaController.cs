@@ -116,9 +116,10 @@ public sealed partial class PersonaController(
 
     /// <summary>
     /// DELETE /api/personas/{id} — remove a persona. 204 on success; 404 for an unknown id; 409,
-    /// naming every offending day/time slot, when the persona still appears in the format-clock
-    /// schedule (SPEC F91.9 — supersedes F35.5's retired delete-clears-active write:
-    /// <c>Station:Persona:ActiveId</c> no longer exists for a delete to clear).
+    /// naming every offending day/time slot AND every offending dated special, when the persona still
+    /// appears in the format-clock schedule or a dated special (SPEC F91.9, F120.1 — supersedes
+    /// F35.5's retired delete-clears-active write: <c>Station:Persona:ActiveId</c> no longer exists
+    /// for a delete to clear).
     ///
     /// <para>
     /// PLAN T121: <see cref="IPersonaStore.DeleteAsync"/> queries <c>station.segment_schedule</c>
@@ -127,21 +128,22 @@ public sealed partial class PersonaController(
     /// RESTRICT is only the store's race backstop now, never the primary signal (house precedent: the
     /// store, never this controller, is where a raw Postgres SQLSTATE becomes a
     /// <see cref="PersonaWriteResult"/> case; mirrors <see cref="PersonaWriteResult.NameConflict"/>'s
-    /// own unique_violation mapping). This action's only job for that case is formatting those slots
-    /// into the 409 <c>Detail</c> an operator can read at a glance.
+    /// own unique_violation mapping).
     /// </para>
     ///
     /// <para>
-    /// PLAN T259 REVIEW FOLLOW-UP: <see cref="IPersonaStore.DeleteAsync"/>'s own pre-query only reaches
-    /// <c>station.segment_schedule</c> — a persona referenced ONLY by a dated special
-    /// (<c>station.schedule_special.persona_id</c>, db/36's own identical <c>ON DELETE RESTRICT</c>)
-    /// still hits the FK race-backstop path and lands here with an EMPTY <c>Slots</c>, since the
-    /// backstop's own re-query never looks at that table either. <see cref="ScheduledPersonaProblem"/>'s
-    /// fallback wording is widened to name that possibility honestly rather than blaming the
-    /// format-clock schedule alone; naming the actual referencing special (mirroring
-    /// <c>ShowsController.Delete</c>'s own PLAN T259 extension) is left as the documented follow-up —
-    /// see <see cref="SpecialsController"/>'s own class remarks for why that guard extension is not
-    /// "cheap" the way the show side was.
+    /// gh-#462 (mirrors <c>ShowsController.Delete</c>'s own PLAN T259 extension): the same pre-query
+    /// now ALSO reaches <c>station.schedule_special</c>, so a persona referenced ONLY by a dated
+    /// special (<c>station.schedule_special.persona_id</c>, db/36's own identical
+    /// <c>ON DELETE RESTRICT</c>) arrives here with a populated
+    /// <see cref="PersonaWriteResult.ScheduledElsewhere.Specials"/> instead of the old
+    /// empty-<c>Slots</c>-and-no-detail case. This action's only job for the
+    /// <c>ScheduledElsewhere</c> case is formatting BOTH lists into the 409 <c>Detail</c> an operator
+    /// can read at a glance — weekly slots via <see cref="ScheduledSlotText.FormatSlot"/>, dated
+    /// specials via <see cref="ScheduledSlotText.FormatSpecial(ScheduledSpecialSlot)"/>.
+    /// <see cref="ScheduledPersonaProblem"/>'s generic fallback wording now survives only for the
+    /// genuinely-empty race case — both lists still empty after the backstop's own re-query of both
+    /// tables — see that method's own remarks.
     /// </para>
     /// </summary>
     [HttpDelete("{id:long}")]
@@ -153,13 +155,15 @@ public sealed partial class PersonaController(
             logger.LogInformation("Persona deleted id={PersonaId}", id);
         else if (result is PersonaWriteResult.ScheduledElsewhere scheduled)
             logger.LogWarning(
-                "Persona delete blocked: id={PersonaId} slotCount={SlotCount}", id, scheduled.Slots.Count);
+                "Persona delete blocked: id={PersonaId} slotCount={SlotCount} specialCount={SpecialCount}",
+                id, scheduled.Slots.Count, scheduled.Specials.Count);
 
         return result switch
         {
             PersonaWriteResult.Deleted => NoContent(),
             PersonaWriteResult.NotFound => NotFound(NotFoundProblem(id)),
-            PersonaWriteResult.ScheduledElsewhere scheduled => Conflict(ScheduledPersonaProblem(id, scheduled.Slots)),
+            PersonaWriteResult.ScheduledElsewhere scheduled =>
+                Conflict(ScheduledPersonaProblem(id, scheduled.Slots, scheduled.Specials)),
             _ => StatusCode(StatusCodes.Status500InternalServerError),
         };
     }
@@ -701,26 +705,32 @@ public sealed partial class PersonaController(
     };
 
     /// <summary>
-    /// SPEC F91.9 (PLAN T121) — names every slot blocking the delete, formatted for an operator to
-    /// read at a glance: <c>"Mon 09:00–12:00, Tue 14:00–16:00"</c>. <paramref name="slots"/> is empty
-    /// only on the store's race-backstop path (a slot re-queried after the FK fired, but no longer
-    /// found) — the detail falls back to the T120 scaffolding's generic wording for that one case,
-    /// since there is nothing left to name.
+    /// SPEC F91.9, F120.1 (PLAN T121, gh-#462) — names every slot AND every dated special blocking
+    /// the delete, formatted for an operator to read at a glance:
+    /// <c>"Mon 09:00–12:00, 2026-08-20 09:00–12:00"</c> — weekly slots first (in their own
+    /// day-then-start-minute order), dated specials after (in their own date-then-start-minute
+    /// order), mirroring <c>ShowsController.ReferencedProblem</c>'s own slots-then-specials
+    /// concatenation. Both <paramref name="slots"/> and <paramref name="specials"/> are empty only on
+    /// the store's race-backstop path (both tables re-queried after one of their FKs fired, but
+    /// neither found anything left) — the detail falls back to the T120 scaffolding's original generic
+    /// wording for that one genuinely-empty case, since there is nothing left to name.
     /// </summary>
-    // PLAN T259 review finding 1: the fallback (empty-slots) branch fires for BOTH the pre-existing
-    // race (the FK fired, the re-query found nothing — station.segment_schedule changed between the
-    // pre-query and the delete) AND, since db/36 gave station.schedule_special.persona_id the
-    // identical ON DELETE RESTRICT FK, a persona referenced ONLY by a dated special (this action's
-    // own remarks above have the full story). Naming "or a dated special" here is the honest minimum
-    // fix — it does not identify WHICH special, just that one might be why.
-    static ProblemDetails ScheduledPersonaProblem(long id, IReadOnlyList<ScheduledSlot> slots) => new()
+    static ProblemDetails ScheduledPersonaProblem(
+        long id, IReadOnlyList<ScheduledSlot> slots, IReadOnlyList<ScheduledSpecialSlot> specials)
     {
-        Status = StatusCodes.Status409Conflict,
-        Title  = "Persona is scheduled.",
-        Detail = slots.Count > 0
-            ? $"Persona {id} is still scheduled and cannot be deleted: {string.Join(", ", slots.Select(ScheduledSlotText.FormatSlot))}."
-            : $"Persona {id} still appears in the format-clock schedule or a dated special and cannot be deleted while scheduled.",
-    };
+        var references = slots.Select(ScheduledSlotText.FormatSlot)
+            .Concat(specials.Select(ScheduledSlotText.FormatSpecial))
+            .ToList();
+
+        return new ProblemDetails
+        {
+            Status = StatusCodes.Status409Conflict,
+            Title  = "Persona is scheduled.",
+            Detail = references.Count > 0
+                ? $"Persona {id} is still scheduled and cannot be deleted: {string.Join(", ", references)}."
+                : $"Persona {id} still appears in the format-clock schedule or a dated special and cannot be deleted while scheduled.",
+        };
+    }
 
     static ProblemDetails UnknownSlugProblem(string slug) => new()
     {

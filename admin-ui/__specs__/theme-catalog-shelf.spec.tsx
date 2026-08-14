@@ -15,13 +15,13 @@
 // T185 — un-pinned from the it.todo skeleton this file used to carry.
 
 jest.mock("next/navigation", () => ({
-  ...jest.requireActual("next/navigation"),
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
   useRouter: jest.fn(),
 }));
 
 import { describe, it, expect, jest, beforeAll, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { useRouter } from "next/navigation";
 import type { PersonaCatalogClient as PersonaCatalogClientComponent } from "../app/(authed)/persona-catalog/PersonaCatalogClient";
 import type { CatalogShelfEntryDto } from "../app/(authed)/persona-catalog/types";
@@ -49,6 +49,8 @@ const PERSONA_ENTRY: CatalogShelfEntryDto = {
   audience: "everyone",
   bestFor: ["late-night"],
   preview: null,
+  fontFamily: null,
+  fontByteTotal: null,
 };
 
 const THEME_ENTRY: CatalogShelfEntryDto = {
@@ -60,6 +62,8 @@ const THEME_ENTRY: CatalogShelfEntryDto = {
     light: { bg: "#f7ecd2", surface: "#fff8e6", ink: "#2c2410", accent: "#b8860b", "accent-2": "#4f6b52" },
     dark: { bg: "#171205", surface: "#241c09", ink: "#f4ecce", accent: "#e0a52c", "accent-2": "#7fa382" },
   },
+  fontFamily: null,
+  fontByteTotal: null,
 };
 
 const THEME_ENTRY_WITHOUT_PREVIEW: CatalogShelfEntryDto = {
@@ -68,6 +72,8 @@ const THEME_ENTRY_WITHOUT_PREVIEW: CatalogShelfEntryDto = {
   audience: "everyone",
   bestFor: [],
   preview: null,
+  fontFamily: null,
+  fontByteTotal: null,
 };
 
 // F3 review finding: `preview` is typed `CatalogThemePreview | null`, but that type only holds

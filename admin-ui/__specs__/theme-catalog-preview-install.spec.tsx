@@ -18,13 +18,13 @@
 // crash or mutate anything.
 
 jest.mock("next/navigation", () => ({
-  ...jest.requireActual("next/navigation"),
+  ...jest.requireActual<typeof import("next/navigation")>("next/navigation"),
   useRouter: jest.fn(),
 }));
 
 import { describe, it, expect, jest, beforeAll, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { useRouter } from "next/navigation";
 import { Toaster } from "@/components/ui/toast";
 import type { PersonaCatalogClient as PersonaCatalogClientComponent } from "../app/(authed)/persona-catalog/PersonaCatalogClient";
@@ -83,6 +83,8 @@ const THEME_ENTRY: CatalogShelfEntryDto = {
   audience: "everyone",
   bestFor: [],
   preview: null,
+  fontFamily: null,
+  fontByteTotal: null,
 };
 
 const THEME_DETAIL: CatalogEntryDetailDto = {
@@ -95,6 +97,13 @@ const THEME_DETAIL: CatalogEntryDetailDto = {
   author: null,
   description: null,
   samplePatter: [],
+  fontFamily: null,
+  fontByteTotal: null,
+  fontSpecimenFile: null,
+  fontLicense: null,
+  fontVersion: null,
+  fontSubset: null,
+  suggestedPersona: null,
 };
 
 const ENTRY_URL = "/api/catalog/entries/golden-frequency";

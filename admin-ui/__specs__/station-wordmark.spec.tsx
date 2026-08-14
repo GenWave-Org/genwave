@@ -34,7 +34,7 @@ jest.mock("@/app/login/actions", () => ({
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, fireEvent } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { ReactNode } from "react";
 import type { cookies } from "next/headers";
 import type { usePathname } from "next/navigation";

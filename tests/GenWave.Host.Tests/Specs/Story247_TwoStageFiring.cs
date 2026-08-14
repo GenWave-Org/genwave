@@ -317,7 +317,7 @@ public static class FeatureTwoStageFiring
             var client = await PersonaDeleteWebFactory.LoggedInClientAsync(factory);
             var created = await CreateAsync(client, "Scheduled DJ");
             store.DeleteOverride = new PersonaWriteResult.ScheduledElsewhere(
-                [new ScheduledSlot(DayOfWeek.Monday, 540, 720), new ScheduledSlot(DayOfWeek.Tuesday, 840, 960)]);
+                [new ScheduledSlot(DayOfWeek.Monday, 540, 720), new ScheduledSlot(DayOfWeek.Tuesday, 840, 960)], []);
 
             var response = await client.DeleteAsync($"/api/personas/{created.Id}");
 
@@ -335,7 +335,7 @@ public static class FeatureTwoStageFiring
             await using var factory = new PersonaDeleteWebFactory(store);
             var client = await PersonaDeleteWebFactory.LoggedInClientAsync(factory);
             var created = await CreateAsync(client, "Scheduled DJ Two");
-            store.DeleteOverride = new PersonaWriteResult.ScheduledElsewhere([new ScheduledSlot(DayOfWeek.Wednesday, 0, 1440)]);
+            store.DeleteOverride = new PersonaWriteResult.ScheduledElsewhere([new ScheduledSlot(DayOfWeek.Wednesday, 0, 1440)], []);
 
             var response = await client.DeleteAsync($"/api/personas/{created.Id}");
             Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);

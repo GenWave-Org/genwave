@@ -45,7 +45,7 @@ function treeContains(node: ReactNode, text: string): boolean {
 // ---------------------------------------------------------------------------
 
 jest.mock("next/headers", () => ({
-  cookies: jest.fn().mockResolvedValue({
+  cookies: jest.fn<() => Promise<{ toString: () => string }>>().mockResolvedValue({
     toString: () => "session=test-cookie",
   }),
 }));

@@ -51,20 +51,20 @@ namespace GenWave.Host.Api;
 /// </para>
 ///
 /// <para>
-/// <b>The Shows delete guard names a referencing special; the Persona one still doesn't (PLAN T259
-/// review — why that isn't "cheap").</b> <c>ShowsController.Delete</c> re-queries
-/// <see cref="IScheduleSpecialStore.ListUpcomingAsync"/> and filters by show id to NAME a referencing
-/// special in its 409 — cheap, because <c>ScheduleSpecial.ShowId</c> is already the exact shape
-/// <c>ScheduledSlot</c> (the weekly-block guard's own payload type) can't carry anyway, so there was
-/// no existing type to reconcile. <c>PersonaController.Delete</c>'s guard is different: it would need
-/// to represent a DATE, not just a day-of-week/minute span, and <c>PersonaWriteResult.ScheduledElsewhere</c>
-/// carries a plain <c>IReadOnlyList&lt;ScheduledSlot&gt;</c> that has no field for one — widening it
-/// (or adding a sibling case) is a <see cref="Core.Domain.PersonaWriteResult"/> shape change that
-/// ripples into <c>PersonaRepository</c> and every existing <c>PersonaWriteResult.ScheduledElsewhere</c>
-/// consumer/test, not a same-shaped filter this controller's own store can already answer. That
-/// widening is deliberately out of scope here too — a follow-up beyond PLAN T260 (the resolver-wiring
-/// task, now landed) — rather than landing in this controller; <c>PersonaController.Delete</c>'s own
-/// remarks carry the interim, honest fallback-wording fix in the meantime.
+/// <b>The Shows delete guard names a referencing special; so does the Persona one now (gh-#462).</b>
+/// <c>ShowsController.Delete</c> re-queries <see cref="IScheduleSpecialStore.ListUpcomingAsync"/> and
+/// filters by show id to NAME a referencing special in its 409 — cheap, because
+/// <c>ScheduleSpecial.ShowId</c> is already the exact shape <c>ScheduledSlot</c> (the weekly-block
+/// guard's own payload type) can't carry anyway, so there was no existing type to reconcile.
+/// <c>PersonaController.Delete</c>'s guard took a different route, once it landed (gh-#462): it needed
+/// to represent a DATE, not just a day-of-week/minute span, so <c>PersonaWriteResult.ScheduledElsewhere</c>
+/// grew a second payload, <c>Specials</c> — a narrow <see cref="Core.Domain.ScheduledSpecialSlot"/>
+/// projection (<see cref="Core.Domain.ScheduledSlot"/>'s own sibling), never this store's full
+/// <see cref="Core.Domain.ScheduleSpecial"/> row — populated by <c>PersonaRepository.DeleteAsync</c>'s
+/// own direct pre-query of <c>station.schedule_special</c> (never through
+/// <see cref="IScheduleSpecialStore"/> at all, unlike the Shows guard above), since that store's
+/// <see cref="IScheduleSpecialStore.ListUpcomingAsync"/> is scoped to upcoming rows only and this guard
+/// needs every blocking row regardless of date.
 /// </para>
 ///
 /// Security: <c>AdminSurface</c>/<c>Settings</c> — the same admin-plane pairing every other

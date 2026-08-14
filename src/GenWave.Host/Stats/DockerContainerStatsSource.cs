@@ -3,7 +3,6 @@ namespace GenWave.Host.Stats;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using GenWave.Host.Api;
 using GenWave.Host.Options;
 
 /// <summary>

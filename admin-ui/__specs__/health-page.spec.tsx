@@ -11,7 +11,7 @@
 
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { render, screen, within, act } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { HealthView, stateChip, formatBytes } from "../app/(authed)/health/HealthView";
 import type { ContainerStat, ContainerStatsReport } from "@/lib/container-stats-api";
 
