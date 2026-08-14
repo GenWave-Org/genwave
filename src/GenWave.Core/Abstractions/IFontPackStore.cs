@@ -27,8 +27,16 @@ public interface IFontPackStore
     /// never left orphaned from a stale install. <c>imported_at</c> is always the write's own
     /// <c>now()</c>, mirroring <see cref="IThemeStore.UpsertAsync"/>'s own "a re-import refreshes the
     /// stamp" rule.
+    ///
+    /// <para>
+    /// Returns <see cref="FontPackUpsertResult.FileCollision"/> (gh-#406 slice 2) rather than letting a
+    /// storage-layer unique-violation escape — <c>station.font_pack_face.file</c> is UNIQUE across
+    /// every installed pack, not scoped per-pack, so a cross-pack filename clash is a real, if rare,
+    /// possibility every caller must handle, never a surprise exception from a seam whose whole point
+    /// is hiding the storage technology behind it.
+    /// </para>
     /// </summary>
-    Task UpsertAsync(
+    Task<FontPackUpsertResult> UpsertAsync(
         string slug, string family, string definition, string importedFrom,
         IReadOnlyList<FontPackFaceInput> faces, CancellationToken ct);
 

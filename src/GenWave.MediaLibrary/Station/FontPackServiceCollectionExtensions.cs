@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using GenWave.Core.Abstractions;
 using Npgsql;
 
@@ -27,9 +28,15 @@ public static class FontPackServiceCollectionExtensions
     /// source build is wrapped in a <see cref="Lazy{T}"/> — mirrors
     /// <see cref="ThemeServiceCollectionExtensions.AddThemeStore"/>'s own remarks: merely resolving
     /// <see cref="IFontPackStore"/> must never be enough to trigger a connection attempt against an
-    /// empty/dev-mode connection string.
+    /// empty/dev-mode connection string. <see cref="FontPackRepository"/> is hand-constructed rather
+    /// than DI-activated (it needs this method's own <paramref name="connectionString"/>, not the
+    /// default <c>library_svc</c> one the container would otherwise inject), so its
+    /// <c>ILogger&lt;FontPackRepository&gt;</c> is pulled from the container explicitly too (gh-#406
+    /// slice 2 — that logger is the one place this repository logs anything, its own rare 23505
+    /// collision path).
     /// </summary>
     public static IServiceCollection AddFontPackStore(this IServiceCollection services, string connectionString) =>
-        services.AddSingleton<IFontPackStore>(
-            _ => new FontPackRepository(new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build())));
+        services.AddSingleton<IFontPackStore>(sp => new FontPackRepository(
+            new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build()),
+            sp.GetRequiredService<ILogger<FontPackRepository>>()));
 }

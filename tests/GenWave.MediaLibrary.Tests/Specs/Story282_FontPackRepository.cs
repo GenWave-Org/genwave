@@ -19,6 +19,7 @@ using System.Text.Json.Nodes;
 using Dapper;
 using GenWave.Core.Domain;
 using GenWave.MediaLibrary.Station;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 
 namespace GenWave.MediaLibrary.Tests.Specs;
@@ -29,7 +30,8 @@ public static class FeatureFontPackRepository
     // Helpers
     // ---------------------------------------------------------------------
 
-    static FontPackRepository Repo(DatabaseFixture db) => new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+    static FontPackRepository Repo(DatabaseFixture db) =>
+        new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource), NullLogger<FontPackRepository>.Instance);
 
     const string Definition = """{"slug":"space-grotesk","family":"Space Grotesk","licence":"OFL-1.1"}""";
 
@@ -173,15 +175,19 @@ public static class FeatureFontPackRepository
 
     // ---------------------------------------------------------------------
     // SAD PATH — a mid-upsert failure rolls back EVERYTHING ("abort-pinning", T198/T199 review
-    // obligation): station.font_pack_face.file is UNIQUE across every installed pack, not scoped
-    // per-pack, so installing a brand-new pack whose own face names an already-installed filename
-    // raises a REAL Postgres 23505 partway through UpsertAsync's single transaction — AFTER the new
-    // pack row itself has already been inserted. This proves that failure rolls back the WHOLE
-    // transaction, not just the failing insert: no trace of the new pack survives, not even the row
-    // that landed before the failing statement. (FontPackController's own 23505-to-409 HTTP mapping
-    // is proven separately, against a scripted throwing fake, in
-    // GenWave.Host.Tests/Specs/Story282_FontPackInstall.cs — this is the real-Postgres half of the
-    // same review obligation.)
+    // obligation; the 23505-to-FileCollision mapping itself is gh-#406 slice 2): station.font_pack_face.file
+    // is UNIQUE across every installed pack, not scoped per-pack, so installing a brand-new pack whose
+    // own face names an already-installed filename raises a REAL Postgres 23505 partway through
+    // UpsertAsync's single transaction — AFTER the new pack row itself has already been inserted.
+    // UpsertAsync's own catch maps that into a FontPackUpsertResult.FileCollision RETURN value rather
+    // than letting the exception escape this seam (L2 Postgres confinement — FontPackController no
+    // longer references Npgsql at all); this proves BOTH halves of that mapping against a real
+    // Postgres unique_violation: the transaction rolls back the WHOLE write (no trace of the new pack
+    // survives, not even the row that landed before the failing statement), and the returned case
+    // names the actual colliding file and its owning pack. (FontPackController's own
+    // FileCollision-to-409 HTTP mapping is proven separately, against a scripted FakeFontPackStore
+    // result, in GenWave.Host.Tests/Specs/Story282_FontPackInstall.cs — this is the real-Postgres half
+    // of the same review obligation.)
     // ---------------------------------------------------------------------
 
     [Collection(DatabaseCollection.Name)]
@@ -189,7 +195,7 @@ public static class FeatureFontPackRepository
     public sealed class ScenarioAMidUpsertFailureAborts(DatabaseFixture db)
     {
         [Fact]
-        public async Task ACrossPackFilenameCollisionLeavesNoTraceOfTheAbortedPack()
+        public async Task ACrossPackFilenameCollisionReturnsFileCollisionNamingTheFileAndOwningPack()
         {
             await db.ResetFontPackAsync();
             var repo = Repo(db);
@@ -205,10 +211,36 @@ public static class FeatureFontPackRepository
             // filename — UpsertAsync's own transaction inserts the new pack row FIRST, then hits the
             // real unique_violation partway through inserting its faces,
             var collidingBytes = "a different pack's own face payload, same filename"u8.ToArray();
-            await Assert.ThrowsAsync<PostgresException>(() => repo.UpsertAsync(
+            var result = await repo.UpsertAsync(
                 "pack-b", "Pack B", Definition, "pack-b-catalog-entry",
                 [new FontPackFaceInput("shared-latin.woff2", collidingBytes, Sha256Hex(collidingBytes))],
-                CancellationToken.None));
+                CancellationToken.None);
+
+            // Then the write is refused with a FileCollision naming the actual colliding file and its
+            // real owning pack ("pack-a") — never a raw PostgresException escaping this seam.
+            var collision = Assert.IsType<FontPackUpsertResult.FileCollision>(result);
+            Assert.Equal(("shared-latin.woff2", "pack-a"), (collision.File, collision.OwnerSlug));
+        }
+
+        [Fact]
+        public async Task ACrossPackFilenameCollisionLeavesNoTraceOfTheAbortedPack()
+        {
+            await db.ResetFontPackAsync();
+            var repo = Repo(db);
+
+            // Given the same already-installed "pack-a" collision setup as the Fact above,
+            var sharedBytes = "an already-installed pack's own face payload"u8.ToArray();
+            await repo.UpsertAsync(
+                "pack-a", "Pack A", Definition, "pack-a-catalog-entry",
+                [new FontPackFaceInput("shared-latin.woff2", sharedBytes, Sha256Hex(sharedBytes))],
+                CancellationToken.None);
+
+            // When installing a DIFFERENT, brand-new pack whose own face declares that SAME filename,
+            var collidingBytes = "a different pack's own face payload, same filename"u8.ToArray();
+            await repo.UpsertAsync(
+                "pack-b", "Pack B", Definition, "pack-b-catalog-entry",
+                [new FontPackFaceInput("shared-latin.woff2", collidingBytes, Sha256Hex(collidingBytes))],
+                CancellationToken.None);
 
             // Then the whole transaction rolled back — no "pack-b" row exists at all, not even the
             // pack row UpsertAsync had already inserted before the face insert failed.

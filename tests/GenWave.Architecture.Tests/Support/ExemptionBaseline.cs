@@ -52,12 +52,5 @@ internal static class ExemptionBaseline
             "2026-08-07",
             "Reads/writes the boot-seed marker directly via NpgsqlConnection on the station.settings " +
             "table (F27.10). Pre-existing; not trivial to fix in this diff — follow-up gh-#406."),
-        new ArchitectureExemption(
-            LawId.L2,
-            "GenWave.Host.Api.FontPackController",
-            "2026-08-07",
-            "Catches Npgsql.PostgresException directly to translate a unique_violation into a 409 " +
-            "(documented house idiom, no Npgsql.PostgresErrorCodes dependency). Pre-existing; not " +
-            "trivial to fix in this diff — follow-up gh-#406."),
     };
 }

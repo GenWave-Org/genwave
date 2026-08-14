@@ -19,6 +19,7 @@
 using Dapper;
 using GenWave.Core.Domain;
 using GenWave.MediaLibrary.Station;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 
 namespace GenWave.MediaLibrary.Tests.Specs;
@@ -29,7 +30,8 @@ public static class FeatureFontPackUninstall
     // Helpers
     // ---------------------------------------------------------------------
 
-    static FontPackRepository FontPacks(DatabaseFixture db) => new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+    static FontPackRepository FontPacks(DatabaseFixture db) =>
+        new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource), NullLogger<FontPackRepository>.Instance);
     static ThemeRepository Themes(DatabaseFixture db) => new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
 
     const string Definition = """{"slug":"space-grotesk","family":"Space Grotesk","licence":"OFL-1.1"}""";
