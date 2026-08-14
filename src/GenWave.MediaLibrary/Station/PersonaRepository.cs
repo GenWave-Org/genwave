@@ -196,25 +196,26 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
     }
 
     /// <summary>
-    /// Query-then-delete (SPEC F91.9, PLAN T121). Reads every <c>station.segment_schedule</c> row
-    /// still naming this persona BEFORE attempting the DELETE: a non-empty result short-circuits
-    /// straight to <see cref="PersonaWriteResult.ScheduledElsewhere"/> carrying those slots — an
-    /// honest, informative rejection instead of a round trip to the DELETE just to have the FK bounce
-    /// it (and the FK violation alone carries no slot detail to report). A benched persona (zero
-    /// schedule rows) falls through to the plain SQL DELETE (SPEC F35.4).
+    /// Query-then-delete (SPEC F91.9, PLAN T121; F120.1, gh-#462). Reads every
+    /// <c>station.segment_schedule</c> AND every <c>station.schedule_special</c> row still naming this
+    /// persona BEFORE attempting the DELETE: a non-empty result on either short-circuits straight to
+    /// <see cref="PersonaWriteResult.ScheduledElsewhere"/> carrying both lists — an honest, informative
+    /// rejection instead of a round trip to the DELETE just to have one of the two FKs bounce it (and a
+    /// bare FK violation carries no slot/special detail to report). A benched persona (zero rows in
+    /// either table) falls through to the plain SQL DELETE (SPEC F35.4).
     ///
     /// <para>
-    /// RACE BACKSTOP: the table's own <c>ON DELETE RESTRICT</c> (db/27) still fires as a
-    /// <c>foreign_key_violation</c> if a slot is painted between the query above and the DELETE below
-    /// — caught here exactly like <see cref="CreateAsync"/>/<see cref="UpdateAsync"/> already catch a
-    /// name collision (PLAN T120 review F4: this mapping lives in the store, never
+    /// RACE BACKSTOP: either table's own <c>ON DELETE RESTRICT</c> (db/27, db/36) still fires as a
+    /// <c>foreign_key_violation</c> if a slot or special is painted between the queries above and the
+    /// DELETE below — caught here exactly like <see cref="CreateAsync"/>/<see cref="UpdateAsync"/>
+    /// already catch a name collision (PLAN T120 review F4: this mapping lives in the store, never
     /// <c>PersonaController</c>, so the controller never imports Npgsql at all). That path re-queries
-    /// the schedule rather than trusting the pre-DELETE read, which is now stale by definition; the
-    /// smallest honest result is whatever THAT re-query finds — including empty, if the race closed
-    /// the other way (the painted slot was itself removed again before the re-query runs). An empty
-    /// <see cref="PersonaWriteResult.ScheduledElsewhere.Slots"/> here still means "rejected, try
-    /// again" — it is never treated as "actually fine to delete", since this branch is only ever
-    /// reached when the database itself just refused the DELETE.
+    /// BOTH tables rather than trusting the pre-DELETE reads, which are now stale by definition; the
+    /// smallest honest result is whatever THAT re-query finds — including both lists empty, if the
+    /// race closed the other way (the painted row was itself removed again before the re-query runs).
+    /// Both lists empty here still means "rejected, try again" — it is never treated as "actually fine
+    /// to delete", since this branch is only ever reached when the database itself just refused the
+    /// DELETE.
     /// </para>
     /// </summary>
     public async Task<PersonaWriteResult> DeleteAsync(long id, CancellationToken ct)
@@ -222,8 +223,9 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
 
         var slots = await QueryScheduledSlotsAsync(conn, id, ct);
-        if (slots.Count > 0)
-            return new PersonaWriteResult.ScheduledElsewhere(slots);
+        var specials = await QueryScheduledSpecialsAsync(conn, id, ct);
+        if (slots.Count > 0 || specials.Count > 0)
+            return new PersonaWriteResult.ScheduledElsewhere(slots, specials);
 
         try
         {
@@ -236,7 +238,8 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
         catch (PostgresException ex) when (ex.SqlState == ForeignKeyViolation)
         {
             var raceSlots = await QueryScheduledSlotsAsync(conn, id, ct);
-            return new PersonaWriteResult.ScheduledElsewhere(raceSlots);
+            var raceSpecials = await QueryScheduledSpecialsAsync(conn, id, ct);
+            return new PersonaWriteResult.ScheduledElsewhere(raceSlots, raceSpecials);
         }
     }
 
@@ -273,6 +276,47 @@ sealed class PersonaRepository(Lazy<NpgsqlDataSource> dataSource) : IPersonaStor
             cancellationToken: ct));
 
         return rows.Select(row => new ScheduledSlot((DayOfWeek)row.DayOfWeek, row.StartMinute, row.EndMinute)).ToList();
+    }
+
+    /// <summary>
+    /// Ephemeral Dapper projection for <see cref="QueryScheduledSpecialsAsync"/> (gh-#462) — the
+    /// <see cref="ScheduledSlotRow"/> sibling for <c>station.schedule_special</c>'s narrower own
+    /// <see cref="ScheduledSpecialSlot"/> shape: <c>on_date</c> is already the right CLR type
+    /// (<see cref="DateOnly"/>, via the process-wide <c>DateOnlyTypeHandler</c>
+    /// <c>MediaLibraryServiceCollectionExtensions.AddMediaLibrary</c> registers), so unlike
+    /// <see cref="ScheduledSlotRow"/>'s own <see cref="DayOfWeek"/>-as-<see cref="int"/> workaround
+    /// there is no column here that needs a cast on the way out.
+    /// </summary>
+    sealed record ScheduledSpecialRow
+    {
+        public DateOnly OnDate { get; init; }
+        public int StartMinute { get; init; }
+        public int EndMinute { get; init; }
+    }
+
+    /// <summary>
+    /// Every <c>station.schedule_special</c> row naming <paramref name="personaId"/> (gh-#462,
+    /// db/36's own <c>persona_id</c> FK — the identical <c>ON DELETE RESTRICT</c>
+    /// <see cref="QueryScheduledSlotsAsync"/>'s own <c>station.segment_schedule</c> read already
+    /// guards), ordered date-then-start-minute — the <see cref="QueryScheduledSlotsAsync"/> sibling's
+    /// own day-then-start-minute ordering, translated to a specific calendar date instead of a
+    /// repeating weekday — so a 409 body listing multiple specials reads in a natural, predictable
+    /// order.
+    /// </summary>
+    static async Task<IReadOnlyList<ScheduledSpecialSlot>> QueryScheduledSpecialsAsync(
+        NpgsqlConnection conn, long personaId, CancellationToken ct)
+    {
+        var rows = await conn.QueryAsync<ScheduledSpecialRow>(new CommandDefinition(
+            """
+            select on_date, start_minute, end_minute
+            from station.schedule_special
+            where persona_id = @personaId
+            order by on_date, start_minute
+            """,
+            new { personaId },
+            cancellationToken: ct));
+
+        return rows.Select(row => new ScheduledSpecialSlot(row.OnDate, row.StartMinute, row.EndMinute)).ToList();
     }
 
     /// <summary>

@@ -38,6 +38,20 @@ internal static class ScheduledSlotText
         $"{special.OnDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} " +
         $"{FormatMinutes(special.StartMinute)}–{FormatMinutes(special.EndMinute)}";
 
+    /// <summary>
+    /// <c>"2026-08-20 09:00–12:00"</c> — the <see cref="ScheduledSpecialSlot"/> overload (gh-#462):
+    /// <c>PersonaController.Delete</c>'s own guard pre-queries <c>station.schedule_special</c>
+    /// directly (<c>PersonaRepository.DeleteAsync</c>) rather than through
+    /// <c>IScheduleSpecialStore</c>, so it only ever has the narrow <see cref="ScheduledSpecialSlot"/>
+    /// projection on hand, never a full <see cref="ScheduleSpecial"/> row — this overload formats
+    /// that shape identically to <see cref="FormatSpecial(ScheduleSpecial)"/> (same ISO
+    /// <c>yyyy-MM-dd</c>, same invariant-culture posture, same rationale) rather than forcing a caller
+    /// to fabricate a full row's worth of nulls just to reuse the other overload.
+    /// </summary>
+    internal static string FormatSpecial(ScheduledSpecialSlot special) =>
+        $"{special.OnDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} " +
+        $"{FormatMinutes(special.StartMinute)}–{FormatMinutes(special.EndMinute)}";
+
     // Minutes-since-midnight as HH:mm — plain arithmetic, not TimeSpan's "hh" format specifier: a
     // 1440-minute end (midnight, the grid's own maximum) rolls into TimeSpan's Days component, which
     // "hh" ignores entirely, silently printing "00:00" for what is actually the end of the day.

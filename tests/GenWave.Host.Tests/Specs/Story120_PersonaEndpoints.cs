@@ -389,7 +389,7 @@ public static class FeaturePersonaEndpoints
             // Story247_TwoStageFiring.cs's own coverage (ScenarioScheduledPersonasAreUndeletable).
             var store = new FakePersonaStore
             {
-                DeleteResult = new PersonaWriteResult.ScheduledElsewhere([new ScheduledSlot(DayOfWeek.Monday, 540, 720)]),
+                DeleteResult = new PersonaWriteResult.ScheduledElsewhere([new ScheduledSlot(DayOfWeek.Monday, 540, 720)], []),
             };
             var controller = BuildController(store, new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
 
@@ -400,21 +400,60 @@ public static class FeaturePersonaEndpoints
         }
 
         [Fact]
-        public async Task DeletingAPersonaBlockedOnlyByASpecialNamesBothPossibilitiesInTheFallback()
+        public async Task DeletingAPersonaBlockedOnlyByASpecialNamesItInTheDetail()
         {
-            // PLAN T259 review finding 1: PersonaRepository's own pre-query only ever reaches
-            // station.segment_schedule (SPEC F91.9's T121 scaffolding predates specials) — a persona
-            // referenced ONLY by a dated special (station.schedule_special.persona_id, db/36's own
-            // identical ON DELETE RESTRICT) still trips the FK race-backstop path and lands here with
-            // EMPTY Slots, since that backstop's own re-query never looks at schedule_special either.
-            // Mirrors Story305_ShowsApi.cs's own DeleteWithEmptyReferencedBlocksStillRefusesWithAGenericDetail
-            // wording-pin precedent: this asserts the FALLBACK wording literally, not just the shape —
-            // it must name BOTH possibilities honestly rather than blaming the format-clock schedule
-            // alone (PersonaController.Delete's own remarks carry the full story; naming the actual
-            // referencing special is the documented follow-up, not this fact's claim).
+            // gh-#462: PersonaRepository's own pre-query now ALSO reaches station.schedule_special —
+            // a persona referenced ONLY by a dated special (station.schedule_special.persona_id,
+            // db/36's own identical ON DELETE RESTRICT) arrives here with a populated Specials list,
+            // not an empty Slots list and a generic fallback. This asserts the special itself is named
+            // in the 409 detail, the way ScheduledSlotText.FormatSpecial(ScheduledSpecialSlot) formats
+            // it — mirrors ShowsController's own referencing-special-naming precedent.
             var store = new FakePersonaStore
             {
-                DeleteResult = new PersonaWriteResult.ScheduledElsewhere([]),
+                DeleteResult = new PersonaWriteResult.ScheduledElsewhere(
+                    [], [new ScheduledSpecialSlot(new DateOnly(2026, 8, 20), 540, 720)]),
+            };
+            var controller = BuildController(store, new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
+
+            var result = await controller.Delete(5, CancellationToken.None);
+
+            var conflict = Assert.IsType<ConflictObjectResult>(result);
+            var problem = Assert.IsType<ProblemDetails>(conflict.Value);
+            Assert.Contains("2026-08-20 09:00–12:00", problem.Detail, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task DeletingAPersonaBlockedByBothASlotAndASpecialNamesBoth()
+        {
+            // gh-#462: a persona blocked by BOTH a weekly slot and a dated special names both in the
+            // same 409 detail — slots first, then specials, mirroring ShowsController.ReferencedProblem's
+            // own concatenation order.
+            var store = new FakePersonaStore
+            {
+                DeleteResult = new PersonaWriteResult.ScheduledElsewhere(
+                    [new ScheduledSlot(DayOfWeek.Monday, 540, 720)],
+                    [new ScheduledSpecialSlot(new DateOnly(2026, 8, 20), 540, 720)]),
+            };
+            var controller = BuildController(store, new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
+
+            var result = await controller.Delete(5, CancellationToken.None);
+
+            var conflict = Assert.IsType<ConflictObjectResult>(result);
+            var problem = Assert.IsType<ProblemDetails>(conflict.Value);
+            Assert.Contains("Mon 09:00–12:00", problem.Detail, StringComparison.Ordinal);
+            Assert.Contains("2026-08-20 09:00–12:00", problem.Detail, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task DeletingAPersonaWithBothListsEmptyFallsBackToTheGenericWording()
+        {
+            // The race-closed-empty case (SPEC F91.9's original T120 scaffolding wording): both the
+            // segment_schedule and schedule_special re-queries came back empty — the FK fired, but
+            // nothing is left to name — so the generic fallback survives ONLY here now, not for a
+            // special-only block (see DeletingAPersonaBlockedOnlyByASpecialNamesItInTheDetail above).
+            var store = new FakePersonaStore
+            {
+                DeleteResult = new PersonaWriteResult.ScheduledElsewhere([], []),
             };
             var controller = BuildController(store, new FakeOptionsMonitor<StationOptions>(BuildStationOptions()));
 
