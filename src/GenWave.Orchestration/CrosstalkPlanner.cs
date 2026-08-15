@@ -256,6 +256,19 @@ public sealed class CrosstalkPlanner(
     }
 
     /// <summary>
+    /// Whether <paramref name="showSlug"/>'s stock currently sits below <see cref="StockTargetPerShow"/>
+    /// (SPEC F127.7) — the ONE decision <c>CrosstalkStockWorker</c>'s (PLAN T286) Host timer shell
+    /// consults every tick to decide whether generation is worth attempting at all. Kept here rather
+    /// than at the call site so the "≤2 ready exchanges per show" invariant has exactly one place that
+    /// states the target (<see cref="StockTargetPerShow"/>) and one place that compares
+    /// <see cref="StockCount"/> against it for the "should I even try" question — <see cref="Stock"/>'s
+    /// own last-line refusal is the SEPARATE "may I actually add one" guard, checked again at the
+    /// moment a generated exchange is offered (a concurrent generation elsewhere in the same tick
+    /// window could have already filled the slot this read observed as empty).
+    /// </summary>
+    public bool NeedsStock(string showSlug) => StockCount(showSlug) < StockTargetPerShow;
+
+    /// <summary>
     /// Vends the next fresh exchange stocked for <paramref name="showSlug"/>, or
     /// <see langword="null"/> when none is available. Fail-closed on scope FIRST (PLAN T285 review
     /// F2): a show no longer named in <c>Crosstalk:Shows</c> never vends, even with exchanges still

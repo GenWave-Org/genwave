@@ -23,6 +23,11 @@ static class PlayoutServiceCollectionExtensions
             // NowPlayingService itself, so there is no DI cycle.
             .AddSingleton<DurationRehydrator>()
             .AddSingleton<NowPlayingService>()
+            // The on-air render in-flight signal (SPEC F127.7, PLAN T286 review F1) — set by
+            // PlayoutFeederService around its own feeder.RefillAsync call below, read by
+            // CrosstalkStockWorker (GenWave.Host.Crosstalk) so it never generates while a real
+            // on-air LLM+TTS render is running. See OnAirRenderGate's own remarks.
+            .AddSingleton<OnAirRenderGate>()
             .AddSingleton<PlayHistoryEventSink>()
             // The host's event-sink binding (gitea-#246): composes PlayHistoryEventSink
             // (TrackAired -> play history ring) and the booth log's BoothLogWriter
@@ -96,7 +101,8 @@ static class PlayoutServiceCollectionExtensions
                     sp.GetRequiredService<PlayoutFeeder>(),
                     identityProvider,
                     sp.GetRequiredService<ILogger<PlayoutFeederService>>(),
-                    sp.GetRequiredService<NowPlayingService>());
+                    sp.GetRequiredService<NowPlayingService>(),
+                    sp.GetRequiredService<OnAirRenderGate>());
             })
             // PlayoutSupervisor runs the single station's feeder, bound to the configured engine host.
             .AddHostedService<PlayoutSupervisor>();

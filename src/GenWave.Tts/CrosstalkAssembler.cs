@@ -96,6 +96,13 @@ public sealed class CrosstalkAssembler(
     /// from either.</summary>
     const string CrosstalkDirName = "crosstalk";
 
+    /// <summary>The crosstalk cache directory under <paramref name="options"/>'s own
+    /// <see cref="TtsOptions.CacheRoot"/> (the T284/T285-recorded rider for T286 — see <c>CrosstalkStockWorker</c>'s
+    /// startup purge) — the SAME path <see cref="AssembleAsync"/> itself writes into, composed the one
+    /// place that knows <see cref="CrosstalkDirName"/> so a purge (or any other future caller) can
+    /// never target the wrong directory even if that constant's own value ever changes.</summary>
+    public static string ResolveCacheDir(TtsOptions options) => Path.Combine(options.CacheRoot, CrosstalkDirName);
+
     /// <summary>Sample rate every per-line input is normalized to before <c>adelay</c>/<c>amix</c> —
     /// mirrors <c>FfmpegAudioMixer.BedProcessingSampleRate</c>'s own reasoning: a shared rate makes
     /// the mix deterministic regardless of what rate any one engine happens to render at.</summary>
@@ -117,7 +124,7 @@ public sealed class CrosstalkAssembler(
         }
 
         var cfg = ttsOptions.CurrentValue;
-        var outputDir = Path.Combine(cfg.CacheRoot, CrosstalkDirName);
+        var outputDir = ResolveCacheDir(cfg);
         Directory.CreateDirectory(outputDir);
         var outputPath = Path.Combine(outputDir, $"{Guid.NewGuid():N}.{cfg.Format}");
 

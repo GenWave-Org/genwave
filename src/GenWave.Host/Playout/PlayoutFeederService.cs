@@ -30,6 +30,7 @@ sealed class PlayoutFeederService : IHostedService
     readonly ILogger<PlayoutFeederService> log;
     readonly string stationId;
     readonly NowPlayingService? nowPlaying;
+    readonly OnAirRenderGate? onAirRenderGate;
 
     CancellationTokenSource? cts;
     Task? executeTask;
@@ -44,17 +45,24 @@ sealed class PlayoutFeederService : IHostedService
     /// <param name="nowPlaying">
     /// Optional now-playing sink. When provided, the snapshot is updated after every successful tick.
     /// </param>
+    /// <param name="onAirRenderGate">
+    /// Optional (PLAN T286 review F1) — bracketed around <see cref="PlayoutFeeder.RefillAsync"/>
+    /// below, marking the on-air LLM+TTS render window in flight so <c>CrosstalkStockWorker</c> never
+    /// competes with it for CPU (see <see cref="OnAirRenderGate"/>'s own remarks).
+    /// </param>
     public PlayoutFeederService(
         Station station,
         PlayoutFeeder feeder,
         IStationIdentityProvider identityProvider,
         ILogger<PlayoutFeederService> log,
-        NowPlayingService? nowPlaying = null)
+        NowPlayingService? nowPlaying = null,
+        OnAirRenderGate? onAirRenderGate = null)
     {
         this.feeder = feeder;
         this.identityProvider = identityProvider;
         this.log = log;
         this.nowPlaying = nowPlaying;
+        this.onAirRenderGate = onAirRenderGate;
         stationId = station.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
@@ -110,7 +118,15 @@ sealed class PlayoutFeederService : IHostedService
                 if (observed)
                 {
                     var refillStarted = Stopwatch.GetTimestamp();
-                    await feeder.RefillAsync(ct);
+                    onAirRenderGate?.Enter();
+                    try
+                    {
+                        await feeder.RefillAsync(ct);
+                    }
+                    finally
+                    {
+                        onAirRenderGate?.Exit();
+                    }
                     var refillElapsed = Stopwatch.GetElapsedTime(refillStarted);
                     if (refillElapsed >= SlowRefillLogThreshold)
                     {

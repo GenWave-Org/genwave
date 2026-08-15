@@ -206,6 +206,19 @@ public sealed class CachingScheduleResolver
         return current is null ? null : resolver.Resolve(current, specials);
     }
 
+    /// <summary>
+    /// Synchronous, in-memory read of the cached <see cref="ScheduleWeekSnapshot"/> ITSELF (PLAN
+    /// T286) — the sibling <see cref="TryGetCurrent"/> re-derives only an <see cref="OnAirSnapshot"/>
+    /// from (who/what is on right now). <c>CrosstalkStockWorker</c> needs the raw snapshot because
+    /// <c>CrosstalkPlanner.TryCastAsync</c> casts by walking the WHOLE grid's own cyclic adjacency
+    /// (the next block AND the previous block), which a single on-air answer cannot reconstruct. No
+    /// store round trip, and no staleness beyond what <see cref="TryGetCurrent"/>'s own remarks already
+    /// document for the identical cached reference (at most one unit stale in production).
+    /// <see langword="null"/> before the very first <see cref="ResolveAsync"/> call has completed, on
+    /// the same terms as <see cref="TryGetCurrent"/>.
+    /// </summary>
+    public ScheduleWeekSnapshot? TryGetCurrentWeekSnapshot() => snapshot;
+
     void OnWeekChanged() => dirty = true;
 
     void OnSpecialsChanged() => specialsDirty = true;

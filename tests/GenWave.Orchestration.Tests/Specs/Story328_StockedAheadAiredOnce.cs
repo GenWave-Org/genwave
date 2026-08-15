@@ -12,9 +12,14 @@
 // T285 (this file's own facts, below): CrosstalkPlanner's casting/retire/staleness/restart
 // behavior, plus the SPEC F127.8 eligibility gate (the "empty Shows = OFF" fail-closed rule) —
 // added beyond the original scaffold's 9 Pending-T285 facts because the mutation self-run this
-// task requires (the empty-Shows-means-OFF pin) needs a live fact to kill. The 2 Pending-T286
-// facts (stock-fill trigger, break-window fence) stay skipped — the Host stock-timer loop is a
-// LATER task.
+// task requires (the empty-Shows-means-OFF pin) needs a live fact to kill.
+//
+// T286 (this file's ScenarioTheStockFillsOffTheClock/ScenarioNeverInsideABreakWindow groups): the
+// two Pending-T286 facts are now live, pinning CrosstalkPlanner.NeedsStock (the "is this show below
+// target" decision) and CrosstalkBreakWindow.IsOpen (the "never inside a break window" gate) — the
+// two framework-free deciders CrosstalkStockWorker's Host timer shell (PLAN T286) consults every
+// tick. Siblings beyond the original 2 pin the mutation surface each decider's own comparison
+// actually needs (an off-by-one on '<'/'<=', an inverted null-check) — see each fact's own remarks.
 //
 // PLAN T285 review round 2 (F1/F2/F3/F6/F9, design note): adjacency is now CYCLIC (F1) — the
 // wraparound fact below is what a linear revert reds; "previous casts when no next" is re-pinned
@@ -122,18 +127,179 @@ public static class FeatureStockedAheadAiredOnce
 
     public static class ScenarioTheStockFillsOffTheClock
     {
-        [Fact(Skip = "Pending T286 — see docs/PLAN.md")]
+        [Fact]
         public static void A_show_below_its_stock_target_triggers_generation()
         {
-            // Target: ≤2 ready exchanges per enabled show.
-            Assert.Fail("pending T286");
+            // Given a show holding no stock at all — below StockTargetPerShow's floor of 2 (SPEC
+            // F127.7)
+            var planner = MakePlanner(new FakePersonaStore());
+
+            var needsStock = planner.NeedsStock("morning-drive");
+
+            // Then the stock-timer loop's own trigger reads true — generation is worth attempting
+            Assert.True(needsStock);
         }
 
-        [Fact(Skip = "Pending T286 — see docs/PLAN.md")]
-        public static void The_worker_never_generates_or_renders_inside_a_break_window()
+        [Fact]
+        public static void A_show_already_at_its_stock_target_does_not_trigger_generation()
         {
-            // Off the on-air clock, always — the render fence serves air first.
-            Assert.Fail("pending T286");
+            // Given a show already holding StockTargetPerShow (2) ready exchanges — the sibling of
+            // the fact above, closing the '<' vs '<=' mutant NeedsStock's own comparison could hide
+            var planner = MakePlanner(new FakePersonaStore());
+            planner.Stock(MakeStocked("morning-drive", new CrosstalkCast(10, 20), Path.GetTempFileName()));
+            planner.Stock(MakeStocked("morning-drive", new CrosstalkCast(10, 21), Path.GetTempFileName()));
+
+            var needsStock = planner.NeedsStock("morning-drive");
+
+            // Then the trigger reads false — nothing left to fill
+            Assert.False(needsStock);
+        }
+    }
+
+    public static class ScenarioNeverInsideABreakWindow
+    {
+        // RELOCATION NOTE (PLAN T286 review F2, honesty requirement): the original scaffold's
+        // `The_worker_never_generates_or_renders_inside_a_break_window` (Pending T286) named the
+        // WORKER's own end-to-end behavior — that CrosstalkStockWorker itself, not merely
+        // CrosstalkBreakWindow.IsOpen in isolation, never issues a script-writer/assembler call
+        // while a break window is open. Turning that placeholder live here would only ever re-prove
+        // the pure decider below, not the wiring between it and TickOnceAsync — so the facts below
+        // are the pure, framework-free half (no Host, no HTTP, no ollama) and the worker-behavior
+        // half now lives in GenWave.Host.Tests (Story328_CrosstalkStockWorker.cs,
+        // ScenarioTheWorkerNeverGeneratesInsideABreakWindow), which can actually drive the real
+        // CrosstalkScriptWriter/CrosstalkAssembler and assert zero outbound calls.
+
+        // A render-budget/started-at pairing that sits comfortably clear of the after-transition
+        // face (check 2) for every fact below that means to isolate the end-of-item margin face
+        // (check 3) instead — mirrors CrosstalkBreakWindow's own three-check remarks.
+        static readonly TimeSpan RenderBudget = TimeSpan.FromSeconds(30);
+        static readonly DateTimeOffset LongAgo =
+            new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero) - TimeSpan.FromHours(1);
+
+        [Fact]
+        public static void A_break_window_reads_open_within_the_safety_margin()
+        {
+            // Given the current on-air item's estimated end sits just inside CrosstalkBreakWindow's
+            // own safety margin — imminent, not yet arrived (isolating check 3: the item started
+            // long ago, clear of check 2's after-transition window, and nothing is mid-render)
+            var now = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+            var estimatedEndsAt = now + CrosstalkBreakWindow.Margin - TimeSpan.FromSeconds(1);
+
+            var isOpen = CrosstalkBreakWindow.IsOpen(now, estimatedEndsAt, LongAgo, RenderBudget, refillInFlight: false);
+
+            // Then the window reads open — the stock-timer must not start (or must abandon) work
+            Assert.True(isOpen);
+        }
+
+        [Fact]
+        public static void A_break_window_reads_open_exactly_at_the_safety_margin()
+        {
+            // Given the current on-air item's estimated end sits EXACTLY Margin away — the inclusive
+            // boundary (closes the '<=' vs '<' mutant the two comfortably-inside/outside facts above
+            // cannot: both sit strictly clear of the boundary by design, to avoid a flaky clock-math
+            // off-by-one)
+            var now = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+            var estimatedEndsAt = now + CrosstalkBreakWindow.Margin;
+
+            var isOpen = CrosstalkBreakWindow.IsOpen(now, estimatedEndsAt, LongAgo, RenderBudget, refillInFlight: false);
+
+            // Then the window still reads open — the margin itself is the last safe instant to start
+            Assert.True(isOpen);
+        }
+
+        [Fact]
+        public static void A_break_window_reads_closed_comfortably_before_the_margin()
+        {
+            // Given the current on-air item's estimated end sits well past the safety margin, AND
+            // it is comfortably clear of the after-transition window and no render is in flight
+            var now = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+            var estimatedEndsAt = now + CrosstalkBreakWindow.Margin + TimeSpan.FromMinutes(5);
+
+            var isOpen = CrosstalkBreakWindow.IsOpen(now, estimatedEndsAt, LongAgo, RenderBudget, refillInFlight: false);
+
+            // Then the window reads closed — off the on-air clock, generation may proceed. Paired
+            // with the fact above (an open/closed discrimination pair) so neither reads true/false
+            // vacuously regardless of the estimated end.
+            Assert.False(isOpen);
+        }
+
+        [Fact]
+        public static void An_unknown_estimated_end_reads_the_break_window_as_open()
+        {
+            // Given no estimated end at all (an engine-initiated/foreign on-air item, or no tick has
+            // published a snapshot yet) — SPEC F127.7's "never inside a break window" is a hard
+            // constraint, so an unknown state must never be read as permission to generate
+            var now = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+
+            var isOpen = CrosstalkBreakWindow.IsOpen(
+                now, estimatedOnAirEndsAt: null, LongAgo, RenderBudget, refillInFlight: false);
+
+            // Then the window reads open — fail-closed
+            Assert.True(isOpen);
+        }
+
+        // ── PLAN T286 review F1: the after-transition and refill-in-flight faces ───────────────
+
+        [Fact]
+        public static void A_break_window_reads_open_right_after_a_transition_even_with_a_distant_estimated_end()
+        {
+            // Given the on-air item just started (gh-#184: the fresh snapshot publishes, THEN
+            // RefillAsync fires — the render's hazard begins at the transition, not near the item's
+            // end) while its estimated end sits comfortably far away — the shape an end-only fence
+            // would wrongly read as closed (this is the F1 finding's own "fence guards the wrong 45
+            // seconds")
+            var now = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+            var onAirStartedAt = now - TimeSpan.FromSeconds(10);
+            var estimatedEndsAt = now + TimeSpan.FromMinutes(10);
+
+            var isOpen = CrosstalkBreakWindow.IsOpen(now, estimatedEndsAt, onAirStartedAt, RenderBudget, refillInFlight: false);
+
+            // Then the window reads open — the after-transition face blocks on its own
+            Assert.True(isOpen);
+        }
+
+        [Fact]
+        public static void An_unknown_on_air_start_reads_the_break_window_as_open()
+        {
+            // Given no on-air start at all (no snapshot published yet) — the after-transition face's
+            // own fail-closed twin to the "unknown estimated end" fact above
+            var now = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+
+            var isOpen = CrosstalkBreakWindow.IsOpen(
+                now, estimatedOnAirEndsAt: null, onAirStartedAt: null, RenderBudget, refillInFlight: false);
+
+            Assert.True(isOpen);
+        }
+
+        [Fact]
+        public static void A_refill_in_flight_blocks_even_mid_item()
+        {
+            // Given every OTHER face would read closed (comfortably clear of both the after-
+            // transition window and the end-of-item margin) — the real signal alone still blocks
+            var now = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+            var onAirStartedAt = LongAgo;
+            var estimatedEndsAt = now + TimeSpan.FromMinutes(10);
+
+            var isOpen = CrosstalkBreakWindow.IsOpen(now, estimatedEndsAt, onAirStartedAt, RenderBudget, refillInFlight: true);
+
+            Assert.True(isOpen);
+        }
+
+        [Fact]
+        public static void A_mid_item_quiet_stretch_permits_generation()
+        {
+            // Given the on-air item started long ago (clear of the after-transition window), its
+            // estimated end is far away (clear of the end-of-item margin), and no render is in
+            // flight — the positive control proving the two facts above are real gates, not a wire
+            // that always reads open regardless of timing/signal
+            var now = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+            var onAirStartedAt = LongAgo;
+            var estimatedEndsAt = now + TimeSpan.FromMinutes(10);
+
+            var isOpen = CrosstalkBreakWindow.IsOpen(now, estimatedEndsAt, onAirStartedAt, RenderBudget, refillInFlight: false);
+
+            // Then the window reads closed — generation may proceed
+            Assert.False(isOpen);
         }
     }
 

@@ -4,6 +4,7 @@ using GenWave.Host.Api;
 using GenWave.Host.Artwork;
 using GenWave.Host.Catalog;
 using GenWave.Host.Configuration;
+using GenWave.Host.Crosstalk;
 using GenWave.Host.Enrichment;
 using GenWave.Host.Health;
 using GenWave.Host.Options;
@@ -144,6 +145,12 @@ builder.Services
     .AddGenWaveContextHost(cfg)
     // Playout chain: engine control → feeder → feeder service → PlayoutSupervisor (hosted).
     .AddGenWavePlayout()
+    // Crosstalk stock-timer loop (SPEC F127.7, STORY-328, PLAN T286): the thin Host shell that
+    // wires CrosstalkPlanner (GenWave.Orchestration) to CrosstalkScriptWriter/CrosstalkAssembler
+    // (GenWave.Tts). MUST run after .AddGenWaveTts()/.AddGenWaveOrchestration() (both above) and
+    // .AddGenWavePlayout() (needs NowPlayingService, just registered) — see
+    // AddGenWaveCrosstalkHost's own remarks for the full ordering rationale.
+    .AddGenWaveCrosstalkHost()
     // Boot seed: branded safe-loop backstop (F27.6), one-shot + idempotent.
     .AddGenWaveSafeLoopSeed(cfg)
     // Boot migration: reconciles station.persona onto the F71.1 card schema and ensures the
