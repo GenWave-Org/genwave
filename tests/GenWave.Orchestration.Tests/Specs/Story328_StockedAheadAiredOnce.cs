@@ -338,6 +338,39 @@ public static class FeatureStockedAheadAiredOnce
             // Then the stock stays at the target — the refused exchange was never added
             Assert.Equal(CrosstalkPlanner.StockTargetPerShow, planner.StockCount("morning-drive"));
         }
+
+        [Fact]
+        public static void A_vend_between_two_stocks_admits_a_third_without_ever_exceeding_the_target()
+        {
+            // Given a show at its stock target (2), then a genuine vend that frees exactly one slot —
+            // T288 wire finding (gitea-#385 follow-up): this is the ONLY way a THIRD "Crosstalk
+            // exchange stocked" line can ever follow two others with zero discard lines between them.
+            // The vended exchange's own asset stays on disk, unconfirmed, until it actually airs — so
+            // three files can legitimately coexist even though the STOCK LIST itself never once holds
+            // more than StockTargetPerShow. This pins the invariant Stock() actually defends (the
+            // in-memory list), not the unrelated "total files ever on disk" reading that made the
+            // real T288 sequence look like an overrun.
+            var host = Segment(1, DayOfWeek.Monday, 480, 960, personaId: 10);
+            var next = Segment(2, DayOfWeek.Monday, 960, 1440, personaId: 20);
+            var snapshot = new ScheduleWeekSnapshot([host, next]);
+            var planner = MakePlanner(
+                new FakePersonaStore(), new FakeCrosstalkScopeProvider(enabledShows: ["morning-drive"]));
+            planner.Stock(MakeStocked("morning-drive", new CrosstalkCast(10, 20), Path.GetTempFileName()));
+            planner.Stock(MakeStocked("morning-drive", new CrosstalkCast(10, 20), Path.GetTempFileName()));
+            Assert.Equal(CrosstalkPlanner.StockTargetPerShow, planner.StockCount("morning-drive"));
+
+            var vended = planner.TryVend("morning-drive", host, snapshot);
+            Assert.NotNull(vended);
+            Assert.True(planner.StockCount("morning-drive") < CrosstalkPlanner.StockTargetPerShow);
+
+            var acceptedThird =
+                planner.Stock(MakeStocked("morning-drive", new CrosstalkCast(10, 20), Path.GetTempFileName()));
+
+            // Then the third exchange is accepted (the freed slot, not an overrun), and the stock
+            // never exceeds its target at this or any earlier snapshot above
+            Assert.True(acceptedThird);
+            Assert.Equal(CrosstalkPlanner.StockTargetPerShow, planner.StockCount("morning-drive"));
+        }
     }
 
     public static class ScenarioAiredOnceRetiredAtAir
@@ -377,6 +410,35 @@ public static class FeatureStockedAheadAiredOnce
 
             // Then nothing is left to vend — it can never air a second time
             Assert.Null(vendedAgain);
+        }
+    }
+
+    public static class ScenarioAVendLeavesAnEvidenceTrail
+    {
+        [Fact]
+        public static void A_successful_vend_logs_one_Information_line()
+        {
+            // Given a stocked exchange whose cast still matches current grid adjacency — T288 wire
+            // finding (gitea-#385 follow-up): TryVend's own success path used to log NOTHING, so a
+            // legitimate slot freed by a vend was indistinguishable, from the log alone, from an
+            // actual ≤2 invariant break (see ScenarioStockDefendsItsOwnTarget's own sibling pin for
+            // the invariant itself).
+            var host = Segment(1, DayOfWeek.Monday, 480, 960, personaId: 10);
+            var next = Segment(2, DayOfWeek.Monday, 960, 1440, personaId: 20);
+            var snapshot = new ScheduleWeekSnapshot([host, next]);
+            var assetPath = Path.GetTempFileName();
+            var exchange = MakeStocked("morning-drive", new CrosstalkCast(10, 20), assetPath);
+            var logger = new CapturingLogger<CrosstalkPlanner>();
+            var planner = new CrosstalkPlanner(
+                new FakePersonaStore(), new FakeCrosstalkScopeProvider(enabledShows: ["morning-drive"]), logger);
+            planner.Stock(exchange);
+
+            planner.TryVend("morning-drive", host, snapshot);
+
+            // Then exactly one Information line names the vend
+            Assert.Single(
+                logger.Entries,
+                e => e.Level == LogLevel.Information && e.Message.Contains("vended", StringComparison.OrdinalIgnoreCase));
         }
     }
 

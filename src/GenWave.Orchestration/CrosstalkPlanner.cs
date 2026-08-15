@@ -465,6 +465,23 @@ public sealed class CrosstalkPlanner(
             DeleteAssetBestEffort(candidate.AssetPath);
         }
 
+        // T288 wire finding (gitea-#385 follow-up): a successful vend used to be COMPLETELY SILENT —
+        // the asset it hands out is removed from `stock` right here, but nothing logged that removal,
+        // so an operator (or an audit reading only the log + booth_log) had no way to tell "a slot
+        // freed by a genuine vend, awaiting confirmed air" apart from "the ≤2 invariant broke": three
+        // cumulative "stocked" lines with zero visible discards in between is EXACTLY what a legitimate
+        // stock→vend→stock sequence produces (the vended exchange's own asset stays on disk,
+        // unconfirmed, until Retire/RetireByMediaId's own later "retired after airing" line fires) —
+        // it looks identical to an overrun without this line. One Information line closes that gap;
+        // it changes no behavior, only the evidence trail.
+        if (fresh is not null)
+        {
+            logger.LogInformation(
+                "Crosstalk exchange for '{Show}' vended — cast (host={HostPersonaId}, " +
+                "neighbor={NeighborPersonaId}) removed from stock, awaiting confirmed air",
+                LogSanitize.Strip(showSlug), fresh.Cast.HostPersonaId, fresh.Cast.NeighborPersonaId);
+        }
+
         return fresh;
     }
 
