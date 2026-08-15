@@ -50,6 +50,42 @@ public sealed class CrosstalkScriptWriter(
     TimeProvider timeProvider)
 {
     /// <summary>
+    /// Headroom the whole-script generation cap carries OVER <see cref="CrosstalkOptions.DurationTargetSeconds"/>'s
+    /// own char estimate (SPEC F127.3, T283 paper-audition reconciliation, gh-#385). The cap exists
+    /// to stop runaway rambling, not to enforce the duration target itself —
+    /// <see cref="CrosstalkScriptParser.Parse"/>'s own estimated-duration check is what does that
+    /// quality rejection, AFTER a clean (untruncated) completion has already come back. A cap that
+    /// bites right at the target converts a script the duration gate would have cleanly discarded
+    /// (recoverable — the slot is skipped, stock regenerates) into an unparseable, unrecoverable
+    /// truncation (<c>finish_reason: length</c>, caught before <see cref="CrosstalkScriptParser.Parse"/>
+    /// ever runs — see this class's own finish-reason check remarks). ~2x leaves room for
+    /// speaker-tag/newline overhead and ordinary model variance without turning the cap into a
+    /// second, tighter duration gate.
+    /// </summary>
+    const double GenerationCapHeadroomMultiplier = 2.0;
+
+    /// <summary>
+    /// Derives the whole-script <c>max_tokens</c> cap from <see cref="CrosstalkOptions.DurationTargetSeconds"/>
+    /// (SPEC F127.3, T283 paper-audition reconciliation, gh-#385) — the ONLY setting this reads;
+    /// <see cref="LlmOptions.MaxCopyChars"/> stays the per-LINE budget <see cref="CrosstalkScriptParser.Parse"/>
+    /// enforces and never reaches this formula. The first live run against llama3.2:3b proved the
+    /// PRIOR blurb-scaled derivation (this method used to just call
+    /// <see cref="LlmCopyWriter.DeriveMaxTokens"/> straight on <c>Llm:MaxCopyChars</c>, sized for one
+    /// short line) starves a 3-8 line script: 4 of 8 attempts died to <c>finish_reason: length</c>
+    /// before a single reply could even reach the parser. Multiplies the duration target's own char
+    /// estimate (<see cref="CrosstalkScriptParser.CharsPerSecond"/> — the SAME spoken-rate constant
+    /// the parser's own over-duration check already applies to an accepted script) by
+    /// <see cref="GenerationCapHeadroomMultiplier"/>, then hands that figure to
+    /// <see cref="LlmCopyWriter.DeriveMaxTokens"/> — reusing that method's chars-to-tokens shape
+    /// (divisor, floor, ceiling) rather than a second, independently-tuned formula.
+    /// </summary>
+    static int DeriveScriptGenerationCap(int durationTargetSeconds)
+    {
+        var headroomChars = durationTargetSeconds * CrosstalkScriptParser.CharsPerSecond * GenerationCapHeadroomMultiplier;
+        return LlmCopyWriter.DeriveMaxTokens((int)headroomChars);
+    }
+
+    /// <summary>
     /// Requests one exchange. Never throws toward the caller for anything short of the caller's own
     /// <paramref name="ct"/> cancelling — every other fault (disabled endpoint, timeout, non-2xx,
     /// connect, malformed/invalid script) resolves to <see cref="CrosstalkWriteResult.Discarded"/>
@@ -67,7 +103,7 @@ public sealed class CrosstalkScriptWriter(
 
         var durationTargetSeconds = crosstalkOptions.CurrentValue.DurationTargetSeconds;
 
-        var systemPrompt = CrosstalkPromptBuilder.BuildSystemPrompt(request.HostCard, request.NeighborCard, cfg.MaxCopyChars);
+        var systemPrompt = CrosstalkPromptBuilder.BuildSystemPrompt(request.HostCard, request.NeighborCard, durationTargetSeconds);
         var userPrompt = CrosstalkPromptBuilder.BuildUserContent(
             request, LlmPromptBuilder.BuildStationClockLine(request.StationLocalNow));
 
@@ -87,10 +123,13 @@ public sealed class CrosstalkScriptWriter(
                     new { role = "system", content = systemPrompt },
                     new { role = "user", content = userPrompt },
                 },
-                // SPEC F127.3: "the F123.1 derived generation cap applies to the whole script" — the
-                // SAME formula LlmCopyWriter derives an ordinary blurb's cap from, not a second,
-                // banter-specific one (the one-knob discipline).
-                max_tokens = LlmCopyWriter.DeriveMaxTokens(cfg.MaxCopyChars),
+                // SPEC F127.3 (T283 paper-audition reconciliation, gh-#385): the cap derives from
+                // Crosstalk:DurationTargetSeconds — the ONE knob that already describes a whole
+                // exchange — not from Llm:MaxCopyChars (that stayed blurb-scaled and starved a
+                // multi-line script on the first live run; see DeriveScriptGenerationCap's own
+                // remarks). Still reuses LlmCopyWriter.DeriveMaxTokens's chars-to-tokens shape
+                // (divisor/floor/ceiling) rather than a second, independently-tuned formula.
+                max_tokens = DeriveScriptGenerationCap(durationTargetSeconds),
             };
 
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri)

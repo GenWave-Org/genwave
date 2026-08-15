@@ -718,16 +718,18 @@ public sealed class LlmCopyWriter(
     };
 
     /// <summary>
-    /// Derives the completion request's <c>max_tokens</c> cap from <see cref="LlmOptions.MaxCopyChars"/>
+    /// Derives a completion request's <c>max_tokens</c> cap from a char figure
     /// (SPEC F123.1, STORY-319, PLAN T262) — see <see cref="CharsPerTokenDivisor"/>,
     /// <see cref="MinGenerationTokenCap"/>, and <see cref="MaxGenerationTokenCap"/> for why the
     /// divisor, floor, and ceiling are what they are. Applied identically to the on-air path and
-    /// the preview path, since both funnel through <see cref="RequestCleanedCompletionAsync"/>'s single
-    /// request-builder. Internal (PLAN T282, SPEC F127.3: "the F123.1 derived generation cap applies
-    /// to the whole script") — <see cref="CrosstalkScriptWriter"/> derives its own completion's
-    /// <c>max_tokens</c> through this exact formula rather than a second, independently-tuned one;
-    /// the one-knob discipline (a single <c>Llm:MaxCopyChars</c>) extends to banter with zero new
-    /// generation-cap machinery.
+    /// the preview path (both fed <see cref="LlmOptions.MaxCopyChars"/>, funnelled through
+    /// <see cref="RequestCleanedCompletionAsync"/>'s single request-builder). Internal (PLAN T282,
+    /// SPEC F127.3, T283 paper-audition reconciliation) — <see cref="CrosstalkScriptWriter"/> reuses
+    /// this exact chars-to-tokens SHAPE for its own whole-script cap rather than a second,
+    /// independently-tuned formula, but feeds it a char figure derived from
+    /// <c>Crosstalk:DurationTargetSeconds</c>, not <c>Llm:MaxCopyChars</c> — a blurb-scaled figure
+    /// starves a multi-line script (see <c>CrosstalkScriptWriter.DeriveScriptGenerationCap</c>'s own
+    /// remarks for the T283 finding).
     /// </summary>
     internal static int DeriveMaxTokens(int maxCopyChars) =>
         Math.Clamp(maxCopyChars / CharsPerTokenDivisor, MinGenerationTokenCap, MaxGenerationTokenCap);
