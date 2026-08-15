@@ -55,12 +55,12 @@ public sealed class CrosstalkScriptWriter(
     /// to stop runaway rambling, not to enforce the duration target itself —
     /// <see cref="CrosstalkScriptParser.Parse"/>'s own estimated-duration check is what does that
     /// quality rejection, AFTER a clean (untruncated) completion has already come back. A cap that
-    /// bites right at the target converts a script the duration gate would have cleanly discarded
-    /// (recoverable — the slot is skipped, stock regenerates) into an unparseable, unrecoverable
-    /// truncation (<c>finish_reason: length</c>, caught before <see cref="CrosstalkScriptParser.Parse"/>
-    /// ever runs — see this class's own finish-reason check remarks). ~2x leaves room for
-    /// speaker-tag/newline overhead and ordinary model variance without turning the cap into a
-    /// second, tighter duration gate.
+    /// bites right at the target would truncate scripts the duration gate would have ACCEPTED —
+    /// and a truncated reply is never airable regardless of how it reads (it can still parse
+    /// cleanly, which is exactly why the <c>finish_reason: length</c> check discards it before
+    /// <see cref="CrosstalkScriptParser.Parse"/> ever runs — see that check's own remarks). ~2x
+    /// leaves room for speaker-tag/newline overhead and ordinary model variance without turning
+    /// the cap into a second, tighter duration gate.
     /// </summary>
     const double GenerationCapHeadroomMultiplier = 2.0;
 
@@ -69,7 +69,7 @@ public sealed class CrosstalkScriptWriter(
     /// (SPEC F127.3, T283 paper-audition reconciliation, gh-#385) — the ONLY setting this reads;
     /// <see cref="LlmOptions.MaxCopyChars"/> stays the per-LINE budget <see cref="CrosstalkScriptParser.Parse"/>
     /// enforces and never reaches this formula. The first live run against llama3.2:3b proved the
-    /// PRIOR blurb-scaled derivation (this method used to just call
+    /// PRIOR blurb-scaled derivation (before this method existed, the request site called
     /// <see cref="LlmCopyWriter.DeriveMaxTokens"/> straight on <c>Llm:MaxCopyChars</c>, sized for one
     /// short line) starves a 3-8 line script: 4 of 8 attempts died to <c>finish_reason: length</c>
     /// before a single reply could even reach the parser. Multiplies the duration target's own char
