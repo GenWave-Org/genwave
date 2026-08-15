@@ -83,6 +83,7 @@ export const SETTINGS_HELP_KEYS = [
   "Station:Imaging:TimeAnnouncements",
   "Station:Imaging:TimeAnnouncementStaleMinutes",
   "Station:Shows:PatterCadenceMinutes",
+  "Crosstalk:DurationTargetSeconds",
 ] as const;
 
 export type SettingsHelpKey = (typeof SETTINGS_HELP_KEYS)[number];

@@ -1,0 +1,520 @@
+// STORY-326 — The booth writes for two (gh-#385 · SPEC F127.3/.4 · PLAN VQ-i, T282)
+//
+// BDD specification — xUnit, LIVE as of T282. The design's named risk (2026-08-14): a 3B model
+// writing two coherent voices — these facts pin the contract that makes bad output unairable, not
+// the output good. One completion produces the WHOLE exchange (reactions must react to what was
+// actually said); validation is fail-closed and the failure mode is silent skip — no template rung,
+// no salvage. One assertion per Fact; happy first; sad path segregated. The T288 wire acceptance (an
+// exchange airs once on a running stack) is a production check, not represented here. T283, the
+// paper-audition checkpoint, gates everything after T282 — these facts green first.
+
+namespace GenWave.Tts.Tests.Specs;
+
+using Microsoft.Extensions.Logging;
+using GenWave.Core.Domain;
+using GenWave.Tts.Tests.Fakes;
+
+public static class FeatureBoothWritesForTwo
+{
+    // ── Shared fixtures ─────────────────────────────────────────────────────
+
+    static readonly PersonaCard HostCard = MakeCard(
+        "Neon Nightowl", "Neon Nightowl spins moody late-night sets deep into the small hours.");
+
+    static readonly PersonaCard NeighborCard = MakeCard(
+        "Daybreak Dana", "Daybreak Dana brings bright upbeat energy straight off the morning show.");
+
+    static readonly string WellFormedReply = string.Join('\n', new[]
+    {
+        $"{CrosstalkScriptParser.HostTag}: Hey, welcome back to the show.",
+        $"{CrosstalkScriptParser.NeighborTag}: Great to drop in tonight.",
+        $"{CrosstalkScriptParser.HostTag}: Always good to have you around.",
+    });
+
+    static PersonaCard MakeCard(string name, string soul) =>
+        new(PersonaCard.CurrentSchemaVersion, name, Tagline: "", soul, Quirks: [],
+            new VoiceSpec("kokoro", "af_heart", 1.0, "en"), EnergyDisposition: 0, Lore: [], Corrections: []);
+
+    static CrosstalkExchangeRequest Request() =>
+        new(HostCard, NeighborCard, "GenWave", ShowName: "Night Shift", Daypart: "late night",
+            StationLocalNow: DateTimeOffset.UtcNow);
+
+    /// <summary>
+    /// The one constructor arg list in this file (mirrors Story319_CopyFitsItsBreak's own
+    /// BuildWriterWithRingAndLogger idiom) — every other builder below is expressed in terms of
+    /// this, not a second copy of it.
+    /// </summary>
+    static (CrosstalkScriptWriter Writer, LlmCallRing Ring, CapturingLogger<CrosstalkScriptWriter> Logger,
+        TestOptionsMonitor<CrosstalkOptions> CrosstalkMonitor) BuildWriterWithRingAndLogger(
+            string endpoint, int maxCopyChars = 450, int durationTargetSeconds = 25)
+    {
+        var ring = new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions()));
+        var logger = new CapturingLogger<CrosstalkScriptWriter>();
+        var crosstalkMonitor = new TestOptionsMonitor<CrosstalkOptions>(
+            new CrosstalkOptions { DurationTargetSeconds = durationTargetSeconds });
+        var writer = new CrosstalkScriptWriter(
+            new FakeHttpClientFactory(),
+            new TestOptionsMonitor<LlmOptions>(new LlmOptions
+            {
+                Endpoint = endpoint,
+                Model = "test-model",
+                TimeoutSeconds = 5,
+                MaxCopyChars = maxCopyChars,
+            }),
+            crosstalkMonitor,
+            ring,
+            new FakeDegradationModeReader(),
+            logger,
+            TimeProvider.System);
+        return (writer, ring, logger, crosstalkMonitor);
+    }
+
+    static CrosstalkScriptWriter BuildWriter(string endpoint, int maxCopyChars = 450, int durationTargetSeconds = 25) =>
+        BuildWriterWithRingAndLogger(endpoint, maxCopyChars, durationTargetSeconds).Writer;
+
+    static string ExtractSystemPrompt(string body)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(body);
+        foreach (var message in doc.RootElement.GetProperty("messages").EnumerateArray())
+        {
+            if (message.GetProperty("role").GetString() == "system")
+                return message.GetProperty("content").GetString() ?? "";
+        }
+
+        return "";
+    }
+
+    static int ExtractMaxTokens(string body)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(body);
+        return doc.RootElement.GetProperty("max_tokens").GetInt32();
+    }
+
+    static string ExtractUserContent(string body)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(body);
+        foreach (var message in doc.RootElement.GetProperty("messages").EnumerateArray())
+        {
+            if (message.GetProperty("role").GetString() == "user")
+                return message.GetProperty("content").GetString() ?? "";
+        }
+
+        return "";
+    }
+
+    // ── HAPPY PATH ──────────────────────────────────────────────────────────
+
+    public sealed class ScenarioOneCallWholeExchange : IAsyncLifetime
+    {
+        const int MaxCopyChars = 300;
+
+        MockCompletionsServer mock = null!;
+        string wireSystemPrompt = "";
+        int wireMaxTokens;
+
+        public async Task InitializeAsync()
+        {
+            // Given the host and neighbor persona cards plus show/daypart/time hooks...
+            mock = await MockCompletionsServer.StartAsync();
+            mock.ReplyContent = WellFormedReply;
+            var writer = BuildWriter(mock.BaseUri.ToString(), MaxCopyChars);
+
+            // When the writer requests an exchange...
+            await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            wireSystemPrompt = ExtractSystemPrompt(mock.Requests[0].Body);
+            wireMaxTokens = ExtractMaxTokens(mock.Requests[0].Body);
+        }
+
+        public async Task DisposeAsync() => await mock.DisposeAsync();
+
+        [Fact]
+        public void Exactly_one_completion_is_issued_per_exchange() =>
+            // Then ONE completion request leaves — never per-turn calls.
+            Assert.Equal(1, mock.RequestCount);
+
+        [Fact]
+        public void The_request_carries_both_persona_cards()
+        {
+            Assert.Contains(HostCard.Soul, wireSystemPrompt, StringComparison.Ordinal);
+            Assert.Contains(NeighborCard.Soul, wireSystemPrompt, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void The_request_carries_the_F123_derived_generation_cap() =>
+            // The one-knob discipline extends: the cap derives from Llm:MaxCopyChars, no second
+            // operator setting for banter.
+            Assert.Equal(LlmCopyWriter.DeriveMaxTokens(MaxCopyChars), wireMaxTokens);
+    }
+
+    public sealed class ScenarioTheScriptParsesStrictly : IAsyncLifetime
+    {
+        // A NEIGHBOR interjection immediately after another NEIGHBOR line — plain alternation would
+        // reject this, but the interjection marker is the one sanctioned exception (SPEC F127.4).
+        static readonly string Reply = string.Join('\n', new[]
+        {
+            $"{CrosstalkScriptParser.HostTag}: Hey, welcome back to the show.",
+            $"{CrosstalkScriptParser.NeighborTag}: Great to drop in tonight.",
+            $"{CrosstalkScriptParser.NeighborTag} {CrosstalkScriptParser.InterjectionMarker}: Wait, I have to say —",
+            $"{CrosstalkScriptParser.HostTag}: Go right ahead then.",
+        });
+
+        MockCompletionsServer mock = null!;
+        CrosstalkWriteResult result = null!;
+
+        public async Task InitializeAsync()
+        {
+            mock = await MockCompletionsServer.StartAsync();
+            mock.ReplyContent = Reply;
+            var writer = BuildWriter(mock.BaseUri.ToString());
+
+            // When the script is parsed...
+            result = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+        }
+
+        public async Task DisposeAsync() => await mock.DisposeAsync();
+
+        [Fact]
+        public void A_well_formed_response_yields_three_to_eight_speaker_tagged_lines()
+        {
+            var accepted = Assert.IsType<CrosstalkWriteResult.Accepted>(result);
+            Assert.InRange(accepted.Script.Lines.Count, CrosstalkScriptParser.MinLines, CrosstalkScriptParser.MaxLines);
+        }
+
+        [Fact]
+        public void Both_speakers_are_present_in_an_accepted_script()
+        {
+            var accepted = Assert.IsType<CrosstalkWriteResult.Accepted>(result);
+            Assert.Contains(accepted.Script.Lines, line => line.Speaker == CrosstalkSpeaker.Host);
+            Assert.Contains(accepted.Script.Lines, line => line.Speaker == CrosstalkSpeaker.Neighbor);
+        }
+
+        [Fact]
+        public void Alternation_holds_outside_interjection_marked_lines()
+        {
+            // The reply's third line breaks strict adjacent alternation (NEIGHBOR follows NEIGHBOR)
+            // ONLY because it is marked as an interjection — proving the parser's one sanctioned
+            // exception is what let it through, not a broken alternation check.
+            var accepted = Assert.IsType<CrosstalkWriteResult.Accepted>(result);
+            Assert.True(accepted.Script.Lines[2].IsInterjection);
+            Assert.Equal(accepted.Script.Lines[1].Speaker, accepted.Script.Lines[2].Speaker);
+        }
+    }
+
+    public sealed class ScenarioPerLineHygieneWithoutTrimming : IAsyncLifetime
+    {
+        MockCompletionsServer mock = null!;
+
+        public async Task InitializeAsync() => mock = await MockCompletionsServer.StartAsync();
+        public async Task DisposeAsync() => await mock.DisposeAsync();
+
+        [Fact]
+        public async Task Every_accepted_line_has_cleared_the_standing_copy_cleanup()
+        {
+            // Given a parsed script whose lines carry the same hygiene hazards an ordinary blurb
+            // does (wrapping quotes, a bracketed stage direction)...
+            mock.ReplyContent = string.Join('\n', new[]
+            {
+                $"{CrosstalkScriptParser.HostTag}: \"Welcome back to the show.\"",
+                $"{CrosstalkScriptParser.NeighborTag}: *laughs* Great to be here tonight.",
+                $"{CrosstalkScriptParser.HostTag}: Always a pleasure to have you.",
+            });
+            var writer = BuildWriter(mock.BaseUri.ToString());
+
+            // When validation runs...
+            var result = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            // Then every accepted line has cleared the standing copy cleanup.
+            var accepted = Assert.IsType<CrosstalkWriteResult.Accepted>(result);
+            Assert.Equal("Welcome back to the show.", accepted.Script.Lines[0].Text);
+            Assert.Equal("Great to be here tonight.", accepted.Script.Lines[1].Text);
+        }
+
+        [Fact]
+        public async Task No_line_is_ever_trimmed()
+        {
+            // A cut dialogue line breaks the reaction to it — over-budget rejects the WHOLE exchange
+            // (sad path), it never salvages a line (F123.2's trim deliberately does NOT extend here).
+            mock.ReplyContent = string.Join('\n', new[]
+            {
+                $"{CrosstalkScriptParser.HostTag}: This line is written to run well past the tiny " +
+                    "configured per-line character budget for this fact.",
+                $"{CrosstalkScriptParser.NeighborTag}: Short reply.",
+                $"{CrosstalkScriptParser.HostTag}: Another short one.",
+            });
+            var writer = BuildWriter(mock.BaseUri.ToString(), maxCopyChars: 20);
+
+            var result = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            // Never a truncated Accepted — the whole exchange is discarded instead.
+            Assert.IsType<CrosstalkWriteResult.Discarded>(result);
+        }
+    }
+
+    public sealed class ScenarioTheExchangeFitsItsMoment : IAsyncLifetime
+    {
+        MockCompletionsServer mock = null!;
+
+        public async Task InitializeAsync() => mock = await MockCompletionsServer.StartAsync();
+        public async Task DisposeAsync() => await mock.DisposeAsync();
+
+        [Fact]
+        public async Task A_script_under_the_duration_target_is_accepted()
+        {
+            // Given a validated script well under the 25s default (three short lines)...
+            mock.ReplyContent = WellFormedReply;
+            var writer = BuildWriter(mock.BaseUri.ToString());
+
+            // When the spoken-duration estimate is computed...
+            var result = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            Assert.IsType<CrosstalkWriteResult.Accepted>(result);
+        }
+
+        [Fact]
+        public async Task The_duration_target_is_live_editable_with_a_25s_default()
+        {
+            // Given the shipped default (SPEC F127.4) — 200 chars / 15 chars-per-sec ~= 13.3s, which
+            // fits comfortably under it.
+            Assert.Equal(25, new CrosstalkOptions().DurationTargetSeconds);
+
+            mock.ReplyContent = string.Join('\n', new[]
+            {
+                $"{CrosstalkScriptParser.HostTag}: {new string('a', 70)}",
+                $"{CrosstalkScriptParser.NeighborTag}: {new string('b', 70)}",
+                $"{CrosstalkScriptParser.HostTag}: {new string('c', 60)}",
+            });
+            var (writer, _, _, crosstalkMonitor) = BuildWriterWithRingAndLogger(mock.BaseUri.ToString());
+
+            var underDefault = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+            Assert.IsType<CrosstalkWriteResult.Accepted>(underDefault);
+
+            // When the live setting drops below that same script's estimate, with NO writer
+            // rebuild...
+            crosstalkMonitor.CurrentValue = new CrosstalkOptions { DurationTargetSeconds = 10 };
+            var overLoweredTarget = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            // Then the very next attempt reflects the live edit.
+            Assert.IsType<CrosstalkWriteResult.Discarded>(overLoweredTarget);
+        }
+    }
+
+    public static class ScenarioGenerationIsVisible
+    {
+        [Fact]
+        public static async Task The_call_appears_in_the_llm_ring_under_its_own_kind()
+        {
+            // Given any generation attempt...
+            await using var mock = await MockCompletionsServer.StartAsync();
+            mock.ReplyContent = WellFormedReply;
+            var (writer, ring, _, _) = BuildWriterWithRingAndLogger(mock.BaseUri.ToString());
+
+            await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            // When /api/llm-calls is read (the ring it's built from)...
+            var record = Assert.Single(ring.Snapshot());
+
+            // Then the call appears under its own kind.
+            Assert.Equal(LlmCallKind.Crosstalk, record.Kind);
+        }
+
+        // T282 review finding (F2b): mutation-proven — deleting the discard path's own
+        // callRing.Record(...) call left the suite green, since nothing previously asserted a
+        // DISCARDED attempt is visible to the ring at all. A discard must be just as visible as an
+        // accept (SPEC F127.11 — "why was there no banter" has to be answerable from the ring for
+        // a reject, not only for a success).
+        [Fact]
+        public static async Task A_discarded_attempt_also_appears_in_the_ring()
+        {
+            // Given a response that fails validation (no recognizable speaker tags at all)...
+            await using var mock = await MockCompletionsServer.StartAsync();
+            mock.ReplyContent = "Hey there, welcome back!\nGreat to see you too!\nLet's get into it.";
+            var (writer, ring, _, _) = BuildWriterWithRingAndLogger(mock.BaseUri.ToString());
+
+            var result = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            // Then the ring records the discard — Rejected outcome, the Crosstalk kind, and the
+            // SAME reason string returned to the caller carried as StatusDetail — never silence.
+            var discarded = Assert.IsType<CrosstalkWriteResult.Discarded>(result);
+            var record = Assert.Single(ring.Snapshot());
+            Assert.Equal(LlmCallOutcome.Rejected, record.Outcome);
+            Assert.Equal(LlmCallKind.Crosstalk, record.Kind);
+            Assert.Equal(discarded.Reason, record.StatusDetail);
+        }
+    }
+
+    // ── SAD PATH ────────────────────────────────────────────────────────────
+
+    public sealed class ScenarioAnyValidationFailureDiscardsSilently : IAsyncLifetime
+    {
+        MockCompletionsServer mock = null!;
+
+        public async Task InitializeAsync() => mock = await MockCompletionsServer.StartAsync();
+        public async Task DisposeAsync() => await mock.DisposeAsync();
+
+        [Fact]
+        public async Task A_malformed_response_produces_no_exchange_and_one_reason_line()
+        {
+            // Given a response failing parse (no recognizable speaker tags at all)...
+            mock.ReplyContent = "Hey there, welcome back!\nGreat to see you too!\nLet's get into it.";
+            var (writer, _, logger, _) = BuildWriterWithRingAndLogger(mock.BaseUri.ToString());
+
+            // When the writer completes...
+            var result = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            // Then no exchange is produced, and exactly one Information line names the reason — no
+            // template rung, no salvage, and never a WARN (banter is optional color, a miss is not
+            // an outage).
+            Assert.IsType<CrosstalkWriteResult.Discarded>(result);
+            Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Information);
+            Assert.Empty(logger.Warnings);
+        }
+
+        [Fact]
+        public async Task An_over_budget_line_rejects_the_whole_exchange()
+        {
+            mock.ReplyContent = string.Join('\n', new[]
+            {
+                $"{CrosstalkScriptParser.HostTag}: A line intentionally longer than the tiny " +
+                    "per-line budget configured for this fact.",
+                $"{CrosstalkScriptParser.NeighborTag}: Short.",
+                $"{CrosstalkScriptParser.HostTag}: Also short.",
+            });
+            var writer = BuildWriter(mock.BaseUri.ToString(), maxCopyChars: 15);
+
+            var result = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            var discarded = Assert.IsType<CrosstalkWriteResult.Discarded>(result);
+            Assert.Contains("per-line budget", discarded.Reason, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task An_over_duration_script_rejects_whole()
+        {
+            mock.ReplyContent = string.Join('\n', new[]
+            {
+                $"{CrosstalkScriptParser.HostTag}: {new string('a', 70)}",
+                $"{CrosstalkScriptParser.NeighborTag}: {new string('b', 70)}",
+                $"{CrosstalkScriptParser.HostTag}: {new string('c', 60)}",
+            });
+            var writer = BuildWriter(mock.BaseUri.ToString(), durationTargetSeconds: 1);
+
+            var result = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            var discarded = Assert.IsType<CrosstalkWriteResult.Discarded>(result);
+            Assert.Contains("exceeds", discarded.Reason, StringComparison.Ordinal);
+        }
+
+        // T282 review finding (F2a): mutation-proven — deleting the both-speakers-present guards
+        // left the suite green. The reachable hole: a reply where every line AFTER the first is
+        // marked as an interjection (SPEC F127.4's one sanctioned exception to strict alternation)
+        // never trips the alternation loop below either, since IsInterjection short-circuits every
+        // adjacent pair — so with the guards gone, a one-voice "HOST:"/all-"HOST (interjects):"
+        // script would validate cleanly. Only "both speakers must be present" catches it.
+        [Fact]
+        public async Task A_single_speaker_all_interjection_reply_is_discarded()
+        {
+            mock.ReplyContent = string.Join('\n', new[]
+            {
+                $"{CrosstalkScriptParser.HostTag}: Hey there, just me tonight.",
+                $"{CrosstalkScriptParser.HostTag} {CrosstalkScriptParser.InterjectionMarker}: Still me.",
+                $"{CrosstalkScriptParser.HostTag} {CrosstalkScriptParser.InterjectionMarker}: Also me.",
+            });
+            var writer = BuildWriter(mock.BaseUri.ToString());
+
+            var result = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            var discarded = Assert.IsType<CrosstalkWriteResult.Discarded>(result);
+            Assert.Contains(CrosstalkScriptParser.NeighborTag, discarded.Reason, StringComparison.Ordinal);
+        }
+    }
+
+    // T282 review finding (F3, gh-#424 class one seam over): a completion the backend cuts short
+    // at its own max_tokens cap leaves a truncated last line that can still PARSE cleanly (a
+    // chopped sentence still matches the HOST:/NEIGHBOR: line shape) and would otherwise air
+    // mid-word — finish_reason is the OpenAI/ollama-compatible signal that catches it BEFORE Parse
+    // ever runs.
+    public sealed class ScenarioATruncatedCompletionNeverAirs : IAsyncLifetime
+    {
+        MockCompletionsServer mock = null!;
+
+        public async Task InitializeAsync() => mock = await MockCompletionsServer.StartAsync();
+        public async Task DisposeAsync() => await mock.DisposeAsync();
+
+        [Fact]
+        public async Task A_completion_capped_by_max_tokens_is_discarded_even_though_it_would_otherwise_parse()
+        {
+            // Given a well-formed-LOOKING reply the backend flags as cut short by its own token cap...
+            mock.ReplyContent = WellFormedReply;
+            mock.ReplyFinishReason = "length";
+            var writer = BuildWriter(mock.BaseUri.ToString());
+
+            // When the writer completes...
+            var result = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            // Then the whole exchange is discarded — never aired truncated.
+            var discarded = Assert.IsType<CrosstalkWriteResult.Discarded>(result);
+            Assert.Contains("length", discarded.Reason, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task A_completion_that_finished_naturally_is_not_discarded_for_that_reason()
+        {
+            // Given the SAME well-formed reply, this time flagged as having finished naturally
+            // (the mock's own default) — a "stop" finish_reason must never trip this check.
+            mock.ReplyContent = WellFormedReply;
+            mock.ReplyFinishReason = "stop";
+            var writer = BuildWriter(mock.BaseUri.ToString());
+
+            var result = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            Assert.IsType<CrosstalkWriteResult.Accepted>(result);
+        }
+    }
+
+    public static class ScenarioTheCurrentTrackIsStructurallyUnknowable
+    {
+        [Fact]
+        public static void The_prompt_contains_no_current_track_reference()
+        {
+            // Given prompt assembly for an exchange — CrosstalkExchangeRequest is the ONLY input
+            // CrosstalkPromptBuilder ever reads from, and it carries no MediaItem/track-shaped member
+            // at all, by construction (mirrors Story228_RequestShoutOut's own reflection proof one
+            // seam over).
+            var properties = typeof(CrosstalkExchangeRequest).GetProperties();
+
+            Assert.DoesNotContain(properties, p => p.PropertyType == typeof(MediaItem));
+            Assert.DoesNotContain(properties, p => p.Name.Contains("Track", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    // T282 review finding (F4): CrosstalkExchangeRequest's ShowName/Daypart are operator-editable
+    // hooks with no length constraint of their own (the db show name column is unbounded text) —
+    // every LlmPromptBuilder counterpart truncates text like this before it reaches a prompt (e.g.
+    // BuildShowLine's own showName truncation), and this builder must do the same.
+    public sealed class ScenarioOperatorHooksAreCapped : IAsyncLifetime
+    {
+        MockCompletionsServer mock = null!;
+
+        public async Task InitializeAsync() => mock = await MockCompletionsServer.StartAsync();
+        public async Task DisposeAsync() => await mock.DisposeAsync();
+
+        [Fact]
+        public async Task An_oversized_show_name_reaches_the_prompt_truncated()
+        {
+            // Given a ShowName far past the house 4000-char cap...
+            mock.ReplyContent = WellFormedReply;
+            var writer = BuildWriter(mock.BaseUri.ToString());
+            var oversizedShowName = new string('a', 5000);
+            var request = Request() with { ShowName = oversizedShowName };
+
+            // When the writer requests an exchange...
+            await writer.WriteExchangeAsync(request, CancellationToken.None);
+
+            // Then the prompt carries the truncated form, never the full 5000 chars.
+            var userContent = ExtractUserContent(mock.Requests[0].Body);
+            Assert.DoesNotContain(oversizedShowName, userContent, StringComparison.Ordinal);
+            Assert.Contains(new string('a', 4000), userContent, StringComparison.Ordinal);
+        }
+    }
+}

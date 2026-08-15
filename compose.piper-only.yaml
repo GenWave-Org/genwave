@@ -104,7 +104,9 @@ services:
       # SegmentKind, and every kind-less caller (safe-loop authoring, admin preview) alike —
       # goes straight to Piper. This superseded the old per-kind Tts:EngineByKind seed
       # (STORY-191): pinning every kind to a Piper FALLBACK hop while the primary stayed Kokoro
-      # was a chain-shaped workaround for what this key now states directly.
+      # was a chain-shaped workaround for what this key now states directly. (Crosstalk, the
+      # eighth kind — SPEC F127.1, T281 — needs no entry here for the same reason: the primary
+      # serves every kind, present and future, with no per-kind map to maintain.)
       Tts__PiperPrimaryEndpoint: "http://piper:5000"
       # gh-#334 — enrichment halved, by the same reasoning as the kokoro and LLM removals above.
       # This overlay exists because a 4GB/4-core box cannot afford the default topology, and the

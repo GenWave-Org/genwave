@@ -12,9 +12,10 @@ public abstract record PersonaPreviewResult
     private PersonaPreviewResult() { }
 
     /// <summary>
-    /// The rendered copy, ready to display. Carries either genuine LLM output or — for
-    /// <see cref="SegmentKind.StationId"/>/<see cref="SegmentKind.TimeDate"/>, which never touch the
-    /// LLM even on-air — the exact template text production would air for that kind.
+    /// The rendered copy, ready to display. Carries either genuine LLM output or — for whichever
+    /// <see cref="SegmentKind"/> values <c>GenWave.Tts.LlmCopyWriter.IsLlmAuthored</c> reports false
+    /// for (never touch the LLM even on-air) — the exact template text production would air for that
+    /// kind.
     /// </summary>
     public sealed record Success(string Text) : PersonaPreviewResult;
 

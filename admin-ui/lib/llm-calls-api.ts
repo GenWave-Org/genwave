@@ -22,6 +22,12 @@ export interface LlmCallEntry {
   response: string | null;
   promptChars: number;
   responseChars: number;
+  /** gh-#385, SPEC F127.11 — which generation surface produced this call
+   * (GenWave.Tts.LlmCallKind): `"copy"` for every ordinary segment-copy call, `"crosstalk"` for a
+   * CrosstalkScriptWriter call — so an operator can tell "why was there no banter" apart from an
+   * ordinary blurb miss. Plain string, not a closed union, for the same reason `status`/`mode`
+   * are above. */
+  kind: string;
 }
 
 /**

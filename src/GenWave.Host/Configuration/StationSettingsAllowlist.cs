@@ -392,6 +392,15 @@ public static class StationSettingsAllowlist
         // it entirely — an opt-in feature, not a default-on one (mirrors Context:{Key}:PatterCadenceMinutes's
         // own "0 = off" floor immediately above).
         new("Station:Shows:PatterCadenceMinutes",             SettingApplyMode.Live,          SettingKind.Number,     "minutes"),
+
+        // Crosstalk two-voice banter, the duration-fit knob only (SPEC F127.4, STORY-326, PLAN T282)
+        // — CrosstalkScriptWriter (GenWave.Tts) reads this fresh via IOptionsMonitor<CrosstalkOptions>
+        // on every generation attempt, so a PUT here reaches the very next attempt with no api
+        // restart. Defaults to the spec'd 25s; an estimate over target discards the WHOLE exchange
+        // rather than trimming a line (F127.4 — a cut dialogue line breaks the reaction to it).
+        // Crosstalk:Shows/EveryNthAiring (F127.8's scope/cadence pair) join this allowlist in a LATER
+        // task (T284's CrosstalkPlanner) — nothing reads them yet.
+        new("Crosstalk:DurationTargetSeconds",                SettingApplyMode.Live,          SettingKind.Number,     "seconds"),
     };
 
     /// <summary>All operator-editable settings, keyed by configuration key.</summary>

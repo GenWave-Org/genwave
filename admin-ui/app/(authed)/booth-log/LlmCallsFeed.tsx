@@ -15,8 +15,21 @@ interface LlmCallsFeedProps {
   timeZone?: string;
 }
 
-const STATUS_LABELS: Record<string, string> = { ok: "Ok", failed: "Failed", timeout: "Timeout", trimmed: "Trimmed" };
+const STATUS_LABELS: Record<string, string> = {
+  ok: "Ok",
+  failed: "Failed",
+  timeout: "Timeout",
+  trimmed: "Trimmed",
+  rejected: "Rejected",
+};
 const MODE_LABELS: Record<string, string> = { normal: "Normal", soft: "Soft", hard: "Hard" };
+
+/** SPEC F127.11, PLAN T282 — which generation surface produced the call
+ * (GenWave.Tts.LlmCallKind): "copy" for every ordinary segment-copy call, "crosstalk" for a
+ * CrosstalkScriptWriter call. Rendered so the new wire value isn't shipped unrendered — an
+ * unstyled kind this UI doesn't specifically label still shows its raw text (the same
+ * "never drop an unknown kind" discipline STATUS_LABELS/MODE_LABELS already follow). */
+const KIND_LABELS: Record<string, string> = { copy: "Copy", crosstalk: "Crosstalk" };
 
 /** gh-#142: the MODE column is the F69/F70 degradation ladder, which nothing on the page said —
  * a native-title flyover per chip explains the rung without spending any screen real estate.
@@ -59,12 +72,16 @@ function Chip({ tone, children }: { tone: ChipTone; children: ReactNode }): Reac
   );
 }
 
-/** ok -> success, trimmed -> brass (the same "system note, not a fault" tone modeTone uses for
- * soft — a trim airs shorter copy, it did not fail), failed/timeout -> danger — both real misses
- * read the same "something's wrong" tone; the label text (STATUS_LABELS) is what tells them apart. */
+/** ok -> success, trimmed/rejected -> brass (the same "system note, not a fault" tone modeTone
+ * uses for soft — a trim airs shorter copy and a reject skips a banter exchange, neither one
+ * failed), failed/timeout -> danger — both real misses read the same "something's wrong" tone;
+ * the label text (STATUS_LABELS) is what tells them apart. rejected specifically is the gh-#277
+ * lesson re-applied one outcome over (SPEC F127.4, F127.11): a validation reject is a
+ * content-quality decision this project made on a genuinely successful HTTP call, never an
+ * outage, so it must never paint the inspector red. */
 function statusTone(status: string): ChipTone {
   if (status === "ok") return "success";
-  if (status === "trimmed") return "brass";
+  if (status === "trimmed" || status === "rejected") return "brass";
   return "danger";
 }
 
@@ -78,6 +95,13 @@ function modeTone(mode: string): ChipTone {
 
 function StatusChip({ status }: { status: string }): ReactNode {
   return <Chip tone={statusTone(status)}>{STATUS_LABELS[status] ?? status}</Chip>;
+}
+
+/** Neutral tone (mirrors BoothLogFeed's own track-started kind badge) — Kind is a plain
+ * "which surface authored this" label, not a state judgment, so it never borrows a
+ * success/danger/brass tone the way StatusChip/ModeChip do. */
+function KindChip({ kind }: { kind: string }): ReactNode {
+  return <Chip tone="neutral">{KIND_LABELS[kind] ?? kind}</Chip>;
 }
 
 function ModeChip({ mode }: { mode: string }): ReactNode {
@@ -154,6 +178,7 @@ export function LlmCallsFeed({ entries, error, timeZone }: LlmCallsFeedProps): R
               <tr className="border-b-2 border-line text-left">
                 <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Time</th>
                 <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Persona</th>
+                <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Kind</th>
                 <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Status</th>
                 <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">
                   {/* gh-#210: the header carries the house `?` flyover (gh-#145 pattern) — the
@@ -195,6 +220,9 @@ export function LlmCallsFeed({ entries, error, timeZone }: LlmCallsFeedProps): R
                         {entry.personaName ?? "—"}
                       </td>
                       <td className="py-2 pr-3">
+                        <KindChip kind={entry.kind} />
+                      </td>
+                      <td className="py-2 pr-3">
                         <StatusChip status={entry.status} />
                       </td>
                       <td className="py-2 pr-3">
@@ -217,7 +245,7 @@ export function LlmCallsFeed({ entries, error, timeZone }: LlmCallsFeedProps): R
                     </tr>
                     {isExpanded && (
                       <tr className="border-b border-line last:border-b-0">
-                        <td colSpan={7} className="py-3">
+                        <td colSpan={8} className="py-3">
                           <div className="space-y-3 rounded-[6px] border border-line bg-surface-2 p-3">
                             <DetailField label="System prompt" value={entry.promptSystem} />
                             <DetailField label="User prompt" value={entry.promptUser} />

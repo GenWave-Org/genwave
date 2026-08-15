@@ -96,6 +96,21 @@ public static class TtsServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // Crosstalk two-voice banter (SPEC F127.4, F127.8, STORY-326, PLAN T282) — the ONE knob
+        // CrosstalkScriptWriter reads today (DurationTargetSeconds); Crosstalk:Shows/EveryNthAiring
+        // (F127.8) join this same section in a LATER task (T284's CrosstalkPlanner), not here.
+        // IOptionsMonitor<CrosstalkOptions> (not IOptions), mirroring every other live-adjustable
+        // options class in this method — a live PUT reaches the very next generation attempt with no
+        // api restart. CrosstalkScriptWriter is a plain singleton with zero eager I/O in its
+        // constructor (Story125's zero-I/O invariant) — every dependency it takes is itself a cheap
+        // seam, so registering it here never touches the network.
+        services
+            .AddOptions<CrosstalkOptions>()
+            .Bind(configuration.GetSection(CrosstalkOptions.Section))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddSingleton<CrosstalkScriptWriter>();
+
         // Injected clock for DegradationController's cooldown math (no DateTime.Now anywhere in
         // this feature) — TryAdd so a host or test that already registers its own TimeProvider wins.
         services.TryAddSingleton(TimeProvider.System);

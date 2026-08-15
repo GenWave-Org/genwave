@@ -390,6 +390,11 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "How often a show's flavor may color an ordinary lead-in/back-announce, in minutes — shares " +
     "the same one-line slot as the context patter lines above; a due context fact always wins. " +
     "0 disables the show-flavor line. Accepted range: 0–1440.",
+
+  // ── Crosstalk two-voice banter (SPEC F127.4) ────────────────────────────────────────────────
+  "Crosstalk:DurationTargetSeconds":
+    "The longest a generated two-voice banter exchange may run, in seconds, before it is " +
+    "discarded and skipped rather than aired. Defaults to 25. Accepted range: 5–120.",
 };
 
 /**

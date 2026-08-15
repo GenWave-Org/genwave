@@ -22,11 +22,13 @@ public interface IPersonaPreviewWriter
     /// persona, a draft persona built from unsaved fields, or <see langword="null"/> for the
     /// neutral house scaffold — in place of whatever persona is actually active on-air.
     ///
-    /// <see cref="SegmentKind.StationId"/>/<see cref="SegmentKind.TimeDate"/> requests route
-    /// straight to the template rung (mirrors production's own kind-based routing — those kinds
-    /// never call the LLM on-air either, so this is not a fallback). LeadIn/BackAnnounce/SignOff/
-    /// SignOn requests call the LLM and never degrade: any failure (disabled endpoint, timeout,
-    /// non-2xx, empty/over-length copy) yields <see cref="PersonaPreviewResult.Failed"/> instead of
+    /// Routing follows the same closed set production uses
+    /// (<c>GenWave.Tts.LlmCopyWriter.IsLlmAuthored</c> — the single source of truth for which
+    /// <see cref="SegmentKind"/> values ever reach the LLM): a kind that predicate reports false for
+    /// routes straight to the template rung (mirrors production's own kind-based routing — this is
+    /// not a fallback, those kinds never call the LLM on-air either), and every kind it reports true
+    /// for calls the LLM and never degrades — any failure (disabled endpoint, timeout, non-2xx,
+    /// empty/over-length copy) yields <see cref="PersonaPreviewResult.Failed"/> instead of
     /// substituting template text.
     /// </summary>
     Task<PersonaPreviewResult> WritePreviewAsync(
