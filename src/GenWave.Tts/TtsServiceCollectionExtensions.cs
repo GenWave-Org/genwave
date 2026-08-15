@@ -111,6 +111,19 @@ public static class TtsServiceCollectionExtensions
             .ValidateOnStart();
         services.AddSingleton<CrosstalkScriptWriter>();
 
+        // Crosstalk per-line render + assembly (SPEC F127.5, F127.6, STORY-327, PLAN T284) —
+        // CrosstalkScriptWriter's own sibling immediately above turns a completion into a validated
+        // script; this turns a validated script into one mixed, measured asset. Depends on
+        // ILoudnessAnalyzer/ICueAnalyzer exactly like TtsSegmentSource below does — neither is
+        // registered by this method (GenWave.MediaLibrary's AddMediaLibrary owns that binding, called
+        // by the Host alongside this one) — so this registration is only ever resolvable once the
+        // Host has wired both, the same standing assumption TtsSegmentSource's own registration
+        // already makes. A plain singleton with zero eager I/O in its constructor (Story125's
+        // zero-I/O invariant): every dependency here is itself a cheap seam, so registering it never
+        // touches the network or the filesystem. No caller resolves it yet — T286's stock worker is
+        // the first (a LATER task).
+        services.AddSingleton<CrosstalkAssembler>();
+
         // Injected clock for DegradationController's cooldown math (no DateTime.Now anywhere in
         // this feature) — TryAdd so a host or test that already registers its own TimeProvider wins.
         services.TryAddSingleton(TimeProvider.System);

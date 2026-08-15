@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -63,7 +62,7 @@ public sealed class FfmpegAudioMixer : IAudioMixer
         args.Add("--");   // end-of-options: OutputPath may start with '-' once operator input drives it
         args.Add(request.OutputPath);
 
-        await RunFfmpegAsync(args, ct);
+        await FfmpegProcess.RunFfmpegAsync(args, ct);
     }
 
     /// <summary>
@@ -72,11 +71,11 @@ public sealed class FfmpegAudioMixer : IAudioMixer
     /// </summary>
     static async Task RunWithBedAsync(AudioMixRequest request, BedSpec bed, CancellationToken ct)
     {
-        var voiceDurationSec = await ProbeDurationSecondsAsync(request.VoicePath, ct);
+        var voiceDurationSec = await FfmpegProcess.ProbeDurationSecondsAsync(request.VoicePath, ct);
         var totalDurationSec = voiceDurationSec + (2 * request.BedPadSeconds);
 
         var cueInSec = bed.CueInSec ?? 0.0;
-        var cueOutSec = bed.CueOutSec ?? await ProbeDurationSecondsAsync(bed.Path, ct);
+        var cueOutSec = bed.CueOutSec ?? await FfmpegProcess.ProbeDurationSecondsAsync(bed.Path, ct);
         var bedSegmentDurationSec = cueOutSec - cueInSec;
         if (bedSegmentDurationSec <= 0.0)
             throw new InvalidOperationException(
@@ -112,7 +111,7 @@ public sealed class FfmpegAudioMixer : IAudioMixer
         args.Add("--");   // end-of-options: OutputPath may start with '-' once operator input drives it
         args.Add(request.OutputPath);
 
-        await RunFfmpegAsync(args, ct);
+        await FfmpegProcess.RunFfmpegAsync(args, ct);
     }
 
     static void AddTagArgs(List<string> args, AudioTags tags)
@@ -138,96 +137,6 @@ public sealed class FfmpegAudioMixer : IAudioMixer
         file.Tag.Performers = new[] { artist };
         file.RemoveTags(TagLib.TagTypes.MovieId | TagLib.TagTypes.DivX);
         file.Save();
-    }
-
-    /// <summary>Probes the container duration of <paramref name="path"/> via ffprobe.</summary>
-    static async Task<double> ProbeDurationSecondsAsync(string path, CancellationToken ct)
-    {
-        using var p = Process.Start(new ProcessStartInfo("ffprobe")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            ArgumentList =
-            {
-                "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                path
-            }
-        }) ?? throw new InvalidOperationException("Failed to start ffprobe.");
-
-        string stdout;
-        string stderr;
-        try
-        {
-            var stdoutTask = p.StandardOutput.ReadToEndAsync(ct);
-            stderr = await p.StandardError.ReadToEndAsync(ct);
-            stdout = await stdoutTask;
-            await p.WaitForExitAsync(ct);
-        }
-        catch (OperationCanceledException)
-        {
-            // Cancelling the awaits does not stop the child process — kill it and wait for the OS
-            // to confirm it is actually gone before the caller's cleanup runs, or a still-running
-            // ffprobe/ffmpeg could keep writing after DeletePartialOutput already ran.
-            await KillAndWaitForExitAsync(p);
-            throw;
-        }
-
-        if (p.ExitCode != 0 ||
-            !double.TryParse(stdout.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var duration))
-        {
-            throw new InvalidOperationException($"ffprobe failed to determine duration for '{path}': {stderr}");
-        }
-
-        return duration;
-    }
-
-    static async Task RunFfmpegAsync(IReadOnlyList<string> args, CancellationToken ct)
-    {
-        var psi = new ProcessStartInfo("ffmpeg") { RedirectStandardError = true, UseShellExecute = false };
-        foreach (var a in args)
-            psi.ArgumentList.Add(a);
-
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start ffmpeg.");
-        string stderr;
-        try
-        {
-            stderr = await p.StandardError.ReadToEndAsync(ct);
-            await p.WaitForExitAsync(ct);
-        }
-        catch (OperationCanceledException)
-        {
-            // Same reasoning as ProbeDurationSecondsAsync: confirm the process is dead before we
-            // return control to MixAsync, which deletes any partial output on the way out.
-            await KillAndWaitForExitAsync(p);
-            throw;
-        }
-
-        if (p.ExitCode != 0)
-            throw new InvalidOperationException($"ffmpeg exited with code {p.ExitCode}: {stderr}");
-    }
-
-    /// <summary>
-    /// Terminates <paramref name="p"/> and any children, then waits (uncancellably) for the OS to
-    /// confirm it has actually exited. A cancelled awaiter does not stop the underlying process —
-    /// without this, a killed mix could leak a running ffmpeg that keeps writing the output file
-    /// after the caller already deleted it.
-    /// </summary>
-    static async Task KillAndWaitForExitAsync(Process p)
-    {
-        try
-        {
-            if (!p.HasExited)
-                p.Kill(entireProcessTree: true);
-        }
-        catch (InvalidOperationException)
-        {
-            // Exited between the check and Kill() — nothing left to terminate.
-        }
-
-        await p.WaitForExitAsync(CancellationToken.None);
     }
 
     /// <summary>Best-effort cleanup of a partially-written output file after a failed mix.</summary>
