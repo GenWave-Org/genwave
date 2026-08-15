@@ -213,7 +213,8 @@ public sealed class CrosstalkStockWorker(
             cooldownUntil.Remove(attempt.ShowSlug);
 
             var exchange = new StockedCrosstalkExchange(
-                attempt.ShowSlug, cast.Cast, assembled.Path, assembled.Loudness, assembled.Cue, assembled.DurationMs);
+                attempt.ShowSlug, cast.Cast, assembled.Result.Path, assembled.Result.Loudness,
+                assembled.Result.Cue, assembled.Result.DurationMs, Script: assembled.Script);
 
             if (planner.Stock(exchange))
             {
@@ -227,7 +228,7 @@ public sealed class CrosstalkStockWorker(
                 // runs ticks sequentially, never overlapping), so the target cannot have filled behind
                 // this same tick's own earlier NeedsStock read. Never leak the freshly-assembled asset
                 // regardless.
-                DeleteAssetBestEffort(assembled.Path);
+                DeleteAssetBestEffort(assembled.Result.Path);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -273,7 +274,7 @@ public sealed class CrosstalkStockWorker(
                 new CrosstalkAssemblyRequest(accepted.Script, cast.HostCard, cast.NeighborCard), workCts.Token);
 
             return assembleResult is CrosstalkAssemblyResult.Assembled assembled
-                ? new GenerationOutcome(assembled, CancelledByBreakWindow: false)
+                ? new GenerationOutcome(new GenerationOutcome.AssembledExchange(assembled, accepted.Script), CancelledByBreakWindow: false)
                 : GenerationOutcome.Discarded;
         }
         catch (OperationCanceledException) when (workCts.IsCancellationRequested && !stoppingToken.IsCancellationRequested)

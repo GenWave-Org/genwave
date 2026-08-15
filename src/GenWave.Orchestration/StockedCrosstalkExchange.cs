@@ -27,10 +27,23 @@ using GenWave.Core.Domain;
 /// exchange rather than airing a cast pair the schedule no longer names.</param>
 /// <param name="AssetPath">Absolute path to the single mixed audio asset — deleted whenever this
 /// exchange is discarded (staleness) or retired (aired).</param>
+/// <param name="Script">
+/// SPEC F127.11 (STORY-329, PLAN T287) — the full validated script this exchange's asset was mixed
+/// from, carried straight off <c>GenWave.Tts.CrosstalkScriptWriter</c>'s own accepted output (round-2
+/// review F8: that writer already produces the published <see cref="CrosstalkAiredScript"/> shape
+/// directly — no GenWave.Tts-local script type and no mapper stands between the two, so
+/// <c>GenWave.Host.Crosstalk.CrosstalkStockWorker</c> simply carries it forward, unchanged, when it
+/// builds this record — this project still never references <c>GenWave.Tts</c> itself, only the
+/// shared Abstractions shape). Carried forward, unchanged again, onto the composed
+/// <c>MediaItem.CrosstalkScript</c> at vend time, so the booth log's own <c>pick</c> jsonb stamp
+/// answers "what did they say" (F127.11) with no re-derivation. Defaults to <see langword="null"/> so
+/// every pre-T287 construction site (every T285 spec in this project's own test suite) stays diff-free.
+/// </param>
 public sealed record StockedCrosstalkExchange(
     string ShowSlug,
     CrosstalkCast Cast,
     string AssetPath,
     Loudness Loudness,
     CuePoints? Cue,
-    int? DurationMs);
+    int? DurationMs,
+    CrosstalkAiredScript? Script = null);

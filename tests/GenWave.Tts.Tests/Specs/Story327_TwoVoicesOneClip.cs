@@ -44,18 +44,18 @@ public static class FeatureTwoVoicesOneClip
             new VoiceSpec("kokoro", voiceId, pace, "en"), EnergyDisposition: 0, Lore: [], Corrections: [],
             Pronunciations: pronunciations);
 
-    static CrosstalkScript ThreeLineScript() => new(
+    static CrosstalkAiredScript ThreeLineScript() => new(
     [
-        new CrosstalkLine(CrosstalkSpeaker.Host, "Hey, welcome back to the show.", IsInterjection: false),
-        new CrosstalkLine(CrosstalkSpeaker.Neighbor, "Great to drop in tonight.", IsInterjection: false),
-        new CrosstalkLine(CrosstalkSpeaker.Host, "Always good to have you around.", IsInterjection: false),
+        new CrosstalkAiredLine(CrosstalkSpeaker.Host, "Hey, welcome back to the show.", IsInterjection: false),
+        new CrosstalkAiredLine(CrosstalkSpeaker.Neighbor, "Great to drop in tonight.", IsInterjection: false),
+        new CrosstalkAiredLine(CrosstalkSpeaker.Host, "Always good to have you around.", IsInterjection: false),
     ]);
 
     /// <summary>SPEC F127.4's own upper bound (8 lines, 7 transitions) — enough transitions that
     /// "not all gaps are identical" is a meaningful, not-by-luck assertion.</summary>
-    static CrosstalkScript EightLineScript() => new(
+    static CrosstalkAiredScript EightLineScript() => new(
     [
-        .. Enumerable.Range(0, 8).Select(i => new CrosstalkLine(
+        .. Enumerable.Range(0, 8).Select(i => new CrosstalkAiredLine(
             i % 2 == 0 ? CrosstalkSpeaker.Host : CrosstalkSpeaker.Neighbor,
             $"Line number {i + 1}.",
             IsInterjection: false)),
@@ -197,7 +197,7 @@ public static class FeatureTwoVoicesOneClip
         [Fact]
         public void Gap_planning_is_deterministic_per_script_content()
         {
-            // Given two DISTINCT CrosstalkScript instances built from IDENTICAL content, and a third,
+            // Given two DISTINCT CrosstalkAiredScript instances built from IDENTICAL content, and a third,
             // genuinely different script (T284 review F2 — a killer proved unseeding
             // CrosstalkTimeline.ComputeGapsSeconds's Random survived undetected)...
             var scriptA = ThreeLineScript();
@@ -229,10 +229,10 @@ public static class FeatureTwoVoicesOneClip
             // (longer than InterjectionOverlapSeconds) keeps the interjection's start comfortably
             // off the zero floor.
             synth.LineDurationSeconds = 1.0;
-            var withoutInterjection = new CrosstalkScript(
+            var withoutInterjection = new CrosstalkAiredScript(
             [
-                new CrosstalkLine(CrosstalkSpeaker.Host, "Hey, welcome back to the show.", IsInterjection: false),
-                new CrosstalkLine(CrosstalkSpeaker.Neighbor, "Great to drop in tonight.", IsInterjection: false),
+                new CrosstalkAiredLine(CrosstalkSpeaker.Host, "Hey, welcome back to the show.", IsInterjection: false),
+                new CrosstalkAiredLine(CrosstalkSpeaker.Neighbor, "Great to drop in tonight.", IsInterjection: false),
             ]);
             var withInterjection = withoutInterjection with
             {
@@ -348,10 +348,10 @@ public static class FeatureTwoVoicesOneClip
             // interjection's own ~0.35s overlap can produce, two 0 dBFS signals genuinely summed...
             synth.Amplitude = 1.0;
             synth.LineDurationSeconds = 1.0;
-            var script = new CrosstalkScript(
+            var script = new CrosstalkAiredScript(
             [
-                new CrosstalkLine(CrosstalkSpeaker.Host, "Hey, welcome back to the show.", IsInterjection: false),
-                new CrosstalkLine(CrosstalkSpeaker.Neighbor, "Great to drop in tonight.", IsInterjection: true),
+                new CrosstalkAiredLine(CrosstalkSpeaker.Host, "Hey, welcome back to the show.", IsInterjection: false),
+                new CrosstalkAiredLine(CrosstalkSpeaker.Neighbor, "Great to drop in tonight.", IsInterjection: true),
             ]);
 
             // When the exchange is assembled...
@@ -463,7 +463,7 @@ public static class FeatureTwoVoicesOneClip
             // record, so nothing upstream of AssembleAsync itself guarantees CrosstalkScriptWriter's
             // own 3-8 line invariant reached this call (T284 review F7)...
             var (assembler, synth, _, _, _, cacheRoot) = BuildAssembler();
-            var oneLineScript = new CrosstalkScript([new CrosstalkLine(CrosstalkSpeaker.Host, "Solo.", IsInterjection: false)]);
+            var oneLineScript = new CrosstalkAiredScript([new CrosstalkAiredLine(CrosstalkSpeaker.Host, "Solo.", IsInterjection: false)]);
 
             try
             {

@@ -54,7 +54,7 @@ static class ProductionChainHarness
     public static ProductionChain BuildProductionChain(
         FakePersonaStore personaStore, ScheduleWeekSnapshot snapshot, DateTimeOffset now, TimeSpan lookahead,
         CadenceConfig? cadence = null, TimeSpan? renderBudget = null, FakeMediaCatalog? catalog = null,
-        IPatterDurationEstimator? patterEstimator = null)
+        IPatterDurationEstimator? patterEstimator = null, CrosstalkPlanner? crosstalkPlanner = null)
     {
         var time = new FakeTimeProvider(now);
         var scheduleStore = new FakeScheduleStore(snapshot);
@@ -89,7 +89,8 @@ static class ProductionChainHarness
             personaStore: personaStore,
             events: events,
             catalog: mediaCatalog,
-            patterEstimator: patterEstimator);
+            patterEstimator: patterEstimator,
+            crosstalkPlanner: crosstalkPlanner);
 
         return new ProductionChain(orchestrator, queue, time, scheduleStore, tts, events, logger, mediaCatalog);
     }

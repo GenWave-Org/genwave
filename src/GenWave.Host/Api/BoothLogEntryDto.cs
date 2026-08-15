@@ -23,6 +23,12 @@ namespace GenWave.Host.Api;
 /// UI renders NO taste thumbs for such a row (regardless of <see cref="PersonaId"/>), and the thumb
 /// endpoint independently refuses it. Computed at read time against the live safe scope, so a
 /// SafeScope edit governs the very next page.
+///
+/// <see cref="Crosstalk"/> (SPEC F127.11, STORY-329, PLAN T287, review finding F3) mirrors
+/// <see cref="Pick"/>'s own additive/absent-when-null shape for a <c>SegmentKind.Crosstalk</c> row: the
+/// full two-voice script, never a false "off-schema pick stamp" WARN (the row's stored <c>pick</c> jsonb
+/// is dispatched to whichever DTO shape it actually parses as — <see cref="BoothLogController"/>'s own
+/// remarks). Mutually exclusive with <see cref="Pick"/> — a row carries at most one of the two.
 /// </summary>
 public sealed record BoothLogEntryDto(
     long Id,
@@ -31,4 +37,5 @@ public sealed record BoothLogEntryDto(
     string Summary,
     long? PersonaId,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BoothLogPickDto? Pick = null,
-    bool TasteExcluded = false);
+    bool TasteExcluded = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BoothLogCrosstalkScriptDto? Crosstalk = null);

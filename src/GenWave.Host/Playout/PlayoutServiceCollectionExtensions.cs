@@ -29,17 +29,24 @@ static class PlayoutServiceCollectionExtensions
             // on-air LLM+TTS render is running. See OnAirRenderGate's own remarks.
             .AddSingleton<OnAirRenderGate>()
             .AddSingleton<PlayHistoryEventSink>()
+            // Crosstalk retire-at-air (SPEC F127.7, STORY-329, PLAN T287) — auto-constructor-resolved
+            // (no factory), so its own optional CrosstalkPlanner? ctor param degrades to null (a
+            // harmless no-op) whenever GenWave.Host.Crosstalk.CrosstalkHostServiceCollectionExtensions
+            // was never called, with no ordering dependency on when it IS. See
+            // CrosstalkRetirementEventSink's own remarks.
+            .AddSingleton<CrosstalkRetirementEventSink>()
             // The host's event-sink binding (gitea-#246): composes PlayHistoryEventSink
-            // (TrackAired -> play history ring) and the booth log's BoothLogWriter
-            // (IBoothLogEventConsumer, SPEC F72.1, STORY-195) into the ONE binding every publisher
-            // resolves — see CompositeStationEventSink's own remarks. Deliberately a plain Add
-            // (not TryAdd) so it wins over the no-op defaults the library extensions register; a
-            // future consumer is added to the list this factory builds, not by re-wiring either
-            // existing sink.
+            // (TrackAired -> play history ring), the booth log's BoothLogWriter
+            // (IBoothLogEventConsumer, SPEC F72.1, STORY-195), and CrosstalkRetirementEventSink
+            // (TrackAired -> asset delete, PLAN T287) into the ONE binding every publisher resolves —
+            // see CompositeStationEventSink's own remarks. Deliberately a plain Add (not TryAdd) so it
+            // wins over the no-op defaults the library extensions register; a future consumer is added
+            // to the list this factory builds, not by re-wiring any existing sink.
             .AddSingleton<IStationEventSink>(sp => new CompositeStationEventSink(
                 [
                     sp.GetRequiredService<PlayHistoryEventSink>(),
                     sp.GetRequiredService<IBoothLogEventConsumer>(),
+                    sp.GetRequiredService<CrosstalkRetirementEventSink>(),
                 ],
                 sp.GetRequiredService<ILogger<CompositeStationEventSink>>()))
             // Artwork/station-icon URL resolution on the push path (SPEC F88.4–F88.5, STORY-223,

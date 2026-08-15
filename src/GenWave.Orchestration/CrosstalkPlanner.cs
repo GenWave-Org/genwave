@@ -101,6 +101,40 @@ public sealed class CrosstalkPlanner(
     readonly object gate = new();
     readonly Dictionary<string, List<StockedCrosstalkExchange>> stock = new(StringComparer.OrdinalIgnoreCase);
 
+    // ── Nth-airing state (SPEC F127.8, STORY-329, PLAN T287) ──────────────────────────────────────
+    //
+    // lastObservedShowSlug is a SINGLE ambient field, not a per-show one: only one show is ever on
+    // the air at a time, and the whole point is detecting the EDGE from whatever slug was on air a
+    // moment ago to whatever NoteOnAirShow is told now — across shows and gaps alike — so that
+    // Show A -> Show B -> Show A again counts as TWO separate airings of A, never one continuous
+    // occurrence spanning dozens of track breaks. airingCounts/eligibleThisAiring/vendedThisAiring
+    // ARE per-show (keyed the same way stock already is): how many eligible airings of THIS show have
+    // been observed, whether the CURRENT occurrence cleared Crosstalk:EveryNthAiring, and whether this
+    // occurrence has already spent its one exchange (never re-armed until the NEXT airing begins).
+    //
+    // Absent from all three dictionaries (a show TryVend is asked about before NoteOnAirShow has ever
+    // been told about it) reads as eligible/not-yet-vended — the SAME permissive default TryVend's own
+    // pre-T287 contract always had — so every construction site that vends directly (every T285 spec
+    // in this project's own test suite) keeps behaving exactly as before. In production this default
+    // is never actually exercised: NoteOnAirShow always runs once per unit, at the top of
+    // Orchestrator.GetNextAsync, strictly before that SAME unit's own crosstalk vend attempt.
+    string? lastObservedShowSlug;
+    readonly Dictionary<string, int> airingCounts = new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, bool> eligibleThisAiring = new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, bool> vendedThisAiring = new(StringComparer.OrdinalIgnoreCase);
+
+    // ── Retirement bookkeeping (SPEC F127.7, STORY-329, PLAN T287) ────────────────────────────────
+    //
+    // TryVend already removes a vended exchange from stock the instant it hands it out (single-use by
+    // construction). What happens to its ASSET from that point is this dictionary's own job: an
+    // exchange that reaches the playout buffer is marked here (MarkVended, keyed by the MediaId the
+    // caller composed for it) and its asset is deleted only once the SAME id is CONFIRMED aired
+    // (RetireByMediaId, driven by the real TrackAired signal — never at plan/enqueue time, when the
+    // engine has not necessarily finished reading the file yet). An exchange that never reaches the
+    // buffer at all (DiscardUnaired's own caller) never enters this dictionary — there is nothing to
+    // wait for confirmation of.
+    readonly Dictionary<string, StockedCrosstalkExchange> awaitingRetirement = new(StringComparer.Ordinal);
+
     // ── Eligibility face (SPEC F127.8) ─────────────────────────────────────────────────────────
 
     /// <summary>
@@ -124,6 +158,62 @@ public sealed class CrosstalkPlanner(
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// SPEC F127.8's own "EveryNthAiring counts AIRINGS, not stock events" ruling (STORY-329, PLAN
+    /// T287) — told the CURRENTLY on-air show slug once per unit, continuously (a caller's own
+    /// GetNextAsync-scoped read of <c>CachingScheduleResolver.TryGetCurrent()?.Show?.Slug</c>),
+    /// regardless of whether crosstalk is even enabled for it: an "airing" is one continuous on-air
+    /// OCCURRENCE of a show — the edge from whatever slug was on air a moment ago to a DIFFERENT slug
+    /// now (including from/to no show at all) — never a per-unit or per-break count, so a two-hour
+    /// block spanning dozens of track breaks is still exactly ONE airing, and two temporally separate
+    /// occurrences of the SAME recurring show (with anything, enabled or not, airing in between) count
+    /// as two. A no-op when <paramref name="showSlug"/> matches whatever this method was last told —
+    /// the common case, called on every unit of a show's own multi-hour block.
+    ///
+    /// <para>
+    /// On a genuine transition INTO a show (never on a transition OUT, to no show, or to a different
+    /// show for the FIRST time — see <see cref="TryVend"/>'s own "absent means eligible" default for
+    /// why the very first airing this process ever observes is never blocked): increments that show's
+    /// own airing count, and re-derives THIS occurrence's eligibility from the live
+    /// <see cref="ICrosstalkScopeProvider.EveryNthAiring"/> (read fresh, exactly once, right here —
+    /// never re-read for the rest of the occurrence, so a live edit mid-occurrence cannot retroactively
+    /// flip a decision <see cref="TryVend"/> may already have acted on) — <c>count % EveryNthAiring ==
+    /// 0</c>, which airs the Nth, 2*Nth, 3*Nth, ... airing, and (for the shipped default, 1) every
+    /// single one. The occurrence's own "already spent its one exchange" flag resets false — a fresh
+    /// occurrence has not yet vended anything.
+    /// </para>
+    ///
+    /// <para>
+    /// <see cref="TryVend"/> is the ONE consumer of the two derived flags this method writes — see
+    /// that method's own remarks for the "absent means eligible, not-yet-vended" default every
+    /// pre-T287 caller (including every T285 spec in this project's own test suite) relies on never
+    /// having called this method at all.
+    /// </para>
+    /// </summary>
+    public void NoteOnAirShow(string? showSlug)
+    {
+        lock (gate)
+        {
+            if (showSlug == lastObservedShowSlug)
+                return; // same occurrence continuing — including a showless station's null == null
+
+            lastObservedShowSlug = showSlug;
+
+            if (showSlug is null)
+                return; // transitioned OFF the air entirely — nothing to count until a show returns
+
+            var count = airingCounts.GetValueOrDefault(showSlug) + 1;
+            airingCounts[showSlug] = count;
+
+            // Math.Max guards a degenerate 0 (never shipped — SettingValidator floors the live
+            // setting at 1 — but scope is a caller-supplied interface, not something this type can
+            // itself validate) from a modulo-by-zero crash.
+            var everyNth = Math.Max(scope.EveryNthAiring, 1);
+            eligibleThisAiring[showSlug] = count % everyNth == 0;
+            vendedThisAiring[showSlug] = false;
+        }
     }
 
     // ── Casting face (SPEC F127.2) ─────────────────────────────────────────────────────────────
@@ -278,17 +368,46 @@ public sealed class CrosstalkPlanner(
     /// <paramref name="currentSnapshot"/> at all, e.g. the on-air block is currently a projected
     /// special that has not been persisted) returns <see langword="null"/> WITHOUT touching the stock
     /// at all — uncertainty is not evidence of staleness, and a null host id must never fall through
-    /// to null-matching the first null-Id segment in the snapshot. Otherwise walks the show's stock in
-    /// FIFO order, discarding — deleting the asset,
-    /// logging one Information line — every exchange whose captured
-    /// <see cref="StockedCrosstalkExchange.Cast"/> no longer matches the CURRENT grid adjacency
-    /// (re-derived from <paramref name="currentHostBlock"/>/<paramref name="currentSnapshot"/> via
-    /// <see cref="TryCastPersonas"/>, SPEC F127.7's own staleness rule) until it finds a fresh one or
-    /// the stock empties. A vended exchange is removed from the stock the instant it is returned —
-    /// single-use by construction, it can never be handed out a second time (SPEC F127.7's "airs once"
-    /// ruling); <see cref="Retire"/> is the separate, LATER call that deletes its asset once it has
-    /// actually aired. Every discard's asset-delete + log happens OUTSIDE the lock (PLAN T285 review
-    /// F7) — only the list mutation itself needs to be synchronized; disk I/O and logging never do.
+    /// to null-matching the first null-Id segment in the snapshot.
+    ///
+    /// <para>
+    /// <b>The staleness sweep runs BEFORE the <c>EveryNthAiring</c> gate (SPEC F127.8 review F7).</b>
+    /// Every stocked exchange whose captured <see cref="StockedCrosstalkExchange.Cast"/> no longer
+    /// matches the CURRENT grid adjacency (re-derived from <paramref name="currentHostBlock"/>/
+    /// <paramref name="currentSnapshot"/> via <see cref="TryCastPersonas"/>) is discarded —
+    /// asset deleted, one Information line logged — UNCONDITIONALLY, even on an airing the Nth-airing
+    /// gate below is about to skip: F127.7 puts the staleness check "at vend", and a skipped airing is
+    /// still a vend attempt for exactly this purpose. Sweeping only when an airing also happens to be
+    /// ELIGIBLE would strand stale stock — and the freed slot it exists to open for <c>CrosstalkStockWorker</c>'s
+    /// own <see cref="NeedsStock"/> check — for however long <c>EveryNthAiring</c> keeps skipping this
+    /// show, when nothing about eligibility bears on whether a cast pair is still current.
+    /// </para>
+    ///
+    /// <para>
+    /// SPEC F127.8's <c>EveryNthAiring</c> gate (STORY-329, PLAN T287) runs immediately AFTER the sweep,
+    /// on whatever fresh stock remains: a show whose CURRENT occurrence has not cleared its Nth-airing
+    /// count, or has already spent this occurrence's one exchange, vends nothing —
+    /// <see cref="NoteOnAirShow"/> is what derives both flags, from the CURRENT occurrence's own
+    /// count, not this call's own. A show <see cref="NoteOnAirShow"/> has never been told about reads
+    /// as eligible/not-yet-vended (the permissive default that method's own remarks name) — every
+    /// PRE-T287 caller of this method (every T285 spec) never called it and keeps behaving exactly as
+    /// before.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>One lock acquisition, sweep-through-spend (SPEC F127.8 review F6).</b> The eligibility
+    /// read and the vended-flag spend used to live in two SEPARATE lock statements with plain,
+    /// synchronous work in between — genuinely non-atomic (a race window a comment nonetheless
+    /// claimed away as harmless, "there is at most one caller... but this costs nothing to state
+    /// correctly"). Both now live in the SAME <c>lock (gate)</c> block the sweep itself runs inside,
+    /// so "is this occurrence still eligible and unspent" and "spend it" are genuinely one atomic step
+    /// — the claim the old comment made is now actually true rather than merely asserted. A vended
+    /// exchange is removed from the stock the instant it is returned — single-use by construction, it
+    /// can never be handed out a second time (SPEC F127.7's "airs once" ruling); <see cref="Retire"/>
+    /// is the separate, LATER call that deletes its asset once it has actually aired. Every discard's
+    /// asset-delete + log happens OUTSIDE the lock (PLAN T285 review F7) — only the list mutation
+    /// itself needs to be synchronized; disk I/O and logging never do.
+    /// </para>
     /// </summary>
     public StockedCrosstalkExchange? TryVend(
         string showSlug, ScheduleSegment currentHostBlock, ScheduleWeekSnapshot currentSnapshot)
@@ -309,21 +428,31 @@ public sealed class CrosstalkPlanner(
 
         lock (gate)
         {
+            // The sweep (SPEC F127.8 review F7): removes every entry whose cast no longer matches
+            // currentCast, scanning the WHOLE list rather than stopping at the first fresh match —
+            // unconditional, regardless of what the eligibility check just below decides.
             if (stock.TryGetValue(showSlug, out var list))
             {
-                while (list.Count > 0)
+                for (var i = list.Count - 1; i >= 0; i--)
                 {
-                    var candidate = list[0];
-                    list.RemoveAt(0);
-
-                    if (currentCast is not null && candidate.Cast == currentCast)
+                    if (currentCast is null || list[i].Cast != currentCast)
                     {
-                        fresh = candidate;
-                        break;
+                        discarded.Add(list[i]);
+                        list.RemoveAt(i);
                     }
-
-                    discarded.Add(candidate);
                 }
+            }
+
+            // The Nth-airing gate (SPEC F127.8 review F6 — same lock as the sweep above and the spend
+            // below, genuinely atomic): a skipped airing still keeps whatever fresh stock the sweep
+            // just left behind, untouched, for a LATER eligible airing.
+            var eligible = eligibleThisAiring.GetValueOrDefault(showSlug, defaultValue: true);
+            var alreadyVended = vendedThisAiring.GetValueOrDefault(showSlug);
+            if (eligible && !alreadyVended && stock.TryGetValue(showSlug, out var freshList) && freshList.Count > 0)
+            {
+                fresh = freshList[0];
+                freshList.RemoveAt(0);
+                vendedThisAiring[showSlug] = true;
             }
         }
 
@@ -362,6 +491,104 @@ public sealed class CrosstalkPlanner(
         logger.LogInformation(
             "Crosstalk exchange for '{Show}' retired after airing — {Outcome} ({Path})",
             LogSanitize.Strip(exchange.ShowSlug), outcomeText, LogSanitize.Strip(exchange.AssetPath));
+    }
+
+    /// <summary>
+    /// SPEC F127.7 (STORY-329, PLAN T287) — marks <paramref name="exchange"/> as awaiting confirmed
+    /// air, keyed by <paramref name="mediaId"/> (the SAME id the caller stamped onto the composed
+    /// <c>MediaItem</c>). Called once, by <c>Orchestrator.EnqueuePatterAsync</c>'s own vend step, the
+    /// instant a vended exchange is genuinely on its way to the playout buffer — never earlier (a
+    /// caller that later fails to enqueue it owns the failure-path delete itself, via
+    /// <see cref="DiscardUnaired"/>, and must never have called this method first) and never later (a
+    /// held-but-unmarked exchange would let <see cref="RetireByMediaId"/> silently no-op on the
+    /// genuine advance this exchange is about to earn).
+    ///
+    /// <para>
+    /// <b>The third outcome (round-2 review F-B, stated honestly): pushed-but-never-aired leaks one
+    /// entry per unconfirmed vend, for process life — not the "≤2+1 per show" bound an earlier version
+    /// of this remark claimed.</b> <see cref="StockTargetPerShow"/> caps how much stock a show holds
+    /// CONCURRENTLY; it says nothing about cumulative vends over a process's uptime. Every entry marked
+    /// here whose <paramref name="mediaId"/>'s <c>TrackAired</c> never arrives at all (a lost push, or a
+    /// process restart between this call and the genuine advance) stays in
+    /// <see cref="awaitingRetirement"/> — roughly 200 bytes plus one asset file on disk — for the
+    /// remainder of THIS process's life; nothing here times it out or evicts it. This is deliberate,
+    /// not an oversight: an eviction timer was considered and rejected as speculative machinery with no
+    /// observed need — the NEXT process's own <c>CrosstalkStockWorker</c> startup purge (that worker's
+    /// own remarks: "nothing else in the system ever sweeps crosstalk/, by design") deletes every
+    /// orphaned asset on the next boot regardless, so the honest bound is "one process's uptime," not
+    /// "forever."
+    /// </para>
+    /// </summary>
+    public void MarkVended(string mediaId, StockedCrosstalkExchange exchange)
+    {
+        lock (gate)
+        {
+            awaitingRetirement[mediaId] = exchange;
+        }
+    }
+
+    /// <summary>
+    /// SPEC F127.7 (STORY-329, PLAN T287) — the confirmed-air half of <see cref="MarkVended"/>: retires
+    /// whichever exchange was marked under <paramref name="mediaId"/>, or no-ops when none was (every
+    /// non-crosstalk advance, and the SAME id retired twice — <see cref="Retire"/>'s own asset delete
+    /// is itself idempotent, but this guard means a repeat advance never even attempts it, let alone
+    /// logs a second "retired" line for the same exchange). The one production caller is a
+    /// <c>TrackAired</c>-driven <c>IStationEventSink</c> consumer
+    /// (<c>GenWave.Host.Playout.CrosstalkRetirementEventSink</c> — round-2 review F5: that sink lives
+    /// in <c>GenWave.Host.Playout</c>, beside <c>PlayHistoryEventSink</c>, not <c>GenWave.Host.Crosstalk</c>
+    /// where the rest of this feature's Host wiring sits, specifically to avoid a two-namespace
+    /// Host-internal cycle — see that sink's own remarks)
+    /// — the SAME genuine, engine-confirmed air-time signal the booth log and play history already
+    /// key their own writes off, never a plan-time or push-time guess (deleting the asset before the
+    /// engine has necessarily finished reading it would risk the exact silent playback corruption this
+    /// whole design exists to avoid).
+    ///
+    /// <para>
+    /// <b>The no-op branch above IS the third outcome (round-2 review F4).</b> A no-match here is not
+    /// only "every non-crosstalk advance" and "a repeat advance for an already-retired id" — it is also
+    /// the honest face of a pushed-but-never-confirmed exchange (see <see cref="MarkVended"/>'s own
+    /// remarks for why that is a deliberately BOUNDED leak, swept only by the next process's own
+    /// startup purge, never by this method).
+    /// </para>
+    /// </summary>
+    public void RetireByMediaId(string mediaId)
+    {
+        StockedCrosstalkExchange? exchange;
+        lock (gate)
+        {
+            if (!awaitingRetirement.Remove(mediaId, out exchange))
+                return;
+        }
+
+        Retire(exchange);
+    }
+
+    /// <summary>
+    /// SPEC F127.7's own "TryVend removes before air" contract (STORY-329, PLAN T287 rider) — the
+    /// failure-path delete this integration owns: <paramref name="exchange"/> was already removed from
+    /// stock by <see cref="TryVend"/>, but never reached (or will never reach) the playout buffer, so
+    /// its asset must not leak. Deliberately a DIFFERENT log line than <see cref="Retire"/>'s own —
+    /// "discarded, never aired" is a materially different fact than "retired after airing" for an
+    /// operator reading F127.11's own "why was there no banter" evidence trail. Never removes anything
+    /// from <see cref="awaitingRetirement"/> — a caller that already called <see cref="MarkVended"/>
+    /// for this exchange must call <see cref="RetireByMediaId"/> instead; the two are mutually
+    /// exclusive by construction (this method's own doc above).
+    /// </summary>
+    public void DiscardUnaired(StockedCrosstalkExchange exchange, string reason)
+    {
+        var outcome = DeleteAssetBestEffort(exchange.AssetPath);
+        var outcomeText = outcome switch
+        {
+            AssetDeleteOutcome.Deleted => "asset deleted",
+            AssetDeleteOutcome.AlreadyAbsent => "asset already absent",
+            AssetDeleteOutcome.Failed => "asset delete failed",
+            _ => "asset delete outcome unknown",
+        };
+
+        logger.LogInformation(
+            "Crosstalk exchange for '{Show}' discarded — never reached air ({Reason}) — {Outcome} ({Path})",
+            LogSanitize.Strip(exchange.ShowSlug), LogSanitize.Strip(reason), outcomeText,
+            LogSanitize.Strip(exchange.AssetPath));
     }
 
     /// <summary>The three outcomes <see cref="DeleteAssetBestEffort"/> can observe — what

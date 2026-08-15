@@ -41,4 +41,25 @@ public sealed record TrackAired(
     DateTimeOffset StartedAt,
     int? DurationMs,
     PersonaPickDiagnostics? PersonaPick = null,
-    SegmentKind? SegmentKind = null) : StationEvent;
+    SegmentKind? SegmentKind = null) : StationEvent
+{
+    /// <summary>
+    /// SPEC F127.11 (STORY-329, PLAN T287) — the SAME <see cref="CrosstalkAiredScript"/> the
+    /// feeder's pushed-item metadata carries off <c>MediaItem.CrosstalkScript</c>, forwarded the same way
+    /// <see cref="PersonaPick"/> is above. Non-null only when <see cref="SegmentKind"/> is
+    /// <see cref="Core.Domain.SegmentKind.Crosstalk"/>. The booth log's event consumer stamps this SAME
+    /// row's <c>pick</c> jsonb from exactly this value (the <c>BoothLogPickStamp</c> precedent, narrowed
+    /// per-kind) rather than a persona-pick stamp.
+    ///
+    /// <para>
+    /// <b>Declared as a defaulted body property, not a 9th primary-constructor parameter (round-2
+    /// review F1 — the exact T285-round-3 defect, <see cref="Core.Domain.ShowSummary.Slug"/>'s own
+    /// precedent).</b> This record already shipped inside the Abstractions 5.0.0 NuGet with an 8-arg
+    /// <c>ctor</c> and 8-arity <c>Deconstruct</c>; adding a further positional parameter would silently
+    /// delete both from the published binary surface, breaking every compiled caller regardless of the
+    /// new parameter's own default value. Every construction site that needs to set this uses an
+    /// object-initializer/<c>with</c> expression, never a positional/named constructor argument.
+    /// </para>
+    /// </summary>
+    public CrosstalkAiredScript? CrosstalkScript { get; init; }
+}

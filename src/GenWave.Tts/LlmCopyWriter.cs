@@ -106,6 +106,15 @@ using GenWave.Core.Domain;
 /// which is what keeps its own show's cadence window from being spent on a line that never aired. See
 /// that method's own remarks for the full reasoning.
 /// </para>
+///
+/// <para>
+/// Crosstalk supersedes BOTH lanes at once (SPEC F127.9, STORY-329, PLAN T287): a break vending a
+/// <see cref="SegmentKind.Crosstalk"/> exchange stamps <see cref="SegmentRequest.CrosstalkAiredThisBreak"/>
+/// true on that SAME break's LeadIn/BackAnnounce request — one voice-moment per break — and both
+/// <see cref="TakeDuePatterFactForOnAirRender"/> and <see cref="TakeDueShowFlavorLineForOnAirRender"/>
+/// gate on it, never even asking either seam (the identical never-even-ask discipline the show-flavor
+/// line's own "context wins" paragraph above already establishes).
+/// </para>
 /// </summary>
 public sealed class LlmCopyWriter(
     TemplateCopyWriter fallback,
@@ -294,13 +303,20 @@ public sealed class LlmCopyWriter(
             // patter lane's due fact; see TakeDuePatterFactForOnAirRender's own remarks for why this
             // call lives HERE, in WriteAsync's own body, rather than inside the shared
             // RequestCleanedCompletionAsync below (which WritePreviewAsync also calls).
-            var patterFact = TakeDuePatterFactForOnAirRender(request.Kind);
+            //
+            // SPEC F127.9 (STORY-329, PLAN T287) — "banter supersedes": request.CrosstalkAiredThisBreak
+            // gates BOTH takes below, exactly like the request.Kind gate every other caller already
+            // reads (LlmPromptBuilder.IsPatterFactKind) — a break airing crosstalk never even ASKS
+            // either seam for this render, the same "never even ask" CQS discipline
+            // TakeDueShowFlavorLineForOnAirRender's own remarks describe one seam over, so a lost slot
+            // costs neither lane its own cadence window.
+            var patterFact = TakeDuePatterFactForOnAirRender(request.Kind, request.CrosstalkAiredThisBreak);
             // SPEC F116.3 (STORY-308, PLAN T249) — the show-flavor line's own pull point, ONLY
             // consulted when patterFact above is null; see TakeDueShowFlavorLineForOnAirRender's own
             // remarks for why "never even ask" (not "ask and discard") is what keeps a lost slot from
             // spending the show's own cadence window.
             var showFlavorFact = patterFact is null
-                ? TakeDueShowFlavorLineForOnAirRender(request.Kind)
+                ? TakeDueShowFlavorLineForOnAirRender(request.Kind, request.CrosstalkAiredThisBreak)
                 : null;
             // updateTasteMemory: true — this is an on-air call, so previousBreakTasteNotes is both
             // read and (on success) overwritten INSIDE RequestCleanedCompletionAsync's own single-flight
@@ -485,8 +501,15 @@ public sealed class LlmCopyWriter(
     /// current break's only due fact out from under the on-air render that actually airs (the exact
     /// CQS trap the T222 review flagged for <c>GenWave.Context.ContextPipeline</c>'s own TryTake).
     /// </summary>
-    ContextPatterFact? TakeDuePatterFactForOnAirRender(SegmentKind kind) =>
-        LlmPromptBuilder.IsPatterFactKind(kind)
+    /// <param name="crosstalkAiredThisBreak">
+    /// SPEC F127.9 (STORY-329, PLAN T287) — <see langword="true"/> when this SAME break is airing a
+    /// <see cref="SegmentKind.Crosstalk"/> exchange (<see cref="SegmentRequest.CrosstalkAiredThisBreak"/>,
+    /// stamped by <c>Orchestrator.EnqueuePatterAsync</c>'s own vend step, the ONE writer): the fact
+    /// lane is never even asked for that break — one voice-moment per break, never a stacked "ask and
+    /// discard" (the exact CQS trap this method's own remarks already describe for every other kind).
+    /// </param>
+    ContextPatterFact? TakeDuePatterFactForOnAirRender(SegmentKind kind, bool crosstalkAiredThisBreak) =>
+        LlmPromptBuilder.IsPatterFactKind(kind) && !crosstalkAiredThisBreak
             ? (patterFactSource ?? NoOpContextPatterFactSource.Instance).TryTakeDuePatterFact()
             : null;
 
@@ -508,8 +531,12 @@ public sealed class LlmCopyWriter(
     /// over). <see cref="WritePreviewAsync"/> never calls this method at all, for the identical reason
     /// it never calls <see cref="TakeDuePatterFactForOnAirRender"/>.
     /// </summary>
-    ShowFlavorFact? TakeDueShowFlavorLineForOnAirRender(SegmentKind kind) =>
-        LlmPromptBuilder.IsPatterFactKind(kind)
+    /// <param name="crosstalkAiredThisBreak">
+    /// SPEC F127.9 — same gate, same reason, as <see cref="TakeDuePatterFactForOnAirRender"/>'s own
+    /// identically-named parameter one seam over.
+    /// </param>
+    ShowFlavorFact? TakeDueShowFlavorLineForOnAirRender(SegmentKind kind, bool crosstalkAiredThisBreak) =>
+        LlmPromptBuilder.IsPatterFactKind(kind) && !crosstalkAiredThisBreak
             ? (showFlavorLineSource ?? NoOpShowFlavorLineSource.Instance).TryTakeDueShowLine()
             : null;
 

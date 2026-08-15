@@ -423,6 +423,59 @@ public static class FeatureStockedAheadAiredOnce
             // Then the show's stock is freed — the slot a LATER task's stock-timer loop will refill
             Assert.Equal(0, planner.StockCount("morning-drive"));
         }
+
+        [Fact]
+        public static void Stale_stock_is_discarded_even_on_an_airing_the_Nth_airing_gate_skips()
+        {
+            // Given Crosstalk:EveryNthAiring set to 2 (this show's FIRST airing is therefore
+            // INELIGIBLE, count=1, 1 % 2 != 0) — and a stocked exchange whose cast pair no longer
+            // matches grid adjacency (SPEC F127.8 review F7: the staleness sweep must run BEFORE the
+            // Nth-airing gate, so a skipped airing still discards stale stock and frees the slot for
+            // CrosstalkStockWorker to refill with the CURRENT cast, rather than stranding it for
+            // however long the gate keeps skipping)
+            var host = Segment(1, DayOfWeek.Monday, 480, 960, personaId: 10);
+            var next = Segment(2, DayOfWeek.Monday, 960, 1440, personaId: 20);
+            var snapshot = new ScheduleWeekSnapshot([host, next]);
+            var assetPath = Path.GetTempFileName();
+            var stale = MakeStocked("morning-drive", new CrosstalkCast(10, 99), assetPath);
+            var scope = new FakeCrosstalkScopeProvider(enabledShows: ["morning-drive"], everyNthAiring: 2);
+            var planner = MakePlanner(new FakePersonaStore(), scope);
+            planner.Stock(stale);
+            planner.NoteOnAirShow("morning-drive"); // airing #1 — 1 % 2 != 0, ineligible
+
+            // When the (skipped) airing vends
+            var vended = planner.TryVend("morning-drive", host, snapshot);
+
+            // Then nothing is handed out (the gate still skips it) — but the stale exchange is gone
+            // from stock regardless, exactly as if the airing had been eligible
+            Assert.Null(vended);
+            Assert.Equal(0, planner.StockCount("morning-drive"));
+        }
+
+        [Fact]
+        public static void Stock_is_discarded_as_stale_when_the_current_adjacency_casts_no_one()
+        {
+            // Given a stocked exchange, and a CURRENT grid where the host now has no distinct
+            // adjacent persona at all (both neighbors music-only) — currentCast resolves to null.
+            // Every stocked exchange is stale by definition here: none of them can possibly match "no
+            // cast". This is what a mutant inverting the sweep's null-cast guard (discard nothing when
+            // currentCast is null, rather than discard everything) would survive undetected.
+            var previous = Segment(1, DayOfWeek.Monday, 0, 480, personaId: null);
+            var host = Segment(2, DayOfWeek.Monday, 480, 960, personaId: 10);
+            var next = Segment(3, DayOfWeek.Monday, 960, 1440, personaId: null);
+            var snapshot = new ScheduleWeekSnapshot([previous, host, next]);
+            var assetPath = Path.GetTempFileName();
+            var stale = MakeStocked("morning-drive", new CrosstalkCast(10, 99), assetPath);
+            var planner = MakePlanner(
+                new FakePersonaStore(), new FakeCrosstalkScopeProvider(enabledShows: ["morning-drive"]));
+            planner.Stock(stale);
+
+            var vended = planner.TryVend("morning-drive", host, snapshot);
+
+            // Then nothing vends, and the stock is swept clean regardless
+            Assert.Null(vended);
+            Assert.Equal(0, planner.StockCount("morning-drive"));
+        }
     }
 
     public static class ScenarioAnUnknownHostIsUncertaintyNotStaleness

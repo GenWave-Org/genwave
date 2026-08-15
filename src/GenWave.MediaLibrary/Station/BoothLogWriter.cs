@@ -72,7 +72,8 @@ sealed class BoothLogWriter(
             // never-re-derived discipline — the ONE chokepoint this switch arm already is covers
             // music and kinded TrackAired alike (PLAN T242's own "verify one chokepoint" note).
             TrackAired t => new BoothLogEntryRequest(
-                "track-started", Summarize(t), personaAccessor.ActivePersonaId, t.Artist, BuildPickStamp(t.PersonaPick),
+                "track-started", Summarize(t), personaAccessor.ActivePersonaId, t.Artist,
+                BuildPickStamp(t.PersonaPick, t.CrosstalkScript),
                 ParseMediaId(t.MediaId), SegmentKind: t.SegmentKind?.ToString(), ShowId: personaAccessor.ActiveShowId),
             SegmentGenerated s => new BoothLogEntryRequest("patter-aired", Summarize(s), PersonaId: null),
             DegradationModeChanged d => new BoothLogEntryRequest("mode-changed", Summarize(d), PersonaId: null),
@@ -94,9 +95,19 @@ sealed class BoothLogWriter(
     /// pick (<paramref name="diagnostics"/> itself is null in both cases); otherwise the F86.1
     /// jsonb text, narrowed to firedRules/isExploration only (scores, pool size, and the degradation
     /// step are deliberately never persisted — see <see cref="BoothLogPickStamp"/>'s own remarks).
+    ///
+    /// <para>
+    /// SPEC F127.11 (STORY-329, PLAN T287) — the SAME <c>booth_log.pick</c> column carries a
+    /// <see cref="CrosstalkAiredScript"/> instead, for a <see cref="SegmentKind.Crosstalk"/> row: a
+    /// music pick and a crosstalk exchange are mutually exclusive by construction (<paramref name="diagnostics"/>
+    /// is a persona-ranker fact, never set for a TTS-kind item), so <paramref name="diagnostics"/> is
+    /// checked first — reads as "the ordinary case, then the one narrow exception" — and never both.
+    /// </para>
     /// </summary>
-    static string? BuildPickStamp(PersonaPickDiagnostics? diagnostics) =>
-        diagnostics is null ? null : BoothLogPickStampSerializer.Serialize(BoothLogPickStamp.FromDiagnostics(diagnostics));
+    static string? BuildPickStamp(PersonaPickDiagnostics? diagnostics, CrosstalkAiredScript? crosstalkScript) =>
+        diagnostics is not null ? BoothLogPickStampSerializer.Serialize(BoothLogPickStamp.FromDiagnostics(diagnostics))
+        : crosstalkScript is not null ? CrosstalkAiredScriptSerializer.Serialize(crosstalkScript)
+        : null;
 
     /// <summary>
     /// gh-#99 — the aired row's numeric catalog id, or <see langword="null"/> for a non-catalog id

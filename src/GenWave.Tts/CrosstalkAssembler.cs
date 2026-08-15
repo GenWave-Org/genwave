@@ -8,7 +8,7 @@ using GenWave.Core.Logging;
 using GenWave.Loudness;
 
 /// <summary>
-/// Renders every line of a validated <see cref="CrosstalkScript"/> through the one TTS funnel — each
+/// Renders every line of a validated <see cref="GenWave.Core.Domain.CrosstalkAiredScript"/> through the one TTS funnel — each
 /// with ITS speaker's own <see cref="TtsRenderContext"/> (SPEC F127.5) — then mixes the per-line
 /// renders into a single audio asset (SPEC F127.6) via one argv-only ffmpeg invocation, measures it
 /// exactly like any other segment, and caches the result. Lives beside <see cref="CrosstalkScriptWriter"/>
@@ -176,7 +176,7 @@ public sealed class CrosstalkAssembler(
     /// <see langword="null"/> once every line has rendered.
     /// </summary>
     async Task<CrosstalkAssemblyResult.Discarded?> RenderLinesAsync(
-        CrosstalkScript script, PersonaCard hostCard, PersonaCard neighborCard, List<string> lineFiles, CancellationToken ct)
+        CrosstalkAiredScript script, PersonaCard hostCard, PersonaCard neighborCard, List<string> lineFiles, CancellationToken ct)
     {
         for (var i = 0; i < script.Lines.Count; i++)
         {
@@ -332,7 +332,7 @@ public sealed class CrosstalkAssembler(
     /// </para>
     /// </summary>
     static async Task MixAsync(
-        IReadOnlyList<string> lineFiles, IReadOnlyList<CrosstalkLine> lines, int seed, string outputPath, CancellationToken ct)
+        IReadOnlyList<string> lineFiles, IReadOnlyList<CrosstalkAiredLine> lines, int seed, string outputPath, CancellationToken ct)
     {
         var gaps = CrosstalkTimeline.ComputeGapsSeconds(lineFiles.Count - 1, seed);
         var starts = new double[lineFiles.Count];

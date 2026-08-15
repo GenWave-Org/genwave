@@ -2,6 +2,7 @@ namespace GenWave.Tts;
 
 using System.Security.Cryptography;
 using System.Text;
+using GenWave.Core.Domain;
 
 /// <summary>
 /// Pure timing math for <see cref="CrosstalkAssembler"/>'s ffmpeg delay/mix plan (SPEC F127.6,
@@ -51,7 +52,7 @@ static class CrosstalkTimeline
     /// different ones. Never <see cref="Random.Shared"/> unseeded, which would re-roll different
     /// timing on every assembly of the identical script for no reason.
     /// </summary>
-    internal static int ComputeSeed(CrosstalkScript script)
+    internal static int ComputeSeed(CrosstalkAiredScript script)
     {
         var content = new StringBuilder();
         foreach (var line in script.Lines)

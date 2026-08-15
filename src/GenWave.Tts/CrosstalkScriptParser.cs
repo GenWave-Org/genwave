@@ -1,5 +1,7 @@
 namespace GenWave.Tts;
 
+using GenWave.Core.Domain;
+
 /// <summary>
 /// Strict parse + validation for a <see cref="CrosstalkScriptWriter"/> completion reply (SPEC F127.3,
 /// F127.4, STORY-326 AC2, AC3, AC4, AC6). Fail-closed by construction: the FIRST rule a reply breaks
@@ -8,6 +10,14 @@ namespace GenWave.Tts;
 /// single source of truth for the wire format — <see cref="CrosstalkPromptBuilder"/> states the exact
 /// same three tokens in the instructions it builds, so the model is never asked to emit a shape this
 /// parser doesn't also accept.
+///
+/// <para>
+/// Produces <see cref="CrosstalkAiredScript"/>/<see cref="CrosstalkAiredLine"/> directly (round-2
+/// review F8) — the SAME published GenWave.Abstractions shape <c>GenWave.Orchestration</c>/
+/// <c>GenWave.MediaLibrary</c> carry a validated script forward on, so no second, GenWave.Tts-local
+/// script/line pair (and no mapper between the two) is needed. See
+/// <see cref="CrosstalkSpeaker"/>'s own remarks for why the shared enum lives in Abstractions.
+/// </para>
 /// </summary>
 static class CrosstalkScriptParser
 {
@@ -55,7 +65,7 @@ static class CrosstalkScriptParser
     internal const double CharsPerSecond = 15.0;
 
     /// <summary>
-    /// Parses and fully validates one completion reply into a <see cref="CrosstalkScript"/> (SPEC
+    /// Parses and fully validates one completion reply into a <see cref="CrosstalkAiredScript"/> (SPEC
     /// F127.3, F127.4). <paramref name="maxLineChars"/> is the per-line char budget (the SAME
     /// <c>Llm:MaxCopyChars</c> ceiling an ordinary blurb carries — no second setting); a line over it
     /// discards the WHOLE exchange, never a trim (F127.4). <paramref name="durationTargetSeconds"/> is
@@ -75,7 +85,7 @@ static class CrosstalkScriptParser
                 $"expected {MinLines}-{MaxLines} speaker-tagged lines, got {rawLines.Count}");
         }
 
-        var lines = new List<CrosstalkLine>(rawLines.Count);
+        var lines = new List<CrosstalkAiredLine>(rawLines.Count);
         foreach (var rawLine in rawLines)
         {
             if (!TryParseLine(rawLine, out var speaker, out var isInterjection, out var rawText))
@@ -95,7 +105,7 @@ static class CrosstalkScriptParser
                     $"{maxLineChars}-char per-line budget — no line is ever trimmed (SPEC F127.4)");
             }
 
-            lines.Add(new CrosstalkLine(speaker, cleaned, isInterjection));
+            lines.Add(new CrosstalkAiredLine(speaker, cleaned, isInterjection));
         }
 
         if (lines.All(line => line.Speaker != CrosstalkSpeaker.Host))
@@ -128,7 +138,7 @@ static class CrosstalkScriptParser
                 $"{nameof(CrosstalkOptions.DurationTargetSeconds)} target");
         }
 
-        return new CrosstalkWriteResult.Accepted(new CrosstalkScript(lines));
+        return new CrosstalkWriteResult.Accepted(new CrosstalkAiredScript(lines));
     }
 
     /// <summary>

@@ -16,7 +16,7 @@ public sealed class CrosstalkOptions
     public const string Section = "Crosstalk";
 
     /// <summary>
-    /// The spoken-duration target a validated <see cref="CrosstalkScript"/> must fit under (SPEC
+    /// The spoken-duration target a validated <see cref="GenWave.Core.Domain.CrosstalkAiredScript"/> must fit under (SPEC
     /// F127.4) — an estimate over this rejects the WHOLE exchange (never a trim; see
     /// <see cref="CrosstalkScriptParser"/>'s own remarks). Defaults to the spec'd 25 seconds. Live via
     /// <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}"/>, read fresh by

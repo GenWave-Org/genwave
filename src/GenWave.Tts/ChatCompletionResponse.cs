@@ -8,7 +8,7 @@ using System.Text.Json.Serialization;
 /// — only the fields either one needs, see <see cref="ChatCompletionChoice.FinishReason"/>'s own
 /// remarks for exactly which class reads which field. Internal — callers only ever see the
 /// extracted, cleaned copy via <see cref="GenWave.Core.Abstractions.ISegmentCopyWriter"/> (or, for
-/// crosstalk, a validated <see cref="CrosstalkScript"/>).
+/// crosstalk, a validated <see cref="GenWave.Core.Domain.CrosstalkAiredScript"/>).
 /// </summary>
 sealed record ChatCompletionResponse(
     [property: JsonPropertyName("choices")] List<ChatCompletionChoice>? Choices);
