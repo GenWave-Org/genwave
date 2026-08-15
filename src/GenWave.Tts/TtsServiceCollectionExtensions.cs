@@ -97,8 +97,10 @@ public static class TtsServiceCollectionExtensions
             .ValidateOnStart();
 
         // Crosstalk two-voice banter (SPEC F127.4, F127.8, STORY-326, PLAN T282) — the ONE knob
-        // CrosstalkScriptWriter reads today (DurationTargetSeconds); Crosstalk:Shows/EveryNthAiring
-        // (F127.8) join this same section in a LATER task (T284's CrosstalkPlanner), not here.
+        // CrosstalkScriptWriter reads (DurationTargetSeconds); Crosstalk:Shows/EveryNthAiring
+        // (F127.8, PLAN T285) share this SAME section/options class but are read by
+        // GenWave.Orchestration.CrosstalkPlanner through the Host's ICrosstalkScopeProvider binding
+        // instead, never by anything in this project.
         // IOptionsMonitor<CrosstalkOptions> (not IOptions), mirroring every other live-adjustable
         // options class in this method — a live PUT reaches the very next generation attempt with no
         // api restart. CrosstalkScriptWriter is a plain singleton with zero eager I/O in its

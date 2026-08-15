@@ -63,15 +63,17 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<Sched
         public double? EnergyMax { get; init; }
         public long? ShowId { get; init; }
         public string? ShowName { get; init; }
+        public string? ShowSlug { get; init; }
         public string? ShowTagline { get; init; }
         public string? ShowFlavor { get; init; }
     }
 
-    // SPEC F116.1/F91.3 (PLAN T241): the LEFT JOIN resolves every block's show identity at THIS one
-    // load (LoadWeekAsync/ReplaceWeekAsync's own post-write reload both share this constant) rather
-    // than a per-tick lookup — ScheduleResolver only ever sees the already-joined ScheduleWeekSnapshot
-    // (ARCHITECTURE.md "the 3s feeder tick performs no schedule query", now extended to show identity
-    // too). Selects ONLY show.id/name/tagline/flavor — never show.persona_id/envelope (SPEC F115.2's
+    // SPEC F116.1/F91.3 (PLAN T241); ShowSlug joins PLAN T285 (SPEC F127.8 review F4) — the LEFT
+    // JOIN resolves every block's show identity at THIS one load (LoadWeekAsync/ReplaceWeekAsync's
+    // own post-write reload both share this constant) rather than a per-tick lookup —
+    // ScheduleResolver only ever sees the already-joined ScheduleWeekSnapshot (ARCHITECTURE.md "the
+    // 3s feeder tick performs no schedule query", now extended to show identity too). Selects ONLY
+    // show.id/name/slug/tagline/flavor — never show.persona_id/envelope (SPEC F115.2's
     // dormant-columns-unread pin), enforced here at the query itself, not merely by ScheduleRow's own
     // shape above.
     const string SelectColumns =
@@ -79,7 +81,8 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<Sched
         select s.id::bigint as id, s.day_of_week, s.start_minute, s.end_minute,
                s.persona_id::bigint as persona_id, s.genres,
                s.energy_min::double precision as energy_min, s.energy_max::double precision as energy_max,
-               sh.id::bigint as show_id, sh.name as show_name, sh.tagline as show_tagline, sh.flavor as show_flavor
+               sh.id::bigint as show_id, sh.name as show_name, sh.slug as show_slug,
+               sh.tagline as show_tagline, sh.flavor as show_flavor
         from station.segment_schedule s
         left join station.show sh on sh.id = s.show_id
         """;
@@ -416,18 +419,22 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<Sched
         row.Id, (DayOfWeek)row.DayOfWeek, row.StartMinute, row.EndMinute, row.PersonaId,
         row.Genres, row.EnergyMin, row.EnergyMax, ToShowSummary(row), row.ShowId);
 
-    /// <summary>SPEC F116.1 (PLAN T241) — <see langword="null"/> when the block names no show (the
-    /// LEFT JOIN found no matching <c>station.show</c> row); otherwise the four identity columns
-    /// <see cref="SelectColumns"/> selected, never <c>persona_id</c>/<c>envelope</c> (SPEC F115.2's
-    /// dormant-columns-unread pin — this method has no row data to even attempt reading either from).
-    /// <c>ShowName</c> is checked alongside <c>ShowId</c> purely as belt-and-suspenders null-safety
-    /// (never the actual guard in practice — <c>station.show.name</c> is <c>NOT NULL</c>, so any row
-    /// the join finds by id always carries one): this avoids ever needing the null-forgiving operator
-    /// to construct <see cref="ShowSummary"/> from a row Dapper types every column of as nullable.
+    /// <summary>SPEC F116.1 (PLAN T241), <c>Slug</c> joins at PLAN T285 (SPEC F127.8 review F4) —
+    /// <see langword="null"/> when the block names no show (the LEFT JOIN found no matching
+    /// <c>station.show</c> row); otherwise the five identity columns <see cref="SelectColumns"/>
+    /// selected, never <c>persona_id</c>/<c>envelope</c> (SPEC F115.2's dormant-columns-unread pin —
+    /// this method has no row data to even attempt reading either from). <c>ShowName</c> is checked
+    /// alongside <c>ShowId</c> purely as belt-and-suspenders null-safety (never the actual guard in
+    /// practice — <c>station.show.name</c> is <c>NOT NULL</c>, so any row the join finds by id always
+    /// carries one): this avoids ever needing the null-forgiving operator to construct
+    /// <see cref="ShowSummary"/> from a row Dapper types every column of as nullable. <c>ShowSlug</c>
+    /// falls back to <see cref="ShowSummary"/>'s own <c>""</c> default rather than a second
+    /// belt-and-suspenders null check — <c>station.show.slug</c> is likewise <c>NOT NULL</c>, so this
+    /// fallback is unreachable in practice too.
     /// </summary>
     static ShowSummary? ToShowSummary(ScheduleRow row) =>
         row.ShowId is { } showId && row.ShowName is { } showName
-            ? new ShowSummary(showId, showName, row.ShowTagline, row.ShowFlavor)
+            ? new ShowSummary(showId, showName, row.ShowTagline, row.ShowFlavor) { Slug = row.ShowSlug ?? "" }
             : null;
 
     /// <summary>

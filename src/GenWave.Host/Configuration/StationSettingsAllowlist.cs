@@ -393,14 +393,23 @@ public static class StationSettingsAllowlist
         // own "0 = off" floor immediately above).
         new("Station:Shows:PatterCadenceMinutes",             SettingApplyMode.Live,          SettingKind.Number,     "minutes"),
 
-        // Crosstalk two-voice banter, the duration-fit knob only (SPEC F127.4, STORY-326, PLAN T282)
-        // — CrosstalkScriptWriter (GenWave.Tts) reads this fresh via IOptionsMonitor<CrosstalkOptions>
+        // Crosstalk two-voice banter, the duration-fit knob (SPEC F127.4, STORY-326, PLAN T282) —
+        // CrosstalkScriptWriter (GenWave.Tts) reads this fresh via IOptionsMonitor<CrosstalkOptions>
         // on every generation attempt, so a PUT here reaches the very next attempt with no api
         // restart. Defaults to the spec'd 25s; an estimate over target discards the WHOLE exchange
         // rather than trimming a line (F127.4 — a cut dialogue line breaks the reaction to it).
-        // Crosstalk:Shows/EveryNthAiring (F127.8's scope/cadence pair) join this allowlist in a LATER
-        // task (T284's CrosstalkPlanner) — nothing reads them yet.
         new("Crosstalk:DurationTargetSeconds",                SettingApplyMode.Live,          SettingKind.Number,     "seconds"),
+        // Crosstalk scope/cadence (SPEC F127.8, STORY-328, PLAN T285) — Shows is a JSON array of
+        // enabled show SLUGS, never display names (T175's "names slugs, not labels" rule — a rename
+        // must never silently kill banter forever; the Station:Envelope:Genres opaque-string-kind
+        // shape otherwise); EMPTY means the feature is OFF everywhere (fail-closed — no station's
+        // sound changes on upgrade). Read live through ICrosstalkScopeProvider by
+        // GenWave.Orchestration.CrosstalkPlanner, so a PUT here reaches the very next
+        // casting/eligibility check with no api restart. EveryNthAiring defaults to 1 (every eligible
+        // airing carries banter) — the counting itself is a LATER task's own concern (PLAN T287's
+        // vend gate).
+        new("Crosstalk:Shows",                                SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Crosstalk:EveryNthAiring",                       SettingApplyMode.Live,          SettingKind.Number,     "airings"),
     };
 
     /// <summary>All operator-editable settings, keyed by configuration key.</summary>
