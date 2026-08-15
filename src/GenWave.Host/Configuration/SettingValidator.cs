@@ -187,6 +187,14 @@ public sealed class SettingValidator
     // a negative value would still resolve safely if it slipped through some other path.
     internal const int ContextPersonaIdMin = 0;
 
+    // Crosstalk:DurationTargetSeconds (SPEC F127.4, STORY-326, PLAN T282) — CrosstalkOptions' own
+    // [Range(1, int.MaxValue)] (boot-enforced via ValidateDataAnnotations, the
+    // Llm:MaxCopyChars precedent); this validator adds the F53.1 settings-API-only ceiling. Floor of
+    // 5s guards a degenerate near-zero target from rejecting every exchange outright; 120s (2
+    // minutes) is comfortably past the spec'd 25s default while still bounding a fat-finger entry.
+    internal const int CrosstalkDurationTargetSecondsMin = 5;
+    internal const int CrosstalkDurationTargetSecondsMax = 120;
+
     // Maps each allowlisted key to a per-key (range + type) validator. An instance method (not a
     // static field) purely because the Station:Theme entry below closes over the constructor's own
     // themeCatalog — every other entry is a plain static delegate exactly as before.
@@ -406,6 +414,13 @@ public sealed class SettingValidator
             // Show-flavor patter line cadence (SPEC F116.3, STORY-308, PLAN T249) — same
             // "0 = off, 1440 ceiling" shape as Context:{Key}:PatterCadenceMinutes above.
             ["Station:Shows:PatterCadenceMinutes"] = v => IsIntInRange(v, ShowsPatterCadenceMinutesMin, ShowsPatterCadenceMinutesMax),
+
+            // Crosstalk duration-fit target (SPEC F127.4, STORY-326, PLAN T282) — floor of 5s
+            // guards a degenerate near-zero target from rejecting every exchange outright (see
+            // CrosstalkDurationTargetSecondsMin's own remarks); F53.1 adds the settings-API ceiling
+            // on top of CrosstalkOptions' own boot-enforced [Range(1, int.MaxValue)].
+            ["Crosstalk:DurationTargetSeconds"] =
+                v => IsIntInRange(v, CrosstalkDurationTargetSecondsMin, CrosstalkDurationTargetSecondsMax),
         };
 
     // ── Per-key validation ─────────────────────────────────────────────────────────────────────
@@ -959,6 +974,8 @@ public sealed class SettingValidator
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Station:Shows:PatterCadenceMinutes", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {ShowsPatterCadenceMinutesMin} and {ShowsPatterCadenceMinutesMax} (minutes); 0 disables the show-flavor line.",
+        var k when k.Equals("Crosstalk:DurationTargetSeconds", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {CrosstalkDurationTargetSecondsMin} and {CrosstalkDurationTargetSecondsMax} (seconds).",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }

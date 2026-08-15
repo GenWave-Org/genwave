@@ -4,8 +4,8 @@ namespace GenWave.Tts;
 /// In-memory record of the most recent <see cref="LlmCopyWriter"/> completion attempt (SPEC F34.8).
 /// Singleton, process-lifetime only — no persistence and no active health-polling; <c>GET
 /// /api/status</c> (STORY-125) reads whatever the last render produced. A disabled writer and the
-/// templated kinds (StationId/TimeDate) never call <see cref="Record"/> — this holder reflects LLM
-/// attempts only.
+/// templated kinds (StationId/TimeDate/Crosstalk) never call <see cref="Record"/> — this holder
+/// reflects LLM attempts only.
 ///
 /// <see cref="ConsecutiveFailureCount"/> (SPEC F69.2, STORY-188) is what
 /// <see cref="DegradationController"/> reads for the auto-drop side of the mode state machine — the

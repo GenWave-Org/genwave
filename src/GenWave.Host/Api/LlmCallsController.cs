@@ -45,5 +45,6 @@ public sealed class LlmCallsController(LlmCallRing ring) : ControllerBase
         record.PromptUser,
         record.Response,
         (record.PromptSystem?.Length ?? 0) + (record.PromptUser?.Length ?? 0),
-        record.Response?.Length ?? 0);
+        record.Response?.Length ?? 0,
+        record.Kind.ToString().ToLowerInvariant());
 }

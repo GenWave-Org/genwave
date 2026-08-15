@@ -8,7 +8,9 @@ namespace GenWave.Host.Api;
 /// own remarks). <see cref="PromptChars"/>/<see cref="ResponseChars"/> are a cheap at-a-glance size
 /// for the table view; the full text is what the expandable row shows. <see cref="PersonaName"/>
 /// (gh-#429) is who authored the call — <see langword="null"/> for a persona-less render, never an
-/// empty string.
+/// empty string. <see cref="Kind"/> (SPEC F127.11, PLAN T282) is <c>"copy"</c> for every ordinary
+/// segment-copy call or <c>"crosstalk"</c> for a <see cref="GenWave.Tts.CrosstalkScriptWriter"/> call
+/// — so an operator can tell "why was there no banter" apart from an ordinary blurb miss.
 /// </summary>
 public sealed record LlmCallDto(
     long Seq,
@@ -22,4 +24,5 @@ public sealed record LlmCallDto(
     string? PromptUser,
     string? Response,
     int PromptChars,
-    int ResponseChars);
+    int ResponseChars,
+    string Kind);

@@ -611,7 +611,8 @@ static class LlmPromptBuilder
     /// this break is so the model never has to guess its own role. Only ever called with a kind
     /// <see cref="LlmCopyWriter.IsLlmAuthored"/> reports true for — the single source of truth for
     /// "which kinds"; the remaining kinds (<see cref="SegmentKind.StationId"/>,
-    /// <see cref="SegmentKind.TimeDate"/>) never reach the LLM and so never reach this method either.
+    /// <see cref="SegmentKind.TimeDate"/>, <see cref="SegmentKind.Crosstalk"/>) never reach the LLM
+    /// and so never reach this method either.
     /// Exhaustive switch below: a new LLM-eligible <see cref="SegmentKind"/> needs a matching arm
     /// added HERE as well as in <see cref="LlmCopyWriter.IsLlmAuthored"/> for it to actually take
     /// effect end to end — the compiler's own exhaustiveness check on this switch is the guard

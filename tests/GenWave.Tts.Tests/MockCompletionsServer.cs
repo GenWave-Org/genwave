@@ -40,6 +40,16 @@ sealed class MockCompletionsServer : IAsyncDisposable
     /// <summary>Completion text served in <see cref="MockCompletionsMode.Serve"/>/<see cref="MockCompletionsMode.Delay"/>.</summary>
     public volatile string ReplyContent = "Great tune coming up, stay tuned.";
 
+    /// <summary>
+    /// <c>finish_reason</c> served alongside <see cref="ReplyContent"/> (SPEC F127.4, F127.11,
+    /// PLAN T282) — the OpenAI/ollama-compatible per-choice field (see
+    /// <c>GenWave.Tts.ChatCompletionChoice.FinishReason</c>'s own remarks). Defaults to
+    /// <c>"stop"</c> — a normal, non-truncated completion — so every pre-existing spec against
+    /// this stub is unaffected; a test flips this to <c>"length"</c> to simulate a backend that
+    /// cut the reply short at its own <c>max_tokens</c> cap.
+    /// </summary>
+    public volatile string? ReplyFinishReason = "stop";
+
     /// <summary>The base URI the stub is listening on (e.g. <c>http://127.0.0.1:12345</c>).</summary>
     public Uri BaseUri { get; }
 
@@ -98,12 +108,12 @@ sealed class MockCompletionsServer : IAsyncDisposable
                 case MockCompletionsMode.Delay:
                     // Longer than any test's Llm:TimeoutSeconds (tests use 1-2s budgets).
                     await Task.Delay(TimeSpan.FromSeconds(30), ctx.RequestAborted);
-                    await WriteReplyAsync(ctx, server.ReplyContent);
+                    await WriteReplyAsync(ctx, server.ReplyContent, server.ReplyFinishReason);
                     return;
 
                 case MockCompletionsMode.Serve:
                 default:
-                    await WriteReplyAsync(ctx, server.ReplyContent);
+                    await WriteReplyAsync(ctx, server.ReplyContent, server.ReplyFinishReason);
                     return;
             }
         });
@@ -118,11 +128,11 @@ sealed class MockCompletionsServer : IAsyncDisposable
 
     public async ValueTask DisposeAsync() => await app.DisposeAsync();
 
-    static Task WriteReplyAsync(HttpContext ctx, string content)
+    static Task WriteReplyAsync(HttpContext ctx, string content, string? finishReason)
     {
         ctx.Response.StatusCode = 200;
         return ctx.Response.WriteAsJsonAsync(
-            new { choices = new[] { new { message = new { content } } } },
+            new { choices = new[] { new { message = new { content }, finish_reason = finishReason } } },
             ctx.RequestAborted);
     }
 }

@@ -37,9 +37,17 @@ namespace GenWave.Tts;
 /// </param>
 /// <param name="StartedAt">When this call was dispatched (includes any single-flight queueing wait — mirrors <see cref="LlmCopyStatusHolder"/>'s own attemptedAt semantics).</param>
 /// <param name="ElapsedMs">Wall-clock duration from <see cref="StartedAt"/> to completion (success or failure).</param>
-/// <param name="Outcome">ok/failed/timeout/trimmed (SPEC F73.1, F123.2-F123.4).</param>
-/// <param name="StatusDetail">The HTTP status or exception type name for a non-<see cref="LlmCallOutcome.Ok"/> outcome; <see langword="null"/> for Ok and for <see cref="LlmCallOutcome.Trimmed"/> alike — a trim is not a fault, so it carries no fault detail either.</param>
+/// <param name="Outcome">ok/failed/timeout/trimmed/rejected (SPEC F73.1, F123.2-F123.4, F127.4).</param>
+/// <param name="StatusDetail">The HTTP status or exception type name for a non-<see cref="LlmCallOutcome.Ok"/> outcome; <see langword="null"/> for Ok and for <see cref="LlmCallOutcome.Trimmed"/> alike — a trim is not a fault, so it carries no fault detail either. Carries the discard reason for <see cref="LlmCallOutcome.Rejected"/> (SPEC F127.4, F127.11).</param>
 /// <param name="Mode">The degradation mode active at call time (SPEC F73.1, F69.1) — Normal/Soft/Hard.</param>
+/// <param name="Kind">
+/// Which generation surface produced this call (SPEC F127.11, PLAN T282) — <see cref="LlmCallKind.Copy"/>
+/// for every call <see cref="LlmCopyWriter"/> itself records, <see cref="LlmCallKind.Crosstalk"/> for
+/// <see cref="CrosstalkScriptWriter"/>'s own. Defaults to <see cref="LlmCallKind.Copy"/> so
+/// <see cref="LlmCallRing.Record"/>'s two pre-existing call sites (inside
+/// <see cref="LlmCopyWriter.RequestCleanedCompletionAsync"/>) needed no change at all when this
+/// parameter was added.
+/// </param>
 public sealed record LlmCallRecord(
     long Seq,
     string? PersonaName,
@@ -50,4 +58,5 @@ public sealed record LlmCallRecord(
     long ElapsedMs,
     LlmCallOutcome Outcome,
     string? StatusDetail,
-    DegradationMode Mode);
+    DegradationMode Mode,
+    LlmCallKind Kind = LlmCallKind.Copy);

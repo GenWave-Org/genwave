@@ -14,9 +14,11 @@ using GenWave.Core.Domain;
 /// copy for exactly the kinds <see cref="IsLlmAuthored"/> reports true for — <see cref="SegmentKind.LeadIn"/>,
 /// <see cref="SegmentKind.BackAnnounce"/>, <see cref="SegmentKind.SignOff"/>,
 /// <see cref="SegmentKind.SignOn"/>, and, as of T224, <see cref="SegmentKind.ContextSegment"/> —
-/// from an OpenAI-compatible chat-completions endpoint. <see cref="SegmentKind.StationId"/> and
-/// <see cref="SegmentKind.TimeDate"/> always delegate straight to <paramref name="fallback"/> with
-/// zero HTTP — brand/time copy stays fixed and forever-cached.
+/// from an OpenAI-compatible chat-completions endpoint. <see cref="SegmentKind.StationId"/>,
+/// <see cref="SegmentKind.TimeDate"/>, and <see cref="SegmentKind.Crosstalk"/> always delegate
+/// straight to <paramref name="fallback"/> with zero HTTP — brand/time copy stays fixed and
+/// forever-cached, and Crosstalk's real copy arrives via its own ahead-of-air script writer
+/// (T282, SPEC F127.3) rather than this seam.
 /// Enabled-ness and every other option are read from <paramref name="optionsMonitor"/> fresh on each
 /// call (F36.2) — an empty <c>Llm:Endpoint</c> means disabled. Any failure (disabled, timeout,
 /// non-2xx, connect, empty/over-length copy) degrades to <paramref name="fallback"/>'s template copy
@@ -241,9 +243,9 @@ public sealed class LlmCopyWriter(
     /// non-fresh-copy guard, extended alongside SignOff/SignOn for exactly that reason). Gates both
     /// <see cref="WriteAsync"/> and <see cref="WritePreviewAsync"/> so the two can never drift apart,
     /// and is the fact <see cref="LlmPromptBuilder.BuildSegmentLine"/>'s own exhaustiveness switch
-    /// relies on staying in sync with (see that method's remarks): <see cref="SegmentKind.StationId"/>
-    /// and <see cref="SegmentKind.TimeDate"/> are the only two kinds this reports false for, and they
-    /// never reach a prompt at all.
+    /// relies on staying in sync with (see that method's remarks): <see cref="SegmentKind.StationId"/>,
+    /// <see cref="SegmentKind.TimeDate"/>, and (as of PLAN T281) <see cref="SegmentKind.Crosstalk"/>
+    /// are the three kinds this reports false for today, and none of them ever reach a prompt.
     /// </summary>
     static bool IsLlmAuthored(SegmentKind kind) =>
         kind is SegmentKind.LeadIn or SegmentKind.BackAnnounce or SegmentKind.SignOff or SegmentKind.SignOn
@@ -252,8 +254,11 @@ public sealed class LlmCopyWriter(
     public async Task<SegmentCopy> WriteAsync(SegmentRequest request, CancellationToken ct)
     {
         // StationId/TimeDate stay templated — brand/time copy must be crisp, consistent, and
-        // forever-cacheable; the two track-anchored kinds (F34.2) and the two handoff kinds (F92.2,
-        // F92.5) are the ones worth an LLM's while (see IsLlmAuthored, the single source of truth).
+        // forever-cacheable. Crosstalk (PLAN T281) also stays templated here, for a different
+        // reason: its real copy arrives via its own ahead-of-air script writer (T282, SPEC F127.3),
+        // not this seam, so this writer is template-class for it by design, not degrading. The two
+        // track-anchored kinds (F34.2) and the two handoff kinds (F92.2, F92.5) are the ones worth an
+        // LLM's while (see IsLlmAuthored, the single source of truth).
         if (!IsLlmAuthored(request.Kind))
             return await fallback.WriteAsync(request, ct);
 
@@ -358,9 +363,11 @@ public sealed class LlmCopyWriter(
     public async Task<PersonaPreviewResult> WritePreviewAsync(
         SegmentRequest request, Persona? personaOverride, CancellationToken ct)
     {
-        // StationId/TimeDate route straight to the template rung — mirrors WriteAsync's own
-        // kind-based routing (F34.2, IsLlmAuthored). This is not a fallback: those two kinds never
-        // call the LLM on-air either, so template text IS the correct preview for them.
+        // StationId/TimeDate/Crosstalk route straight to the template rung — mirrors WriteAsync's
+        // own kind-based routing (F34.2, IsLlmAuthored; see that method's own comment for why
+        // Crosstalk joins the two — its real copy arrives via its own ahead-of-air script writer,
+        // T282, SPEC F127.3, not this seam). This is not a fallback: none of the three call the LLM
+        // on-air either, so template text IS the correct preview for them.
         if (!IsLlmAuthored(request.Kind))
         {
             var templated = await fallback.WriteAsync(request, ct);
@@ -703,7 +710,7 @@ public sealed class LlmCopyWriter(
     /// out timeout, so duplicating this small a classification is simpler than threading a shared
     /// helper through two call sites with different needs.
     /// </summary>
-    static (LlmCallOutcome Outcome, string Detail) ClassifyForRing(Exception ex) => ex switch
+    internal static (LlmCallOutcome Outcome, string Detail) ClassifyForRing(Exception ex) => ex switch
     {
         OperationCanceledException => (LlmCallOutcome.Timeout, "Llm:TimeoutSeconds exceeded"),
         HttpRequestException { StatusCode: { } status } => (LlmCallOutcome.Failed, $"HTTP {(int)status}"),
@@ -716,9 +723,13 @@ public sealed class LlmCopyWriter(
     /// <see cref="MinGenerationTokenCap"/>, and <see cref="MaxGenerationTokenCap"/> for why the
     /// divisor, floor, and ceiling are what they are. Applied identically to the on-air path and
     /// the preview path, since both funnel through <see cref="RequestCleanedCompletionAsync"/>'s single
-    /// request-builder.
+    /// request-builder. Internal (PLAN T282, SPEC F127.3: "the F123.1 derived generation cap applies
+    /// to the whole script") — <see cref="CrosstalkScriptWriter"/> derives its own completion's
+    /// <c>max_tokens</c> through this exact formula rather than a second, independently-tuned one;
+    /// the one-knob discipline (a single <c>Llm:MaxCopyChars</c>) extends to banter with zero new
+    /// generation-cap machinery.
     /// </summary>
-    static int DeriveMaxTokens(int maxCopyChars) =>
+    internal static int DeriveMaxTokens(int maxCopyChars) =>
         Math.Clamp(maxCopyChars / CharsPerTokenDivisor, MinGenerationTokenCap, MaxGenerationTokenCap);
 
     /// <summary>
@@ -738,17 +749,18 @@ public sealed class LlmCopyWriter(
     };
 
     /// <summary>
-    /// Copy hygiene (SPEC F34.5) plus the F123.2 sentence-boundary salvage (STORY-319, PLAN T263):
-    /// trims, unwraps one layer of wrapping quotes, collapses newlines to spaces, and strips stage
-    /// directions and markdown emphasis markers. A result that still exceeds <paramref name="maxChars"/>
-    /// after that hygiene is no longer an automatic reject — it is cut at the LAST complete sentence
-    /// that fits under the cap (see <see cref="TrimToLastCompleteSentence"/>), never mid-sentence,
-    /// and never at an abbreviation's own period (see that method's own remarks).
-    /// <see cref="LlmCopyCleanupResult.Rejected"/> is reserved for the cases nothing salvages:
-    /// hygiene left an empty string, or nothing complete under the cap survives that filter — no
-    /// candidate at all, or every candidate under the cap was an abbreviation/lone-initial period.
+    /// The hygiene pass every LLM-authored line in this project runs through (SPEC F34.5): trims,
+    /// strips a chat preamble, unwraps one layer of wrapping quotes, collapses newlines to spaces,
+    /// and strips stage directions and markdown emphasis markers. Deliberately excludes the F123.2
+    /// sentence-boundary SALVAGE below — that is a length-policy decision <see cref="CleanCopy"/>
+    /// layers on top for the ordinary on-air/preview path, and <see cref="CrosstalkScriptWriter"/>'s
+    /// own per-line validation (SPEC F127.4: cleared, never trimmed) needs the SAME text transform
+    /// with a completely different length policy (reject the whole exchange, never cut a line).
+    /// Internal (PLAN T282 extraction) — a small shared helper rather than a second hand-maintained
+    /// copy of these five steps, with zero change to <see cref="CleanCopy"/>'s own byte-for-byte
+    /// output (a pure extract-method refactor).
     /// </summary>
-    static LlmCopyCleanupResult CleanCopy(string raw, int maxChars)
+    internal static string ApplyCopyHygiene(string raw)
     {
         var text = StripChatPreamble(raw.Trim());   // gh-#186 — must run BEFORE quote unwrapping
         text = StripWrappingQuotes(text);
@@ -756,7 +768,22 @@ public sealed class LlmCopyWriter(
         text = BracketStageDirectionPattern.Replace(text, string.Empty);
         text = AsteriskStageDirectionPattern.Replace(text, string.Empty);
         text = MarkdownEmphasisPattern.Replace(text, string.Empty);
-        text = RepeatedWhitespacePattern.Replace(text, " ").Trim();
+        return RepeatedWhitespacePattern.Replace(text, " ").Trim();
+    }
+
+    /// <summary>
+    /// Copy hygiene (<see cref="ApplyCopyHygiene"/>, SPEC F34.5) plus the F123.2 sentence-boundary
+    /// salvage (STORY-319, PLAN T263): a result that still exceeds <paramref name="maxChars"/> after
+    /// hygiene is no longer an automatic reject — it is cut at the LAST complete sentence that fits
+    /// under the cap (see <see cref="TrimToLastCompleteSentence"/>), never mid-sentence, and never at
+    /// an abbreviation's own period (see that method's own remarks).
+    /// <see cref="LlmCopyCleanupResult.Rejected"/> is reserved for the cases nothing salvages:
+    /// hygiene left an empty string, or nothing complete under the cap survives that filter — no
+    /// candidate at all, or every candidate under the cap was an abbreviation/lone-initial period.
+    /// </summary>
+    static LlmCopyCleanupResult CleanCopy(string raw, int maxChars)
+    {
+        var text = ApplyCopyHygiene(raw);
 
         if (text.Length == 0)
             return new LlmCopyCleanupResult.Rejected();

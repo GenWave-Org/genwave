@@ -34,6 +34,7 @@ interface EntryOverrides {
   response?: string | null;
   promptChars?: number;
   responseChars?: number;
+  kind?: string;
 }
 
 function makeEntry(overrides: EntryOverrides = {}) {
@@ -50,6 +51,7 @@ function makeEntry(overrides: EntryOverrides = {}) {
     response: "Coming up, a deep cut to ease into the evening.",
     promptChars: 100,
     responseChars: 48,
+    kind: "copy",
     ...overrides,
   };
 }
@@ -168,6 +170,42 @@ describe("Feature: LLM call inspector", () => {
       const chip = screen.getByText("Trimmed");
       expect(chip.className).toContain("text-accent-2");
       expect(chip.className).not.toContain("text-danger");
+    });
+
+    // SPEC F127.4, F127.11 (gh-#385) — the gh-#277 lesson re-created and re-fixed one outcome
+    // over: a crosstalk validation reject is a content-quality decision, not an outage, so its
+    // chip must never paint the inspector red the same way a real failed/timeout call does.
+    it("shows a Rejected status chip in the non-danger brass tone, not the danger tone of a real miss", async () => {
+      installFetchMock(ok([makeEntry({ status: "rejected", statusDetail: "no HOST line appeared" })]));
+
+      render(<LlmCallsView timeZone="UTC" />);
+      await flush();
+
+      const chip = screen.getByText("Rejected");
+      expect(chip.className).toContain("text-accent-2");
+      expect(chip.className).not.toContain("text-danger");
+    });
+  });
+
+  // gh-#385, SPEC F127.11 — the Kind column names which generation surface produced the call so
+  // an operator can tell "why was there no banter" apart from an ordinary blurb miss.
+  describe("Scenario: rows show which surface produced the call", () => {
+    it("renders a Crosstalk kind chip for a CrosstalkScriptWriter call", async () => {
+      installFetchMock(ok([makeEntry({ kind: "crosstalk" })]));
+
+      render(<LlmCallsView timeZone="UTC" />);
+      await flush();
+
+      expect(screen.getByText("Crosstalk")).toBeInTheDocument();
+    });
+
+    it("renders a Copy kind chip for an ordinary segment-copy call", async () => {
+      installFetchMock(ok([makeEntry({ kind: "copy" })]));
+
+      render(<LlmCallsView timeZone="UTC" />);
+      await flush();
+
+      expect(screen.getByText("Copy")).toBeInTheDocument();
     });
   });
 
