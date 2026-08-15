@@ -1,5 +1,7 @@
 namespace GenWave.Tts;
 
+using GenWave.Core.Domain;
+
 /// <summary>
 /// Outcome of <see cref="CrosstalkScriptWriter.WriteExchangeAsync"/> (SPEC F127.3, F127.4, STORY-326)
 /// — mirrors <see cref="GenWave.Core.Domain.PersonaPreviewResult"/>'s closed-hierarchy shape (an
@@ -14,8 +16,10 @@ public abstract record CrosstalkWriteResult
 {
     CrosstalkWriteResult() { }
 
-    /// <summary>A fully validated, ready-to-render two-voice script.</summary>
-    public sealed record Accepted(CrosstalkScript Script) : CrosstalkWriteResult;
+    /// <summary>A fully validated, ready-to-render two-voice script — the published
+    /// <see cref="CrosstalkAiredScript"/> shape directly (round-2 review F8), so a caller carrying it
+    /// forward onto <c>GenWave.Orchestration</c>/<c>GenWave.MediaLibrary</c> needs no mapping.</summary>
+    public sealed record Accepted(CrosstalkAiredScript Script) : CrosstalkWriteResult;
 
     /// <summary>
     /// No exchange was produced. <see cref="Reason"/> is the SAME text logged at Information (SPEC

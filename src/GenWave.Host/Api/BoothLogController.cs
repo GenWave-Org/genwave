@@ -62,52 +62,78 @@ public sealed class BoothLogController(
         var safeContentIds = await membership.FilterToLibrariesAsync(stampedIds, safeScope.Current, ct);
 
         return Ok(new BoothLogPageDto(
-            page.Entries.Select(e => new BoothLogEntryDto(
-                e.Id, e.OccurredAt, e.Kind, e.Summary, e.PersonaId, ToPickDto(e.Id, e.Pick),
-                TasteExcluded: e.MediaId is long mediaId && safeContentIds.Contains(mediaId))).ToList(),
+            page.Entries.Select(e =>
+            {
+                var (pick, crosstalk) = ToPickOrCrosstalkDto(e.Id, e.Pick);
+                return new BoothLogEntryDto(
+                    e.Id, e.OccurredAt, e.Kind, e.Summary, e.PersonaId, pick,
+                    TasteExcluded: e.MediaId is long mediaId && safeContentIds.Contains(mediaId),
+                    Crosstalk: crosstalk);
+            }).ToList(),
             page.NextBefore?.ToString()));
     }
 
     /// <summary>
     /// <paramref name="pick"/> is the row's raw <c>booth_log.pick</c> jsonb text (or
-    /// <see langword="null"/>, SPEC F86.1) — deserialized through the one canonical
-    /// <see cref="BoothLogPickStampSerializer"/> and narrowed to this endpoint's wire shape
-    /// (F86.2). <see langword="null"/> in, <see langword="null"/> out: <see cref="BoothLogEntryDto.Pick"/>'s
-    /// own <c>JsonIgnore(WhenWritingNull)</c> is what turns that into an ABSENT field on the wire.
+    /// <see langword="null"/>, SPEC F86.1) — dispatched to whichever of the TWO shapes that column can
+    /// hold (<see cref="BoothLogEntryDto.Pick"/> for a persona pick, <see cref="BoothLogEntryDto.Crosstalk"/>
+    /// for a <c>SegmentKind.Crosstalk</c> row's own two-voice script, SPEC F127.11, PLAN T287 — mutually
+    /// exclusive by construction, <c>BoothLogWriter.BuildPickStamp</c>'s own remarks). <see langword="null"/>
+    /// in, both <see langword="null"/> out: each DTO's own <c>JsonIgnore(WhenWritingNull)</c> is what
+    /// turns that into an ABSENT field on the wire.
     ///
+    /// <para>
+    /// <b>Crosstalk tried FIRST (review finding F3 — narrow fix over the pre-fix defect).</b>
+    /// <see cref="CrosstalkAiredScriptSerializer.Deserialize"/> is now validated (round-2 review F9 —
+    /// the sibling serializer's own documented off-schema trap): it returns <see langword="null"/> for
+    /// anything that is not genuinely a <c>{"lines":[...]}</c> shape, so trying it first here never
+    /// misclassifies an ordinary persona-pick stamp as crosstalk — only a row whose <c>pick</c> IS a
+    /// crosstalk script ever takes this branch, and it does so with no WARN at all (this is the
+    /// everyday, valid shape for that row's own kind, not corruption). Every other row falls through to
+    /// the persona-pick path exactly as before.
+    /// </para>
+    ///
+    /// <para>
     /// F72.2 (a working feed) takes priority over F86.1 (a decorative field): a stored
-    /// <paramref name="pick"/> that is off-schema JSON (e.g. <c>{}</c> — every property missing, so
-    /// <c>FiredRules</c> deserializes to <see langword="null"/> despite the record's own non-nullable
-    /// annotation, since JSON deserialization fills constructor parameters by reflection, not through
-    /// the record's own constructor) or not even valid JSON (<see cref="JsonException"/>) never 500s
-    /// the whole page over one bad row — it degrades to "no pick chips" for that row, with ONE warning
-    /// logged (row id included) so the corruption stays discoverable.
+    /// <paramref name="pick"/> that is off-schema JSON for BOTH shapes (e.g. <c>{}</c> — every property
+    /// missing, so <c>BoothLogPickStamp.FiredRules</c> deserializes to <see langword="null"/> despite
+    /// the record's own non-nullable annotation, since JSON deserialization fills constructor
+    /// parameters by reflection, not through the record's own constructor) or not even valid JSON
+    /// (<see cref="JsonException"/>) never 500s the whole page over one bad row — it degrades to "no
+    /// pick chips" for that row, with ONE warning logged (row id included) so the corruption stays
+    /// discoverable.
+    /// </para>
     /// </summary>
-    BoothLogPickDto? ToPickDto(long rowId, string? pick)
+    (BoothLogPickDto? Pick, BoothLogCrosstalkScriptDto? Crosstalk) ToPickOrCrosstalkDto(long rowId, string? pick)
     {
         if (pick is null)
-            return null;
+            return (null, null);
 
-        BoothLogPickStamp? stamp;
         try
         {
-            stamp = BoothLogPickStampSerializer.Deserialize(pick);
+            if (CrosstalkAiredScriptSerializer.Deserialize(pick) is { } script)
+            {
+                return (null, new BoothLogCrosstalkScriptDto(
+                    script.Lines
+                        .Select(line => new BoothLogCrosstalkLineDto(line.Speaker.ToString(), line.Text, line.IsInterjection))
+                        .ToList()));
+            }
+
+            if (BoothLogPickStampSerializer.Deserialize(pick) is { FiredRules: { } firedRules } stamp)
+            {
+                return (new BoothLogPickDto(
+                    firedRules.Select(rule => new BoothLogFiredRuleDto(rule.Summary, rule.Weight)).ToList(),
+                    stamp.IsExploration), null);
+            }
         }
         catch (JsonException ex)
         {
             logger.LogWarning(ex, "Booth-log row {RowId} has a pick that failed to deserialize — omitting it from the response", rowId);
-            return null;
+            return (null, null);
         }
 
-        if (stamp?.FiredRules is null)
-        {
-            logger.LogWarning("Booth-log row {RowId} has an off-schema pick stamp — omitting it from the response", rowId);
-            return null;
-        }
-
-        return new BoothLogPickDto(
-            stamp.FiredRules.Select(rule => new BoothLogFiredRuleDto(rule.Summary, rule.Weight)).ToList(),
-            stamp.IsExploration);
+        logger.LogWarning("Booth-log row {RowId} has an off-schema pick stamp — omitting it from the response", rowId);
+        return (null, null);
     }
 
     /// <summary>

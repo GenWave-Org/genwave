@@ -104,8 +104,23 @@ public sealed class PlayoutFeeder(
     // the MediaItem's own SegmentKind (null for music, TtsSegmentSource's request.Kind for a TTS
     // render); an engine-initiated advance always carries null — the feeder never pushed it, so no
     // kind was ever stamped. TrackAired forwards it verbatim to the booth log (SPEC F113.1).
-    readonly Dictionary<string, (string? Title, string? Artist, double GainDb, int? DurationMs, PersonaPickDiagnostics? PersonaPick, string? ArtworkUrl, string? DjName, SegmentKind? SegmentKind)> pushedMeta
-        = new(StringComparer.Ordinal);
+    // CrosstalkScript (SPEC F127.11, PLAN T287) rides the SAME two paths one member further: a feeder
+    // push captures the MediaItem's own CrosstalkScript (null for every kind but SegmentKind.Crosstalk);
+    // an engine-initiated advance always carries null — a station never engine-initiates a crosstalk
+    // asset (F127.7's single-use stock is feeder-pushed only). TrackAired forwards it verbatim to the
+    // booth log's own pick jsonb stamp (SPEC F127.11) — deliberately NOT carried onto OnAirState below
+    // (booth-log/admin-only, exactly like PersonaPick and SegmentKind already are).
+    readonly Dictionary<string, PushedItemMeta> pushedMeta = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// One <see cref="pushedMeta"/> entry (round-2 review F11 — named record, not an anonymous
+    /// nine-member tuple, at the field declaration and both write sites). Title/Artist/GainDb/
+    /// DurationMs/PersonaPick/ArtworkUrl/DjName/SegmentKind/CrosstalkScript all carry the SAME
+    /// remarks the field declaration above documents.
+    /// </summary>
+    sealed record PushedItemMeta(
+        string? Title, string? Artist, double GainDb, int? DurationMs, PersonaPickDiagnostics? PersonaPick,
+        string? ArtworkUrl, string? DjName, SegmentKind? SegmentKind, CrosstalkAiredScript? CrosstalkScript);
 
     // Media ids whose pushedMeta entry is feeder-authoritative — set at PushAsync time from the
     // exact MediaItem we queued, so TickAsync must never overwrite it with an engine-output guess.
@@ -228,7 +243,9 @@ public sealed class PlayoutFeeder(
                     var artworkUrl = echoedArtworkUrl is not null && (artworkUrlEchoValidator?.IsTrusted(echoedArtworkUrl) ?? false)
                         ? echoedArtworkUrl
                         : null;
-                    pushedMeta[mediaId] = (title, artist, gainDb, DurationMs: null, PersonaPick: null, ArtworkUrl: artworkUrl, DjName: null, SegmentKind: null);
+                    pushedMeta[mediaId] = new PushedItemMeta(
+                        title, artist, gainDb, DurationMs: null, PersonaPick: null, ArtworkUrl: artworkUrl,
+                        DjName: null, SegmentKind: null, CrosstalkScript: null);
                 }
                 else
                 {
@@ -242,8 +259,13 @@ public sealed class PlayoutFeeder(
                 // Publish the advance (e.g. for PlayHistoryService's sink). The event carries only
                 // Core-friendly primitives — no Host types cross this seam.
                 {
-                    pushedMeta.TryGetValue(mediaId, out var pm);
-                    events.Publish(new TrackAired(mediaId, pm.Title, pm.Artist, pm.GainDb, advancedAt, pm.DurationMs, pm.PersonaPick, pm.SegmentKind));
+                    var pm = pushedMeta.GetValueOrDefault(mediaId);
+                    events.Publish(new TrackAired(
+                        mediaId, pm?.Title, pm?.Artist, pm?.GainDb ?? 0.0, advancedAt, pm?.DurationMs,
+                        pm?.PersonaPick, pm?.SegmentKind)
+                    {
+                        CrosstalkScript = pm?.CrosstalkScript,
+                    });
                 }
             }
 
@@ -352,7 +374,9 @@ public sealed class PlayoutFeeder(
                 // advance (elsewhere in this method) is null, rehydrated later at the Host layer (F66.2).
                 // ArtworkUrl (SPEC F88.4, F93.3, PLAN T125) is the SAME url= this exact push already
                 // stamped, handed back on EnginePushResult — never re-resolved.
-                pushedMeta[item.MediaId] = (item.Title, item.Artist, gainDb, item.DurationMs, item.PersonaPick, pushResult.ArtworkUrl, item.DjName, item.SegmentKind);
+                pushedMeta[item.MediaId] = new PushedItemMeta(
+                    item.Title, item.Artist, gainDb, item.DurationMs, item.PersonaPick, pushResult.ArtworkUrl,
+                    item.DjName, item.SegmentKind, item.CrosstalkScript);
                 feederOwnedIds.Add(item.MediaId);
                 MarkPendingAir(item.MediaId);   // claim (d) starts here (SPEC F57.1(d), gh-#88)
                 chainIds.Add(item.MediaId);
@@ -383,21 +407,23 @@ public sealed class PlayoutFeeder(
     void PublishOnAirState()
     {
         string? currentMediaId = onAirIsReal ? onAirId : null;
-        (string? Title, string? Artist, double GainDb, int? DurationMs, PersonaPickDiagnostics? PersonaPick, string? ArtworkUrl, string? DjName, SegmentKind? SegmentKind) currentMeta = currentMediaId is not null
-            ? pushedMeta.GetValueOrDefault(currentMediaId)
-            : default;
+        // CrosstalkScript deliberately never reaches OnAirState below (booth-log/admin-only — see
+        // pushedMeta's own remarks) — only the fields OnAirState actually reads (Title/Artist/GainDb/
+        // DurationMs/ArtworkUrl/DjName) are ever forwarded; currentMeta stays null (never found) for a
+        // drain or an id this feeder never pushed, mirrored below via the null-conditional reads.
+        var currentMeta = currentMediaId is not null ? pushedMeta.GetValueOrDefault(currentMediaId) : null;
 
         CurrentOnAir = new OnAirState(
             MediaId: currentMediaId,
-            Title: currentMeta.Title,
-            Artist: currentMeta.Artist,
-            GainDb: currentMeta.GainDb,
+            Title: currentMeta?.Title,
+            Artist: currentMeta?.Artist,
+            GainDb: currentMeta?.GainDb ?? 0.0,
             StartedAt: onAirStartedAt,
-            DurationMs: currentMeta.DurationMs,
+            DurationMs: currentMeta?.DurationMs,
             IsReal: onAirIsReal,
             IsReady: true,
-            ArtworkUrl: currentMeta.ArtworkUrl,
-            DjName: currentMeta.DjName);
+            ArtworkUrl: currentMeta?.ArtworkUrl,
+            DjName: currentMeta?.DjName);
     }
 
     // Enqueues mediaId into the anti-repeat ring and trims to the live capacity (SPEC F41.6, read

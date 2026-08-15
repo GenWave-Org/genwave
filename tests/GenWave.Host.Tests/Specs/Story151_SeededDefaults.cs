@@ -143,7 +143,11 @@ public static class FeatureSeededDefaults
     /// T148) join the set having MOVED here from <see cref="ComposeApiEnvMirror"/>: TTS failover
     /// became opt-in — the shipped compose.yaml no longer sets either key, so a fresh deploy's
     /// effective value really is blank now (an operator opts in with a live PUT /api/settings).
-    /// Every other allowlisted key's C# default is non-empty.
+    /// Crosstalk:Shows (SPEC F127.8, STORY-328, PLAN T285) joins on Station:Envelope:Genres' own
+    /// identical rationale, same shape (a JSON array of strings): empty IS the spec'd fail-closed
+    /// default — the feature is off until an operator names a show, so seeding a value here would
+    /// silently turn banter on for every fresh deploy. Every other allowlisted key's C# default is
+    /// non-empty.
     /// </summary>
     static readonly IReadOnlySet<string> HonestlyBlankKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -164,6 +168,7 @@ public static class FeatureSeededDefaults
         "Station:Location:Latitude",
         "Station:Location:Longitude",
         "Station:Location:SpokenName",
+        "Crosstalk:Shows",
     };
 
     /// <summary>

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Linq;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Configuration;
 using GenWave.Core.Domain;
 using GenWave.Host.Theming;
@@ -22,7 +23,7 @@ namespace GenWave.Host.Configuration;
 /// Registered as a singleton; thread-safe (stateless beyond the injected
 /// <see cref="IConfiguration"/> and <see cref="ThemeCatalog"/>).
 /// </summary>
-public sealed class SettingValidator
+public sealed partial class SettingValidator
 {
     readonly IConfiguration configuration;
     readonly ThemeCatalog themeCatalog;
@@ -194,6 +195,20 @@ public sealed class SettingValidator
     // minutes) is comfortably past the spec'd 25s default while still bounding a fat-finger entry.
     internal const int CrosstalkDurationTargetSecondsMin = 5;
     internal const int CrosstalkDurationTargetSecondsMax = 120;
+
+    // Crosstalk:EveryNthAiring (SPEC F127.8, STORY-328, PLAN T285) — CrosstalkOptions' own
+    // [Range(1, int.MaxValue)] (boot-enforced via ValidateDataAnnotations); this validator adds the
+    // F53.1 settings-API-only ceiling. Floor of 1 mirrors the option's own default ("every eligible
+    // airing carries banter" — 0 has no honest meaning, unlike the "0 = off" cadence knobs
+    // elsewhere in this file, since Shows being empty is ALREADY the off switch for this feature).
+    // 100 is a generous ceiling — "1 every 100 shows" is already indistinguishable from off.
+    internal const int CrosstalkEveryNthAiringMin = 1;
+    internal const int CrosstalkEveryNthAiringMax = 100;
+
+    // Crosstalk:Shows (SPEC F127.8, STORY-328, PLAN T285 review F4) — a fat-finger guard on entry
+    // count, the F53.1 ceiling shape every other array-valued key on this list already carries; no
+    // real station names anywhere close to this many shows.
+    internal const int CrosstalkShowsMaxCount = 50;
 
     // Maps each allowlisted key to a per-key (range + type) validator. An instance method (not a
     // static field) purely because the Station:Theme entry below closes over the constructor's own
@@ -421,6 +436,17 @@ public sealed class SettingValidator
             // on top of CrosstalkOptions' own boot-enforced [Range(1, int.MaxValue)].
             ["Crosstalk:DurationTargetSeconds"] =
                 v => IsIntInRange(v, CrosstalkDurationTargetSecondsMin, CrosstalkDurationTargetSecondsMax),
+
+            // Crosstalk:Shows (SPEC F127.8, STORY-328, PLAN T285 review F4) — a JSON array of show
+            // SLUGS, never display names/labels (T175's "names slugs, not labels" rule — the
+            // Station:Theme precedent just above); empty ("[]" or blank) is legal and is the
+            // fail-closed OFF state (F127.8).
+            ["Crosstalk:Shows"] = IsValidCrosstalkShowsArray,
+
+            // Crosstalk:EveryNthAiring (SPEC F127.8, STORY-328, PLAN T285) — floor mirrors
+            // CrosstalkOptions' own [Range(1, int.MaxValue)]; F53.1 adds the ceiling.
+            ["Crosstalk:EveryNthAiring"] =
+                v => IsIntInRange(v, CrosstalkEveryNthAiringMin, CrosstalkEveryNthAiringMax),
         };
 
     // ── Per-key validation ─────────────────────────────────────────────────────────────────────
@@ -782,6 +808,53 @@ public sealed class SettingValidator
         }
     }
 
+    // Mirrors GenWave.Host.Api.PersonaController.SlugFormat's own character class (lowercase
+    // letters, digits, single hyphens — the house Slugify/LegacyPersonaCardMapper output shape).
+    // \A/\z, NOT ^/$ (that finding's own security-api rationale): .NET regex `$` matches immediately
+    // before a trailing '\n', not only at the true end of input.
+    [GeneratedRegex("\\A[a-z0-9]+(-[a-z0-9]+)*\\z")]
+    private static partial Regex ShowSlugFormat();
+
+    /// <summary>
+    /// Validates <c>Crosstalk:Shows</c> (SPEC F127.8, PLAN T285 review F4): a JSON array of unique
+    /// show SLUGS (lowercase-kebab, <see cref="ShowSlugFormat"/>), at most
+    /// <see cref="CrosstalkShowsMaxCount"/> entries. An empty array, or a blank value, is legal — SPEC
+    /// F127.8's fail-closed "empty means the feature is off" state. Existence against
+    /// <c>station.show</c> is deliberately NOT checked here — unlike <see cref="IsValidThemeSlug"/>,
+    /// which consults the already-DI-registered, in-memory <see cref="ThemeCatalog"/>, there is no
+    /// equivalent cheap in-memory show catalog today; adding one is plumbing this task does not need
+    /// (a typo'd/deleted slug simply never matches any real show, so it resolves to no eligible show
+    /// via <c>GenWave.Orchestration.CrosstalkPlanner.IsShowEnabled</c>'s own fail-closed default, not
+    /// a 400 here).
+    /// </summary>
+    static bool IsValidCrosstalkShowsArray(string v)
+    {
+        if (string.IsNullOrWhiteSpace(v)) return true;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(v);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Array) return false;
+            if (root.GetArrayLength() > CrosstalkShowsMaxCount) return false;
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var element in root.EnumerateArray())
+            {
+                if (element.ValueKind != JsonValueKind.String) return false;
+                var slug = element.GetString();
+                if (slug is null || !ShowSlugFormat().IsMatch(slug)) return false;
+                if (!seen.Add(slug)) return false;
+            }
+
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Validates <c>Tts:EngineByKind</c> (SPEC F70.3, STORY-191): a JSON object whose keys are
     /// valid <see cref="SegmentKind"/> names (case-insensitive, mirroring
@@ -976,6 +1049,12 @@ public sealed class SettingValidator
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {ShowsPatterCadenceMinutesMin} and {ShowsPatterCadenceMinutesMax} (minutes); 0 disables the show-flavor line.",
         var k when k.Equals("Crosstalk:DurationTargetSeconds", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {CrosstalkDurationTargetSecondsMin} and {CrosstalkDurationTargetSecondsMax} (seconds).",
+        var k when k.Equals("Crosstalk:Shows", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be a JSON array of unique show SLUGS " +
+               $"(lowercase letters, digits, single hyphens — not display names), at most {CrosstalkShowsMaxCount} " +
+               "entries, e.g. [] or [\"morning-drive\"]. Empty means the feature is off.",
+        var k when k.Equals("Crosstalk:EveryNthAiring", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {CrosstalkEveryNthAiringMin} and {CrosstalkEveryNthAiringMax} (airings).",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }

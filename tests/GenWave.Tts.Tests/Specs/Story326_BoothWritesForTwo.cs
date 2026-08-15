@@ -141,10 +141,120 @@ public static class FeatureBoothWritesForTwo
         }
 
         [Fact]
-        public void The_request_carries_the_F123_derived_generation_cap() =>
-            // The one-knob discipline extends: the cap derives from Llm:MaxCopyChars, no second
-            // operator setting for banter.
-            Assert.Equal(LlmCopyWriter.DeriveMaxTokens(MaxCopyChars), wireMaxTokens);
+        public void The_request_carries_the_duration_derived_generation_cap() =>
+            // SPEC F127.3 (T283 paper-audition reconciliation, gh-#385): the cap derives from
+            // Crosstalk:DurationTargetSeconds (default 25s here — BuildWriter's own default), NOT
+            // from Llm:MaxCopyChars (300 in this fixture) — 25s x 15 chars/sec (CrosstalkScriptParser
+            // .CharsPerSecond) x 2x headroom = 750 chars -> DeriveMaxTokens(750) = 250 tokens.
+            // ScenarioTheGenerationCapTracksDuration below pins that this tracks DURATION, not chars.
+            Assert.Equal(250, wireMaxTokens);
+    }
+
+    // T283 paper-audition reconciliation (SPEC F127.3, gh-#385): the first live run against
+    // llama3.2:3b proved the PRIOR blurb-scaled cap (derived from Llm:MaxCopyChars, sized for one
+    // short line) starves a 3-8 line script — 4 of 8 attempts died to finish_reason=length. These
+    // facts pin that the cap now tracks Crosstalk:DurationTargetSeconds instead, and that
+    // Llm:MaxCopyChars alone can no longer move it.
+    public sealed class ScenarioTheGenerationCapTracksDuration : IAsyncLifetime
+    {
+        const int MaxCopyChars = 300;
+
+        MockCompletionsServer shortTargetMock = null!;
+        MockCompletionsServer longTargetMock = null!;
+        int shortTargetMaxTokens;
+        int longTargetMaxTokens;
+
+        public async Task InitializeAsync()
+        {
+            // Given two writers differing ONLY in Crosstalk:DurationTargetSeconds (both share the
+            // SAME Llm:MaxCopyChars)...
+            shortTargetMock = await MockCompletionsServer.StartAsync();
+            shortTargetMock.ReplyContent = WellFormedReply;
+            var shortWriter = BuildWriter(shortTargetMock.BaseUri.ToString(), MaxCopyChars, durationTargetSeconds: 25);
+            await shortWriter.WriteExchangeAsync(Request(), CancellationToken.None);
+            shortTargetMaxTokens = ExtractMaxTokens(shortTargetMock.Requests[0].Body);
+
+            longTargetMock = await MockCompletionsServer.StartAsync();
+            longTargetMock.ReplyContent = WellFormedReply;
+            var longWriter = BuildWriter(longTargetMock.BaseUri.ToString(), MaxCopyChars, durationTargetSeconds: 50);
+            await longWriter.WriteExchangeAsync(Request(), CancellationToken.None);
+            longTargetMaxTokens = ExtractMaxTokens(longTargetMock.Requests[0].Body);
+        }
+
+        public async Task DisposeAsync()
+        {
+            await shortTargetMock.DisposeAsync();
+            await longTargetMock.DisposeAsync();
+        }
+
+        [Fact]
+        public void A_longer_duration_target_yields_a_larger_generation_cap() =>
+            // Then the cap MOVED with the duration target alone.
+            Assert.True(longTargetMaxTokens > shortTargetMaxTokens);
+
+        [Fact]
+        public void Doubling_the_duration_target_doubles_the_derived_generation_cap() =>
+            // 50s x 15 chars/sec x 2x headroom = 1500 chars -> DeriveMaxTokens(1500) = 500 tokens.
+            Assert.Equal(500, longTargetMaxTokens);
+    }
+
+    public static class ScenarioMaxCopyCharsAloneDoesNotMoveTheCap
+    {
+        [Fact]
+        public static async Task Changing_MaxCopyChars_alone_leaves_the_generation_cap_unchanged()
+        {
+            // Given two writers differing ONLY in Llm:MaxCopyChars (both share the SAME
+            // Crosstalk:DurationTargetSeconds default)...
+            await using var smallMaxCopyMock = await MockCompletionsServer.StartAsync();
+            smallMaxCopyMock.ReplyContent = WellFormedReply;
+            var smallMaxCopyWriter = BuildWriter(smallMaxCopyMock.BaseUri.ToString(), maxCopyChars: 150);
+            await smallMaxCopyWriter.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            await using var largeMaxCopyMock = await MockCompletionsServer.StartAsync();
+            largeMaxCopyMock.ReplyContent = WellFormedReply;
+            var largeMaxCopyWriter = BuildWriter(largeMaxCopyMock.BaseUri.ToString(), maxCopyChars: 900);
+            await largeMaxCopyWriter.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            // Then the generation cap is IDENTICAL — MaxCopyChars alone never moves it.
+            Assert.Equal(
+                ExtractMaxTokens(smallMaxCopyMock.Requests[0].Body),
+                ExtractMaxTokens(largeMaxCopyMock.Requests[0].Body));
+        }
+    }
+
+    // T283 paper-audition reconciliation (SPEC F127.3, gh-#385): the prompt's stated word budget
+    // now derives from the SAME Crosstalk:DurationTargetSeconds figure as the generation cap (never
+    // from Llm:MaxCopyChars) — the model is asked for what the duration gate will actually accept.
+    public static class ScenarioTheStatedWordBudgetTracksDuration
+    {
+        [Fact]
+        public static async Task The_default_duration_target_states_the_duration_derived_word_budget()
+        {
+            // 25s x 15 chars/sec / 6 chars-per-word = 62 words (int division: 375 / 6 = 62).
+            await using var mock = await MockCompletionsServer.StartAsync();
+            mock.ReplyContent = WellFormedReply;
+            var writer = BuildWriter(mock.BaseUri.ToString());
+
+            await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            var prompt = ExtractSystemPrompt(mock.Requests[0].Body);
+            Assert.Contains("approximately 62 words total", prompt, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public static async Task A_longer_duration_target_states_a_larger_word_budget()
+        {
+            // 50s x 15 chars/sec / 6 chars-per-word = 125 words — double the duration target moves
+            // the stated budget too, proving it is not a fixed/hardcoded figure.
+            await using var mock = await MockCompletionsServer.StartAsync();
+            mock.ReplyContent = WellFormedReply;
+            var writer = BuildWriter(mock.BaseUri.ToString(), durationTargetSeconds: 50);
+
+            await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            var prompt = ExtractSystemPrompt(mock.Requests[0].Body);
+            Assert.Contains("approximately 125 words total", prompt, StringComparison.Ordinal);
+        }
     }
 
     public sealed class ScenarioTheScriptParsesStrictly : IAsyncLifetime

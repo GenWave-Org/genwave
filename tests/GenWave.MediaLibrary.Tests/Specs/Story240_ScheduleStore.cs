@@ -242,7 +242,8 @@ public static class FeatureScheduleStore
             var block = Assert.Single(after.Segments);
             Assert.Equal(blockPersonaId, block.PersonaId);
             Assert.NotNull(block.Show);
-            Assert.Equal(new ShowSummary(showId, "Night Moves", "Late-night deep cuts", "moody, sparse"), block.Show);
+            Assert.Equal(
+                new ShowSummary(showId, "Night Moves", "Late-night deep cuts", "moody, sparse") { Slug = "night-moves" }, block.Show);
         }
 
         [Fact]

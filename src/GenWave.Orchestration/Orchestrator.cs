@@ -182,6 +182,33 @@ using GenWave.Core.Events;
 /// every other StationId render, no new kind needed). No show on the air degrades this whole
 /// paragraph away — byte-identical to F110.2/F110.3 above, the required outside-show posture.
 /// </para>
+///
+/// <para>
+/// <b>Crosstalk (SPEC F127.1/.8/.9, STORY-329, PLAN T287):</b> <paramref name="crosstalkPlanner"/> is
+/// told the on-air show once per unit, at the very top of <see cref="GetNextAsync"/>
+/// (<see cref="CrosstalkPlanner.NoteOnAirShow"/> — SPEC F127.8's own "EveryNthAiring counts AIRINGS,
+/// not stock events" ruling depends on this call running EVERY unit, never only when a vend is
+/// attempted, so a transition through a disabled show or a schedule gap is never missed). The vend
+/// attempt itself lives in <see cref="EnqueuePatterAsync"/>, gated on THREE conditions — two structural,
+/// one a peek — that together keep banter outside the F92/F124 boundary-ceremony ladder (SPEC F127.8's
+/// own "never inside the boundary-ceremony window" ruling): an ordinary music unit
+/// (<c>next is not null</c> — <see cref="TryServeCeremonyOnlyUnitAsync"/>'s own call passes null), a
+/// drain not already forced ahead of a straddling boundary (<c>drainAsOf is null</c> — the straddle
+/// branch below is the only OTHER caller that sets it), AND no pending SignOff/SignOn that will itself
+/// leave the deferral queue at THIS SAME unit's own upcoming <see cref="SpeechDeferralQueue.TryDequeueDue"/>
+/// call (SPEC F127.8 review F2 — <c>EnqueuePatterAsync</c>'s own <c>CeremonyDrainsThisBreak</c> local).
+/// This third condition closes the gap the first two leave open: a ceremony piece already due (or
+/// overdue) never gets a <see cref="BoundaryFitPlan"/> at all — <see cref="GetNextAsync"/>'s own peek
+/// only builds one for a deferral STRICTLY in the future (<c>untilDue &gt; TimeSpan.Zero</c>) — so
+/// neither the ceremony-only decline nor the straddle branch ever sees it, yet
+/// <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s own <c>Due &lt;= now</c> check still drains it a
+/// few lines later in the SAME unit regardless. Proven live, pre-fix: a stocked exchange plus a SignOff
+/// due 1s in the past produced AIRED ORDER [Crosstalk, SignOff, LeadIn] — the ceremony piece airing
+/// AFTER the banter it was supposed to structurally precede. A vended exchange supersedes the
+/// F107.5/F116.3 shared-slot lanes for that SAME break (SPEC F127.9) via
+/// <see cref="SegmentRequest.CrosstalkAiredThisBreak"/>, stamped onto that unit's own LeadIn/
+/// BackAnnounce requests — see <see cref="EnqueuePatterAsync"/>'s own remarks for the rest.
+/// </para>
 /// </summary>
 public sealed class Orchestrator(
     IStationIdentityProvider identityProvider,
@@ -203,7 +230,8 @@ public sealed class Orchestrator(
     IPatterDurationEstimator? patterEstimator = null,
     IContextSettingsProvider? contextSettings = null,
     IMediaCatalog? catalog = null,
-    IStationImagingSettingsProvider? imagingSettings = null) : INextItemProvider, IBoundaryFitLog
+    IStationImagingSettingsProvider? imagingSettings = null,
+    CrosstalkPlanner? crosstalkPlanner = null) : INextItemProvider, IBoundaryFitLog
 {
     // gh-#254 — how far from the boundary a candidate may land and still count as a WIN ("±30s of
     // the boundary is a win"), widened as the gh-#253 estimate's confidence tier drops: the fit's
@@ -324,6 +352,14 @@ public sealed class Orchestrator(
         // gh-#254 (same single read, just earlier): the boundary fit keys its persona-owned patter
         // estimates by the unit's show persona.
         var unitDjName = await ResolveUnitDjNameAsync(ct);
+
+        // SPEC F127.8 (STORY-329, PLAN T287) — Crosstalk:EveryNthAiring's own counter: told the
+        // on-air show EVERY unit, continuously, regardless of whether crosstalk is even enabled or a
+        // vend is even attempted this unit — see CrosstalkPlanner.NoteOnAirShow's own remarks for why
+        // this must never be narrowed to "only when a vend is about to be attempted". A null
+        // crosstalkPlanner (the feature's Host wiring never ran) or a null scheduleResolver (no
+        // format-clock schedule wired) both degrade this to a permanent no-op.
+        crosstalkPlanner?.NoteOnAirShow(scheduleResolver?.TryGetCurrent()?.Show?.Slug);
 
         // Strip tts:* from the recent-ids list (F12.6 discipline) so the ordered-recent list
         // GetRotationCandidateAsync tiers against stays music-only. ctx.RecentMediaIds is already
@@ -984,6 +1020,65 @@ public sealed class Orchestrator(
         void KickResolved(SegmentRequest request, MediaItem item) =>
             pendingRenders.Add((request, Task.FromResult<MediaItem?>(item), null, false));
 
+        // SPEC F127.1/.7/.8/.9 (STORY-329, PLAN T287) — the crosstalk vend attempt: gated on THREE
+        // conditions (see this class's own "Crosstalk" remarks above for why the third exists) — next
+        // is not null (an ordinary music unit; gh-#300's ceremony-only call passes null), drainAsOf is
+        // null (excludes the straddle branch's own forced-ahead SignOff drain — the only OTHER caller
+        // that sets it), AND CeremonyDrainsThisBreak() is false. The third is a PEEK, not a structural
+        // exclusion like the first two: a SignOff/SignOn already due (or overdue) never gets a
+        // BoundaryFitPlan at all, so the first two conditions alone never see it, yet it still drains a
+        // few lines below via the ordinary TryDequeueDue(drainNow) call regardless (SPEC F127.8 review
+        // F2). Decided BEFORE step 1 below, never after: SPEC F127.9's supersede must already be known
+        // before this SAME unit's BackAnnounce/LeadIn requests are built, a few lines down.
+        var vendedCrosstalk = next is not null && drainAsOf is null && !CeremonyDrainsThisBreak()
+            ? TryVendCrosstalkForThisBreak()
+            : null;
+        var crosstalkAiredThisBreak = vendedCrosstalk is not null;
+
+        // SPEC F127.8 review F2 — mirrors SpeechDeferralQueue.TryDequeueDue's own Due/NotBefore
+        // eligibility check (its Pass 1) for exactly the two handoff kinds ever drained here
+        // (SignOff/SignOn), without dequeuing anything: true when either would ACTUALLY leave the
+        // queue at THIS SAME unit's own drain, a few lines below (drainAsOf ?? now — collapses to
+        // plain "now" on every path that reaches this branch, since the caller above already proved
+        // drainAsOf is null before ever calling this). The hold parameter TryDequeueDue itself takes is
+        // never consulted here: hold is non-null ONLY together with a non-null drainAsOf (the straddle
+        // branch), which the caller's own drainAsOf-is-null check already excludes before this runs.
+        bool CeremonyDrainsThisBreak()
+        {
+            var realNow = timeProvider.GetUtcNow();
+            var drainNow = drainAsOf ?? realNow;
+            return WouldDrainAt(deferralQueue.Peek(SpeechDeferralKind.SignOff), drainNow, realNow)
+                || WouldDrainAt(deferralQueue.Peek(SpeechDeferralKind.SignOn), drainNow, realNow);
+        }
+
+        static bool WouldDrainAt(SpeechDeferral? deferral, DateTimeOffset drainNow, DateTimeOffset realNow) =>
+            deferral is not null
+            && deferral.Due <= drainNow
+            && (deferral.NotBefore is not { } notBefore || notBefore <= realNow);
+
+        // Local to this method (mirrors Kick/KickResolved's own placement one function up) —
+        // CrosstalkPlanner.TryVend is pure, in-memory, synchronous state; there is no render to await,
+        // so nothing here needs async. The failure-path delete this integration owns (PLAN T287
+        // rider): TryVend has ALREADY removed exchange from stock the instant it hands it back, so a
+        // vanished asset (deleted out of band, or a race with a fresh CrosstalkStockWorker's own
+        // startup purge) must not silently leak.
+        StockedCrosstalkExchange? TryVendCrosstalkForThisBreak()
+        {
+            if (crosstalkPlanner is null) return null;
+            if (scheduleResolver?.TryGetCurrent() is not { Segment: { } hostBlock, Show: { Slug.Length: > 0 } show })
+                return null;
+            if (scheduleResolver.TryGetCurrentWeekSnapshot() is not { } week) return null;
+            if (crosstalkPlanner.TryVend(show.Slug, hostBlock, week) is not { } exchange) return null;
+
+            if (!File.Exists(exchange.AssetPath))
+            {
+                crosstalkPlanner.DiscardUnaired(exchange, "asset missing at vend");
+                return null;
+            }
+
+            return exchange;
+        }
+
         // 1. Back-announce for the previous track
         if (cadence.BackAnnounceAfterEachTrack && prev is not null)
         {
@@ -995,8 +1090,52 @@ public sealed class Orchestrator(
                 prev,
                 StationLocalNow(),
                 identity.Id,
-                personaName);
+                personaName)
+            {
+                CrosstalkAiredThisBreak = crosstalkAiredThisBreak,
+            };
             Kick(req);
+        }
+
+        // 1.5. Crosstalk banter (SPEC F127.1/.6/.11, STORY-329, PLAN T287) — one cached asset the
+        // feeder treats as a normal item (SPEC F66.1's shape, exactly like a pool-first StationId
+        // ident's own KickResolved precedent): no render, the exchange was already fully mixed and
+        // measured ahead of air (T284/T286's off-clock generation). Kicked AFTER the back-announce and
+        // BEFORE the station-id/lead-in steps below, so it airs as this break's own mid-block color:
+        // the outgoing track's back-announce, then banter, then whatever imaging/lead-in follows.
+        //
+        // MediaItem presentation (build-time decision, T287): Title is the STATION name and Artist is
+        // "unitDjName ?? identity.Name" — the SAME shape every other TTS-kind segment already presents
+        // (TtsSegmentSource.RenderAsync's own Title/Artist stamp) — never the neighbor persona's name,
+        // which would be a NEW disclosure the spectator now-playing surface has never carried for any
+        // kind. DjName is the unit's own on-air host persona (unitDjName) — the host's own voice opens
+        // the exchange (SPEC F127.2), so Now Playing attribution stays exactly what the rest of this
+        // unit already carries; the neighbor voice is audible on air but never a NEW distinct
+        // attribution field (F127.11's own booth-log stamp, not the spectator surface, is where "who
+        // else spoke" is answerable). MediaId keeps the tts: prefix (excluded from the recent-ids list
+        // the SAME way every other TTS segment already is, SPEC F12.6) even though it is not a
+        // TtsSegmentSource cache key — the asset's own filename (a GUID, CrosstalkAssembler.AssembleAsync)
+        // is unique per exchange, so no second id-uniqueness scheme is needed.
+        if (vendedCrosstalk is { } exchangeToAir)
+        {
+            var crosstalkMediaId = $"tts:crosstalk:{Path.GetFileNameWithoutExtension(exchangeToAir.AssetPath)}";
+            var crosstalkRequest = new SegmentRequest(
+                SegmentKind.Crosstalk,
+                identity.Voice,
+                identity.Name,
+                null,
+                StationLocalNow(),
+                identity.Id,
+                PersonaName: unitDjName);
+            var crosstalkItem = new MediaItem(
+                crosstalkMediaId, exchangeToAir.AssetPath, identity.Name, exchangeToAir.Loudness,
+                Artist: unitDjName ?? identity.Name, Cue: exchangeToAir.Cue, DurationMs: exchangeToAir.DurationMs,
+                DjName: unitDjName, SegmentKind: SegmentKind.Crosstalk)
+            {
+                CrosstalkScript = exchangeToAir.Script,
+            };
+            crosstalkPlanner?.MarkVended(crosstalkMediaId, exchangeToAir);
+            KickResolved(crosstalkRequest, crosstalkItem);
         }
 
         // 2. Station ID every N units (checked BEFORE incrementing unitCount). unitCount > 0 joins
@@ -1137,7 +1276,10 @@ public sealed class Orchestrator(
                 next,
                 StationLocalNow(),
                 identity.Id,
-                personaName);
+                personaName)
+            {
+                CrosstalkAiredThisBreak = crosstalkAiredThisBreak,
+            };
             Kick(req);
         }
 

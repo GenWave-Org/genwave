@@ -72,18 +72,23 @@ sealed class SpecialsRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSp
         public double? EnergyMax { get; init; }
         public long? ShowId { get; init; }
         public string? ShowName { get; init; }
+        public string? ShowSlug { get; init; }
         public string? ShowTagline { get; init; }
         public string? ShowFlavor { get; init; }
     }
 
     // Mirrors ScheduleRepository's own SelectColumns constant, keyed on on_date instead of
-    // day_of_week/start_minute. sh.id/name/tagline/flavor only — never persona_id/envelope.
+    // day_of_week/start_minute. sh.id/name/slug/tagline/flavor only — never persona_id/envelope.
+    // ShowSlug joins at PLAN T285 (SPEC F127.8 review F4) — a special-covered airing needs the same
+    // stable show identity a weekly block carries, so CrosstalkPlanner.IsShowEnabled works identically
+    // whether "now" resolves to a weekly block or a projected special (ScheduleResolver.ProjectSpecial).
     const string SelectColumns =
         """
         select s.id::bigint as id, s.on_date, s.start_minute, s.end_minute,
                s.persona_id::bigint as persona_id, s.genres,
                s.energy_min::double precision as energy_min, s.energy_max::double precision as energy_max,
-               sh.id::bigint as show_id, sh.name as show_name, sh.tagline as show_tagline, sh.flavor as show_flavor
+               sh.id::bigint as show_id, sh.name as show_name, sh.slug as show_slug,
+               sh.tagline as show_tagline, sh.flavor as show_flavor
         from station.schedule_special s
         left join station.show sh on sh.id = s.show_id
         """;
@@ -128,7 +133,8 @@ sealed class SpecialsRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSp
                 select ins.id::bigint as id, ins.on_date, ins.start_minute, ins.end_minute,
                        ins.persona_id::bigint as persona_id, ins.genres,
                        ins.energy_min::double precision as energy_min, ins.energy_max::double precision as energy_max,
-                       sh.id::bigint as show_id, sh.name as show_name, sh.tagline as show_tagline, sh.flavor as show_flavor
+                       sh.id::bigint as show_id, sh.name as show_name, sh.slug as show_slug,
+                       sh.tagline as show_tagline, sh.flavor as show_flavor
                 from ins
                 left join station.show sh on sh.id = ins.show_id
                 """,
@@ -177,9 +183,10 @@ sealed class SpecialsRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSp
         row.Genres, row.EnergyMin, row.EnergyMax, ToShowSummary(row), row.ShowId);
 
     /// <summary>Mirrors <see cref="ScheduleRepository"/>'s own <c>ToShowSummary</c> — see that
-    /// method's remarks for why <c>ShowName</c> is checked alongside <c>ShowId</c>.</summary>
+    /// method's remarks for why <c>ShowName</c> is checked alongside <c>ShowId</c>, and for
+    /// <c>ShowSlug</c>'s own <c>""</c>-default fallback (PLAN T285, SPEC F127.8 review F4).</summary>
     static ShowSummary? ToShowSummary(SpecialRow row) =>
         row.ShowId is { } showId && row.ShowName is { } showName
-            ? new ShowSummary(showId, showName, row.ShowTagline, row.ShowFlavor)
+            ? new ShowSummary(showId, showName, row.ShowTagline, row.ShowFlavor) { Slug = row.ShowSlug ?? "" }
             : null;
 }

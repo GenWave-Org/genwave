@@ -60,4 +60,31 @@ namespace GenWave.Core.Domain;
 /// so the booth log's <c>track-started</c> row can stamp a structured <c>segment_kind</c> at the
 /// genuine AIR-time instant — never at render time, when a budget-dropped piece never actually airs.
 /// </param>
-public sealed record MediaItem(string MediaId, string Locator, string Title, Loudness Loudness, string? Artist = null, CuePoints? Cue = null, double? IntroEnergy = null, double? OutroEnergy = null, string? Album = null, string? Genre = null, int? Year = null, int? DurationMs = null, PersonaPickDiagnostics? PersonaPick = null, bool RequestFulfilled = false, string? DjName = null, SegmentKind? SegmentKind = null);
+public sealed record MediaItem(string MediaId, string Locator, string Title, Loudness Loudness, string? Artist = null, CuePoints? Cue = null, double? IntroEnergy = null, double? OutroEnergy = null, string? Album = null, string? Genre = null, int? Year = null, int? DurationMs = null, PersonaPickDiagnostics? PersonaPick = null, bool RequestFulfilled = false, string? DjName = null, SegmentKind? SegmentKind = null)
+{
+    /// <summary>
+    /// SPEC F127.11 (STORY-329, PLAN T287) — the full validated two-voice script this item carries, when
+    /// <see cref="SegmentKind"/> is <see cref="Core.Domain.SegmentKind.Crosstalk"/>; <see langword="null"/>
+    /// for every other item, including the common persona/music case. Rides the SAME two paths
+    /// <see cref="PersonaPick"/> already does — <c>Orchestrator.EnqueuePatterAsync</c>'s own crosstalk vend
+    /// step stamps it once, at compose time, from the stocked exchange's own script — through
+    /// <c>PlayoutFeeder</c>'s push-time metadata into <see cref="GenWave.Core.Events.TrackAired.CrosstalkScript"/>,
+    /// so the booth log's <c>track-started</c> row can carry it as the <c>pick</c> jsonb stamp (the
+    /// <c>BoothLogPickStamp</c> precedent). Deliberately NOT carried onto <c>OnAirState</c>/the spectator
+    /// now-playing surface — booth-log/admin-only, exactly like <see cref="PersonaPick"/> and
+    /// <see cref="SegmentKind"/> already are.
+    ///
+    /// <para>
+    /// <b>Declared as a defaulted body property, not a 17th primary-constructor parameter (round-2
+    /// review F1 — the exact T285-round-3 defect, <see cref="ShowSummary.Slug"/>'s own precedent).</b>
+    /// This record already shipped inside the Abstractions 5.0.0 NuGet with a 16-arg <c>ctor</c> and
+    /// 16-arity <c>Deconstruct</c>; adding a further positional parameter would silently delete both
+    /// from the published binary surface, breaking every compiled caller regardless of the new
+    /// parameter's own default value. The body-property shape preserves that shipped ctor/Deconstruct
+    /// exactly, so this widening is genuinely additive (a minor bump) rather than a break. Every
+    /// construction site that needs to set this uses an object-initializer/<c>with</c> expression, never
+    /// a positional/named constructor argument.
+    /// </para>
+    /// </summary>
+    public CrosstalkAiredScript? CrosstalkScript { get; init; }
+}

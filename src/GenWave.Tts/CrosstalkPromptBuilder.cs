@@ -19,8 +19,9 @@ static class CrosstalkPromptBuilder
     /// reason — see <see cref="LlmCopyWriter.CharsPerTokenDivisor"/>'s neighboring remarks on why a
     /// WORD estimate divides by the true average rather than padding for headroom the way a TOKEN
     /// cap does). STATED only, exactly like the ordinary-break prompt's own word figure — the
-    /// completion request's <c>max_tokens</c> (<see cref="LlmCopyWriter.DeriveMaxTokens"/>) is what
-    /// actually bounds generation.
+    /// completion request's <c>max_tokens</c> (<see cref="CrosstalkScriptWriter"/>'s own
+    /// duration-derived cap) is what actually bounds generation, and carries its OWN headroom —
+    /// this divisor never does.
     /// </summary>
     const int CharsPerWordDivisor = 6;
 
@@ -42,10 +43,23 @@ static class CrosstalkPromptBuilder
     /// mentions a track, a song, or "what's playing" — this writer's caller (a LATER task's
     /// <c>CrosstalkPlanner</c>) never hands one in (see <see cref="CrosstalkExchangeRequest"/>'s own
     /// remarks), so there is nothing here for the model to be asked about.
+    ///
+    /// <para>
+    /// <paramref name="durationTargetSeconds"/> is the live <see cref="CrosstalkOptions.DurationTargetSeconds"/>
+    /// value (SPEC F127.3, T283 paper-audition reconciliation, gh-#385) — the stated word budget asks
+    /// for what <see cref="CrosstalkScriptParser.Parse"/>'s own duration gate will actually accept,
+    /// not a figure scaled off <see cref="LlmOptions.MaxCopyChars"/> (the per-LINE budget, which has
+    /// no fixed relationship to how many lines a script carries).
+    /// </para>
     /// </summary>
-    public static string BuildSystemPrompt(PersonaCard hostCard, PersonaCard neighborCard, int maxCopyChars)
+    public static string BuildSystemPrompt(PersonaCard hostCard, PersonaCard neighborCard, int durationTargetSeconds)
     {
-        var wordBudget = Math.Max(1, maxCopyChars / CharsPerWordDivisor);
+        // Same spoken-rate estimate CrosstalkScriptParser.Parse applies to an accepted script — the
+        // STATED word budget asks for what the duration gate will accept, no headroom added (unlike
+        // the completion request's own max_tokens cap; see CrosstalkScriptWriter.DeriveScriptGenerationCap
+        // for why that cap carries headroom and this instruction deliberately does not).
+        var estimatedChars = durationTargetSeconds * CrosstalkScriptParser.CharsPerSecond;
+        var wordBudget = Math.Max(1, (int)estimatedChars / CharsPerWordDivisor);
 
         var scaffold =
             $"You write a short, natural-sounding radio banter exchange between two DJs sharing " +

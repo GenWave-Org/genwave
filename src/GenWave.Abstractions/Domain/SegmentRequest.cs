@@ -98,4 +98,27 @@ public sealed record SegmentRequest(
     string?        CrossingTrackArtist = null,
     string?        ShowName = null,
     string?        ShowFlavor = null,
-    string?        CounterpartShowName = null);
+    string?        CounterpartShowName = null)
+{
+    /// <summary>
+    /// SPEC F127.9 (STORY-329, PLAN T287) — "banter supersedes": <see langword="true"/> on a
+    /// <see cref="SegmentKind.LeadIn"/>/<see cref="SegmentKind.BackAnnounce"/> request built for the SAME
+    /// break a <see cref="SegmentKind.Crosstalk"/> exchange is vending into, so
+    /// <c>GenWave.Tts.LlmCopyWriter</c>'s shared-slot arbitration (SPEC F107.5/F116.3) never even ASKS its
+    /// context-fact/show-flavor seams for that render — one voice-moment per break. <see langword="false"/>
+    /// (the default) for every other request, including every pre-F127 caller, so this field is diff-free
+    /// for the whole codebase until <c>Orchestrator.EnqueuePatterAsync</c>'s own crosstalk vend step (the
+    /// ONLY writer) stamps it true.
+    ///
+    /// <para>
+    /// <b>Declared as a defaulted body property, not a 15th primary-constructor parameter (round-2
+    /// review F1 — the exact T285-round-3 defect, <see cref="ShowSummary.Slug"/>'s own precedent).</b>
+    /// This record already shipped inside the Abstractions 5.0.0 NuGet with a 14-arg <c>ctor</c> and
+    /// 14-arity <c>Deconstruct</c>; adding a further positional parameter would silently delete both
+    /// from the published binary surface, breaking every compiled caller regardless of the new
+    /// parameter's own default value. Every construction site that needs to set this uses an
+    /// object-initializer/<c>with</c> expression, never a positional/named constructor argument.
+    /// </para>
+    /// </summary>
+    public bool CrosstalkAiredThisBreak { get; init; }
+}

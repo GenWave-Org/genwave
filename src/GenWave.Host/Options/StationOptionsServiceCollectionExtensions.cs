@@ -114,6 +114,18 @@ static class StationOptionsServiceCollectionExtensions
             // re-reads CurrentValue on every call, so a live PUT /api/settings edit reaches the very
             // next eligible break with no api restart — mirrors ICadenceProvider's own live-read shape.
             .AddSingleton<IShowPatterCadenceProvider, OptionsMonitorShowPatterCadenceProvider>()
+            // Crosstalk scope/cadence (SPEC F127.8, STORY-328, PLAN T285): Crosstalk:Shows/
+            // EveryNthAiring are advertised Live in the settings allowlist. Wraps
+            // IOptionsMonitor<GenWave.Tts.CrosstalkOptions> and re-reads CurrentValue on every call,
+            // so a live PUT /api/settings edit reaches the very next casting/eligibility check with
+            // no api restart — mirrors IShowPatterCadenceProvider's own live-read shape immediately
+            // above. Registering here (this method runs BEFORE AddGenWaveTts in Program.cs, the SAME
+            // order IShowFlavorLineSource's own remarks below document) is safe regardless: DI
+            // resolves IOptionsMonitor<CrosstalkOptions> lazily, and AddGenWaveTts's own
+            // AddOptions<CrosstalkOptions>().Bind(...) has always run by the time anything actually
+            // asks for ICrosstalkScopeProvider. No consumer resolves this yet — GenWave.Orchestration.
+            // CrosstalkPlanner (PLAN T285) is registered by a LATER task's own Host wiring (PLAN T286).
+            .AddSingleton<ICrosstalkScopeProvider, OptionsMonitorCrosstalkScopeProvider>()
             // The gate itself (mirrors IEnvelopeProvider/ScheduleEnvelopeProvider two lines above):
             // depends on CachingScheduleResolver, registered by AddGenWaveStationSettings, which runs
             // BEFORE this method in Program.cs. Plain AddSingleton, never TryAdd (the IContextPatterFactSource

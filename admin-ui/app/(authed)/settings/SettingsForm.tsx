@@ -391,10 +391,18 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "the same one-line slot as the context patter lines above; a due context fact always wins. " +
     "0 disables the show-flavor line. Accepted range: 0–1440.",
 
-  // ── Crosstalk two-voice banter (SPEC F127.4) ────────────────────────────────────────────────
+  // ── Crosstalk two-voice banter (SPEC F127.4, F127.8) ────────────────────────────────────────
   "Crosstalk:DurationTargetSeconds":
     "The longest a generated two-voice banter exchange may run, in seconds, before it is " +
     "discarded and skipped rather than aired. Defaults to 25. Accepted range: 5–120.",
+  "Crosstalk:Shows":
+    "A JSON array of show SLUGS allowed to carry two-voice banter — a show's stable URL-safe " +
+    "identity, not its display name (e.g. \"morning-drive\" for a show named \"Morning Drive\"), " +
+    "e.g. [\"morning-drive\"]. Empty (the default) turns the feature off entirely — no station's " +
+    "sound changes on upgrade until a show is named here.",
+  "Crosstalk:EveryNthAiring":
+    "How many eligible airings of an enabled show pass before one carries banter — 1 (the " +
+    "default) airs every time. Accepted range: 1–100.",
 };
 
 /**

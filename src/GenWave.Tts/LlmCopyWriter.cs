@@ -106,6 +106,15 @@ using GenWave.Core.Domain;
 /// which is what keeps its own show's cadence window from being spent on a line that never aired. See
 /// that method's own remarks for the full reasoning.
 /// </para>
+///
+/// <para>
+/// Crosstalk supersedes BOTH lanes at once (SPEC F127.9, STORY-329, PLAN T287): a break vending a
+/// <see cref="SegmentKind.Crosstalk"/> exchange stamps <see cref="SegmentRequest.CrosstalkAiredThisBreak"/>
+/// true on that SAME break's LeadIn/BackAnnounce request — one voice-moment per break — and both
+/// <see cref="TakeDuePatterFactForOnAirRender"/> and <see cref="TakeDueShowFlavorLineForOnAirRender"/>
+/// gate on it, never even asking either seam (the identical never-even-ask discipline the show-flavor
+/// line's own "context wins" paragraph above already establishes).
+/// </para>
 /// </summary>
 public sealed class LlmCopyWriter(
     TemplateCopyWriter fallback,
@@ -294,13 +303,20 @@ public sealed class LlmCopyWriter(
             // patter lane's due fact; see TakeDuePatterFactForOnAirRender's own remarks for why this
             // call lives HERE, in WriteAsync's own body, rather than inside the shared
             // RequestCleanedCompletionAsync below (which WritePreviewAsync also calls).
-            var patterFact = TakeDuePatterFactForOnAirRender(request.Kind);
+            //
+            // SPEC F127.9 (STORY-329, PLAN T287) — "banter supersedes": request.CrosstalkAiredThisBreak
+            // gates BOTH takes below, exactly like the request.Kind gate every other caller already
+            // reads (LlmPromptBuilder.IsPatterFactKind) — a break airing crosstalk never even ASKS
+            // either seam for this render, the same "never even ask" CQS discipline
+            // TakeDueShowFlavorLineForOnAirRender's own remarks describe one seam over, so a lost slot
+            // costs neither lane its own cadence window.
+            var patterFact = TakeDuePatterFactForOnAirRender(request.Kind, request.CrosstalkAiredThisBreak);
             // SPEC F116.3 (STORY-308, PLAN T249) — the show-flavor line's own pull point, ONLY
             // consulted when patterFact above is null; see TakeDueShowFlavorLineForOnAirRender's own
             // remarks for why "never even ask" (not "ask and discard") is what keeps a lost slot from
             // spending the show's own cadence window.
             var showFlavorFact = patterFact is null
-                ? TakeDueShowFlavorLineForOnAirRender(request.Kind)
+                ? TakeDueShowFlavorLineForOnAirRender(request.Kind, request.CrosstalkAiredThisBreak)
                 : null;
             // updateTasteMemory: true — this is an on-air call, so previousBreakTasteNotes is both
             // read and (on success) overwritten INSIDE RequestCleanedCompletionAsync's own single-flight
@@ -485,8 +501,15 @@ public sealed class LlmCopyWriter(
     /// current break's only due fact out from under the on-air render that actually airs (the exact
     /// CQS trap the T222 review flagged for <c>GenWave.Context.ContextPipeline</c>'s own TryTake).
     /// </summary>
-    ContextPatterFact? TakeDuePatterFactForOnAirRender(SegmentKind kind) =>
-        LlmPromptBuilder.IsPatterFactKind(kind)
+    /// <param name="crosstalkAiredThisBreak">
+    /// SPEC F127.9 (STORY-329, PLAN T287) — <see langword="true"/> when this SAME break is airing a
+    /// <see cref="SegmentKind.Crosstalk"/> exchange (<see cref="SegmentRequest.CrosstalkAiredThisBreak"/>,
+    /// stamped by <c>Orchestrator.EnqueuePatterAsync</c>'s own vend step, the ONE writer): the fact
+    /// lane is never even asked for that break — one voice-moment per break, never a stacked "ask and
+    /// discard" (the exact CQS trap this method's own remarks already describe for every other kind).
+    /// </param>
+    ContextPatterFact? TakeDuePatterFactForOnAirRender(SegmentKind kind, bool crosstalkAiredThisBreak) =>
+        LlmPromptBuilder.IsPatterFactKind(kind) && !crosstalkAiredThisBreak
             ? (patterFactSource ?? NoOpContextPatterFactSource.Instance).TryTakeDuePatterFact()
             : null;
 
@@ -508,8 +531,12 @@ public sealed class LlmCopyWriter(
     /// over). <see cref="WritePreviewAsync"/> never calls this method at all, for the identical reason
     /// it never calls <see cref="TakeDuePatterFactForOnAirRender"/>.
     /// </summary>
-    ShowFlavorFact? TakeDueShowFlavorLineForOnAirRender(SegmentKind kind) =>
-        LlmPromptBuilder.IsPatterFactKind(kind)
+    /// <param name="crosstalkAiredThisBreak">
+    /// SPEC F127.9 — same gate, same reason, as <see cref="TakeDuePatterFactForOnAirRender"/>'s own
+    /// identically-named parameter one seam over.
+    /// </param>
+    ShowFlavorFact? TakeDueShowFlavorLineForOnAirRender(SegmentKind kind, bool crosstalkAiredThisBreak) =>
+        LlmPromptBuilder.IsPatterFactKind(kind) && !crosstalkAiredThisBreak
             ? (showFlavorLineSource ?? NoOpShowFlavorLineSource.Instance).TryTakeDueShowLine()
             : null;
 
@@ -718,16 +745,18 @@ public sealed class LlmCopyWriter(
     };
 
     /// <summary>
-    /// Derives the completion request's <c>max_tokens</c> cap from <see cref="LlmOptions.MaxCopyChars"/>
+    /// Derives a completion request's <c>max_tokens</c> cap from a char figure
     /// (SPEC F123.1, STORY-319, PLAN T262) — see <see cref="CharsPerTokenDivisor"/>,
     /// <see cref="MinGenerationTokenCap"/>, and <see cref="MaxGenerationTokenCap"/> for why the
     /// divisor, floor, and ceiling are what they are. Applied identically to the on-air path and
-    /// the preview path, since both funnel through <see cref="RequestCleanedCompletionAsync"/>'s single
-    /// request-builder. Internal (PLAN T282, SPEC F127.3: "the F123.1 derived generation cap applies
-    /// to the whole script") — <see cref="CrosstalkScriptWriter"/> derives its own completion's
-    /// <c>max_tokens</c> through this exact formula rather than a second, independently-tuned one;
-    /// the one-knob discipline (a single <c>Llm:MaxCopyChars</c>) extends to banter with zero new
-    /// generation-cap machinery.
+    /// the preview path (both fed <see cref="LlmOptions.MaxCopyChars"/>, funnelled through
+    /// <see cref="RequestCleanedCompletionAsync"/>'s single request-builder). Internal (PLAN T282,
+    /// SPEC F127.3, T283 paper-audition reconciliation) — <see cref="CrosstalkScriptWriter"/> reuses
+    /// this exact chars-to-tokens SHAPE for its own whole-script cap rather than a second,
+    /// independently-tuned formula, but feeds it a char figure derived from
+    /// <c>Crosstalk:DurationTargetSeconds</c>, not <c>Llm:MaxCopyChars</c> — a blurb-scaled figure
+    /// starves a multi-line script (see <c>CrosstalkScriptWriter.DeriveScriptGenerationCap</c>'s own
+    /// remarks for the T283 finding).
     /// </summary>
     internal static int DeriveMaxTokens(int maxCopyChars) =>
         Math.Clamp(maxCopyChars / CharsPerTokenDivisor, MinGenerationTokenCap, MaxGenerationTokenCap);

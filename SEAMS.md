@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **83 seams across 6 projects.**
+> **84 seams across 6 projects.**
 
 ## GenWave.Context (2 seams)
 
@@ -53,7 +53,7 @@
 | `GenWave.Core.Abstractions.IContextPatterFactSource` | `GenWave.Context.ContextPipeline` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextPatterFactSource` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IContextProvider` | `GenWave.Context.History.HistoryContextProvider` | Singleton | also registered: `GenWave.Context.Weather.WeatherContextProvider` (GenWave.Context) |
 
-## GenWave.Host (23 seams)
+## GenWave.Host (24 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -62,6 +62,7 @@
 | `GenWave.Core.Abstractions.ICadenceProvider` | `GenWave.Host.Options.OptionsMonitorCadenceProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IContextCacheRootProvider` | `GenWave.Host.Options.OptionsMonitorContextCacheRootProvider` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextCacheRootProvider` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IContextSettingsProvider` | `GenWave.Host.Options.ConfigurationContextSettingsProvider` | Singleton | — |
+| `GenWave.Core.Abstractions.ICrosstalkScopeProvider` | `GenWave.Host.Options.OptionsMonitorCrosstalkScopeProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.ILiquidsoapControl` | `GenWave.Host.Engine.LiquidsoapControl` | Singleton | — |
 | `GenWave.Core.Abstractions.IListenerStatsSource` | `GenWave.Host.Stats.IcecastListenerStatsSource` | Singleton | — |
 | `GenWave.Core.Abstractions.ILlmBatchGate` | `GenWave.Host.Enrichment.LlmBatchGate` | Singleton | — |

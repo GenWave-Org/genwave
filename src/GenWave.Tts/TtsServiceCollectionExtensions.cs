@@ -97,8 +97,10 @@ public static class TtsServiceCollectionExtensions
             .ValidateOnStart();
 
         // Crosstalk two-voice banter (SPEC F127.4, F127.8, STORY-326, PLAN T282) — the ONE knob
-        // CrosstalkScriptWriter reads today (DurationTargetSeconds); Crosstalk:Shows/EveryNthAiring
-        // (F127.8) join this same section in a LATER task (T284's CrosstalkPlanner), not here.
+        // CrosstalkScriptWriter reads (DurationTargetSeconds); Crosstalk:Shows/EveryNthAiring
+        // (F127.8, PLAN T285) share this SAME section/options class but are read by
+        // GenWave.Orchestration.CrosstalkPlanner through the Host's ICrosstalkScopeProvider binding
+        // instead, never by anything in this project.
         // IOptionsMonitor<CrosstalkOptions> (not IOptions), mirroring every other live-adjustable
         // options class in this method — a live PUT reaches the very next generation attempt with no
         // api restart. CrosstalkScriptWriter is a plain singleton with zero eager I/O in its
@@ -110,6 +112,19 @@ public static class TtsServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddSingleton<CrosstalkScriptWriter>();
+
+        // Crosstalk per-line render + assembly (SPEC F127.5, F127.6, STORY-327, PLAN T284) —
+        // CrosstalkScriptWriter's own sibling immediately above turns a completion into a validated
+        // script; this turns a validated script into one mixed, measured asset. Depends on
+        // ILoudnessAnalyzer/ICueAnalyzer exactly like TtsSegmentSource below does — neither is
+        // registered by this method (GenWave.MediaLibrary's AddMediaLibrary owns that binding, called
+        // by the Host alongside this one) — so this registration is only ever resolvable once the
+        // Host has wired both, the same standing assumption TtsSegmentSource's own registration
+        // already makes. A plain singleton with zero eager I/O in its constructor (Story125's
+        // zero-I/O invariant): every dependency here is itself a cheap seam, so registering it never
+        // touches the network or the filesystem. No caller resolves it yet — T286's stock worker is
+        // the first (a LATER task).
+        services.AddSingleton<CrosstalkAssembler>();
 
         // Injected clock for DegradationController's cooldown math (no DateTime.Now anywhere in
         // this feature) — TryAdd so a host or test that already registers its own TimeProvider wins.
