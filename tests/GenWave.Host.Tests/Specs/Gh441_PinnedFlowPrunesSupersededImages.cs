@@ -81,7 +81,12 @@ public static class FeaturePinnedFlowPrunesSupersededImages
             // Pruning before `up -d` could remove the very images a rollback needs while the
             // new ones are still unproven.
             var lines = PlanLines(Run.Value.StdOut);
-            var upIndex = Array.FindIndex(lines, l => l.EndsWith("up -d", StringComparison.Ordinal));
+            // The FULL-stack up, not the earlier db-only bootstrap step (which also contains
+            // "up -d", as "up -d --no-recreate db") — distinguished by the absence of
+            // --no-recreate, not by an exact flag suffix, so this ordering pin survives the full
+            // up's own flag set changing (T148 review finding F6 added --remove-orphans there).
+            var upIndex = Array.FindIndex(lines, l =>
+                l.Contains("up -d", StringComparison.Ordinal) && !l.Contains("--no-recreate", StringComparison.Ordinal));
             var pruneIndex = Array.FindIndex(lines, l => l.Contains("image prune", StringComparison.Ordinal));
             Assert.True(upIndex >= 0 && pruneIndex > upIndex, $"expected image prune after `up -d` (up at {upIndex}, prune at {pruneIndex})");
         }

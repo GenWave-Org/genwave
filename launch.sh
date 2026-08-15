@@ -230,7 +230,7 @@ if [ "$PINNED" = "1" ]; then
     plan_line "$(compose_display) ps -q db"
     plan_line "docker inspect <db container> --format {{.State.Health.Status}} (poll until healthy, up to 30x2s)"
     plan_line "./migrate.sh ${MIGRATE_ARGS[*]}"
-    plan_line "$(compose_display) up -d"
+    plan_line "$(compose_display) up -d --remove-orphans"
     plan_line "record COMPOSE_FILE=$(compose_file_value) in .env (gh-#309)"
     plan_line "docker image prune -af --filter until=168h (success-path hygiene, gh-#441)"
     plan_line "docker builder prune -af"
@@ -280,7 +280,20 @@ if [ "$PINNED" = "1" ]; then
   # A failed partial up on an appliance is deliberately NOT rolled back with `down`:
   # whatever is still broadcasting keeps broadcasting (never-silent outranks tidiness).
   # Report precisely and say how to proceed instead.
-  if ! compose up -d; then
+  #
+  # --remove-orphans (T148 review finding F6, SPEC F99.3): tears down any container whose
+  # SERVICE no longer exists in this launch's file stack at all — e.g. a box upgrading across a
+  # release that deletes/renames a service. Verified (docker-linux-ops, live daemon,
+  # 2026-08-14): Compose's own definition of "orphan" is narrower than "not currently selected
+  # by profile" — a container for a service that's still DEFINED but merely profile-gated OFF
+  # (piper's `profiles: ["fallback"]`) is untouched by this flag, confirmed against a scratch
+  # compose file with a profile-gated service turned on then off across two `up -d
+  # --remove-orphans` runs. So this flag alone does NOT stop a previously-opted-in `piper`
+  # sidecar when an operator later removes `--with fallback` — see DEPLOYMENT.md's failover
+  # section for the one-time manual step that actually does. Still worth adding: safe (never
+  # removes an active service — verified against this box's own compose.yaml +
+  # compose.demo.yaml render), and it IS the mechanism for the case it does cover.
+  if ! compose up -d --remove-orphans; then
     # `ps -a`, not `ps`: plain `ps` lists RUNNING containers only — so it omitted exactly the
     # one service this message tells the operator to go inspect. A container the daemon
     # refused to START (stale network id after an unclean host power cut, a port already

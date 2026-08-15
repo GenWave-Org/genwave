@@ -286,6 +286,39 @@ containers (`admin_ui`, `cloudflared`, `alloy`) behind. Use `--remove-orphans`, 
 standing `COMPOSE_PROFILES` in `.env` (which `launch.sh` already reads as the base for
 `--with`).
 
+### TTS failover: opt-in (SPEC F99.2/F99.3, STORY-257)
+
+The shipped default runs **no** Piper fallback sidecar and configures **no** fallback
+chain — a Kokoro failure drops the affected break rather than substituting a different
+voice (right voice or no speech, SPEC F99.1). `piper` sits behind
+`profiles: ["fallback"]` in `compose.yaml`, off by default same as `admin`/`tunnel`/`logging`.
+
+Opting in needs both halves:
+
+```bash
+./launch.sh --with fallback          # or COMPOSE_PROFILES=fallback in .env — starts piper
+```
+
+then a live `PUT /api/settings` for `Tts:Fallback:Endpoint` (`http://piper:5000` on this
+stack) — no restart needed, `FallbackTtsSynthesizer` reads it per render. This applies to
+every install, including existing ones (see ARCHITECTURE.md "The deleted default" for the
+ruling and its recorded expiry).
+
+The piper-only topology below is unrelated to this mechanism: there Piper is the PRIMARY
+engine (SPEC F99.4), not an opt-in fallback, and always runs.
+
+> ⚠️ **Deselecting `fallback` on `--pinned` leaves the old `piper` container running —
+> stop it by hand, once.** `./launch.sh --pinned` now passes `--remove-orphans` to its
+> `up -d` (T148 review finding F6), but that flag only removes containers for services no
+> longer **defined** in the file stack at all — verified empirically (`docker-linux-ops`,
+> live daemon): a service that is still defined but merely profile-gated OFF (`piper`
+> dropping out of `--with fallback`/`COMPOSE_PROFILES`) is **not** an "orphan" to Compose,
+> so a previously-opted-in `piper` container survives every subsequent `--pinned` launch
+> untouched, still running, still (harmlessly) idle. The same is true switching topology
+> the other way (`--piper-only` on ↔ off) for `kokoro`/`ollama`/`ollama-init`. One-time fix
+> after any such change: `docker compose rm -fs piper` (`-s` stops it first, `-f` skips the
+> confirmation) — or the equivalent service name for the topology switch you made.
+
 ### Low-memory topology: `--piper-only` (gh-#242, gh-#310)
 
 For a 4GB-class box (Raspberry Pi, small VPS), `--piper-only` merges
@@ -309,10 +342,12 @@ for the ranked hardware topologies.
 > at the absent kokoro host: it cannot point at piper (kokoro-fastapi speaks
 > `POST /v1/audio/speech`, piper's server speaks `POST text/plain → /`) and it cannot be
 > emptied (`TtsOptions.Endpoint` is `[Required]`). The dead hostname is the mechanism, not
-> the fault — the few kind-less renders (safe-loop authoring, admin preview) fail fast on
-> Docker's NXDOMAIN and fall to piper, and once the cached verdict flips they stop trying
-> at all. `GET /api/voices` returns a 502 for the same reason. The broadcast never depends
-> on any of it. Full rationale lives in `compose.piper-only.yaml`.
+> the fault — it is fully quarantined to Kokoro's own health probe / voice lister now (SPEC
+> F99.4, STORY-257): **Piper is the topology's PRIMARY engine directly** via
+> `Tts:PiperPrimaryEndpoint`, so every render — kind-carrying or not — goes straight to
+> Piper with no NXDOMAIN dance and no fallback chain involved at all. `GET /api/voices`
+> still returns a 502 (Kokoro's own voice list, unreachable) for the same reason. The
+> broadcast never depends on any of it. Full rationale lives in `compose.piper-only.yaml`.
 
 As of gh-#334 it also halves **`Library:EnrichmentConcurrency` to 2**. Enrichment is the
 heaviest sustained load GenWave produces — the ffmpeg analyzers use every core they are

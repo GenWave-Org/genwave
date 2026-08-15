@@ -18,30 +18,46 @@ using Microsoft.Extensions.Options;
 /// <para>
 /// Probes the FIRST piper-kind hop of the effective fallback chain
 /// (<see cref="TtsFallbackChain.Resolve"/>, gh-#147) — under the legacy flat keys that is exactly
-/// the old <c>Tts:Fallback:Endpoint</c>, unchanged. No piper hop configured at all (empty chain,
-/// or an operator-built chain with no piper in it) is the disabled-by-design state (F70.1) —
+/// the old <c>Tts:Fallback:Endpoint</c>, unchanged. No chain hop at all falls back to
+/// <see cref="TtsOptions.PiperPrimaryEndpoint"/> (T148 review finding F4, SPEC F99.4/F99.5): the
+/// piper-only topology has no fallback chain by construction — Piper is the PRIMARY there, not a
+/// hop — so without this fallback the engine producing 100% of the station's speech was never
+/// probed at all, a T148-introduced regression against F99.5's "an operator must be able to tell
+/// the DJ is silent because the engine is down" legibility promise. Only when NEITHER a chain hop
+/// NOR a piper-primary endpoint is configured is this the disabled-by-design state (F70.1) —
 /// mirrors <see cref="OllamaHealthProbe"/>'s empty-<c>Llm:Endpoint</c> handling: returns false
 /// (not-configured) without ever calling out.
 /// </para>
 /// <para>
 /// No boot-frozen <see cref="HttpClient.BaseAddress"/>, same discipline as
-/// <see cref="KokoroHealthProbe"/>/<see cref="OllamaHealthProbe"/> (SPEC F36.1-F36.2): the chain
-/// is resolved from <see cref="IOptionsMonitor{TOptions}.CurrentValue"/> per probe, so a live
-/// repoint applies to the very next cycle.
+/// <see cref="KokoroHealthProbe"/>/<see cref="OllamaHealthProbe"/> (SPEC F36.1-F36.2): both the
+/// chain and <see cref="TtsOptions.PiperPrimaryEndpoint"/> are resolved from
+/// <see cref="IOptionsMonitor{TOptions}.CurrentValue"/> per probe, so a live repoint applies to
+/// the very next cycle.
 /// </para>
 /// </summary>
-public sealed class PiperHealthProbe(HttpClient http, IOptionsMonitor<TtsFallbackOptions> optionsMonitor) : IDependencyProbe
+public sealed class PiperHealthProbe(
+    HttpClient http,
+    IOptionsMonitor<TtsFallbackOptions> fallbackOptions,
+    IOptionsMonitor<TtsOptions> ttsOptions) : IDependencyProbe
 {
     public string DependencyName => DependencyNames.Piper;
 
     public async Task<bool> ProbeAsync(CancellationToken ct)
     {
-        var chain = TtsFallbackChain.Resolve(optionsMonitor.CurrentValue);
+        var chain = TtsFallbackChain.Resolve(fallbackOptions.CurrentValue);
         var piperIndex = chain.IndexOfFirstEngine(DependencyNames.Piper);
-        if (piperIndex < 0)
-            return false;   // no piper hop configured — disabled by design (F70.1), not a probe failure
 
-        var requestUri = EndpointUri.Combine(chain.Hops[piperIndex].Endpoint, "/");
+        // A configured chain hop wins when both exist: a piper-only station MAY also opt into a
+        // fallback chain on top of its Piper primary (SPEC F99.2's opt-in applies regardless of
+        // which engine is primary — see FallbackTtsSynthesizer's T148 review finding F3 remarks
+        // for the matching reachable-bug fix on the render side), and the chain hop is the more
+        // specific, operator-authored signal in that case.
+        var endpoint = piperIndex >= 0 ? chain.Hops[piperIndex].Endpoint : ttsOptions.CurrentValue.PiperPrimaryEndpoint;
+        if (string.IsNullOrEmpty(endpoint))
+            return false;   // neither configured — disabled by design (F70.1), not a probe failure
+
+        var requestUri = EndpointUri.Combine(endpoint, "/");
         // OPTIONS, not GET: Flask answers it without running the route handler, so the probe stays
         // out of piper's error log (gh-#64) — see class remarks.
         using var request = new HttpRequestMessage(HttpMethod.Options, requestUri);

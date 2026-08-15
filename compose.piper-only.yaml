@@ -11,8 +11,13 @@
 #     resident in the stack, and a 4GB box (Raspberry Pi 4, small VPS) can't afford it
 #   * drops api's hard `depends_on: kokoro: service_healthy` (keeps db/engine), so the
 #     api boots without any kokoro container existing at all
-#   * seeds `Tts:EngineByKind` mapping ALL EIGHT SegmentKinds -> "piper", so every on-air
-#     render routes straight to the piper sidecar and never touches the absent primary
+#   * resets the piper service's `profiles: ["fallback"]` gate (base compose.yaml, SPEC F99.3)
+#     back to unconditional — on THIS topology piper is not an opt-in fallback, it is the
+#     PRIMARY engine (SPEC F99.4, STORY-257), so it must always run
+#   * seeds `Tts:PiperPrimaryEndpoint` so every on-air render goes straight to Piper as the
+#     primary engine — no fallback chain to lean on (F99.1's "right voice or no speech" is
+#     satisfied directly: a Piper failure drops the break, exactly like a Kokoro failure does
+#     on the default topology's own empty-chain pass-through)
 #
 # The default experience is untouched: this file is opt-in via -f (never auto-loaded),
 # and kokoro deliberately does NOT sit behind a profile in compose.yaml — profiles
@@ -61,14 +66,24 @@ services:
   # The api's own LLM path needs no change: Llm:Endpoint defaults to "" (LlmOptions'
   # documented disabled state, F34.2), which short-circuits to the template writer with
   # no HTTP attempt at all. A box that HAS saved an Llm:Endpoint settings row keeps it —
-  # a DB row overrides an env default, the same DEPLOYMENT.md gotcha the EngineByKind
-  # note below carries — and degrades through Docker-DNS NXDOMAIN to templated patter,
-  # exactly as HARDWARE.md topology (a) describes.
+  # a DB row overrides an env default, the same DEPLOYMENT.md Station:SpectatorMode-class
+  # gotcha the api block's own environment comments below describe — and degrades through
+  # Docker-DNS NXDOMAIN to templated patter, exactly as HARDWARE.md topology (a) describes.
   ollama:
     profiles: ["disabled-by-piper-only"]
 
   ollama-init:
     profiles: ["disabled-by-piper-only"]
+
+  piper:
+    # `!reset`, not a plain mapping merge: base compose.yaml's `profiles: ["fallback"]` (SPEC
+    # F99.3) would otherwise MERGE with anything set here (Compose unions sequence-typed
+    # attributes like `profiles` across -f files, verified against v5.0.2 — a plain
+    # `profiles: []` here changes nothing, the base list survives untouched). On THIS topology
+    # piper is not an opt-in fallback — it is the PRIMARY engine (SPEC F99.4, STORY-257) — so
+    # the gate must come off entirely, the same `!override`/`!reset`-for-attributes idiom the
+    # api block below already uses for `depends_on`.
+    profiles: !reset []
 
   api:
     # `!override`, not a plain mapping merge: compose merges `depends_on` by KEY across
@@ -83,15 +98,16 @@ services:
       engine:
         condition: service_healthy              # convenience; the feeder retries regardless
     environment:
-      # All eight SegmentKinds pinned to the piper engine (SPEC F70.3, STORY-191; bumped
-      # from seven to eight for Crosstalk, SPEC F127.1, STORY-329, PLAN T281) — the
-      # allowlist's expected shape: a JSON object mapping SegmentKind names to
-      # "kokoro"/"piper". With this map, every on-air render (TtsSegmentSource carries
-      # the kind) goes straight to Piper; kokoro is never contacted. If a ninth kind
-      # is ever added to SegmentKind, add it here too — the gh-#242 spec pins this map
-      # against the enum, so the build fails loudly rather than silently routing the
-      # new kind at a kokoro that doesn't exist.
-      Tts__EngineByKind: '{"StationId":"piper","LeadIn":"piper","BackAnnounce":"piper","TimeDate":"piper","SignOff":"piper","SignOn":"piper","ContextSegment":"piper","Crosstalk":"piper"}'
+      # Piper as the PRIMARY engine (SPEC F99.4, STORY-257), not a fallback hop pinned by kind:
+      # TtsServiceCollectionExtensions selects PiperPrimaryTtsSynthesizer as
+      # FallbackTtsSynthesizer's primary whenever this key is set, so EVERY render — every
+      # SegmentKind, and every kind-less caller (safe-loop authoring, admin preview) alike —
+      # goes straight to Piper. This superseded the old per-kind Tts:EngineByKind seed
+      # (STORY-191): pinning every kind to a Piper FALLBACK hop while the primary stayed Kokoro
+      # was a chain-shaped workaround for what this key now states directly. (Crosstalk, the
+      # eighth kind — SPEC F127.1, T281 — needs no entry here for the same reason: the primary
+      # serves every kind, present and future, with no per-kind map to maintain.)
+      Tts__PiperPrimaryEndpoint: "http://piper:5000"
       # gh-#334 — enrichment halved, by the same reasoning as the kokoro and LLM removals above.
       # This overlay exists because a 4GB/4-core box cannot afford the default topology, and the
       # ffmpeg analyzers are the heaviest sustained load GenWave produces: base compose's 4 pins
@@ -108,21 +124,22 @@ services:
       # ⚠️ Same seeding shape as compose.demo.yaml's Station__* overrides: an env
       # default (GET /api/settings reports source="default") that a row saved in the
       # settings DB OVERRIDES — the DEPLOYMENT.md Station:SpectatorMode gotcha, same
-      # class. If renders still chase kokoro despite this overlay, check
-      # GET /api/settings for a stale Tts:EngineByKind (or Tts:Fallback:Endpoint) DB
-      # row and clear it through PUT /api/settings.
+      # class. Tts:PiperPrimaryEndpoint is deliberately absent from StationSettingsAllowlist
+      # (deploy-time topology, never a live PUT — see TtsOptions.PiperPrimaryEndpoint's own
+      # remarks), so there is no DB-row precedence gotcha for it specifically to chase; a
+      # stale Tts:EngineByKind row left over from a pre-STORY-257 box is harmless here too —
+      # the empty-chain short-circuit (no Tts:Fallback:Profiles/Endpoint on this topology
+      # either) skips the per-kind lookup entirely before it would ever be consulted.
       #
-      # Tts__Endpoint deliberately STAYS pointed at the absent kokoro host (the base
-      # compose value). It cannot point at piper — KokoroTtsSynthesizer speaks
+      # Tts__Endpoint deliberately STAYS pointed at the absent kokoro host (the base compose
+      # value) rather than being repointed at piper: KokoroTtsSynthesizer speaks
       # kokoro-fastapi's `POST /v1/audio/speech`, piper's http server speaks
-      # `POST text/plain -> /` — and TtsOptions.Endpoint is [Required], so it cannot be
-      # emptied either. That dead hostname is safe: the few kind-less renders (safe-loop
-      # authoring, admin preview) take F70.1's health-based path, where the first
-      # attempt fails FAST on Docker's embedded-DNS NXDOMAIN (no retry handler on the
-      # typed client) and falls to Piper; within two probe cycles (F70.2 default:
-      # 30s interval x threshold 2) the cached kokoro verdict flips unhealthy and those
-      # renders route straight to Piper with no attempt at all. Tts__Fallback__Endpoint
-      # (http://piper:5000, base compose) must stay non-empty — an empty fallback
-      # endpoint turns FallbackTtsSynthesizer into a kokoro-only pass-through and moots
-      # the map above. GET /api/voices degrades to 502 ProblemDetails (no kokoro voice
-      # list); the broadcast never depends on it.
+      # `POST text/plain -> /`, so KokoroHealthProbe/KokoroVoiceLister/KokoroTtsSynthesizer
+      # would misbehave against a repointed value (piper/server.py's do_GET answers ANY path
+      # 200, so a repointed KokoroHealthProbe would report Kokoro falsely HEALTHY — worse than
+      # today's honest NXDOMAIN failure). That dead hostname is fully quarantined to those
+      # three Kokoro-shaped clients now — the actual TTS render path never touches it: every
+      # render (kind-carrying or not) goes straight to Piper via Tts:PiperPrimaryEndpoint
+      # above, with no NXDOMAIN dance and no cached-verdict wait involved. GET /api/voices
+      # still degrades to 502 ProblemDetails (Kokoro's own voice list, unreachable); the
+      # broadcast never depends on it.

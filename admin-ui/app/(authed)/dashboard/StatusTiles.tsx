@@ -39,6 +39,20 @@ function llmTileVariant(llm: StatusResponse["llm"]): "neutral" | "ok" | "warning
   return llm.lastOutcome === "failed" ? "warning" : "ok";
 }
 
+/** SPEC F99.5, F100.3, STORY-256 AC4 — the Voice tile has no "disabled" state (the primary engine
+ * is always configured): "warning" when the cached verdict is unhealthy, "ok" otherwise (including
+ * the brief startup window before the first probe cycle completes — a degraded read is never
+ * shown ahead of real evidence). */
+function voiceTileVariant(voice: StatusResponse["voice"]): "ok" | "warning" {
+  return voice.degraded ? "warning" : "ok";
+}
+
+/** Log-display casing only ("kokoro" -> "Kokoro") — mirrors the api's own DependencyNames casing
+ * convention (FallbackTtsSynthesizer.DisplayName) so the engine name reads the same on both sides. */
+function displayEngineName(engine: string): string {
+  return engine.charAt(0).toUpperCase() + engine.slice(1);
+}
+
 interface StatusTilesProps {
   status: StatusResponse | null;
   error: boolean;
@@ -59,7 +73,7 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
 
   return (
     <section aria-label="Station status">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Tile label="Catalog">
           {loading && <TileSkeleton />}
           {neverLoaded && <TileUnavailable />}
@@ -114,6 +128,28 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
                 <p className="mt-1 text-[0.75rem] font-semibold text-danger">
                   Last completion failed — falling back to templated copy
                 </p>
+              )}
+            </>
+          )}
+        </Tile>
+
+        <Tile label="Voice" variant={status !== null ? voiceTileVariant(status.voice) : "neutral"}>
+          {loading && <TileSkeleton />}
+          {neverLoaded && <TileUnavailable />}
+          {status !== null && (
+            <>
+              <p className="mt-1 text-[0.9rem] text-ink">{displayEngineName(status.voice.engine)}</p>
+              {status.voice.degraded ? (
+                <>
+                  <p className="mt-1 text-[0.75rem] font-semibold text-danger">
+                    Engine down — DJ breaks are dropped, music keeps playing
+                  </p>
+                  {status.voice.reason !== null && (
+                    <p className="mt-0.5 line-clamp-2 text-[0.72rem] text-danger">{status.voice.reason}</p>
+                  )}
+                </>
+              ) : (
+                <p className="mt-1 text-[0.8rem] text-mute">Reachable</p>
               )}
             </>
           )}

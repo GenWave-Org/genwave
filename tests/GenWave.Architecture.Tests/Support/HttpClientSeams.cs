@@ -86,6 +86,14 @@ internal static class HttpClientSeams
         "GenWave.Tts.KokoroFallbackRenderer",
         "GenWave.Tts.KokoroHealthProbe",
         "GenWave.Tts.PiperTtsSynthesizer",
+        // Piper as PRIMARY (SPEC F99.4, STORY-257, PLAN T148) — a second typed-client seam
+        // alongside PiperTtsSynthesizer above, and the shared wire-mechanics helper the outbound
+        // http.PostAsync call itself now lives in (PiperWireProtocol.RenderAsync takes the
+        // already-constructed HttpClient as a plain parameter rather than a typed-client
+        // constructor — the real egress point moved here when PiperTtsSynthesizer/
+        // PiperPrimaryTtsSynthesizer were split from one copy of this logic into two callers).
+        "GenWave.Tts.PiperPrimaryTtsSynthesizer",
+        "GenWave.Tts.PiperWireProtocol",
         "GenWave.Tts.PiperHealthProbe",
         "GenWave.Tts.OllamaHealthProbe",
         "GenWave.Tts.LlmCopyWriter",

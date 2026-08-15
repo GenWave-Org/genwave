@@ -48,7 +48,13 @@ public static class FeatureAcceptanceGatePersonalitiesOnAir
         // value left the operator no lever at all while enrichment pinned all four cores of a Pi 5.
         // Config-indirection only — no service, wire, volume or healthcheck change. Another intentional
         // edit from a later epic, not a regression of this epic's zero-diff promise.
-        const string ComposeYamlSha256  = "553b3a676b81dde8e9ac8be97a3965b850f7b8bb294f3344164281eb718ce2a7";
+        // ComposeYamlSha256 re-pinned 2026-08-14 (PLAN T148, SPEC F99.2/F99.3, STORY-257): TTS
+        // failover becomes opt-in — Tts__Fallback__Endpoint/Tts__Fallback__Voice no longer ship on
+        // the api service (the shipped default now resolves an empty fallback chain), and the
+        // piper service gains `profiles: ["fallback"]` (off by default; an operator opts in with
+        // `--with fallback` plus a live PUT /api/settings). Another intentional edit from a later
+        // epic, not a regression of this epic's zero-diff promise.
+        const string ComposeYamlSha256  = "f6d3d83923562ee2d6fde56749b5099c8ecea079f6d019101fd9c3cb73dbb27c";
 
         [Fact]
         public static void EngineScriptByteMatchesMain()

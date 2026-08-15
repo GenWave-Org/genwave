@@ -63,6 +63,9 @@ function makeStatusBody(overrides: StatusBodyOverrides = {}): unknown {
     safeScope: { libraryIds: overrides.libraryIds ?? [1], playable: overrides.playable ?? 0 },
     // STORY-125: disabled/never-attempted — this file's scenarios exercise the SafeScope tile only.
     llm: { enabled: false, model: null, activePersona: null, lastOutcome: null, lastAttemptAt: null },
+    // SPEC F99.5, STORY-256 AC4: healthy Kokoro primary — this file's scenarios exercise the
+    // SafeScope tile only.
+    voice: { engine: "kokoro", degraded: false, reason: null, checkedAt: null },
   };
 }
 

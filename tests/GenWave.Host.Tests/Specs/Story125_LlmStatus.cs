@@ -160,12 +160,19 @@ public static class FeatureLlmStatus
             TimeProvider.System,
             NullLogger<DegradationController>.Instance);
 
+        // `voice` (SPEC F99.5, F100.3, PLAN T149) rides the same response — this suite's own
+        // scenarios only assert the pre-existing llm.* fields, so an unprobed (null-verdict) reader
+        // is enough to keep those unaffected (mirrors degradationController immediately above).
+        var voiceHealthReader = new VoiceHealthReader(
+            new PrimaryVoiceEngine(DependencyNames.Kokoro), new FakeDependencyHealth());
+
         return new(
             new FakeMediaCatalog(ready: null),
             new FakeOptionsMonitor<StationOptions>(BuildStationOptions()),
             llmOptionsMonitor,
             resolvedStatusHolder,
             degradationController,
+            voiceHealthReader,
             new FakeActivePersonaAccessor { Persona = activePersona },
             new ProcessStartTime(new DateTimeOffset(2026, 7, 11, 9, 30, 0, TimeSpan.Zero)))
         {

@@ -40,6 +40,8 @@ function makeStatus(llm: LlmOverrides = {}): unknown {
       lastAttemptAt: null,
       ...llm,
     },
+    // SPEC F99.5, STORY-256 AC4: healthy Kokoro primary — these specs exercise the LLM tile only.
+    voice: { engine: "kokoro", degraded: false, reason: null, checkedAt: null },
   };
 }
 

@@ -92,13 +92,16 @@ interface StatusOverrides {
   llm?: StatusLlmOverrides;
 }
 
-/** Default llm is the disabled/never-attempted state (STORY-125) — no story in this file exercises it. */
+/** Default llm is the disabled/never-attempted state (STORY-125) — no story in this file exercises it.
+ * Default voice is a healthy Kokoro primary (SPEC F99.5, STORY-256 AC4) — no story in this file
+ * exercises the Voice tile either. */
 function makeStatus(overrides: StatusOverrides = {}) {
   return {
     startedAt: "2026-01-01T08:00:00.000Z",
     catalog: { ready: 120, enriching: 3, failed: 1, unavailable: 2 },
     safeScope: { libraryIds: [1, 7], playable: 45 },
     llm: { enabled: false, model: null, activePersona: null, lastOutcome: null, lastAttemptAt: null },
+    voice: { engine: "kokoro", degraded: false, reason: null, checkedAt: null },
     ...overrides,
   };
 }

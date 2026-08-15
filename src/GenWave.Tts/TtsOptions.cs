@@ -31,4 +31,33 @@ public sealed class TtsOptions
     /// </summary>
     [Range(0.0, 5.0)]
     public double SentencePauseSeconds { get; set; } = 0.6;
+
+    /// <summary>
+    /// Piper's base URL when Piper is the PRIMARY engine, not merely a fallback hop (SPEC F99.4,
+    /// STORY-257) — the piper-only topology's opt-in path (<c>compose.piper-only.yaml</c> sets
+    /// this to <c>http://piper:5000</c>). Null/empty (the default, every other topology) means
+    /// Kokoro is primary via <see cref="Endpoint"/> above, unchanged.
+    ///
+    /// Deliberately a SEPARATE key from <see cref="Endpoint"/>, never a re-point of it:
+    /// <see cref="Endpoint"/> stays whatever <c>KokoroHealthProbe</c>/<c>KokoroVoiceLister</c>/
+    /// <see cref="KokoroTtsSynthesizer"/> already read it as — on the piper-only topology that is
+    /// deliberately the absent kokoro host (DEPLOYMENT.md's "expected on every piper-only box"
+    /// note) — so those Kokoro-shaped probes are never fed a Piper response they would misread as
+    /// healthy. That risk is real, not theoretical: <c>piper/server.py</c>'s <c>do_GET</c>
+    /// answers ANY path with 200 (by design, so nothing GenWave GETs from it ever 404s), so a
+    /// <c>KokoroHealthProbe</c> repointed at Piper would see a 200 from <c>GET /health</c> and
+    /// report Kokoro falsely healthy — worse than the honest "unhealthy" the dead-hostname
+    /// posture reports today. Deploy-time only, chosen once at DI composition
+    /// (<see cref="TtsServiceCollectionExtensions"/>) — never live-editable through the settings
+    /// API, unlike every other <c>Tts:*</c> leaf: swapping wire protocol mid-render is a different
+    /// topology, not a live reroute.
+    /// </summary>
+    /// <remarks>
+    /// T148 review finding F5: this was <c>[Url]</c>, which rejects <c>""</c> — boot-crashing the
+    /// very default this property's own remarks above document as legal. Empty/null and an
+    /// absolute http/https URL are the only two legal shapes; see
+    /// <see cref="AbsoluteHttpUrlOrEmptyAttribute"/>.
+    /// </remarks>
+    [AbsoluteHttpUrlOrEmpty]
+    public string? PiperPrimaryEndpoint { get; set; }
 }
