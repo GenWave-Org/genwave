@@ -618,6 +618,198 @@ public static class FeatureTheWornFace
         }
     }
 
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — the admin read route (SPEC F128.9, PLAN T296)
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioTheAdminReadRouteServesTheWornFace
+    {
+        [Fact]
+        public async Task GetServesTheStoredBytesAsImagePng()
+        {
+            // Given a persona wearing a real face,
+            var personaAvatarStore = new FakePersonaAvatarStore();
+            var faceBytes = TestImages.CreatePng(512, 512);
+            await personaAvatarStore.UpsertAsync(
+                new PersonaAvatarInput(
+                    PersonaAvatarFixtures.KnownPersonaId, faceBytes, "sha", "a-token", PersonaAvatarSource.Upload, null),
+                CancellationToken.None);
+            await using var factory = new PersonaAvatarWebFactory(
+                personaStore: PersonaAvatarFixtures.SeededPersonaStore(), personaAvatarStore: personaAvatarStore);
+            var client = await PersonaAvatarWebFactory.LoggedInClientAsync(factory);
+
+            // When GET /api/personas/{id}/avatar is called (the real production route),
+            var response = await client.GetAsync($"/api/personas/{PersonaAvatarFixtures.KnownPersonaId}/avatar");
+
+            // Then it serves the exact stored bytes as image/png, stamped nosniff — the admin plane
+            // carries no CSP (gh-#346), the SAME precedent CatalogController/FontEndpoints already
+            // establish for their own served bytes.
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("image/png", response.Content.Headers.ContentType?.MediaType);
+            Assert.Equal(faceBytes, await response.Content.ReadAsByteArrayAsync());
+            Assert.True(response.Headers.TryGetValues("X-Content-Type-Options", out var nosniff));
+            Assert.Equal("nosniff", Assert.Single(nosniff));
+        }
+
+        [Fact]
+        public async Task AMatchingIfNoneMatchIsNotModified()
+        {
+            // Given a persona wearing a face, and its own ETag already read once,
+            var personaAvatarStore = new FakePersonaAvatarStore();
+            await personaAvatarStore.UpsertAsync(
+                new PersonaAvatarInput(
+                    PersonaAvatarFixtures.KnownPersonaId, TestImages.CreatePng(512, 512), "sha", "a-token",
+                    PersonaAvatarSource.Upload, null),
+                CancellationToken.None);
+            await using var factory = new PersonaAvatarWebFactory(
+                personaStore: PersonaAvatarFixtures.SeededPersonaStore(), personaAvatarStore: personaAvatarStore);
+            var client = await PersonaAvatarWebFactory.LoggedInClientAsync(factory);
+            var firstResponse = await client.GetAsync($"/api/personas/{PersonaAvatarFixtures.KnownPersonaId}/avatar");
+            var etag = firstResponse.Headers.ETag ?? throw new InvalidOperationException("First GET carried no ETag.");
+
+            // When the SAME route is asked again with If-None-Match set to that exact ETag,
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/personas/{PersonaAvatarFixtures.KnownPersonaId}/avatar");
+            request.Headers.IfNoneMatch.Add(etag);
+            var secondResponse = await client.SendAsync(request);
+
+            // Then it responds 304, with no body re-sent — the framework's own conditional-request
+            // handling off the token-derived EntityTag this route hands File(), never a hand-rolled
+            // comparison (PersonaAvatarController.Get's own ETAG remarks).
+            Assert.Equal(HttpStatusCode.NotModified, secondResponse.StatusCode);
+            Assert.Empty(await secondResponse.Content.ReadAsByteArrayAsync());
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // SAD PATH — the admin read route has no face, or no session, to serve it to (T296)
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioTheAdminReadRouteRefusesHonestly
+    {
+        [Fact]
+        public async Task AFacelessPersonaIs404()
+        {
+            // Given a known persona with no face at all,
+            await using var factory = new PersonaAvatarWebFactory(personaStore: PersonaAvatarFixtures.SeededPersonaStore());
+            var client = await PersonaAvatarWebFactory.LoggedInClientAsync(factory);
+
+            // When GET /api/personas/{id}/avatar is called,
+            var response = await client.GetAsync($"/api/personas/{PersonaAvatarFixtures.KnownPersonaId}/avatar");
+
+            // Then it responds 404 — the SAME "no oracle distinction beyond 404" posture this
+            // controller's write actions already establish (an unknown persona id reads identically).
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task AnAnonymousRequestIs401()
+        {
+            // Given no logged-in session at all,
+            await using var factory = new PersonaAvatarWebFactory(personaStore: PersonaAvatarFixtures.SeededPersonaStore());
+            var client = factory.CreateClient();
+
+            // When GET /api/personas/{id}/avatar is called anonymously,
+            var response = await client.GetAsync($"/api/personas/{PersonaAvatarFixtures.KnownPersonaId}/avatar");
+
+            // Then it responds 401 — the SAME AdminSurface+Settings gate every other action on this
+            // controller already carries.
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // SAD PATH — the T295-review riders folded in at T296
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioTheT295ReviewRidersHold
+    {
+        [Fact]
+        public async Task FromPackPersistsTheCanonicalPackSlugNotTheRequestSpelling()
+        {
+            // Given — HONESTLY: no store in this codebase resolves a pack slug case-insensitively
+            // today. AvatarPackRepository's own production query is exact-match (`where slug = @slug`
+            // against station.avatar_pack's plain-text UNIQUE column) — a caller-typed spelling that
+            // differs by case from the stored slug simply doesn't resolve at all, so
+            // request.PackSlug and the resolved pack's own Slug are ALWAYS byte-identical against real
+            // Postgres right now. CaseInsensitiveAvatarPackStore below is a test double standing in
+            // for a resolution rule this repo doesn't have yet, not a model of reality — this fact is
+            // a DEFENSIVE pin of the controller's own behavior (it persists the resolved pack's own
+            // canonical Slug, never the request's raw PackSlug) against the day a future store DOES
+            // relax to case-insensitive matching: the write-path discipline is already correct, and
+            // this proves it stays correct even once that day arrives, rather than silently relying on
+            // "the two strings happen to always match anyway" to keep passing by accident.
+            var canonicalItemBytes = TestImages.CreatePng(512, 512);
+            var canonicalPack = new AvatarPack(
+                "Canonical-Pack-Slug", "{}", "Canonical-Pack-Slug", DateTime.UtcNow,
+                [new AvatarPackItem(
+                    PersonaAvatarFixtures.ItemName, null, canonicalItemBytes, canonicalItemBytes.Length,
+                    Convert.ToHexStringLower(SHA256.HashData(canonicalItemBytes)))]);
+            var personaAvatarStore = new FakePersonaAvatarStore();
+            await using var factory = new PersonaAvatarWebFactory(
+                personaStore: PersonaAvatarFixtures.SeededPersonaStore(), personaAvatarStore: personaAvatarStore,
+                avatarPackStore: new CaseInsensitiveAvatarPackStore(canonicalPack));
+            var client = await PersonaAvatarWebFactory.LoggedInClientAsync(factory);
+
+            // When POST .../from-pack names that pack with a DIFFERENTLY-CASED spelling that still
+            // resolves to it,
+            var response = await client.PostAsJsonAsync(
+                $"/api/personas/{PersonaAvatarFixtures.KnownPersonaId}/avatar/from-pack",
+                new { packSlug = "canonical-pack-slug", itemName = PersonaAvatarFixtures.ItemName });
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+
+            // Then the stored provenance carries the pack's own CANONICAL slug, never the request's
+            // own spelling.
+            var stored = await personaAvatarStore.GetByPersonaIdAsync(PersonaAvatarFixtures.KnownPersonaId, CancellationToken.None);
+            Assert.Equal("Canonical-Pack-Slug", stored?.ImportedFrom);
+        }
+
+        [Fact]
+        public async Task AConcurrentDeleteBetweenUpsertAndReadBackIsAnHonest404NotACrash()
+        {
+            // Given a persona with no face yet, wired through a store whose read visibility blips
+            // ONCE immediately after a write completes — simulating a concurrent DELETE landing
+            // between this controller's own UpsertAsync and its own immediate re-read,
+            var innerStore = new FakePersonaAvatarStore();
+            var raceyStore = new RaceySinglePersonaAvatarStore(innerStore);
+            await using var factory = new PersonaAvatarWebFactory(
+                personaStore: PersonaAvatarFixtures.SeededPersonaStore(), personaAvatarStore: raceyStore);
+            var client = await PersonaAvatarWebFactory.LoggedInClientAsync(factory);
+            using var content = PersonaAvatarFixtures.ImageBody(TestImages.CreatePng(512, 512));
+
+            // When PUT /api/personas/{id}/avatar is called (the real production route),
+            var response = await client.PutAsync($"/api/personas/{PersonaAvatarFixtures.KnownPersonaId}/avatar", content);
+
+            // Then it responds 404 — an honest "it's gone again", never a 500 crash off the old
+            // UnreachableException — even though the write itself genuinely reached the store
+            // underneath (proven by reading the WRAPPED store directly, bypassing the one-shot blip).
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.NotNull(await innerStore.GetByPersonaIdAsync(PersonaAvatarFixtures.KnownPersonaId, CancellationToken.None));
+        }
+
+        [Fact]
+        public async Task UnknownPackAndItemProblemsClampTheEchoedStrings()
+        {
+            // Given a known persona, no avatar pack installed, and a hostile packSlug carrying a
+            // control character plus a long run well over LogSafeText.MaxLength,
+            await using var factory = new PersonaAvatarWebFactory(personaStore: PersonaAvatarFixtures.SeededPersonaStore());
+            var client = await PersonaAvatarWebFactory.LoggedInClientAsync(factory);
+            var hostilePackSlug = "line1\nline2" + new string('x', 500);
+
+            // When POST .../from-pack names it,
+            var response = await client.PostAsJsonAsync(
+                $"/api/personas/{PersonaAvatarFixtures.KnownPersonaId}/avatar/from-pack",
+                new { packSlug = hostilePackSlug, itemName = PersonaAvatarFixtures.ItemName });
+            var body = await response.Content.ReadAsStringAsync();
+
+            // Then the 404's own Detail carries no raw control character (JSON-escaped or not) and no
+            // 250-char run of the hostile filler — the echoed slug was clamped through
+            // LogSafeText.Sanitize, never interpolated verbatim.
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.DoesNotContain("\\n", body, StringComparison.Ordinal);
+            Assert.DoesNotContain(new string('x', 250), body, StringComparison.Ordinal);
+        }
+    }
+
     // ── ffprobe/ffmpeg verification helpers — black-box: probe the produced bytes, never the
     // service's internals (mirrors GenWave.Tts.Tests' own Story327_TwoVoicesOneClip idiom). ──────
 
@@ -738,14 +930,14 @@ public static class FeatureTheWornFace
 /// production registration (real ffmpeg) — never faked, mirrors this file's own T291 posture.
 /// </summary>
 file sealed class PersonaAvatarWebFactory(
-    FakePersonaStore? personaStore = null, FakePersonaAvatarStore? personaAvatarStore = null,
-    FakeAvatarPackStore? avatarPackStore = null) : WebApplicationFactory<Program>
+    FakePersonaStore? personaStore = null, IPersonaAvatarStore? personaAvatarStore = null,
+    IAvatarPackStore? avatarPackStore = null) : WebApplicationFactory<Program>
 {
     internal const string Password = "test-password-story333-avatarwrite";
 
     readonly FakePersonaStore personaStore = personaStore ?? PersonaAvatarFixtures.SeededPersonaStore();
-    readonly FakePersonaAvatarStore personaAvatarStore = personaAvatarStore ?? new FakePersonaAvatarStore();
-    readonly FakeAvatarPackStore avatarPackStore = avatarPackStore ?? new FakeAvatarPackStore();
+    readonly IPersonaAvatarStore personaAvatarStore = personaAvatarStore ?? new FakePersonaAvatarStore();
+    readonly IAvatarPackStore avatarPackStore = avatarPackStore ?? new FakeAvatarPackStore();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -821,4 +1013,68 @@ file static class PersonaAvatarFixtures
         content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
         return content;
     }
+}
+
+/// <summary>
+/// Decorates a real <see cref="IPersonaAvatarStore"/> so its FIRST read immediately after an
+/// <see cref="UpsertAsync"/> reports "no face" once, then reverts to normal — simulating a concurrent
+/// <c>DELETE /api/personas/{id}/avatar</c> landing between <see cref="PersonaAvatarController"/>'s own
+/// write and its immediate re-read (T295-review rider: <c>ToDtoResultAsync</c> must downgrade that race
+/// to an honest 404, never crash on the old <see cref="System.Diagnostics.UnreachableException"/>). The
+/// wrapped row is never actually removed — only this ONE read's own visibility blips — so a Fact using
+/// this can still prove the write itself genuinely reached the store, by reading the WRAPPED instance
+/// directly afterward.
+/// </summary>
+file sealed class RaceySinglePersonaAvatarStore(IPersonaAvatarStore inner) : IPersonaAvatarStore
+{
+    bool nextReadRacesPastTheRow;
+
+    public Task<PersonaAvatar?> GetByPersonaIdAsync(long personaId, CancellationToken ct)
+    {
+        if (nextReadRacesPastTheRow)
+        {
+            nextReadRacesPastTheRow = false;
+            return Task.FromResult<PersonaAvatar?>(null);
+        }
+
+        return inner.GetByPersonaIdAsync(personaId, ct);
+    }
+
+    public Task<PersonaAvatar?> GetByTokenAsync(string token, CancellationToken ct) =>
+        inner.GetByTokenAsync(token, ct);
+
+    public async Task UpsertAsync(PersonaAvatarInput avatar, CancellationToken ct)
+    {
+        await inner.UpsertAsync(avatar, ct);
+        nextReadRacesPastTheRow = true;
+    }
+
+    public Task<bool> DeleteAsync(long personaId, CancellationToken ct) =>
+        inner.DeleteAsync(personaId, ct);
+}
+
+/// <summary>
+/// A minimal <see cref="IAvatarPackStore"/> double proving the T295-review rider: resolves
+/// <see cref="GetBySlugAsync"/> CASE-INSENSITIVELY (a shape distinct from <see cref="FakeAvatarPackStore"/>'s
+/// own ordinal dictionary, which can never produce a resolved <see cref="AvatarPack.Slug"/> that differs
+/// from the exact string a caller looked it up with) but always returns its own CANONICAL
+/// <paramref name="canonicalPack"/> — proof that <see cref="PersonaAvatarController.ApplyFromPack"/>
+/// persists THAT value, never the raw request spelling that merely happened to resolve it. Only
+/// <see cref="GetBySlugAsync"/> is ever exercised by that action; every other member is unused by this
+/// file's one Fact that constructs this double.
+/// </summary>
+file sealed class CaseInsensitiveAvatarPackStore(AvatarPack canonicalPack) : IAvatarPackStore
+{
+    public Task<AvatarPack?> GetBySlugAsync(string slug, CancellationToken ct) =>
+        Task.FromResult(string.Equals(slug, canonicalPack.Slug, StringComparison.OrdinalIgnoreCase) ? canonicalPack : null);
+
+    public Task UpsertAsync(
+        string slug, string definition, string importedFrom, IReadOnlyList<AvatarPackItemInput> items, CancellationToken ct) =>
+        throw new NotSupportedException("Unused by this double's one caller.");
+
+    public Task<IReadOnlyList<AvatarPackSummary>> GetAllAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Unused by this double's one caller.");
+
+    public Task<bool> DeleteAsync(string slug, CancellationToken ct) =>
+        throw new NotSupportedException("Unused by this double's one caller.");
 }

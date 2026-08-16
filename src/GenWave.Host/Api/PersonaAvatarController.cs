@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Net.Http.Headers;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Catalog;
@@ -72,6 +73,61 @@ public sealed class PersonaAvatarController(
     const int TokenLength = 32;
 
     /// <summary>
+    /// GET /api/personas/{id}/avatar — the worn face's own bytes (SPEC F128.9, STORY-333, PLAN T296 —
+    /// the Personas-page render decision recorded there: build the admin-plane byte read, since T295
+    /// shipped only the write paths and T298's public token route is still unbuilt). AdminSurface+Settings
+    /// gates this exactly like every other action in this controller — this is the authed console's OWN
+    /// read of a face, never the public door: T298's forthcoming spectator route resolves the SAME bytes
+    /// anonymously by opaque token instead, a wholly separate capability-URL surface this action carries
+    /// no relationship to beyond serving the same underlying <see cref="IPersonaAvatarStore"/> row.
+    ///
+    /// <para>
+    /// <b>NO OBJECT-LEVEL PRE-CHECK — mirrors <see cref="Delete"/>'s own reasoning exactly.</b> An unknown
+    /// persona id and a known persona with no face both read as 404 here, with no separate
+    /// <see cref="IPersonaStore.GetByIdAsync"/> round trip to tell them apart:
+    /// <see cref="IPersonaAvatarStore.GetByPersonaIdAsync"/> already answers "is there a face to serve" in
+    /// one call, and there is nothing a second existence check would protect a READ from the way it
+    /// protects <see cref="Put"/>/<see cref="ApplyFromPack"/>'s own writes from a foreign-key violation.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>ETAG, NOT A LONG IMMUTABLE CACHE — a deliberate divergence from <see cref="SpectatorArtworkController"/>'s
+    /// own year-long <c>immutable</c> contract.</b> A spectator artwork URL is scoped by an opaque,
+    /// per-extraction token that never reuses a byte-different payload under the same URL — genuinely
+    /// immutable. THIS route is scoped by persona <paramref name="id"/>, a stable value that keeps
+    /// resolving to whatever face is CURRENTLY worn — the opposite property: the bytes behind this URL
+    /// change the moment an operator uploads, removes, or applies a pack face, with no URL change to
+    /// signal it. Marking this response <c>immutable</c> would tell a browser to skip revalidation
+    /// entirely for up to a year, silently keeping a stale face on-screen through every write that
+    /// follows. <c>Cache-Control: private, no-cache</c> instead means "cache it, but always ask first" —
+    /// paired with the <see cref="EntityTagHeaderValue"/> this action hands
+    /// <see cref="ControllerBase.File(byte[], string, System.DateTimeOffset?, EntityTagHeaderValue?)"/>,
+    /// the framework's own conditional-request handling answers a matching <c>If-None-Match</c> with a bodyless 304 rather
+    /// than re-sending the same ≤512 KiB PNG on every render — cheap AND correct, never trading one for
+    /// the other. <c>Private</c> (never <c>Public</c>, unlike <see cref="SpectatorArtworkController"/>'s
+    /// own anonymous route): this is cookie-authenticated admin content, not a byte stream any
+    /// shared/proxy cache should ever be allowed to hold.
+    /// </para>
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> Get(long id, CancellationToken ct)
+    {
+        var avatar = await personaAvatarStore.GetByPersonaIdAsync(id, ct);
+        if (avatar is null)
+            return NotFound(NoFaceToServeProblem(id));
+
+        Response.GetTypedHeaders().CacheControl = new CacheControlHeaderValue
+        {
+            Private = true,
+            NoCache = true,
+        };
+        // Admin plane carries no CSP (gh-#346) — nosniff stamped directly here, same precedent as
+        // CatalogController.AssetFileResult and FontEndpoints.
+        Response.Headers.XContentTypeOptions = "nosniff";
+        return File(avatar.Bytes, "image/png", lastModified: null, entityTag: new EntityTagHeaderValue($"\"{avatar.Token}\""));
+    }
+
+    /// <summary>
     /// PUT /api/personas/{id}/avatar — accepts a raw <c>image/png</c> or <c>image/jpeg</c> body
     /// (SPEC F128.6). <c>Content-Type</c> is advisory only and never gates anything here — the T291
     /// pipeline's own magic-bytes check is the real decision, so this action carries no
@@ -111,7 +167,7 @@ public sealed class PersonaAvatarController(
                     new PersonaAvatarInput(id, success.Bytes, success.Sha256, GenerateToken(), PersonaAvatarSource.Upload, null),
                     ct);
                 logger.LogInformation("Persona avatar uploaded personaId={PersonaId}", id);
-                return Ok(await ToDtoAsync(id, ct));
+                return await ToDtoResultAsync(id, ct);
 
             default:
                 throw new UnreachableException($"Unhandled {nameof(ImageNormalizeResult)} case.");
@@ -167,14 +223,18 @@ public sealed class PersonaAvatarController(
         if (item is null)
             return NotFound(UnknownItemProblem(request.PackSlug, request.ItemName));
 
+        // T295-review rider: persist the pack's own CANONICAL Slug, not the caller-typed
+        // request.PackSlug — GetBySlugAsync already resolved the two as the same installed row, but
+        // the stored provenance should name what the pack actually IS, not merely echo whatever
+        // string this particular request happened to spell it as.
         await personaAvatarStore.UpsertAsync(
-            new PersonaAvatarInput(id, item.Bytes, item.Sha256, GenerateToken(), PersonaAvatarSource.Catalog, request.PackSlug),
+            new PersonaAvatarInput(id, item.Bytes, item.Sha256, GenerateToken(), PersonaAvatarSource.Catalog, pack.Slug),
             ct);
 
         logger.LogInformation(
             "Persona avatar applied from pack personaId={PersonaId} packSlug={PackSlug} item={Item}",
-            id, LogSafeText.Sanitize(request.PackSlug), LogSafeText.Sanitize(request.ItemName));
-        return Ok(await ToDtoAsync(id, ct));
+            id, LogSafeText.Sanitize(pack.Slug), LogSafeText.Sanitize(request.ItemName));
+        return await ToDtoResultAsync(id, ct);
     }
 
     /// <summary>
@@ -217,12 +277,25 @@ public sealed class PersonaAvatarController(
     /// <c>PersonaController.Create</c>'s own "read back after write" idiom) rather than this
     /// controller's own copy of the values it handed to <see cref="IPersonaAvatarStore.UpsertAsync"/> —
     /// in particular <c>updated_at</c>, which only the store's own <c>now()</c> ever sets.
+    ///
+    /// <para>
+    /// <b>T295-REVIEW RIDER — THE RE-READ CAN GENUINELY COME BACK EMPTY.</b> A concurrent
+    /// <c>DELETE /api/personas/{id}/avatar</c> landing between this method's caller's own
+    /// <see cref="IPersonaAvatarStore.UpsertAsync"/> and this re-read is a real, reachable race — not
+    /// the "should never happen" shape an <see cref="UnreachableException"/> is for. This downgrades
+    /// that case to the SAME honest 404 <see cref="Get"/> already reports for "no face right now",
+    /// rather than crashing the request that just successfully wrote one: the write itself already
+    /// happened and already logged, so the caller reporting "it's gone again" is simply true.
+    /// </para>
     /// </summary>
-    async Task<PersonaAvatarDto> ToDtoAsync(long id, CancellationToken ct)
+    async Task<IActionResult> ToDtoResultAsync(long id, CancellationToken ct)
     {
-        var avatar = await personaAvatarStore.GetByPersonaIdAsync(id, ct)
-            ?? throw new UnreachableException("A face just upserted for this persona must read back.");
-        return new PersonaAvatarDto(avatar.PersonaId, avatar.Token, SourceText(avatar.Source), avatar.ImportedFrom, avatar.UpdatedAt);
+        var avatar = await personaAvatarStore.GetByPersonaIdAsync(id, ct);
+        if (avatar is null)
+            return NotFound(NoFaceToServeProblem(id));
+
+        var dto = new PersonaAvatarDto(avatar.PersonaId, avatar.Token, SourceText(avatar.Source), avatar.ImportedFrom, avatar.UpdatedAt);
+        return Ok(dto);
     }
 
     static string SourceText(PersonaAvatarSource source) => source switch
@@ -246,6 +319,18 @@ public sealed class PersonaAvatarController(
         Detail = $"Persona {id} has no worn face to remove.",
     };
 
+    /// <summary>Shared by <see cref="Get"/> (no face right now) and <see cref="ToDtoResultAsync"/> (no
+    /// face any more, by the time this re-read the row it just wrote — see that method's own T295-review
+    /// rider remarks). Deliberately not <see cref="NoFaceProblem"/>: that one's own wording is
+    /// DELETE-specific ("to remove"), which would misdescribe a request that never asked to remove
+    /// anything.</summary>
+    static ProblemDetails NoFaceToServeProblem(long id) => new()
+    {
+        Status = StatusCodes.Status404NotFound,
+        Title  = "Not found.",
+        Detail = $"Persona {id} has no worn face to serve.",
+    };
+
     static ProblemDetails BlankFromPackFieldProblem() => new()
     {
         Status = StatusCodes.Status400BadRequest,
@@ -253,18 +338,24 @@ public sealed class PersonaAvatarController(
         Detail = "packSlug and itemName must both be present and non-blank.",
     };
 
+    // T295-review rider: packSlug/itemName are caller-typed request-body fields (never re-validated
+    // against a slug/name shape gate before this point — unlike a route-bound slug), so both are
+    // clamped through LogSafeText.Sanitize before they're echoed into a response body, the same
+    // discipline CatalogInstallShell/AvatarPackController already apply to every remote-derived
+    // string these two problems' own siblings interpolate.
+
     static ProblemDetails UnknownPackProblem(string packSlug) => new()
     {
         Status = StatusCodes.Status404NotFound,
         Title  = "Not found.",
-        Detail = $"No installed avatar pack with slug \"{packSlug}\" exists.",
+        Detail = $"No installed avatar pack with slug \"{LogSafeText.Sanitize(packSlug)}\" exists.",
     };
 
     static ProblemDetails UnknownItemProblem(string packSlug, string itemName) => new()
     {
         Status = StatusCodes.Status404NotFound,
         Title  = "Not found.",
-        Detail = $"Avatar pack \"{packSlug}\" has no item named \"{itemName}\".",
+        Detail = $"Avatar pack \"{LogSafeText.Sanitize(packSlug)}\" has no item named \"{LogSafeText.Sanitize(itemName)}\".",
     };
 
     /// <summary>
