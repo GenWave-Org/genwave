@@ -33,6 +33,24 @@ sealed class PersonaAvatarRepository(Lazy<NpgsqlDataSource> dataSource) : IPerso
         return row is null ? null : ToEntry(row);
     }
 
+    /// <summary>
+    /// The token-only sibling of <see cref="GetByPersonaIdAsync"/> (PLAN T299 fix round, gh-blocking
+    /// finding): a bare <c>select token</c>, deliberately NOT built on <see cref="SelectColumns"/> —
+    /// that shared projection carries the ~512 KiB <c>bytes</c> column every other read in this class
+    /// legitimately needs, but the one caller of this method
+    /// (<c>SpectatorController.ResolveDjAvatarUrlAsync</c>) only ever composes a URL from the token
+    /// and was pulling that whole payload off Postgres, unread, on every spectator now-playing poll's
+    /// 5-second cache window before this method existed.
+    /// </summary>
+    public async Task<string?> GetTokenByPersonaIdAsync(long personaId, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
+            "select token from station.persona_avatar where persona_id = @personaId",
+            new { personaId },
+            cancellationToken: ct));
+    }
+
     public async Task<PersonaAvatar?> GetByTokenAsync(string token, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);

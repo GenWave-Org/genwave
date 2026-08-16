@@ -8,8 +8,15 @@
 // — this project has no Postgres fixture; the real station.persona_avatar/station_image SQL is
 // T290's own coverage (GenWave.MediaLibrary.Tests). Mirrors Gh258_SpectatorStationLogo.cs's own
 // StationLogoWebFactory and Story222_ArtworkEndpoint.cs's own ArtworkWebFactory for the DI shape.
+//
+// T299 payload facts drive GET /spectator/api/now-playing through the SAME production pipeline —
+// the factory below additionally swaps IScheduleStore/IScheduleSpecialStore/TimeProvider (mirrors
+// Story311_SpectatorShowFields.cs's own ShowFieldsWebFactory) whenever a scenario needs a real
+// on-air persona id for CachingScheduleResolver to resolve; the T298 route facts above never
+// exercise that resolver at all, so those construct the factory without them.
 
 using System.Net;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
@@ -17,10 +24,13 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Time.Testing;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
+using GenWave.Host.Playout;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Orchestration;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -29,13 +39,36 @@ namespace GenWave.Host.Tests.Specs;
 /// doubles — the same DI-swap shape <c>Story333_TheWornFace.cs</c>'s own
 /// <c>PersonaAvatarWebFactory</c> uses, plus the spectator-mode arrangement
 /// <c>Gh258_SpectatorStationLogo.cs</c>'s own <c>StationLogoWebFactory</c> already establishes for
-/// this exact controller.</summary>
+/// this exact controller.
+/// <para>
+/// PLAN T299 extension: <paramref name="scheduleStore"/>/<paramref name="timeProvider"/> are ALSO
+/// swappable (null = leave the real, Postgres-backed registrations in place, exactly as the T298
+/// route facts need — they never call <see cref="CachingScheduleResolver.ResolveAsync"/>, so the
+/// real store is never actually reached). <paramref name="publicBaseUrl"/> mirrors
+/// <c>Story223_ArtworkEmission.cs</c>'s own "Station:PublicBaseUrl set" arrangement — required for
+/// <c>SpectatorController.ResolveDjAvatarUrlAsync</c> to ever compose a URL at all (F129.2's own
+/// gate).
+/// </para>
+/// <para>
+/// PLAN T299 fix-round extension: <paramref name="activePersonaAccessor"/> is ALSO swappable
+/// (default: a fresh <see cref="FakeActivePersonaAccessor"/>, empty <c>Names</c>) — needed once
+/// <c>SpectatorController.DjIdentityAgrees</c> started gating <c>djAvatarUrl</c> on whether this
+/// accessor's cached name for the on-air persona id agrees with the item-truth <c>dj</c> the
+/// snapshot carries: a fact wanting to prove the URL-composition path (not the suppression gate)
+/// must seed a name here that matches the snapshot's own <c>DjName</c>.
+/// </para>
+/// </summary>
 file sealed class DjArtworkWebFactory(
     IPersonaAvatarStore? personaAvatarStore = null,
-    IStationImageStore? stationImageStore = null) : WebApplicationFactory<Program>
+    IStationImageStore? stationImageStore = null,
+    IScheduleStore? scheduleStore = null,
+    TimeProvider? timeProvider = null,
+    IActivePersonaAccessor? activePersonaAccessor = null,
+    string publicBaseUrl = "") : WebApplicationFactory<Program>
 {
     readonly IPersonaAvatarStore personaAvatarStore = personaAvatarStore ?? new FakePersonaAvatarStore();
     readonly IStationImageStore stationImageStore = stationImageStore ?? new FakeStationImageStore();
+    readonly IActivePersonaAccessor activePersonaAccessor = activePersonaAccessor ?? new FakeActivePersonaAccessor();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -43,19 +76,38 @@ file sealed class DjArtworkWebFactory(
         builder.UseSetting("Station:SpectatorMode", "true");
         builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
         builder.UseSetting("Admin:Password", "test-password-x7z");
+        if (!string.IsNullOrEmpty(publicBaseUrl))
+            builder.UseSetting("Station:PublicBaseUrl", publicBaseUrl);
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IHostedService>();
             services.RemoveAll<IMediaCatalog>();
             services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
             services.RemoveAll<IActivePersonaAccessor>();
-            services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
+            services.AddSingleton(activePersonaAccessor);
 
             services.RemoveAll<IPersonaAvatarStore>();
             services.AddSingleton(personaAvatarStore);
 
             services.RemoveAll<IStationImageStore>();
             services.AddSingleton(stationImageStore);
+
+            if (scheduleStore is not null)
+            {
+                services.RemoveAll<IScheduleStore>();
+                services.AddSingleton(scheduleStore);
+                // CachingScheduleResolver.ResolveAsync reads this on every call alongside
+                // IScheduleStore (Story311's own T260 note) — an empty fake is enough since none
+                // of these facts author a special.
+                services.RemoveAll<IScheduleSpecialStore>();
+                services.AddSingleton<IScheduleSpecialStore>(new FakeScheduleSpecialStore());
+            }
+
+            if (timeProvider is not null)
+            {
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton(timeProvider);
+            }
         });
     }
 }
@@ -258,24 +310,146 @@ public static class FeatureTheFaceOnThePublicSurface
 
     public sealed class ScenarioThePayloadNamesTheFace
     {
-        [Fact(Skip = "Pending T299 — see docs/PLAN.md")]
-        public void DjAvatarUrlCarriesTheOnAirPersonasTokenUrl()
+        // UTC, no DST/timezone concern rides these facts. Day() below derives the segment's own
+        // DayOfWeek from this instant directly — never a separate hardcoded literal — so the two
+        // can never silently drift apart the way a copy-pasted fixture date can (the bug this
+        // exact mismatch produced while writing this fact: 2026-08-16 is a Sunday, not the
+        // Wednesday Story311's own fixture comment names for its own, different date).
+        static readonly DateTimeOffset Now = new(2026, 8, 16, 10, 0, 0, TimeSpan.Zero);
+        const int Midnight = 24 * 60;
+        const string PublicBaseUrl = "https://example.test";
+
+        /// <summary>One all-day segment covering <see cref="Now"/>'s own day-of-week, persona id 1
+        /// — the SAME id <see cref="SeededPersonaAvatarStoreAsync"/> seeds a face for, so the
+        /// resolver's on-air answer and the avatar store agree on who is on air without threading
+        /// an id through both separately.</summary>
+        static ScheduleSegment[] Persona1AllDay() =>
+        [
+            new(Id: 1, Day: Now.DayOfWeek, StartMinute: 0, EndMinute: Midnight,
+                PersonaId: 1, Genres: null, EnergyMin: null, EnergyMax: null),
+        ];
+
+        /// <param name="djName">The item-truth <c>dj</c> stamp (PLAN T299 fix round default: null,
+        /// unchanged for every fact that predates <c>SpectatorController.DjIdentityAgrees</c>) — a
+        /// fact proving <c>djAvatarUrl</c> actually composes a URL must pass the SAME name it also
+        /// seeds onto <see cref="FakeActivePersonaAccessor.Names"/>, or the RIGHT FACE OR NO FACE
+        /// gate suppresses it.</param>
+        static NowPlayingSnapshot TrackSnapshot(string? djName = null) =>
+            new(MediaId: "42", Title: "Night Drive", Artist: "The Waveforms", GainDb: -2.5,
+                StartedAt: Now.AddMinutes(-5), DurationMs: 214_000, IsDrain: false, DjName: djName);
+
+        /// <summary>Warms <see cref="CachingScheduleResolver"/>'s cached week snapshot exactly once
+        /// — mirrors Story311's own <c>WarmScheduleAsync</c>: <see cref="CachingScheduleResolver.TryGetCurrent"/>
+        /// answers null until this has run once.</summary>
+        static Task WarmScheduleAsync(IServiceProvider services) =>
+            services.GetRequiredService<CachingScheduleResolver>().ResolveAsync(CancellationToken.None);
+
+        static async Task<JsonElement> FetchNowPlayingAsync(WebApplicationFactory<Program> factory, NowPlayingSnapshot snapshot)
         {
-            Assert.Fail("pending T299");
+            await WarmScheduleAsync(factory.Services);
+            factory.Services.GetRequiredService<NowPlayingService>().Update("1", snapshot); // SingleStation.IdString
+
+            var client = factory.CreateClient();
+            var response = await client.GetAsync("/spectator/api/now-playing");
+            return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         }
 
-        [Fact(Skip = "Pending T299 — see docs/PLAN.md")]
-        public void DjAvatarUrlIsNullWhenTheOnAirPersonaIsFaceless()
+        [Fact]
+        public async Task DjAvatarUrlCarriesTheOnAirPersonasTokenUrl()
         {
-            Assert.Fail("pending T299");
+            // RIGHT FACE OR NO FACE (SPEC F129.6, PLAN T299 fix round, SpectatorController.DjIdentityAgrees)
+            // demands the item-truth dj name agree with the resolver's own cached name before it
+            // will ever compose a URL — seed both to the SAME value so this fact proves the
+            // URL-composition path itself, not the suppression gate
+            // (DjAvatarUrlIsNullWhenTheCachedNameDisagreesWithTheItemTruthDj below proves that one).
+            const string djName = "Nova";
+            var personaAvatarStore = await SeededPersonaAvatarStoreAsync();
+            var scheduleStore = new FakeScheduleStore(new ScheduleWeekSnapshot(Persona1AllDay()));
+            var activePersonaAccessor = new FakeActivePersonaAccessor();
+            activePersonaAccessor.Names[1] = djName;
+            await using var factory = new DjArtworkWebFactory(
+                personaAvatarStore: personaAvatarStore, scheduleStore: scheduleStore,
+                timeProvider: new FakeTimeProvider(Now), activePersonaAccessor: activePersonaAccessor,
+                publicBaseUrl: PublicBaseUrl);
+
+            var body = await FetchNowPlayingAsync(factory, TrackSnapshot(djName));
+
+            // SAME composition SpectatorArtworkController.GetDjArtwork's own route pattern serves —
+            // {PublicBaseUrl}/spectator/api/artwork/dj/{token}, the token this persona's seeded face
+            // (SeededPersonaAvatarStoreAsync) actually carries.
+            Assert.Equal($"{PublicBaseUrl}/spectator/api/artwork/dj/{CurrentToken}",
+                body.GetProperty("djAvatarUrl").GetString());
         }
 
-        [Fact(Skip = "Pending T299 — see docs/PLAN.md")]
-        public void TheDisclosureContractPinsTheCompletePropertySet()
+        [Fact]
+        public async Task DjAvatarUrlIsNullWhenTheCachedNameDisagreesWithTheItemTruthDj()
         {
-            // F93.5/F67.5 amendment: the suite's complete-set assertion includes djAvatarUrl,
-            // so an unblessed field still fails the build.
-            Assert.Fail("pending T299");
+            // RIGHT FACE OR NO FACE (SPEC F129.6, PLAN T299 fix round): persona 1 genuinely wears a
+            // face (SeededPersonaAvatarStoreAsync) and IS who the resolver names on air
+            // (Persona1AllDay), but the item-truth dj the snapshot carries names someone else — the
+            // exact shape a boundary mid-drain produces (GetNowPlaying's own BOUNDARY SKEW remarks).
+            // djAvatarUrl must suppress to null rather than pair persona 1's real face with the
+            // wrong name.
+            var personaAvatarStore = await SeededPersonaAvatarStoreAsync();
+            var scheduleStore = new FakeScheduleStore(new ScheduleWeekSnapshot(Persona1AllDay()));
+            var activePersonaAccessor = new FakeActivePersonaAccessor();
+            activePersonaAccessor.Names[1] = "Nova";
+            await using var factory = new DjArtworkWebFactory(
+                personaAvatarStore: personaAvatarStore, scheduleStore: scheduleStore,
+                timeProvider: new FakeTimeProvider(Now), activePersonaAccessor: activePersonaAccessor,
+                publicBaseUrl: PublicBaseUrl);
+
+            var body = await FetchNowPlayingAsync(factory, TrackSnapshot("Outgoing Dj"));
+
+            Assert.True(body.TryGetProperty("djAvatarUrl", out var djAvatarUrl));
+            Assert.Equal(JsonValueKind.Null, djAvatarUrl.ValueKind);
+        }
+
+        [Fact]
+        public async Task DjAvatarUrlIsNullWhenTheOnAirPersonaIsFaceless()
+        {
+            // No SeededPersonaAvatarStoreAsync call here — the default FakePersonaAvatarStore has
+            // no rows at all, so GetTokenByPersonaIdAsync(1, …) reports null: an honest "no face",
+            // never an error, mirroring IPersonaAvatarStore's own contract.
+            var scheduleStore = new FakeScheduleStore(new ScheduleWeekSnapshot(Persona1AllDay()));
+            await using var factory = new DjArtworkWebFactory(
+                scheduleStore: scheduleStore, timeProvider: new FakeTimeProvider(Now),
+                publicBaseUrl: PublicBaseUrl);
+
+            var body = await FetchNowPlayingAsync(factory, TrackSnapshot());
+
+            // A present key with a null value (F93.3's own "present key, absent value" idiom for
+            // ArtworkUrl) — never an absent property, which would instead be a disclosure-contract
+            // violation (TheDisclosureContractPinsTheCompletePropertySet below).
+            Assert.True(body.TryGetProperty("djAvatarUrl", out var djAvatarUrl));
+            Assert.Equal(JsonValueKind.Null, djAvatarUrl.ValueKind);
+        }
+
+        [Fact]
+        public async Task TheDisclosureContractPinsTheCompletePropertySet()
+        {
+            // F93.5/F67.5 amendment: Story183_DisclosureContractCompleteness.cs (and its Story230/
+            // Story248 census copies) own the canonical blessed-shape table, amended alongside this
+            // task to bless djAvatarUrl. This fact is this suite's OWN complementary proof, off the
+            // SHIPPED wire response from the real production pipeline (not an in-memory instance) —
+            // an unblessed/missing field on the actual wire still fails here, independently of
+            // whatever those tables already assert.
+            var personaAvatarStore = await SeededPersonaAvatarStoreAsync();
+            var scheduleStore = new FakeScheduleStore(new ScheduleWeekSnapshot(Persona1AllDay()));
+            await using var factory = new DjArtworkWebFactory(
+                personaAvatarStore: personaAvatarStore, scheduleStore: scheduleStore,
+                timeProvider: new FakeTimeProvider(Now), publicBaseUrl: PublicBaseUrl);
+
+            var body = await FetchNowPlayingAsync(factory, TrackSnapshot());
+
+            var properties = body.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+            Assert.Equal(
+                new HashSet<string>(StringComparer.Ordinal)
+                {
+                    "title", "artist", "startedAt", "durationMs", "listeners",
+                    "dj", "djAvatarUrl", "show", "upNext", "artworkUrl", "state", "kind",
+                },
+                properties);
         }
     }
 

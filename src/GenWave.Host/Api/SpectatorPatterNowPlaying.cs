@@ -20,6 +20,12 @@ namespace GenWave.Host.Api;
 /// on-air shapes one persona-name field with one name. Null in a music-only segment or grid gap —
 /// never generated patter text or any other persona field (F62.9 still holds for those).
 /// </param>
+/// <param name="DjAvatarUrl">
+/// The ON-AIR persona's worn-face token URL (SPEC F129.2, STORY-335, PLAN T299) — the same field
+/// <see cref="SpectatorTrackNowPlaying"/> carries, for the identical reason <c>Dj</c> rides both
+/// shapes: a DJ break is still that persona on air. Null when faceless or
+/// <c>Station:PublicBaseUrl</c> is unset.
+/// </param>
 /// <param name="Show">
 /// The on-air show's <c>{name, tagline}</c> (SPEC F116.4, F115.3; STORY-311, PLAN T251) — the same
 /// field <see cref="SpectatorTrackNowPlaying"/> carries, read straight off
@@ -32,7 +38,8 @@ namespace GenWave.Host.Api;
 /// <see cref="SpectatorUpNext"/>'s own remarks for the same-persona collapse rule.
 /// </param>
 public sealed record SpectatorPatterNowPlaying(
-    DateTimeOffset StartedAt, int? DurationMs, int? Listeners, string? Dj, SpectatorShow? Show, SpectatorUpNext? UpNext)
+    DateTimeOffset StartedAt, int? DurationMs, int? Listeners, string? Dj, string? DjAvatarUrl,
+    SpectatorShow? Show, SpectatorUpNext? UpNext)
 {
     public string State => "onAir";
     public string Kind => "patter";

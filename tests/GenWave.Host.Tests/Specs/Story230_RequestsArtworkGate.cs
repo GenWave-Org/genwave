@@ -192,6 +192,8 @@ public static class FeatureRequestsArtworkGate
         /// `upNext.show` (NAME ONLY — <c>SpectatorUpNextShow</c>, no <c>Tagline</c> member) joins
         /// upNext — blessed in Story183's contract table alongside this census; Flavor never
         /// appears here or anywhere on this surface (F115.3).
+        /// ⚠️ Amended PLAN T299 (SPEC F129.2, F67.5 extension, STORY-335): `djAvatarUrl` joins both
+        /// on-air shapes — blessed in Story183's contract table alongside this census.
         /// </summary>
         static readonly string[] PinnedFieldCensus =
         [
@@ -202,6 +204,10 @@ public static class FeatureRequestsArtworkGate
             "SpectatorAbout.StreamUrl",
             "SpectatorAbout.Version",
             "SpectatorPatterNowPlaying.Dj",
+            // SPEC F129.2, F67.5 extension ("the face is on-air identity"), STORY-335, PLAN T299:
+            // the on-air persona's worn-face token URL — blessed in Story183's contract table
+            // alongside this census.
+            "SpectatorPatterNowPlaying.DjAvatarUrl",
             "SpectatorPatterNowPlaying.DurationMs",
             "SpectatorPatterNowPlaying.Kind",
             "SpectatorPatterNowPlaying.Listeners",
@@ -245,6 +251,10 @@ public static class FeatureRequestsArtworkGate
             "SpectatorTrackNowPlaying.Artist",
             "SpectatorTrackNowPlaying.ArtworkUrl",
             "SpectatorTrackNowPlaying.Dj",
+            // SPEC F129.2, F67.5 extension ("the face is on-air identity"), STORY-335, PLAN T299:
+            // the on-air persona's worn-face token URL — blessed in Story183's contract table
+            // alongside this census.
+            "SpectatorTrackNowPlaying.DjAvatarUrl",
             "SpectatorTrackNowPlaying.DurationMs",
             "SpectatorTrackNowPlaying.Kind",
             "SpectatorTrackNowPlaying.Listeners",

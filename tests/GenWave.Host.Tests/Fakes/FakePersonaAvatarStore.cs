@@ -27,6 +27,12 @@ sealed class FakePersonaAvatarStore : IPersonaAvatarStore
     public Task<PersonaAvatar?> GetByPersonaIdAsync(long personaId, CancellationToken ct) =>
         Task.FromResult(byPersonaId.TryGetValue(personaId, out var avatar) ? avatar : null);
 
+    /// <summary>The in-memory answer to the token-only projection (PLAN T299 fix round) —
+    /// <see cref="IPersonaAvatarStore.GetTokenByPersonaIdAsync"/>'s own contract, read straight off
+    /// the same dictionary <see cref="GetByPersonaIdAsync"/> uses.</summary>
+    public Task<string?> GetTokenByPersonaIdAsync(long personaId, CancellationToken ct) =>
+        Task.FromResult(byPersonaId.TryGetValue(personaId, out var avatar) ? avatar.Token : null);
+
     public Task<PersonaAvatar?> GetByTokenAsync(string token, CancellationToken ct)
     {
         GetByTokenCallCount++;

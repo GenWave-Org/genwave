@@ -1040,6 +1040,12 @@ file sealed class RaceySinglePersonaAvatarStore(IPersonaAvatarStore inner) : IPe
         return inner.GetByPersonaIdAsync(personaId, ct);
     }
 
+    /// <summary>Passes straight through — unexercised by this file's own race, which only ever
+    /// drives <see cref="GetByPersonaIdAsync"/> through <c>PersonaAvatarController</c>'s post-write
+    /// re-read.</summary>
+    public Task<string?> GetTokenByPersonaIdAsync(long personaId, CancellationToken ct) =>
+        inner.GetTokenByPersonaIdAsync(personaId, ct);
+
     public Task<PersonaAvatar?> GetByTokenAsync(string token, CancellationToken ct) =>
         inner.GetByTokenAsync(token, ct);
 

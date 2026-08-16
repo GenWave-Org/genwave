@@ -57,21 +57,25 @@ public static class FeatureDisclosureContractCompleteness
         // now-playing (SPEC F62.4; amended 2026-07-20 to carry listeners — STORY-179; amended
         // 2026-07-27 to carry dj/upNext/artworkUrl — SPEC F93.1/F93.2/F93.3/F93.5, STORY-244/245,
         // PLAN T125; amended 2026-08-11 to carry show/upNext.show — SPEC F116.4, STORY-311, PLAN
-        // T251). SpectatorUpNext/SpectatorShow/SpectatorUpNextShow are their own nested shapes,
-        // blessed separately below. Flavor is deliberately absent from both show shapes (SPEC
-        // F115.3) — see ScenarioDisclosureHoldsTheLine in Story311_SpectatorShowFields.cs for the
+        // T251; amended 2026-08-16 to carry djAvatarUrl — SPEC F129.2, F67.5 extension ("the face
+        // is on-air identity"), STORY-335, PLAN T299). SpectatorUpNext/SpectatorShow/
+        // SpectatorUpNextShow are their own nested shapes, blessed separately below. Flavor is
+        // deliberately absent from both show shapes (SPEC F115.3) — see
+        // ScenarioDisclosureHoldsTheLine in Story311_SpectatorShowFields.cs for the
         // structural-absence assertion this table's own omission relies on.
         new(typeof(SpectatorTrackNowPlaying),
             new SpectatorTrackNowPlaying("Night Drive", "The Waveforms", DateTimeOffset.UtcNow, 214_000, 12,
-                "Nova", new SpectatorShow("Night Drive Radio", "Two hours of driving synths"),
+                "Nova", "https://example.test/artwork/dj/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+                new SpectatorShow("Night Drive Radio", "Two hours of driving synths"),
                 new SpectatorUpNext(DateTimeOffset.UtcNow, "Echo", new SpectatorUpNextShow("Echo Chamber")),
                 "https://example.test/artwork/abc"),
-            ["title", "artist", "startedAt", "durationMs", "listeners", "dj", "show", "upNext", "artworkUrl", "state", "kind"]),
+            ["title", "artist", "startedAt", "durationMs", "listeners", "dj", "djAvatarUrl", "show", "upNext", "artworkUrl", "state", "kind"]),
         new(typeof(SpectatorPatterNowPlaying),
             new SpectatorPatterNowPlaying(DateTimeOffset.UtcNow, 9_000, 12,
-                "Nova", new SpectatorShow("Night Drive Radio", "Two hours of driving synths"),
+                "Nova", "https://example.test/artwork/dj/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+                new SpectatorShow("Night Drive Radio", "Two hours of driving synths"),
                 new SpectatorUpNext(DateTimeOffset.UtcNow, "Echo", new SpectatorUpNextShow("Echo Chamber"))),
-            ["startedAt", "durationMs", "listeners", "dj", "show", "upNext", "state", "kind"]),
+            ["startedAt", "durationMs", "listeners", "dj", "djAvatarUrl", "show", "upNext", "state", "kind"]),
         new(typeof(SpectatorStandbyNowPlaying),
             new SpectatorStandbyNowPlaying(12),
             ["listeners", "state"]),

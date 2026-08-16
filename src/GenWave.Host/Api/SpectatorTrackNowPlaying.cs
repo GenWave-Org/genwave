@@ -23,6 +23,13 @@ namespace GenWave.Host.Api;
 /// The On-The-Air persona display name (SPEC F67.5-public, F93.1, STORY-244, PLAN T125), or null in
 /// a music-only segment or grid gap — never the admin persona id, backstory, or any other field.
 /// </param>
+/// <param name="DjAvatarUrl">
+/// The ON-AIR persona's worn-face token URL (SPEC F129.2, STORY-335, PLAN T299 — the disclosure
+/// ruling extending F67.5: "the face is on-air identity"), or null when that persona wears no face
+/// or <c>Station:PublicBaseUrl</c> is unset — see <see cref="SpectatorController"/>'s own
+/// <c>ResolveDjAvatarUrlAsync</c> remarks. The page renders a placeholder for null, exactly like
+/// <see cref="ArtworkUrl"/>'s own station-icon fallback.
+/// </param>
 /// <param name="Show">
 /// The on-air show's <c>{name, tagline}</c> (SPEC F116.4, F115.3; STORY-311, PLAN T251), or null on
 /// a grid gap or an unnamed block — read straight off
@@ -40,7 +47,7 @@ namespace GenWave.Host.Api;
 /// </param>
 public sealed record SpectatorTrackNowPlaying(
     string? Title, string? Artist, DateTimeOffset StartedAt, int? DurationMs, int? Listeners,
-    string? Dj, SpectatorShow? Show, SpectatorUpNext? UpNext, string? ArtworkUrl)
+    string? Dj, string? DjAvatarUrl, SpectatorShow? Show, SpectatorUpNext? UpNext, string? ArtworkUrl)
 {
     public string State => "onAir";
     public string Kind => "track";

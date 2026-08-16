@@ -16,13 +16,25 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using GenWave.Core.Abstractions;
+using GenWave.Host.Tests.Fakes;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
 
 /// <summary>Mirrors <c>SpectatorPageWebFactory</c> (Story173), plus per-scenario settings so each
 /// scenario arranges its own <c>Station:PublicBaseUrl</c>/<c>Station:PublicStreamUrl</c>/
-/// <c>Station:SpectatorMode</c> once, at construction.</summary>
+/// <c>Station:SpectatorMode</c> once, at construction.
+/// <para>
+/// PLAN T299 (T298-review rider): <see cref="IPersonaAvatarStore"/>/<see cref="IStationImageStore"/>
+/// are ALSO swapped for seedable-but-unseeded doubles — mirrors
+/// <c>Story335_TheFaceOnThePublicSurface.cs</c>'s own <c>DjArtworkWebFactory</c>. Needed so
+/// <c>ScenarioHeadersOnEverySpectatorRoute</c>'s malformed-token artwork rows below can prove the
+/// header contract without a real Postgres connection: <c>SpectatorArtworkController.GetDjArtwork</c>'s
+/// own malformed-token fallback still reads <see cref="IStationImageStore"/> (only the
+/// <see cref="IPersonaAvatarStore"/> round trip short-circuits on a malformed token), and this
+/// project has no Postgres fixture.
+/// </para>
+/// </summary>
 file sealed class SecurityHeadersWebFactory(params (string Key, string Value)[] settings)
     : WebApplicationFactory<Program>
 {
@@ -41,6 +53,11 @@ file sealed class SecurityHeadersWebFactory(params (string Key, string Value)[] 
             services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
+
+            services.RemoveAll<IPersonaAvatarStore>();
+            services.AddSingleton<IPersonaAvatarStore>(new FakePersonaAvatarStore());
+            services.RemoveAll<IStationImageStore>();
+            services.AddSingleton<IStationImageStore>(new FakeStationImageStore());
         });
     }
 }
@@ -119,7 +136,22 @@ public static class FeatureSpectatorSecurityHeaders
             "/spectator/api/now-playing",
             "/spectator/api/play-history",
             "/spectator/api/stats",
-            "/spectator/api/about");
+            "/spectator/api/about",
+            // PLAN T299 (T298-review rider): the two binary artwork routes carry the SAME
+            // SpectatorSurfaceAttribute tagging as every route above — this theory previously only
+            // proved it for JSON routes and the static page. "abc" is deliberately malformed (not
+            // 32 lowercase hex, ArtworkToken.IsWellFormed's own guard): GetArtwork's own
+            // ArtworkTokenRepository.ResolveAsync rejects it before any DB round trip, and
+            // GetDjArtwork's own explicit IsWellFormed check skips personaAvatarStore entirely too —
+            // but GetDjArtwork's malformed-token fallback (ServeStationImageAsync) still reads
+            // IStationImageStore (see SecurityHeadersWebFactory's own remarks above), a genuine
+            // store round trip this factory answers with FakeStationImageStore rather than skipping
+            // (fix round: an earlier revision of this comment wrongly claimed NEITHER route ever
+            // attempts a store round trip here). No Postgres connection is configured on this
+            // factory either way, and the header assertion below cares only about the RESPONSE
+            // headers, not which token-resolution branch produced the 200.
+            "/spectator/api/artwork/abc",
+            "/spectator/api/artwork/dj/abc");
 
         [Theory]
         [MemberData(nameof(SpectatorPaths), MemberType = typeof(ScenarioHeadersOnEverySpectatorRoute))]

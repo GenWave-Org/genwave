@@ -487,6 +487,9 @@ file sealed class ThrowingUpsertPersonaAvatarStore : IPersonaAvatarStore
     public Task<PersonaAvatar?> GetByPersonaIdAsync(long personaId, CancellationToken ct) =>
         inner.GetByPersonaIdAsync(personaId, ct);
 
+    public Task<string?> GetTokenByPersonaIdAsync(long personaId, CancellationToken ct) =>
+        inner.GetTokenByPersonaIdAsync(personaId, ct);
+
     public Task<PersonaAvatar?> GetByTokenAsync(string token, CancellationToken ct) =>
         inner.GetByTokenAsync(token, ct);
 

@@ -50,8 +50,17 @@ public sealed class SpectatorController(
     IOptionsMonitor<StationOptions> stationMonitor,
     CachingScheduleResolver scheduleResolver,
     IActivePersonaAccessor personaAccessor,
-    IRequestCatalogProbe requestCatalogProbe) : ControllerBase
+    IRequestCatalogProbe requestCatalogProbe,
+    IPersonaAvatarStore personaAvatarStore) : ControllerBase
 {
+    /// <summary>The <c>SpectatorArtworkController.GetDjArtwork</c> route prefix (SPEC F129.1, PLAN
+    /// T298), composed here rather than shared from that controller: the two live in different
+    /// concerns (binary file serving vs. JSON URL composition) and
+    /// <see cref="GenWave.Host.Engine.ArtworkUrlResolver"/>'s own analogous prefix is private for
+    /// the identical reason — see <see cref="ResolveDjAvatarUrlAsync"/>'s own remarks for why this
+    /// is not routed through that resolver either (T300's own scope, not this one's).</summary>
+    const string DjAvatarPathPrefix = "/spectator/api/artwork/dj/";
+
     /// <summary>Hard cap on <c>GET /spectator/api/play-history</c> entries (SPEC F62.6), independent
     /// of the operator-configurable <c>Admin:PlayHistoryCapacity</c> ring size.</summary>
     const int MaxHistoryEntries = 20;
@@ -131,6 +140,33 @@ public sealed class SpectatorController(
     /// F92.6 already accepts and documents for ceremony timing, now visible on the public surface
     /// too: not a bug to chase, a property of two independently-correct sources of truth.
     /// </para>
+    /// <para>
+    /// Both on-air shapes also carry <c>djAvatarUrl</c> (SPEC F129.2, STORY-335, PLAN T299) — the
+    /// ON-AIR persona's worn-face token URL, or null when that persona wears no face (or
+    /// <c>Station:PublicBaseUrl</c> is unset — see <see cref="ResolveDjAvatarUrlAsync"/>). Read via
+    /// <see cref="OnAirSnapshot.PersonaId"/>, the SAME resolver source <c>show</c> already reads —
+    /// deliberately NOT the item-attributed <c>dj</c> clock above: no equivalent persona id rides
+    /// <see cref="NowPlayingSnapshot"/>/<see cref="GenWave.Core.Domain.MediaItem"/> today (only the
+    /// display name does, gh-#259), and threading one through the whole feeder-push pipeline for a
+    /// payload-only field is T300's own concern (the <c>ArtworkUrlResolver</c> ICY mapping), not
+    /// this one's. Practically this means <c>djAvatarUrl</c> reads off a DIFFERENT clock than
+    /// <c>dj</c> — the SAME one-ahead BOUNDARY SKEW documented just above for <c>show</c> — so at a
+    /// boundary the resolver's on-air persona id can briefly name someone other than the item-truth
+    /// <c>dj</c> the queue is still draining.
+    /// </para>
+    /// <para>
+    /// <b>RIGHT FACE OR NO FACE (PLAN T299 fix round, SPEC F129.6: "the spectator card shows the
+    /// face while that DJ is on air").</b> Rather than let that boundary skew reach the identity
+    /// surface — a card that would otherwise show the OUTGOING dj's name beside the INCOMING dj's
+    /// face for up to a whole track's runtime — <see cref="DjIdentityAgrees"/> SUPPRESSES
+    /// <c>djAvatarUrl</c> to null whenever <see cref="IActivePersonaAccessor.TryGetCachedName"/> for
+    /// the resolver's on-air persona id disagrees with the item-truth <c>dj</c> name, INCLUDING when
+    /// the cached name is simply unknown (never yet resolved that id — "can't verify" is treated as
+    /// "disagrees", never as a free pass). The placeholder renders instead — no face is always safer
+    /// than the WRONG face. The suppression window is exactly the queue-drain span <c>show</c>/
+    /// <c>upNext</c> already document above, and self-heals the very next poll once the item-truth
+    /// <c>dj</c> catches up to the resolver's answer.
+    /// </para>
     /// </summary>
     [HttpGet("now-playing")]
     [HttpHead("now-playing")]   // gh-#160: HEAD answers with GET's exact status/headers, body suppressed by the server
@@ -148,13 +184,74 @@ public sealed class SpectatorController(
         var onAir = scheduleResolver.TryGetCurrent();
         var upNext = onAir is null ? null : ResolveUpNext(onAir);
         var show = onAir?.Show is { } onAirShow ? new SpectatorShow(onAirShow.Name, onAirShow.Tagline) : null;
+        var djAvatarUrl = onAir?.PersonaId is { } onAirPersonaId && DjIdentityAgrees(onAirPersonaId, dj)
+            ? await ResolveDjAvatarUrlAsync(onAirPersonaId, ct)
+            : null;
 
         if (snapshot.MediaId is { } mediaId && mediaId.StartsWith("tts:", StringComparison.Ordinal))
-            return Ok(new SpectatorPatterNowPlaying(snapshot.StartedAt, snapshot.DurationMs, listeners, dj, show, upNext));
+            return Ok(new SpectatorPatterNowPlaying(
+                snapshot.StartedAt, snapshot.DurationMs, listeners, dj, djAvatarUrl, show, upNext));
 
         return Ok(new SpectatorTrackNowPlaying(
             snapshot.Title, snapshot.Artist, snapshot.StartedAt, snapshot.DurationMs, listeners,
-            dj, show, upNext, snapshot.ArtworkUrl));
+            dj, djAvatarUrl, show, upNext, snapshot.ArtworkUrl));
+    }
+
+    /// <summary>
+    /// The "right face or no face" gate (SPEC F129.6, PLAN T299 fix round) guarding
+    /// <c>djAvatarUrl</c> — see <see cref="GetNowPlaying"/>'s own RIGHT FACE OR NO FACE remarks.
+    /// True only when <see cref="IActivePersonaAccessor.TryGetCachedName"/> for
+    /// <paramref name="onAirPersonaId"/> is non-null AND matches <paramref name="djName"/> exactly
+    /// (<see cref="StringComparison.Ordinal"/>, this controller's existing string-comparison
+    /// convention — see <see cref="GetNowPlaying"/>'s own <c>MediaId.StartsWith</c> checks). A null
+    /// cached name — the id was never resolved through the ordinary orchestration path, including
+    /// the process-boot window — counts as "can't verify" and therefore as disagreement: it is
+    /// never a free pass to show a face this method cannot actually confirm belongs to the on-air
+    /// dj.
+    /// </summary>
+    bool DjIdentityAgrees(long onAirPersonaId, string? djName) =>
+        personaAccessor.TryGetCachedName(onAirPersonaId) is { } cachedName
+        && string.Equals(cachedName, djName, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Resolves the ON-AIR persona's worn-face token URL for <c>djAvatarUrl</c> (SPEC F129.2,
+    /// STORY-335, PLAN T299) — the disclosure ruling extending F67.5: "the face is on-air identity".
+    /// Null when <paramref name="personaId"/> wears no face (<see cref="IPersonaAvatarStore.GetTokenByPersonaIdAsync"/>
+    /// returns null — an honest "no face", never an error) or when
+    /// <see cref="StationOptions.PublicBaseUrl"/> is blank, mirroring
+    /// <see cref="GenWave.Host.Engine.ArtworkUrlResolver.ResolveAsync"/>'s own gate: no absolute
+    /// host, no URL, ever (the page falls back to the DJ-card placeholder either way).
+    /// <para>
+    /// <b>HOT-PATH JUDGMENT CALL (PLAN T299 build note, corrected at the T299 fix round):</b> this
+    /// is a fresh per-request <see cref="IPersonaAvatarStore"/> read, not routed through a dedicated
+    /// memo. This handler already performs an equivalent per-request I/O read for <c>listeners</c>
+    /// (<see cref="IListenerStatsSource.GetListenerCountAsync"/>, itself internally memoized ~10s —
+    /// see <c>IcecastListenerStatsSource</c>'s own remarks) inside the SAME 5-second
+    /// <see cref="SpectatorOutputCachePolicies.NowPlaying"/> output-cache window: the whole handler
+    /// body — this read included — only actually executes once per 5s regardless of concurrent
+    /// spectator poll volume, an existing bound already ≤ the gh-#482 ≤30s TTL rider. A fourth memo
+    /// copy here would duplicate that ceiling for no gain. The ORIGINAL shipped code called
+    /// <see cref="IPersonaAvatarStore.GetByPersonaIdAsync"/> here and claimed that was already the
+    /// same bounded-cost class as the listener-stats call it sat beside — that claim was WRONG:
+    /// <c>GetByPersonaIdAsync</c> selects the whole row, including the ~512 KiB <c>bytes</c> column
+    /// this method never reads, on every 5s window; the listener-stats read never drags a
+    /// half-megabyte payload off Postgres. <see cref="IPersonaAvatarStore.GetTokenByPersonaIdAsync"/>
+    /// (PLAN T299 fix round) is the token-only projection that actually closes the gap: a single
+    /// indexed 1:1 row read of one <c>text</c> column (<c>station.persona_avatar.persona_id</c> is
+    /// <c>UNIQUE</c>), genuinely the same bounded-cost class as the listener-stats call now.
+    /// </para>
+    /// </summary>
+    async Task<string?> ResolveDjAvatarUrlAsync(long personaId, CancellationToken ct)
+    {
+        var baseUrl = stationMonitor.CurrentValue.PublicBaseUrl;
+        if (string.IsNullOrEmpty(baseUrl)) return null;
+
+        var token = await personaAvatarStore.GetTokenByPersonaIdAsync(personaId, ct);
+        if (token is null) return null;
+
+        // Trim a trailing '/' an operator may have typed — the same ArtworkUrlResolver.ResolveAsync
+        // idiom, so the two composition sites never disagree on a double-slash edge case.
+        return baseUrl.TrimEnd('/') + DjAvatarPathPrefix + token;
     }
 
     /// <summary>
