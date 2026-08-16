@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **88 seams across 6 projects.**
+> **89 seams across 6 projects.**
 
 ## GenWave.Context (2 seams)
 
@@ -53,7 +53,7 @@
 | `GenWave.Core.Abstractions.IContextPatterFactSource` | `GenWave.Context.ContextPipeline` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextPatterFactSource` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IContextProvider` | `GenWave.Context.History.HistoryContextProvider` | Singleton | also registered: `GenWave.Context.Weather.WeatherContextProvider` (GenWave.Context) |
 
-## GenWave.Host (24 seams)
+## GenWave.Host (25 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -79,6 +79,7 @@
 | `GenWave.Core.Abstractions.IStationLocationProvider` | `GenWave.Host.Options.OptionsMonitorStationLocationProvider` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpStationLocationProvider` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IStationScopeProvider` | `GenWave.Host.Options.OptionsMonitorStationScopeProvider` | Singleton | — |
 | `GenWave.Host.Configuration.IStationSettingsStore` | `GenWave.Host.Configuration.StationSettingsStore` | Singleton | — |
+| `GenWave.Host.Images.IImageProcessRunner` | `GenWave.Host.Images.FfmpegImageProcessRunner` | Singleton | — |
 | `GenWave.Host.Pronunciations.IRespellOracle` | `GenWave.Host.Pronunciations.EspeakRespellOracle` | Singleton | — |
 | `GenWave.Host.Seeding.ISafeLoopSeedMarkerStore` | `GenWave.Host.Seeding.SafeLoopSeedMarkerStore` | Singleton | — |
 
