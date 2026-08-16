@@ -6,6 +6,11 @@
     <ProjectReference Include="..\GenWave.Tts\GenWave.Tts.csproj" />
     <ProjectReference Include="..\GenWave.Orchestration\GenWave.Orchestration.csproj" />
     <ProjectReference Include="..\GenWave.Context\GenWave.Context.csproj" />
+    <!-- ImageNormalizeService (PLAN T291) uses GenWave.Loudness.FfmpegProcess directly — the same
+         house argv-only ffmpeg plumbing GenWave.Tts/GenWave.MediaLibrary already reuse rather than
+         rolling a second Process.Start shape. Declared explicitly rather than leaning on the
+         transitive reference MediaLibrary already carries. -->
+    <ProjectReference Include="..\GenWave.Loudness\GenWave.Loudness.csproj" />
   </ItemGroup>
 
   <ItemGroup>

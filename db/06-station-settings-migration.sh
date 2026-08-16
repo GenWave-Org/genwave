@@ -389,4 +389,60 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  byte_size int    NOT NULL,
 	  sha256    text   NOT NULL
 	);
+
+	-- The visual layer (SPEC F128-F131, "The visual layer"; STORY-332, STORY-333, STORY-337, STORY-339,
+	-- PLAN T290). See db/37-visual-layer-migration.sh for the in-place upgrade path these four tables
+	-- also ship as, and its own remarks for the fuller rationale on every column below.
+	--
+	-- The worn face: 1:1 persona extension (F33 media_rating precedent — bytes off the hot persona row).
+	-- token is UNIQUE and ROTATED on every write (F129.1, the F88 opaque-token art-transport idiom).
+	CREATE TABLE IF NOT EXISTS station.persona_avatar (
+	  id            serial      PRIMARY KEY,
+	  persona_id    int         NOT NULL UNIQUE REFERENCES station.persona(id) ON DELETE CASCADE,
+	  bytes         bytea       NOT NULL,        -- 512x512 normalized PNG, metadata-free
+	  byte_size     int         NOT NULL,
+	  sha256        text        NOT NULL,
+	  token         text        NOT NULL UNIQUE, -- 128-bit hex; ROTATED on every write (F129.1)
+	  source        text        NOT NULL CHECK (source IN ('upload','catalog')),
+	  imported_from text,                        -- pack slug or persona-entry slug when source='catalog'
+	  updated_at    timestamptz NOT NULL DEFAULT now()
+	);
+
+	-- Installed avatar packs: the library store (F104 font_pack shape immediately above).
+	CREATE TABLE IF NOT EXISTS station.avatar_pack (
+	  id            serial      PRIMARY KEY,
+	  slug          text        NOT NULL UNIQUE,
+	  definition    jsonb       NOT NULL,        -- the pack manifest
+	  imported_from text        NOT NULL,        -- catalog slug (catalog is the only door)
+	  imported_at   timestamptz NOT NULL DEFAULT now()
+	);
+	CREATE TABLE IF NOT EXISTS station.avatar_pack_item (
+	  id                serial PRIMARY KEY,
+	  pack_id           int    NOT NULL REFERENCES station.avatar_pack(id) ON DELETE CASCADE,
+	  name              text   NOT NULL,
+	  suggested_persona text,                    -- slug hint; an OFFER, never an auto-write
+	  bytes             bytea  NOT NULL,
+	  byte_size         int    NOT NULL,
+	  sha256            text   NOT NULL,
+	  UNIQUE (pack_id, name)
+	);
+
+	-- Installed icon packs: pure jsonb, no binary assets (SPEC F130.1's constrained vector document).
+	CREATE TABLE IF NOT EXISTS station.icon_pack (
+	  id            serial      PRIMARY KEY,
+	  slug          text        NOT NULL UNIQUE,
+	  definition    jsonb       NOT NULL,
+	  imported_from text        NOT NULL,
+	  imported_at   timestamptz NOT NULL DEFAULT now()
+	);
+
+	-- The station image: deliberate single-row deviation from serial pk — the row IS the image.
+	CREATE TABLE IF NOT EXISTS station.station_image (
+	  id         int         PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+	  bytes      bytea       NOT NULL,
+	  byte_size  int         NOT NULL,
+	  sha256     text        NOT NULL,
+	  token      text        NOT NULL,           -- rotated on write; busts immutable caches
+	  updated_at timestamptz NOT NULL DEFAULT now()
+	);
 	SQL

@@ -105,24 +105,20 @@ internal static class ShowManifestParser
     };
 
     /// <summary>
-    /// Reads the optional top-level <c>schemaVersion</c> field off <paramref name="root"/> — the exact
-    /// three-outcome contract <c>ThemeSchemaVersionGate.ExtractSchemaVersion</c> already establishes
-    /// (ABSENT ⇒ <c>(null, false)</c>, treated as <see cref="CurrentSchemaVersion"/>; PRESENT and a
-    /// readable <see cref="int"/> ⇒ <c>(version, false)</c>; PRESENT but unreadable — a string, a
-    /// fraction, an overflow — ⇒ <c>(null, true)</c>, a refusal rather than a silent "treat as
+    /// Reads the optional top-level <c>schemaVersion</c> field off <paramref name="root"/> — delegates
+    /// to the shared <see cref="SchemaVersionProbe"/> (PLAN T302 review F4; this method used to hold its
+    /// own verbatim copy of the extraction, until a THIRD format — Icons — duplicated it too), the exact
+    /// three-outcome contract (ABSENT ⇒ <c>(null, false)</c>, treated as <see cref="CurrentSchemaVersion"/>;
+    /// PRESENT and a readable <see cref="int"/> ⇒ <c>(version, false)</c>; PRESENT but unreadable — a
+    /// string, a fraction, an overflow — ⇒ <c>(null, true)</c>, a refusal rather than a silent "treat as
     /// absent"), called by <see cref="Api.ShowsController.Import"/> BEFORE <see cref="Parse"/> ever
-    /// runs. See this type's own "SCHEMA-MAJOR" remarks for why Show keeps its own copy of this
-    /// extraction rather than sharing Theme's.
+    /// runs. Kept as this type's own public entry point (rather than having
+    /// <see cref="Api.ShowsController"/> call <see cref="SchemaVersionProbe"/> directly) — see this
+    /// type's own "SCHEMA-MAJOR" remarks for why Show keeps its own copy of the CONSTANT and the
+    /// two-parse ordering rather than sharing Theme's write-gate type.
     /// </summary>
-    public static (int? Version, bool Unreadable) ExtractSchemaVersion(JsonElement root)
-    {
-        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("schemaVersion", out var property))
-            return (null, false);
-
-        return property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var version)
-            ? (version, false)
-            : (null, true);
-    }
+    public static (int? Version, bool Unreadable) ExtractSchemaVersion(JsonElement root) =>
+        SchemaVersionProbe.Extract(root);
 
     public static ShowManifest Parse(ShowManifestSource source)
     {

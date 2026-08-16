@@ -90,6 +90,22 @@ namespace GenWave.Host.Api;
 /// every non-show entry, when unreachable, when the entry's meta.json omits it, or when it fails its
 /// own shape check (a real catalog slug, ≤64 chars — <see cref="CatalogController.ValidateSuggestedPersonaShape"/>).
 /// </param>
+/// <param name="AvatarItems">
+/// An avatar pack's own faces (SPEC F128.1, F128.4, PLAN T292), parsed off <see cref="Card"/> (the
+/// pack's own <c>.avatar.json</c> manifest, already fetched and hash-verified to build this same
+/// response, via <see cref="Catalog.CatalogAvatarPackManifestSerializer.Deserialize"/>) at ZERO extra
+/// network cost — the SAME "parse the already-fetched manifest" shape <see cref="FontFamily"/> already
+/// has for a font pack. <see langword="null"/> for every non-avatar entry, when unreachable, or when
+/// the manifest fails to parse (degrades — never a 500, see that method's own remarks).
+/// </param>
+/// <param name="PersonaAvatarFile">
+/// A persona entry's OWN optional sidecar face (SPEC F128.2, PLAN T292) — the bare filename of its
+/// one avatar asset (<see cref="Catalog.CatalogEntrySummary.Assets"/>, already index-validated to
+/// hold at most one element for this kind — <see cref="Catalog.CatalogIndexValidator.TryValidatePersonaAvatarAsset"/>),
+/// ready to pass straight to <c>GET /api/catalog/entries/{slug}/assets/{file}</c> the same way
+/// <see cref="FontSpecimenFile"/> already does for a font pack's specimen face. <see langword="null"/>
+/// for every non-persona entry, when unreachable, or when this persona entry declares no face.
+/// </param>
 public sealed record CatalogEntryResponse(
     string? Card,
     string? Meta,
@@ -107,7 +123,9 @@ public sealed record CatalogEntryResponse(
     string? FontLicense,
     string? FontVersion,
     string? FontSubset,
-    string? SuggestedPersona)
+    string? SuggestedPersona,
+    IReadOnlyList<CatalogAvatarItemDto>? AvatarItems,
+    string? PersonaAvatarFile)
 {
     /// <summary>
     /// The graceful "catalog currently unreachable" shape (SPEC F90.4, <see cref="Unreachable"/> =
@@ -143,5 +161,7 @@ public sealed record CatalogEntryResponse(
         FontLicense: null,
         FontVersion: null,
         FontSubset: null,
-        SuggestedPersona: null);
+        SuggestedPersona: null,
+        AvatarItems: null,
+        PersonaAvatarFile: null);
 }

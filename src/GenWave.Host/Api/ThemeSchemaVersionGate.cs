@@ -29,24 +29,17 @@ internal static class ThemeSchemaVersionGate
     public const int CurrentSchemaVersion = 1;
 
     /// <summary>
-    /// Reads the optional top-level <c>schemaVersion</c> field off <paramref name="root"/>. Three
-    /// outcomes, not two (PLAN T184 review F2): the field is ABSENT ⇒ <c>(null, false)</c>, treated by
-    /// callers as version <see cref="CurrentSchemaVersion"/>; PRESENT and a readable <see cref="int"/>
-    /// ⇒ <c>(version, false)</c>; PRESENT but not a readable <see cref="int"/> — a JSON string, a
+    /// Reads the optional top-level <c>schemaVersion</c> field off <paramref name="root"/> — delegates
+    /// to the shared <see cref="SchemaVersionProbe"/> (PLAN T302 review F4; this method used to hold its
+    /// own verbatim copy of the extraction, until a THIRD format duplicated it too). Three outcomes,
+    /// not two (PLAN T184 review F2): the field is ABSENT ⇒ <c>(null, false)</c>, treated by callers as
+    /// version <see cref="CurrentSchemaVersion"/>; PRESENT and a readable <see cref="int"/> ⇒
+    /// <c>(version, false)</c>; PRESENT but not a readable <see cref="int"/> — a JSON string, a
     /// fractional number, or one that overflows <see cref="int"/> — ⇒ <c>(null, true)</c>, a refusal
-    /// rather than a silent "treat as absent". Guards <paramref name="root"/>'s own
-    /// <see cref="JsonElement.ValueKind"/> before calling
-    /// <see cref="JsonElement.TryGetProperty(string,out JsonElement)"/>, which throws for a
-    /// syntactically valid but non-object root (a bare JSON array/string/number) — that shape is left
-    /// for the caller's own structural parse to report, never here.
+    /// rather than a silent "treat as absent". Kept as this type's own public entry point (rather than
+    /// having both call sites below call <see cref="SchemaVersionProbe"/> directly) so this type stays
+    /// the one thing both theme routes depend on for their schema-major gate.
     /// </summary>
-    public static (int? Version, bool Unreadable) ExtractSchemaVersion(JsonElement root)
-    {
-        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("schemaVersion", out var property))
-            return (null, false);
-
-        return property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var version)
-            ? (version, false)
-            : (null, true);
-    }
+    public static (int? Version, bool Unreadable) ExtractSchemaVersion(JsonElement root) =>
+        SchemaVersionProbe.Extract(root);
 }

@@ -220,19 +220,21 @@ public static class FeatureCatalogKindDiscriminator
         [Fact]
         public void TheRestOfTheIndexStillLoads()
         {
-            // Given an index entry whose kind the app does not recognise (a future icon/avatar —
-            // NOT "font", which F104.1/T193 widened this app to recognise; S3 review finding: this
-            // fixture used to read kind:"font" here, which now parses as a KNOWN kind and would
-            // pass this Fact for the wrong reason — zero declared assets, not forward-compat skip —
-            // leaving STORY-269 AC6 with no live coverage) alongside an ordinary, valid persona
-            // entry,
+            // Given an index entry whose kind the app does not recognise (a future kind —
+            // NOT "font"/"icon"/"avatar", which F104.1/T193 and F128.1/F130.6/T292 widened this app
+            // to recognise; S3 review finding: this fixture used to read kind:"font" here, which now
+            // parses as a KNOWN kind and would pass this Fact for the wrong reason — zero declared
+            // assets, not forward-compat skip — leaving STORY-269 AC6 with no live coverage; T292
+            // review finding: it was later re-pointed at kind:"icon", which the SAME widening then
+            // overtook a second time — "hologram" (STORY-331's own header comment) is this file's
+            // now-still-genuinely-unknown placeholder) alongside an ordinary, valid persona entry,
             // When the index is parsed,
             // Then that entry is skipped and the rest of the index still loads (AC6) — forward-compat.
             var index = """
                 { "generatedAt": "2026-08-04", "entries": [
-                  { "slug": "future-icon", "kind": "icon", "audience": "everyone",
-                    "manifest": { "path": "entries/future-icon/future-icon.icon.json", "sha256": "SHA" },
-                    "meta": { "path": "entries/future-icon/future-icon.meta.json", "sha256": "SHA" } },
+                  { "slug": "future-hologram", "kind": "hologram", "audience": "everyone",
+                    "manifest": { "path": "entries/future-hologram/future-hologram.hologram.json", "sha256": "SHA" },
+                    "meta": { "path": "entries/future-hologram/future-hologram.meta.json", "sha256": "SHA" } },
                   { "slug": "valid-dj", "kind": "persona", "audience": "everyone",
                     "manifest": { "path": "entries/valid-dj/valid-dj.persona.json", "sha256": "SHA" },
                     "meta": { "path": "entries/valid-dj/valid-dj.meta.json", "sha256": "SHA" } } ] }

@@ -144,6 +144,19 @@ static class StationSettingsHostingExtensions
         // the first Host call site.
         builder.Services.AddShowStore(stationConnStr);
 
+        // The visual layer's four stores (SPEC F128-F131, STORY-332/333/337/339, PLAN T290) — same
+        // station_svc connection string as every registration above; station.persona_avatar,
+        // station.avatar_pack(+_item), station.icon_pack, and station.station_image all live in the
+        // same schema. Every one of these four repositories ships dark at T290 (none of these Add*
+        // calls registers a consumer): PersonaAvatarController (T295), AvatarPackController (T293),
+        // IconPackController (T303), and StationImageController (T307) are their respective first
+        // Host call sites — the same "seam before consumer" way station.theme (T181) and
+        // station.font_pack (T198) shipped just above.
+        builder.Services.AddPersonaAvatarStore(stationConnStr);
+        builder.Services.AddAvatarPackStore(stationConnStr);
+        builder.Services.AddIconPackStore(stationConnStr);
+        builder.Services.AddStationImageStore(stationConnStr);
+
         return builder;
     }
 }

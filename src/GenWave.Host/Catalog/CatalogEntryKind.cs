@@ -35,4 +35,23 @@ public enum CatalogEntryKind
     /// (<see cref="Api.CatalogController"/>'s own <c>ToEntryResponse</c>).
     /// </summary>
     Show,
+
+    /// <summary>
+    /// An avatar pack (SPEC F128.1, PLAN T292) — the SECOND assets-carrying kind, alongside
+    /// <see cref="Font"/>: manifest <c>&lt;slug&gt;.avatar.json</c> (pack name + <c>items[{name, file,
+    /// suggestedPersona?}]</c>) + the usual meta, with one PNG per item riding <c>assets[]</c> (the
+    /// F104 <c>{path, sha256, bytes}</c> shape) — a pack IS its files, same all-or-nothing posture
+    /// <see cref="Font"/> already has (<see cref="CatalogIndexValidator.TryValidateAssets"/>). Deep PNG
+    /// re-validation (magic bytes, IHDR 512², acTL reject) happens at INSTALL time (PLAN T293) —
+    /// <see cref="CatalogIndexValidator"/> only checks the index/manifest SHAPE here, never bytes.
+    /// </summary>
+    Avatar,
+
+    /// <summary>
+    /// An icon pack (SPEC F130.6, PLAN T292) — manifest <c>&lt;slug&gt;.icon.json</c> + the usual
+    /// meta, carrying NO binary <c>assets[]</c> at all (the constrained-vector-JSON pack body lives
+    /// entirely inside the manifest document itself, SPEC F130.1) — the same minimal
+    /// <c>{manifest, meta}</c> shape <see cref="Show"/> already has.
+    /// </summary>
+    Icon,
 }
