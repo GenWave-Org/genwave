@@ -31,9 +31,11 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Playout;
 using GenWave.Host.Api;
+using GenWave.Host.Artwork;
 using GenWave.Host.Engine;
 using GenWave.Host.Options;
 using GenWave.Host.Playout;
+using GenWave.Host.Tests.Fakes;
 
 using CoreLoudness = GenWave.Core.Domain.Loudness;
 
@@ -81,7 +83,8 @@ public static class FeatureArtistFidelityEngineInitiatedPlays
                 new FixedOptionsMonitor<StationOptions>(stationOpts),
                 new FixedOptionsMonitor<LoudnessOptions>(new LoudnessOptions()),
                 new ArtworkUrlResolver(
-                    new FixedOptionsMonitor<StationOptions>(stationOpts), new FakeArtworkTokenStore()),
+                    new FixedOptionsMonitor<StationOptions>(stationOpts), new FakeArtworkTokenStore(),
+                    new FakeActivePersonaAccessor(), new PersonaAvatarTokenCache(new FakePersonaAvatarStore(), TimeProvider.System, NullLogger<PersonaAvatarTokenCache>.Instance)),
                 NullLogger.Instance,
                 ctx.Response,
                 CancellationToken.None);

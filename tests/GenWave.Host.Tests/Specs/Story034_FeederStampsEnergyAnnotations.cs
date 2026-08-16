@@ -6,8 +6,10 @@
 
 using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Host.Artwork;
 using GenWave.Host.Engine;
 using GenWave.Host.Options;
+using GenWave.Host.Tests.Fakes;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -23,7 +25,8 @@ public static class FeatureFeederStampsEnergyAnnotations
             stationId: "st-01",
             new FakeStationIdentityProvider(new StationIdentity("st-01", "GenWave", "af_heart")),
             new ArtworkUrlResolver(
-                new FakeOptionsMonitor<StationOptions>(new StationOptions()), new FakeArtworkTokenStore()),
+                new FakeOptionsMonitor<StationOptions>(new StationOptions()), new FakeArtworkTokenStore(),
+                new FakeActivePersonaAccessor(), new PersonaAvatarTokenCache(new FakePersonaAvatarStore(), TimeProvider.System, NullLogger<PersonaAvatarTokenCache>.Instance)),
             NullLogger<LiquidsoapControl>.Instance);
 
     static readonly GenWave.Core.Domain.Loudness DefaultLoudness = new(-16.0, -1.0, Measurable: true);

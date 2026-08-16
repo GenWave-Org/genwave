@@ -138,8 +138,8 @@ public sealed class SpectatorArtworkController(
     /// owner changed it — the exact regression gh-#258 already taught this codebase to avoid.
     /// </para>
     /// </summary>
-    [HttpGet("artwork/dj/{token}")]
-    [HttpHead("artwork/dj/{token}")]   // gh-#160 parity: HEAD must answer with GET's exact status/headers
+    [HttpGet(DjArtworkPaths.RouteSegment)]
+    [HttpHead(DjArtworkPaths.RouteSegment)]   // gh-#160 parity: HEAD must answer with GET's exact status/headers
     public async Task<IActionResult> GetDjArtwork(string token, CancellationToken ct)
     {
         // The F88.2 non-enumerability guard, extended to the dj token space (ArtworkToken's own

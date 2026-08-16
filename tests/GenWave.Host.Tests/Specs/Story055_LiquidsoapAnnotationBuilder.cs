@@ -8,8 +8,10 @@
 
 using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Host.Artwork;
 using GenWave.Host.Engine;
 using GenWave.Host.Options;
+using GenWave.Host.Tests.Fakes;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -28,7 +30,8 @@ public static class FeatureLiquidsoapAnnotationBuilder
             stationId: "st-01",
             new FakeStationIdentityProvider(new StationIdentity("st-01", "GenWave", "af_heart")),
             new ArtworkUrlResolver(
-                new FakeOptionsMonitor<StationOptions>(new StationOptions()), new FakeArtworkTokenStore()),
+                new FakeOptionsMonitor<StationOptions>(new StationOptions()), new FakeArtworkTokenStore(),
+                new FakeActivePersonaAccessor(), new PersonaAvatarTokenCache(new FakePersonaAvatarStore(), TimeProvider.System, NullLogger<PersonaAvatarTokenCache>.Instance)),
             NullLogger<LiquidsoapControl>.Instance);
 
     // ---------------------------------------------------------------------

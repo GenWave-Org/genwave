@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Playout;
+using GenWave.Host.Artwork;
 using GenWave.Host.Engine;
 using GenWave.Host.Options;
 
@@ -49,12 +50,21 @@ static class PlayoutServiceCollectionExtensions
                     sp.GetRequiredService<CrosstalkRetirementEventSink>(),
                 ],
                 sp.GetRequiredService<ILogger<CompositeStationEventSink>>()))
-            // Artwork/station-icon URL resolution on the push path (SPEC F88.4–F88.5, STORY-223,
-            // PLAN T85) — shared by LiquidsoapControl.PushAsync and the safe-track endpoint
-            // (InternalEndpoints), mirroring how LiquidsoapAnnotationBuilder itself is shared
-            // between the two. Depends only on IOptionsMonitor<StationOptions> (bound by
-            // AddGenWaveStationOptions) and IArtworkTokenStore (bound by AddMediaLibrary) —
-            // Program.cs runs both before AddGenWavePlayout.
+            // Persona-id -> worn-face token, memoized on a ≤30s TTL (SPEC F129.5, STORY-336, PLAN
+            // T300, gh-#482 rider) — the ONE shared memo both ArtworkUrlResolver (below) and
+            // SpectatorController (Host.Api) read, so the ICY stream and the now-playing payload
+            // can never answer a stale-vs-fresh token differently for the same instant. Depends only
+            // on IPersonaAvatarStore (bound by AddGenWaveStationSettings, which Program.cs runs
+            // before this) and TimeProvider.
+            .AddSingleton<PersonaAvatarTokenCache>()
+            // Artwork/station-icon/dj-token URL resolution on the push path (SPEC F88.4–F88.5,
+            // STORY-223, PLAN T85; amended F129.4, STORY-336, PLAN T300) — shared by
+            // LiquidsoapControl.PushAsync and the safe-track endpoint (InternalEndpoints), mirroring
+            // how LiquidsoapAnnotationBuilder itself is shared between the two. Depends on
+            // IOptionsMonitor<StationOptions> (bound by AddGenWaveStationOptions), IArtworkTokenStore
+            // (bound by AddMediaLibrary), IActivePersonaAccessor (bound by AddGenWaveStationSettings),
+            // and PersonaAvatarTokenCache (just above) — Program.cs runs all of these before
+            // AddGenWavePlayout.
             .AddSingleton<ArtworkUrlResolver>()
             // The engine-control seam, bound to the configured Liquidsoap host. Station name on
             // the push path is read live through IStationIdentityProvider (SPEC F44.1).

@@ -21,8 +21,10 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Playout;
 using GenWave.Host.Api;
+using GenWave.Host.Artwork;
 using GenWave.Host.Engine;
 using GenWave.Host.Options;
+using GenWave.Host.Tests.Fakes;
 // Alias to avoid clash with the GenWave.Loudness namespace (FfmpegLoudnessAnalyzer project).
 using TrackLoudness = GenWave.Core.Domain.Loudness;
 
@@ -137,7 +139,8 @@ public static class FeatureSafeTrackEndpoint
     /// <see cref="FakeArtworkTokenStore"/>.
     /// </summary>
     static ArtworkUrlResolver NoArtworkResolver() =>
-        new(new FakeOptionsMonitor<StationOptions>(new StationOptions()), new FakeArtworkTokenStore());
+        new(new FakeOptionsMonitor<StationOptions>(new StationOptions()), new FakeArtworkTokenStore(),
+            new FakeActivePersonaAccessor(), new PersonaAvatarTokenCache(new FakePersonaAvatarStore(), TimeProvider.System, NullLogger<PersonaAvatarTokenCache>.Instance));
 
     /// <summary>
     /// Builds a ready, measurable <see cref="MediaReference"/> for use in tests.
