@@ -97,7 +97,12 @@ public sealed class CatalogPersonaAvatarInstaller(
                 return;
             }
 
-            var normalized = await imageNormalizeService.NormalizeAsync(okAsset.Bytes, ct);
+            // gh-#520: NormalizeCatalogAssetAsync, not NormalizeAsync — this is the SAME
+            // catalog-sourced, hash-verified-fetch situation AvatarPackController's own install route
+            // is in, so it earns the identical chunk-strip fast path for an already-512×512 PNG
+            // rather than paying ffmpeg's own weaker re-encode a second time; see that method's own
+            // remarks for the full reasoning.
+            var normalized = await imageNormalizeService.NormalizeCatalogAssetAsync(okAsset.Bytes, ct);
             switch (normalized)
             {
                 case ImageNormalizeResult.Success success:

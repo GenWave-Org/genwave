@@ -26,11 +26,11 @@ public interface IPersonaAvatarStore
 
     /// <summary>Token-only projection of the worn face for <paramref name="personaId"/> (PLAN T299
     /// fix round) — the same answer as <see cref="GetByPersonaIdAsync"/>'s own
-    /// <see cref="PersonaAvatar.Token"/>, but never selects the ~512 KiB <c>bytes</c> column. For a
+    /// <see cref="PersonaAvatar.Token"/>, but never selects the ≤768 KiB <c>bytes</c> column. For a
     /// caller that only ever composes a token URL — <c>GenWave.Host.Api.SpectatorController.ResolveDjAvatarUrlAsync</c>
     /// is the first (T300's own persona→token memo reads this projection too, never the
-    /// bytes-carrying one) — <see cref="GetByPersonaIdAsync"/> would otherwise pull a whole face
-    /// payload off Postgres purely to discard it. <see langword="null"/> for the same "no face"
+    /// bytes-carrying one) — <see cref="GetByPersonaIdAsync"/> would otherwise pull a whole
+    /// face payload off Postgres purely to discard it. <see langword="null"/> for the same "no face"
     /// reasons <see cref="GetByPersonaIdAsync"/> documents.</summary>
     Task<string?> GetTokenByPersonaIdAsync(long personaId, CancellationToken ct);
 

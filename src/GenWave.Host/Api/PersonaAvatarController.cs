@@ -103,7 +103,7 @@ public sealed class PersonaAvatarController(
     /// paired with the <see cref="EntityTagHeaderValue"/> this action hands
     /// <see cref="ControllerBase.File(byte[], string, System.DateTimeOffset?, EntityTagHeaderValue?)"/>,
     /// the framework's own conditional-request handling answers a matching <c>If-None-Match</c> with a bodyless 304 rather
-    /// than re-sending the same ≤512 KiB PNG on every render — cheap AND correct, never trading one for
+    /// than re-sending the same ≤768 KiB PNG on every render — cheap AND correct, never trading one for
     /// the other. <c>Private</c> (never <c>Public</c>, unlike <see cref="SpectatorArtworkController"/>'s
     /// own anonymous route): this is cookie-authenticated admin content, not a byte stream any
     /// shared/proxy cache should ever be allowed to hold.
@@ -192,17 +192,26 @@ public sealed class PersonaAvatarController(
     /// refusals must stay silent about.
     ///
     /// <para>
-    /// <b>NO RE-NORMALIZE (deliberate, documented here per the PLAN T295 build note).</b> An installed
-    /// pack item's bytes are ALREADY the normalized derivative — <see cref="AvatarPackController"/>'s
-    /// own install route ran every item through this exact <see cref="ImageNormalizeService"/> pipeline
-    /// BEFORE ever writing <c>station.avatar_pack_item</c> (its own RE-VALIDATION IS NOT OPTIONAL
-    /// remarks). Running the pipeline a second time here would be redundant work with an identical
-    /// outcome — the SAME bytes, since ffmpeg's re-encode of an already-512×512, already-<c>-pix_fmt
-    /// rgba</c>, already-metadata-stripped PNG is idempotent — so this action CARRIES the item's own
-    /// <see cref="AvatarPackItem.Sha256"/> forward rather than recomputing a hash over bytes it never
-    /// mutates: the pinned hash still genuinely describes the bytes this write stores (unlike
-    /// <see cref="AvatarPackController"/>'s own install route, which recomputes because normalization
-    /// there DOES change the bytes it fetched).
+    /// <b>NO RE-NORMALIZE (deliberate, documented here per the PLAN T295 build note; rewritten fix
+    /// round finding #3 — the old wording's "idempotent ffmpeg re-encode" claim no longer describes
+    /// every installed item).</b> An installed pack item's bytes are ALREADY validated:
+    /// <see cref="AvatarPackController"/>'s own install route ran every item through this exact
+    /// <see cref="ImageNormalizeService.NormalizeCatalogAssetAsync"/> pipeline BEFORE ever writing
+    /// <c>station.avatar_pack_item</c> (its own RE-VALIDATION IS NOT OPTIONAL remarks) — but since
+    /// gh-#520, that pipeline no longer always means "a fresh ffmpeg re-encode": an exactly-512×512
+    /// catalog item instead takes the <see cref="PngMetadataStripper"/> fast path, which stores the
+    /// chunk-stripped ORIGINAL encoding verbatim (whatever pixel format/color type the catalog seed's
+    /// own PNG already used, never necessarily <c>-pix_fmt rgba</c>) — only the ffmpeg fallback still
+    /// produces that specific re-encoded shape. Running the pipeline a second time here is not "the
+    /// same idempotent encoder twice" for every item any more; it would simply be POINTLESS work
+    /// either way: <c>item.Bytes</c> already cleared every install-time gate (magic bytes, header
+    /// dimensions, APNG-reject, chunk strip or ffmpeg re-encode), and <c>item.Sha256</c> is the
+    /// install-time pipeline's own freshly-computed hash over THAT exact output (the stripper's hash
+    /// over its own stripped bytes, or ffmpeg's over its own re-encoded ones) — so this action CARRIES
+    /// it forward rather than recomputing over bytes it never mutates: the pinned hash still genuinely
+    /// describes the bytes this write stores (unlike <see cref="AvatarPackController"/>'s own install
+    /// route, which recomputes because normalization there is what actually PRODUCES the bytes being
+    /// hashed in the first place).
     /// </para>
     /// </summary>
     [HttpPost("from-pack")]

@@ -19,7 +19,7 @@ public interface IStationImageStore
 
     /// <summary>Token-only projection of the current station image (PLAN T307 fix round) — the same
     /// answer as <see cref="GetAsync"/>'s own <see cref="StationImage.Token"/>, but never selects the
-    /// ≤512 KiB <c>bytes</c> column. For a caller that only ever needs to know WHETHER a row exists
+    /// ≤768 KiB <c>bytes</c> column. For a caller that only ever needs to know WHETHER a row exists
     /// and, if so, under what token — <c>GenWave.Host.Api.AuthController.Stations</c>'s own
     /// <c>GET /api/stations</c> snapshot is the first (the authed shell's own tab-icon href, resolved
     /// from that SAME snapshot rather than a per-navigation bytes fetch) — <see cref="GetAsync"/> would

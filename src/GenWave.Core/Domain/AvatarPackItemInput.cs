@@ -19,11 +19,13 @@ namespace GenWave.Core.Domain;
 /// (PLAN T293, the seam's first real write consumer) runs every fetched PNG through
 /// <c>GenWave.Host.Images.ImageNormalizeService</c> BEFORE ever constructing one of these — SPEC
 /// F129.2's "served bytes are metadata-free by construction" promise means what is actually stored is
-/// a freshly re-encoded 512×512 derivative, never the verbatim fetched bytes, so a hash pinned from
-/// the FETCH would describe bytes this row does not even hold. This is instead
-/// <c>ImageNormalizeService.NormalizeAsync</c>'s own freshly-computed hash of its OWN output — the
-/// fetched asset's hash is verified in-transport, once, by <c>CatalogProxyService</c> (against the
-/// index's declared sha256) and is never carried any further forward; this field only ever describes
+/// a validated 512×512 derivative (a chunk-stripped original encoding, or a freshly re-encoded one —
+/// see <c>ImageNormalizeService.NormalizeCatalogAssetAsync</c>'s own gh-#520 remarks), never the
+/// verbatim fetched bytes, so a hash pinned from the FETCH would describe bytes this row does not even
+/// hold. This is instead <c>ImageNormalizeService.NormalizeCatalogAssetAsync</c>'s own freshly-computed
+/// hash of its OWN output — the fetched asset's hash is verified in-transport, once, by
+/// <c>CatalogProxyService</c> (against the index's declared sha256) and is never carried any further
+/// forward; this field only ever describes
 /// what is actually persisted.</param>
 /// <param name="SuggestedPersona">A slug hint the apply-from-pack picker highlights (T296) —
 /// <see langword="null"/> when the pack manifest names none.</param>

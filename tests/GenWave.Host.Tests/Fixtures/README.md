@@ -126,6 +126,43 @@ cp genwave-catalog/fixtures/golden.show.json genwave/tests/GenWave.Host.Tests/Fi
 and update the pinned commit above. Never hand-edit this file in place — see
 `genwave-catalog/README.md`'s own "golden fixture" section for how that repo generates/curates it.
 
+## `gh520-real-art-512.png` / `gh520-real-art-large.png` — the gh-#520 hotfix's real-art-class fixtures
+
+Two REAL, first-party PNGs — not synthetic ffmpeg `testsrc` patterns — needed because gh-#520's own
+bug (`ImageNormalizeService`'s ffmpeg re-encode measurably losing to the ImageMagick max-compression
+that produced the catalog's own avatar seeds) only reproduces against genuinely high-information-
+content art; a synthetic flat/gradient pattern compresses far too well to ever exercise the ceiling
+either version of the code enforces. `TestImages.CreatePng`/`CreateHighBitDepthPng` (ffmpeg-generated)
+cannot stand in: a pure noise fill is EITHER trivially compressible (low-entropy patterns) or
+incompressible in a way real photographic/illustrated art never is (uniform random noise, the
+existing `CreateHighBitDepthPng` fixture's own job) — neither shape matches "real art near a real
+compression ceiling." ImageMagick (`convert`) can regenerate a fixture LIKE this locally, but `ci.yml`
+installs ffmpeg only, so the generation recipe itself is not CI-reproducible; committing the actual
+repro assets is the SAFEST option named at gh-#520's own build time, not a shortcut.
+
+Both files are first-party GenWave-authored CC0 1.0 Universal art (`genwave-catalog`'s own
+`LICENSE`/README: catalog content is CC0 unless otherwise noted, and both source files below are
+GenWave's own, `avatar-pack-two.meta.json`'s `"author": "GenWave"`) — safe to vendor here with
+provenance noted, same footing as this codebase's other binary fixtures above.
+
+- **`gh520-real-art-512.png`** — copied verbatim from `genwave-catalog/entries/avatars/avatar-pack-two/maxxie-volt.png`
+  (511,707 bytes, exactly 512×512, ImageMagick-max-compressed at catalog-CI publish time, no
+  ancillary chunks). The literal gh-#520 bug-report asset for the INSTALL path: measured
+  511,707 → 662,829 bytes under the pre-fix ffmpeg re-encode (busting the old 512 KiB ceiling),
+  511,707 → 511,707 (byte-identical) under the fast-path `PngMetadataStripper` fix, since it already
+  carries no metadata to strip.
+- **`gh520-real-art-large.png`** — copied verbatim from `avatars/transparent/nova-demo-1.png` in the
+  sibling `avatars/` working tree (1,948,878 bytes, 1024×1024, carries real ancillary chunks —
+  `cHRM`/`bKGD`/`tIME`/`tEXt`×2 — so it also still exercises metadata stripping via the ffmpeg
+  fallback, since 1024×1024 is not the fast path's exact-512×512 shape). The literal gh-#520
+  bug-report asset for the UPLOAD path: measured re-encode to 629,193 bytes at the OLD ffmpeg
+  settings/512 KiB ceiling (a refusal), 541,265 bytes at the gh-#520 max-compression settings/768 KiB
+  ceiling (a success).
+
+`Specs/Story332_AvatarPacksIntoTheLibrary.cs`/`Specs/Story333_TheWornFace.cs` drive these through the
+real production install/upload routes. **Never regenerate** — these are the ACTUAL bug-report assets;
+a "fresh" regeneration would no longer be the artifact gh-#520 was measured against.
+
 ## `font-catalog-index.json` — a font entry with real asset hashes (PLAN T193, STORY-279 AC4)
 
 A sibling to `mixed-catalog-index.json` (never that file itself — see its own remarks on why a third
