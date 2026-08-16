@@ -32,6 +32,7 @@ using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
+using GenWave.Host.Catalog;
 using GenWave.Host.Options;
 
 namespace GenWave.Host.Tests.Specs;
@@ -178,6 +179,16 @@ file sealed class NotUsedTtsVoiceLister : ITtsVoiceLister
         throw new NotSupportedException("Not exercised by Story120's CRUD scenarios.");
 }
 
+/// <summary>Unused-by-these-scenarios <see cref="ICatalogPersonaAvatarInstaller"/> double (PLAN T297
+/// added this constructor dependency to <see cref="PersonaController"/> for its import endpoint; none
+/// of this file's CRUD scenarios call it) — same reason as <see cref="NotUsedPersonaImportStore"/>
+/// above.</summary>
+file sealed class NotUsedCatalogPersonaAvatarInstaller : ICatalogPersonaAvatarInstaller
+{
+    public Task InstallIfPresentAsync(long personaId, string catalogSlug, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story120's CRUD scenarios.");
+}
+
 // ── WebApplicationFactory for auth/content-type AC tests ─────────────────────────────────────────
 
 /// <summary>
@@ -240,6 +251,7 @@ public static class FeaturePersonaEndpoints
             new NotUsedPersonaMemory(), new NotUsedPersonaTasteReader(),
             new NotUsedPersonaImportStore(), new NotUsedTtsVoiceLister(),
             new FakeStationClockProvider(DateTimeOffset.UtcNow),
+            new NotUsedCatalogPersonaAvatarInstaller(),
             NullLogger<PersonaController>.Instance);
 
     // ---------------------------------------------------------------------

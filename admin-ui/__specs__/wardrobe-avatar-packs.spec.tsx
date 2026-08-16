@@ -90,6 +90,7 @@ const AVATAR_DETAIL: CatalogEntryDetailDto = {
   fontSubset: null,
   suggestedPersona: null,
   avatarItems: [{ name: "Classic", file: "classic.png", suggestedPersona: "flip" }],
+  personaAvatarFile: null,
 };
 
 const ENTRY_URL = "/api/catalog/entries/warm-grins";

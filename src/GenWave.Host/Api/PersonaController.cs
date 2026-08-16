@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Logging;
+using GenWave.Host.Catalog;
 using GenWave.Host.Options;
 using GenWave.Tts;
 
@@ -44,6 +45,7 @@ public sealed partial class PersonaController(
     IPersonaImportStore personaImportStore,
     ITtsVoiceLister voiceLister,
     IStationClockProvider stationClock,
+    ICatalogPersonaAvatarInstaller catalogPersonaAvatarInstaller,
     ILogger<PersonaController> logger) : ControllerBase
 {
     /// <summary>GET /api/personas — every persona row, ordered by name (F35.4). Each row is joined
@@ -326,7 +328,11 @@ public sealed partial class PersonaController(
     /// POST /api/personas/{slug}/import — upserts a persona from a portable <c>&lt;slug&gt;.persona.json</c>
     /// card (SPEC F79.2, F79.3, F79.4, F79.6, F90.7; STORY-209, STORY-237, PLAN T67, T98). Every gate
     /// below runs BEFORE <see cref="IPersonaImportStore.ImportAsync"/> — the one transactional write —
-    /// so a rejection at ANY of them means nothing was ever written (F79.6):
+    /// so a rejection at ANY of them means nothing was ever written (F79.6). AFTER that write commits
+    /// on a catalog origin, <see cref="CatalogPersonaAvatarInstaller.InstallIfPresentAsync"/> installs
+    /// the entry's own sidecar face, if it declares one (SPEC F128.7, STORY-334, PLAN T297) — see this
+    /// method's own call site remarks and that class's own THE FACE IS DECORATIVE remarks for why
+    /// nothing about that step can ever turn a successful import into a failed response:
     /// <list type="number">
     /// <item>Slug format: the same lowercase/digit/single-hyphen shape
     /// <c>LegacyPersonaCardMapper.Slugify</c> ever PRODUCES, checked here as a REJECT rather than a
@@ -427,9 +433,30 @@ public sealed partial class PersonaController(
             new PersonaImportRequest(slug, legacyVoice, card, importedFrom), ct);
 
         if (outcome is PersonaImportOutcome.Imported succeeded)
+        {
             logger.LogInformation(
                 "Persona imported slug={Slug} id={PersonaId} created={WasCreated} warnings={WarningCount}",
                 slug, succeeded.PersonaId, succeeded.WasCreated, warnings.Count);
+
+            // SPEC F128.7 (STORY-334, PLAN T297): a catalog-origin import may carry the entry's own
+            // sidecar face — installed here, AFTER the one transactional write above already
+            // committed, never before. catalogSlug is the SAME F90.7 signal importedFrom already
+            // branches on two lines up; a file-upload import (catalogSlug absent) never reaches this
+            // call at all — CatalogPersonaAvatarInstaller's own THE FACE IS DECORATIVE remarks are
+            // why a face-side failure here can never fail — or even be visible to — this response.
+            //
+            // LATENCY: this call is fully AWAITED — this action's own response does not return until
+            // it finishes — so its worst case is this route's own worst case. Cold (nothing yet in
+            // CatalogProxyService's cache): up to the 15s named-client timeout for EACH of the index,
+            // manifest, meta, and asset fetches InstallIfPresentAsync's own call graph makes (4 × 15s
+            // = 60s) plus ImageNormalizeService's own 10s ffmpeg timeout — ~70s worst case. Warm —
+            // the ordinary case — is near-zero: the trust modal's own preceding
+            // GET /api/catalog/entries/{slug} call (rendering that entry's <img> face) already
+            // populated the SAME 15-minute cache this call re-reads, so every fetch above is an
+            // in-process hit and only the (fast) ffmpeg re-encode itself remains.
+            if (!string.IsNullOrEmpty(catalogSlug))
+                await catalogPersonaAvatarInstaller.InstallIfPresentAsync(succeeded.PersonaId, catalogSlug, ct);
+        }
 
         return outcome switch
         {

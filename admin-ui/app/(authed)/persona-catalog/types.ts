@@ -84,7 +84,12 @@ export interface CatalogIndexResponseDto {
  * index/personas state, not a further catalog fetch.
  * `avatarItems` (SPEC F128.1, F128.4, PLAN T292/T294) is an avatar pack entry's own faces, parsed off
  * `card` (the pack's `.avatar.json` manifest) — `null` for every non-avatar entry, when unreachable,
- * or when the manifest fails to parse. See `CatalogAvatarItemDto`'s own remarks. */
+ * or when the manifest fails to parse. See `CatalogAvatarItemDto`'s own remarks.
+ * `personaAvatarFile` (SPEC F128.2, F128.7, PLAN T292/T297) is a PERSONA entry's OWN optional
+ * sidecar face — the bare filename of its one avatar asset, ready to pass straight to
+ * `GET /api/catalog/entries/{slug}/assets/{file}` the same way `fontSpecimenFile` already does for a
+ * font pack's specimen face. `null` for every non-persona entry, when unreachable, or when this
+ * persona entry declares no face — see Host's `CatalogEntryResponse.PersonaAvatarFile`. */
 export interface CatalogEntryDetailDto {
   card: string | null;
   meta: string | null;
@@ -103,6 +108,7 @@ export interface CatalogEntryDetailDto {
   fontSubset: string | null;
   suggestedPersona: string | null;
   avatarItems: CatalogAvatarItemDto[] | null;
+  personaAvatarFile: string | null;
 }
 
 /**

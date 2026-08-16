@@ -270,6 +270,15 @@ builder.Services
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddSingleton<CatalogProxyService>();
 
+// Installs a catalog persona entry's own sidecar face after a successful catalog-origin import
+// (SPEC F128.7, STORY-334, PLAN T297) — PersonaController.Import's own post-commit call site.
+// Singleton for the same reason as CatalogProxyService/ImageNormalizeService just above: every
+// dependency it composes is itself a singleton, and it carries no per-request state of its own.
+// Registered against its own ICatalogPersonaAvatarInstaller seam (that interface's own remarks:
+// PersonaController's existing direct-construction unit tests need a throwing stub, not this real
+// dependency graph).
+builder.Services.AddSingleton<ICatalogPersonaAvatarInstaller, CatalogPersonaAvatarInstaller>();
+
 builder.Services.AddControllers();
 
 // Liveness endpoint for the compose healthcheck. No checks registered = 200 Healthy when up.

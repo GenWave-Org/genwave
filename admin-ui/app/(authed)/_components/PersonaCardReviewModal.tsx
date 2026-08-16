@@ -16,6 +16,7 @@ import {
   type PersonaCardReviewCorrection,
   type PersonaCardReviewTasteRule,
 } from "./persona-card-review";
+import { PersonaCardReviewFace } from "./PersonaCardReviewFace";
 
 export interface PersonaCardReviewImportResult {
   name: string;
@@ -37,6 +38,11 @@ export interface PersonaCardReviewModalProps {
    * appended as `?catalogSlug=` on import. Omitted entirely for a file-upload origin
    * (STORY-236/T104), which stamps `imported_from = "file"` server-side by default. */
   catalogSlug?: string;
+  /** The catalog entry's own sidecar face — `CatalogEntryDetailDto.personaAvatarFile` (SPEC F128.7,
+   * PLAN T297), or `null`/omitted when the entry declares none. Meaningless without `catalogSlug`
+   * (there is no asset route without an entry to resolve it against) — the file-upload origin
+   * simply never passes this prop, mirroring `samples`' own "omitted there" shape exactly. */
+  avatarFile?: string | null;
   /** Sample patter lines from the catalog entry's `meta.json` sidecar (SPEC F90.5's "Entry =
    * unchanged F79 card + meta.json sidecar" split) — the trust ruling's "samples when present"
    * requirement, shown alongside the card's own sections. A file-upload origin carries no sidecar
@@ -165,15 +171,34 @@ function renderOtherField([key, value]: [string, unknown]): ReactNode {
 }
 
 /** Every SPEC F90.6/ARCHITECTURE.md "Trust ruling" section, plain text (React's default escaping
- * only — no `dangerouslySetInnerHTML` anywhere in this tree, ever). */
-function ReviewBody({ review, samples }: { review: PersonaCardReview; samples: string[] }): ReactNode {
+ * only — no `dangerouslySetInnerHTML` anywhere in this tree, ever). `catalogSlug`/`avatarFile` (SPEC
+ * F128.7, PLAN T297) render the entry's own face beside its Name — `catalogSlug === undefined` (the
+ * file-upload origin) never even mounts `PersonaCardReviewFace`, since there is no asset route to
+ * build without an entry slug; `PersonaCardReviewFace` itself already renders nothing for a
+ * catalog-origin entry that simply declares no face (`avatarFile === null`). */
+function ReviewBody({
+  review,
+  samples,
+  catalogSlug,
+  avatarFile,
+}: {
+  review: PersonaCardReview;
+  samples: string[];
+  catalogSlug: string | undefined;
+  avatarFile: string | null | undefined;
+}): ReactNode {
   const otherFieldEntries = Object.entries(review.otherFields);
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h3 className={SECTION_LABEL_CLASSES}>Name</h3>
-        <p className={SECTION_BODY_CLASSES}>{review.name}</p>
+      <div className="flex items-center gap-3">
+        {catalogSlug !== undefined && (
+          <PersonaCardReviewFace slug={catalogSlug} file={avatarFile ?? null} personaName={review.name} />
+        )}
+        <div>
+          <h3 className={SECTION_LABEL_CLASSES}>Name</h3>
+          <p className={SECTION_BODY_CLASSES}>{review.name}</p>
+        </div>
       </div>
       <TextSection label="Tagline" value={review.tagline} />
       <TextSection label="Soul" value={review.soul} />
@@ -237,6 +262,7 @@ function ReviewBody({ review, samples }: { review: PersonaCardReview; samples: s
 export function PersonaCardReviewModal({
   cardText,
   catalogSlug,
+  avatarFile,
   samples = [],
   verb = "import",
   onCancel,
@@ -315,7 +341,7 @@ export function PersonaCardReviewModal({
                 This card couldn&apos;t be read — it may be malformed. Cancel and try again.
               </p>
             ) : (
-              <ReviewBody review={review} samples={samples} />
+              <ReviewBody review={review} samples={samples} catalogSlug={catalogSlug} avatarFile={avatarFile} />
             )}
           </div>
 

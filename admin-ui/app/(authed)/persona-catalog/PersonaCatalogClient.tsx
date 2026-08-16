@@ -607,6 +607,7 @@ export function PersonaCatalogClient({
         <PersonaCardReviewModal
           cardText={detail.detail.card}
           catalogSlug={detail.slug}
+          avatarFile={detail.detail.personaAvatarFile}
           samples={detail.detail.samplePatter ?? []}
           verb="hire"
           onCancel={() => setReviewingPersonaSlug(null)}

@@ -82,6 +82,7 @@ const SHOW_DETAIL_WITH_OFFERABLE_SUGGESTION: CatalogEntryDetailDto = {
   fontSubset: null,
   suggestedPersona: "flip",
   avatarItems: null,
+  personaAvatarFile: null,
 };
 
 const SHOW_DETAIL_NO_SUGGESTION: CatalogEntryDetailDto = {
@@ -135,6 +136,7 @@ const FLIP_DETAIL: CatalogEntryDetailDto = {
   fontSubset: null,
   suggestedPersona: null,
   avatarItems: null,
+  personaAvatarFile: null,
 };
 
 /** A SECOND, unrelated persona entry (PLAN T255 review finding F1) — "the next card clicked" in
