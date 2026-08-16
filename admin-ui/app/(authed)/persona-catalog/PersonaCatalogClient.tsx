@@ -13,6 +13,9 @@ import { formatDateStamp } from "@/lib/format-clock";
 import { readErrorMessage } from "@/lib/problem-details";
 import { cn } from "@/lib/utils";
 import { PersonaCardReviewModal, type PersonaCardReviewImportResult } from "../_components/PersonaCardReviewModal";
+import { AvatarDetailPanel } from "./AvatarDetailPanel";
+import { AvatarInstallModal, type AvatarInstallResult } from "./AvatarInstallModal";
+import { clampPackDisplayText } from "./avatar-format";
 import { BestForChips, MatureBadge } from "./catalog-badges";
 import { FontDetailPanel } from "./FontDetailPanel";
 import { FontInstallModal, type FontInstallResult } from "./FontInstallModal";
@@ -32,12 +35,16 @@ import type {
 } from "./types";
 
 /** Plural noun per kind for the per-tab empty state (gh-#372) — matches each kind's own shelf
- * vocabulary ("font packs", the F104 wording, not bare "fonts"). */
+ * vocabulary ("font packs", the F104 wording, not bare "fonts"). `icon` carries a noun even though
+ * no tab reads it yet (T304's own future tab) — `Record<CatalogEntryKind, string>` requires every
+ * member, the same exhaustiveness discipline `renderShelfEntry`'s own switch states explicitly. */
 const KIND_TAB_NOUN: Record<CatalogEntryKind, string> = {
   persona: "personas",
   theme: "themes",
   font: "font packs",
   show: "shows",
+  avatar: "avatar packs",
+  icon: "icons",
 };
 
 interface PersonaCatalogClientProps {
@@ -87,6 +94,14 @@ interface PersonaCatalogClientProps {
    * state props above, but the same "no live signal, no false claim" posture).
    */
   hiredPersonaSlugs?: string[];
+  /**
+   * Every already-installed avatar pack's slug (PLAN T294) — mirrors `installedFontSlugs`'s own
+   * "reopening shows no installed state" fix (gh-#375/PLAN T204), applied to the avatar kind per
+   * this task's own "match the font install flow exactly" instruction. Sourced from
+   * `GET /api/avatar-packs` (PLAN T294's own listing route). Defaults to `[]` — fail closed, the
+   * same posture every other installed-slugs prop on this component carries.
+   */
+  installedAvatarSlugs?: string[];
   /** Test-only injection point for the theme provenance line's `formatDateStamp` call (gh-#375);
    * production omits this and gets the browser's local zone — the same SettingsForm/WardrobeClient/
    * PersonasClient idiom, not a bespoke one. */
@@ -147,6 +162,7 @@ export function PersonaCatalogClient({
   installedThemeProvenance = [],
   importedShowSlugs = [],
   hiredPersonaSlugs = [],
+  installedAvatarSlugs = [],
   timeZone,
   activeKind = "persona",
 }: PersonaCatalogClientProps): ReactNode {
@@ -164,6 +180,7 @@ export function PersonaCatalogClient({
   const [reviewingPersonaSlug, setReviewingPersonaSlug] = useState<string | null>(null);
   const [installingTheme, setInstallingTheme] = useState(false);
   const [installingFont, setInstallingFont] = useState(false);
+  const [installingAvatar, setInstallingAvatar] = useState(false);
   // Which show entry (if any) has its combined detail/review modal open (PLAN T255) — a show never
   // routes through `detail`/`loadDetail` at all (see `ShowCardReviewModal`'s own remarks for why),
   // so this is its own, independent piece of state.
@@ -180,6 +197,12 @@ export function PersonaCatalogClient({
   // `useState(() => ...)` (lazy initializer): this only needs to run once, not re-derive the Set on
   // every render.
   const [installedSlugs, setInstalledSlugs] = useState<ReadonlySet<string>>(() => new Set(installedFontSlugs));
+  // Same lazy-initializer/local-flip shape as `installedSlugs` above (PLAN T294) — flipped the
+  // instant an avatar pack install succeeds (handleAvatarInstalled below), so reopening that same
+  // slug reads "Installed"/"Re-install" with no reload.
+  const [installedAvatarPackSlugs, setInstalledAvatarPackSlugs] = useState<ReadonlySet<string>>(
+    () => new Set(installedAvatarSlugs)
+  );
   // Same lazy-initializer/local-flip shape as `installedSlugs` above, keyed by slug — a Map, not a
   // Set, because the theme detail panel's provenance line needs the WHOLE row
   // (importedFrom/importedAt), not just a boolean.
@@ -311,6 +334,21 @@ export function PersonaCatalogClient({
   }
 
   /**
+   * SPEC F128.3's success path — mirrors `handleFontInstalled`'s own shape exactly (this task's own
+   * "match the font install flow" instruction): closes the modal, marks `slug` installed in local
+   * state so `AvatarDetailPanel` flips to "Installed"/"Re-install" immediately (no reload), and
+   * toasts the pack's own manifest name. `clampPackDisplayText` (PLAN T294 rider 2) bounds that name
+   * before it reaches the toast — `AvatarPackController.Install` never bounds `manifest.PackName`'s
+   * own length itself (see `avatar-format.ts`'s own remarks), so this is layout protection for the
+   * toast, not a security boundary (React/the toast layer already escape the content either way).
+   */
+  function handleAvatarInstalled(slug: string, result: AvatarInstallResult): void {
+    setInstallingAvatar(false);
+    setInstalledAvatarPackSlugs((prev) => new Set(prev).add(slug));
+    toast.success(`"${clampPackDisplayText(result.packName)}" installed.`);
+  }
+
+  /**
    * A show entry's OPTIONAL `suggestedPersona` (SPEC F118.3, PLAN T255) is on the shelf when the
    * ALREADY-fetched index carries a persona entry under that exact slug — never a further catalog
    * fetch just to answer this. An absent/unknown suggestion (no such persona entry at all) reads
@@ -401,7 +439,11 @@ export function PersonaCatalogClient({
    * over `kind`, not a two-way ternary — the SERVER already drops any kind it doesn't recognise
    * (CatalogIndexValidator, F103.1/AC6), but a ternary's `else` branch would silently render an
    * unrecognised future kind AS a persona card. The `default` here renders nothing instead, so the
-   * client never lies about an entry it can't actually route, should that server invariant ever slip. */
+   * client never lies about an entry it can't actually route, should that server invariant ever slip.
+   * There is deliberately no `"icon"` case yet (PLAN T294 rider 1): an icon-kind entry falls to
+   * `default` and renders no card — "still-hidden", this task's own stated, minimal-safe treatment
+   * for a kind the wire has emitted since T292 but no tab yet browses — T304 adds its own case and
+   * tab together, replacing this placeholder rather than growing around it. */
   function renderShelfEntry(entry: CatalogShelfEntryDto): ReactNode {
     switch (entry.kind) {
       case "theme":
@@ -425,6 +467,15 @@ export function PersonaCatalogClient({
       case "font":
         return (
           <FontShelfCard
+            key={entry.slug}
+            entry={entry}
+            selected={entry.slug === selectedSlug}
+            onSelect={() => handleCardClick(entry.slug)}
+          />
+        );
+      case "avatar":
+        return (
+          <AvatarShelfCard
             key={entry.slug}
             entry={entry}
             selected={entry.slug === selectedSlug}
@@ -490,6 +541,15 @@ export function PersonaCatalogClient({
             detail={loaded.detail}
             isInstalled={installedSlugs.has(loaded.slug)}
             onInstallClick={() => setInstallingFont(true)}
+          />
+        );
+      case "avatar":
+        return (
+          <AvatarDetailPanel
+            slug={loaded.slug}
+            detail={loaded.detail}
+            isInstalled={installedAvatarPackSlugs.has(loaded.slug)}
+            onInstallClick={() => setInstallingAvatar(true)}
           />
         );
       default:
@@ -575,6 +635,17 @@ export function PersonaCatalogClient({
           slug={detail.slug}
           onCancel={() => setInstallingFont(false)}
           onInstalled={(result) => handleFontInstalled(detail.slug, result)}
+        />
+      )}
+
+      {/* Cancel = no-op (mirrors the font block immediately above, the SAME "no request body" shape
+          — AvatarInstallModal posts no body of its own either, so only `selectedEntry?.kind ===
+          "avatar"` gates it, no `detail.detail.card !== null` guard needed). */}
+      {installingAvatar && detail.kind === "loaded" && selectedEntry?.kind === "avatar" && (
+        <AvatarInstallModal
+          slug={detail.slug}
+          onCancel={() => setInstallingAvatar(false)}
+          onInstalled={(result) => handleAvatarInstalled(detail.slug, result)}
         />
       )}
 
@@ -678,6 +749,8 @@ function detailSectionAriaLabel(kind: CatalogEntryKind | undefined): string {
       return "Theme details";
     case "font":
       return "Font pack details";
+    case "avatar":
+      return "Avatar pack details";
     case "persona":
     default:
       return "Persona details";
@@ -911,6 +984,60 @@ function FontShelfCard({
         {entry.fontByteTotal != null && (
           <p className="text-[0.82rem] text-mute">{formatFontByteTotal(entry.fontByteTotal)}</p>
         )}
+      </button>
+    </li>
+  );
+}
+
+/**
+ * An avatar pack entry's shelf card (SPEC F128.1, F128.3, PLAN T294) — mirrors `FontShelfCard`'s own
+ * shape one level up: a title, the 18+ badge, a small brass "Avatar pack" kind marker (this kind has
+ * no swatches/art either), and `bestFor` chips — all painted straight off the entry's already-fetched
+ * index row, no manifest or asset fetch, ever, while browsing (the SAME zero-cost-browse contract
+ * every other kind's shelf card already holds to).
+ *
+ * The title reads `prettifySlug(entry.slug)`, NOT `entry.fontFamily`/a pack-name field of its own:
+ * `CatalogShelfEntryDto` carries no avatar-kind display-name (or item-count) field at all — T292
+ * widened this DTO's own `kind` union to admit `"avatar"`, never its shape, and widening the shelf
+ * wire itself is out of this task's own scope (see `AvatarDetailPanel`'s own remarks for the same
+ * "smallest honest surface" call applied one level down, at the detail panel). This is the SAME
+ * slug-derived fallback `ShelfCard`/`ThemeShelfCard` already use as their own title outright (not
+ * merely a fallback for them, `FontShelfCard`'s own `??` chain) — an avatar pack's real manifest name
+ * only ever reaches the wire post-install (`AvatarPackInstallResponse.packName`,
+ * `GET /api/avatar-packs`'s own listing), never this pre-install browse card.
+ *
+ * No item-count line either, for the identical reason: `CatalogShelfEntryDto` has no such field for
+ * this kind. The pack's own item COUNT is what opening the card's face grid shows (`AvatarDetailPanel`
+ * — PLAN T294's own bullet on the shelf card groups "pack name, item count" together with the DETAIL
+ * view's own content, not a literal shelf-card requirement this DTO could actually satisfy without a
+ * manifest fetch on every browse render).
+ */
+function AvatarShelfCard({
+  entry,
+  selected,
+  onSelect,
+}: {
+  entry: CatalogShelfEntryDto;
+  selected: boolean;
+  onSelect: () => void;
+}): ReactNode {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-expanded={selected}
+        className={cn(
+          "flex w-full flex-col items-start gap-2 rounded-[6px] border p-4 text-left transition-colors duration-[120ms] ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+          selected ? "border-accent bg-surface-2" : "border-line bg-surface hover:bg-surface-2"
+        )}
+      >
+        <div className="flex w-full items-center justify-between gap-2">
+          <span className="font-display text-[1.05rem] text-ink">{prettifySlug(entry.slug)}</span>
+          {entry.audience === "mature" && <MatureBadge />}
+        </div>
+        <p className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Avatar pack</p>
+        <BestForChips items={entry.bestFor} />
       </button>
     </li>
   );

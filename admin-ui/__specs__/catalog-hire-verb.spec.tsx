@@ -85,6 +85,7 @@ const LENA_DETAIL: CatalogEntryDetailDto = {
   fontVersion: null,
   fontSubset: null,
   suggestedPersona: null,
+  avatarItems: null,
 };
 
 function makeJsonResponse(status: number, body: unknown): Response {

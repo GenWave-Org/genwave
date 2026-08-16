@@ -544,7 +544,7 @@ public static class FeatureVisualLayerStores
         }
 
         [Fact]
-        public async Task ReinstallingReplacesTheItemListWholeAndGetAllAsyncOmitsItemBytes()
+        public async Task ReinstallingReplacesTheItemListWholeAndGetAllAsyncCarriesItemMetadataWithoutBytes()
         {
             // Given an installed pack with one item
             RunMigrationScript(db);
@@ -570,12 +570,15 @@ public static class FeatureVisualLayerStores
                 (pack.ImportedFrom, ItemNamesMatch: pack.Items.Select(i => i.Name).SequenceEqual(["zed"])));
             Assert.Contains("\"v2\"", pack.Definition);
 
-            // And GetAllAsync's own listing read carries the EMPTY-Items contract — this pack shows up
-            // with zero items even though it genuinely has one, proving the shelf-listing query never
-            // joins avatar_pack_item at all.
+            // And GetAllAsync's own listing read carries the re-installed item's own name/suggested-
+            // persona metadata (review finding B1: the listing widened to include this directly, rather
+            // than requiring a second per-pack GetBySlugAsync round trip just to read it), but the
+            // returned AvatarPackItemSummary shape is structurally incapable of carrying bytes at all —
+            // there is no Bytes member to even assert absent.
             var all = await repo.GetAllAsync(CancellationToken.None);
             var listed = Assert.Single(all, p => p.Slug == slug);
-            Assert.Empty(listed.Items);
+            var item = Assert.Single(listed.Items);
+            Assert.Equal(("zed", (string?)null), (item.Name, item.SuggestedPersona));
         }
 
         [Fact]

@@ -141,6 +141,7 @@ const FONT_DETAIL: CatalogEntryDetailDto = {
   fontVersion: "2.000",
   fontSubset: "latin",
   suggestedPersona: null,
+  avatarItems: null,
 };
 
 // PLAN T204 (Dean's post-v3.1.0 review): "no mention of license anywhere in the panel" — the

@@ -104,18 +104,33 @@ sealed class AvatarPackRepository(Lazy<NpgsqlDataSource> dataSource) : IAvatarPa
         return new AvatarPack(pack.Slug, pack.Definition, pack.ImportedFrom, pack.ImportedAt, items.ToList());
     }
 
-    /// <summary>Every installed pack, each with an EMPTY <see cref="AvatarPack.Items"/> list — see that
-    /// property's own remarks for why this listing read deliberately excludes per-item bytes (a single
-    /// query against <c>station.avatar_pack</c> alone, never joining <c>_item</c>).</summary>
-    public async Task<IReadOnlyList<AvatarPack>> GetAllAsync(CancellationToken ct)
+    /// <summary>
+    /// Two queries (packs, then every item's own name/suggested_persona — NO <c>bytes</c> column, review
+    /// finding B1) rather than a SQL join, mirroring <see cref="FontPackRepository.GetAllAsync"/>'s own
+    /// reasoning: a pack typically owns a handful of items (SPEC F128.10's own dozen-item seed packs),
+    /// so grouping in memory via <see cref="Enumerable.ToLookup{TSource,TKey}"/> stays simpler than a
+    /// join-and-split-on shape for no real cost at this scale. Unlike the prior N+1 shape this replaced
+    /// (one <see cref="GetBySlugAsync"/> round trip per pack, pulling every item's bytes only to discard
+    /// them), this is exactly TWO queries regardless of how many packs are installed.
+    /// </summary>
+    public async Task<IReadOnlyList<AvatarPackSummary>> GetAllAsync(CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+
         var packs = await conn.QueryAsync<PackRow>(new CommandDefinition(
             "select id, slug, definition::text as definition, imported_from, imported_at from station.avatar_pack",
             cancellationToken: ct));
 
+        var items = await conn.QueryAsync<ItemSummaryRow>(new CommandDefinition(
+            "select pack_id, name, suggested_persona from station.avatar_pack_item",
+            cancellationToken: ct));
+
+        var itemsByPack = items.ToLookup(item => item.PackId);
+
         return packs
-            .Select(pack => new AvatarPack(pack.Slug, pack.Definition, pack.ImportedFrom, pack.ImportedAt, []))
+            .Select(pack => new AvatarPackSummary(
+                pack.Slug, pack.Definition, pack.ImportedFrom, pack.ImportedAt,
+                itemsByPack[pack.Id].Select(item => new AvatarPackItemSummary(item.Name, item.SuggestedPersona)).ToList()))
             .ToList();
     }
 
@@ -133,8 +148,15 @@ sealed class AvatarPackRepository(Lazy<NpgsqlDataSource> dataSource) : IAvatarPa
     }
 
     /// <summary>Dapper deserialization shape for a <c>station.avatar_pack</c> row — carries <c>id</c>
-    /// only to key <see cref="GetBySlugAsync"/>'s own item lookup; <see cref="AvatarPack"/> itself
-    /// never exposes the surrogate key, mirroring <see cref="OwnerTheme"/>/<see cref="FontPack"/>'s own
+    /// only to key <see cref="GetBySlugAsync"/>'s own item lookup and <see cref="GetAllAsync"/>'s own
+    /// item-summary grouping; <see cref="AvatarPack"/>/<see cref="AvatarPackSummary"/> themselves never
+    /// expose the surrogate key, mirroring <see cref="OwnerTheme"/>/<see cref="FontPack"/>'s own
     /// slug-is-identity convention.</summary>
     sealed record PackRow(int Id, string Slug, string Definition, string ImportedFrom, DateTime ImportedAt);
+
+    /// <summary>Dapper deserialization shape for a <c>station.avatar_pack_item</c> row projected WITHOUT
+    /// <c>bytes</c> (review finding B1), keyed by <see cref="PackId"/> for <see cref="GetAllAsync"/>'s
+    /// own grouping — mirrors <c>FontPackRepository</c>'s own metadata-only <c>FaceRow</c>
+    /// shape.</summary>
+    sealed record ItemSummaryRow(int PackId, string Name, string? SuggestedPersona);
 }

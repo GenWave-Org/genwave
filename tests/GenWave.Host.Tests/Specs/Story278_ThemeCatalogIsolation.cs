@@ -229,7 +229,11 @@ public static class FeatureThemeCatalogIsolation
         // AvatarPackController's own install/uninstall pair — a FOURTH guarded prefix joining
         // api/catalog, api/themes, and api/fonts, pinned here the moment it exists (review finding S5
         // — the SAME "the moment it exists" precedent every prior addition to this set already
-        // followed) rather than left for a future disclosure re-audit to discover it first.
+        // followed) rather than left for a future disclosure re-audit to discover it first. GET
+        // api/avatar-packs (T294, SPEC F128.3) is that same controller's OWN library-listing route —
+        // the T200/T203 review's own N7 obligation, applied to the fourth prefix: pinned here the
+        // moment it exists, joining its sibling install/uninstall pair, with the SAME class-level
+        // AdminSurface+Settings pairing this file's next Fact asserts on every discovered endpoint.
         static readonly IReadOnlySet<(string Verb, string Route)> KnownCatalogAndThemeRoutes =
             new HashSet<(string Verb, string Route)>
             {
@@ -246,6 +250,7 @@ public static class FeatureThemeCatalogIsolation
                 ("DELETE", "api/fonts/{slug}"),
                 ("POST", "api/avatar-packs/{slug}/install"),
                 ("DELETE", "api/avatar-packs/{slug}"),
+                ("GET", "api/avatar-packs"),
             };
 
         // All FOUR controllers are ROOTED at their own bare prefix ([Route("api/catalog")],

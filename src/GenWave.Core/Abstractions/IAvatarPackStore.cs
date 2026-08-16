@@ -36,10 +36,17 @@ public interface IAvatarPackStore
     /// if no such pack is installed.</summary>
     Task<AvatarPack?> GetBySlugAsync(string slug, CancellationToken ct);
 
-    /// <summary>Every installed pack, in no particular guaranteed order, each with an EMPTY
-    /// <see cref="AvatarPack.Items"/> list — see that property's own remarks for why the shelf's own
-    /// listing read deliberately excludes per-item bytes.</summary>
-    Task<IReadOnlyList<AvatarPack>> GetAllAsync(CancellationToken ct);
+    /// <summary>
+    /// Every installed pack, in no particular guaranteed order, each with its own
+    /// <see cref="AvatarPackSummary.Items"/> — name and suggested-persona metadata for every item, but
+    /// NEVER their bytes (review finding B1: the shelf/wardrobe listing this feeds has no use for a raw
+    /// payload it would only discard, and <see cref="AvatarPackItemSummary"/> is structurally incapable
+    /// of carrying one). Mirrors <see cref="IFontPackStore.GetAllAsync"/>'s own "listing is
+    /// metadata-only, in ONE query" contract — a caller needing an item's actual bytes reads
+    /// <see cref="GetBySlugAsync"/> instead, whose <see cref="AvatarPack.Items"/> stays the
+    /// bytes-carrying shape.
+    /// </summary>
+    Task<IReadOnlyList<AvatarPackSummary>> GetAllAsync(CancellationToken ct);
 
     /// <summary>Removes the pack identified by <paramref name="slug"/> — and, by
     /// <c>station.avatar_pack_item</c>'s own <c>ON DELETE CASCADE</c>, every one of its items — in the

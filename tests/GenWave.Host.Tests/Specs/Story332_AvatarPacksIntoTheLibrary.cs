@@ -1,8 +1,13 @@
-// STORY-332 — Avatar packs into the library (SPEC F128.3/.4 · PLAN T293)
+// STORY-332 — Avatar packs into the library (SPEC F128.3/.4 · PLAN T293/T294)
 //
-// BDD specification — xUnit. Backend install/uninstall only; the Wardrobe Avatars tab
+// BDD specification — xUnit. Install/uninstall/list only; the Wardrobe Avatars tab
 // and transient shelf previews (AC3's UI half) live in admin-ui jest
-// (wardrobe-avatar-packs.spec.tsx) + the T301 wire.
+// (wardrobe-avatar-packs.spec.tsx) + the T301 wire. The T294 GET /api/avatar-packs listing route's
+// own Facts (ScenarioTheInstalledPacksListing, below) join this file rather than a new one — same
+// controller, same FakeAvatarPackStore/AvatarPackInstallWebFactory harness, the Story284_FontPackLibrary.cs
+// precedent of a listing route's Facts living beside its sibling install/uninstall route only applies
+// there because THAT listing route sits in its OWN controller file's own Story number; this one is the
+// SAME controller PLAN T294 widened, not a new one.
 //
 // WIRED T293 — every Fact below drives the real production route through WebApplicationFactory<Program>
 // (real routing/auth/content-negotiation pipeline, real ffmpeg via the real ImageNormalizeService — no
@@ -65,10 +70,12 @@ public sealed class FeatureAvatarPacksIntoTheLibrary
 
             // Then it responds success, and the stored item's own sha256 genuinely describes its own
             // stored bytes — proving the hash was computed over what actually landed, not merely
-            // copied through from the index. Read through GetBySlugAsync (review finding S4) — the
-            // real IAvatarPackStore.GetAllAsync contract returns items EMPTY (a shelf-listing read,
-            // FakeAvatarPackStore now mirrors that shape exactly); GetBySlugAsync is the one-pack
-            // detail read shape-identical between this fake and the real repository.
+            // copied through from the index. Read through GetBySlugAsync (review finding S4/B1) — the
+            // real IAvatarPackStore.GetAllAsync contract carries item name/suggestedPersona metadata
+            // but NEVER bytes (a shelf-listing read, FakeAvatarPackStore now mirrors that shape
+            // exactly); GetBySlugAsync is the one-pack, bytes-carrying detail read shape-identical
+            // between this fake and the real repository — the only read this Fact's own bytes
+            // assertion can use.
             Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
             var pack = await store.GetBySlugAsync(AvatarPackInstallFixtures.PackSlug, CancellationToken.None);
             var item = Assert.Single(pack?.Items ?? []);
@@ -575,6 +582,107 @@ public sealed class FeatureAvatarPacksIntoTheLibrary
             Assert.Equal(
                 (HttpStatusCode.BadRequest, 0),
                 (response.StatusCode, (await store.GetAllAsync(CancellationToken.None)).Count));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // T294 — THE INSTALLED PACKS LISTING (GET /api/avatar-packs)
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioTheInstalledPacksListing
+    {
+        [Fact]
+        public async Task AnInstalledPackListsWithNameItemsAndProvenance()
+        {
+            // Given a pack installed through the real production install route (so the `definition`
+            // this GET re-parses is the SAME jsonb the install route actually wrote — mirrors
+            // Story284_FontPackLibrary.cs's own ScenarioTheLibraryListsInstalledPacks precedent),
+            var itemBytes = TestImages.CreatePng(512, 512);
+            var store = new FakeAvatarPackStore();
+            await using var factory = new AvatarPackInstallWebFactory(store, handler: AvatarPackInstallFixtures.BuildRoutedHandler(itemBytes));
+            var client = await AvatarPackInstallWebFactory.LoggedInClientAsync(factory);
+            var install = await client.PostAsync($"/api/avatar-packs/{AvatarPackInstallFixtures.PackSlug}/install", null);
+            Assert.True(install.IsSuccessStatusCode, await install.Content.ReadAsStringAsync());
+
+            // When the library is listed,
+            var response = await client.GetAsync("/api/avatar-packs");
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var pack = Assert.Single(document.RootElement.EnumerateArray());
+            var item = Assert.Single(pack.GetProperty("items").EnumerateArray());
+
+            // Then it lists the pack's own manifest name, its one item's name/suggestedPersona, and
+            // the db/25 provenance pair.
+            Assert.Equal(
+                (Status: HttpStatusCode.OK, Slug: AvatarPackInstallFixtures.PackSlug, Name: "Warm Grins",
+                 ItemName: AvatarPackInstallFixtures.ItemName, ItemSuggestedPersona: AvatarPackInstallFixtures.SuggestedPersonaSlug,
+                 ImportedFrom: AvatarPackInstallFixtures.PackSlug),
+                (Status: response.StatusCode, Slug: pack.GetProperty("slug").GetString(), Name: pack.GetProperty("name").GetString(),
+                 ItemName: item.GetProperty("name").GetString(), ItemSuggestedPersona: item.GetProperty("suggestedPersona").GetString(),
+                 ImportedFrom: pack.GetProperty("importedFrom").GetString()));
+        }
+
+        [Fact]
+        public async Task TheListingNeverCarriesItemBytes()
+        {
+            // Given the same installed pack,
+            var itemBytes = TestImages.CreatePng(512, 512);
+            var store = new FakeAvatarPackStore();
+            await using var factory = new AvatarPackInstallWebFactory(store, handler: AvatarPackInstallFixtures.BuildRoutedHandler(itemBytes));
+            var client = await AvatarPackInstallWebFactory.LoggedInClientAsync(factory);
+            var install = await client.PostAsync($"/api/avatar-packs/{AvatarPackInstallFixtures.PackSlug}/install", null);
+            Assert.True(install.IsSuccessStatusCode, await install.Content.ReadAsStringAsync());
+
+            // When the library is listed,
+            var response = await client.GetAsync("/api/avatar-packs");
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var pack = Assert.Single(document.RootElement.EnumerateArray());
+            var item = Assert.Single(pack.GetProperty("items").EnumerateArray());
+
+            // Then neither the pack row nor its item carries a "bytes" member — this listing is
+            // metadata only (mirrors FontLibraryPackDto's own "no face bytes on this wire" contract);
+            // the Wardrobe's face grid reads bytes through the transient proxied catalog route
+            // instead.
+            var packMembers = pack.EnumerateObject().Select(p => p.Name).ToArray();
+            var itemMembers = item.EnumerateObject().Select(p => p.Name).ToArray();
+            Assert.DoesNotContain("bytes", packMembers);
+            Assert.DoesNotContain("bytes", itemMembers);
+        }
+
+        [Fact]
+        public async Task NoInstalledPacksListsAnEmptyArrayNotAnError()
+        {
+            // Given no packs installed,
+            var store = new FakeAvatarPackStore();
+            await using var factory = new AvatarPackInstallWebFactory(store);
+            var client = await AvatarPackInstallWebFactory.LoggedInClientAsync(factory);
+
+            // When the library is listed,
+            var response = await client.GetAsync("/api/avatar-packs");
+
+            // Then it responds 200 with an empty array — the honest "nothing installed yet" shape,
+            // never an error.
+            Assert.Equal(
+                (HttpStatusCode.OK, "[]"),
+                (response.StatusCode, await response.Content.ReadAsStringAsync()));
+        }
+
+        [Fact]
+        public async Task AnAnonymousRequestIsUnauthorized()
+        {
+            // Given no session cookie (mirrors Story284_FontPackLibrary.cs's own AnonymousAccess
+            // Fact — this route carries the SAME AdminSurface+Settings pairing every other
+            // api/avatar-packs route does; the Story278 route-set pin + Story289's broad sweep both
+            // re-confirm this by name, this Fact just keeps the local, dedicated coverage this
+            // controller's sibling routes already have),
+            var store = new FakeAvatarPackStore();
+            await using var factory = new AvatarPackInstallWebFactory(store);
+            var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+            // When the library is listed anonymously,
+            var response = await client.GetAsync("/api/avatar-packs");
+
+            // Then it is refused 401.
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
     }
 

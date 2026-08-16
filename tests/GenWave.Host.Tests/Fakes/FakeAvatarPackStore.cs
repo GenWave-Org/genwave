@@ -36,16 +36,19 @@ sealed class FakeAvatarPackStore : IAvatarPackStore
     public Task<AvatarPack?> GetBySlugAsync(string slug, CancellationToken ct) =>
         Task.FromResult(bySlug.TryGetValue(slug, out var pack) ? pack : null);
 
-    /// <summary>Every installed pack, each with an EMPTY <see cref="AvatarPack.Items"/> list — MIRRORS
-    /// the real <see cref="IAvatarPackStore.GetAllAsync"/> contract exactly (review
-    /// finding S4: this fake used to return items WIDER than that documented contract, so a Fact
-    /// asserting against <c>pack.Items</c> off this method would have passed here while silently
-    /// proving nothing true of the real repository's own items-empty shelf-listing read). A Fact that
-    /// needs a specific pack's own item content reads it through <see cref="GetBySlugAsync"/> instead —
-    /// shape-identical between this fake and the real <c>AvatarPackRepository</c>, unlike this
-    /// method.</summary>
-    public Task<IReadOnlyList<AvatarPack>> GetAllAsync(CancellationToken ct) =>
-        Task.FromResult<IReadOnlyList<AvatarPack>>(bySlug.Values.Select(pack => pack with { Items = [] }).ToList());
+    /// <summary>Every installed pack, each with its own item name/suggestion metadata folded in but NO
+    /// bytes — MIRRORS the real <see cref="IAvatarPackStore.GetAllAsync"/> contract exactly (review
+    /// finding B1: the store now widens this read to include item metadata directly rather than
+    /// forcing a caller into a per-pack <see cref="GetBySlugAsync"/> round trip just to read it off a
+    /// bytes-carrying shape). A Fact that needs a specific pack's own item BYTES still reads them
+    /// through <see cref="GetBySlugAsync"/> instead — shape-identical between this fake and the real
+    /// <c>AvatarPackRepository</c>, unlike this method.</summary>
+    public Task<IReadOnlyList<AvatarPackSummary>> GetAllAsync(CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<AvatarPackSummary>>(bySlug.Values
+            .Select(pack => new AvatarPackSummary(
+                pack.Slug, pack.Definition, pack.ImportedFrom, pack.ImportedAt,
+                pack.Items.Select(item => new AvatarPackItemSummary(item.Name, item.SuggestedPersona)).ToList()))
+            .ToList());
 
     public Task<bool> DeleteAsync(string slug, CancellationToken ct) =>
         Task.FromResult(bySlug.Remove(slug));

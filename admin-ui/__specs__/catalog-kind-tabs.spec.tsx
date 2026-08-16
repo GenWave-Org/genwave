@@ -43,7 +43,12 @@ const PERSONA_ENTRY: CatalogShelfEntryDto = {
 describe("Feature: the shelf silos kinds by tab (gh-#372)", () => {
   describe("Scenario: ?kind= resolves to a shelf kind", () => {
     it("maps the plural URL values to the wire kinds", () => {
-      expect(["themes", "fonts", "shows"].map(resolveCatalogKind)).toEqual(["theme", "font", "show"]);
+      expect(["themes", "fonts", "shows", "avatars"].map(resolveCatalogKind)).toEqual([
+        "theme",
+        "font",
+        "show",
+        "avatar",
+      ]);
     });
 
     it("defaults to persona when absent or unrecognised", () => {
@@ -54,7 +59,7 @@ describe("Feature: the shelf silos kinds by tab (gh-#372)", () => {
   });
 
   describe("Scenario: the tab strip lists every kind, always", () => {
-    it("renders all four tabs with their ?kind= hrefs", () => {
+    it("renders all five tabs with their ?kind= hrefs", () => {
       render(<PersonaCatalogTabs activeKind="persona" />);
 
       const nav = screen.getByRole("navigation", { name: "Catalog kinds" });
@@ -62,6 +67,7 @@ describe("Feature: the shelf silos kinds by tab (gh-#372)", () => {
       expect(within(nav).getByRole("link", { name: "Themes" })).toHaveAttribute("href", "/persona-catalog?kind=themes");
       expect(within(nav).getByRole("link", { name: "Fonts" })).toHaveAttribute("href", "/persona-catalog?kind=fonts");
       expect(within(nav).getByRole("link", { name: "Shows" })).toHaveAttribute("href", "/persona-catalog?kind=shows");
+      expect(within(nav).getByRole("link", { name: "Avatars" })).toHaveAttribute("href", "/persona-catalog?kind=avatars");
     });
 
     it("marks only the active tab with aria-current", () => {

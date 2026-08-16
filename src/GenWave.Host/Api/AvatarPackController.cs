@@ -12,8 +12,10 @@ namespace GenWave.Host.Api;
 /// <summary>
 /// <c>POST /api/avatar-packs/{slug}/install</c> + <c>DELETE /api/avatar-packs/{slug}</c> (SPEC F128.3,
 /// STORY-332, PLAN T293) — installs/uninstalls a Dean-curated avatar pack from the Community Catalog's
-/// <c>avatar</c> kind into this station's own library (<c>station.avatar_pack</c>+<c>_item</c>). F79
-/// shell, POLICY PARITY WITH FONTS (SPEC F128.3's own words): mirrors
+/// <c>avatar</c> kind into this station's own library (<c>station.avatar_pack</c>+<c>_item</c>). Also
+/// <c>GET /api/avatar-packs</c> (PLAN T294, see <see cref="List"/>'s own remarks) — the Wardrobe
+/// Avatars tab's own listing route, metadata only. F79 shell, POLICY PARITY WITH FONTS (SPEC F128.3's
+/// own words): mirrors
 /// <see cref="FontPackController"/> almost verbatim — the same <see cref="AdminSurfaceAttribute"/> +
 /// <see cref="AuthorizationPolicies.Settings"/> pairing, the same catalog-slug vocabulary
 /// (<see cref="CatalogIndexValidator.SlugSegment"/>), the same "no request body, every byte fetched
@@ -237,6 +239,53 @@ public sealed class AvatarPackController(
 
         logger.LogInformation("Avatar pack uninstalled slug={Slug}", LogSafeText.Sanitize(slug));
         return NoContent();
+    }
+
+    // ── Library listing (GET /api/avatar-packs) ─────────────────────────────
+
+    /// <summary>
+    /// GET /api/avatar-packs — every installed pack (SPEC F128.3, STORY-332, PLAN T294): the pack's
+    /// own manifest name (re-parsed from the stored <c>definition</c>, degrading to
+    /// <see langword="null"/> on the should-never-happen re-parse failure — mirrors
+    /// <see cref="FontPackController.List"/>'s own <c>ToLibraryDto</c> posture), each item's own
+    /// name+suggestion (NO bytes — the Wardrobe Avatars tab's own face grid reads bytes through the
+    /// TRANSIENT proxied catalog route instead, the F104 specimen precedent, never this listing), and
+    /// imported_from/imported_at provenance (db/25 pattern). Reads
+    /// <see cref="IAvatarPackStore.GetAllAsync"/> ONCE for every pack row WITH its own item
+    /// name/suggestion metadata already folded in (review finding B1 — mirrors
+    /// <see cref="FontPackController.List"/>'s own single-<c>GetAllAsync</c>-call shape exactly; this
+    /// route used to call <see cref="IAvatarPackStore.GetBySlugAsync"/> a second time PER PACK just to
+    /// read that same metadata off a bytes-carrying read, discarding up to 6 MiB of item payload per
+    /// pack per request for nothing this listing ever used). Ordered by slug (ordinal) for a stable,
+    /// deterministic listing — mirrors <see cref="FontPackController.List"/>'s own rule.
+    ///
+    /// <para>
+    /// <b>NO <see cref="CommunityCatalogAccessor.IsEnabled"/> GATE — DELIBERATE</b> (mirrors
+    /// <see cref="FontPackController.List"/>'s own remarks verbatim, applied to the avatar kind): this
+    /// action lists what is ALREADY INSTALLED — <c>station.avatar_pack</c>(+<c>_item</c>) rows this
+    /// station wrote for itself at some past install, station-local state that outlives the catalog
+    /// the same way an installed font pack does. The kill switch gates DISCOVERY of new packs
+    /// (<see cref="Install"/>), never REMEMBRANCE of installed ones.
+    /// </para>
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> List(CancellationToken ct)
+    {
+        var packs = await avatarPackStore.GetAllAsync(ct);
+        return Ok(packs.OrderBy(p => p.Slug, StringComparer.Ordinal).Select(ToSummaryDto).ToArray());
+    }
+
+    /// <summary>See <see cref="AvatarPackSummaryDto"/>'s own remarks for why <see cref="AvatarPackSummaryDto.Name"/>
+    /// is the only field this re-parse can affect.</summary>
+    static AvatarPackSummaryDto ToSummaryDto(AvatarPackSummary pack)
+    {
+        var manifest = CatalogAvatarPackManifestSerializer.Deserialize(pack.Definition);
+        return new AvatarPackSummaryDto(
+            pack.Slug,
+            manifest?.PackName,
+            pack.Items.Select(item => new AvatarPackSummaryItemDto(item.Name, item.SuggestedPersona)).ToArray(),
+            pack.ImportedFrom,
+            pack.ImportedAt);
     }
 
     // ── Entry resolution + asset fetch (SHARED SHELL, PLAN T293 review finding S6) ──────────────────
