@@ -84,7 +84,7 @@ public static class FeatureArtistFidelityEngineInitiatedPlays
                 new FixedOptionsMonitor<LoudnessOptions>(new LoudnessOptions()),
                 new ArtworkUrlResolver(
                     new FixedOptionsMonitor<StationOptions>(stationOpts), new FakeArtworkTokenStore(),
-                    new FakeActivePersonaAccessor(), new PersonaAvatarTokenCache(new FakePersonaAvatarStore(), TimeProvider.System, NullLogger<PersonaAvatarTokenCache>.Instance)),
+                    new FakeActivePersonaAccessor(), new PersonaAvatarTokenCache(new FakePersonaAvatarStore(), TimeProvider.System, NullLogger<PersonaAvatarTokenCache>.Instance), new StationImageCache(new FakeStationImageStore(), TimeProvider.System, NullLogger<StationImageCache>.Instance)),
                 NullLogger.Instance,
                 ctx.Response,
                 CancellationToken.None);

@@ -15,6 +15,7 @@ using GenWave.Core.Domain;
 using GenWave.Host.Api;
 using GenWave.Host.Auth;
 using GenWave.Host.Options;
+using GenWave.Host.Tests.Fakes;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -42,6 +43,7 @@ public static class FeatureLoginCallerIdentityLogging
         var controller = new AuthController(
             Microsoft.Extensions.Options.Options.Create(new AdminOptions { Password = configuredPassword }),
             new FakeStationIdentityProvider(new StationIdentity("st-01", "GenWave", "af_heart")),
+            new FakeStationImageStore(),
             logger)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

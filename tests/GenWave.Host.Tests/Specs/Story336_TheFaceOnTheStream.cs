@@ -9,6 +9,7 @@
 // wire's own acceptance, not a unit fact — this suite pins the annotation VALUE the resolver
 // produces, which is everything T301's wire needs to already be correct.
 
+using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Artwork;
 using GenWave.Host.Engine;
@@ -52,11 +53,15 @@ public static class FeatureTheFaceOnTheStream
 
     static ArtworkUrlResolver Resolver(
         FakeActivePersonaAccessor accessor, FakePersonaAvatarStore avatarStore,
-        TimeProvider? timeProvider = null, string publicBaseUrl = PublicBaseUrl) => new(
+        TimeProvider? timeProvider = null, string publicBaseUrl = PublicBaseUrl,
+        IStationImageStore? stationImageStore = null) => new(
         new FakeOptionsMonitor<StationOptions>(new StationOptions { PublicBaseUrl = publicBaseUrl }),
         new FakeArtworkTokenStore(), accessor,
         new PersonaAvatarTokenCache(
-            avatarStore, timeProvider ?? TimeProvider.System, NullLogger<PersonaAvatarTokenCache>.Instance));
+            avatarStore, timeProvider ?? TimeProvider.System, NullLogger<PersonaAvatarTokenCache>.Instance),
+        new StationImageCache(
+            stationImageStore ?? new FakeStationImageStore(), timeProvider ?? TimeProvider.System,
+            NullLogger<StationImageCache>.Instance));
 
     // ---------------------------------------------------------------------
     // HAPPY PATH — the mapping
@@ -139,6 +144,52 @@ public static class FeatureTheFaceOnTheStream
             var url = await resolver.ResolveAsync(item, CancellationToken.None);
 
             Assert.Equal($"{PublicBaseUrl}/spectator/api/artwork/tok42", url);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — F131.2's own token-versioned station URL (PLAN T307)
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioTheStationImageTokenVersionsWhenCustomized
+    {
+        const string StationImageToken = "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1";
+
+        static FakeStationImageStore CustomizedStationImageStore()
+        {
+            var store = new FakeStationImageStore();
+            store.Seed(new StationImage([0xFA, 0xCE], 2, "sha256-stub", StationImageToken, DateTime.UtcNow));
+            return store;
+        }
+
+        [Fact]
+        public async Task ACrosstalkItemStampsTheTokenVersionedStationUrlWhenCustomized()
+        {
+            // SPEC F131.2: customized → the TOKEN-VERSIONED station URL, not the shipped constant —
+            // the SAME Crosstalk kind ScenarioTheStationSpeaksAsTheStation's own
+            // ACrosstalkItemStampsTheStationImageUrl fact pins to the constant when NOT customized;
+            // this fact proves the OTHER half of F131.2's own "customized vs otherwise" branch.
+            var resolver = Resolver(
+                AgreeingAccessor(), await FacedAvatarStoreAsync(), stationImageStore: CustomizedStationImageStore());
+            var item = new MediaItem("tts:crosstalk2", "/tts/crosstalk2.wav", "GenWave", DefaultLoudness,
+                DjName: PersonaName, SegmentKind: SegmentKind.Crosstalk);
+
+            var url = await resolver.ResolveAsync(item, CancellationToken.None);
+
+            Assert.Equal($"{PublicBaseUrl}/spectator/api/artwork/station/{StationImageToken}", url);
+        }
+
+        [Fact]
+        public async Task AFacelessPersonasItemStampsTheTokenVersionedStationUrlWhenCustomized()
+        {
+            var resolver = Resolver(
+                AgreeingAccessor(), new FakePersonaAvatarStore(), stationImageStore: CustomizedStationImageStore());
+            var item = new MediaItem("tts:backannounce2", "/tts/backannounce2.wav", "GenWave", DefaultLoudness,
+                DjName: PersonaName, SegmentKind: SegmentKind.BackAnnounce);
+
+            var url = await resolver.ResolveAsync(item, CancellationToken.None);
+
+            Assert.Equal($"{PublicBaseUrl}/spectator/api/artwork/station/{StationImageToken}", url);
         }
     }
 

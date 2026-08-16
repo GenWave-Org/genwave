@@ -57,13 +57,24 @@ static class PlayoutServiceCollectionExtensions
             // on IPersonaAvatarStore (bound by AddGenWaveStationSettings, which Program.cs runs
             // before this) and TimeProvider.
             .AddSingleton<PersonaAvatarTokenCache>()
-            // Artwork/station-icon/dj-token URL resolution on the push path (SPEC F88.4–F88.5,
-            // STORY-223, PLAN T85; amended F129.4, STORY-336, PLAN T300) — shared by
-            // LiquidsoapControl.PushAsync and the safe-track endpoint (InternalEndpoints), mirroring
-            // how LiquidsoapAnnotationBuilder itself is shared between the two. Depends on
-            // IOptionsMonitor<StationOptions> (bound by AddGenWaveStationOptions), IArtworkTokenStore
-            // (bound by AddMediaLibrary), IActivePersonaAccessor (bound by AddGenWaveStationSettings),
-            // and PersonaAvatarTokenCache (just above) — Program.cs runs all of these before
+            // The station image's own ≤30s-memoized read (SPEC F131.2/F131.3, STORY-339, PLAN T307
+            // review rider, MANDATORY) — the ONE shared memo every station-image reader goes
+            // through: this push path (ArtworkUrlResolver, below), the spectator artwork fallback
+            // ladder and station-token route (SpectatorArtworkController), and the spectator
+            // favicon/logo routes (SpectatorPageEndpoints) — so an anonymous miss at the spectator
+            // surface's own 120/min/IP rate limit can never drag the full ~200 KiB bytes column
+            // through Postgres per request. Depends only on IStationImageStore (bound by
+            // AddGenWaveStationSettings, which Program.cs runs before this) and TimeProvider —
+            // mirrors PersonaAvatarTokenCache's own registration just above one-for-one.
+            .AddSingleton<StationImageCache>()
+            // Artwork/station/dj-token URL resolution on the push path (SPEC F88.4–F88.5,
+            // STORY-223, PLAN T85; amended F129.4, STORY-336, PLAN T300; amended F131.2, STORY-339,
+            // PLAN T307) — shared by LiquidsoapControl.PushAsync and the safe-track endpoint
+            // (InternalEndpoints), mirroring how LiquidsoapAnnotationBuilder itself is shared
+            // between the two. Depends on IOptionsMonitor<StationOptions> (bound by
+            // AddGenWaveStationOptions), IArtworkTokenStore (bound by AddMediaLibrary),
+            // IActivePersonaAccessor (bound by AddGenWaveStationSettings), PersonaAvatarTokenCache,
+            // and StationImageCache (both just above) — Program.cs runs all of these before
             // AddGenWavePlayout.
             .AddSingleton<ArtworkUrlResolver>()
             // The engine-control seam, bound to the configured Liquidsoap host. Station name on

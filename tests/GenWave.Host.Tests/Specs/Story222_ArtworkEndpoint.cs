@@ -16,6 +16,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Host.Tests.Fakes;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -134,6 +135,12 @@ file sealed class FakeArtworkTokenStore : IArtworkTokenStore
         Task.FromResult(resolutions.TryGetValue(token, out var resolution) ? resolution : null);
 }
 
+/// <summary>
+/// PLAN T307 (ladder unification): <see cref="IStationImageStore"/> is ALSO swapped for a
+/// seedable-but-unseeded double — <c>GetArtwork</c>'s own no-oracle fallback now reads it (through
+/// <c>StationImageCache</c>) on every miss/artless/unknown-token fact below; this project has no
+/// Postgres fixture, so an un-swapped store would otherwise attempt a real connection.
+/// </summary>
 file sealed class ArtworkWebFactory(string cacheDir, FakeArtworkTokenStore tokenStore) : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -152,6 +159,8 @@ file sealed class ArtworkWebFactory(string cacheDir, FakeArtworkTokenStore token
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
             services.RemoveAll<IArtworkTokenStore>();
             services.AddSingleton<IArtworkTokenStore>(tokenStore);
+            services.RemoveAll<IStationImageStore>();
+            services.AddSingleton<IStationImageStore>(new FakeStationImageStore());
         });
     }
 }

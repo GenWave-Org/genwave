@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { apiGet } from "@/lib/api";
@@ -17,10 +18,14 @@ interface AuthedLayoutProps {
 
 const FALLBACK_STATION_NAME = "GenWave";
 
-/** Wire shape of a `GET /api/stations` list item (see Host's StationDto). */
+/** Wire shape of a `GET /api/stations` list item (see Host's StationDto). `stationImageToken` is
+ * `null` when the station has never customized its image (SPEC F131.3, PLAN T307 fix round) — a
+ * bytes-free `IStationImageStore.GetTokenAsync` read folded into this SAME row, never a second
+ * per-navigation fetch of the image's own bytes. */
 interface StationDto {
   id: number;
   name: string;
+  stationImageToken: string | null;
 }
 
 /** The one F19 allowlist key this layout reads to know whether to list the Persona Catalog nav
@@ -119,25 +124,74 @@ async function fetchActiveIconPackDefinitionText(cookieHeader: string): Promise<
   }
 }
 
+/** Everything this layout's chrome derives from `GET /api/stations` — the wordmark and the tab-icon
+ * token alike (SPEC F44.7/F131.3, PLAN T307 fix round). */
+interface StationSnapshot {
+  name: string;
+  stationImageToken: string | null;
+}
+
+const EMPTY_STATION_SNAPSHOT: StationSnapshot = {
+  name: FALLBACK_STATION_NAME,
+  stationImageToken: null,
+};
+
 /**
- * Reads the live station name for the shell wordmark (SPEC F44.7, closes gitea-#195).
- * Falls back to the "GenWave" product brand on any failure — non-200, a
- * network error, or an empty station list — so the shell chrome never
- * renders blank or throws. `GET /api/stations` reads the live-effective name
- * on every call (post-V7), so a `Station:Name` settings edit shows up on the
- * shell's very next navigation with no client polling.
+ * The ONE `GET /api/stations` read this layout needs for two otherwise-unrelated pieces of chrome —
+ * the shell wordmark (SPEC F44.7, closes gitea-#195) AND the authed tab-icon's own token (SPEC
+ * F131.3, PLAN T307 fix round). Falls back to {@link EMPTY_STATION_SNAPSHOT} on any failure —
+ * non-200, a network error, or an empty station list — so the shell chrome never renders blank or
+ * throws, and the tab icon stays the shipped one. `GET /api/stations` reads both fields
+ * live-effective on every call (the name since V7, the token via a bytes-free
+ * `IStationImageStore.GetTokenAsync` read added at T307) — a `Station:Name` edit or a station-image
+ * upload/delete alike show up on the very next navigation, no client polling, no api restart.
+ *
+ * {@link generateMetadata} below calls this SAME function a second time rather than sharing this
+ * call's own result — a separate Next.js export can't read another export's local variables, and
+ * `apiGet`'s `no-store` cache option means Next's request-memoization wouldn't dedupe the two calls
+ * even if it could. The traded-off cost is one extra `GET /api/stations` round trip per authed
+ * navigation; the traded-off WIN is what this fix round exists for: neither call ever touches the
+ * station image's own ≤512 KiB bytes column, unlike the per-navigation `GET /api/station/image`
+ * probe this function replaces.
  */
-async function fetchStationName(cookieHeader: string): Promise<string> {
+async function fetchStationSnapshot(cookieHeader: string): Promise<StationSnapshot> {
   try {
     const response = await apiGet("/api/stations", { cookies: cookieHeader });
-    if (!response.ok) {
-      return FALLBACK_STATION_NAME;
-    }
+    if (!response.ok) return EMPTY_STATION_SNAPSHOT;
     const stations = (await response.json()) as StationDto[];
-    return stations[0]?.name ?? FALLBACK_STATION_NAME;
+    const station = stations[0];
+    return {
+      name: station?.name ?? FALLBACK_STATION_NAME,
+      stationImageToken: station?.stationImageToken ?? null,
+    };
   } catch {
-    return FALLBACK_STATION_NAME;
+    return EMPTY_STATION_SNAPSHOT;
   }
+}
+
+/**
+ * Overrides the root layout's own file-convention favicon (`app/icon.png`) with the station's
+ * customized image when one is set (SPEC F131.3's own "authenticated admin pages swap their tab
+ * icon" posture) — Next's `icons` metadata field is NOT deep-merged across nested segments, so
+ * returning it here REPLACES the root layout's resolved icon outright for every page under this
+ * (authed) segment; the login page sits OUTSIDE this segment (no `(authed)` ancestor) and so keeps
+ * the shipped icon untouched — AC4's "no anonymous byte route on the admin surface" holds
+ * structurally, not by a runtime check, since this function never runs for that page at all.
+ *
+ * The href carries the token as a `?v=` query param (PLAN T307 fix round rider R2, the PersonaFace
+ * `?v=` precedent) — `GET /api/station/image` itself ignores the query string (the route is
+ * scoped by the row, not the token), but a changed token changes the URL the browser caches
+ * against, so a re-upload's new bytes are never masked by a `Cache-Control: private, no-cache`
+ * response the browser never bothered to revalidate. `{}` (no `icons` field) when unset lets the
+ * inherited file-convention icon show through unchanged.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const cookieStore = await cookies();
+  const cookieHeader = cookieStore.toString();
+  const { stationImageToken } = await fetchStationSnapshot(cookieHeader);
+  return stationImageToken
+    ? { icons: { icon: `/api/station/image?v=${stationImageToken}` } }
+    : {};
 }
 
 // Persistent shell for every authenticated route (SPEC F28.5). Auth itself is
@@ -161,11 +215,12 @@ async function fetchStationName(cookieHeader: string): Promise<string> {
 export default async function AuthedLayout({ children }: AuthedLayoutProps): Promise<ReactNode> {
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
-  const [stationName, settingsSnapshot, activeIconPackDefinitionText] = await Promise.all([
-    fetchStationName(cookieHeader),
+  const [stationSnapshot, settingsSnapshot, activeIconPackDefinitionText] = await Promise.all([
+    fetchStationSnapshot(cookieHeader),
     fetchSettingsSnapshot(cookieHeader),
     fetchActiveIconPackDefinitionText(cookieHeader),
   ]);
+  const { name: stationName } = stationSnapshot;
   const { catalogEnabled, themeChoices, stationThemeSlug } = settingsSnapshot;
 
   return (

@@ -771,7 +771,7 @@ public static class FeatureVisualLayerStores
             // When the first write lands — no row yet, the INSERT branch of the ON CONFLICT
             var firstBytes = new byte[] { 1, 2, 3, 4 };
             var firstToken = Guid.NewGuid().ToString("N");
-            await repo.UpsertAsync(firstBytes, "hash-first", firstToken, CancellationToken.None);
+            await repo.UpsertAsync(new StationImageInput(firstBytes, "hash-first", firstToken), CancellationToken.None);
 
             // Then it round-trips whole, byte_size derived from the payload's own length
             var afterFirst = await repo.GetAsync(CancellationToken.None);
@@ -783,7 +783,7 @@ public static class FeatureVisualLayerStores
             // When a second write lands against the SAME (only ever) row — the ON CONFLICT(id) branch
             var secondBytes = new byte[] { 9, 9, 9 };
             var secondToken = Guid.NewGuid().ToString("N");
-            await repo.UpsertAsync(secondBytes, "hash-second", secondToken, CancellationToken.None);
+            await repo.UpsertAsync(new StationImageInput(secondBytes, "hash-second", secondToken), CancellationToken.None);
 
             // Then the row is replaced whole, never a second row inserted alongside it
             var afterSecond = await repo.GetAsync(CancellationToken.None);
@@ -797,6 +797,32 @@ public static class FeatureVisualLayerStores
         }
 
         [Fact]
+        public async Task GetTokenAsyncSurfacesTheTokenAloneWithoutTheBytesColumn()
+        {
+            // Given a clean slate — no row yet (PLAN T307 fix round: the token-only projection
+            // AuthController.Stations reads instead of the whole-row GetAsync).
+            RunMigrationScript(db);
+            await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+                await conn.ExecuteAsync("delete from station.station_image");
+            var repo = StationImageRepo(db);
+
+            // Then it reports null — an honest "no customization", never an error.
+            Assert.Null(await repo.GetTokenAsync(CancellationToken.None));
+
+            // When an image is upserted,
+            var bytes = new byte[] { 1, 2, 3, 4 };
+            var token = Guid.NewGuid().ToString("N");
+            await repo.UpsertAsync(new StationImageInput(bytes, "hash", token), CancellationToken.None);
+
+            // Then GetTokenAsync reads back the SAME token GetAsync's own whole-row read carries — the
+            // projection agrees with the wider read, it just never selects bytes/byte_size/sha256/
+            // updated_at to get there.
+            var wholeRow = await repo.GetAsync(CancellationToken.None);
+            Assert.NotNull(wholeRow);
+            Assert.Equal(wholeRow.Token, await repo.GetTokenAsync(CancellationToken.None));
+        }
+
+        [Fact]
         public async Task DeleteAsyncRemovesTheRowAndReportsWhetherOneExisted()
         {
             // Given a stored image
@@ -804,7 +830,7 @@ public static class FeatureVisualLayerStores
             await using (var conn = await db.StationDataSource.OpenConnectionAsync())
                 await conn.ExecuteAsync("delete from station.station_image");
             var repo = StationImageRepo(db);
-            await repo.UpsertAsync([1, 2, 3, 4], "hash", Guid.NewGuid().ToString("N"), CancellationToken.None);
+            await repo.UpsertAsync(new StationImageInput([1, 2, 3, 4], "hash", Guid.NewGuid().ToString("N")), CancellationToken.None);
 
             // When it is deleted
             var deleted = await repo.DeleteAsync(CancellationToken.None);

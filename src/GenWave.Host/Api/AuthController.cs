@@ -29,6 +29,7 @@ namespace GenWave.Host.Api;
 public sealed class AuthController(
     IOptions<AdminOptions> adminOptions,
     IStationIdentityProvider identityProvider,
+    IStationImageStore stationImageStore,
     ILogger<AuthController> logger) : ControllerBase
 {
     const string InvalidCredentialsMessage = "Invalid credentials.";
@@ -101,11 +102,20 @@ public sealed class AuthController(
     /// <summary>
     /// Lists stations — exactly one in a single-station deployment. Reads the live-effective name
     /// through <see cref="IStationIdentityProvider"/> on every call (SPEC F44.6, gitea-#196) — a
-    /// <c>Station:Name</c> settings edit is visible on the very next call, no api restart.
+    /// <c>Station:Name</c> settings edit is visible on the very next call, no api restart. Also carries
+    /// <see cref="StationDto.StationImageToken"/> (PLAN T307 fix round): a bytes-free
+    /// <see cref="IStationImageStore.GetTokenAsync"/> read, folded into this SAME per-navigation
+    /// snapshot the admin shell's layout already fetches for the wordmark — never
+    /// <c>StationImageCache</c>, whose ≤30s memo is right for the high-volume spectator/feeder read
+    /// paths but wrong for this admin surface, where a favicon href a few seconds behind the store
+    /// defeats the whole point of reading a token at all.
     /// </summary>
     [HttpGet("stations")]
-    public IActionResult Stations() =>
-        Ok(new[] { new StationDto(SingleStation.Id, identityProvider.Current.Name) });
+    public async Task<IActionResult> Stations(CancellationToken ct)
+    {
+        var stationImageToken = await stationImageStore.GetTokenAsync(ct);
+        return Ok(new[] { new StationDto(SingleStation.Id, identityProvider.Current.Name, stationImageToken) });
+    }
 
     static bool FixedTimeEquals(string a, string b) =>
         CryptographicOperations.FixedTimeEquals(

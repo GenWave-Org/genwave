@@ -16,10 +16,17 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using GenWave.Core.Abstractions;
+using GenWave.Host.Tests.Fakes;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
 
+/// <summary>
+/// PLAN T307 (ladder unification): <see cref="IStationImageStore"/> is ALSO swapped for a
+/// seedable-but-unseeded double — the unknown-artwork-token fact below now reads it (through
+/// <c>StationImageCache</c>) on its own no-oracle fallback; this project has no Postgres fixture, so
+/// an un-swapped store would otherwise attempt a real connection.
+/// </summary>
 file sealed class SpectatorHeadParityWebFactory : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -35,6 +42,8 @@ file sealed class SpectatorHeadParityWebFactory : WebApplicationFactory<Program>
             services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
+            services.RemoveAll<IStationImageStore>();
+            services.AddSingleton<IStationImageStore>(new FakeStationImageStore());
         });
     }
 }

@@ -12,10 +12,19 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using GenWave.Core.Abstractions;
+using GenWave.Host.Tests.Fakes;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
 
+/// <summary>
+/// PLAN T307 (SPEC F131.3): <see cref="IStationImageStore"/> is ALSO swapped for a
+/// seedable-but-unseeded double — <c>SpectatorPageEndpoints</c>'s own <c>favicon.ico</c> route now
+/// reads it (through <c>StationImageCache</c>) row-else-file on every request; this project has no
+/// Postgres fixture, so an un-swapped store would otherwise attempt a real connection. Every fact in
+/// this file leaves it unseeded (no <c>Seed</c> call), proving the byte-identical shipped-file
+/// fallback this file's own facts assert.
+/// </summary>
 file sealed class FaviconWebFactory(bool spectatorMode = true) : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -31,6 +40,8 @@ file sealed class FaviconWebFactory(bool spectatorMode = true) : WebApplicationF
             services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
+            services.RemoveAll<IStationImageStore>();
+            services.AddSingleton<IStationImageStore>(new FakeStationImageStore());
         });
     }
 }

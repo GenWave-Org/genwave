@@ -17,9 +17,19 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using GenWave.Core.Abstractions;
+using GenWave.Host.Tests.Fakes;
 
 namespace GenWave.Host.Tests.Specs;
 
+/// <summary>
+/// PLAN T307 (ladder unification): <see cref="IStationImageStore"/> is now ALSO swapped for a
+/// seedable-but-unseeded double — mirrors <c>Story335_TheFaceOnThePublicSurface.cs</c>'s own
+/// <c>DjArtworkWebFactory</c>. Needed because <c>SpectatorArtworkController.GetArtwork</c>'s own
+/// fallback (this file's own <c>TheArtworkEndpointFallbackServesTheLogoBytes</c>) and
+/// <see cref="Api.SpectatorPageEndpoints"/>'s own <c>logo.png</c> route now BOTH read
+/// <see cref="IStationImageStore"/> through <c>StationImageCache</c> — this project has no Postgres
+/// fixture, so an un-swapped store would otherwise attempt a real connection on every fact here.
+/// </summary>
 file sealed class StationLogoWebFactory(bool spectatorMode = true) : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -35,6 +45,8 @@ file sealed class StationLogoWebFactory(bool spectatorMode = true) : WebApplicat
             services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
+            services.RemoveAll<IStationImageStore>();
+            services.AddSingleton<IStationImageStore>(new FakeStationImageStore());
         });
     }
 }

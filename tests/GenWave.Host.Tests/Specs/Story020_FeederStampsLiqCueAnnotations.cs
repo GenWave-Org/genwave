@@ -26,7 +26,7 @@ public static class FeatureFeederStampsLiqCueAnnotations
             new FakeStationIdentityProvider(new StationIdentity("st-01", "GenWave", "af_heart")),
             new ArtworkUrlResolver(
                 new FakeOptionsMonitor<StationOptions>(new StationOptions()), new FakeArtworkTokenStore(),
-                new FakeActivePersonaAccessor(), new PersonaAvatarTokenCache(new FakePersonaAvatarStore(), TimeProvider.System, NullLogger<PersonaAvatarTokenCache>.Instance)),
+                new FakeActivePersonaAccessor(), new PersonaAvatarTokenCache(new FakePersonaAvatarStore(), TimeProvider.System, NullLogger<PersonaAvatarTokenCache>.Instance), new StationImageCache(new FakeStationImageStore(), TimeProvider.System, NullLogger<StationImageCache>.Instance)),
             NullLogger<LiquidsoapControl>.Instance);
 
     static readonly GenWave.Core.Domain.Loudness DefaultLoudness = new(-16.0, -1.0, Measurable: true);
