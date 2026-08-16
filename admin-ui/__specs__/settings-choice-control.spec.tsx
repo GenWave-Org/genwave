@@ -295,6 +295,83 @@ describe("Feature: SettingKind.Choice's dedicated Settings control", () => {
     });
   });
 
+  describe("Scenario: Station:IconPack shares the same generic control (T303 review finding F1)", () => {
+    // Station:IconPack has NO registry entry of its own (SettingsForm.tsx's own kind-chain
+    // fallback routes it here) — a second, independent proof that ChoiceSettingControl truly
+    // generalizes past Theme, and the vehicle for pinning the two shapes the T303 fix round
+    // corrected: a zero-packs station renders a WORKING dropdown rather than the "no choices"
+    // alert (review finding F1), and a dangling pack slug is visible with an inline notice, never
+    // an error (STORY-337 AC6).
+    const HOUSE_ICONS_ONLY_CHOICES = [{ value: "", label: "House icons", isDefault: true }];
+
+    // A station with packs installed — house icons still leads (server-flagged isDefault), then
+    // every installed slug in order, each doubling as its own label (no display name in the
+    // manifest — StationSettingsAllowlist.IconPackChoices' own remarks).
+    const PACKS_INSTALLED_CHOICES = [
+      { value: "", label: "House icons", isDefault: true },
+      { value: "line-icons", label: "line-icons" },
+      { value: "solid-icons", label: "solid-icons" },
+    ];
+
+    function makeIconPackSetting(overrides: Partial<SettingDto> = {}): SettingDto {
+      return {
+        key: "Station:IconPack",
+        value: "",
+        source: "default",
+        applyMode: "live",
+        kind: "choice",
+        unit: "",
+        choices: HOUSE_ICONS_ONLY_CHOICES,
+        ...overrides,
+      };
+    }
+
+    it("a zero-packs station renders a working dropdown, never the 'no choices' alert", () => {
+      renderWithProviders(<SettingsForm settings={[makeIconPackSetting()]} />);
+
+      const select = screen.getByLabelText(/Station:IconPack/) as HTMLSelectElement;
+      expect(select.tagName).toBe("SELECT");
+      expect(select.value).toBe("");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("a zero-packs station's dropdown holds exactly ONE \"\"-valued option, labeled House icons — never stacked with a synthesized second one (F1-residual)", () => {
+      // Regression pin: ChoiceSettingControl's own isUnset branch used to synthesize its own
+      // `<option value="">` unconditionally, which STACKED with IconPack's real "" choice below —
+      // every fresh station showed BOTH "Station default (House icons)" AND "House icons", both
+      // submitting "". A substring `toHaveTextContent("House icons")` against options[0] passed
+      // either way (it matches the FIRST word of "Station default (House icons)" too), which is
+      // exactly what let the duplicate ship unnoticed — so this asserts the full option list.
+      renderWithProviders(<SettingsForm settings={[makeIconPackSetting()]} />);
+
+      const select = screen.getByLabelText(/Station:IconPack/) as HTMLSelectElement;
+      const optionPairs = Array.from(select.options).map((o) => [o.value, o.textContent]);
+      expect(optionPairs).toEqual(HOUSE_ICONS_ONLY_CHOICES.map((c) => [c.value, c.label]));
+    });
+
+    it("a packs-installed station's dropdown lists house icons first, then every installed slug — still no synthesized duplicate", () => {
+      renderWithProviders(
+        <SettingsForm settings={[makeIconPackSetting({ choices: PACKS_INSTALLED_CHOICES })]} />
+      );
+
+      const select = screen.getByLabelText(/Station:IconPack/) as HTMLSelectElement;
+      const optionPairs = Array.from(select.options).map((o) => [o.value, o.textContent]);
+      expect(optionPairs).toEqual(PACKS_INSTALLED_CHOICES.map((c) => [c.value, c.label]));
+    });
+
+    it("a dangling pack slug renders visibly with an inline notice, and nothing errors (STORY-337 AC6)", () => {
+      renderWithProviders(
+        <SettingsForm settings={[makeIconPackSetting({ value: "uninstalled-pack" })]} />
+      );
+
+      const select = screen.getByLabelText(/Station:IconPack/) as HTMLSelectElement;
+      expect(select.value).toBe("uninstalled-pack");
+      expect(screen.getByText(/uninstalled-pack.*current/i)).toBeInTheDocument();
+      expect(screen.getByText(/isn.t one of the choices offered/i)).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
   describe("Scenario: keys absent from the registry are unaffected (sad path)", () => {
     it("a plain string setting still renders the shipped text input (F54.1)", () => {
       renderWithProviders(

@@ -17,6 +17,7 @@ using GenWave.Host.Api;
 using GenWave.Host.Configuration;
 using GenWave.Host.Options;
 using GenWave.Host.Playout;
+using GenWave.Host.Tests.Fakes;
 using GenWave.Orchestration;
 
 // Alias to disambiguate GenWave.Loudness (the analyzer project) from the Loudness domain type.
@@ -80,7 +81,8 @@ public static class FeatureSettingsSurfaceCompletion
             config,
             store,
             new SettingValidator(config),
-            NullLogger<SettingsController>.Instance)
+            NullLogger<SettingsController>.Instance,
+            new FakeIconPackStore())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

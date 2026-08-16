@@ -31,6 +31,7 @@ using GenWave.Context.Weather;
 using GenWave.Host.Api;
 using GenWave.Host.Configuration;
 using GenWave.Host.Options;
+using GenWave.Host.Tests.Fakes;
 using GenWave.Loudness;
 using GenWave.MediaLibrary.Options;
 using GenWave.Tts;
@@ -81,7 +82,7 @@ public static class FeatureSeededDefaults
     }
 
     static SettingsController BuildController(IConfiguration config, IStationSettingsStore store) =>
-        new(config, store, new SettingValidator(config), NullLogger<SettingsController>.Instance)
+        new(config, store, new SettingValidator(config), NullLogger<SettingsController>.Instance, new FakeIconPackStore())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };
@@ -146,7 +147,11 @@ public static class FeatureSeededDefaults
     /// Crosstalk:Shows (SPEC F127.8, STORY-328, PLAN T285) joins on Station:Envelope:Genres' own
     /// identical rationale, same shape (a JSON array of strings): empty IS the spec'd fail-closed
     /// default — the feature is off until an operator names a show, so seeding a value here would
-    /// silently turn banter on for every fresh deploy. Every other allowlisted key's C# default is
+    /// silently turn banter on for every fresh deploy. Station:IconPack (SPEC F130.4, STORY-337,
+    /// PLAN T303) joins on Station:Theme's own identical rationale (not Crosstalk:Shows' fail-closed
+    /// one): empty resolves to house icons — F130.4's own spec'd default, an icon pack has no
+    /// "shipped" row a seed could even name — so a fresh deploy legitimately reports this key blank
+    /// until an operator installs and activates a pack. Every other allowlisted key's C# default is
     /// non-empty.
     /// </summary>
     static readonly IReadOnlySet<string> HonestlyBlankKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -163,6 +168,7 @@ public static class FeatureSeededDefaults
         "Station:Envelope:Genres",
         "Station:Timezone",
         "Station:Theme",
+        "Station:IconPack",
         "Context:Weather:PersonaId",
         "Context:History:PersonaId",
         "Station:Location:Latitude",

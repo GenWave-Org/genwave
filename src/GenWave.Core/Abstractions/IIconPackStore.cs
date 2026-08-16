@@ -29,6 +29,17 @@ public interface IIconPackStore
     /// <summary>Every installed pack, in no particular guaranteed order.</summary>
     Task<IReadOnlyList<IconPack>> GetAllAsync(CancellationToken ct);
 
+    /// <summary>
+    /// Every installed pack's own slug alone, in no particular guaranteed order — the settings-page
+    /// hot path's lighter-weight sibling of <see cref="GetAllAsync"/> (SPEC F130.4, PLAN T303 review
+    /// finding F2). <c>Station:IconPack</c>'s live choices only ever need the slug (it doubles as its
+    /// own label — a <c>gw-icon-pack</c> document carries no display name at all), never
+    /// <c>definition</c>/<c>imported_from</c>/<c>imported_at</c>, so this projects only the slug column
+    /// rather than paying for every installed pack's full (up to 256 KiB) <c>definition</c> text on
+    /// every settings <c>GET</c>/<c>PUT</c>.
+    /// </summary>
+    Task<IReadOnlyList<string>> GetAllSlugsAsync(CancellationToken ct);
+
     /// <summary>Removes the pack identified by <paramref name="slug"/>. Returns <see langword="true"/>
     /// when a pack was deleted, <see langword="false"/> when no such pack existed. No referenced-by
     /// guard — <c>Station:IconPack</c> names an installed pack by slug in the settings overlay, never a

@@ -34,6 +34,7 @@
 // SAD PATH — migration discipline (ScenarioRerunningTheMigrationIsIdempotent) is the one place left
 // calling RunMigrationScript(db) TWICE in the same fact — that repetition IS what the fact is about.
 
+using System.Text.Json;
 using Dapper;
 using GenWave.Core.Domain;
 using GenWave.MediaLibrary.Station;
@@ -124,6 +125,12 @@ public static class FeatureVisualLayerStores
 
     /// <summary>The T290 station-image repository under spec — same wiring as <see cref="PersonaAvatarRepo"/>.</summary>
     static StationImageRepository StationImageRepo(DatabaseFixture db) =>
+        new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+
+    /// <summary>The T290 icon-pack repository under spec (PLAN T303 review rider — see file header's
+    /// own (3) HAPPY PATH remarks: this class carried zero live-Postgres coverage before this task)
+    /// — same wiring as <see cref="PersonaAvatarRepo"/>.</summary>
+    static IconPackRepository IconPackRepo(DatabaseFixture db) =>
         new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
 
     // ---------------------------------------------------------------------
@@ -633,6 +640,114 @@ public static class FeatureVisualLayerStores
 
             // Then it reports false rather than throwing
             Assert.False(deletedAgain);
+        }
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioIconPackRepository(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task UpsertAsyncThenGetBySlugAsyncRoundTripsTheDefinitionAsJsonbText()
+        {
+            // Given a fresh slug with a real definition document
+            RunMigrationScript(db);
+            var slug = $"icon-pack-repo-{Guid.NewGuid():N}";
+            var repo = IconPackRepo(db);
+            const string definition = """{"schemaVersion":1,"style":{"strokeWidth":1.5,"fill":"none"},"icons":{"play":[{"tag":"path","d":"M0 0"}]}}""";
+
+            // When the pack installs
+            await repo.UpsertAsync(slug, definition, "catalog-slug", CancellationToken.None);
+
+            // Then GetBySlugAsync reads the row back whole — the jsonb column round-trips as TEXT
+            // (station.icon_pack.definition::text, IconPackRepository's own SelectColumns) carrying
+            // the same DOCUMENT written, field for field (jsonb itself reformats whitespace on the
+            // way back out — e.g. a space after every ':' — so this compares parsed VALUES, not raw
+            // substrings).
+            var pack = await repo.GetBySlugAsync(slug, CancellationToken.None);
+            Assert.NotNull(pack);
+            Assert.Equal(
+                (Slug: slug, ImportedFrom: "catalog-slug"),
+                (pack.Slug, pack.ImportedFrom));
+            using var doc = JsonDocument.Parse(pack.Definition);
+            Assert.True(doc.RootElement.GetProperty("icons").TryGetProperty("play", out _));
+            Assert.Equal(1.5, doc.RootElement.GetProperty("style").GetProperty("strokeWidth").GetDouble());
+        }
+
+        [Fact]
+        public async Task ReinstallingReplacesTheDefinitionAndGetAllAsyncListsEveryPack()
+        {
+            // Given an installed pack
+            RunMigrationScript(db);
+            var slug = $"icon-pack-repo-{Guid.NewGuid():N}";
+            var repo = IconPackRepo(db);
+            await repo.UpsertAsync(slug, """{"icons":{"a":[]}}""", "catalog-slug-v1", CancellationToken.None);
+
+            // When the SAME slug re-installs with a DIFFERENT definition and refreshed provenance
+            await repo.UpsertAsync(slug, """{"icons":{"b":[]}}""", "catalog-slug-v2", CancellationToken.None);
+
+            // Then the single row is replaced whole — never a second row, never a merge of the two
+            // definitions — and GetAllAsync's own listing read carries this pack among every installed
+            // one.
+            var pack = await repo.GetBySlugAsync(slug, CancellationToken.None);
+            Assert.NotNull(pack);
+            Assert.Equal("catalog-slug-v2", pack.ImportedFrom);
+            Assert.Contains("\"b\"", pack.Definition);
+            Assert.DoesNotContain("\"a\"", pack.Definition);
+
+            var all = await repo.GetAllAsync(CancellationToken.None);
+            var listed = Assert.Single(all, p => p.Slug == slug);
+            Assert.Equal("catalog-slug-v2", listed.ImportedFrom);
+        }
+
+        [Fact]
+        public async Task DeleteAsyncRemovesThePackAndReportsWhetherOneExisted()
+        {
+            // Given an installed pack
+            RunMigrationScript(db);
+            var slug = $"icon-pack-repo-{Guid.NewGuid():N}";
+            var repo = IconPackRepo(db);
+            await repo.UpsertAsync(slug, "{}", "catalog-slug", CancellationToken.None);
+
+            // When it is deleted
+            var deleted = await repo.DeleteAsync(slug, CancellationToken.None);
+
+            // Then it reports true and the pack is gone
+            Assert.True(deleted);
+            Assert.Null(await repo.GetBySlugAsync(slug, CancellationToken.None));
+
+            // When deleted again
+            var deletedAgain = await repo.DeleteAsync(slug, CancellationToken.None);
+
+            // Then it reports false rather than throwing
+            Assert.False(deletedAgain);
+        }
+
+        [Fact]
+        public async Task GetAllSlugsAsyncSurfacesEveryInstalledPacksSlug()
+        {
+            // Proves the RESULT SET, not the SQL shape underneath it — the lighter-weight
+            // `select slug from station.icon_pack` projection (PLAN T303 review finding F2, see
+            // IconPackRepository.GetAllSlugsAsync's own remarks) needs nothing past the slug for
+            // Station:IconPack's live choices, but this fact has no way to observe query-column
+            // width from the returned `IReadOnlyList<string>` alone — a `Select(p => p.Slug)` over
+            // GetAllAsync's own full-row read would pass it identically. The name says only what it
+            // proves: the same installed-pack set GetAllAsync would list, reachable through this
+            // narrower read too.
+            RunMigrationScript(db);
+            var repo = IconPackRepo(db);
+            var slugA = $"icon-pack-repo-{Guid.NewGuid():N}";
+            var slugB = $"icon-pack-repo-{Guid.NewGuid():N}";
+            await repo.UpsertAsync(slugA, "{}", "catalog-slug-a", CancellationToken.None);
+            await repo.UpsertAsync(slugB, "{}", "catalog-slug-b", CancellationToken.None);
+
+            // When the settings hot path's own projection runs
+            var slugs = await repo.GetAllSlugsAsync(CancellationToken.None);
+
+            // Then both installed packs' slugs are present — the lighter SELECT still surfaces every
+            // installed pack, the same set GetAllAsync's own full-row read would.
+            Assert.Contains(slugA, slugs);
+            Assert.Contains(slugB, slugs);
         }
     }
 

@@ -75,6 +75,53 @@ public static class StationSettingsAllowlist
                 entry.Provenance?.ImportedFrom, entry.Provenance?.ImportedAt))
             .ToList();
 
+    /// <summary>
+    /// Computes <c>Station:IconPack</c>'s LIVE choices from every currently installed pack's own SLUG
+    /// (SPEC F130.4, STORY-337, PLAN T303) — the second <see cref="SettingKind.Choice"/> entry,
+    /// mirroring <see cref="ThemeChoices"/>'s "resolve fresh, every call, off the real store" shape
+    /// rather than this static table's own frozen snapshot. Unlike a theme (a build-time embedded
+    /// resource plus an in-memory <see cref="ThemeCatalog"/> singleton an owner import folds into), an
+    /// icon pack has NO shipped set and NO in-memory catalog of its own — every non-default choice is an
+    /// installed <c>station.icon_pack</c> row's own slug, read fresh off
+    /// <see cref="GenWave.Core.Abstractions.IIconPackStore.GetAllSlugsAsync"/> by the caller
+    /// (<c>SettingsController</c>) and handed in here already fetched (PLAN T303 review — the settings
+    /// hot path needs nothing past the slug, never the full pack row's own up-to-256-KiB definition
+    /// text), the same "the caller owns the I/O, this method only shapes it" split <see cref="ThemeChoices"/>
+    /// keeps between itself and its own DI-registered <see cref="ThemeCatalog"/> argument.
+    ///
+    /// <para>
+    /// LABEL = SLUG for every installed pack (unlike <see cref="ThemeChoices"/>'s own manifest-carried
+    /// display name): SPEC F130.1's <c>gw-icon-pack</c> document has no pack-level display-name field
+    /// at all — style plus an icons map, nothing else — so the slug IS the only honest label this
+    /// schema can offer (mirrors <c>SettingValidator.IsValidCrosstalkShowsArray</c>'s own "names slugs,
+    /// not labels" T175 rule applied to a value that, here, has no separate label to begin with).
+    /// </para>
+    ///
+    /// <para>
+    /// <b>THE FIRST CHOICE IS ALWAYS <c>("", "House icons")</c>, FLAGGED <see cref="SettingChoice.IsDefault"/>
+    /// (review finding F1 — corrects the T303-as-built shape, which returned an EMPTY list for a
+    /// station with no packs installed, exactly the "zero choices" state
+    /// <c>ChoiceSettingControl</c>'s own guard treats as a wiring bug and refuses to render at all,
+    /// which every fresh station legitimately is on day one).</b> <c>Station:IconPack</c>'s empty
+    /// value is not merely "unset" the way an unseeded <see cref="ThemeChoices"/> slug would be — it
+    /// is itself a SELECTABLE, permanent member of the closed set (SPEC F130.4's own house-icons
+    /// fallback), so it earns a real <see cref="SettingChoice"/> row rather than living only in
+    /// <see cref="ChoiceSettingControl"/>'s own "unset" branch the way <see cref="ThemeChoices"/>'s
+    /// shipped default does. This is also what makes the dropdown WORK on a station with zero packs
+    /// installed — the single most common case, every station until an operator installs one — instead
+    /// of always rendering <c>ChoiceSettingControl</c>'s own "no choices available" alert.
+    /// </para>
+    /// </summary>
+    public static IReadOnlyList<SettingChoice> IconPackChoices(IReadOnlyList<string> installedSlugs)
+    {
+        var choices = new List<SettingChoice>(installedSlugs.Count + 1)
+        {
+            new("", "House icons", IsDefault: true),
+        };
+        choices.AddRange(installedSlugs.Select(slug => new SettingChoice(slug, slug)));
+        return choices;
+    }
+
     /// <summary>All operator-editable settings as an ordered list.</summary>
     public static readonly IReadOnlyList<AllowedSetting> All = new AllowedSetting[]
     {
@@ -336,6 +383,22 @@ public static class StationSettingsAllowlist
         // deployment. A fresh deploy with no key present resolves to the shipped default exactly
         // because the chain has a floor, not because appsettings.json states one.
         new("Station:Theme",                                  SettingApplyMode.Live,          SettingKind.Choice,     "", ShippedThemeChoices),
+
+        // Icon pack selection (SPEC F130.4, STORY-337, PLAN T303) — the admin chrome's third
+        // swappable layer, the SAME SettingKind.Choice shape Station:Theme established immediately
+        // above. The Choices carried HERE is an empty placeholder ONLY (there is no shipped icon
+        // pack — F130.1's document has no "house" pack row, house icons are the shipped React
+        // components an empty value falls back to) — SettingsController re-sources the live set from
+        // IIconPackStore.GetAllSlugsAsync via IconPackChoices(IReadOnlyList<string>) instead (review
+        // finding F2 — the slug-only projection, never the full pack row's own definition text), so a
+        // pack installed or uninstalled after boot widens/narrows what is selectable with no restart,
+        // the same live-resolution split Station:Theme already established. Live: IconPackController.Active
+        // reads it via IOptionsMonitor<StationOptions> per request. Default "" resolves to house
+        // icons (F130.4) and is ALWAYS a selectable choice in its own right (review finding F1 —
+        // IconPackChoices carries it first, flagged IsDefault, on every station regardless of how many
+        // packs are installed); a value naming an uninstalled pack (the F130.5 fail-open uninstall —
+        // DELETE never touches this setting) resolves the same way, never an error.
+        new("Station:IconPack",                               SettingApplyMode.Live,          SettingKind.Choice,     "", []),
 
         // The F107 context seam (SPEC F107.2/F107.7, F108.1-F108.2, F109.1, STORY-297, PLAN T226) —
         // Context:{Key}:* per registered IContextProvider (weather, history today; any future

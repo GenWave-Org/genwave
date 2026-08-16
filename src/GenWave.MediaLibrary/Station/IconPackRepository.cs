@@ -60,6 +60,20 @@ sealed class IconPackRepository(Lazy<NpgsqlDataSource> dataSource) : IIconPackSt
         return rows.ToList();
     }
 
+    /// <summary>
+    /// The settings-page hot path's own lighter-weight projection (SPEC F130.4, PLAN T303 review
+    /// finding F2) — selects <c>slug</c> alone, never <c>definition::text</c>, so
+    /// <c>Station:IconPack</c>'s live choices stop paying for every installed pack's full (up to 256
+    /// KiB) definition on every settings <c>GET</c>/<c>PUT</c>.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> GetAllSlugsAsync(CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<string>(new CommandDefinition(
+            "select slug from station.icon_pack", cancellationToken: ct));
+        return rows.ToList();
+    }
+
     public async Task<bool> DeleteAsync(string slug, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);

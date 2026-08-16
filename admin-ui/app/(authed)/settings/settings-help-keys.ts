@@ -68,6 +68,7 @@ export const SETTINGS_HELP_KEYS = [
   "Station:Audience",
   "Station:Timezone",
   "Station:Theme",
+  "Station:IconPack",
   "Context:Weather:Enabled",
   "Context:Weather:SegmentCadenceMinutes",
   "Context:Weather:PatterCadenceMinutes",

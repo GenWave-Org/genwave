@@ -395,6 +395,17 @@ public sealed partial class SettingValidator
             // way an unresolvable String value would (F102.6).
             ["Station:Theme"] = v => IsValidThemeSlug(v, themeCatalog),
 
+            // Icon pack selection (SPEC F130.4, STORY-337, PLAN T303) — the SECOND SettingKind.Choice
+            // key, but SHAPE-ONLY (unlike Station:Theme's own membership check just above): empty is
+            // legal and is the F130.4 default (house icons); a non-empty value must be catalog-slug-
+            // shaped. Existence against currently-installed station.icon_pack rows is deliberately NOT
+            // checked here — there is no in-memory icon-pack catalog the way ThemeCatalog is for
+            // themes (see IsValidCrosstalkShowsArray's own remarks for the identical reasoning this
+            // validator already applies to Crosstalk:Shows), and F130.5's own fail-open uninstall
+            // posture means a slug that stops resolving after this write is an EXPECTED, handled
+            // state (house icons), never a defect a stricter write-time gate would need to prevent.
+            ["Station:IconPack"] = IsValidIconPackSlug,
+
             // The F107 context seam (SPEC F107.2/F107.7, F108.1-F108.2, F109.1, STORY-297, PLAN
             // T226) — Context:{Key}:* per registered IContextProvider. Enabled is a plain bool kill
             // switch, same shape as every other surface toggle above.
@@ -598,6 +609,13 @@ public sealed partial class SettingValidator
     // display label (T175).
     static bool IsValidThemeSlug(string v, ThemeCatalog themeCatalog) =>
         themeCatalog.TryGetBySlug(v, out _);
+
+    // Station:IconPack (SPEC F130.4, STORY-337, PLAN T303) — empty (house icons) or a value shaped
+    // like a real catalog slug. Reuses ShowSlugFormat's own character class — the ONE catalog-slug
+    // shape every kind on this house shares (PersonaController.SlugFormat/CatalogIndexValidator.SlugSegment),
+    // not a show-specific one despite that method's name — rather than a third independently-authored
+    // copy of the identical pattern.
+    static bool IsValidIconPackSlug(string v) => v.Length == 0 || ShowSlugFormat().IsMatch(v);
 
     /// <summary>
     /// An absolute, well-formed http/https URL (used for <c>Tts:Endpoint</c>/<c>Llm:Endpoint</c>,
@@ -1029,6 +1047,9 @@ public sealed partial class SettingValidator
             // moment it becomes selectable.
             => $"Value '{value}' is not valid for '{key}'. Must be one of the available theme " +
                $"slugs: {string.Join(", ", themeCatalog.All.Select(t => t.Slug))}.",
+        var k when k.Equals("Station:IconPack", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be empty (house icons), or a lowercase, " +
+               "hyphen-separated slug (e.g. line-icons).",
         var k when k.Equals("Context:Weather:Enabled", StringComparison.OrdinalIgnoreCase) ||
                    k.Equals("Context:History:Enabled", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
