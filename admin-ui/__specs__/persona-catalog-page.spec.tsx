@@ -111,6 +111,8 @@ const LENA_DETAIL: CatalogEntryDetailDto = {
   suggestedPersona: null,
   avatarItems: null,
   personaAvatarFile: null,
+  packName: null,
+  iconCount: null,
 };
 
 const GARY_DETAIL: CatalogEntryDetailDto = {
@@ -132,6 +134,8 @@ const GARY_DETAIL: CatalogEntryDetailDto = {
   suggestedPersona: null,
   avatarItems: null,
   personaAvatarFile: null,
+  packName: null,
+  iconCount: null,
 };
 
 function makeJsonResponse(status: number, body: unknown): Response {

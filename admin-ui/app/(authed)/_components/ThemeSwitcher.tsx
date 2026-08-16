@@ -11,7 +11,7 @@ import {
   type Mode,
   type ThemeChoice,
 } from "@/lib/theme";
-import { MoonIcon, SunIcon } from "./icons";
+import { Icon } from "./Icon";
 
 export interface ThemeSwitcherProps {
   /**
@@ -161,7 +161,7 @@ export function ThemeSwitcher({ choices, stationThemeSlug }: ThemeSwitcherProps)
           aria-label={modeLabel}
           className={MODE_BUTTON_CLASSES}
         >
-          {isDark ? <SunIcon /> : <MoonIcon />}
+          {isDark ? <Icon name="sun" /> : <Icon name="moon" />}
         </button>
       </Tooltip>
     </div>

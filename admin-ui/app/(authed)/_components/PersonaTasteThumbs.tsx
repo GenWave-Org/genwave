@@ -5,7 +5,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { describeTasteThumbFailure, postTasteThumb, type TasteThumbDirection } from "@/lib/persona-taste-api";
-import { TasteThumbDownIcon, TasteThumbUpIcon } from "./icons";
+import { Icon } from "./Icon";
 
 interface PersonaTasteThumbsProps {
   /** The stamped booth-log row id (SPEC F84.1, F84.6) — the wire's airing identity for BOTH the
@@ -63,7 +63,7 @@ export function PersonaTasteThumbs({ boothLogRowId, personaName, className }: Pe
         className="border-accent-2 text-accent-2 hover:bg-surface-2"
         onClick={() => void handleThumb("up")}
       >
-        <TasteThumbUpIcon />
+        <Icon name="taste-thumb-up" />
       </IconButton>
       <IconButton
         label={`Taste down for ${personaName}`}
@@ -72,7 +72,7 @@ export function PersonaTasteThumbs({ boothLogRowId, personaName, className }: Pe
         className="border-accent-2 text-accent-2 hover:bg-surface-2"
         onClick={() => void handleThumb("down")}
       >
-        <TasteThumbDownIcon />
+        <Icon name="taste-thumb-down" />
       </IconButton>
     </div>
   );

@@ -91,6 +91,11 @@ const AVATAR_DETAIL: CatalogEntryDetailDto = {
   suggestedPersona: null,
   avatarItems: [{ name: "Classic", file: "classic.png", suggestedPersona: "flip" }],
   personaAvatarFile: null,
+  // Deliberately DIFFERENT from `prettifySlug("warm-grins")` ("Warm Grins") — proves
+  // AvatarDetailPanel's heading reads this WIRE field (PLAN T304 rider 4), not a coincidental
+  // slug-derived match (see the "reads the manifest's own packName" fact below).
+  packName: "Warm Grins & Co.",
+  iconCount: null,
 };
 
 const ENTRY_URL = "/api/catalog/entries/warm-grins";
@@ -168,6 +173,27 @@ describe("Feature: Avatar packs in the Wardrobe", () => {
 
       const image = await screen.findByAltText("Classic");
       expect(image).toHaveAttribute("src", "/api/catalog/entries/warm-grins/assets/classic.png");
+    });
+
+    it("the detail panel's own heading reads the manifest's own packName off the wire (PLAN T304 rider 4)", async () => {
+      const fetchMock = jest.fn<typeof fetch>().mockImplementation(async (input) => {
+        const url = String(input);
+        if (url === ENTRY_URL) return makeJsonResponse(200, AVATAR_DETAIL);
+        throw new Error(`unexpected fetch ${url}`);
+      }) as unknown as jest.MockedFunction<typeof fetch>;
+      global.fetch = fetchMock;
+
+      render(
+        <PersonaCatalogClient
+          activeKind="avatar"
+          initialIndex={{ entries: [AVATAR_ENTRY], fetchedAt: "2026-08-15T00:00:00Z", unreachable: false }}
+        />
+      );
+      // The SHELF card still reads prettifySlug(slug) ("Warm Grins") — only the shelf INDEX row has
+      // no packName field; the click below opens the DETAIL panel, which does.
+      fireEvent.click(cardFor("Warm Grins"));
+
+      expect(await screen.findByRole("heading", { name: "Warm Grins & Co." })).toBeInTheDocument();
     });
 
     it("issues no install/write request from merely opening the detail", async () => {

@@ -9,7 +9,7 @@ import { toast } from "@/components/ui/toast";
 import { setNeverPlay, voteTrack, type VoteDirection } from "@/lib/broadcast-api";
 import type { LibraryDto } from "@/lib/library";
 import { useRowPatch } from "@/lib/use-row-patch";
-import { CloseIcon, RestoreIcon, VoteDownIcon, VoteUpIcon } from "../_components/icons";
+import { Icon } from "../_components/Icon";
 import {
   ALL_REENRICH_FIELDS,
   REENRICH_FIELD_HINTS,
@@ -557,7 +557,7 @@ export function CatalogToolbar({
             void handleVote("up");
           }}
         >
-          <VoteUpIcon />
+          <Icon name="vote-up" />
         </IconButton>
         <IconButton
           label="Vote down"
@@ -566,7 +566,7 @@ export function CatalogToolbar({
             void handleVote("down");
           }}
         >
-          <VoteDownIcon />
+          <Icon name="vote-down" />
         </IconButton>
         <IconButton
           label="Never play"
@@ -575,7 +575,7 @@ export function CatalogToolbar({
             void handleNeverPlay(true);
           }}
         >
-          <CloseIcon />
+          <Icon name="close" />
         </IconButton>
         <IconButton
           label="Restore to rotation"
@@ -584,7 +584,7 @@ export function CatalogToolbar({
             void handleNeverPlay(false);
           }}
         >
-          <RestoreIcon />
+          <Icon name="restore" />
         </IconButton>
       </div>
     </section>

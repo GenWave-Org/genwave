@@ -3,10 +3,10 @@
 import type { ReactNode } from "react";
 import { Chip } from "@/components/ui/chip";
 import { EmptyState } from "@/components/ui/empty-state";
-import { formatDateStamp } from "@/lib/format-clock";
-import { clampPackDisplayText } from "../persona-catalog/avatar-format";
+import { clampPackDisplayText } from "@/lib/clamp-pack-display-text";
 import { prettifySlug } from "../persona-catalog/format-slug";
 import { AvatarUninstallPackButton } from "./AvatarUninstallPackButton";
+import { ProvenanceChip } from "./ProvenanceChip";
 import type { AvatarPackSummaryDto } from "./types";
 
 export interface AvatarWardrobeClientProps {
@@ -20,14 +20,6 @@ export interface AvatarWardrobeClientProps {
    * itself 404s off-catalog. Defaults to `false` — fail closed, matching every sibling tab's own
    * posture. */
   catalogEnabled?: boolean;
-}
-
-/** Provenance chip — "Installed · &lt;slug&gt; · &lt;date&gt;" (the db/25 pattern) — mirrors
- * `WardrobeClient`'s own `ProvenanceChip` exactly, one directory over (that component stays
- * file-local to `WardrobeClient.tsx`, so this is its own small copy rather than reaching into
- * another file's non-exported function). */
-function ProvenanceChip({ importedFrom, importedAt, timeZone }: { importedFrom: string; importedAt: string; timeZone?: string }): ReactNode {
-  return <Chip>{`Installed · ${importedFrom} · ${formatDateStamp(importedAt, { timeZone })}`}</Chip>;
 }
 
 /**
@@ -45,8 +37,8 @@ function ProvenanceChip({ importedFrom, importedAt, timeZone }: { importedFrom: 
  *
  * <b>PLAIN TEXT ONLY, EVERYWHERE (PLAN T294 rider 2).</b> `pack.name` and each item's own `name` are
  * unbounded free-form prose straight off a remote manifest with NO server-side length gate on this
- * read (see `avatar-format.ts`'s own remarks) — both render as bare React text-node children ONLY,
- * through the shared `clampPackDisplayText` clamp, React's default escaping, never
+ * read (see `lib/clamp-pack-display-text.ts`'s own remarks) — both render as bare React text-node
+ * children ONLY, through the shared `clampPackDisplayText` clamp, React's default escaping, never
  * `dangerouslySetInnerHTML`.
  */
 export function AvatarWardrobeClient({ packs, timeZone, catalogEnabled = false }: AvatarWardrobeClientProps): ReactNode {

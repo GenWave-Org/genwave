@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { BoothLogFiredRule, BoothLogPick } from "@/lib/booth-log-api";
 import { cn } from "@/lib/utils";
-import { ExplorationIcon } from "./icons";
+import { Icon } from "./Icon";
 
 interface PickChipsProps {
   /** The stamped row's `pick` field, or `undefined` for a row/airing with no stamp at all (SPEC
@@ -68,7 +68,7 @@ function ExplorationBadge({ className }: { className?: string }): ReactNode {
         className
       )}
     >
-      <ExplorationIcon />
+      <Icon name="exploration" />
       Exploration pick
     </span>
   );

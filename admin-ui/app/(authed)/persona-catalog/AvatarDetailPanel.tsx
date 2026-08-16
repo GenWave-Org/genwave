@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
+import { clampPackDisplayText } from "@/lib/clamp-pack-display-text";
 import { AvatarItemFace } from "./AvatarItemFace";
 import { BestForChips, MatureBadge } from "./catalog-badges";
 import { prettifySlug } from "./format-slug";
@@ -30,24 +31,22 @@ export interface AvatarDetailPanelProps {
  * for why it loads through a plain `<img>` rather than `SpecimenBlock`'s own fetch/Blob/FontFace
  * machinery.
  *
- * No pack-name/item-count line here (a stated deviation from this task's own dispatch wording,
- * "showing pack name, item count"): `CatalogShelfEntryDto`/`CatalogEntryResponse` carry no
- * avatar-kind display-name or item-count field of their own — widening either wire shape is T292's
- * own territory, already shipped and out of scope here (T294's own "smallest honest surface" rule
- * applied the same way `FontShelfCard`'s own remarks apply it to a font pack's shelf card: this panel
- * shows exactly what the entry's OWN fetched fields carry). The heading falls back to
- * `prettifySlug(slug)`, the SAME fallback every other kind's card/panel already uses when no
- * separate display name exists on the wire; the item COUNT is implicit in the face grid itself
+ * The heading reads `detail.packName ?? prettifySlug(slug)` (PLAN T304 rider 4, closing this
+ * panel's own T294 stated deviation — `CatalogEntryResponse` now carries the manifest's own
+ * `packName` at zero extra cost, parsed off the SAME already-fetched `card` `avatarItems` reads):
+ * the SAME slug-derived fallback every other kind's card/panel already uses when no separate
+ * display name resolves. No item-COUNT line: it stays implicit in the face grid itself
  * (`detail.avatarItems.length` tiles, rendered), never restated as a separate line.
  */
 export function AvatarDetailPanel({ slug, detail, isInstalled, onInstallClick }: AvatarDetailPanelProps): ReactNode {
   const items = detail.avatarItems ?? [];
+  const displayName = clampPackDisplayText(detail.packName ?? prettifySlug(slug));
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="font-display text-[1.1rem] text-ink">{prettifySlug(slug)}</h2>
+          <h2 className="font-display text-[1.1rem] text-ink">{displayName}</h2>
           {/* 18+ badge — ALWAYS shown on a mature entry, never behind a toggle (the house rule this
               task's own dispatch restates). */}
           {detail.audience === "mature" && <MatureBadge />}

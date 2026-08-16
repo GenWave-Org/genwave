@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { PersonaIcon } from "../_components/icons";
+import { Icon } from "../_components/Icon";
 
 export interface PersonaFaceProps {
   /** The persona whose face this renders — the admin read route (PLAN T296, Host's
@@ -78,9 +78,10 @@ function PersonaFaceImage({
   );
 }
 
-/** The neutral Wireless placeholder (SPEC F128.9: "never a broken image") — house icons only, no
- * emoji: reuses `PersonaIcon`, the SAME microphone glyph the nav rail already uses for "DJ
- * persona", rather than a bespoke silhouette this feature would own alone. */
+/** The neutral Wireless placeholder (SPEC F128.9: "never a broken image") — resolves the SAME
+ * `"persona"` icon-chrome slot (`Icon`, SPEC F130.2/F130.3, PLAN T304) the nav rail already uses
+ * for "DJ persona", rather than a bespoke silhouette this feature would own alone; an active icon
+ * pack covering that name swaps this placeholder's glyph too, no separate wiring. */
 function PersonaFacePlaceholder({
   personaName,
   dimensionClass,
@@ -94,7 +95,7 @@ function PersonaFacePlaceholder({
       aria-label={`${personaName} has no face set`}
       className={`${dimensionClass} inline-flex shrink-0 items-center justify-center rounded-full border border-line bg-surface-2 text-mute`}
     >
-      <PersonaIcon className="h-1/2 w-1/2" />
+      <Icon name="persona" className="h-1/2 w-1/2" />
     </span>
   );
 }

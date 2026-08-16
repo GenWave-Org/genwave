@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { Chip } from "@/components/ui/chip";
-import { clampPackDisplayText } from "./avatar-format";
+import { clampPackDisplayText } from "@/lib/clamp-pack-display-text";
 import { prettifySlug } from "./format-slug";
 
 export interface AvatarItemFaceProps {

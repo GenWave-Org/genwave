@@ -4,9 +4,9 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
+import { clampPackDisplayText } from "@/lib/clamp-pack-display-text";
 import { readErrorMessage } from "@/lib/problem-details";
 import { useAvatarPacks, type AvatarPackListEntry } from "@/lib/use-avatar-packs";
-import { clampPackDisplayText } from "../persona-catalog/avatar-format";
 import { prettifySlug } from "../persona-catalog/format-slug";
 import type { PersonaDto } from "./types";
 

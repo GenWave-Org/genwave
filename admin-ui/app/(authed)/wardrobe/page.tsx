@@ -2,10 +2,11 @@ import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { apiGet } from "@/lib/api";
 import { AvatarWardrobeClient } from "./AvatarWardrobeClient";
+import { IconWardrobeClient } from "./IconWardrobeClient";
 import { InstalledEntriesList } from "./InstalledEntriesList";
 import { WardrobeClient } from "./WardrobeClient";
 import { resolveWardrobeTab, WardrobeTabs, type WardrobeTab } from "./WardrobeTabs";
-import type { AvatarPackSummaryDto, FontLibraryPackDto, InstalledEntryRow } from "./types";
+import type { AvatarPackSummaryDto, FontLibraryPackDto, IconPackSummaryDto, InstalledEntryRow } from "./types";
 
 // A pack can be installed elsewhere in the app, or uninstalled right here (gh-#428,
 // UninstallPackButton's own router.refresh() call re-triggers this exact server render) — always
@@ -57,22 +58,29 @@ const CATALOG_INDEX_URL_KEY = "Community:CatalogIndexUrl";
 
 const STATION_THEME_KEY = "Station:Theme";
 
+/** `Station:IconPack`'s own key (SPEC F130.4) — mirrors `STATION_THEME_KEY` immediately above, a
+ * different allowlisted Choice setting. */
+const STATION_ICON_PACK_KEY = "Station:IconPack";
+
 /**
- * Everything this page reads off `GET /api/settings`, in ONE request (gh-#393): the catalog-enabled
- * signal (the empty-state CTA swap, PLAN T203 review finding F3 — see `WardrobeClient`'s own
- * `catalogEnabled` remarks for the full posture) AND the Themes tab's rows — every `Station:Theme`
- * choice carrying the F103.11 provenance pair, the SAME settings-derived derivation
- * `persona-catalog/page.tsx`'s own `fetchInstalledThemeProvenance` documents at length (no
- * `GET /api/themes` round trip for data an existing endpoint already carries). `null` themes =
- * the fetch itself failed (the tab renders its load error); catalog-enabled degrades to `false` —
+ * Everything this page reads off `GET /api/settings`, in ONE request (gh-#393, widened at PLAN
+ * T304): the catalog-enabled signal (the empty-state CTA swap, PLAN T203 review finding F3 — see
+ * `WardrobeClient`'s own `catalogEnabled` remarks for the full posture), the Themes tab's rows —
+ * every `Station:Theme` choice carrying the F103.11 provenance pair, the SAME settings-derived
+ * derivation `persona-catalog/page.tsx`'s own `fetchInstalledThemeProvenance` documents at length
+ * (no `GET /api/themes` round trip for data an existing endpoint already carries) — AND the Icons
+ * tab's own active-pack slug (`Station:IconPack`'s current `value`, SPEC F130.4), the SAME
+ * settings-derived signal `IconWardrobeClient`'s own "Active" chip and fail-open uninstall copy
+ * need. `null` themes = the fetch itself failed (the tab renders its load error); catalog-enabled
+ * and `stationIconPackSlug` both degrade to their own "no live signal" defaults (`false`/`""`) —
  * fail closed, matching F90.1's own posture.
  */
 async function fetchSettingsFacts(
   cookieHeader: string
-): Promise<{ catalogEnabled: boolean; themes: InstalledEntryRow[] | null }> {
+): Promise<{ catalogEnabled: boolean; themes: InstalledEntryRow[] | null; stationIconPackSlug: string }> {
   try {
     const response = await apiGet("/api/settings", { cookies: cookieHeader });
-    if (!response.ok) return { catalogEnabled: false, themes: null };
+    if (!response.ok) return { catalogEnabled: false, themes: null, stationIconPackSlug: "" };
     const settings = (await response.json()) as SettingRow[];
 
     const catalogRow = settings.find((row) => row.key === CATALOG_INDEX_URL_KEY);
@@ -92,9 +100,11 @@ async function fetchSettingsFacts(
         importedAt: choice.importedAt,
       }));
 
-    return { catalogEnabled, themes };
+    const stationIconPackSlug = settings.find((row) => row.key === STATION_ICON_PACK_KEY)?.value ?? "";
+
+    return { catalogEnabled, themes, stationIconPackSlug };
   } catch {
-    return { catalogEnabled: false, themes: null };
+    return { catalogEnabled: false, themes: null, stationIconPackSlug: "" };
   }
 }
 
@@ -150,6 +160,20 @@ async function fetchAvatarPacks(cookieHeader: string): Promise<AvatarPackSummary
   }
 }
 
+/** Every installed icon pack (SPEC F130.4, PLAN T304) — mirrors `fetchAvatarPacks`'s own shape
+ * verbatim, a different endpoint (`GET /api/icon-packs`). `null` (any fetch failure or non-200) is
+ * distinct from `[]` here, the SAME "a lost signal IS the tab's content" reasoning every other
+ * installed-listing fetcher on this page follows. */
+async function fetchIconPacks(cookieHeader: string): Promise<IconPackSummaryDto[] | null> {
+  try {
+    const response = await apiGet("/api/icon-packs", { cookies: cookieHeader });
+    if (!response.ok) return null;
+    return (await response.json()) as IconPackSummaryDto[];
+  } catch {
+    return null;
+  }
+}
+
 /** The active tab's own load-failure line — the `catalog/page.tsx` "Unable to load …" shape; every
  * OTHER tab stays reachable through the strip, so one wedged endpoint never blanks the whole page. */
 function loadError(what: string): ReactNode {
@@ -157,15 +181,16 @@ function loadError(what: string): ReactNode {
 }
 
 /**
- * The Wardrobe (SPEC F104.7, widened by gh-#393 and, for the Avatars tab, PLAN T294): everything
- * installed off the Community Catalog, siloed by kind — Personas | Themes | Fonts | Shows | Avatars,
- * one tab each (URL-driven, the CatalogTabs idiom), every tab present even when empty (Dean's ruling
- * on the issue). Fonts keep their original `WardrobeClient` cards (faces, licence, uninstall — this
- * page's founding kind); Personas/Themes/Shows render the shared read-only `InstalledEntriesList`;
- * Avatars gets its own `AvatarWardrobeClient` (an item grid + uninstall, mirroring `WardrobeClient`'s
- * own shape more closely than `InstalledEntriesList`'s single secondary-line contract can express).
- * All five sources fetch in one `Promise.all` alongside the settings read that serves both the
- * catalog-enabled signal and the Themes rows.
+ * The Wardrobe (SPEC F104.7, widened by gh-#393, PLAN T294's Avatars tab, and PLAN T304's Icons
+ * tab): everything installed off the Community Catalog, siloed by kind — Personas | Themes | Fonts
+ * | Shows | Avatars | Icons, one tab each (URL-driven, the CatalogTabs idiom), every tab present
+ * even when empty (Dean's ruling on the issue). Fonts keep their original `WardrobeClient` cards
+ * (faces, licence, uninstall — this page's founding kind); Personas/Themes/Shows render the shared
+ * read-only `InstalledEntriesList`; Avatars gets its own `AvatarWardrobeClient` (an item grid +
+ * uninstall); Icons gets its own `IconWardrobeClient` (a specimen row drawn by the safe renderer +
+ * uninstall, mirroring `AvatarWardrobeClient`'s own shape one kind over). All six sources fetch in
+ * one `Promise.all` alongside the settings read that serves the catalog-enabled signal, the Themes
+ * rows, AND the Icons tab's own active-pack slug.
  */
 export default async function WardrobePage({ searchParams }: WardrobePageProps): Promise<ReactNode> {
   const sp = await searchParams;
@@ -173,7 +198,7 @@ export default async function WardrobePage({ searchParams }: WardrobePageProps):
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
 
-  const [packs, settingsFacts, personas, shows, avatarPacks] = await Promise.all([
+  const [packs, settingsFacts, personas, shows, avatarPacks, iconPacks] = await Promise.all([
     fetchFontPacks(cookieHeader),
     fetchSettingsFacts(cookieHeader),
     fetchImportedRows<PersonaRow>("/api/personas", cookieHeader, (row) => ({
@@ -191,8 +216,9 @@ export default async function WardrobePage({ searchParams }: WardrobePageProps):
       importedAt: row.importedAt,
     })),
     fetchAvatarPacks(cookieHeader),
+    fetchIconPacks(cookieHeader),
   ]);
-  const { catalogEnabled, themes } = settingsFacts;
+  const { catalogEnabled, themes, stationIconPackSlug } = settingsFacts;
 
   let tabContent: ReactNode;
   switch (activeTab) {
@@ -255,6 +281,14 @@ export default async function WardrobePage({ searchParams }: WardrobePageProps):
           loadError("the installed avatar packs")
         ) : (
           <AvatarWardrobeClient packs={avatarPacks} catalogEnabled={catalogEnabled} />
+        );
+      break;
+    case "icons":
+      tabContent =
+        iconPacks === null ? (
+          loadError("the installed icon packs")
+        ) : (
+          <IconWardrobeClient packs={iconPacks} catalogEnabled={catalogEnabled} activeSlug={stationIconPackSlug} />
         );
       break;
   }

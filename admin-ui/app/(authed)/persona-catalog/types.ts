@@ -89,7 +89,17 @@ export interface CatalogIndexResponseDto {
  * sidecar face — the bare filename of its one avatar asset, ready to pass straight to
  * `GET /api/catalog/entries/{slug}/assets/{file}` the same way `fontSpecimenFile` already does for a
  * font pack's specimen face. `null` for every non-persona entry, when unreachable, or when this
- * persona entry declares no face — see Host's `CatalogEntryResponse.PersonaAvatarFile`. */
+ * persona entry declares no face — see Host's `CatalogEntryResponse.PersonaAvatarFile`.
+ * `packName` (PLAN T304 rider 4) is an AVATAR entry's own manifest display name, parsed off `card`
+ * at zero extra cost — `null` for every non-avatar entry, when unreachable, or on the (should-never-
+ * happen) chance the manifest fails to parse; see `AvatarDetailPanel`'s own remarks for where this
+ * closes the T294 "no pack-name field on the wire" stated deviation.
+ * `iconCount` (PLAN T304 rider 4) is an ICON entry's own declared icon count, re-validated off
+ * `card` at zero extra cost — `null` for every non-icon entry, when unreachable, or when the
+ * manifest fails the whitelist gate (the safe renderer, `IconDetailPanel`, still draws whatever it
+ * defensively can from `card` regardless of whether this count resolved). An icon pack carries no
+ * `packName` at all (SPEC F130.1 — no pack-level display-name field exists), the reason these two
+ * fields are separate rather than one shared slot. */
 export interface CatalogEntryDetailDto {
   card: string | null;
   meta: string | null;
@@ -109,6 +119,8 @@ export interface CatalogEntryDetailDto {
   suggestedPersona: string | null;
   avatarItems: CatalogAvatarItemDto[] | null;
   personaAvatarFile: string | null;
+  packName: string | null;
+  iconCount: number | null;
 }
 
 /**

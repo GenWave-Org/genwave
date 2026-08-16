@@ -143,6 +143,8 @@ const FONT_DETAIL: CatalogEntryDetailDto = {
   suggestedPersona: null,
   avatarItems: null,
   personaAvatarFile: null,
+  packName: null,
+  iconCount: null,
 };
 
 // PLAN T204 (Dean's post-v3.1.0 review): "no mention of license anywhere in the panel" — the

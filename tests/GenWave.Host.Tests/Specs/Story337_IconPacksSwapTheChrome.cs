@@ -166,6 +166,59 @@ public static class FeatureIconPacksSwapTheChrome
 
             Assert.Equal(namesFromTsx, contractNames);
         }
+
+        // Cross-language grammar pin (PLAN T304 fix round) — admin-ui/lib/icon-pack.ts holds its OWN
+        // three regex LITERALS (`PATH_DATA_PATTERN`/`POINTS_PATTERN`/`ICON_NAME_PATTERN`) rather than
+        // importing this parser's grammar (no shared build step crosses the C#/TS boundary at build
+        // time), so this fact is what keeps them from drifting apart silently. Extraction stays
+        // deliberately dumb — string-parses the .ts source directly, the same
+        // Story151/FeatureSettingsHelpKeysParity repo-content-fact idiom
+        // `TheIconNameContractMatchesTheHouseIconExports` above already applies to icons.tsx; no TS
+        // toolchain runs inside xUnit.
+        static string IconPackTsPath =>
+            Path.Combine(RepoRoot, "admin-ui", "lib", "icon-pack.ts");
+
+        /// <summary>Finds `const {constName} = /.../;` in `icon-pack.ts` and returns the regex SOURCE
+        /// between the two `/` delimiters, verbatim (no unescaping needed here — none of this
+        /// grammar's three patterns contain a literal `/`).</summary>
+        static string ExtractTsPatternSource(string constName)
+        {
+            var text = File.ReadAllText(IconPackTsPath);
+            var match = Regex.Match(text, $@"const {Regex.Escape(constName)} = /(.+?)/;");
+            Assert.True(match.Success, $"could not find `const {constName} = /.../;` in {IconPackTsPath}");
+            return match.Groups[1].Value;
+        }
+
+        /// <summary>Strips one regex source string's own start/end ANCHOR tokens, leaving just the
+        /// character-class body the two languages' grammars must agree on. The anchors themselves are
+        /// a deliberate, DOCUMENTED cross-language difference, not a drift this pin should flag: JS
+        /// `$` (no `/m` flag) is already true end-of-input, so `icon-pack.ts` anchors with plain
+        /// `^`/`$`; C#'s DEFAULT `$` still admits a trailing line terminator, so
+        /// <see cref="IconPackDefinitionParser"/> anchors with `\A`/`\z` instead — see that module's
+        /// own `matchesGrammar` doc comment for the full reasoning.</summary>
+        static string GrammarBody(string patternSource, string startAnchor, string endAnchor)
+        {
+            Assert.StartsWith(startAnchor, patternSource);
+            Assert.EndsWith(endAnchor, patternSource);
+            return patternSource[startAnchor.Length..^endAnchor.Length];
+        }
+
+        [Theory]
+        [InlineData("PATH_DATA_PATTERN", IconPackDefinitionParser.PathDataText)]
+        [InlineData("POINTS_PATTERN", IconPackDefinitionParser.PointsText)]
+        [InlineData("ICON_NAME_PATTERN", IconPackDefinitionParser.IconNameText)]
+        public void TheTsGrammarMatchesTheCSharpConst(string tsConstName, string csPattern)
+        {
+            var tsSource = ExtractTsPatternSource(tsConstName);
+            var tsBody = GrammarBody(tsSource, "^", "$");
+            var csBody = GrammarBody(csPattern, @"\A", @"\z");
+
+            Assert.True(
+                tsBody == csBody,
+                $"admin-ui/lib/icon-pack.ts's {tsConstName} (/{tsSource}/) has drifted from " +
+                $"IconPackDefinitionParser's server-side const ('{tsBody}' vs '{csBody}') — " +
+                "the TS grammar drifted from the C# const; hyphen must stay LAST.");
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -252,11 +305,36 @@ public static class FeatureIconPacksSwapTheChrome
             var response = await client.PostAsync($"/api/icon-packs/{IconPackInstallFixtures.PackSlug}/install", null);
 
             Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
-            // SPEC F130.2's own "ignored with ONE install-time WARN" — a single log line naming both
-            // out-of-contract names, sanitized (PLAN T303 review rider 4).
+            // SPEC F130.2's own "ignored with ONE install-time WARN" — count-plus-first-N (PLAN T304
+            // review rider 7): with only two ignored names, both still fit inside the bounded sample.
             var warning = Assert.Single(capturingLogger.Warnings, w => w.Contains("ignored", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains("count=2", warning, StringComparison.Ordinal);
             Assert.Contains("not-a-real-icon-slot", warning, StringComparison.Ordinal);
             Assert.Contains("another-unknown-slot", warning, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task OutOfContractNamesBeyondTheSampleBoundAreCountedButNotAllNamed()
+        {
+            // PLAN T304 review rider 7 — the WARN's own sample is bounded (5 names): a pack ignoring
+            // MORE than that must still report the true total via count=, without growing the log
+            // line to match a potentially-large (up to MaxIconsPerPack) ignored set.
+            var capturingLogger = new CapturingLogger<IconPackController>();
+            await using var factory = new IconPackInstallWebFactory(
+                handler: IconPackInstallFixtures.BuildRoutedHandler(IconPackInstallFixtures.DefinitionWithManyIgnoredNamesJson),
+                capturingLogger: capturingLogger);
+            var client = await IconPackInstallWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.PostAsync($"/api/icon-packs/{IconPackInstallFixtures.PackSlug}/install", null);
+
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+            var warning = Assert.Single(capturingLogger.Warnings, w => w.Contains("ignored", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains("count=6", warning, StringComparison.Ordinal);
+            // Sorted ordinally (IconPackValidationResult.Valid.IgnoredNames' own remarks) — the first
+            // 5 of 6 "ignored-N" names land in the sample, the 6th does not.
+            Assert.Contains("ignored-1", warning, StringComparison.Ordinal);
+            Assert.Contains("ignored-5", warning, StringComparison.Ordinal);
+            Assert.DoesNotContain("ignored-6", warning, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -315,6 +393,28 @@ public static class FeatureIconPacksSwapTheChrome
             var packs = await response.Content.ReadFromJsonAsync<IconPackSummaryDto[]>();
             var pack = Assert.Single(packs!);
             Assert.Equal((IconPackInstallFixtures.PackSlug, 1, IconPackInstallFixtures.PackSlug), (pack.Slug, pack.IconCount, pack.ImportedFrom));
+        }
+
+        [Fact]
+        public async Task ListCarriesTheStoredDefinitionForTheAdminUIsOwnSpecimenRow()
+        {
+            // PLAN T304 review rider 7 — unlike an avatar/font pack's own summary DTO (binary
+            // assets withheld from the listing, the N+1-with-bytes lesson), an icon pack has no
+            // binary assets at all: its OWN already-canonical JSON text rides this listing wire so
+            // the Wardrobe Icons tab can draw a real specimen row per pack without a further fetch.
+            var store = new FakeIconPackStore();
+            await using var factory = new IconPackInstallWebFactory(store);
+            var client = await IconPackInstallWebFactory.LoggedInClientAsync(factory);
+            var install = await client.PostAsync($"/api/icon-packs/{IconPackInstallFixtures.PackSlug}/install", null);
+            Assert.True(install.IsSuccessStatusCode, await install.Content.ReadAsStringAsync());
+
+            var response = await client.GetAsync("/api/icon-packs");
+
+            var packs = await response.Content.ReadFromJsonAsync<IconPackSummaryDto[]>();
+            var pack = Assert.Single(packs!);
+            var valid = Assert.IsType<IconPackValidationResult.Valid>(
+                IconPackDefinitionParser.Validate(Encoding.UTF8.GetBytes(pack.Definition)));
+            Assert.True(valid.Definition.Icons.ContainsKey("dashboard"));
         }
 
         [Fact]
@@ -766,6 +866,21 @@ file static class IconPackInstallFixtures
             "dashboard": [ { "tag": "circle", "cx": 8, "cy": 8, "r": 2 } ],
             "not-a-real-icon-slot": [ { "tag": "circle", "cx": 8, "cy": 8, "r": 2 } ],
             "another-unknown-slot": [ { "tag": "circle", "cx": 8, "cy": 8, "r": 2 } ]
+          } }
+        """;
+
+    /// <summary>Six names outside <see cref="IconNameContract.Names"/> (SPEC F130.2) — PLAN T304
+    /// review rider 7's own sample-bound fact needs more than <c>MaxLoggedIgnoredNames</c> (5).</summary>
+    public const string DefinitionWithManyIgnoredNamesJson = """
+        { "style": { "strokeWidth": 1.5, "fill": "none" },
+          "icons": {
+            "dashboard": [ { "tag": "circle", "cx": 8, "cy": 8, "r": 2 } ],
+            "ignored-1": [ { "tag": "circle", "cx": 8, "cy": 8, "r": 2 } ],
+            "ignored-2": [ { "tag": "circle", "cx": 8, "cy": 8, "r": 2 } ],
+            "ignored-3": [ { "tag": "circle", "cx": 8, "cy": 8, "r": 2 } ],
+            "ignored-4": [ { "tag": "circle", "cx": 8, "cy": 8, "r": 2 } ],
+            "ignored-5": [ { "tag": "circle", "cx": 8, "cy": 8, "r": 2 } ],
+            "ignored-6": [ { "tag": "circle", "cx": 8, "cy": 8, "r": 2 } ]
           } }
         """;
 

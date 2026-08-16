@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { logout } from "@/app/login/actions";
 import { cn } from "@/lib/utils";
-import { SignOutIcon } from "./icons";
+import { Icon } from "./Icon";
 import { NAV_LINK_CLASSES, isActiveSection, visibleNavItems } from "./nav-items";
 
 interface SidebarProps {
@@ -44,7 +44,7 @@ export function Sidebar({ stationName = "GenWave", catalogEnabled = false }: Sid
 
       <nav aria-label="Sections" className="flex-1 px-3">
         <ul className="flex flex-col gap-1">
-          {visibleNavItems(catalogEnabled).map(({ href, label, Icon }) => {
+          {visibleNavItems(catalogEnabled).map(({ href, label, iconName }) => {
             const active = isActiveSection(pathname, href);
             return (
               <li key={href}>
@@ -58,7 +58,7 @@ export function Sidebar({ stationName = "GenWave", catalogEnabled = false }: Sid
                       : "text-mute hover:bg-surface hover:text-ink"
                   )}
                 >
-                  <Icon className="shrink-0" />
+                  <Icon name={iconName} className="shrink-0" />
                   {label}
                 </Link>
               </li>
@@ -69,7 +69,7 @@ export function Sidebar({ stationName = "GenWave", catalogEnabled = false }: Sid
 
       <form action={logout} className="border-t border-line px-3 py-4">
         <button type="submit" className={cn(NAV_LINK_CLASSES, "w-full text-mute hover:bg-surface hover:text-ink")}>
-          <SignOutIcon className="shrink-0" />
+          <Icon name="sign-out" className="shrink-0" />
           Sign out
         </button>
       </form>

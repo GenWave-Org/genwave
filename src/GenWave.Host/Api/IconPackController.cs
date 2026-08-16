@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -94,6 +95,11 @@ public sealed class IconPackController(
     IOptionsMonitor<StationOptions> stationMonitor,
     ILogger<IconPackController> logger) : ControllerBase
 {
+    /// <summary>The ignored-out-of-contract-names WARN's own sample bound (PLAN T304 review rider
+    /// 7) — see <see cref="Install"/>'s own remarks for why this is a bounded sample, not the whole
+    /// set.</summary>
+    const int MaxLoggedIgnoredNames = 5;
+
     /// <summary>
     /// POST /api/icon-packs/{slug}/install — see this class's own remarks for the full gate order and
     /// the reasoning behind each one.
@@ -127,16 +133,22 @@ public sealed class IconPackController(
             case IconPackValidationResult.Valid valid:
                 if (valid.IgnoredNames.Count > 0)
                 {
-                    // SPEC F130.2's own "ignored with ONE install-time WARN" — every name sanitized
-                    // AND length-clamped (PLAN T303 review rider 4: LogSafeText.Sanitize does both in
-                    // one call, its own remarks) even though every name here has already passed
-                    // IconPackDefinitionParser's own shape/length gate — belt-and-suspenders, the same
-                    // "every string in a log line goes through Sanitize" rule this codebase already
-                    // holds every other catalog log line to.
+                    // SPEC F130.2's own "ignored with ONE install-time WARN" — count-plus-first-N
+                    // (PLAN T304 review rider 7, replacing T303's own unbounded name list): a pack
+                    // authored to be slow rather than unsafe could still declare hundreds of
+                    // out-of-contract names within MaxIconsPerPack's own 512-icon ceiling, and every
+                    // name printed here is unbounded remote text — the count is the operationally
+                    // useful signal, a bounded sample is enough to identify WHICH pack/names without
+                    // one log line scaling with the whole ignored set. Every sampled name still goes
+                    // through LogSafeText.Sanitize (PLAN T303 review rider 4) even though it has
+                    // already passed IconPackDefinitionParser's own shape/length gate —
+                    // belt-and-suspenders, the same "every string in a log line goes through Sanitize"
+                    // rule this codebase already holds every other catalog log line to.
                     logger.LogWarning(
-                        "Icon pack install ignored names outside the contract slug={Slug} names={Names}",
+                        "Icon pack install ignored names outside the contract slug={Slug} count={Count} first={First}",
                         LogSafeText.Sanitize(slug),
-                        string.Join(", ", valid.IgnoredNames.Select(LogSafeText.Sanitize)));
+                        valid.IgnoredNames.Count,
+                        string.Join(", ", valid.IgnoredNames.Take(MaxLoggedIgnoredNames).Select(LogSafeText.Sanitize)));
                 }
 
                 // The re-serialized VALIDATED MODEL, never content.ManifestJson's own raw fetched
@@ -149,7 +161,12 @@ public sealed class IconPackController(
                     "Icon pack installed slug={Slug} iconCount={IconCount}",
                     LogSafeText.Sanitize(slug), valid.Definition.Icons.Count);
 
-                return Ok(new IconPackInstallResponse(slug, valid.Definition.Icons.Count, slug));
+                // No ImportedFrom on this response (PLAN T304 review rider 7, dropped from
+                // IconPackInstallResponse) — it is definitionally always == slug (SPEC F130.5: a pack
+                // has no authored-in-place path) and no admin-ui consumer reads it off THIS response
+                // (the Wardrobe Icons tab's own provenance chip reads it off GET /api/icon-packs'
+                // IconPackSummaryDto instead, which still carries it).
+                return Ok(new IconPackInstallResponse(slug, valid.Definition.Icons.Count));
 
             case IconPackValidationResult.Invalid invalid:
                 // The real reason is WARN-logged, sanitized AND length-clamped (PLAN T303 review
@@ -213,12 +230,34 @@ public sealed class IconPackController(
         return Ok(packs.OrderBy(pack => pack.Slug, StringComparer.Ordinal).Select(ToSummaryDto).ToArray());
     }
 
-    static IconPackSummaryDto ToSummaryDto(IconPack pack)
+    static IconPackSummaryDto ToSummaryDto(IconPack pack) =>
+        new(pack.Slug, CountIconKeys(pack.Definition), pack.Definition, pack.ImportedFrom, pack.ImportedAt);
+
+    /// <summary>
+    /// The listing's own cheap icon count (PLAN T304 review rider 7) — a plain <c>icons</c> object KEY
+    /// COUNT off the raw stored jsonb, never a full <see cref="IconPackDefinitionParser.Validate"/>
+    /// whitelist/grammar walk: <see cref="List"/> enumerates every installed pack on one request, and
+    /// the expensive per-element gate buys nothing here that a key count doesn't already answer just
+    /// as honestly for a value ONLY this controller's own <see cref="Install"/> ever writes (always
+    /// already-validated, always the canonical re-serialized form — <see cref="Icons.IconPackDefinitionSerializer"/>'s
+    /// own remarks). Degrades to <c>0</c>, never throws, on the should-never-happen chance the stored
+    /// text is not even parseable JSON or carries no object-shaped <c>icons</c> member — mirrors
+    /// <see cref="Active"/>'s own "should never fail, degrade rather than 500" posture for the same
+    /// anomaly class.
+    /// </summary>
+    static int CountIconKeys(string definitionJson)
     {
-        var iconCount = IconPackDefinitionParser.Validate(Encoding.UTF8.GetBytes(pack.Definition)) is IconPackValidationResult.Valid valid
-            ? valid.Definition.Icons.Count
-            : 0;
-        return new IconPackSummaryDto(pack.Slug, iconCount, pack.ImportedFrom, pack.ImportedAt);
+        try
+        {
+            using var document = JsonDocument.Parse(definitionJson);
+            return document.RootElement.TryGetProperty("icons", out var icons) && icons.ValueKind == JsonValueKind.Object
+                ? icons.EnumerateObject().Count()
+                : 0;
+        }
+        catch (JsonException)
+        {
+            return 0;
+        }
     }
 
     // ── Active pack (GET /api/icon-packs/active) ─────────────────────────────
