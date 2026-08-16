@@ -136,12 +136,35 @@ public static class FeatureTheWornFace
             // When it is normalized...
             var result = await BuildRealService().NormalizeAsync(input, CancellationToken.None);
 
-            // Then the output still succeeds AND lands at or under SPEC F128.1's own ≤512 KiB
-            // catalog-avatar cap — proof the -pix_fmt rgba pin (not merely the defensive ceiling
+            // Then the output still succeeds AND lands at or under ImageNormalizeService's own
+            // MaxOutputBytes ceiling (768 KiB since gh-#520 — that constant's own remarks carry the
+            // full honest history) — proof the -pix_fmt rgba pin (not merely the defensive ceiling
             // check) keeps a high-bit-depth input's output bounded.
             var success = Assert.IsType<ImageNormalizeResult.Success>(result);
             Assert.True(success.Bytes.Length <= ImageNormalizeService.MaxOutputBytes,
                 $"expected <= {ImageNormalizeService.MaxOutputBytes} bytes, got {success.Bytes.Length}");
+        }
+
+        [Fact]
+        public async Task RealHighEntropyArtReencodesUnderTheRaisedCeilingAtMaxCompressionSettings()
+        {
+            // Given the ACTUAL gh-#520 bug-report upload-path asset — a real, large (1,948,878-byte,
+            // 1024×1024) PNG carrying genuine ancillary chunks (Fixtures/README.md's own provenance
+            // entry): the measured class that used to refuse under the OLD 512 KiB ceiling/default
+            // ffmpeg settings (a 629,193-byte re-encode) but now succeeds under the raised 768 KiB
+            // ceiling with BuildFfmpegArgs's own -compression_level 100 -pred mixed (a measured
+            // 541,265-byte re-encode),
+            var input = TestImages.LoadRealArtLargeUpload();
+
+            // When it is normalized (the real ImageNormalizeService/FfmpegImageProcessRunner pipeline,
+            // real max-compression ffmpeg args — no mock of the encoder itself),
+            var result = await BuildRealService().NormalizeAsync(input, CancellationToken.None);
+
+            // Then it succeeds, and the re-encoded output lands UNDER the raised 768 KiB ceiling — the
+            // gh-#520 fix, proven against the actual bug-report asset rather than a synthetic stand-in.
+            var success = Assert.IsType<ImageNormalizeResult.Success>(result);
+            Assert.True(success.Bytes.Length < ImageNormalizeService.MaxOutputBytes,
+                $"expected < {ImageNormalizeService.MaxOutputBytes} bytes, got {success.Bytes.Length}");
         }
     }
 
@@ -417,11 +440,15 @@ public static class FeatureTheWornFace
         [Fact]
         public async Task EveryFailureReasonGetsItsOwnDistinctTitle()
         {
-            // Given one request per ImageNormalizeFailureReason this pipeline can quiet-400 on —
-            // Empty, TooLarge, NotAnImage, DimensionsTooSmall, DimensionsTooLarge, Animated, and
-            // EncodeFailed (the enum's own full member set, ImageNormalizeProblemMapper's own
-            // switch — EXTRACTED from this controller at PLAN T307's own second-copy moment,
-            // StationImageController now shares the identical mapping) —
+            // Given one request per ImageNormalizeFailureReason reachable through a real PUT — Empty,
+            // TooLarge, NotAnImage, DimensionsTooSmall, DimensionsTooLarge, Animated, and EncodeFailed
+            // (ImageNormalizeProblemMapper's own switch — EXTRACTED from this controller at PLAN T307's
+            // own second-copy moment, StationImageController now shares the identical mapping) — PLUS
+            // OutputTooLarge (gh-#520), mapped DIRECTLY rather than through an eighth PUT: reaching it
+            // for real needs a specially-rigged oversize-producing IImageProcessRunner (this file's own
+            // ASuccessfulReencodeThatIsMerelyTooBigReturnsOutputTooLargeNotEncodeFailed Fact drives that
+            // full round trip instead) — this Fact only needs the MAPPER's own output for the eighth
+            // title, which is the ONE thing under test here, not a second HTTP wiring,
             await using var factory = new PersonaAvatarWebFactory(personaStore: PersonaAvatarFixtures.SeededPersonaStore());
             var client = await PersonaAvatarWebFactory.LoggedInClientAsync(factory);
 
@@ -443,11 +470,51 @@ public static class FeatureTheWornFace
                 await TitleForAsync(TestImages.MakeSyntheticPngHeader(5000, 5000)),  // DimensionsTooLarge
                 await TitleForAsync(TestImages.CreateApng(300, 300)),                // Animated
                 await TitleForAsync(TestImages.CreateCorruptPng(400, 400)),          // EncodeFailed
+                ImageNormalizeProblemMapper.ToProblem(ImageNormalizeFailureReason.OutputTooLarge).Title, // OutputTooLarge
             };
 
             // When mapped to ProblemDetails — then no two reasons share a title: honest, per-reason
-            // mapping means every distinct cause reads as a distinct claim.
+            // mapping means every distinct cause reads as a distinct claim, over the enum's own full
+            // eight-member set.
             Assert.Equal(titles.Length, titles.Distinct().Count());
+        }
+
+        [Fact]
+        public async Task ASuccessfulReencodeThatIsMerelyTooBigReturnsOutputTooLargeNotEncodeFailed()
+        {
+            // Given ffmpeg genuinely "succeeding" — a fake IImageProcessRunner that writes a real
+            // PNG-signed but over-ceiling file — the only DETERMINISTIC way to hit the ceiling branch:
+            // a real re-encode at max settings never approaches it (this file's own
+            // RealHighEntropyArtReencodesUnderTheRaisedCeilingAtMaxCompressionSettings Fact proves
+            // that directly),
+            var service = new ImageNormalizeService(new OversizeOutputImageProcessRunner(), NullLogger<ImageNormalizeService>.Instance);
+            var input = TestImages.CreateJpeg(400, 300);
+
+            // When it is normalized,
+            var result = await service.NormalizeAsync(input, CancellationToken.None);
+
+            // Then the failure reason is OutputTooLarge — NEVER EncodeFailed — since ffmpeg genuinely
+            // produced a valid, decodable PNG; it was merely too large to store (gh-#520's own honest
+            // split, discharging the standing T295 rider).
+            var failure = Assert.IsType<ImageNormalizeResult.Failure>(result);
+            Assert.Equal(ImageNormalizeFailureReason.OutputTooLarge, failure.Reason);
+        }
+
+        [Fact]
+        public void OutputTooLargeMapsToAnHonestTooLargeToStoreProblemNeverTheEncodeFailedCopy()
+        {
+            // Given OutputTooLarge and EncodeFailed — both ffmpeg-stage reasons, but distinct causes
+            // (gh-#520: a SUCCESSFUL re-encode that is merely too big, vs ffmpeg genuinely failing),
+            var outputTooLarge = ImageNormalizeProblemMapper.ToProblem(ImageNormalizeFailureReason.OutputTooLarge);
+            var encodeFailed = ImageNormalizeProblemMapper.ToProblem(ImageNormalizeFailureReason.EncodeFailed);
+
+            // When compared — then OutputTooLarge's own Detail is the HONEST "too large to store" copy
+            // (never EncodeFailed's generic "could not be processed" one — gh-#520's own root-cause
+            // report: the over-ceiling case used to read as a misleading decode failure), and the two
+            // carry distinct titles.
+            Assert.Equal(
+                (Detail: "The processed image is too large to store.", TitlesDiffer: true),
+                (outputTooLarge.Detail, TitlesDiffer: outputTooLarge.Title != encodeFailed.Title));
         }
     }
 
@@ -1084,4 +1151,29 @@ file sealed class CaseInsensitiveAvatarPackStore(AvatarPack canonicalPack) : IAv
 
     public Task<bool> DeleteAsync(string slug, CancellationToken ct) =>
         throw new NotSupportedException("Unused by this double's one caller.");
+}
+
+/// <summary>
+/// A fake <see cref="IImageProcessRunner"/> that writes a genuine PNG-signed but deliberately
+/// over-<see cref="ImageNormalizeService.MaxOutputBytes"/> file to whatever output path
+/// <c>ImageNormalizeService.BuildFfmpegArgs</c> asked for — the only DETERMINISTIC way to
+/// drive <c>RunFfmpegNormalizeAsync</c>'s own ceiling branch (gh-#520's <c>OutputTooLarge</c> reason):
+/// a real ffmpeg re-encode at max settings never approaches the raised 768 KiB ceiling for any
+/// fixture this test suite generates, by design (that is the whole fix). Never touches a real ffmpeg
+/// process — models "ffmpeg genuinely succeeded, the result was merely too large" directly.
+/// </summary>
+file sealed class OversizeOutputImageProcessRunner : IImageProcessRunner
+{
+    static readonly byte[] PngSignature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+
+    public Task RunAsync(IReadOnlyList<string> args, CancellationToken ct)
+    {
+        // BuildFfmpegArgs's own shape always ends with "--", outputPath — the last element is always
+        // the file this fake must produce.
+        var outputPath = args[^1];
+        var oversizeButSignatureValid = new byte[ImageNormalizeService.MaxOutputBytes + 1];
+        PngSignature.CopyTo(oversizeButSignatureValid, 0);
+        File.WriteAllBytes(outputPath, oversizeButSignatureValid);
+        return Task.CompletedTask;
+    }
 }

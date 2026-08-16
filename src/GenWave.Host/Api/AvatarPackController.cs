@@ -43,8 +43,8 @@ namespace GenWave.Host.Api;
 /// bad shape rather than rejecting the install (review finding S2, see
 /// <see cref="CatalogInstallShell.ValidateSuggestedPersonaShape"/>'s own remarks) → re-validate and
 /// normalize EVERY fetched item's bytes, memoized per distinct FILE so two items sharing one already-
-/// fetched image re-encode exactly once (<see cref="ImageNormalizeService.NormalizeAsync"/>: ANY
-/// failure fails the WHOLE install, see this class's own RE-VALIDATION remarks and
+/// fetched image normalize exactly once (<see cref="ImageNormalizeService.NormalizeCatalogAssetAsync"/>:
+/// ANY failure fails the WHOLE install, see this class's own RE-VALIDATION remarks and
 /// <see cref="NormalizeAllItemsAsync"/>'s own MEMOIZATION remarks, review finding S1) → ONE
 /// <see cref="IAvatarPackStore.UpsertAsync"/> call → 200.
 /// </para>
@@ -60,10 +60,14 @@ namespace GenWave.Host.Api;
 /// (APNG) chunk, or tEXt/eXIf metadata that would otherwise ride straight through to a publicly-served
 /// face — hash verification proves the bytes are what the INDEX says; it proves nothing about what
 /// those bytes actually ARE. <see cref="NormalizeAllItemsAsync"/> runs EVERY fetched item through the
-/// SAME <see cref="ImageNormalizeService"/> gates a direct owner upload passes (magic bytes → header
-/// dimensions/APNG-reject → ffmpeg center-crop-and-scale re-encode) — the re-encode is what
-/// structurally strips any metadata chunk, never a chunk-by-chunk filter this route would have to keep
-/// in lockstep with the pipeline's own gates. A single item failing ANY gate fails the WHOLE install
+/// SAME pre-decode gates a direct owner upload passes (magic bytes → header dimensions/APNG-reject),
+/// via <see cref="ImageNormalizeService.NormalizeCatalogAssetAsync"/> rather than
+/// <see cref="ImageNormalizeService.NormalizeAsync"/> (gh-#520): an exactly-512×512 PNG — every
+/// catalog avatar seed's own required shape — takes a chunk-level metadata STRIP instead of a pixel
+/// re-encode (structurally the same "any ancillary chunk is gone" guarantee, reached by filtering the
+/// chunk stream rather than by re-encoding pixels through ffmpeg); anything that is not exactly that
+/// shape still falls through to the SAME ffmpeg center-crop-and-scale re-encode this route always ran
+/// before gh-#520. Either way, a single item failing ANY gate fails the WHOLE install
 /// (SPEC F104 "a pack IS its files" all-or-nothing posture, applied here identically): nothing is ever
 /// written for a partially-good pack, and the refusal is a quiet 400 naming no gate/reason (F15.7 — an
 /// admin-only surface is still no reason to hand a caller a validation oracle for what shape of hostile
@@ -75,15 +79,16 @@ namespace GenWave.Host.Api;
 /// divergence from <see cref="FontPackController"/>'s own "the store persists whatever the transport
 /// already verified" idiom.</b> A font face is stored VERBATIM (bytes = what the transport fetched,
 /// sha256 = the index's own pinned hash) because nothing further happens to it. An avatar item is
-/// NOT: <see cref="ImageNormalizeService.NormalizeAsync"/> replaces the fetched bytes with a freshly
-/// re-encoded 512×512 PNG before this route ever constructs an <see cref="AvatarPackItemInput"/>, so
-/// <c>station.avatar_pack_item.bytes</c>/<c>.sha256</c> describe THAT derivative, never the bytes the
+/// NOT: <see cref="ImageNormalizeService.NormalizeCatalogAssetAsync"/> replaces the fetched bytes with
+/// a fresh 512×512 PNG before this route ever constructs an <see cref="AvatarPackItemInput"/> — either
+/// the metadata-stripped derivative (the gh-#520 fast path) or a freshly re-encoded one (the fallback)
+/// — so <c>station.avatar_pack_item.bytes</c>/<c>.sha256</c> describe THAT derivative, never the bytes the
 /// index's own sha256 pinned. The FETCH's own integrity is still fully verified — <see cref="CatalogProxyService.GetAssetAsync"/>
 /// hash-checks every byte against the index before this route ever sees it, exactly as
 /// <see cref="FontPackController"/>'s own fetch does — that check is just never carried any further:
 /// once normalization replaces the payload, continuing to store the FETCH's own hash next to
 /// DIFFERENT bytes would be actively dishonest (a stored hash that does not describe the stored
-/// payload), so <see cref="ImageNormalizeService.NormalizeAsync"/>'s own freshly-computed
+/// payload), so <see cref="ImageNormalizeService.NormalizeCatalogAssetAsync"/>'s own freshly-computed
 /// <see cref="ImageNormalizeResult.Success.Sha256"/> is what <see cref="AvatarPackItemInput.Sha256"/>
 /// actually carries — see that type's own remarks for the same reasoning, recorded once more at its
 /// own home.
@@ -135,15 +140,21 @@ public sealed class AvatarPackController(
     /// ceiling only bounds the FETCH stage's own running total, but <see cref="BuildRawItems"/>'s own
     /// remarks explain why a manifest may legitimately declare many items sharing one already-fetched
     /// file — an unbounded item COUNT could still drive the normalize stage to hold up to (item count)
-    /// × <see cref="ImageNormalizeService.MaxOutputBytes"/> (512 KiB) of normalized output at once
+    /// × <see cref="ImageNormalizeService.MaxOutputBytes"/> (768 KiB, gh-#520's own honest re-derivation
+    /// of that constant — see its own remarks) of normalized output at once
     /// (<see cref="NormalizeAllItemsAsync"/>'s own per-file memoization caps the number of ffmpeg
     /// invocations, never the number of ITEMS this loop still has to hold a normalized copy for —
     /// every item, memoized or not, still gets its own <see cref="AvatarPackItemInput"/> in the final
-    /// list). ~8,700 items × 512 KiB ≈ 4.2 GiB — enough to OOM this process on a 4 GB box (dead air).
-    /// SPEC F128.1's own catalog-CI arithmetic (≤512 KiB per item, ≤6 MiB per pack) already caps a
-    /// CI-legal pack at 12 items, and the seed packs (SPEC F128.10) ship exactly 12; 64 is generous
-    /// headroom over that CI-legal maximum, not a number this app expects a legitimate pack to
-    /// approach.
+    /// list). ~5,700 items × 768 KiB ≈ 4.2 GiB — enough to OOM this process on a 4 GB box (dead air),
+    /// the honest re-derivation of the same "a hostile item count alone can starve this box" threat
+    /// this ceiling exists for (fix round finding #2 — the item count needed to hit it shrank from the
+    /// old, no-longer-current ~8,700 figure once the ceiling itself grew from 512 KiB to 768 KiB, the
+    /// same growth needed fewer, bigger items to reach the same OOM floor). With <see cref="MaxPackItems"/>
+    /// enforced, the actual worst case this route can ever hold at once is 64 × 768 KiB = 48 MiB —
+    /// comfortably within any box's budget, the number this ceiling exists to guarantee. SPEC F128.1's
+    /// own catalog-CI arithmetic (≤512 KiB per item, ≤6 MiB per pack) already caps a CI-legal pack at 12
+    /// items, and the seed packs (SPEC F128.10) ship exactly 12; 64 is generous headroom over that
+    /// CI-legal maximum, not a number this app expects a legitimate pack to approach.
     /// </summary>
     public const int MaxPackItems = 64;
 
@@ -366,7 +377,8 @@ public sealed class AvatarPackController(
     // ── Re-validation + normalize (SPEC F128.3/F129.2, PLAN T293 orchestrator addition) ───────────
 
     /// <summary>
-    /// Runs EVERY <paramref name="rawItems"/> entry through <see cref="ImageNormalizeService.NormalizeAsync"/>
+    /// Runs EVERY <paramref name="rawItems"/> entry through
+    /// <see cref="ImageNormalizeService.NormalizeCatalogAssetAsync"/>
     /// — see this class's own RE-VALIDATION IS NOT OPTIONAL and STORED BYTES ARE THE NORMALIZED
     /// DERIVATIVE remarks for why this exists and what it stores. A SINGLE failing item fails the
     /// WHOLE install (F104 "a pack IS its files" all-or-nothing posture): the instant one item fails
@@ -382,10 +394,11 @@ public sealed class AvatarPackController(
     /// <b>MEMOIZATION, PER DISTINCT FILE (review finding S1).</b> <see cref="BuildRawItems"/>'s own
     /// remarks establish that two items may legitimately share one already-fetched image (a DIFFERENT
     /// item NAME pointing at the SAME manifest <c>file</c>) — without this cache, each such item would
-    /// re-run the full ffmpeg re-encode independently, turning an item-count multiplier into a
-    /// process-spawn multiplier too. <paramref name="rawItems"/>'s own <see cref="RawItem.File"/> is
-    /// the cache key: the FIRST item naming a given file pays for the real
-    /// <see cref="ImageNormalizeService.NormalizeAsync"/> call (and, on failure, still fails the whole
+    /// re-run the normalize call independently (a chunk-strip for the gh-#520 fast path, or the full
+    /// ffmpeg re-encode for the fallback — either way, needless duplicate work), turning an item-count
+    /// multiplier into a normalize-call multiplier too. <paramref name="rawItems"/>'s own
+    /// <see cref="RawItem.File"/> is the cache key: the FIRST item naming a given file pays for the
+    /// real <see cref="ImageNormalizeService.NormalizeCatalogAssetAsync"/> call (and, on failure, still fails the whole
     /// install exactly as an un-memoized call would — nothing here changes WHICH items can fail, only
     /// how many times an already-decided outcome is computed); every LATER item naming that same file
     /// reuses the cached <see cref="ImageNormalizeResult.Success"/> outright. Only successes are ever
@@ -404,7 +417,11 @@ public sealed class AvatarPackController(
         {
             if (!normalizedByFile.TryGetValue(raw.File, out var success))
             {
-                var result = await imageNormalizeService.NormalizeAsync(raw.Bytes, ct);
+                // gh-#520: NormalizeCatalogAssetAsync, not NormalizeAsync — the catalog-install fast
+                // path (chunk-strip an already-512×512 PNG instead of paying ffmpeg's own weaker
+                // re-encode a second time). Same gates, same all-or-nothing failure contract; see
+                // that method's own remarks.
+                var result = await imageNormalizeService.NormalizeCatalogAssetAsync(raw.Bytes, ct);
                 switch (result)
                 {
                     case ImageNormalizeResult.Success ok:

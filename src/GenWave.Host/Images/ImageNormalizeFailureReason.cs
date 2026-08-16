@@ -1,11 +1,12 @@
 namespace GenWave.Host.Images;
 
 /// <summary>
-/// Every quiet-400 reason <see cref="ImageNormalizeService.NormalizeAsync"/> can fail with (SPEC
-/// F128.6, PLAN T291) — ordered the same as the gates run: byte length, magic bytes, header
-/// dimensions/APNG, then the ffmpeg re-encode itself. Carries no message text of its own (a reason
-/// enum, not a string) — the HTTP mapping owns its own user-facing copy, per T295/T307's own
-/// ProblemDetails controllers.
+/// Every quiet-400 reason <see cref="ImageNormalizeService.NormalizeAsync"/>/
+/// <see cref="ImageNormalizeService.NormalizeCatalogAssetAsync"/> can fail with (SPEC F128.6, PLAN
+/// T291; <see cref="OutputTooLarge"/> added at gh-#520) — ordered the same as the gates run: byte
+/// length, magic bytes, header dimensions/APNG, then the ffmpeg re-encode itself. Carries no message
+/// text of its own (a reason enum, not a string) — the HTTP mapping owns its own user-facing copy, per
+/// T295/T307's own ProblemDetails controllers.
 /// </summary>
 public enum ImageNormalizeFailureReason
 {
@@ -31,7 +32,12 @@ public enum ImageNormalizeFailureReason
     DimensionsTooLarge,
 
     /// <summary>The ffmpeg re-encode itself failed (missing/unusable binary, non-zero exit, no
-    /// usable PNG on disk after it returned) or exceeded its bounded runtime, or its output
-    /// exceeded <see cref="ImageNormalizeService.MaxOutputBytes"/>.</summary>
+    /// usable PNG on disk after it returned) or exceeded its bounded runtime.</summary>
     EncodeFailed,
+
+    /// <summary>The ffmpeg re-encode SUCCEEDED — it produced a genuine, decodable PNG — but the
+    /// output exceeded <see cref="ImageNormalizeService.MaxOutputBytes"/> (gh-#520: distinct from
+    /// <see cref="EncodeFailed"/> so an over-ceiling result never misreads as "could not be
+    /// processed" when ffmpeg did its job correctly and simply produced too much of it).</summary>
+    OutputTooLarge,
 }

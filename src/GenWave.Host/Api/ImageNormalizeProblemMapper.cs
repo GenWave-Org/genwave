@@ -15,12 +15,15 @@ namespace GenWave.Host.Api;
 /// otherwise be pasted.
 /// <para>
 /// <see cref="ImageNormalizeFailureReason.EncodeFailed"/> covers several distinct underlying causes
-/// (a missing/unusable ffmpeg binary, a genuinely corrupt input ffmpeg's own decoder refuses, AND the
-/// defensive output-byte-ceiling case, <see cref="ImageNormalizeService.MaxOutputBytes"/>'s own
-/// remarks) — none of which is a "decode" problem specifically, so its own title stays deliberately
-/// generic ("could not be processed") rather than naming a stage this reason does not uniquely pin
-/// down; F15.7 already forbids naming the exact gate/gate-internal detail in any of these bodies
-/// regardless.
+/// (a missing/unusable ffmpeg binary, a genuinely corrupt input ffmpeg's own decoder refuses) — none
+/// of which is a "decode" problem specifically, so its own title stays deliberately generic ("could
+/// not be processed") rather than naming a stage this reason does not uniquely pin down; F15.7
+/// already forbids naming the exact gate/gate-internal detail in any of these bodies regardless.
+/// <see cref="ImageNormalizeFailureReason.OutputTooLarge"/> (gh-#520) is DELIBERATELY split out of
+/// that generic bucket rather than folded into it — a successfully re-encoded image that is merely
+/// too big to store is a genuinely different, honestly-nameable claim ("too large"), never the
+/// misleading "could not be processed" copy the pre-#520 EncodeFailed catch-all used to hand back for
+/// this exact case (the root cause of gh-#520's own bug report).
 /// </para>
 /// </summary>
 static class ImageNormalizeProblemMapper
@@ -72,6 +75,12 @@ static class ImageNormalizeProblemMapper
             Status = StatusCodes.Status400BadRequest,
             Title  = "Could not process image.",
             Detail = "The uploaded image could not be processed.",
+        },
+        ImageNormalizeFailureReason.OutputTooLarge => new ProblemDetails
+        {
+            Status = StatusCodes.Status400BadRequest,
+            Title  = "Processed image too large.",
+            Detail = "The processed image is too large to store.",
         },
         _ => throw new UnreachableException($"Unhandled {nameof(ImageNormalizeFailureReason)} case."),
     };

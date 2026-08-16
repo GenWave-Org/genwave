@@ -104,9 +104,20 @@ static class TestImages
     /// (<c>keyword\0text</c>) spliced in immediately after IHDR — a genuine text-metadata chunk a
     /// real decoder (ffmpeg included) reads back, not merely bytes that look like one.
     /// </summary>
-    public static byte[] WithTextChunk(byte[] png, string keyword, string text)
+    public static byte[] WithTextChunk(byte[] png, string keyword, string text) =>
+        WithChunk(png, "tEXt", Encoding.Latin1.GetBytes($"{keyword}\0{text}"));
+
+    /// <summary>
+    /// <paramref name="png"/> with a real, correctly-CRC'd chunk of ANY <paramref name="type"/>
+    /// spliced in immediately after IHDR — the general form <see cref="WithTextChunk"/> is built on
+    /// (gh-#520's own <c>PngMetadataStripper</c> facts need to plant non-text chunk types too, e.g.
+    /// <c>eXIf</c>/<c>tRNS</c>, that a text-shaped helper alone couldn't produce). The spliced chunk's
+    /// own CRC is computed for real over <paramref name="type"/>+<paramref name="data"/>, so a real
+    /// decoder reads it back as a genuine chunk, not merely bytes shaped to look like one.
+    /// </summary>
+    public static byte[] WithChunk(byte[] png, string type, byte[] data)
     {
-        var chunk = BuildChunk("tEXt", Encoding.Latin1.GetBytes($"{keyword}\0{text}"));
+        var chunk = BuildChunk(type, data);
 
         // Splice point: signature(8) + IHDR chunk(8 header + 13 data + 4 crc) = 33.
         const int insertAt = 8 + 8 + 13 + 4;
@@ -114,6 +125,32 @@ static class TestImages
         png.AsSpan(0, insertAt).CopyTo(result);
         chunk.CopyTo(result, insertAt);
         png.AsSpan(insertAt).CopyTo(result.AsSpan(insertAt + chunk.Length));
+        return result;
+    }
+
+    /// <summary>
+    /// <paramref name="png"/> with its own genuine, zero-length terminal <c>IEND</c> chunk replaced by
+    /// a "fat" one whose data IS <paramref name="payload"/> (gh-#520 fix round finding #1's own repro
+    /// shape) — a real, correctly-CRC'd chunk named <c>IEND</c> that a naive length-prefixed chunk
+    /// walk (the un-fixed <c>PngMetadataStripper</c>) reads as an ordinary last chunk and copies
+    /// through verbatim, smuggling <paramref name="payload"/> straight into output the caller believes
+    /// is metadata-free. <paramref name="png"/> is expected to already end with a genuine zero-length
+    /// <c>IEND</c> (every fixture this helper is ever handed does) — asserts that shape explicitly
+    /// rather than silently mis-splicing a differently-shaped input.
+    /// </summary>
+    public static byte[] WithFatIend(byte[] png, byte[] payload)
+    {
+        const int genuineIendChunkLength = 8 + 4; // header(8) + zero-length data(0) + crc(4)
+        var iendStart = png.Length - genuineIendChunkLength;
+        if (iendStart < PngSignature.Length
+            || Encoding.ASCII.GetString(png, iendStart + 4, 4) != "IEND"
+            || BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(iendStart, 4)) != 0)
+            throw new InvalidOperationException("png does not end with a genuine zero-length IEND chunk");
+
+        var fatIend = BuildChunk("IEND", payload);
+        var result = new byte[iendStart + fatIend.Length];
+        png.AsSpan(0, iendStart).CopyTo(result);
+        fatIend.CopyTo(result, iendStart);
         return result;
     }
 
@@ -179,6 +216,44 @@ static class TestImages
         }
 
         return types;
+    }
+
+    /// <summary>
+    /// The gh-#520 hotfix's own committed real-art-class fixture (see <c>Fixtures/README.md</c>'s own
+    /// entry for the full provenance) — the ACTUAL bug-report install-path asset: a real,
+    /// ImageMagick-max-compressed, exactly-512×512 catalog avatar seed (511,707 bytes), copied
+    /// verbatim from <c>genwave-catalog/entries/avatars/avatar-pack-two/maxxie-volt.png</c>. Neither
+    /// <see cref="CreatePng"/> (too compressible) nor <see cref="CreateHighBitDepthPng"/> (a DIFFERENT
+    /// pathology — uniform random noise, not real art) can stand in for this shape; see
+    /// <c>Fixtures/README.md</c>'s own remarks for why this is a committed binary, not generated.
+    /// </summary>
+    public static byte[] LoadRealArtNearCap512() => ReadFixtureBytes("gh520-real-art-512.png");
+
+    /// <summary>
+    /// The gh-#520 hotfix's own committed real-art-class fixture — the ACTUAL bug-report upload-path
+    /// asset: a real, 1024×1024 PNG carrying genuine ancillary metadata chunks (1,948,878 bytes),
+    /// copied verbatim from the sibling <c>avatars/transparent/nova-demo-1.png</c> working tree. See
+    /// <see cref="LoadRealArtNearCap512"/>'s own remarks and <c>Fixtures/README.md</c> for the full
+    /// provenance and why this is a committed binary, not generated.
+    /// </summary>
+    public static byte[] LoadRealArtLargeUpload() => ReadFixtureBytes("gh520-real-art-large.png");
+
+    /// <summary>
+    /// Locates and reads a committed binary fixture under <c>Fixtures/</c> from its SOURCE location
+    /// (not a build-output copy) — mirrors <c>Story231_GoldenCardParity.GoldenFixtureFile</c>'s own
+    /// established convention for a non-code file a test needs at runtime: walk up from
+    /// <see cref="AppContext.BaseDirectory"/> until the repo root (<c>GenWave.sln</c>) is found, then
+    /// address the file by its fixed source-tree path.
+    /// </summary>
+    static byte[] ReadFixtureBytes(string fileName)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
+            dir = dir.Parent;
+        if (dir is null)
+            throw new InvalidOperationException("repo root (GenWave.sln) not found");
+
+        return File.ReadAllBytes(Path.Combine(dir.FullName, "tests", "GenWave.Host.Tests", "Fixtures", fileName));
     }
 
     static string FormatSize(int width, int height) =>

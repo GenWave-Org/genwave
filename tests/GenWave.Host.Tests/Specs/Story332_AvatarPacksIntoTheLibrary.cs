@@ -37,6 +37,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
@@ -431,8 +432,13 @@ public sealed class FeatureAvatarPacksIntoTheLibrary
             // (BuildRawItems's own carve-out — never a store-level collision), with the real
             // ImageNormalizeService/FfmpegImageProcessRunner pipeline wired behind a COUNTING decorator
             // (review finding S1's own observable seam — a real re-encode still runs, so this proves
-            // memoization, not merely that the gate was skipped),
-            var itemBytes = TestImages.CreatePng(512, 512);
+            // memoization, not merely that the gate was skipped). A NON-512×512 shape (gh-#520 update):
+            // an exactly-512×512 item now takes NormalizeCatalogAssetAsync's own PngMetadataStripper
+            // fast path, which never touches IImageProcessRunner at all — a 512×512 fixture here would
+            // prove nothing about ffmpeg-invocation memoization (InvocationCount would read 0 either
+            // way). 300×400 still falls through to the SAME ffmpeg re-encode fallback this Fact's own
+            // memoization proof always needed.
+            var itemBytes = TestImages.CreatePng(300, 400);
             var runner = new CountingRealImageProcessRunner();
             var store = new FakeAvatarPackStore();
             await using var factory = new AvatarPackInstallWebFactory(
@@ -582,6 +588,199 @@ public sealed class FeatureAvatarPacksIntoTheLibrary
             Assert.Equal(
                 (HttpStatusCode.BadRequest, 0),
                 (response.StatusCode, (await store.GetAllAsync(CancellationToken.None)).Count));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // gh-#520 — THE CHUNK-STRIP FAST PATH (an exactly-512×512 catalog item skips ffmpeg entirely)
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioTheChunkStripFastPathHandlesRealArt
+    {
+        [Fact]
+        public async Task ARealNearCapCatalogItemInstallsWithStoredBytesAtMostTheInputAndOnlyAllowedChunks()
+        {
+            // Given the ACTUAL gh-#520 bug-report asset as this pack's one item — a real, exactly-
+            // 512×512, ImageMagick-max-compressed catalog seed near the per-item cap (511,707 bytes),
+            // the exact shape that used to bust ImageNormalizeService.MaxOutputBytes once ffmpeg
+            // re-encoded it (Fixtures/README.md's own provenance entry carries the measured numbers),
+            var itemBytes = TestImages.LoadRealArtNearCap512();
+            var store = new FakeAvatarPackStore();
+            await using var factory = new AvatarPackInstallWebFactory(store, handler: AvatarPackInstallFixtures.BuildRoutedHandler(itemBytes));
+            var client = await AvatarPackInstallWebFactory.LoggedInClientAsync(factory);
+
+            // When install is attempted (the real production route, the real PngMetadataStripper fast
+            // path — no ffmpeg re-encode for this exactly-512×512 item),
+            var response = await client.PostAsync($"/api/avatar-packs/{AvatarPackInstallFixtures.PackSlug}/install", null);
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+
+            // Then the stored bytes are at most the fetched input — the stripper's own output-≤-input-
+            // by-construction guarantee, gh-#520's whole point (this exact asset used to GROW past the
+            // ceiling under the old ffmpeg re-encode) — and carry ONLY critical chunks plus tRNS, SPEC
+            // F129.2's metadata-free-by-construction contract, reached here by chunk filtering rather
+            // than a pixel re-encode.
+            var pack = await store.GetBySlugAsync(AvatarPackInstallFixtures.PackSlug, CancellationToken.None);
+            var item = Assert.Single(pack?.Items ?? []);
+            var allowedChunkTypes = new HashSet<string>(StringComparer.Ordinal) { "IHDR", "PLTE", "IDAT", "tRNS", "IEND" };
+            var storedChunkTypes = TestImages.PngChunkTypes(item.Bytes);
+            Assert.True(
+                item.Bytes.Length <= itemBytes.Length && storedChunkTypes.All(allowedChunkTypes.Contains),
+                $"expected stored ({item.Bytes.Length} bytes, chunks: {string.Join(',', storedChunkTypes)}) " +
+                $"<= input ({itemBytes.Length} bytes) with only critical+tRNS chunk types");
+        }
+
+        [Fact]
+        public async Task APlantedMetadataChunkIsDroppedButTrnsSurvivesWithoutEverInvokingFfmpeg()
+        {
+            // Given a real, exactly-512×512 PNG (the fast path's own gate — any content, the stripper
+            // is a pure structural filter) carrying a real, correctly-CRC'd tRNS chunk AND a real
+            // planted tEXt chunk (mirrors TestImages.WithTextChunk's own "genuine chunk a real decoder
+            // reads back" idiom, generalized via WithChunk to a non-text chunk type too) — self-
+            // verified here so a broken fixture can't pass this fact for the wrong reason,
+            var plain = TestImages.CreatePng(512, 512);
+            var withTrns = TestImages.WithChunk(plain, "tRNS", [0xFF, 0xFF, 0xFF]);
+            var withPlantedMetadata = TestImages.WithChunk(withTrns, "tEXt", Encoding.Latin1.GetBytes("Comment\0secret gps location data"));
+            Assert.Contains("tRNS", TestImages.PngChunkTypes(withPlantedMetadata));
+            Assert.Contains("tEXt", TestImages.PngChunkTypes(withPlantedMetadata));
+
+            // When it is normalized through the catalog-install fast path (the real
+            // ImageNormalizeService, wired to a COUNTING fake IImageProcessRunner that would record
+            // any ffmpeg invocation),
+            var runner = new CountingImageProcessRunner();
+            var service = new ImageNormalizeService(runner, NullLogger<ImageNormalizeService>.Instance);
+            var result = await service.NormalizeCatalogAssetAsync(withPlantedMetadata, CancellationToken.None);
+
+            // Then the planted tEXt is gone, tRNS survives (transparency structurally preserved), and
+            // ffmpeg was NEVER invoked — proof this is the chunk-strip fast path doing the work, not a
+            // re-encode that happened to also drop text metadata.
+            var success = Assert.IsType<ImageNormalizeResult.Success>(result);
+            var outputChunkTypes = TestImages.PngChunkTypes(success.Bytes);
+            Assert.Equal(
+                (HasText: false, HasTrns: true, FfmpegInvocations: 0),
+                (HasText: outputChunkTypes.Contains("tEXt"), HasTrns: outputChunkTypes.Contains("tRNS"),
+                 FfmpegInvocations: runner.InvocationCount));
+        }
+
+        [Fact]
+        public async Task ANonExactly512SquareCatalogItemFallsThroughToTheFfmpegReencode()
+        {
+            // Given a real, VALID PNG that is NOT exactly 512×512 (300×400 — the defensive fallback
+            // this class's own remarks describe: catalog CI is SUPPOSED to guarantee exact 512×512,
+            // but this route never trusts that alone) as this pack's one item,
+            var itemBytes = TestImages.CreatePng(300, 400);
+            var runner = new CountingRealImageProcessRunner();
+            var store = new FakeAvatarPackStore();
+            await using var factory = new AvatarPackInstallWebFactory(
+                store, handler: AvatarPackInstallFixtures.BuildRoutedHandler(itemBytes), imageProcessRunner: runner);
+            var client = await AvatarPackInstallWebFactory.LoggedInClientAsync(factory);
+
+            // When install is attempted,
+            var response = await client.PostAsync($"/api/avatar-packs/{AvatarPackInstallFixtures.PackSlug}/install", null);
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+
+            // Then ffmpeg genuinely ran — the fast path never engaged for a non-512-square item, the
+            // SAME fallback ScenarioInstallLandsThePack.EveryStoredPngWasReValidatedServerSide already
+            // proves by its own stored-dimensions assertion, pinned here from the OTHER observable
+            // side (the runner itself was invoked).
+            Assert.Equal(1, runner.InvocationCount);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // gh-#520 fix round finding #1 (SAD PATH) — a KEPT chunk type's own declared length lying about
+    // its shape is refused, never copied through by the fast path's own naive length-prefixed walk.
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioTheStripperRejectsOutOfBoundDeclaredLengths
+    {
+        [Fact]
+        public void AFatIendPayloadIsRejectedByTheStripperItself()
+        {
+            // Given the PROVEN hostile shape (fix round finding #1): a real, exactly-512×512 PNG
+            // whose own genuine, zero-length terminal IEND has been swapped for a "fat" one whose
+            // declared length smuggles a 130-byte payload — a real, correctly-CRC'd chunk still named
+            // IEND, which the un-fixed walk read as an ordinary last chunk and copied straight
+            // through,
+            var hostile = TestImages.WithFatIend(TestImages.CreatePng(512, 512), new byte[130]);
+
+            // When the stripper itself is asked to strip it,
+            var stripped = PngMetadataStripper.TryStrip(hostile, out _);
+
+            // Then it refuses outright.
+            Assert.False(stripped);
+        }
+
+        [Fact]
+        public async Task AFatIendPayloadNeverReachesStoredBytesThroughTheProductionPipeline()
+        {
+            // Given the SAME proven-hostile fixture, fed to the real production entry point
+            // (NormalizeCatalogAssetAsync, not TryStrip directly) with the REAL ffmpeg runner behind
+            // it — the fallback this fix depends on is exercised for real, never assumed,
+            var payload = new byte[130];
+            Random.Shared.NextBytes(payload);
+            var hostile = TestImages.WithFatIend(TestImages.CreatePng(512, 512), payload);
+            var runner = new CountingRealImageProcessRunner();
+            var service = new ImageNormalizeService(runner, NullLogger<ImageNormalizeService>.Instance);
+
+            // When it is normalized,
+            var result = await service.NormalizeCatalogAssetAsync(hostile, CancellationToken.None);
+
+            // Then the smuggled payload never reaches stored bytes either way this can honestly
+            // resolve — a genuine ffmpeg fallback re-encode (fresh pixels, the payload nowhere in the
+            // output) or an outright failure — never the fast path's own verbatim copy carrying the
+            // payload through.
+            var payloadNeverEscaped = result switch
+            {
+                ImageNormalizeResult.Success success => success.Bytes.AsSpan().IndexOf(payload) < 0,
+                ImageNormalizeResult.Failure => true,
+                _ => false,
+            };
+            Assert.True(payloadNeverEscaped, $"expected the smuggled payload absent or an honest failure, got {result}");
+        }
+
+        [Fact]
+        public void AFatTrnsChunkIsRejectedByTheStripper()
+        {
+            // Given a real, exactly-512×512 PNG carrying a real, correctly-CRC'd tRNS chunk whose
+            // declared length (300 bytes) exceeds the stripper's own 256-byte ceiling (fix round
+            // finding #1 — "same gap for fat tRNS"),
+            var hostile = TestImages.WithChunk(TestImages.CreatePng(512, 512), "tRNS", new byte[300]);
+
+            // When the stripper is asked to strip it,
+            var stripped = PngMetadataStripper.TryStrip(hostile, out _);
+
+            // Then it refuses.
+            Assert.False(stripped);
+        }
+
+        [Fact]
+        public void APlteChunkOverThePaletteCeilingIsRejectedEvenWhenDivisibleByThree()
+        {
+            // Given a real, exactly-512×512 PNG carrying a PLTE chunk whose declared length (900
+            // bytes = 300 palette entries) is a whole multiple of 3 but still over the stripper's own
+            // 768-byte (256-entry) ceiling (fix round finding #1 — "same gap for ... PLTE"),
+            var hostile = TestImages.WithChunk(TestImages.CreatePng(512, 512), "PLTE", new byte[900]);
+
+            // When the stripper is asked to strip it,
+            var stripped = PngMetadataStripper.TryStrip(hostile, out _);
+
+            // Then it refuses.
+            Assert.False(stripped);
+        }
+
+        [Fact]
+        public void APlteChunkWhoseLengthIsNotAMultipleOfThreeIsRejected()
+        {
+            // Given a real, exactly-512×512 PNG carrying a PLTE chunk whose declared length (301
+            // bytes) is under the ceiling but not a whole multiple of 3 — not a real palette shape at
+            // all (fix round finding #1),
+            var hostile = TestImages.WithChunk(TestImages.CreatePng(512, 512), "PLTE", new byte[301]);
+
+            // When the stripper is asked to strip it,
+            var stripped = PngMetadataStripper.TryStrip(hostile, out _);
+
+            // Then it refuses.
+            Assert.False(stripped);
         }
     }
 

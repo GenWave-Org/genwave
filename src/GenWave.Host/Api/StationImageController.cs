@@ -80,7 +80,7 @@ public sealed class StationImageController(
     /// contract — so this response is never <c>immutable</c>: <c>Cache-Control: private, no-cache</c>
     /// paired with the row's own token as the <see cref="EntityTagHeaderValue"/> lets the framework's
     /// own conditional-request handling answer a matching <c>If-None-Match</c> with a bodyless 304
-    /// without re-sending the same ≤512 KiB PNG on every render.
+    /// without re-sending the same ≤768 KiB PNG on every render.
     /// </para>
     /// </summary>
     [HttpGet]
