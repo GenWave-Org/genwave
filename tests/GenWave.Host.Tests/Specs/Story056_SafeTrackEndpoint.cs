@@ -140,7 +140,7 @@ public static class FeatureSafeTrackEndpoint
     /// </summary>
     static ArtworkUrlResolver NoArtworkResolver() =>
         new(new FakeOptionsMonitor<StationOptions>(new StationOptions()), new FakeArtworkTokenStore(),
-            new FakeActivePersonaAccessor(), new PersonaAvatarTokenCache(new FakePersonaAvatarStore(), TimeProvider.System, NullLogger<PersonaAvatarTokenCache>.Instance));
+            new FakeActivePersonaAccessor(), new PersonaAvatarTokenCache(new FakePersonaAvatarStore(), TimeProvider.System, NullLogger<PersonaAvatarTokenCache>.Instance), new StationImageCache(new FakeStationImageStore(), TimeProvider.System, NullLogger<StationImageCache>.Instance));
 
     /// <summary>
     /// Builds a ready, measurable <see cref="MediaReference"/> for use in tests.

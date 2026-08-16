@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Net.Http.Headers;
+using GenWave.Host.Artwork;
 
 namespace GenWave.Host.Api;
 
@@ -54,7 +55,15 @@ static class SpectatorPageEndpoints
     static IResult ServeIndex(HttpContext context, IWebHostEnvironment env) =>
         ServeFile(context, env, "index.html", "text/html; charset=utf-8", PageMaxAgeSeconds);
 
-    static IResult ServeAsset(string asset, HttpContext context, IWebHostEnvironment env) =>
+    /// <summary>
+    /// SPEC F131.3 (STORY-339, PLAN T307): <c>favicon.ico</c> and <c>logo.png</c> now serve the
+    /// owner-customized station image ROW when one is set, falling back to their own shipped FILE
+    /// otherwise — the row-else-file swap every other station-image consumer (the F88 artwork
+    /// fallback, the dj/station token routes) already carries. Every other asset here is untouched
+    /// static content with no store to consult.
+    /// </summary>
+    static async Task<IResult> ServeAsset(
+        string asset, HttpContext context, IWebHostEnvironment env, StationImageCache stationImageCache, CancellationToken ct) =>
         asset switch
         {
             "app.js" => ServeFile(context, env, "app.js", JavaScriptContentType, AssetMaxAgeSeconds),
@@ -62,14 +71,42 @@ static class SpectatorPageEndpoints
             // fetches GET /spectator/api/themes itself; nothing here templates the catalog into it.
             "switcher.js" => ServeFile(context, env, "switcher.js", JavaScriptContentType, AssetMaxAgeSeconds),
             "styles.css" => ServeFile(context, env, "styles.css", StylesheetContentType, AssetMaxAgeSeconds),
-            "favicon.ico" => ServeFile(context, env, "favicon.ico", IconContentType, AssetMaxAgeSeconds),
+            "favicon.ico" => await ServeStationImageOrFileAsync(
+                context, stationImageCache, () => ServeFile(context, env, "favicon.ico", IconContentType, AssetMaxAgeSeconds), ct),
             // The card-sized station mark (gh-#258): a 256px PNG derived from the operator's
             // GenWave-logo.png (byte-identical to admin-ui/app/icon.png, exactly the favicon's own
             // provenance discipline). The favicon.ico above is a 16/32px tab icon — upscaling it to
             // the 72px now-playing art slot is what looked fuzzy; art slots must use this instead.
-            "logo.png" => ServeFile(context, env, "logo.png", PngContentType, AssetMaxAgeSeconds),
+            "logo.png" => await ServeStationImageOrFileAsync(
+                context, stationImageCache, () => ServeFile(context, env, "logo.png", PngContentType, AssetMaxAgeSeconds), ct),
             _ => Results.NotFound(),
         };
+
+    /// <summary>
+    /// Row-else-file (SPEC F131.3): serves the owner-customized station image, ETag'd on its own
+    /// rotating token, at the SAME short <see cref="AssetMaxAgeSeconds"/> cadence every other asset
+    /// here uses — deliberately NOT <c>immutable</c>, since <c>favicon.ico</c>/<c>logo.png</c> are
+    /// STABLE URLs whose bytes change the moment an operator uploads or deletes, unlike the token-
+    /// scoped feeder-stamp URL (<see cref="StationArtworkPaths.PathPrefix"/>'s own remarks). Reads
+    /// through <see cref="StationImageCache"/>, never <see cref="GenWave.Core.Abstractions.IStationImageStore"/>
+    /// directly — the SAME amplification-control mandate every other station-image reader follows
+    /// (PLAN T307 review rider). Falls to <paramref name="shippedFile"/> — byte-identical to today —
+    /// when no row exists.
+    /// </summary>
+    static async Task<IResult> ServeStationImageOrFileAsync(
+        HttpContext context, StationImageCache stationImageCache, Func<IResult> shippedFile, CancellationToken ct)
+    {
+        var stationImage = await stationImageCache.GetAsync(ct);
+        if (stationImage is null)
+            return shippedFile();
+
+        context.Response.GetTypedHeaders().CacheControl = new CacheControlHeaderValue
+        {
+            Public = true,
+            MaxAge = TimeSpan.FromSeconds(AssetMaxAgeSeconds),
+        };
+        return Results.File(stationImage.Bytes, PngContentType, entityTag: new EntityTagHeaderValue($"\"{stationImage.Token}\""));
+    }
 
     /// <summary>
     /// Stamps the shared spectator <c>Cache-Control: public, max-age=N</c> shape (matching

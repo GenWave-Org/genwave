@@ -419,8 +419,9 @@ public static class FeatureTheWornFace
         {
             // Given one request per ImageNormalizeFailureReason this pipeline can quiet-400 on —
             // Empty, TooLarge, NotAnImage, DimensionsTooSmall, DimensionsTooLarge, Animated, and
-            // EncodeFailed (the enum's own full member set, PersonaAvatarController's own
-            // NormalizeFailureProblem switch) —
+            // EncodeFailed (the enum's own full member set, ImageNormalizeProblemMapper's own
+            // switch — EXTRACTED from this controller at PLAN T307's own second-copy moment,
+            // StationImageController now shares the identical mapping) —
             await using var factory = new PersonaAvatarWebFactory(personaStore: PersonaAvatarFixtures.SeededPersonaStore());
             var client = await PersonaAvatarWebFactory.LoggedInClientAsync(factory);
 

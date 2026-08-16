@@ -9,14 +9,17 @@ namespace GenWave.Host.Engine;
 
 /// <summary>
 /// Resolves the <c>url=</c> annotation value carried on every feeder push (SPEC F88.4–F88.5,
-/// STORY-223, PLAN T85; amended by SPEC F129.4, STORY-336, PLAN T300): a music item's own
-/// per-track artwork-token URL, or — for a <c>tts:*</c> segment — either the DJ's own worn-face
-/// token URL (a single-voice, persona-attributed item whose persona wears a face) or the reserved
-/// station-icon URL (crosstalk, idents, and every other station-voiced kind — see
-/// <see cref="ResolveDjTokenAsync"/> for the full F129.4 mapping). Shared by
-/// <see cref="LiquidsoapControl.PushAsync"/> and the safe-track endpoint (<c>InternalEndpoints</c>)
-/// so both resolve the same way, mirroring how <see cref="LiquidsoapAnnotationBuilder"/> itself is
-/// shared between the two.
+/// STORY-223, PLAN T85; amended by SPEC F129.4, STORY-336, PLAN T300; amended by SPEC F131.2,
+/// STORY-339, PLAN T307): a music item's own per-track artwork-token URL, or — for a <c>tts:*</c>
+/// segment — either the DJ's own worn-face token URL (a single-voice, persona-attributed item whose
+/// persona wears a face) or the station's own URL (crosstalk, idents, and every other station-voiced
+/// kind — see <see cref="ResolveDjTokenAsync"/> for the full F129.4 mapping): the TOKEN-VERSIONED
+/// <see cref="StationArtworkPaths.PathPrefix"/> when the station image is customized, or the SAME
+/// reserved <see cref="StationArtworkPaths.ShippedFallbackPath"/> constant this method emitted
+/// before F131 otherwise (see <see cref="ResolveStationSuffixAsync"/> for the full F131.2 mapping).
+/// Shared by <see cref="LiquidsoapControl.PushAsync"/> and the safe-track endpoint
+/// (<c>InternalEndpoints</c>) so both resolve the same way, mirroring how
+/// <see cref="LiquidsoapAnnotationBuilder"/> itself is shared between the two.
 /// <para>
 /// Returns <see langword="null"/> — "omit <c>url=</c> entirely" — whenever
 /// <see cref="StationOptions.PublicBaseUrl"/> is blank, which is the whole of the F88.5 contract:
@@ -38,21 +41,12 @@ public sealed class ArtworkUrlResolver(
     IOptionsMonitor<StationOptions> stationOptions,
     IArtworkTokenStore tokenStore,
     IActivePersonaAccessor personaAccessor,
-    PersonaAvatarTokenCache avatarTokenCache) : IArtworkUrlEchoValidator
+    PersonaAvatarTokenCache avatarTokenCache,
+    StationImageCache stationImageCache) : IArtworkUrlEchoValidator
 {
     /// <summary>Convention shared with <see cref="LiquidsoapAnnotationBuilder"/>: TTS segment ids
     /// start with this, music ids never do.</summary>
     const string TtsIdPrefix = "tts:";
-
-    /// <summary>
-    /// The reserved artwork-token path segment every TTS push carries (SPEC F88.3's own no-oracle
-    /// fallback mechanism — deliberately NOT a dedicated route). "station" is 7 characters, so
-    /// <see cref="IArtworkTokenStore.ResolveAsync"/>'s "must be exactly 32 lowercase hex
-    /// characters" guard rejects it before any database round trip, and
-    /// <c>SpectatorArtworkController</c> falls straight through to its <c>ServeStationIcon</c>
-    /// branch — the exact station-icon bytes every other no-oracle fallback path already serves.
-    /// </summary>
-    internal const string StationIconToken = "station";
 
     const string ArtworkPathPrefix = "/spectator/api/artwork/";
 
@@ -75,7 +69,7 @@ public sealed class ArtworkUrlResolver(
         if (item.MediaId.StartsWith(TtsIdPrefix, StringComparison.Ordinal))
             return await ResolveDjTokenAsync(item, ct) is { } djToken
                 ? baseUrl + DjArtworkPaths.PathPrefix + djToken
-                : baseUrl + ArtworkPathPrefix + StationIconToken;
+                : baseUrl + await ResolveStationSuffixAsync(ct);
 
         if (!long.TryParse(item.MediaId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var mediaId))
             return null;
@@ -129,6 +123,28 @@ public sealed class ArtworkUrlResolver(
         if (!DjIdentity.Agrees(personaAccessor, activePersonaId, djName)) return null;
 
         return await avatarTokenCache.GetTokenAsync(activePersonaId, ct);
+    }
+
+    /// <summary>
+    /// SPEC F131.2 (PLAN T307) — the absolute-path suffix a TTS push carries when
+    /// <see cref="ResolveDjTokenAsync"/> answers <see langword="null"/> (no face to wear: a
+    /// station-voiced kind, an unattributed item, a disagreeing/unverifiable identity, or a
+    /// faceless persona alike). Reads the current station image through <see cref="StationImageCache"/>
+    /// (never <see cref="IStationImageStore"/> directly — the SAME ≤30s-memoized, never-throws
+    /// discipline <see cref="avatarTokenCache"/> already gives this push path, so a station-image
+    /// store fault can no more break a push than a persona-avatar store fault already can):
+    /// customized → the TOKEN-VERSIONED <see cref="StationArtworkPaths.PathPrefix"/> + the current
+    /// token (immutable-safe on the receiving end — the mutable-under-immutable favicon lesson made
+    /// structural); never customized → <see cref="StationArtworkPaths.ShippedFallbackPath"/>, the
+    /// SAME constant literal this method emitted before this task — byte-identical for every station
+    /// that has never uploaded one (SPEC F131.2's own "upgrade is byte-identical" promise).
+    /// </summary>
+    async Task<string> ResolveStationSuffixAsync(CancellationToken ct)
+    {
+        var stationImage = await stationImageCache.GetAsync(ct);
+        return stationImage is not null
+            ? StationArtworkPaths.PathPrefix + stationImage.Token
+            : StationArtworkPaths.ShippedFallbackPath;
     }
 
     /// <inheritdoc/>

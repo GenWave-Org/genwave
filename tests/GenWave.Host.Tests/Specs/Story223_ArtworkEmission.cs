@@ -24,7 +24,7 @@ public static class FeatureArtworkEmission
         new FakeOptionsMonitor<StationOptions>(new StationOptions { PublicBaseUrl = publicBaseUrl }),
         new FakeArtworkTokenStore(), new FakeActivePersonaAccessor(),
         new PersonaAvatarTokenCache(
-            new FakePersonaAvatarStore(), TimeProvider.System, NullLogger<PersonaAvatarTokenCache>.Instance));
+            new FakePersonaAvatarStore(), TimeProvider.System, NullLogger<PersonaAvatarTokenCache>.Instance), new StationImageCache(new FakeStationImageStore(), TimeProvider.System, NullLogger<StationImageCache>.Instance));
 
     /// <summary>Repo root, resolved relative to the test assembly's build output (Story074/102/107's convention).</summary>
     static string RepoRoot =>

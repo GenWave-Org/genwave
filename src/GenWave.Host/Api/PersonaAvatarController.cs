@@ -138,7 +138,8 @@ public sealed class PersonaAvatarController(
     /// pipeline (magic bytes → header dimensions/APNG → ffmpeg re-encode) → a fresh token
     /// (<see cref="GenerateToken"/>) → <see cref="IPersonaAvatarStore.UpsertAsync"/> with
     /// <see cref="PersonaAvatarSource.Upload"/>. Any failure at any gate is a quiet 400
-    /// (<see cref="NormalizeFailureProblem"/> — F15.7, never named beyond the honest reason text) and
+    /// (<see cref="ImageNormalizeProblemMapper.ToProblem"/> — F15.7, never named beyond the honest
+    /// reason text; EXTRACTED to that shared home at PLAN T307's own second-copy moment) and
     /// writes nothing: the PREVIOUS face (if any) survives untouched, since
     /// <see cref="IPersonaAvatarStore.UpsertAsync"/> is never reached on a failing path.
     /// </summary>
@@ -149,7 +150,7 @@ public sealed class PersonaAvatarController(
         var (bytes, oversized) = await BoundedImportBodyReader.ReadBoundedBytesAsync(
             Request, ImageNormalizeService.MaxInputBytes, ct);
         if (oversized)
-            return BadRequest(NormalizeFailureProblem(ImageNormalizeFailureReason.TooLarge));
+            return BadRequest(ImageNormalizeProblemMapper.ToProblem(ImageNormalizeFailureReason.TooLarge));
 
         if (await FindMissingPersonaResultAsync(id, ct) is { } missing)
             return missing;
@@ -160,7 +161,7 @@ public sealed class PersonaAvatarController(
             case ImageNormalizeResult.Failure failure:
                 logger.LogInformation(
                     "Persona avatar upload rejected personaId={PersonaId} reason={Reason}", id, failure.Reason);
-                return BadRequest(NormalizeFailureProblem(failure.Reason));
+                return BadRequest(ImageNormalizeProblemMapper.ToProblem(failure.Reason));
 
             case ImageNormalizeResult.Success success:
                 await personaAvatarStore.UpsertAsync(
@@ -358,61 +359,4 @@ public sealed class PersonaAvatarController(
         Detail = $"Avatar pack \"{LogSafeText.Sanitize(packSlug)}\" has no item named \"{LogSafeText.Sanitize(itemName)}\".",
     };
 
-    /// <summary>
-    /// Honest, per-<see cref="ImageNormalizeFailureReason"/> ProblemDetails (PLAN T291/T295 rider: an
-    /// over-ceiling re-encoded output must never read as a "decode error", and every other reason gets
-    /// its own true title rather than a shared generic one). <see cref="ImageNormalizeFailureReason.EncodeFailed"/>
-    /// covers several distinct underlying causes (a missing/unusable ffmpeg binary, a genuinely corrupt
-    /// input ffmpeg's own decoder refuses, AND the defensive output-byte-ceiling case,
-    /// <see cref="ImageNormalizeService.MaxOutputBytes"/>'s own remarks) — none of which is a "decode"
-    /// problem specifically, so its own title stays deliberately generic ("could not be processed")
-    /// rather than naming a stage this reason does not uniquely pin down; F15.7 already forbids naming
-    /// the exact gate/gate-internal detail in any of these bodies regardless.
-    /// </summary>
-    static ProblemDetails NormalizeFailureProblem(ImageNormalizeFailureReason reason) => reason switch
-    {
-        ImageNormalizeFailureReason.Empty => new ProblemDetails
-        {
-            Status = StatusCodes.Status400BadRequest,
-            Title  = "Empty upload.",
-            Detail = "The request body was empty.",
-        },
-        ImageNormalizeFailureReason.TooLarge => new ProblemDetails
-        {
-            Status = StatusCodes.Status400BadRequest,
-            Title  = "Upload too large.",
-            Detail = $"The uploaded image must be at most {ImageNormalizeService.MaxInputBytes / (1024 * 1024)} MiB.",
-        },
-        ImageNormalizeFailureReason.NotAnImage => new ProblemDetails
-        {
-            Status = StatusCodes.Status400BadRequest,
-            Title  = "Unsupported image format.",
-            Detail = "The uploaded file is not a recognized PNG or JPEG image.",
-        },
-        ImageNormalizeFailureReason.Animated => new ProblemDetails
-        {
-            Status = StatusCodes.Status400BadRequest,
-            Title  = "Animated images are not supported.",
-            Detail = "An animated PNG (APNG) cannot be used as a face.",
-        },
-        ImageNormalizeFailureReason.DimensionsTooSmall => new ProblemDetails
-        {
-            Status = StatusCodes.Status400BadRequest,
-            Title  = "Image too small.",
-            Detail = $"The uploaded image must be at least {ImageNormalizeService.MinDimensionPx}x{ImageNormalizeService.MinDimensionPx} pixels.",
-        },
-        ImageNormalizeFailureReason.DimensionsTooLarge => new ProblemDetails
-        {
-            Status = StatusCodes.Status400BadRequest,
-            Title  = "Image dimensions too large.",
-            Detail = $"The uploaded image must be at most {ImageNormalizeService.MaxDimensionPx}x{ImageNormalizeService.MaxDimensionPx} pixels.",
-        },
-        ImageNormalizeFailureReason.EncodeFailed => new ProblemDetails
-        {
-            Status = StatusCodes.Status400BadRequest,
-            Title  = "Could not process image.",
-            Detail = "The uploaded image could not be processed into a face.",
-        },
-        _ => throw new UnreachableException($"Unhandled {nameof(ImageNormalizeFailureReason)} case."),
-    };
 }

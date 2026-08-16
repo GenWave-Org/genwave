@@ -105,7 +105,10 @@ public static class FeatureStationIdentityLive
     /// <see cref="OptionsMonitorStationIdentityProvider"/>/<see cref="AuthController"/> sharing the
     /// SAME <see cref="IConfiguration"/> root and <see cref="IOptionsMonitor{StationOptions}"/> — a
     /// PUT through <see cref="Settings"/> is observed by <see cref="IdentityProvider"/>/
-    /// <see cref="Auth"/> exactly as it would be in the running api, no restart.
+    /// <see cref="Auth"/> exactly as it would be in the running api, no restart. <see cref="Auth"/>'s
+    /// own <see cref="IStationImageStore"/> dependency (PLAN T307 fix round) is a bare
+    /// <see cref="FakeStationImageStore"/>, unseeded — this rig is about the NAME going live, not the
+    /// image, so every fact here expects <see cref="StationDto.StationImageToken"/> to read null.
     /// </summary>
     sealed record LiveRig(SettingsController Settings, IStationIdentityProvider IdentityProvider, AuthController Auth);
 
@@ -141,7 +144,8 @@ public static class FeatureStationIdentityLive
         };
 
         var authController = new AuthController(
-            ExtOptions.Create(new AdminOptions()), identityProvider, NullLogger<AuthController>.Instance)
+            ExtOptions.Create(new AdminOptions()), identityProvider, new FakeStationImageStore(),
+            NullLogger<AuthController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };
@@ -162,7 +166,7 @@ public static class FeatureStationIdentityLive
             // no api restart.
             var rig = BuildLiveRig(name: "GenWave");
 
-            var before = Assert.IsType<OkObjectResult>(rig.Auth.Stations());
+            var before = Assert.IsType<OkObjectResult>(await rig.Auth.Stations(CancellationToken.None));
             var beforeDto = Assert.IsAssignableFrom<IEnumerable<StationDto>>(before.Value).Single();
             Assert.Equal("GenWave", beforeDto.Name);
 
@@ -170,7 +174,7 @@ public static class FeatureStationIdentityLive
                 [new SettingUpdateRequest("Station:Name", "Radio Free Somewhere")], CancellationToken.None);
             Assert.IsType<OkObjectResult>(putResult);
 
-            var after = Assert.IsType<OkObjectResult>(rig.Auth.Stations());
+            var after = Assert.IsType<OkObjectResult>(await rig.Auth.Stations(CancellationToken.None));
             var afterDto = Assert.IsAssignableFrom<IEnumerable<StationDto>>(after.Value).Single();
             Assert.Equal("Radio Free Somewhere", afterDto.Name);
         }
