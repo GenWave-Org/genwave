@@ -18,6 +18,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Host.Api;
 using GenWave.Host.Configuration;
+using GenWave.Host.Tests.Fakes;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -112,7 +113,8 @@ public static class FeatureSafeScopeLiveEditViaSettingsApi
             config,
             store,
             new SettingValidator(config),
-            NullLogger<SettingsController>.Instance)
+            NullLogger<SettingsController>.Instance,
+            new FakeIconPackStore())
         {
             ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
             {

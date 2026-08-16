@@ -106,30 +106,38 @@ internal static partial class CatalogInstallShell
 
     // Distinct from UnknownPackProblem above: that one names a CATALOG entry an install route couldn't
     // resolve; this one names an INSTALLED pack an uninstall route couldn't find.
-    public static ProblemDetails UnknownInstalledPackProblem(string kind, string slug) => new()
+    //
+    // Takes the ENUM, not a second, independently-suppliable noun string (PLAN T303 review finding F6
+    // — mirrors ResolveEntryAsync's own "TAKES ONLY THE ENUM" remarks): the noun is derived once,
+    // internally, via NounFor, the ONE place that mapping lives. This is what makes a controller's own
+    // KindNoun constant (the pre-T303-review shape) redundant for every Problem factory on this type —
+    // see NounFor's own remarks.
+    public static ProblemDetails UnknownInstalledPackProblem(CatalogEntryKind kind, string slug) => new()
     {
         Status = StatusCodes.Status404NotFound,
         Title  = "Not found.",
-        Detail = $"No installed {kind} pack with slug \"{slug}\" exists.",
+        Detail = $"No installed {NounFor(kind)} pack with slug \"{slug}\" exists.",
     };
 
-    public static ProblemDetails MalformedManifestProblem(string kind, string slug) => new()
+    public static ProblemDetails MalformedManifestProblem(CatalogEntryKind kind, string slug) => new()
     {
         Status = StatusCodes.Status400BadRequest,
-        Title  = $"Malformed {kind} pack manifest.",
-        Detail = $"\"{slug}\"'s {kind} manifest could not be parsed.",
+        Title  = $"Malformed {NounFor(kind)} pack manifest.",
+        Detail = $"\"{slug}\"'s {NounFor(kind)} manifest could not be parsed.",
     };
 
     /// <summary>
     /// <paramref name="file"/> is a manifest-declared filename off an UNTRUSTED, remote origin — passed
     /// through <see cref="LogSafeText.Sanitize"/> (review finding S2) rather than interpolated raw, the
     /// same "never echo a remote string unbounded into a body" discipline every other Problem factory
-    /// on this type already gets for free by carrying no remote free-text field at all.
+    /// on this type already gets for free by carrying no remote free-text field at all. Takes the ENUM,
+    /// not a second noun string — see <see cref="UnknownInstalledPackProblem"/>'s own remarks (PLAN
+    /// T303 review finding F6).
     /// </summary>
-    public static ProblemDetails UndeclaredManifestAssetProblem(string kind, string slug, string file) => new()
+    public static ProblemDetails UndeclaredManifestAssetProblem(CatalogEntryKind kind, string slug, string file) => new()
     {
         Status = StatusCodes.Status400BadRequest,
-        Title  = $"Malformed {kind} pack manifest.",
+        Title  = $"Malformed {NounFor(kind)} pack manifest.",
         Detail = $"\"{slug}\"'s manifest references \"{LogSafeText.Sanitize(file)}\", which is not one of its declared catalog assets.",
     };
 
@@ -164,10 +172,29 @@ internal static partial class CatalogInstallShell
     /// <see cref="CatalogEntryContent"/>, and vice versa — the C#-without-unions tuple idiom every
     /// helper here follows, narrowed at each call site via an explicit <c>is not { } x</c> check rather
     /// than the null-forgiving operator.
+    ///
+    /// <para>
+    /// TAKES ONLY THE ENUM (PLAN T303 review rider — kills the noun/enum connascence a prior version
+    /// left every caller to keep in sync by hand: a separate <c>string kind</c> parameter alongside
+    /// <paramref name="expectedKind"/>, two independently-suppliable values a caller could transpose,
+    /// or let drift the day a new <see cref="CatalogEntryKind"/> joined without a matching noun update).
+    /// The display noun every <c>Problem</c> factory below needs is derived once, internally, via
+    /// <see cref="NounFor"/> — the ONE place that mapping lives now. <b>Review finding F6 (T303 fix
+    /// round) carries the SAME "take the enum, derive the noun via <see cref="NounFor"/>" discipline
+    /// onto <see cref="MalformedManifestProblem"/>, <see cref="UnknownInstalledPackProblem"/>, and
+    /// <see cref="UndeclaredManifestAssetProblem"/> too</b> — the three Problem factories a controller's
+    /// own install/uninstall route calls directly, previously each fed a separately-declared
+    /// <c>KindNoun</c> constant per controller (a THIRD noun/enum connascence: the constant's own
+    /// string literal had to keep matching <see cref="NounFor"/>'s own switch arm by hand). Those
+    /// per-controller <c>KindNoun</c> constants are gone — a controller now passes the SAME
+    /// <see cref="CatalogEntryKind"/> value it already threads through <see cref="ResolveEntryAsync"/>/
+    /// <see cref="FetchAllAssetsAsync"/>, never a second, independently-suppliable string.
+    /// </para>
     /// </summary>
     public static async Task<(IActionResult? Error, CatalogEntryContent? Content)> ResolveEntryAsync(
-        CatalogProxyService catalogProxyService, string kind, CatalogEntryKind expectedKind, string slug, CancellationToken ct)
+        CatalogProxyService catalogProxyService, CatalogEntryKind expectedKind, string slug, CancellationToken ct)
     {
+        var noun = NounFor(expectedKind);
         var result = await catalogProxyService.GetEntryAsync(slug, ct);
         switch (result)
         {
@@ -177,13 +204,13 @@ internal static partial class CatalogInstallShell
                 // A real entry that just isn't this kind of pack gets the SAME "unknown pack" refusal
                 // as a slug naming nothing at all — no route here has any business revealing that a
                 // different-kind entry exists under this slug.
-                return (new NotFoundObjectResult(UnknownPackProblem(kind, slug)), null);
+                return (new NotFoundObjectResult(UnknownPackProblem(noun, slug)), null);
             case CatalogEntryFetchResult.Unreachable:
                 return (Status503(CatalogUnavailableProblem()), null);
             case CatalogEntryFetchResult.HashMismatch:
-                return (Status502(WithheldProblem(kind, "failed its integrity check")), null);
+                return (Status502(WithheldProblem(noun, "failed its integrity check")), null);
             case CatalogEntryFetchResult.Oversize:
-                return (Status502(WithheldProblem(kind, "exceeded its size limit")), null);
+                return (Status502(WithheldProblem(noun, "exceeded its size limit")), null);
             default:
                 // CatalogEntryFetchResult's constructor is private (closed hierarchy) — this arm can
                 // never actually run; mirrors CatalogController's own discard-arm remarks.
@@ -192,25 +219,57 @@ internal static partial class CatalogInstallShell
     }
 
     /// <summary>
+    /// Derives a controller's own display noun ("persona"/"theme"/"font"/"show"/"avatar"/"icon")
+    /// straight from <see cref="CatalogEntryKind"/> — the ONE place that mapping lives (PLAN T303
+    /// review rider, see <see cref="ResolveEntryAsync"/>'s own remarks for the connascence this
+    /// closes; review finding F6 widens this to every Problem factory on this type, not merely the
+    /// two <see cref="ResolveEntryAsync"/>/<see cref="FetchAllAssetsAsync"/> themselves once fed).
+    /// This is what makes a controller's own <c>KindNoun</c> constant (the pre-F6 shape) entirely
+    /// redundant — every noun this shell's Problem factories ever need derives from here, never a
+    /// hand-typed string a controller has to keep matching this switch's own arms.
+    /// </summary>
+    static string NounFor(CatalogEntryKind kind) => kind switch
+    {
+        CatalogEntryKind.Persona => "persona",
+        CatalogEntryKind.Theme => "theme",
+        CatalogEntryKind.Font => "font",
+        CatalogEntryKind.Show => "show",
+        CatalogEntryKind.Avatar => "avatar",
+        CatalogEntryKind.Icon => "icon",
+        _ => throw new UnreachableException($"Unhandled {nameof(CatalogEntryKind)} value: {kind}."),
+    };
+
+    /// <summary>
     /// Fetches and hash-verifies EVERY asset the resolved entry declares (not just a manifest's own
     /// item/file subset), summing each fetched asset's own byte length against
-    /// <paramref name="maxPackBytes"/> INSIDE the loop, refusing the INSTANT it is crossed — the early
-    /// cutoff discipline <see cref="FontPackController.FetchAllAssetsAsync"/>'s own N1 review finding
-    /// established, never only after every declared asset is already buffered.
-    /// <paramref name="assetByteCeiling"/> is the defense-in-depth re-check on each individual fetched
-    /// asset's own size (<paramref name="kind"/>'s real per-asset transport cap —
-    /// <see cref="CatalogProxyService"/> already enforces it during the fetch itself; this is a second,
-    /// belt-and-suspenders look at the same invariant, mirrors each former per-controller copy's own
-    /// "verify, don't re-trust" remarks). Every returned asset carries its own <c>Sha256</c> — the
-    /// index's own pinned hash for that asset — even though only a font pack's own write path still
-    /// reads it back out (an avatar pack's own stored hash is instead the LATER re-encode's own hash,
-    /// see <see cref="AvatarPackItemInput.Sha256"/>'s own remarks); returning it unconditionally keeps
-    /// this one fetch shape usable by both callers rather than a font-only return type.
+    /// <paramref name="policy"/>'s own <see cref="PackFetchPolicy.MaxPackBytes"/> INSIDE the loop,
+    /// refusing the INSTANT it is crossed — the early cutoff discipline
+    /// <see cref="FontPackController.FetchAllAssetsAsync"/>'s own N1 review finding established, never
+    /// only after every declared asset is already buffered. <see cref="PackFetchPolicy.AssetByteCeiling"/>
+    /// is the defense-in-depth re-check on each individual fetched asset's own size (the real per-asset
+    /// transport cap for <paramref name="policy"/>'s own kind — <see cref="CatalogProxyService"/>
+    /// already enforces it during the fetch itself; this is a second, belt-and-suspenders look at the
+    /// same invariant, mirrors each former per-controller copy's own "verify, don't re-trust" remarks).
+    /// Every returned asset carries its own <c>Sha256</c> — the index's own pinned hash for that asset —
+    /// even though only a font pack's own write path still reads it back out (an avatar pack's own
+    /// stored hash is instead the LATER re-encode's own hash, see
+    /// <see cref="AvatarPackItemInput.Sha256"/>'s own remarks); returning it unconditionally keeps this
+    /// one fetch shape usable by both callers rather than a font-only return type.
+    ///
+    /// <para>
+    /// <paramref name="policy"/> COLLAPSES four independently-suppliable positional values into one
+    /// named record (PLAN T303 review rider — this method took EIGHT positional parameters before this
+    /// change, three of them plain <see langword="long"/>s a call site could transpose with no compiler
+    /// help): <see cref="PackFetchPolicy.Kind"/> (this method's own display noun, derived via the SAME
+    /// <see cref="NounFor"/> map <see cref="ResolveEntryAsync"/> now uses — never a second,
+    /// independently-suppliable string), <see cref="PackFetchPolicy.AssetByteCeiling"/>,
+    /// <see cref="PackFetchPolicy.MaxPackBytes"/>, and <see cref="PackFetchPolicy.MaxPackBytesSpecRef"/>.
+    /// </para>
     /// </summary>
     public static async Task<(IActionResult? Error, Dictionary<string, CatalogFetchedAsset>? Assets)> FetchAllAssetsAsync(
-        CatalogProxyService catalogProxyService, string kind, string slug, CatalogEntryContent content,
-        long assetByteCeiling, long maxPackBytes, string maxPackBytesSpecRef, CancellationToken ct)
+        CatalogProxyService catalogProxyService, string slug, CatalogEntryContent content, PackFetchPolicy policy, CancellationToken ct)
     {
+        var noun = NounFor(policy.Kind);
         var fetched = new Dictionary<string, CatalogFetchedAsset>(StringComparer.Ordinal);
         long totalBytes = 0;
 
@@ -221,27 +280,27 @@ internal static partial class CatalogInstallShell
             switch (result)
             {
                 case CatalogAssetFetchResult.Ok ok:
-                    if (ok.Bytes.LongLength > assetByteCeiling)
-                        return (Status502(WithheldProblem(kind, "exceeded its size limit")), null);
+                    if (ok.Bytes.LongLength > policy.AssetByteCeiling)
+                        return (Status502(WithheldProblem(noun, "exceeded its size limit")), null);
 
                     totalBytes += ok.Bytes.LongLength;
 
-                    if (totalBytes > maxPackBytes)
-                        return (new BadRequestObjectResult(PackTooLargeProblem(kind, slug, totalBytes, maxPackBytes, maxPackBytesSpecRef)), null);
+                    if (totalBytes > policy.MaxPackBytes)
+                        return (new BadRequestObjectResult(PackTooLargeProblem(noun, slug, totalBytes, policy.MaxPackBytes, policy.MaxPackBytesSpecRef)), null);
 
                     fetched[file] = new CatalogFetchedAsset(ok.Bytes, assetRef.Sha256);
                     break;
                 case CatalogAssetFetchResult.HashMismatch:
-                    return (Status502(WithheldProblem(kind, "failed its integrity check")), null);
+                    return (Status502(WithheldProblem(noun, "failed its integrity check")), null);
                 case CatalogAssetFetchResult.Oversize:
-                    return (Status502(WithheldProblem(kind, "exceeded its size limit")), null);
+                    return (Status502(WithheldProblem(noun, "exceeded its size limit")), null);
                 case CatalogAssetFetchResult.Unreachable:
                     return (Status503(CatalogUnavailableProblem()), null);
                 case CatalogAssetFetchResult.NotFound:
                     // The index changed out from under this request between GetEntryAsync and this
                     // call (a rare TOCTOU race, never a client input error) — the same withheld
                     // posture as a hash mismatch: this asset could not be cleanly fetched.
-                    return (Status502(WithheldProblem(kind, "could not be fetched")), null);
+                    return (Status502(WithheldProblem(noun, "could not be fetched")), null);
                 default:
                     throw new UnreachableException($"Unhandled {nameof(CatalogAssetFetchResult)} case.");
             }
@@ -249,6 +308,22 @@ internal static partial class CatalogInstallShell
 
         return (null, fetched);
     }
+
+    /// <summary>
+    /// <see cref="FetchAllAssetsAsync"/>'s own per-kind policy (PLAN T303 review rider — see that
+    /// method's own COLLAPSES remarks): everything it needs beyond the fetch triple
+    /// (<c>catalogProxyService</c>/<c>slug</c>/<c>content</c>) and <c>ct</c>.
+    /// </summary>
+    /// <param name="Kind">The resolved entry's own kind — <see cref="NounFor"/> derives the display
+    /// noun from this, never a second, independently-suppliable string.</param>
+    /// <param name="AssetByteCeiling">The real per-asset transport cap for <paramref name="Kind"/>
+    /// (defense-in-depth re-check; <see cref="CatalogProxyService"/> already enforces its own cap
+    /// during the fetch itself).</param>
+    /// <param name="MaxPackBytes">The app-side ceiling on the RUNNING total across every asset this
+    /// entry declares (the caller's own re-assertion of catalog CI's real per-pack ceiling).</param>
+    /// <param name="MaxPackBytesSpecRef">The SPEC citation named in <see cref="PackTooLargeProblem"/>'s
+    /// own body when <see cref="MaxPackBytes"/> is crossed.</param>
+    public sealed record PackFetchPolicy(CatalogEntryKind Kind, long AssetByteCeiling, long MaxPackBytes, string MaxPackBytesSpecRef);
 
     static ObjectResult Status502(ProblemDetails problem) => new(problem) { StatusCode = StatusCodes.Status502BadGateway };
     static ObjectResult Status503(ProblemDetails problem) => new(problem) { StatusCode = StatusCodes.Status503ServiceUnavailable };

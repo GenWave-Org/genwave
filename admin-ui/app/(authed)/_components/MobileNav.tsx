@@ -7,7 +7,7 @@ import { useState, type ReactNode } from "react";
 import { logout } from "@/app/login/actions";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { CloseIcon, MenuIcon, SignOutIcon } from "./icons";
+import { Icon } from "./Icon";
 import { NAV_LINK_CLASSES, isActiveSection, visibleNavItems } from "./nav-items";
 
 const ICON_BUTTON_CLASSES =
@@ -51,7 +51,7 @@ export function MobileNav({ stationName = "GenWave", catalogEnabled = false }: M
       <Tooltip label="Open navigation">
         <Dialog.Trigger asChild>
           <button type="button" aria-label="Open navigation" className={cn(ICON_BUTTON_CLASSES, "lg:hidden")}>
-            <MenuIcon />
+            <Icon name="menu" />
           </button>
         </Dialog.Trigger>
       </Tooltip>
@@ -69,7 +69,7 @@ export function MobileNav({ stationName = "GenWave", catalogEnabled = false }: M
             <Tooltip label="Close navigation">
               <Dialog.Close asChild>
                 <button type="button" aria-label="Close navigation" className={ICON_BUTTON_CLASSES}>
-                  <CloseIcon />
+                  <Icon name="close" />
                 </button>
               </Dialog.Close>
             </Tooltip>
@@ -77,7 +77,7 @@ export function MobileNav({ stationName = "GenWave", catalogEnabled = false }: M
 
           <nav aria-label="Sections" className="flex-1 px-3">
             <ul className="flex flex-col gap-1">
-              {visibleNavItems(catalogEnabled).map(({ href, label, Icon }) => {
+              {visibleNavItems(catalogEnabled).map(({ href, label, iconName }) => {
                 const active = isActiveSection(pathname, href);
                 return (
                   <li key={href}>
@@ -92,7 +92,7 @@ export function MobileNav({ stationName = "GenWave", catalogEnabled = false }: M
                           : "text-mute hover:bg-surface hover:text-ink"
                       )}
                     >
-                      <Icon className="shrink-0" />
+                      <Icon name={iconName} className="shrink-0" />
                       {label}
                     </Link>
                   </li>
@@ -106,7 +106,7 @@ export function MobileNav({ stationName = "GenWave", catalogEnabled = false }: M
               type="submit"
               className={cn(NAV_LINK_CLASSES, "w-full text-mute hover:bg-surface hover:text-ink")}
             >
-              <SignOutIcon className="shrink-0" />
+              <Icon name="sign-out" className="shrink-0" />
               Sign out
             </button>
           </form>

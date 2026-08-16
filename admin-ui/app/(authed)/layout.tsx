@@ -4,6 +4,7 @@ import { apiGet } from "@/lib/api";
 import type { ThemeChoice } from "@/lib/theme";
 import { BreadcrumbTitleProvider } from "./_components/BreadcrumbTitle";
 import { Breadcrumbs } from "./_components/Breadcrumbs";
+import { IconPackProvider } from "./_components/IconPackContext";
 import { MobileNav } from "./_components/MobileNav";
 import { Sidebar } from "./_components/Sidebar";
 import { ThemeSwitcher } from "./_components/ThemeSwitcher";
@@ -97,6 +98,28 @@ async function fetchSettingsSnapshot(cookieHeader: string): Promise<SettingsSnap
 }
 
 /**
+ * The active icon pack's own raw canonical JSON text (SPEC F130.3/F130.4, STORY-337, PLAN T304
+ * rider 6) — the layout-snapshot fold the T303 review recommended over a per-page client fetch of
+ * `GET /api/icon-packs/active` (that route carries no ETag/cache validator of its own): this
+ * server-side read happens ONCE per authed navigation, alongside `fetchSettingsSnapshot`'s own
+ * single `GET /api/settings` read, in the SAME `Promise.all` below — mirroring exactly how
+ * `stationThemeSlug`/`themeChoices` already ride this layout rather than `ThemeSwitcher` fetching
+ * its own list. `200` carries the definition body as plain text (parsed defensively, client-side,
+ * by `IconPackProvider` — never trusted here even though this station's own `Active` route already
+ * re-validates before serving); `204` (`Station:IconPack` unset, or the F130.5 fail-open uninstall)
+ * and any failure alike degrade to `null` — house icons, never an error.
+ */
+async function fetchActiveIconPackDefinitionText(cookieHeader: string): Promise<string | null> {
+  try {
+    const response = await apiGet("/api/icon-packs/active", { cookies: cookieHeader });
+    if (response.status !== 200) return null;
+    return await response.text();
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Reads the live station name for the shell wordmark (SPEC F44.7, closes gitea-#195).
  * Falls back to the "GenWave" product brand on any failure — non-200, a
  * network error, or an empty station list — so the shell chrome never
@@ -138,30 +161,33 @@ async function fetchStationName(cookieHeader: string): Promise<string> {
 export default async function AuthedLayout({ children }: AuthedLayoutProps): Promise<ReactNode> {
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
-  const [stationName, settingsSnapshot] = await Promise.all([
+  const [stationName, settingsSnapshot, activeIconPackDefinitionText] = await Promise.all([
     fetchStationName(cookieHeader),
     fetchSettingsSnapshot(cookieHeader),
+    fetchActiveIconPackDefinitionText(cookieHeader),
   ]);
   const { catalogEnabled, themeChoices, stationThemeSlug } = settingsSnapshot;
 
   return (
-    <BreadcrumbTitleProvider>
-      <div className="flex min-h-screen bg-bg text-ink">
-        <Sidebar stationName={stationName} catalogEnabled={catalogEnabled} />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-line bg-surface px-4 sm:px-6">
-            <div className="flex min-w-0 items-center gap-3">
-              <MobileNav stationName={stationName} catalogEnabled={catalogEnabled} />
-              <Breadcrumbs />
-            </div>
-            <ThemeSwitcher choices={themeChoices} stationThemeSlug={stationThemeSlug} />
-          </header>
-          <main className="min-w-0 flex-1 p-4 sm:p-6">
-            <ConfirmDialogProvider>{children}</ConfirmDialogProvider>
-          </main>
+    <IconPackProvider definitionText={activeIconPackDefinitionText}>
+      <BreadcrumbTitleProvider>
+        <div className="flex min-h-screen bg-bg text-ink">
+          <Sidebar stationName={stationName} catalogEnabled={catalogEnabled} />
+          <div className="flex min-w-0 flex-1 flex-col">
+            <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-line bg-surface px-4 sm:px-6">
+              <div className="flex min-w-0 items-center gap-3">
+                <MobileNav stationName={stationName} catalogEnabled={catalogEnabled} />
+                <Breadcrumbs />
+              </div>
+              <ThemeSwitcher choices={themeChoices} stationThemeSlug={stationThemeSlug} />
+            </header>
+            <main className="min-w-0 flex-1 p-4 sm:p-6">
+              <ConfirmDialogProvider>{children}</ConfirmDialogProvider>
+            </main>
+          </div>
+          <Toaster />
         </div>
-        <Toaster />
-      </div>
-    </BreadcrumbTitleProvider>
+      </BreadcrumbTitleProvider>
+    </IconPackProvider>
   );
 }

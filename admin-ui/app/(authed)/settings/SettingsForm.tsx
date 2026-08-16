@@ -333,6 +333,13 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "themes; an unrecognized slug is rejected outright rather than silently failing to " +
     "resolve. Changes apply live.",
 
+  // ── Icon pack selection (SPEC F130.4, STORY-337, PLAN T303) ───────────────────────────────
+  "Station:IconPack":
+    "The station's active icon pack, by slug — fed by the packs installed on the Wardrobe " +
+    "Icons tab. Empty (the default) uses the house icons. Uninstalling the active pack leaves " +
+    "this value dangling; the admin chrome falls back to house icons rather than erroring. " +
+    "Changes apply live.",
+
   // ── The F107 context seam (SPEC F107.2/F107.7, F108.1-F108.2, F109.1, STORY-297, PLAN T226) ──
   "Context:Weather:Enabled":
     "Airs a weather segment/patter line sourced from Open-Meteo. Off by default; also requires " +
@@ -434,6 +441,12 @@ const SETTING_CONTROL_REGISTRY: Record<string, ComponentType<SettingControlProps
   // T175 (SPEC F102.14, STORY-265) — ChoiceSettingControl is generic over `setting.choices`, not
   // Theme-specific; a future SettingKind.Choice setting registers the SAME component here.
   "Station:Theme": ChoiceSettingControl,
+  // Station:IconPack (SPEC F130.4, STORY-337, PLAN T303) is deliberately NOT registered here
+  // (review finding F1) — SettingField's own kind-chain fallback (`setting.kind === "choice"`)
+  // already routes every unregistered Choice-kind setting to ChoiceSettingControl, the SAME
+  // component a registry entry would point at; a second entry here would be a redundant path to
+  // the identical component, not a different behavior. This registry stays reserved for a KEY
+  // that needs something OTHER than the generic Choice control.
   // gh-#426 — both hold a persona ROW ID; PersonaSettingControl is generic over which key it's
   // fed (it never hardcodes either), so one component serves both registrations.
   "Context:Weather:PersonaId": PersonaSettingControl,

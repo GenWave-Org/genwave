@@ -153,12 +153,6 @@ public sealed class AvatarPackController(
     /// full shape gate.</summary>
     const int MaxItemNameLength = 64;
 
-    /// <summary>This kind's own noun, fed to every <see cref="CatalogInstallShell"/> factory that needs
-    /// one ("avatar pack unavailable", "no installable avatar pack…") — the ONE place this
-    /// controller's own kind-word lives, mirrors <see cref="FontPackController"/>'s own sibling
-    /// constant.</summary>
-    internal const string KindNoun = "avatar";
-
     /// <summary>
     /// POST /api/avatar-packs/{slug}/install — see this class's own remarks for the full gate order
     /// and the reasoning behind each one.
@@ -176,14 +170,16 @@ public sealed class AvatarPackController(
             return CatalogInstallShell.DisabledSurfaceResult(Response);
 
         var (entryError, entryContent) = await CatalogInstallShell.ResolveEntryAsync(
-            catalogProxyService, KindNoun, CatalogEntryKind.Avatar, slug, ct);
+            catalogProxyService, CatalogEntryKind.Avatar, slug, ct);
         if (entryError is not null)
             return entryError;
         if (entryContent is not { } content)
             throw new UnreachableException("CatalogInstallShell.ResolveEntryAsync returned neither an error nor content.");
 
         var (assetsError, fetchedAssetsOrNull) = await CatalogInstallShell.FetchAllAssetsAsync(
-            catalogProxyService, KindNoun, slug, content, CatalogIndexValidator.MaxPngAssetBytes, MaxPackBytes, "SPEC F128.1", ct);
+            catalogProxyService, slug, content,
+            new CatalogInstallShell.PackFetchPolicy(CatalogEntryKind.Avatar, CatalogIndexValidator.MaxPngAssetBytes, MaxPackBytes, "SPEC F128.1"),
+            ct);
         if (assetsError is not null)
             return assetsError;
         if (fetchedAssetsOrNull is not { } fetchedAssets)
@@ -191,7 +187,7 @@ public sealed class AvatarPackController(
 
         var manifest = CatalogAvatarPackManifestSerializer.Deserialize(content.ManifestJson);
         if (manifest is null)
-            return BadRequest(CatalogInstallShell.MalformedManifestProblem(KindNoun, slug));
+            return BadRequest(CatalogInstallShell.MalformedManifestProblem(CatalogEntryKind.Avatar, slug));
 
         var (rawError, rawItemsOrNull) = BuildRawItems(slug, manifest, fetchedAssets);
         if (rawError is not null)
@@ -235,7 +231,7 @@ public sealed class AvatarPackController(
 
         var deleted = await avatarPackStore.DeleteAsync(slug, ct);
         if (!deleted)
-            return NotFound(CatalogInstallShell.UnknownInstalledPackProblem(KindNoun, slug));
+            return NotFound(CatalogInstallShell.UnknownInstalledPackProblem(CatalogEntryKind.Avatar, slug));
 
         logger.LogInformation("Avatar pack uninstalled slug={Slug}", LogSafeText.Sanitize(slug));
         return NoContent();
@@ -336,7 +332,7 @@ public sealed class AvatarPackController(
                 return (BadRequest(DuplicateManifestItemNameProblem(slug, item.Name)), null);
 
             if (!fetchedAssets.TryGetValue(item.File, out var asset))
-                return (BadRequest(CatalogInstallShell.UndeclaredManifestAssetProblem(KindNoun, slug, item.File)), null);
+                return (BadRequest(CatalogInstallShell.UndeclaredManifestAssetProblem(CatalogEntryKind.Avatar, slug, item.File)), null);
 
             var suggestedPersona = CatalogInstallShell.ValidateSuggestedPersonaShape(item.SuggestedPersona);
             items.Add(new RawItem(item.Name, item.File, asset.Bytes, suggestedPersona));

@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react";
 import { IconButton } from "@/components/ui/icon-button";
 import { toast } from "@/components/ui/toast";
 import { describeRatingFailure, setNeverPlay } from "@/lib/broadcast-api";
-import { CloseIcon, RestoreIcon } from "../_components/icons";
+import { Icon } from "../_components/Icon";
 
 export interface NeverPlayControlProps {
   mediaId: string;
@@ -48,7 +48,7 @@ export function NeverPlayControl({ mediaId, neverPlay, onChange }: NeverPlayCont
       disabled={pending}
       onClick={() => void handleClick()}
     >
-      {neverPlay ? <RestoreIcon /> : <CloseIcon />}
+      {neverPlay ? <Icon name="restore" /> : <Icon name="close" />}
     </IconButton>
   );
 }

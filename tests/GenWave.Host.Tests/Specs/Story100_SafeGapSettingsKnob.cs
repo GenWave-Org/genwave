@@ -11,6 +11,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Host.Api;
 using GenWave.Host.Configuration;
+using GenWave.Host.Tests.Fakes;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -50,7 +51,8 @@ public static class FeatureSafeGapSettingsKnob
             config,
             store,
             new SettingValidator(config),
-            NullLogger<SettingsController>.Instance)
+            NullLogger<SettingsController>.Instance,
+            new FakeIconPackStore())
         {
             ControllerContext = new ControllerContext
             {

@@ -85,7 +85,10 @@ public sealed class FeatureWardrobeIsolation
             // rather than being migrated onto this sweep — the two are deliberately redundant, not
             // merged, so a regression this discovery-based sweep might ever miss for an unforeseen
             // reason still has that hand-picked list catching it.
-            var endpoints = GuardedRouteInspector.DiscoverEndpoints(publicFactory.Services, "api/catalog", "api/themes", "api/fonts", "api/avatar-packs");
+            // api/icon-packs (PLAN T303) joins this sweep the moment it exists — the SAME "pinned the
+            // moment it exists" precedent api/avatar-packs got at review finding S5.
+            var endpoints = GuardedRouteInspector.DiscoverEndpoints(
+                publicFactory.Services, "api/catalog", "api/themes", "api/fonts", "api/avatar-packs", "api/icon-packs");
             Assert.NotEmpty(endpoints); // guards this sweep against a silent rename emptying it
 
             var violations = new List<string>();

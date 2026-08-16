@@ -1,10 +1,8 @@
 "use client";
 
-import * as Dialog from "@radix-ui/react-dialog";
-import { useRef, useState, type ReactNode } from "react";
-import { Button } from "@/components/ui/button";
+import type { ReactNode } from "react";
 import { readErrorMessage } from "@/lib/problem-details";
-import { prettifySlug } from "./format-slug";
+import { CatalogInstallConfirmModal, type CatalogInstallOutcome } from "./CatalogInstallConfirmModal";
 
 export interface ThemeInstallResult {
   name: string;
@@ -39,33 +37,16 @@ export interface ThemeInstallModalProps {
   onInstalled: (result: ThemeInstallResult) => void;
 }
 
-type ConfirmStatus = { kind: "idle" } | { kind: "installing" } | { kind: "error"; message: string };
-
 /**
- * The theme catalog's install confirmation (SPEC F103.6, STORY-274, PLAN T186) — the trust ruling's
- * "review, then explicitly confirm" stop (ARCHITECTURE.md "Trust ruling"), applied to the theme
- * kind: opening this dialog issues no request of any kind; only Confirm does, and Cancel/Escape/a
- * backdrop click all close it with none either. A theme's "review" is the live composed preview
- * already showing behind this modal (`ThemeDetailPreview`) — unlike `PersonaCardReviewModal`, this
- * dialog does not re-render the manifest's own fields, it only asks for the final go/no-go.
- *
- * House modal conventions mirrored from `PersonaCardReviewModal` (Radix `Dialog`; Cancel, Escape,
- * and a backdrop click all route through the same `onOpenChange` → `onCancel` path; hand-wired
- * focus restoration since this component mounts fresh with no real `Dialog.Trigger` of its own —
- * see that component's own remarks for the full reasoning).
+ * The theme catalog's install confirmation (SPEC F103.6, STORY-274, PLAN T186; re-platformed onto
+ * the shared `CatalogInstallConfirmModal` shell at PLAN T304 — this file now owns only the theme
+ * kind's own POST target/body and success-body mapping, mechanically unchanged behaviour). The
+ * "review" already happened via the live composed preview showing behind this modal
+ * (`ThemeDetailPreview`) — unlike `PersonaCardReviewModal`, this dialog does not re-render the
+ * manifest's own fields, it only asks for the final go/no-go.
  */
 export function ThemeInstallModal({ slug, manifestText, onCancel, onInstalled }: ThemeInstallModalProps): ReactNode {
-  const [status, setStatus] = useState<ConfirmStatus>({ kind: "idle" });
-
-  const restoreFocusRef = useRef<HTMLElement | null | undefined>(undefined);
-  if (restoreFocusRef.current === undefined) {
-    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  }
-
-  async function handleConfirm(): Promise<void> {
-    if (status.kind === "installing") return;
-    setStatus({ kind: "installing" });
-
+  async function handleConfirm(): Promise<CatalogInstallOutcome> {
     const encodedSlug = encodeURIComponent(slug);
 
     try {
@@ -78,65 +59,23 @@ export function ThemeInstallModal({ slug, manifestText, onCancel, onInstalled }:
       if (resp.ok) {
         const body = (await resp.json()) as ThemeImportSuccessBody;
         onInstalled({ name: body.name, importedFrom: body.importedFrom, importedAt: body.importedAt });
-        return;
+        return { ok: true };
       }
 
-      setStatus({ kind: "error", message: await readErrorMessage(resp) });
+      return { ok: false, message: await readErrorMessage(resp) };
     } catch {
-      setStatus({ kind: "error", message: "Network error — check your connection" });
+      return { ok: false, message: "Network error — check your connection" };
     }
   }
 
   return (
-    <Dialog.Root
-      open
-      onOpenChange={(open) => {
-        if (!open) onCancel();
-      }}
-    >
-      <Dialog.Portal>
-        <Dialog.Overlay
-          data-testid="theme-install-overlay"
-          className="fixed inset-0 z-50 bg-ink/40 transition-opacity duration-200 ease-out motion-reduce:transition-none"
-        />
-        <Dialog.Content
-          aria-label="Install theme"
-          className="fixed left-1/2 top-1/2 z-50 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 flex-col rounded-[6px] border border-line bg-surface p-6 transition-opacity duration-200 ease-out focus:outline-none motion-reduce:transition-none"
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            restoreFocusRef.current?.focus();
-          }}
-        >
-          <Dialog.Title className="font-display text-[1.1rem] text-ink">
-            Install &quot;{prettifySlug(slug)}&quot;?
-          </Dialog.Title>
-          <Dialog.Description className="mt-1 text-[0.82rem] text-mute">
-            The station adopts this theme immediately for anyone who selects it. Nothing installs until
-            you confirm.
-          </Dialog.Description>
-
-          {status.kind === "error" && (
-            <p role="alert" className="mt-3 text-[0.85rem] text-danger">
-              {status.message}
-            </p>
-          )}
-
-          <div className="mt-5 flex justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={onCancel} disabled={status.kind === "installing"}>
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                void handleConfirm();
-              }}
-              disabled={status.kind === "installing"}
-            >
-              {status.kind === "installing" ? "Installing…" : "Confirm install"}
-            </Button>
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    <CatalogInstallConfirmModal
+      slug={slug}
+      ariaLabel="Install theme"
+      testId="theme-install"
+      description="The station adopts this theme immediately for anyone who selects it. Nothing installs until you confirm."
+      onCancel={onCancel}
+      onConfirm={handleConfirm}
+    />
   );
 }

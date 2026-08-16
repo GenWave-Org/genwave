@@ -44,6 +44,7 @@ using GenWave.Core.Domain;
 using GenWave.Host.Api;
 using GenWave.Host.Configuration;
 using GenWave.Host.Options;
+using GenWave.Host.Tests.Fakes;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -255,7 +256,8 @@ public static class FeatureAudiencePostureSetting
         var store = new SeededSettingsStore(seed, provider);
 
         var settingsController = new SettingsController(
-            root, store, new SettingValidator(root), NullLogger<SettingsController>.Instance)
+            root, store, new SettingValidator(root), NullLogger<SettingsController>.Instance,
+            new FakeIconPackStore())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

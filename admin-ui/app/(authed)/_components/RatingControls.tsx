@@ -11,7 +11,7 @@ import {
   type RatingEntry,
   type VoteDirection,
 } from "@/lib/broadcast-api";
-import { CloseIcon, RestoreIcon, VoteDownIcon, VoteUpIcon } from "./icons";
+import { Icon } from "./Icon";
 
 export type RatingControlsValue = Pick<RatingEntry, "score" | "neverPlay">;
 
@@ -77,17 +77,17 @@ export function RatingControls({ mediaId, value, onChange, className }: RatingCo
         {value.score}
       </span>
       <IconButton label="Vote up" disabled={pending} onClick={() => void handleVote("up")}>
-        <VoteUpIcon />
+        <Icon name="vote-up" />
       </IconButton>
       <IconButton label="Vote down" disabled={pending} onClick={() => void handleVote("down")}>
-        <VoteDownIcon />
+        <Icon name="vote-down" />
       </IconButton>
       <IconButton
         label={value.neverPlay ? "Restore to rotation" : "Never play"}
         disabled={pending}
         onClick={() => void handleNeverPlay()}
       >
-        {value.neverPlay ? <RestoreIcon /> : <CloseIcon />}
+        {value.neverPlay ? <Icon name="restore" /> : <Icon name="close" />}
       </IconButton>
     </div>
   );

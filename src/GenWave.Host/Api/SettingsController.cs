@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
+using GenWave.Core.Abstractions;
 using GenWave.Host.Configuration;
 using GenWave.Host.Theming;
 
@@ -29,6 +30,7 @@ public sealed class SettingsController(
     IStationSettingsStore store,
     SettingValidator validator,
     ILogger<SettingsController> logger,
+    IIconPackStore iconPackStore,
     ThemeCatalog? injectedThemeCatalog = null) : ControllerBase
 {
     /// <summary>
@@ -56,6 +58,7 @@ public sealed class SettingsController(
     public async Task<IActionResult> Get(CancellationToken ct)
     {
         var overrideKeys = await store.ReadAllAsync(ct);
+        var iconPackChoices = await IconPackChoicesAsync(ct);
 
         var items = StationSettingsAllowlist.All.Select(allowed =>
         {
@@ -65,7 +68,7 @@ public sealed class SettingsController(
             var source    = overrideKeys.ContainsKey(allowed.Key) ? "override" : "default";
             var applyMode = ApplyModeWireValue(allowed.ApplyMode);
             var kind      = KindWireValue(allowed.Kind);
-            return new SettingDto(allowed.Key, rawValue, source, applyMode, kind, allowed.Unit, ChoicesFor(allowed));
+            return new SettingDto(allowed.Key, rawValue, source, applyMode, kind, allowed.Unit, ChoicesFor(allowed, iconPackChoices));
         }).ToList();
 
         return Ok(items);
@@ -187,6 +190,7 @@ public sealed class SettingsController(
 
         // Build the response so the caller knows the applyMode and kind/unit for each written key.
         var overrideKeys = await store.ReadAllAsync(ct);
+        var iconPackChoices = await IconPackChoicesAsync(ct);
         var result = updates.Select(u =>
         {
             var allowed   = StationSettingsAllowlist.ByKey[u.Key];
@@ -196,7 +200,7 @@ public sealed class SettingsController(
             var source    = overrideKeys.ContainsKey(u.Key) ? "override" : "default";
             var applyMode = ApplyModeWireValue(allowed.ApplyMode);
             var kind      = KindWireValue(allowed.Kind);
-            return new SettingDto(u.Key, rawValue, source, applyMode, kind, allowed.Unit, ChoicesFor(allowed));
+            return new SettingDto(u.Key, rawValue, source, applyMode, kind, allowed.Unit, ChoicesFor(allowed, iconPackChoices));
         }).ToList();
 
         return Ok(result);
@@ -207,18 +211,64 @@ public sealed class SettingsController(
     /// <summary>
     /// Choices to present for one allowlisted entry, THIS request — <c>Station:Theme</c> widens to
     /// <see cref="themeCatalog"/>'s current shipped ∪ owner set (SPEC F103.7, STORY-271, PLAN T183)
-    /// rather than the static snapshot baked into <see cref="AllowedSetting.Choices"/> at this
-    /// process's first touch of <see cref="StationSettingsAllowlist"/>. Every other allowlisted
-    /// key's choices (today, always <see langword="null"/> — <c>Station:Theme</c> is the only
-    /// <see cref="SettingKind.Choice"/> entry) pass through unchanged; this stays a single
-    /// key-specific branch, not a generic per-key dispatch table, because there is exactly one
-    /// Choice-kind key to widen (YAGNI — a second one is free to earn its own branch, or a real
-    /// dispatcher, when it exists).
+    /// and <c>Station:IconPack</c> widens to <paramref name="iconPackChoices"/>, every currently
+    /// installed pack (SPEC F130.4, STORY-337, PLAN T303 — the SECOND branch this comment's own prior
+    /// YAGNI note anticipated: "a second one is free to earn its own branch… when it exists"), rather
+    /// than the static snapshot baked into <see cref="AllowedSetting.Choices"/> at this process's
+    /// first touch of <see cref="StationSettingsAllowlist"/>. Every other allowlisted key's choices
+    /// pass through unchanged.
     /// </summary>
-    IReadOnlyList<SettingChoice>? ChoicesFor(AllowedSetting allowed) =>
-        allowed.Key.Equals("Station:Theme", StringComparison.OrdinalIgnoreCase)
-            ? StationSettingsAllowlist.ThemeChoices(themeCatalog)
-            : allowed.Choices;
+    IReadOnlyList<SettingChoice>? ChoicesFor(AllowedSetting allowed, IReadOnlyList<SettingChoice> iconPackChoices) =>
+        allowed.Key switch
+        {
+            "Station:Theme" => StationSettingsAllowlist.ThemeChoices(themeCatalog),
+            "Station:IconPack" => iconPackChoices,
+            _ => allowed.Choices,
+        };
+
+    /// <summary>
+    /// Fetches <see cref="iconPackStore"/>'s current installed-pack SLUG set ONCE per request (SPEC
+    /// F130.4, PLAN T303 review finding F2 — <see cref="IIconPackStore.GetAllSlugsAsync"/>, never the
+    /// full-row <see cref="IIconPackStore.GetAllAsync"/>: the settings hot path needs nothing past the
+    /// slug) and shapes it via <see cref="StationSettingsAllowlist.IconPackChoices"/> —
+    /// <see cref="Get"/>/<see cref="Put"/> each call this exactly once, before building their own
+    /// per-key <see cref="SettingDto"/> list, rather than a per-entry re-fetch inside
+    /// <see cref="ChoicesFor"/> (which runs once per ALLOWLISTED KEY, not once per request).
+    ///
+    /// <para>
+    /// <see cref="iconPackStore"/> ITSELF IS REQUIRED (review finding F5 — no nullable/optional
+    /// fallback: <c>Program.cs</c>'s own <c>StationSettingsHostingExtensions.AddIconPackStore</c> call
+    /// registers the real, Postgres-backed <see cref="IIconPackStore"/> singleton unconditionally, so a
+    /// genuinely missing registration surfaces as a DI resolution failure the moment ASP.NET Core
+    /// activates this controller for its first request, same as every other constructor dependency
+    /// here). This method's own try/catch instead handles a REACHABLE-but-failing store — a transient
+    /// <c>station.icon_pack</c> outage — by degrading <c>Station:IconPack</c>'s own choices to
+    /// house-icons-only rather than letting the whole settings page 500 (
+    /// <see cref="StationSettingsAllowlist.IconPackChoices"/>'s own house-icons-first choice, see that
+    /// method's own remarks, is what makes this a WORKING admin-ui dropdown on the degrade path rather
+    /// than the admin-ui <c>ChoiceSettingControl</c>'s own "no choices available" alert; mirrors
+    /// <see cref="ThemeCatalog.ReloadOwnerThemesAsync"/>'s own "an unreachable store degrades,
+    /// WARN-logged" offline-floor posture, applied here per-request instead of once at boot since
+    /// <see cref="IIconPackStore"/> carries no in-memory warm cache of its own — SPEC F130's own "ships
+    /// dark, thin repository" shape, unlike <see cref="ThemeCatalog"/>). Every OTHER allowlisted key
+    /// must still read/write normally even on a transient <c>station.icon_pack</c> outage — an operator
+    /// fixing an unrelated setting has no business being blocked by one unavailable pack listing;
+    /// <c>Station:IconPack</c>'s own choices are simply narrowed to house icons alone that request,
+    /// exactly the same shape a fresh station with zero packs installed already renders.
+    /// </para>
+    /// </summary>
+    async Task<IReadOnlyList<SettingChoice>> IconPackChoicesAsync(CancellationToken ct)
+    {
+        try
+        {
+            return StationSettingsAllowlist.IconPackChoices(await iconPackStore.GetAllSlugsAsync(ct));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Icon pack listing unavailable for Station:IconPack's own choices — degrading to house icons only");
+            return StationSettingsAllowlist.IconPackChoices([]);
+        }
+    }
 
     /// <summary>
     /// Maps <see cref="SettingApplyMode"/> to the wire string the admin UI badges on (SPEC F44.3

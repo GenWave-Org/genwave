@@ -1,9 +1,11 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using GenWave.Host.Catalog;
+using GenWave.Host.Icons;
 using GenWave.Host.Options;
 
 namespace GenWave.Host.Api;
@@ -289,8 +291,10 @@ public sealed partial class CatalogController(
         var isShow = ok.Content.Kind == CatalogEntryKind.Show;
         var isAvatar = ok.Content.Kind == CatalogEntryKind.Avatar;
         var isPersona = ok.Content.Kind == CatalogEntryKind.Persona;
+        var isIcon = ok.Content.Kind == CatalogEntryKind.Icon;
         var fontManifest = isFont ? CatalogFontManifestSerializer.Deserialize(ok.Content.ManifestJson) : null;
         var avatarManifest = isAvatar ? CatalogAvatarPackManifestSerializer.Deserialize(ok.Content.ManifestJson) : null;
+        var iconDefinition = isIcon ? ResolveIconCount(ok.Content.ManifestJson) : null;
         return new CatalogEntryResponse(
             ok.Content.ManifestJson,
             ok.Content.MetaJson,
@@ -310,8 +314,29 @@ public sealed partial class CatalogController(
             FontSubset: fontManifest?.Subset,
             SuggestedPersona: isShow ? ValidateSuggestedPersonaShape(meta.SuggestedPersona) : null,
             AvatarItems: avatarManifest?.Items.Select(item => ToAvatarItemDto(item, ok.Content.Assets)).ToArray(),
-            PersonaAvatarFile: isPersona ? ResolvePersonaAvatarFile(ok.Content.Assets) : null);
+            PersonaAvatarFile: isPersona ? ResolvePersonaAvatarFile(ok.Content.Assets) : null,
+            PackName: avatarManifest?.PackName,
+            IconCount: iconDefinition);
     }
+
+    /// <summary>
+    /// An icon pack entry's own declared icon count (SPEC F130.1, PLAN T304 rider 4) — re-validates
+    /// <paramref name="manifestJson"/> (the already-fetched, hash-verified <c>.icon.json</c> text)
+    /// through the SAME whitelist gate <see cref="IconPackController.Install"/> runs at install time,
+    /// at zero extra network cost. A pre-install manifest has never been through that gate before —
+    /// unlike <see cref="IconPackController.ToSummaryDto"/>'s own cheap key-count for an ALREADY
+    /// installed (and so already-canonical) pack's listing row, this is the one honest count a
+    /// not-yet-installed entry can offer, so the full <see cref="IconPackDefinitionParser.Validate"/>
+    /// walk is worth paying here, once per detail click. Degrades to <see langword="null"/> — never a
+    /// 500 — on a manifest that fails the whitelist (mirrors <see cref="ResolveSpecimenFile"/>'s own
+    /// "degrade, never throw" posture for a font pack's own parse failure); the admin-ui's own safe
+    /// renderer (PLAN T304) still draws whatever it defensively can from the raw <see cref="CatalogEntryResponse.Card"/>
+    /// text regardless of whether this count resolved.
+    /// </summary>
+    static int? ResolveIconCount(string manifestJson) =>
+        IconPackDefinitionParser.Validate(Encoding.UTF8.GetBytes(manifestJson)) is IconPackValidationResult.Valid valid
+            ? valid.Definition.Icons.Count
+            : null;
 
     /// <summary>
     /// One avatar pack item, projected onto the wire (SPEC F128.1, F128.4, PLAN T292) —

@@ -106,6 +106,8 @@ const THEME_DETAIL: CatalogEntryDetailDto = {
   suggestedPersona: null,
   avatarItems: null,
   personaAvatarFile: null,
+  packName: null,
+  iconCount: null,
 };
 
 const ENTRY_URL = "/api/catalog/entries/golden-frequency";

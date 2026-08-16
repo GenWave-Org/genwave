@@ -39,11 +39,12 @@ describe("Feature: the Wardrobe silos kinds by tab (gh-#393)", () => {
     });
 
     it("passes each named tab through", () => {
-      expect(["themes", "fonts", "shows", "avatars"].map(resolveWardrobeTab)).toEqual([
+      expect(["themes", "fonts", "shows", "avatars", "icons"].map(resolveWardrobeTab)).toEqual([
         "themes",
         "fonts",
         "shows",
         "avatars",
+        "icons",
       ]);
     });
 
@@ -54,7 +55,7 @@ describe("Feature: the Wardrobe silos kinds by tab (gh-#393)", () => {
   });
 
   describe("Scenario: the tab strip lists every kind, always", () => {
-    it("renders all five tabs with their ?tab= hrefs", () => {
+    it("renders all six tabs with their ?tab= hrefs", () => {
       render(<WardrobeTabs activeTab="personas" />);
 
       const nav = screen.getByRole("navigation", { name: "Wardrobe sections" });
@@ -63,6 +64,7 @@ describe("Feature: the Wardrobe silos kinds by tab (gh-#393)", () => {
       expect(within(nav).getByRole("link", { name: "Fonts" })).toHaveAttribute("href", "/wardrobe?tab=fonts");
       expect(within(nav).getByRole("link", { name: "Shows" })).toHaveAttribute("href", "/wardrobe?tab=shows");
       expect(within(nav).getByRole("link", { name: "Avatars" })).toHaveAttribute("href", "/wardrobe?tab=avatars");
+      expect(within(nav).getByRole("link", { name: "Icons" })).toHaveAttribute("href", "/wardrobe?tab=icons");
     });
 
     it("marks only the active tab with aria-current", () => {

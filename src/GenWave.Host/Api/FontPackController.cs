@@ -184,12 +184,6 @@ public sealed class FontPackController(
     /// </summary>
     public const long MaxPackBytes = 200 * 1024;
 
-    /// <summary>This kind's own noun, fed to every <see cref="CatalogInstallShell"/> factory that needs
-    /// one ("font pack unavailable", "no installable font pack…") — the ONE place this controller's
-    /// own kind-word lives, mirrors <see cref="AvatarPackController.KindNoun"/>'s own sibling
-    /// constant.</summary>
-    const string KindNoun = "font";
-
     /// <summary>
     /// POST /api/fonts/{slug}/install — see this class's own remarks for the full gate order and the
     /// reasoning behind each one.
@@ -207,14 +201,16 @@ public sealed class FontPackController(
             return CatalogInstallShell.DisabledSurfaceResult(Response);
 
         var (entryError, entryContent) = await CatalogInstallShell.ResolveEntryAsync(
-            catalogProxyService, KindNoun, CatalogEntryKind.Font, slug, ct);
+            catalogProxyService, CatalogEntryKind.Font, slug, ct);
         if (entryError is not null)
             return entryError;
         if (entryContent is not { } content)
             throw new UnreachableException("CatalogInstallShell.ResolveEntryAsync returned neither an error nor content.");
 
         var (assetsError, fetchedAssetsOrNull) = await CatalogInstallShell.FetchAllAssetsAsync(
-            catalogProxyService, KindNoun, slug, content, CatalogProxyService.MaxAssetBytes, MaxPackBytes, "SPEC F104.2", ct);
+            catalogProxyService, slug, content,
+            new CatalogInstallShell.PackFetchPolicy(CatalogEntryKind.Font, CatalogProxyService.MaxAssetBytes, MaxPackBytes, "SPEC F104.2"),
+            ct);
         if (assetsError is not null)
             return assetsError;
         if (fetchedAssetsOrNull is not { } fetchedAssets)
@@ -222,7 +218,7 @@ public sealed class FontPackController(
 
         var manifest = CatalogFontManifestSerializer.Deserialize(content.ManifestJson);
         if (manifest is null)
-            return BadRequest(CatalogInstallShell.MalformedManifestProblem(KindNoun, slug));
+            return BadRequest(CatalogInstallShell.MalformedManifestProblem(CatalogEntryKind.Font, slug));
 
         var (facesError, facesOrNull) = BuildFaces(slug, manifest, fetchedAssets);
         if (facesError is not null)
@@ -298,7 +294,7 @@ public sealed class FontPackController(
                 logger.LogInformation("Font pack uninstalled slug={Slug}", LogSafeText.Sanitize(slug));
                 return NoContent();
             case FontPackDeleteResult.NotFound:
-                return NotFound(CatalogInstallShell.UnknownInstalledPackProblem(KindNoun, slug));
+                return NotFound(CatalogInstallShell.UnknownInstalledPackProblem(CatalogEntryKind.Font, slug));
             case FontPackDeleteResult.Referenced referenced:
                 logger.LogWarning(
                     "Font pack uninstall refused slug={Slug} referencedByCount={Count}",
@@ -522,7 +518,7 @@ public sealed class FontPackController(
                 return (BadRequest(DuplicateManifestAssetProblem(slug, file.File)), null);
 
             if (!fetchedAssets.TryGetValue(file.File, out var asset))
-                return (BadRequest(CatalogInstallShell.UndeclaredManifestAssetProblem(KindNoun, slug, file.File)), null);
+                return (BadRequest(CatalogInstallShell.UndeclaredManifestAssetProblem(CatalogEntryKind.Font, slug, file.File)), null);
 
             faces.Add(new FontPackFaceInput(file.File, asset.Bytes, asset.Sha256, file.Style));
         }

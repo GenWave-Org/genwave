@@ -105,6 +105,23 @@ public static class FeatureTheShelfGainsTheVisualKinds
                 },
                 byName);
         }
+
+        [Fact]
+        public async Task TheDetailProjectionCarriesThePackName()
+        {
+            // PLAN T304 review rider 4 — the avatar pack's own manifest packName rides the detail
+            // wire at zero extra cost, mirroring FontFamily's own "parsed off the already-fetched
+            // manifest" shape, closing AvatarDetailPanel's own stated T294 deviation.
+            await using var factory = new VisualKindShelfWebFactory();
+            var client = await VisualKindShelfWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync($"/api/catalog/entries/{VisualKindCatalogFixtures.AvatarPackSlug}");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<CatalogEntryResponse>();
+            Assert.Equal("Face Pack", body!.PackName);
+            Assert.Null(body.IconCount);
+        }
     }
 
     public sealed class ScenarioAnIconPackEntryIsAdmitted
@@ -125,6 +142,24 @@ public static class FeatureTheShelfGainsTheVisualKinds
             var body = await response.Content.ReadFromJsonAsync<CatalogIndexResponse>();
             var entry = body!.Entries!.Single(e => e.Slug == VisualKindCatalogFixtures.IconPackSlug);
             Assert.Equal("icon", entry.Kind);
+        }
+
+        [Fact]
+        public async Task TheDetailProjectionCarriesTheIconCount()
+        {
+            // PLAN T304 review rider 4 — a pre-install icon manifest's own declared icon count
+            // rides the detail wire at zero extra cost, the icon-kind sibling of PackName above
+            // (an icon pack has no pack-level display name at all — SPEC F130.1 — so this is its
+            // own honest projection instead).
+            await using var factory = new VisualKindShelfWebFactory();
+            var client = await VisualKindShelfWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync($"/api/catalog/entries/{VisualKindCatalogFixtures.IconPackSlug}");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<CatalogEntryResponse>();
+            Assert.Equal(2, body!.IconCount);
+            Assert.Null(body.PackName);
         }
     }
 
@@ -464,7 +499,10 @@ file static class VisualKindCatalogFixtures
         {
           "schemaVersion": 1,
           "style": { "strokeWidth": 1.5, "fill": "none" },
-          "icons": {}
+          "icons": {
+            "dashboard": [ { "tag": "circle", "cx": 8, "cy": 8, "r": 2 } ],
+            "settings": [ { "tag": "circle", "cx": 8, "cy": 8, "r": 2.2 } ]
+          }
         }
         """;
 

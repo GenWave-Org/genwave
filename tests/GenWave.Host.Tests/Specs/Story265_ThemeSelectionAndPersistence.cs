@@ -52,6 +52,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Api;
 using GenWave.Host.Configuration;
+using GenWave.Host.Tests.Fakes;
 using GenWave.Host.Theming;
 using GenWave.Tts;
 
@@ -250,7 +251,8 @@ public static class FeatureThemeSelectionAndPersistence
                 })
                 .Build();
             var controller = new SettingsController(
-                config, new FakeSettingsStore(), new SettingValidator(config), NullLogger<SettingsController>.Instance)
+                config, new FakeSettingsStore(), new SettingValidator(config), NullLogger<SettingsController>.Instance,
+                new FakeIconPackStore())
             {
                 ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
             };
@@ -379,7 +381,8 @@ public static class FeatureThemeSelectionAndPersistence
             //         this, "the env var didn't take" is indistinguishable from "a row is
             //         winning" — the Station:SpectatorMode gotcha class DEPLOYMENT.md documents.
             var controller = new SettingsController(
-                config, new FakeSettingsStoreWithThemeOverride(), new SettingValidator(config), NullLogger<SettingsController>.Instance)
+                config, new FakeSettingsStoreWithThemeOverride(), new SettingValidator(config), NullLogger<SettingsController>.Instance,
+                new FakeIconPackStore())
             {
                 ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
             };

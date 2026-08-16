@@ -80,6 +80,25 @@ async function fetchInstalledAvatarSlugs(cookieHeader: string): Promise<string[]
   return fetchSlugs<InstalledAvatarPackRow>("/api/avatar-packs", cookieHeader);
 }
 
+/** Wire shape of a `GET /api/icon-packs` row (PLAN T304) — only the one field this page reads;
+ * mirrors `InstalledAvatarPackRow`'s own narrow-cast idiom above for the SAME reasoning, a
+ * different endpoint. */
+interface InstalledIconPackRow {
+  slug: string;
+}
+
+/**
+ * Every already-installed icon pack's slug (PLAN T304) — mirrors `fetchInstalledAvatarSlugs`'s own
+ * remarks verbatim, applied to the icon kind: fetched ALONGSIDE the index, in the SAME server
+ * component, so `IconDetailPanel` never has to guess whether a slug it is about to offer "Install"
+ * for is already in the Wardrobe. Every row counts (no predicate): an icon pack has only one
+ * provenance path (SPEC F130.5), so "installed" and "genuinely installed by this route" are the
+ * same thing.
+ */
+async function fetchInstalledIconSlugs(cookieHeader: string): Promise<string[]> {
+  return fetchSlugs<InstalledIconPackRow>("/api/icon-packs", cookieHeader);
+}
+
 /** Wire shape of one `Station:Theme` choice, off `GET /api/settings` (SPEC F103.11, PLAN T187) —
  * only the fields this page reads; mirrors `InstalledFontPackRow`'s own narrow-cast idiom above
  * rather than importing `settings/settings-types.ts`'s full `SettingChoice` for three fields. */
@@ -204,15 +223,23 @@ export default async function PersonaCatalogPage({ searchParams }: PersonaCatalo
   const activeKind = resolveCatalogKind(sp.kind);
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
-  const [response, installedFontSlugs, installedThemeProvenance, importedShowSlugs, hiredPersonaSlugs, installedAvatarSlugs] =
-    await Promise.all([
-      apiGet("/api/catalog/index", { cookies: cookieHeader }),
-      fetchInstalledFontSlugs(cookieHeader),
-      fetchInstalledThemeProvenance(cookieHeader),
-      fetchImportedShowSlugs(cookieHeader),
-      fetchHiredPersonaSlugs(cookieHeader),
-      fetchInstalledAvatarSlugs(cookieHeader),
-    ]);
+  const [
+    response,
+    installedFontSlugs,
+    installedThemeProvenance,
+    importedShowSlugs,
+    hiredPersonaSlugs,
+    installedAvatarSlugs,
+    installedIconSlugs,
+  ] = await Promise.all([
+    apiGet("/api/catalog/index", { cookies: cookieHeader }),
+    fetchInstalledFontSlugs(cookieHeader),
+    fetchInstalledThemeProvenance(cookieHeader),
+    fetchImportedShowSlugs(cookieHeader),
+    fetchHiredPersonaSlugs(cookieHeader),
+    fetchInstalledAvatarSlugs(cookieHeader),
+    fetchInstalledIconSlugs(cookieHeader),
+  ]);
 
   // Disabled (SPEC F90.1): CatalogController serves a bare, zero-byte 404 here — the same
   // per-resource 404 shape MediaDetailPage's own "Not found" branch renders inline for (house
@@ -253,6 +280,7 @@ export default async function PersonaCatalogPage({ searchParams }: PersonaCatalo
           importedShowSlugs={importedShowSlugs}
           hiredPersonaSlugs={hiredPersonaSlugs}
           installedAvatarSlugs={installedAvatarSlugs}
+          installedIconSlugs={installedIconSlugs}
           activeKind={activeKind}
         />
       </div>

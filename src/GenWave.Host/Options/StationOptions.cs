@@ -119,6 +119,19 @@ public sealed class StationOptions
     /// </summary>
     public string Theme { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The station's chosen icon-pack slug (SPEC F130.4, STORY-337, PLAN T303) — activation for the
+    /// admin chrome's third swappable layer. Not required — defaults to empty, the honest "house
+    /// icons" state (<c>Station:IconPack</c> is deliberately unseeded in <c>appsettings.json</c>, the
+    /// same <see cref="Theme"/> precedent immediately above): the F130.3 renderer resolves an empty
+    /// value, and any value naming no currently-installed pack (F130.5's fail-open uninstall — a
+    /// dangling slug left behind by a <c>DELETE</c> that never touches this setting), identically to
+    /// house icons, never an error. Read live, per request, through
+    /// <c>IOptionsMonitor&lt;StationOptions&gt;</c> by <c>IconPackController.Active</c>, so a
+    /// <c>PUT /api/settings</c> here reaches the very next request with no api restart.
+    /// </summary>
+    public string IconPack { get; set; } = string.Empty;
+
     /// <summary>The station's broadcast location (SPEC F108.1, F108.3, PLAN T226) — read live
     /// through <see cref="OptionsMonitorStationLocationProvider"/> by
     /// <c>GenWave.Context.Weather.WeatherContextProvider</c>. Bound to <c>Station:Location</c>.

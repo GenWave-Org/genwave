@@ -1,10 +1,9 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Chip } from "@/components/ui/chip";
 import { EmptyState } from "@/components/ui/empty-state";
-import { formatDateStamp } from "@/lib/format-clock";
 import { formatFontByteTotal, licenceLine } from "../persona-catalog/font-format";
+import { ProvenanceChip } from "./ProvenanceChip";
 import { UninstallPackButton } from "./UninstallPackButton";
 import type { FontLibraryPackDto } from "./types";
 
@@ -26,28 +25,6 @@ export interface WardrobeClientProps {
    * isolated render with no live signal offers no browse promise it cannot keep.
    */
   catalogEnabled?: boolean;
-}
-
-/** Provenance chip — "Installed · &lt;slug&gt; · &lt;date&gt;" (SPEC F104.7 AC1, the db/25 pattern)
- * — the shared `Chip` component (`components/ui/chip.tsx`, gh-#375 extraction) rather than
- * `PersonasClient`'s own `ProvenanceBadge`/`SettingsForm`'s own `ThemeProvenanceBadge` directly:
- * this page sits outside both files' own partitions, and the TEXT shape here ("Installed", no
- * leading label) differs from both ("Hired"/"&lt;label&gt; — Imported") — only the visual chip
- * styling itself was ever duplicated, which `Chip` now owns once. `importedFrom` renders VERBATIM —
- * this is provenance, not decoration, same rule the persona/theme chips already follow — even
- * though it is always equal to the pack's own `slug` today (a pack has no authored-in-place path);
- * reading it off its own field rather than `pack.slug` keeps this chip honest about which column IS
- * the provenance stamp. */
-function ProvenanceChip({
-  importedFrom,
-  importedAt,
-  timeZone,
-}: {
-  importedFrom: string;
-  importedAt: string;
-  timeZone?: string;
-}): ReactNode {
-  return <Chip>{`Installed · ${importedFrom} · ${formatDateStamp(importedAt, { timeZone })}`}</Chip>;
 }
 
 /**

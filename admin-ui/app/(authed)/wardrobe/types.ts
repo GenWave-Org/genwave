@@ -77,3 +77,25 @@ export interface AvatarPackSummaryDto {
   importedFrom: string;
   importedAt: string;
 }
+
+/**
+ * One `GET /api/icon-packs` row (SPEC F130.4/F130.5, STORY-337, PLAN T303/T304) — an installed icon
+ * pack. Mirrors Host's `IconPackSummaryDto`. NO `name` field (unlike `AvatarPackSummaryDto.name`):
+ * SPEC F130.1's own `gw-icon-pack` document has no pack-level display-name field at all — `slug` IS
+ * the only honest label this schema can offer (`StationSettingsAllowlist.IconPackChoices`'s own
+ * remarks give the same reasoning for a `Station:IconPack` choice's own label).
+ *
+ * `definition` DOES ride this listing wire (PLAN T304), unlike `AvatarPackSummaryDto`/
+ * `FontLibraryPackDto`'s own "no bytes on the listing" posture: an icon pack carries no binary
+ * assets at all (SPEC F130.6), only its own already-canonical, whitelist-safe JSON text — this is
+ * what lets `IconWardrobeClient` draw a real specimen row per pack through the SAME safe renderer
+ * `IconDetailPanel`/`Icon` use, parsed defensively client-side (`lib/icon-pack.ts`), never trusted
+ * blindly even though this station's own install route already validated it once.
+ */
+export interface IconPackSummaryDto {
+  slug: string;
+  iconCount: number;
+  definition: string;
+  importedFrom: string;
+  importedAt: string;
+}

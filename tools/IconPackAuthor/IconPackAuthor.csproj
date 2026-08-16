@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- T305 (SPEC F130.7, STORY-338). References GenWave.Host.Tests — NOT GenWave.Host directly —
+       for IconPackAuthoringGateway: IconPackDefinitionParser/IconPackDefinitionSerializer are
+       `internal`, and GenWave.Host.Tests is the one assembly GenWave.Host.csproj's InternalsVisibleTo
+       already names (same "must not touch src/" reasoning tools/SeamIndexGenerator's own csproj
+       comment records for T216). The public types this project also reaches — IconElement,
+       IconPackDefinition, IconPackStyle, IconNameContract — come along for free via the same
+       transitive ProjectReference; no second reference to GenWave.Host is declared. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>GenWave.IconPackAuthor</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\tests\GenWave.Host.Tests\GenWave.Host.Tests.csproj" />
+  </ItemGroup>
+
+  <!-- testdata/ (self-test's sample SVGs + name-mapping fixtures) is deliberately NOT a <None
+       CopyToOutputDirectory> item here. SelfTest.cs's TestDataDirectory() reads it straight from the
+       source tree via [CallerFilePath] — copying it into bin/ as well would be a second, redundant
+       resolution mechanism for the same files (a place for the two to silently drift), not a fix for
+       the constraint that mechanism already carries. See TestDataDirectory()'s own remarks for that
+       constraint. -->
+
+</Project>

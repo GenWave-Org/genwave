@@ -106,6 +106,24 @@ namespace GenWave.Host.Api;
 /// <see cref="FontSpecimenFile"/> already does for a font pack's specimen face. <see langword="null"/>
 /// for every non-persona entry, when unreachable, or when this persona entry declares no face.
 /// </param>
+/// <param name="PackName">
+/// An avatar pack's own manifest display name (SPEC F128.1, PLAN T304 rider 4 — closes the "no
+/// pack-name field on the wire" gap the admin-ui's <c>AvatarDetailPanel</c> used to document as a
+/// stated deviation, PLAN T294) — parsed off <see cref="Card"/> at ZERO extra network cost, the SAME shape
+/// <see cref="FontFamily"/> already has for a font pack. <see langword="null"/> for every non-avatar
+/// entry, when unreachable, or when the manifest fails to parse (degrades — never a 500). An icon
+/// entry never carries one: SPEC F130.1's <c>gw-icon-pack</c> document has no pack-level display-name
+/// field at all (see <see cref="IconPackSummaryDto"/>'s own remarks) — <see cref="IconCount"/> is
+/// that kind's own honest projection instead.
+/// </param>
+/// <param name="IconCount">
+/// An icon pack entry's own declared icon count (SPEC F130.1, PLAN T294 rider 3), re-validated off
+/// <see cref="Card"/> via <see cref="Icons.IconPackDefinitionParser.Validate"/> at zero extra network
+/// cost — a pre-install manifest that fails that whitelist gate degrades to <see langword="null"/>
+/// (never a 500; the Wardrobe/shelf specimen renderer, PLAN T304, still draws whatever it can from
+/// the raw <see cref="Card"/> text defensively regardless of this count). <see langword="null"/> for
+/// every non-icon entry or when unreachable.
+/// </param>
 public sealed record CatalogEntryResponse(
     string? Card,
     string? Meta,
@@ -125,7 +143,9 @@ public sealed record CatalogEntryResponse(
     string? FontSubset,
     string? SuggestedPersona,
     IReadOnlyList<CatalogAvatarItemDto>? AvatarItems,
-    string? PersonaAvatarFile)
+    string? PersonaAvatarFile,
+    string? PackName,
+    int? IconCount)
 {
     /// <summary>
     /// The graceful "catalog currently unreachable" shape (SPEC F90.4, <see cref="Unreachable"/> =
@@ -163,5 +183,7 @@ public sealed record CatalogEntryResponse(
         FontSubset: null,
         SuggestedPersona: null,
         AvatarItems: null,
-        PersonaAvatarFile: null);
+        PersonaAvatarFile: null,
+        PackName: null,
+        IconCount: null);
 }
