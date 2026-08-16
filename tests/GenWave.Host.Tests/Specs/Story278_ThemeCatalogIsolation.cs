@@ -224,7 +224,12 @@ public static class FeatureThemeCatalogIsolation
         // F104.14) is FontPackController's own uninstall route — the guarded pack library's FIRST
         // delete, joining install/list/assignable under the SAME class-level AdminSurface+Settings
         // pairing, pinned here (mirrors the N4/N7 "the moment it exists" precedent every sibling route
-        // above already followed) rather than left for the T209 disclosure re-audit to discover.
+        // above already followed) rather than left for the T209 disclosure re-audit to discover. POST
+        // api/avatar-packs/{slug}/install + DELETE api/avatar-packs/{slug} (T293, SPEC F128.3) are
+        // AvatarPackController's own install/uninstall pair — a FOURTH guarded prefix joining
+        // api/catalog, api/themes, and api/fonts, pinned here the moment it exists (review finding S5
+        // — the SAME "the moment it exists" precedent every prior addition to this set already
+        // followed) rather than left for a future disclosure re-audit to discover it first.
         static readonly IReadOnlySet<(string Verb, string Route)> KnownCatalogAndThemeRoutes =
             new HashSet<(string Verb, string Route)>
             {
@@ -239,18 +244,20 @@ public static class FeatureThemeCatalogIsolation
                 ("GET", "api/fonts"),
                 ("GET", "api/fonts/assignable"),
                 ("DELETE", "api/fonts/{slug}"),
+                ("POST", "api/avatar-packs/{slug}/install"),
+                ("DELETE", "api/avatar-packs/{slug}"),
             };
 
-        // All three controllers are ROOTED at their own bare prefix ([Route("api/catalog")],
-        // [Route("api/themes")], [Route("api/fonts")] — review finding F2, extended to the third
-        // prefix at N4): GuardedRouteInspector.DiscoverEndpoints's own segment-bounded match — the
-        // prefix itself, or the prefix followed by a '/', never a bare substring match — is what makes
-        // that safe. Extracted to GenWave.Host.Tests.Fakes.GuardedRouteInspector (PLAN T209 review
-        // finding N3, the extract-on-third-copy precedent) once Story283_InstalledFontServing.cs and
-        // Story289_WardrobeIsolation.cs each carried their own near-verbatim copy of this discovery +
+        // All FOUR controllers are ROOTED at their own bare prefix ([Route("api/catalog")],
+        // [Route("api/themes")], [Route("api/fonts")], [Route("api/avatar-packs")] — review finding F2,
+        // extended to the third prefix at N4 and the fourth at S5): GuardedRouteInspector.DiscoverEndpoints's
+        // own segment-bounded match — the prefix itself, or the prefix followed by a '/', never a bare
+        // substring match — is what makes that safe. Extracted to GenWave.Host.Tests.Fakes.GuardedRouteInspector
+        // (PLAN T209 review finding N3, the extract-on-third-copy precedent) once Story283_InstalledFontServing.cs
+        // and Story289_WardrobeIsolation.cs each carried their own near-verbatim copy of this discovery +
         // AdminSurface/Settings shape check.
         static List<RouteEndpoint> DiscoverCatalogAndThemeEndpoints(IServiceProvider services) =>
-            GuardedRouteInspector.DiscoverEndpoints(services, "api/catalog", "api/themes", "api/fonts");
+            GuardedRouteInspector.DiscoverEndpoints(services, "api/catalog", "api/themes", "api/fonts", "api/avatar-packs");
 
         [Fact]
         public void TheDiscoveredRouteSetMatchesTheKnownDeliberateSet()
@@ -274,8 +281,8 @@ public static class FeatureThemeCatalogIsolation
         {
             var added = discovered.Except(KnownCatalogAndThemeRoutes).ToArray();
             var removed = KnownCatalogAndThemeRoutes.Except(discovered).ToArray();
-            return "The api/catalog/* + api/themes/* + api/fonts/* route set no longer matches the " +
-                "known, deliberate set. " +
+            return "The api/catalog/* + api/themes/* + api/fonts/* + api/avatar-packs/* route set no " +
+                "longer matches the known, deliberate set. " +
                 (added.Length > 0 ? $"Newly present: [{string.Join(", ", added)}]. " : "") +
                 (removed.Length > 0 ? $"No longer present: [{string.Join(", ", removed)}]. " : "") +
                 "A new route under any of these prefixes is a disclosure decision (SPEC F103.12) — " +

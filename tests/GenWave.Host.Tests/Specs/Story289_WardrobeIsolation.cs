@@ -72,10 +72,12 @@ public sealed class FeatureWardrobeIsolation
             await using var internalFactory = new WardrobeIsolationWebFactory();
             var internalClient = internalFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
-            // When every route under api/catalog, api/themes, and api/fonts — every guarded prefix
-            // this epic's own routes ever join (review finding N3: widened from "just editor/library"
-            // to the whole guarded set, since CatalogController carries the identical
-            // AdminSurface+Settings pairing and costs this sweep nothing extra to include) — is
+            // When every route under api/catalog, api/themes, api/fonts, and api/avatar-packs — every
+            // guarded prefix this epic's own routes ever join (review finding N3: widened from "just
+            // editor/library" to the whole guarded set, since CatalogController carries the identical
+            // AdminSurface+Settings pairing and costs this sweep nothing extra to include; api/avatar-packs
+            // joined at review finding S5, the SAME "pinned the moment it exists" precedent PLAN T293's
+            // install/uninstall pair got in Story278_ThemeCatalogIsolation.cs's own route-set pin) — is
             // discovered off the app's OWN table via the shared GuardedRouteInspector (never a
             // hand-maintained mirror of it, per this task's own "consolidated audit fact… so drift in
             // ANY of them shows up in one suite" charge). Story278_ThemeCatalogIsolation.cs's own
@@ -83,7 +85,7 @@ public sealed class FeatureWardrobeIsolation
             // rather than being migrated onto this sweep — the two are deliberately redundant, not
             // merged, so a regression this discovery-based sweep might ever miss for an unforeseen
             // reason still has that hand-picked list catching it.
-            var endpoints = GuardedRouteInspector.DiscoverEndpoints(publicFactory.Services, "api/catalog", "api/themes", "api/fonts");
+            var endpoints = GuardedRouteInspector.DiscoverEndpoints(publicFactory.Services, "api/catalog", "api/themes", "api/fonts", "api/avatar-packs");
             Assert.NotEmpty(endpoints); // guards this sweep against a silent rename emptying it
 
             var violations = new List<string>();

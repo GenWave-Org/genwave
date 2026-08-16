@@ -1,0 +1,36 @@
+using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
+
+namespace GenWave.Host.Tests.Fakes;
+
+/// <summary>
+/// In-memory <see cref="IPersonaAvatarStore"/> double — Story332's own "a worn copy survives an
+/// avatar-pack uninstall" Fact uses this directly to seed a worn face BEFORE the uninstall (T290's own
+/// store contract, arranged straight against the seam rather than a whole apply-from-pack write path
+/// that does not exist yet, PLAN T295) and assert it untouched AFTER, proving
+/// <c>AvatarPackController.Uninstall</c>'s own guard-free delete never reaches
+/// <c>station.persona_avatar</c> at all (ARCHITECTURE.md's "assignment copies, provenance records"
+/// ruling — see <see cref="AvatarPackController"/>'s own UNINSTALL IS GUARD-FREE remarks). Mirrors
+/// <see cref="FakeFontPackStore"/>'s own minimal-contract idiom.
+/// </summary>
+sealed class FakePersonaAvatarStore : IPersonaAvatarStore
+{
+    readonly Dictionary<long, PersonaAvatar> byPersonaId = new();
+
+    public Task<PersonaAvatar?> GetByPersonaIdAsync(long personaId, CancellationToken ct) =>
+        Task.FromResult(byPersonaId.TryGetValue(personaId, out var avatar) ? avatar : null);
+
+    public Task<PersonaAvatar?> GetByTokenAsync(string token, CancellationToken ct) =>
+        Task.FromResult(byPersonaId.Values.FirstOrDefault(a => a.Token == token));
+
+    public Task UpsertAsync(PersonaAvatarInput avatar, CancellationToken ct)
+    {
+        byPersonaId[avatar.PersonaId] = new PersonaAvatar(
+            avatar.PersonaId, avatar.Bytes, avatar.ByteSize, avatar.Sha256, avatar.Token,
+            avatar.Source, avatar.ImportedFrom, DateTime.UtcNow);
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> DeleteAsync(long personaId, CancellationToken ct) =>
+        Task.FromResult(byPersonaId.Remove(personaId));
+}

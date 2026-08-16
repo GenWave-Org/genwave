@@ -108,29 +108,36 @@ public sealed class CatalogProxyService(
     /// order of magnitude invented just for this cap) — comfortable headroom for any one file a
     /// 200 KiB-ceilinged pack could ever declare.
     /// </para>
+    ///
+    /// <para>
+    /// FONT-KIND ONLY as of PLAN T293's widening (the follow-up <see cref="MaxCachedAssets"/>'s own
+    /// remarks name, and the T292 review finding this constant's own body used to carry as an open
+    /// gap): <see cref="AssetFetchCapFor"/>, not this constant alone, is what a real fetch actually
+    /// enforces PER KIND. This constant still bounds a font pack's own woff2/OFL.txt fetch exactly as
+    /// before, but an avatar-pack-item or persona-sidecar PNG now fetches under
+    /// <see cref="CatalogIndexValidator.MaxPngAssetBytes"/> (512 KiB) instead — closing the gap: a
+    /// CI-legal, index-validated 256-512 KiB avatar/persona-face asset used to 502 Oversize the moment
+    /// it was actually fetched, despite validating cleanly at index time.
+    /// </para>
     /// </summary>
     public const int MaxAssetBytes = 256 * 1024;
 
     /// <summary>
     /// Ceiling on <see cref="cachedAssets"/>' distinct entries — mirrors <see cref="MaxCachedEntries"/>'s
-    /// own bounded-growth rationale, set far lower because each slot here can hold up to
-    /// <see cref="MaxAssetBytes"/> (256 KiB) of ACTUALLY FETCHED bytes rather than a small JSON
-    /// document: 64 slots is a 16 MiB worst case, comfortably bounded for an admin-only, low-traffic
-    /// specimen-preview surface (SPEC F104.4) with headroom well beyond any one real pack's face count.
+    /// own bounded-growth rationale, set far lower because each slot here can hold up to a real fetch's
+    /// worth of ACTUALLY FETCHED bytes rather than a small JSON document.
     ///
     /// <para>
-    /// PLAN T292 review finding, revisited honestly: <see cref="CatalogIndexValidator"/> now admits an
-    /// avatar-pack/persona-sidecar asset's DECLARED size up to its own <c>MaxPngAssetBytes</c> (512
-    /// KiB, SPEC F128.1) — LARGER than <see cref="MaxAssetBytes"/> above. That widening is
-    /// validation-time only: the bytes this cache ever actually holds still pass through
-    /// <see cref="FetchAndVerifyAssetAsync"/>'s own <c>effectiveCap = Math.Min(declared, MaxAssetBytes)</c>,
-    /// so a real fetch — and thus THIS cache's true worst case — stays exactly the 256 KiB/16 MiB
-    /// figure above, UNCHANGED, for every kind including avatar. The new worst case is: no new worst
-    /// case. (A known, narrower consequence this task does not close: a declared avatar/persona-face
-    /// asset between 256 KiB and 512 KiB validates at index time but still withholds as
-    /// <see cref="CatalogAssetFetchResult.Oversize"/> the moment it is actually fetched — raising
-    /// <see cref="MaxAssetBytes"/>'s own runtime fetch cap for those two kinds is a follow-up, not
-    /// this comment's claim.)
+    /// PLAN T293, re-derived honestly (the PLAN T292 review finding this constant's own body used to
+    /// carry — "the new worst case is: no new worst case" — no longer holds; this IS the follow-up
+    /// that comment named). <see cref="AssetFetchCapFor"/> now fetches an avatar-pack-item/
+    /// persona-sidecar PNG under <see cref="CatalogIndexValidator.MaxPngAssetBytes"/> (512 KiB) rather
+    /// than the flat <see cref="MaxAssetBytes"/> (256 KiB) every kind used before — a REAL widening of
+    /// what one slot can actually hold, not merely of what index.json may declare. The worst case per
+    /// slot is therefore the LARGER of the two per-kind caps, 512 KiB, regardless of which kind
+    /// happens to occupy it: 64 slots × 512 KiB = 32 MiB, comfortably bounded for an admin-only,
+    /// low-traffic specimen-preview surface (SPEC F104.4/F128.4) with headroom well beyond any one
+    /// real pack's item count.
     /// </para>
     /// </summary>
     const int MaxCachedAssets = 64;
@@ -304,7 +311,7 @@ public sealed class CatalogProxyService(
         if (indexResult is not CatalogIndexFetchResult.Ok)
             return new CatalogAssetFetchResult.Unreachable();
 
-        if (!TryResolveAsset(slug, file, out var assetRef, out var directory))
+        if (!TryResolveAsset(slug, file, out var assetRef, out var directory, out var kind))
             return new CatalogAssetFetchResult.NotFound();
 
         if (TryServeFreshAsset(assetRef.Path, out var fresh))
@@ -316,7 +323,7 @@ public sealed class CatalogProxyService(
             if (TryServeFreshAsset(assetRef.Path, out var freshAfterWait))
                 return freshAfterWait;
 
-            var outcome = await FetchAndVerifyAssetAsync(directory, assetRef, ct);
+            var outcome = await FetchAndVerifyAssetAsync(directory, assetRef, kind, ct);
             return outcome switch
             {
                 AssetFetchOutcome.Ok ok => CacheAndReturnAsset(assetRef, ok),
@@ -404,9 +411,18 @@ public sealed class CatalogProxyService(
     /// Resolves <paramref name="file"/> (a bare filename, e.g. <c>"space-grotesk-variable-latin.woff2"</c>)
     /// against the current index's entry for <paramref name="slug"/> — same "same cacheGate as every
     /// writer, so this can only run once <see cref="GetIndexAsync"/> guaranteed a populated cache"
-    /// reasoning as <see cref="TryResolveSummary"/>.
+    /// reasoning as <see cref="TryResolveSummary"/>. <paramref name="kind"/> is the resolved entry's
+    /// own <see cref="CatalogEntrySummary.Kind"/> (PLAN T293) — <see cref="FetchAndVerifyAssetAsync"/>'s
+    /// own per-kind fetch cap needs it; when this returns <see langword="false"/> (no entry/asset
+    /// resolved), <paramref name="kind"/> is set to <see cref="CatalogEntryKind.Font"/> rather than the
+    /// enum's own default (<see cref="CatalogEntryKind.Persona"/>, 512 KiB's own kind, review finding
+    /// S7) — a caller can never actually read this out-value on a <see langword="false"/> return
+    /// (<see cref="AssetFetchCapFor"/>'s own caller, <see cref="GetAssetAsync"/>, always short-circuits
+    /// on <see langword="false"/> before ever reaching it), but a fail-open default is still the wrong
+    /// shape for an unreachable value to carry: <see cref="MaxAssetBytes"/> (256 KiB, the FONT cap) is
+    /// the conservative choice between this method's two real per-kind caps, not the wider 512 KiB one.
     /// </summary>
-    bool TryResolveAsset(string slug, string file, [NotNullWhen(true)] out CatalogAssetRef? assetRef, out Uri directory)
+    bool TryResolveAsset(string slug, string file, [NotNullWhen(true)] out CatalogAssetRef? assetRef, out Uri directory, out CatalogEntryKind kind)
     {
         lock (cacheGate)
         {
@@ -414,6 +430,11 @@ public sealed class CatalogProxyService(
                 "Catalog index cache was empty immediately after a successful GetIndexAsync call.");
             directory = snapshot.Directory;
             var summary = snapshot.Entries.FirstOrDefault(e => e.Slug == slug);
+            // Fail-open default fixed (review finding S7): CatalogEntryKind's own enum default
+            // (Persona, value 0) used to silently pick the WIDER 512 KiB avatar/persona fetch cap for
+            // an unreachable value — Font's 256 KiB is the conservative pick between the two real caps
+            // AssetFetchCapFor actually distinguishes.
+            kind = summary?.Kind ?? CatalogEntryKind.Font;
             assetRef = summary?.Assets.FirstOrDefault(a => Path.GetFileName(a.Path) == file);
             return assetRef is not null;
         }
@@ -705,20 +726,21 @@ public sealed class CatalogProxyService(
     /// Fetches and hash-verifies ONE binary asset (SPEC F104.1, T194) — the same belt-and-braces
     /// directory re-check <see cref="FetchAndVerifyFileAsync"/> already does for a manifest/meta
     /// pointer, applied to <see cref="CatalogAssetRef"/>. The size cap actually passed to the bounded
-    /// read is <c>min(the asset's own declared <see cref="CatalogAssetRef.Bytes"/>, <see cref="MaxAssetBytes"/>)</c>
-    /// (T193 review obligation) — <paramref name="assetRef"/>'s declared size is untrusted origin
-    /// content and must never be the ONLY bound the stream read trusts. The cast to <see langword="int"/>
-    /// is always safe here: <see cref="Math.Min(long, long)"/> can only ever return
-    /// <see cref="MaxAssetBytes"/> itself (an <see langword="int"/> literal) when the declared size is
-    /// the larger operand, and the declared size when IT is smaller — <see cref="CatalogIndexValidator"/>
-    /// already proved that value positive before this ever ran.
+    /// read is <c>min(the asset's own declared <see cref="CatalogAssetRef.Bytes"/>, <see cref="AssetFetchCapFor"/>(<paramref name="kind"/>))</c>
+    /// (T193 review obligation, widened per-kind at PLAN T293 — see <see cref="AssetFetchCapFor"/>'s
+    /// own remarks) — <paramref name="assetRef"/>'s declared size is untrusted origin content and must
+    /// never be the ONLY bound the stream read trusts. The cast to <see langword="int"/> is always
+    /// safe here: <see cref="Math.Min(long, long)"/> can only ever return the per-kind cap itself (an
+    /// <see langword="int"/> literal) when the declared size is the larger operand, and the declared
+    /// size when IT is smaller — <see cref="CatalogIndexValidator"/> already proved that value
+    /// positive before this ever ran.
     /// </summary>
-    async Task<AssetFetchOutcome> FetchAndVerifyAssetAsync(Uri directory, CatalogAssetRef assetRef, CancellationToken ct)
+    async Task<AssetFetchOutcome> FetchAndVerifyAssetAsync(Uri directory, CatalogAssetRef assetRef, CatalogEntryKind kind, CancellationToken ct)
     {
         if (!CatalogIndexValidator.TryResolveWithinDirectory(directory, assetRef.Path, out var uri))
             throw new UnreachableException($"'{assetRef.Path}' no longer resolves under its index directory.");
 
-        var effectiveCap = (int)Math.Min(assetRef.Bytes, MaxAssetBytes);
+        var effectiveCap = (int)Math.Min(assetRef.Bytes, AssetFetchCapFor(kind));
         var outcome = await CatalogHttpFetcher.FetchAsync(httpClientFactory, uri, effectiveCap, ct);
         return outcome switch
         {
@@ -728,6 +750,33 @@ public sealed class CatalogProxyService(
             _ => throw new UnreachableException($"Unhandled {nameof(CatalogFetchOutcome)} case."),
         };
     }
+
+    /// <summary>
+    /// The per-kind fetch cap actually enforced during a STREAMED read (PLAN T293 — the follow-up
+    /// <see cref="MaxAssetBytes"/>'s and <see cref="MaxCachedAssets"/>'s own remarks both name).
+    /// Deliberately distinct from <see cref="CatalogIndexValidator"/>'s own internal
+    /// <c>AssetByteCeiling</c>, which bounds what an index.json entry may DECLARE at VALIDATION time
+    /// for the two pack-shaped kinds only (<see cref="CatalogEntryKind.Font"/>/<see cref="CatalogEntryKind.Avatar"/>)
+    /// — this method answers a different question, for a wider set of callers: what THIS process will
+    /// actually stream for ANY kind <see cref="GetAssetAsync"/> is ever asked to resolve, including a
+    /// <see cref="CatalogEntryKind.Persona"/> entry's own sidecar face (never validated through
+    /// <c>AssetByteCeiling</c> — <see cref="CatalogIndexValidator.TryValidatePersonaAvatarAsset"/> checks
+    /// it against <see cref="CatalogIndexValidator.MaxPngAssetBytes"/> directly), which
+    /// <see cref="Api.CatalogController.Asset"/>'s own kind-agnostic route can fetch too. Font stays
+    /// pinned to <see cref="MaxAssetBytes"/> (256 KiB, unchanged); every PNG-carrying kind — an
+    /// installed avatar-pack item AND a persona's own sidecar face, both declared under the SAME
+    /// <see cref="CatalogIndexValidator.MaxPngAssetBytes"/> ceiling — fetches under that identical 512
+    /// KiB number instead. A kind that carries no assets at all (Theme/Show/Icon) never reaches this
+    /// method: <see cref="TryResolveAsset"/> already answers <see langword="false"/> before
+    /// <see cref="GetAssetAsync"/> ever calls this, because <see cref="CatalogIndexValidator"/> never
+    /// builds one of those kinds' entries with a populated <see cref="CatalogEntrySummary.Assets"/> —
+    /// the fallback arm below exists only so the switch is total, never because it is expected to run.
+    /// </summary>
+    static int AssetFetchCapFor(CatalogEntryKind kind) => kind switch
+    {
+        CatalogEntryKind.Avatar or CatalogEntryKind.Persona => CatalogIndexValidator.MaxPngAssetBytes,
+        _ => MaxAssetBytes,
+    };
 
     static AssetFetchOutcome VerifyAssetHash(byte[] bytes, CatalogAssetRef assetRef)
     {
