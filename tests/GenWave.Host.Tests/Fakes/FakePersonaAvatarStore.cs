@@ -17,11 +17,21 @@ sealed class FakePersonaAvatarStore : IPersonaAvatarStore
 {
     readonly Dictionary<long, PersonaAvatar> byPersonaId = new();
 
+    /// <summary>Bumped on every <see cref="GetByTokenAsync"/> call — Story335's own malformed-token
+    /// facts use this to prove <c>SpectatorArtworkController.GetDjArtwork</c>'s well-formedness
+    /// guard short-circuits BEFORE any lookup here, not merely happens to answer the same way. The
+    /// real store is Postgres-backed (<c>PersonaAvatarRepository</c>): a malformed token must never
+    /// buy a round trip against it.</summary>
+    public int GetByTokenCallCount { get; private set; }
+
     public Task<PersonaAvatar?> GetByPersonaIdAsync(long personaId, CancellationToken ct) =>
         Task.FromResult(byPersonaId.TryGetValue(personaId, out var avatar) ? avatar : null);
 
-    public Task<PersonaAvatar?> GetByTokenAsync(string token, CancellationToken ct) =>
-        Task.FromResult(byPersonaId.Values.FirstOrDefault(a => a.Token == token));
+    public Task<PersonaAvatar?> GetByTokenAsync(string token, CancellationToken ct)
+    {
+        GetByTokenCallCount++;
+        return Task.FromResult(byPersonaId.Values.FirstOrDefault(a => a.Token == token));
+    }
 
     public Task UpsertAsync(PersonaAvatarInput avatar, CancellationToken ct)
     {
