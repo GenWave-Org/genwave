@@ -114,9 +114,24 @@ public sealed class CatalogProxyService(
     /// <summary>
     /// Ceiling on <see cref="cachedAssets"/>' distinct entries — mirrors <see cref="MaxCachedEntries"/>'s
     /// own bounded-growth rationale, set far lower because each slot here can hold up to
-    /// <see cref="MaxAssetBytes"/> (256 KiB) of raw bytes rather than a small JSON document: 64 slots
-    /// is a 16 MiB worst case, comfortably bounded for an admin-only, low-traffic specimen-preview
-    /// surface (SPEC F104.4) with headroom well beyond any one real pack's face count.
+    /// <see cref="MaxAssetBytes"/> (256 KiB) of ACTUALLY FETCHED bytes rather than a small JSON
+    /// document: 64 slots is a 16 MiB worst case, comfortably bounded for an admin-only, low-traffic
+    /// specimen-preview surface (SPEC F104.4) with headroom well beyond any one real pack's face count.
+    ///
+    /// <para>
+    /// PLAN T292 review finding, revisited honestly: <see cref="CatalogIndexValidator"/> now admits an
+    /// avatar-pack/persona-sidecar asset's DECLARED size up to its own <c>MaxPngAssetBytes</c> (512
+    /// KiB, SPEC F128.1) — LARGER than <see cref="MaxAssetBytes"/> above. That widening is
+    /// validation-time only: the bytes this cache ever actually holds still pass through
+    /// <see cref="FetchAndVerifyAssetAsync"/>'s own <c>effectiveCap = Math.Min(declared, MaxAssetBytes)</c>,
+    /// so a real fetch — and thus THIS cache's true worst case — stays exactly the 256 KiB/16 MiB
+    /// figure above, UNCHANGED, for every kind including avatar. The new worst case is: no new worst
+    /// case. (A known, narrower consequence this task does not close: a declared avatar/persona-face
+    /// asset between 256 KiB and 512 KiB validates at index time but still withholds as
+    /// <see cref="CatalogAssetFetchResult.Oversize"/> the moment it is actually fetched — raising
+    /// <see cref="MaxAssetBytes"/>'s own runtime fetch cap for those two kinds is a follow-up, not
+    /// this comment's claim.)
+    /// </para>
     /// </summary>
     const int MaxCachedAssets = 64;
 
@@ -582,8 +597,11 @@ public sealed class CatalogProxyService(
         switch (outcome)
         {
             case CatalogFetchOutcome.Ok ok:
-                if (CatalogIndexValidator.TryValidate(ok.Bytes, directory, out var entries, out var reason))
+                if (CatalogIndexValidator.TryValidate(ok.Bytes, directory, out var entries, out var notices, out var reason))
+                {
+                    LogValidationNotices(notices);
                     return entries;
+                }
 
                 logger.LogWarning("Persona catalog index rejected: {Reason}", LogSafeText.Sanitize(reason));
                 return null;
@@ -601,6 +619,36 @@ public sealed class CatalogProxyService(
                 // never actually run; see GetEntryAsync's own discard arm for why a closed
                 // hierarchy still needs one (Roslyn doesn't treat it as provably exhaustive).
                 throw new UnreachableException($"Unhandled {nameof(CatalogFetchOutcome)} case.");
+        }
+    }
+
+    /// <summary>
+    /// Logs each non-fatal <see cref="CatalogValidationNotice"/> <see cref="CatalogIndexValidator.TryValidate"/>
+    /// surfaced (round-1 review findings 1/3, PLAN T292) — that class stays log-free by design (its
+    /// own class remarks), so this is the one place either notice kind becomes the WARN line SPEC
+    /// F90.3's own per-entry withheld shape already established (mirrors
+    /// <see cref="WithheldHashMismatch"/>/<see cref="WithheldOversize"/>'s own <c>"slug={Slug} ..."</c>
+    /// shape).
+    /// </summary>
+    void LogValidationNotices(IReadOnlyList<CatalogValidationNotice> notices)
+    {
+        foreach (var notice in notices)
+        {
+            switch (notice.Kind)
+            {
+                case CatalogValidationNoticeKind.EntryWithheld:
+                    logger.LogWarning("Persona catalog entry withheld: slug={Slug} reason={Reason}",
+                        LogSafeText.Sanitize(notice.Slug), LogSafeText.Sanitize(notice.Reason));
+                    break;
+
+                case CatalogValidationNoticeKind.FieldDegraded:
+                    logger.LogWarning("Persona catalog entry degraded: slug={Slug} reason={Reason}",
+                        LogSafeText.Sanitize(notice.Slug), LogSafeText.Sanitize(notice.Reason));
+                    break;
+
+                default:
+                    throw new UnreachableException($"Unhandled {nameof(CatalogValidationNoticeKind)} value: {notice.Kind}.");
+            }
         }
     }
 

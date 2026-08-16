@@ -22,12 +22,19 @@ namespace GenWave.Host.Catalog;
 /// <see cref="BestFor"/>'s "absent means empty" posture, since a swatch set has no meaningful empty
 /// value: a caller either has five colours to paint chips with, or it has nothing to show at all.
 ///
-/// <see cref="Assets"/> (SPEC F104.1, T193) follows <see cref="BestFor"/>'s "absent means empty"
-/// posture, not <see cref="Preview"/>'s "genuinely optional" one: empty (never null) for every
-/// persona/theme entry — those kinds have no assets concept at all, not merely an omitted one — and
-/// non-empty for a <see cref="CatalogEntryKind.Font"/> entry, which <see cref="CatalogIndexValidator"/>
-/// never constructs with zero (a pack IS its files; a font entry whose declared assets are missing
-/// or malformed is skipped outright rather than admitted with an empty list).
+/// <see cref="Assets"/> (SPEC F104.1, F128.1/.2, T193/T292) follows <see cref="BestFor"/>'s "absent
+/// means empty" posture, not <see cref="Preview"/>'s "genuinely optional" one: empty (never null) for
+/// every theme/show/icon entry — those kinds have no assets concept at all, not merely an omitted
+/// one — and non-empty for a <see cref="CatalogEntryKind.Font"/>/<see cref="CatalogEntryKind.Avatar"/>
+/// entry, which <see cref="CatalogIndexValidator"/> never constructs with zero (a pack IS its files; a
+/// font/avatar entry whose declared assets are missing or malformed is skipped outright rather than
+/// admitted with an empty list). A <see cref="CatalogEntryKind.Persona"/> entry is the one exception
+/// to "empty means no concept at all": it MAY carry exactly one avatar asset (its own sidecar face,
+/// SPEC F128.2) — empty when no face is declared OR when its one declared sidecar is malformed (a
+/// round-1 review finding 3 degrade, WARN-logged but the entry still lists), a single element when
+/// one validates (<see cref="CatalogIndexValidator.TryValidatePersonaAvatarAsset"/>), never more than
+/// one (STORY-331 AC6: two-or-more withholds just this ONE entry, WARN-logged, never the whole index —
+/// round-1 review finding 1).
 ///
 /// <see cref="Family"/> (SPEC F104.3, STORY-281 AC1 reconciliation, T194) is the index's OWN
 /// optional shelf-card family name — <see langword="null"/> for every persona/theme entry, and for

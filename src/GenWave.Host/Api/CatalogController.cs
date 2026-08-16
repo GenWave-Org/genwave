@@ -217,10 +217,11 @@ public sealed partial class CatalogController(
         return File(bytes, AssetContentType(file));
     }
 
-    /// <summary><c>font/woff2</c> matches <c>FontEndpoints</c>' own vendored-face content type; the pack's OFL.txt (never a specimen itself, but served by the SAME asset-generic route) gets a plain-text type; anything else this pattern doesn't recognise falls back to a generic binary type rather than guessing.</summary>
+    /// <summary><c>font/woff2</c> matches <c>FontEndpoints</c>' own vendored-face content type; <c>image/png</c> (SPEC F128.1, review finding — an avatar pack item/persona sidecar face is a real PNG, not opaque bytes) matches the .woff2 arm's own precedent rather than falling back to the generic binary type; the pack's OFL.txt (never a specimen itself, but served by the SAME asset-generic route) gets a plain-text type; anything else this pattern doesn't recognise falls back to a generic binary type rather than guessing.</summary>
     static string AssetContentType(string file) => Path.GetExtension(file).ToLowerInvariant() switch
     {
         ".woff2" => "font/woff2",
+        ".png" => "image/png",
         ".txt" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     };
@@ -262,6 +263,8 @@ public sealed partial class CatalogController(
         CatalogEntryKind.Theme => "theme",
         CatalogEntryKind.Font => "font",
         CatalogEntryKind.Show => "show",
+        CatalogEntryKind.Avatar => "avatar",
+        CatalogEntryKind.Icon => "icon",
         _ => throw new UnreachableException($"Unhandled {nameof(CatalogEntryKind)} value: {kind}."),
     };
 
@@ -284,7 +287,10 @@ public sealed partial class CatalogController(
         var meta = ParseMetaFields(ok.Content.MetaJson);
         var isFont = ok.Content.Kind == CatalogEntryKind.Font;
         var isShow = ok.Content.Kind == CatalogEntryKind.Show;
+        var isAvatar = ok.Content.Kind == CatalogEntryKind.Avatar;
+        var isPersona = ok.Content.Kind == CatalogEntryKind.Persona;
         var fontManifest = isFont ? CatalogFontManifestSerializer.Deserialize(ok.Content.ManifestJson) : null;
+        var avatarManifest = isAvatar ? CatalogAvatarPackManifestSerializer.Deserialize(ok.Content.ManifestJson) : null;
         return new CatalogEntryResponse(
             ok.Content.ManifestJson,
             ok.Content.MetaJson,
@@ -302,8 +308,49 @@ public sealed partial class CatalogController(
             FontLicense: fontManifest?.License,
             FontVersion: fontManifest?.Version,
             FontSubset: fontManifest?.Subset,
-            SuggestedPersona: isShow ? ValidateSuggestedPersonaShape(meta.SuggestedPersona) : null);
+            SuggestedPersona: isShow ? ValidateSuggestedPersonaShape(meta.SuggestedPersona) : null,
+            AvatarItems: avatarManifest?.Items.Select(item => ToAvatarItemDto(item, ok.Content.Assets)).ToArray(),
+            PersonaAvatarFile: isPersona ? ResolvePersonaAvatarFile(ok.Content.Assets) : null);
     }
+
+    /// <summary>
+    /// One avatar pack item, projected onto the wire (SPEC F128.1, F128.4, PLAN T292) —
+    /// <see cref="CatalogAvatarPackItem.SuggestedPersona"/> gets the SAME shape check
+    /// <see cref="ValidateSuggestedPersonaShape"/> already applies to a show entry's own suggestion
+    /// (a real catalog slug, ≤64 chars): the field arrives off the SAME untrusted, remote manifest
+    /// content every other field on this DTO does, so a malformed value degrades to
+    /// <see langword="null"/> rather than reaching the wire (and, eventually, a second catalog fetch)
+    /// unchecked. <see cref="ResolveDeclaredAssetFile"/> applies the SAME "never trust a
+    /// manifest-only filename" rule to <see cref="CatalogAvatarPackItem.File"/> (review finding,
+    /// PLAN T292 — mirrors <see cref="ResolveSpecimenFile"/>'s own cross-reference for a font pack's
+    /// upright face): a hostile or simply out-of-sync <c>.avatar.json</c> manifest can name a file
+    /// the index's own <c>assets[]</c> never declared, and this projection must not repeat that
+    /// unverified name back onto the wire (and, eventually, into an unresolvable
+    /// <c>GET /api/catalog/entries/{slug}/assets/{file}</c> call).
+    /// </summary>
+    static CatalogAvatarItemDto ToAvatarItemDto(CatalogAvatarPackItem item, IReadOnlyList<CatalogAssetRef> assets) =>
+        new(item.Name, ResolveDeclaredAssetFile(item.File, assets), ValidateSuggestedPersonaShape(item.SuggestedPersona));
+
+    /// <summary>
+    /// Resolves <paramref name="file"/> to itself when — and only when — <paramref name="assets"/>
+    /// (this entry's own hash-verified, index-declared asset list) actually carries a file by that
+    /// bare name; <see langword="null"/> otherwise (review finding, PLAN T292 — see
+    /// <see cref="ToAvatarItemDto"/>'s own remarks). The SAME cross-reference
+    /// <see cref="ResolveSpecimenFile"/> already applies to a font pack's own upright face.
+    /// </summary>
+    static string? ResolveDeclaredAssetFile(string file, IReadOnlyList<CatalogAssetRef> assets) =>
+        assets.Any(a => Path.GetFileName(a.Path) == file) ? file : null;
+
+    /// <summary>
+    /// Resolves a PERSONA entry's own optional sidecar face to its bare filename (SPEC F128.2, PLAN
+    /// T292) — <paramref name="assets"/> is already index-validated (<c>CatalogIndexValidator.TryValidatePersonaAvatarAsset</c>)
+    /// to hold AT MOST one element for this kind, so a single lookup (never a cross-reference against
+    /// a manifest, unlike <see cref="ResolveSpecimenFile"/>'s own font-kind job — a persona's sidecar
+    /// asset names itself, <c>&lt;slug&gt;.avatar.png</c>, with no separate manifest declaration to
+    /// match against) is the whole job. <see langword="null"/> when this persona declares no face.
+    /// </summary>
+    static string? ResolvePersonaAvatarFile(IReadOnlyList<CatalogAssetRef> assets) =>
+        assets.Count == 1 ? Path.GetFileName(assets[0].Path) : null;
 
     /// <summary>
     /// A show entry's OPTIONAL <c>suggestedPersona</c> meta field (SPEC F118.3, PLAN T254) — read

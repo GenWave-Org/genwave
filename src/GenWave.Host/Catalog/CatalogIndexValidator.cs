@@ -10,9 +10,11 @@ using GenWave.Host.Theming;
 /// <summary>
 /// Pure, I/O-free validation of a fetched index.json payload against SPEC F90.2's strict shape
 /// rules — no HTTP, no caching, no logging. <see cref="CatalogProxyService"/> is the only caller,
-/// and owns turning a rejection into the one WARN log line F90.2 asks for; this class only ever
-/// answers "is this shape trustworthy", never "should I serve/cache it" (single responsibility,
-/// and independently testable without a fake HTTP handler in play).
+/// and owns turning a whole-index rejection into the one WARN log line F90.2 asks for, PLUS
+/// (round-1 review findings 1/3, PLAN T292) turning each returned <see cref="CatalogValidationNotice"/>
+/// into its own WARN line; this class only ever answers "is this shape trustworthy, and what
+/// non-fatal issues did I notice along the way", never "should I serve/cache it, or log about it"
+/// (single responsibility, and independently testable without a fake HTTP handler in play).
 ///
 /// <para>
 /// THE `kind` SEAM (SPEC F103.1, widened to <c>"font"</c> by F104.1, <c>"show"</c> by F118.1): each
@@ -32,6 +34,25 @@ using GenWave.Host.Theming;
 /// </para>
 ///
 /// <para>
+/// WIDENED TO <c>"avatar"</c> AND <c>"icon"</c> (SPEC F128.1, F130.6, PLAN T292): an avatar pack is
+/// the SECOND assets-carrying kind — one PNG per pack item riding <c>assets[]</c>, the exact same
+/// all-or-nothing "a pack IS its files" posture <see cref="CatalogEntryKind.Font"/> already has (see
+/// <see cref="TryValidateAssets"/>). An icon pack carries no binary assets at all — the same minimal
+/// <c>{manifest, meta}</c> shape a show entry has. SEPARATELY (SPEC F128.2), a PERSONA entry may now
+/// ALSO carry <c>assets[]</c> — at most ONE <c>&lt;slug&gt;.avatar.png</c>, the "this DJ ships with
+/// this face" sidecar — a GENUINELY OPTIONAL field with its OWN three-rung ladder (round-1 review
+/// findings 1/3, STORY-331 AC3/AC6), deliberately unlike a pack's own all-or-nothing assets: 0 or 1
+/// well-formed asset validates normally (absent/empty both mean "no face"); a SINGLE malformed asset
+/// (bad path/sha256/bytes/filename, or a non-array <c>assets</c> value) DEGRADES to no face with a
+/// WARN — the entry still lists (SPEC F128.9's own "absent ⇒ a neutral placeholder" posture, mirrored
+/// here rather than losing the whole DJ over one broken sidecar); TWO OR MORE declared assets — a
+/// genuine cardinality violation, never incidental JSON noise — WITHHOLDS just that one entry with a
+/// WARN naming the one-face rule, while the REST OF THE SHELF still lists (STORY-331 AC6's own words:
+/// "that ENTRY is rejected", never the whole index — see <see cref="TryValidatePersonaAvatarAsset"/>'s
+/// own remarks for the exact ladder).
+/// </para>
+///
+/// <para>
 /// THE SSRF BOUNDARY THIS CLASS ENFORCES (see <see cref="CatalogProxyService"/>'s own remarks for
 /// the full ruling): the operator-controlled index URL is trusted, but REMOTE content — the index
 /// body itself — never chooses a fetch target. Every entry path is checked against the entry's own
@@ -42,7 +63,9 @@ using GenWave.Host.Theming;
 /// the second-to-last) equals the entry's own declared slug, and then resolved ONLY against
 /// the index URL's own directory, with a second, independent "still starts with that directory"
 /// check on the resolved absolute URI (<see cref="TryResolveWithinDirectory"/>) — belt and braces,
-/// SPEC F90.2. A single bad entry rejects the WHOLE index, never just that one entry.
+/// SPEC F90.2. A single bad MANIFEST/META path rejects the WHOLE index, never just that one entry —
+/// the one exception is narrower still, and lives entirely in the WIDENED TO paragraph above: a
+/// persona entry's own two-or-more-avatar-assets shape withholds only that entry.
 /// </para>
 /// </summary>
 internal static partial class CatalogIndexValidator
@@ -69,42 +92,64 @@ internal static partial class CatalogIndexValidator
     // the new one is what it serves after the move). When the folder IS present it must name the
     // entry's OWN kind — a persona manifest under entries/shows/ is a lie about what the file is,
     // not an alternative layout, and fails the persona pattern outright. The folder set is CLOSED
-    // (the four kinds this app recognises), mirroring TryResolveKind: an unrecognised-kind entry is
-    // already skipped before any path pattern is consulted, so an unrecognised kind FOLDER can only
-    // ever appear on a known-kind entry — where it is exactly the mismatch case above.
+    // (the six kinds this app recognises, widened from four by F128.1/F130.6/T292), mirroring
+    // TryResolveKind: an unrecognised-kind entry is already skipped before any path pattern is
+    // consulted, so an unrecognised kind FOLDER can only ever appear on a known-kind entry — where it
+    // is exactly the mismatch case above.
     const string PersonaFolderText = "(?:personas/)?";
     const string ThemeFolderText = "(?:themes/)?";
     const string FontFolderText = "(?:fonts/)?";
     const string ShowFolderText = "(?:shows/)?";
-    const string AnyKindFolderText = "(?:(?:personas|themes|fonts|shows)/)?";
+    const string AvatarFolderText = "(?:avatars/)?";
+    const string IconFolderText = "(?:icons/)?";
+    const string AnyKindFolderText = "(?:(?:personas|themes|fonts|shows|avatars|icons)/)?";
 
-    // entries/[<kind-plural>/]<slug>/<name>.persona.json (and .theme/.font/.show) — the per-kind
-    // manifest shape (SPEC F103.2, F104.1, F118.1): the filename segment is the SAME shape as the
-    // slug segment (SPEC F90.2/F89.2: schemas/index.schema.json's card/meta path patterns use this
-    // one shape for both segments, not the looser "any run of [a-z0-9-]" a prior version allowed
-    // here, which would have tolerated a leading/trailing/doubled hyphen the real schema rejects).
-    // The meta pattern alone takes the ANY-kind folder alternation — a meta filename carries no kind
-    // of its own — with the manifest-directory equality check in TryValidateEntry pinning it to the
-    // one folder its entry actually lives in.
+    // entries/[<kind-plural>/]<slug>/<name>.persona.json (and .theme/.font/.show/.avatar/.icon) — the
+    // per-kind manifest shape (SPEC F103.2, F104.1, F118.1, F128.1, F130.6): the filename segment is
+    // the SAME shape as the slug segment (SPEC F90.2/F89.2: schemas/index.schema.json's card/meta
+    // path patterns use this one shape for both segments, not the looser "any run of [a-z0-9-]" a
+    // prior version allowed here, which would have tolerated a leading/trailing/doubled hyphen the
+    // real schema rejects). The meta pattern alone takes the ANY-kind folder alternation — a meta
+    // filename carries no kind of its own — with the manifest-directory equality check in
+    // TryValidateEntry pinning it to the one folder its entry actually lives in.
     const string PersonaManifestPathText = @"\Aentries/" + PersonaFolderText + SlugSegment + "/" + SlugSegment + @"\.persona\.json\z";
     const string ThemeManifestPathText = @"\Aentries/" + ThemeFolderText + SlugSegment + "/" + SlugSegment + @"\.theme\.json\z";
     const string FontManifestPathText = @"\Aentries/" + FontFolderText + SlugSegment + "/" + SlugSegment + @"\.font\.json\z";
     const string ShowManifestPathText = @"\Aentries/" + ShowFolderText + SlugSegment + "/" + SlugSegment + @"\.show\.json\z";
+    const string AvatarManifestPathText = @"\Aentries/" + AvatarFolderText + SlugSegment + "/" + SlugSegment + @"\.avatar\.json\z";
+    const string IconManifestPathText = @"\Aentries/" + IconFolderText + SlugSegment + "/" + SlugSegment + @"\.icon\.json\z";
     const string MetaPathText = @"\Aentries/" + AnyKindFolderText + SlugSegment + "/" + SlugSegment + @"\.meta\.json\z";
 
-    // entries/<slug>/<filename> — a font pack's binary asset (SPEC F104.1): 1-2 latin-subsetted
-    // woff2 faces and the pack's OFL licence text, sitting alongside (never inside) its
-    // <slug>.font.json manifest. UNLIKE the manifest/meta filename segment above (which must equal
-    // the slug itself), an asset's filename is the pack's OWN file name (e.g.
-    // "space-grotesk-variable-latin.woff2", "OFL.txt") — so this pattern constrains character set
-    // and extension only, not the slug shape. It still gives the SAME SSRF-shaped guarantee (no
-    // absolute URL, no scheme, no leading slash, no ".." traversal): no '/' appears anywhere in the
+    // entries/<slug>/<filename> — a pack's binary asset (SPEC F104.1, F128.1): a font pack's 1-2
+    // latin-subsetted woff2 faces and its OFL licence text, or an avatar pack's PNG items, sitting
+    // alongside (never inside) its own manifest. UNLIKE the manifest/meta filename segment above
+    // (which must equal the slug itself), an asset's filename is the pack's OWN file name (e.g.
+    // "space-grotesk-variable-latin.woff2", "OFL.txt", "warm-grin.png") — so this pattern constrains
+    // character set and extension only, not the slug shape. It still gives the SAME SSRF-shaped
+    // guarantee (no absolute URL, no scheme, no leading slash, no ".." traversal): no '/' appears anywhere in the
     // character class, so a value can never introduce a second path segment to traverse with, and
-    // the leading-character class rules out a value starting with '.'. Extensions are the closed
-    // set F104.1 actually ships — woff2 (the subsetted faces) and txt (the licence file) — anything
-    // else is a shape this app does not expect a font pack to carry.
-    const string AssetFileNameText = @"[A-Za-z0-9][A-Za-z0-9._-]*\.(?:woff2|txt)";
-    const string AssetPathText = @"\Aentries/" + FontFolderText + SlugSegment + "/" + AssetFileNameText + @"\z";
+    // the leading-character class rules out a value starting with '.'. Extension sets are SPLIT PER
+    // KIND (review finding, PLAN T292 — a single shared set let a font pack declare a .png item and
+    // an avatar pack declare a .woff2 one, neither of which either real pack kind ever ships): a
+    // font pack's own woff2 faces + OFL licence text (F104.1), an avatar pack's own PNG items only
+    // (F128.1) — never a format the other kind doesn't actually ship.
+    const string FontAssetFileNameText = @"[A-Za-z0-9][A-Za-z0-9._-]*\.(?:woff2|txt)";
+    const string AvatarAssetFileNameText = @"[A-Za-z0-9][A-Za-z0-9._-]*\.png";
+    const string FontAssetPathText = @"\Aentries/" + FontFolderText + SlugSegment + "/" + FontAssetFileNameText + @"\z";
+    const string AvatarAssetPathText = @"\Aentries/" + AvatarFolderText + SlugSegment + "/" + AvatarAssetFileNameText + @"\z";
+
+    // entries/[personas/]<slug>/<slug>.avatar.png — a PERSONA entry's OWN optional avatar sidecar
+    // (SPEC F128.2), UNLIKE a pack's own free-named asset above: the filename segment MUST equal the
+    // directory's own slug segment — enforced by the pattern ITSELF via a named backreference
+    // (review finding, PLAN T292: a prior version used two independent, unrelated SlugSegment
+    // occurrences here, which admitted ANY slug-shaped filename sitting in the entry's own directory,
+    // e.g. entries/valid-dj/some-other-dj.avatar.png — not just valid-dj's own face — despite the
+    // comment already claiming the binding this pattern alone did not perform). Combined with
+    // TryValidateFileRef's own directory-segment-equals-declared-slug check, this transitively pins
+    // the filename to the ENTRY's declared slug too, so this DJ's face can never be confused for
+    // another entry's. See TryValidatePersonaAvatarAsset's own remarks for the at-most-one
+    // cardinality rule this pattern alone does not express.
+    const string PersonaAvatarAssetPathText = @"\Aentries/" + PersonaFolderText + @"(?<avatarSlug>" + SlugSegment + @")/\k<avatarSlug>\.avatar\.png\z";
 
     [GeneratedRegex(@"\A" + SlugSegment + @"\z")]
     private static partial Regex SlugPattern();
@@ -144,23 +189,59 @@ internal static partial class CatalogIndexValidator
     [GeneratedRegex(ShowManifestPathText)]
     private static partial Regex ShowManifestPathPattern();
 
+    [GeneratedRegex(AvatarManifestPathText)]
+    private static partial Regex AvatarManifestPathPattern();
+
+    [GeneratedRegex(IconManifestPathText)]
+    private static partial Regex IconManifestPathPattern();
+
     [GeneratedRegex(MetaPathText)]
     private static partial Regex MetaPathPattern();
 
-    [GeneratedRegex(AssetPathText)]
-    private static partial Regex AssetPathPattern();
+    [GeneratedRegex(FontAssetPathText)]
+    private static partial Regex FontAssetPathPattern();
+
+    [GeneratedRegex(AvatarAssetPathText)]
+    private static partial Regex AvatarAssetPathPattern();
+
+    [GeneratedRegex(PersonaAvatarAssetPathText)]
+    private static partial Regex PersonaAvatarAssetPathPattern();
 
     /// <summary>
-    /// Parses and strictly validates a raw index.json payload. On success, every returned
-    /// <see cref="CatalogEntrySummary"/> has already passed kind/slug/audience/sha256-shape/path
-    /// validation AND the belt-and-braces directory-prefix check — an entry naming an unrecognised
-    /// <c>kind</c> is simply absent from the result (F103.1, forward-compat), never a rejection
-    /// reason. On failure, the WHOLE index is rejected — <paramref name="rejectionReason"/> names
-    /// the first offending value (a malformed entry path names that exact path, per F90.2).
+    /// Back-compat overload for every caller that has no use for the round-1 (PLAN T292)
+    /// <see cref="CatalogValidationNotice"/> channel — discards it. <see cref="CatalogProxyService"/>
+    /// is the one caller that DOES need it, to log F90.3's own "withholds-that-entry" WARN shape for
+    /// each one (see the 5-out overload's own remarks); every other caller in this codebase's test
+    /// suite (driving this seam directly) never had a reason to see them before this widening and
+    /// still doesn't.
     /// </summary>
     public static bool TryValidate(
         byte[] json, Uri directory,
         [NotNullWhen(true)] out IReadOnlyList<CatalogEntrySummary>? entries,
+        [NotNullWhen(false)] out string? rejectionReason) =>
+        TryValidate(json, directory, out entries, out _, out rejectionReason);
+
+    /// <summary>
+    /// Parses and strictly validates a raw index.json payload. On success, every returned
+    /// <see cref="CatalogEntrySummary"/> has already passed kind/slug/audience/sha256-shape/path
+    /// validation AND the belt-and-braces directory-prefix check. TWO different reasons an entry can
+    /// be missing from the result, neither one a rejection reason: an entry naming an unrecognised
+    /// <c>kind</c> is simply absent (F103.1, forward-compat — no <paramref name="notices"/> entry, this
+    /// is the ordinary, expected case); a persona entry that failed its own one-face rule (SPEC
+    /// F128.2, STORY-331 AC6, round-1 review finding 1) is WITHHELD and absent too, but DOES add a
+    /// <paramref name="notices"/> entry naming the slug and reason — this class stays log-free by
+    /// design (its own class remarks), so <paramref name="notices"/> is how that WARN-worthy fact
+    /// ever reaches a caller. A malformed persona sidecar that only DEGRADES (round-1 review finding
+    /// 3) also adds a <paramref name="notices"/> entry, even though its entry is NOT missing from the
+    /// result — see <see cref="TryValidatePersonaAvatarAsset"/>'s own remarks for the full ladder. On
+    /// failure, the WHOLE index is rejected — <paramref name="rejectionReason"/> names the first
+    /// offending value (a malformed entry path names that exact path, per F90.2), and
+    /// <paramref name="notices"/> is discarded (empty).
+    /// </summary>
+    public static bool TryValidate(
+        byte[] json, Uri directory,
+        [NotNullWhen(true)] out IReadOnlyList<CatalogEntrySummary>? entries,
+        out IReadOnlyList<CatalogValidationNotice> notices,
         [NotNullWhen(false)] out string? rejectionReason)
     {
         CatalogIndexJson? document;
@@ -171,6 +252,7 @@ internal static partial class CatalogIndexValidator
         catch (JsonException ex)
         {
             entries = null;
+            notices = [];
             rejectionReason = $"malformed JSON ({ex.Message})";
             return false;
         }
@@ -178,29 +260,43 @@ internal static partial class CatalogIndexValidator
         if (document?.Entries is not { } rawEntries)
         {
             entries = null;
+            notices = [];
             rejectionReason = "missing an 'entries' array";
             return false;
         }
 
         var validated = new List<CatalogEntrySummary>(rawEntries.Count);
+        var collectedNotices = new List<CatalogValidationNotice>();
         foreach (var raw in rawEntries)
         {
-            switch (TryValidateEntry(raw, directory, out var summary, out var entryRejectionReason))
+            switch (TryValidateEntry(raw, directory, out var summary, out var entryNotice, out var entryRejectionReason))
             {
                 case EntryValidationOutcome.Valid:
                     validated.Add(summary
                         ?? throw new UnreachableException($"{nameof(EntryValidationOutcome.Valid)} without a summary."));
+                    if (entryNotice is not null)
+                        collectedNotices.Add(entryNotice);
                     break;
 
                 case EntryValidationOutcome.Skip:
-                    // F103.1/AC6: an entry naming a kind this app does not recognise is dropped —
-                    // forward-compat for a future font/icon/avatar kind — the rest of the index
-                    // still loads.
+                    // F103.1/AC5: an entry naming a kind this app does not recognise is dropped —
+                    // forward-compat for a future kind — the rest of the index still loads. No
+                    // notice: this is the ordinary, expected case, never a WARN-worthy business-rule
+                    // violation (unlike EntryValidationOutcome.Withheld below).
+                    break;
+
+                case EntryValidationOutcome.Withheld:
+                    // STORY-331 AC6 (round-1 review finding 1): this ENTRY alone is excluded — the
+                    // rest of the index still loads. The reason travels via entryNotice, never
+                    // rejectionReason, which stays reserved for a whole-index-fatal shape failure.
+                    collectedNotices.Add(entryNotice
+                        ?? throw new UnreachableException($"{nameof(EntryValidationOutcome.Withheld)} without a notice."));
                     break;
 
                 case EntryValidationOutcome.Reject:
                 default:
                     entries = null;
+                    notices = [];
                     rejectionReason = entryRejectionReason
                         ?? throw new UnreachableException($"{nameof(EntryValidationOutcome.Reject)} without a reason.");
                     return false;
@@ -208,6 +304,7 @@ internal static partial class CatalogIndexValidator
         }
 
         entries = validated;
+        notices = collectedNotices;
         rejectionReason = null;
         return true;
     }
@@ -228,25 +325,31 @@ internal static partial class CatalogIndexValidator
         return resolved.AbsoluteUri.StartsWith(directory.AbsoluteUri, StringComparison.Ordinal);
     }
 
-    /// <summary>One raw entry's fate: kept, silently dropped (forward-compat), or fatal to the whole index.</summary>
+    /// <summary>One raw entry's fate: kept (optionally with a non-fatal <see cref="CatalogValidationNotice"/>
+    /// riding alongside it, e.g. a degraded sidecar face), silently dropped (forward-compat, an
+    /// unrecognised kind), withheld with a <see cref="CatalogValidationNotice"/> WARN (a real
+    /// per-entry business-rule violation — STORY-331 AC6 — the rest of the index still loads), or
+    /// fatal to the whole index.</summary>
     enum EntryValidationOutcome
     {
         Valid,
         Skip,
+        Withheld,
         Reject,
     }
 
     static EntryValidationOutcome TryValidateEntry(
         CatalogIndexEntryJson raw, Uri directory,
-        out CatalogEntrySummary? summary, out string? reason)
+        out CatalogEntrySummary? summary, out CatalogValidationNotice? notice, out string? reason)
     {
         summary = null;
+        notice = null;
         reason = null;
 
         // Kind is resolved FIRST (F103.1): an entry naming a kind this app doesn't recognise might
-        // be shaped in a way no persona/theme/font rule below can meaningfully validate (a future
-        // icon/avatar) — it is skipped outright, before slug/audience/manifest are even looked at,
-        // and never counts toward rejecting the rest of the index.
+        // be shaped in a way no persona/theme/font/show/avatar/icon rule below can meaningfully
+        // validate (a future kind) — it is skipped outright, before slug/audience/manifest are even
+        // looked at, and never counts toward rejecting the rest of the index.
         if (!TryResolveKind(raw.Kind, out var kind))
             return EntryValidationOutcome.Skip;
 
@@ -302,22 +405,58 @@ internal static partial class CatalogIndexValidator
             return EntryValidationOutcome.Reject;
         }
 
-        // F104.1: only a font entry carries assets[] at all — persona/theme entries always resolve
-        // to the empty list (CatalogEntrySummary.Assets's own "absent means empty" remarks). A font
-        // entry whose assets[] is missing, empty, or contains anything malformed is skipped OUTRIGHT
-        // (never rejects the whole index) — see TryValidateAssets's own remarks for why this is a
-        // whole-entry skip rather than a field-level degrade like Preview.
+        // F104.1/F128.1/F128.2: font AND avatar entries carry assets[] with the SAME all-or-nothing
+        // "a pack IS its files" posture (TryValidateAssets); a persona entry's own assets[] is
+        // GENUINELY OPTIONAL (at most one sidecar face, TryValidatePersonaAvatarAsset); theme/show/
+        // icon entries always resolve to the empty list (CatalogEntrySummary.Assets's own "absent
+        // means empty" remarks) — an icon manifest carries its whole vector document inline, F130.1,
+        // never a binary asset.
         IReadOnlyList<CatalogAssetRef> assets;
-        if (kind == CatalogEntryKind.Font)
+        switch (kind)
         {
-            if (!TryValidateAssets(raw.Assets, slug, entryDirectory, directory, out var fontAssets))
-                return EntryValidationOutcome.Skip;
+            case CatalogEntryKind.Font:
+            case CatalogEntryKind.Avatar:
+                // A font/avatar entry whose assets[] is missing, empty, or contains anything
+                // malformed is skipped OUTRIGHT (never rejects the whole index) — see
+                // TryValidateAssets's own remarks for why this is a whole-entry skip rather than a
+                // field-level degrade like Preview.
+                if (!TryValidateAssets(raw.Assets, slug, entryDirectory, directory, kind, out var packAssets))
+                    return EntryValidationOutcome.Skip;
 
-            assets = fontAssets;
-        }
-        else
-        {
-            assets = [];
+                assets = packAssets;
+                break;
+
+            case CatalogEntryKind.Persona:
+                // The three-rung ladder (round-1 review findings 1/3) — see
+                // TryValidatePersonaAvatarAsset's own remarks for why each rung lands here.
+                switch (TryValidatePersonaAvatarAsset(raw.Assets, slug, entryDirectory, directory, out var personaAssets, out var personaNotice))
+                {
+                    case PersonaAvatarOutcome.TooMany:
+                        // STORY-331 AC6: this ENTRY is withheld — never the whole index.
+                        notice = personaNotice
+                            ?? throw new UnreachableException($"{nameof(PersonaAvatarOutcome.TooMany)} without a notice.");
+                        return EntryValidationOutcome.Withheld;
+
+                    case PersonaAvatarOutcome.Degraded:
+                        // A malformed sidecar degrades to no face; the entry itself still lists.
+                        notice = personaNotice
+                            ?? throw new UnreachableException($"{nameof(PersonaAvatarOutcome.Degraded)} without a notice.");
+                        assets = [];
+                        break;
+
+                    case PersonaAvatarOutcome.Ok:
+                        assets = personaAssets;
+                        break;
+
+                    default:
+                        throw new UnreachableException($"Unhandled {nameof(PersonaAvatarOutcome)} value.");
+                }
+
+                break;
+
+            default:
+                assets = [];
+                break;
         }
 
         // STORY-281 AC1 reconciliation (T194 review finding): only meaningful on a font entry,
@@ -451,22 +590,22 @@ internal static partial class CatalogIndexValidator
     }
 
     /// <summary>
-    /// Validates a font entry's whole <c>assets[]</c> array (SPEC F104.1, T193) — REJECT-VS-DEGRADE
-    /// POSTURE: unlike <see cref="TryParsePreview"/>'s field-level degrade (a bad <c>preview</c>
-    /// nulls just that one decorative field, keeping the rest of the entry), a malformed or absent
-    /// assets list here fails the WHOLE entry, which <see cref="TryValidateEntry"/> then SKIPS
-    /// (never rejects the whole index — that stays reserved for slug/audience/manifest/meta shape
-    /// failures). The difference: a pack IS its files — an entry admitted with an empty or
-    /// partly-broken assets list would be a shelf card advertising a font nothing can actually
-    /// serve, a strictly worse outcome than the entry simply not existing yet. So this is
-    /// ALL-OR-NOTHING: every declared asset must individually validate (<see cref="TryValidateAssetRef"/>)
-    /// and at least one must be present, or the caller treats the entire font entry as absent. A
-    /// path declared TWICE (F1 review finding, T194) is the SAME all-or-nothing failure — a pack
-    /// declaring the same file twice is malformed by definition (which of the two would even be the
-    /// real one?) — never merely de-duplicated into a shorter list, and never left for
-    /// <see cref="CatalogProxyService"/>'s own cache-prune bookkeeping to trip over downstream (that
-    /// bookkeeping is hardened separately, defense-in-depth, but the front door is where a malformed
-    /// pack belongs being turned away).
+    /// Validates a font/avatar entry's whole <c>assets[]</c> array (SPEC F104.1, F128.1, T193/T292) —
+    /// REJECT-VS-DEGRADE POSTURE: unlike <see cref="TryParsePreview"/>'s field-level degrade (a bad
+    /// <c>preview</c> nulls just that one decorative field, keeping the rest of the entry), a
+    /// malformed or absent assets list here fails the WHOLE entry, which <see cref="TryValidateEntry"/>
+    /// then SKIPS (never rejects the whole index — that stays reserved for slug/audience/manifest/meta
+    /// shape failures). The difference: a pack IS its files — an entry admitted with an empty or
+    /// partly-broken assets list would be a shelf card advertising a font/avatar pack nothing can
+    /// actually serve, a strictly worse outcome than the entry simply not existing yet. So this is
+    /// ALL-OR-NOTHING: every declared asset must individually validate (<see cref="TryValidateAssetRef"/>,
+    /// against <paramref name="kind"/>'s own asset path pattern) and at least one must be present, or
+    /// the caller treats the entire entry as absent. A path declared TWICE (F1 review finding, T194)
+    /// is the SAME all-or-nothing failure — a pack declaring the same file twice is malformed by
+    /// definition (which of the two would even be the real one?) — never merely de-duplicated into a
+    /// shorter list, and never left for <see cref="CatalogProxyService"/>'s own cache-prune bookkeeping
+    /// to trip over downstream (that bookkeeping is hardened separately, defense-in-depth, but the
+    /// front door is where a malformed pack belongs being turned away).
     ///
     /// <para>
     /// <paramref name="raw"/> is a raw <see cref="JsonElement"/>, not the typed
@@ -479,9 +618,16 @@ internal static partial class CatalogIndexValidator
     /// element's own shape is then re-validated defensively, element by element, inside
     /// <see cref="TryValidateAssetRef"/>.
     /// </para>
+    ///
+    /// <para>
+    /// <paramref name="kind"/> (PLAN T292 widening) is always <see cref="CatalogEntryKind.Font"/> or
+    /// <see cref="CatalogEntryKind.Avatar"/> — the two pack-shaped kinds this method's own all-or-
+    /// nothing posture applies to; a persona entry's own, genuinely-optional sidecar asset is
+    /// <see cref="TryValidatePersonaAvatarAsset"/>'s separate job.
+    /// </para>
     /// </summary>
     static bool TryValidateAssets(
-        JsonElement? raw, string slug, string entryDirectory, Uri directory,
+        JsonElement? raw, string slug, string entryDirectory, Uri directory, CatalogEntryKind kind,
         [NotNullWhen(true)] out IReadOnlyList<CatalogAssetRef>? assets)
     {
         if (raw is not { ValueKind: JsonValueKind.Array } array)
@@ -494,7 +640,7 @@ internal static partial class CatalogIndexValidator
         var seenPaths = new HashSet<string>(StringComparer.Ordinal);
         foreach (var element in array.EnumerateArray())
         {
-            if (!TryValidateAssetRef(element, slug, entryDirectory, directory, out var assetRef))
+            if (!TryValidateAssetRef(element, slug, entryDirectory, directory, AssetPathPattern(kind), AssetByteCeiling(kind), out var assetRef))
             {
                 assets = null;
                 return false;
@@ -522,26 +668,126 @@ internal static partial class CatalogIndexValidator
         return true;
     }
 
+    /// <summary>One persona entry's own optional sidecar-face check outcome (round-1 review findings
+    /// 1/3, PLAN T292) — see <see cref="TryValidatePersonaAvatarAsset"/>'s own remarks for the exact
+    /// three-rung ladder each value maps to.</summary>
+    enum PersonaAvatarOutcome
+    {
+        Ok,
+        Degraded,
+        TooMany,
+    }
+
+    /// <summary>
+    /// Validates a PERSONA entry's OWN optional avatar sidecar asset (SPEC F128.2, PLAN T292) — at
+    /// most ONE <c>&lt;slug&gt;.avatar.png</c> in <c>assets[]</c>, the "this DJ ships with this face"
+    /// shape. UNLIKE <see cref="TryValidateAssets"/>'s all-or-nothing pack posture (a pack IS its
+    /// files, at least one required), a persona's own assets are GENUINELY OPTIONAL, with their own
+    /// THREE-RUNG LADDER (round-1 review findings 1/3):
+    ///
+    /// <para>
+    /// (1) ABSENT, or present-but-EMPTY — both mean "no face declared"
+    /// (<see cref="PersonaAvatarOutcome.Ok"/>, <paramref name="assets"/> resolves to an empty list),
+    /// no different from an older index that has never heard of this field.
+    /// </para>
+    ///
+    /// <para>
+    /// (2) EXACTLY ONE declared asset that fails its OWN shape check (bad path/sha256/bytes, wrong
+    /// directory, oversize, or a filename other than THIS entry's own <c>&lt;slug&gt;.avatar.png</c>
+    /// — <see cref="PersonaAvatarAssetPathPattern"/> pins the filename to the slug via a named
+    /// backreference, unlike a pack's own free-named items), or a non-array <c>assets</c> value —
+    /// DEGRADES to no face (<see cref="PersonaAvatarOutcome.Degraded"/>): the entry still validates
+    /// and still lists, with a <paramref name="notice"/> naming the slug and reason for
+    /// <see cref="CatalogProxyService"/> to WARN on. Round-1 review finding 3: a malformed sidecar on
+    /// the entry class that matters most (a real, otherwise-fine DJ) must never cost the whole entry
+    /// its listing — the same "absent ⇒ a neutral placeholder, never a broken card" posture SPEC
+    /// F128.9 already states for a genuinely absent face, extended here to a present-but-broken one.
+    /// </para>
+    ///
+    /// <para>
+    /// (3) TWO OR MORE declared assets — a deliberate CARDINALITY VIOLATION, never incidental JSON
+    /// noise — WITHHOLDS just this one entry (<see cref="PersonaAvatarOutcome.TooMany"/>): excluded
+    /// from the index's returned list, with a <paramref name="notice"/> naming the slug and the
+    /// one-face rule for <see cref="CatalogProxyService"/> to WARN on, while the REST OF THE SHELF
+    /// still loads. STORY-331 AC6's own words: "Given a persona entry carrying two or more assets ...
+    /// Then that ENTRY is rejected with a reason naming the one-face rule" — an ENTRY-scoped outcome
+    /// (round-1 review finding 1: a prior version of this method instead rejected the WHOLE INDEX
+    /// here — a single community typo on one persona's sidecar could brick every OTHER station's
+    /// shelf on a cold process, which no SPEC/STORY text ever asked for; SPEC F90.3's own
+    /// "withholds-that-entry" WARN posture — <c>CatalogProxyService.WithheldHashMismatch</c>/
+    /// <c>WithheldOversize</c> — is the precedent this now mirrors instead).
+    /// </para>
+    /// </summary>
+    static PersonaAvatarOutcome TryValidatePersonaAvatarAsset(
+        JsonElement? raw, string slug, string entryDirectory, Uri directory,
+        out IReadOnlyList<CatalogAssetRef> assets, out CatalogValidationNotice? notice)
+    {
+        assets = [];
+        notice = null;
+
+        if (raw is not { } element)
+            return PersonaAvatarOutcome.Ok; // Absent — no face declared, the ordinary pre-F128 case.
+
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            notice = DegradedNotice(slug, "its avatar assets value is not an array");
+            return PersonaAvatarOutcome.Degraded;
+        }
+
+        var count = element.GetArrayLength();
+        if (count == 0)
+            return PersonaAvatarOutcome.Ok; // Declared-but-empty — the same "no face" outcome as absent.
+
+        if (count >= 2)
+        {
+            notice = new CatalogValidationNotice(slug, CatalogValidationNoticeKind.EntryWithheld,
+                $"entry '{slug}' carries {count} avatar assets — a persona entry may carry at most one face ({slug}.avatar.png)");
+            return PersonaAvatarOutcome.TooMany;
+        }
+
+        if (!TryValidateAssetRef(element.EnumerateArray().Single(), slug, entryDirectory, directory, PersonaAvatarAssetPathPattern(), MaxPngAssetBytes, out var assetRef))
+        {
+            notice = DegradedNotice(slug, "its one declared avatar sidecar asset is malformed (bad path/sha256/bytes, wrong directory or oversize, or a filename other than <slug>.avatar.png)");
+            return PersonaAvatarOutcome.Degraded;
+        }
+
+        assets = [assetRef];
+        return PersonaAvatarOutcome.Ok;
+    }
+
+    /// <summary>Builds the <see cref="CatalogValidationNoticeKind.FieldDegraded"/> shape both
+    /// <see cref="TryValidatePersonaAvatarAsset"/> degrade rungs share — one place the message
+    /// template lives, rather than two independently-drifting copies.</summary>
+    static CatalogValidationNotice DegradedNotice(string slug, string detail) =>
+        new(slug, CatalogValidationNoticeKind.FieldDegraded, $"entry '{slug}' {detail} — degraded to no face");
+
     /// <summary>
     /// One <c>assets[]</c> element's shape check (SPEC F104.1) — the same SSRF-shaped belt-and-braces
     /// rules <see cref="TryValidateFileRef"/> applies to a manifest/meta pointer (path shape, slug
     /// ownership, directory containment), plus a positive <see cref="CatalogAssetJson.Bytes"/> (the
     /// fetch transport's declared size cap, T194 — zero or negative names nothing a caller could
-    /// ever stream) THAT ALSO NEVER EXCEEDS <see cref="CatalogProxyService.MaxAssetBytes"/> (F2
-    /// review finding, T194): an asset declaring more bytes than the transport will EVER accept is
-    /// malformed by definition — admitting it anyway would only defer the rejection to fetch time
-    /// (withheld as <see cref="CatalogAssetFetchResult.Oversize"/>) while leaving an unbounded
-    /// declared value sitting in <see cref="CatalogEntrySummary.Assets"/> for every zero-fetch shelf
-    /// projection (<see cref="Api.CatalogController"/>'s <c>FontByteTotal</c> sum) to trust. Bounding
-    /// it HERE keeps that sum structurally bounded by construction, never merely by hoping every
-    /// summing call site remembers to guard against a hostile origin's declared size. S4 review
-    /// finding: rather than re-implementing the belt-and-braces path/slug/directory check a second
-    /// time, this calls <see cref="TryValidateFileRef"/> ITSELF — the one place that security-critical
-    /// traversal/SSRF logic lives — passing <see cref="AssetPathPattern"/> in place of a manifest/meta
-    /// pattern and discarding its WARN-worthy reason string (unlike <see cref="TryValidateFileRef"/>'s
-    /// callers, which reject the whole index and so need one, a bad asset here degrades/skips its OWN
-    /// entry silently — the same no-reason shape <see cref="TryValidateEntry"/>'s unknown-kind
-    /// <c>Skip</c> outcome already carries).
+    /// ever stream) THAT ALSO NEVER EXCEEDS <paramref name="maxBytes"/> — the caller's own PER-KIND
+    /// ceiling (review finding, PLAN T292: a prior version always compared against
+    /// <see cref="CatalogProxyService.MaxAssetBytes"/> — 256 KiB, a number FONTS.md/F104.2 derived for
+    /// a font pack's own woff2/txt world — regardless of kind, so a CI-legal, SPEC F128.1-compliant
+    /// avatar/persona-sidecar PNG between 256 KiB and 512 KiB would silently fail here and vanish its
+    /// whole pack/entry). An asset declaring more bytes than <paramref name="maxBytes"/> is malformed
+    /// by definition — admitting it anyway would only defer the rejection to fetch time (withheld as
+    /// <see cref="CatalogAssetFetchResult.Oversize"/>) while leaving an unbounded declared value
+    /// sitting in <see cref="CatalogEntrySummary.Assets"/> for every zero-fetch shelf projection
+    /// (<see cref="Api.CatalogController"/>'s <c>FontByteTotal</c> sum) to trust. Bounding it HERE
+    /// keeps that sum structurally bounded by construction, never merely by hoping every summing call
+    /// site remembers to guard against a hostile origin's declared size. S4 review finding: rather
+    /// than re-implementing the belt-and-braces path/slug/directory check a second time, this calls
+    /// <see cref="TryValidateFileRef"/> ITSELF — the one place that security-critical traversal/SSRF
+    /// logic lives — passing <paramref name="pathPattern"/> (PLAN T292: the caller's own choice of
+    /// <see cref="FontAssetPathPattern"/>/<see cref="AvatarAssetPathPattern"/>/
+    /// <see cref="PersonaAvatarAssetPathPattern"/>, never a single shared pattern — a font pack's free-
+    /// named item and a persona's slug-named sidecar face are shaped differently) in place of a
+    /// manifest/meta pattern and discarding its WARN-worthy reason string (unlike
+    /// <see cref="TryValidateFileRef"/>'s callers, which reject the whole index and so need one, a bad
+    /// asset here degrades/skips its OWN entry silently — the same no-reason shape
+    /// <see cref="TryValidateEntry"/>'s unknown-kind <c>Skip</c> outcome already carries).
     ///
     /// <para>
     /// <paramref name="element"/> is a raw <see cref="JsonElement"/>, not the typed
@@ -554,7 +800,7 @@ internal static partial class CatalogIndexValidator
     /// </para>
     /// </summary>
     static bool TryValidateAssetRef(
-        JsonElement element, string slug, string entryDirectory, Uri directory,
+        JsonElement element, string slug, string entryDirectory, Uri directory, Regex pathPattern, long maxBytes,
         [NotNullWhen(true)] out CatalogAssetRef? assetRef)
     {
         CatalogAssetJson? raw;
@@ -571,7 +817,7 @@ internal static partial class CatalogIndexValidator
             return false;
         }
 
-        if (raw is not { Bytes: { } bytes } || bytes <= 0 || bytes > CatalogProxyService.MaxAssetBytes)
+        if (raw is not { Bytes: { } bytes } || bytes <= 0 || bytes > maxBytes)
         {
             assetRef = null;
             return false;
@@ -579,7 +825,7 @@ internal static partial class CatalogIndexValidator
 
         if (!TryValidateFileRef(
                 new CatalogFileRefJson { Path = raw.Path, Sha256 = raw.Sha256 },
-                AssetPathPattern(), slug, directory, out var fileRef, out _))
+                pathPattern, slug, directory, out var fileRef, out _))
         {
             assetRef = null;
             return false;
@@ -603,7 +849,7 @@ internal static partial class CatalogIndexValidator
     /// matched a pattern whose shape guarantees at least one <c>/</c>.</summary>
     static string DirectoryOf(string path) => path[..path.LastIndexOf('/')];
 
-    /// <summary>A missing <c>kind</c> defaults to persona (back-compat, F103.1/AC2); any value other than <c>"persona"</c>/<c>"theme"</c>/<c>"font"</c> is unrecognised.</summary>
+    /// <summary>A missing <c>kind</c> defaults to persona (back-compat, F103.1/AC2); any value other than <c>"persona"</c>/<c>"theme"</c>/<c>"font"</c>/<c>"show"</c>/<c>"avatar"</c>/<c>"icon"</c> is unrecognised.</summary>
     static bool TryResolveKind(string? raw, out CatalogEntryKind kind)
     {
         switch (raw)
@@ -621,6 +867,12 @@ internal static partial class CatalogIndexValidator
             case "show":
                 kind = CatalogEntryKind.Show;
                 return true;
+            case "avatar":
+                kind = CatalogEntryKind.Avatar;
+                return true;
+            case "icon":
+                kind = CatalogEntryKind.Icon;
+                return true;
             default:
                 kind = default;
                 return false;
@@ -633,7 +885,50 @@ internal static partial class CatalogIndexValidator
         CatalogEntryKind.Theme => ThemeManifestPathPattern(),
         CatalogEntryKind.Font => FontManifestPathPattern(),
         CatalogEntryKind.Show => ShowManifestPathPattern(),
+        CatalogEntryKind.Avatar => AvatarManifestPathPattern(),
+        CatalogEntryKind.Icon => IconManifestPathPattern(),
         _ => throw new UnreachableException($"Unhandled {nameof(CatalogEntryKind)} value: {kind}."),
+    };
+
+    /// <summary>
+    /// The pack-shaped kinds' own asset path pattern (PLAN T292) — the two <see cref="CatalogEntryKind"/>
+    /// members <see cref="TryValidateAssets"/> is ever called for; a persona's own sidecar face uses
+    /// <see cref="PersonaAvatarAssetPathPattern"/> directly instead (its filename is slug-shaped, not
+    /// free-named like a pack item).
+    /// </summary>
+    static Regex AssetPathPattern(CatalogEntryKind kind) => kind switch
+    {
+        CatalogEntryKind.Font => FontAssetPathPattern(),
+        CatalogEntryKind.Avatar => AvatarAssetPathPattern(),
+        _ => throw new UnreachableException($"{kind} entries do not carry a pack-shaped assets[]."),
+    };
+
+    /// <summary>
+    /// Declared-size ceiling for a PNG-carrying asset — an avatar pack item OR a persona entry's own
+    /// sidecar face (SPEC F128.1: "≤512 KiB per item"; T291 pinned this exact value app-side; T309's
+    /// future catalog-CI gate enforces it upstream too). Review finding, PLAN T292:
+    /// <see cref="TryValidateAssetRef"/> used to check EVERY kind's declared asset bytes against
+    /// <see cref="CatalogProxyService.MaxAssetBytes"/> (256 KiB) — a number FONTS.md/F104.2 derived
+    /// for a font pack's own much smaller woff2/txt world, not F128.1's PNG one. A CI-legal, 300-512
+    /// KiB avatar face declared in index.json would silently vanish its whole pack/entry over that
+    /// borrowed ceiling; this is F128.1's OWN number, named for what it actually bounds.
+    /// </summary>
+    internal const int MaxPngAssetBytes = 512 * 1024;
+
+    /// <summary>
+    /// The pack-shaped kinds' own asset-declared-size ceiling (review finding, PLAN T292) — SPLIT PER
+    /// KIND, unlike the single shared check every kind used to get (the bug this fixes, see
+    /// <see cref="TryValidateAssetRef"/>'s own remarks): a font pack's woff2/txt items stay pinned to
+    /// <see cref="CatalogProxyService.MaxAssetBytes"/> (256 KiB, unaffected by this widening), while
+    /// an avatar pack's items — and, via <see cref="TryValidatePersonaAvatarAsset"/>'s own direct call,
+    /// a persona's own sidecar face — get <see cref="MaxPngAssetBytes"/> (512 KiB, SPEC F128.1's own
+    /// number).
+    /// </summary>
+    static long AssetByteCeiling(CatalogEntryKind kind) => kind switch
+    {
+        CatalogEntryKind.Font => CatalogProxyService.MaxAssetBytes,
+        CatalogEntryKind.Avatar => MaxPngAssetBytes,
+        _ => throw new UnreachableException($"{kind} entries do not carry a pack-shaped assets[]."),
     };
 
     static bool TryValidateFileRef(
