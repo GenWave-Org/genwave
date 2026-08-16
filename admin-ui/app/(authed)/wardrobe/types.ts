@@ -49,3 +49,31 @@ export interface InstalledEntryRow {
   importedFrom: string;
   importedAt: string;
 }
+
+/** One item on a `GET /api/avatar-packs` row (PLAN T294) — mirrors Host's
+ * `AvatarPackSummaryItemDto`: a display name and an OPTIONAL "pairs well with" catalog persona slug
+ * (SPEC F128.1), no bytes on this wire (the Avatars tab's own face grid reads bytes through the
+ * TRANSIENT proxied catalog route instead, the F104 specimen precedent — mirrors
+ * `AvatarDetailPanel`'s own pre-install face grid one directory up). `name` is UNBOUNDED free-form
+ * prose (PLAN T294 rider 2 — see `../persona-catalog/avatar-format.ts`'s own remarks); this page
+ * renders it through that shared clamp, never verbatim. */
+export interface AvatarPackSummaryItemDto {
+  name: string;
+  suggestedPersona: string | null;
+}
+
+/** One `GET /api/avatar-packs` row (SPEC F128.3, PLAN T294) — an installed avatar pack, metadata
+ * only (no item bytes on this wire). Mirrors Host's `AvatarPackSummaryDto`. `name` is the pack's own
+ * manifest `packName`, re-parsed from the stored `definition` server-side — `null` only on the
+ * (should-never-happen) chance that re-parse fails, degrading the SAME way `FontLibraryPackDto`'s
+ * own `license`/`sourceUrl`/`version`/`subset` fields do; `slug`/`items`/`importedFrom`/`importedAt`
+ * are unaffected either way, since none of them round-trips through that parse. `name`, like every
+ * item's own `name` above, is UNBOUNDED free-form prose (PLAN T294 rider 2) — never rendered
+ * verbatim, always through `../persona-catalog/avatar-format.ts`'s shared clamp. */
+export interface AvatarPackSummaryDto {
+  slug: string;
+  name: string | null;
+  items: AvatarPackSummaryItemDto[];
+  importedFrom: string;
+  importedAt: string;
+}

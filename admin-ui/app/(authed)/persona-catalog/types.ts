@@ -5,8 +5,14 @@ export type CatalogAudience = "everyone" | "mature";
 /** The F103.1 entry-kind discriminator, lowercase — see Host's `CatalogEntryKind`/
  * `CatalogController.ToWireKind`. Always present on a shelf row: the api never omits `kind`, even
  * for a legacy persona entry whose own index.json predates the field (the api resolves that
- * default server-side). Widened to `"font"` at F104.1/T193, `"show"` at F118.1/T254. */
-export type CatalogEntryKind = "persona" | "theme" | "font" | "show";
+ * default server-side). Widened to `"font"` at F104.1/T193, `"show"` at F118.1/T254, and to
+ * `"avatar"`/`"icon"` at F128/T292 (the wire has emitted both since T292; this union catches up at
+ * T294's own rider 1) — `"avatar"` gets a shelf card + detail routing NOW (this task); `"icon"`
+ * stays routed to nothing (the shelf's own exhaustive-switch `default` arms already degrade an
+ * unrecognised kind to "renders nothing" rather than misrouting it as a persona card — see
+ * `PersonaCatalogClient.renderShelfEntry`'s own remarks) until T304 gives it a tab and a card of its
+ * own to replace this "still-hidden" placeholder with. */
+export type CatalogEntryKind = "persona" | "theme" | "font" | "show" | "avatar" | "icon";
 
 /** One mode's five shelf-chip swatches (SPEC F103.4, PLAN T185) — see Host's
  * `CatalogShelfSwatchSetDto`. `"accent-2"` keeps its hyphenated wire name (the app's own
@@ -75,7 +81,15 @@ export interface CatalogIndexResponseDto {
  * only ever surfaces this value to offer against — it is never itself validated here for "is this
  * slug actually on the shelf" or "is it already hired"; that eligibility check is `PersonaCatalogClient`'s
  * own job (SPEC F118.3's "on-shelf and un-hired" gate), reading this station's already-fetched
- * index/personas state, not a further catalog fetch. */
+ * index/personas state, not a further catalog fetch.
+ * `avatarItems` (SPEC F128.1, F128.4, PLAN T292/T294) is an avatar pack entry's own faces, parsed off
+ * `card` (the pack's `.avatar.json` manifest) — `null` for every non-avatar entry, when unreachable,
+ * or when the manifest fails to parse. See `CatalogAvatarItemDto`'s own remarks.
+ * `personaAvatarFile` (SPEC F128.2, F128.7, PLAN T292/T297) is a PERSONA entry's OWN optional
+ * sidecar face — the bare filename of its one avatar asset, ready to pass straight to
+ * `GET /api/catalog/entries/{slug}/assets/{file}` the same way `fontSpecimenFile` already does for a
+ * font pack's specimen face. `null` for every non-persona entry, when unreachable, or when this
+ * persona entry declares no face — see Host's `CatalogEntryResponse.PersonaAvatarFile`. */
 export interface CatalogEntryDetailDto {
   card: string | null;
   meta: string | null;
@@ -92,6 +106,26 @@ export interface CatalogEntryDetailDto {
   fontLicense: string | null;
   fontVersion: string | null;
   fontSubset: string | null;
+  suggestedPersona: string | null;
+  avatarItems: CatalogAvatarItemDto[] | null;
+  personaAvatarFile: string | null;
+}
+
+/**
+ * One avatar pack item on the entry detail wire (SPEC F128.1, F128.4, PLAN T292/T294) — mirrors
+ * Host's `CatalogAvatarItemDto`, itself the wire projection of one hash-verified `.avatar.json`
+ * manifest item. `file` is the bare filename `GET /api/catalog/entries/{slug}/assets/{file}` already
+ * serves, or `null` when the manifest names a file the index's own hash-verified `assets[]` never
+ * actually declared — the SAME "never trust a manifest-only filename alone" posture
+ * `CatalogEntryDetailDto.fontSpecimenFile` already carries for a font pack's own upright face; a
+ * `null` file renders no image at all in the face grid (T294 rider), never an attempted fetch
+ * against an unverified name. `suggestedPersona` is an OPTIONAL "pairs well with" catalog persona
+ * slug (SPEC F128.1), shape-checked server-side the same way a show entry's own `suggestedPersona`
+ * is — an OFFER only, this detail panel never auto-applies it.
+ */
+export interface CatalogAvatarItemDto {
+  name: string;
+  file: string | null;
   suggestedPersona: string | null;
 }
 

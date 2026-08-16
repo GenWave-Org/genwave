@@ -13,9 +13,8 @@ namespace GenWave.Host.Images;
 /// returns bytes in memory or a reason; persisting a <see cref="ImageNormalizeResult.Success"/> is
 /// entirely T295/T307's write-path controllers' own job, not this seam's.
 ///
-/// Ships DI-dark at T291 (no Host call site consumes this yet, mirrors how the four T290 stores
-/// shipped) — <c>PersonaAvatarController</c> (T295) and <c>StationImageController</c> (T307) are
-/// the first consumers.
+/// Consumed by <c>AvatarPackController</c> (T293) and <c>PersonaAvatarController</c> (T295);
+/// <c>StationImageController</c> (T307) is the next consumer.
 /// </summary>
 public sealed class ImageNormalizeService(IImageProcessRunner processRunner, ILogger<ImageNormalizeService> logger)
 {
@@ -110,18 +109,51 @@ public sealed class ImageNormalizeService(IImageProcessRunner processRunner, ILo
 
         try
         {
-            // linkedCts.Token, not ct alone — the 10s bounded-runtime ceiling this method promises
-            // must cover the scratch write too, not just the ffmpeg run that follows it.
-            await File.WriteAllBytesAsync(inputPath, bytes, linkedCts.Token);
+            byte[] outputBytes;
 
             try
             {
+                // linkedCts.Token, not ct alone, for the scratch write, the ffmpeg run, AND the
+                // output read below — the 10s bounded-runtime ceiling this method promises must
+                // cover all three, not merely the run in the middle (T295 review: the write used
+                // to sit OUTSIDE this catch, then the output read did too — either one hitting the
+                // timeout boundary escaped as an unhandled OperationCanceledException instead of
+                // this pipeline's own quiet-400 contract; both now live inside this same try so the
+                // `when (!ct.IsCancellationRequested)` filter below owns every timeout-boundary OCE
+                // this method can produce).
+                await File.WriteAllBytesAsync(inputPath, bytes, linkedCts.Token);
                 await processRunner.RunAsync(BuildFfmpegArgs(inputPath, outputPath), linkedCts.Token);
+
+                // The runner returning is not proof it produced anything usable — a fake/observing
+                // IImageProcessRunner in tests writes nothing, and a real ffmpeg exiting zero
+                // without writing outputPath is not a case this pipeline should ever hand to
+                // Success. Verify BEFORE reading rather than letting File.ReadAllBytesAsync throw.
+                if (!File.Exists(outputPath))
+                {
+                    logger.LogDebug("Image normalize ffmpeg run produced no output file.");
+                    return new ImageNormalizeResult.Failure(ImageNormalizeFailureReason.EncodeFailed);
+                }
+
+                outputBytes = await File.ReadAllBytesAsync(outputPath, linkedCts.Token);
+                if (outputBytes.Length == 0 || !PngImageHeader.HasSignature(outputBytes))
+                {
+                    logger.LogDebug("Image normalize ffmpeg run produced no usable PNG output.");
+                    return new ImageNormalizeResult.Failure(ImageNormalizeFailureReason.EncodeFailed);
+                }
+
+                if (outputBytes.Length > MaxOutputBytes)
+                {
+                    logger.LogDebug(
+                        "Image normalize output was {Bytes} bytes, over the {Cap} byte ceiling.",
+                        outputBytes.Length, MaxOutputBytes);
+                    return new ImageNormalizeResult.Failure(ImageNormalizeFailureReason.EncodeFailed);
+                }
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
                 // Our own bounded-runtime timeout fired, not the caller's — surface as an
                 // ordinary encode failure (mirrors ArtworkService.ExtractAsync's own split).
+                // Covers a timeout anywhere above: the write, the ffmpeg run, or the output read.
                 logger.LogDebug("Image normalize ffmpeg run exceeded {Timeout}.", FfmpegTimeout);
                 return new ImageNormalizeResult.Failure(ImageNormalizeFailureReason.EncodeFailed);
             }
@@ -139,31 +171,6 @@ public sealed class ImageNormalizeService(IImageProcessRunner processRunner, ILo
                 // precedent) — without this catch, a missing binary would escape as an unhandled
                 // 500 instead of this pipeline's own quiet-400 contract.
                 logger.LogDebug(ex, "Image normalize ffmpeg failed to start.");
-                return new ImageNormalizeResult.Failure(ImageNormalizeFailureReason.EncodeFailed);
-            }
-
-            // The runner returning is not proof it produced anything usable — a fake/observing
-            // IImageProcessRunner in tests writes nothing, and a real ffmpeg exiting zero without
-            // writing outputPath is not a case this pipeline should ever hand to Success. Verify
-            // BEFORE building Success rather than letting File.ReadAllBytesAsync throw.
-            if (!File.Exists(outputPath))
-            {
-                logger.LogDebug("Image normalize ffmpeg run produced no output file.");
-                return new ImageNormalizeResult.Failure(ImageNormalizeFailureReason.EncodeFailed);
-            }
-
-            var outputBytes = await File.ReadAllBytesAsync(outputPath, ct);
-            if (outputBytes.Length == 0 || !PngImageHeader.HasSignature(outputBytes))
-            {
-                logger.LogDebug("Image normalize ffmpeg run produced no usable PNG output.");
-                return new ImageNormalizeResult.Failure(ImageNormalizeFailureReason.EncodeFailed);
-            }
-
-            if (outputBytes.Length > MaxOutputBytes)
-            {
-                logger.LogDebug(
-                    "Image normalize output was {Bytes} bytes, over the {Cap} byte ceiling.",
-                    outputBytes.Length, MaxOutputBytes);
                 return new ImageNormalizeResult.Failure(ImageNormalizeFailureReason.EncodeFailed);
             }
 

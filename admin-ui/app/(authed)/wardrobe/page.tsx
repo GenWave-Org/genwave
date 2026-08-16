@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { apiGet } from "@/lib/api";
+import { AvatarWardrobeClient } from "./AvatarWardrobeClient";
 import { InstalledEntriesList } from "./InstalledEntriesList";
 import { WardrobeClient } from "./WardrobeClient";
 import { resolveWardrobeTab, WardrobeTabs, type WardrobeTab } from "./WardrobeTabs";
-import type { FontLibraryPackDto, InstalledEntryRow } from "./types";
+import type { AvatarPackSummaryDto, FontLibraryPackDto, InstalledEntryRow } from "./types";
 
 // A pack can be installed elsewhere in the app, or uninstalled right here (gh-#428,
 // UninstallPackButton's own router.refresh() call re-triggers this exact server render) — always
@@ -133,6 +134,22 @@ async function fetchFontPacks(cookieHeader: string): Promise<FontLibraryPackDto[
   }
 }
 
+/** Every installed avatar pack (SPEC F128.3, PLAN T294) — mirrors `fetchFontPacks`'s own shape
+ * verbatim for the SAME reasoning, a different endpoint (`GET /api/avatar-packs`, this task's own
+ * minimal listing route). `null` (any fetch failure or non-200) is distinct from `[]` here, unlike
+ * the shelf page's own degrade-to-`[]` fetchers — see `fetchImportedRows`'s own remarks for why: a
+ * lost signal here IS the tab's content, a silent `[]` would render "nothing installed" as a fact
+ * this page doesn't actually know. */
+async function fetchAvatarPacks(cookieHeader: string): Promise<AvatarPackSummaryDto[] | null> {
+  try {
+    const response = await apiGet("/api/avatar-packs", { cookies: cookieHeader });
+    if (!response.ok) return null;
+    return (await response.json()) as AvatarPackSummaryDto[];
+  } catch {
+    return null;
+  }
+}
+
 /** The active tab's own load-failure line — the `catalog/page.tsx` "Unable to load …" shape; every
  * OTHER tab stays reachable through the strip, so one wedged endpoint never blanks the whole page. */
 function loadError(what: string): ReactNode {
@@ -140,13 +157,15 @@ function loadError(what: string): ReactNode {
 }
 
 /**
- * The Wardrobe (SPEC F104.7, widened by gh-#393): everything installed off the Community Catalog,
- * siloed by kind — Personas | Themes | Fonts | Shows, one tab each (URL-driven, the CatalogTabs
- * idiom), every tab present even when empty (Dean's ruling on the issue). Fonts keep their original
- * `WardrobeClient` cards (faces, licence, uninstall — this page's founding kind); the other three
- * kinds render the shared read-only `InstalledEntriesList`. All four sources fetch in one
- * `Promise.all` alongside the settings read that serves both the catalog-enabled signal and the
- * Themes rows.
+ * The Wardrobe (SPEC F104.7, widened by gh-#393 and, for the Avatars tab, PLAN T294): everything
+ * installed off the Community Catalog, siloed by kind — Personas | Themes | Fonts | Shows | Avatars,
+ * one tab each (URL-driven, the CatalogTabs idiom), every tab present even when empty (Dean's ruling
+ * on the issue). Fonts keep their original `WardrobeClient` cards (faces, licence, uninstall — this
+ * page's founding kind); Personas/Themes/Shows render the shared read-only `InstalledEntriesList`;
+ * Avatars gets its own `AvatarWardrobeClient` (an item grid + uninstall, mirroring `WardrobeClient`'s
+ * own shape more closely than `InstalledEntriesList`'s single secondary-line contract can express).
+ * All five sources fetch in one `Promise.all` alongside the settings read that serves both the
+ * catalog-enabled signal and the Themes rows.
  */
 export default async function WardrobePage({ searchParams }: WardrobePageProps): Promise<ReactNode> {
   const sp = await searchParams;
@@ -154,7 +173,7 @@ export default async function WardrobePage({ searchParams }: WardrobePageProps):
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
 
-  const [packs, settingsFacts, personas, shows] = await Promise.all([
+  const [packs, settingsFacts, personas, shows, avatarPacks] = await Promise.all([
     fetchFontPacks(cookieHeader),
     fetchSettingsFacts(cookieHeader),
     fetchImportedRows<PersonaRow>("/api/personas", cookieHeader, (row) => ({
@@ -171,6 +190,7 @@ export default async function WardrobePage({ searchParams }: WardrobePageProps):
       importedFrom: row.importedFrom,
       importedAt: row.importedAt,
     })),
+    fetchAvatarPacks(cookieHeader),
   ]);
   const { catalogEnabled, themes } = settingsFacts;
 
@@ -227,6 +247,14 @@ export default async function WardrobePage({ searchParams }: WardrobePageProps):
             emptyReason="Browse the Community Catalog to import a show for this station."
             catalogEnabled={catalogEnabled}
           />
+        );
+      break;
+    case "avatars":
+      tabContent =
+        avatarPacks === null ? (
+          loadError("the installed avatar packs")
+        ) : (
+          <AvatarWardrobeClient packs={avatarPacks} catalogEnabled={catalogEnabled} />
         );
       break;
   }

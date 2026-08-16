@@ -35,7 +35,7 @@ const STALL_CONFIRM_MS = 2000;
 // art slot is exactly the fuzzy DJ-break art of gh-#258.
 const STATION_ICON_PATH = "/spectator/logo.png";
 
-/** @type {{kind: "standby"} | {kind: "track"|"patter", title?: string, artist?: string, startedAt: Date, durationMs: number|null, dj?: string|null, upNext?: {startsAt: string, dj: string|null}|null, artworkUrl?: string|null}} */
+/** @type {{kind: "standby"} | {kind: "track"|"patter", title?: string, artist?: string, startedAt: Date, durationMs: number|null, dj?: string|null, djAvatarUrl?: string|null, show?: {name: string, tagline: string|null}|null, upNext?: {startsAt: string, dj: string|null}|null, artworkUrl?: string|null}} */
 let nowPlaying = { kind: "standby" };
 let stationName = "GenWave";
 
@@ -66,6 +66,7 @@ async function pollNowPlaying() {
   try {
     const payload = await fetchJson("/spectator/api/now-playing");
     const previousArtworkUrl = nowPlaying.kind === "standby" ? null : nowPlaying.artworkUrl ?? null;
+    const previousDjAvatarUrl = nowPlaying.kind === "standby" ? null : nowPlaying.djAvatarUrl ?? null;
     nowPlaying =
       payload.state === "onAir"
         ? {
@@ -74,10 +75,12 @@ async function pollNowPlaying() {
             artist: payload.artist,
             startedAt: new Date(payload.startedAt),
             durationMs: payload.durationMs ?? null,
-            // dj/upNext/artworkUrl (SPEC F93.1–F93.3) — optional-chained/defaulted since an
-            // OutputCache entry from before PLAN T125 shipped may still be in rotation and
-            // simply lack these properties.
+            // dj/djAvatarUrl/show/upNext/artworkUrl (SPEC F93.1–F93.3, F116.4, F129.2) —
+            // optional-chained/defaulted since an OutputCache entry from before one of these
+            // shipped may still be in rotation and simply lack the property.
             dj: payload.dj ?? null,
+            djAvatarUrl: payload.djAvatarUrl ?? null,
+            show: payload.show ?? null,
             upNext: payload.upNext ?? null,
             artworkUrl: payload.artworkUrl ?? null,
           }
@@ -86,6 +89,10 @@ async function pollNowPlaying() {
     // failure, if any, no longer applies, so give the new URL a fresh attempt.
     const nextArtworkUrl = nowPlaying.kind === "standby" ? null : nowPlaying.artworkUrl ?? null;
     if (nextArtworkUrl !== previousArtworkUrl) failedArtworkUrl = null;
+    // Same reset, for the DJ avatar URL (SPEC F129.2): a new on-air persona (or a transition
+    // to/from standby) always gets a fresh load attempt.
+    const nextDjAvatarUrl = nowPlaying.kind === "standby" ? null : nowPlaying.djAvatarUrl ?? null;
+    if (nextDjAvatarUrl !== previousDjAvatarUrl) failedDjAvatarUrl = null;
     renderListenerCount(payload.listeners ?? null);
   } catch (error) {
     console.error(error);
@@ -110,7 +117,6 @@ function renderNowPlaying() {
   const kicker = document.getElementById("now-playing-kicker");
   const title = document.getElementById("now-playing-title");
   const artist = document.getElementById("now-playing-artist");
-  const dj = document.getElementById("now-playing-dj");
   const meta = document.getElementById("now-playing-meta");
   const progress = document.getElementById("progress");
   const fill = document.getElementById("progress-fill");
@@ -123,7 +129,7 @@ function renderNowPlaying() {
     kicker.textContent = "Stand by";
     title.textContent = stationName;
     artist.textContent = "";
-    renderDjLine(dj, null);
+    renderDjCard(null, null, null);
     meta.hidden = true;
     renderUpNextLine(upNext, null);
     return;
@@ -142,7 +148,7 @@ function renderNowPlaying() {
     artist.textContent = nowPlaying.artist || "";
   }
 
-  renderDjLine(dj, nowPlaying.dj ?? null);
+  renderDjCard(nowPlaying.dj ?? null, nowPlaying.show ?? null, nowPlaying.djAvatarUrl ?? null);
   renderArt(art, nowPlaying.artworkUrl ?? null);
 
   meta.hidden = false;
@@ -162,10 +168,76 @@ function renderNowPlaying() {
   renderUpNextLine(upNext, nowPlaying.upNext ?? null);
 }
 
-/** @param {string|null} dj — the on-air persona's display name, or null for a music-only segment. */
-function renderDjLine(element, dj) {
-  element.hidden = !dj;
-  element.textContent = dj ? `with ${dj}` : "";
+/**
+ * Renders the DJ card (SPEC F129.3, STORY-335, PLAN T299): face + name + show, replacing the
+ * pre-F129 plain "with {name}" text line. The whole card hides exactly when there is no dj —
+ * same condition the retired renderDjLine used, so a music-only segment or grid gap still shows
+ * nothing here.
+ * <p>Host-only for v1 (PLAN T299 build note, SPEC F129.3's own RECORDED DEFERRAL): dj/djAvatarUrl/
+ * show already name the SCHEDULED host of whatever is airing, and a crosstalk exchange airs
+ * entirely under that same attribution today — this function never special-cases it. Attributing
+ * the crosstalk GUEST voice separately is future work, not a gap in this render.</p>
+ * @param {string|null} dj — the on-air persona's display name, or null for a music-only segment.
+ * @param {{name: string, tagline: string|null}|null} show — NAME only rides this card; tagline
+ *   has no render site yet anywhere on this page.
+ * @param {string|null} djAvatarUrl — the on-air persona's worn-face token URL (SPEC F129.2), or
+ *   null when faceless — renderDjAvatar below shows the placeholder glyph either way.
+ */
+function renderDjCard(dj, show, djAvatarUrl) {
+  const card = document.getElementById("dj-card");
+  const name = document.getElementById("dj-card-name");
+  const showLine = document.getElementById("dj-card-show");
+
+  card.hidden = !dj;
+  name.textContent = dj ? `with ${dj}` : "";
+  showLine.hidden = !show;
+  showLine.textContent = show ? `· ${show.name}` : "";
+
+  renderDjAvatar(djAvatarUrl);
+}
+
+// Sticky failure memory for the current DJ avatar URL (SPEC F129.2) — the same
+// failedArtworkUrl idiom below, one section down, applied to the DJ card's own face slot: once a
+// URL has failed to load, renderDjAvatar keeps showing the placeholder glyph for it on every
+// subsequent 1s clock tick instead of re-arming the same known-bad URL. Cleared by pollNowPlaying
+// whenever djAvatarUrl actually changes (a new on-air persona, or a transition to/from standby,
+// always gets a fresh attempt).
+let failedDjAvatarUrl = null;
+
+/**
+ * Renders the DJ card's face slot (SPEC F129.2/F129.3): the real face when djAvatarUrl is set and
+ * has not already failed to load this session, the placeholder glyph otherwise (null/faceless, or
+ * a load failure recorded by initDjAvatarFallback). Idempotent on every 1s clock tick, the same
+ * discipline renderArt already follows for track artwork.
+ * @param {string|null} djAvatarUrl
+ */
+function renderDjAvatar(djAvatarUrl) {
+  const img = document.getElementById("dj-card-avatar-img");
+  const placeholder = document.getElementById("dj-card-avatar-placeholder");
+  const target = djAvatarUrl && djAvatarUrl !== failedDjAvatarUrl ? djAvatarUrl : null;
+
+  if (target === null) {
+    img.hidden = true;
+    placeholder.hidden = false;
+    return;
+  }
+
+  if (img.getAttribute("src") !== target) img.setAttribute("src", target);
+  img.hidden = false;
+  placeholder.hidden = true;
+}
+
+/** Wires the fallback for a real DJ avatar URL that fails to load (SPEC F129.2/F129.3): records
+ * the failing URL as failedDjAvatarUrl (so renderDjAvatar stops re-arming it) and swaps back to
+ * the placeholder glyph — mirrors initArtworkFallback's own idiom below. */
+function initDjAvatarFallback() {
+  const img = document.getElementById("dj-card-avatar-img");
+  img.addEventListener("error", () => {
+    const failing = img.getAttribute("src");
+    if (failing) failedDjAvatarUrl = failing;
+    img.hidden = true;
+    document.getElementById("dj-card-avatar-placeholder").hidden = false;
+  });
 }
 
 /** @param {{startsAt: string, dj: string|null}|null} upNext */
@@ -601,6 +673,7 @@ function initRequestForm() {
 function init() {
   loadAbout();
   initArtworkFallback();
+  initDjAvatarFallback();
   initPlayerRecovery();
   initMediaSession();
   pollNowPlaying();

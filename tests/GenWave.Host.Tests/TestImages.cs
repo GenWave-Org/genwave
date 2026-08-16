@@ -106,15 +106,7 @@ static class TestImages
     /// </summary>
     public static byte[] WithTextChunk(byte[] png, string keyword, string text)
     {
-        var data = Encoding.Latin1.GetBytes($"{keyword}\0{text}");
-        var typeBytes = Encoding.ASCII.GetBytes("tEXt");
-
-        var chunk = new byte[4 + 4 + data.Length + 4];
-        BinaryPrimitives.WriteUInt32BigEndian(chunk.AsSpan(0, 4), (uint)data.Length);
-        typeBytes.CopyTo(chunk, 4);
-        data.CopyTo(chunk, 8);
-        var crc = Crc32(chunk.AsSpan(4, 4 + data.Length));
-        BinaryPrimitives.WriteUInt32BigEndian(chunk.AsSpan(8 + data.Length, 4), crc);
+        var chunk = BuildChunk("tEXt", Encoding.Latin1.GetBytes($"{keyword}\0{text}"));
 
         // Splice point: signature(8) + IHDR chunk(8 header + 13 data + 4 crc) = 33.
         const int insertAt = 8 + 8 + 13 + 4;
@@ -123,6 +115,54 @@ static class TestImages
         chunk.CopyTo(result, insertAt);
         png.AsSpan(insertAt).CopyTo(result.AsSpan(insertAt + chunk.Length));
         return result;
+    }
+
+    /// <summary>
+    /// A hand-built PNG whose signature + IHDR are genuinely well-formed and in-bounds (an 8-bit RGBA
+    /// image at <paramref name="width"/>x<paramref name="height"/>), but whose single <c>IDAT</c> chunk
+    /// carries random GARBAGE bytes instead of a real zlib/deflate stream — every gate that reads only
+    /// the signature/IHDR/chunk-type-before-IDAT (SPEC F128.6's magic-bytes, header-dimensions, and
+    /// APNG gates) admits this fixture exactly as it would a real photo; only ffmpeg's own decoder,
+    /// asked to actually inflate the IDAT payload, rejects it with a non-zero exit. This is the T291
+    /// round-2 reviewer's own "corrupt-but-header-valid PNG through the real binary" repro (PLAN T295
+    /// rider) — the live case that reaches <see cref="GenWave.Host.Images.ImageNormalizeFailureReason.EncodeFailed"/>
+    /// through <see cref="GenWave.Host.Images.FfmpegImageProcessRunner"/> for real, never a fake
+    /// runner asserting the reason without ffmpeg ever actually running.
+    /// </summary>
+    public static byte[] CreateCorruptPng(int width, int height)
+    {
+        var ihdr = new byte[13];
+        BinaryPrimitives.WriteUInt32BigEndian(ihdr.AsSpan(0, 4), (uint)width);
+        BinaryPrimitives.WriteUInt32BigEndian(ihdr.AsSpan(4, 4), (uint)height);
+        ihdr[8] = 8;  // bit depth
+        ihdr[9] = 6;  // color type: RGBA
+        ihdr[10] = 0; // compression method
+        ihdr[11] = 0; // filter method
+        ihdr[12] = 0; // interlace method
+
+        var garbage = new byte[256];
+        Random.Shared.NextBytes(garbage);
+
+        var bytes = new List<byte>(PngSignature.Length + 64 + garbage.Length);
+        bytes.AddRange(PngSignature);
+        bytes.AddRange(BuildChunk("IHDR", ihdr));
+        bytes.AddRange(BuildChunk("IDAT", garbage));
+        bytes.AddRange(BuildChunk("IEND", []));
+        return [.. bytes];
+    }
+
+    /// <summary>A length-prefixed, correctly-CRC'd PNG chunk (<c>length | type | data | crc32</c>) —
+    /// the one chunk-framing primitive <see cref="WithTextChunk"/> and <see cref="CreateCorruptPng"/>
+    /// both build on, so the CRC math lives in exactly one place.</summary>
+    static byte[] BuildChunk(string type, byte[] data)
+    {
+        var chunk = new byte[4 + 4 + data.Length + 4];
+        BinaryPrimitives.WriteUInt32BigEndian(chunk.AsSpan(0, 4), (uint)data.Length);
+        Encoding.ASCII.GetBytes(type).CopyTo(chunk, 4);
+        data.CopyTo(chunk, 8);
+        var crc = Crc32(chunk.AsSpan(4, 4 + data.Length));
+        BinaryPrimitives.WriteUInt32BigEndian(chunk.AsSpan(8 + data.Length, 4), crc);
+        return chunk;
     }
 
     /// <summary>Every chunk type name present in <paramref name="png"/>, in stream order — a pure

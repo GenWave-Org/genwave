@@ -59,6 +59,27 @@ async function fetchInstalledFontSlugs(cookieHeader: string): Promise<string[]> 
   return fetchSlugs<InstalledFontPackRow>("/api/fonts", cookieHeader);
 }
 
+/** Wire shape of a `GET /api/avatar-packs` row (PLAN T294) — only the one field this page reads;
+ * mirrors `InstalledFontPackRow`'s own narrow-cast idiom above for the SAME reasoning, a different
+ * endpoint. */
+interface InstalledAvatarPackRow {
+  slug: string;
+}
+
+/**
+ * Every already-installed avatar pack's slug (PLAN T294) — mirrors `fetchInstalledFontSlugs`'s own
+ * remarks verbatim, applied to the avatar kind (this task's own "match the font install flow
+ * exactly" instruction): fetched ALONGSIDE the index, in the SAME server component, so
+ * `AvatarDetailPanel` never has to guess whether a slug it is about to offer "Install" for is
+ * already in the Wardrobe. Independent of `Community:CatalogIndexUrl` — same posture as
+ * `fetchInstalledFontSlugs`, an installed pack outlives the catalog. Every row counts (no
+ * predicate): an avatar pack has only one provenance path (SPEC F128.3), so "installed" and
+ * "genuinely installed by this route" are the same thing.
+ */
+async function fetchInstalledAvatarSlugs(cookieHeader: string): Promise<string[]> {
+  return fetchSlugs<InstalledAvatarPackRow>("/api/avatar-packs", cookieHeader);
+}
+
 /** Wire shape of one `Station:Theme` choice, off `GET /api/settings` (SPEC F103.11, PLAN T187) —
  * only the fields this page reads; mirrors `InstalledFontPackRow`'s own narrow-cast idiom above
  * rather than importing `settings/settings-types.ts`'s full `SettingChoice` for three fields. */
@@ -183,13 +204,14 @@ export default async function PersonaCatalogPage({ searchParams }: PersonaCatalo
   const activeKind = resolveCatalogKind(sp.kind);
   const cookieStore = await cookies();
   const cookieHeader = cookieStore.toString();
-  const [response, installedFontSlugs, installedThemeProvenance, importedShowSlugs, hiredPersonaSlugs] =
+  const [response, installedFontSlugs, installedThemeProvenance, importedShowSlugs, hiredPersonaSlugs, installedAvatarSlugs] =
     await Promise.all([
       apiGet("/api/catalog/index", { cookies: cookieHeader }),
       fetchInstalledFontSlugs(cookieHeader),
       fetchInstalledThemeProvenance(cookieHeader),
       fetchImportedShowSlugs(cookieHeader),
       fetchHiredPersonaSlugs(cookieHeader),
+      fetchInstalledAvatarSlugs(cookieHeader),
     ]);
 
   // Disabled (SPEC F90.1): CatalogController serves a bare, zero-byte 404 here — the same
@@ -230,6 +252,7 @@ export default async function PersonaCatalogPage({ searchParams }: PersonaCatalo
           installedThemeProvenance={installedThemeProvenance}
           importedShowSlugs={importedShowSlugs}
           hiredPersonaSlugs={hiredPersonaSlugs}
+          installedAvatarSlugs={installedAvatarSlugs}
           activeKind={activeKind}
         />
       </div>

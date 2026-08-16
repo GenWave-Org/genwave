@@ -5,10 +5,10 @@ namespace GenWave.Core.Abstractions;
 /// <summary>
 /// SEAM (SPEC F128-F129, STORY-333, PLAN T290) — persistence for the worn face in
 /// <c>station.persona_avatar</c> (a 1:1 <c>station.persona</c> extension, the F33 <c>media_rating</c>
-/// precedent). Ships dark: no consumer lands with this seam yet — <c>PersonaAvatarController</c> (T295,
-/// the upload/remove/apply-from-pack write paths) and the Personas UI (T296) are the first Host call
-/// sites; <c>SpectatorArtworkController</c> (T298) and <c>ArtworkUrlResolver</c> (T300) are the first
-/// read consumers of <see cref="GetByTokenAsync"/>.
+/// precedent). <c>PersonaAvatarController</c> (T295, the upload/remove/apply-from-pack write paths) is
+/// the first Host call site; the Personas UI (T296), <c>SpectatorArtworkController</c> (T298), and
+/// <c>ArtworkUrlResolver</c> (T300, the first read consumer of <see cref="GetByTokenAsync"/>) are still
+/// to come.
 ///
 /// Deliberately a DUMB store — token generation and rotation policy belong to the caller (T295), not
 /// this seam: <see cref="UpsertAsync"/> takes a <see cref="PersonaAvatarInput"/> carrying an
@@ -23,6 +23,16 @@ public interface IPersonaAvatarStore
     /// persona has none — <c>station.persona_avatar.persona_id</c> is <c>UNIQUE</c>, so at most one row
     /// can ever match.</summary>
     Task<PersonaAvatar?> GetByPersonaIdAsync(long personaId, CancellationToken ct);
+
+    /// <summary>Token-only projection of the worn face for <paramref name="personaId"/> (PLAN T299
+    /// fix round) — the same answer as <see cref="GetByPersonaIdAsync"/>'s own
+    /// <see cref="PersonaAvatar.Token"/>, but never selects the ~512 KiB <c>bytes</c> column. For a
+    /// caller that only ever composes a token URL — <c>GenWave.Host.Api.SpectatorController.ResolveDjAvatarUrlAsync</c>
+    /// is the first (T300's own persona→token memo reads this projection too, never the
+    /// bytes-carrying one) — <see cref="GetByPersonaIdAsync"/> would otherwise pull a whole face
+    /// payload off Postgres purely to discard it. <see langword="null"/> for the same "no face"
+    /// reasons <see cref="GetByPersonaIdAsync"/> documents.</summary>
+    Task<string?> GetTokenByPersonaIdAsync(long personaId, CancellationToken ct);
 
     /// <summary>The worn face serving under <paramref name="token"/>, or <see langword="null"/> if no
     /// row carries it — the read path <c>SpectatorArtworkController</c>'s DJ-token route (T298)

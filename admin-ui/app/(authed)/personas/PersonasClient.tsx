@@ -9,8 +9,12 @@ import { formatDateStamp } from "@/lib/format-clock";
 import { readErrorMessage } from "@/lib/problem-details";
 import { useVoiceList } from "@/lib/use-voice-list";
 import { VoiceControl } from "../safe-content/VoiceControl";
+import { BulkApplySuggestedModal } from "./BulkApplySuggestedModal";
 import { FireModal } from "./FireModal";
+import { PersonaAvatarPackPicker } from "./PersonaAvatarPackPicker";
 import { PersonaExportLink } from "./PersonaExportLink";
+import { PersonaFace } from "./PersonaFace";
+import { PersonaFaceEditor } from "./PersonaFaceEditor";
 import { PersonaImportPanel } from "./PersonaImportPanel";
 import { PersonaPreview } from "./PersonaPreview";
 import { PersonaTasteSection } from "./PersonaTasteSection";
@@ -229,6 +233,23 @@ export function PersonasClient({
   const [isFiring, setIsFiring] = useState(false);
   const [expandedTasteIds, setExpandedTasteIds] = useState<ReadonlySet<number>>(new Set());
 
+  // Worn faces (SPEC F128.5/.6/.9, STORY-333, PLAN T296) — a per-persona cache-bust counter
+  // (`PersonaFace`'s own remarks: 0 means "no write yet this session", so the first render never
+  // appends a query param). Bumped by `PersonaFaceEditor`/`PersonaAvatarPackPicker`/
+  // `BulkApplySuggestedModal` after any successful write to that persona's face; read by BOTH the
+  // roster row's own thumbnail and the edit form's own portrait, so a write in either place
+  // refreshes both together.
+  const [avatarVersion, setAvatarVersion] = useState<ReadonlyMap<number, number>>(new Map());
+  const [showBulkApplyModal, setShowBulkApplyModal] = useState(false);
+
+  function bumpAvatarVersion(personaId: number): void {
+    setAvatarVersion((prev) => {
+      const next = new Map(prev);
+      next.set(personaId, (next.get(personaId) ?? 0) + 1);
+      return next;
+    });
+  }
+
   // Scheduled/Bench split (SPEC F94.1, STORY-246) — a Set for O(1) membership, built fresh each
   // render off the prop rather than mirrored into state: there is nothing here for this component
   // to own or mutate locally, unlike `personas` itself (create/edit/delete all splice that array).
@@ -389,7 +410,14 @@ export function PersonasClient({
       <Fragment key={persona.id}>
         <tr className="border-b border-line last:border-b-0">
           <td className="py-2 pr-3 text-ink">
-            <span data-testid={`persona-name-${persona.name}`}>{persona.name}</span>
+            <span className="inline-flex items-center gap-2 align-middle">
+              <PersonaFace
+                personaId={persona.id}
+                personaName={persona.name}
+                version={avatarVersion.get(persona.id) ?? 0}
+              />
+              <span data-testid={`persona-name-${persona.name}`}>{persona.name}</span>
+            </span>
             {isOnAir && <OnAirBadge />}
             {persona.importedFrom !== null && persona.importedAt !== null && (
               <ProvenanceBadge
@@ -518,6 +546,30 @@ export function PersonasClient({
               className={FIELD_INPUT_CLASSES}
             />
           </div>
+
+          {/* Worn face (SPEC F128.5/.6/.9, STORY-333, PLAN T296) — only once a persona actually
+              HAS an id to write against: the create-mode draft has none yet, so upload/remove/
+              apply-from-pack all wait for the first save, the same way `PersonaPreview`'s own
+              "saved" target only exists post-create. */}
+          {mode.kind === "edit" && editingPersona !== null && (
+            <div className="flex flex-col gap-4 rounded-[6px] border border-line bg-surface-2 p-3">
+              <PersonaFaceEditor
+                personaId={editingPersona.id}
+                personaName={editingPersona.name}
+                version={avatarVersion.get(editingPersona.id) ?? 0}
+                onChanged={() => bumpAvatarVersion(editingPersona.id)}
+              />
+              <div className="flex flex-col gap-1.5">
+                <span className={FIELD_LABEL_CLASSES}>Apply a face from an installed pack</span>
+                <PersonaAvatarPackPicker
+                  personaId={editingPersona.id}
+                  personaSlug={editingPersona.slug}
+                  personaName={editingPersona.name}
+                  onApplied={() => bumpAvatarVersion(editingPersona.id)}
+                />
+              </div>
+            </div>
+          )}
 
           {mode.kind === "edit" && mode.cardNarrative ? (
             // gh-#256: a catalog-hired persona's narrative lives in its card soul (with the
@@ -661,7 +713,16 @@ export function PersonasClient({
       </section>
 
       <section aria-label="Personas">
-        <h2 className="font-display text-[1.1rem] text-ink">Personas</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-display text-[1.1rem] text-ink">Personas</h2>
+          {/* Bulk apply-suggested (SPEC F128.5, STORY-333, PLAN T296) — the roster toolbar, the
+              smaller honest surface (this page already has the full roster + slugs in hand; a
+              Wardrobe pack card would need its OWN persona-roster fetch to compute the identical
+              mapping). Opens BulkApplySuggestedModal — no request fires until its own Confirm. */}
+          <Button type="button" variant="secondary" onClick={() => setShowBulkApplyModal(true)}>
+            Apply suggested faces
+          </Button>
+        </div>
 
         {personas.length === 0 ? (
           <EmptyState
@@ -704,6 +765,14 @@ export function PersonasClient({
           onConfirmFire={() => {
             void handleFireConfirm();
           }}
+        />
+      )}
+
+      {showBulkApplyModal && (
+        <BulkApplySuggestedModal
+          personas={personas}
+          onClose={() => setShowBulkApplyModal(false)}
+          onApplied={bumpAvatarVersion}
         />
       )}
     </div>

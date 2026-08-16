@@ -29,6 +29,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
+using GenWave.Host.Catalog;
 using GenWave.Host.Options;
 
 namespace GenWave.Host.Tests.Specs;
@@ -138,6 +139,15 @@ file sealed class NotUsedTtsVoiceLister : ITtsVoiceLister
         throw new NotSupportedException("Not exercised by Story219's taste-inspector scenarios.");
 }
 
+/// <summary>Unused-by-Taste <see cref="ICatalogPersonaAvatarInstaller"/> double — the constructor
+/// dependency exists for the sibling import action (PLAN T297), same reason as
+/// <see cref="NotUsedPersonaPreviewWriter"/> above.</summary>
+file sealed class NotUsedCatalogPersonaAvatarInstaller : ICatalogPersonaAvatarInstaller
+{
+    public Task InstallIfPresentAsync(long personaId, string catalogSlug, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story219's taste-inspector scenarios.");
+}
+
 /// <summary>
 /// Builds a <see cref="PersonaController"/> wired to the given fakes — every dependency
 /// <see cref="PersonaController.Taste"/> never touches is a throwing "not used" double (mirrors
@@ -158,6 +168,7 @@ file static class PersonaTasteControllerFactory
             new NotUsedPersonaImportStore(),
             new NotUsedTtsVoiceLister(),
             new FakeStationClockProvider(DateTimeOffset.UtcNow),
+            new NotUsedCatalogPersonaAvatarInstaller(),
             NullLogger<PersonaController>.Instance);
 }
 

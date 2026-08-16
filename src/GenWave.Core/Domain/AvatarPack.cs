@@ -18,9 +18,11 @@ namespace GenWave.Core.Domain;
 /// <param name="Items">Every item this pack ships, WITH bytes (unlike <see cref="FontPack.Faces"/>'s
 /// own metadata-only listing shape) — see <see cref="AvatarPackItem"/>'s own remarks for why. Populated
 /// by <see cref="Abstractions.IAvatarPackStore.GetBySlugAsync"/> (the one-pack detail read a later
-/// apply-from-pack write, T295/T296, needs bytes for); deliberately left EMPTY by
-/// <see cref="Abstractions.IAvatarPackStore.GetAllAsync"/> (the shelf's own pack-level-only listing —
-/// shelf cards show slug/definition, never per-item bytes for every installed pack at once).</param>
+/// apply-from-pack write, T295/T296, needs bytes for) — this type is that ONE bytes-carrying shape;
+/// <see cref="Abstractions.IAvatarPackStore.GetAllAsync"/>'s own shelf-listing read returns the
+/// separate, structurally bytes-free <see cref="AvatarPackSummary"/> instead (review finding B1 — a
+/// shared shape reused with an empty or stripped item list could too easily drift back into carrying
+/// bytes it has no business carrying).</param>
 public sealed record AvatarPack(
     string Slug,
     string Definition,

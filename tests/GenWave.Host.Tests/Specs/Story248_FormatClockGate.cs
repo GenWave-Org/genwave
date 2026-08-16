@@ -144,6 +144,9 @@ public static class FeatureFormatClockGate
         /// ⚠️ Amended PLAN T251 (SPEC F116.4, STORY-311, outside this file's own T118-T130 epic):
         /// `show` joins both on-air shapes and `upNext.show` (NAME ONLY — no <c>Tagline</c> member)
         /// joins upNext — same amendment Story183/Story230 carry; Flavor never appears here (F115.3).
+        /// ⚠️ Amended PLAN T299 (SPEC F129.2, F67.5 extension, STORY-335, outside this file's own
+        /// T118-T130 epic): `djAvatarUrl` joins both on-air shapes — same amendment Story183/Story230
+        /// carry.
         static readonly string[] PinnedFieldCensus =
         [
             "SpectatorAbout.License",
@@ -153,6 +156,7 @@ public static class FeatureFormatClockGate
             "SpectatorAbout.StreamUrl",
             "SpectatorAbout.Version",
             "SpectatorPatterNowPlaying.Dj",
+            "SpectatorPatterNowPlaying.DjAvatarUrl",
             "SpectatorPatterNowPlaying.DurationMs",
             "SpectatorPatterNowPlaying.Kind",
             "SpectatorPatterNowPlaying.Listeners",
@@ -196,6 +200,7 @@ public static class FeatureFormatClockGate
             "SpectatorTrackNowPlaying.Artist",
             "SpectatorTrackNowPlaying.ArtworkUrl",
             "SpectatorTrackNowPlaying.Dj",
+            "SpectatorTrackNowPlaying.DjAvatarUrl",
             "SpectatorTrackNowPlaying.DurationMs",
             "SpectatorTrackNowPlaying.Kind",
             "SpectatorTrackNowPlaying.Listeners",

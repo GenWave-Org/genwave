@@ -89,6 +89,48 @@
         <p class="now-playing__kicker" id="now-playing-kicker">Loading…</p>
         <h2 class="now-playing__title" id="now-playing-title"></h2>
         <p class="now-playing__artist" id="now-playing-artist"></p>
+        <!-- The DJ card (SPEC F129.3, STORY-335, PLAN T299) — face + name + show, replacing the
+             pre-F129 plain "with {name}" text line. Host-only for v1: the payload's dj/djAvatarUrl
+             already name the SCHEDULED host regardless of a crosstalk exchange airing underneath
+             (see app.js's own renderDjCard remarks) — crosstalk guest attribution is a RECORDED
+             DEFERRAL, nothing this markup needs to special-case. -->
+        <div class="dj-card" id="dj-card" hidden>
+          <span class="dj-card__avatar">
+            <!-- Faceless/load-error placeholder shown first, hidden once (if ever) a real
+                 djAvatarUrl loads successfully — see initDjAvatarFallback()'s own remarks. Same
+                 microphone glyph the admin Personas page uses for "no face set"
+                 (PersonaFace.tsx's own PersonaFacePlaceholder) — one placeholder style across
+                 both surfaces. -->
+            <svg
+              class="dj-card__avatar-placeholder"
+              id="dj-card-avatar-placeholder"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <rect x="6" y="1.6" width="4" height="7" rx="2" />
+              <path d="M4 7.5a4 4 0 0 0 8 0" />
+              <line x1="8" y1="11.5" x2="8" y2="14" />
+              <line x1="5.5" y1="14" x2="10.5" y2="14" />
+            </svg>
+            <img class="dj-card__avatar-img" id="dj-card-avatar-img" alt="" hidden />
+          </span>
+          <span class="dj-card__text">
+            <span class="dj-card__name" id="dj-card-name"></span>
+            <span class="dj-card__show" id="dj-card-show"></span>
+          </span>
+        </div>
+        <!-- Deploy-skew stub (PLAN T299 fix round): the pre-F129 element id an already-cached
+             app.js (a returning browser that has not yet refetched app.js post-deploy) still
+             dereferences unguarded — without this hidden stub, that stale script's TypeError on a
+             missing element freezes the WHOLE now-playing panel for up to app.js's own 300s
+             browser-cache TTL. Never populated by the current app.js; remove after the release
+             following v5.1.0's successor ships. -->
         <p class="now-playing__dj" id="now-playing-dj" hidden></p>
         <div class="now-playing__meta" id="now-playing-meta" hidden>
           <div class="progress" id="progress" hidden>

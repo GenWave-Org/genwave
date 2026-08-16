@@ -6,8 +6,11 @@
 // observation (F88.5) is T85's compose-stack acceptance, not a unit fact.
 
 using GenWave.Core.Domain;
+using GenWave.Host.Artwork;
 using GenWave.Host.Engine;
 using GenWave.Host.Options;
+using GenWave.Host.Tests.Fakes;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -19,7 +22,9 @@ public static class FeatureArtworkEmission
 
     static ArtworkUrlResolver Resolver(string publicBaseUrl) => new(
         new FakeOptionsMonitor<StationOptions>(new StationOptions { PublicBaseUrl = publicBaseUrl }),
-        new FakeArtworkTokenStore());
+        new FakeArtworkTokenStore(), new FakeActivePersonaAccessor(),
+        new PersonaAvatarTokenCache(
+            new FakePersonaAvatarStore(), TimeProvider.System, NullLogger<PersonaAvatarTokenCache>.Instance));
 
     /// <summary>Repo root, resolved relative to the test assembly's build output (Story074/102/107's convention).</summary>
     static string RepoRoot =>

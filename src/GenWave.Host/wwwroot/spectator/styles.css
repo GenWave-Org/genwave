@@ -318,8 +318,58 @@ audio:focus-visible {
   color: var(--mute);
 }
 
-.now-playing__dj {
-  margin: 0.15rem 0 0;
+/* DJ card (SPEC F129.3, STORY-335, PLAN T299) — face + name + show, replacing the pre-F129
+   .now-playing__dj text-only line. Small enough to read as a byline under the artist line, not a
+   second hero image competing with .now-playing__art. */
+.dj-card {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.3rem 0 0;
+}
+
+.dj-card__avatar {
+  position: relative;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background-color: var(--surface-2);
+  overflow: hidden;
+}
+
+.dj-card__avatar-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.dj-card__avatar-placeholder {
+  width: 55%;
+  height: 55%;
+  color: var(--mute);
+}
+
+.dj-card__text {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.dj-card__name {
+  color: var(--mute);
+}
+
+.dj-card__show {
+  font-size: 0.82rem;
   color: var(--mute);
 }
 

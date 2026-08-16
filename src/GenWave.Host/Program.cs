@@ -210,10 +210,9 @@ builder.Services.AddSingleton<ArtworkService>();
 
 // The SPEC F128.6 upload-normalize pipeline (STORY-333, STORY-339, PLAN T291): bounded read →
 // magic-bytes gate → header-dims/APNG gate → ffmpeg center-crop-and-scale to a fresh 512×512 PNG.
-// Ships DI-dark at T291 (no Host call site consumes ImageNormalizeService yet, mirrors how the
-// four T290 stores shipped): PersonaAvatarController (T295) and StationImageController (T307) are
-// the first consumers. IImageProcessRunner is production-wired to FfmpegImageProcessRunner here
-// (internal, InternalsVisibleTo GenWave.Host.Tests); tests substitute a counting fake directly
+// Consumed by AvatarPackController (T293) and PersonaAvatarController (T295); StationImageController
+// (T307) is the next consumer. IImageProcessRunner is production-wired to FfmpegImageProcessRunner
+// here (internal, InternalsVisibleTo GenWave.Host.Tests); tests substitute a counting fake directly
 // against ImageNormalizeService's own constructor instead — no DI-container involvement needed
 // for that seam.
 builder.Services.AddSingleton<IImageProcessRunner, FfmpegImageProcessRunner>();
@@ -270,6 +269,15 @@ builder.Services
     })
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddSingleton<CatalogProxyService>();
+
+// Installs a catalog persona entry's own sidecar face after a successful catalog-origin import
+// (SPEC F128.7, STORY-334, PLAN T297) — PersonaController.Import's own post-commit call site.
+// Singleton for the same reason as CatalogProxyService/ImageNormalizeService just above: every
+// dependency it composes is itself a singleton, and it carries no per-request state of its own.
+// Registered against its own ICatalogPersonaAvatarInstaller seam (that interface's own remarks:
+// PersonaController's existing direct-construction unit tests need a throwing stub, not this real
+// dependency graph).
+builder.Services.AddSingleton<ICatalogPersonaAvatarInstaller, CatalogPersonaAvatarInstaller>();
 
 builder.Services.AddControllers();
 

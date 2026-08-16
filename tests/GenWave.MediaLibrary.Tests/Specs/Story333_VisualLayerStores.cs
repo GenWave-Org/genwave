@@ -473,6 +473,37 @@ public static class FeatureVisualLayerStores
         }
 
         [Fact]
+        public async Task GetTokenByPersonaIdAsyncRoundTripsTheTokenAloneWithoutTheBytesColumn()
+        {
+            // Given two personas — one with no worn face, one whose face is about to be upserted —
+            // proving the projection is scoped per-persona, not a single global answer (PLAN T299
+            // fix round: the bounded-cost projection SpectatorController.ResolveDjAvatarUrlAsync
+            // reads instead of GetByPersonaIdAsync's whole-row select).
+            RunMigrationScript(db);
+            var facelessPersonaId = await InsertPersonaAsync(db, $"Token Repo Faceless {Guid.NewGuid()}");
+            var personaId = await InsertPersonaAsync(db, $"Token Repo Round Trip {Guid.NewGuid()}");
+            var repo = PersonaAvatarRepo(db);
+
+            // Then the faceless persona reports null — an honest "no face", never an error.
+            Assert.Null(await repo.GetTokenByPersonaIdAsync(facelessPersonaId, CancellationToken.None));
+
+            // When a face is upserted for the other persona
+            var token = Guid.NewGuid().ToString("N");
+            await repo.UpsertAsync(
+                new PersonaAvatarInput(personaId, [1, 2, 3, 4], "hash", token, PersonaAvatarSource.Upload, null),
+                CancellationToken.None);
+
+            // Then GetTokenByPersonaIdAsync reads back the SAME token GetByPersonaIdAsync's own
+            // whole-row read carries — the projection agrees with the wider read, it just never
+            // selects bytes/byte_size/sha256/source/imported_from/updated_at to get there — while the
+            // still-faceless persona keeps reporting null.
+            var wholeRow = await repo.GetByPersonaIdAsync(personaId, CancellationToken.None);
+            Assert.NotNull(wholeRow);
+            Assert.Equal(wholeRow.Token, await repo.GetTokenByPersonaIdAsync(personaId, CancellationToken.None));
+            Assert.Null(await repo.GetTokenByPersonaIdAsync(facelessPersonaId, CancellationToken.None));
+        }
+
+        [Fact]
         public async Task DeleteAsyncRemovesTheFaceAndReportsWhetherOneExisted()
         {
             // Given a persona with a worn face
@@ -544,7 +575,7 @@ public static class FeatureVisualLayerStores
         }
 
         [Fact]
-        public async Task ReinstallingReplacesTheItemListWholeAndGetAllAsyncOmitsItemBytes()
+        public async Task ReinstallingReplacesTheItemListWholeAndGetAllAsyncCarriesItemMetadataWithoutBytes()
         {
             // Given an installed pack with one item
             RunMigrationScript(db);
@@ -570,12 +601,15 @@ public static class FeatureVisualLayerStores
                 (pack.ImportedFrom, ItemNamesMatch: pack.Items.Select(i => i.Name).SequenceEqual(["zed"])));
             Assert.Contains("\"v2\"", pack.Definition);
 
-            // And GetAllAsync's own listing read carries the EMPTY-Items contract — this pack shows up
-            // with zero items even though it genuinely has one, proving the shelf-listing query never
-            // joins avatar_pack_item at all.
+            // And GetAllAsync's own listing read carries the re-installed item's own name/suggested-
+            // persona metadata (review finding B1: the listing widened to include this directly, rather
+            // than requiring a second per-pack GetBySlugAsync round trip just to read it), but the
+            // returned AvatarPackItemSummary shape is structurally incapable of carrying bytes at all —
+            // there is no Bytes member to even assert absent.
             var all = await repo.GetAllAsync(CancellationToken.None);
             var listed = Assert.Single(all, p => p.Slug == slug);
-            Assert.Empty(listed.Items);
+            var item = Assert.Single(listed.Items);
+            Assert.Equal(("zed", (string?)null), (item.Name, item.SuggestedPersona));
         }
 
         [Fact]

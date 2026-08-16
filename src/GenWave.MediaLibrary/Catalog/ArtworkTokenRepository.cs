@@ -26,12 +26,9 @@ namespace GenWave.MediaLibrary.Catalog;
 /// </summary>
 sealed class ArtworkTokenRepository(NpgsqlDataSource dataSource) : IArtworkTokenStore
 {
-    // 32 lowercase hex chars = 16 bytes = 128 bits (SPEC F88.2).
-    const int TokenLength = 32;
-
     public async Task<string> GetOrCreateTokenAsync(long mediaId, CancellationToken ct)
     {
-        var candidate = RandomNumberGenerator.GetHexString(TokenLength, lowercase: true);
+        var candidate = RandomNumberGenerator.GetHexString(ArtworkToken.Length, lowercase: true);
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var token = await conn.ExecuteScalarAsync<string?>(new CommandDefinition("""
@@ -49,7 +46,10 @@ sealed class ArtworkTokenRepository(NpgsqlDataSource dataSource) : IArtworkToken
 
     public async Task<ArtworkTokenResolution?> ResolveAsync(string token, CancellationToken ct)
     {
-        if (!IsWellFormed(token))
+        // The F88.2 non-enumerability guard (GenWave.Core.Domain.ArtworkToken, the ONE shared
+        // predicate — see its own remarks): a malformed token (wrong length, uppercase, non-hex)
+        // can never justify a database round trip.
+        if (!ArtworkToken.IsWellFormed(token))
             return null;
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
@@ -59,22 +59,5 @@ sealed class ArtworkTokenRepository(NpgsqlDataSource dataSource) : IArtworkToken
             cancellationToken: ct));
 
         return row is null ? null : new ArtworkTokenResolution(row.Value.Id, row.Value.Path);
-    }
-
-    /// <summary>
-    /// The F88.2 non-enumerability guard: rejects anything that is not exactly
-    /// <see cref="TokenLength"/> lowercase hex characters before a single query is issued — a
-    /// malformed token (wrong length, uppercase, non-hex) can never justify a database round trip.
-    /// </summary>
-    static bool IsWellFormed(string token)
-    {
-        if (token.Length != TokenLength)
-            return false;
-
-        foreach (var c in token)
-            if (c is not ((>= '0' and <= '9') or (>= 'a' and <= 'f')))
-                return false;
-
-        return true;
     }
 }

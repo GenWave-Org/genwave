@@ -34,6 +34,7 @@ using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
+using GenWave.Host.Catalog;
 using GenWave.Host.Options;
 using GenWave.Tts;
 
@@ -143,6 +144,15 @@ file sealed class NotUsedTtsVoiceLister : ITtsVoiceLister
         throw new NotSupportedException("Not exercised by Story123's preview scenarios.");
 }
 
+/// <summary>Unused-by-preview <see cref="ICatalogPersonaAvatarInstaller"/> double — the constructor
+/// dependency exists for the sibling import action (PLAN T297), never called by these preview
+/// scenarios.</summary>
+file sealed class NotUsedCatalogPersonaAvatarInstaller : ICatalogPersonaAvatarInstaller
+{
+    public Task InstallIfPresentAsync(long personaId, string catalogSlug, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story123's preview scenarios.");
+}
+
 /// <summary>Scriptable <see cref="IActivePersonaAccessor"/> double for the "neither personaId nor
 /// draft" default-to-active-persona case (F35.6).</summary>
 file sealed class FakeActivePersonaAccessor : IActivePersonaAccessor
@@ -219,6 +229,7 @@ file static class PreviewControllerFactory
             new NotUsedPersonaImportStore(),
             new NotUsedTtsVoiceLister(),
             new FakeStationClockProvider(DateTimeOffset.UtcNow),
+            new NotUsedCatalogPersonaAvatarInstaller(),
             NullLogger<PersonaController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },

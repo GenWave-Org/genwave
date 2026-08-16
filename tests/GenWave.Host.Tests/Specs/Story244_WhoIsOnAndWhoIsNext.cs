@@ -406,7 +406,10 @@ public static class FeatureWhoIsOnAndWhoIsNext
             // Live-wire exhaustive shape for the track state — SPEC F93.5's own inventory, proved
             // over HTTP rather than only against the DTO in isolation (Story183 owns that half).
             // Amended SPEC F116.4 (STORY-311, PLAN T251): show joins this set too — the showless
-            // segment below still resolves it to a present-but-null property.
+            // segment below still resolves it to a present-but-null property. Amended SPEC F129.2
+            // (STORY-335, PLAN T299): djAvatarUrl joins this set too — Station:PublicBaseUrl is
+            // unset here (as every other fact in this file leaves it), so it resolves to a
+            // present-but-null property, same as artworkUrl already does for an art-less track.
             await using var factory = BuildFactory(
                 [new ScheduleSegment(1, DayOfWeek.Wednesday, 0, Midnight, PersonaId: 1, null, null, null)],
                 out _, out var accessor);
@@ -417,7 +420,7 @@ public static class FeatureWhoIsOnAndWhoIsNext
             var properties = body.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
             Assert.Equal(
                 new HashSet<string>(
-                    ["title", "artist", "startedAt", "durationMs", "listeners", "dj", "show", "upNext", "artworkUrl", "state", "kind"]),
+                    ["title", "artist", "startedAt", "durationMs", "listeners", "dj", "djAvatarUrl", "show", "upNext", "artworkUrl", "state", "kind"]),
                 properties);
         }
     }
