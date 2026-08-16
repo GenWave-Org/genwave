@@ -210,10 +210,9 @@ builder.Services.AddSingleton<ArtworkService>();
 
 // The SPEC F128.6 upload-normalize pipeline (STORY-333, STORY-339, PLAN T291): bounded read →
 // magic-bytes gate → header-dims/APNG gate → ffmpeg center-crop-and-scale to a fresh 512×512 PNG.
-// Ships DI-dark at T291 (no Host call site consumes ImageNormalizeService yet, mirrors how the
-// four T290 stores shipped): PersonaAvatarController (T295) and StationImageController (T307) are
-// the first consumers. IImageProcessRunner is production-wired to FfmpegImageProcessRunner here
-// (internal, InternalsVisibleTo GenWave.Host.Tests); tests substitute a counting fake directly
+// Consumed by AvatarPackController (T293) and PersonaAvatarController (T295); StationImageController
+// (T307) is the next consumer. IImageProcessRunner is production-wired to FfmpegImageProcessRunner
+// here (internal, InternalsVisibleTo GenWave.Host.Tests); tests substitute a counting fake directly
 // against ImageNormalizeService's own constructor instead — no DI-container involvement needed
 // for that seam.
 builder.Services.AddSingleton<IImageProcessRunner, FfmpegImageProcessRunner>();

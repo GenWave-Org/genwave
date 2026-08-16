@@ -11,9 +11,8 @@ namespace GenWave.MediaLibrary.Station;
 /// <c>library</c> — the same "own connection string, own <see cref="Lazy{T}"/> data source" shape
 /// <see cref="ThemeServiceCollectionExtensions"/>'s own registration uses.
 ///
-/// T290 ships this registration deliberately without a Host call site consuming
-/// <see cref="IPersonaAvatarStore"/> anywhere (mirrors <see cref="ThemeServiceCollectionExtensions.AddThemeStore"/>'s
-/// own original shape): <c>PersonaAvatarController</c> (T295) is the first write consumer.
+/// <c>PersonaAvatarController</c> (T295) is the first write consumer of <see cref="IPersonaAvatarStore"/>
+/// registered here.
 /// </summary>
 public static class PersonaAvatarServiceCollectionExtensions
 {

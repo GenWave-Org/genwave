@@ -5,10 +5,10 @@ namespace GenWave.Core.Abstractions;
 /// <summary>
 /// SEAM (SPEC F128-F129, STORY-333, PLAN T290) — persistence for the worn face in
 /// <c>station.persona_avatar</c> (a 1:1 <c>station.persona</c> extension, the F33 <c>media_rating</c>
-/// precedent). Ships dark: no consumer lands with this seam yet — <c>PersonaAvatarController</c> (T295,
-/// the upload/remove/apply-from-pack write paths) and the Personas UI (T296) are the first Host call
-/// sites; <c>SpectatorArtworkController</c> (T298) and <c>ArtworkUrlResolver</c> (T300) are the first
-/// read consumers of <see cref="GetByTokenAsync"/>.
+/// precedent). <c>PersonaAvatarController</c> (T295, the upload/remove/apply-from-pack write paths) is
+/// the first Host call site; the Personas UI (T296), <c>SpectatorArtworkController</c> (T298), and
+/// <c>ArtworkUrlResolver</c> (T300, the first read consumer of <see cref="GetByTokenAsync"/>) are still
+/// to come.
 ///
 /// Deliberately a DUMB store — token generation and rotation policy belong to the caller (T295), not
 /// this seam: <see cref="UpsertAsync"/> takes a <see cref="PersonaAvatarInput"/> carrying an
