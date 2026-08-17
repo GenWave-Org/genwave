@@ -1,9 +1,10 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useState, type ChangeEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { readErrorMessage } from "@/lib/problem-details";
+import { useRestoreFocus } from "@/lib/use-restore-focus";
 import type { ThemeSummaryDto } from "./types";
 
 const LABEL_CLASSES = "block text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-accent-2";
@@ -97,10 +98,7 @@ export function SaveAsOwnModal({
   const [slugTouched, setSlugTouched] = useState(false);
   const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
 
-  const restoreFocusRef = useRef<HTMLElement | null | undefined>(undefined);
-  if (restoreFocusRef.current === undefined) {
-    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  }
+  const restoreFocus = useRestoreFocus("on-mount");
 
   function handleNameChange(event: ChangeEvent<HTMLInputElement>): void {
     const nextName = event.target.value;
@@ -169,10 +167,7 @@ export function SaveAsOwnModal({
         <Dialog.Content
           aria-label="Save as own theme"
           className="fixed left-1/2 top-1/2 z-50 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 flex-col rounded-[6px] border border-line bg-surface p-6 transition-opacity duration-200 ease-out focus:outline-none motion-reduce:transition-none"
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            restoreFocusRef.current?.focus();
-          }}
+          onCloseAutoFocus={restoreFocus.onCloseAutoFocus}
         >
           <Dialog.Title className="font-display text-[1.1rem] text-ink">Save as own theme</Dialog.Title>
           <Dialog.Description className="mt-1 text-[0.82rem] text-mute">

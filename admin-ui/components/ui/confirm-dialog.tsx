@@ -12,16 +12,19 @@ import {
 import * as Dialog from "@radix-ui/react-dialog";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
+import { useRestoreFocus } from "@/lib/use-restore-focus";
 
 // Wireless confirm-dialog conventions (.claude/skills/design-aesthetic,
 // SPEC F28.9/F28.14): the browser's native confirm prompt is removed in
 // favor of a modal that states the consequence in plain words. Focus trap
 // and Escape-to-cancel are Radix Dialog's job (FocusScope + DismissableLayer)
 // — we don't hand-roll either. Focus *restoration* is the one piece we wire
-// ourselves: Radix's built-in restore-on-close only knows how to refocus its
-// own <Dialog.Trigger>, and useConfirm() is imperative/headless — callers
-// never render one. So we capture whatever had focus when confirm() was
-// called and restore it explicitly via onCloseAutoFocus.
+// ourselves, via the shared useRestoreFocus hook (gh-#465): Radix's built-in
+// restore-on-close only knows how to refocus its own <Dialog.Trigger>, and
+// useConfirm() is imperative/headless — callers never render one. This
+// provider is the hook's ONE "imperative"-timing consumer: its Dialog.Root
+// mounts once for the whole authed shell, so the capture must ride each
+// confirm() call, not the mount (see the hook's own remarks).
 
 export interface ConfirmOptions {
   title: string;
@@ -57,9 +60,9 @@ export function ConfirmDialogProvider({ children }: ConfirmDialogProviderProps):
   // Mirrors `pending` so `settle` can resolve the in-flight promise without
   // taking a dependency on the state value (and re-creating on every render).
   const pendingRef = useRef<PendingConfirm | null>(null);
-  // What had focus right before confirm() opened the dialog — restored
-  // explicitly on close (see file header comment).
-  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  // What had focus right before confirm() opened the dialog — captured per
+  // call below, restored explicitly on close (see file header comment).
+  const restoreFocus = useRestoreFocus("imperative");
 
   const settle = useCallback((result: boolean) => {
     pendingRef.current?.resolve(result);
@@ -67,14 +70,17 @@ export function ConfirmDialogProvider({ children }: ConfirmDialogProviderProps):
     setPending(null);
   }, []);
 
-  const confirm = useCallback<ConfirmFn>((options) => {
-    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    return new Promise<boolean>((resolve) => {
-      const entry: PendingConfirm = { options, resolve };
-      pendingRef.current = entry;
-      setPending(entry);
-    });
-  }, []);
+  const confirm = useCallback<ConfirmFn>(
+    (options) => {
+      restoreFocus.capture();
+      return new Promise<boolean>((resolve) => {
+        const entry: PendingConfirm = { options, resolve };
+        pendingRef.current = entry;
+        setPending(entry);
+      });
+    },
+    [restoreFocus]
+  );
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
@@ -94,10 +100,7 @@ export function ConfirmDialogProvider({ children }: ConfirmDialogProviderProps):
       <DialogShell
         open={pending !== null}
         onOpenChange={handleOpenChange}
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          restoreFocusRef.current?.focus();
-        }}
+        onCloseAutoFocus={restoreFocus.onCloseAutoFocus}
       >
         {pending && (
           <>
