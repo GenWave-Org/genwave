@@ -14,8 +14,8 @@
 // ABudgetDroppedRenderProducesNoKindedRow) drive real StationEvents through the REAL
 // BoothLogWriter/BoothLogDrainService pipeline into the real (test) database — the same
 // production-pipeline discipline Story215_BoothLogPersonaStamp.cs's own DriveThroughAsync uses —
-// because the write-side types (BoothLogWriter, BoothLogDrainService, BoothLogEntryRequest) are
-// internal to GenWave.MediaLibrary, and a fake store would never prove the real INSERT column-list
+// because the write-side types (BoothLogWriter, BoothLogDrainService) are internal to
+// GenWave.MediaLibrary, and a fake store would never prove the real INSERT column-list
 // wiring honestly. `segment_kind` is deliberately read back with a raw query rather than through
 // BoothLogRepository.ReadAsync/BoothLogEntry — F113.3 keeps the read path untouched this cycle, so
 // the column has no projection to assert against yet.
@@ -90,7 +90,7 @@ public static class FeatureAiredKindStamp
     /// </summary>
     static async Task DriveThroughAsync(DatabaseFixture db, params StationEvent[] events)
     {
-        var channel = Channel.CreateBounded<BoothLogEntryRequest>(16);
+        var channel = Channel.CreateBounded<BoothLogAppendRequest>(16);
         var writer = new BoothLogWriter(channel.Writer, new NullPersonaAccessor(), NullLogger<BoothLogWriter>.Instance);
         var drain = new BoothLogDrainService(channel.Reader, Store(db), NullLogger<BoothLogDrainService>.Instance);
 

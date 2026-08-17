@@ -121,6 +121,11 @@ services:
       ollama:
         condition: service_healthy
     restart: "no"
+    labels:
+      # gh-#283: utility container — the Health page's dockerproxy stats skip anything
+      # carrying this label (see DockerContainerStatsSource). Tag future one-shot /
+      # ephemeral helpers the same way instead of hardcoding names in the api.
+      genwave.role: utility
 
   icecast:
     image: ghcr.io/genwave-org/genwave-icecast:home-v5.2.1   # bump per release

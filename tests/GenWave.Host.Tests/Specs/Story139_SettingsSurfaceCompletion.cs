@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Api;
@@ -53,15 +54,18 @@ file sealed class FakeSettingsStore : IStationSettingsStore
 
 /// <summary>TTS segment source double whose render can be delayed to exercise the render-budget
 /// timeout path — mirrors Orchestration.Tests' FakeTtsSegmentSource.RenderDelay (not reusable here:
-/// test projects don't reference each other).</summary>
-file sealed class DelayableTtsSegmentSource : ITtsSegmentSource
+/// test projects don't reference each other). The delay rides the injected
+/// <see cref="TimeProvider"/> — the SAME fake clock the orchestrator's budget delay reads
+/// (gh-#554) — so a spec advances time instead of sleeping, and the render-vs-budget race is
+/// decided by fake-clock due-order, never wall-clock scheduling.</summary>
+file sealed class DelayableTtsSegmentSource(TimeProvider timeProvider) : ITtsSegmentSource
 {
     public TimeSpan RenderDelay { get; set; } = TimeSpan.Zero;
 
     public async Task<MediaItem?> RenderAsync(SegmentRequest request, CancellationToken ct)
     {
         if (RenderDelay > TimeSpan.Zero)
-            await Task.Delay(RenderDelay, ct);
+            await Task.Delay(RenderDelay, timeProvider, ct);
         return new MediaItem("tts:seg", "/tts/seg.wav", request.StationName, new CoreLoudness(-16.0, -1.0, true));
     }
 }
@@ -154,6 +158,10 @@ public static class FeatureSettingsSurfaceCompletion
             // A boot-frozen TimeSpan (the pre-V8 design) would keep dropping the segment forever
             // once constructed short — this proves the SAME Orchestrator instance honors a live
             // widen with no re-construction (SPEC F44.2, mirrors Story135's rotation-depth proof).
+            // Deterministic (gh-#554): the render delay AND the orchestrator's budget delay both
+            // ride the SAME FakeTimeProvider, so each race is decided by fake-clock due-order —
+            // full-suite load contention cannot flip the winner.
+            var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero));
             var identityProvider = new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", "default"));
             var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
             var cadenceProvider = new FakeCadenceProvider(new CadenceConfig
@@ -166,29 +174,36 @@ public static class FeatureSettingsSurfaceCompletion
             var catalog = new FakeMediaCatalog(new MediaReference(
                 "m1", "/media/m1.mp3", "Track 1", new CoreLoudness(-23.0, -1.0, true),
                 null, null, null, null, null, null, null, null));
-            var tts = new DelayableTtsSegmentSource { RenderDelay = TimeSpan.FromMilliseconds(300) };
-            var budgetProvider = new FakeRenderBudgetProvider(TimeSpan.FromMilliseconds(20));
+            var tts = new DelayableTtsSegmentSource(time) { RenderDelay = TimeSpan.FromSeconds(10) };
+            var budgetProvider = new FakeRenderBudgetProvider(TimeSpan.FromSeconds(1));
 
             var musicSelectionPolicy = new MusicSelectionPolicy(catalog, NullLogger<MusicSelectionPolicy>.Instance);
             var orchestrator = new Orchestrator(
                 identityProvider, scopeProvider, cadenceProvider, rotationProvider, musicSelectionPolicy, tts,
                 new NoOpActivePersonaAccessor(), NullLogger<Orchestrator>.Instance, budgetProvider,
-                new SpeechDeferralQueue(TimeProvider.System),
-                TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero));
+                new SpeechDeferralQueue(time),
+                time, new FakeBoundaryBiasProvider(TimeSpan.Zero));
             var ctx = new PlayoutContext([]);
 
-            // Unit 1 — budget (20ms) is far shorter than the render delay (300ms): the lead-in is
-            // dropped and the first pulled item is music.
-            var firstItem = await orchestrator.GetNextAsync(ctx, CancellationToken.None);
+            // Unit 1 — budget (1s) is far shorter than the render delay (10s): the budget timer is
+            // due first, the lead-in is dropped, and the first pulled item is music. GetNextAsync
+            // parks at the render-vs-budget race with both fake timers already registered (every
+            // other await on the path completes synchronously), so Advance decides the race.
+            var firstPull = orchestrator.GetNextAsync(ctx, CancellationToken.None);
+            time.Advance(TimeSpan.FromSeconds(10));
+            var firstItem = await firstPull;
             Assert.NotNull(firstItem);
             Assert.False(firstItem.MediaId.StartsWith("tts:", StringComparison.Ordinal));
 
             // The live edit: no re-construction, no restart — same provider instance, new value.
-            budgetProvider.Budget = TimeSpan.FromSeconds(5);
+            budgetProvider.Budget = TimeSpan.FromMinutes(1);
 
-            // Unit 2 — the SAME orchestrator, now with a budget comfortably longer than the
-            // render delay: the lead-in succeeds and is pulled first.
-            var secondItem = await orchestrator.GetNextAsync(ctx, CancellationToken.None);
+            // Unit 2 — the SAME orchestrator, now with a budget (60s) comfortably longer than the
+            // render delay (10s): the render timer is due first, the lead-in succeeds and is pulled
+            // first. A frozen 1s budget would still be due before the render and fail this.
+            var secondPull = orchestrator.GetNextAsync(ctx, CancellationToken.None);
+            time.Advance(TimeSpan.FromSeconds(10));
+            var secondItem = await secondPull;
             Assert.NotNull(secondItem);
             Assert.StartsWith("tts:", secondItem.MediaId, StringComparison.Ordinal);
         }

@@ -30,11 +30,11 @@ public static class FeatureCrosstalkBoothStamp
     }
 
     /// <summary>Publishes <paramref name="evt"/> through the real <see cref="BoothLogWriter"/> and
-    /// reads back the ONE <see cref="BoothLogEntryRequest"/> it queued — no drain, no database (this
+    /// reads back the ONE <see cref="BoothLogAppendRequest"/> it queued — no drain, no database (this
     /// file's own concern stops at the stamp <see cref="BoothLogWriter"/> itself builds).</summary>
-    static async Task<BoothLogEntryRequest> PublishAndCaptureAsync(StationEvent evt)
+    static async Task<BoothLogAppendRequest> PublishAndCaptureAsync(StationEvent evt)
     {
-        var channel = Channel.CreateBounded<BoothLogEntryRequest>(1);
+        var channel = Channel.CreateBounded<BoothLogAppendRequest>(1);
         var writer = new BoothLogWriter(channel.Writer, new NullPersonaAccessor(), NullLogger<BoothLogWriter>.Instance);
 
         writer.Publish(evt);

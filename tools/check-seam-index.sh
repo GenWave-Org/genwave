@@ -34,7 +34,7 @@ seams="SEAMS.md"
 
 if [[ ! -f "$seams" ]]; then
   echo "❌ $seams is missing from the repo root." >&2
-  echo "Fix: dotnet run --project tools/SeamIndexGenerator" >&2
+  echo "Fix: dotnet run --project tools/SeamIndexGenerator --configuration Release" >&2
   exit 1
 fi
 
@@ -51,6 +51,6 @@ fi
 echo "❌ $seams is stale — it does not match a fresh generation. Diff:" >&2
 diff -u --label "SEAMS.md (committed)" --label "SEAMS.md (freshly generated)" "$seams" "$fresh" >&2 || true
 echo "" >&2
-echo "Fix: dotnet run --project tools/SeamIndexGenerator, then commit SEAMS.md. (SPEC F105.6)" >&2
+echo "Fix: dotnet run --project tools/SeamIndexGenerator --configuration Release, then commit SEAMS.md. (SPEC F105.6)" >&2
 
 exit 1

@@ -1,8 +1,9 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { useRestoreFocus } from "@/lib/use-restore-focus";
 import { PersonaExportLink } from "./PersonaExportLink";
 import type { PersonaDto } from "./types";
 
@@ -42,12 +43,9 @@ export function FireModal({ persona, isFiring, onCancel, onConfirmFire }: FireMo
   const [skipExport, setSkipExport] = useState(false);
   const canDelete = hasExported || skipExport;
 
-  // Same "capture before the dialog steals focus" idiom as `PersonaCardReviewModal`/
-  // `confirm-dialog.tsx` — this component has no `Dialog.Trigger` Radix could refocus on its own.
-  const restoreFocusRef = useRef<HTMLElement | null | undefined>(undefined);
-  if (restoreFocusRef.current === undefined) {
-    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  }
+  // "Capture before the dialog steals focus" (gh-#465's shared hook) — this component mounts
+  // fresh per open with no `Dialog.Trigger` Radix could refocus on its own.
+  const restoreFocus = useRestoreFocus("on-mount");
 
   return (
     <Dialog.Root
@@ -61,10 +59,7 @@ export function FireModal({ persona, isFiring, onCancel, onConfirmFire }: FireMo
         <Dialog.Content
           aria-label={`Fire ${persona.name}`}
           className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-surface p-6 transition-opacity duration-200 ease-out focus:outline-none motion-reduce:transition-none"
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            restoreFocusRef.current?.focus();
-          }}
+          onCloseAutoFocus={restoreFocus.onCloseAutoFocus}
         >
           <Dialog.Title className="font-display text-[1.1rem] text-ink">
             Fire &quot;{persona.name}&quot;?

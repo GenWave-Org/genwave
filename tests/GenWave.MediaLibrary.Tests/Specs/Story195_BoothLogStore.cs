@@ -81,7 +81,7 @@ public static class FeatureBoothLogStore
             // REAL production pipeline: BoothLogWriter (the IStationEventSink consumer) enqueues,
             // BoothLogDrainService's real per-item work persists via the real BoothLogRepository...
             await db.ResetBoothLogAsync();
-            var channel = Channel.CreateBounded<BoothLogEntryRequest>(16);
+            var channel = Channel.CreateBounded<BoothLogAppendRequest>(16);
             var writer = new BoothLogWriter(channel.Writer, new NoActivePersonaAccessor(), NullLogger<BoothLogWriter>.Instance);
             var store = Store(db);
             var drain = new BoothLogDrainService(channel.Reader, store, NullLogger<BoothLogDrainService>.Instance);
@@ -111,7 +111,7 @@ public static class FeatureBoothLogStore
         {
             // Given an event kind the booth log has no narrative for (a library mutation)...
             await db.ResetBoothLogAsync();
-            var channel = Channel.CreateBounded<BoothLogEntryRequest>(16);
+            var channel = Channel.CreateBounded<BoothLogAppendRequest>(16);
             var writer = new BoothLogWriter(channel.Writer, new NoActivePersonaAccessor(), NullLogger<BoothLogWriter>.Instance);
 
             // When it is published through the real consumer...

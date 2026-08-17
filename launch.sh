@@ -3,6 +3,8 @@
 #
 # Building is build.sh's job; this script just (re)launches. Compose will still build any
 # missing image for a service that has a build: context, so a first launch works too.
+# After a successful up it reports what it is actually running — built-image ages on the
+# dev flow, the pinned tags under --pinned (gh-#351: stale images used to verify silently).
 #
 # Single-station stack. Everything is published on localhost — no proxy, no FQDNs.
 #
@@ -215,6 +217,118 @@ wait_db_healthy() {
   return 1
 }
 
+# --- gh-#351: what is this launch actually running? --------------------------------------
+# launch.sh never (re)builds (see the header — that's build.sh's job), so a dev box can
+# `up` week-old images and quietly verify the OLD code. After a successful up, print the
+# facts: which locally-built images came up and how old they are (dev flow), or which
+# pinned tags came up (--pinned, where an image date means nothing — the tag is the fact).
+# INFORMATIONAL ONLY, ruled on gh-#351: no implicit build, no staleness heuristic, no
+# prompt. Every call in here is guarded and both call sites add `|| true` — a readout must
+# never fail a launch that already succeeded.
+
+# The services with a build: context, read from the rendered compose config — derived, not
+# hardcoded, so the list can't rot when a service is added or changes posture. The render
+# is profile-aware, so this is exactly the built set THIS launch ran. Rendered output is
+# normalized: service names sit at two-space indent under `services:`, their keys at four —
+# which is all the parsing this needs.
+built_services() {
+  compose config 2>/dev/null | awk '
+    /^services:/                 { in_services = 1; next }
+    in_services && /^[^ ]/       { in_services = 0 }       # left the services: block
+    in_services && /^  [^ ]/     { svc = $1; sub(/:.*$/, "", svc); next }
+    in_services && /^    build:/ { print svc }
+  ' || true
+}
+
+# "built 6 days ago" from a created/now epoch pair. Under two minutes reads "built just
+# now" — the first-launch case, where compose itself just built the missing image on the
+# way up. Unit boundaries (120s/120m/48h) are chosen so a count of 1 never prints, which is
+# what lets every phrase pluralize without a grammar branch.
+age_phrase() {
+  local created_epoch="$1" now_epoch="$2"
+  local delta=$(( now_epoch - created_epoch ))
+  if [ "$delta" -lt 120 ]; then
+    echo "built just now"
+  elif [ "$delta" -lt 7200 ]; then
+    echo "built $(( delta / 60 )) minutes ago"
+  elif [ "$delta" -lt 172800 ]; then
+    echo "built $(( delta / 3600 )) hours ago"
+  else
+    echo "built $(( delta / 86400 )) days ago"
+  fi
+}
+
+# Dev-flow readout: one line per locally-built service with its image's CreatedAt age, then
+# the one hint that matters. Age comes from the service's CONTAINER's image, not an image-
+# name lookup: whatever the container holds is by definition what this launch is playing
+# out. A ⚠ marks an image meaningfully older than the newest — same-build.sh siblings
+# finish minutes apart, so anything over an hour behind missed a rebuild.
+print_built_image_ages() {
+  local services svc cid image_id created created_epoch now_epoch newest_epoch i
+  local names=() epochs=()
+
+  services="$(built_services)"
+  [ -n "$services" ] || return 0   # config unreadable, or nothing locally built: say nothing
+
+  now_epoch="$(date +%s)"
+  newest_epoch=0
+  for svc in $services; do
+    # -a: a container that came up and already stopped still names the image it ran.
+    cid="$(compose ps -a -q "$svc" 2>/dev/null | head -n1 || true)"
+    created=""
+    if [ -n "$cid" ]; then
+      image_id="$(docker inspect "$cid" --format '{{.Image}}' 2>/dev/null || true)"
+      if [ -n "$image_id" ]; then
+        created="$(docker image inspect "$image_id" --format '{{.Created}}' 2>/dev/null || true)"
+      fi
+    fi
+    created_epoch=""
+    if [ -n "$created" ]; then
+      created_epoch="$(date -d "$created" +%s 2>/dev/null || true)"
+    fi
+    # No container, no image, or an unparseable date (a first launch mid-build, a coy
+    # daemon): report it as freshly built rather than erroring — "built just now" is the
+    # honest reading of an image compose only just produced.
+    if [ -z "$created_epoch" ]; then
+      created_epoch="$now_epoch"
+    fi
+    names+=("$svc")
+    epochs+=("$created_epoch")
+    if [ "$created_epoch" -gt "$newest_epoch" ]; then
+      newest_epoch="$created_epoch"
+    fi
+  done
+  [ "${#names[@]}" -gt 0 ] || return 0
+
+  echo
+  echo "==> built-image ages (informational — launching never rebuilds, gh-#351)"
+  for i in "${!names[@]}"; do
+    if [ $(( newest_epoch - ${epochs[$i]} )) -gt 3600 ]; then
+      printf '    %-12s %s  ⚠ older than the newest build\n' "${names[$i]}" "$(age_phrase "${epochs[$i]}" "$now_epoch")"
+    else
+      printf '    %-12s %s\n' "${names[$i]}" "$(age_phrase "${epochs[$i]}" "$now_epoch")"
+    fi
+  done
+  echo "    Run ./build.sh (or BUILD=1 ./launch.sh) to rebuild from source."
+}
+
+# --pinned readout: the tags being run. The repo's own published images all live under
+# ghcr.io/genwave-org/ — that registry path IS the built-vs-pulled split on a pinned box
+# (upstream pulls like postgres/ollama age on someone else's schedule; nothing to report).
+# No rebuild hint here: --pinned never builds, and telling an appliance operator to run
+# build.sh would be exactly the wrong advice.
+print_pinned_image_tags() {
+  local tags tag
+  tags="$(compose config --images 2>/dev/null | grep '^ghcr\.io/genwave-org/' | sort -u || true)"
+  [ -n "$tags" ] || return 0
+
+  echo
+  echo "==> pinned images this launch is running (gh-#351)"
+  while IFS= read -r tag; do
+    printf '    %s\n' "$tag"
+  done <<< "$tags"
+}
+
 if [ "$PINNED" = "1" ]; then
   # --- pinned/demo flow: pull -> db up -> migrate.sh -> up -d, never builds --------------
   # Re-run hint carrying the flags this launch was actually given — the bare "--pinned"
@@ -235,6 +349,7 @@ if [ "$PINNED" = "1" ]; then
     plan_line "docker image prune -af --filter until=168h (success-path hygiene, gh-#441)"
     plan_line "docker builder prune -af"
     plan_line "$(compose_display) ps"
+    plan_line "report pinned image tags — $(compose_display) config --images (informational, gh-#351)"
     plan_profiles
     exit 0
   fi
@@ -322,6 +437,8 @@ if [ "$PINNED" = "1" ]; then
 
   echo "==> stack status"
   compose ps
+
+  print_pinned_image_tags || true
   exit 0
 fi
 
@@ -341,6 +458,7 @@ if [ "$DRY_RUN" = "1" ]; then
   plan_line "$(compose_display) up ${UP_ARGS[*]}"
   plan_line "record COMPOSE_FILE=$(compose_file_value) in .env (gh-#309)"
   plan_line "$(compose_display) ps"
+  plan_line "report built-image ages — $(compose_display) config + docker image inspect (informational, gh-#351)"
   plan_profiles
   exit 0
 fi
@@ -411,3 +529,5 @@ printf '    %-12s %s\n' "Admin UI" "http://localhost:3000/"
 printf '    %-12s %s\n' "API"      "http://localhost:8080/  (health: /health)"
 printf '    %-12s %s\n' "Stream"   "http://localhost:8000/stream"
 printf '    %-12s %s\n' "Icecast"  "http://localhost:8000/  (status page)"
+
+print_built_image_ages || true
