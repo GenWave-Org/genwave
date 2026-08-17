@@ -13,7 +13,7 @@ namespace GenWave.MediaLibrary.Station;
 /// failed append is logged and the entry dropped (never retried, never crashes the loop), per the
 /// sink contract's "must never affect playout" posture.
 ///
-/// <see cref="BoothLogEntryRequest.PersonaId"/> (SPEC F84.6, STORY-215) arrives here already resolved
+/// <see cref="BoothLogAppendRequest.PersonaId"/> (SPEC F84.6, STORY-215) arrives here already resolved
 /// — <see cref="BoothLogWriter.Publish"/> captured it SYNCHRONOUSLY at air time, before the entry ever
 /// reached this queue. This loop persists it verbatim and never calls
 /// <see cref="IActivePersonaAccessor"/> itself: re-resolving here, at drain time, would mis-stamp a
@@ -22,23 +22,23 @@ namespace GenWave.MediaLibrary.Station;
 /// inferred after the fact" failure F84.6 rules out. A persona deleted between air and this drain is
 /// an append-time (FK) concern, degraded inside <c>BoothLogRepository.AppendAsync</c>, not here.
 ///
-/// <see cref="BoothLogEntryRequest.Pick"/> (SPEC F86.1, STORY-217, PLAN T73) arrives the same way —
+/// <see cref="BoothLogAppendRequest.Pick"/> (SPEC F86.1, STORY-217, PLAN T73) arrives the same way —
 /// already resolved to its final jsonb text (or <see langword="null"/>) by
 /// <see cref="BoothLogWriter.Publish"/> — and is persisted verbatim, never re-serialized or
 /// re-derived here.
 ///
-/// <see cref="BoothLogEntryRequest.SegmentKind"/> (SPEC F113.1, STORY-304, PLAN T220) arrives the
+/// <see cref="BoothLogAppendRequest.SegmentKind"/> (SPEC F113.1, STORY-304, PLAN T220) arrives the
 /// same way — already stringified (or <see langword="null"/>) by <see cref="BoothLogWriter.Publish"/>
 /// — and is persisted verbatim.
 ///
-/// <see cref="BoothLogEntryRequest.ShowId"/> (SPEC F121.1, STORY-310, PLAN T242) arrives the same
+/// <see cref="BoothLogAppendRequest.ShowId"/> (SPEC F121.1, STORY-310, PLAN T242) arrives the same
 /// way — already resolved off <c>IActivePersonaAccessor.ActiveShowId</c> by
 /// <see cref="BoothLogWriter.Publish"/> at air time — and is persisted verbatim; no FK to degrade
-/// (F121.1: history outlives the entity), so unlike <see cref="BoothLogEntryRequest.PersonaId"/> it
+/// (F121.1: history outlives the entity), so unlike <see cref="BoothLogAppendRequest.PersonaId"/> it
 /// has no append-time retry concern for <c>BoothLogRepository</c> to handle either.
 /// </summary>
 sealed class BoothLogDrainService(
-    ChannelReader<BoothLogEntryRequest> queue,
+    ChannelReader<BoothLogAppendRequest> queue,
     IBoothLogAppender store,
     ILogger<BoothLogDrainService> logger) : BackgroundService
 {
@@ -53,20 +53,13 @@ sealed class BoothLogDrainService(
     /// testable seam (STORY-195) so a DB-backed spec can drive one entry through the real append +
     /// retention path without needing to run (and poll) the hosted background loop itself.
     /// </summary>
-    internal async Task ProcessAsync(BoothLogEntryRequest request, CancellationToken ct)
+    internal async Task ProcessAsync(BoothLogAppendRequest request, CancellationToken ct)
     {
         try
         {
-            // Recorded carry-forward (T220 review, still only half-closed): BoothLogEntryRequest and
-            // BoothLogAppendRequest duplicate these same 8 fields positionally — this mapping exists
-            // only because the two types are two records, not one. Not merged now (out of this task's
-            // scope); merge candidate is passing BoothLogEntryRequest straight onto the channel and
-            // dropping BoothLogAppendRequest as a separate type.
-            await store.AppendAsync(
-                new BoothLogAppendRequest(
-                    request.Kind, request.Summary, request.PersonaId, request.Artist, request.Pick,
-                    request.MediaId, request.SegmentKind, request.ShowId),
-                ct);
+            // gh-#464 (the T220 review carry-forward, now closed): BoothLogWriter queues the appender's
+            // own BoothLogAppendRequest, so there is no per-field mapping here to forget a new stamp in.
+            await store.AppendAsync(request, ct);
         }
         catch (OperationCanceledException)
         {

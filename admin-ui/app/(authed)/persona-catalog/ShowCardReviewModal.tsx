@@ -1,11 +1,12 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { readErrorMessage } from "@/lib/problem-details";
+import { useRestoreFocus } from "@/lib/use-restore-focus";
 import { BestForChips, MatureBadge } from "./catalog-badges";
 import { parseShowCardReview, type ShowCardReview } from "./show-card-review";
 import type { CatalogEntryDetailDto } from "./types";
@@ -193,10 +194,7 @@ export function ShowCardReviewModal({
     [entryState]
   );
 
-  const restoreFocusRef = useRef<HTMLElement | null | undefined>(undefined);
-  if (restoreFocusRef.current === undefined) {
-    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  }
+  const restoreFocus = useRestoreFocus("on-mount");
 
   async function handleConfirm(): Promise<void> {
     if (entryState.kind !== "loaded" || review === null || status.kind === "importing") return;
@@ -249,10 +247,7 @@ export function ShowCardReviewModal({
         <Dialog.Content
           aria-label="Review show"
           className="fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 flex-col rounded-[6px] border border-line bg-surface p-6 transition-opacity duration-200 ease-out focus:outline-none motion-reduce:transition-none"
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            restoreFocusRef.current?.focus();
-          }}
+          onCloseAutoFocus={restoreFocus.onCloseAutoFocus}
         >
           <div className="flex flex-wrap items-center gap-2">
             <Dialog.Title className="font-display text-[1.1rem] text-ink">
