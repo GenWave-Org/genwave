@@ -8,7 +8,7 @@
 # (x86_64 + aarch64), so `pip install` never compiles anything on either arch.
 
 # PIN — bookworm variant named explicitly so a Debian base jump is always a deliberate bump.
-FROM python:3.12-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 # onnxruntime's manylinux wheel links libgomp, which the slim base does not carry.
 RUN apt-get update -qq \

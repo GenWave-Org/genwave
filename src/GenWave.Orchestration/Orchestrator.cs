@@ -1298,7 +1298,10 @@ public sealed class Orchestrator(
         foreach (var (request, renderTask, contextProviderKey, observeDuration) in pendingRenders)
         {
             var kind = request.Kind;
-            var winner = await Task.WhenAny(renderTask, Task.Delay(renderBudget, ct));
+            // The budget delay rides the injected timeProvider (gh-#554) — behavior-identical under
+            // TimeProvider.System, but it lets a spec drive this race off a fake clock's due-order
+            // instead of wall-clock timer scheduling, which full-suite load contention can skew.
+            var winner = await Task.WhenAny(renderTask, Task.Delay(renderBudget, timeProvider, ct));
 
             if (winner != renderTask)
             {

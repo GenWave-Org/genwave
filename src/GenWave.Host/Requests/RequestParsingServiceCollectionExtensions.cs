@@ -14,7 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 /// <para>
 /// The queue is registered as bare <see cref="ChannelReader{T}"/>/<see cref="ChannelWriter{T}"/>
 /// singletons, deliberately NOT the enclosing <see cref="Channel{T}"/> itself — contrast
-/// <c>BoothLogServiceCollectionExtensions</c>'s own <c>Channel&lt;BoothLogEntryRequest&gt;</c>
+/// <c>BoothLogServiceCollectionExtensions</c>'s own <c>Channel&lt;BoothLogAppendRequest&gt;</c>
 /// registration. <c>GenWave.MediaLibrary.MediaLibraryServiceCollectionExtensions</c> already owns the
 /// ONE <see cref="Channel{T}"/> of <see langword="long"/> in this container (the enrich-delta queue
 /// <c>EnrichmentService</c> drains) — a second bare <c>Channel&lt;long&gt;</c> registration here

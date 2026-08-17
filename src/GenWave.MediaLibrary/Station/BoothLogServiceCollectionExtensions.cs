@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -45,10 +46,10 @@ public static class BoothLogServiceCollectionExtensions
         // generous headroom. BoothLogWriter's Publish call uses TryWrite (never WriteAsync), so a
         // full queue drops the newest entry with a WARN instead of ever blocking the feeder tick or
         // a TTS render.
-        services.AddSingleton(Channel.CreateBounded<BoothLogEntryRequest>(
+        services.AddSingleton(Channel.CreateBounded<BoothLogAppendRequest>(
             new BoundedChannelOptions(512) { FullMode = BoundedChannelFullMode.Wait }));
-        services.AddSingleton(sp => sp.GetRequiredService<Channel<BoothLogEntryRequest>>().Reader);
-        services.AddSingleton(sp => sp.GetRequiredService<Channel<BoothLogEntryRequest>>().Writer);
+        services.AddSingleton(sp => sp.GetRequiredService<Channel<BoothLogAppendRequest>>().Reader);
+        services.AddSingleton(sp => sp.GetRequiredService<Channel<BoothLogAppendRequest>>().Writer);
 
         services.AddSingleton<BoothLogWriter>();
         services.AddSingleton<IBoothLogEventConsumer>(sp => sp.GetRequiredService<BoothLogWriter>());

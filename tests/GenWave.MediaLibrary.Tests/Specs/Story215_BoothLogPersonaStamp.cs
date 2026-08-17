@@ -74,7 +74,7 @@ public static class FeatureBoothLogPersonaStamp
     /// </summary>
     static async Task DriveThroughAsync(DatabaseFixture db, Persona? activePersona, params StationEvent[] events)
     {
-        var channel = Channel.CreateBounded<BoothLogEntryRequest>(16);
+        var channel = Channel.CreateBounded<BoothLogAppendRequest>(16);
         var writer = new BoothLogWriter(
             channel.Writer, new FakeActivePersonaAccessor(activePersona), NullLogger<BoothLogWriter>.Instance);
         var drain = new BoothLogDrainService(channel.Reader, Store(db), NullLogger<BoothLogDrainService>.Instance);
@@ -233,7 +233,7 @@ public static class FeatureBoothLogPersonaStamp
             var personaBId = await CreatePersonaAsync(db, "Rook");
             var accessor = new FakeActivePersonaAccessor(APersona(personaAId, "Nova"));
 
-            var channel = Channel.CreateBounded<BoothLogEntryRequest>(16);
+            var channel = Channel.CreateBounded<BoothLogAppendRequest>(16);
             var writer = new BoothLogWriter(channel.Writer, accessor, NullLogger<BoothLogWriter>.Instance);
             var drain = new BoothLogDrainService(channel.Reader, Store(db), NullLogger<BoothLogDrainService>.Instance);
 
@@ -302,7 +302,7 @@ public static class FeatureBoothLogPersonaStamp
             var personaId = await CreatePersonaAsync(db, "Nova");
             var accessor = new FakeActivePersonaAccessor(APersona(personaId, "Nova"));
 
-            var channel = Channel.CreateBounded<BoothLogEntryRequest>(16);
+            var channel = Channel.CreateBounded<BoothLogAppendRequest>(16);
             var writer = new BoothLogWriter(channel.Writer, accessor, NullLogger<BoothLogWriter>.Instance);
             writer.Publish(ATrackAiring());
             var request = await channel.Reader.ReadAsync();

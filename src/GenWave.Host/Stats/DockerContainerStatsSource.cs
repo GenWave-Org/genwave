@@ -23,6 +23,13 @@ using GenWave.Host.Options;
 /// (Program.cs) — generous against the ~1s a one-shot stats read blocks by design (the daemon
 /// takes the two cpu samples the percentage needs).
 /// </para>
+/// <para>
+/// Utility containers are invisible (gh-#283): a compose service labeled
+/// <c>genwave.role: utility</c> (ollama-init today — one-shot/ephemeral helpers generally) is
+/// dropped from the roster before any per-container read, so every consumer of the report
+/// (health cards, admin UI) inherits the exclusion. The label is the contract — new helpers get
+/// the label in compose, never a name hardcoded here.
+/// </para>
 /// </summary>
 public sealed class DockerContainerStatsSource(
     HttpClient http,
@@ -30,6 +37,8 @@ public sealed class DockerContainerStatsSource(
     ILogger<DockerContainerStatsSource> logger)
 {
     const string ComposeServiceLabel = "com.docker.compose.service";
+    const string RoleLabel = "genwave.role";
+    const string UtilityRole = "utility";
 
     public async Task<ContainerStatsReportDto> GetReportAsync(CancellationToken ct)
     {
@@ -53,9 +62,22 @@ public sealed class DockerContainerStatsSource(
             return new ContainerStatsReportDto(true, $"Container stats sidecar unreachable at {baseUrl}.", []);
         }
 
-        var rows = await Task.WhenAll(summaries.Select(summary => BuildRowAsync(baseUrl, summary, ct)));
+        var rows = await Task.WhenAll(summaries
+            .Where(summary => !IsUtility(summary))
+            .Select(summary => BuildRowAsync(baseUrl, summary, ct)));
         return new ContainerStatsReportDto(false, null, rows.OrderBy(row => row.Name, StringComparer.Ordinal).ToArray());
     }
+
+    /// <summary>
+    /// The gh-#283 exclusion contract: a container labeled <c>genwave.role: utility</c> is a
+    /// one-shot/ephemeral helper (compose labels ride into <c>/containers/json</c>'s
+    /// <c>Labels</c>), so the Health page never lists it — an exited ollama-init is routine, not
+    /// a red card. Value match is case-insensitive, same tolerance as the running-state check.
+    /// Public static so the contract is spec-pinned directly.
+    /// </summary>
+    public static bool IsUtility(DockerContainerSummary summary) =>
+        summary.Labels.TryGetValue(RoleLabel, out var role) &&
+        string.Equals(role, UtilityRole, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// A compose-managed container names its service via the <c>com.docker.compose.service</c>

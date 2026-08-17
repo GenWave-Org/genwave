@@ -20,7 +20,9 @@ public static class FeatureContainerStatsSource
     const string BaseUrl = "http://proxy.test:2375";
 
     // Real /containers/json shape: PascalCase, leading-slash names, compose labels on managed
-    // containers. Row 1 is compose-managed + running; row 2 is an unlabeled exited container.
+    // containers. Row 1 is compose-managed + running; row 2 is an unlabeled exited container;
+    // row 3 is a running utility container (gh-#283: `genwave.role: utility`, ollama-init's
+    // shape mid-pull) that the report must never surface.
     const string ContainerListJson = """
         [
           {
@@ -41,6 +43,18 @@ public static class FeatureContainerStatsSource
             "State": "exited",
             "Status": "Exited (0) 2 hours ago",
             "Labels": {}
+          },
+          {
+            "Id": "eb5f7c9a11d24f60b83a55c0de176a3390c47eab5cf1de60b21a9f03c655d8f2",
+            "Names": ["/genwave-ollama-init-1"],
+            "Image": "ollama/ollama:0.9.6",
+            "State": "running",
+            "Status": "Up 15 seconds",
+            "Labels": {
+              "com.docker.compose.project": "genwave",
+              "com.docker.compose.service": "ollama-init",
+              "genwave.role": "utility"
+            }
           }
         ]
         """;
@@ -163,7 +177,8 @@ public static class FeatureContainerStatsSource
         [Fact]
         public async Task RowsAreNameSorted()
         {
-            // Given the two-container stack ("api", "standalone-box")
+            // Given the three-container stack — the utility row never surfaces, see
+            // ScenarioUtilityContainersAreInvisible
             var source = Source(HealthyStackHandler());
 
             // When the report is built
@@ -171,6 +186,41 @@ public static class FeatureContainerStatsSource
 
             // Then rows come back in stable name order
             Assert.Equal(["api", "standalone-box"], report.Containers.Select(row => row.Name).ToArray());
+        }
+    }
+
+    public sealed class ScenarioUtilityContainersAreInvisible
+    {
+        [Fact]
+        public async Task UtilityLabeledRowNeverReachesTheReport()
+        {
+            // Given the stack's third container carrying `genwave.role: utility` (gh-#283:
+            // ollama-init's shape — a one-shot helper mid-pull, running right now)
+            var source = Source(HealthyStackHandler());
+
+            // When the report is built
+            var report = await source.GetReportAsync(CancellationToken.None);
+
+            // Then the report holds only the real services — no ollama-init card
+            Assert.False(report.Degraded);
+            Assert.DoesNotContain(report.Containers, row => row.Name == "ollama-init");
+            Assert.Equal(2, report.Containers.Count);
+        }
+
+        [Fact]
+        public async Task NoStatsOrInspectRequestIsEverIssuedForAUtilityContainer()
+        {
+            // Given the same stack — the utility container is running, so an unfiltered source
+            // would owe it the ~1s one-shot stats read plus an inspect
+            var handler = HealthyStackHandler();
+            var source = Source(handler);
+
+            // When the report is built
+            await source.GetReportAsync(CancellationToken.None);
+
+            // Then the filter ran before the per-container fan-out: not one request names it
+            Assert.DoesNotContain(handler.Requests, request =>
+                (request.RequestUri?.PathAndQuery ?? "").Contains("eb5f7c9a11d2"));
         }
     }
 
@@ -266,6 +316,55 @@ public static class FeatureContainerStatsSource
             var summary = new DockerContainerSummary { Id = "ce23d1e36dea0be43b7a272fd82e283c" };
 
             Assert.Equal("ce23d1e36dea", DockerContainerStatsSource.ResolveServiceName(summary));
+        }
+    }
+
+    public sealed class ScenarioUtilityLabelContract
+    {
+        [Fact]
+        public void TheUtilityRoleLabelMarksAContainerUtility()
+        {
+            // gh-#283's contract, spec-pinned: `genwave.role: utility` in compose is the whole
+            // switch — no service-name hardcoding anywhere.
+            var summary = new DockerContainerSummary
+            {
+                Id = "abc",
+                Names = ["/genwave-ollama-init-1"],
+                Labels = new Dictionary<string, string> { ["genwave.role"] = "utility" },
+            };
+
+            Assert.True(DockerContainerStatsSource.IsUtility(summary));
+        }
+
+        [Fact]
+        public void TheRoleValueIsCaseInsensitive()
+        {
+            // Same tolerance as the running-state check — a hand-typed "Utility" still counts.
+            var summary = new DockerContainerSummary
+            {
+                Id = "abc",
+                Labels = new Dictionary<string, string> { ["genwave.role"] = "Utility" },
+            };
+
+            Assert.True(DockerContainerStatsSource.IsUtility(summary));
+        }
+
+        [Fact]
+        public void AnyOtherRoleValueIsNotUtility()
+        {
+            var summary = new DockerContainerSummary
+            {
+                Id = "abc",
+                Labels = new Dictionary<string, string> { ["genwave.role"] = "app" },
+            };
+
+            Assert.False(DockerContainerStatsSource.IsUtility(summary));
+        }
+
+        [Fact]
+        public void AnUnlabeledContainerIsNotUtility()
+        {
+            Assert.False(DockerContainerStatsSource.IsUtility(new DockerContainerSummary { Id = "abc" }));
         }
     }
 
