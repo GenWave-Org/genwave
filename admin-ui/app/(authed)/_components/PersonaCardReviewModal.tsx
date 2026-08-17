@@ -1,10 +1,11 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { describeStationDefault, type PersonaImportSuccessBody } from "@/lib/persona-import-api";
 import { readErrorMessage } from "@/lib/problem-details";
+import { useRestoreFocus } from "@/lib/use-restore-focus";
 import { cn } from "@/lib/utils";
 import { personaSlug } from "../personas/persona-slug";
 import {
@@ -245,19 +246,19 @@ function ReviewBody({
  * and a backdrop click all route through the same `onOpenChange` → `onCancel` path, so there is
  * exactly one "nothing happened" exit, not three slightly different ones.
  *
- * Focus restoration (review finding #1): unlike `MobileNav.tsx`'s real rendered
- * `<Dialog.Trigger>` (where Radix's own built-in trigger-refocus already suffices), this
- * component has no trigger Radix could refocus automatically — same as `confirm-dialog.tsx`'s
- * own single persistent `<Dialog.Root>`, which ALSO renders no `Dialog.Trigger` and hand-wires
- * its own `restoreFocusRef` for exactly this reason. This component follows that same pattern:
- * it mounts fresh on every open (a new component instance each time the parent shows it), so
- * `restoreFocusRef` captures `document.activeElement` inline during that first render — before
- * Radix's own `FocusScope` mount effect ever runs — the same "capture before the dialog steals
- * focus" moment `confirm-dialog.tsx`'s `confirm()` captures explicitly at call time;
- * `onCloseAutoFocus` below then prevents Radix's default (moving focus into the by-then-unmounted
- * content) and restores it by hand, so closing this modal by ANY path (Cancel, Escape, backdrop,
- * or a successful import) hands focus back to whatever the operator was on before — normally the
- * Import button that opened it.
+ * Focus restoration (review finding #1; the shared `useRestoreFocus` hook since gh-#465): unlike
+ * `MobileNav.tsx`'s real rendered `<Dialog.Trigger>` (where Radix's own built-in trigger-refocus
+ * already suffices), this component has no trigger Radix could refocus automatically — same as
+ * `confirm-dialog.tsx`'s own single persistent `<Dialog.Root>`. This component mounts fresh on
+ * every open (a new component instance each time the parent shows it), so it takes the hook's
+ * `"on-mount"` timing: `document.activeElement` is captured inline during that first render —
+ * before Radix's own `FocusScope` mount effect ever runs — where `confirm-dialog.tsx`'s
+ * always-mounted dialog instead captures `"imperative"`ly at each `confirm()` call (the two
+ * timings the hook exists to parameterize; see its own remarks). The hook's `onCloseAutoFocus`
+ * then prevents Radix's default (moving focus into the by-then-unmounted content) and restores
+ * it by hand, so closing this modal by ANY path (Cancel, Escape, backdrop, or a successful
+ * import) hands focus back to whatever the operator was on before — normally the Import button
+ * that opened it.
  */
 export function PersonaCardReviewModal({
   cardText,
@@ -271,13 +272,9 @@ export function PersonaCardReviewModal({
   const [status, setStatus] = useState<ConfirmStatus>({ kind: "idle" });
   const review = useMemo(() => parsePersonaCardReview(cardText), [cardText]);
 
-  // Lazy-captured exactly once per mount (guarded by the `undefined` sentinel, not re-read on
-  // every re-render — a later render's `document.activeElement` would already be inside this
-  // dialog, which is worthless as a restore target).
-  const restoreFocusRef = useRef<HTMLElement | null | undefined>(undefined);
-  if (restoreFocusRef.current === undefined) {
-    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  }
+  // Lazy-captured exactly once per mount — the hook's `"on-mount"` timing (see this component's
+  // own remarks above, and the hook's).
+  const restoreFocus = useRestoreFocus("on-mount");
 
   async function handleConfirm(): Promise<void> {
     if (review === null || status.kind === "importing") return;
@@ -323,10 +320,7 @@ export function PersonaCardReviewModal({
         <Dialog.Content
           aria-label="Review persona card"
           className="fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 flex-col rounded-[6px] border border-line bg-surface p-6 transition-opacity duration-200 ease-out focus:outline-none motion-reduce:transition-none"
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            restoreFocusRef.current?.focus();
-          }}
+          onCloseAutoFocus={restoreFocus.onCloseAutoFocus}
         >
           <Dialog.Title className="font-display text-[1.1rem] text-ink">
             {review === null ? "Review card" : `Review "${review.name}"`}
