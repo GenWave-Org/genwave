@@ -1,12 +1,13 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
 import { clampPackDisplayText } from "@/lib/clamp-pack-display-text";
 import { readErrorMessage } from "@/lib/problem-details";
 import { useAvatarPacks, type AvatarPackListEntry } from "@/lib/use-avatar-packs";
+import { useRestoreFocus } from "@/lib/use-restore-focus";
 import { prettifySlug } from "../persona-catalog/format-slug";
 import type { PersonaDto } from "./types";
 
@@ -83,12 +84,10 @@ export function BulkApplySuggestedModal({ personas, onClose, onApplied }: BulkAp
     [packsState, personas]
   );
 
-  // Same "capture before the dialog steals focus" idiom as `FireModal`/`confirm-dialog.tsx` — this
-  // component has no `Dialog.Trigger` Radix could refocus on its own.
-  const restoreFocusRef = useRef<HTMLElement | null | undefined>(undefined);
-  if (restoreFocusRef.current === undefined) {
-    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  }
+  // Same "capture before the dialog steals focus" idiom as `FireModal`/`confirm-dialog.tsx`
+  // (gh-#465's shared hook) — this component has no `Dialog.Trigger` Radix could refocus on
+  // its own.
+  const restoreFocus = useRestoreFocus("on-mount");
 
   async function handleConfirm(): Promise<void> {
     setPhase("applying");
@@ -140,10 +139,7 @@ export function BulkApplySuggestedModal({ personas, onClose, onApplied }: BulkAp
         <Dialog.Content
           aria-label="Apply suggested faces"
           className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-surface p-6 transition-opacity duration-200 ease-out focus:outline-none motion-reduce:transition-none"
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            restoreFocusRef.current?.focus();
-          }}
+          onCloseAutoFocus={restoreFocus.onCloseAutoFocus}
         >
           <Dialog.Title className="font-display text-[1.1rem] text-ink">Apply suggested faces</Dialog.Title>
           <Dialog.Description className="mt-2 text-[0.85rem] text-mute">

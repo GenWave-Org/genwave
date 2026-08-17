@@ -12,6 +12,7 @@ import { toast } from "@/components/ui/toast";
 import { clampPackDisplayText } from "@/lib/clamp-pack-display-text";
 import { formatDateStamp } from "@/lib/format-clock";
 import { readErrorMessage } from "@/lib/problem-details";
+import { useRestoreFocus } from "@/lib/use-restore-focus";
 import { cn } from "@/lib/utils";
 import { PersonaCardReviewModal, type PersonaCardReviewImportResult } from "../_components/PersonaCardReviewModal";
 import { AvatarDetailPanel } from "./AvatarDetailPanel";
@@ -756,14 +757,12 @@ function PersonaOfferDialog({
   onAccept: () => void;
   onDecline: () => void;
 }): ReactNode {
-  // Hand-wired focus restoration (mirrors every other modal in this file): this component mounts
-  // fresh with no real `Dialog.Trigger` of its own, so Radix has nothing to auto-refocus. Owned
-  // HERE, not by `DialogShell` (see that component's own remarks on why the capture timing can't
-  // be centralised between it and `ConfirmDialogProvider`'s own always-mounted dialog).
-  const restoreFocusRef = useRef<HTMLElement | null | undefined>(undefined);
-  if (restoreFocusRef.current === undefined) {
-    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  }
+  // Hand-wired focus restoration (the shared `useRestoreFocus` hook, gh-#465): this component
+  // mounts fresh with no real `Dialog.Trigger` of its own, so Radix has nothing to auto-refocus.
+  // Owned HERE, not by `DialogShell` (see that component's own remarks on why the capture timing
+  // can't be centralised between it and `ConfirmDialogProvider`'s own always-mounted dialog —
+  // the hook's `"on-mount"` vs `"imperative"` split).
+  const restoreFocus = useRestoreFocus("on-mount");
 
   return (
     <DialogShell
@@ -771,10 +770,7 @@ function PersonaOfferDialog({
       onOpenChange={(open) => {
         if (!open) onDecline();
       }}
-      onCloseAutoFocus={(event) => {
-        event.preventDefault();
-        restoreFocusRef.current?.focus();
-      }}
+      onCloseAutoFocus={restoreFocus.onCloseAutoFocus}
     >
       <Dialog.Title className="font-display text-[1.1rem] text-ink">
         {`Also hire "${prettifySlug(suggestedSlug)}"?`}
