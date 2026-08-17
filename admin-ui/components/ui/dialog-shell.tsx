@@ -15,8 +15,9 @@ export interface DialogShellProps {
    */
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Forwarded straight to `Dialog.Content` — each caller owns ITS OWN focus-restore ref and
-   * capture timing (see this file's own remarks for why that can't be centralised here). */
+  /** Forwarded straight to `Dialog.Content` — each caller owns ITS OWN `useRestoreFocus()` call
+   * and picks its capture timing there (see this file's own remarks for why that can't be
+   * centralised here). */
   onCloseAutoFocus: (event: Event) => void;
   children: ReactNode;
 }
@@ -51,7 +52,10 @@ export interface DialogShellProps {
  * outside the render path); every other consumer instead mounts fresh per-open and captures once,
  * lazily, on that first render. A ref this shell owned internally could only implement ONE of
  * those two timings correctly — sharing the STYLING while leaving the CAPTURE TIMING to each
- * caller (who already differs on it) is the honest boundary, not a false unification.
+ * caller (who already differs on it) is the honest boundary, not a false unification. The
+ * mechanics of both timings now live in ONE place — `useRestoreFocus()` in
+ * `lib/use-restore-focus.ts` (gh-#465), parameterized `"imperative"` vs `"on-mount"` — but the
+ * CHOICE stays with each caller, which is why this prop remains required rather than shell-owned.
  */
 export function DialogShell({ open, onOpenChange, onCloseAutoFocus, children }: DialogShellProps): ReactNode {
   return (

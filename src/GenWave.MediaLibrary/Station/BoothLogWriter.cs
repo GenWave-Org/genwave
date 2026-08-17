@@ -31,7 +31,7 @@ namespace GenWave.MediaLibrary.Station;
 /// contract's "must return promptly" holds unconditionally.
 /// </summary>
 sealed class BoothLogWriter(
-    ChannelWriter<BoothLogEntryRequest> queue,
+    ChannelWriter<BoothLogAppendRequest> queue,
     IActivePersonaAccessor personaAccessor,
     ILogger<BoothLogWriter> logger) : IBoothLogEventConsumer
 {
@@ -71,17 +71,17 @@ sealed class BoothLogWriter(
             // render-time one. ShowId rides personaAccessor.ActiveShowId, same capture-at-publish-time,
             // never-re-derived discipline — the ONE chokepoint this switch arm already is covers
             // music and kinded TrackAired alike (PLAN T242's own "verify one chokepoint" note).
-            TrackAired t => new BoothLogEntryRequest(
+            TrackAired t => new BoothLogAppendRequest(
                 "track-started", Summarize(t), personaAccessor.ActivePersonaId, t.Artist,
                 BuildPickStamp(t.PersonaPick, t.CrosstalkScript),
                 ParseMediaId(t.MediaId), SegmentKind: t.SegmentKind?.ToString(), ShowId: personaAccessor.ActiveShowId),
-            SegmentGenerated s => new BoothLogEntryRequest("patter-aired", Summarize(s), PersonaId: null),
-            DegradationModeChanged d => new BoothLogEntryRequest("mode-changed", Summarize(d), PersonaId: null),
-            HandoffPieceDropped h => new BoothLogEntryRequest("handoff-dropped", Summarize(h), PersonaId: null),
-            RequestReceived => new BoothLogEntryRequest("request-received", "Request received", PersonaId: null),
-            RequestEvicted => new BoothLogEntryRequest("request-evicted", "Request evicted (pending cap)", PersonaId: null),
-            RequestExpired => new BoothLogEntryRequest("request-expired", "Request expired", PersonaId: null),
-            RequestFulfilled => new BoothLogEntryRequest("request-fulfilled", "Request fulfilled", PersonaId: null),
+            SegmentGenerated s => new BoothLogAppendRequest("patter-aired", Summarize(s), PersonaId: null),
+            DegradationModeChanged d => new BoothLogAppendRequest("mode-changed", Summarize(d), PersonaId: null),
+            HandoffPieceDropped h => new BoothLogAppendRequest("handoff-dropped", Summarize(h), PersonaId: null),
+            RequestReceived => new BoothLogAppendRequest("request-received", "Request received", PersonaId: null),
+            RequestEvicted => new BoothLogAppendRequest("request-evicted", "Request evicted (pending cap)", PersonaId: null),
+            RequestExpired => new BoothLogAppendRequest("request-expired", "Request expired", PersonaId: null),
+            RequestFulfilled => new BoothLogAppendRequest("request-fulfilled", "Request fulfilled", PersonaId: null),
             _ => null,
         };
         if (request is null) return;

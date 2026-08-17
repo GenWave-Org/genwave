@@ -4,10 +4,16 @@ namespace GenWave.Core.Domain;
 /// One <c>station.booth_log</c> row awaiting persistence — <see cref="Abstractions.IBoothLogAppender.AppendAsync"/>'s
 /// parameter object (PLAN T220 review carry-forward: "IBoothLogAppender 8-param positional call wants
 /// a Core-side parameter object"; closed here at PLAN T242, where <see cref="ShowId"/> would have
-/// pushed that positional call to nine). Every field mirrors a stamp <c>BoothLogWriter.Publish</c>
-/// already captured SYNCHRONOUSLY, at AIR time, before the request was ever queued for
-/// <c>BoothLogDrainService</c> to drain — this type only regroups them into one argument; it derives
-/// nothing of its own and enforces no invariant beyond the shape.
+/// pushed that positional call to nine), and since gh-#464 ALSO the enqueue payload
+/// <c>BoothLogWriter.Publish</c> puts on the bounded queue <c>BoothLogDrainService</c> drains — the
+/// two roles used to be two field-for-field records (this one plus an internal channel twin),
+/// hand-mapped at the drain seam, so a ninth stamp cost three edits.
+/// Every field mirrors a stamp <c>BoothLogWriter.Publish</c> already captured SYNCHRONOUSLY, at AIR
+/// time, before the request was ever queued — this type only regroups them into one argument; it
+/// derives nothing of its own and enforces no invariant beyond the shape. The track-start-only stamps
+/// (<see cref="Artist"/> onward) default to <see langword="null"/> so a non-track publish site names
+/// only what it stamps. The public shape read BACK is <see cref="BoothLogEntry"/>, which additionally
+/// carries the DB-assigned id/occurred_at.
 /// </summary>
 /// <param name="Kind">The narrative kind (e.g. <c>"track-started"</c>, <c>"patter-aired"</c>).</param>
 /// <param name="Summary">The operator-readable narrative line — human language, never a JSON dump.</param>
@@ -32,5 +38,5 @@ namespace GenWave.Core.Domain;
 /// FK — history must outlive the entity, so a show deleted later never rewrites or blocks on a past
 /// airing.</param>
 public sealed record BoothLogAppendRequest(
-    string Kind, string Summary, long? PersonaId, string? Artist, string? Pick, long? MediaId,
-    string? SegmentKind, long? ShowId);
+    string Kind, string Summary, long? PersonaId, string? Artist = null, string? Pick = null, long? MediaId = null,
+    string? SegmentKind = null, long? ShowId = null);

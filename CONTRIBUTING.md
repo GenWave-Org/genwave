@@ -24,7 +24,7 @@ Adoption is honest: violations that predate a law are named and dated in the sui
 
 L3's designated seams are a named constant, not a list here: `HttpClientSeams.DesignatedSeams`. Likewise L7's relays and L8's exemption: `TtsSynthesizeContextSeam.DesignatedRelays` and `PronunciationResolveSeam.DesignatedExemptions`.
 
-**Check `SEAMS.md`** before adding a new seam — extend or decorate an existing port over minting a near-duplicate; regenerate with `dotnet run --project tools/SeamIndexGenerator` (CI byte-diffs it against committed, SPEC F105.6).
+**Check `SEAMS.md`** before adding a new seam — extend or decorate an existing port over minting a near-duplicate; regenerate with `dotnet run --project tools/SeamIndexGenerator --configuration Release` (CI byte-diffs it against committed, SPEC F105.6 — Release, same configuration the CI drift check builds, gh-#413).
 
 **Nothing on the feeder push path may throw on artwork resolution.** `ArtworkUrlResolver.ResolveAsync` composes the ICY `url=` annotation for every track/segment push; a thrown exception there is a dead-air bug, not merely a bad annotation. The discipline is now three-component: the resolver itself, `PersonaAvatarTokenCache` (dj faces), and `StationImageCache` (the station image) — each of the two caches degrades a store fault to an honest "nothing to offer" (no face / no customization) rather than propagating, the same never-throws contract `DurationRehydrator` (Playout) carries for its own catalog read. Extend this list, don't grow a fourth independent throw-suppressing wrapper, if a future artwork source joins the push path.
 

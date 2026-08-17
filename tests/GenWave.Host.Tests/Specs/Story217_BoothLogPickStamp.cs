@@ -12,7 +12,7 @@
 // it through BoothLogPickStampSerializer into BoothLogEntryDto.Pick — JsonIgnore(WhenWritingNull)
 // makes a null stamp ABSENT from the wire rather than a null-valued field.
 //
-// Write-side entry-point discipline: BoothLogWriter/BoothLogDrainService/BoothLogEntryRequest are
+// Write-side entry-point discipline: BoothLogWriter/BoothLogDrainService are
 // internal to GenWave.MediaLibrary (no InternalsVisibleTo to this project) — every write-side
 // scenario below drives the REAL production pipeline the exact way GenWave.Host composes it
 // (BoothLogServiceCollectionExtensions.AddBoothLog, then IBoothLogEventConsumer/IHostedService),

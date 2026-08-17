@@ -1,8 +1,9 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { useRestoreFocus } from "@/lib/use-restore-focus";
 import { prettifySlug } from "./format-slug";
 
 /** The outcome one kind's own `onConfirm` reports back to this shell — `ok: true` once the caller
@@ -67,10 +68,7 @@ export function CatalogInstallConfirmModal({
 }: CatalogInstallConfirmModalProps): ReactNode {
   const [status, setStatus] = useState<ConfirmStatus>({ kind: "idle" });
 
-  const restoreFocusRef = useRef<HTMLElement | null | undefined>(undefined);
-  if (restoreFocusRef.current === undefined) {
-    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  }
+  const restoreFocus = useRestoreFocus("on-mount");
 
   async function handleConfirm(): Promise<void> {
     if (status.kind === "installing") return;
@@ -99,10 +97,7 @@ export function CatalogInstallConfirmModal({
         <Dialog.Content
           aria-label={ariaLabel}
           className="fixed left-1/2 top-1/2 z-50 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 flex-col rounded-[6px] border border-line bg-surface p-6 transition-opacity duration-200 ease-out focus:outline-none motion-reduce:transition-none"
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            restoreFocusRef.current?.focus();
-          }}
+          onCloseAutoFocus={restoreFocus.onCloseAutoFocus}
         >
           <Dialog.Title className="font-display text-[1.1rem] text-ink">
             Install &quot;{prettifySlug(slug)}&quot;?

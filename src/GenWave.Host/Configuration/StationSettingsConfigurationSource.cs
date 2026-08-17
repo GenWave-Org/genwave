@@ -11,13 +11,16 @@ namespace GenWave.Host.Configuration;
 public sealed class StationSettingsConfigurationSource : IConfigurationSource
 {
     readonly string connectionString;
+    readonly bool expectNoStore;
 
     // The single provider instance, accessible after Build() is called by the config system.
     StationSettingsConfigurationProvider? builtProvider;
 
-    public StationSettingsConfigurationSource(string connectionString)
+    // expectNoStore: see StationSettingsConfigurationProvider's ctor remarks (gh-#412).
+    public StationSettingsConfigurationSource(string connectionString, bool expectNoStore = false)
     {
         this.connectionString = connectionString;
+        this.expectNoStore = expectNoStore;
     }
 
     /// <summary>
@@ -28,7 +31,7 @@ public sealed class StationSettingsConfigurationSource : IConfigurationSource
 
     public IConfigurationProvider Build(IConfigurationBuilder builder)
     {
-        builtProvider = new StationSettingsConfigurationProvider(connectionString);
+        builtProvider = new StationSettingsConfigurationProvider(connectionString, expectNoStore);
         return builtProvider;
     }
 }

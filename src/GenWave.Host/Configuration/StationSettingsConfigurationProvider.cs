@@ -28,6 +28,7 @@ namespace GenWave.Host.Configuration;
 public class StationSettingsConfigurationProvider : IConfigurationProvider, IDisposable
 {
     readonly string connectionString;
+    readonly bool expectNoStore;
     readonly StationSettingsRepository repository;
 
     // The mutable data bag surfaced to IConfiguration.
@@ -36,9 +37,15 @@ public class StationSettingsConfigurationProvider : IConfigurationProvider, IDis
     // Change-token infrastructure: we swap a new CancellationTokenSource each reload.
     CancellationTokenSource cts = new();
 
-    public StationSettingsConfigurationProvider(string connectionString)
+    // expectNoStore (gh-#412): true only when the host explicitly declared — via
+    // StationSettingsHostingExtensions.ExpectNoStoreKey — that running without a Station store is
+    // deliberate (e.g. the SEAMS.md generator's DB-free composition snapshot), so the
+    // empty-connection-string stderr diagnostic below is suppressed. Failures with a REAL
+    // connection string still print regardless.
+    public StationSettingsConfigurationProvider(string connectionString, bool expectNoStore = false)
     {
         this.connectionString = connectionString;
+        this.expectNoStore = expectNoStore;
 
         // Constructed directly here, not resolved through DI: Load() (below) is called by the
         // configuration system while Microsoft.Extensions.Configuration.IConfigurationBuilder itself
@@ -93,8 +100,11 @@ public class StationSettingsConfigurationProvider : IConfigurationProvider, IDis
         if (string.IsNullOrWhiteSpace(connectionString))
         {
             // Match the DbException catch below: surface the degradation so an accidentally
-            // empty Station connection string in a real deploy is observable, not silent.
-            Console.Error.WriteLine("[station-settings] no Station connection string; using config defaults");
+            // empty Station connection string in a real deploy is observable, not silent —
+            // unless the host explicitly opted out (expectNoStore, gh-#412), in which case
+            // the absence is by design and the line is pure noise.
+            if (!expectNoStore)
+                Console.Error.WriteLine("[station-settings] no Station connection string; using config defaults");
             data = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
             return;
         }
