@@ -1,0 +1,40 @@
+name: Backup to R2
+
+# gh-#543: archive the repo to Cloudflare R2 on every push to main — the guarantee the
+# private Gitea original carried, minus its Gitea-internal steps (internal CA, NuGet
+# mirror, SDK container), which a backup never needed. workflow_dispatch exists so the
+# first run can be proven from the Actions tab without waiting for a push.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Create archive
+        run: |
+          TIMESTAMP=$(date -u +%Y%m%d_%H%M%S)
+          ARCHIVE_NAME="${{ github.event.repository.name }}_${TIMESTAMP}_${{ github.run_number }}.tar.gz"
+          git archive --format=tar.gz --prefix="${{ github.event.repository.name }}/" HEAD > "$ARCHIVE_NAME"
+          echo "ARCHIVE_NAME=$ARCHIVE_NAME" >> "$GITHUB_ENV"
+
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          # aws-cli ≥ 2.23 sends CRC32 request checksums by default, which R2's S3 API
+          # rejects — when_required is Cloudflare's documented compatibility setting.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+        run: |
+          aws s3 cp "$ARCHIVE_NAME" \
+            "s3://${{ secrets.R2_BUCKET_NAME }}/${{ github.event.repository.name }}-backups/$ARCHIVE_NAME" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}"
