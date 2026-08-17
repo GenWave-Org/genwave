@@ -59,7 +59,7 @@ public static class SeamIndexDocument
             > DI registrations GenWave.Host's composition root (`Program.cs`) builds — every seam below
             > was resolved from a live `IServiceCollection`/`IServiceProvider`
             > (`WebApplicationFactory<Program>`, no Kestrel, no Postgres/Liquidsoap/Kokoro/Ollama/Icecast
-            > reached), never re-typed by hand. Regenerate: `dotnet run --project tools/SeamIndexGenerator`.
+            > reached), never re-typed by hand. Regenerate: `dotnet run --project tools/SeamIndexGenerator --configuration Release`.
             > Regenerated and byte-diffed by CI (SPEC F105.6, `tools/check-seam-index.sh`) — a new or
             > changed seam shipped without a regenerated index is a red check.
             >
