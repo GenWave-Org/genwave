@@ -6,7 +6,7 @@
 # If the api is unreachable the compose-set GW_XFADE_* env vars are used as fallback.
 #
 # PIN: matches the version in compose.yaml — operator/setting syntax shifts across versions.
-FROM savonet/liquidsoap:v2.4.4
+FROM savonet/liquidsoap:v2.4.5
 
 # The savonet image is Debian-based; apt-get is available.
 # curl is the only addition — keep the layer lean.
