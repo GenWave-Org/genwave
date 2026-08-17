@@ -11,9 +11,20 @@ namespace GenWave.Host.Configuration;
 /// </summary>
 static class StationSettingsHostingExtensions
 {
+    /// <summary>
+    /// Boot-time marker (gh-#412) a deliberately DB-free host sets to <c>true</c> — via plain
+    /// configuration, e.g. <c>UseSetting</c> — to declare that the absent Station connection string
+    /// is intentional, so the overlay provider skips its "no Station connection string" stderr
+    /// diagnostic. Set by the SEAMS.md generator's composition snapshot
+    /// (<c>SeamCompositionSnapshot</c> in GenWave.Host.Tests); a real deploy never sets it, keeping
+    /// an accidentally empty connection string observable.
+    /// </summary>
+    public const string ExpectNoStoreKey = "Station:Settings:ExpectNoStore";
+
     public static WebApplicationBuilder AddGenWaveStationSettings(this WebApplicationBuilder builder)
     {
         var stationConnStr = builder.Configuration.GetConnectionString("Station") ?? string.Empty;
+        var expectNoStore = builder.Configuration.GetValue<bool>(ExpectNoStoreKey);
 
         // ── Station settings overlay (STORY-042, Epic I) ────────────────────
         // The custom provider is registered AFTER env/appsettings so a row in station.settings wins
@@ -21,7 +32,7 @@ static class StationSettingsHostingExtensions
         // register the singleton store against the same source instance — the store calls
         // source.BuiltProvider.Reload() after each write, which raises the change token for
         // IOptionsMonitor<T>.
-        var stationSettingsSource = new StationSettingsConfigurationSource(stationConnStr);
+        var stationSettingsSource = new StationSettingsConfigurationSource(stationConnStr, expectNoStore);
         builder.Configuration.AddEnvironmentVariables();   // ensure env vars are loaded before we append
         builder.Configuration.Sources.Add(stationSettingsSource);
 
