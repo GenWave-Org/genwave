@@ -4,7 +4,7 @@
 // F113.1 pattern exactly, and the SAME production pipeline Story215_BoothLogPersonaStamp.cs/
 // Story304_AiredKindStamp.cs's own DriveThroughAsync drive: real StationEvents through the REAL
 // BoothLogWriter/BoothLogDrainService into the real (test) database, because the write-side types
-// (BoothLogWriter, BoothLogDrainService, BoothLogEntryRequest) are internal to GenWave.MediaLibrary,
+// (BoothLogWriter, BoothLogDrainService) are internal to GenWave.MediaLibrary,
 // and a fake store would never prove the real INSERT column-list wiring honestly. `show_id` is
 // deliberately read back with a raw query rather than through BoothLogRepository.ReadAsync/
 // BoothLogEntry — F113.3's precedent (segment_kind) keeps the read path untouched this cycle too, so
@@ -60,7 +60,7 @@ public static class FeatureShowStamp
     /// </summary>
     static async Task DriveThroughAsync(DatabaseFixture db, long? activeShowId, params StationEvent[] events)
     {
-        var channel = Channel.CreateBounded<BoothLogEntryRequest>(16);
+        var channel = Channel.CreateBounded<BoothLogAppendRequest>(16);
         var writer = new BoothLogWriter(channel.Writer, new FakeActiveShowAccessor(activeShowId), NullLogger<BoothLogWriter>.Instance);
         var drain = new BoothLogDrainService(channel.Reader, Store(db), NullLogger<BoothLogDrainService>.Instance);
 
@@ -123,7 +123,7 @@ public static class FeatureShowStamp
             // airing stamps through above — not a second writer, not a second accessor...
             await db.ResetBoothLogAsync();
             const long showId = 777;
-            var channel = Channel.CreateBounded<BoothLogEntryRequest>(16);
+            var channel = Channel.CreateBounded<BoothLogAppendRequest>(16);
             var writer = new BoothLogWriter(channel.Writer, new FakeActiveShowAccessor(showId), NullLogger<BoothLogWriter>.Instance);
             var drain = new BoothLogDrainService(channel.Reader, Store(db), NullLogger<BoothLogDrainService>.Instance);
 
@@ -165,7 +165,7 @@ public static class FeatureShowStamp
             const long showBId = 222;
             var accessor = new FakeActiveShowAccessor(showAId);
 
-            var channel = Channel.CreateBounded<BoothLogEntryRequest>(16);
+            var channel = Channel.CreateBounded<BoothLogAppendRequest>(16);
             var writer = new BoothLogWriter(channel.Writer, accessor, NullLogger<BoothLogWriter>.Instance);
             var drain = new BoothLogDrainService(channel.Reader, Store(db), NullLogger<BoothLogDrainService>.Instance);
 
