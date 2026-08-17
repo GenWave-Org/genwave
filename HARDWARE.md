@@ -33,6 +33,7 @@ notes, test status — is below it.
 | `demo.genwaveradio.com` appliance (CCX23) | x86-64 | 4 | 16GB | 80GB | Public demo station, full stack + admin + LLM + tunnel + logging | 🟢 | Runs the pinned release 24/7 (health-probed by CI). Source of the one live-observed sizing fact: ollama at a 3 GB fence OOM-killed constantly; stable at **1 CPU / 6GB** (observed 2026-07-21, v2.2.0 rollout) | GenWave |
 | Development machine | x86-64 | 112 | 512GB | 4TB | `./launch.sh` dev flow, full stack from source | 🟢 | Ubuntu 25.04 + Docker on Dell Precision 7920 Tower| GenWave |
 | Raspberry Pi 5 Model B Rev 1.0 | **arm64** | 4 | **4GB** | 256GB NVMe via M.2 HAT+, no SD card | Piper-only playout appliance, `./launch.sh --pinned --piper-only` | 🟢 | **First ARM deployment** (2026-08-02, `home-v2.9.0`). Gapless stream with no stutters; 66–69 °C flat under a full enrichment burst; `vcgencmd get_throttled` = `0x0` at 2.4 GHz uncapped. **Measured under 4-core enrichment load**: piper **RTF 0.252**, enrichment **~800 tracks/h**, and **zero mid-broadcast safe-branch engagements** across 1 h 40 m. 9,094-track library over NFS. Debian 13 trixie, kernel 6.12 (16k pages). Three hard prerequisites — see [Raspberry Pi setup](#-raspberry-pi-setup): stock CPU clock, `cgroup_enable=memory`, official 27 W PSU | GenWave |
+| Raspberry Pi 4 Model B Rev 1.1 | **arm64** | 4 (A72, stock 1.5 GHz) | **4GB** | **16GB SD card** (ext4) | Piper-only playout appliance, `./launch.sh --pinned --piper-only` | 🟢 | **7-day soak PASSED** (2026-08-09 → 08-17, `home-v3.3.2`, closed at **7 d 10 h 51 m**): `get_throttled=0x0` the entire boot, **0 restarts / 0 OOM kills** on all 8 containers, **api 0 warn/error lines per 24 h at every checkpoint**, swap untouched, load ~0.7 idle / ~1.6 mid-decode. Memory plateaued (engine ~270 MiB, api ~255 MiB); piper parked at ~405–411 MiB for six days then **stepped to ~498 MiB on the final day** — real heap, flat on re-sample, no OOM; watch item, not a fail (768 MiB cap holds). Same 9,094-track library **over NFS** — the media transport is load-bearing for the boundary-slip baseline, see [Compute notes](#-compute-notes-raspberry-pi). Upgraded to `home-v5.2.1` post-soak, airing verified same day | GenWave |
 
 ### Internet Radios
 | Make | Model | Status | Notes | Verifier |
@@ -98,14 +99,16 @@ notes recorded alongside them.
 `./launch.sh --pinned --piper-only` on the `home-v2.8.8+` multi-arch images. Measured 2026-08-02
 over 1 h 40 m: gapless broadcast at 66–69 °C with clean power, piper rendering **4× faster than
 real time** and enrichment chewing through **~800 tracks/hour** — *simultaneously*, on four cores.
-The safe branch never engaged after boot. The full Kokoro+LLM demo shape fits on **no** Pi.
+The safe branch never engaged after boot. **A Pi 4 4GB runs the same topology** — proven by a
+7-day soak (2026-08, `home-v3.3.2`, zero restarts, zero throttling), on a 16GB SD card. The full
+Kokoro+LLM demo shape fits on **no** Pi.
 
 | | Topology | Confidence | Shape |
 |:---:|---|:---:|---|
 | a | **Pi 5 all-in-one "quiet DJ" — RECOMMENDED** | 🟢 | Playout + piper-only, no LLM. **Verified on 4 GB**, 2026-08-02. The shipped shape: `./launch.sh --pinned --piper-only` (gh-#242) on the v2.8.8+ multi-arch images. ⚠️ "No LLM" costs more than patter — see below |
 | b | **Pi 5 playout + off-box brain — best sound** | 🟡 | Kokoro + ollama live on any x86 box; `Tts:Endpoint`, `Tts:Fallback:Endpoint`, and `Llm:Endpoint`/`Llm:Model` are all live-settable — verified pointable, but never run in this split |
 | c | **Pi 5 all-in-one + LLM — experimental** | 🔴 | ollama fenced ~4.5–5 GB, piper-only, active cooler + 27 W PSU mandatory; the degradation ladder is the net. ⚠️ **Not expressible with the shipped flags as of gh-#310**: `--piper-only` now drops `ollama`/`ollama-init` along with kokoro (topology (a) was booting a resident model it could not hold). This shape needs its own overlay — an explicit opt-in, deliberately not a side effect of the low-memory one. Restores mood tagging and explicit classification |
-| d | **Pi 4 4GB headless minimal** | 🔴 | Works in principle; enrichment time is the pain. Never run |
+| d | **Pi 4 4GB headless minimal** | 🟢 | Same shape as (a) on slower silicon — **proven to stay working: 7-day soak PASSED on `home-v3.3.2`** (2026-08, see Known deployments), and on a 16GB SD card at that. Enrichment throughput on the A72 was never separately measured (the soak box's catalog was already built); plan for slower-than-Pi-5, not for broken |
 
 ### ⚠️ What "no LLM" actually costs (gh-#336)
 
@@ -245,7 +248,8 @@ clocked box with an active cooler plateaus around 69 °C under that load.
 
 **5. 💾 Storage.** NVMe via the M.2 HAT+ is the tested path (also verified: media over NFS). An
 SD card works but makes the power-cut corruption story much worse — ext4 journal plus Postgres
-WAL on NVMe recover far more reliably.
+WAL on NVMe recover far more reliably. That said, the risk is power-cut corruption, not
+steady-state wear: the Pi 4 soak box ran **7 days on a 16 GB SD card** without incident.
 
 ### ✅ Proving the box before you trust any numbers
 
@@ -319,17 +323,18 @@ multiple hosts in the variable.
 - 🟢 **Enrichment saturates every core it is given.** The api held 310–381% of 400% for the whole
   burst. The **piper-only overlay defaults this to 2** (gh-#334), buying two free cores and lower
   thermals — set `LIBRARY_ENRICHMENT_CONCURRENCY` to override on either stack.
-- 🟡 **Memory over a 25 h soak: api falls, engine climbs — unresolved, being measured.** Between
-  the 9 h and 25 h marks of the 2026-08-03 soak, `api` went **708 → 378 MiB** (the healthy
-  direction: enrichment finished and the GC reclaimed), while `engine` went **169 → 289 MiB**,
-  `piper` 289 → 305 MiB, and free memory 2,840 → 2,776 MiB. Sampled over 60 s at the 25 h mark the
-  engine was **flat** (288.9 / 289.0 / 289.0 MiB), which argues a plateau rather than a leak —
-  **but two readings 16 h apart cannot distinguish a plateau from slow linear growth**, and the
-  two were not like-for-like (the 9 h reading was taken under enrichment load, the 25 h one idle).
-  If the growth were linear (~7.5 MiB/h ≈ 180 MiB/day) a 4 GB box would have roughly **15 days** of
-  headroom. ⚠️ `engine` has **no `mem_limit` configured**, unlike `kokoro` and `piper`. A
-  multi-day sampling run is under way to settle it; this note will be replaced by the verdict, not
-  quietly dropped.
+- 🟢 **Engine memory: plateau, not leak — SETTLED** (replacing the 2026-08-03 "unresolved" note,
+  as promised). The multi-day extension answered it: engine climbed 169 → 289 MiB then **fell back
+  and held** (265 MiB at the ~70 h mark of the Pi 5 run; **269.6 MiB at day 7** of the 2026-08
+  Pi 4 soak). The climb is warm-up, not a slope — no `mem_limit` needed. Piper is the one to
+  keep an eye on instead: see the soak-runbook reference numbers below.
+- 🟡 **NFS media is load-bearing for the boundary-slip baseline.** Both Pi test boxes mount music
+  over NFS — **local-storage behavior is unmeasured**. The engine's boundary-slip log family (an
+  internal catch-up; zero audible effect in a week of ear checks) runs at an intrinsic **~18–33/h
+  on the Pi 4's A72** and correlates with FLAC-decode-over-NFS: it fell 36–40/h → ~18/h once
+  enrichment catch-up finished, and tracks decode load. Treat the rate as a per-box baseline to
+  compare against across checkpoints — a drift (the Pi 4 crept 20 → 33/h over its 7-day soak) is
+  a note; a spike is a question; neither has ever been a dropout.
 - 🟢 **Concurrency 2 costs far less than half — measured ~700 tracks/hour** on the same 4 GB Pi 5
   (2026-08-03): 6,303 tracks over a 9-hour sustained run, flat at 654–766/h per hour with no gaps,
   api at ~234% of 400%. So **9,000 tracks is ~13 h at 2, not the ~22 h a linear model predicts**
@@ -370,10 +375,10 @@ The gh-#213 plan and where it stands after the 2026-08-02 field run:
 | 6 | **The open Kokoro question** — does the arm64 image survive warmup on a Pi 5? | 🔴 not attempted |
 | 7 | **ollama tok/s** — prompt/eval rates on a real DJ prompt; abort below 3 tok/s | 🔴 not attempted |
 | 8 | **24 h piper-only soak** — 0 safe-library engagements, 0 restarts, flat memory, temps, render-seconds vs budget | 🟢 **PASSED — 25 h 36 m**, 2026-08-03T00:04Z → 2026-08-04T01:40Z on `home-v2.9.1`. **0 restarts** on all 8 containers; **0 mid-broadcast safe-branch engagements** — the engine's entire switch history is still the 5 boot-ladder lines from 00:04; `vcgencmd get_throttled` = `0x0` at **51.0 °C**; enrichment 9,094/9,094 intact. **5 real error lines across the final 16 h** (4× cosmetic `mjpeg: error decoding EXIF data` from malformed album art, 1× icecast metadata `ECONNRESET`). ⚠️ Memory is not uniformly flat — see [Compute notes](#-compute-notes-raspberry-pi) |
-| 9 | **Pi 4 pass** — steps 1–5 only | 🔴 not run |
+| 9 | **Pi 4 pass** — steps 1–5 only | 🟢 steps 1–3 via the 2026-08 **7-day soak** (`home-v3.3.2` and later `home-v5.2.1` pulled clean on arm64; pinned boot; week-long broadcast, ear-checked). Steps 4–5 (piper RTF, enrichment tracks/h) were **not** re-measured on the A72 — those numbers remain Pi 5 figures |
 
-Steps 6–9 remain. Steps 6 and 7 are only interesting for topology (c); step 8 (the 24 h soak) is
-the one that would move topology (a) from "proven working" to "proven to stay working".
+Steps 6 and 7 remain; both matter only for topology (c). Step 8's bar has since been cleared
+twice over — the 25 h Pi 5 soak below, then the Pi 4's 7-day run (see Known deployments).
 
 Results land as 🟢 rows in **Known deployments** above — problems are as valuable as successes.
 
@@ -410,7 +415,11 @@ ssh <box> 'bash -s' < tools/soak-check.sh   # or from a workstation
 - 0 render-budget drops; feeder refill holds well under `Tts:RenderBudgetSeconds`
 - Memory **plateau, not slope**: record the `docker stats` snapshot each checkpoint and compare
   — the Compute-notes table above holds the Pi 5 reference numbers (engine plateaus high-200s
-  to ~300 MiB; piper crept 289 → 408 → 421 MiB over two weeks, decelerating, cap 768 MiB)
+  to ~300 MiB; piper crept 289 → 408 → 421 MiB over two weeks, decelerating, cap 768 MiB).
+  Pi 4 7-day reference (2026-08, `home-v3.3.2`): piper parked ~405–411 MiB for six days then
+  **stepped +87 MiB to ~498 on day 7** — real heap (`RssAnon`, not page cache), flat on a 20 s
+  re-sample, no OOM. **A step reads as a watch item, not a fail**: re-check next day to
+  discriminate step-plateau from resumed growth. A fresh `home-v5.2.1` piper starts ~262 MiB
 
 **Gotchas that have burned us** ⚠️ (all encoded in the script, listed so nobody "fixes" them):
 - Icecast's public `status-json.xsl` shows **no mounts by design** (F67 hardening). "No source
