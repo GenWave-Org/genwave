@@ -28,12 +28,12 @@ notes, test status — is below it.
 ## 📦 Known deployments
 
 ### Computer Systems
-| Machine | Arch | Core/vCPU Count | RAM | Storage | Role | Status | Notes | Verifier |
-|---|---|:---:|:---:|:---:|---|:---:|---|---|
-| `demo.genwaveradio.com` appliance (CCX23) | x86-64 | 4 | 16GB | 80GB | Public demo station, full stack + admin + LLM + tunnel + logging | 🟢 | Runs the pinned release 24/7 (health-probed by CI). Source of the one live-observed sizing fact: ollama at a 3 GB fence OOM-killed constantly; stable at **1 CPU / 6GB** (observed 2026-07-21, v2.2.0 rollout) | GenWave |
-| Development machine | x86-64 | 112 | 512GB | 4TB | `./launch.sh` dev flow, full stack from source | 🟢 | Ubuntu 25.04 + Docker on Dell Precision 7920 Tower| GenWave |
-| Raspberry Pi 5 Model B Rev 1.0 | **arm64** | 4 | **4GB** | 256GB NVMe via M.2 HAT+, no SD card | Piper-only playout appliance, `./launch.sh --pinned --piper-only` | 🟢 | **First ARM deployment** (2026-08-02, `home-v2.9.0`). Gapless stream with no stutters; 66–69 °C flat under a full enrichment burst; `vcgencmd get_throttled` = `0x0` at 2.4 GHz uncapped. **Measured under 4-core enrichment load**: piper **RTF 0.252**, enrichment **~800 tracks/h**, and **zero mid-broadcast safe-branch engagements** across 1 h 40 m. 9,094-track library over NFS. Debian 13 trixie, kernel 6.12 (16k pages). Three hard prerequisites — see [Raspberry Pi setup](#-raspberry-pi-setup): stock CPU clock, `cgroup_enable=memory`, official 27 W PSU | GenWave |
-| Raspberry Pi 4 Model B Rev 1.1 | **arm64** | 4 (A72, stock 1.5 GHz) | **4GB** | **16GB SD card** (ext4) | Piper-only playout appliance, `./launch.sh --pinned --piper-only` | 🟢 | **7-day soak PASSED** (2026-08-09 → 08-17, `home-v3.3.2`, closed at **7 d 10 h 51 m**): `get_throttled=0x0` the entire boot, **0 restarts / 0 OOM kills** on all 8 containers, **api 0 warn/error lines per 24 h at every checkpoint**, swap untouched, load ~0.7 idle / ~1.6 mid-decode. Memory plateaued (engine ~270 MiB, api ~255 MiB); piper parked at ~405–411 MiB for six days then **stepped to ~498 MiB on the final day** — real heap, flat on re-sample, no OOM; watch item, not a fail (768 MiB cap holds). Same 9,094-track library **over NFS** — the media transport is load-bearing for the boundary-slip baseline, see [Compute notes](#-compute-notes-raspberry-pi). Upgraded to `home-v5.2.1` post-soak, airing verified same day | GenWave |
+| Machine | Arch | Core/vCPU Count | RAM | Storage | OS | GenWave | Role | Status | Notes | Verifier |
+|---|---|:---:|:---:|:---:|---|:---:|---|:---:|---|---|
+| `demo.genwaveradio.com` appliance (CCX23) | x86-64 | 4 | 16GB | 80GB | Ubuntu 26.04 LTS | `home-v5.2.1` (tracks each release) | Public demo station, full stack + admin + LLM + tunnel + logging | 🟢 | Runs the pinned release 24/7 (health-probed by CI). Source of the one live-observed sizing fact: ollama at a 3 GB fence OOM-killed constantly; stable at **1 CPU / 6GB** (observed 2026-07-21, v2.2.0 rollout) | GenWave |
+| Development machine | x86-64 | 112 | 512GB | 4TB | Ubuntu 25.04 | source (`main`) | `./launch.sh` dev flow, full stack from source | 🟢 | Docker on Dell Precision 7920 Tower | GenWave |
+| Raspberry Pi 5 Model B Rev 1.0 | **arm64** | 4 | **4GB** | 256GB NVMe via M.2 HAT+, no SD card | Debian 13 trixie | `home-v2.9.1` (last verified) | Piper-only playout appliance, `./launch.sh --pinned --piper-only` | 🟢 | **First ARM deployment** (2026-08-02, `home-v2.9.0`). Gapless stream with no stutters; 66–69 °C flat under a full enrichment burst; `vcgencmd get_throttled` = `0x0` at 2.4 GHz uncapped. **Measured under 4-core enrichment load**: piper **RTF 0.252**, enrichment **~800 tracks/h**, and **zero mid-broadcast safe-branch engagements** across 1 h 40 m. 9,094-track library over NFS. Kernel 6.12 (16k pages). Three hard prerequisites — see [Raspberry Pi setup](#-raspberry-pi-setup): stock CPU clock, `cgroup_enable=memory`, official 27 W PSU | GenWave |
+| Raspberry Pi 4 Model B Rev 1.1 | **arm64** | 4 (A72, stock 1.5 GHz) | **4GB** | **16GB SD card** (ext4) | Debian 12 bookworm | `home-v5.2.1` | Piper-only playout appliance, `./launch.sh --pinned --piper-only` | 🟢 | **7-day soak PASSED** (2026-08-09 → 08-17, `home-v3.3.2`, closed at **7 d 10 h 51 m**): `get_throttled=0x0` the entire boot, **0 restarts / 0 OOM kills** on all 8 containers, **api 0 warn/error lines per 24 h at every checkpoint**, swap untouched, load ~0.7 idle / ~1.6 mid-decode. Memory plateaued (engine ~270 MiB, api ~255 MiB); piper parked at ~405–411 MiB for six days then **stepped to ~498 MiB on the final day** — real heap, flat on re-sample, no OOM; watch item, not a fail (768 MiB cap holds). Same 9,094-track library **over NFS** — the media transport is load-bearing for the boundary-slip baseline, see [Compute notes](#-compute-notes-raspberry-pi). Upgraded to `home-v5.2.1` post-soak, airing verified same day | GenWave |
 
 ### Internet Radios
 | Make | Model | Status | Notes | Verifier |
@@ -440,7 +440,8 @@ Compute notes, then the final verdict lands as a **Known deployments** row.
 ## 🤝 Contributing an entry
 
 1. Run the stack (`./launch.sh`, or the `--pinned` appliance flow — see [DEPLOYMENT.md](DEPLOYMENT.md)).
-2. Note CPU model, core count, RAM, storage, and which profiles you ran (`--pinned`, `admin`, `logging`,
+2. Note CPU model, core count, RAM, storage, host OS (name + version), the GenWave version you
+   ran (image tag, or "source" + commit), and which profiles (`--pinned`, `admin`, `logging`,
    `tunnel`, the demo LLM overlay).
 3. PR a row into **Known deployments** with 🟢 for what you verified and a note for anything that
    needed tuning (e.g. a different ollama fence). Problems are as valuable as successes — file

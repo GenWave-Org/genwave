@@ -1,3 +1,4 @@
+using GenWave.Host.Configuration;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -112,6 +113,13 @@ public static class SeamCompositionSnapshot
             builder.UseEnvironment("Development");
             builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
             builder.UseSetting("Admin:Password", "seam-index-snapshot");
+
+            // gh-#412: this host runs DB-free BY DESIGN (no Station connection string), so declare
+            // that to the composition root — otherwise every SEAMS.md generation/drift check carries
+            // the overlay provider's "[station-settings] no Station connection string" stderr line,
+            // noise that a green CI check should not print. Real deploys never set this marker, so
+            // an accidentally empty connection string there stays observable.
+            builder.UseSetting(StationSettingsHostingExtensions.ExpectNoStoreKey, "true");
 
             builder.ConfigureTestServices(services =>
             {
