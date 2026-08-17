@@ -27,3 +27,22 @@ updates:
     schedule:
       interval: weekly
     labels: [dependencies]
+  # gh-#271: the liquidsoap pin (engine/Dockerfile FROM savonet/liquidsoap) is the one this
+  # repo most needs watched. NOT covered by any entry here: icecast itself — a SHA-pinned
+  # source tarball (icecast/Dockerfile ICECAST_TARBALL_URL), invisible to dependabot's docker
+  # ecosystem; bumping it stays a manual edit of that ARG pair.
+  - package-ecosystem: docker
+    directory: /engine
+    schedule:
+      interval: weekly
+    labels: [dependencies]
+  - package-ecosystem: docker
+    directory: /piper
+    schedule:
+      interval: weekly
+    labels: [dependencies]
+  - package-ecosystem: docker
+    directory: /admin-ui
+    schedule:
+      interval: weekly
+    labels: [dependencies]
