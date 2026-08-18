@@ -4,6 +4,9 @@
 # .env before the process exits, but the EXIT trap only cleans up a leftover if the run was
 # killed mid-write; this is a backstop against staging one by accident regardless.
 .env.setup.*
+# setup.sh's on-air timing log (T318, SPEC F132.7) — local-machine timing data next to .env,
+# never a secret, but no reason to track it either.
+setup.log
 
 # .NET build output
 bin/

@@ -9,10 +9,74 @@
 // preflight_env_secrets in after the write, on real (stubbed) machine facts.
 
 using System.Diagnostics;
+using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace GenWave.Host.Tests.Specs;
+
+/// <summary>
+/// A scratch icecast-mount stand-in for the two facts in this file that now run the wizard all
+/// the way to on-air (T318/STORY-345 landed setup.sh's real launch invocation, which those two
+/// facts' success-path assertions depend on) — 404s on the first request, then always answers
+/// 200 with a small nonzero body from the second request onward. The one 404 is required by
+/// T318's round-3 review BLOCKING finding B2: setup.sh's stale-mount gate is now UNIVERSAL (a
+/// mount already serving on the very first poll, before this run's own launch even began, is
+/// indistinguishable from a stale/pre-existing stack and is never trusted) — this Kestrel
+/// instance is already listening before setup.sh's process even starts, so serving 200
+/// unconditionally from request #1 would trip that gate and time out instead of reaching
+/// on-air. Same Kestrel-on-port-0-then-read-back idiom as Story179_SpectatorListenerCount.cs
+/// (gh-#329: no free-port-then-rebind race) and Story345_SetupLaunchClockHandoff.cs's own
+/// (richer, scriptable) MountStub — that one is file-scoped to its own file, so this is a
+/// deliberately minimal duplicate rather than a cross-file reuse.
+/// </summary>
+file sealed class ImmediateMountStub : IDisposable
+{
+    readonly WebApplication app;
+    int requestCount;
+
+    public string Url { get; }
+
+    public ImmediateMountStub()
+    {
+        var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions());
+        builder.WebHost.UseKestrelCore().ConfigureKestrel(k => k.Listen(IPAddress.Loopback, 0));
+        app = builder.Build();
+
+        app.Run(async ctx =>
+        {
+            if (Interlocked.Increment(ref requestCount) == 1)
+            {
+                ctx.Response.StatusCode = 404;
+                return;
+            }
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentType = "audio/mpeg";
+            var bytes = new byte[512];
+            Random.Shared.NextBytes(bytes);
+            await ctx.Response.Body.WriteAsync(bytes);
+        });
+
+        app.Start();
+        var baseUrl = app.Services.GetRequiredService<IServer>()
+            .Features.Get<IServerAddressesFeature>()!
+            .Addresses.First()
+            .TrimEnd('/');
+        Url = $"{baseUrl}/stream";
+    }
+
+    public void Dispose()
+    {
+        app.StopAsync().GetAwaiter().GetResult();
+        app.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+}
 
 public static class FeatureSetupWizardInterview
 {
@@ -33,6 +97,12 @@ public static class FeatureSetupWizardInterview
         "ADMIN_PASSWORD", "COMPOSE_PROFILES", "GW_PRESET", "GW_ENV_FILE", "GW_MEMINFO_FILE",
         "GW_ARCH", "GW_PREFLIGHT_TOPOLOGY", "GW_PREFLIGHT_DEMO", "GW_CMDLINE_FILE",
         "GW_MOUNTS_FILE", "GW_SS_CMD", "GW_DF_CMD", "GW_FIND_CMD", "GW_DOCKER_ROOT_FALLBACK",
+        // T318/STORY-345 seams — scrubbed here too so an ambient shell's own values can never
+        // sway a fact; ScenarioPreflightRunsAfterTheEnvWrite.AHealthyMachineReachesReadyToLaunch
+        // and ScenarioTheNoMusicLane.TheRecheckLoopProceedsOnceAudioFilesAppear pin all three
+        // explicitly (the wizard now actually launches on its way to "ready to launch" / a full
+        // exit 0, so both need a real GW_LAUNCH_CMD/GW_STREAM_URL pair to reach it honestly).
+        "GW_LAUNCH_CMD", "GW_STREAM_URL", "GW_ONAIR_TIMEOUT_SECONDS",
         // T317 review LOW finding: an ambient SKIP_PREFLIGHT=1 (e.g. a developer's own shell)
         // must never silently sway a fact — ScenarioPreflightRunsAfterTheEnvWrite's two facts
         // set it deliberately (by omission — neither passes it as extraEnv, both need the real
@@ -44,6 +114,11 @@ public static class FeatureSetupWizardInterview
     [
         "bash", "sh", "grep", "sed", "tail", "head", "cut", "seq", "sleep", "awk", "dirname",
         "cat", "paste", "find", "tr", "mktemp", "mv", "rm", "uname",
+        // T318/STORY-345: setup.sh's on-air path needs curl (wait_for_on_air), hostname
+        // (print_handoff's admin URL) and date (append_setup_log's ISO timestamp only — the
+        // clock itself runs on bash's builtin $SECONDS, no `date` needed there). Harmless to
+        // every other fact in this file, which never reaches that code path.
+        "curl", "hostname", "date",
     ];
 
     static string RepoRoot()
@@ -212,6 +287,25 @@ public static class FeatureSetupWizardInterview
         process.WaitForExit();
 
         return (process.ExitCode, stdOutTask.Result, stdErrTask.Result);
+    }
+
+    /// <summary>Writes a scripted launch.sh stand-in that exits 0 immediately — T318's on-air
+    /// path needs SOME launch to succeed, and the real ./launch.sh would try to talk to a real
+    /// Docker daemon this harness never has. Mirrors Story345_SetupLaunchClockHandoff.cs's own
+    /// WriteLaunchStub (file-scoped there too, so duplicated rather than shared).</summary>
+    static string WriteExitZeroLaunchStub()
+    {
+        var path = Path.Combine(
+            Directory.CreateTempSubdirectory("gw-setup-story344-launch-").FullName, "launch-stub.sh");
+        File.WriteAllText(path, "#!/usr/bin/env bash\nexit 0\n");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+        }
+        return path;
     }
 
     /// <summary>Every generated-secret key this wizard writes into .env (F132.3) — the five
@@ -648,8 +742,14 @@ public static class FeatureSetupWizardInterview
             // test while the child is blocked on its "check again?" read, and only THEN is the
             // "check again" answer sent — proving the loop re-derives the count from reality
             // rather than remembering the first (zero) answer.
+            //
+            // T318/STORY-345: this fact's own assertion needs the wizard to finish with exit 0
+            // — which, now that setup.sh actually launches, needs a real (stubbed) launch.sh
+            // and mount too (the T318 review's cross-file finding).
             var mediaDir = MakeMediaDir();
             var envFile = ScratchEnvPath();
+            var launchStub = WriteExitZeroLaunchStub();
+            using var mount = new ImmediateMountStub();
 
             var startInfo = new ProcessStartInfo("bash")
             {
@@ -665,6 +765,9 @@ public static class FeatureSetupWizardInterview
             foreach (var name in SeamEnvVars) startInfo.Environment.Remove(name);
             startInfo.Environment["GW_ENV_FILE"] = envFile;
             startInfo.Environment["SKIP_PREFLIGHT"] = "1";
+            startInfo.Environment["GW_LAUNCH_CMD"] = launchStub;
+            startInfo.Environment["GW_STREAM_URL"] = mount.Url;
+            startInfo.Environment["GW_ONAIR_TIMEOUT_SECONDS"] = "30";
 
             using var process = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("failed to start setup.sh");
@@ -792,11 +895,23 @@ public static class FeatureSetupWizardInterview
         [Fact]
         public void AHealthyMachineReachesReadyToLaunch()
         {
+            // T318/STORY-345: setup.sh now actually launches on its way past "ready to launch"
+            // — a real completion needs a real (stubbed) launch.sh and mount, or this would
+            // fall through to the REAL ./launch.sh against an intentionally-incomplete docker
+            // stub and never reach exit 0 (the T318 review's cross-file finding).
             var mediaDir = MakeMediaDir(flacCount: 1);
             var envFile = ScratchEnvPath();
+            var launchStub = WriteExitZeroLaunchStub();
+            using var mount = new ImmediateMountStub();
 
             var (exitCode, stdOut, stdErr) = RunSetup(
-                HealthyPreflightBin(), envFile, $"{mediaDir}\n1\ny\n");
+                HealthyPreflightBin(), envFile, $"{mediaDir}\n1\ny\n",
+                new Dictionary<string, string>
+                {
+                    ["GW_LAUNCH_CMD"] = launchStub,
+                    ["GW_STREAM_URL"] = mount.Url,
+                    ["GW_ONAIR_TIMEOUT_SECONDS"] = "30",
+                });
 
             Assert.True(exitCode == 0 && stdOut.Contains("ready to launch", StringComparison.Ordinal),
                 $"expected a clean run reaching 'ready to launch'; exit={exitCode} stderr={stdErr} stdout={stdOut}");
