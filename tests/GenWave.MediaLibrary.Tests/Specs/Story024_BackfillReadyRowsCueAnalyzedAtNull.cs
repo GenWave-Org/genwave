@@ -150,11 +150,7 @@ public static class FeatureBackfillReadyRowsCueAnalyzedAtNull
                 // BackfillWith uses fakeLoud as the Enricher's loudness analyzer — it must not be called.
                 var svc = new GenWave.MediaLibrary.Enrich.EnrichmentService(
                     repo,
-                    new GenWave.MediaLibrary.Enrich.Enricher(
-                        fakeLoud, fakeCue,
-                        new GenWave.MediaLibrary.Tests.Fakes.FakeEnergyAnalyzer(),
-                        new GenWave.MediaLibrary.Tests.Fakes.FakeBpmAnalyzer(),
-                        Microsoft.Extensions.Logging.Abstractions.NullLogger<GenWave.MediaLibrary.Enrich.Enricher>.Instance),
+                    new GenWave.MediaLibrary.Enrich.Enricher(fakeLoud),
                     System.Threading.Channels.Channel.CreateUnbounded<long>(),
                     new FakeOptionsMonitor<GenWave.MediaLibrary.Options.LibraryOptions>(new GenWave.MediaLibrary.Options.LibraryOptions()),
                     Microsoft.Extensions.Logging.Abstractions.NullLogger<GenWave.MediaLibrary.Enrich.EnrichmentService>.Instance,

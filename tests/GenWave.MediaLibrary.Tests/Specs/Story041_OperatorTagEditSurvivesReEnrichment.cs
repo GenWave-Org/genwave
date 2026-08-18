@@ -6,7 +6,9 @@
 //
 // AC1 — first enrichment (tags_edited_at NULL) writes tag columns from embedded file tags.
 // AC2 — a row with tags_edited_at set is NOT overwritten on re-enrichment.
-// AC3 — loudness/cue/energy still (re)write on the edited row (disjoint columns).
+// AC3 — loudness still (re)writes unconditionally on the edited row (disjoint column from tags).
+//       Cue/energy/bpm are NOT "still written" post-STORY-341 (SPEC F135.1): the fast pass resets
+//       them to NULL on every run, edited row or not, and the backfill lane sweeps them back in.
 // AC4 — a tags_edited_at-NULL row may be (re)written from the file.
 
 using Dapper;
@@ -156,22 +158,21 @@ public static class FeatureOperatorTagEditSurvivesReEnrichment
         }
 
         [Fact]
-        public async Task EnricherOwnedColumnsStillUpdateOnAnEditedRow()
+        public async Task LoudnessStillUpdatesUnconditionallyOnAnEditedRow()
         {
-            // AC3: loudness/cue/energy columns are still (re)written even when tags_edited_at is set.
+            // AC3: loudness is enricher-owned and disjoint from the tag columns — it (re)writes
+            // even when tags_edited_at is set, unlike title/artist/album/genre/year above.
             await db.ResetAsync();
             var dir = TestMedia.NewTempDir();
             try
             {
-                var path = TestMedia.CreateTone(dir, "ac3_energy.flac");
+                var path = TestMedia.CreateTone(dir, "ac3_loudness.flac");
 
                 var repo = Harness.Repo(db);
                 var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
 
-                // First enrichment with energy = (0.1, 0.1).
-                var fakeEnergy1 = new FakeEnergyAnalyzer();
-                fakeEnergy1.Returns(new GenWave.Core.Domain.EnergyPoints(0.1, 0.1));
-                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), fakeEnergy1)
+                // First enrichment with loudness = -16.0 LUFS (FakeLoudnessAnalyzer's default).
+                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer())
                     .EnrichOneAsync(id, CancellationToken.None);
 
                 // Simulate operator tag edit + stamp tags_edited_at.
@@ -182,22 +183,52 @@ public static class FeatureOperatorTagEditSurvivesReEnrichment
                 await using var conn = await db.DataSource.OpenConnectionAsync();
                 await conn.ExecuteAsync("update library.media set state = 'discovered' where id = @id", new { id });
 
-                // Act: re-enrich with energy = (0.9, 0.8) — different values.
-                var fakeEnergy2 = new FakeEnergyAnalyzer();
-                fakeEnergy2.Returns(new GenWave.Core.Domain.EnergyPoints(0.9, 0.8));
-                var before = DateTime.UtcNow;
-                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), fakeEnergy2)
+                // Act: re-enrich with a different loudness measurement.
+                var fakeLoud2 = new FakeLoudnessAnalyzer { Fixed = new GenWave.Core.Domain.Loudness(-9.0, -0.5, true) };
+                await Harness.EnrichmentWith(repo, fakeLoud2, new FakeCueAnalyzer())
                     .EnrichOneAsync(id, CancellationToken.None);
-                var after = DateTime.UtcNow;
 
-                // Assert: energy columns updated to new values (unconditional write).
+                // Assert: loudness updated to the new value (unconditional write).
                 var row = await SelectRowAsync(db, id);
-                Assert.Equal(0.9, row.IntroEnergy);
-                Assert.Equal(0.8, row.OutroEnergy);
-                Assert.NotNull(row.EnergyAnalyzedAt);
-                Assert.InRange(row.EnergyAnalyzedAt!.Value, before.AddSeconds(-1), after.AddSeconds(1));
+                Assert.Equal(-9.0, row.IntegratedLufs);
                 // Tag columns remain frozen at operator values.
                 Assert.Equal("Frozen", row.Title);
+            }
+            finally
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+        }
+
+        [Fact]
+        public async Task EnergyResetsToNullOnAnEditedRowsFastPassEvenIfPreviouslyBackfilled()
+        {
+            // AC3 addendum (SPEC F135.1, STORY-341): re-running the fast pass — edited row or not —
+            // always nulls out energy again, even if a prior backfill had already filled it in; the
+            // backfill lane re-sweeps it on the next tick (same NULL-driven claim, no special case).
+            await db.ResetAsync();
+            var dir = TestMedia.NewTempDir();
+            try
+            {
+                var path = TestMedia.CreateTone(dir, "ac3_energy_reset.flac");
+
+                var repo = Harness.Repo(db);
+                var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
+                await repo.WriteEnrichmentAsync(
+                    id, Harness.ReadyResult(true) with { IntroEnergy = 0.6, OutroEnergy = 0.4, EnergyAnalyzedAt = DateTime.UtcNow },
+                    CancellationToken.None);
+
+                await SimulateOperatorTagEditAsync(db, id,
+                    title: "Frozen", artist: "Frozen", album: "Frozen", genre: "Jazz", year: 1999);
+
+                await using var conn = await db.DataSource.OpenConnectionAsync();
+                await conn.ExecuteAsync("update library.media set state = 'discovered' where id = @id", new { id });
+
+                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer())
+                    .EnrichOneAsync(id, CancellationToken.None);
+
+                var row = await SelectRowAsync(db, id);
+                Assert.Null(row.IntroEnergy);
             }
             finally
             {

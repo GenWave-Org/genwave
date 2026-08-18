@@ -295,9 +295,7 @@ public static class FeatureYearLookupPipeline
             var capturingLogger = new CapturingLogger<EnrichmentService>();
             var svc = new EnrichmentService(
                 repo,
-                new Enricher(
-                    new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FakeEnergyAnalyzer(), new FakeBpmAnalyzer(),
-                    NullLogger<Enricher>.Instance),
+                new Enricher(new FakeLoudnessAnalyzer()),
                 System.Threading.Channels.Channel.CreateUnbounded<long>(),
                 new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
                 capturingLogger,
@@ -365,8 +363,7 @@ public static class FeatureYearLookupPipeline
 
             var svc = new EnrichmentService(
                 repo,
-                new Enricher(
-                    new FakeLoudnessAnalyzer(), fakeCue, fakeEnergy, fakeBpm, NullLogger<Enricher>.Instance),
+                new Enricher(new FakeLoudnessAnalyzer()),
                 System.Threading.Channels.Channel.CreateUnbounded<long>(),
                 new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
                 NullLogger<EnrichmentService>.Instance,

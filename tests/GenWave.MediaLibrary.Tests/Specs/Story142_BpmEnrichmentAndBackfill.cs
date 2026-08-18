@@ -68,7 +68,7 @@ public static class FeatureBpmEnrichmentAndBackfill
 
     [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
-    public sealed class ScenarioFirstPassEnrichmentMeasuresBpm(DatabaseFixture db)
+    public sealed class ScenarioBpmSchema(DatabaseFixture db)
     {
         [Fact]
         public async Task TheMigrationAddsBpmColumnsIdempotently()
@@ -104,14 +104,54 @@ public static class FeatureBpmEnrichmentAndBackfill
             Assert.Equal(bpm.Value.IsNullable, bpmAfter.Value.IsNullable);
         }
 
+    }
+
+    // ---------------------------------------------------------------------
+    // RETIRED BY STORY-341 (SPEC F135.1, PLAN T314): first-pass enrichment no longer runs BPM
+    // analysis — it slims to TagLib (tags + duration) + loudness only, and the atomic write leaves
+    // bpm/bpm_analyzed_at NULL unconditionally. BPM now arrives exclusively through the backfill
+    // lane below (unchanged). This pins the retirement.
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioFastPassNeverInvokesBpmAnalysis(DatabaseFixture db)
+    {
         [Fact]
-        public async Task EnrichmentWritesBpmAndStampsTheSentinel()
+        public async Task BpmAnalyzerIsNeverInvoked()
         {
             await db.ResetAsync();
             var dir = TestMedia.NewTempDir();
             try
             {
-                var path = TestMedia.CreateTone(dir, "bpm_first_pass.flac");
+                var path = TestMedia.CreateTone(dir, "bpm_never_invoked.flac");
+                var repo = Harness.Repo(db);
+                var id = await repo.InsertDiscoveredAsync(
+                    path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
+
+                var fakeBpm = new FakeBpmAnalyzer();
+                fakeBpm.Returns(128.0);
+
+                await Harness.EnrichmentWith(
+                        repo, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FakeEnergyAnalyzer(), fakeBpm)
+                    .EnrichOneAsync(id, CancellationToken.None);
+
+                Assert.Equal(0, fakeBpm.Calls);
+            }
+            finally
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+        }
+
+        [Fact]
+        public async Task BpmAndItsSentinelStayNullSoTheBackfillLaneClaimsTheRow()
+        {
+            await db.ResetAsync();
+            var dir = TestMedia.NewTempDir();
+            try
+            {
+                var path = TestMedia.CreateTone(dir, "bpm_stays_null.flac");
                 var repo = Harness.Repo(db);
                 var id = await repo.InsertDiscoveredAsync(
                     path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
@@ -124,8 +164,8 @@ public static class FeatureBpmEnrichmentAndBackfill
                     .EnrichOneAsync(id, CancellationToken.None);
 
                 var row = await SelectBpmRowAsync(db, id);
-                Assert.Equal(128.0, row.Bpm);
-                Assert.NotNull(row.BpmAnalyzedAt);
+                Assert.Null(row.Bpm);
+                Assert.Null(row.BpmAnalyzedAt);
                 Assert.Equal("ready", row.State);
             }
             finally
@@ -230,35 +270,11 @@ public static class FeatureBpmEnrichmentAndBackfill
     [Trait("Category", "Integration")]
     public sealed class ScenarioAttemptedNoneFoundIsNotAnError(DatabaseFixture db)
     {
-        [Fact]
-        public async Task ANullAnalyzerResultStampsTheSentinelAndLeavesStateAlone()
-        {
-            await db.ResetAsync();
-            var dir = TestMedia.NewTempDir();
-            try
-            {
-                var path = TestMedia.CreateTone(dir, "bpm_null_result.flac");
-                var repo = Harness.Repo(db);
-                var id = await repo.InsertDiscoveredAsync(
-                    path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
-
-                var fakeBpm = new FakeBpmAnalyzer();
-                fakeBpm.Returns(null);   // indeterminate tempo — attempted, none found
-
-                await Harness.EnrichmentWith(
-                        repo, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FakeEnergyAnalyzer(), fakeBpm)
-                    .EnrichOneAsync(id, CancellationToken.None);
-
-                var row = await SelectBpmRowAsync(db, id);
-                Assert.Null(row.Bpm);
-                Assert.NotNull(row.BpmAnalyzedAt);
-                Assert.Equal("ready", row.State);
-            }
-            finally
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
+        // The fast-pass half of this contract (an indeterminate-tempo result is unreachable there,
+        // since the fast pass never calls the bpm analyzer at all) is already pinned by
+        // ScenarioFastPassNeverInvokesBpmAnalysis.BpmAndItsSentinelStayNullSoTheBackfillLaneClaimsTheRow
+        // above — a duplicate fact here was retired by the T314 review (SPEC F135.1). The "attempted,
+        // none found, not reclaimed" contract lives entirely in the backfill lane below.
 
         [Fact]
         public async Task AStampedNoneFoundRowIsNotReclaimed()

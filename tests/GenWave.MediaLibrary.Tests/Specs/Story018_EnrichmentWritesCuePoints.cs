@@ -1,7 +1,14 @@
 // STORY-018 — Enrichment writes cue points (cue failure does not block ready)
 //
-// BDD specification — xUnit. Integration via DatabaseCollection; the Enricher gets
-// fake ILoudnessAnalyzer + fake ICueAnalyzer to exercise both branches.
+// RETIRED BY STORY-341 (SPEC F135.1, PLAN T314): first-pass enrichment no longer runs cue
+// analysis at all — it slims to TagLib (tags + duration) + loudness only, and the atomic write
+// leaves cue_in_sec/cue_out_sec/cue_analyzed_at NULL unconditionally. Cue points now arrive
+// exclusively through the STORY-024 backfill lane. This file pins that retirement: the fast pass
+// never touches the cue analyzer, and cue columns stay NULL regardless of what one would return.
+// The write-on-success/write-on-null/write-on-throw cue behavior this file used to cover now
+// lives in Story024_BackfillReadyRowsCueAnalyzedAtNull.cs.
+//
+// BDD specification — xUnit. Integration via DatabaseCollection.
 
 using Dapper;
 using GenWave.Core.Domain;
@@ -31,12 +38,12 @@ public static class FeatureEnrichmentWritesCuePoints
     }
 
     // ---------------------------------------------------------------------
-    // HAPPY PATH
+    // HAPPY PATH — the fast pass never runs cue analysis (SPEC F135.1)
     // ---------------------------------------------------------------------
 
     [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
-    public sealed class ScenarioEnricherInvokesBothAnalyzersPerFile(DatabaseFixture db)
+    public sealed class ScenarioFastPassNeverInvokesCueAnalysis(DatabaseFixture db)
     {
         [Fact]
         public async Task LoudnessAnalyzerInvokedExactlyOnce()
@@ -64,8 +71,10 @@ public static class FeatureEnrichmentWritesCuePoints
         }
 
         [Fact]
-        public async Task CueAnalyzerInvokedExactlyOnce()
+        public async Task CueAnalyzerIsNeverInvoked()
         {
+            // The fast pass has no cue dependency to call — this proves it via the seam that used
+            // to invoke it (EnrichmentWith wires fakeCue only into the backfill-lane field now).
             await db.ResetAsync();
             var dir = TestMedia.NewTempDir();
             try
@@ -80,32 +89,7 @@ public static class FeatureEnrichmentWritesCuePoints
 
                 await Harness.EnrichmentWith(repo, fakeLoud, fakeCue).EnrichOneAsync(id, CancellationToken.None);
 
-                Assert.Equal(1, fakeCue.Calls);
-            }
-            finally
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
-
-        [Fact]
-        public async Task BothAnalyzersReceiveSameFilePath()
-        {
-            await db.ResetAsync();
-            var dir = TestMedia.NewTempDir();
-            try
-            {
-                var path = TestMedia.CreateTone(dir, "invoke_both.flac");
-                var repo = Harness.Repo(db);
-                var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
-
-                var fakeLoud = new FakeLoudnessAnalyzer();
-                var fakeCue = new FakeCueAnalyzer();
-                fakeCue.Returns(new CuePoints(0.5, 10.0));
-
-                await Harness.EnrichmentWith(repo, fakeLoud, fakeCue).EnrichOneAsync(id, CancellationToken.None);
-
-                Assert.Equal(fakeLoud.LastPath, fakeCue.LastPath);
+                Assert.Equal(0, fakeCue.Calls);
             }
             finally
             {
@@ -116,16 +100,16 @@ public static class FeatureEnrichmentWritesCuePoints
 
     [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
-    public sealed class ScenarioSuccessfulCueAnalysisPersistsCueValuesAndTimestamp(DatabaseFixture db)
+    public sealed class ScenarioCueColumnsStayNullRegardlessOfWhatACueAnalyzerWouldReturn(DatabaseFixture db)
     {
         [Fact]
-        public async Task CueInSecIsPersistedToTheRow()
+        public async Task CueInSecStaysNull()
         {
             await db.ResetAsync();
             var dir = TestMedia.NewTempDir();
             try
             {
-                var path = TestMedia.CreateTone(dir, "cue_in.flac");
+                var path = TestMedia.CreateTone(dir, "cue_in_stays_null.flac");
                 var repo = Harness.Repo(db);
                 var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
 
@@ -134,7 +118,7 @@ public static class FeatureEnrichmentWritesCuePoints
                 await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), fakeCue).EnrichOneAsync(id, CancellationToken.None);
 
                 var row = await SelectRowAsync(db, id);
-                Assert.Equal(3.45, row.CueInSec);
+                Assert.Null(row.CueInSec);
             }
             finally
             {
@@ -143,13 +127,13 @@ public static class FeatureEnrichmentWritesCuePoints
         }
 
         [Fact]
-        public async Task CueOutSecIsPersistedToTheRow()
+        public async Task CueOutSecStaysNull()
         {
             await db.ResetAsync();
             var dir = TestMedia.NewTempDir();
             try
             {
-                var path = TestMedia.CreateTone(dir, "cue_out.flac");
+                var path = TestMedia.CreateTone(dir, "cue_out_stays_null.flac");
                 var repo = Harness.Repo(db);
                 var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
 
@@ -158,7 +142,7 @@ public static class FeatureEnrichmentWritesCuePoints
                 await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), fakeCue).EnrichOneAsync(id, CancellationToken.None);
 
                 var row = await SelectRowAsync(db, id);
-                Assert.Equal(187.20, row.CueOutSec);
+                Assert.Null(row.CueOutSec);
             }
             finally
             {
@@ -167,25 +151,24 @@ public static class FeatureEnrichmentWritesCuePoints
         }
 
         [Fact]
-        public async Task CueAnalyzedAtIsSetToARecentTimestamp()
+        public async Task CueAnalyzedAtStaysNullSoTheBackfillLaneClaimsTheRow()
         {
+            // NULL cue_analyzed_at is exactly the STORY-024 backfill predicate's claim signal —
+            // this is what lets the second-tier lane find and sweep the row afterward (F135.1).
             await db.ResetAsync();
             var dir = TestMedia.NewTempDir();
             try
             {
-                var path = TestMedia.CreateTone(dir, "cue_at.flac");
+                var path = TestMedia.CreateTone(dir, "cue_at_stays_null.flac");
                 var repo = Harness.Repo(db);
                 var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
 
                 var fakeCue = new FakeCueAnalyzer();
                 fakeCue.Returns(new CuePoints(3.45, 187.20));
-                var before = DateTime.UtcNow;
                 await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), fakeCue).EnrichOneAsync(id, CancellationToken.None);
-                var after = DateTime.UtcNow;
 
                 var row = await SelectRowAsync(db, id);
-                Assert.NotNull(row.CueAnalyzedAt);
-                Assert.InRange(row.CueAnalyzedAt!.Value, before.AddSeconds(-1), after.AddSeconds(1));
+                Assert.Null(row.CueAnalyzedAt);
             }
             finally
             {
@@ -194,7 +177,7 @@ public static class FeatureEnrichmentWritesCuePoints
         }
 
         [Fact]
-        public async Task RowTransitionsToReadyState()
+        public async Task RowStillTransitionsToReadyState()
         {
             await db.ResetAsync();
             var dir = TestMedia.NewTempDir();
@@ -218,190 +201,9 @@ public static class FeatureEnrichmentWritesCuePoints
         }
     }
 
-    [Collection(DatabaseCollection.Name)]
-    [Trait("Category", "Integration")]
-    public sealed class ScenarioCueAnalyzedAtIsSetEvenWhenCuePointsIsNull(DatabaseFixture db)
-    {
-        [Fact]
-        public async Task CueInSecRemainsNull()
-        {
-            await db.ResetAsync();
-            var dir = TestMedia.NewTempDir();
-            try
-            {
-                var path = TestMedia.CreateTone(dir, "null_cue_in.flac");
-                var repo = Harness.Repo(db);
-                var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
-
-                var fakeCue = new FakeCueAnalyzer();
-                fakeCue.Returns(null);
-                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), fakeCue).EnrichOneAsync(id, CancellationToken.None);
-
-                var row = await SelectRowAsync(db, id);
-                Assert.Null(row.CueInSec);
-            }
-            finally
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
-
-        [Fact]
-        public async Task CueOutSecRemainsNull()
-        {
-            await db.ResetAsync();
-            var dir = TestMedia.NewTempDir();
-            try
-            {
-                var path = TestMedia.CreateTone(dir, "null_cue_out.flac");
-                var repo = Harness.Repo(db);
-                var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
-
-                var fakeCue = new FakeCueAnalyzer();
-                fakeCue.Returns(null);
-                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), fakeCue).EnrichOneAsync(id, CancellationToken.None);
-
-                var row = await SelectRowAsync(db, id);
-                Assert.Null(row.CueOutSec);
-            }
-            finally
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
-
-        [Fact]
-        public async Task CueAnalyzedAtIsStillSet()
-        {
-            await db.ResetAsync();
-            var dir = TestMedia.NewTempDir();
-            try
-            {
-                // The row will NOT be re-picked by STORY-024 backfill, because we tried.
-                var path = TestMedia.CreateTone(dir, "null_cue_at.flac");
-                var repo = Harness.Repo(db);
-                var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
-
-                var fakeCue = new FakeCueAnalyzer();
-                fakeCue.Returns(null);
-                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), fakeCue).EnrichOneAsync(id, CancellationToken.None);
-
-                var row = await SelectRowAsync(db, id);
-                Assert.NotNull(row.CueAnalyzedAt);
-            }
-            finally
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
-
-        [Fact]
-        public async Task RowStillTransitionsToReadyState()
-        {
-            await db.ResetAsync();
-            var dir = TestMedia.NewTempDir();
-            try
-            {
-                var path = TestMedia.CreateTone(dir, "null_cue_ready.flac");
-                var repo = Harness.Repo(db);
-                var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
-
-                var fakeCue = new FakeCueAnalyzer();
-                fakeCue.Returns(null);
-                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), fakeCue).EnrichOneAsync(id, CancellationToken.None);
-
-                var row = await SelectRowAsync(db, id);
-                Assert.Equal("ready", row.State);
-            }
-            finally
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
-    }
-
     // ---------------------------------------------------------------------
-    // SAD PATH
+    // SAD PATH — loudness failure still blocks ready (unchanged failure contract, SPEC F135.1/AC5)
     // ---------------------------------------------------------------------
-
-    [Collection(DatabaseCollection.Name)]
-    [Trait("Category", "Integration")]
-    public sealed class ScenarioCueAnalyzerThrowingDoesNotBlockReady(DatabaseFixture db)
-    {
-        [Fact]
-        public async Task RowTransitionsToReadyDespiteCueException()
-        {
-            await db.ResetAsync();
-            var dir = TestMedia.NewTempDir();
-            try
-            {
-                var path = TestMedia.CreateTone(dir, "cue_throw_ready.flac");
-                var repo = Harness.Repo(db);
-                var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
-
-                var fakeCue = new FakeCueAnalyzer();
-                fakeCue.Throws(new InvalidOperationException("boom"));
-                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), fakeCue).EnrichOneAsync(id, CancellationToken.None);
-
-                var row = await SelectRowAsync(db, id);
-                Assert.Equal("ready", row.State);
-            }
-            finally
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
-
-        [Fact]
-        public async Task CueValuesRemainNullAfterCueException()
-        {
-            await db.ResetAsync();
-            var dir = TestMedia.NewTempDir();
-            try
-            {
-                var path = TestMedia.CreateTone(dir, "cue_throw_null.flac");
-                var repo = Harness.Repo(db);
-                var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
-
-                var fakeCue = new FakeCueAnalyzer();
-                fakeCue.Throws(new InvalidOperationException("boom"));
-                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), fakeCue).EnrichOneAsync(id, CancellationToken.None);
-
-                var row = await SelectRowAsync(db, id);
-                Assert.Null(row.CueInSec);
-                Assert.Null(row.CueOutSec);
-            }
-            finally
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
-
-        [Fact]
-        public async Task CueAnalyzedAtIsStillSetAfterCueException()
-        {
-            await db.ResetAsync();
-            var dir = TestMedia.NewTempDir();
-            try
-            {
-                // "We tried" — the row will not be retried indefinitely by backfill.
-                var path = TestMedia.CreateTone(dir, "cue_throw_at.flac");
-                var repo = Harness.Repo(db);
-                var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
-
-                var fakeCue = new FakeCueAnalyzer();
-                fakeCue.Throws(new InvalidOperationException("boom"));
-                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), fakeCue).EnrichOneAsync(id, CancellationToken.None);
-
-                var row = await SelectRowAsync(db, id);
-                Assert.NotNull(row.CueAnalyzedAt);
-            }
-            finally
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
-    }
 
     [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
@@ -414,8 +216,6 @@ public static class FeatureEnrichmentWritesCuePoints
             var dir = TestMedia.NewTempDir();
             try
             {
-                // Regression — Phase 1 behavior must survive the cue addition.
-                // Loudness throwing causes EnrichmentService to catch and call MarkFailedAsync → state = 'failed'.
                 var path = TestMedia.CreateTone(dir, "loud_fail_state.flac");
                 var repo = Harness.Repo(db);
                 var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
@@ -442,7 +242,6 @@ public static class FeatureEnrichmentWritesCuePoints
             var dir = TestMedia.NewTempDir();
             try
             {
-                // Regression — existing F2.2/F2.3 behavior on unmeasurable/failed rows.
                 var path = TestMedia.CreateTone(dir, "loud_fail_select.flac");
                 var repo = Harness.Repo(db);
                 var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);

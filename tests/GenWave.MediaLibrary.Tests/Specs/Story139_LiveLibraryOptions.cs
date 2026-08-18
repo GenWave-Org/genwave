@@ -86,9 +86,7 @@ public static class FeatureLiveLibraryOptions
         public void AChangedEnrichmentConcurrencyAppliesOnTheNextTick()
         {
             var queue = Channel.CreateUnbounded<long>();
-            var enricher = new Enricher(
-                new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FakeEnergyAnalyzer(), new FakeBpmAnalyzer(),
-                NullLogger<Enricher>.Instance);
+            var enricher = new Enricher(new FakeLoudnessAnalyzer());
             var options = new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions { EnrichmentConcurrency = 2 });
             var svc = new EnrichmentService(
                 DisconnectedRepo(queue), enricher, queue, options, NullLogger<EnrichmentService>.Instance,
@@ -131,7 +129,7 @@ public static class FeatureLiveLibraryOptions
 
                 var gate = new TaskCompletionSource();
                 var loud = new GatedLoudnessAnalyzer(gate.Task);
-                var enricher = new Enricher(loud, new FakeCueAnalyzer(), new FakeEnergyAnalyzer(), new FakeBpmAnalyzer(), NullLogger<Enricher>.Instance);
+                var enricher = new Enricher(loud);
                 var queue = Channel.CreateUnbounded<long>();
                 var options = new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions { EnrichmentConcurrency = 2 });
                 var svc = new EnrichmentService(

@@ -23,12 +23,7 @@ public class RecoveryTests(DatabaseFixture fixture)
     {
         var cueAnalyzer = new FfmpegCueAnalyzer(new FakeOptionsMonitor<CueDetectionOptions>(new CueDetectionOptions()));
         return new(repo,
-            new Enricher(
-                new FfmpegLoudnessAnalyzer(),
-                cueAnalyzer,
-                new FakeEnergyAnalyzer(),
-                new FakeBpmAnalyzer(),
-                NullLogger<Enricher>.Instance),
+            new Enricher(new FfmpegLoudnessAnalyzer()),
             queue,
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
             NullLogger<EnrichmentService>.Instance,
