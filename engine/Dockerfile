@@ -1,4 +1,4 @@
-# Engine image — Liquidsoap 2.4.4 extended with curl for the boot-time config fetch.
+# Engine image — Liquidsoap 2.4.5 extended with curl for the boot-time config fetch.
 #
 # The entrypoint.sh wrapper runs BEFORE liquidsoap starts: it fetches GW_XFADE_MIN /
 # GW_XFADE_MAX from the api's /internal/engine-config endpoint (which includes the

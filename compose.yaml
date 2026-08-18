@@ -79,7 +79,7 @@ services:
 
   engine:
     build:
-      context: ./engine                        # engine/Dockerfile extends savonet/liquidsoap:v2.4.4 with curl + entrypoint.sh
+      context: ./engine                        # engine/Dockerfile extends savonet/liquidsoap:v2.4.5 with curl + entrypoint.sh
     networks: [core]                            # control port 1234 deliberately NOT published
     # No hard depends_on: api here — the entrypoint.sh fetches config with retries and falls back
     # to the GW_XFADE_* env vars below if the api is slow/down on a cold start. A strict
