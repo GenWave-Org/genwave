@@ -129,8 +129,16 @@ services:
         condition: service_healthy              # schema must exist before first query
       engine:
         condition: service_healthy              # convenience; the feeder retries regardless
+      # required: false (SPEC F136.2, STORY-343, compose >=2.20 — this repo's v2.24+ floor
+      # covers it): condition still orders api's start AFTER kokoro's when kokoro is part of
+      # this launch, but a kokoro that never comes up (piper-only's profile-disabled kokoro,
+      # or a heavyweight pull/start still in flight under the staged pinned flow, launch.sh)
+      # no longer blocks or fails api's own startup. Runtime tolerance was already proven —
+      # piper-only boxes already log harmless kokoro probe failures; degradation modes and the
+      # safe loop already cover a kokoro that is down or absent.
       kokoro:
-        condition: service_healthy              # TTS service must be ready before api starts
+        condition: service_healthy
+        required: false
     environment:
       # The library service owns the only DB access; it connects as the dedicated library_svc role
       # with its search_path pinned to the `library` schema.

@@ -135,7 +135,15 @@ public static class FeatureAcceptanceGateCurationSettings
         // piper service gains `profiles: ["fallback"]` (off by default; an operator opts in with
         // `--with fallback` plus a live PUT /api/settings). Another intentional edit from a later
         // epic, not a regression of this epic's zero-diff promise.
-        const string ComposeYamlSha256  = "c9d55749062f13388f2a8c5811da51e54e36b690db8a07baf0ac0db94845c9f8";
+        // ComposeYamlSha256 re-pinned 2026-08-18 (PLAN T316, SPEC F136.2, STORY-343): api's
+        // depends_on: kokoro gains `required: false` — the core `up` no longer blocks/fails on
+        // an absent or not-yet-healthy kokoro (staged startup — launch.sh's pinned flow pulls
+        // + brings up db/icecast/engine/api[/piper] first, scoped `--no-deps` so kokoro can't
+        // ride along via depends_on membership; a second, UNSCOPED pull + `up -d
+        // --remove-orphans` (no --no-recreate) then converges kokoro/ollama/ollama-init plus
+        // every other profile-gated service). Same T85/T93 epoch-break-and-re-pin ritual; a
+        // `depends_on`-only edit — no service, wire, volume or healthcheck change.
+        const string ComposeYamlSha256  = "bd61cd11a3c2a8079db63cf1f43618bf7d149d03bee020fc07d2585b04fe6fc7";
 
         [Fact]
         public void EngineScriptByteMatchesMain()

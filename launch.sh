@@ -11,13 +11,22 @@
 # Presets (STORY-201 / SPEC F78.10):
 #   ./launch.sh              dev flow (default, unchanged): teardown, db-first up, wait for
 #                             db healthy, ./migrate.sh --keep-going, full up, status.
-#   ./launch.sh --pinned     demo/appliance flow: pull -> db up (--no-recreate) + health
-#                             wait -> migrate.sh -> up -d against compose.yaml +
-#                             compose.demo.yaml. NEVER builds — it's meant for a box that
+#   ./launch.sh --pinned     demo/appliance flow, STAGED (SPEC F136, STORY-343): pull the
+#                             core images (db, icecast, engine, api, +piper when the
+#                             fallback profile is active) -> db up (--no-recreate) + health
+#                             wait -> migrate.sh -> up -d --no-deps the core -> ON AIR -> an
+#                             unscoped pull (fast no-op for the already-pulled core layers) ->
+#                             an unscoped up -d --remove-orphans, converging every remaining
+#                             pin (see the STAGED comment in the script body for why both
+#                             --no-deps and the missing --no-recreate matter here). A failed
+#                             stage-2 pull/up leaves the already-airing core untouched and does
+#                             not abort the launch, but it is NOT a silent success either: a
+#                             degradation summary prints last and the script exits 4, not 0 —
+#                             see "Exit codes" below. NEVER builds — it's meant for a box that
 #                             only ever runs published GHCR images. Works on a fresh box
 #                             (gh-#305) AND as the upgrade path: --no-recreate starts an
-#                             absent/stopped db but never touches a running one, so an
-#                             upgrade still restarts nothing before migrations pass. See
+#                             absent/stopped db but never touches a running one, so an upgrade
+#                             still restarts nothing before migrations pass. See
 #                             DEPLOYMENT.md's "Applying migrations".
 #   ./launch.sh --with a,b   merge a,b into COMPOSE_PROFILES (env var, else .env's value)
 #                             for this launch's compose invocations.
@@ -25,7 +34,9 @@
 #                             compose.piper-only.yaml — always LAST, so its kokoro
 #                             removal + depends_on reset win — into whichever file set
 #                             the flow uses (dev, or --pinned's demo pair). kokoro never
-#                             runs; every TTS render routes to the piper sidecar.
+#                             runs; every TTS render routes to the piper sidecar. Combined
+#                             with --pinned there are no heavyweights to stage behind, so
+#                             that flow stays unstaged (one pull, one up).
 #   ./launch.sh --dry-run    print the exact command plan (one per line, "plan> "-prefixed)
 #                             plus the effective profile set ("plan-profiles> "), then exit
 #                             0. Touches nothing — no docker/compose call is made at all.
@@ -37,6 +48,21 @@
 #   BUILD=1 ./launch.sh      force a rebuild on the way up — dev flow only. BUILD=1 with
 #                             --pinned is a hard error (--pinned never builds).
 #   SKIP_PREFLIGHT=1 ./launch.sh  bypass machine preflight checks (gh-#19 escape hatch).
+#   GW_PRESET=<preset> in .env  (SPEC F132.5) — one of: pinned, pinned-piper-only, dev,
+#                             dev-piper-only. Honored ONLY when no explicit --pinned/
+#                             --piper-only flag is given (an explicit flag always wins); an
+#                             unrecognized value is a loud exit (2), never a silent fallback.
+#                             launch.sh is the ONLY reader of this key in the whole repo.
+#
+# Exit codes:
+#   0   success — dev flow, or --pinned fully converged through stage 2.
+#   2   bad invocation (unknown flag, bad GW_PRESET, BUILD=1 with --pinned).
+#   3   preflight/launch failure (tools/preflight.sh's preflight_fail); dev flow rolls the
+#       partial stack back down, --pinned stage-1 failures leave the stack exactly as it was.
+#   4   --pinned stage 2 (the post-on-air pull/up) failed — the on-air core is untouched, but
+#       heavyweights and/or profile-gated extras (caddy, admin_ui, alloy, cloudflared,
+#       dockerproxy) may be stale or missing; the printed degradation summary names the
+#       catch-up command.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -50,15 +76,21 @@ PINNED=0
 PIPER_ONLY=0
 DRY_RUN=0
 WITH=""
+# Tracks whether the caller passed an explicit topology flag, independently of PINNED/
+# PIPER_ONLY's final values — GW_PRESET (below, F132.5) is honored ONLY when neither was
+# given; an explicit flag always outranks whatever GW_PRESET says.
+TOPOLOGY_FLAG_GIVEN=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --pinned)
       PINNED=1
+      TOPOLOGY_FLAG_GIVEN=1
       shift
       ;;
     --piper-only)
       PIPER_ONLY=1
+      TOPOLOGY_FLAG_GIVEN=1
       shift
       ;;
     --with)
@@ -86,6 +118,38 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# --- GW_PRESET resolution (SPEC F132.5) ---------------------------------------------------
+# launch.sh is the ONLY reader of GW_PRESET in the repo: it resolves flags + preset into
+# concrete topology, so nothing else may read the key. Honored ONLY when the caller gave no
+# explicit topology flag at all — an explicit --pinned/--piper-only always wins, even a
+# lone --piper-only (dev flow) against a GW_PRESET=pinned in .env. Same effective-value
+# convention as COMPOSE_PROFILES below: process env wins, else the env file's last
+# assignment (GW_ENV_FILE, defaulting to .env — the preflight.sh test seam, mirrored here so
+# the wizard's .env is read the same way by everything that reads it). Delegated to
+# preflight.sh's own preflight_env_value (tools/preflight.sh, sourced above) instead of a
+# second hand-rolled reader — that used to hardcode `.env` here while this comment already
+# claimed GW_ENV_FILE parity, a split-brain a scratch GW_ENV_FILE would silently miss.
+GW_PRESET_VALUES="pinned, pinned-piper-only, dev, dev-piper-only"
+
+if [ "$TOPOLOGY_FLAG_GIVEN" = "0" ]; then
+  gw_preset_env_file="${GW_ENV_FILE:-.env}"
+  gw_preset="$(preflight_env_value GW_PRESET)"
+
+  case "$gw_preset" in
+    "")                 ;;                    # unset — the existing bare-flag default stands
+    pinned)             PINNED=1 ;;
+    pinned-piper-only)  PINNED=1; PIPER_ONLY=1 ;;
+    dev)                ;;                    # the plain dev flow — nothing to set
+    dev-piper-only)     PIPER_ONLY=1 ;;
+    *)
+      echo "launch.sh: unrecognized GW_PRESET value '${gw_preset}' (from ${gw_preset_env_file})." >&2
+      echo "  Valid values: ${GW_PRESET_VALUES}." >&2
+      echo "  Fix GW_PRESET in ${gw_preset_env_file}, or pass an explicit --pinned/--piper-only flag instead." >&2
+      exit 2
+      ;;
+  esac
+fi
+
 # --build never applies to --pinned (it only ever runs pulled images) — reject the
 # combination up front, before any docker/compose call is made.
 if [ "$PINNED" = "1" ] && [ "${BUILD:-0}" = "1" ]; then
@@ -111,6 +175,18 @@ if [ "$PIPER_ONLY" = "1" ]; then
   COMPOSE_ARGS+=(-f compose.piper-only.yaml)
   MIGRATE_ARGS+=(-f compose.piper-only.yaml)
 fi
+
+# --- preflight topology inputs (F134.3a amendment): launch.sh alone resolves flags +
+# GW_PRESET into concrete topology (above) and hands preflight the result as two explicit
+# env inputs — tools/preflight.sh reads no preset key itself. Exported here, once topology
+# is fully known, ahead of every preflight_docker/preflight_env_secrets call site below.
+GW_PREFLIGHT_TOPOLOGY="full"
+[ "$PIPER_ONLY" = "1" ] && GW_PREFLIGHT_TOPOLOGY="piper-only"
+export GW_PREFLIGHT_TOPOLOGY
+
+GW_PREFLIGHT_DEMO="0"
+[ "$PINNED" = "1" ] && GW_PREFLIGHT_DEMO="1"
+export GW_PREFLIGHT_DEMO
 
 compose() {
   docker compose "${COMPOSE_ARGS[@]}" "$@"
@@ -177,13 +253,11 @@ persist_compose_file() {
   echo "==> recorded COMPOSE_FILE=$value in .env — bare 'docker compose down' now matches this launch (gh-#309)"
 }
 
-# --- profile merge (--with): existing COMPOSE_PROFILES (env, else .env) + the given list -
-base_profiles="${COMPOSE_PROFILES:-}"
-if [ -z "$base_profiles" ] && [ -f .env ]; then
-  # `|| true` (gh-#19): an .env without COMPOSE_PROFILES is a valid config, not a pipefail
-  # that silently aborts the whole launch under set -e.
-  base_profiles="$(grep -E '^COMPOSE_PROFILES=' .env | tail -n1 | cut -d= -f2- || true)"
-fi
+# --- profile merge (--with): existing COMPOSE_PROFILES (env, else GW_ENV_FILE/.env) + the
+# given list. Same preflight_env_value delegate as GW_PRESET above (F5): this used to
+# hardcode `.env` here regardless of GW_ENV_FILE, splitting from every other reader in the
+# launch — a scratch-env-file test could set COMPOSE_PROFILES and see it silently ignored.
+base_profiles="$(preflight_env_value COMPOSE_PROFILES)"
 
 EFFECTIVE_PROFILES="$base_profiles"
 if [ -n "$WITH" ]; then
@@ -194,6 +268,55 @@ if [ -n "$WITH" ]; then
   fi
 fi
 [ -n "$EFFECTIVE_PROFILES" ] && export COMPOSE_PROFILES="$EFFECTIVE_PROFILES"
+
+# --- staged startup (SPEC F136): the pinned flow's core-first, everything-else-after split -
+# THIS is the authoritative comment for the staged design — every other mention of it below
+# is a one-line pointer back here, not a restatement.
+#
+# CORE_SERVICES pull+start first (scoped, `up` adds `--no-deps`) and put the station on air;
+# everything else — the TTS/LLM heavyweights (kokoro, ollama, ollama-init) AND every other
+# profile-gated service this scoped stage never names at all (caddy, admin_ui, alloy,
+# cloudflared, dockerproxy) — pulls and converges afterwards via a second, UNSCOPED pull + up,
+# never blocking or delaying "on air" (F136.1). Two things make the split actually hold, both
+# live-daemon-proven 2026-08-18 (F136 review findings F1-F3):
+#   - stage 1's `up` carries `--no-deps`: a SCOPED `up` still starts every target's depends_on
+#     set regardless of required:false — that flag only relaxes the health GATE a dependency
+#     must clear, not membership in the set a scoped `up` brings up. Without it, api's
+#     depends_on: kokoro pulls and health-waits kokoro right here, defeating the whole split.
+#   - stage 2's `up` carries NO --no-recreate: that flag never recreates a service whose PIN
+#     changed, only one that's entirely absent — proven to leave admin_ui/caddy/ollama STALE
+#     across an upgrade (the gh-#93 regression class, documented in compose.demo.yaml itself).
+#     Stage 2 has to be the plain pre-F136 `up -d --remove-orphans` to actually converge pins.
+#
+# STAGED is the one predicate both the --dry-run plan and the real invocations key off — true
+# iff the pinned flow has heavyweights to stage behind at all. `--piper-only` profile-gates
+# kokoro/ollama/ollama-init off unconditionally (compose.piper-only.yaml), so it has nothing
+# to stage and stays the exact pre-F136 flow instead: one pull, one up, both unscoped, neither
+# carrying --no-deps nor a service list.
+STAGED=1
+[ "$PIPER_ONLY" = "1" ] && STAGED=0
+
+CORE_SERVICES=(db icecast engine api)
+case ",${EFFECTIVE_PROFILES}," in
+  # piper opted in as the TTS fallback (`--with fallback`, SPEC F99.3): a small CPU-only
+  # sidecar, core-fast rather than a heavyweight — pulls and starts alongside the rest of
+  # core instead of waiting on the catch-up stage.
+  *,fallback,*) CORE_SERVICES+=(piper) ;;
+esac
+
+# STAGE1_TARGETS: CORE_SERVICES when STAGED, else empty — compose's own "every active-profile
+# service" default when no service is named, so pull and up share the one array (a prior
+# round kept a PULL_TARGETS/UP_TARGETS pair that always held the same value).
+STAGE1_TARGETS=()
+[ "$STAGED" = "1" ] && STAGE1_TARGETS=("${CORE_SERVICES[@]}")
+
+# UP1_ARGS: the stage-1 `up` flags — --no-deps only when STAGED. Computed once here and
+# consumed by both the --dry-run plan line and the real invocation below, so a regression in
+# one is a regression in the other (round 2's F1 bug was exactly this pair drifting apart —
+# a correct --dry-run string sitting beside a real `compose up` call with --no-deps hardcoded
+# unconditionally).
+UP1_ARGS=(-d --remove-orphans)
+[ "$STAGED" = "1" ] && UP1_ARGS+=(--no-deps)
 
 UP_ARGS=(-d)
 [ "${BUILD:-0}" = "1" ] && UP_ARGS+=(--build)
@@ -339,12 +462,26 @@ if [ "$PINNED" = "1" ]; then
   [ -n "$WITH" ] && RELAUNCH="$RELAUNCH --with $WITH"
 
   if [ "$DRY_RUN" = "1" ]; then
-    plan_line "$(compose_display) pull"
+    if [ "$STAGED" = "1" ]; then
+      plan_line "$(compose_display) pull ${STAGE1_TARGETS[*]}"
+    else
+      # STAGED=0: see the authoritative comment above STAGED, near CORE_SERVICES — nothing to
+      # stage behind, so this stays the exact pre-F136 flow (unscoped).
+      plan_line "$(compose_display) pull"
+    fi
     plan_line "$(compose_display) up -d --no-recreate db"
     plan_line "$(compose_display) ps -q db"
     plan_line "docker inspect <db container> --format {{.State.Health.Status}} (poll until healthy, up to 30x2s)"
     plan_line "./migrate.sh ${MIGRATE_ARGS[*]}"
-    plan_line "$(compose_display) up -d --remove-orphans"
+    if [ "$STAGED" = "1" ]; then
+      # Staged startup (SPEC F136.1) — see the authoritative comment above STAGED for why
+      # stage 1 carries --no-deps and stage 2 carries neither --no-deps nor a service list.
+      plan_line "$(compose_display) up ${UP1_ARGS[*]} ${STAGE1_TARGETS[*]}"
+      plan_line "$(compose_display) pull"
+      plan_line "$(compose_display) up -d --remove-orphans"
+    else
+      plan_line "$(compose_display) up ${UP1_ARGS[*]}"
+    fi
     plan_line "record COMPOSE_FILE=$(compose_file_value) in .env (gh-#309)"
     plan_line "docker image prune -af --filter until=168h (success-path hygiene, gh-#441)"
     plan_line "docker builder prune -af"
@@ -360,7 +497,7 @@ if [ "$PINNED" = "1" ]; then
   preflight_env_secrets
 
   echo "==> pulling published images"
-  if ! compose pull; then
+  if ! compose pull "${STAGE1_TARGETS[@]}"; then
     preflight_fail "Image pull failed — the running stack was NOT touched." \
       "Check network/GHCR reachability, then re-run: $RELAUNCH" \
       "The previous images are still local; the stack keeps running as-is."
@@ -408,7 +545,15 @@ if [ "$PINNED" = "1" ]; then
   # section for the one-time manual step that actually does. Still worth adding: safe (never
   # removes an active service — verified against this box's own compose.yaml +
   # compose.demo.yaml render), and it IS the mechanism for the case it does cover.
-  if ! compose up -d --remove-orphans; then
+  #
+  # --no-deps only when STAGED — UP1_ARGS/STAGE1_TARGETS were computed once, above (see the
+  # authoritative comment near CORE_SERVICES for why). Safe for this call specifically because
+  # db is already explicitly health-waited above and api's other dependency (engine) is
+  # convenience only (the feeder retries) — both are already CORE_SERVICES members brought up
+  # in this same command anyway. When STAGED=0, UP1_ARGS carries no --no-deps and
+  # STAGE1_TARGETS is empty, so this call is then byte-for-flags the pre-F136 unstaged
+  # `up -d --remove-orphans`.
+  if ! compose up "${UP1_ARGS[@]}" "${STAGE1_TARGETS[@]}"; then
     # `ps -a`, not `ps`: plain `ps` lists RUNNING containers only — so it omitted exactly the
     # one service this message tells the operator to go inspect. A container the daemon
     # refused to START (stale network id after an unclean host power cut, a port already
@@ -421,24 +566,69 @@ if [ "$PINNED" = "1" ]; then
       "Re-run when fixed: $RELAUNCH (up is idempotent — it converges the rest)."
   fi
 
+  # Staged startup (SPEC F136.1/F136.3) — see the authoritative comment above STAGED, near
+  # CORE_SERVICES, for why both calls below are deliberately UNSCOPED with no --no-recreate.
+  # The core (or, when STAGED=0, the entire topology — it has nothing to stage behind) is on
+  # air as of the `up` above. Stage 2 converges everything else next, best-effort: a failure
+  # here must leave the already-airing core untouched and must NOT abort a launch that already
+  # succeeded — never-silent outranks a complete catch-up, same as it outranks tidiness above.
+  # It must also NOT report success (F4): STAGE2_DEGRADED drives a degradation summary + a
+  # non-zero exit below, and skips the image prune (see gh-#441 below) so a rollback target
+  # survives a degraded run.
+  STAGE2_DEGRADED=0
+  if [ "$STAGED" = "1" ]; then
+    echo "==> pulling the remaining images (TTS/LLM backends + any profile-gated extras) — already on air"
+    if ! compose pull; then
+      echo "==> stage-2 image pull failed — the on-air core is untouched; everything else stays on whatever it last ran (or never starts, on a fresh box — the safe loop/templated patter carries the show). Re-run to retry: $RELAUNCH" >&2
+      STAGE2_DEGRADED=1
+    else
+      echo "==> converging the full stack onto the pulled images"
+      if ! compose up -d --remove-orphans; then
+        # Same "status above" idiom as the core failure above — `ps -a`, not `ps`.
+        compose ps -a || true
+        echo "==> stage-2 up failed part-way (status above) — the on-air core is untouched. Re-run to retry: $RELAUNCH" >&2
+        STAGE2_DEGRADED=1
+      fi
+    fi
+  fi
+
   persist_compose_file
 
   # gh-#441: superseded release images accumulate ~1.5 GB per release and nothing else ever
   # prunes them — 46 GB of dead tags filled the demo box's disk mid-deploy (2026-08-09), and an
-  # SD-card Pi hits that wall far sooner. Success path only: every failure above bails via
-  # preflight_fail before reaching here, so a failed upgrade never touches the previous images
-  # (they are what is still running). Best-effort — hygiene never fails a launch that already
-  # succeeded. `until=168h` keys on image CREATED time, so everything in use plus roughly the
-  # last week of releases survives for instant rollback; older tags go. The builder cache is
-  # pure waste on a --pinned box, which never builds (BUILD=1 + --pinned errors at parse time).
-  echo "==> pruning superseded images (kept: in-use + last 7 days)"
-  docker image prune -af --filter "until=168h" | tail -1 || true
-  docker builder prune -af >/dev/null 2>&1 || true
+  # SD-card Pi hits that wall far sooner. Success-path hygiene only, gated on STAGE2_DEGRADED
+  # (F3): every failure above bails via preflight_fail before reaching here, but a degraded
+  # stage 2 (just above) still falls through to here with the on-air core running on its
+  # PREVIOUS pins — those previous images are the rollback target, so pruning here would defeat
+  # the very "keep the airing core untouched" promise stage 2 makes. `until=168h` keys on image
+  # CREATED time, so everything in use plus roughly the last week of releases survives for
+  # instant rollback; older tags go. The builder cache is pure waste on a --pinned box, which
+  # never builds (BUILD=1 + --pinned errors at parse time).
+  if [ "$STAGE2_DEGRADED" = "0" ]; then
+    echo "==> pruning superseded images (kept: in-use + last 7 days)"
+    docker image prune -af --filter "until=168h" | tail -1 || true
+    docker builder prune -af >/dev/null 2>&1 || true
+  fi
 
   echo "==> stack status"
   compose ps
 
   print_pinned_image_tags || true
+
+  # F4: a degraded stage 2 must not read as a clean success — the summary is the LAST thing
+  # printed (after every status readout above) and the exit code is distinct from 0 so a
+  # caller/cron job can tell. The airing core is never touched by this — never-touch-a-
+  # broadcasting-stack — only the catch-up is owed.
+  if [ "$STAGE2_DEGRADED" = "1" ]; then
+    echo
+    echo "==> DEGRADED (exit 4): stage 2 did not fully converge. The on-air core (${CORE_SERVICES[*]}) is untouched and broadcasting normally."
+    echo "    prune skipped — previous images kept for rollback."
+    echo "    The TTS/LLM heavyweights (kokoro, ollama) and any profile-gated extras (caddy, admin_ui, alloy, cloudflared, dockerproxy) may be missing or on stale pins — check the messages above for which stage-2 step failed."
+    echo "    Catch up: $(compose_display) pull && $(compose_display) up -d --remove-orphans"
+    echo "    Or simply re-run: $RELAUNCH"
+    exit 4
+  fi
+
   exit 0
 fi
 
