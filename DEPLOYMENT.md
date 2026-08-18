@@ -1,13 +1,20 @@
 # 📡 GenWave Deployment — Reference Public-Station Topology
 
+> ℹ️ **v5.3 note:** the GHCR image pins moved out of `compose.demo.yaml` into their own
+> overlay, `compose.pinned.yaml` (SPEC F136.5). Every pinned/appliance command below is
+> now **three** `-f` files — `compose.yaml` + `compose.pinned.yaml` + `compose.demo.yaml`,
+> in that order. The old two-file `compose.yaml` + `compose.demo.yaml` form still runs,
+> but it silently **source-builds** instead of pulling published images — don't use it.
+
 One deployment == one station (`compose.yaml`'s own rule). This doc covers the four
 operating modes a single deployment can run in, and the reference topology for the
 "public station" case: a demo/appliance box reachable from the open internet. The
-topology itself ships as **`compose.demo.yaml`** + **`Caddyfile`** in this repo:
+topology itself ships as **`compose.demo.yaml`** + **`Caddyfile`** in this repo, stacked
+on the **`compose.pinned.yaml`** image-pin overlay (SPEC F136.5):
 
 ```bash
 # .env: set PUBLIC_HOST=radio.example.com (plus the usual secrets), clear COMPOSE_PROFILES
-docker compose -f compose.yaml -f compose.demo.yaml up -d
+docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml up -d
 ```
 
 ---
@@ -122,7 +129,7 @@ only boundary is network isolation) to the internet. `compose.demo.yaml` uses th
 `!override` merge tag to *replace* the list. Trust nothing until you've seen the merge:
 
 ```bash
-docker compose -f compose.yaml -f compose.demo.yaml config
+docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml config
 # api.ports must resolve to exactly one entry: host_ip 127.0.0.1, target 8080.
 # No 0.0.0.0, no 8081. Then confirm on the host after `up`:
 ss -ltn     # 127.0.0.1:8080 and 127.0.0.1:3000 only — never 0.0.0.0:8080/:8081/:3000
@@ -206,8 +213,8 @@ Appliance boot (`compose.demo.yaml` defaults):
 - `.env`: `PUBLIC_HOST` set, strong `ADMIN_PASSWORD` (empty = admin locked entirely,
   fail-closed) and `ICECAST_ADMIN_PASSWORD` (also guards the listener-stats poll),
   `COMPOSE_PROFILES=` cleared.
-- `docker compose -f compose.yaml -f compose.demo.yaml up -d`, then run the `config` +
-  `ss -ltn` verification above.
+- `docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml up -d`, then
+  run the `config` + `ss -ltn` verification above.
 - From a private browser: the page renders at `https://${PUBLIC_HOST}/`, the stream
   plays at `/stream`, and `/api/status`, `/api/auth/login`, `/internal/engine-config`,
   `/media/random` all return **404**.
@@ -222,14 +229,14 @@ sanctioned launch/upgrade path — `launch.sh` bare assumes the source-build dev
 ./launch.sh --pinned
 ```
 
-Under the hood `--pinned` runs, against `compose.yaml` + `compose.demo.yaml`, and never
-builds:
+Under the hood `--pinned` runs, against `compose.yaml` + `compose.pinned.yaml` +
+`compose.demo.yaml`, and never builds:
 
 ```bash
-docker compose -f compose.yaml -f compose.demo.yaml pull
-docker compose -f compose.yaml -f compose.demo.yaml up -d --no-recreate db   # + health wait
-./migrate.sh -f compose.yaml -f compose.demo.yaml
-docker compose -f compose.yaml -f compose.demo.yaml up -d
+docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml pull
+docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml up -d --no-recreate db   # + health wait
+./migrate.sh -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml
+docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml up -d
 docker image prune -af --filter "until=168h"   # success-path hygiene (gh-#441), + builder prune
 ```
 
@@ -263,17 +270,17 @@ same launch: `./launch.sh --pinned --with logging,tunnel` merges them into whate
 
 ### After a launch, bare `docker compose` matches it (gh-#309)
 
-`--pinned` runs against `compose.yaml` **+** `compose.demo.yaml`, but a bare
-`docker compose down` in this directory loads only `compose.yaml` — so every service that
-exists solely in an overlay (`caddy`, `ollama`, `ollama-init`) was invisible to it,
-survived the teardown, and was left running.
+`--pinned` runs against `compose.yaml` **+** `compose.pinned.yaml` **+**
+`compose.demo.yaml`, but a bare `docker compose down` in this directory loads only
+`compose.yaml` — so every service that exists solely in an overlay (`caddy`, `ollama`,
+`ollama-init`) was invisible to it, survived the teardown, and was left running.
 
 `launch.sh` now records the file stack it used as `COMPOSE_FILE` in `.env` after a
 successful `up`. Compose reads that from the project directory automatically, so
 `down`/`ps`/`logs` all target what was actually launched, with no flags to remember:
 
 ```bash
-./launch.sh --pinned          # writes e.g. COMPOSE_FILE=compose.yaml:compose.demo.yaml
+./launch.sh --pinned          # writes e.g. COMPOSE_FILE=compose.yaml:compose.pinned.yaml:compose.demo.yaml
 docker compose down           # now tears down caddy + ollama too
 ```
 
@@ -375,7 +382,7 @@ station is on air throughout, so this trades catalog-build time for headroom, no
 **Temporary admin access** (settings, personas, catalog curation on the public box):
 
 1. Edit `compose.demo.yaml`'s `api` env: `Admin__Enabled: "true"`.
-2. `COMPOSE_PROFILES=admin docker compose -f compose.yaml -f compose.demo.yaml up -d`
+2. `COMPOSE_PROFILES=admin docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml up -d`
    — recreates `api`, starts `admin_ui` on loopback only.
 3. Tunnel in: `ssh -L 3000:127.0.0.1:3000 you@your-box` → `http://localhost:3000`. If
    Cloudflare Access is fronting this box (see "Zero Trust Access (optional)" below),

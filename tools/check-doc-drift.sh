@@ -47,16 +47,19 @@ else
   drift "model: doc never states \`$model\`, compose ollama-init pulls \"$model\""
 fi
 
-# --- Pair 3: the two home-v* image pins agree with each other. ---------------------------
+# --- Pair 3: the five home-v* image pins agree with each other. --------------------------
 # Not a doc pair, but the same drift class: a half-bumped release (api bumped, icecast not)
-# has no other guard. All home-v tags in compose.demo.yaml must be identical.
-mapfile -t pins < <(grep -oE 'home-v[0-9]+\.[0-9]+\.[0-9]+' compose.demo.yaml | sort -u)
+# has no other guard. SPEC F136.5 (T317): the pins moved OUT of compose.demo.yaml into their
+# own overlay, compose.pinned.yaml — release pin-bump PRs touch that file only now, so this
+# is where a half-bumped release would actually show up. All home-v tags in it must be
+# identical.
+mapfile -t pins < <(grep -oE 'home-v[0-9]+\.[0-9]+\.[0-9]+' compose.pinned.yaml | sort -u)
 if [[ ${#pins[@]} -eq 0 ]]; then
-  drift "pins: no home-v* image tags found in compose.demo.yaml — update this script's extraction"
+  drift "pins: no home-v* image tags found in compose.pinned.yaml — update this script's extraction"
 elif [[ ${#pins[@]} -gt 1 ]]; then
-  drift "pins: compose.demo.yaml carries mixed image pins: ${pins[*]} — a half-bumped release"
+  drift "pins: compose.pinned.yaml carries mixed image pins: ${pins[*]} — a half-bumped release"
 else
-  ok "pins: all compose.demo.yaml images pinned to ${pins[0]}"
+  ok "pins: all compose.pinned.yaml images pinned to ${pins[0]}"
 fi
 
 if [[ $fail -ne 0 ]]; then

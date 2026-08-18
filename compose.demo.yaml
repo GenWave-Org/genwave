@@ -1,17 +1,23 @@
 # =============================================================================
 # compose.demo.yaml — the public-station overlay (SPEC F64.3; field-tested topology).
 #
-#   docker compose -f compose.yaml -f compose.demo.yaml up -d
+#   docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml up -d
 #
-# What it does on top of compose.yaml:
+# REQUIRES stacking on compose.pinned.yaml (SPEC F136.5) — this file carries ONLY the
+# public-appliance TOPOLOGY (Caddy front door, port lockdown, ollama DJ brain, env). The
+# GHCR image pins for admin_ui/engine/piper/icecast/api (image:/pull_policy:/build: !reset
+# null) moved to compose.pinned.yaml so release pin-bumps touch one file instead of this
+# one. `launch.sh --pinned` stacks all three files in this order; this file alone (without
+# compose.pinned.yaml) leaves those five services on the base compose.yaml's `build:`
+# contexts, which is NOT the public-appliance posture (gh-#93: a demo box must pull
+# published images, never source-build and freeze on stale local code).
+#
+# What it does on top of compose.yaml + compose.pinned.yaml:
 #   * Caddy front door: TLS for ${PUBLIC_HOST}, routes /stream* -> icecast and
 #     everything else -> api:8081 (the spectator-only public listener)
-#   * api + icecast + admin_ui + engine run the published GHCR release images
-#     (pull_policy: always — a demo box never source-builds; bump the tags per release.
-#     admin_ui/engine gained published images in v2.4.1, gh-#93: before that a --pinned
-#     box kept its first-deploy locally-built images forever)
 #   * api ports locked down: 8080 loopback-only (SSH tunnel), 8081 not host-published
 #   * admin_ui loopback-only, for the temporary-admin recipe in DEPLOYMENT.md
+#   * icecast unpublished — Caddy reaches it over the `core` network
 #   * ollama DJ brain: pinned, model kept resident, cpu+mem fenced so generation
 #     can never starve real-time playout
 #
@@ -47,37 +53,12 @@ services:
     restart: unless-stopped
 
   admin_ui:
-    image: ghcr.io/genwave-org/genwave-admin-ui:home-v5.2.2  # bump per release
-    pull_policy: always
-    # `!reset` drops the base `build:` context entirely: a demo box must pull this image or
-    # fail loudly — never silently fall back to building (and then forever running) local
-    # source. That silent fallback is exactly how the box served a stale admin UI across
-    # two releases (gh-#93).
-    build: !reset null
     # Base compose publishes 3000:3000 on 0.0.0.0 — loopback-only on a public box;
     # reach it through an SSH tunnel (ssh -L 3000:127.0.0.1:3000). Only runs at all
-    # when COMPOSE_PROFILES=admin (temporary-admin recipe in DEPLOYMENT.md).
+    # when COMPOSE_PROFILES=admin (temporary-admin recipe in DEPLOYMENT.md). The GHCR
+    # image pin for this service lives in compose.pinned.yaml (SPEC F136.5).
     ports: !override
       - "127.0.0.1:3000:3000"
-
-  engine:
-    image: ghcr.io/genwave-org/genwave-engine:home-v5.2.2    # bump per release
-    pull_policy: always
-    # Same !reset rationale as admin_ui above (gh-#93). Note genwave.liq is a bind mount
-    # from the checkout (see compose.yaml), NOT baked into this image — the image carries
-    # the Liquidsoap version pin + entrypoint.sh; liq script changes arrive via git pull.
-    build: !reset null
-
-  piper:
-    # gh-#241: piper is now a repo-built image (base compose builds ./piper), so a demo box pins
-    # the published one, same posture as admin_ui/engine (gh-#93): pull or fail loudly — never
-    # silently source-build and freeze. NOTE the first genwave-piper publish happens at the FIRST
-    # TAG CUT AFTER gh-#240/#241 — until that release's pin bump this tag does not exist and the
-    # pull fails loudly by design. Bump with the other four pins per release.
-    image: ghcr.io/genwave-org/genwave-piper:home-v5.2.2     # bump per release
-    pull_policy: always
-    # Same !reset rationale as admin_ui above (gh-#93).
-    build: !reset null
 
   ollama:
     image: ollama/ollama:0.9.6            # PIN — tested; `latest` drifts
@@ -128,26 +109,25 @@ services:
       genwave.role: utility
 
   icecast:
-    image: ghcr.io/genwave-org/genwave-icecast:home-v5.2.2   # bump per release
-    pull_policy: always
-    # Base compose publishes 8000:8000 on 0.0.0.0 — right for LAN listening in
-    # Operator/Standard, wrong on a public box: Icecast serves status.xsl (listener
-    # counts, server version; aliased at "/") and /admin (password-only, no rate
-    # limiting) on that same port, straight past Caddy. Same list-merge gotcha as
-    # api below — without `!override` the base publish survives the overlay merge.
-    # Caddy reaches icecast:8000 over the `core` network; nothing is host-published.
+    # Icecast serves status.xsl (listener counts, server version; aliased at "/") and
+    # /admin (password-only, no rate limiting) on that same port, straight past Caddy —
+    # right for LAN listening in Operator/Standard, wrong on a public box. Same
+    # list-merge gotcha as api below — without `!override` the base publish survives
+    # the overlay merge. Caddy reaches icecast:8000 over the `core` network; nothing is
+    # host-published. The GHCR image pin for this service lives in compose.pinned.yaml
+    # (SPEC F136.5).
     ports: !override []
 
   api:
-    image: ghcr.io/genwave-org/genwave:home-v5.2.2           # bump per release
-    pull_policy: always
     # compose.yaml's base `ports:` publishes BOTH 8080 and 8081 on 0.0.0.0 — fine for
     # Operator/Standard (LAN reachability is the point there), wrong for a public box.
     # Compose list-type keys MERGE across `-f` files by default: a plain `ports:`
     # override here would APPEND to the base list, not replace it, leaving 0.0.0.0:8080
     # and 0.0.0.0:8081 published right alongside whatever you add here. The `!override`
     # merge tag (Compose Specification) is what actually replaces the list. Verify with
-    # `docker compose -f compose.yaml -f compose.demo.yaml config` — see DEPLOYMENT.md.
+    # `docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml config`
+    # — see DEPLOYMENT.md. The GHCR image pin for this service lives in
+    # compose.pinned.yaml (SPEC F136.5).
     ports: !override
       - "127.0.0.1:8080:8080"
       # No 8081 entry at all — Caddy reaches api:8081 over the `core` network; a public

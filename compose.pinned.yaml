@@ -1,0 +1,58 @@
+# =============================================================================
+# compose.pinned.yaml — the GHCR image-pin overlay (SPEC F136.5).
+#
+#   docker compose -f compose.yaml -f compose.pinned.yaml [-f compose.demo.yaml] up -d
+#
+# What it is: ONLY the pin mechanics for the five repo-built services — image: tag +
+# pull_policy: always, plus `build: !reset null` wherever the base service's `build:`
+# context must be dropped entirely (a box running this overlay must pull the published
+# image or fail loudly, never silently fall back to building — and then forever running —
+# local source; that silent fallback is exactly how a box served a stale admin UI across
+# two releases, gh-#93).
+#
+# What it deliberately is NOT: no topology lives here — no ports, no environment, no
+# Caddy, no ollama, no admin gating. `compose.demo.yaml` owns the public-appliance
+# topology and stacks on top of this file (SPEC F136.5); `GW_PRESET=home` (launch.sh)
+# stacks base + this file alone for the wizard's LAN station — published ports, admin per
+# COMPOSE_PROFILES, no PUBLIC_HOST required.
+#
+# Release pin-bumps edit THIS file only — bump all five tags together per release.
+# Deliberately carries NO zero-diff hash epoch: unlike compose.yaml/compose.demo.yaml
+# (the T85/T93 ritual re-pins those only when their CONTENT changes), this file's pins
+# change every release by design.
+# =============================================================================
+
+services:
+  admin_ui:
+    image: ghcr.io/genwave-org/genwave-admin-ui:home-v5.2.2  # bump per release
+    pull_policy: always
+    # `!reset` drops the base `build:` context entirely — see the file header for why.
+    build: !reset null
+
+  engine:
+    image: ghcr.io/genwave-org/genwave-engine:home-v5.2.2    # bump per release
+    pull_policy: always
+    # Same !reset rationale as admin_ui above (gh-#93). Note genwave.liq is a bind mount
+    # from the checkout (see compose.yaml), NOT baked into this image — the image carries
+    # the Liquidsoap version pin + entrypoint.sh; liq script changes arrive via git pull.
+    build: !reset null
+
+  piper:
+    # gh-#241: piper is now a repo-built image (base compose builds ./piper), so a pinned
+    # box pins the published one, same posture as admin_ui/engine (gh-#93): pull or fail
+    # loudly — never silently source-build and freeze. NOTE the first genwave-piper publish
+    # happens at the FIRST TAG CUT AFTER gh-#240/#241 — until that release's pin bump this
+    # tag does not exist and the pull fails loudly by design. Bump with the other four pins
+    # per release.
+    image: ghcr.io/genwave-org/genwave-piper:home-v5.2.2     # bump per release
+    pull_policy: always
+    # Same !reset rationale as admin_ui above (gh-#93).
+    build: !reset null
+
+  icecast:
+    image: ghcr.io/genwave-org/genwave-icecast:home-v5.2.2   # bump per release
+    pull_policy: always
+
+  api:
+    image: ghcr.io/genwave-org/genwave:home-v5.2.2           # bump per release
+    pull_policy: always

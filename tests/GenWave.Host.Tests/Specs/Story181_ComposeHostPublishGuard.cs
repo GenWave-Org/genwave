@@ -14,10 +14,12 @@
 //
 // ScenarioTunnelProfilePasses (cloudflared observability, Q3 housekeeping) pins that the
 // optional `cloudflared` service (profiles: ["tunnel"], off by default, no `ports:` at all)
-// never regresses the host-publish posture: it renders the real merged config WITH the
-// "tunnel" profile active via `docker compose --profile tunnel config --format json`, then
-// drives the guard's --config-file mode against that render. Needs the docker CLI (to render),
-// so it carries Category=Integration like AC1.
+// never regresses the host-publish posture: it renders the real merged
+// compose.yaml + compose.pinned.yaml + compose.demo.yaml config (the actual `--pinned`
+// three-file shape, SPEC F136.5 — what ships) WITH the "tunnel" profile active via
+// `docker compose --profile tunnel config --format json`, then drives the guard's
+// --config-file mode against that render. Needs the docker CLI (to render), so it carries
+// Category=Integration like AC1.
 
 using System.Diagnostics;
 
@@ -88,8 +90,9 @@ public static class FeatureComposeHostPublishGuard
         [Trait("Category", "Integration")]
         public static void Guard_exits_zero_with_tunnel_profile_rendered_via_config_file()
         {
-            // Given the merged compose.yaml + compose.demo.yaml config, rendered WITH the
-            // optional "tunnel" profile active (cloudflared observability, Q3 housekeeping)
+            // Given the merged compose.yaml + compose.pinned.yaml + compose.demo.yaml config
+            // (the real --pinned three-file shape, SPEC F136.5), rendered WITH the optional
+            // "tunnel" profile active (cloudflared observability, Q3 housekeeping)
             // When  that render is fed to the guard through --config-file mode
             // Then  it still exits 0 — cloudflared publishes no host ports at all, so activating
             //       its profile can never regress the caddy-80/443-only invariant (F67.1)
@@ -122,7 +125,7 @@ public static class FeatureComposeHostPublishGuard
             };
             foreach (var arg in new[]
             {
-                "compose", "-f", "compose.yaml", "-f", "compose.demo.yaml",
+                "compose", "-f", "compose.yaml", "-f", "compose.pinned.yaml", "-f", "compose.demo.yaml",
                 "--profile", "tunnel", "config", "--format", "json",
             })
             {
@@ -132,6 +135,7 @@ public static class FeatureComposeHostPublishGuard
             // Same dummy-secret idiom as the guard script's own docker-invoking path (see its
             // header comment): `config` only merges and substitutes text, it never talks to a
             // daemon or starts a container, so these never reach a running service.
+            // compose.pinned.yaml itself needs no secrets/env of its own (image pins only).
             startInfo.Environment["POSTGRES_PASSWORD"] = "story181-dummy";
             startInfo.Environment["LIBRARY_DB_PASSWORD"] = "story181-dummy";
             startInfo.Environment["STATION_DB_PASSWORD"] = "story181-dummy";

@@ -310,10 +310,10 @@ public static class FeatureStagedStartup
     [Trait("Category", "Integration")]
     public sealed class ScenarioGwPresetAloneChoosesTheShape
     {
-        // GW_ENV_FILE seam carries GW_PRESET=pinned-piper-only; ./launch.sh --dry-run with
-        // no topology flags plans the piper-only pinned shape.
+        // GW_ENV_FILE seam carries GW_PRESET=home-piper-only (vocabulary v2, SPEC F136.5);
+        // ./launch.sh --dry-run with no topology flags plans the piper-only home shape.
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
-            new(() => RunLaunch(WriteEnvFile("GW_PRESET=pinned-piper-only"), "--dry-run"));
+            new(() => RunLaunch(WriteEnvFile("GW_PRESET=home-piper-only"), "--dry-run"));
 
         [Fact]
         public void ExitsZero()
@@ -323,9 +323,34 @@ public static class FeatureStagedStartup
         }
 
         [Fact]
-        public void PlansThePiperOnlyPinnedShapeFromGwPresetAlone()
+        public void PlansThePiperOnlyHomeShapeFromGwPresetAlone()
         {
             Assert.Contains(PlanLines(Run.Value.StdOut), l => l.Contains("compose.piper-only.yaml", StringComparison.Ordinal));
+        }
+    }
+
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioGwPresetHomeAloneChoosesBasePlusPinnedWithoutDemo
+    {
+        // GW_ENV_FILE seam carries GW_PRESET=home; ./launch.sh --dry-run with no topology
+        // flags plans base + compose.pinned.yaml — the wizard's LAN station — WITHOUT
+        // compose.demo.yaml (SPEC F136.5: the public appliance stays flag-only, --pinned).
+        static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
+            new(() => RunLaunch(WriteEnvFile("GW_PRESET=home"), "--dry-run"));
+
+        [Fact]
+        public void ExitsZero()
+        {
+            Assert.True(Run.Value.ExitCode == 0,
+                $"expected a clean dry-run exit; exit={Run.Value.ExitCode} stderr={Run.Value.StdErr}");
+        }
+
+        [Fact]
+        public void PlansThePinnedOverlayWithoutTheDemoOverlay()
+        {
+            var lines = PlanLines(Run.Value.StdOut);
+            Assert.Contains(lines, l => l.Contains("compose.pinned.yaml", StringComparison.Ordinal));
+            Assert.DoesNotContain(lines, l => l.Contains("compose.demo.yaml", StringComparison.Ordinal));
         }
     }
 
@@ -333,7 +358,7 @@ public static class FeatureStagedStartup
     public sealed class ScenarioExplicitFlagOverridesGwPreset
     {
         // GW_PRESET=dev in the env file, but an explicit --pinned flag is given — the flag
-        // wins, so the plan shows the pinned/demo-overlay shape, not the dev flow.
+        // wins, so the plan shows the pinned+demo overlay shape, not the dev flow.
         static readonly Lazy<(int ExitCode, string StdOut, string StdErr)> Run =
             new(() => RunLaunch(WriteEnvFile("GW_PRESET=dev"), "--pinned", "--dry-run"));
 
@@ -375,12 +400,43 @@ public static class FeatureStagedStartup
         [Fact]
         public void AnUnrecognizedGwPresetValueExitsWithGuidanceNotSilence()
         {
-            var envFile = WriteEnvFile("GW_PRESET=piper-only-pinned");   // pre-F132.5 spelling — not in the closed vocabulary
+            var envFile = WriteEnvFile("GW_PRESET=piper-only-pinned");   // never a valid spelling in either vocabulary
 
             var (exitCode, _, stdErr) = RunLaunch(envFile, "--dry-run");
 
             Assert.True(exitCode != 0 && stdErr.Contains("GW_PRESET", StringComparison.Ordinal),
                 $"expected a loud, non-zero exit naming GW_PRESET; exit={exitCode} stderr={stdErr}");
+        }
+    }
+
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioOldPinnedPresetValueIsRejected
+    {
+        // Pre-F136.5 spelling: `pinned` used to mean the base+demo pair; the pins/topology
+        // split retired it (SPEC F136.5 vocabulary v2) in favor of `home` (base+pinned, no
+        // demo). A stale .env surviving from a pre-split box must fail loud with the exit-2
+        // it always used for a bad GW_PRESET, never silently resolve to `home` or the demo
+        // shape.
+        [Fact]
+        public void ExitsWithCode2AndNamesGwPreset()
+        {
+            var envFile = WriteEnvFile("GW_PRESET=pinned");
+
+            var (exitCode, _, stdErr) = RunLaunch(envFile, "--dry-run");
+
+            Assert.True(exitCode == 2 && stdErr.Contains("GW_PRESET", StringComparison.Ordinal),
+                $"expected exit 2 naming GW_PRESET; exit={exitCode} stderr={stdErr}");
+        }
+
+        [Fact]
+        public void PiperOnlyVariantIsAlsoRejected()
+        {
+            var envFile = WriteEnvFile("GW_PRESET=pinned-piper-only");
+
+            var (exitCode, _, stdErr) = RunLaunch(envFile, "--dry-run");
+
+            Assert.True(exitCode == 2 && stdErr.Contains("GW_PRESET", StringComparison.Ordinal),
+                $"expected exit 2 naming GW_PRESET; exit={exitCode} stderr={stdErr}");
         }
     }
 }

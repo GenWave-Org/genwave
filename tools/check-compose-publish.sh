@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
 # check-compose-publish.sh — SPEC F67.1 / STORY-181 guard.
 #
-# On the public (compose.demo.yaml) overlay, the merged compose config must publish
-# 0.0.0.0 host ports ONLY for the front proxy (caddy 80/443). Every other service must be
-# loopback-bound (127.0.0.1:...) or unpublished entirely. This is exactly the Icecast
-# :8000 gotcha fixed in 05303ce — this script pins it shut so it can never silently recur.
+# On the public (--pinned: compose.pinned.yaml + compose.demo.yaml) overlay, the merged
+# compose config must publish 0.0.0.0 host ports ONLY for the front proxy (caddy 80/443).
+# Every other service must be loopback-bound (127.0.0.1:...) or unpublished entirely. This
+# is exactly the Icecast :8000 gotcha fixed in 05303ce — this script pins it shut so it can
+# never silently recur.
 #
 # Usage:
 #   tools/check-compose-publish.sh
-#     Renders the real merged config (`docker compose -f compose.yaml -f compose.demo.yaml
-#     config --format json`, from the repo root) and checks it. Requires the docker CLI.
-#     Dummy secrets are exported for the vars compose.yaml/compose.demo.yaml require
-#     (${VAR:?}) so this runs standalone, without a real .env — `config` only merges and
-#     substitutes text, it never talks to a daemon or starts a container.
+#     Renders the real merged config (`docker compose -f compose.yaml -f compose.pinned.yaml
+#     -f compose.demo.yaml config --format json`, from the repo root — the actual `--pinned`
+#     shape launch.sh runs, SPEC F136.5) and checks it. Requires the docker CLI. Dummy
+#     secrets are exported for the vars compose.yaml/compose.demo.yaml require (${VAR:?}) so
+#     this runs standalone, without a real .env — `config` only merges and substitutes text,
+#     it never talks to a daemon or starts a container. compose.pinned.yaml itself needs no
+#     env (static image tags only).
 #
 #   tools/check-compose-publish.sh --config-file <path>
 #     Checks an already-rendered `docker compose ... config --format json` document at
@@ -80,7 +83,7 @@ else
   export POSTGRES_PASSWORD LIBRARY_DB_PASSWORD STATION_DB_PASSWORD ICECAST_SOURCE_PASSWORD \
          ICECAST_ADMIN_PASSWORD ADMIN_PASSWORD MEDIA_DIR PUBLIC_HOST
 
-  CONFIG_JSON="$(cd "$REPO_ROOT" && docker compose -f compose.yaml -f compose.demo.yaml config --format json)"
+  CONFIG_JSON="$(cd "$REPO_ROOT" && docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml config --format json)"
 fi
 
 # TSV rows, one per published port across every service: service, published (host) port,
