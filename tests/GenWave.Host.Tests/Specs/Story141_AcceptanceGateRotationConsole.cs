@@ -113,7 +113,11 @@ public static class FeatureAcceptanceGateRotationConsole
         // volume, and healthcheck contract — a piper-service-only edit, another intentional
         // edit from a LATER epic, not a regression of this epic's zero-diff promise.
         // EngineScriptSha256 unchanged — gh-#241 does not touch engine/genwave.liq.
-        const string EngineScriptSha256 = "869ea6fc35e3d73de4ca6cc47551a07da63bd855481ba77120fe73f1754d72da";
+        // BOTH hashes re-pinned 2026-08-17 (gh-#575 follow-up): liquidsoap v2.4.4->v2.4.5 pin
+        // comments refreshed in compose.yaml + engine/genwave.liq (prose only, zero functional
+        // bytes — the FROM bump itself lives in engine/Dockerfile, outside both pinned files).
+        // Another intentional edit from a later epic, not a regression of the zero-diff promise.
+        const string EngineScriptSha256 = "36bc56cb9909ed94b475528ab1bb3a2f3d7f7332a5652b5c7e30189955d1358d";
         // ComposeYamlSha256 re-pinned 2026-07-30 (gh-#276): kokoro mem_limit 3g->4g + comment
         // refresh — ops-only edit, no service/wire/volume change. Another intentional edit from
         // a later epic, not a regression of this epic's zero-diff promise.
@@ -129,7 +133,7 @@ public static class FeatureAcceptanceGateRotationConsole
         // piper service gains `profiles: ["fallback"]` (off by default; an operator opts in with
         // `--with fallback` plus a live PUT /api/settings). Another intentional edit from a later
         // epic, not a regression of this epic's zero-diff promise.
-        const string ComposeYamlSha256  = "f6d3d83923562ee2d6fde56749b5099c8ecea079f6d019101fd9c3cb73dbb27c";
+        const string ComposeYamlSha256  = "c9d55749062f13388f2a8c5811da51e54e36b690db8a07baf0ac0db94845c9f8";
 
         [Fact]
         public void EngineScriptByteMatchesMain()

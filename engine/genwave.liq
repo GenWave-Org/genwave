@@ -1,7 +1,7 @@
 # genwave.liq — single-station broadcast playout.
 # The C# control plane pushes annotated requests over the telnet socket; this script applies
 # per-track gain, crossfades, backstops dead air, and streams to Icecast.
-# Target: Liquidsoap 2.4.x  (pinned to v2.4.4 in compose — operator/setting syntax shifts across versions).
+# Target: Liquidsoap 2.4.x  (pinned to v2.4.5 in compose — operator/setting syntax shifts across versions).
 
 # --- Control socket: bind 0.0.0.0 so the api container can reach it. Port 1234 is NEVER
 #     published in compose, so "all interfaces" resolves to "the internal Docker network only".

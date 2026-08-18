@@ -191,7 +191,7 @@ image) — lives in [CHANGELOG.md](CHANGELOG.md).
 - **Upgrading an existing deployment:** run `./migrate.sh` after pulling a new release — it applies every `db/*-migration.sh` idempotently against the running stack (`./migrate.sh -f compose.yaml -f compose.demo.yaml` on a demo/appliance box; see [DEPLOYMENT.md](DEPLOYMENT.md)). `./launch.sh` does this automatically for the dev stack; a raw `docker compose up` does **not**.
 - Secrets live only in `.env` (gitignored). Promote to Docker secrets before anything public.
 - If you change `duration=` in `engine/genwave.liq`, pass the matching `CROSSFADE=` to `smoke_test.sh` so its analysis windows line up.
-- The `crossfade` operator behavior and `output.icecast.metadata` on-air signal are specific to Liquidsoap 2.4.x. The engine image is pinned to `v2.4.4` in `engine/Dockerfile` (`FROM savonet/liquidsoap:v2.4.4`) — `compose.yaml` only echoes the pin in a comment — do not change it without re-running the smoke test.
+- The `crossfade` operator behavior and `output.icecast.metadata` on-air signal are specific to Liquidsoap 2.4.x. The engine image is pinned to `v2.4.5` in `engine/Dockerfile` (`FROM savonet/liquidsoap:v2.4.5`) — `compose.yaml` only echoes the pin in a comment — do not change it without re-running the smoke test.
 
 ## Built with AI assistance
 

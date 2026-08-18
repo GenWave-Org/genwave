@@ -71,7 +71,11 @@ public static class FeatureIcecastTwoFive
         // never carried "url", so the annotation was filtered out before icy_song/icy_metadata saw
         // it and StreamUrl never reached listeners (Story230 gate's live-run finding). Re-pinned
         // to the one-line export-list fix.
-        const string EngineScriptSha256 = "869ea6fc35e3d73de4ca6cc47551a07da63bd855481ba77120fe73f1754d72da";
+        // BOTH hashes re-pinned 2026-08-17 (gh-#575 follow-up): liquidsoap v2.4.4->v2.4.5 pin
+        // comments refreshed in compose.yaml + engine/genwave.liq (prose only, zero functional
+        // bytes — the FROM bump itself lives in engine/Dockerfile, outside both pinned files).
+        // Another intentional edit from a later epic, not a regression of the zero-diff promise.
+        const string EngineScriptSha256 = "36bc56cb9909ed94b475528ab1bb3a2f3d7f7332a5652b5c7e30189955d1358d";
 
         [Fact]
         public static void StreamTitleBuilderInputsRemainPinned()
