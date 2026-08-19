@@ -1848,29 +1848,49 @@ primary_lan_address() {
 # quietly means the READER's own laptop, not the station (the exact confusion Dean hit). The
 # plain hostname (never the FQDN) resolves for other devices on the same LAN via the home
 # router's own mDNS/LLMNR, and it's what Dean asked for. Total function, same contract as
-# primary_lan_address above: a missing/broken/empty `hostname`, or the literal string
-# "localhost" (a candidate that would defeat the whole point of this function), degrades to
-# "skip this line" — never a crash, never a lie.
+# primary_lan_address above: a missing/empty `hostname`, or the literal string "localhost" (a
+# candidate that would defeat the whole point of this function), degrades to "skip this line" —
+# never a crash, never a lie.
+#
+# N1 (gate-run round 2 review): a `hostname` command that EXISTS but misbehaves also has to
+# degrade the same way, mirroring primary_lan_address's own round-4 F2 guard, which this
+# function originally lacked — a `hostname` writing a USAGE message to stdout instead of failing
+# cleanly used to flow straight into the lead URL (repro: candidate "usage: hostname [-v]",
+# handoff prints `http://usage: hostname [-v]:8000/stream`), and so did bare whitespace (repro:
+# candidate "   ", handoff prints `http://   :3000/`). Only a hostname-SHAPED token — letters,
+# digits, hyphens, dots, no whitespace or other punctuation — is ever returned; anything else
+# (garbage, empty, "localhost") degrades to "skip this line", and the caller's own contract
+# (print_url_block/primary_url) already falls through to the LAN line from there.
 primary_hostname() {
   command -v hostname >/dev/null 2>&1 || return 0
   local candidate
   candidate="$(hostname 2>/dev/null)" || true
-  if [ -n "$candidate" ] && [ "$candidate" != "localhost" ]; then
+  if [[ "$candidate" =~ ^[A-Za-z0-9.-]+$ ]] && [ "$candidate" != "localhost" ]; then
     printf '%s' "$candidate"
   fi
   return 0
 }
 
+# format_url <host> <port> <path> — the ONE place the IPv6-bracket logic lives (round-4 review
+# N2: an IPv6 literal dropped straight into a URL without brackets is ambiguous with the port's
+# own colon). PR #586 extracted print_lan_line for exactly this reason (two call sites had
+# started drifting apart); finding 2 (gate-run round 2 review, N3) re-grew a THIRD copy across
+# print_lan_line/print_url_block/primary_url — extracted one level further, to a primitive that
+# builds the bare "http://host:port/path" string (no label, no trailing annotation), so the
+# bracket case can never drift again no matter how many call sites need a URL.
+format_url() {
+  local host="$1" port="$2" path="$3"
+  case "$host" in
+    *:*) printf 'http://[%s]:%s%s' "$host" "$port" "$path" ;;
+    *)   printf 'http://%s:%s%s' "$host" "$port" "$path" ;;
+  esac
+}
+
 # print_lan_line <lan_addr> <port> <path> — the "(from other devices on your network)" line,
-# shared by the stream and admin URL blocks (finding 1, post-v5.3.0 gate run) so the IPv6-
-# bracket logic (round-4 review N2: an IPv6 literal dropped straight into a URL without brackets
-# is ambiguous with the port's own colon) can never drift between the two call sites.
+# shared by every URL block (finding 1, post-v5.3.0 gate run).
 print_lan_line() {
   local addr="$1" port="$2" path="$3"
-  case "$addr" in
-    *:*) echo "                   http://[${addr}]:${port}${path}  (from other devices on your network)" ;;
-    *)   echo "                   http://${addr}:${port}${path}  (from other devices on your network)" ;;
-  esac
+  echo "                   $(format_url "$addr" "$port" "$path")  (from other devices on your network)"
 }
 
 # print_url_block <label> <host_name> <lan_addr> <port> <path> — finding 2 (gate-run round 2):
@@ -1882,17 +1902,14 @@ print_lan_line() {
 print_url_block() {
   local label="$1" host="$2" lan="$3" port="$4" path="$5" led=0
   if [ -n "$host" ]; then
-    printf '    %-14s %s\n' "$label" "http://${host}:${port}${path}"
+    printf '    %-14s %s\n' "$label" "$(format_url "$host" "$port" "$path")"
     led=1
   fi
   if [ -n "$lan" ]; then
     if [ "$led" = "1" ]; then
       print_lan_line "$lan" "$port" "$path"
     else
-      case "$lan" in
-        *:*) printf '    %-14s %s\n' "$label" "http://[${lan}]:${port}${path}" ;;
-        *)   printf '    %-14s %s\n' "$label" "http://${lan}:${port}${path}" ;;
-      esac
+      printf '    %-14s %s\n' "$label" "$(format_url "$lan" "$port" "$path")"
     fi
     led=1
   fi
@@ -1914,12 +1931,9 @@ print_url_block() {
 primary_url() {
   local host="$1" lan="$2" port="$3" path="$4"
   if [ -n "$host" ]; then
-    printf 'http://%s:%s%s' "$host" "$port" "$path"
+    format_url "$host" "$port" "$path"
   elif [ -n "$lan" ]; then
-    case "$lan" in
-      *:*) printf 'http://[%s]:%s%s' "$lan" "$port" "$path" ;;
-      *)   printf 'http://%s:%s%s' "$lan" "$port" "$path" ;;
-    esac
+    format_url "$lan" "$port" "$path"
   else
     printf 'http://localhost:%s%s' "$port" "$path"
   fi

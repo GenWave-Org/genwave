@@ -408,6 +408,20 @@ public static class FeatureSetupLaunchClockHandoff
         return bin;
     }
 
+    /// <summary>N1 (gate-run round 2 review): a `hostname` that exists, exits 0, and answers
+    /// `hostname -I` honestly (a valid LAN address) — but its BARE invocation (primary_hostname's
+    /// own call) writes a usage/error-shaped message to stdout instead of a real name, the exact
+    /// misbehaving-but-zero-exit shape primary_lan_address's own round-4 F2 guard already handles
+    /// for the LAN line and primary_hostname originally did not for the hostname line.</summary>
+    static string BinWithHostnameReturningUsageText()
+    {
+        var bin = MakeBinDir();
+        File.Delete(Path.Combine(bin, "hostname"));
+        AddStub(bin, "hostname",
+            """if [ "${1:-}" = "-I" ]; then echo "192.168.9.9"; exit 0; fi; echo "usage: hostname [-v]"; exit 0""");
+        return bin;
+    }
+
     /// <summary>N4 (round-3 review): a bin dir with every <see cref="BaseTools"/> entry except
     /// curl — the "no prober available at all" shape wait_for_on_air_bg must degrade honestly
     /// under, per this file's own note that the specs already control PATH via
@@ -1121,6 +1135,13 @@ public static class FeatureSetupLaunchClockHandoff
             // `hostname -I` (primary_lan_address) fail entirely must still hand the operator a
             // working URL rather than an unlabelled blank — this is the one shape where
             // localhost still appears, and it appears alone (no LAN line either).
+            //
+            // N2 (gate-run round 2 review): asserting localhost's PRESENCE alone would also pass
+            // against the old, pre-finding-2 code (which printed localhost unconditionally,
+            // hostname or no) — that proves nothing about THIS fixture's broken hostname actually
+            // engaging the new degrade path. Also asserting the REAL hostname's own URL is
+            // ABSENT closes that gap: it can only be missing if primary_hostname genuinely
+            // treated BinWithBrokenHostname's stub as unusable, not by coincidence.
             var launchStub = WriteLaunchStub(exitCode: 0);
             using var mount = new MountStub(servesOnAttempt: 2);
             var mediaDir = MakeMediaDir(flacCount: 1);
@@ -1129,7 +1150,33 @@ public static class FeatureSetupLaunchClockHandoff
             var (_, stdOut, _) = RunSetup(BinWithBrokenHostname(), envFile, $"{mediaDir}\n1\ny\n",
                 BaseEnv(launchStub, mount.Url, 30));
 
-            Assert.Contains("http://localhost:3000/", stdOut, StringComparison.Ordinal);
+            Assert.True(
+                stdOut.Contains("http://localhost:3000/", StringComparison.Ordinal) &&
+                !stdOut.Contains($"http://{RealHostname.Value}:3000/", StringComparison.Ordinal),
+                $"expected the last-resort localhost fallback, with no real-hostname line leaking through; stdout:\n{stdOut}");
+        }
+
+        [Fact]
+        public void AHostnameThatAnswersWithUsageTextDegradesToTheLanLineNotGarbage()
+        {
+            // N1 (gate-run round 2 review, the finding that mattered): primary_hostname's own
+            // shape check — a `hostname` that exists on PATH and exits 0, but writes a USAGE
+            // message to stdout instead of a real name (the reviewer's own repro), used to flow
+            // straight into the lead URL (`http://usage: hostname [-v]:8000/stream`). It must
+            // degrade exactly like an empty/missing hostname already does: skip the hostname
+            // line, fall straight through to the LAN line — never a garbage URL anywhere.
+            var launchStub = WriteLaunchStub(exitCode: 0);
+            using var mount = new MountStub(servesOnAttempt: 2);
+            var mediaDir = MakeMediaDir(flacCount: 1);
+            var envFile = ScratchEnvPath();
+
+            var (_, stdOut, _) = RunSetup(BinWithHostnameReturningUsageText(), envFile, $"{mediaDir}\n1\ny\n",
+                BaseEnv(launchStub, mount.Url, 30));
+
+            Assert.True(
+                stdOut.Contains("http://192.168.9.9:3000/", StringComparison.Ordinal) &&
+                !stdOut.Contains("usage", StringComparison.Ordinal),
+                $"expected the admin URL to lead with the LAN address, with no garbage 'usage' text anywhere; stdout:\n{stdOut}");
         }
 
         [Fact]
