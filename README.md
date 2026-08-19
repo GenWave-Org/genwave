@@ -207,7 +207,7 @@ GenWave is a control plane, not a from-scratch audio engine — it's wired aroun
 - **[Icecast](https://icecast.org/)** — fans the mixed stream out to every listener.
 - **[Kokoro](https://github.com/hexgrad/kokoro)** — the primary DJ voice, an open-weight TTS model rendered locally.
 - **[Piper](https://github.com/rhasspy/piper)** — the CPU-only fallback voice that keeps a DJ talking on modest hardware.
-- **[Ollama](https://ollama.com/)** — runs the local LLM that writes lead-ins and back-announces.
+- **[Ollama](https://ollama.com/)** — runs the local LLM that writes lead-ins and back-announces when you point GenWave at one — the station airs template patter without it.
 - **[ffmpeg](https://ffmpeg.org/)** — loudness, cue points, energy analysis: the numbers every crossfade decision rests on.
 - **[aubio](https://aubio.org/)** — the BPM analysis behind every track's tempo.
 - **[PostgreSQL](https://www.postgresql.org/)** — the catalog of record for every track, measurement, and scheduled show.
