@@ -164,6 +164,24 @@ cd "$(dirname "$0")"
 ENV_FILE="${GW_ENV_FILE:-.env}"
 SECRET_LENGTH=40   # comfortably over F132.3's >=32-char floor
 
+# GW_STREAM_PORT_DEFAULT — the handoff's own display constant (finding 1, post-v5.3.0 gate run):
+# named here, not inline, so both print_handoff's stream block and the poll-timeout diagnostic
+# share one source. Deliberately NOT derived from GW_STREAM_URL (the wait_for_on_air_bg poll
+# seam, which Story345's specs point at a scratch loopback server on a random port) — the
+# handoff has to show the real listener-facing URL a production box actually serves, and
+# compose.yaml's own icecast port mapping ("8000:8000") is a fixed literal, not something any
+# .env key configures — there is no seam to derive it from. 8000 is also the port launch.sh's
+# own access-points printout already names for the same mount.
+#
+# The one overlay that DOES override this — compose.demo.yaml's `icecast: ports: !override []`
+# (unpublishes 8000 entirely; Caddy reaches icecast over the internal `core` network instead,
+# right for the public-appliance box that overlay is for) — is unreachable from this wizard: the
+# public appliance stays flag-only (`--pinned`, SPEC F136.5), never something this interview can
+# select, and resolve_preset_and_topology hardcodes GW_PREFLIGHT_DEMO_VALUE="0" for exactly that
+# reason (this wizard has no path to compose.demo.yaml at all). 8000 is therefore not just a
+# fallback guess for the runs this script can actually produce — it's the fact.
+GW_STREAM_PORT_DEFAULT=8000
+
 # Adoption mode's own CLI surface (T319, STORY-346) — parsed in main(), before the virgin-vs-
 # existing routing decision. Meaningless on the virgin (interview) path; a first-run box simply
 # ignores them (no --repair-only validation gate here — the least surprising behaviour for an
@@ -208,6 +226,13 @@ fi
 # mount poller (SETUP_POLLER_PID, set only for the window main() has one actually running) and
 # its stamp file (SETUP_ONAIR_STAMP_FILE) — a Ctrl-C (or any other signal) during the wait must
 # never leave an orphan poller running after this script itself has exited.
+#
+# Finding 5 (post-v5.3.0 gate run): main() also calls preflight_print_report explicitly, right
+# after the checks that populate it, so the table renders before the on-air line instead of
+# waiting for this trap to fire at true process exit (after the handoff). This trap's own call
+# below is therefore usually a no-op by the time it runs — preflight_print_report's own
+# idempotency guard (tools/preflight.sh) is what makes that safe — but it stays here unconditionally
+# for every path that never reaches the explicit call (a hard preflight_fail, in particular).
 SETUP_TMP_ENV_FILE=""
 SETUP_POLLER_PID=""
 SETUP_ONAIR_STAMP_FILE=""
@@ -954,16 +979,16 @@ verify_env_completeness() {
   done < <(grep -oE '^[A-Z_][A-Z0-9_]*=' "$example" | sed 's/=$//')
 
   if [ "${#missing[@]}" -eq 0 ] && [ "${#placeholder[@]}" -eq 0 ]; then
-    verify_record PASS ".env completeness" "every key ${example} sets by default is present in ${ENV_FILE}"
+    verify_record PASS ".env completeness" "Every key ${example} sets by default is present in ${ENV_FILE}"
     return
   fi
   if [ "${#missing[@]}" -gt 0 ]; then
     verify_record WARN ".env completeness" \
-      "missing from ${ENV_FILE} (present in ${example}): ${missing[*]} — key names only; add each with a real value, then re-run"
+      "Missing from ${ENV_FILE} (present in ${example}): ${missing[*]} — key names only; add each with a real value, then re-run"
   fi
   if [ "${#placeholder[@]}" -gt 0 ]; then
     verify_record WARN ".env completeness" \
-      "still holding a change-me* placeholder in ${ENV_FILE}: ${placeholder[*]} — key names only; edit ${ENV_FILE} and set real values"
+      "Still holding a change-me* placeholder in ${ENV_FILE}: ${placeholder[*]} — key names only; edit ${ENV_FILE} and set real values"
   fi
 }
 
@@ -1044,7 +1069,7 @@ verify_migrations() {
   verify_derive_migration_marker
   if [ -z "$GW_VERIFY_MIGRATION_MARKER_NUM" ]; then
     verify_record UNKNOWN "Schema migrations" \
-      "no create-table migration found under db/ to check against — repo's db/ max is db/${repo_max}. Verify manually; ./migrate.sh is always safe to run (idempotent)."
+      "No create-table migration found under db/ to check against — repo's db/ max is db/${repo_max}. Verify manually; ./migrate.sh is always safe to run (idempotent)."
     return
   fi
 
@@ -1072,7 +1097,7 @@ verify_migrations() {
       gap_verb="add"
     fi
     verify_record UNKNOWN "Schema migrations" \
-      "can't verify past db/${marker_num_fmt} — ${gap_label} ${gap_verb} no new table (repo's db/ max). Verify manually; ./migrate.sh is always safe to run (idempotent)."
+      "Can't verify past db/${marker_num_fmt} — ${gap_label} ${gap_verb} no new table (repo's db/ max). Verify manually; ./migrate.sh is always safe to run (idempotent)."
     return
   fi
 
@@ -1080,24 +1105,24 @@ verify_migrations() {
   db_cid="$GW_VERIFY_DB_CONTAINER_ID"
   if [ -z "$db_cid" ]; then
     verify_record UNKNOWN "Schema migrations" \
-      "could not reach the db service to check (not running, or docker unreachable) — repo's db/ max is db/${repo_max}. Start the stack, then re-run; ./migrate.sh is always safe to run (idempotent)."
+      "Could not reach the db service to check (not running, or docker unreachable) — repo's db/ max is db/${repo_max}. Start the stack, then re-run; ./migrate.sh is always safe to run (idempotent)."
     return
   fi
 
   result="$(verify_db_psql "select to_regclass('${marker_table}') is not null")" || result=""
   case "$result" in
     t)
-      verify_record PASS "Schema migrations" "schema is current through db/${marker_num_fmt} (${marker_table} present)"
+      verify_record PASS "Schema migrations" "Schema is current through db/${marker_num_fmt} (${marker_table} present)"
       ;;
     f)
       verify_add_finding "migrations" "Schema migrations" \
-        "repo's db/ max is db/${marker_num_fmt}, but its marker (${marker_table}) is missing from the schema — this box may be behind." \
+        "Repo's db/ max is db/${marker_num_fmt}, but its marker (${marker_table}) is missing from the schema — this box may be behind." \
         0 \
         ./migrate.sh
       ;;
     *)
       verify_record UNKNOWN "Schema migrations" \
-        "could not determine the applied schema version (query failed) — repo's db/ max is db/${marker_num_fmt}. ./migrate.sh is always safe to run (idempotent)."
+        "Could not determine the applied schema version (query failed) — repo's db/ max is db/${marker_num_fmt}. ./migrate.sh is always safe to run (idempotent)."
       ;;
   esac
 }
@@ -1160,14 +1185,14 @@ verify_pinned_image_tags() {
   local docker_cmd="$1" tags tag joined=""
   tags="$("$docker_cmd" compose "${GW_VERIFY_COMPOSE_ARGS[@]}" config --images 2>/dev/null | grep '^ghcr\.io/genwave-org/' | sort -u)" || tags=""
   if [ -z "$tags" ]; then
-    verify_record UNKNOWN "Pinned image tags" "could not render this box's compose configuration — skipped."
+    verify_record UNKNOWN "Pinned image tags" "Could not render this box's compose configuration — skipped."
     return
   fi
   while IFS= read -r tag; do
     [ -n "$tag" ] || continue
     if [ -z "$joined" ]; then joined="$tag"; else joined="${joined}, ${tag}"; fi
   done <<< "$tags"
-  verify_record INFO "Pinned image tags" "this box is running (gh-#351): ${joined}"
+  verify_record INFO "Pinned image tags" "This box is running (gh-#351): ${joined}"
 }
 
 # Dev-flow readout (mirrors launch.sh's own built_services/print_built_image_ages).
@@ -1175,7 +1200,7 @@ verify_built_image_ages() {
   local docker_cmd="$1" rendered
   rendered="$("$docker_cmd" compose "${GW_VERIFY_COMPOSE_ARGS[@]}" config 2>/dev/null)" || rendered=""
   if [ -z "$rendered" ]; then
-    verify_record UNKNOWN "Built image ages" "could not render this box's compose configuration — skipped."
+    verify_record UNKNOWN "Built image ages" "Could not render this box's compose configuration — skipped."
     return
   fi
 
@@ -1192,7 +1217,7 @@ verify_built_image_ages() {
   ')
 
   if [ "${#built[@]}" -eq 0 ]; then
-    verify_record INFO "Built image ages" "no locally-built services in this box's compose config — every image here is pulled/pinned."
+    verify_record INFO "Built image ages" "No locally-built services in this box's compose config — every image here is pulled/pinned."
     return
   fi
 
@@ -1216,7 +1241,7 @@ verify_built_image_ages() {
   done
 
   if [ "${#names[@]}" -eq 0 ]; then
-    verify_record INFO "Built image ages" "locally-built services found, but none have a running/created container yet."
+    verify_record INFO "Built image ages" "Locally-built services found, but none have a running/created container yet."
     return
   fi
 
@@ -1231,7 +1256,7 @@ verify_built_image_ages() {
   joined="${parts[0]}"
   for part in "${parts[@]:1}"; do joined="${joined}, ${part}"; done
   verify_record INFO "Built image ages" \
-    "informational only (gh-#351 — never auto-rebuilt): ${joined}. Run ./build.sh or BUILD=1 ./launch.sh to refresh."
+    "Informational only (gh-#351 — never auto-rebuilt): ${joined}. Run ./build.sh or BUILD=1 ./launch.sh to refresh."
 }
 
 # --- probe 4: orphaned profile containers (F137.1) -----------------------------------------
@@ -1250,7 +1275,7 @@ verify_built_image_ages() {
 verify_orphaned_containers() {
   local docker_cmd="${GW_DOCKER_CMD:-docker}"
   if [ "${#GW_VERIFY_COMPOSE_ARGS[@]}" -eq 0 ]; then
-    verify_record UNKNOWN "Orphaned containers" "no COMPOSE_FILE recorded yet (this box has never completed a launch) — nothing to check."
+    verify_record UNKNOWN "Orphaned containers" "No COMPOSE_FILE recorded yet (this box has never completed a launch) — nothing to check."
     return
   fi
 
@@ -1263,7 +1288,7 @@ verify_orphaned_containers() {
   local expected
   expected="$("$docker_cmd" compose "${GW_VERIFY_COMPOSE_ARGS[@]}" config --services 2>/dev/null)" || expected=""
   if [ -z "$expected" ]; then
-    verify_record UNKNOWN "Orphaned containers" "could not render this box's compose configuration — skipped."
+    verify_record UNKNOWN "Orphaned containers" "Could not render this box's compose configuration — skipped."
     return
   fi
 
@@ -1271,7 +1296,7 @@ verify_orphaned_containers() {
   project="$("$docker_cmd" compose "${GW_VERIFY_COMPOSE_ARGS[@]}" config --format json 2>/dev/null \
     | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed -E 's/.*"([^"]*)"[[:space:]]*$/\1/')"
   if [ -z "$project" ]; then
-    verify_record UNKNOWN "Orphaned containers" "could not determine the compose project name — skipped."
+    verify_record UNKNOWN "Orphaned containers" "Could not determine the compose project name — skipped."
     return
   fi
 
@@ -1297,7 +1322,7 @@ verify_orphaned_containers() {
     --format '{{.Label "com.docker.compose.service"}}|{{.Names}}|{{.State}}' 2>/dev/null)
 
   if [ "$found" = "0" ]; then
-    verify_record PASS "Orphaned containers" "none found for project '${project}'"
+    verify_record PASS "Orphaned containers" "None found for project '${project}'"
   fi
 }
 
@@ -1323,13 +1348,13 @@ verify_prune_advice() {
   local docker_cmd="${GW_DOCKER_CMD:-docker}" df_out reclaimable
   df_out="$("$docker_cmd" system df 2>/dev/null)" || df_out=""
   if [ -z "$df_out" ]; then
-    verify_record UNKNOWN "Disk (docker images)" "could not read 'docker system df' — skipped."
+    verify_record UNKNOWN "Disk (docker images)" "Could not read 'docker system df' — skipped."
     return
   fi
 
   reclaimable="$(printf '%s\n' "$df_out" | awk '$1=="Images" {print $5}')"
   if [ -z "$reclaimable" ]; then
-    verify_record UNKNOWN "Disk (docker images)" "could not parse 'docker system df' output — skipped."
+    verify_record UNKNOWN "Disk (docker images)" "Could not parse 'docker system df' output — skipped."
     return
   fi
 
@@ -1360,7 +1385,7 @@ verify_db_settings_overrides() {
   value="${value#\"}"
   value="${value%\"}"
   verify_record INFO "Station name" \
-    "the database has an operator-set override ('${value}', via the Admin UI) — this wins over any STATION_NAME in ${ENV_FILE} for the running station; not drift, never offered as a fix."
+    "The database has an operator-set override ('${value}', via the Admin UI) — this wins over any STATION_NAME in ${ENV_FILE} for the running station; not drift, never offered as a fix."
 }
 
 # An operator COMPOSE_FILE customization: any file COMPOSE_FILE names beyond this repo's own
@@ -1413,7 +1438,7 @@ verify_compose_overrides() {
 
 # --- repair: per-item confirm, --yes for bulk (F137.2/F137.3) -------------------------------
 # GW_VERIFY_REPAIR_REMAINING is a global rather than this function's own stdout — every item's
-# progress line (the exact command, the restart warning, the prompt, "done."/"skipped.") has to
+# progress line (the exact command, the restart warning, the prompt, "Done."/"Skipped.") has to
 # reach the operator's terminal directly; capturing this function via $(...) to get a return
 # value would swallow all of that into the captured string instead.
 GW_VERIFY_REPAIR_REMAINING=0
@@ -1460,13 +1485,13 @@ verify_run_repair() {
 
     if [ "$proceed" = "1" ]; then
       if "${cmdref[@]}"; then
-        echo "   done."
+        echo "   Done."
       else
         echo "   FAILED — left as-is; re-run ./setup.sh --repair to retry." >&2
         GW_VERIFY_REPAIR_REMAINING=$((GW_VERIFY_REPAIR_REMAINING + 1))
       fi
     else
-      echo "   skipped."
+      echo "   Skipped."
       GW_VERIFY_REPAIR_REMAINING=$((GW_VERIFY_REPAIR_REMAINING + 1))
     fi
   done
@@ -1579,8 +1604,18 @@ T0_SECONDS=""
 # topology; launch.sh reads it itself (F132.5) whenever it's given no explicit flag. This
 # function's return value is launch.sh's own exit code — main() is what interprets it (the
 # T316 rider: 0/4 proceed to the clock, anything else is a genuine launch failure).
+#
+# Finding 5 (post-v5.3.0 gate run): SKIP_PREFLIGHT=1 forced on THIS call only — main() has
+# already run preflight_docker + preflight_env_secrets against this exact machine and this
+# exact .env moments earlier (nothing observable changes in the gap; print_ready_to_launch does
+# no I/O). Without this, the real launch.sh (which sources tools/preflight.sh itself) redundantly
+# re-checks the identical machine state and renders its OWN preflight summary table as this
+# subprocess exits — a genuine duplicate render Dean's transcript caught landing BEFORE the
+# on-air line, with this script's own (single, now explicitly-placed — see main()) table still
+# to come after the handoff. An env-var prefix, not an argv flag, so this still honors "invoked
+# BARE" above.
 invoke_launch() {
-  "${GW_LAUNCH_CMD:-./launch.sh}"
+  SKIP_PREFLIGHT=1 "${GW_LAUNCH_CMD:-./launch.sh}"
 }
 
 # mount_serves_audio <url> — one-shot check: HTTP 200 with a nonzero body, ignoring any ambient
@@ -1802,12 +1837,32 @@ primary_lan_address() {
   return 0
 }
 
+# print_lan_line <lan_addr> <port> <path> — the "(from other devices on your network)" line,
+# shared by the stream and admin URL blocks (finding 1, post-v5.3.0 gate run) so the IPv6-
+# bracket logic (round-4 review N2: an IPv6 literal dropped straight into a URL without brackets
+# is ambiguous with the port's own colon) can never drift between the two call sites.
+print_lan_line() {
+  local addr="$1" port="$2" path="$3"
+  case "$addr" in
+    *:*) echo "                   http://[${addr}]:${port}${path}  (from other devices on your network)" ;;
+    *)   echo "                   http://${addr}:${port}${path}  (from other devices on your network)" ;;
+  esac
+}
+
 # print_handoff <launch_exit> — F132.8: the once-only screen with everything the owner needs to
 # actually use the station. ADMIN_PASSWORD (T318 review BLOCKING finding F2) is read straight
 # from SECRET_ADMIN_UI — the value THIS run generated (apply_generate_secrets) and wrote to
 # ENV_FILE — never read back via preflight_env_value: that reader's process-env-wins precedence
 # means an ambient ADMIN_PASSWORD exported in the caller's own shell would print instead of the
 # one this run actually generated and wrote. Never written to SETUP_LOG_FILE or anywhere else.
+#
+# The stream block (finding 1, post-v5.3.0 gate run): Dean's own vmtest report — the handoff
+# named the admin URL/password/persona link but never the single most important URL a radio
+# station has, and an all-'n' interview (admin declined) printed no URL at all. Always printed,
+# independent of ADMIN_PROFILE, first (it's the one thing every run has, admin or not) — same
+# localhost + LAN treatment as the admin URL block below, plus one honest cloud-firewall line:
+# this exact confusion (wizard said on-air, VLC timed out on Hetzner's firewall) cost the gate
+# run an hour.
 print_handoff() {
   local launch_exit="$1" lan_addr
 
@@ -1822,20 +1877,19 @@ print_handoff() {
   echo "==> you're on the air — here's everything you need:"
   echo
 
+  # round-4 review N2's shape check admits IPv6 tokens as well as IPv4 — resolved once here,
+  # shared by the stream block below and the admin block further down (print_lan_line).
+  lan_addr="$(primary_lan_address)"
+
+  echo "    Stream         http://localhost:${GW_STREAM_PORT_DEFAULT}/stream"
+  [ -n "$lan_addr" ] && print_lan_line "$lan_addr" "$GW_STREAM_PORT_DEFAULT" "/stream"
+  echo "                   Listening from another machine (e.g. a cloud VM)? Port ${GW_STREAM_PORT_DEFAULT}"
+  echo "                   must be reachable — check your host/cloud firewall if playback times out."
+
+  echo
   if [ -n "$ADMIN_PROFILE" ]; then
     echo "    Admin UI       http://localhost:3000/"
-    lan_addr="$(primary_lan_address)"
-    if [ -n "$lan_addr" ]; then
-      # round-4 review N2: primary_lan_address's own shape check admits IPv6 tokens (colon-
-      # separated hex groups) as well as IPv4 — an IPv6 literal dropped straight into a URL
-      # without brackets is ambiguous with the port's own colon (`http://2001:db8::1:3000/`).
-      # Bracket only when the candidate actually contains a colon; an IPv4 dotted-quad never
-      # does, so this never touches the common case.
-      case "$lan_addr" in
-        *:*) echo "                   http://[${lan_addr}]:3000/  (from other devices on your network)" ;;
-        *)   echo "                   http://${lan_addr}:3000/  (from other devices on your network)" ;;
-      esac
-    fi
+    [ -n "$lan_addr" ] && print_lan_line "$lan_addr" 3000 "/"
     echo "    Password       ${SECRET_ADMIN_UI}   (shown once — it's also in ${ENV_FILE}; change it there any time)"
     echo "    Hire a DJ      http://localhost:3000/persona-catalog"
   else
@@ -1909,6 +1963,14 @@ main() {
   export GW_PREFLIGHT_DEMO="$GW_PREFLIGHT_DEMO_VALUE"
   preflight_docker
   preflight_env_secrets
+  # Finding 5 (post-v5.3.0 gate run): rendered explicitly HERE, right after the checks that
+  # populate it, so the operator reads it before "On air" — where it belongs — rather than
+  # after the handoff's own "Next runs" block. setup_exit_trap (near the top of this file) still
+  # calls preflight_print_report unconditionally on every exit path (an early preflight_fail
+  # never reaches this line at all and still needs its own render); the idempotency guard inside
+  # preflight_print_report itself (tools/preflight.sh) is what keeps that a harmless no-op here
+  # rather than a second render of the same table.
+  preflight_print_report
 
   print_ready_to_launch
 
@@ -2010,6 +2072,10 @@ main() {
       echo "  never proved it's actually broadcasting." >&2
       echo "  Diagnostics: docker compose ps   /   docker compose logs <service>" >&2
       # F7: the stack may well be up regardless — the operator still needs a way in.
+      # Finding 1 follow-up (post-v5.3.0 gate run): this path already names the admin URL and
+      # points at the secrets file — it must name the stream URL too, for the same reason and
+      # just as consistently (the poll gave up, but the stream itself may still be there).
+      echo "  Check the stream directly: http://localhost:${GW_STREAM_PORT_DEFAULT}/stream" >&2
       echo "  Your secrets (including the Admin UI password) are in ${ENV_FILE}." >&2
       if [ -n "$ADMIN_PROFILE" ]; then
         echo "  Admin UI (once you've confirmed the stream): http://localhost:3000/" >&2

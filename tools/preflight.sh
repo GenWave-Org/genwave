@@ -84,8 +84,18 @@ preflight_record() {
   GW_PREFLIGHT_ROW_MESSAGE+=("$3")
 }
 
+# GW_PREFLIGHT_REPORT_PRINTED — post-v5.3.0 gate-run finding: setup.sh calls this function
+# explicitly (right after preflight_env_secrets, so the table renders BEFORE the on-air line
+# rather than after the handoff) in addition to the EXIT trap below still firing at true
+# process exit — without a guard, that's a real duplicate render, not just a theoretical one.
+# One process, one render, no matter how many times (trap + explicit call, or several explicit
+# calls) this is invoked.
+GW_PREFLIGHT_REPORT_PRINTED=0
+
 preflight_print_report() {
+  [ "$GW_PREFLIGHT_REPORT_PRINTED" = "1" ] && return 0
   [ "${#GW_PREFLIGHT_ROW_STATUS[@]}" -gt 0 ] || return 0
+  GW_PREFLIGHT_REPORT_PRINTED=1
   echo
   echo "==> preflight summary"
   local i status label message symbol
@@ -180,6 +190,22 @@ preflight_compose_version() {
     "Then re-run this script."
 }
 
+# preflight_admin_profile_selected — true iff "admin" is in the effective COMPOSE_PROFILES
+# (F134.3a: process env wins, else the last assignment in GW_ENV_FILE — preflight_env_value's
+# own convention; never GW_PRESET, which this script never reads at all). Extracted (N2,
+# post-v5.3.0 gate review) so this exact predicate has ONE home: preflight_ports' own port-3000
+# gate and preflight_admin_password's own row-wording branch used to each read COMPOSE_PROFILES
+# and re-run the identical `case ",${profiles}," in *,admin,*)` test independently — the same
+# drift class print_lan_line (setup.sh) was extracted to prevent.
+preflight_admin_profile_selected() {
+  local profiles
+  profiles="$(preflight_env_value COMPOSE_PROFILES)"
+  case ",${profiles}," in
+    *,admin,*) return 0 ;;
+    *)         return 1 ;;
+  esac
+}
+
 # ---- port availability (F134.3) -----------------------------------------------------------
 # Base ports are always published (icecast + api, see compose.yaml); 3000 (admin_ui) only
 # when the "admin" profile is active; 80/443 (caddy) only under the demo overlay
@@ -213,11 +239,8 @@ preflight_port_is_docker_owned() {
 }
 
 preflight_ports() {
-  local profiles ports=("${GW_PREFLIGHT_BASE_PORTS[@]}")
-  profiles="$(preflight_env_value COMPOSE_PROFILES)"
-  case ",${profiles}," in
-    *,admin,*) ports+=("$GW_PREFLIGHT_ADMIN_PORT") ;;
-  esac
+  local ports=("${GW_PREFLIGHT_BASE_PORTS[@]}")
+  preflight_admin_profile_selected && ports+=("$GW_PREFLIGHT_ADMIN_PORT")
   if [ "${GW_PREFLIGHT_DEMO:-0}" = "1" ]; then
     ports+=("${GW_PREFLIGHT_DEMO_PORTS[@]}")
   fi
@@ -256,7 +279,14 @@ preflight_ports() {
     preflight_record WARN "Ports" \
       "${unverified[*]} appear bound but 'docker ps' could not be read to confirm a Docker container publishes them — verify manually before launching."
   else
-    preflight_record PASS "Ports" "${ports[*]} free (or published by a Docker container)"
+    # Finding 2 (post-v5.3.0 gate run): this is a LOCAL bind check only (this machine's own
+    # sockets, or already Docker-owned) — it says nothing about whether another machine can
+    # actually reach these ports, which is the operator's host/cloud firewall's call, not this
+    # script's. The old copy ("free (or published by a Docker container)") never said "local"
+    # at all, and a cloud-VM operator reasonably read it as a reachability guarantee it never
+    # was — an hour lost on Hetzner to exactly that misreading.
+    preflight_record PASS "Ports" \
+      "${ports[*]} available locally (free, or already published by a Docker container) — reachability from other machines depends on your host/cloud firewall."
   fi
 }
 
@@ -483,8 +513,18 @@ preflight_env_secrets() {
 # posture (DEPLOYMENT.md: "empty = admin locked entirely, fail-closed") — so empty WARNs
 # instead of failing. A surviving change-me* placeholder is never intentional, so that still
 # hard-fails exactly like the six required vars above.
+#
+# Finding 4 (post-v5.3.0 gate run): the PASS row used to read "Set (value not shown)"
+# unconditionally, even on a run where the admin profile was never selected — Dean's own
+# reaction ("not sure why it bothered?"). The check itself is correct by design: the secret has
+# to be healthy NOW so the handoff's own "add 'admin' to COMPOSE_PROFILES and re-run" enable-
+# later path works without a placeholder/empty surprise at that point — but the row should say
+# WHY it's checking a password for a surface that's currently off. Reads COMPOSE_PROFILES via
+# preflight_admin_profile_selected — the SAME predicate preflight_ports' own port-3000 gate
+# uses (N2, post-v5.3.0 gate review) — never GW_PRESET, which this script never reads at all.
 preflight_admin_password() {
   local env_file="${GW_ENV_FILE:-.env}" value
+
   value="$(preflight_env_value ADMIN_PASSWORD)"
 
   if preflight_is_placeholder "$value"; then
@@ -496,8 +536,14 @@ preflight_admin_password() {
   if [ -z "$value" ]; then
     preflight_record WARN "ADMIN_PASSWORD" \
       "Empty — the admin UI stays locked entirely (fail-closed); this is the documented appliance posture. Set one in ${env_file} to enable admin sign-in."
-  else
+    return
+  fi
+
+  if preflight_admin_profile_selected; then
     preflight_record PASS "ADMIN_PASSWORD" "Set (value not shown)"
+  else
+    preflight_record PASS "ADMIN_PASSWORD" \
+      "Set (value not shown; Admin UI is off — used the moment you enable it)"
   fi
 }
 
@@ -578,7 +624,15 @@ preflight_media_nfs_notes() {
         "NFS-mounted (${best_mp}, ${best_fs}). Two gotchas: a stale inode after the export is recreated (restart api+engine to pick it back up), and case-sensitivity differences from the NFS server."
       ;;
     *)
-      preflight_record PASS "MEDIA_DIR filesystem" "local (${best_fs:-unknown})"
+      # Finding 6 (post-v5.3.0 gate run): "local (unknown)" was self-contradictory — it read as
+      # though "local" itself were unverified, when the only unverified fact is the filesystem
+      # TYPE. The parenthetical is reserved for the actual detected type; an unreadable/absent
+      # mount table says so honestly instead.
+      if [ -n "$best_fs" ]; then
+        preflight_record PASS "MEDIA_DIR filesystem" "Local disk (${best_fs})"
+      else
+        preflight_record PASS "MEDIA_DIR filesystem" "Local disk (type not identified)"
+      fi
       ;;
   esac
 }
