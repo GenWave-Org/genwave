@@ -12,9 +12,9 @@ No hand-built audio engine. A C# / .NET 10 control plane orchestrates [Liquidsoa
 
 This is **GenWave Home**, the AGPL edition — see [License](#license).
 
-🎧 **Hear it live:** [demo.genwaveradio.com](https://demo.genwaveradio.com/) — the public demo station, running the [reference appliance topology](DEPLOYMENT.md): watch what's on the air, tune in, and ask the station for a song!
+🎧 **Hear it live:** [demo.genwaveradio.com](https://demo.genwaveradio.com/) — the public demo station, running the [reference appliance topology](DEPLOYMENT.md): hear & see what's on the air, tune in, even request a song!
 
-🎙️ **On air fast:** `curl -fsSL https://install.genwaveradio.com | bash` clones the latest release and hands off to the setup wizard — no sudo, anywhere in the path. Measured cold start: **on air in 1:03** on a Raspberry Pi 5 (4 GB, 9,000-track NFS library) — 1:36 to the first note. 1:10 on a fresh VM. (2026-08-19, wizard-measured.)
+🎙️ **On the air fast:** [download.genwaveradio.com](https://download.genwaveradio.com/) launches the setup wizard — no sudo, anywhere in the path. Measured cold start: **on air in 1:03** on a Raspberry Pi 5 (4 GB, 9,000-track NFS library) — 1:36 to the first note. 1:10 on a fresh VM (CCX23 same as demo.genwaveradio.com). (2026-08-19, wizard-measured.)
 
 
 ## Why GenWave
