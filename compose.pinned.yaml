@@ -24,13 +24,13 @@
 
 services:
   admin_ui:
-    image: ghcr.io/genwave-org/genwave-admin-ui:home-v5.2.2  # bump per release
+    image: ghcr.io/genwave-org/genwave-admin-ui:home-v5.3.0  # bump per release
     pull_policy: always
     # `!reset` drops the base `build:` context entirely — see the file header for why.
     build: !reset null
 
   engine:
-    image: ghcr.io/genwave-org/genwave-engine:home-v5.2.2    # bump per release
+    image: ghcr.io/genwave-org/genwave-engine:home-v5.3.0    # bump per release
     pull_policy: always
     # Same !reset rationale as admin_ui above (gh-#93). Note genwave.liq is a bind mount
     # from the checkout (see compose.yaml), NOT baked into this image — the image carries
@@ -44,15 +44,15 @@ services:
     # happens at the FIRST TAG CUT AFTER gh-#240/#241 — until that release's pin bump this
     # tag does not exist and the pull fails loudly by design. Bump with the other four pins
     # per release.
-    image: ghcr.io/genwave-org/genwave-piper:home-v5.2.2     # bump per release
+    image: ghcr.io/genwave-org/genwave-piper:home-v5.3.0     # bump per release
     pull_policy: always
     # Same !reset rationale as admin_ui above (gh-#93).
     build: !reset null
 
   icecast:
-    image: ghcr.io/genwave-org/genwave-icecast:home-v5.2.2   # bump per release
+    image: ghcr.io/genwave-org/genwave-icecast:home-v5.3.0   # bump per release
     pull_policy: always
 
   api:
-    image: ghcr.io/genwave-org/genwave:home-v5.2.2           # bump per release
+    image: ghcr.io/genwave-org/genwave:home-v5.3.0           # bump per release
     pull_policy: always
