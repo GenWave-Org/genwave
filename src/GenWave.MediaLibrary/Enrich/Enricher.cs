@@ -1,36 +1,29 @@
-using Microsoft.Extensions.Logging;
 using GenWave.Core.Abstractions;
-using GenWave.Core.Domain;
 using GenWave.MediaLibrary.Catalog;
 using LoudnessMeasurement = GenWave.Core.Domain.Loudness;
 
 namespace GenWave.MediaLibrary.Enrich;
 
 /// <summary>
-/// One enrichment pass over a file (PRD §8): loudness via FFmpeg ebur128, cue-point detection via
-/// silence analysis, energy analysis over the cue-trimmed windows (STORY-033), BPM analysis over the
-/// same cue-trimmed window (SPEC F46.3), plus the technical audio properties and the normalized tags
-/// via TagLibSharp (which reads both in one managed call and normalizes across MP3/ID3 and
-/// FLAC/Vorbis, so genre/artist are consistent for future criteria queries). Text tags pass through
-/// <see cref="TagText.Normalize"/> — the single entity-decode seam (gh-#257): entity-encoded tags
-/// some export pipelines write (<c>Paul &amp;amp; Manuel</c>) are decoded exactly once HERE, so every
-/// downstream consumer (annotate, now-playing, play-history, both UIs) stays a pass-through.
+/// The first-pass enrichment fast pass (SPEC F135.1, STORY-341): loudness via FFmpeg ebur128, plus
+/// the technical audio properties and the normalized tags via TagLibSharp (which reads both in one
+/// managed call and normalizes across MP3/ID3 and FLAC/Vorbis, so genre/artist are consistent for
+/// future criteria queries) — one ffmpeg pass and one tag read, nothing more. The existing atomic
+/// write (<see cref="Catalog.MediaRepository.WriteEnrichmentAsync"/>) flips the row to <c>ready</c>
+/// with cue/energy/BPM columns left NULL; the second-tier backfill lanes in
+/// <see cref="EnrichmentService"/> sweep them in afterward by finding the row through those very
+/// NULLs — no new queue, worker, or schema. Text tags pass through <see cref="TagText.Normalize"/> —
+/// the single entity-decode seam (gh-#257): entity-encoded tags some export pipelines write
+/// (<c>Paul &amp;amp; Manuel</c>) are decoded exactly once HERE, so every downstream consumer
+/// (annotate, now-playing, play-history, both UIs) stays a pass-through.
 /// Pure of any DB concern —
 /// it returns an <see cref="EnrichmentResult"/> the repository writes atomically. Idempotent:
 /// re-enriching a file yields the same result.
 ///
-/// Cue analysis failure (SPEC F13.3): an exception from <see cref="ICueAnalyzer"/> is caught,
-/// logged at WARN, and does not block the row from becoming <c>ready</c> — loudness still gates that
-/// transition. <c>cue_analyzed_at</c> is always written to mark "we tried".
-///
-/// Energy analysis failure (STORY-033): an exception from <see cref="IEnergyAnalyzer"/> is treated
-/// identically — caught, logged at WARN, energy columns persist NULL, but the row still reaches
-/// <c>ready</c> provided loudness succeeded. <c>energy_analyzed_at</c> is always written.
-///
-/// BPM analysis failure (SPEC F46.1/F46.3): an exception from <see cref="IBpmAnalyzer"/> is treated
-/// identically to cue/energy — caught, logged at WARN, <c>bpm</c> persists NULL, but the row still
-/// reaches <c>ready</c> provided loudness succeeded. <c>bpm_analyzed_at</c> is always written, whether
-/// the analyzer throws or simply returns <c>null</c> (indeterminate tempo) — attempted-none-found.
+/// Loudness failure (SPEC F135.1/AC5): an exception from <see cref="ILoudnessAnalyzer"/> is left
+/// uncaught — no local catch-and-log, unlike the pre-F135 cue/energy/bpm calls this class used to
+/// make. It propagates to <see cref="EnrichmentService.EnrichOneAsync"/>, which logs it and marks the
+/// row <c>failed</c>. The fast pass narrows the work, never the failure contract.
 ///
 /// Advisory/explicit tag (SPEC F95.3, STORY-251, PLAN T112): read alongside the other normalized
 /// tags via the same TagLib open — never a second file open. Honors the real-world ITUNESADVISORY
@@ -38,69 +31,17 @@ namespace GenWave.MediaLibrary.Enrich;
 /// = explicit, "2" = clean (a positive clean rating is itself information the tag pass stamps),
 /// "0"/absent/unparseable = a miss (stays <see langword="null"/>, never stamped).
 /// </summary>
-sealed class Enricher(
-    ILoudnessAnalyzer loudness,
-    ICueAnalyzer cueAnalyzer,
-    IEnergyAnalyzer energyAnalyzer,
-    IBpmAnalyzer bpmAnalyzer,
-    ILogger<Enricher> log)
+sealed class Enricher(ILoudnessAnalyzer loudness)
 {
     public async Task<EnrichmentResult> EnrichAsync(string path, CancellationToken ct)
     {
         var measured = await loudness.AnalyzeAsync(path, ct);   // ffmpeg ebur128 (subprocess)
         ct.ThrowIfCancellationRequested();
 
-        CuePoints? cuePoints = null;
-        try
-        {
-            cuePoints = await cueAnalyzer.AnalyzeAsync(path, ct);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            log.LogWarning(ex, "Cue analysis failed for {Path}; cue columns will be NULL", path);
-        }
-
-        EnergyPoints? energyPoints = null;
-        try
-        {
-            energyPoints = await energyAnalyzer.AnalyzeAsync(path, cuePoints?.CueInSec, cuePoints?.CueOutSec, ct);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            log.LogWarning(ex, "Energy analysis failed for {Path}; energy columns will be NULL", path);
-        }
-
-        double? bpm = null;
-        try
-        {
-            bpm = await bpmAnalyzer.AnalyzeAsync(path, cuePoints?.CueInSec, cuePoints?.CueOutSec, ct);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            log.LogWarning(ex, "BPM analysis failed for {Path}; bpm will be NULL", path);
-        }
-
-        return ReadTags(path, measured, cuePoints, energyPoints, bpm);
+        return ReadTags(path, measured);
     }
 
-    static EnrichmentResult ReadTags(
-        string path,
-        LoudnessMeasurement loudnessMeasurement,
-        CuePoints? cuePoints,
-        EnergyPoints? energyPoints,
-        double? bpm)
+    static EnrichmentResult ReadTags(string path, LoudnessMeasurement loudnessMeasurement)
     {
         using var file = TagLib.File.Create(path);
         var props = file.Properties;
@@ -129,14 +70,16 @@ sealed class Enricher(
             IntegratedLufs:   loudnessMeasurement.IntegratedLufs,
             TruePeakDbtp:     loudnessMeasurement.TruePeakDbtp,
             Measurable:       loudnessMeasurement.Measurable,
-            CueInSec:         cuePoints?.CueInSec,
-            CueOutSec:        cuePoints?.CueOutSec,
-            CueAnalyzedAt:    DateTime.UtcNow,
-            IntroEnergy:      energyPoints?.IntroEnergy,
-            OutroEnergy:      energyPoints?.OutroEnergy,
-            EnergyAnalyzedAt: DateTime.UtcNow,
-            Bpm:              bpm,
-            BpmAnalyzedAt:    DateTime.UtcNow);
+            // Cue/energy/BPM stay NULL — including the *_analyzed_at columns (SPEC F135.1) — so the
+            // existing second-tier backfill lanes find this row by those very NULLs and sweep it in.
+            CueInSec:         null,
+            CueOutSec:        null,
+            CueAnalyzedAt:    null,
+            IntroEnergy:      null,
+            OutroEnergy:      null,
+            EnergyAnalyzedAt: null,
+            Bpm:              null,
+            BpmAnalyzedAt:    null);
     }
 
     // The real-world advisory-flag convention (SPEC F95.3): iTunes/Picard/beets all key it

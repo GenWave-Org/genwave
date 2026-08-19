@@ -12,7 +12,6 @@
 // [Trait("Category", "Integration")] — the same convention as Story016's ffmpeg scenarios.
 // The TagText scenarios are pure and run everywhere.
 
-using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.MediaLibrary.Enrich;
 using GenWave.MediaLibrary.Tests.Fakes;
 
@@ -109,12 +108,7 @@ public static class FeatureTagEntityDecode
                     dir, "encoded.mp3",
                     title: "Rock &amp; Roll", artist: "Paul &amp; Manuel", genre: "R&amp;B");
 
-                var enricher = new Enricher(
-                    new FakeLoudnessAnalyzer(),
-                    new FakeCueAnalyzer(),
-                    new FakeEnergyAnalyzer(),
-                    new FakeBpmAnalyzer(),
-                    NullLogger<Enricher>.Instance);
+                var enricher = new Enricher(new FakeLoudnessAnalyzer());
 
                 var result = await enricher.EnrichAsync(path, CancellationToken.None);
 

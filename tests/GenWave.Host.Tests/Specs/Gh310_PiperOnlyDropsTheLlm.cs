@@ -177,17 +177,20 @@ public static class FeatureComposePiperOnlyDropsTheLlm
         public static void The_appliance_flow_records_both_overlay_files()
         {
             // gh-#309's repro: caddy and ollama survived a bare `docker compose down` because it
-            // loaded compose.yaml alone.
+            // loaded compose.yaml alone. SPEC F136.5 (T317): --pinned now stacks THREE files —
+            // compose.pinned.yaml (the GHCR image pins) joined compose.demo.yaml (the public-
+            // appliance topology) as a separate overlay.
             Assert.Contains(
-                "record COMPOSE_FILE=compose.yaml:compose.demo.yaml in .env",
+                "record COMPOSE_FILE=compose.yaml:compose.pinned.yaml:compose.demo.yaml in .env",
                 DryRunPlan("--pinned"), StringComparison.Ordinal);
         }
 
         [Fact]
         public static void The_piper_only_appliance_flow_records_all_three()
         {
+            // Four, post-F136.5 — see the comment above.
             Assert.Contains(
-                "record COMPOSE_FILE=compose.yaml:compose.demo.yaml:compose.piper-only.yaml in .env",
+                "record COMPOSE_FILE=compose.yaml:compose.pinned.yaml:compose.demo.yaml:compose.piper-only.yaml in .env",
                 DryRunPlan("--pinned", "--piper-only"), StringComparison.Ordinal);
         }
 

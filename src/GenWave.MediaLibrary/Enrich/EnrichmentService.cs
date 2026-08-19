@@ -16,9 +16,20 @@ namespace GenWave.MediaLibrary.Enrich;
 
 /// <summary>
 /// Enrichment: the expensive, throttled half of the two-tier scan (PRD §5.2). A bounded pool of
-/// workers drains the delta queue discovery fills; each opens its file once, extracts everything, and
-/// writes one atomic row update that flips the row to <c>ready</c>. Per-file failures are isolated
-/// (the row becomes <c>failed</c>) and never crash a worker. Idempotent — safe to re-run after a crash.
+/// workers drains the delta queue discovery fills; each runs the loudness-first fast pass
+/// (<see cref="Enricher.EnrichAsync"/>, SPEC F135.1) — one ffmpeg loudness pass plus a tag read, never
+/// cue/energy/BPM — and writes one atomic row update that flips the row to <c>ready</c> with those
+/// columns NULL. The backfill loops below sweep them in afterward, finding each row by those very
+/// NULLs. Per-file failures are isolated (the row becomes <c>failed</c>) and never crash a worker.
+/// Idempotent — safe to re-run after a crash.
+///
+/// Ordering fairness (SPEC F135.4): this worker pool and the backfill loop below are independent
+/// execution paths with no shared throttle — the workers drain <c>enrichQueue</c> continuously and
+/// concurrently up to <see cref="LibraryOptions.EnrichmentConcurrency"/>, while the backfill loop is a
+/// single sequential task bounded to <see cref="CueDetectionOptions.BackfillBatchSize"/> rows per lane
+/// per tick with a <see cref="LibraryOptions.ScanIntervalSeconds"/> delay between ticks. A deep
+/// backfill queue therefore never blocks a freshly discovered file from reaching <c>ready</c> — the
+/// fast pass keeps priority structurally, not by an explicit scheduler.
 ///
 /// Also runs a backfill loop for <c>ready</c> rows that pre-date cue analysis (SPEC F13 / T027):
 /// picks up rows where <c>cue_analyzed_at IS NULL</c> and runs only <see cref="ICueAnalyzer"/> on them

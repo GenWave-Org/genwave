@@ -1244,16 +1244,20 @@ sealed class MediaRepository(
     }
 
     /// <summary>
-    /// Rows eligible for energy backfill: <c>state='ready'</c> with <c>energy_analyzed_at IS NULL</c>.
-    /// Returns id, path, and existing cue points so the energy analyzer receives the cue-trimmed windows
-    /// without a second round-trip. Limited to <paramref name="limit"/> rows per tick.
+    /// Rows eligible for energy backfill: <c>state='ready'</c> with <c>energy_analyzed_at IS NULL</c>
+    /// and <c>cue_analyzed_at IS NOT NULL</c> — the cue lane must have run first (SPEC F135.5) so
+    /// energy is never measured over an un-trimmed file. Cue stamps its sentinel even when its
+    /// analyzer throws or finds nothing, so no row can strand behind this gate. Returns id, path,
+    /// and existing cue points so the energy analyzer receives the cue-trimmed windows without a
+    /// second round-trip. Limited to <paramref name="limit"/> rows per tick.
     /// </summary>
     public async Task<IReadOnlyList<EnergyClaimRow>> ListEnergyClaimsAsync(int limit, CancellationToken ct)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var rows = await conn.QueryAsync<EnergyClaimRow>(new CommandDefinition(
             "select id, path, cue_in_sec, cue_out_sec from library.media " +
-            "where state = 'ready' and energy_analyzed_at is null limit @limit",
+            "where state = 'ready' and energy_analyzed_at is null and cue_analyzed_at is not null " +
+            "limit @limit",
             new { limit }, cancellationToken: ct));
         return rows.AsList();
     }
@@ -1273,17 +1277,21 @@ sealed class MediaRepository(
     }
 
     /// <summary>
-    /// Rows eligible for BPM backfill: <c>state='ready'</c> with <c>bpm_analyzed_at IS NULL</c>.
-    /// Returns id, path, and existing cue points so the BPM analyzer receives the cue-trimmed windows
-    /// without a second round-trip. Limited to <paramref name="limit"/> rows per tick (SPEC F46.3).
-    /// Mirrors <see cref="ListEnergyClaimsAsync"/> exactly.
+    /// Rows eligible for BPM backfill: <c>state='ready'</c> with <c>bpm_analyzed_at IS NULL</c> and
+    /// <c>cue_analyzed_at IS NOT NULL</c> — the cue lane must have run first (SPEC F135.5) so BPM is
+    /// never measured over an un-trimmed file. Cue stamps its sentinel even when its analyzer throws
+    /// or finds nothing, so no row can strand behind this gate. Returns id, path, and existing cue
+    /// points so the BPM analyzer receives the cue-trimmed windows without a second round-trip.
+    /// Limited to <paramref name="limit"/> rows per tick (SPEC F46.3). Mirrors
+    /// <see cref="ListEnergyClaimsAsync"/> exactly.
     /// </summary>
     public async Task<IReadOnlyList<BpmClaimRow>> ListBpmClaimsAsync(int limit, CancellationToken ct)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var rows = await conn.QueryAsync<BpmClaimRow>(new CommandDefinition(
             "select id, path, cue_in_sec, cue_out_sec from library.media " +
-            "where state = 'ready' and bpm_analyzed_at is null limit @limit",
+            "where state = 'ready' and bpm_analyzed_at is null and cue_analyzed_at is not null " +
+            "limit @limit",
             new { limit }, cancellationToken: ct));
         return rows.AsList();
     }

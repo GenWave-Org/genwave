@@ -37,7 +37,7 @@ public static class FeatureWorkerPoolPrune
     static EnrichmentService NewService(Channel<long> queue, FakeOptionsMonitor<LibraryOptions> options) =>
         new(
             DisconnectedRepo(queue),
-            new Enricher(new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FakeEnergyAnalyzer(), new FakeBpmAnalyzer(), NullLogger<Enricher>.Instance),
+            new Enricher(new FakeLoudnessAnalyzer()),
             queue,
             options,
             NullLogger<EnrichmentService>.Instance,
@@ -198,7 +198,7 @@ public static class FeatureWorkerPoolPrune
                 var options = new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions { EnrichmentConcurrency = 1 });
                 var svc = new EnrichmentService(
                     repo,
-                    new Enricher(new FfmpegLoudnessAnalyzer(), new FakeCueAnalyzer(), new FakeEnergyAnalyzer(), new FakeBpmAnalyzer(), NullLogger<Enricher>.Instance),
+                    new Enricher(new FfmpegLoudnessAnalyzer()),
                     queue,
                     options,
                     NullLogger<EnrichmentService>.Instance,

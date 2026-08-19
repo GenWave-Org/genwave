@@ -53,23 +53,29 @@ public static class FeatureWireCueAnalyzerAndLiveVerification
         }
     }
 
-    public sealed class ScenarioEnricherAndTtsSegmentSourceShareTheSameInstance
+    public sealed class ScenarioEnrichmentServiceAndTtsSegmentSourceShareTheSameInstance
     {
         [Fact]
         public void BothConsumersResolveTheSameICueAnalyzerSingleton()
         {
-            // Both Enricher and TtsSegmentSource declare ICueAnalyzer in their primary constructors.
-            // The singleton registration in AddMediaLibrary guarantees both receive the same instance
-            // at runtime. These reflection checks confirm the design contract is in place.
+            // Both EnrichmentService and TtsSegmentSource declare ICueAnalyzer in their primary
+            // constructors. The singleton registration in AddMediaLibrary guarantees both receive
+            // the same instance at runtime. These reflection checks confirm the design contract is
+            // in place.
+            //
+            // Pre-STORY-341 (SPEC F135.1) this was Enricher's own ICueAnalyzer dependency — the fast
+            // pass slimmed to loudness + tags only and dropped it; EnrichmentService already held its
+            // own ICueAnalyzer field for the backfill lane, so THAT is now the shared-instance side
+            // of this contract instead.
 
-            // Enricher is internal — reach it via its assembly.
-            var enricherType = typeof(GenWave.MediaLibrary.MediaLibraryServiceCollectionExtensions)
+            // EnrichmentService is internal — reach it via its assembly.
+            var enrichmentServiceType = typeof(GenWave.MediaLibrary.MediaLibraryServiceCollectionExtensions)
                 .Assembly
-                .GetType("GenWave.MediaLibrary.Enrich.Enricher");
+                .GetType("GenWave.MediaLibrary.Enrich.EnrichmentService");
 
-            Assert.NotNull(enricherType);
+            Assert.NotNull(enrichmentServiceType);
 
-            var enricherCtorParams = enricherType.GetConstructors(
+            var enrichmentServiceCtorParams = enrichmentServiceType.GetConstructors(
                     System.Reflection.BindingFlags.Instance |
                     System.Reflection.BindingFlags.Public |
                     System.Reflection.BindingFlags.NonPublic)
@@ -77,7 +83,7 @@ public static class FeatureWireCueAnalyzerAndLiveVerification
                 .Select(p => p.ParameterType)
                 .ToList();
 
-            Assert.Contains(typeof(ICueAnalyzer), enricherCtorParams);
+            Assert.Contains(typeof(ICueAnalyzer), enrichmentServiceCtorParams);
 
             // TtsSegmentSource is public.
             var ttsCtorParams = typeof(TtsSegmentSource)

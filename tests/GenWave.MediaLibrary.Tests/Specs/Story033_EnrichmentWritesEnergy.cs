@@ -1,8 +1,15 @@
 // STORY-033 — Enrichment writes energy (failure never blocks ready)
 //
-// BDD specification — xUnit. Integration via DatabaseCollection; the Enricher gets
-// fake ILoudnessAnalyzer + fake ICueAnalyzer + fake IEnergyAnalyzer to exercise all branches.
-// Mirrors Story018_EnrichmentWritesCuePoints.cs seam-for-seam.
+// RETIRED BY STORY-341 (SPEC F135.1, PLAN T314): first-pass enrichment no longer runs energy
+// analysis at all — it slims to TagLib (tags + duration) + loudness only, and the atomic write
+// leaves intro_energy/outro_energy/energy_analyzed_at NULL unconditionally. Energy now arrives
+// exclusively through the STORY-036 backfill lane, which still forwards the row's own
+// cue_in_sec/cue_out_sec to the energy analyzer unchanged. This file pins the retirement: the
+// fast pass never touches the energy analyzer, and energy columns stay NULL regardless of what
+// one would return. The write-on-success/write-on-null/write-on-throw energy behavior this file
+// used to cover now lives in Story036_BackfillEnergyForReadyRows.cs.
+//
+// BDD specification — xUnit. Integration via DatabaseCollection.
 
 using Dapper;
 using GenWave.Core.Domain;
@@ -32,21 +39,21 @@ public static class FeatureEnrichmentWritesEnergy
     }
 
     // ---------------------------------------------------------------------
-    // HAPPY PATH
+    // HAPPY PATH — the fast pass never runs energy analysis (SPEC F135.1)
     // ---------------------------------------------------------------------
 
     [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
-    public sealed class ScenarioEnergyPersistedOnSuccess(DatabaseFixture db)
+    public sealed class ScenarioFastPassNeverInvokesEnergyAnalysis(DatabaseFixture db)
     {
         [Fact]
-        public async Task IntroAndOutroEnergyArePersisted()
+        public async Task EnergyAnalyzerIsNeverInvoked()
         {
             await db.ResetAsync();
             var dir = TestMedia.NewTempDir();
             try
             {
-                var path = TestMedia.CreateTone(dir, "energy_values.flac");
+                var path = TestMedia.CreateTone(dir, "energy_never_invoked.flac");
                 var repo = Harness.Repo(db);
                 var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
 
@@ -56,37 +63,38 @@ public static class FeatureEnrichmentWritesEnergy
                 await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), fakeEnergy)
                     .EnrichOneAsync(id, CancellationToken.None);
 
-                var row = await SelectRowAsync(db, id);
-                Assert.Equal(0.75, row.IntroEnergy);
-                Assert.Equal(0.30, row.OutroEnergy);
+                Assert.Equal(0, fakeEnergy.Calls);
             }
             finally
             {
                 Directory.Delete(dir, recursive: true);
             }
         }
+    }
 
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioEnergyColumnsStayNullRegardlessOfWhatAnEnergyAnalyzerWouldReturn(DatabaseFixture db)
+    {
         [Fact]
-        public async Task EnergyAnalyzedAtIsSetOnSuccess()
+        public async Task IntroAndOutroEnergyStayNull()
         {
             await db.ResetAsync();
             var dir = TestMedia.NewTempDir();
             try
             {
-                var path = TestMedia.CreateTone(dir, "energy_at_success.flac");
+                var path = TestMedia.CreateTone(dir, "energy_stays_null.flac");
                 var repo = Harness.Repo(db);
                 var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
 
                 var fakeEnergy = new FakeEnergyAnalyzer();
                 fakeEnergy.Returns(new EnergyPoints(0.5, 0.2));
-                var before = DateTime.UtcNow;
                 await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), fakeEnergy)
                     .EnrichOneAsync(id, CancellationToken.None);
-                var after = DateTime.UtcNow;
 
                 var row = await SelectRowAsync(db, id);
-                Assert.NotNull(row.EnergyAnalyzedAt);
-                Assert.InRange(row.EnergyAnalyzedAt!.Value, before.AddSeconds(-1), after.AddSeconds(1));
+                Assert.Null(row.IntroEnergy);
+                Assert.Null(row.OutroEnergy);
             }
             finally
             {
@@ -95,7 +103,33 @@ public static class FeatureEnrichmentWritesEnergy
         }
 
         [Fact]
-        public async Task RowTransitionsToReadyState()
+        public async Task EnergyAnalyzedAtStaysNullSoTheBackfillLaneClaimsTheRow()
+        {
+            // NULL energy_analyzed_at is exactly the STORY-036 backfill predicate's claim signal.
+            await db.ResetAsync();
+            var dir = TestMedia.NewTempDir();
+            try
+            {
+                var path = TestMedia.CreateTone(dir, "energy_at_stays_null.flac");
+                var repo = Harness.Repo(db);
+                var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
+
+                var fakeEnergy = new FakeEnergyAnalyzer();
+                fakeEnergy.Returns(new EnergyPoints(0.5, 0.2));
+                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), fakeEnergy)
+                    .EnrichOneAsync(id, CancellationToken.None);
+
+                var row = await SelectRowAsync(db, id);
+                Assert.Null(row.EnergyAnalyzedAt);
+            }
+            finally
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+        }
+
+        [Fact]
+        public async Task RowStillTransitionsToReadyState()
         {
             await db.ResetAsync();
             var dir = TestMedia.NewTempDir();
@@ -121,128 +155,13 @@ public static class FeatureEnrichmentWritesEnergy
     }
 
     // ---------------------------------------------------------------------
-    // energy_analyzed_at is set unconditionally (backfill predicate)
+    // SAD PATH — loudness failure still blocks ready (unchanged failure contract, SPEC F135.1/AC5)
     // ---------------------------------------------------------------------
 
     [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
-    public sealed class ScenarioAttemptMarkedUnconditionally(DatabaseFixture db)
+    public sealed class ScenarioLoudnessFailureStillBlocksReadyRegardlessOfEnergy(DatabaseFixture db)
     {
-        [Fact]
-        public async Task EnergyAnalyzedAtIsSetEvenWhenAnalyzerReturnsNull()
-        {
-            await db.ResetAsync();
-            var dir = TestMedia.NewTempDir();
-            try
-            {
-                var path = TestMedia.CreateTone(dir, "energy_null_at.flac");
-                var repo = Harness.Repo(db);
-                var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
-
-                var fakeEnergy = new FakeEnergyAnalyzer();
-                fakeEnergy.Returns(null);   // analyzer ran, returned null — still set energy_analyzed_at
-                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), fakeEnergy)
-                    .EnrichOneAsync(id, CancellationToken.None);
-
-                var row = await SelectRowAsync(db, id);
-                Assert.NotNull(row.EnergyAnalyzedAt);
-                Assert.Null(row.IntroEnergy);
-                Assert.Null(row.OutroEnergy);
-            }
-            finally
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
-
-        [Fact]
-        public async Task RowStillTransitionsToReadyWhenAnalyzerReturnsNull()
-        {
-            await db.ResetAsync();
-            var dir = TestMedia.NewTempDir();
-            try
-            {
-                var path = TestMedia.CreateTone(dir, "energy_null_ready.flac");
-                var repo = Harness.Repo(db);
-                var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
-
-                var fakeEnergy = new FakeEnergyAnalyzer();
-                fakeEnergy.Returns(null);
-                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), fakeEnergy)
-                    .EnrichOneAsync(id, CancellationToken.None);
-
-                var row = await SelectRowAsync(db, id);
-                Assert.Equal("ready", row.State);
-            }
-            finally
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
-    }
-
-    // ---------------------------------------------------------------------
-    // SAD PATH — failure isolation (energy never gates ready)
-    // ---------------------------------------------------------------------
-
-    [Collection(DatabaseCollection.Name)]
-    [Trait("Category", "Integration")]
-    public sealed class ScenarioEnergyFailureDoesNotBlockReady(DatabaseFixture db)
-    {
-        [Fact]
-        public async Task RowStillReachesReadyWhenEnergyFailsButLoudnessSucceeds()
-        {
-            await db.ResetAsync();
-            var dir = TestMedia.NewTempDir();
-            try
-            {
-                var path = TestMedia.CreateTone(dir, "energy_throw_ready.flac");
-                var repo = Harness.Repo(db);
-                var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
-
-                var fakeEnergy = new FakeEnergyAnalyzer();
-                fakeEnergy.Throws(new InvalidOperationException("energy boom"));
-                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), fakeEnergy)
-                    .EnrichOneAsync(id, CancellationToken.None);
-
-                var row = await SelectRowAsync(db, id);
-                Assert.Equal("ready", row.State);
-            }
-            finally
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
-
-        [Fact]
-        public async Task EnergyFailureLogsWarningAndPersistsNull()
-        {
-            await db.ResetAsync();
-            var dir = TestMedia.NewTempDir();
-            try
-            {
-                var path = TestMedia.CreateTone(dir, "energy_throw_null.flac");
-                var repo = Harness.Repo(db);
-                var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
-
-                var fakeEnergy = new FakeEnergyAnalyzer();
-                fakeEnergy.Throws(new InvalidOperationException("energy boom"));
-                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), fakeEnergy)
-                    .EnrichOneAsync(id, CancellationToken.None);
-
-                // The WARN is emitted by Enricher; NullLogger swallows it in tests.
-                // Assertion: energy columns are NULL but energy_analyzed_at is still set (we tried).
-                var row = await SelectRowAsync(db, id);
-                Assert.Null(row.IntroEnergy);
-                Assert.Null(row.OutroEnergy);
-                Assert.NotNull(row.EnergyAnalyzedAt);
-            }
-            finally
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
-
         [Fact]
         public async Task LoudnessFailureStillBlocksReadyRegardlessOfEnergy()
         {
@@ -250,7 +169,6 @@ public static class FeatureEnrichmentWritesEnergy
             var dir = TestMedia.NewTempDir();
             try
             {
-                // Regression — loudness failure gates ready regardless of energy outcome.
                 var path = TestMedia.CreateTone(dir, "energy_loud_fail.flac");
                 var repo = Harness.Repo(db);
                 var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
@@ -264,71 +182,6 @@ public static class FeatureEnrichmentWritesEnergy
 
                 var row = await SelectRowAsync(db, id);
                 Assert.NotEqual("ready", row.State);
-            }
-            finally
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
-    }
-
-    // ---------------------------------------------------------------------
-    // CUE-WINDOW FORWARDING — energy is measured over trimmed windows, not raw file head/tail
-    // ---------------------------------------------------------------------
-
-    [Collection(DatabaseCollection.Name)]
-    [Trait("Category", "Integration")]
-    public sealed class ScenarioEnergyMeasuredOverCueTrimmedWindows(DatabaseFixture db)
-    {
-        [Fact]
-        public async Task CueInSecIsForwardedToEnergyAnalyzer()
-        {
-            await db.ResetAsync();
-            var dir = TestMedia.NewTempDir();
-            try
-            {
-                var path = TestMedia.CreateTone(dir, "energy_cue_in.flac");
-                var repo = Harness.Repo(db);
-                var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
-
-                var fakeCue = new FakeCueAnalyzer();
-                fakeCue.Returns(new CuePoints(CueInSec: 2.5, CueOutSec: 175.0));
-
-                var fakeEnergy = new FakeEnergyAnalyzer();
-                fakeEnergy.Returns(new EnergyPoints(0.6, 0.4));
-
-                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), fakeCue, fakeEnergy)
-                    .EnrichOneAsync(id, CancellationToken.None);
-
-                Assert.Equal(2.5, fakeEnergy.LastCueInSec);
-            }
-            finally
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-        }
-
-        [Fact]
-        public async Task CueOutSecIsForwardedToEnergyAnalyzer()
-        {
-            await db.ResetAsync();
-            var dir = TestMedia.NewTempDir();
-            try
-            {
-                var path = TestMedia.CreateTone(dir, "energy_cue_out.flac");
-                var repo = Harness.Repo(db);
-                var id = await repo.InsertDiscoveredAsync(path, "flac", new FileInfo(path).Length, Harness.Mtime, CancellationToken.None);
-
-                var fakeCue = new FakeCueAnalyzer();
-                fakeCue.Returns(new CuePoints(CueInSec: 2.5, CueOutSec: 175.0));
-
-                var fakeEnergy = new FakeEnergyAnalyzer();
-                fakeEnergy.Returns(new EnergyPoints(0.6, 0.4));
-
-                await Harness.EnrichmentWith(repo, new FakeLoudnessAnalyzer(), fakeCue, fakeEnergy)
-                    .EnrichOneAsync(id, CancellationToken.None);
-
-                Assert.Equal(175.0, fakeEnergy.LastCueOutSec);
             }
             finally
             {

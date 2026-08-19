@@ -54,12 +54,7 @@ static class Harness
 
     public static EnrichmentService Enrichment(MediaRepository repo) =>
         new(repo,
-            new Enricher(
-                new FfmpegLoudnessAnalyzer(),
-                new FfmpegCueAnalyzer(new FakeOptionsMonitor<CueDetectionOptions>(new CueDetectionOptions())),
-                new FakeEnergyAnalyzer(),
-                new FakeBpmAnalyzer(),
-                NullLogger<Enricher>.Instance),
+            new Enricher(new FfmpegLoudnessAnalyzer()),
             Channel.CreateUnbounded<long>(),
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
             NullLogger<EnrichmentService>.Instance,
@@ -71,13 +66,15 @@ static class Harness
             DefaultYearLookupOptions());
 
     /// <summary>
-    /// Builds an EnrichmentService with caller-supplied fake analyzers — used by Story018 specs that
-    /// need to control what each analyzer returns without touching the filesystem.
-    /// Uses a no-op energy analyzer (energy is not under test in Story018) and a no-op bpm analyzer.
+    /// Builds an EnrichmentService with caller-supplied fake loudness/cue analyzers. Since the SPEC
+    /// F135.1 fast pass, <paramref name="cue"/> is reachable only through the backfill lane
+    /// (<c>BackfillCueAsync</c>) — <c>EnrichOneAsync</c> (the fast pass) never calls it, only
+    /// <paramref name="loudness"/>. Used by Story018 specs. Uses a no-op energy analyzer (energy is
+    /// not under test in Story018) and a no-op bpm analyzer.
     /// </summary>
     public static EnrichmentService EnrichmentWith(MediaRepository repo, ILoudnessAnalyzer loudness, ICueAnalyzer cue) =>
         new(repo,
-            new Enricher(loudness, cue, new FakeEnergyAnalyzer(), new FakeBpmAnalyzer(), NullLogger<Enricher>.Instance),
+            new Enricher(loudness),
             Channel.CreateUnbounded<long>(),
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
             NullLogger<EnrichmentService>.Instance,
@@ -89,13 +86,15 @@ static class Harness
             DefaultYearLookupOptions());
 
     /// <summary>
-    /// Builds an EnrichmentService with caller-supplied fake analyzers including energy — used by
-    /// Story033 specs that need to control what each analyzer returns. Uses a no-op bpm analyzer
-    /// (bpm is not under test in Story033).
+    /// Builds an EnrichmentService with caller-supplied fake loudness/cue/energy analyzers. Since the
+    /// SPEC F135.1 fast pass, <paramref name="cue"/> and <paramref name="energy"/> are reachable only
+    /// through their respective backfill lanes (<c>BackfillCueAsync</c>/<c>BackfillEnergyAsync</c>) —
+    /// <c>EnrichOneAsync</c> (the fast pass) never calls them, only <paramref name="loudness"/>. Used
+    /// by Story033 specs. Uses a no-op bpm analyzer (bpm is not under test in Story033).
     /// </summary>
     public static EnrichmentService EnrichmentWith(MediaRepository repo, ILoudnessAnalyzer loudness, ICueAnalyzer cue, IEnergyAnalyzer energy) =>
         new(repo,
-            new Enricher(loudness, cue, energy, new FakeBpmAnalyzer(), NullLogger<Enricher>.Instance),
+            new Enricher(loudness),
             Channel.CreateUnbounded<long>(),
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
             NullLogger<EnrichmentService>.Instance,
@@ -107,13 +106,17 @@ static class Harness
             DefaultYearLookupOptions());
 
     /// <summary>
-    /// Builds an EnrichmentService with caller-supplied fake analyzers including bpm — used by
-    /// Story142 specs that need to control what the bpm analyzer returns.
+    /// Builds an EnrichmentService with caller-supplied fake loudness/cue/energy/bpm analyzers. Since
+    /// the SPEC F135.1 fast pass, <paramref name="cue"/>, <paramref name="energy"/>, and
+    /// <paramref name="bpm"/> are reachable only through their respective backfill lanes
+    /// (<c>BackfillCueAsync</c>/<c>BackfillEnergyAsync</c>/<c>BackfillBpmAsync</c>) —
+    /// <c>EnrichOneAsync</c> (the fast pass) never calls them, only <paramref name="loudness"/>. Used
+    /// by Story142 specs.
     /// </summary>
     public static EnrichmentService EnrichmentWith(
         MediaRepository repo, ILoudnessAnalyzer loudness, ICueAnalyzer cue, IEnergyAnalyzer energy, IBpmAnalyzer bpm) =>
         new(repo,
-            new Enricher(loudness, cue, energy, bpm, NullLogger<Enricher>.Instance),
+            new Enricher(loudness),
             Channel.CreateUnbounded<long>(),
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
             NullLogger<EnrichmentService>.Instance,
@@ -130,7 +133,7 @@ static class Harness
     /// </summary>
     public static EnrichmentService BackfillWith(MediaRepository repo, ICueAnalyzer cue) =>
         new(repo,
-            new Enricher(new FakeLoudnessAnalyzer(), cue, new FakeEnergyAnalyzer(), new FakeBpmAnalyzer(), NullLogger<Enricher>.Instance),
+            new Enricher(new FakeLoudnessAnalyzer()),
             Channel.CreateUnbounded<long>(),
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
             NullLogger<EnrichmentService>.Instance,
@@ -146,7 +149,7 @@ static class Harness
     /// </summary>
     public static EnrichmentService BackfillWith(MediaRepository repo, ICueAnalyzer cue, int batchSize) =>
         new(repo,
-            new Enricher(new FakeLoudnessAnalyzer(), cue, new FakeEnergyAnalyzer(), new FakeBpmAnalyzer(), NullLogger<Enricher>.Instance),
+            new Enricher(new FakeLoudnessAnalyzer()),
             Channel.CreateUnbounded<long>(),
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
             NullLogger<EnrichmentService>.Instance,
@@ -163,7 +166,7 @@ static class Harness
     /// </summary>
     public static EnrichmentService BackfillEnergyWith(MediaRepository repo, IEnergyAnalyzer energy) =>
         new(repo,
-            new Enricher(new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), energy, new FakeBpmAnalyzer(), NullLogger<Enricher>.Instance),
+            new Enricher(new FakeLoudnessAnalyzer()),
             Channel.CreateUnbounded<long>(),
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
             NullLogger<EnrichmentService>.Instance,
@@ -179,7 +182,7 @@ static class Harness
     /// </summary>
     public static EnrichmentService BackfillEnergyWith(MediaRepository repo, IEnergyAnalyzer energy, int batchSize) =>
         new(repo,
-            new Enricher(new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), energy, new FakeBpmAnalyzer(), NullLogger<Enricher>.Instance),
+            new Enricher(new FakeLoudnessAnalyzer()),
             Channel.CreateUnbounded<long>(),
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
             NullLogger<EnrichmentService>.Instance,
@@ -197,7 +200,7 @@ static class Harness
     /// </summary>
     public static EnrichmentService BackfillBpmWith(MediaRepository repo, IBpmAnalyzer bpm) =>
         new(repo,
-            new Enricher(new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FakeEnergyAnalyzer(), bpm, NullLogger<Enricher>.Instance),
+            new Enricher(new FakeLoudnessAnalyzer()),
             Channel.CreateUnbounded<long>(),
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
             NullLogger<EnrichmentService>.Instance,
@@ -213,13 +216,33 @@ static class Harness
     /// </summary>
     public static EnrichmentService BackfillBpmWith(MediaRepository repo, IBpmAnalyzer bpm, int batchSize) =>
         new(repo,
-            new Enricher(new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FakeEnergyAnalyzer(), bpm, NullLogger<Enricher>.Instance),
+            new Enricher(new FakeLoudnessAnalyzer()),
             Channel.CreateUnbounded<long>(),
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
             NullLogger<EnrichmentService>.Instance,
             new FakeCueAnalyzer(),
             Microsoft.Extensions.Options.Options.Create(new CueDetectionOptions { BackfillBatchSize = batchSize }),
             new FakeEnergyAnalyzer(),
+            bpm,
+            new FakeYearLookup(),
+            DefaultYearLookupOptions());
+
+    /// <summary>
+    /// Builds an EnrichmentService wired for the SPEC F135.5 lane-ordering pin: caller-supplied fake
+    /// cue/energy/bpm analyzers sharing ONE <paramref name="batchSize"/> across all three lanes, so a
+    /// spec can drive <c>BackfillCueAsync</c> then <c>BackfillEnergyAsync</c>/<c>BackfillBpmAsync</c>
+    /// against the same instance and observe the cue-before-energy/bpm claim gate across ticks.
+    /// </summary>
+    public static EnrichmentService BackfillLanesWith(
+        MediaRepository repo, ICueAnalyzer cue, IEnergyAnalyzer energy, IBpmAnalyzer bpm, int batchSize) =>
+        new(repo,
+            new Enricher(new FakeLoudnessAnalyzer()),
+            Channel.CreateUnbounded<long>(),
+            new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
+            NullLogger<EnrichmentService>.Instance,
+            cue,
+            Microsoft.Extensions.Options.Options.Create(new CueDetectionOptions { BackfillBatchSize = batchSize }),
+            energy,
             bpm,
             new FakeYearLookup(),
             DefaultYearLookupOptions());
@@ -233,7 +256,7 @@ static class Harness
     public static EnrichmentService BackfillYearLookupWith(
         MediaRepository repo, IYearLookup yearLookup, IOptionsMonitor<YearLookupOptions>? yearLookupOptions = null) =>
         new(repo,
-            new Enricher(new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FakeEnergyAnalyzer(), new FakeBpmAnalyzer(), NullLogger<Enricher>.Instance),
+            new Enricher(new FakeLoudnessAnalyzer()),
             Channel.CreateUnbounded<long>(),
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
             NullLogger<EnrichmentService>.Instance,
@@ -250,7 +273,7 @@ static class Harness
     public static EnrichmentService BackfillYearLookupWith(
         MediaRepository repo, IYearLookup yearLookup, int batchSize, IOptionsMonitor<YearLookupOptions>? yearLookupOptions = null) =>
         new(repo,
-            new Enricher(new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FakeEnergyAnalyzer(), new FakeBpmAnalyzer(), NullLogger<Enricher>.Instance),
+            new Enricher(new FakeLoudnessAnalyzer()),
             Channel.CreateUnbounded<long>(),
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
             NullLogger<EnrichmentService>.Instance,
@@ -276,7 +299,7 @@ static class Harness
         MediaRepository repo, HttpMessageHandler handler,
         ILlmBatchGate? gate = null, ILogger<EnrichmentService>? logger = null) =>
         new(repo,
-            new Enricher(new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FakeEnergyAnalyzer(), new FakeBpmAnalyzer(), NullLogger<Enricher>.Instance),
+            new Enricher(new FakeLoudnessAnalyzer()),
             Channel.CreateUnbounded<long>(),
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
             logger ?? NullLogger<EnrichmentService>.Instance,
@@ -308,7 +331,7 @@ static class Harness
         MediaRepository repo, HttpMessageHandler handler,
         ILlmBatchGate? gate = null, ILogger<EnrichmentService>? logger = null) =>
         new(repo,
-            new Enricher(new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), new FakeEnergyAnalyzer(), new FakeBpmAnalyzer(), NullLogger<Enricher>.Instance),
+            new Enricher(new FakeLoudnessAnalyzer()),
             Channel.CreateUnbounded<long>(),
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions()),
             logger ?? NullLogger<EnrichmentService>.Instance,
