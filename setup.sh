@@ -489,8 +489,8 @@ interview_topology() {
   arch="$(detect_arch)"
   recommended="$(recommend_topology "$ram_gib" "$arch")"
   echo "   Detected: ${ram_gib:-unknown} GiB RAM, arch ${arch} — recommended: ${recommended}"
-  echo "   [1] Full — kokoro + ollama (richer voice/LLM, needs more RAM)"
-  echo "   [2] Piper-only — lighter footprint, no LLM-backed TTS"
+  echo "   [1] Full — kokoro (richer TTS voice, needs more RAM)"
+  echo "   [2] Piper-only — lighter footprint, Piper voice instead of kokoro"
   default_choice=1
   [ "$recommended" = "piper-only" ] && default_choice=2
   prompt "   Choose [${default_choice}]: " answer "$default_choice"

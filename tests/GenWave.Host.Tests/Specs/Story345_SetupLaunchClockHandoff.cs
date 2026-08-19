@@ -907,8 +907,8 @@ public static class FeatureSetupLaunchClockHandoff
         public void WhatIsStillArrivingIsNamed()
         {
             // Default topology answer ("1") -> full/home -> kokoro is what's still arriving.
-            // Asserted against print_handoff's own unique wording, not the topology menu's
-            // "kokoro + ollama" text (printed regardless of what this fact is proving).
+            // Asserted against print_handoff's own unique wording, not the topology menu's own
+            // "kokoro" mention (printed regardless of what this fact is proving).
             Assert.Contains("TTS voice model", Run.Value.StdOut, StringComparison.Ordinal);
         }
 
@@ -1015,8 +1015,8 @@ public static class FeatureSetupLaunchClockHandoff
         static readonly Lazy<(int ExitCode, string StdOut)> Run = new(() => RunDegraded(topologyAnswer: "1"));
 
         /// <summary>Everything from the "🎙️ On air" line onward — excludes the interview's OWN
-        /// static prompt text (Q3's topology menu literally reads "kokoro + ollama", which would
-        /// otherwise false-positive any "does the output ever mention ollama" check against the
+        /// static prompt text (Q3's topology menu mentions "kokoro" in both options, which would
+        /// otherwise false-positive any "does the output ever mention kokoro" check against the
         /// full transcript).</summary>
         static string PostOnAirSection(string stdOut)
         {
@@ -1056,8 +1056,8 @@ public static class FeatureSetupLaunchClockHandoff
             // compose.demo.yaml (GW_PREFLIGHT_DEMO_VALUE is hardcoded "0" in
             // resolve_preset_and_topology) — ollama and caddy exist only there, so a
             // wizard-driven catch-up banner must never name either, on ANY preset. Scoped to the
-            // post-on-air section — Q3's own topology menu text literally reads "kokoro +
-            // ollama", which is not this fact's concern.
+            // post-on-air section — Q3's own topology menu text mentions "kokoro", which is not
+            // this fact's concern.
             var postOnAir = PostOnAirSection(Run.Value.StdOut);
 
             Assert.True(
@@ -1112,8 +1112,8 @@ public static class FeatureSetupLaunchClockHandoff
             // Full topology ("1") + Admin UI on ("y", Run's own default) -> heavyweights_desc
             // "kokoro" joined with extras_desc "admin_ui". F5 (round-4 review): scoped to the
             // post-on-air section, like its three siblings above — Q3's own topology menu text
-            // literally reads "kokoro + ollama", which would otherwise false-positive this fact
-            // against the interview transcript rather than the DEGRADED banner itself.
+            // mentions "kokoro", which would otherwise false-positive this fact against the
+            // interview transcript rather than the DEGRADED banner itself.
             var postOnAir = PostOnAirSection(Run.Value.StdOut);
 
             Assert.Contains("(kokoro, admin_ui)", postOnAir, StringComparison.Ordinal);

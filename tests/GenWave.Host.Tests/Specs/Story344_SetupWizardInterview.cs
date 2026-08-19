@@ -404,6 +404,32 @@ public static class FeatureSetupWizardInterview
     }
 
     // ---------------------------------------------------------------------
+    // HAPPY PATH — Q3's menu names only services the chosen preset actually composes (T320 wire
+    // defect: the menu used to read "kokoro + ollama", but F136.5 means no wizard preset EVER
+    // stacks compose.demo.yaml — `docker compose -f compose.yaml -f compose.pinned.yaml config
+    // --services` on what "home" resolves to lists no ollama at all. Mirrors the "never names
+    // ollama" negative pin Story345_SetupLaunchClockHandoff.cs already carries for the
+    // DEGRADED-BUT-AIRING banner (ScenarioLaunchDegradedButAiring.TheDegradedBannerNeverNamesOllamaOrCaddy)
+    // — this is the same law, pinned at the one place it was actually being broken.
+    // ---------------------------------------------------------------------
+
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTheTopologyMenuNamesOnlyComposedServices
+    {
+        [Fact]
+        public void TheTopologyMenuNeverMentionsOllama()
+        {
+            var mediaDir = MakeMediaDir(flacCount: 1);
+            var (_, stdOut, _) = RunSetup(
+                BinWithoutDotnet(), ScratchEnvPath(), $"{mediaDir}\n1\ny\n", SkipPreflight);
+
+            Assert.True(
+                !stdOut.Contains("ollama", StringComparison.Ordinal),
+                $"expected Q3's topology menu to never name ollama — it exists only in compose.demo.yaml, which no wizard preset ever stacks; stdout:\n{stdOut}");
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // HAPPY PATH — the topology recommendation gates arm64 on RAM, never bare arch
     // (T317 review LOW finding)
     // ---------------------------------------------------------------------
