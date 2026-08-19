@@ -635,7 +635,7 @@ public static class FeaturePreflightExpansion
 
             var (_, stdOut, _) = RunPreflight(HealthyDockerBin(), envFile);
 
-            Assert.Contains("==> preflight summary", stdOut);
+            Assert.Contains("==> Preflight summary", stdOut);
         }
 
         [Fact]
@@ -667,7 +667,7 @@ public static class FeaturePreflightExpansion
 
             var (_, stdOut, stdErr) = RunPreflight(HealthyDockerBin(), envFile, script: script);
 
-            var occurrences = Regex.Matches(stdOut, Regex.Escape("==> preflight summary")).Count;
+            var occurrences = Regex.Matches(stdOut, Regex.Escape("==> Preflight summary")).Count;
             Assert.True(occurrences == 1,
                 $"expected exactly one render across two explicit calls; occurrences={occurrences} stderr={stdErr} stdout:\n{stdOut}");
         }

@@ -298,7 +298,7 @@ persist_compose_file() {
     printf 'COMPOSE_FILE=%s\n' "$value" >> .env
   fi
 
-  echo "==> recorded COMPOSE_FILE=$value in .env — bare 'docker compose down' now matches this launch (gh-#309)"
+  echo "==> Recorded COMPOSE_FILE=$value in .env — bare 'docker compose down' now matches this launch (gh-#309)"
 }
 
 # --- profile merge (--with): existing COMPOSE_PROFILES (env, else GW_ENV_FILE/.env) + the
@@ -491,7 +491,7 @@ print_built_image_ages() {
   [ "${#names[@]}" -gt 0 ] || return 0
 
   echo
-  echo "==> built-image ages (informational — launching never rebuilds, gh-#351)"
+  echo "==> Built-image ages (informational — launching never rebuilds, gh-#351)"
   for i in "${!names[@]}"; do
     if [ $(( newest_epoch - ${epochs[$i]} )) -gt 3600 ]; then
       printf '    %-12s %s  ⚠ older than the newest build\n' "${names[$i]}" "$(age_phrase "${epochs[$i]}" "$now_epoch")"
@@ -513,7 +513,7 @@ print_pinned_image_tags() {
   [ -n "$tags" ] || return 0
 
   echo
-  echo "==> pinned images this launch is running (gh-#351)"
+  echo "==> Pinned images this launch is running (gh-#351)"
   while IFS= read -r tag; do
     printf '    %s\n' "$tag"
   done <<< "$tags"
@@ -570,7 +570,7 @@ if [ "$USE_PINNED_OVERLAY" = "1" ]; then
   preflight_docker
   preflight_env_secrets
 
-  echo "==> pulling published images"
+  echo "==> Pulling published images"
   if ! compose pull "${STAGE1_TARGETS[@]}"; then
     preflight_fail "Image pull failed — the running stack was NOT touched." \
       "Check network/GHCR reachability, then re-run: $RELAUNCH" \
@@ -582,7 +582,7 @@ if [ "$USE_PINNED_OVERLAY" = "1" ]; then
   # deadlocked here forever. --no-recreate starts an absent/stopped db and leaves a
   # running one completely untouched — an upgrade still restarts nothing onto the new
   # images before migrations pass; a first boot finally gets a db to migrate.
-  echo "==> ensuring the database is up (a running db is never recreated here)"
+  echo "==> Ensuring the database is up (a running db is never recreated here)"
   if ! compose up -d --no-recreate db; then
     preflight_fail "The database service failed to start — nothing else was touched." \
       "Inspect it: $(compose_display) logs db" \
@@ -595,14 +595,14 @@ if [ "$USE_PINNED_OVERLAY" = "1" ]; then
       "Fix the cause and re-run: $RELAUNCH"
   fi
 
-  echo "==> applying schema migrations against the running db"
+  echo "==> Applying schema migrations against the running db"
   if ! ./migrate.sh "${MIGRATE_ARGS[@]}"; then
     preflight_fail "Schema migration failed — the stack was NOT restarted onto the new images." \
       "Inspect the db: $(compose_display) logs db" \
       "Migrations are idempotent — fix the cause and re-run: $RELAUNCH"
   fi
 
-  echo "==> bringing the stack up"
+  echo "==> Bringing the stack up"
   # A failed partial up on an appliance is deliberately NOT rolled back with `down`:
   # whatever is still broadcasting keeps broadcasting (never-silent outranks tidiness).
   # Report precisely and say how to proceed instead.
@@ -652,16 +652,16 @@ if [ "$USE_PINNED_OVERLAY" = "1" ]; then
   # survives a degraded run.
   STAGE2_DEGRADED=0
   if [ "$STAGED" = "1" ]; then
-    echo "==> pulling the remaining images (TTS/LLM backends + any profile-gated extras) — already on air"
+    echo "==> Pulling the remaining images (TTS/LLM backends + any profile-gated extras) — already on air"
     if ! compose pull; then
-      echo "==> stage-2 image pull failed — the on-air core is untouched; everything else stays on whatever it last ran (or never starts, on a fresh box — the safe loop/templated patter carries the show). Re-run to retry: $RELAUNCH" >&2
+      echo "==> Stage-2 image pull failed — the on-air core is untouched; everything else stays on whatever it last ran (or never starts, on a fresh box — the safe loop/templated patter carries the show). Re-run to retry: $RELAUNCH" >&2
       STAGE2_DEGRADED=1
     else
-      echo "==> converging the full stack onto the pulled images"
+      echo "==> Converging the full stack onto the pulled images"
       if ! compose up -d --remove-orphans; then
         # Same "status above" idiom as the core failure above — `ps -a`, not `ps`.
         compose ps -a || true
-        echo "==> stage-2 up failed part-way (status above) — the on-air core is untouched. Re-run to retry: $RELAUNCH" >&2
+        echo "==> Stage-2 up failed part-way (status above) — the on-air core is untouched. Re-run to retry: $RELAUNCH" >&2
         STAGE2_DEGRADED=1
       fi
     fi
@@ -680,12 +680,12 @@ if [ "$USE_PINNED_OVERLAY" = "1" ]; then
   # instant rollback; older tags go. The builder cache is pure waste on a pinned-overlay box,
   # which never builds (BUILD=1 with --pinned/a home* GW_PRESET errors at parse time).
   if [ "$STAGE2_DEGRADED" = "0" ]; then
-    echo "==> pruning superseded images (kept: in-use + last 7 days)"
+    echo "==> Pruning superseded images (kept: in-use + last 7 days)"
     docker image prune -af --filter "until=168h" | tail -1 || true
     docker builder prune -af >/dev/null 2>&1 || true
   fi
 
-  echo "==> stack status"
+  echo "==> Stack status"
   compose ps
 
   print_pinned_image_tags || true
@@ -740,15 +740,15 @@ preflight_env_secrets
 fail_and_rollback() {
   local problem="$1"
   shift
-  echo "==> launch failed — rolling the partial stack back down (never-half-a-stack, gh-#19)"
+  echo "==> Launch failed — rolling the partial stack back down (never-half-a-stack, gh-#19)"
   compose down --remove-orphans || true
   preflight_fail "$problem" "$@"
 }
 
-echo "==> tearing down stack"
+echo "==> Tearing down stack"
 compose down --remove-orphans
 
-echo "==> bringing the database up first"
+echo "==> Bringing the database up first"
 if ! compose up "${UP_ARGS[@]}" db; then
   fail_and_rollback "The database service failed to start." \
     "Inspect it: $(compose_display) logs db" \
@@ -776,7 +776,7 @@ fi
 # overlay file selection under --piper-only.
 ./migrate.sh --keep-going "${MIGRATE_ARGS[@]}" || true
 
-echo "==> bringing the rest of the stack up"
+echo "==> Bringing the rest of the stack up"
 if ! compose up "${UP_ARGS[@]}"; then
   fail_and_rollback "Bringing the full stack up failed part-way." \
     "Inspect the failing service: $(compose_display) logs <service>" \
@@ -785,11 +785,11 @@ fi
 
 persist_compose_file
 
-echo "==> stack status"
+echo "==> Stack status"
 compose ps
 
 echo
-echo "==> access points (all on localhost — no proxy)"
+echo "==> Access points (all on localhost — no proxy)"
 printf '    %-12s %s\n' "Admin UI" "http://localhost:3000/"
 printf '    %-12s %s\n' "API"      "http://localhost:8080/  (health: /health)"
 printf '    %-12s %s\n' "Stream"   "http://localhost:8000/stream"

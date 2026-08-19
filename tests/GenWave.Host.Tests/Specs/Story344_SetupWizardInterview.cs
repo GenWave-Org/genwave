@@ -100,7 +100,7 @@ public static class FeatureSetupWizardInterview
         // T318/STORY-345 seams — scrubbed here too so an ambient shell's own values can never
         // sway a fact; ScenarioPreflightRunsAfterTheEnvWrite.AHealthyMachineReachesReadyToLaunch
         // and ScenarioTheNoMusicLane.TheRecheckLoopProceedsOnceAudioFilesAppear pin all three
-        // explicitly (the wizard now actually launches on its way to "ready to launch" / a full
+        // explicitly (the wizard now actually launches on its way to "Ready to launch" / a full
         // exit 0, so both need a real GW_LAUNCH_CMD/GW_STREAM_URL pair to reach it honestly).
         "GW_LAUNCH_CMD", "GW_STREAM_URL", "GW_ONAIR_TIMEOUT_SECONDS",
         // T317 review LOW finding: an ambient SKIP_PREFLIGHT=1 (e.g. a developer's own shell)
@@ -911,7 +911,7 @@ public static class FeatureSetupWizardInterview
     }
 
     // ---------------------------------------------------------------------
-    // SAD/HAPPY PATH — preflight is wired in after the write, before "ready to launch"
+    // SAD/HAPPY PATH — preflight is wired in after the write, before "Ready to launch"
     // ---------------------------------------------------------------------
 
     [Trait("Category", "Integration")]
@@ -935,7 +935,7 @@ public static class FeatureSetupWizardInterview
         [Fact]
         public void AHealthyMachineReachesReadyToLaunch()
         {
-            // T318/STORY-345: setup.sh now actually launches on its way past "ready to launch"
+            // T318/STORY-345: setup.sh now actually launches on its way past "Ready to launch"
             // — a real completion needs a real (stubbed) launch.sh and mount, or this would
             // fall through to the REAL ./launch.sh against an intentionally-incomplete docker
             // stub and never reach exit 0 (the T318 review's cross-file finding).
@@ -953,8 +953,8 @@ public static class FeatureSetupWizardInterview
                     ["GW_ONAIR_TIMEOUT_SECONDS"] = "30",
                 });
 
-            Assert.True(exitCode == 0 && stdOut.Contains("ready to launch", StringComparison.Ordinal),
-                $"expected a clean run reaching 'ready to launch'; exit={exitCode} stderr={stdErr} stdout={stdOut}");
+            Assert.True(exitCode == 0 && stdOut.Contains("Ready to launch", StringComparison.Ordinal),
+                $"expected a clean run reaching 'Ready to launch'; exit={exitCode} stderr={stdErr} stdout={stdOut}");
         }
     }
 }

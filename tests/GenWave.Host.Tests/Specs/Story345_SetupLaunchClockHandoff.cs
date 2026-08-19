@@ -18,7 +18,7 @@
 //     Story179_SpectatorListenerCount.cs already established for a fake upstream HTTP
 //     service) that scripts which poll attempt first returns HTTP 200 + audio bytes.
 // Every scenario also passes SKIP_PREFLIGHT=1 — preflight itself is Story342/Story344's own
-// suite; this file's concern starts at the "ready to launch" point.
+// suite; this file's concern starts at the "Ready to launch" point.
 //
 // House rule: one assert per Fact — a handful of facts assert one combined boolean via a
 // single Assert.True(...) call where the observation is genuinely one logical fact (several
@@ -206,6 +206,26 @@ public static class FeatureSetupLaunchClockHandoff
         throw new InvalidOperationException($"required tool not on PATH: {tool}");
     }
 
+    /// <summary>Finding 2 (gate-run round 2): setup.sh's own handoff now leads every URL block
+    /// with `$(hostname)` — asserted here against whatever the REAL `hostname` binary on this
+    /// box actually prints, never <see cref="Environment.MachineName"/> or <see
+    /// cref="System.Net.Dns"/> (both can differ in case from bash's own `hostname`, which is
+    /// exactly the binary <see cref="BaseTools"/> symlinks into every scenario's scratch PATH
+    /// here). Lazy + cached: every fact in this file that needs it asks for the same value.</summary>
+    static readonly Lazy<string> RealHostname = new(() =>
+    {
+        var startInfo = new ProcessStartInfo(ResolveTool("hostname"))
+        {
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("failed to start hostname");
+        var output = process.StandardOutput.ReadToEnd().Trim();
+        process.WaitForExit();
+        return output;
+    });
+
     static string MakeBinDir()
     {
         var dir = Directory.CreateTempSubdirectory("gw-setup-story345-bin-").FullName;
@@ -370,6 +390,35 @@ public static class FeatureSetupLaunchClockHandoff
         var bin = MakeBinDir();
         File.Delete(Path.Combine(bin, "hostname"));
         AddStub(bin, "hostname", "exit 1");
+        return bin;
+    }
+
+    /// <summary>Finding 2 (gate-run round 2): the MORE common real-world shape than <see
+    /// cref="BinWithBrokenHostname"/>'s total failure — bare `hostname` (primary_hostname's own
+    /// call) succeeds and answers a fixed name, but `hostname -I` (primary_lan_address's call,
+    /// the GNU-ism) still fails, exactly as it does on busybox/Alpine/macOS. Proves the hostname
+    /// line leads on its own, with no LAN line and no localhost fallback, when only the LAN
+    /// address is unavailable.</summary>
+    static string BinWithHostnameButBrokenLanAddress()
+    {
+        var bin = MakeBinDir();
+        File.Delete(Path.Combine(bin, "hostname"));
+        AddStub(bin, "hostname",
+            """if [ "${1:-}" = "-I" ]; then exit 1; fi; echo "fixture-station"; exit 0""");
+        return bin;
+    }
+
+    /// <summary>N1 (gate-run round 2 review): a `hostname` that exists, exits 0, and answers
+    /// `hostname -I` honestly (a valid LAN address) — but its BARE invocation (primary_hostname's
+    /// own call) writes a usage/error-shaped message to stdout instead of a real name, the exact
+    /// misbehaving-but-zero-exit shape primary_lan_address's own round-4 F2 guard already handles
+    /// for the LAN line and primary_hostname originally did not for the hostname line.</summary>
+    static string BinWithHostnameReturningUsageText()
+    {
+        var bin = MakeBinDir();
+        File.Delete(Path.Combine(bin, "hostname"));
+        AddStub(bin, "hostname",
+            """if [ "${1:-}" = "-I" ]; then echo "192.168.9.9"; exit 0; fi; echo "usage: hostname [-v]"; exit 0""");
         return bin;
     }
 
@@ -878,22 +927,27 @@ public static class FeatureSetupLaunchClockHandoff
         }
 
         [Fact]
-        public void TheAdminUrlUsesLocalhostExplicitly()
+        public void TheAdminUrlLeadsWithTheHostname()
         {
-            // T318 review LOW finding F6: the bare short hostname (e.g. "http://thor:3000/")
-            // resolves on nobody's machine but this one — localhost must be printed explicitly,
-            // not merely SOME host:port string (TheHandoffShowsTheAdminUrl's looser regex would
-            // pass on the old bare-hostname bug too).
-            Assert.Contains("http://localhost:3000/", Run.Value.StdOut, StringComparison.Ordinal);
+            // Finding 2 (gate-run round 2): Dean's own ruling OVERRIDES the earlier T318 review
+            // LOW finding F6 (which required localhost explicitly, on the theory the bare
+            // hostname "resolves on nobody's machine but this one") — the wizard is read over
+            // SSH more often than not, so localhost there quietly means the READER's own
+            // machine. The admin URL now leads with the real `$(hostname)` this box's own
+            // `hostname` binary reports (TheHandoffShowsTheAdminUrl's looser regex would pass on
+            // any host:port string; this pins the actual value).
+            Assert.Contains($"http://{RealHostname.Value}:3000/", Run.Value.StdOut, StringComparison.Ordinal);
         }
 
         [Fact]
-        public void TheHandoffShowsTheStreamUrlOnLocalhost()
+        public void TheHandoffShowsTheStreamUrlOnTheHostname()
         {
             // Finding 1 (post-v5.3.0 gate run): Dean's own words — the handoff "never gives any
             // URLs to try... just says 'you're on the air' without any proof or breadcrumbs".
-            // The stream is the single most important URL a radio station has.
-            Assert.Contains("http://localhost:8000/stream", Run.Value.StdOut, StringComparison.Ordinal);
+            // The stream is the single most important URL a radio station has. Finding 2
+            // (gate-run round 2): it leads with the hostname now too — see
+            // TheAdminUrlLeadsWithTheHostname's own note.
+            Assert.Contains($"http://{RealHostname.Value}:8000/stream", Run.Value.StdOut, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -911,10 +965,10 @@ public static class FeatureSetupLaunchClockHandoff
         public void TheStreamUrlAppearsBeforeTheAdminBlock()
         {
             // The stream is the single most important URL a radio station has — it leads the
-            // handoff, admin or not. Scoped to the handoff itself (from "you're on the air"
+            // handoff, admin or not. Scoped to the handoff itself (from "You're on the air"
             // onward) — Q4's own interview prompt ("Enable the Admin UI?") mentions "Admin UI"
             // too, well before the handoff block this fact is actually about.
-            var handoff = Run.Value.StdOut[Run.Value.StdOut.IndexOf("you're on the air", StringComparison.Ordinal)..];
+            var handoff = Run.Value.StdOut[Run.Value.StdOut.IndexOf("You're on the air", StringComparison.Ordinal)..];
             var streamIndex = handoff.IndexOf("Stream", StringComparison.Ordinal);
             var adminIndex = handoff.IndexOf("Admin UI", StringComparison.Ordinal);
 
@@ -937,8 +991,8 @@ public static class FeatureSetupLaunchClockHandoff
                 BaseEnv(launchStub, mount.Url, 30));
 
             Assert.True(
-                !declinedStdOut.Contains("http://localhost:3000/", StringComparison.Ordinal) &&
-                declinedStdOut.Contains("http://localhost:8000/stream", StringComparison.Ordinal),
+                !declinedStdOut.Contains($"http://{RealHostname.Value}:3000/", StringComparison.Ordinal) &&
+                declinedStdOut.Contains($"http://{RealHostname.Value}:8000/stream", StringComparison.Ordinal),
                 $"expected the stream URL even with admin declined (and no admin URL); stdout:\n{declinedStdOut}");
         }
 
@@ -1071,6 +1125,79 @@ public static class FeatureSetupLaunchClockHandoff
                 stdOut.Contains("./launch.sh", StringComparison.Ordinal) &&
                 stdOut.Contains("./setup.sh", StringComparison.Ordinal),
                 $"expected the handoff to complete (password + next-run lines) and exit 0 even when hostname -I fails; exit={exitCode} stdout={stdOut} stderr={stdErr}");
+        }
+
+        [Fact]
+        public void AHostnameThatFailsEntirelyFallsBackToLocalhostRatherThanShowingNoUrlAtAll()
+        {
+            // Finding 2 (gate-run round 2): print_url_block's own last-resort rule — localhost
+            // is never the LEAD, but a box where both `hostname` (primary_hostname) AND
+            // `hostname -I` (primary_lan_address) fail entirely must still hand the operator a
+            // working URL rather than an unlabelled blank — this is the one shape where
+            // localhost still appears, and it appears alone (no LAN line either).
+            //
+            // N2 (gate-run round 2 review): asserting localhost's PRESENCE alone would also pass
+            // against the old, pre-finding-2 code (which printed localhost unconditionally,
+            // hostname or no) — that proves nothing about THIS fixture's broken hostname actually
+            // engaging the new degrade path. Also asserting the REAL hostname's own URL is
+            // ABSENT closes that gap: it can only be missing if primary_hostname genuinely
+            // treated BinWithBrokenHostname's stub as unusable, not by coincidence.
+            var launchStub = WriteLaunchStub(exitCode: 0);
+            using var mount = new MountStub(servesOnAttempt: 2);
+            var mediaDir = MakeMediaDir(flacCount: 1);
+            var envFile = ScratchEnvPath();
+
+            var (_, stdOut, _) = RunSetup(BinWithBrokenHostname(), envFile, $"{mediaDir}\n1\ny\n",
+                BaseEnv(launchStub, mount.Url, 30));
+
+            Assert.True(
+                stdOut.Contains("http://localhost:3000/", StringComparison.Ordinal) &&
+                !stdOut.Contains($"http://{RealHostname.Value}:3000/", StringComparison.Ordinal),
+                $"expected the last-resort localhost fallback, with no real-hostname line leaking through; stdout:\n{stdOut}");
+        }
+
+        [Fact]
+        public void AHostnameThatAnswersWithUsageTextDegradesToTheLanLineNotGarbage()
+        {
+            // N1 (gate-run round 2 review, the finding that mattered): primary_hostname's own
+            // shape check — a `hostname` that exists on PATH and exits 0, but writes a USAGE
+            // message to stdout instead of a real name (the reviewer's own repro), used to flow
+            // straight into the lead URL (`http://usage: hostname [-v]:8000/stream`). It must
+            // degrade exactly like an empty/missing hostname already does: skip the hostname
+            // line, fall straight through to the LAN line — never a garbage URL anywhere.
+            var launchStub = WriteLaunchStub(exitCode: 0);
+            using var mount = new MountStub(servesOnAttempt: 2);
+            var mediaDir = MakeMediaDir(flacCount: 1);
+            var envFile = ScratchEnvPath();
+
+            var (_, stdOut, _) = RunSetup(BinWithHostnameReturningUsageText(), envFile, $"{mediaDir}\n1\ny\n",
+                BaseEnv(launchStub, mount.Url, 30));
+
+            Assert.True(
+                stdOut.Contains("http://192.168.9.9:3000/", StringComparison.Ordinal) &&
+                !stdOut.Contains("usage", StringComparison.Ordinal),
+                $"expected the admin URL to lead with the LAN address, with no garbage 'usage' text anywhere; stdout:\n{stdOut}");
+        }
+
+        [Fact]
+        public void AHostnameThatCannotReportItsLanAddressStillLeadsWithTheHostnameNotLocalhost()
+        {
+            // Finding 2 (gate-run round 2): the realistic busybox/Alpine/macOS shape — bare
+            // `hostname` succeeds (primary_hostname), only `-I` (primary_lan_address) doesn't
+            // exist — must still lead with the real hostname, never fall back to localhost just
+            // because the SECOND (LAN) line couldn't be computed.
+            var launchStub = WriteLaunchStub(exitCode: 0);
+            using var mount = new MountStub(servesOnAttempt: 2);
+            var mediaDir = MakeMediaDir(flacCount: 1);
+            var envFile = ScratchEnvPath();
+
+            var (_, stdOut, _) = RunSetup(BinWithHostnameButBrokenLanAddress(), envFile, $"{mediaDir}\n1\ny\n",
+                BaseEnv(launchStub, mount.Url, 30));
+
+            Assert.True(
+                stdOut.Contains("http://fixture-station:3000/", StringComparison.Ordinal) &&
+                !stdOut.Contains("http://localhost:3000/", StringComparison.Ordinal),
+                $"expected the admin URL to lead with the real hostname, never localhost; stdout:\n{stdOut}");
         }
     }
 
@@ -1412,8 +1539,8 @@ public static class FeatureSetupLaunchClockHandoff
 
             Assert.True(
                 stdErr.Contains(envFile, StringComparison.Ordinal) &&
-                stdErr.Contains("http://localhost:3000/", StringComparison.Ordinal),
-                $"expected the poll-timeout message to name the .env path and the admin URL; stderr:\n{stdErr}");
+                stdErr.Contains($"http://{RealHostname.Value}:3000/", StringComparison.Ordinal),
+                $"expected the poll-timeout message to name the .env path and the (hostname-first, finding 2) admin URL; stderr:\n{stdErr}");
         }
 
         [Fact]
@@ -1430,7 +1557,7 @@ public static class FeatureSetupLaunchClockHandoff
             var (_, _, stdErr) = RunSetup(BinWithoutDotnet(), envFile, $"{mediaDir}\n1\ny\n",
                 BaseEnv(launchStub, mount.Url, onAirTimeoutSeconds: 3));
 
-            Assert.Contains("http://localhost:8000/stream", stdErr, StringComparison.Ordinal);
+            Assert.Contains($"http://{RealHostname.Value}:8000/stream", stdErr, StringComparison.Ordinal);
         }
     }
 
@@ -1544,8 +1671,8 @@ public static class FeatureSetupLaunchClockHandoff
 
             var (exitCode, stdOut, stdErr) = RunSetup(BinWithHealthyDockerAndNoSdk(), envFile, $"{mediaDir}\n1\ny\n", extraEnv);
 
-            var occurrences = Regex.Matches(stdOut, Regex.Escape("==> preflight summary")).Count;
-            var summaryIndex = stdOut.IndexOf("==> preflight summary", StringComparison.Ordinal);
+            var occurrences = Regex.Matches(stdOut, Regex.Escape("==> Preflight summary")).Count;
+            var summaryIndex = stdOut.IndexOf("==> Preflight summary", StringComparison.Ordinal);
             var onAirIndex = stdOut.IndexOf("🎙️ On air", StringComparison.Ordinal);
             var launchStubEnv = File.ReadAllText(argvLog);
 
