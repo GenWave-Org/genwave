@@ -847,13 +847,27 @@ public static class FeatureSetupWizardInterview
         }
 
         [Fact]
-        public void RoutingToAdoptionExitsZero()
+        public void RoutingToAdoptionCompletesWithoutCrashing()
         {
+            // T319/STORY-346 superseded the routing stub this fact originally pinned (a bare
+            // "always exits 0" contract): adoption mode is now the real verify pass, so THIS
+            // fixture — a one-line .env, no docker stubbed at all — legitimately reports missing
+            // keys and unreachable-daemon UNKNOWNs, i.e. genuine drift, not a clean box.
+            //
+            // N5 (round-2 review): pinned to the SINGLE deterministic outcome rather than a
+            // loose 0/3/5 set. SKIP_PREFLIGHT=1 rules out 3 outright (preflight never runs). B3's
+            // fix (round-2 review) narrowed .env completeness' scope to skip overlay-gated keys
+            // (PUBLIC_HOST/TUNNEL_TOKEN) that this box's own COMPOSE_FILE doesn't stack — but this
+            // fixture is still missing every OTHER .env.example key (COMPOSE_PROFILES, MEDIA_DIR,
+            // the six secrets), which are never gated, so verify_env_completeness still WARNs and
+            // drift is reported: exit 5, always, on this exact one-line fixture. What this fact
+            // still owns is that ROUTING itself completes cleanly through adoption mode's own
+            // documented exit code rather than a shell-level crash.
             var envFile = WriteExistingEnvFile("MARKER-EXISTING-ENV=1\n");
 
             var (exitCode, _, _) = RunSetup(BinWithoutDotnet(), envFile, "", SkipPreflight);
 
-            Assert.Equal(0, exitCode);
+            Assert.Equal(5, exitCode);
         }
 
         [Fact]

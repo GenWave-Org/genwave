@@ -2,15 +2,18 @@
 # setup.sh — the first-run wizard: four questions, generated secrets, a ready-to-launch .env
 # (SPEC F132.1-.6, STORY-344).
 #
-# Lives at repo root, peer of launch.sh — wraps it, never re-implements compose orchestration
-# (this script never calls `docker compose` directly — launch.sh alone owns that). Plain bash,
-# plain numbered prompts, no whiptail/dialog dependency.
+# Lives at repo root, peer of launch.sh — wraps it, never re-implements compose ORCHESTRATION
+# (up/pull/down stay launch.sh's alone; adoption mode's own drift probes, below, may still run
+# READ-ONLY `docker`/`docker compose` inspection — config/ps/exec-a-select-query — through the
+# GW_DOCKER_CMD seam, F137/T319). Plain bash, plain numbered prompts, no whiptail/dialog
+# dependency.
 #
 # Virgin box (no .env yet at this script's target path) -> the four-question interview, secrets
 # generation, and one atomic .env write. Existing box (a .env is already there) -> routes to
-# setup_adoption_mode, a stub for now: real verify/repair is STORY-346/T319's build, arriving in
-# the next release slice. This script's contract on that branch is ROUTING and NEVER
-# OVERWRITING an existing .env — nothing about the adoption mode's internals.
+# setup_adoption_mode: verify (read-only drift report) by default, or verify-then-repair under
+# --repair (F137, STORY-346, T319 — see that function's own header, further down, for the full
+# contract). This script's write to ENV_FILE only EVER happens on the virgin path — adoption
+# mode never opens it for writing at all.
 #
 # Idempotency = derive, don't record (F132.4): there is no wizard state file anywhere. The one
 # fact this script ever persists is .env itself — its presence *is* the "already set up" signal,
@@ -44,8 +47,21 @@
 #                       budget wait_for_on_air_bg gives up after. Exists so Story345's poll-
 #                       timeout (sad-path) spec doesn't have to wait the real, generous
 #                       production budget out.
+#   GW_DOCKER_CMD     — the `docker` binary this script's adoption-mode drift probes invoke
+#                       (default docker; T319, STORY-346). Mirrors GW_LAUNCH_CMD's own shape:
+#                       every adoption-mode `docker ...`/`docker compose ...` call in this file
+#                       goes through this seam, so Story346's specs can point it at a scripted
+#                       stub and prove exactly which subcommands ran (read-only in verify mode,
+#                       never more than the confirmed fix in repair mode) with no real daemon
+#                       anywhere in the loop. tools/preflight.sh's OWN docker calls (preflight_docker
+#                       et al, sourced above) are NOT behind this seam — that file is shared with
+#                       build.sh/launch.sh and owns its own SKIP_PREFLIGHT escape hatch instead;
+#                       adoption mode runs under SKIP_PREFLIGHT=1 in Story346's specs precisely so
+#                       preflight's own (already-tested-elsewhere) checks stay out of this file's
+#                       own facts.
 #   stdin             — the interview's answer channel: a caller pipes newline-terminated
-#                       answers in, one per prompt.
+#                       answers in, one per prompt. Doubles as adoption-mode repair's per-item
+#                       confirm channel (T319) when --repair runs without --yes.
 # The .NET SDK probe (Q1) needs no seam of its own: like build.sh's own check, it is just
 # `dotnet` present-or-absent on PATH (Gh019's idiom) — a scratch PATH with no dotnet stub
 # already proves the pinned-only branch.
@@ -110,6 +126,36 @@
 # tools/preflight.sh's own EXIT trap (F134.6's pass/warn summary table) fires after all of the
 # above, on any exit path — see the trap setup right below the source line for why this script
 # chains onto it rather than replacing it (T317 review LOW finding).
+#
+# Adoption mode: verify & repair for existing boxes (F137, STORY-346, T319, setup_adoption_mode
+# et al. near the bottom of this file). An existing ENV_FILE routes here instead of the interview
+# — never both. Two invocation shapes:
+#   ./setup.sh                 VERIFY — read-only. Runs the F134 preflight (preflight_docker +
+#                               preflight_env_secrets) plus six drift probes (.env completeness
+#                               vs .env.example, unapplied schema migrations vs the repo's db/
+#                               max, stale locally-built images — gh-#351, informational only per
+#                               Dean's ruling, never a fix — orphaned profile containers, and
+#                               disk-prune advice), prints one report, and NEVER writes a file,
+#                               starts/stops/recreates a container, or pulls/prunes anything.
+#                               Deliberate divergences (a DB-stored settings override, an operator
+#                               COMPOSE_FILE customization) print as INFO, never as a finding.
+#   ./setup.sh --repair [--yes]  REPAIR — runs the same verify pass first (nothing above changes),
+#                               then walks every mechanically-fixable finding: prints its exact
+#                               command, warns first if it will stop/restart a container (F137.3),
+#                               and waits for a per-item y/N — or applies every one of them
+#                               without prompting under --yes (F137.2). A finding with no safe,
+#                               scriptable fix (env completeness, stale-image ages) stays
+#                               report-only in both modes; the operator edits/rebuilds by hand.
+#
+# Exit codes (adoption mode only — the interview path's own vocabulary, above, is unaffected):
+#   0   verify: no drift found (deliberate divergences, if any, are INFO-only — F137.4's
+#       do-no-harm gate). repair: every finding was applied (or none existed to begin with).
+#   2   bad invocation (unknown flag).
+#   3   tools/preflight.sh's own preflight_fail (a genuine machine/secrets problem — same
+#       meaning it always has).
+#   5   verify: drift was found and reported (nothing was changed — do-no-harm still holds).
+#       repair: at least one finding is still outstanding after the pass (declined, or its fix
+#       command itself failed) — re-run ./setup.sh --repair to retry.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -117,6 +163,18 @@ cd "$(dirname "$0")"
 
 ENV_FILE="${GW_ENV_FILE:-.env}"
 SECRET_LENGTH=40   # comfortably over F132.3's >=32-char floor
+
+# Adoption mode's own CLI surface (T319, STORY-346) — parsed in main(), before the virgin-vs-
+# existing routing decision. Meaningless on the virgin (interview) path; a first-run box simply
+# ignores them (no --repair-only validation gate here — the least surprising behaviour for an
+# operator who passes them out of habit before ever installing).
+SETUP_REPAIR=0
+SETUP_YES=0
+
+# usage — dumps this file's own header comment (the launch.sh idiom), for -h/--help.
+usage() {
+  awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"
+}
 
 # T318/F132.7 — the on-air timing log: a plain file beside ENV_FILE (gitignored, never the
 # secrets file itself — see append_setup_log). One greppable line per run.
@@ -176,6 +234,10 @@ discard_poller() {
 setup_exit_trap() {
   discard_poller
   [ -n "$SETUP_TMP_ENV_FILE" ] && rm -f "$SETUP_TMP_ENV_FILE"
+  # Adoption mode's own verify_print_report (T319) is called explicitly from
+  # setup_adoption_mode, not chained here — its own report has to print BEFORE that function's
+  # green/drift-found verdict line, and this trap only ever fires AFTER a function's own exit
+  # call, which would put the table below the verdict instead of above it.
   preflight_print_report
 }
 trap setup_exit_trap EXIT
@@ -565,18 +627,861 @@ apply_env_write() {
 # Routing (F132.1/AC6) + the ready-to-launch handoff
 # =============================================================================
 
+# =============================================================================
+# Adoption mode: verify & repair for existing boxes (F137, STORY-346, T319)
+# =============================================================================
+#
+# The report: two parallel row arrays (status/label/message), one row per probe/preflight check
+# — the SAME shape tools/preflight.sh's own GW_PREFLIGHT_ROW_* arrays already use, kept as a
+# SEPARATE set here (GW_VERIFY_ROW_*) since these rows are adoption-mode's own drift probes, not
+# F134's machine checks (preflight prints its own table separately, unchanged).
+GW_VERIFY_ROW_STATUS=()
+GW_VERIFY_ROW_LABEL=()
+GW_VERIFY_ROW_MESSAGE=()
+
+# verify_record PASS|WARN|INFO|UNKNOWN "<label>" "<message>" — PASS/INFO/UNKNOWN rows are
+# report-only. A WARN row is a "finding" for exit-code purposes (F137's honest-exit rule) whether
+# or not it also carries a repairable command — see verify_add_finding below for the repairable
+# subset.
+verify_record() {
+  GW_VERIFY_ROW_STATUS+=("$1")
+  GW_VERIFY_ROW_LABEL+=("$2")
+  GW_VERIFY_ROW_MESSAGE+=("$3")
+}
+
+# The repairable subset of findings — parallel arrays again, PLUS one dynamically-named array
+# PER finding (GW_VERIFY_FINDING_CMD_<index>) holding its exact command as real argv, not a
+# joined string. This is the T316 "one array source, never a printed twin" discipline applied
+# here: verify_run_repair's own display line and its own execution both read the SAME array via
+# a nameref (see verify_run_repair), so a finding's PRINTED command and its EXECUTED command can
+# never diverge — there is only ever one copy.
+GW_VERIFY_FINDING_ID=()
+GW_VERIFY_FINDING_LABEL=()
+GW_VERIFY_FINDING_MESSAGE=()
+GW_VERIFY_FINDING_RESTARTS=()
+GW_VERIFY_FINDING_COUNT=0
+
+# verify_add_finding <id> <label> <message> <restarts:0|1> <command...>
+# Records a WARN report row (verify_record) AND a repairable finding in the same call — every
+# repairable finding IS a WARN row; a few probes below call verify_record directly instead for a
+# PASS/INFO/UNKNOWN row, or for an advisory WARN that has no safe scripted fix at all (env
+# completeness, stale image ages) and so is never offered to verify_run_repair.
+verify_add_finding() {
+  local id="$1" label="$2" message="$3" restarts="$4"
+  shift 4
+  local idx="$GW_VERIFY_FINDING_COUNT"
+  GW_VERIFY_FINDING_ID+=("$id")
+  GW_VERIFY_FINDING_LABEL+=("$label")
+  GW_VERIFY_FINDING_MESSAGE+=("$message")
+  GW_VERIFY_FINDING_RESTARTS+=("$restarts")
+  # Dynamic array naming is the only way bash stores a per-index ARRAY (not a scalar) without a
+  # second, parallel, string-joined copy of the same command — exactly the plan/real divergence
+  # class T316 closed off for launch.sh's own UP1_ARGS. "$@" is expanded INSIDE the eval'd array
+  # literal, so every argument becomes its own quoted element regardless of embedded spaces —
+  # never a format-string or word-splitting hazard; every caller here is this script's own probe
+  # code, nothing attacker-controlled ever reaches this eval.
+  eval "GW_VERIFY_FINDING_CMD_${idx}=(\"\$@\")"
+  GW_VERIFY_FINDING_COUNT=$((GW_VERIFY_FINDING_COUNT + 1))
+  verify_record WARN "$label" "$message"
+}
+
+# verify_print_report — one line per recorded row, emoji-marked by status (PASS/INFO/UNKNOWN vs
+# a finding).
+#
+# F4 (round-3 review): this comment used to claim it was "chained onto the shared EXIT trap" —
+# false; setup_exit_trap's own remarks (near the top of this file) say the opposite. The real
+# contract: setup_adoption_mode calls this explicitly, ordered BEFORE that function's own
+# green/drift-found verdict line, so the table always prints above the verdict rather than below
+# it (an EXIT-trap ordering could never guarantee that). Because the call is explicit, not
+# trap-driven, an abort mid-probe (a hard crash before setup_adoption_mode reaches this line)
+# drops the table entirely — nothing here rescues that path the way a trap-fired call would.
+verify_print_report() {
+  [ "${#GW_VERIFY_ROW_STATUS[@]}" -gt 0 ] || return 0
+  echo
+  echo "==> verify: existing-install drift report (SPEC F137)"
+  local i status label message symbol
+  for i in "${!GW_VERIFY_ROW_STATUS[@]}"; do
+    status="${GW_VERIFY_ROW_STATUS[$i]}"
+    label="${GW_VERIFY_ROW_LABEL[$i]}"
+    message="${GW_VERIFY_ROW_MESSAGE[$i]}"
+    case "$status" in
+      PASS)    symbol="✅" ;;
+      INFO)    symbol="ℹ️ " ;;
+      UNKNOWN) symbol="❓" ;;
+      *)       symbol="⚠️ " ;;
+    esac
+    printf '    %s %-24s %s\n' "$symbol" "$label" "$message"
+  done
+}
+
+# --- shared plumbing the probes below build on --------------------------------------------
+
+# GW_VERIFY_COMPOSE_FILE_VALUE — COMPOSE_FILE (gh-#309, written by launch.sh's
+# persist_compose_file after a successful launch), read ONCE per verify run (round-2 review N6:
+# five separate call sites used to each re-read it independently via preflight_env_value — every
+# derivation below now reads this one cached copy instead). Populated by
+# verify_resolve_env_facts, which MUST run before any of the functions below (setup_adoption_mode
+# calls it first, ahead of even preflight_docker/preflight_env_secrets, which also consume the
+# topology/demo values derived from it).
+GW_VERIFY_COMPOSE_FILE_VALUE=""
+
+# GW_VERIFY_COMPOSE_ARGS — this box's own last-launched file set, straight from
+# GW_VERIFY_COMPOSE_FILE_VALUE — NEVER a second, hand-derived resolution of GW_PRESET (F132.5:
+# launch.sh is the ONLY reader of that key in the whole repo; adoption mode reads COMPOSE_FILE
+# instead, a different key entirely, which is also a strictly BETTER signal here — it names what
+# this box actually last ran, not merely what an interview once chose). Empty when the box has
+# never completed a launch — every probe that needs it degrades to UNKNOWN rather than guessing.
+GW_VERIFY_COMPOSE_ARGS=()
+
+verify_resolve_env_facts() {
+  GW_VERIFY_COMPOSE_FILE_VALUE="$(preflight_env_value COMPOSE_FILE)"
+
+  GW_VERIFY_COMPOSE_ARGS=()
+  if [ -n "$GW_VERIFY_COMPOSE_FILE_VALUE" ]; then
+    # `read -ra` (not an unquoted `local -a files=($compose_file)`) splits on IFS without ALSO
+    # globbing each resulting word — round-2 review N6: a COMPOSE_FILE value containing a `*`
+    # would otherwise expand against whatever happens to be in the current directory.
+    local -a files=()
+    local IFS=':'
+    read -ra files <<< "$GW_VERIFY_COMPOSE_FILE_VALUE"
+    unset IFS
+    local f
+    for f in "${files[@]}"; do
+      GW_VERIFY_COMPOSE_ARGS+=(-f "$f")
+    done
+  fi
+}
+
+# verify_topology_from_compose_file / verify_demo_from_compose_file — the F134.3a preflight
+# inputs, derived from the SAME cached COMPOSE_FILE value above rather than GW_PRESET (same
+# single-reader reasoning) — this is what lets adoption mode still run "the F134 preflight" (its
+# own F137.1 contract) with a topology-aware disk/port check, on a box this script never
+# interviewed.
+verify_topology_from_compose_file() {
+  case ":${GW_VERIFY_COMPOSE_FILE_VALUE}:" in
+    *"compose.piper-only.yaml"*) printf 'piper-only' ;;
+    *)                            printf 'full' ;;
+  esac
+}
+
+verify_demo_from_compose_file() {
+  case ":${GW_VERIFY_COMPOSE_FILE_VALUE}:" in
+    *"compose.demo.yaml"*) printf '1' ;;
+    *)                      printf '0' ;;
+  esac
+}
+
+# verify_resolve_db_container_id — resolves the db service's container id under this box's own
+# file set into GW_VERIFY_DB_CONTAINER_ID (empty when it can't be determined: docker unreachable,
+# db not running under this project). Every read-only docker/docker compose call in adoption mode
+# goes through GW_DOCKER_CMD (default docker — see this file's own header) so Story346's specs
+# never need a real daemon.
+#
+# F8 (round-3 review): memoized — this file has two call sites (verify_migrations,
+# verify_db_settings_overrides) that both want the SAME db container id, and calling out to
+# `docker compose ... ps -q db` twice per run for one unchanging fact was pure waste (N6's own
+# "one source, not two independent readers" discipline, applied here to a lazily-resolved fact
+# rather than an eagerly-resolved one like GW_VERIFY_COMPOSE_FILE_VALUE — not every verify run
+# reaches either call site at all: verify_migrations short-circuits to UNKNOWN before ever needing
+# it once the marker itself can't be established, so resolving it unconditionally up front would
+# add a docker call some runs never needed in the first place).
+#
+# A PLAIN function call, never `$(verify_resolve_db_container_id)` — bash runs a command
+# substitution in its OWN subshell, so a naive "memoize inside the function, callers capture its
+# stdout via $(...)" shape (this fix's own first draft) silently never memoizes anything at all:
+# every $(...) call forks a fresh subshell, sets the RESOLVED flag inside THAT subshell's own
+# copy, then the subshell exits and takes the mutation with it — the parent shell's flag never
+# flips. Every caller below calls this bare, then reads GW_VERIFY_DB_CONTAINER_ID directly.
+GW_VERIFY_DB_CONTAINER_ID=""
+GW_VERIFY_DB_CONTAINER_ID_RESOLVED=0
+
+verify_resolve_db_container_id() {
+  if [ "$GW_VERIFY_DB_CONTAINER_ID_RESOLVED" != "1" ]; then
+    local docker_cmd="${GW_DOCKER_CMD:-docker}"
+    GW_VERIFY_DB_CONTAINER_ID="$("$docker_cmd" compose "${GW_VERIFY_COMPOSE_ARGS[@]}" ps -q db 2>/dev/null || true)"
+    GW_VERIFY_DB_CONTAINER_ID_RESOLVED=1
+  fi
+}
+
+# verify_db_psql <sql> — a single-column, single-row read-only query against the running db
+# service (never a write — every call site below passes a plain `select`). Prints the trimmed
+# result on success; returns 1 (nothing printed) when the query itself failed for any reason —
+# callers treat that as UNKNOWN, never a hard failure (the T318 "report honestly, never die
+# mid-report" lesson, applied here).
+#
+# B1 (round-2 review): `exec -T db psql ...` with no `-U` lands as the CONTAINER's own default
+# exec user — root, on postgres:16.4 (that image sets no USER directive) — and a bare `psql`
+# then tries to connect as role "root", which does not exist: `FATAL: role "root" does not
+# exist`, on every real box, always. Fixed the same way db/*-migration.sh's own init scripts
+# already do it (they run inside this exact container too): read POSTGRES_USER/POSTGRES_DB from
+# the CONTAINER's own environment (Postgres's entrypoint always sets both, so this never has to
+# guess or hardcode a role name) via `sh -c`, not the exec'd process's caller-supplied identity.
+# `$sql` is passed as `sh -c`'s own positional `$1` (the `_` placeholder fills `$0`), never
+# interpolated into the `-c` string itself, so a `$sql` containing a shell metacharacter can
+# never widen what actually runs.
+#
+# B5 (round-2 review, defense in depth): every call site in this file passes a literal `select`
+# — refuse anything else outright here too, so a future non-select call is impossible, not
+# merely untested by the allowlisted-argv fact (Story346_AdoptionVerifyRepair.cs).
+#
+# F2 (round-3 review): the `^select` check alone is live-reproof bypassable — psql happily runs
+# a `;`-separated statement list in one `-tAc`, so `select 1; delete from station.settings` still
+# starts with `select ` and sailed straight through (reviewer-proven: printed `1`, then `DELETE
+# 0`). A bare `;` anywhere in `$sql` is refused outright now too — every real call site here is a
+# single, plain `select ... ` with no reason to ever contain one.
+verify_db_psql() {
+  local sql="$1" docker_cmd="${GW_DOCKER_CMD:-docker}" out
+  [[ "$sql" =~ ^[[:space:]]*[Ss][Ee][Ll][Ee][Cc][Tt][[:space:]] ]] || return 1
+  [[ "$sql" == *';'* ]] && return 1
+  out="$("$docker_cmd" compose "${GW_VERIFY_COMPOSE_ARGS[@]}" exec -T db \
+    sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -tAc "$1"' _ "$sql" 2>/dev/null)" || return 1
+  printf '%s' "$out" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
+# verify_env_file_value <key> — B6 fix (round-2 review, a T318 F2 regression): unlike
+# preflight_env_value (process-env-wins, correct for the interview/preflight seam contract this
+# probe is NOT part of), this probe reports drift found IN ${ENV_FILE} — reading the process
+# environment first is a false-both-ways trap on an adopted box: an ambient exported value
+# (a caller's own shell, a systemd unit's Environment=) makes a real placeholder in the file
+# read as green, and an ambient garbage value over a clean file fabricates drift that was never
+# actually written anywhere. Same grep/tail/cut shape as preflight_env_value, minus the env-var
+# layer — the file is the only source of truth for what THIS probe reports.
+verify_env_file_value() {
+  local name="$1"
+  [ -f "$ENV_FILE" ] || return 0
+  grep -E "^${name}=" "$ENV_FILE" | tail -n1 | cut -d= -f2- || true
+}
+
+# verify_env_key_is_needed <key> — B3 fix (round-2 review): true for every .env.example key
+# except the handful .env.example itself documents as overlay/profile-gated — PUBLIC_HOST (only
+# read under compose.demo.yaml) and TUNNEL_TOKEN (only read once COMPOSE_PROFILES=tunnel is
+# active) — and even then only when THIS box's own COMPOSE_FILE/COMPOSE_PROFILES don't actually
+# stack that overlay. Reviewer-proven bug this closes: T317's build_env_content deliberately
+# writes both COMMENTED (F136.5's split-overlays ruling — the wizard never fabricates
+# PUBLIC_HOST), so the old unconditional scope flagged every wizard-written box as "missing"
+# and steered a home operator toward the exact public-appliance value that ruling removed.
+# Never keys off GW_PRESET (F132.5: adoption mode reads COMPOSE_FILE, this box's own
+# last-launched fact, not the interview's).
+verify_env_key_is_needed() {
+  local key="$1"
+  case "$key" in
+    PUBLIC_HOST)
+      [ "$(verify_demo_from_compose_file)" = "1" ]
+      ;;
+    TUNNEL_TOKEN)
+      case ",$(preflight_env_value COMPOSE_PROFILES)," in
+        *,tunnel,*) return 0 ;;
+        *)          return 1 ;;
+      esac
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+# --- probe 1: .env completeness vs .env.example (F137.1) ----------------------------------
+# Reports KEY NAMES ONLY — never a value (hard rule: an operator pasting verify output into an
+# issue must never leak a secret). Scoped to .env.example's own UNCOMMENTED keys — a commented
+# line there (e.g. #STATION_NAME=...) documents an OPTIONAL setting; its absence from a real
+# .env is normal, not drift. Advisory only: the six required secrets + ADMIN_PASSWORD already
+# have their own hard-fail floor in preflight_env_secrets (F134.1), which this box's own verify
+# pass runs first (setup_adoption_mode) — this probe only ever adds NEW information about the
+# remaining, non-required keys.
+verify_env_completeness() {
+  local example=".env.example"
+  if [ ! -f "$example" ]; then
+    verify_record UNKNOWN ".env completeness" "${example} not found in this checkout — skipped."
+    return
+  fi
+
+  local -a missing=() placeholder=()
+  local key value
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    if grep -qE "^${key}=" "$ENV_FILE" 2>/dev/null; then
+      value="$(verify_env_file_value "$key")"
+      preflight_is_placeholder "$value" && placeholder+=("$key")
+    else
+      verify_env_key_is_needed "$key" && missing+=("$key")
+    fi
+  done < <(grep -oE '^[A-Z_][A-Z0-9_]*=' "$example" | sed 's/=$//')
+
+  if [ "${#missing[@]}" -eq 0 ] && [ "${#placeholder[@]}" -eq 0 ]; then
+    verify_record PASS ".env completeness" "every key ${example} sets by default is present in ${ENV_FILE}"
+    return
+  fi
+  if [ "${#missing[@]}" -gt 0 ]; then
+    verify_record WARN ".env completeness" \
+      "missing from ${ENV_FILE} (present in ${example}): ${missing[*]} — key names only; add each with a real value, then re-run"
+  fi
+  if [ "${#placeholder[@]}" -gt 0 ]; then
+    verify_record WARN ".env completeness" \
+      "still holding a change-me* placeholder in ${ENV_FILE}: ${placeholder[*]} — key names only; edit ${ENV_FILE} and set real values"
+  fi
+}
+
+# --- probe 2: unapplied migrations vs the repo's db/ max (F137.1) -------------------------
+# GenWave's migrations record no version/tracking table of their own — every db/NN-*-migration.sh
+# is idempotent, always-safe-to-re-run DDL (see migrate.sh's own header: "bash scripts as
+# baseline", a real migration runner is future work, gh-#12). The schema itself is therefore the
+# only honest record of what has been applied: this probe reads whether the newest migration's
+# own artifact exists, via a read-only query through the docker seam. Never claims precision this
+# repo's own migration story can't back up — a missing marker WARNs "may be behind", never a
+# specific missing migration number.
+verify_repo_migration_max() {
+  local f base max=0 num
+  for f in db/*-migration.sh; do
+    [ -f "$f" ] || continue
+    base="${f##*/}"   # strip the db/ prefix via bash's own parameter expansion — no `basename`
+                       # dependency needed for a single, already-known-shaped path segment.
+    num="$(printf '%s' "$base" | grep -oE '^[0-9]+')"
+    [ -n "$num" ] || continue
+    num=$((10#$num))
+    [ "$num" -gt "$max" ] && max="$num"
+  done
+  printf '%02d' "$max"
+}
+
+# verify_derive_migration_marker — B2 fix (round-2 review): the hand-maintained marker constant
+# this replaced went silently stale the moment a future migration shipped without updating it —
+# reviewer-proven: a scratch db/38 with the marker table already present made the OLD code print
+# "schema is current through db/38" and exit 0, even though db/38 itself was never checked at
+# all. Derived fresh every run instead: scans every db/*-migration.sh for a
+# `create table if not exists <schema>.<table>` line (case-insensitive — this repo spells it both
+# ways) and keeps the one from the HIGHEST-numbered file that has at least one match. That file
+# both NAMES the artifact this probe checks for AND PROVES the migration number that artifact
+# actually backs — a later migration that only ALTERs existing tables (no CREATE TABLE at all,
+# e.g. a hypothetical db/38 with only an ADD COLUMN) is invisible to this scan by construction,
+# which is exactly the honesty this probe now owes: it can only ever claim precision through a
+# migration that demonstrably created something, never fabricate a claim about one that didn't.
+# A file with more than one CREATE TABLE (db/37 creates five) contributes its LAST one — an
+# arbitrary but stable and sufficient single artifact to stand for "this migration ran".
+# Sets GW_VERIFY_MIGRATION_MARKER_NUM/_TABLE; both left empty when db/ has no table-creating
+# migration at all (a repo state this codebase has never actually been in — verify_migrations
+# below still degrades to an honest UNKNOWN rather than assuming it can't happen).
+GW_VERIFY_MIGRATION_MARKER_NUM=""
+GW_VERIFY_MIGRATION_MARKER_TABLE=""
+
+verify_derive_migration_marker() {
+  GW_VERIFY_MIGRATION_MARKER_NUM=""
+  GW_VERIFY_MIGRATION_MARKER_TABLE=""
+
+  local f base num table best_num=-1 best_table=""
+  for f in db/*-migration.sh; do
+    [ -f "$f" ] || continue
+    base="${f##*/}"
+    num="$(printf '%s' "$base" | grep -oE '^[0-9]+')"
+    [ -n "$num" ] || continue
+    num=$((10#$num))
+
+    table="$(grep -ioE 'create[[:space:]]+table[[:space:]]+if[[:space:]]+not[[:space:]]+exists[[:space:]]+[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*' "$f" 2>/dev/null \
+      | tail -n1 | grep -oE '[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*$' || true)"
+    [ -n "$table" ] || continue
+
+    if [ "$num" -gt "$best_num" ]; then
+      best_num="$num"
+      best_table="${table,,}"
+    fi
+  done
+
+  if [ "$best_num" -ge 0 ]; then
+    GW_VERIFY_MIGRATION_MARKER_NUM="$best_num"
+    GW_VERIFY_MIGRATION_MARKER_TABLE="$best_table"
+  fi
+}
+
+verify_migrations() {
+  local repo_max db_cid result
+  repo_max="$(verify_repo_migration_max)"
+
+  verify_derive_migration_marker
+  if [ -z "$GW_VERIFY_MIGRATION_MARKER_NUM" ]; then
+    verify_record UNKNOWN "Schema migrations" \
+      "no create-table migration found under db/ to check against — repo's db/ max is db/${repo_max}. Verify manually; ./migrate.sh is always safe to run (idempotent)."
+    return
+  fi
+
+  local marker_num="$GW_VERIFY_MIGRATION_MARKER_NUM" marker_table="$GW_VERIFY_MIGRATION_MARKER_TABLE"
+  local marker_num_fmt
+  marker_num_fmt="$(printf '%02d' "$marker_num")"
+
+  if [ "$marker_num" -lt "$((10#$repo_max))" ]; then
+    # B2: db/(marker_num+1..repo_max) add no new table this scan can see — never claim
+    # "current through db/${repo_max}" on evidence that only reaches db/${marker_num_fmt}.
+    #
+    # F11 (round-3 review): the unverifiable gap is that whole range, not just repo_max alone —
+    # a message naming only the last file implied every file between marker_num and repo_max-1
+    # had somehow been accounted for, when none of them were scanned either. Named as a range
+    # once the gap spans more than one file; a single-file gap still reads exactly as it always
+    # has ("db/NN adds no new table").
+    local gap_start gap_start_fmt gap_label gap_verb
+    gap_start=$((10#$marker_num + 1))
+    gap_start_fmt="$(printf '%02d' "$gap_start")"
+    if [ "$gap_start" -eq "$((10#$repo_max))" ]; then
+      gap_label="db/${repo_max}"
+      gap_verb="adds"
+    else
+      gap_label="db/${gap_start_fmt}-db/${repo_max}"
+      gap_verb="add"
+    fi
+    verify_record UNKNOWN "Schema migrations" \
+      "can't verify past db/${marker_num_fmt} — ${gap_label} ${gap_verb} no new table (repo's db/ max). Verify manually; ./migrate.sh is always safe to run (idempotent)."
+    return
+  fi
+
+  verify_resolve_db_container_id
+  db_cid="$GW_VERIFY_DB_CONTAINER_ID"
+  if [ -z "$db_cid" ]; then
+    verify_record UNKNOWN "Schema migrations" \
+      "could not reach the db service to check (not running, or docker unreachable) — repo's db/ max is db/${repo_max}. Start the stack, then re-run; ./migrate.sh is always safe to run (idempotent)."
+    return
+  fi
+
+  result="$(verify_db_psql "select to_regclass('${marker_table}') is not null")" || result=""
+  case "$result" in
+    t)
+      verify_record PASS "Schema migrations" "schema is current through db/${marker_num_fmt} (${marker_table} present)"
+      ;;
+    f)
+      verify_add_finding "migrations" "Schema migrations" \
+        "repo's db/ max is db/${marker_num_fmt}, but its marker (${marker_table}) is missing from the schema — this box may be behind." \
+        0 \
+        ./migrate.sh
+      ;;
+    *)
+      verify_record UNKNOWN "Schema migrations" \
+        "could not determine the applied schema version (query failed) — repo's db/ max is db/${marker_num_fmt}. ./migrate.sh is always safe to run (idempotent)."
+      ;;
+  esac
+}
+
+# --- probe 3: stale locally-built images, gh-#351 (F137.1) --------------------------------
+# INFORMATIONAL ONLY — Dean's ruling on gh-#351 (docs/MEMORY.md): "no implicit build, no
+# rebuild-if-stale heuristic, no prompt." This never becomes a finding and is never offered to
+# verify_run_repair, no matter how old an image is. Mirrors launch.sh's own
+# built_services/print_built_image_ages (gh-#351) in shape — reimplemented small and self-
+# contained here rather than sourced, the same "this script may not edit launch.sh" boundary
+# count_audio_files already accepts for tools/preflight.sh above.
+#
+# N1 (round-2 review): mirrors launch.sh's OWN USE_PINNED_OVERLAY split too — compose.yaml +
+# compose.pinned.yaml still renders a `build:` key for api/icecast (that overlay only resets
+# admin_ui/engine/piper's build context, per its own header; api/icecast carry `image:` +
+# `pull_policy: always` ALONGSIDE the inherited `build:`), so the dev-flow scan below used to
+# misreport a healthy pinned/home* box as "locally built" and print "Run ./build.sh" — advice
+# launch.sh's own pinned/home* flow explicitly REJECTS at parse time (BUILD=1 is a hard error
+# there) and never prints itself. A pinned box gets launch.sh's OTHER readout instead: the
+# published tags actually running, never an age (a tag IS the fact on a pinned box, not a date).
+GW_VERIFY_IMAGE_AGE_WARN_SECONDS=3600   # matches launch.sh's own "> 1h behind the newest build"
+
+# verify_pinned_from_compose_file — true once compose.pinned.yaml (SPEC F136.5) is stacked,
+# same derivation shape as verify_topology_from_compose_file/verify_demo_from_compose_file.
+verify_pinned_from_compose_file() {
+  case ":${GW_VERIFY_COMPOSE_FILE_VALUE}:" in
+    *"compose.pinned.yaml"*) return 0 ;;
+    *)                        return 1 ;;
+  esac
+}
+
+verify_stale_images() {
+  local docker_cmd="${GW_DOCKER_CMD:-docker}"
+  if verify_pinned_from_compose_file; then
+    verify_pinned_image_tags "$docker_cmd"
+  else
+    verify_built_image_ages "$docker_cmd"
+  fi
+}
+
+# Pinned-overlay readout (mirrors launch.sh's own print_pinned_image_tags): the published GHCR
+# tags this box is actually running. No rebuild hint — a pinned/home* box never builds, and
+# ./build.sh would be exactly the wrong advice for it.
+verify_pinned_image_tags() {
+  local docker_cmd="$1" tags tag joined=""
+  tags="$("$docker_cmd" compose "${GW_VERIFY_COMPOSE_ARGS[@]}" config --images 2>/dev/null | grep '^ghcr\.io/genwave-org/' | sort -u)" || tags=""
+  if [ -z "$tags" ]; then
+    verify_record UNKNOWN "Pinned image tags" "could not render this box's compose configuration — skipped."
+    return
+  fi
+  while IFS= read -r tag; do
+    [ -n "$tag" ] || continue
+    if [ -z "$joined" ]; then joined="$tag"; else joined="${joined}, ${tag}"; fi
+  done <<< "$tags"
+  verify_record INFO "Pinned image tags" "this box is running (gh-#351): ${joined}"
+}
+
+# Dev-flow readout (mirrors launch.sh's own built_services/print_built_image_ages).
+verify_built_image_ages() {
+  local docker_cmd="$1" rendered
+  rendered="$("$docker_cmd" compose "${GW_VERIFY_COMPOSE_ARGS[@]}" config 2>/dev/null)" || rendered=""
+  if [ -z "$rendered" ]; then
+    verify_record UNKNOWN "Built image ages" "could not render this box's compose configuration — skipped."
+    return
+  fi
+
+  # F9 (round-3 review): `mapfile -t` (not an unquoted `built=($(...))`) — same word-splitting/
+  # globbing hazard verify_resolve_env_facts and verify_compose_overrides already guard against
+  # (round-2 review N6) — a service name that happened to contain a shell glob character would
+  # otherwise expand against whatever is in the current directory.
+  local -a built=()
+  mapfile -t built < <(printf '%s\n' "$rendered" | awk '
+    /^services:/                 { in_services = 1; next }
+    in_services && /^[^ ]/       { in_services = 0 }
+    in_services && /^  [^ ]/     { svc = $1; sub(/:.*$/, "", svc); next }
+    in_services && /^    build:/ { print svc }
+  ')
+
+  if [ "${#built[@]}" -eq 0 ]; then
+    verify_record INFO "Built image ages" "no locally-built services in this box's compose config — every image here is pulled/pinned."
+    return
+  fi
+
+  local now_epoch newest_epoch=0 svc cid image_id created created_epoch
+  now_epoch="$(date +%s)"
+  local -a names=() epochs=()
+  for svc in "${built[@]}"; do
+    cid="$("$docker_cmd" compose "${GW_VERIFY_COMPOSE_ARGS[@]}" ps -a -q "$svc" 2>/dev/null | head -n1)"
+    created="" created_epoch=""
+    if [ -n "$cid" ]; then
+      image_id="$("$docker_cmd" inspect "$cid" --format '{{.Image}}' 2>/dev/null || true)"
+      if [ -n "$image_id" ]; then
+        created="$("$docker_cmd" image inspect "$image_id" --format '{{.Created}}' 2>/dev/null || true)"
+      fi
+    fi
+    [ -n "$created" ] && created_epoch="$(date -d "$created" +%s 2>/dev/null || true)"
+    [ -n "$created_epoch" ] || continue
+    names+=("$svc")
+    epochs+=("$created_epoch")
+    [ "$created_epoch" -gt "$newest_epoch" ] && newest_epoch="$created_epoch"
+  done
+
+  if [ "${#names[@]}" -eq 0 ]; then
+    verify_record INFO "Built image ages" "locally-built services found, but none have a running/created container yet."
+    return
+  fi
+
+  local i part joined="" age flag
+  local -a parts=()
+  for i in "${!names[@]}"; do
+    age=$(( (now_epoch - epochs[i]) / 3600 ))
+    flag=""
+    [ $(( newest_epoch - epochs[i] )) -gt "$GW_VERIFY_IMAGE_AGE_WARN_SECONDS" ] && flag=" (older than the newest build)"
+    parts+=("${names[$i]} ~${age}h${flag}")
+  done
+  joined="${parts[0]}"
+  for part in "${parts[@]:1}"; do joined="${joined}, ${part}"; done
+  verify_record INFO "Built image ages" \
+    "informational only (gh-#351 — never auto-rebuilt): ${joined}. Run ./build.sh or BUILD=1 ./launch.sh to refresh."
+}
+
+# --- probe 4: orphaned profile containers (F137.1) -----------------------------------------
+# The piper/kokoro leftover gotcha: a container for a service that is DEFINED but no longer
+# profile-selected survives `docker compose ... up --remove-orphans` (that flag's own "orphan"
+# is narrower than "not currently selected by profile" — see launch.sh's own comment on it) and
+# is invisible to compose's own profile-aware `ps`. Found instead via a raw, project-labeled
+# `docker ps` (the Engine API has no notion of "profiles" at all, so a raw list is never
+# profile-filtered) against the EXPECTED set this box's own resolved compose config selects
+# right now (`docker compose config --services`, itself profile-aware) — never a hardcoded
+# service list on either side (the T316/T318 review lesson).
+#
+# N6 (round-2 review): checks GW_VERIFY_COMPOSE_ARGS itself (already derived, once, by
+# verify_resolve_env_facts) rather than re-reading COMPOSE_FILE a second time here — one source,
+# not two independent readers of the same fact that could drift apart.
+verify_orphaned_containers() {
+  local docker_cmd="${GW_DOCKER_CMD:-docker}"
+  if [ "${#GW_VERIFY_COMPOSE_ARGS[@]}" -eq 0 ]; then
+    verify_record UNKNOWN "Orphaned containers" "no COMPOSE_FILE recorded yet (this box has never completed a launch) — nothing to check."
+    return
+  fi
+
+  # N6 (round-2 review): considered folding this and the `--format json` call below into ONE
+  # `config --format json` render (it answers services/build/project all at once) — declined:
+  # this repo has no `jq` dependency anywhere, and reliably pulling a services LIST plus a build-
+  # key CHECK plus the project name back out of nested JSON with pure bash/grep/sed would be far
+  # uglier and more fragile than two purpose-built, single-value calls. `--services` and
+  # `--format json` stay separate on purpose.
+  local expected
+  expected="$("$docker_cmd" compose "${GW_VERIFY_COMPOSE_ARGS[@]}" config --services 2>/dev/null)" || expected=""
+  if [ -z "$expected" ]; then
+    verify_record UNKNOWN "Orphaned containers" "could not render this box's compose configuration — skipped."
+    return
+  fi
+
+  local project
+  project="$("$docker_cmd" compose "${GW_VERIFY_COMPOSE_ARGS[@]}" config --format json 2>/dev/null \
+    | grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed -E 's/.*"([^"]*)"[[:space:]]*$/\1/')"
+  if [ -z "$project" ]; then
+    verify_record UNKNOWN "Orphaned containers" "could not determine the compose project name — skipped."
+    return
+  fi
+
+  # N3 (round-2 review): this lists `ps -a` — every container regardless of state, running or
+  # long-exited — but used to WARN "is running" and print the stop/restart caution unconditionally
+  # for all of them. `{{.State}}` names what was actually observed, and the restart-class caution
+  # (F137.3) now fires only when the leftover genuinely IS running; an already-exited one gets
+  # `rm -f` offered with no false "this will stop a running container" caution attached to it.
+  local svc name state found=0 restarts
+  while IFS='|' read -r svc name state; do
+    [ -n "$svc" ] || continue
+    case $'\n'"${expected}"$'\n' in
+      *$'\n'"${svc}"$'\n'*) continue ;;   # still selected under this box's own profiles — fine
+    esac
+    found=1
+    restarts=0
+    [ "$state" = "running" ] && restarts=1
+    verify_add_finding "orphan:${name}" "Orphaned container (${svc})" \
+      "'${name}' (state: ${state}) is not part of this box's currently selected profiles/topology — the piper/kokoro leftover gotcha ('up --remove-orphans' does not catch a profile-gated-off service's own leftover container)." \
+      "$restarts" \
+      "$docker_cmd" rm -f "$name"
+  done < <("$docker_cmd" ps -a --filter "label=com.docker.compose.project=${project}" \
+    --format '{{.Label "com.docker.compose.service"}}|{{.Names}}|{{.State}}' 2>/dev/null)
+
+  if [ "$found" = "0" ]; then
+    verify_record PASS "Orphaned containers" "none found for project '${project}'"
+  fi
+}
+
+# --- probe 5: disk-prune advice (F137.1) ----------------------------------------------------
+# Read-only (`docker system df`, never `docker system prune`/`docker image prune` — this probe
+# never runs either, in verify OR repair mode).
+#
+# B4 (round-2 review): INFO-ONLY, by design, never a finding — F137.1 itself calls this "advice",
+# never a fix. Any box that has ever upgraded has SOME reclaimable space (a superseded image from
+# the previous pin, still referenced by nothing) the instant a newer one lands; the OLD code
+# turned that into a WARN/exit-5, so a perfectly healthy, just-upgraded box could never verify
+# green — F137.4's own do-no-harm gate (and T321's Pi 4 wire, which expects exit 0 on a healthy
+# box) both depend on this NOT happening. It also could never have been offered as a scripted
+# repair honestly: the trigger read UNFILTERED `system df` reclaimable while the old repair
+# command pruned only `until=168h`-old images — young reclaimable space (a same-day pin bump)
+# would trip the finding but the repair would then prune nothing, an unclearable loop. The exact
+# prune command still prints, for the operator to run by hand when THEY judge it worth it — see
+# N4 (round-2 review) for why its own message spells out the blast radius rather than implying
+# it's GenWave-scoped.
+GW_VERIFY_PRUNE_UNTIL_HOURS=168   # matches launch.sh's own gh-#441 prune filter
+
+verify_prune_advice() {
+  local docker_cmd="${GW_DOCKER_CMD:-docker}" df_out reclaimable
+  df_out="$("$docker_cmd" system df 2>/dev/null)" || df_out=""
+  if [ -z "$df_out" ]; then
+    verify_record UNKNOWN "Disk (docker images)" "could not read 'docker system df' — skipped."
+    return
+  fi
+
+  reclaimable="$(printf '%s\n' "$df_out" | awk '$1=="Images" {print $5}')"
+  if [ -z "$reclaimable" ]; then
+    verify_record UNKNOWN "Disk (docker images)" "could not parse 'docker system df' output — skipped."
+    return
+  fi
+
+  if [ "$reclaimable" = "0B" ]; then
+    verify_record PASS "Disk (docker images)" "0B reclaimable — nothing to prune"
+    return
+  fi
+
+  verify_record INFO "Disk (docker images)" \
+    "${reclaimable} reclaimable from superseded/dangling images (docker system df) — advice, not a finding (F137.1); this is normal after any upgrade. Prune by hand if you want it back: ${docker_cmd} image prune -af --filter until=${GW_VERIFY_PRUNE_UNTIL_HOURS}h — removes every unused image on this machine older than 7 days, not just GenWave's, including rollback targets you may still want."
+}
+
+# --- deliberate divergences: INFO only, never a finding (F137.2/AC3) -----------------------
+
+# A DB-stored settings override: StationSettingsAllowlist.All documents Station:Name as the
+# canonical example (env STATION_NAME only catches up the Icecast stream name on the next
+# ENGINE restart; the api-side value is whatever's live in station.settings, an operator's own
+# Admin UI edit). Any row here for that key IS by design the currently-winning value — never
+# drift, never a finding.
+verify_db_settings_overrides() {
+  local db_cid value
+  verify_resolve_db_container_id
+  db_cid="$GW_VERIFY_DB_CONTAINER_ID"
+  [ -n "$db_cid" ] || return 0   # can't check — silently skipped (optional/informational only,
+                                  # distinct from verify_migrations' own required UNKNOWN row)
+  value="$(verify_db_psql "select value from station.settings where key = 'Station:Name'")" || return 0
+  [ -n "$value" ] || return 0
+  value="${value#\"}"
+  value="${value%\"}"
+  verify_record INFO "Station name" \
+    "the database has an operator-set override ('${value}', via the Admin UI) — this wins over any STATION_NAME in ${ENV_FILE} for the running station; not drift, never offered as a fix."
+}
+
+# An operator COMPOSE_FILE customization: any file COMPOSE_FILE names beyond this repo's own
+# shipped compose*.yaml set (derived by listing the checkout itself, never a hardcoded filename
+# array) is a deliberate operator overlay — gh-#309's own documented mechanism for exactly this.
+verify_compose_overrides() {
+  [ "${#GW_VERIFY_COMPOSE_ARGS[@]}" -eq 0 ] && return 0
+
+  local -a shipped=()
+  local f
+  for f in compose*.yaml; do
+    [ -f "$f" ] || continue
+    shipped+=("$f")
+  done
+
+  # F7 (round-3 review): GW_VERIFY_COMPOSE_ARGS itself — already derived once by
+  # verify_resolve_env_facts (N6's own discipline) — is the ONE source now, rather than this
+  # function independently re-splitting GW_VERIFY_COMPOSE_FILE_VALUE a second time (the same
+  # IFS=':' `read -ra` it already cites as the reason not to do that). The array is laid out as
+  # alternating `-f`/file pairs (verify_resolve_env_facts' own shape), so every ODD index is a
+  # filename.
+  local -a files=()
+  local i
+  for ((i = 1; i < ${#GW_VERIFY_COMPOSE_ARGS[@]}; i += 2)); do
+    files+=("${GW_VERIFY_COMPOSE_ARGS[$i]}")
+  done
+  local -a extra=()
+  local s known
+  for f in "${files[@]}"; do
+    known=0
+    for s in "${shipped[@]}"; do
+      [ "$f" = "$s" ] && { known=1; break; }
+    done
+    [ "$known" = "0" ] && extra+=("$f")
+  done
+
+  if [ "${#extra[@]}" -gt 0 ]; then
+    verify_record INFO "Compose file overrides" \
+      "COMPOSE_FILE in ${ENV_FILE} names a file this repo doesn't ship (${extra[*]}) — a deliberate operator customization; not drift, never offered as a fix."
+  fi
+}
+
+# --- repair: per-item confirm, --yes for bulk (F137.2/F137.3) -------------------------------
+# GW_VERIFY_REPAIR_REMAINING is a global rather than this function's own stdout — every item's
+# progress line (the exact command, the restart warning, the prompt, "done."/"skipped.") has to
+# reach the operator's terminal directly; capturing this function via $(...) to get a return
+# value would swallow all of that into the captured string instead.
+GW_VERIFY_REPAIR_REMAINING=0
+
+verify_run_repair() {
+  GW_VERIFY_REPAIR_REMAINING=0
+  local i
+  for i in "${!GW_VERIFY_FINDING_ID[@]}"; do
+    local label="${GW_VERIFY_FINDING_LABEL[$i]}" message="${GW_VERIFY_FINDING_MESSAGE[$i]}"
+    local restarts="${GW_VERIFY_FINDING_RESTARTS[$i]}"
+    # The nameref IS the single source both this display line and the execution below read —
+    # they can never diverge (see verify_add_finding's own remarks on why this array exists).
+    local -n cmdref="GW_VERIFY_FINDING_CMD_${i}"
+
+    echo
+    echo "-- ${label}"
+    echo "   ${message}"
+    printf '   Fix: %s\n' "${cmdref[*]}"
+    if [ "$restarts" = "1" ]; then
+      echo "   ⚠️  this will stop/restart a running container — printed before the confirm, never a surprise (F137.3)."
+    fi
+
+    local proceed="$SETUP_YES"
+    if [ "$proceed" != "1" ]; then
+      printf '   Apply this fix? [y/N]: '
+      local answer
+      if IFS= read -r answer; then
+        case "$answer" in
+          [Yy]*) proceed=1 ;;
+          *)     proceed=0 ;;
+        esac
+      else
+        # N2 (round-2 review): EOF here is NOT the interview's own abandonment signal — an
+        # ssh/cron-piped --repair with a shorter answer stream than there are findings hits this
+        # constantly, and `prompt`'s own EOF handling (exit 1, "Nothing was written") would be
+        # false the moment an EARLIER item in this same run was already applied. Treat it as a
+        # decline for THIS item only: never applied, counted toward the remaining total, and the
+        # loop continues (every SUBSEQUENT read also hits EOF and also declines) — the run still
+        # ends via the ordinary "N finding(s) still outstanding" exit 5 below, never a crash.
+        echo
+        proceed=0
+      fi
+    fi
+
+    if [ "$proceed" = "1" ]; then
+      if "${cmdref[@]}"; then
+        echo "   done."
+      else
+        echo "   FAILED — left as-is; re-run ./setup.sh --repair to retry." >&2
+        GW_VERIFY_REPAIR_REMAINING=$((GW_VERIFY_REPAIR_REMAINING + 1))
+      fi
+    else
+      echo "   skipped."
+      GW_VERIFY_REPAIR_REMAINING=$((GW_VERIFY_REPAIR_REMAINING + 1))
+    fi
+  done
+}
+
 # setup_adoption_mode — an existing checkout/stack (a .env is already at ENV_FILE) never re-runs
-# the interview. STUB for this task: full verify/repair is STORY-346/T319's build. This
-# function's whole contract is ROUTING here and NEVER touching ENV_FILE — it exits before
-# reading a single line of stdin.
+# the interview; this is VERIFY (SETUP_REPAIR=0) or VERIFY-then-REPAIR (SETUP_REPAIR=1), never
+# both, and VERIFY never writes/starts/stops/pulls/prunes anything (F137.4's do-no-harm gate) —
+# only a confirmed repair item, run from verify_run_repair above, ever mutates the box.
 setup_adoption_mode() {
   # "a .env already exists here", not "already configured" (T317 review LOW finding) — this
-  # stub never opens the file, so it has no basis to claim the install is actually correct or
-  # complete, only that the virgin-vs-existing signal (F132.4) tripped.
+  # mode's own probes are what actually establishes whether the install is correct/complete;
+  # this line only ever reports the virgin-vs-existing signal (F132.4) that routed here.
   echo "==> A .env already exists here (${ENV_FILE})."
-  echo "    Verify/repair for existing installs is arriving in the next release slice (STORY-346)."
-  echo "    Nothing was changed — your .env is untouched."
-  echo "    To relaunch as-is: ./launch.sh (honors GW_PRESET from ${ENV_FILE})."
+  if [ "$SETUP_REPAIR" = "1" ]; then
+    echo "    Repairing (SPEC F137, STORY-346) — verifying first; nothing changes until you confirm."
+  else
+    echo "    Verifying (SPEC F137, STORY-346) — read-only; nothing here is changed."
+  fi
+
+  # N6 (round-2 review): COMPOSE_FILE read exactly once here, ahead of everything else that
+  # derives from it — GW_PREFLIGHT_TOPOLOGY/GW_PREFLIGHT_DEMO below, GW_VERIFY_COMPOSE_ARGS, and
+  # every probe's own topology/demo/override check, all now read the one cached copy.
+  verify_resolve_env_facts
+
+  export GW_PREFLIGHT_TOPOLOGY GW_PREFLIGHT_DEMO
+  GW_PREFLIGHT_TOPOLOGY="$(verify_topology_from_compose_file)"
+  GW_PREFLIGHT_DEMO="$(verify_demo_from_compose_file)"
+  preflight_docker
+  preflight_env_secrets
+
+  verify_env_completeness
+  verify_migrations
+  verify_stale_images
+  verify_orphaned_containers
+  verify_prune_advice
+  verify_db_settings_overrides
+  verify_compose_overrides
+
+  verify_print_report
+
+  local has_finding=0 unknown_count=0 status
+  for status in "${GW_VERIFY_ROW_STATUS[@]}"; do
+    [ "$status" = "WARN" ] && has_finding=1
+    [ "$status" = "UNKNOWN" ] && unknown_count=$((unknown_count + 1))
+  done
+
+  if [ "$SETUP_REPAIR" != "1" ]; then
+    if [ "$has_finding" = "1" ]; then
+      echo
+      echo "==> drift found — nothing was changed. Re-run: ./setup.sh --repair"
+      exit 5
+    fi
+    echo
+    # F5 (round-3 review): UNKNOWN is not drift (still exit 0 — a probe that couldn't be
+    # verified is not the same claim as one that failed), but "no drift found" alone overclaims
+    # when several probes never actually got to look (e.g. the daemon-up-containers-down case,
+    # where most of adoption mode's own probes degrade to UNKNOWN) — say so instead of implying
+    # a clean sweep.
+    if [ "$unknown_count" -gt 0 ]; then
+      echo "==> green — no drift found (${unknown_count} check(s) could not be verified), nothing to do."
+    else
+      echo "==> green — no drift found, nothing to do."
+    fi
+    exit 0
+  fi
+
+  if [ "$GW_VERIFY_FINDING_COUNT" -eq 0 ]; then
+    echo
+    echo "==> nothing here is auto-repairable — see the report above for anything advisory."
+    exit 0
+  fi
+
+  echo
+  echo "==> repairing — per-item confirm (--yes=${SETUP_YES})"
+  verify_run_repair
+  if [ "$GW_VERIFY_REPAIR_REMAINING" -gt 0 ]; then
+    echo
+    echo "==> ${GW_VERIFY_REPAIR_REMAINING} finding(s) still outstanding — re-run ./setup.sh --repair to retry, or ./setup.sh to verify."
+    exit 5
+  fi
+
+  echo
+  echo "==> repaired — re-run ./setup.sh to verify green."
   exit 0
 }
 
@@ -876,13 +1781,40 @@ print_handoff() {
   echo
   echo "    Next runs:"
   echo "      ./launch.sh    restart/relaunch as-is (GW_PRESET=${GW_PRESET} in ${ENV_FILE})"
-  echo "      ./setup.sh     re-run any time — routes to a short stub today; guided verify/repair"
-  echo "                     lands with STORY-346"
+  echo "      ./setup.sh     re-run any time — verifies this install (read-only); add --repair to fix"
+  echo "                     drift it finds (SPEC F137, STORY-346)"
 }
 
 main() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --repair) SETUP_REPAIR=1 ;;
+      --yes)    SETUP_YES=1 ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        echo "setup.sh: unknown argument: $arg" >&2
+        echo "  ./setup.sh                 first-run interview, or verify an existing install (read-only)" >&2
+        echo "  ./setup.sh --repair [--yes] fix drift verify finds — per-item confirm, or --yes for all" >&2
+        exit 2
+        ;;
+    esac
+  done
+
   if [ -f "$ENV_FILE" ]; then
     setup_adoption_mode
+  fi
+
+  # N7 (round-2 review): a virgin box with `--repair` used to silently fall through to the
+  # interview with no acknowledgment that the flag itself did nothing — --repair is adoption
+  # mode's own surface (F137), meaningless on the virgin path (this file's own header already
+  # documents that "no --repair-only validation gate" is deliberate). One honest line, then the
+  # ordinary interview, rather than a flag an operator passed out of habit vanishing silently.
+  if [ "$SETUP_REPAIR" = "1" ]; then
+    echo "==> no install here yet (${ENV_FILE} not found) — --repair has nothing to fix; running first-run setup instead."
   fi
 
   echo "GenWave setup — four quick questions, then you're on air."
@@ -1049,4 +1981,4 @@ main() {
   exit "$launch_exit"
 }
 
-main
+main "$@"
