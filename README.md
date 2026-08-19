@@ -199,6 +199,21 @@ GenWave is developed openly with AI as a force multiplier for the people (me) bu
 
 If you want the workflows/skills I use in GenWave for your own projects, you can find them [here](https://ai.bigmachine.io/c/hello), along with a lot of other awesome AI resources. Hats off to Rob Conery for his awesome [Claude Code Toolkit](https://ai.bigmachine.io/c/free-stuff/roll-your-own-claude-code-toolkit-bc0a72)!
 
+## Standing on
+
+GenWave is a control plane, not a from-scratch audio engine — it's wired around real infrastructure that did the hard parts first:
+
+- **[Liquidsoap](https://www.liquidsoap.info/)** — the real-time mixing, crossfade, and encode engine underneath the whole broadcast.
+- **[Icecast](https://icecast.org/)** — fans the mixed stream out to every listener.
+- **[Kokoro](https://github.com/hexgrad/kokoro)** — the primary DJ voice, an open-weight TTS model rendered locally.
+- **[Piper](https://github.com/rhasspy/piper)** — the CPU-only fallback voice that keeps a DJ talking on modest hardware.
+- **[Ollama](https://ollama.com/)** — runs the local LLM that writes lead-ins and back-announces.
+- **[ffmpeg](https://ffmpeg.org/)** — loudness, cue points, energy analysis: the numbers every crossfade decision rests on.
+- **[aubio](https://aubio.org/)** — the BPM analysis behind every track's tempo.
+- **[PostgreSQL](https://www.postgresql.org/)** — the catalog of record for every track, measurement, and scheduled show.
+
+🙏 to the maintainers of all eight — none of this plays a note without them.
+
 ## Contributing
 
 Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). External contributions require a one-time, lightweight [CLA](CLA.md) so the Home/Business dual-license model stays viable. Please also read the [Code of Conduct](CODE_OF_CONDUCT.md) and, for anything security-shaped, [SECURITY.md](SECURITY.md).
