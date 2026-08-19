@@ -114,7 +114,7 @@ list_migrations() {
 }
 
 if [ "$DRY_RUN" = "1" ]; then
-  echo "==> --dry-run: migrations that would run (sorted; db/01-*.sh excluded — first-boot only)"
+  echo "==> --dry-run: Migrations that would run (sorted; db/01-*.sh excluded — first-boot only)"
   mapfile -t to_run < <(list_migrations)
   if [ "${#to_run[@]}" -eq 0 ]; then
     echo "    (none found)"
@@ -147,7 +147,7 @@ if [ "$(docker inspect "$db_cid" --format '{{.State.Running}}' 2>/dev/null)" != 
 fi
 
 # --- the loop itself — extracted from launch.sh verbatim in shape/output ---------------
-echo "==> applying in-place schema migrations (idempotent)"
+echo "==> Applying in-place schema migrations (idempotent)"
 
 run_migration() {
   local migration="$1" output
@@ -184,7 +184,7 @@ fi
 
 # Keep launch.sh's dev-flow output byte-identical: with --keep-going (how launch.sh calls
 # this script) there was never a closing line here — the next output launch.sh itself
-# prints is "==> bringing the rest of the stack up". Only announce completion standalone.
+# prints is "==> Bringing the rest of the stack up". Only announce completion standalone.
 if [ "$KEEP_GOING" != "1" ]; then
-  echo "==> schema migrations up to date"
+  echo "==> Schema migrations up to date"
 fi

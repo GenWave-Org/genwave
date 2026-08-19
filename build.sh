@@ -35,13 +35,13 @@ if [ -f "$SLN" ]; then
   dotnet build "$SLN" -c "$CONFIG" --nologo
 
   if [ "${SKIP_TESTS:-0}" = "1" ]; then
-    echo "==> (skip) tests disabled via SKIP_TESTS=1"
+    echo "==> (skip) Tests disabled via SKIP_TESTS=1"
   else
     echo "==> dotnet test"
     dotnet test "$SLN" -c "$CONFIG" --no-build --nologo
   fi
 else
-  echo "==> (skip) no ${SLN} yet — C# solution arrives in Phase 2"
+  echo "==> (skip) No ${SLN} yet — C# solution arrives in Phase 2"
 fi
 
 # --- 2. Docker images -------------------------------------------------------------------
@@ -60,4 +60,4 @@ else
   docker compose build icecast
 fi
 
-echo "==> build complete"
+echo "==> Build complete"

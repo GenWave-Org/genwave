@@ -111,9 +111,13 @@
 # that line's ISO timestamp is the one place this whole feature actually calls `date`
 # (append_setup_log).
 #
-# The handoff (F132.8, print_handoff): the admin URL (localhost plus a LAN line for other
-# devices on the network — T318 review F6, never the bare short hostname, which resolves on
-# nobody's machine but this one), the generated ADMIN_PASSWORD shown exactly this once (T318
+# The handoff (F132.8, print_handoff): the admin URL (hostname-first, then the always-works
+# LAN-IP line for other devices on the network, localhost demoted to a last-resort fallback —
+# finding 2, gate-run round 2: Dean's own ruling OVERRIDES the earlier T318 review F6 call,
+# which rejected the bare hostname outright; his reasoning: this wizard is read over SSH more
+# often than not, so a URL that resolves back to the READER's own machine (localhost) is
+# actively wrong there, while the plain hostname resolves for other devices via the home
+# router's own mDNS/LLMNR), the generated ADMIN_PASSWORD shown exactly this once (T318
 # review F2: read straight from SECRET_ADMIN_UI, the value this run itself generated — never
 # read back via preflight_env_value, whose process-env-wins precedence can print an ambient
 # caller's ADMIN_PASSWORD instead of the one actually written to .env), the persona-shelf deep
@@ -723,7 +727,7 @@ verify_add_finding() {
 verify_print_report() {
   [ "${#GW_VERIFY_ROW_STATUS[@]}" -gt 0 ] || return 0
   echo
-  echo "==> verify: existing-install drift report (SPEC F137)"
+  echo "==> Verify: existing-install drift report (SPEC F137)"
   local i status label message symbol
   for i in "${!GW_VERIFY_ROW_STATUS[@]}"; do
     status="${GW_VERIFY_ROW_STATUS[$i]}"
@@ -1542,7 +1546,7 @@ setup_adoption_mode() {
   if [ "$SETUP_REPAIR" != "1" ]; then
     if [ "$has_finding" = "1" ]; then
       echo
-      echo "==> drift found — nothing was changed. Re-run: ./setup.sh --repair"
+      echo "==> Drift found — nothing was changed. Re-run: ./setup.sh --repair"
       exit 5
     fi
     echo
@@ -1552,21 +1556,21 @@ setup_adoption_mode() {
     # where most of adoption mode's own probes degrade to UNKNOWN) — say so instead of implying
     # a clean sweep.
     if [ "$unknown_count" -gt 0 ]; then
-      echo "==> green — no drift found (${unknown_count} check(s) could not be verified), nothing to do."
+      echo "==> Green — no drift found (${unknown_count} check(s) could not be verified), nothing to do."
     else
-      echo "==> green — no drift found, nothing to do."
+      echo "==> Green — no drift found, nothing to do."
     fi
     exit 0
   fi
 
   if [ "$GW_VERIFY_FINDING_COUNT" -eq 0 ]; then
     echo
-    echo "==> nothing here is auto-repairable — see the report above for anything advisory."
+    echo "==> Nothing here is auto-repairable — see the report above for anything advisory."
     exit 0
   fi
 
   echo
-  echo "==> repairing — per-item confirm (--yes=${SETUP_YES})"
+  echo "==> Repairing — per-item confirm (--yes=${SETUP_YES})"
   verify_run_repair
   if [ "$GW_VERIFY_REPAIR_REMAINING" -gt 0 ]; then
     echo
@@ -1575,14 +1579,14 @@ setup_adoption_mode() {
   fi
 
   echo
-  echo "==> repaired — re-run ./setup.sh to verify green."
+  echo "==> Repaired — re-run ./setup.sh to verify green."
   exit 0
 }
 
 print_ready_to_launch() {
   echo
   echo "==> .env written to ${ENV_FILE} (GW_PRESET=${GW_PRESET})"
-  echo "==> ready to launch — GW_PRESET already selects the ${GW_PRESET} shape, no flags needed"
+  echo "==> Ready to launch — GW_PRESET already selects the ${GW_PRESET} shape, no flags needed"
 }
 
 # =============================================================================
@@ -1669,11 +1673,11 @@ wait_for_on_air_bg() {
   local timeout="${GW_ONAIR_TIMEOUT_SECONDS:-$GW_ONAIR_TIMEOUT_SECONDS_DEFAULT}"
 
   if ! command -v curl >/dev/null 2>&1; then
-    echo "==> can't verify on-air automatically (curl not found on this machine) — check manually: curl -I ${url}" >&2
+    echo "==> Can't verify on-air automatically (curl not found on this machine) — check manually: curl -I ${url}" >&2
     return 2
   fi
 
-  echo "==> waiting for ${url} to serve audio (a first run's image pulls can take a few minutes)..."
+  echo "==> Waiting for ${url} to serve audio (a first run's image pulls can take a few minutes)..."
 
   # B2: a mount already serving BEFORE this run's launch even began is never trusted until a
   # non-serving gap is observed — for every preset, unconditionally.
@@ -1801,11 +1805,13 @@ describe_still_arriving() {
 }
 
 # primary_lan_address — T318 review LOW finding F6: the box's outward-facing IP (the first
-# address `hostname -I` reports), or empty if unavailable. Never the bare short hostname (the
-# previous copy printed `http://thor:3000/`, which resolves on nobody's machine but this one,
-# and not reliably even there) — localhost covers the operator's own browser, this covers every
-# other device on the LAN this station is actually meant to be shared with (CLAUDE.md: "a small
-# private community").
+# address `hostname -I` reports), or empty if unavailable. This function's own mechanism is
+# UNCHANGED by finding 2 (gate-run round 2, see print_handoff's own header): it is still the
+# always-works second line every URL block prints — the plain hostname (primary_hostname,
+# below) leads now, but a hostname can fail to resolve for some OTHER device on the LAN even
+# when the command itself succeeds on this box (no mDNS/LLMNR reflected on that network, a
+# router that doesn't forward it), so the numeric address stays the one guaranteed-reachable
+# fallback (CLAUDE.md: "a small private community").
 primary_lan_address() {
   command -v hostname >/dev/null 2>&1 || return 0
   # round-4 review F2: gate on `command -v awk` rather than letting a MISSING awk leak "awk:
@@ -1837,6 +1843,24 @@ primary_lan_address() {
   return 0
 }
 
+# primary_hostname — finding 2 (gate-run round 2): Dean's own ruling — this wizard is usually
+# read over SSH, from a machine that is NOT this box, so a URL that says "localhost" there
+# quietly means the READER's own laptop, not the station (the exact confusion Dean hit). The
+# plain hostname (never the FQDN) resolves for other devices on the same LAN via the home
+# router's own mDNS/LLMNR, and it's what Dean asked for. Total function, same contract as
+# primary_lan_address above: a missing/broken/empty `hostname`, or the literal string
+# "localhost" (a candidate that would defeat the whole point of this function), degrades to
+# "skip this line" — never a crash, never a lie.
+primary_hostname() {
+  command -v hostname >/dev/null 2>&1 || return 0
+  local candidate
+  candidate="$(hostname 2>/dev/null)" || true
+  if [ -n "$candidate" ] && [ "$candidate" != "localhost" ]; then
+    printf '%s' "$candidate"
+  fi
+  return 0
+}
+
 # print_lan_line <lan_addr> <port> <path> — the "(from other devices on your network)" line,
 # shared by the stream and admin URL blocks (finding 1, post-v5.3.0 gate run) so the IPv6-
 # bracket logic (round-4 review N2: an IPv6 literal dropped straight into a URL without brackets
@@ -1847,6 +1871,58 @@ print_lan_line() {
     *:*) echo "                   http://[${addr}]:${port}${path}  (from other devices on your network)" ;;
     *)   echo "                   http://${addr}:${port}${path}  (from other devices on your network)" ;;
   esac
+}
+
+# print_url_block <label> <host_name> <lan_addr> <port> <path> — finding 2 (gate-run round 2):
+# hostname leads (if it resolved), the LAN-IP is the always-works second line (unchanged
+# print_lan_line mechanism), and localhost is a LAST-RESORT single line — printed only when
+# NEITHER of the other two resolved, never as the lead (that is the whole finding). Column
+# alignment (14-wide label) matches the pre-existing literal spacing print_lan_line's own
+# 19-space continuation indent was built against.
+print_url_block() {
+  local label="$1" host="$2" lan="$3" port="$4" path="$5" led=0
+  if [ -n "$host" ]; then
+    printf '    %-14s %s\n' "$label" "http://${host}:${port}${path}"
+    led=1
+  fi
+  if [ -n "$lan" ]; then
+    if [ "$led" = "1" ]; then
+      print_lan_line "$lan" "$port" "$path"
+    else
+      case "$lan" in
+        *:*) printf '    %-14s %s\n' "$label" "http://[${lan}]:${port}${path}" ;;
+        *)   printf '    %-14s %s\n' "$label" "http://${lan}:${port}${path}" ;;
+      esac
+    fi
+    led=1
+  fi
+  # `if`, not `[ ... ] && printf ...` — under `set -e` a bare `&&` chain that ends up FALSE
+  # (the common case: led=1, nothing left to print) returns the function's own exit status as
+  # non-zero, which a caller invoking this as a plain statement (not itself inside an `if`)
+  # would trip errexit on — the exact footgun round-4 review F2/B1 already found in
+  # primary_lan_address, repeated here if this were left as a one-liner.
+  if [ "$led" = "0" ]; then
+    printf '    %-14s %s\n' "$label" "http://localhost:${port}${path}"
+  fi
+}
+
+# primary_url <host_name> <lan_addr> <port> <path> — the single best URL for a one-line message
+# (the poll-timeout diagnostics, the Hire-a-DJ deep link): same hostname-then-LAN-then-
+# localhost-last-resort priority as print_url_block, collapsed to one line for call sites that
+# don't want the full two-line block (the admin block right above Hire-a-DJ already showed both
+# addresses; repeating them for a plain deep link would be clutter).
+primary_url() {
+  local host="$1" lan="$2" port="$3" path="$4"
+  if [ -n "$host" ]; then
+    printf 'http://%s:%s%s' "$host" "$port" "$path"
+  elif [ -n "$lan" ]; then
+    case "$lan" in
+      *:*) printf 'http://[%s]:%s%s' "$lan" "$port" "$path" ;;
+      *)   printf 'http://%s:%s%s' "$lan" "$port" "$path" ;;
+    esac
+  else
+    printf 'http://localhost:%s%s' "$port" "$path"
+  fi
 }
 
 # print_handoff <launch_exit> — F132.8: the once-only screen with everything the owner needs to
@@ -1860,11 +1936,11 @@ print_lan_line() {
 # named the admin URL/password/persona link but never the single most important URL a radio
 # station has, and an all-'n' interview (admin declined) printed no URL at all. Always printed,
 # independent of ADMIN_PROFILE, first (it's the one thing every run has, admin or not) — same
-# localhost + LAN treatment as the admin URL block below, plus one honest cloud-firewall line:
-# this exact confusion (wizard said on-air, VLC timed out on Hetzner's firewall) cost the gate
-# run an hour.
+# hostname + LAN treatment as the admin URL block below (finding 2, gate-run round 2 — see this
+# function's own header two paragraphs up), plus one honest cloud-firewall line: this exact
+# confusion (wizard said on-air, VLC timed out on Hetzner's firewall) cost the gate run an hour.
 print_handoff() {
-  local launch_exit="$1" lan_addr
+  local launch_exit="$1" lan_addr host_name
 
   if [ "$launch_exit" = "4" ]; then
     echo
@@ -1874,24 +1950,24 @@ print_handoff() {
   fi
 
   echo
-  echo "==> you're on the air — here's everything you need:"
+  echo "==> You're on the air — here's everything you need:"
   echo
 
   # round-4 review N2's shape check admits IPv6 tokens as well as IPv4 — resolved once here,
-  # shared by the stream block below and the admin block further down (print_lan_line).
+  # shared by the stream block below and the admin block further down (print_lan_line,
+  # print_url_block). host_name likewise resolved once (primary_hostname) — finding 2.
   lan_addr="$(primary_lan_address)"
+  host_name="$(primary_hostname)"
 
-  echo "    Stream         http://localhost:${GW_STREAM_PORT_DEFAULT}/stream"
-  [ -n "$lan_addr" ] && print_lan_line "$lan_addr" "$GW_STREAM_PORT_DEFAULT" "/stream"
+  print_url_block "Stream" "$host_name" "$lan_addr" "$GW_STREAM_PORT_DEFAULT" "/stream"
   echo "                   Listening from another machine (e.g. a cloud VM)? Port ${GW_STREAM_PORT_DEFAULT}"
   echo "                   must be reachable — check your host/cloud firewall if playback times out."
 
   echo
   if [ -n "$ADMIN_PROFILE" ]; then
-    echo "    Admin UI       http://localhost:3000/"
-    [ -n "$lan_addr" ] && print_lan_line "$lan_addr" 3000 "/"
+    print_url_block "Admin UI" "$host_name" "$lan_addr" 3000 "/"
     echo "    Password       ${SECRET_ADMIN_UI}   (shown once — it's also in ${ENV_FILE}; change it there any time)"
-    echo "    Hire a DJ      http://localhost:3000/persona-catalog"
+    echo "    Hire a DJ      $(primary_url "$host_name" "$lan_addr" 3000 "/persona-catalog")"
   else
     echo "    Admin UI       disabled (fail-closed — 'admin' isn't in COMPOSE_PROFILES). Add it"
     echo "                   to ${ENV_FILE} and re-run ./launch.sh to turn it on."
@@ -1937,7 +2013,7 @@ main() {
   # documents that "no --repair-only validation gate" is deliberate). One honest line, then the
   # ordinary interview, rather than a flag an operator passed out of habit vanishing silently.
   if [ "$SETUP_REPAIR" = "1" ]; then
-    echo "==> no install here yet (${ENV_FILE} not found) — --repair has nothing to fix; running first-run setup instead."
+    echo "==> No install here yet (${ENV_FILE} not found) — --repair has nothing to fix; running first-run setup instead."
   fi
 
   echo "GenWave setup — four quick questions, then you're on air."
@@ -1954,7 +2030,7 @@ main() {
   apply_env_write
 
   echo
-  echo "==> checking the machine and the .env just written"
+  echo "==> Checking the machine and the .env just written"
   # Handed to preflight as the caller-resolved explicit input (F134.3a) — preflight itself
   # reads no preset/topology key. Both values come from resolve_preset_and_topology's own
   # output (above), the same source GW_PRESET itself was just written from — never a second,
@@ -2075,10 +2151,15 @@ main() {
       # Finding 1 follow-up (post-v5.3.0 gate run): this path already names the admin URL and
       # points at the secrets file — it must name the stream URL too, for the same reason and
       # just as consistently (the poll gave up, but the stream itself may still be there).
-      echo "  Check the stream directly: http://localhost:${GW_STREAM_PORT_DEFAULT}/stream" >&2
+      # Finding 2 (gate-run round 2): hostname-first here too — same primary_url priority
+      # print_handoff's own blocks use (its header has the full Dean-ruling rationale).
+      local host_name lan_addr
+      host_name="$(primary_hostname)"
+      lan_addr="$(primary_lan_address)"
+      echo "  Check the stream directly: $(primary_url "$host_name" "$lan_addr" "$GW_STREAM_PORT_DEFAULT" "/stream")" >&2
       echo "  Your secrets (including the Admin UI password) are in ${ENV_FILE}." >&2
       if [ -n "$ADMIN_PROFILE" ]; then
-        echo "  Admin UI (once you've confirmed the stream): http://localhost:3000/" >&2
+        echo "  Admin UI (once you've confirmed the stream): $(primary_url "$host_name" "$lan_addr" 3000 "/")" >&2
       fi
       exit 1
       ;;

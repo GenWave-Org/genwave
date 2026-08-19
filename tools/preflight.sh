@@ -97,7 +97,7 @@ preflight_print_report() {
   [ "${#GW_PREFLIGHT_ROW_STATUS[@]}" -gt 0 ] || return 0
   GW_PREFLIGHT_REPORT_PRINTED=1
   echo
-  echo "==> preflight summary"
+  echo "==> Preflight summary"
   local i status label message symbol
   for i in "${!GW_PREFLIGHT_ROW_STATUS[@]}"; do
     status="${GW_PREFLIGHT_ROW_STATUS[$i]}"
