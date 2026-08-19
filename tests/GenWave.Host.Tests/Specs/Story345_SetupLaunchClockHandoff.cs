@@ -267,15 +267,21 @@ public static class FeatureSetupLaunchClockHandoff
         throw new InvalidOperationException($"'{key}=' not found in the written .env:\n{envContent}");
     }
 
-    /// <summary>Writes a scripted launch.sh stand-in: records its (bare) argv to
-    /// <paramref name="argvLogPath"/> when given, then exits with <paramref name="exitCode"/>.
-    /// Never touches docker/compose — that's exactly the point (GW_LAUNCH_CMD's whole reason
-    /// to exist under this harness).</summary>
+    /// <summary>Writes a scripted launch.sh stand-in: records its (bare) argv, plus the
+    /// SKIP_PREFLIGHT value it actually sees in ITS OWN environment (N1, post-v5.3.0 gate
+    /// review — invoke_launch's own SKIP_PREFLIGHT=1 prefix on this exact command otherwise had
+    /// no regression pin; the stub couldn't see the child's env until this), to <paramref
+    /// name="argvLogPath"/> when given, then exits with <paramref name="exitCode"/>. Never
+    /// touches docker/compose — that's exactly the point (GW_LAUNCH_CMD's whole reason to exist
+    /// under this harness).</summary>
     static string WriteLaunchStub(int exitCode, string? argvLogPath = null)
     {
         var path = Path.Combine(
             Directory.CreateTempSubdirectory("gw-setup-story345-launch-").FullName, "launch-stub.sh");
-        var logLine = argvLogPath is null ? "" : $"printf '%s\\n' \"argv:$*\" >> \"{argvLogPath}\"\n";
+        var logLine = argvLogPath is null
+            ? ""
+            : $"printf '%s\\n' \"argv:$*\" >> \"{argvLogPath}\"\n" +
+              $"printf 'env:SKIP_PREFLIGHT=%s\\n' \"${{SKIP_PREFLIGHT:-unset}}\" >> \"{argvLogPath}\"\n";
         File.WriteAllText(path, $"#!/usr/bin/env bash\n{logLine}exit {exitCode}\n");
         MakeExecutable(path);
         return path;
@@ -590,7 +596,11 @@ public static class FeatureSetupLaunchClockHandoff
             RunSetup(BinWithoutDotnet(), envFile, $"{mediaDir}\n1\ny\n",
                 BaseEnv(launchStub, mount.Url, onAirTimeoutSeconds: 30));
 
-            Assert.Equal("argv:", File.ReadAllText(argvLog).Trim());
+            // First line only — the log's second line (N1) is invoke_launch's own
+            // SKIP_PREFLIGHT prefix, pinned separately by
+            // ThePreflightSummaryAppearsExactlyOnceAndBeforeOnAir; this fact is about argv bareness.
+            var firstLine = File.ReadAllText(argvLog).Split('\n')[0].TrimEnd('\r');
+            Assert.Equal("argv:", firstLine);
         }
 
         [Fact]
@@ -1515,10 +1525,18 @@ public static class FeatureSetupLaunchClockHandoff
             // pinned here is setup.sh's OWN half of the fix: the explicit render-before-print_
             // ready_to_launch call, made safe by preflight_print_report's idempotency guard
             // against the EXIT trap's own unconditional call later.
-            var launchStub = WriteLaunchStub(exitCode: 0);
+            var argvLog = Path.Combine(
+                Directory.CreateTempSubdirectory("gw-setup-story345-argv-").FullName, "argv.log");
+            var launchStub = WriteLaunchStub(exitCode: 0, argvLogPath: argvLog);
             using var mount = new MountStub(servesOnAttempt: 2);
             var mediaDir = MakeMediaDir(flacCount: 1);
             var envFile = ScratchEnvPath();
+            // Setup.sh's own ambient SKIP_PREFLIGHT is "0" here — precisely so the launch stub's
+            // own logged env line can prove invoke_launch's SKIP_PREFLIGHT=1 prefix on THAT one
+            // command, rather than merely reflecting whatever setup.sh's own env already was
+            // (N1, post-v5.3.0 gate review: the prefix previously had no regression pin at all —
+            // removing it left every other fact in this file green, since the stub never reported
+            // what it actually saw).
             var extraEnv = new Dictionary<string, string>(BaseEnv(launchStub, mount.Url, 30))
             {
                 ["SKIP_PREFLIGHT"] = "0",
@@ -1529,10 +1547,12 @@ public static class FeatureSetupLaunchClockHandoff
             var occurrences = Regex.Matches(stdOut, Regex.Escape("==> preflight summary")).Count;
             var summaryIndex = stdOut.IndexOf("==> preflight summary", StringComparison.Ordinal);
             var onAirIndex = stdOut.IndexOf("🎙️ On air", StringComparison.Ordinal);
+            var launchStubEnv = File.ReadAllText(argvLog);
 
             Assert.True(
-                exitCode == 0 && occurrences == 1 && summaryIndex >= 0 && onAirIndex >= 0 && summaryIndex < onAirIndex,
-                $"expected exactly one preflight summary, printed before On-air; occurrences={occurrences} exit={exitCode} stderr={stdErr} stdout:\n{stdOut}");
+                exitCode == 0 && occurrences == 1 && summaryIndex >= 0 && onAirIndex >= 0 && summaryIndex < onAirIndex &&
+                launchStubEnv.Contains("env:SKIP_PREFLIGHT=1", StringComparison.Ordinal),
+                $"expected exactly one preflight summary before On-air, AND the launch stub to see SKIP_PREFLIGHT=1 in its own env despite setup.sh's own ambient value being 0; occurrences={occurrences} exit={exitCode} launchStubEnv={launchStubEnv} stderr={stdErr} stdout:\n{stdOut}");
         }
     }
 }

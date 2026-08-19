@@ -190,6 +190,22 @@ preflight_compose_version() {
     "Then re-run this script."
 }
 
+# preflight_admin_profile_selected — true iff "admin" is in the effective COMPOSE_PROFILES
+# (F134.3a: process env wins, else the last assignment in GW_ENV_FILE — preflight_env_value's
+# own convention; never GW_PRESET, which this script never reads at all). Extracted (N2,
+# post-v5.3.0 gate review) so this exact predicate has ONE home: preflight_ports' own port-3000
+# gate and preflight_admin_password's own row-wording branch used to each read COMPOSE_PROFILES
+# and re-run the identical `case ",${profiles}," in *,admin,*)` test independently — the same
+# drift class print_lan_line (setup.sh) was extracted to prevent.
+preflight_admin_profile_selected() {
+  local profiles
+  profiles="$(preflight_env_value COMPOSE_PROFILES)"
+  case ",${profiles}," in
+    *,admin,*) return 0 ;;
+    *)         return 1 ;;
+  esac
+}
+
 # ---- port availability (F134.3) -----------------------------------------------------------
 # Base ports are always published (icecast + api, see compose.yaml); 3000 (admin_ui) only
 # when the "admin" profile is active; 80/443 (caddy) only under the demo overlay
@@ -223,11 +239,8 @@ preflight_port_is_docker_owned() {
 }
 
 preflight_ports() {
-  local profiles ports=("${GW_PREFLIGHT_BASE_PORTS[@]}")
-  profiles="$(preflight_env_value COMPOSE_PROFILES)"
-  case ",${profiles}," in
-    *,admin,*) ports+=("$GW_PREFLIGHT_ADMIN_PORT") ;;
-  esac
+  local ports=("${GW_PREFLIGHT_BASE_PORTS[@]}")
+  preflight_admin_profile_selected && ports+=("$GW_PREFLIGHT_ADMIN_PORT")
   if [ "${GW_PREFLIGHT_DEMO:-0}" = "1" ]; then
     ports+=("${GW_PREFLIGHT_DEMO_PORTS[@]}")
   fi
@@ -506,11 +519,11 @@ preflight_env_secrets() {
 # reaction ("not sure why it bothered?"). The check itself is correct by design: the secret has
 # to be healthy NOW so the handoff's own "add 'admin' to COMPOSE_PROFILES and re-run" enable-
 # later path works without a placeholder/empty surprise at that point — but the row should say
-# WHY it's checking a password for a surface that's currently off. Reads COMPOSE_PROFILES the
-# same way preflight_ports already does (F134.3a: process env wins, else the last assignment in
-# GW_ENV_FILE) — never GW_PRESET, which this script never reads at all.
+# WHY it's checking a password for a surface that's currently off. Reads COMPOSE_PROFILES via
+# preflight_admin_profile_selected — the SAME predicate preflight_ports' own port-3000 gate
+# uses (N2, post-v5.3.0 gate review) — never GW_PRESET, which this script never reads at all.
 preflight_admin_password() {
-  local env_file="${GW_ENV_FILE:-.env}" value profiles
+  local env_file="${GW_ENV_FILE:-.env}" value
 
   value="$(preflight_env_value ADMIN_PASSWORD)"
 
@@ -526,16 +539,12 @@ preflight_admin_password() {
     return
   fi
 
-  profiles="$(preflight_env_value COMPOSE_PROFILES)"
-  case ",${profiles}," in
-    *,admin,*)
-      preflight_record PASS "ADMIN_PASSWORD" "Set (value not shown)"
-      ;;
-    *)
-      preflight_record PASS "ADMIN_PASSWORD" \
-        "Set (value not shown; Admin UI is off — used the moment you enable it)"
-      ;;
-  esac
+  if preflight_admin_profile_selected; then
+    preflight_record PASS "ADMIN_PASSWORD" "Set (value not shown)"
+  else
+    preflight_record PASS "ADMIN_PASSWORD" \
+      "Set (value not shown; Admin UI is off — used the moment you enable it)"
+  fi
 }
 
 # ---- MEDIA_DIR deep checks (F134.5) --------------------------------------------------------

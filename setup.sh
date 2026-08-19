@@ -172,6 +172,14 @@ SECRET_LENGTH=40   # comfortably over F132.3's >=32-char floor
 # compose.yaml's own icecast port mapping ("8000:8000") is a fixed literal, not something any
 # .env key configures — there is no seam to derive it from. 8000 is also the port launch.sh's
 # own access-points printout already names for the same mount.
+#
+# The one overlay that DOES override this — compose.demo.yaml's `icecast: ports: !override []`
+# (unpublishes 8000 entirely; Caddy reaches icecast over the internal `core` network instead,
+# right for the public-appliance box that overlay is for) — is unreachable from this wizard: the
+# public appliance stays flag-only (`--pinned`, SPEC F136.5), never something this interview can
+# select, and resolve_preset_and_topology hardcodes GW_PREFLIGHT_DEMO_VALUE="0" for exactly that
+# reason (this wizard has no path to compose.demo.yaml at all). 8000 is therefore not just a
+# fallback guess for the runs this script can actually produce — it's the fact.
 GW_STREAM_PORT_DEFAULT=8000
 
 # Adoption mode's own CLI surface (T319, STORY-346) — parsed in main(), before the virgin-vs-

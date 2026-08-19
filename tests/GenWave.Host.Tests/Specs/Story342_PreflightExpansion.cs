@@ -8,6 +8,7 @@
 // build.sh already call, so what's proven here is proven on their real call path too.
 
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -118,10 +119,19 @@ public static class FeaturePreflightExpansion
         return dir;
     }
 
+    /// <summary>The default one-shot invocation: source tools/preflight.sh, run the exact two
+    /// entry points launch.sh and build.sh call. N3 (post-v5.3.0 gate review): a caller that
+    /// needs a DIFFERENT bash script (e.g. calling preflight_print_report a second time to prove
+    /// idempotency) passes its own `script` to RunPreflight below rather than hand-rolling a
+    /// second copy of this whole method.</summary>
+    const string DefaultPreflightScript =
+        "set -euo pipefail; . tools/preflight.sh; preflight_docker; preflight_env_secrets";
+
     /// <summary>Sources the real tools/preflight.sh and calls the exact two entry points launch.sh
     /// and build.sh call, under the caller's own set -euo pipefail discipline.</summary>
     static (int ExitCode, string StdOut, string StdErr) RunPreflight(
-        string binDir, string? envFile = null, IReadOnlyDictionary<string, string>? extraEnv = null)
+        string binDir, string? envFile = null, IReadOnlyDictionary<string, string>? extraEnv = null,
+        string script = DefaultPreflightScript)
     {
         var startInfo = new ProcessStartInfo("bash")
         {
@@ -131,7 +141,7 @@ public static class FeaturePreflightExpansion
             UseShellExecute = false,
         };
         startInfo.ArgumentList.Add("-c");
-        startInfo.ArgumentList.Add("set -euo pipefail; . tools/preflight.sh; preflight_docker; preflight_env_secrets");
+        startInfo.ArgumentList.Add(script);
 
         startInfo.Environment["PATH"] = binDir;
         foreach (var name in RequiredEnvVars) startInfo.Environment.Remove(name);
@@ -651,30 +661,15 @@ public static class FeaturePreflightExpansion
             // it more than once in the SAME process a no-op after the first render, exactly
             // the shape setup.sh's explicit call + its EXIT trap's own call now both hit.
             var envFile = CompleteEnvFile(MakeMediaDir(flacCount: 1));
-            var startInfo = new ProcessStartInfo("bash")
-            {
-                WorkingDirectory = RepoRoot(),
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-            };
-            startInfo.ArgumentList.Add("-c");
-            startInfo.ArgumentList.Add(
+            const string script =
                 "set -euo pipefail; . tools/preflight.sh; preflight_docker; preflight_env_secrets; " +
-                "preflight_print_report; preflight_print_report");
-            startInfo.Environment["PATH"] = HealthyDockerBin();
-            foreach (var name in RequiredEnvVars) startInfo.Environment.Remove(name);
-            foreach (var name in SeamEnvVars) startInfo.Environment.Remove(name);
-            startInfo.Environment["GW_ENV_FILE"] = envFile;
+                "preflight_print_report; preflight_print_report";
 
-            using var process = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("failed to start tools/preflight.sh");
-            var stdOut = process.StandardOutput.ReadToEnd();
-            process.WaitForExit();
+            var (_, stdOut, stdErr) = RunPreflight(HealthyDockerBin(), envFile, script: script);
 
-            var occurrences = System.Text.RegularExpressions.Regex.Matches(
-                stdOut, System.Text.RegularExpressions.Regex.Escape("==> preflight summary")).Count;
-            Assert.True(occurrences == 1, $"expected exactly one render across two explicit calls; occurrences={occurrences} stdout:\n{stdOut}");
+            var occurrences = Regex.Matches(stdOut, Regex.Escape("==> preflight summary")).Count;
+            Assert.True(occurrences == 1,
+                $"expected exactly one render across two explicit calls; occurrences={occurrences} stderr={stdErr} stdout:\n{stdOut}");
         }
     }
 
