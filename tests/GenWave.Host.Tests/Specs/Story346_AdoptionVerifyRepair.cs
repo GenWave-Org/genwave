@@ -204,6 +204,14 @@ public static class FeatureAdoptionVerifyRepair
         sb.AppendLine("#!/usr/bin/env bash");
         if (logPath is not null)
             sb.AppendLine($"printf '%s\\n' \"$*\" >> {Quote(logPath)}");
+        // T321 wire finding 2: setup.sh's own compose argv now carries `--env-file "$ENV_FILE"`
+        // ahead of the `-f` pairs on every adoption-mode invocation (verify_resolve_env_facts).
+        // Stripped back out here, AFTER the raw-argv log line above (so that log — the one
+        // ScenarioComposeInterpolatesFromTheSameEnvFileSetupShReads and the AC4 do-no-harm proof
+        // both read) still shows the real argv), but BEFORE the case match below — every
+        // composeArgs literal this whole file writes stays a plain `-f`-only string rather than
+        // having to spell out a not-yet-known-at-call-site scratch env path in every pattern.
+        sb.AppendLine("if [ \"${1:-}\" = compose ] && [ \"${2:-}\" = --env-file ]; then set -- \"$1\" \"${@:4}\"; fi");
         sb.AppendLine("case \"$*\" in");
 
         if (dbReachable)
@@ -309,18 +317,27 @@ public static class FeatureAdoptionVerifyRepair
     // cwd-relative write anywhere in it is caught by construction, not by coincidence.
     // ─────────────────────────────────────────────────────────────────────────
 
+    /// <summary>The compose global-options prefix every allowlisted `compose ...` shape below
+    /// tolerates ahead of its own subcommand — a repeated, any-order mix of `-f &lt;file&gt;` and
+    /// (T321 wire finding 2) `--env-file &lt;path&gt;` pairs, matching verify_resolve_env_facts' own
+    /// GW_VERIFY_COMPOSE_ARGS construction (`--env-file "$ENV_FILE"` ahead of the `-f` pairs,
+    /// setup.sh). Factored into one constant so every pattern below — and
+    /// <see cref="IsAllowedExecPsql"/>'s own prefix check — reads the SAME shape rather than three
+    /// independent copies that could drift apart.</summary>
+    const string ComposeArgsPrefix = @"(?: (?:-f|--env-file) \S+)*";
+
     /// <summary>Every read-only `docker`/`docker compose` argv shape adoption-mode verify is
     /// permitted to invoke — anything NOT matching one of these (or <see cref="IsAllowedExecPsql"/>)
     /// fails <see cref="ScenarioGreenBoxZeroChanges.VerifyModeMakesZeroWritesToTheBox"/> outright,
     /// including a subcommand this list never anticipated (fail-closed, not fail-open).</summary>
     static readonly Regex[] AllowedReadOnlyArgvPatterns =
     [
-        new Regex(@"^compose(?: -f \S+)* ps -q db$"),
-        new Regex(@"^compose(?: -f \S+)* ps -a -q \S+$"),
-        new Regex(@"^compose(?: -f \S+)* config$"),
-        new Regex(@"^compose(?: -f \S+)* config --services$"),
-        new Regex(@"^compose(?: -f \S+)* config --format json$"),
-        new Regex(@"^compose(?: -f \S+)* config --images$"),
+        new Regex(@"^compose" + ComposeArgsPrefix + @" ps -q db$"),
+        new Regex(@"^compose" + ComposeArgsPrefix + @" ps -a -q \S+$"),
+        new Regex(@"^compose" + ComposeArgsPrefix + @" config$"),
+        new Regex(@"^compose" + ComposeArgsPrefix + @" config --services$"),
+        new Regex(@"^compose" + ComposeArgsPrefix + @" config --format json$"),
+        new Regex(@"^compose" + ComposeArgsPrefix + @" config --images$"),
         new Regex(@"^inspect \S+ --format \{\{\.Image\}\}$"),
         new Regex(@"^image inspect \S+ --format \{\{\.Created\}\}$"),
         new Regex(@"^ps -a --filter label=com\.docker\.compose\.project=\S+ --format \{\{\.Label ""com\.docker\.compose\.service""\}\}\|\{\{\.Names\}\}\|\{\{\.State\}\}$"),
@@ -333,10 +350,11 @@ public static class FeatureAdoptionVerifyRepair
     /// than a single pattern trying to enforce both shape and content at once.</summary>
     const string ExecPsqlInfix = "exec -T db sh -c psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -v ON_ERROR_STOP=1 -tAc \"$1\" _ ";
 
-    /// <summary>True only for `compose &lt;-f args&gt;* exec -T db &lt;the verify_db_psql shape&gt; &lt;sql&gt;`
-    /// where &lt;sql&gt; itself starts with `select` (case-insensitive) — B5's own "ONLY when its SQL
-    /// matches ^select, after flag args" requirement. A `delete from station.settings` (or any
-    /// other non-select) landing after the infix fails this, and therefore fails the fact.
+    /// <summary>True only for `compose &lt;-f/--env-file args&gt;* exec -T db &lt;the verify_db_psql
+    /// shape&gt; &lt;sql&gt;` where &lt;sql&gt; itself starts with `select` (case-insensitive) — B5's own
+    /// "ONLY when its SQL matches ^select, after flag args" requirement. A `delete from
+    /// station.settings` (or any other non-select) landing after the infix fails this, and
+    /// therefore fails the fact.
     /// F2 (round-3 review): a bare `^select` check alone is bypassable — `select 1; delete from
     /// station.settings` still starts with `select ` (reviewer-proven live: printed `1`, then
     /// `DELETE 0`) — so any embedded `;` fails this too, the same defense-in-depth setup.sh's own
@@ -347,7 +365,7 @@ public static class FeatureAdoptionVerifyRepair
         if (idx < 0) return false;
         var before = line[..idx];
         var sql = line[(idx + ExecPsqlInfix.Length)..];
-        return Regex.IsMatch(before, @"^compose(?: -f \S+)* $") &&
+        return Regex.IsMatch(before, @"^compose" + ComposeArgsPrefix + @" $") &&
             Regex.IsMatch(sql, "^select ", RegexOptions.IgnoreCase) &&
             !sql.Contains(';', StringComparison.Ordinal);
     }
@@ -595,6 +613,91 @@ public static class FeatureAdoptionVerifyRepair
         }
 
         [Fact]
+        public void AnOldVintageBoxStackingOnlyTheDemoOverlayStillGetsThePinnedReadout()
+        {
+            // T321 wire finding 1 (live evidence: run-2 on the Pi 4 printed "Built image ages ...
+            // Run ./build.sh" over a healthy, published-image appliance). This box's own
+            // persisted COMPOSE_FILE — written before the F136.5 pins/topology split — names
+            // compose.demo.yaml but never compose.pinned.yaml, which did not exist yet for that
+            // launch to have named: compose.demo.yaml ALONE used to carry the published-GHCR-
+            // image mechanics compose.pinned.yaml owns today, so this box is still a pinned
+            // appliance and must get the SAME pinned-tags readout as
+            // APinnedBoxGetsThePinnedTagsReadoutNeverTheBuildAdvice above — never the dev-flow
+            // advice, which a box this shape could never act on (launch.sh's own pinned flow
+            // rejects BUILD=1 outright at parse time).
+            var envFile = ScratchEnvPath();
+            WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml:compose.demo.yaml:compose.piper-only.yaml"));
+            var docker = WriteDockerStub(
+                composeArgs: "-f compose.yaml -f compose.demo.yaml -f compose.piper-only.yaml",
+                composeConfigBody: "services:\n  api:\n    build: .\n    image: ghcr.io/genwave-org/genwave:home-v5.2.1\n",
+                pinnedImageTags: ["ghcr.io/genwave-org/genwave:home-v5.2.1"]);
+
+            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "",
+                new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
+
+            Assert.True(
+                stdOut.Contains("Pinned image tags", StringComparison.Ordinal) &&
+                stdOut.Contains("ghcr.io/genwave-org/genwave:home-v5.2.1", StringComparison.Ordinal) &&
+                !stdOut.Contains("Run ./build.sh", StringComparison.Ordinal) &&
+                !stdOut.Contains("Built image ages", StringComparison.Ordinal),
+                $"expected the pinned-tags readout on an old-vintage demo-without-pinned box, never the dev-flow build advice; stdout:\n{stdOut}");
+        }
+
+        [Fact]
+        public void AnAbsolutePathComposeFileStillClassifiesByBasename()
+        {
+            // T321 wire finding 1 follow-up (reviewer): the Pi 4's OWN persisted COMPOSE_FILE is
+            // path-qualified — /home/dmills/genwave/compose.yaml:/home/dmills/genwave/compose.
+            // demo.yaml:... — never bare filenames. verify_compose_file_is_stacked's exact-
+            // basename comparison must still classify this exact shape as pinned; a comparison
+            // against the FULL element (rather than its basename) would silently stop matching
+            // the instant a real box's COMPOSE_FILE is path-qualified like this one.
+            var envFile = ScratchEnvPath();
+            const string dir = "/home/dmills/genwave/";
+            WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(),
+                $"{dir}compose.yaml:{dir}compose.demo.yaml:{dir}compose.piper-only.yaml"));
+            var docker = WriteDockerStub(
+                composeArgs: $"-f {dir}compose.yaml -f {dir}compose.demo.yaml -f {dir}compose.piper-only.yaml",
+                composeConfigBody: "services:\n  api:\n    build: .\n    image: ghcr.io/genwave-org/genwave:home-v5.2.1\n",
+                pinnedImageTags: ["ghcr.io/genwave-org/genwave:home-v5.2.1"]);
+
+            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "",
+                new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
+
+            Assert.True(
+                stdOut.Contains("Pinned image tags", StringComparison.Ordinal) &&
+                stdOut.Contains("ghcr.io/genwave-org/genwave:home-v5.2.1", StringComparison.Ordinal) &&
+                !stdOut.Contains("Run ./build.sh", StringComparison.Ordinal),
+                $"expected an absolute-path COMPOSE_FILE (the Pi 4's real persisted shape) to still classify as pinned by basename; stdout:\n{stdOut}");
+        }
+
+        [Fact]
+        public void ABackupOrLookalikeComposeFileNameIsNeverMistakenForTheRealOverlay()
+        {
+            // T321 wire finding 1 follow-up (reviewer-proven mutant, live): a plain substring
+            // test against the whole COMPOSE_FILE string used to false-positive on
+            // compose.demo.yaml.bak, overlays/compose.demo.yaml.local, and my-compose.demo.yaml —
+            // none of which stack the real overlay this repo ships.
+            // verify_compose_file_is_stacked's exact-basename comparison must reject all three.
+            var envFile = ScratchEnvPath();
+            var values = HealthyEnvValues(Path.GetTempPath(),
+                "compose.yaml:compose.demo.yaml.bak:overlays/compose.demo.yaml.local:my-compose.demo.yaml");
+            values.Remove("PUBLIC_HOST");
+            WriteEnvFile(envFile, values);
+            var docker = WriteDockerStub(
+                composeArgs: "-f compose.yaml -f compose.demo.yaml.bak -f overlays/compose.demo.yaml.local -f my-compose.demo.yaml");
+
+            var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "",
+                new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
+
+            Assert.True(
+                !stdOut.Contains("Pinned image tags", StringComparison.Ordinal) &&
+                !stdOut.Contains("PUBLIC_HOST", StringComparison.Ordinal) &&
+                stdOut.Contains("no locally-built services", StringComparison.Ordinal),
+                $"expected lookalike compose file names to never count as the real demo/pinned overlay; stdout:\n{stdOut}");
+        }
+
+        [Fact]
         public void AnOrphanedProfileContainerIsReported()
         {
             // The de-selected piper/kokoro leftover the compose orphan pass misses.
@@ -686,6 +789,57 @@ public static class FeatureAdoptionVerifyRepair
                 stdOut.Contains(".env completeness", StringComparison.Ordinal) &&
                 stdOut.Contains("PUBLIC_HOST", StringComparison.Ordinal),
                 $"expected PUBLIC_HOST reported missing once compose.demo.yaml is actually stacked; stdout:\n{stdOut}");
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // FIXED — the compose invocation reads the SAME .env this script itself does (T321 wire
+    // finding 2). Before this fix, a GW_ENV_FILE naming a file outside the checkout (run 1's own
+    // shape: `cd /tmp/genwave-t321; GW_ENV_FILE=/home/dmills/genwave/.env ./setup.sh`) left every
+    // `docker compose` call interpolating from CWD's own .env — absent here — even though
+    // setup.sh's OWN reads honored GW_ENV_FILE correctly throughout; three probes (migrations,
+    // image ages, orphans) degraded to an honest ❓ UNKNOWN rather than reaching their real
+    // verdict.
+    // ---------------------------------------------------------------------
+
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioComposeInterpolatesFromTheSameEnvFileSetupShReads
+    {
+        [Fact]
+        public void VerifyPassesEnvFileToEveryComposeInvocation()
+        {
+            // MakeScratchCheckout() ships no .env of its own (T321 run 1's own shape: no .env in
+            // cwd), and envFile lives in a WHOLLY SEPARATE scratch dir — the exact "GW_ENV_FILE
+            // points outside the checkout" shape the wire ran under.
+            var checkoutRoot = MakeScratchCheckout();
+            var envFile = ScratchEnvPath();
+            WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
+
+            var logPath = Path.Combine(Directory.CreateTempSubdirectory("gw-setup-story346-log-").FullName, "argv.log");
+            var docker = WriteDockerStub(logPath: logPath);   // every knob at its healthy default
+
+            var (exitCode, stdOut, _) = RunSetupInCheckout(checkoutRoot, MakeBinDir(), envFile, "",
+                new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
+
+            var log = File.ReadAllText(logPath);
+            var composeLines = log.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Where(line => line.StartsWith("compose ", StringComparison.Ordinal))
+                .ToArray();
+
+            Assert.True(
+                composeLines.Length > 0 &&
+                composeLines.All(line => line.Contains($"--env-file {envFile} ", StringComparison.Ordinal)),
+                $"expected every compose invocation to carry --env-file {envFile}; argv log:\n{log}");
+
+            // The three probes T321 run 1 saw degrade to UNKNOWN, each reaching its ordinary
+            // healthy-box verdict instead — proof the plumbing above actually lets compose render
+            // (through the stub) rather than merely appearing in the logged argv.
+            Assert.True(
+                exitCode == 0 &&
+                stdOut.Contains("schema is current through db/37", StringComparison.Ordinal) &&
+                stdOut.Contains("no locally-built services in this box's compose config", StringComparison.Ordinal) &&
+                stdOut.Contains("none found for project 'genwave'", StringComparison.Ordinal),
+                $"expected the migrations/image-ages/orphans probes to reach their normal (non-UNKNOWN) branches; exit={exitCode} stdout:\n{stdOut}");
         }
     }
 
@@ -1185,6 +1339,13 @@ public static class FeatureAdoptionVerifyRepair
             // time, on every real box. The mocked-docker facts above can't catch this class of
             // bug at all (the stub never enforces anything about *how* it's invoked, only *that*
             // it matches) — only a REAL container proves the fix actually authenticates.
+            //
+            // T321 wire finding 2: this is also the ONE fact in this file that runs the REAL
+            // `docker compose` binary (no GW_DOCKER_CMD stub) with `--env-file` sitting in the
+            // compose GLOBAL-options position (verify_resolve_env_facts), so it is the only
+            // proof that the real CLI actually accepts that flag there rather than merely
+            // matching a scripted stub's own case pattern — do not simplify HealthyEnvValues'
+            // composePath argument away.
             var repoRoot = RepoRoot();
             var projectName = $"genwave-hosttest-story346-{Guid.NewGuid():N}";
             var composePath = WriteRealDbCompose(repoRoot, projectName);

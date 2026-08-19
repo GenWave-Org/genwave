@@ -731,6 +731,17 @@ GW_VERIFY_COMPOSE_FILE_VALUE=""
 # instead, a different key entirely, which is also a strictly BETTER signal here — it names what
 # this box actually last ran, not merely what an interview once chose). Empty when the box has
 # never completed a launch — every probe that needs it degrades to UNKNOWN rather than guessing.
+#
+# T321 wire finding 2: also carries `--env-file "$ENV_FILE"`, ahead of the `-f` pairs, once
+# COMPOSE_FILE resolves — every `docker compose` call in this file goes through this ONE array
+# (never a per-call-site flag), so every render/ps/exec now interpolates `${VAR:?}`-class
+# compose refs (compose.demo.yaml's PUBLIC_HOST, etc.) from the SAME file setup.sh's own reads
+# already honor via GW_ENV_FILE — not compose's own default of `.env` in $PWD, which a caller
+# running this script from outside the checkout (T321 run 1: GW_ENV_FILE pointed elsewhere,
+# no .env in cwd at all) leaves silently unset, degrading three probes to UNKNOWN even though
+# GW_ENV_FILE itself was honored correctly everywhere else. Added only alongside the `-f`
+# pairs (never on its own) — an empty array still means "never launched" to every probe that
+# checks its length (verify_orphaned_containers, verify_compose_overrides).
 GW_VERIFY_COMPOSE_ARGS=()
 
 verify_resolve_env_facts() {
@@ -740,16 +751,49 @@ verify_resolve_env_facts() {
   if [ -n "$GW_VERIFY_COMPOSE_FILE_VALUE" ]; then
     # `read -ra` (not an unquoted `local -a files=($compose_file)`) splits on IFS without ALSO
     # globbing each resulting word — round-2 review N6: a COMPOSE_FILE value containing a `*`
-    # would otherwise expand against whatever happens to be in the current directory.
+    # would otherwise expand against whatever happens to be in the current directory. ':' is
+    # COMPOSE_FILE's own separator here (COMPOSE_PATH_SEPARATOR's Linux default — confirmed
+    # against launch.sh's own persist_compose_file, `paste -sd:`, the only writer of this key;
+    # `docker compose ls`'s comma-joined CONFIG FILES column is that command's own display
+    # rendering, not the value actually persisted in .env).
     local -a files=()
     local IFS=':'
     read -ra files <<< "$GW_VERIFY_COMPOSE_FILE_VALUE"
     unset IFS
+    GW_VERIFY_COMPOSE_ARGS=(--env-file "$ENV_FILE")
     local f
     for f in "${files[@]}"; do
       GW_VERIFY_COMPOSE_ARGS+=(-f "$f")
     done
   fi
+}
+
+# verify_compose_file_is_stacked <basename> — true iff this box's own COMPOSE_FILE names a file
+# whose OWN BASENAME is exactly <basename> (T321 wire finding 1 follow-up, reviewer-proven):
+# every derivation below used to test `case ":${GW_VERIFY_COMPOSE_FILE_VALUE}:" in
+# *"compose.demo.yaml"*)` — a plain SUBSTRING test against the whole colon-joined string — which
+# false-positives on compose.demo.yaml.bak, overlays/compose.demo.yaml.local, or
+# my-compose.demo.yaml: none of those stack the actual overlay this repo ships, yet the old
+# substring test called every one of them a match. Fixed by scanning GW_VERIFY_COMPOSE_ARGS'
+# own `-f` pairs (the same scan verify_compose_overrides already uses) and comparing each
+# element's BASENAME, not its full value, against <basename> exactly — deliberately basename,
+# not the whole element, because the Pi 4's own persisted COMPOSE_FILE is PATH-QUALIFIED
+# (`/home/dmills/genwave/compose.demo.yaml`, the box's real, live shape: launch.sh's own
+# compose_file_value records whatever `-f` argument that launch actually ran with, and this
+# box's own launches always ran from its checkout's own absolute path) — basename comparison
+# classifies that box exactly the same as one that persisted a bare `compose.demo.yaml`, one
+# rule for both shapes. This repo has never shipped two different compose*.yaml files under
+# different directories sharing one basename, so a basename collision is not a risk this
+# comparison has to guard against. MUST run after verify_resolve_env_facts (every caller in
+# this file already does — setup_adoption_mode calls it first, ahead of every probe).
+verify_compose_file_is_stacked() {
+  local want="$1" i f
+  for ((i = 0; i < ${#GW_VERIFY_COMPOSE_ARGS[@]}; i++)); do
+    [ "${GW_VERIFY_COMPOSE_ARGS[$i]}" = "-f" ] || continue
+    f="${GW_VERIFY_COMPOSE_ARGS[$((i + 1))]}"
+    [ "${f##*/}" = "$want" ] && return 0
+  done
+  return 1
 }
 
 # verify_topology_from_compose_file / verify_demo_from_compose_file — the F134.3a preflight
@@ -758,17 +802,19 @@ verify_resolve_env_facts() {
 # own F137.1 contract) with a topology-aware disk/port check, on a box this script never
 # interviewed.
 verify_topology_from_compose_file() {
-  case ":${GW_VERIFY_COMPOSE_FILE_VALUE}:" in
-    *"compose.piper-only.yaml"*) printf 'piper-only' ;;
-    *)                            printf 'full' ;;
-  esac
+  if verify_compose_file_is_stacked "compose.piper-only.yaml"; then
+    printf 'piper-only'
+  else
+    printf 'full'
+  fi
 }
 
 verify_demo_from_compose_file() {
-  case ":${GW_VERIFY_COMPOSE_FILE_VALUE}:" in
-    *"compose.demo.yaml"*) printf '1' ;;
-    *)                      printf '0' ;;
-  esac
+  if verify_compose_file_is_stacked "compose.demo.yaml"; then
+    printf '1'
+  else
+    printf '0'
+  fi
 }
 
 # verify_resolve_db_container_id — resolves the db service's container id under this box's own
@@ -1075,12 +1121,27 @@ verify_migrations() {
 GW_VERIFY_IMAGE_AGE_WARN_SECONDS=3600   # matches launch.sh's own "> 1h behind the newest build"
 
 # verify_pinned_from_compose_file — true once compose.pinned.yaml (SPEC F136.5) is stacked,
-# same derivation shape as verify_topology_from_compose_file/verify_demo_from_compose_file.
+# same derivation shape (and the same verify_compose_file_is_stacked basename comparison, T321
+# wire finding 1 follow-up) as verify_topology_from_compose_file/verify_demo_from_compose_file.
+#
+# T321 wire finding 1: also true for a COMPOSE_FILE naming compose.demo.yaml WITHOUT
+# compose.pinned.yaml — an old-vintage box (adopted before the F136.5 pins/topology split)
+# persisted its own COMPOSE_FILE back when compose.demo.yaml alone carried the published-
+# GHCR-image mechanics that live in compose.pinned.yaml today; compose.pinned.yaml did not
+# exist yet for that launch to have named it. That box is still a pinned appliance — it has
+# never once built an image and never will (the demo overlay's own `image:`/`pull_policy:
+# always` directives, unchanged by the split, are still exactly what's running) — so it must
+# still get the pinned-tags readout below, never verify_built_image_ages' "Run ./build.sh"
+# advice, which launch.sh's own pinned/home* flow rejects outright at parse time (N1, above)
+# and a box this shape could never act on anyway (live evidence: T321 run-2 on the Pi 4
+# printed that exact advice over a healthy, published-image appliance). A CURRENT-vintage box
+# stacking compose.demo.yaml always also stacks compose.pinned.yaml (`--pinned` implies both,
+# launch.sh's own USE_PINNED_OVERLAY/PINNED split) — this OR never fires against a genuinely
+# locally-built box.
 verify_pinned_from_compose_file() {
-  case ":${GW_VERIFY_COMPOSE_FILE_VALUE}:" in
-    *"compose.pinned.yaml"*) return 0 ;;
-    *)                        return 1 ;;
-  esac
+  verify_compose_file_is_stacked "compose.pinned.yaml" && return 0
+  verify_compose_file_is_stacked "compose.demo.yaml" && return 0
+  return 1
 }
 
 verify_stale_images() {
@@ -1318,13 +1379,21 @@ verify_compose_overrides() {
   # F7 (round-3 review): GW_VERIFY_COMPOSE_ARGS itself — already derived once by
   # verify_resolve_env_facts (N6's own discipline) — is the ONE source now, rather than this
   # function independently re-splitting GW_VERIFY_COMPOSE_FILE_VALUE a second time (the same
-  # IFS=':' `read -ra` it already cites as the reason not to do that). The array is laid out as
-  # alternating `-f`/file pairs (verify_resolve_env_facts' own shape), so every ODD index is a
-  # filename.
+  # IFS=':' `read -ra` it already cites as the reason not to do that).
+  #
+  # T321 wire finding 2: scans for the element FOLLOWING each literal `-f` token, rather than
+  # assuming every odd index is a filename — GW_VERIFY_COMPOSE_ARGS now also carries a leading
+  # `--env-file "$ENV_FILE"` pair ahead of the `-f` pairs (verify_resolve_env_facts, above),
+  # which the old fixed odd/even parity would have misread the env-file's own PATH as an
+  # "unknown compose file" on every adopted box. Correct only on the invariant
+  # verify_resolve_env_facts itself guarantees — every `-f` token in this array is followed by
+  # its own file argument, never a trailing/dangling `-f`; not a claim about any other flag
+  # shape this array might one day carry.
   local -a files=()
   local i
-  for ((i = 1; i < ${#GW_VERIFY_COMPOSE_ARGS[@]}; i += 2)); do
-    files+=("${GW_VERIFY_COMPOSE_ARGS[$i]}")
+  for ((i = 0; i < ${#GW_VERIFY_COMPOSE_ARGS[@]}; i++)); do
+    [ "${GW_VERIFY_COMPOSE_ARGS[$i]}" = "-f" ] || continue
+    files+=("${GW_VERIFY_COMPOSE_ARGS[$((i + 1))]}")
   done
   local -a extra=()
   local s known
