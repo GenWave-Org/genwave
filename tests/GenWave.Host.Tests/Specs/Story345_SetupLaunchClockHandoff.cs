@@ -227,6 +227,24 @@ public static class FeatureSetupLaunchClockHandoff
     /// so a virgin interview needs only three answers (music path, topology, admin).</summary>
     static string BinWithoutDotnet() => MakeBinDir();
 
+    /// <summary>Finding 5 (post-v5.3.0 gate run): unlike every other fact in this file (which
+    /// sets SKIP_PREFLIGHT=1 and never touches real preflight_docker/preflight_env_secrets at
+    /// all), the print-exactly-once fact needs those checks to actually RUN and populate a real
+    /// row table — the only way to observe the bug (or its fix). A `docker` stub answering
+    /// `info`/`compose version` healthily is the minimum needed; `ss`/`df` stay absent (both
+    /// degrade to a WARN row rather than a hard failure, which still leaves the table non-empty).</summary>
+    static string BinWithHealthyDockerAndNoSdk()
+    {
+        var bin = BinWithoutDotnet();
+        AddStub(bin, "docker",
+            """
+            if [ "${1:-}" = "info" ]; then exit 0; fi
+            if [ "${1:-}" = "compose" ] && [ "${2:-}" = "version" ]; then echo "Docker Compose version v2.24.5"; exit 0; fi
+            exit 0
+            """);
+        return bin;
+    }
+
     static string MakeMediaDir(int flacCount)
     {
         var dir = Directory.CreateTempSubdirectory("gw-setup-story345-media-").FullName;
@@ -860,6 +878,61 @@ public static class FeatureSetupLaunchClockHandoff
         }
 
         [Fact]
+        public void TheHandoffShowsTheStreamUrlOnLocalhost()
+        {
+            // Finding 1 (post-v5.3.0 gate run): Dean's own words — the handoff "never gives any
+            // URLs to try... just says 'you're on the air' without any proof or breadcrumbs".
+            // The stream is the single most important URL a radio station has.
+            Assert.Contains("http://localhost:8000/stream", Run.Value.StdOut, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void TheStreamBlockNamesTheHostCloudFirewallCaveat()
+        {
+            // The exact confusion that cost the gate run an hour: the wizard said on-air, VLC
+            // timed out on Hetzner's firewall. One honest line for the cloud case.
+            Assert.True(
+                Run.Value.StdOut.Contains("firewall", StringComparison.Ordinal) &&
+                Run.Value.StdOut.Contains("8000", StringComparison.Ordinal),
+                $"expected the stream block to name the firewall caveat; stdout:\n{Run.Value.StdOut}");
+        }
+
+        [Fact]
+        public void TheStreamUrlAppearsBeforeTheAdminBlock()
+        {
+            // The stream is the single most important URL a radio station has — it leads the
+            // handoff, admin or not. Scoped to the handoff itself (from "you're on the air"
+            // onward) — Q4's own interview prompt ("Enable the Admin UI?") mentions "Admin UI"
+            // too, well before the handoff block this fact is actually about.
+            var handoff = Run.Value.StdOut[Run.Value.StdOut.IndexOf("you're on the air", StringComparison.Ordinal)..];
+            var streamIndex = handoff.IndexOf("Stream", StringComparison.Ordinal);
+            var adminIndex = handoff.IndexOf("Admin UI", StringComparison.Ordinal);
+
+            Assert.True(
+                streamIndex >= 0 && adminIndex >= 0 && streamIndex < adminIndex,
+                $"expected the stream block to lead the admin block; stdout:\n{Run.Value.StdOut}");
+        }
+
+        [Fact]
+        public void ADeclinedAdminRunStillShowsTheStreamUrl()
+        {
+            // Dean's own repro: an all-'n' interview (admin declined) printed no URL at all —
+            // the stream block is unconditional, independent of the admin answer.
+            var launchStub = WriteLaunchStub(exitCode: 0);
+            using var mount = new MountStub(servesOnAttempt: 2);
+            var mediaDir = MakeMediaDir(flacCount: 1);
+            var envFile = ScratchEnvPath();
+
+            var (_, declinedStdOut, _) = RunSetup(BinWithoutDotnet(), envFile, $"{mediaDir}\n1\nn\n",
+                BaseEnv(launchStub, mount.Url, 30));
+
+            Assert.True(
+                !declinedStdOut.Contains("http://localhost:3000/", StringComparison.Ordinal) &&
+                declinedStdOut.Contains("http://localhost:8000/stream", StringComparison.Ordinal),
+                $"expected the stream URL even with admin declined (and no admin URL); stdout:\n{declinedStdOut}");
+        }
+
+        [Fact]
         public void TheGeneratedAdminPasswordAppearsExactlyOnce()
         {
             var password = ReadEnvValue(Run.Value.EnvContent, "ADMIN_PASSWORD");
@@ -1332,6 +1405,23 @@ public static class FeatureSetupLaunchClockHandoff
                 stdErr.Contains("http://localhost:3000/", StringComparison.Ordinal),
                 $"expected the poll-timeout message to name the .env path and the admin URL; stderr:\n{stdErr}");
         }
+
+        [Fact]
+        public void APollTimeoutAlsoNamesTheStreamUrlConsistentlyWithTheEnvFileAndAdminUrl()
+        {
+            // Finding 1 follow-up (post-v5.3.0 gate run): this path already names the env file
+            // and the admin URL (F7 above) — it must name the stream URL just as consistently,
+            // for the same reason (the poll gave up, but the stream itself may still be there).
+            var launchStub = WriteLaunchStub(exitCode: 0);
+            using var mount = new MountStub(servesOnAttempt: int.MaxValue);   // never serves
+            var mediaDir = MakeMediaDir(flacCount: 1);
+            var envFile = ScratchEnvPath();
+
+            var (_, _, stdErr) = RunSetup(BinWithoutDotnet(), envFile, $"{mediaDir}\n1\ny\n",
+                BaseEnv(launchStub, mount.Url, onAirTimeoutSeconds: 3));
+
+            Assert.Contains("http://localhost:8000/stream", stdErr, StringComparison.Ordinal);
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -1402,6 +1492,47 @@ public static class FeatureSetupLaunchClockHandoff
                 stdErr.Contains("GW_ONAIR_TIMEOUT_SECONDS", StringComparison.Ordinal) &&
                 !stdOut.Contains("1) How should GenWave run?", StringComparison.Ordinal),
                 $"expected an immediate, loud failure before the interview started; exit={exitCode} stdout={stdOut} stderr={stdErr}");
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — finding 5 (post-v5.3.0 gate run): the preflight summary prints exactly
+    // once, and before "On air" — not once from the real launch.sh's own subprocess preflight
+    // pass and again from setup.sh's own EXIT trap at true process exit, after the handoff.
+    // ---------------------------------------------------------------------
+
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioThePreflightSummaryPrintsExactlyOnce
+    {
+        [Fact]
+        public void ThePreflightSummaryAppearsExactlyOnceAndBeforeOnAir()
+        {
+            // Unlike every other fact in this file, this one does NOT set SKIP_PREFLIGHT=1 — it
+            // overrides BaseEnv's own "1" back to "0" so setup.sh's real preflight_docker/
+            // preflight_env_secrets actually run (a docker stub, BinWithHealthyDockerAndNoSdk,
+            // keeps that real without a real daemon). GW_LAUNCH_CMD still points at the launch
+            // stub (never the real launch.sh — this harness can't run that at all), so what's
+            // pinned here is setup.sh's OWN half of the fix: the explicit render-before-print_
+            // ready_to_launch call, made safe by preflight_print_report's idempotency guard
+            // against the EXIT trap's own unconditional call later.
+            var launchStub = WriteLaunchStub(exitCode: 0);
+            using var mount = new MountStub(servesOnAttempt: 2);
+            var mediaDir = MakeMediaDir(flacCount: 1);
+            var envFile = ScratchEnvPath();
+            var extraEnv = new Dictionary<string, string>(BaseEnv(launchStub, mount.Url, 30))
+            {
+                ["SKIP_PREFLIGHT"] = "0",
+            };
+
+            var (exitCode, stdOut, stdErr) = RunSetup(BinWithHealthyDockerAndNoSdk(), envFile, $"{mediaDir}\n1\ny\n", extraEnv);
+
+            var occurrences = Regex.Matches(stdOut, Regex.Escape("==> preflight summary")).Count;
+            var summaryIndex = stdOut.IndexOf("==> preflight summary", StringComparison.Ordinal);
+            var onAirIndex = stdOut.IndexOf("🎙️ On air", StringComparison.Ordinal);
+
+            Assert.True(
+                exitCode == 0 && occurrences == 1 && summaryIndex >= 0 && onAirIndex >= 0 && summaryIndex < onAirIndex,
+                $"expected exactly one preflight summary, printed before On-air; occurrences={occurrences} exit={exitCode} stderr={stdErr} stdout:\n{stdOut}");
         }
     }
 }

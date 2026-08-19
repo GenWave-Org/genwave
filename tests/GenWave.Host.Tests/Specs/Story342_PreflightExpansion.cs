@@ -187,6 +187,46 @@ public static class FeaturePreflightExpansion
 
             Assert.Contains("fail-closed", stdOut);
         }
+
+        [Fact]
+        public void SetAdminPasswordWithAdminProfileOffExplainsWhyItIsCheckedAnyway()
+        {
+            // Finding 4 (post-v5.3.0 gate run): Dean's own reaction to a no-admin wizard run —
+            // "it mentions that ADMIN_PASSWORD was set, but I didn't enable the Admin UI, so
+            // not sure why it bothered?" The check itself stays correct (F134.1: the secret
+            // has to be healthy NOW so the handoff's own "add 'admin' and re-run" enable-later
+            // path works without a placeholder/empty surprise at that point) — the row just has
+            // to say why. No COMPOSE_PROFILES line at all here, the same shape a declined-admin
+            // wizard run leaves.
+            var envFile = CompleteEnvFile(MakeMediaDir(flacCount: 1), "ADMIN_PASSWORD=a-real-admin-password-0123456789");
+
+            var (exitCode, stdOut, _) = RunPreflight(HealthyDockerBin(), envFile);
+
+            Assert.True(
+                exitCode == 0 && stdOut.Contains("Admin UI is off", StringComparison.Ordinal),
+                $"expected the PASS row to explain itself when the admin profile isn't selected; stdout:\n{stdOut}");
+        }
+
+        [Fact]
+        public void SetAdminPasswordWithAdminProfileOnKeepsTheUnqualifiedCopy()
+        {
+            // The flip side: admin genuinely selected (COMPOSE_PROFILES=admin) keeps the
+            // original, unqualified "Set (value not shown)" — no unnecessary caveat when the
+            // surface the password guards is actually on.
+            var mediaDir = MakeMediaDir(flacCount: 1);
+            var envFile = WriteEnvFile(
+                "POSTGRES_PASSWORD=x", "LIBRARY_DB_PASSWORD=x", "STATION_DB_PASSWORD=x",
+                "ICECAST_SOURCE_PASSWORD=x", "ICECAST_ADMIN_PASSWORD=x", $"MEDIA_DIR={mediaDir}",
+                "ADMIN_PASSWORD=a-real-admin-password-0123456789", "COMPOSE_PROFILES=admin");
+
+            var (exitCode, stdOut, _) = RunPreflight(HealthyDockerBin(), envFile);
+
+            Assert.True(
+                exitCode == 0 &&
+                stdOut.Contains("Set (value not shown)", StringComparison.Ordinal) &&
+                !stdOut.Contains("Admin UI is off", StringComparison.Ordinal),
+                $"expected the unqualified copy when the admin profile IS selected; stdout:\n{stdOut}");
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -324,6 +364,34 @@ public static class FeaturePreflightExpansion
             var (exitCode, _, _) = RunPreflight(bin, envFile);
 
             Assert.Equal(0, exitCode);
+        }
+
+        [Fact]
+        public void ThePassRowStatesItIsALocalCheckAndNamesTheFirewallCaveat()
+        {
+            // Finding 2 (post-v5.3.0 gate run): "8000 8080 8081 3000 free (or published by a
+            // Docker container)" reads as a reachability guarantee it never was — this is a
+            // local bind check only (this machine's own sockets, or already Docker-owned).
+            // External reachability is the operator's host/cloud firewall's call, not this
+            // script's — an hour lost on Hetzner to exactly that misreading. An `ss` stub
+            // (nothing bound) is required to reach the clean PASS branch at all — the dev/CI
+            // host running this suite has no `ss` on PATH, which would otherwise degrade to the
+            // (unrelated) "not checked" WARN this fact isn't about.
+            var bin = HealthyDockerBin();
+            AddStub(bin, "ss",
+                """
+                cat <<'OUT'
+                State   Recv-Q  Send-Q   Local Address:Port   Peer Address:Port  Process
+                OUT
+                """);
+            var envFile = CompleteEnvFile(MakeMediaDir(flacCount: 1));
+
+            var (_, stdOut, _) = RunPreflight(bin, envFile);
+
+            Assert.True(
+                stdOut.Contains("available locally", StringComparison.Ordinal) &&
+                stdOut.Contains("host/cloud firewall", StringComparison.Ordinal),
+                $"expected the ports PASS row to scope itself to a local check and name the firewall caveat; stdout:\n{stdOut}");
         }
     }
 
@@ -501,6 +569,46 @@ public static class FeaturePreflightExpansion
 
             Assert.Contains("stale inode", stdOut);
         }
+
+        [Fact]
+        public void ALocalMediaDirNamesTheDetectedFilesystemType()
+        {
+            // Finding 6 (post-v5.3.0 gate run): the old copy read "local (ext4)" — good — but
+            // fell back to the self-contradictory "local (unknown)" once the type couldn't be
+            // determined (see the next fact). Capitalized and reworded to "Local disk (...)"
+            // either way, matching the neighboring "NFS-mounted (...)" row's own capitalization.
+            var mediaDir = MakeMediaDir(flacCount: 1);
+            var mounts = Path.Combine(Directory.CreateTempSubdirectory("gw-preflight-story342-mounts-").FullName, "mounts");
+            File.WriteAllLines(mounts, [$"/dev/sda1 {mediaDir} ext4 rw 0 0"]);
+            var envFile = CompleteEnvFile(mediaDir);
+
+            var (_, stdOut, _) = RunPreflight(
+                HealthyDockerBin(), envFile,
+                extraEnv: new Dictionary<string, string> { ["GW_MOUNTS_FILE"] = mounts });
+
+            Assert.Contains("Local disk (ext4)", stdOut, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void AMediaDirWithNoMatchingMountEntrySaysTypeNotIdentifiedNotUnknown()
+        {
+            // Finding 6: an unreadable/no-match mount table used to print "local (unknown)" —
+            // "local" itself read as though IT were unverified, when only the TYPE is. Honest
+            // wording now, and the parenthetical stays reserved for an actual detected type.
+            var mediaDir = MakeMediaDir(flacCount: 1);
+            var mounts = Path.Combine(Directory.CreateTempSubdirectory("gw-preflight-story342-mounts-").FullName, "mounts");
+            File.WriteAllLines(mounts, ["/dev/sda1 / ext4 rw 0 0"]);   // no entry matching mediaDir
+            var envFile = CompleteEnvFile(mediaDir);
+
+            var (_, stdOut, _) = RunPreflight(
+                HealthyDockerBin(), envFile,
+                extraEnv: new Dictionary<string, string> { ["GW_MOUNTS_FILE"] = mounts });
+
+            Assert.True(
+                stdOut.Contains("Local disk (type not identified)", StringComparison.Ordinal) &&
+                !stdOut.Contains("unknown)", StringComparison.Ordinal),
+                $"expected honest 'type not identified' wording, never the self-contradictory 'local (unknown)'; stdout:\n{stdOut}");
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -529,6 +637,44 @@ public static class FeaturePreflightExpansion
                 MakeBinDir(), extraEnv: new Dictionary<string, string> { ["SKIP_PREFLIGHT"] = "1" });
 
             Assert.Equal(0, exitCode);
+        }
+
+        [Fact]
+        public void CallingPreflightPrintReportTwiceRendersTheTableOnlyOnce()
+        {
+            // Finding 5 (post-v5.3.0 gate run): Dean's vmtest transcript showed the full
+            // preflight table TWICE — once from the real launch.sh's own subprocess preflight
+            // pass (a redundant re-check setup.sh now skips via SKIP_PREFLIGHT=1 on that one
+            // call) and again from setup.sh's own EXIT trap at true process exit, after the
+            // handoff. setup.sh now also calls preflight_print_report explicitly, right after
+            // the checks that populate it — this pins the underlying guard that makes calling
+            // it more than once in the SAME process a no-op after the first render, exactly
+            // the shape setup.sh's explicit call + its EXIT trap's own call now both hit.
+            var envFile = CompleteEnvFile(MakeMediaDir(flacCount: 1));
+            var startInfo = new ProcessStartInfo("bash")
+            {
+                WorkingDirectory = RepoRoot(),
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            startInfo.ArgumentList.Add("-c");
+            startInfo.ArgumentList.Add(
+                "set -euo pipefail; . tools/preflight.sh; preflight_docker; preflight_env_secrets; " +
+                "preflight_print_report; preflight_print_report");
+            startInfo.Environment["PATH"] = HealthyDockerBin();
+            foreach (var name in RequiredEnvVars) startInfo.Environment.Remove(name);
+            foreach (var name in SeamEnvVars) startInfo.Environment.Remove(name);
+            startInfo.Environment["GW_ENV_FILE"] = envFile;
+
+            using var process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("failed to start tools/preflight.sh");
+            var stdOut = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+
+            var occurrences = System.Text.RegularExpressions.Regex.Matches(
+                stdOut, System.Text.RegularExpressions.Regex.Escape("==> preflight summary")).Count;
+            Assert.True(occurrences == 1, $"expected exactly one render across two explicit calls; occurrences={occurrences} stdout:\n{stdOut}");
         }
     }
 

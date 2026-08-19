@@ -693,7 +693,7 @@ public static class FeatureAdoptionVerifyRepair
             Assert.True(
                 !stdOut.Contains("Pinned image tags", StringComparison.Ordinal) &&
                 !stdOut.Contains("PUBLIC_HOST", StringComparison.Ordinal) &&
-                stdOut.Contains("no locally-built services", StringComparison.Ordinal),
+                stdOut.Contains("No locally-built services", StringComparison.Ordinal),
                 $"expected lookalike compose file names to never count as the real demo/pinned overlay; stdout:\n{stdOut}");
         }
 
@@ -836,9 +836,9 @@ public static class FeatureAdoptionVerifyRepair
             // (through the stub) rather than merely appearing in the logged argv.
             Assert.True(
                 exitCode == 0 &&
-                stdOut.Contains("schema is current through db/37", StringComparison.Ordinal) &&
-                stdOut.Contains("no locally-built services in this box's compose config", StringComparison.Ordinal) &&
-                stdOut.Contains("none found for project 'genwave'", StringComparison.Ordinal),
+                stdOut.Contains("Schema is current through db/37", StringComparison.Ordinal) &&
+                stdOut.Contains("No locally-built services in this box's compose config", StringComparison.Ordinal) &&
+                stdOut.Contains("None found for project 'genwave'", StringComparison.Ordinal),
                 $"expected the migrations/image-ages/orphans probes to reach their normal (non-UNKNOWN) branches; exit={exitCode} stdout:\n{stdOut}");
         }
     }
@@ -1430,11 +1430,11 @@ public static class FeatureAdoptionVerifyRepair
             var (_, stdOut, _) = RunSetupInCheckout(checkoutRoot, MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
-            // UNKNOWN, not a fabricated PASS — an honest "can't verify past db/37" naming
+            // UNKNOWN, not a fabricated PASS — an honest "Can't verify past db/37" naming
             // db/38 as the reason, even though db/37's own marker table (station.station_image)
             // IS present and the old hand-maintained constant would have reported it green.
             Assert.True(
-                stdOut.Contains("can't verify past db/37", StringComparison.Ordinal) &&
+                stdOut.Contains("Can't verify past db/37", StringComparison.Ordinal) &&
                 stdOut.Contains("db/38 adds no new table", StringComparison.Ordinal) &&
                 !stdOut.Contains("current through db/38", StringComparison.Ordinal),
                 $"expected an honest UNKNOWN naming db/37 as the verifiable ceiling, never a fabricated green through db/38; stdout:\n{stdOut}");
