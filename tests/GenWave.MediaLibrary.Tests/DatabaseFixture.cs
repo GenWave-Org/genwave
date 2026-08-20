@@ -11,21 +11,26 @@ namespace GenWave.MediaLibrary.Tests;
 /// <c>db/01-library.sh</c>, so the integration tests run against the real <c>library</c> schema and
 /// the <c>library_svc</c> role. On-demand: requires Docker; tears the database down (<c>down -v</c>)
 /// when the test collection finishes. Each test calls <see cref="ResetAsync"/> for a clean catalog.
+/// <para>
+/// gh-#569: the compose project name and host port are both derived per instance rather than fixed,
+/// so two concurrent runs (two checkouts, or CI + local) get isolated containers instead of the
+/// second run's <c>up</c>/<c>down</c> tearing the first run's Postgres out from under it. The host
+/// port is whatever Docker assigns to the container's unpublished-to-a-fixed-port <c>5432</c> (see
+/// db-compose.yaml), discovered via <c>docker compose port</c> after <c>up</c>.
+/// </para>
 /// </summary>
 public sealed class DatabaseFixture : IAsyncLifetime
 {
-    const string Project = "genwave-libtest";
+    readonly string project = $"genwave-libtest-{Guid.NewGuid():N}"[..24];
 
-    public string ConnectionString { get; } =
-        "Host=localhost;Port=55433;Database=genwave;Username=library_svc;Password=libtest;Search Path=library";
+    public string ConnectionString { get; private set; } = "";
 
     /// <summary>
     /// Connects as station_svc (Search Path=station) rather than library_svc — the two roles are
     /// deliberately isolated from each other's schema (no cross-schema grants), so
     /// <see cref="PersonaRepository"/>-shaped tests need this data source, not <see cref="DataSource"/>.
     /// </summary>
-    public string StationConnectionString { get; } =
-        "Host=localhost;Port=55433;Database=genwave;Username=station_svc;Password=stationtest;Search Path=station";
+    public string StationConnectionString { get; private set; } = "";
 
     public NpgsqlDataSource DataSource { get; private set; } = null!;
 
@@ -69,6 +74,10 @@ public sealed class DatabaseFixture : IAsyncLifetime
         composeFile = LocateComposeFile(out var repoRoot);
         RepoRoot = repoRoot;
         Compose("up", "-d", "--wait");
+
+        var port = DiscoverHostPort("testdb", 5432);
+        ConnectionString = $"Host=localhost;Port={port};Database=genwave;Username=library_svc;Password=libtest;Search Path=library";
+        StationConnectionString = $"Host=localhost;Port={port};Database=genwave;Username=station_svc;Password=stationtest;Search Path=station";
 
         DataSource = new NpgsqlDataSourceBuilder(ConnectionString).Build();
         StationDataSource = new NpgsqlDataSourceBuilder(StationConnectionString).Build();
@@ -331,7 +340,7 @@ public sealed class DatabaseFixture : IAsyncLifetime
     /// </summary>
     public void RunFileInContainer(string hostScriptPath)
     {
-        var args = new List<string> { "compose", "-p", Project, "-f", composeFile, "exec", "-T", "testdb", "bash", "-s" };
+        var args = new List<string> { "compose", "-p", project, "-f", composeFile, "exec", "-T", "testdb", "bash", "-s" };
 
         var psi = new ProcessStartInfo("docker")
         {
@@ -360,12 +369,29 @@ public sealed class DatabaseFixture : IAsyncLifetime
 
     void Compose(params string[] verbAndArgs)
     {
-        var args = new List<string> { "compose", "-p", Project, "-f", composeFile };
+        var args = new List<string> { "compose", "-p", project, "-f", composeFile };
         args.AddRange(verbAndArgs);
         Run("docker", args);
     }
 
-    static void Run(string file, IReadOnlyList<string> args)
+    /// <summary>
+    /// Asks Docker which host port it assigned to <paramref name="containerPort"/> on
+    /// <paramref name="service"/> (gh-#569: db-compose.yaml publishes that port without pinning a
+    /// host side, so Docker picks a free one per run). Expects <c>docker compose port</c>'s single-line
+    /// <c>HOST_IP:HOST_PORT</c> output.
+    /// </summary>
+    int DiscoverHostPort(string service, int containerPort)
+    {
+        var output = RunCapture("docker", ["compose", "-p", project, "-f", composeFile, "port", service, containerPort.ToString()]).Trim();
+        var lastColon = output.LastIndexOf(':');
+        if (lastColon < 0 || !int.TryParse(output[(lastColon + 1)..], out var hostPort))
+            throw new InvalidOperationException($"could not parse a host port from 'docker compose port' output: '{output}'");
+        return hostPort;
+    }
+
+    static void Run(string file, IReadOnlyList<string> args) => RunCapture(file, args);
+
+    static string RunCapture(string file, IReadOnlyList<string> args)
     {
         var psi = new ProcessStartInfo(file) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         foreach (var a in args) psi.ArgumentList.Add(a);
@@ -376,6 +402,7 @@ public sealed class DatabaseFixture : IAsyncLifetime
         p.WaitForExit();
         if (p.ExitCode != 0)
             throw new InvalidOperationException($"{file} {string.Join(' ', args)} failed:\n{stderr.Result}{stdout.Result}");
+        return stdout.Result;
     }
 
     static string LocateComposeFile(out string repoRoot)
