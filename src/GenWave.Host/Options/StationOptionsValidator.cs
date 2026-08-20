@@ -61,6 +61,20 @@ using Microsoft.Extensions.Options;
 /// </para>
 ///
 /// <para>
+/// Does NOT enforce SPEC F142's boundary cadence covenant (STORY-356, PLAN T327, closes gh-#300):
+/// unlike every guard above, that rule MUTATES <c>Station:BoundaryBias:LookaheadMinutes</c> (clamps
+/// it up, fail-safe, with one WARN) rather than merely accepting or rejecting the value already
+/// bound — the wrong altitude for a pure <see cref="IValidateOptions{TOptions}"/> predicate.
+/// <c>BoundaryCadenceCovenantPostConfigure</c> (an <see cref="IPostConfigureOptions{TOptions}"/>,
+/// registered separately in <c>Program.cs</c> — see that type's own remarks for why it can't share
+/// this project's <c>StationOptionsServiceCollectionExtensions</c> — but run by the framework
+/// BEFORE this validator on every bind regardless of where it was registered) owns that rule; see
+/// that type's own remarks for why, and <see cref="BoundaryCadenceCovenant"/> for the pure math it
+/// wraps. This validator still guards <c>Station:BoundaryBias:LookaheadMinutes</c>'s plain
+/// non-negativity floor immediately below, same as every nested knob above.
+/// </para>
+///
+/// <para>
 /// Registered as a singleton and triggered by <c>ValidateOnStart()</c> in
 /// <c>Program.cs</c>.
 /// </para>

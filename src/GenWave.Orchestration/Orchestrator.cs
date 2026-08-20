@@ -287,7 +287,10 @@ public sealed class Orchestrator(
     /// SPEC knob the way F74.3's own boundary-bias lookahead is — just an implementation seam.
     /// </para>
     /// </summary>
-    static readonly TimeSpan SignOffLeadTime = TimeSpan.FromSeconds(15);
+    // Public (SPEC F142, PLAN T327): GenWave.Host's BoundaryCadenceCovenantPostConfigure reads this
+    // constant as the covenant's signOffLeadTime term. It must never become a config knob (F142.2 —
+    // "no new knobs").
+    public static readonly TimeSpan SignOffLeadTime = TimeSpan.FromSeconds(15);
 
     /// <summary>
     /// SPEC F141.2 (STORY-355, PLAN T326) — the honesty threshold: a <see cref="SpeechDeferralKind.TimeDate"/>
