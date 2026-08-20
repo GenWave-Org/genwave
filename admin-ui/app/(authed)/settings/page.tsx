@@ -10,13 +10,11 @@ import type { SettingDto } from "./SettingsForm";
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 
-interface SettingsPageProps {
-  // no dynamic segments
-}
-
-export default async function SettingsPage(
-  _props: SettingsPageProps
-): Promise<ReactNode> {
+// Next calls every page with a props object; this route has no dynamic segments to read (settings
+// are a single global resource), but settings-server.spec.ts calls SettingsPage({}) to mirror
+// Next's real invocation shape — the empty destructure keeps that call site type-checking without
+// binding an unused name.
+export default async function SettingsPage({}: Record<string, never>): Promise<ReactNode> {
   const cookieStore = await cookies();
   const cookieStr = cookieStore.toString();
 

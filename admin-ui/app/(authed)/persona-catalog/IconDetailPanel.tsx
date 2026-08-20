@@ -75,7 +75,7 @@ export function IconDetailPanel({ slug, detail, isInstalled, onInstallClick }: I
       )}
 
       {definition === null ? (
-        <p className="text-[0.85rem] text-mute">This pack's definition could not be previewed.</p>
+        <p className="text-[0.85rem] text-mute">This pack&apos;s definition could not be previewed.</p>
       ) : (
         <IconPackSpecimenRow definition={definition} />
       )}
