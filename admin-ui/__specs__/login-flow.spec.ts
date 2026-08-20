@@ -5,7 +5,7 @@
 // suite won't even compile) until T033 lands the Next.js scaffold + Jest
 // config + a real implementation to drive.
 
-import { describe, it, expect } from "@jest/globals";
+import { describe, it } from "@jest/globals";
 
 describe("Feature: Login flow + middleware (admin UI)", () => {
   describe("Scenario: scaffolded project shape", () => {
