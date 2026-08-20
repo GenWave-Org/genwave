@@ -148,6 +148,191 @@ public static class FeatureStationSettingsRepository
                 new { key = "Loudness:TargetLufs" });
             Assert.True(secondUpdatedAt > firstUpdatedAt);
         }
+
+        [Fact]
+        public async Task VersionAdvancesOnTheSecondUnconditionalWrite()
+        {
+            // gh-#486: WriteAsync's own ON CONFLICT branch must keep `version` moving even for the
+            // unconditional path, so a LATER version-guarded write (WriteIfVersionMatchesAsync)
+            // reading this key afterward sees the true current version, not a stale one frozen at
+            // whatever the first insert set.
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+
+            await repo.WriteAsync("Loudness:TargetLufs", -16.0, CancellationToken.None);
+            var versions = await repo.ReadVersionsAsync(CancellationToken.None);
+            Assert.Equal(1, versions["Loudness:TargetLufs"]);
+
+            await repo.WriteAsync("Loudness:TargetLufs", -14.0, CancellationToken.None);
+            versions = await repo.ReadVersionsAsync(CancellationToken.None);
+            Assert.Equal(2, versions["Loudness:TargetLufs"]);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — WriteIfVersionMatchesAsync (gh-#486)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioWriteIfVersionMatchesHappyPath(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task ExpectedVersionZeroInsertsANewKeyAtVersionOne()
+        {
+            // Given no prior row for this key...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+
+            // When it is written with expectedVersion 0 ("I read no row")...
+            var newVersion = await repo.WriteIfVersionMatchesAsync(
+                "Tts:Pronunciations", "[]", 0, CancellationToken.None);
+
+            // Then the row lands at version 1.
+            Assert.Equal(1, newVersion);
+            var row = await ReadRowAsync(db, "Tts:Pronunciations");
+            Assert.Equal("\"[]\"", row.Value);
+        }
+
+        [Fact]
+        public async Task TheMatchingCurrentVersionUpdatesAndAdvancesTheVersion()
+        {
+            // Given a row at version 1...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+            await repo.WriteIfVersionMatchesAsync("Tts:Pronunciations", "[\"a\"]", 0, CancellationToken.None);
+
+            // When it is written again with the version that row is actually at...
+            var newVersion = await repo.WriteIfVersionMatchesAsync(
+                "Tts:Pronunciations", "[\"b\"]", 1, CancellationToken.None);
+
+            // Then the write lands, the new value is stored, and the version advances.
+            Assert.Equal(2, newVersion);
+            var row = await ReadRowAsync(db, "Tts:Pronunciations");
+            Assert.Equal("\"[\\\"b\\\"]\"", row.Value);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // SAD PATH — WriteIfVersionMatchesAsync loses the race (gh-#486, the T144 probe)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioWriteIfVersionMatchesConflict(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task ExpectedVersionZeroAgainstAnAlreadyExistingRowIsAConflict()
+        {
+            // Given a row already exists (another writer created it since the caller's own read
+            // saw nothing)...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+            await repo.WriteIfVersionMatchesAsync("Tts:Pronunciations", "[\"a\"]", 0, CancellationToken.None);
+
+            // When a second caller, still believing no row exists, also writes with expectedVersion 0...
+            var result = await repo.WriteIfVersionMatchesAsync(
+                "Tts:Pronunciations", "[\"b\"]", 0, CancellationToken.None);
+
+            // Then the write is refused (null), and the FIRST writer's value survives untouched —
+            // never silently clobbered.
+            Assert.Null(result);
+            var row = await ReadRowAsync(db, "Tts:Pronunciations");
+            Assert.Equal("\"[\\\"a\\\"]\"", row.Value);
+        }
+
+        [Fact]
+        public async Task AStaleExpectedVersionIsAConflictAndTheConcurrentEditSurvives()
+        {
+            // Given a row at version 1 that a SECOND writer then advances to version 2, unseen by
+            // the first writer's own stale read (the exact "DELETE || PUT both 2xx" T144 probe:
+            // one editor's revision must never silently vanish under another's) ...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+            await repo.WriteIfVersionMatchesAsync("Tts:Pronunciations", "[\"a\"]", 0, CancellationToken.None);
+            await repo.WriteIfVersionMatchesAsync("Tts:Pronunciations", "[\"b\"]", 1, CancellationToken.None);
+
+            // When the first writer's own write finally lands, still expecting version 1...
+            var result = await repo.WriteIfVersionMatchesAsync(
+                "Tts:Pronunciations", "[\"c\"]", 1, CancellationToken.None);
+
+            // Then it is refused (null), and the SECOND writer's revision survives — a lost
+            // revision is reported (409, at the caller), never a silent overwrite.
+            Assert.Null(result);
+            var row = await ReadRowAsync(db, "Tts:Pronunciations");
+            Assert.Equal("\"[\\\"b\\\"]\"", row.Value);
+        }
+
+        [Fact]
+        public async Task ANonZeroExpectedVersionAgainstAMissingRowIsAConflict()
+        {
+            // Given no row at all for this key (perhaps it was never written, or was written and
+            // this repository has no delete path to remove it) ...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+
+            // When a write claims a specific prior version that cannot possibly be right...
+            var result = await repo.WriteIfVersionMatchesAsync(
+                "Tts:Pronunciations", "[\"a\"]", 5, CancellationToken.None);
+
+            // Then the write is refused (null) — never fabricates a row out of a bogus version claim.
+            Assert.Null(result);
+            Assert.Equal(0, await CountRowsAsync(db));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — ReadVersionsAsync (gh-#486)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioReadVersions(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AnEmptyTableReadsAsAnEmptyDictionary()
+        {
+            // Given no rows at all...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+
+            // When every version is read...
+            var versions = await repo.ReadVersionsAsync(CancellationToken.None);
+
+            // Then nothing comes back.
+            Assert.Empty(versions);
+        }
+
+        [Fact]
+        public async Task AFreshlyWrittenKeyReadsAtVersionOne()
+        {
+            // Given a key written once...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+            await repo.WriteAsync("Loudness:TargetLufs", -14.0, CancellationToken.None);
+
+            // When every version is read...
+            var versions = await repo.ReadVersionsAsync(CancellationToken.None);
+
+            // Then it reads at version 1.
+            Assert.Equal(1, versions["Loudness:TargetLufs"]);
+        }
+
+        [Fact]
+        public async Task KeysAreLookedUpCaseInsensitively()
+        {
+            // Given a row stored under its canonical casing...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+            await repo.WriteAsync("Station:Theme", "midnight", CancellationToken.None);
+
+            // When every version is read...
+            var versions = await repo.ReadVersionsAsync(CancellationToken.None);
+
+            // Then a differently-cased lookup still finds it.
+            Assert.True(versions.TryGetValue("station:theme", out var version));
+            Assert.Equal(1, version);
+        }
     }
 
     // ---------------------------------------------------------------------

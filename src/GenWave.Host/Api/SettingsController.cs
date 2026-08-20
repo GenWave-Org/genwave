@@ -58,6 +58,7 @@ public sealed class SettingsController(
     public async Task<IActionResult> Get(CancellationToken ct)
     {
         var overrideKeys = await store.ReadAllAsync(ct);
+        var versions = await store.ReadVersionsAsync(ct);
         var iconPackChoices = await IconPackChoicesAsync(ct);
 
         var items = StationSettingsAllowlist.All.Select(allowed =>
@@ -68,7 +69,8 @@ public sealed class SettingsController(
             var source    = overrideKeys.ContainsKey(allowed.Key) ? "override" : "default";
             var applyMode = ApplyModeWireValue(allowed.ApplyMode);
             var kind      = KindWireValue(allowed.Kind);
-            return new SettingDto(allowed.Key, rawValue, source, applyMode, kind, allowed.Unit, ChoicesFor(allowed, iconPackChoices));
+            var version   = versions.GetValueOrDefault(allowed.Key, 0);
+            return new SettingDto(allowed.Key, rawValue, source, applyMode, kind, allowed.Unit, ChoicesFor(allowed, iconPackChoices), version);
         }).ToList();
 
         return Ok(items);
@@ -158,6 +160,13 @@ public sealed class SettingsController(
 
         // All valid — persist each one.  WriteAsync raises the reload token after each write;
         // IOptionsMonitor re-binds automatically so api-side live knobs take effect immediately.
+        //
+        // gh-#486: an update that carries ExpectedVersion goes through the version-guarded write
+        // instead — a mismatch rejects the whole request with 409 before any LATER entry is
+        // attempted (an EARLIER entry in this same loop may already have committed; this endpoint
+        // was already non-transactional across keys before gh-#486, and stays that way). An update
+        // with no ExpectedVersion is unaffected — the exact unconditional last-write-wins write this
+        // endpoint always did.
         foreach (var update in updates)
         {
             // NumberList keys arrive as a JSON-encoded array string (e.g. "[2]").
@@ -180,7 +189,21 @@ public sealed class SettingsController(
                     "SafeScope emptied by operator — drain events play mksafe silence (F4.4 degraded mode)");
             }
 
-            await store.WriteAsync(update.Key, valueToStore, ct);
+            if (update.ExpectedVersion is { } expectedVersion)
+            {
+                var outcome = await store.WriteIfVersionMatchesAsync(update.Key, valueToStore, expectedVersion, ct);
+                if (outcome == SettingsWriteOutcome.Conflict)
+                {
+                    logger.LogInformation(
+                        "Setting write conflict: key={Key} expectedVersion={ExpectedVersion}",
+                        update.Key, expectedVersion);
+                    return Conflict(VersionConflictProblem(update.Key));
+                }
+            }
+            else
+            {
+                await store.WriteAsync(update.Key, valueToStore, ct);
+            }
 
             logger.LogInformation(
                 "Setting persisted: key={Key} applyMode={ApplyMode}",
@@ -190,6 +213,7 @@ public sealed class SettingsController(
 
         // Build the response so the caller knows the applyMode and kind/unit for each written key.
         var overrideKeys = await store.ReadAllAsync(ct);
+        var versions = await store.ReadVersionsAsync(ct);
         var iconPackChoices = await IconPackChoicesAsync(ct);
         var result = updates.Select(u =>
         {
@@ -200,7 +224,8 @@ public sealed class SettingsController(
             var source    = overrideKeys.ContainsKey(u.Key) ? "override" : "default";
             var applyMode = ApplyModeWireValue(allowed.ApplyMode);
             var kind      = KindWireValue(allowed.Kind);
-            return new SettingDto(u.Key, rawValue, source, applyMode, kind, allowed.Unit, ChoicesFor(allowed, iconPackChoices));
+            var version   = versions.GetValueOrDefault(u.Key, 0);
+            return new SettingDto(u.Key, rawValue, source, applyMode, kind, allowed.Unit, ChoicesFor(allowed, iconPackChoices), version);
         }).ToList();
 
         return Ok(result);
@@ -269,6 +294,20 @@ public sealed class SettingsController(
             return StationSettingsAllowlist.IconPackChoices([]);
         }
     }
+
+    /// <summary>
+    /// The 409 body for a version-guard conflict (gh-#486) — <see cref="SettingsProblemTypes.VersionConflict"/>
+    /// lets the admin UI tell this apart from any other failure shape without parsing
+    /// <see cref="ProblemDetails.Detail"/> text, and refetch + tell the operator their view was
+    /// stale rather than silently merging.
+    /// </summary>
+    static ProblemDetails VersionConflictProblem(string key) => new()
+    {
+        Type   = SettingsProblemTypes.VersionConflict,
+        Status = StatusCodes.Status409Conflict,
+        Title  = "Setting changed since you loaded it.",
+        Detail = $"'{key}' was saved by another editor while this request was in flight. Reload and try again.",
+    };
 
     /// <summary>
     /// Maps <see cref="SettingApplyMode"/> to the wire string the admin UI badges on (SPEC F44.3

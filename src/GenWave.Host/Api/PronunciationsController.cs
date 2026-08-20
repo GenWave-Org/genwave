@@ -91,7 +91,9 @@ public sealed class PronunciationsController(
     /// POST /api/pronunciations — appends a new station rule (SPEC F97.1, STORY-254 AC1). 201 with
     /// the created row; 400 naming the offending field for a rule
     /// <see cref="PronunciationRuleValidator"/> would refuse; 409 when a station rule with the same
-    /// (Pattern, Word) identity already exists (T144 review finding F1/F2).
+    /// (Pattern, Word) identity already exists (T144 review finding F1/F2), OR when this write raced
+    /// a DIFFERENT concurrent save to <c>Tts:Pronunciations</c> and lost (gh-#486) —
+    /// <see cref="VersionConflictProblem"/> tells the two apart via its <c>type</c> URI.
     /// </summary>
     [HttpPost]
     [Consumes("application/json")]
@@ -106,12 +108,13 @@ public sealed class PronunciationsController(
         var rawIpa = request.Ipa ?? "";
         var resolved = PronunciationRule.Parse(rawPattern, rawWord, rawIpa);
 
-        var declared = ReadStationRules();
+        var (declared, version) = await ReadStationRulesWithVersionAsync(ct);
         if (FindDeclaredIndexByIdentity(declared, resolved.Pattern, resolved.Word) is not null)
             return Conflict(DuplicateRuleProblem(resolved.Pattern, resolved.Word));
 
         declared.Add(new PronunciationRule(rawPattern, rawWord ?? "", rawIpa));
-        await WriteStationRulesAsync(declared, ct);
+        if (await WriteStationRulesAsync(declared, version, ct) == SettingsWriteOutcome.Conflict)
+            return Conflict(VersionConflictProblem());
 
         logger.LogInformation(
             "Pronunciation rule created pattern={Pattern} word={Word}",
@@ -125,7 +128,9 @@ public sealed class PronunciationsController(
     /// (Pattern, Word) identity with <paramref name="request"/>'s new shape (SPEC F97.1, STORY-254
     /// AC1). 200 with the updated row; 404 when no station rule matches the query identity (including
     /// a stale reference to an already-deleted row, T144 review finding F1/F2); 409 when the NEW
-    /// identity collides with a DIFFERENT existing station rule; 400 naming the offending field for a
+    /// identity collides with a DIFFERENT existing station rule, OR when this write raced a DIFFERENT
+    /// concurrent save to <c>Tts:Pronunciations</c> and lost (gh-#486) — <see cref="VersionConflictProblem"/>
+    /// tells the two 409 causes apart via its <c>type</c> URI; 400 naming the offending field for a
     /// rule <see cref="PronunciationRuleValidator"/> would refuse.
     /// </summary>
     /// <remarks>
@@ -152,7 +157,7 @@ public sealed class PronunciationsController(
         if (errors.Count > 0)
             return BadRequest(InvalidRuleProblem(errors));
 
-        var declared = ReadStationRules();
+        var (declared, version) = await ReadStationRulesWithVersionAsync(ct);
         var targetIndex = FindDeclaredIndexByIdentity(declared, targetPattern, targetWord);
         if (targetIndex is null)
             return NotFound(NotFoundProblem(targetPattern, targetWord));
@@ -167,7 +172,8 @@ public sealed class PronunciationsController(
             return Conflict(DuplicateRuleProblem(resolved.Pattern, resolved.Word));
 
         declared[targetIndex.Value] = new PronunciationRule(rawPattern, rawWord ?? "", rawIpa);
-        await WriteStationRulesAsync(declared, ct);
+        if (await WriteStationRulesAsync(declared, version, ct) == SettingsWriteOutcome.Conflict)
+            return Conflict(VersionConflictProblem());
 
         logger.LogInformation(
             "Pronunciation rule updated pattern={Pattern} word={Word} newPattern={NewPattern} newWord={NewWord}",
@@ -181,7 +187,9 @@ public sealed class PronunciationsController(
     /// DELETE /api/pronunciations?pattern=&amp;word= — removes the station rule identified by the
     /// query (Pattern, Word) identity (SPEC F97.1, STORY-254 AC1). 204 on success; 404 when no station
     /// rule matches — including a stale reference to a row another tab already deleted (T144 review
-    /// finding F1/F2: never silently deletes whatever now occupies a stale position instead).
+    /// finding F1/F2: never silently deletes whatever now occupies a stale position instead); 409 when
+    /// this write raced a DIFFERENT concurrent save to <c>Tts:Pronunciations</c> and lost (gh-#486) —
+    /// the exact "DELETE || PUT both 2xx, one edit vanished" probe the issue was filed from.
     /// </summary>
     /// <remarks>
     /// <paramref name="pattern"/>/<paramref name="word"/> bind as <see langword="string"/>? for the
@@ -195,14 +203,15 @@ public sealed class PronunciationsController(
         var targetPattern = pattern ?? "";
         var targetWord = word ?? "";
 
-        var declared = ReadStationRules();
+        var (declared, version) = await ReadStationRulesWithVersionAsync(ct);
         var targetIndex = FindDeclaredIndexByIdentity(declared, targetPattern, targetWord);
         if (targetIndex is null)
             return NotFound(NotFoundProblem(targetPattern, targetWord));
 
         var removed = declared[targetIndex.Value];
         declared.RemoveAt(targetIndex.Value);
-        await WriteStationRulesAsync(declared, ct);
+        if (await WriteStationRulesAsync(declared, version, ct) == SettingsWriteOutcome.Conflict)
+            return Conflict(VersionConflictProblem());
 
         logger.LogInformation(
             "Pronunciation rule removed pattern={Pattern} word={Word}",
@@ -334,8 +343,31 @@ public sealed class PronunciationsController(
         return rules.Where(rule => rule is not null).ToList();
     }
 
-    Task WriteStationRulesAsync(IReadOnlyList<PronunciationRule> rules, CancellationToken ct) =>
-        store.WriteAsync(SettingKey, PronunciationRuleJson.Serialize(rules), ct);
+    /// <summary>
+    /// <see cref="ReadStationRules"/> plus the SAME key's currently stored version (gh-#486) — the
+    /// read half of the version guard every write endpoint (Create/Update/Delete) pairs with its own
+    /// <see cref="WriteStationRulesAsync"/> call, close enough together in each request that the
+    /// version genuinely describes the rules just read. 0 when no <c>Tts:Pronunciations</c> row
+    /// exists yet (a fresh station) — <see cref="IStationSettingsStore.WriteIfVersionMatchesAsync"/>'s
+    /// own "no row" sentinel.
+    /// </summary>
+    async Task<(List<PronunciationRule> Rules, long Version)> ReadStationRulesWithVersionAsync(CancellationToken ct)
+    {
+        var rules = ReadStationRules();
+        var versions = await store.ReadVersionsAsync(ct);
+        return (rules, versions.GetValueOrDefault(SettingKey, 0));
+    }
+
+    /// <summary>
+    /// Writes the station's full declared rule set back to <c>Tts:Pronunciations</c>, guarded by
+    /// <paramref name="expectedVersion"/> (gh-#486) — <see cref="SettingsWriteOutcome.Conflict"/>
+    /// means another request already wrote this key since <paramref name="expectedVersion"/> was
+    /// read (the exact "DELETE || PUT both 2xx, one edit vanished" race the issue was filed from);
+    /// the caller returns 409 rather than let this write silently clobber it.
+    /// </summary>
+    Task<SettingsWriteOutcome> WriteStationRulesAsync(
+        IReadOnlyList<PronunciationRule> rules, long expectedVersion, CancellationToken ct) =>
+        store.WriteIfVersionMatchesAsync(SettingKey, PronunciationRuleJson.Serialize(rules), expectedVersion, ct);
 
     /// <summary>
     /// Finds the position in <paramref name="declared"/> whose RESOLVED (Pattern, Word) identity
@@ -387,6 +419,21 @@ public sealed class PronunciationsController(
         Status = StatusCodes.Status409Conflict,
         Title = "A pronunciation rule with this pattern and word already exists.",
         Detail = $"An existing station rule already matches pattern '{pattern}' word '{word}'.",
+    };
+
+    /// <summary>
+    /// The 409 body for a version-guard conflict (gh-#486) — distinguished from
+    /// <see cref="DuplicateRuleProblem"/>'s identity-collision 409 by
+    /// <see cref="SettingsProblemTypes.VersionConflict"/> so the admin UI can tell "another edit
+    /// landed first, refetch" apart from "this pattern/word is already taken, fix the field" without
+    /// parsing <see cref="ProblemDetails.Detail"/> text.
+    /// </summary>
+    static ProblemDetails VersionConflictProblem() => new()
+    {
+        Type   = SettingsProblemTypes.VersionConflict,
+        Status = StatusCodes.Status409Conflict,
+        Title  = "Pronunciation rules changed since you loaded them.",
+        Detail = "Another edit was saved to the station's pronunciation rules while this one was in flight. Refresh and try again.",
     };
 
     static ProblemDetails NotFoundProblem(string pattern, string word) => new()

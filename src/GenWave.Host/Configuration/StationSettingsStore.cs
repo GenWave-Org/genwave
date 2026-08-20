@@ -107,4 +107,61 @@ public sealed class StationSettingsStore : IStationSettingsStore
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
     }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// gh-#486: real version-checked write, overriding <see cref="IStationSettingsStore"/>'s default
+    /// (unconditional) implementation. Same allowlist guard, live-reload signal, and change event
+    /// <see cref="WriteAsync"/> fires on a successful write — a version-guarded save reaches the very
+    /// next render exactly like an unconditional one already does; only a <see cref="SettingsWriteOutcome.Conflict"/>
+    /// skips all three, since nothing was actually persisted.
+    /// </remarks>
+    public async Task<SettingsWriteOutcome> WriteIfVersionMatchesAsync(
+        string key, object value, long expectedVersion, CancellationToken cancellationToken = default)
+    {
+        if (!StationSettingsAllowlist.ByKey.ContainsKey(key))
+            throw new ArgumentException($"Key '{key}' is not on the station settings allowlist.", nameof(key));
+
+        var newVersion = await repository.WriteIfVersionMatchesAsync(key, value, expectedVersion, cancellationToken);
+        if (newVersion is null)
+            return SettingsWriteOutcome.Conflict;
+
+        source.BuiltProvider?.Reload();
+        events.Publish(new SettingChanged(key));
+        return SettingsWriteOutcome.Written;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// gh-#486. Same degrade-to-empty-on-DB-down posture as <see cref="ReadAllAsync"/> — a caller
+    /// reading no version for a key it wants to guard falls back to an unconditional write for that
+    /// key (see <see cref="IStationSettingsStore.WriteIfVersionMatchesAsync"/>'s own default-impl
+    /// remarks) rather than the settings page 500ing while Postgres is briefly down.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<string, long>> ReadVersionsAsync(CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+            return new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            var rows = await repository.ReadVersionsAsync(cancellationToken);
+
+            var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (key, version) in rows)
+            {
+                if (!StationSettingsAllowlist.ByKey.ContainsKey(key))
+                    continue;   // never surface a key that slipped through write-path guards
+
+                result[key] = version;
+            }
+
+            return result;
+        }
+        catch (DbException ex)
+        {
+            logger.LogWarning(ex, "Version read failed; treating as empty");
+            return new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
 }

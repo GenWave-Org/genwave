@@ -24,6 +24,7 @@ import "@testing-library/jest-dom/jest-globals";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { PronunciationRulesControl } from "../app/(authed)/settings/PronunciationRulesControl";
+import { SETTINGS_VERSION_CONFLICT_PROBLEM_TYPE } from "../app/(authed)/settings/settings-types";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -671,6 +672,53 @@ describe("Feature: editing a pronunciation rule in place", () => {
       expect(
         screen.getByText("An existing station rule already matches pattern 'Alpha' word 'Alpha'.")
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("Scenario (sad path): a version-guard conflict (gh-#486) — distinct from a duplicate identity", () => {
+    it("refreshes the list and toasts a stale-view message, never a row-level field message", async () => {
+      makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable(), {
+        status: 409,
+        body: {
+          type: SETTINGS_VERSION_CONFLICT_PROBLEM_TYPE,
+          detail: "Another edit was saved to the station's pronunciation rules while this one was in flight. Refresh and try again.",
+        },
+      }, getRow(200, [STATION_ROW]));
+      renderControl();
+      await waitForLoaded();
+
+      fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /save/i }));
+      });
+
+      // The SAME "stale, refetch" treatment the 404 case below gets — never the duplicate-identity
+      // 409's own row-level field message (the scenario immediately above this one).
+      expect(
+        await screen.findByText(/pronunciation rules changed in another tab/i)
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText("An existing station rule already matches pattern 'Alpha' word 'Alpha'.")
+      ).not.toBeInTheDocument();
+    });
+
+    it("issues the refetch (the list-reload half of 'refetch and tell the operator')", async () => {
+      const mockFetch = makeFetchMock(getRow(200, [STATION_ROW]), probeAvailable(), {
+        status: 409,
+        body: {
+          type: SETTINGS_VERSION_CONFLICT_PROBLEM_TYPE,
+          detail: "Another edit was saved to the station's pronunciation rules while this one was in flight. Refresh and try again.",
+        },
+      }, getRow(200, [STATION_ROW]));
+      renderControl();
+      await waitForLoaded();
+
+      fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /save/i }));
+      });
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(4));
     });
   });
 

@@ -834,12 +834,23 @@ public static class FeatureAdoptionVerifyRepair
             // The three probes T321 run 1 saw degrade to UNKNOWN, each reaching its ordinary
             // healthy-box verdict instead — proof the plumbing above actually lets compose render
             // (through the stub) rather than merely appearing in the logged argv.
+            //
+            // gh-#486 (db/38, a column-only migration — no new table) moved the migration-marker
+            // gap: the repo's real db/ max is now 38, but the marker (the newest CREATE TABLE
+            // migration, B2's own derivation) is still db/37, so the schema-migrations probe's OWN
+            // "ordinary" verdict is the honest gap report below, not a PASS — MakeScratchCheckout()
+            // copies the real db/ directory verbatim (this file's own remarks), so this scratch run
+            // sees the same db/38 the real repo does. Still proves the T321 plumbing fix: the T321
+            // bug's own symptom ("Could not reach the db service to check") is absent, and the gap
+            // report names db/37/db/38 by number — it could only do that by actually reaching and
+            // querying the stub through the env-file-carrying compose call this test exists to pin.
             Assert.True(
                 exitCode == 0 &&
-                stdOut.Contains("Schema is current through db/37", StringComparison.Ordinal) &&
+                stdOut.Contains("Can't verify past db/37 — db/38 adds no new table", StringComparison.Ordinal) &&
+                !stdOut.Contains("Could not reach the db service", StringComparison.Ordinal) &&
                 stdOut.Contains("No locally-built services in this box's compose config", StringComparison.Ordinal) &&
                 stdOut.Contains("None found for project 'genwave'", StringComparison.Ordinal),
-                $"expected the migrations/image-ages/orphans probes to reach their normal (non-UNKNOWN) branches; exit={exitCode} stdout:\n{stdOut}");
+                $"expected the migrations/image-ages/orphans probes to reach their normal (non-UNKNOWN, or honest-gap for schema-migrations) branches; exit={exitCode} stdout:\n{stdOut}");
         }
     }
 
@@ -1346,6 +1357,21 @@ public static class FeatureAdoptionVerifyRepair
             // proof that the real CLI actually accepts that flag there rather than merely
             // matching a scripted stub's own case pattern — do not simplify HealthyEnvValues'
             // composePath argument away.
+            //
+            // gh-#486 added db/38 (a column-only migration — no new table). Once the repo's real
+            // db/ max moves past the newest CREATE TABLE migration (db/37, this fact's own
+            // marker), verify_migrations() short-circuits to an early UNKNOWN gap report BEFORE
+            // ever touching docker (B2's own derivation, setup.sh's verify_migrations) — which
+            // would silently stop this fact from reaching the psql-as-role query it exists to
+            // prove at all. Runs from a SCRATCH checkout instead (MakeScratchCheckout(), the same
+            // copy-then-perturb shape ScenarioMigrationMarkerDerivation below already uses) with
+            // db/38 deleted back out, so the scratch db/'s own max stays AT its marker (db/37) and
+            // verify_migrations() still reaches the real query. WriteRealDbCompose still reads
+            // db/01+db/06 from the REAL repo root — those files are unaffected by this scratch
+            // perturbation and unrelated to which migration is the marker.
+            var checkoutRoot = MakeScratchCheckout();
+            File.Delete(Path.Combine(checkoutRoot, "db", "38-settings-version-migration.sh"));
+
             var repoRoot = RepoRoot();
             var projectName = $"genwave-hosttest-story346-{Guid.NewGuid():N}";
             var composePath = WriteRealDbCompose(repoRoot, projectName);
@@ -1364,7 +1390,7 @@ public static class FeatureAdoptionVerifyRepair
 
                 // No GW_DOCKER_CMD override — the REAL `docker` binary, resolved off PATH
                 // (MakeBinDirWithDocker), exactly as it runs on a real box.
-                var (_, stdOut, stdErr) = RunSetup(MakeBinDirWithDocker(), envFile, "",
+                var (_, stdOut, stdErr) = RunSetupInCheckout(checkoutRoot, MakeBinDirWithDocker(), envFile, "",
                     new Dictionary<string, string>());
 
                 Assert.True(

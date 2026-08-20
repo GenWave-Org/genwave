@@ -70,6 +70,16 @@ const THEME_KEY = "Station:Theme";
 /** {@link SettingsAreaTab.prefix} value `ttsTabExtra` (PLAN T145 review F3) mounts under —
  * `tabPrefixForKey`'s verbatim prefix for every `Tts:*` key, not the lowercased tab id. */
 const TTS_TAB_PREFIX = "Tts";
+
+/**
+ * Whole-document settings keys guarded by optimistic concurrency (gh-#486) — the two JSON-array
+ * keys the issue named (`Tts:Pronunciations`'s own raw fallback field here; its dedicated
+ * `/api/pronunciations` CRUD carries its own server-internal guard, see that controller's own
+ * remarks). A changed entry for one of these keys carries `expectedVersion` on the PUT batch
+ * (from the last GET/PUT response's own {@link SettingDto.version}); every other key is submitted
+ * exactly as it always was.
+ */
+const VERSION_GUARDED_KEYS = new Set<string>(["Tts:Corrections", "Tts:Pronunciations"]);
 const EMPTY_MAIN_SCOPE_ERROR =
   "Main rotation scope cannot be empty — the station would go silent.";
 const SAFE_SCOPE_EMPTY_CONFIRM_TITLE = "Save empty Station Imaging scope";
@@ -474,14 +484,49 @@ function initialValuesFrom(settings: SettingDto[]): Record<string, string> {
   return Object.fromEntries(settings.map((s) => [s.key, s.value]));
 }
 
-/** Diff current values against original; return only entries that changed. */
+/** Build the initial version-token map from the loaded settings (gh-#486) — `undefined` for a
+ * fixture/response that predates the field, so a guarded key with no known version simply skips
+ * the guard on its next save rather than throwing or fabricating a version. */
+function initialVersionsFrom(settings: SettingDto[]): Record<string, number | undefined> {
+  return Object.fromEntries(settings.map((s) => [s.key, s.version]));
+}
+
+/**
+ * Re-fetches the CURRENT settings (gh-#486's 409 recovery path: refetch and tell the operator
+ * their view was stale, never silently merge) — same shape/endpoint `page.tsx`'s own server-side
+ * load reads, called client-side here since this form only ever runs after that initial load.
+ * `null` on any failure — the 409 handler falls back to clearing the just-submitted keys'
+ * versions instead (the same "lose the guard, not the operator's other edits" degrade
+ * {@link handleSubmit}'s own malformed-PUT-response branch uses).
+ */
+async function fetchSettingsSnapshot(): Promise<SettingDto[] | null> {
+  try {
+    const resp = await fetch("/api/settings", { credentials: "include", cache: "no-store" });
+    if (!resp.ok) return null;
+    const raw: unknown = await resp.json();
+    return Array.isArray(raw) ? (raw as SettingDto[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Diff current values against original; return only entries that changed. A VERSION_GUARDED_KEYS
+ * entry carries `expectedVersion` (gh-#486, read from `versions`) when one is known — a stale save
+ * race with another editor then 409s instead of silently overwriting; every other key is submitted
+ * exactly as it always was, with no `expectedVersion` field at all.
+ */
 function changedEntries(
   original: Record<string, string>,
-  current: Record<string, string>
-): Array<{ key: string; value: string }> {
+  current: Record<string, string>,
+  versions: Record<string, number | undefined>
+): Array<{ key: string; value: string; expectedVersion?: number }> {
   return Object.entries(current)
     .filter(([key, value]) => value !== original[key])
-    .map(([key, value]) => ({ key, value }));
+    .map(([key, value]) => {
+      const expectedVersion = VERSION_GUARDED_KEYS.has(key) ? versions[key] : undefined;
+      return expectedVersion === undefined ? { key, value } : { key, value, expectedVersion };
+    });
 }
 
 /** Parse a JSON array-string like "[1,2]" into an array of numbers. Returns [] on any error. */
@@ -553,6 +598,13 @@ export function SettingsForm({
    */
   const [original, setOriginal] = useState<Record<string, string>>(() => initialValuesFrom(settings));
   const [values, setValues] = useState<Record<string, string>>(() => initialValuesFrom(settings));
+  /**
+   * The last-known version token per key (gh-#486) — seeded from the GET response and re-synced
+   * after every successful PUT (from that response's own fresh `SettingDto.version`, the SAME
+   * shape GET returns) so the NEXT save of a VERSION_GUARDED_KEYS key carries the version THIS
+   * save just produced, never a stale one. Re-baselined wholesale on a 409 refetch below.
+   */
+  const [versions, setVersions] = useState<Record<string, number | undefined>>(() => initialVersionsFrom(settings));
   const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
   /**
    * Per-field validation errors surfaced inline next to the relevant control. Populated when a
@@ -701,7 +753,7 @@ export function SettingsForm({
   async function handleSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
 
-    const changed = changedEntries(original, values);
+    const changed = changedEntries(original, values, versions);
     if (changed.length === 0) {
       setStatus({ kind: "noChanges" });
       return;
@@ -772,8 +824,60 @@ export function SettingsForm({
           ...prev,
           ...Object.fromEntries(changed.map((c) => [c.key, c.value])),
         }));
+        // gh-#486 — merge the just-written keys' fresh versions from the PUT response body (the
+        // SAME SettingDto shape GET returns) so the NEXT save of a version-guarded key carries the
+        // version THIS save just produced, not the one it started from. A malformed/non-array body
+        // (an old api during a rolling deploy) clears those keys' versions instead of leaving them
+        // stale — the next save of one simply skips the guard rather than false-conflicting with
+        // its own prior success. Computed OUTSIDE the setVersions updater (not inside it) — a
+        // throw from a `setState(updater)` callback runs during React's own render phase, past
+        // this try/catch's reach entirely.
+        let freshVersions: Record<string, number | undefined> | null = null;
+        try {
+          const updated: unknown = await resp.json();
+          if (Array.isArray(updated)) freshVersions = initialVersionsFrom(updated as SettingDto[]);
+        } catch {
+          // malformed body — freshVersions stays null, handled below
+        }
+        if (freshVersions !== null) {
+          const merged = freshVersions;
+          setVersions((prev) => ({ ...prev, ...merged }));
+        } else {
+          setVersions((prev) => {
+            const next = { ...prev };
+            for (const { key } of changed) delete next[key];
+            return next;
+          });
+        }
         setStatus({ kind: "idle" });
         toast.success("Settings saved.");
+        return;
+      }
+
+      if (resp.status === 409) {
+        // gh-#486 — the only way SettingsController.Put ever 409s: a version-guarded key
+        // (Tts:Corrections, Tts:Pronunciations) moved under this write, another editor saved
+        // first. "Do not silently merge" — refetch and re-baseline the WHOLE form to the server's
+        // current truth (discarding every other staged-but-unsaved edit in this same batch too,
+        // not only the conflicting key: this PUT is one page-wide batch, so "your view was stale"
+        // applies to the batch as a whole) and tell the operator to redo their edit.
+        setStatus({ kind: "idle" });
+        const fresh = await fetchSettingsSnapshot();
+        if (fresh !== null) {
+          setOriginal(initialValuesFrom(fresh));
+          setValues(initialValuesFrom(fresh));
+          setVersions(initialVersionsFrom(fresh));
+        } else {
+          // Refetch itself failed — at minimum stop trusting the versions this PUT raced on.
+          setVersions((prev) => {
+            const next = { ...prev };
+            for (const { key } of changed) delete next[key];
+            return next;
+          });
+        }
+        toast.error(
+          "Someone else saved changes to these settings while this was saving. Reloaded the latest values — redo your edit."
+        );
         return;
       }
 
@@ -867,10 +971,10 @@ export function SettingsForm({
 
   /**
    * gh-#144 — the same string diff Save submits, reduced to a key set so each tab can flag
-   * staged-but-unsaved work. Because it reads `changedEntries(original, values)` verbatim, a
-   * tab's dirty dot can never disagree with what "Save settings" will actually send.
+   * staged-but-unsaved work. Because it reads `changedEntries(original, values, versions)`
+   * verbatim, a tab's dirty dot can never disagree with what "Save settings" will actually send.
    */
-  const dirtyKeySet = new Set(changedEntries(original, values).map((entry) => entry.key));
+  const dirtyKeySet = new Set(changedEntries(original, values, versions).map((entry) => entry.key));
 
   return (
     <form onSubmit={(e) => { void handleSubmit(e); }} className="flex flex-col gap-6">
