@@ -66,9 +66,10 @@ namespace GenWave.Host.Crosstalk;
 /// <para>
 /// <b>PLAN T286 review F4 — a per-show cooldown after a discard.</b> <see cref="cooldownUntil"/>
 /// tracks, per show slug, the earliest time this worker will attempt that show again after its
-/// generation was discarded (not cancelled by a break window — that is retried the very next tick,
-/// off-window, and never counts against a show) — see <see cref="TickOnceAsync"/>'s own remarks for
-/// where it is read and written.
+/// generation was discarded (not cancelled by a break window — that never counts against THIS show's
+/// own cooldown, but SPEC F140.3 backs the worker off GLOBALLY for it instead, so the retry is
+/// off-window only AFTER that backoff delay clears, not the very next tick) — see
+/// <see cref="TickOnceAsync"/>'s own remarks for where it is read and written.
 /// </para>
 ///
 /// <para>
@@ -109,8 +110,10 @@ public sealed class CrosstalkStockWorker(
 
     /// <summary>
     /// PLAN T286 review F4: how long a show sits out after a DISCARD (the writer skipped, or the
-    /// assembler rejected — never a break-window cancellation, which is retried off-window the very
-    /// next tick regardless) before this worker attempts it again. At T283's paper-audition accept
+    /// assembler rejected — never a break-window cancellation, which never charges THIS show's own
+    /// cooldown; SPEC F140.3 backs the worker off GLOBALLY for that instead, so the next attempt — of
+    /// any show — waits out that delay first, not the very next tick) before this worker attempts it
+    /// again. At T283's paper-audition accept
     /// rate (~17%), an unthrottled below-target show would otherwise mean near-continuous LLM traffic
     /// every <see cref="TickInterval"/> — this worker is the one place SPEC F127.7's own "opportunistic,
     /// off the clock" framing is actually paced. 75s: comfortably longer than one whole TickInterval
@@ -127,9 +130,36 @@ public sealed class CrosstalkStockWorker(
     /// SAME show's next successful generation; naturally stale (and so ignored, never explicitly
     /// cleared) once a different show comes on air, since <see cref="DecideAttempt"/> only ever checks
     /// the CURRENTLY on-air show's own slug and <see cref="DiscardCooldown"/> is far shorter than any
-    /// realistic gap before the same show returns.
+    /// realistic gap before the same show returns. Per-show because a discard is a QUALITY problem
+    /// specific to that one show's own copy — see <see cref="pacing"/>'s own remarks for why its
+    /// sibling gate is scoped the opposite way.
     /// </summary>
     readonly Dictionary<string, DateTimeOffset> cooldownUntil = new(StringComparer.Ordinal);
+
+    /// <summary>SPEC F140 (STORY-354, PLAN T328) — the gap-aware runway gate, rolling generation-time
+    /// estimate, and abandon backoff, extracted to <see cref="CrosstalkStockPacing"/> (this class's own
+    /// "logic stays in a framework-free collaborator" precedent) so <see cref="TickOnceAsync"/> stays a
+    /// sequence of guard clauses rather than growing a second pacing state machine inline. Mutated only
+    /// from <see cref="TickOnceAsync"/>, same single-writer posture as <see cref="cooldownUntil"/>.
+    /// GLOBAL (one instance, no per-show key), unlike <see cref="cooldownUntil"/>: an abandon is
+    /// evidence about the SHARED downstream resource every show's attempt draws from equally (the
+    /// single fenced ollama instance SPEC F140's own motivation names), not about the show that
+    /// happened to be on air when the watchdog fired — so it is equally predictive of contention for
+    /// whichever show is on air the next tick, regardless of slug.</summary>
+    readonly CrosstalkStockPacing pacing = new(log, TickInterval);
+
+    /// <summary>Test-observable surface (PLAN T328) — a spec drives real ticks through this worker and
+    /// reads this count directly; internal, with NO live-daemon reader (round-2 review finding F2 —
+    /// the previous remarks here claimed otherwise, which is unsatisfiable for an internal member).
+    /// The operator-facing surface for the SAME tally is the "after {RunwaySkips} runway skips"
+    /// fragment folded into <see cref="CrosstalkStockPacing"/>'s own backoff-engage Information line
+    /// — see <see cref="CrosstalkStockPacing.RunwaySkips"/>'s own remarks.</summary>
+    internal int RunwaySkipCount => pacing.RunwaySkips;
+
+    /// <summary>Test-observable surface (PLAN T328) — the current rolling generation-time estimate
+    /// (SPEC F140.2), read directly rather than re-derived, so a fact can observe it move without
+    /// reaching into <see cref="pacing"/>'s own private state.</summary>
+    internal TimeSpan EstimatedGenerationTime => pacing.Estimate;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -164,19 +194,47 @@ public sealed class CrosstalkStockWorker(
     /// discard), never decides pacing itself, so the decider stays the one place SPEC F127.7's
     /// "opportunistic, off the clock" cadence is actually enforced.
     /// </para>
+    /// <para>
+    /// SPEC F140 (PLAN T328): <see cref="pacing"/> is consulted (backoff) and read+written (runway,
+    /// completion/abandon recording) HERE too, for the identical single-writer reason — never inside
+    /// <see cref="DecideAttempt"/> (which stays a pure function of its own parameters, no side effects)
+    /// or <see cref="GenerateAndAssembleAsync"/> (which only reports outcomes, same as it already does
+    /// for <see cref="cooldownUntil"/>).
+    /// </para>
     /// </summary>
     internal async Task TickOnceAsync(CancellationToken ct)
     {
         try
         {
+            var now = timeProvider.GetUtcNow();
+
+            // SPEC F140.3: a backed-off tick does nothing at all — no schedule/now-playing read, no
+            // log, no count (this type's own remarks: "log nothing per skipped tick" covers this too,
+            // not only the runway skip below).
+            if (pacing.IsBackedOff(now))
+                return;
+
             var onAir = scheduleResolver.TryGetCurrent();
             var nowPlayingSnapshot = nowPlaying.GetSnapshot(SingleStation.IdString);
-            var now = timeProvider.GetUtcNow();
             var renderBudget = TimeSpan.FromSeconds(ttsOptions.CurrentValue.RenderBudgetSeconds);
 
             if (DecideAttempt(planner, onAir, nowPlayingSnapshot, now, onAirRenderGate.InFlight, renderBudget, cooldownUntil)
                 is not { } attempt)
             {
+                return;
+            }
+
+            // SPEC F140.1: clear runway to the next break seam — the instant CrosstalkBreakWindow's own
+            // end-of-item margin will re-engage (EstimatedOnAirEndsAt minus that SAME Margin, never a
+            // second constant invented here) — must comfortably clear the rolling generation-time
+            // estimate, or this attempt is nearly certain to be abandoned mid-flight for nothing
+            // (gh-#546's own "~10 abandoned generations/day"). DecideAttempt having already passed means
+            // the break window is CLOSED right now, so EstimatedOnAirEndsAt is never null here — the
+            // null-guarded form below is defensive only.
+            if (EstimatedOnAirEndsAt(nowPlayingSnapshot) is not { } endsAt ||
+                endsAt - CrosstalkBreakWindow.Margin - now < pacing.Estimate)
+            {
+                pacing.RecordRunwaySkip();
                 return;
             }
 
@@ -191,12 +249,16 @@ public sealed class CrosstalkStockWorker(
             if (await planner.TryCastAsync(attempt.HostBlock, week, ct) is not { } cast)
                 return;
 
+            var attemptStartedAt = timeProvider.GetUtcNow();
             var outcome = await GenerateAndAssembleAsync(attempt, cast, ct);
+            RecordPacingOutcome(outcome, attemptStartedAt);
+
             if (outcome.Assembled is not { } assembled)
             {
                 // PLAN T286 review F4: only a genuine discard costs the show a cooldown — a break
-                // window opening mid-flight is retried the very next tick, off-window, and must not
-                // be conflated with the accept-rate problem the cooldown exists to pace.
+                // window opening mid-flight instead engages SPEC F140.3's own GLOBAL backoff (pacing,
+                // not cooldownUntil), off-window only once that delay clears, and must not be
+                // conflated with the accept-rate problem the per-show cooldown exists to pace.
                 //
                 // The base time is read HERE, at the write, not the tick-start `now` above (PLAN
                 // T286 review finding) — generation (the script writer's HTTP round trip, the
@@ -241,6 +303,36 @@ public sealed class CrosstalkStockWorker(
         }
     }
 
+    /// <summary>SPEC F140.2: every ATTEMPTED generation that reached <see cref="GenerateAndAssembleAsync"/>
+    /// teaches <see cref="pacing"/> something — a completed attempt (assembled OR a genuine discard)
+    /// is a real sample of how long generation takes; an abandoned one (the watchdog cancelled it
+    /// mid-flight) is SPEC F140.2's own "the estimate learns from every cancellation". Elapsed is
+    /// measured from immediately before <see cref="GenerateAndAssembleAsync"/> was called — the script
+    /// writer's HTTP round trip plus the assembler's per-line synth/mix, the SAME wall-clock span
+    /// <see cref="DiscardCooldown"/>'s own remarks already reason about for the identical call.
+    /// <para>
+    /// Round-2 review finding F3 (production bug): <see cref="GenerationOutcome.GenerationAttempted"/>
+    /// false — a pre-flight refusal that resolved in milliseconds without ever running a generation —
+    /// leaves <see cref="pacing"/> completely untouched. Blending a near-zero elapsed time in via the
+    /// 50/50 blend would erode the rolling estimate toward zero on every tick of an outage (e.g.
+    /// <c>Llm:Endpoint</c> unset, or ollama refusing connections), exactly when the runway gate most
+    /// needs an honest number.
+    /// </para>
+    /// </summary>
+    void RecordPacingOutcome(GenerationOutcome outcome, DateTimeOffset attemptStartedAt)
+    {
+        if (!outcome.GenerationAttempted)
+            return;
+
+        var now = timeProvider.GetUtcNow();
+        var elapsed = now - attemptStartedAt;
+
+        if (outcome.CancelledByBreakWindow)
+            pacing.RecordAbandoned(elapsed, now);
+        else
+            pacing.RecordCompleted(elapsed);
+    }
+
     /// <summary>
     /// Runs <see cref="CrosstalkScriptWriter.WriteExchangeAsync"/> then
     /// <see cref="CrosstalkAssembler.AssembleAsync"/> under a worker-owned
@@ -268,7 +360,16 @@ public sealed class CrosstalkStockWorker(
 
             var writeResult = await scriptWriter.WriteExchangeAsync(request, workCts.Token);
             if (writeResult is not CrosstalkWriteResult.Accepted accepted)
-                return GenerationOutcome.Discarded;
+            {
+                // SPEC F140 review finding F3: a pre-flight refusal (GenerationAttempted: false —
+                // see CrosstalkWriteResult.Discarded's own remarks) never ran a generation at all, so
+                // it is reported distinctly from a genuine post-round-trip discard — RecordPacingOutcome
+                // reads GenerationOutcome.GenerationAttempted to decide whether the elapsed time is a
+                // sample worth blending into the rolling estimate.
+                return writeResult is CrosstalkWriteResult.Discarded { GenerationAttempted: false }
+                    ? GenerationOutcome.DiscardedPreFlight
+                    : GenerationOutcome.Discarded;
+            }
 
             var assembleResult = await assembler.AssembleAsync(
                 new CrosstalkAssemblyRequest(accepted.Script, cast.HostCard, cast.NeighborCard), workCts.Token);

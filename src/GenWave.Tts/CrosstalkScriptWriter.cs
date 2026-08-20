@@ -99,7 +99,14 @@ public sealed class CrosstalkScriptWriter(
 
         var cfg = llmOptions.CurrentValue;
         if (string.IsNullOrEmpty(cfg.Endpoint))
-            return Discard("Llm:Endpoint is not configured", personaName, startedAt, mode, systemPrompt: null, userPrompt: null);
+        {
+            // SPEC F140 review finding F3: this is the archetypal pre-flight refusal — zero I/O,
+            // resolves in microseconds — so it carries GenerationAttempted: false (see
+            // CrosstalkWriteResult.Discarded's own remarks for why a pacing caller cares).
+            return Discard(
+                "Llm:Endpoint is not configured", personaName, startedAt, mode, systemPrompt: null, userPrompt: null,
+                generationAttempted: false);
+        }
 
         var durationTargetSeconds = crosstalkOptions.CurrentValue.DurationTargetSeconds;
 
@@ -179,13 +186,23 @@ public sealed class CrosstalkScriptWriter(
         catch (Exception ex)
         {
             var (outcome, detail) = LlmCopyWriter.ClassifyForRing(ex);
+
+            // SPEC F140 review finding F3: an HttpRequestException with no StatusCode is .NET's own
+            // signal that no response was ever received (a connect refusal, DNS failure, TLS
+            // failure — thrown by SendAsync itself, before EnsureSuccessStatusCode ever runs) —
+            // milliseconds, no generation attempted. Every other fault reaching this catch block
+            // (a timeout waiting the full Llm:TimeoutSeconds, a non-2xx status AFTER a response
+            // arrived, a malformed body) represents genuine wall-clock time spent on a real attempt,
+            // so it keeps GenerationAttempted's own default of true.
+            var generationAttempted = ex is not HttpRequestException { StatusCode: null };
+
             callRing.Record(
                 personaName, systemPrompt, userPrompt, response: null, startedAt, ElapsedMs(startedAt),
                 outcome, detail, mode, LlmCallKind.Crosstalk);
             logger.LogInformation(
                 "Crosstalk exchange discarded (persona: {PersonaName}): {Detail}",
                 personaName.ReplaceLineEndings(" "), detail.ReplaceLineEndings(" "));
-            return new CrosstalkWriteResult.Discarded(detail);
+            return new CrosstalkWriteResult.Discarded(detail, generationAttempted);
         }
     }
 
@@ -209,7 +226,7 @@ public sealed class CrosstalkScriptWriter(
     /// </summary>
     CrosstalkWriteResult.Discarded Discard(
         string reason, string personaName, DateTimeOffset startedAt, DegradationMode mode,
-        string? systemPrompt, string? userPrompt, string? raw = null)
+        string? systemPrompt, string? userPrompt, string? raw = null, bool generationAttempted = true)
     {
         if (systemPrompt is not null)
         {
@@ -221,7 +238,7 @@ public sealed class CrosstalkScriptWriter(
         logger.LogInformation(
             "Crosstalk exchange discarded (persona: {PersonaName}): {Reason}",
             personaName.ReplaceLineEndings(" "), reason.ReplaceLineEndings(" "));
-        return new CrosstalkWriteResult.Discarded(reason);
+        return new CrosstalkWriteResult.Discarded(reason, generationAttempted);
     }
 
     long ElapsedMs(DateTimeOffset startedAt) => (long)(timeProvider.GetUtcNow() - startedAt).TotalMilliseconds;
