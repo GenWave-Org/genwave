@@ -45,7 +45,6 @@ public static class FeatureAcceptanceGate02LevelMatchingRealKokoro
     // Constants shared across scenarios
     // -----------------------------------------------------------------------
 
-    const string KokoroBaseUrl = "http://127.0.0.1:18880";
     const string Voice = "af_heart";
     const double TargetLufs = -16.0;
     const double CeilingDbtp = -1.0;
@@ -72,11 +71,12 @@ public static class FeatureAcceptanceGate02LevelMatchingRealKokoro
     // Shared segment render helper (used by the Kokoro collection scenarios)
     // -----------------------------------------------------------------------
 
-    static async Task<MediaItem> RenderSegmentAsync(string cacheRoot, CancellationToken ct)
+    static async Task<MediaItem> RenderSegmentAsync(string cacheRoot, string kokoroBaseUrl, CancellationToken ct)
     {
         var ttsOptionsValue = new TtsOptions
         {
-            Endpoint  = KokoroBaseUrl,
+            // The fixture's discovered per-run endpoint (gh-#602) — never a fixed test port.
+            Endpoint  = kokoroBaseUrl,
             Format    = "wav",
             CacheRoot = cacheRoot,
         };
@@ -147,7 +147,7 @@ public static class FeatureAcceptanceGate02LevelMatchingRealKokoro
         {
             cacheDir = System.IO.Directory.CreateTempSubdirectory("genwave-t016-");
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-            renderedItem = await RenderSegmentAsync(cacheDir.FullName, cts.Token);
+            renderedItem = await RenderSegmentAsync(cacheDir.FullName, fixture.BaseUrl, cts.Token);
         }
 
         public Task DisposeAsync()
