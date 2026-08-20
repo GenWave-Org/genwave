@@ -760,7 +760,9 @@ public static class FeatureHeteronymsSaidRight
             // sibling assertion below (review finding A).
             var (piperRequests, _) = await RunThroughPiperFallbackAsync();
 
-            Assert.Equal(Copy, Assert.Single(piperRequests));
+            // The wire carries the gh-#541-flattened copy — the claim here is only that no
+            // markup token reached Piper, never the casing of the words around it.
+            Assert.Equal("that was macleod spinning something special for us.", Assert.Single(piperRequests));
         }
 
         [Fact]

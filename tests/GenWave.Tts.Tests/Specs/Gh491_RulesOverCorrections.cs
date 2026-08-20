@@ -50,7 +50,7 @@ public static class FeatureGh491RulesOverCorrections
             {
                 await normalizer.SynthesizeAsync(ContextWithRule("MacLeod"), CancellationToken.None);
 
-                Assert.Contains("MacLeod", inner.LastText, StringComparison.Ordinal);
+                Assert.Contains("macleod", inner.LastText, StringComparison.Ordinal);
             }
             finally
             {
@@ -70,7 +70,7 @@ public static class FeatureGh491RulesOverCorrections
             {
                 await normalizer.SynthesizeAsync(ContextWithRule("macleod"), CancellationToken.None);
 
-                Assert.Contains("MacLeod", inner.LastText, StringComparison.Ordinal);
+                Assert.Contains("macleod", inner.LastText, StringComparison.Ordinal);
             }
             finally
             {
@@ -143,7 +143,7 @@ public static class FeatureGh491RulesOverCorrections
             {
                 await normalizer.SynthesizeAsync(context, CancellationToken.None);
 
-                Assert.Equal("Gee-Wave presents: MacLeod.", inner.LastText);
+                Assert.Equal("gee-wave presents macleod.", inner.LastText);
             }
             finally
             {
@@ -164,7 +164,7 @@ public static class FeatureGh491RulesOverCorrections
             {
                 await normalizer.SynthesizeAsync(new TtsRenderContext(Text, "af_heart", Kind: null), CancellationToken.None);
 
-                Assert.Equal("Now playing: Maa-cloud.", inner.LastText);
+                Assert.Equal("now playing maa-cloud.", inner.LastText);
             }
             finally
             {
@@ -188,7 +188,7 @@ public static class FeatureGh491RulesOverCorrections
             {
                 await normalizer.SynthesizeAsync(context, CancellationToken.None);
 
-                Assert.Equal("Next: Maa-cloud Dunkin.", inner.LastText);
+                Assert.Equal("next maa-cloud dunkin.", inner.LastText);
             }
             finally
             {

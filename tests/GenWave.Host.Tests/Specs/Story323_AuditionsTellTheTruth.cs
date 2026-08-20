@@ -298,7 +298,7 @@ public static class FeatureAuditionsTellTheTruth
             // Then the fake engine's captured request carries the rule's IPA markup — the context
             // overload, not the context-less bypass.
             Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
-            Assert.Contains("[MacLeod](/macleodIpa/)", RequestInput(bodies));
+            Assert.Contains("[macleod](/macleodIpa/)", RequestInput(bodies));
         }
 
         [Fact]
@@ -317,7 +317,7 @@ public static class FeatureAuditionsTellTheTruth
 
             Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
             var input = RequestInput(bodies);
-            Assert.True(input.Contains("[Zenith](/zenithIpa/)") && input.Contains("[Nova](/novaIpa/)"));
+            Assert.True(input.Contains("[zenith](/zenithIpa/)") && input.Contains("[nova](/novaIpa/)"));
         }
     }
 
@@ -363,7 +363,7 @@ public static class FeatureAuditionsTellTheTruth
             // Then the candidate applies on top of the resolved merge — the editor auditions the
             // exact rule being authored, before saving.
             Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
-            Assert.Contains("[MacLeod](/candidateIpa/)", RequestInput(bodies));
+            Assert.Contains("[macleod](/candidateIpa/)", RequestInput(bodies));
         }
 
         [Fact]

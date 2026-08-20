@@ -208,7 +208,7 @@ public static class FeatureCorrectionsLiveWiring
 
             // Then the correction reached the engine — no restart, just the PUT above (F68.5).
             Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
-            Assert.Equal("Coming up, a deep cut from Muh-cloud.", engine.LastText);
+            Assert.Equal("coming up a deep cut from muh-cloud.", engine.LastText);
         }
     }
 

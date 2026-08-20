@@ -42,7 +42,7 @@ public static class FeatureSpeechCorrectionProviderDegrade
         {
             var provider = new SpeechCorrectionProvider(options, logger);
             var result = SpeechText.Normalize("A deep cut from MacLeod.", provider.Current);
-            Assert.Equal("A deep cut from MacLeod.", result);
+            Assert.Equal("a deep cut from macleod.", result);
         }
     }
 }
