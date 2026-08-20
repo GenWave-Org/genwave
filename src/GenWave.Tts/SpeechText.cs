@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace GenWave.Tts;
@@ -8,14 +9,17 @@ namespace GenWave.Tts;
 /// TTS (SPEC F68). Pure and static: no I/O, no settings reads, zero non-BCL dependencies —
 /// corrections are passed in by the caller. Passes run in a fixed order: think-strip, then
 /// markdown strip, then HTML-entity decode, then think-strip again, then operator corrections, then
-/// digit-anchored unit expansion, then entity-safe <c>&amp;</c>-to-"and", then whitespace collapse
-/// (F68.2). Think-strip runs first because nothing downstream should ever process leaked reasoning
-/// text; markdown runs before entity decode so a bolded degree symbol still reaches the
-/// unit-expansion pass; think-strip runs a second time immediately after entity decode because an
-/// HTML-encoded <c>&amp;lt;think&amp;gt;</c> block only becomes a literal tag at that point — the
-/// first pass never saw it (F68.3); operator corrections run after cleanup (so a rule matches the
-/// readable text an operator sees in admin) and before the built-in expansions (so a correction can
-/// pre-empt one); whitespace collapse runs last to tidy whatever the earlier passes left behind.
+/// digit-anchored unit expansion, then entity-safe <c>&amp;</c>-to-"and", then the speakability
+/// flatten, then whitespace collapse (F68.2). Think-strip runs first because nothing downstream
+/// should ever process leaked reasoning text; markdown runs before entity decode so a bolded degree
+/// symbol still reaches the unit-expansion pass; think-strip runs a second time immediately after
+/// entity decode because an HTML-encoded <c>&amp;lt;think&amp;gt;</c> block only becomes a literal
+/// tag at that point — the first pass never saw it (F68.3); operator corrections run after cleanup
+/// (so a rule matches the readable text an operator sees in admin) and before the built-in
+/// expansions (so a correction can pre-empt one); the flatten runs after every pass that authors or
+/// rewrites words (gh-#541 — see <see cref="FlattenForSpeech"/> for the ruling and its three
+/// deliberate survivors) so nothing can re-introduce the punctuation and casing it removes;
+/// whitespace collapse runs last to tidy whatever the earlier passes left behind.
 /// </summary>
 public static partial class SpeechText
 {
@@ -33,8 +37,9 @@ public static partial class SpeechText
         var corrected = corrections.Apply(decoded, out _);
         var expanded = ExpandUnits(corrected);
         var withAnd = expanded.Replace("&", " and ");
+        var flattened = FlattenForSpeech(withAnd);
 
-        return CollapseWhitespace(withAnd);
+        return CollapseWhitespace(flattened);
     }
 
     /// <summary>
@@ -113,6 +118,81 @@ public static partial class SpeechText
     }
 
     /// <summary>
+    /// The speakability flatten (gh-#541, subsuming gh-#292's comma-vocative and gh-#432's
+    /// mid-sentence-capitals pauses): both pinned engines read punctuation and casing as prosody
+    /// cues and stumble on exactly the marks grammatically correct copy is full of, so booth copy
+    /// is flattened to what the voice can actually speak — lowercase words, digits, and sentence
+    /// enders. Dean's gh-#541 ruling ("ToLower and discard anything that isn't a-z") is applied
+    /// with three deliberate survivors, each because removal would be WORSE on air than a pause:
+    /// <list type="bullet">
+    /// <item>Sentence enders (<c>.</c> <c>!</c> <c>?</c>) — <see cref="KokoroPauseMarkup"/>'s
+    /// sentence-pause splice (gh-#116) and the blurb cue analyzer both key off them; dropping them
+    /// collapses all prosody into one breathless run. Runs collapse to their first mark and
+    /// ellipses become plain spaces — an ellipsis is a pause instruction, the exact thing this
+    /// pass exists to remove.</item>
+    /// <item>Digits — "76 degrees" with the 76 discarded is mangled copy, and the unit expansion
+    /// one pass earlier is digit-anchored. HOW an engine reads a number aloud is gh-#211's lexicon
+    /// problem, not a character-class one.</item>
+    /// <item>Intra-word marks — a mark with a letter or digit on BOTH sides is identity, not
+    /// prosody: "we'll" stripped to "well" airs a different word, and the F68 survival law pins
+    /// stylized names ("Ke$ha", "AC/DC", "P!nk", snake_case) through this chokepoint — a raw a-z
+    /// filter would rename them on air. Loose marks (quoting: <c>'iceberg'</c>; elision:
+    /// <c>comin'</c>; the spaced pause-dash — all gh-#541 exhibits) are exactly the prosody cues
+    /// the ruling removes. The one amendment this pass makes to the survival law is case: names
+    /// flatten to lowercase like every other word, because casing is precisely gh-#432's pause
+    /// trigger and neither engine spells a name back out loud.</item>
+    /// </list>
+    /// Accents fold to their base letters first (é → e) so a name is never silently truncated the
+    /// way a raw a-z filter would truncate it. <c>[...]</c>-shaped speech-markup tokens (with an
+    /// optional simple <c>(...)</c> annotation — the <see cref="PiperSpeechMarkup"/> vocabulary)
+    /// pass through VERBATIM: authored segments and operator corrections may legally carry
+    /// <c>[pause:Ns]</c> or <c>[word](/ipa/)</c> this far down, and flattening a directive turns
+    /// it into spoken garbage. A nested-paren annotation (<c>[x](/mə(k)laʊd/)</c>) is preserved
+    /// only through its first balanced paren — accepted limitation, matching real producers, which
+    /// never nest (see <see cref="KokoroSpeechMarkup"/>).
+    /// </summary>
+    internal static string FlattenForSpeech(string text)
+    {
+        var result = new StringBuilder(text.Length);
+        var cursor = 0;
+
+        foreach (Match span in MarkupSpanRx().Matches(text))
+        {
+            result.Append(FlattenSegment(text[cursor..span.Index]));
+            result.Append(span.Value);
+            cursor = span.Index + span.Length;
+        }
+
+        result.Append(FlattenSegment(text[cursor..]));
+        return result.ToString();
+    }
+
+    private static string FlattenSegment(string text)
+    {
+        // Accent fold before anything case-sensitive: decompose, drop the combining marks, and
+        // recompose what remains — "Beyoncé" reaches the residual filter as "beyonce", a name,
+        // not "beyonc", a truncation.
+        var folded = CombiningMarkRx().Replace(text.Normalize(NormalizationForm.FormD), string.Empty)
+            .Normalize(NormalizationForm.FormC);
+
+        // Typographic variants map onto the ASCII mark that carries their keep-rule below —
+        // a curly apostrophe in "we’ll" must survive exactly like the straight one.
+        var mapped = folded
+            .Replace('‘', '\'').Replace('’', '\'')
+            .Replace('–', '-').Replace('—', '-');
+
+        var lowered = mapped.ToLowerInvariant();
+        var noEllipses = EllipsisRx().Replace(lowered, " ");
+        var singleEnders = EnderRunRx().Replace(noEllipses, "$1");
+        var noClauseMarks = ClauseMarkRx().Replace(singleEnders, " ");
+        var filtered = LooseMarkRx().Replace(noClauseMarks, " ");
+
+        // Re-attach an ender orphaned by a removal to its word ("iceberg ." → "iceberg.") so the
+        // engines never receive a floating mark to stumble on.
+        return OrphanedEnderRx().Replace(filtered, "$1");
+    }
+
+    /// <summary>
     /// Collapses every run of whitespace to one space and trims the ends — the exact rule every
     /// caller in this assembly that needs whitespace tidied after a strip pass must use, so it
     /// never has to be re-asserted or re-implemented elsewhere (<see cref="PiperSpeechMarkup.Strip"/>
@@ -179,4 +259,44 @@ public static partial class SpeechText
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespaceRx();
+
+    // A [...]-shaped speech-markup token plus its optional simple (...) annotation — the exact
+    // adjacency PiperSpeechMarkup recognises (at most one non-newline space between ] and the
+    // opening paren). Deliberately non-nesting on both sides: real producers never nest (see
+    // FlattenForSpeech remarks), and a conservative match here only means a pathological token
+    // gets flattened instead of preserved — never that prose is wrongly skipped.
+    [GeneratedRegex(@"\[[^\[\]]*\](?: ?\([^()]*\))?")]
+    private static partial Regex MarkupSpanRx();
+
+    // Combining marks left by FormD decomposition — removing them IS the accent fold (é -> e).
+    [GeneratedRegex(@"\p{Mn}")]
+    private static partial Regex CombiningMarkRx();
+
+    // An ellipsis in either spelling ("..." or the single … glyph) is a pause instruction, not a
+    // sentence ender — it becomes a plain space (see FlattenForSpeech).
+    [GeneratedRegex(@"\.{2,}|…+")]
+    private static partial Regex EllipsisRx();
+
+    // "what?!" / "no!!!" -> the first mark speaks for the run.
+    [GeneratedRegex(@"([.!?])[.!?]+")]
+    private static partial Regex EnderRunRx();
+
+    // Clause punctuation — the gh-#292/#303 stumble marks. Commas fall here by Dean's gh-#541
+    // ruling: the prompt-side ban (Issue303_CommaDiscipline) asks the model nicely; this enforces.
+    [GeneratedRegex(@"[,;:]")]
+    private static partial Regex ClauseMarkRx();
+
+    // The intra-word-survivor rule in one expression: any mark outside the speakable alphabet
+    // (words, digits, whitespace, sentence enders) that is missing a letter or digit on either
+    // side is loose — prosody, not identity — and becomes a space. What this leaves behind is by
+    // construction intra-word ("we'll", "ke$ha", "ac/dc", "brass-and-glass", snake_case) and is
+    // kept verbatim: renaming a stylized artist on air is worse than any pause (the F68 survival
+    // law, amended only for case — see FlattenForSpeech). Lookarounds read the ORIGINAL text, so
+    // one loose mark in a run condemns its neighbours the way "-'" after a word falls together.
+    [GeneratedRegex(@"(?<![a-z0-9])[^a-z0-9\s.!?]+|[^a-z0-9\s.!?]+(?![a-z0-9])")]
+    private static partial Regex LooseMarkRx();
+
+    // "iceberg ." -> "iceberg." — an ender orphaned by a removal re-attaches to its word.
+    [GeneratedRegex(@"\s+([.!?])")]
+    private static partial Regex OrphanedEnderRx();
 }

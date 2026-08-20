@@ -212,7 +212,7 @@ public static class FeatureCorrectionsObservability
                 "/api/tts/preview",
                 new { text = "Coming up, a deep cut from MacLeod.", voice = "af_heart" });
             Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
-            Assert.Equal("Coming up, a deep cut from Muh-cloud.", engine.LastText);
+            Assert.Equal("coming up a deep cut from muh-cloud.", engine.LastText);
 
             // Then an Information log line naming the rule exists (SPEC F68.7 as amended by
             // F97.5/F100.1, PLAN T142) — the level is pinned here, not just the message content,

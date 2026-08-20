@@ -6,6 +6,9 @@
 // into the SAME escaped, boundary-anchored, case-insensitive, timeout-guarded chokepoint pattern
 // every context-free rule already uses. Back-compat is the headline contract: a rule that carries
 // no context parses, matches, merges, and fingerprints exactly as it did before this feature.
+// (Expected strings are post-flatten — gh-#541 lowercases booth copy and removes clause marks
+// after corrections run; each scenario's claim is about the RULE firing or not, which the
+// flatten never disturbs.)
 
 using System.Text.Json;
 using Xunit;
@@ -24,21 +27,21 @@ public static class FeatureContextAwareCorrections
         public void FiresOnlyWhereTheContextHolds()
         {
             var result = SpeechText.Normalize("Time to wind down after a strong wind tonight.", rules);
-            Assert.Equal("Time to wynd down after a strong wind tonight.", result);
+            Assert.Equal("time to wynd down after a strong wind tonight.", result);
         }
 
         [Fact]
         public void EveryAlternativeCounts()
         {
             var result = SpeechText.Normalize("We wind up the show soon.", rules);
-            Assert.Equal("We wynd up the show soon.", result);
+            Assert.Equal("we wynd up the show soon.", result);
         }
 
         [Fact]
         public void DoesNotFireWithoutTheContext()
         {
             var result = SpeechText.Normalize("The wind was howling.", rules);
-            Assert.Equal("The wind was howling.", result);
+            Assert.Equal("the wind was howling.", result);
         }
 
         [Fact]
@@ -46,21 +49,21 @@ public static class FeatureContextAwareCorrections
         {
             // "downtown" must not satisfy "followed by down" — same \b discipline as From itself.
             var result = SpeechText.Normalize("They wind downtown streets.", rules);
-            Assert.Equal("They wind downtown streets.", result);
+            Assert.Equal("they wind downtown streets.", result);
         }
 
         [Fact]
         public void MatchAndContextAreCaseInsensitive()
         {
             var result = SpeechText.Normalize("WIND DOWN with us.", rules);
-            Assert.Equal("wynd DOWN with us.", result);
+            Assert.Equal("wynd down with us.", result);
         }
 
         [Fact]
         public void PunctuationBetweenMatchAndContextIsAllowed()
         {
             var result = SpeechText.Normalize("Your wind-down mix starts now.", rules);
-            Assert.Equal("Your wynd-down mix starts now.", result);
+            Assert.Equal("your wynd-down mix starts now.", result);
         }
 
         [Fact]
@@ -68,7 +71,7 @@ public static class FeatureContextAwareCorrections
         {
             // "followed by down" must not reach across a full stop into the next sentence.
             var result = SpeechText.Normalize("Feel that wind. Down the coast it is worse.", rules);
-            Assert.Equal("Feel that wind. Down the coast it is worse.", result);
+            Assert.Equal("feel that wind. down the coast it is worse.", result);
         }
     }
 
@@ -81,14 +84,14 @@ public static class FeatureContextAwareCorrections
         public void FiresOnlyWhereTheContextHolds()
         {
             var result = SpeechText.Normalize("Spin that record while we record the show.", rules);
-            Assert.Equal("Spin that wreckerd while we record the show.", result);
+            Assert.Equal("spin that wreckerd while we record the show.", result);
         }
 
         [Fact]
         public void DoesNotFireAtTextStartWithoutTheContext()
         {
             var result = SpeechText.Normalize("Record this moment.", rules);
-            Assert.Equal("Record this moment.", result);
+            Assert.Equal("record this moment.", result);
         }
 
         [Fact]
@@ -96,7 +99,7 @@ public static class FeatureContextAwareCorrections
         {
             // "data" must not satisfy "preceded by a".
             var result = SpeechText.Normalize("Their data record shows it.", rules);
-            Assert.Equal("Their data record shows it.", result);
+            Assert.Equal("their data record shows it.", result);
         }
     }
 
@@ -109,15 +112,16 @@ public static class FeatureContextAwareCorrections
         public void FiresWhenBothHold()
         {
             var result = SpeechText.Normalize("Ready to tear through the setlist.", rules);
-            Assert.Equal("Ready to tair through the setlist.", result);
+            Assert.Equal("ready to tair through the setlist.", result);
         }
 
         [Theory]
-        [InlineData("Ready to tear it up.")]        // followed-by fails
-        [InlineData("A single tear through it all.")] // preceded-by fails
-        public void DoesNotFireWhenEitherFails(string input)
+        [InlineData("Ready to tear it up.", "ready to tear it up.")]        // followed-by fails
+        [InlineData("A single tear through it all.", "a single tear through it all.")] // preceded-by fails
+        public void DoesNotFireWhenEitherFails(string input, string flattened)
         {
-            Assert.Equal(input, SpeechText.Normalize(input, rules));
+            // The rule must not fire; only the gh-#541 speakability flatten touches the copy.
+            Assert.Equal(flattened, SpeechText.Normalize(input, rules));
         }
     }
 
@@ -130,7 +134,7 @@ public static class FeatureContextAwareCorrections
                 [new SpeechCorrection("tear", "tair") { WhenFollowedBy = "it up|through" }]);
 
             var result = SpeechText.Normalize("We tear it up tonight; no tear was shed.", rules);
-            Assert.Equal("We tair it up tonight; no tear was shed.", result);
+            Assert.Equal("we tair it up tonight no tear was shed.", result);
         }
     }
 
@@ -148,7 +152,7 @@ public static class FeatureContextAwareCorrections
             ]);
 
             var result = SpeechText.Normalize("Let's wind down before the wind picks up.", rules);
-            Assert.Equal("Let's wynd down before the winnd picks up.", result);
+            Assert.Equal("let's wynd down before the winnd picks up.", result);
         }
     }
 
@@ -159,7 +163,7 @@ public static class FeatureContextAwareCorrections
         {
             var rules = SpeechCorrectionSet.Create([new SpeechCorrection("MacLeod", "Muh-cloud")]);
             var result = SpeechText.Normalize("A deep cut from MacLeod.", rules);
-            Assert.Equal("A deep cut from Muh-cloud.", result);
+            Assert.Equal("a deep cut from muh-cloud.", result);
         }
 
         [Theory]
@@ -176,7 +180,7 @@ public static class FeatureContextAwareCorrections
                 [new SpeechCorrection("wind", "wynd") { WhenFollowedBy = blankContext, WhenPrecededBy = blankContext }]);
 
             var result = SpeechText.Normalize("A strong wind tonight.", rules);
-            Assert.Equal("A strong wynd tonight.", result);
+            Assert.Equal("a strong wynd tonight.", result);
         }
 
         [Fact]
@@ -218,7 +222,7 @@ public static class FeatureContextAwareCorrections
             var card = SpeechCorrectionSet.Create([new SpeechCorrection("WIND", "card")]);
 
             var result = SpeechText.Normalize("The wind.", SpeechCorrectionSet.Merge(station, card));
-            Assert.Equal("The card.", result);
+            Assert.Equal("the card.", result);
         }
 
         [Fact]
@@ -232,7 +236,7 @@ public static class FeatureContextAwareCorrections
                 [new SpeechCorrection("wind", "card") { WhenFollowedBy = " Down | UP " }]);
 
             var result = SpeechText.Normalize("We wind down.", SpeechCorrectionSet.Merge(station, card));
-            Assert.Equal("We card down.", result);
+            Assert.Equal("we card down.", result);
         }
 
         [Fact]
@@ -255,7 +259,7 @@ public static class FeatureContextAwareCorrections
             // card rule: every card rule gets its turn on the text before any station rule runs,
             // even on a non-identical overlap like this one, not only on an identical identity.
             var result = SpeechText.Normalize("We wind down as the wind howls.", merged);
-            Assert.Equal("We winnd down as the winnd howls.", result);
+            Assert.Equal("we winnd down as the winnd howls.", result);
         }
 
         [Fact]
@@ -273,7 +277,7 @@ public static class FeatureContextAwareCorrections
 
             var result = SpeechText.Normalize(
                 "Here comes MacLeod Duncan.", SpeechCorrectionSet.Merge(station, card));
-            Assert.Equal("Here comes card-way.", result);
+            Assert.Equal("here comes card-way.", result);
         }
 
         [Fact]
@@ -300,7 +304,7 @@ public static class FeatureContextAwareCorrections
 
             var result = SpeechText.Normalize(
                 "MacLeod Duncan speaks.", SpeechCorrectionSet.Merge(station, card));
-            Assert.Equal("CARDFIRED Duncan speaks.", result);
+            Assert.Equal("cardfired duncan speaks.", result);
         }
     }
 

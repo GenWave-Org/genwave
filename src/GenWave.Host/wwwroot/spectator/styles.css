@@ -373,6 +373,30 @@ audio:focus-visible {
   color: var(--mute);
 }
 
+/* Speaking treatment (gh-#582): the byline avatar above (26px) is "tiny to the point of being a
+   waste of space" the moment the persona is actually talking, not merely hosting the hour — Dean's
+   ruling was to enlarge in place rather than swap the album-art/station-logo slot (a circular
+   avatar filling that square box "might not be very visually appealing"). app.js's renderDjAvatar
+   toggles this class on #dj-card only when BOTH kind === "patter" AND a real face is actually
+   rendering (RIGHT FACE OR NO FACE — see its own remarks); a faceless persona's patter, or a music
+   segment naming its scheduled host, both keep the plain .dj-card look above untouched. */
+.dj-card--speaking {
+  gap: 0.65rem;
+  margin-top: 0.5rem;
+}
+
+.dj-card--speaking .dj-card__avatar {
+  width: 56px; /* more than double the 26px byline size */
+  height: 56px;
+  border-width: 2px;
+  border-color: var(--accent);
+}
+
+.dj-card--speaking .dj-card__name {
+  color: var(--ink);
+  font-weight: 600;
+}
+
 .now-playing__meta {
   margin-top: 0.75rem;
 }
