@@ -21,10 +21,14 @@ public sealed class StationImagingOptions
     public bool TimeAnnouncements { get; set; }
 
     /// <summary>
-    /// SPEC F124.4 (PLAN T269): the live elapsed-due expiry budget, in minutes — a <c>TimeDate</c>
-    /// deferral draining more than this far past its own air-time is dropped undrained rather than
-    /// airing a stale hour. Defaults to 5 — the shipped SPEC F124.4 budget. StationId (idents) are
-    /// deliberately exempt; this knob governs <c>TimeDate</c> only.
+    /// SPEC F124.4/F141.1 (PLAN T269/T326): the live elapsed-due expiry budget, in SECONDS (F141.1's
+    /// own unit change — a <c>TimeDate</c> deferral draining more than this far past its own air-time
+    /// is dropped undrained rather than airing a stale hour. Defaults to 420 — SPEC F141.1's widened
+    /// budget (gh-#526's field data: every real overrun landed 313-362s past Due, just past the
+    /// original 300s/5-minute shipped budget — the break just arrives late, so the fix widens the
+    /// budget AND, inside it, speaks an honest late variant rather than staying silent; see
+    /// <c>GenWave.Orchestration.Orchestrator</c>'s own 90-second honesty-threshold remarks).
+    /// StationId (idents) are deliberately exempt; this knob governs <c>TimeDate</c> only.
     ///
     /// <para>
     /// <c>[Range(1, int.MaxValue)]</c> is documentation-only here — <c>ValidateDataAnnotations()</c>
@@ -34,9 +38,9 @@ public sealed class StationImagingOptions
     /// value below 1 (0 included — 0 would drop EVERY TimeDate deferral, unlike the "0 disables"
     /// convention every other imaging/cadence knob uses) fails boot rather than silently killing
     /// F110.3. <see cref="GenWave.Host.Configuration.SettingValidator"/> enforces the identical [1,
-    /// 1440] floor/ceiling on the live-edit path.
+    /// 86400] (1s floor, 1-day ceiling) floor/ceiling on the live-edit path.
     /// </para>
     /// </summary>
     [Range(1, int.MaxValue)]
-    public int TimeAnnouncementStaleMinutes { get; set; } = 5;
+    public int TimeAnnouncementBudgetSeconds { get; set; } = 420;
 }

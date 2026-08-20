@@ -82,7 +82,7 @@ export const SETTINGS_HELP_KEYS = [
   "Station:Location:SpokenName",
   "Station:Imaging:ClockAnchoredIdents",
   "Station:Imaging:TimeAnnouncements",
-  "Station:Imaging:TimeAnnouncementStaleMinutes",
+  "Station:Imaging:TimeAnnouncementBudgetSeconds",
   "Station:Shows:PatterCadenceMinutes",
   "Crosstalk:DurationTargetSeconds",
   "Crosstalk:Shows",

@@ -370,10 +370,11 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
     /// below for the exact formula) is dropped undrained rather than airing an hour that has already
     /// passed. <see langword="null"/> (the default) disables the check entirely — every pre-T269
     /// caller's behavior, byte-identical, since nothing before T269 ever passed this parameter.
-    /// <c>Orchestrator</c> reads the live <c>Station:Imaging:TimeAnnouncementStaleMinutes</c> setting
-    /// fresh once per unit and forwards the resulting value here, so a live edit governs the very next
-    /// drain with no process restart — the caller's job, not this queue's, exactly like every other
-    /// live-editable knob this project threads through (SPEC F44.2's own precedent).
+    /// <c>Orchestrator</c> reads the live <c>Station:Imaging:TimeAnnouncementBudgetSeconds</c> setting
+    /// (SPEC F141.1 — widened from the original F124.4 shipped budget) fresh once per unit and
+    /// forwards the resulting value here, so a live edit governs the very next drain with no process
+    /// restart — the caller's job, not this queue's, exactly like every other live-editable knob this
+    /// project threads through (SPEC F44.2's own precedent).
     /// </param>
     /// <param name="onExpired">
     /// SPEC F124.4 (PLAN T269) — invoked once per <see cref="SpeechDeferralKind.TimeDate"/> deferral
@@ -477,7 +478,7 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
             {
                 if (deferral.Kind == SpeechDeferralKind.TimeDate && timeDateStaleBudget is { } budget)
                 {
-                    var lateness = realNow + queuedAhead - deferral.Due;
+                    var lateness = AirTimeLateness(realNow, queuedAhead, deferral.Due);
                     if (lateness > budget)
                     {
                         (expired ??= []).Add((deferral, lateness));
@@ -511,4 +512,30 @@ public sealed class SpeechDeferralQueue(TimeProvider timeProvider)
             .OrderBy(deferral => deferral.Due)
             .ThenBy(deferral => deferral.Kind)
             .ThenBy(deferral => deferral.Discriminator, StringComparer.Ordinal);
+
+    /// <summary>
+    /// SPEC F124.4/F141.2 (PLAN T269/T326, review advisory) — the ONE air-time-lateness formula both
+    /// this queue's own expiry classification (pass 2 above, round-2 review finding F8's own remarks)
+    /// and <c>Orchestrator</c>'s post-drain F141.2 honesty classification share, rather than each
+    /// independently retyping <c>now + queuedAhead - due</c> (a connascence-of-algorithm smell flagged
+    /// at PLAN T326 review). <c>internal</c>, not <see langword="private"/>: <c>Orchestrator</c> lives
+    /// in this SAME assembly and is this method's one caller outside this class.
+    ///
+    /// <para>
+    /// <b>Not threaded through <see cref="TryDequeueDue"/>'s own <c>onExpired</c> callback (or a new
+    /// "onSurvived" twin) instead</b> — the fuller extraction the review also floated, so
+    /// <c>Orchestrator</c> never recomputes anything at all, reading the queue's own already-computed
+    /// value back verbatim. That shape needs a second callback parameter (with this file's own
+    /// paragraph-per-parameter documentation discipline) PLUS a caller-side correlation step in
+    /// <c>Orchestrator</c>'s kind-switch loop (a <c>Dictionary&lt;SpeechDeferral, TimeSpan&gt;</c>
+    /// populated before that loop even starts, since the callback fires inside this method, before
+    /// <see cref="TryDequeueDue"/> ever returns) to hand the right value to the right deferral once the
+    /// switch reaches its <c>TimeDate</c> arm — real plumbing, for a connascence-of-algorithm cleanup
+    /// this one-line shared formula already resolves at a fraction of the diff. Two independent reads
+    /// of the SAME <see cref="TimeProvider"/>, microseconds apart at most, is not a correctness gap a
+    /// 90-second honesty threshold can even observe.
+    /// </para>
+    /// </summary>
+    internal static TimeSpan AirTimeLateness(DateTimeOffset now, TimeSpan queuedAhead, DateTimeOffset due) =>
+        now + queuedAhead - due;
 }
