@@ -44,7 +44,6 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import type { LibraryDto } from "@/lib/library";
 import type { useRowPatch, UseRowPatchResult } from "@/lib/use-row-patch";
-import type { SafeContentClient } from "../app/(authed)/safe-content/SafeContentClient";
 import type { SafeContentClientProps, SafeSegmentDto } from "../app/(authed)/safe-content/SafeContentClient";
 import type { EditableTrackFields } from "../app/(authed)/catalog/[mediaId]/EditTrackForm";
 import type { MoveToLibraryAction } from "../app/(authed)/catalog/[mediaId]/MoveToLibraryAction";

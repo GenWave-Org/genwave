@@ -65,6 +65,9 @@ jobs:
           cache-dependency-path: admin-ui/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
+      # gh-#553: `next lint` is a no-op under Next 16 (the CLI subcommand was removed) — this
+      # runs the flat ESLint config (eslint.config.mjs) directly instead.
+      - run: npm run lint
       # gh-#347: the main tsconfig excludes __specs__ (jest runs specs through next/jest's SWC
       # transform, which strips types without checking them) — this is the only step that actually
       # type-checks the spec suite.

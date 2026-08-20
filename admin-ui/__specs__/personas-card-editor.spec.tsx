@@ -16,7 +16,6 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
-import type { ReactNode } from "react";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 import { PersonasClient } from "../app/(authed)/personas/PersonasClient";

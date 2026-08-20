@@ -18,18 +18,28 @@ namespace GenWave.Host.Tests;
 /// </summary>
 public sealed class KokoroFixture : IAsyncLifetime
 {
-    const string Project = "genwave-kokorotest";
-    const string BaseUrl = "http://127.0.0.1:18880";
+    // Per-instance project name and OS-assigned host port (gh-#602, mirroring #597's
+    // DatabaseFixture fix): a fixed name/port pair let two concurrent runs (two checkouts, or CI
+    // plus local) fight over one container — the second `up` reused the first's project and either
+    // teardown's `down -v` killed the other run's Kokoro mid-suite. Teardown needs no extra
+    // scoping: `down -v` was always -p-scoped, so a unique name makes it run-isolated by itself.
+    readonly string project = $"genwave-kokorotest-{Guid.NewGuid():N}"[..29];
 
     static readonly TimeSpan WarmupPollInterval = TimeSpan.FromSeconds(5);
     static readonly TimeSpan WarmupTimeout = TimeSpan.FromMinutes(3);
 
     string composeFile = "";
 
+    /// <summary>The base URL the disposable Kokoro is reachable on — discovered from the ephemeral
+    /// loopback port Docker assigned this run's container, never a fixed constant. Populated by
+    /// <see cref="InitializeAsync"/>; collection tests read it off their injected fixture.</summary>
+    public string BaseUrl { get; private set; } = "";
+
     public async Task InitializeAsync()
     {
         composeFile = LocateComposeFile();
         Compose("up", "-d", "--wait");
+        BaseUrl = $"http://127.0.0.1:{DiscoverHostPort()}";
         await WaitForModelAsync();
     }
 
@@ -67,14 +77,28 @@ public sealed class KokoroFixture : IAsyncLifetime
         }
     }
 
+    int DiscoverHostPort()
+    {
+        // `docker compose port kokoro 8880` prints the mapping's host side (e.g. "127.0.0.1:32771").
+        var output = RunCapture(
+            "docker", ["compose", "-p", project, "-f", composeFile, "port", "kokoro", "8880"]);
+        var portText = output.Trim().Split(':')[^1];
+
+        return int.TryParse(portText, out var port) && port > 0
+            ? port
+            : throw new InvalidOperationException($"could not parse a host port from 'docker compose port' output: '{output.Trim()}'");
+    }
+
     void Compose(params string[] verbAndArgs)
     {
-        var args = new List<string> { "compose", "-p", Project, "-f", composeFile };
+        var args = new List<string> { "compose", "-p", project, "-f", composeFile };
         args.AddRange(verbAndArgs);
         Run("docker", args);
     }
 
-    static void Run(string file, IReadOnlyList<string> args)
+    static void Run(string file, IReadOnlyList<string> args) => RunCapture(file, args);
+
+    static string RunCapture(string file, IReadOnlyList<string> args)
     {
         var psi = new ProcessStartInfo(file)
         {
@@ -91,6 +115,8 @@ public sealed class KokoroFixture : IAsyncLifetime
         if (p.ExitCode != 0)
             throw new InvalidOperationException(
                 $"{file} {string.Join(' ', args)} failed:\n{stderr.Result}{stdout.Result}");
+
+        return stdout.Result;
     }
 
     static string LocateComposeFile()
