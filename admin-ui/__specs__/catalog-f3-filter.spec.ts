@@ -13,51 +13,6 @@
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import type { ReactNode } from "react";
 
-// ---------------------------------------------------------------------------
-// Tree walker (copied from catalog-pages.spec.ts pattern)
-// ---------------------------------------------------------------------------
-
-function collectStrings(node: ReactNode, out: string[] = []): string[] {
-  if (node === null || node === undefined || typeof node === "boolean") {
-    return out;
-  }
-  if (typeof node === "string" || typeof node === "number") {
-    out.push(String(node));
-    return out;
-  }
-  if (Array.isArray(node)) {
-    for (const child of node) collectStrings(child, out);
-    return out;
-  }
-  const el = node as { type?: unknown; props?: Record<string, unknown> };
-  if (el && typeof el === "object" && el.props) {
-    if (typeof el.props["href"] === "string") {
-      out.push(el.props["href"] as string);
-    }
-    if (el.props["children"] !== undefined) {
-      collectStrings(el.props["children"] as ReactNode, out);
-    }
-    // Collect defaultValue from select/input elements (they represent current filter state)
-    if (typeof el.props["defaultValue"] === "string") {
-      out.push(el.props["defaultValue"] as string);
-    }
-    if (typeof el.props["name"] === "string") {
-      out.push(`[name=${el.props["name"]}]`);
-    }
-    if (typeof el.props["value"] === "string") {
-      out.push(el.props["value"] as string);
-    }
-    if (typeof el.props["aria-label"] === "string") {
-      out.push(el.props["aria-label"] as string);
-    }
-  }
-  return out;
-}
-
-function treeContains(node: ReactNode, text: string): boolean {
-  return collectStrings(node).some((s) => s.includes(text));
-}
-
 /** Finds the first element in the tree whose function component reference is `type`. */
 function findElementByType(
   node: ReactNode,

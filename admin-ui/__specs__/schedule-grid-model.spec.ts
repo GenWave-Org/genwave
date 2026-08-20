@@ -291,8 +291,7 @@ describe("Feature: pruneOverrides reconciles the overrides map against the live 
 
     it("does not confuse a merge with a plain forward-extend into an unoverridden run", () => {
       const first = run(0, 0, 5); // the only override in play.
-      const second = run(0, 7, 10); // no override of its own.
-      const merged = run(0, 0, 10);
+      const merged = run(0, 0, 10); // extends into the run(0, 7, 10) span, which has no override of its own.
       const overrides = overridesOf([[first, GENRES_A]]);
 
       const next = pruneOverrides(overrides, [merged]);
