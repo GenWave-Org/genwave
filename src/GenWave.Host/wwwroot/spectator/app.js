@@ -129,7 +129,7 @@ function renderNowPlaying() {
     kicker.textContent = "Stand by";
     title.textContent = stationName;
     artist.textContent = "";
-    renderDjCard(null, null, null);
+    renderDjCard(null, null, null, false);
     meta.hidden = true;
     renderUpNextLine(upNext, null);
     return;
@@ -148,7 +148,15 @@ function renderNowPlaying() {
     artist.textContent = nowPlaying.artist || "";
   }
 
-  renderDjCard(nowPlaying.dj ?? null, nowPlaying.show ?? null, nowPlaying.djAvatarUrl ?? null);
+  // gh-#582: "speaking" is narrower than "has a dj" — the byline shows a scheduled host
+  // through an entire music segment too (SPEC F129.3's own host-of-the-hour posture), but the
+  // enlarged face only earns its keep for the moment that persona is actually the one talking.
+  renderDjCard(
+    nowPlaying.dj ?? null,
+    nowPlaying.show ?? null,
+    nowPlaying.djAvatarUrl ?? null,
+    nowPlaying.kind === "patter",
+  );
   renderArt(art, nowPlaying.artworkUrl ?? null);
 
   meta.hidden = false;
@@ -182,8 +190,13 @@ function renderNowPlaying() {
  *   has no render site yet anywhere on this page.
  * @param {string|null} djAvatarUrl — the on-air persona's worn-face token URL (SPEC F129.2), or
  *   null when faceless — renderDjAvatar below shows the placeholder glyph either way.
+ * @param {boolean} isSpeaking — true only for kind === "patter" (gh-#582): the moment this persona
+ *   is the one actually talking, as opposed to merely being the hour's scheduled host while a
+ *   track plays. Threaded through to renderDjAvatar, which is what actually decides whether the
+ *   enlarged treatment applies (it also requires a real, successfully-attempted face — see its own
+ *   remarks).
  */
-function renderDjCard(dj, show, djAvatarUrl) {
+function renderDjCard(dj, show, djAvatarUrl, isSpeaking) {
   const card = document.getElementById("dj-card");
   const name = document.getElementById("dj-card-name");
   const showLine = document.getElementById("dj-card-show");
@@ -193,7 +206,7 @@ function renderDjCard(dj, show, djAvatarUrl) {
   showLine.hidden = !show;
   showLine.textContent = show ? `· ${show.name}` : "";
 
-  renderDjAvatar(djAvatarUrl);
+  renderDjAvatar(djAvatarUrl, isSpeaking);
 }
 
 // Sticky failure memory for the current DJ avatar URL (SPEC F129.2) — the same
@@ -205,16 +218,27 @@ function renderDjCard(dj, show, djAvatarUrl) {
 let failedDjAvatarUrl = null;
 
 /**
- * Renders the DJ card's face slot (SPEC F129.2/F129.3): the real face when djAvatarUrl is set and
- * has not already failed to load this session, the placeholder glyph otherwise (null/faceless, or
- * a load failure recorded by initDjAvatarFallback). Idempotent on every 1s clock tick, the same
- * discipline renderArt already follows for track artwork.
+ * Renders the DJ card's face slot (SPEC F129.2/F129.3, gh-#582): the real face when djAvatarUrl is
+ * set and has not already failed to load this session, the placeholder glyph otherwise
+ * (null/faceless, or a load failure recorded by initDjAvatarFallback). Idempotent on every 1s
+ * clock tick, the same discipline renderArt already follows for track artwork.
+ *
+ * gh-#582 (Dean's ruling: enlarge, don't swap the album-art slot — a circular avatar in a square
+ * art box "might not be very visually appealing"): the `dj-card--speaking` class doubles the face
+ * in place for the moment the persona is actually talking. It is gated on isSpeaking AND a real
+ * face (target !== null) together — RIGHT FACE OR NO FACE means the honest no-face placeholder
+ * never inflates to fill the treatment; a faceless persona's patter keeps the small, always-on
+ * show-host byline size instead, exactly as before this change.
  * @param {string|null} djAvatarUrl
+ * @param {boolean} isSpeaking
  */
-function renderDjAvatar(djAvatarUrl) {
+function renderDjAvatar(djAvatarUrl, isSpeaking) {
+  const card = document.getElementById("dj-card");
   const img = document.getElementById("dj-card-avatar-img");
   const placeholder = document.getElementById("dj-card-avatar-placeholder");
   const target = djAvatarUrl && djAvatarUrl !== failedDjAvatarUrl ? djAvatarUrl : null;
+
+  card.classList.toggle("dj-card--speaking", isSpeaking && target !== null);
 
   if (target === null) {
     img.hidden = true;
@@ -229,7 +253,10 @@ function renderDjAvatar(djAvatarUrl) {
 
 /** Wires the fallback for a real DJ avatar URL that fails to load (SPEC F129.2/F129.3): records
  * the failing URL as failedDjAvatarUrl (so renderDjAvatar stops re-arming it) and swaps back to
- * the placeholder glyph — mirrors initArtworkFallback's own idiom below. */
+ * the placeholder glyph — mirrors initArtworkFallback's own idiom below. Also drops the gh-#582
+ * `dj-card--speaking` class immediately rather than waiting for the next 1s tick's renderDjAvatar
+ * call to notice the now-failed URL — RIGHT FACE OR NO FACE holds with no visible lag: an enlarged
+ * placeholder glyph never renders even for the one tick between the failure and the next poll. */
 function initDjAvatarFallback() {
   const img = document.getElementById("dj-card-avatar-img");
   img.addEventListener("error", () => {
@@ -237,6 +264,7 @@ function initDjAvatarFallback() {
     if (failing) failedDjAvatarUrl = failing;
     img.hidden = true;
     document.getElementById("dj-card-avatar-placeholder").hidden = false;
+    document.getElementById("dj-card").classList.remove("dj-card--speaking");
   });
 }
 
