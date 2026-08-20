@@ -41,52 +41,10 @@ jobs:
       # on-demand on a dev box, not in CI (same policy as the pre-migration pipeline).
       # ffmpeg: the F88 artwork specs (Story222) drive the REAL binary — both fixture generation
       # and the extraction under test — matching the api image, which ships ffmpeg (gh-#105).
+      # gh-#588: the retry loop itself lives in .github/actions/install-ffmpeg (was
+      # inlined identically here, in release.yml, and in publish-nuget.yml).
       - name: Install ffmpeg (artwork specs drive the real binary)
-        shell: bash
-        run: |
-          # gh-#581: this step has wedged solid against the apt mirror three times (v5.2.2
-          # release night x2, PR #586's CI — the #586 run's step measured 2003s before
-          # cancel+rerun) — a silent stall (the known IPv6-to-mirror hang on GitHub-hosted
-          # runners) with no self-imposed limit, so the runner sits "in_progress" for 30+
-          # minutes until someone notices and cancels+reruns. Force IPv4 (the documented fix
-          # for that stall), cap apt's own retry count and dpkg's lock wait, and wrap each
-          # attempt in a hard `timeout` (with a kill-grace, so a wedge that ignores SIGTERM
-          # still dies) so a wedge fails fast instead of hanging. Three attempts with a short
-          # backoff, refreshing the package index each attempt in case the first handshake is
-          # the one that's stuck.
-          set -euo pipefail
-          apt_opts=(-o Acquire::ForceIPv4=true -o Acquire::Retries=3 -o DPkg::Lock::Timeout=60)
-          max_attempts=3
-          attempt=1
-          until [ "$attempt" -gt "$max_attempts" ]; do
-            echo "Installing ffmpeg (attempt $attempt of $max_attempts)..."
-
-            # A SIGTERM'd leg (our own timeout below, or a cancelled run) can leave dpkg mid
-            # transaction with its lock held — clear that first so the next attempt fails on
-            # the real mirror issue, not a stale lock it then mis-blames on the mirror.
-            sudo dpkg --configure -a || true
-
-            # Keep attempt 1 quiet (the common, healthy case); a recurrence needs the real apt
-            # chatter to diagnose, not a second silent failure.
-            quiet_opts=(-qq)
-            if [ "$attempt" -gt 1 ]; then
-              quiet_opts=()
-            fi
-
-            if timeout -k 10s 180s sudo apt-get update "${quiet_opts[@]}" "${apt_opts[@]}" \
-              && timeout -k 10s 180s sudo apt-get install -y "${quiet_opts[@]}" --no-install-recommends "${apt_opts[@]}" ffmpeg; then
-              echo "Installed ffmpeg."
-              exit 0
-            fi
-
-            echo "Attempt $attempt failed or timed out against the apt mirror."
-            attempt=$((attempt + 1))
-            if [ "$attempt" -le "$max_attempts" ]; then
-              sleep 5
-            fi
-          done
-          echo "::error::All $max_attempts ffmpeg install attempts failed — this is the gh-#581 apt-mirror hang. Failing fast instead of wedging the runner; rerun the job."
-          exit 1
+        uses: ./.github/actions/install-ffmpeg
       - name: Test
         run: dotnet test GenWave.sln --no-build --configuration Release --filter "Category!=Integration"
 
