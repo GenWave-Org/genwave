@@ -26,14 +26,21 @@ public static class FeatureSpeechTextNormalization
 
             // Then  the output is fully scrubbed, corrected, unit-expanded, and
             //       whitespace-collapsed in spec'd order (F68.2)
-            Assert.Equal("Muh-cloud plays at 76 degrees Fahrenheit and sunny.", result);
+            Assert.Equal("muh-cloud plays at 76 degrees fahrenheit and sunny.", result);
         }
     }
 
     public static class ScenarioSurvivalCases
     {
+        // The gh-#541 speakability flatten amends the F68.4 survival law in exactly one respect:
+        // case. A stylized name's MARKS are identity and still survive (the intra-word-survivor
+        // rule — see SpeechText.FlattenForSpeech), but its capitals flatten with every other
+        // word's, because casing is gh-#432's pause trigger and neither engine spells a name
+        // back out loud. "Renamed on air" is the harm this scenario guards; "ke$ha" is not a
+        // rename, "ke ha" would be.
+
         [Fact]
-        public static void Kesha_survives_byte_identical()
+        public static void Kesha_survives_case_folded()
         {
             // Given the string "Ke$ha" and no matching correction
             const string input = "Ke$ha";
@@ -41,30 +48,30 @@ public static class FeatureSpeechTextNormalization
             // When  it is normalized
             var result = SpeechText.Normalize(input, SpeechCorrectionSet.Empty);
 
-            // Then  it survives byte-identical (F68.4)
-            Assert.Equal(input, result);
+            // Then  the intra-word mark survives; only the case flattens (F68.4 as amended by gh-#541)
+            Assert.Equal("ke$ha", result);
         }
 
         [Fact]
-        public static void Acdc_survives_byte_identical()
+        public static void Acdc_survives_case_folded()
         {
-            // Given "AC/DC" — Then byte-identical (F68.4)
+            // Given "AC/DC" — Then the slash survives, case flattens (F68.4 as amended by gh-#541)
             const string input = "AC/DC";
 
             var result = SpeechText.Normalize(input, SpeechCorrectionSet.Empty);
 
-            Assert.Equal(input, result);
+            Assert.Equal("ac/dc", result);
         }
 
         [Fact]
-        public static void Pink_survives_byte_identical()
+        public static void Pink_survives_case_folded()
         {
-            // Given "P!nk" — Then byte-identical (F68.4)
+            // Given "P!nk" — Then the bang survives, case flattens (F68.4 as amended by gh-#541)
             const string input = "P!nk";
 
             var result = SpeechText.Normalize(input, SpeechCorrectionSet.Empty);
 
-            Assert.Equal(input, result);
+            Assert.Equal("p!nk", result);
         }
 
         [Fact]
@@ -120,7 +127,7 @@ public static class FeatureSpeechTextNormalization
             var result = SpeechText.Normalize(input, SpeechCorrectionSet.Empty);
 
             // Then  no reasoning text remains in the output (F68.3)
-            Assert.Equal("Good morning GenWave listeners. Next up is a great track.", result);
+            Assert.Equal("good morning genwave listeners. next up is a great track.", result);
         }
 
         [Fact]
@@ -149,7 +156,7 @@ public static class FeatureSpeechTextNormalization
             var result = SpeechText.Normalize(input, SpeechCorrectionSet.Empty);
 
             // Then  the decoded think block is stripped, not just decoded and shipped to TTS
-            Assert.Equal("Coming up next. More content.", result);
+            Assert.Equal("coming up next. more content.", result);
         }
 
         [Fact]
@@ -200,7 +207,9 @@ public static class FeatureSpeechTextNormalization
             var result = SpeechText.Normalize("The price is set.", corrections);
 
             // Then  the replacement text is literal, not a regex group reference (F68.5)
-            Assert.Equal("The cost is $0 today is set.", result);
+            // The leading $ is loose (space before it), so the gh-#541 flatten drops it; the claim —
+            // no group-0 expansion ever ran — still shows, since an expansion would inject the match.
+            Assert.Equal("the cost is 0 today is set.", result);
         }
 
         [Fact]
