@@ -33,6 +33,13 @@ namespace GenWave.Host.Api;
 ///   box, with a real display label rather than a raw slug, so a typo cannot produce an
 ///   unresolvable value (SPEC F102.14). <see langword="null"/> for every other kind.
 /// </param>
+/// <param name="Version">
+///   Optimistic-concurrency token (gh-#486): the key's currently stored version, or <c>0</c> when no
+///   override row exists yet (<paramref name="Source"/> is <c>"default"</c>). A client that wants a
+///   later <c>PUT /api/settings</c> write to this key guarded against a concurrent editor's save
+///   echoes this back as that update's <see cref="SettingUpdateRequest.ExpectedVersion"/>; omitting
+///   it keeps the pre-gh-#486 unconditional last-write-wins behavior.
+/// </param>
 public sealed record SettingDto(
     string Key,
     string Value,
@@ -40,4 +47,5 @@ public sealed record SettingDto(
     string ApplyMode,
     string Kind,
     string Unit,
-    IReadOnlyList<SettingChoice>? Choices = null);
+    IReadOnlyList<SettingChoice>? Choices = null,
+    long Version = 0);

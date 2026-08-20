@@ -52,11 +52,95 @@ public sealed class StationSettingsRepository(string connectionString)
             VALUES (@key, @value::jsonb, now())
             ON CONFLICT (key) DO UPDATE
               SET value      = EXCLUDED.value,
+                  version    = station.settings.version + 1,
                   updated_at = EXCLUDED.updated_at
             """;
         cmd.Parameters.AddWithValue("key", key);
         cmd.Parameters.AddWithValue("value", json);
         await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
+    /// Optimistic-concurrency write (gh-#486): persists <paramref name="value"/> only if the row's
+    /// current <c>version</c> still matches <paramref name="expectedVersion"/> — the guard against a
+    /// whole-array/document write silently clobbering a concurrent editor's save (probed at T144:
+    /// DELETE || PUT both 2xx, one edit vanished). No allowlist check here, same split
+    /// <see cref="WriteAsync"/> already keeps from its caller.
+    ///
+    /// <paramref name="expectedVersion"/> of <c>0</c> means "no row existed at the caller's read" —
+    /// a plain conditional INSERT (<c>ON CONFLICT DO NOTHING</c>), never a version comparison, since
+    /// there is no row yet to compare against; a real row's <c>version</c> starts at 1 and only ever
+    /// grows, so it can never legitimately equal 0 and collide with this sentinel. Any other value
+    /// runs a conditional UPDATE gated on <c>version = @expectedVersion</c>.
+    ///
+    /// Returns the row's new version on success, or <see langword="null"/> when the guard failed —
+    /// either no row existed and one raced into existence first (the 0 branch), or an existing row's
+    /// version had already moved (the UPDATE branch matched zero rows). The caller decides how a
+    /// <see langword="null"/> surfaces (a 409, in every Host caller today).
+    /// </summary>
+    public async Task<long?> WriteIfVersionMatchesAsync(
+        string key, object value, long expectedVersion, CancellationToken ct)
+    {
+        var json = JsonSerializer.Serialize(value);
+
+        await using var conn = new NpgsqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+        if (expectedVersion == 0)
+        {
+            cmd.CommandText =
+                """
+                INSERT INTO station.settings (key, value, version, updated_at)
+                VALUES (@key, @value::jsonb, 1, now())
+                ON CONFLICT (key) DO NOTHING
+                RETURNING version
+                """;
+        }
+        else
+        {
+            cmd.CommandText =
+                """
+                UPDATE station.settings
+                   SET value      = @value::jsonb,
+                       version    = version + 1,
+                       updated_at = now()
+                 WHERE key = @key
+                   AND version = @expectedVersion
+                RETURNING version
+                """;
+            cmd.Parameters.AddWithValue("expectedVersion", expectedVersion);
+        }
+        cmd.Parameters.AddWithValue("key", key);
+        cmd.Parameters.AddWithValue("value", json);
+
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result is long newVersion ? newVersion : null;
+    }
+
+    /// <summary>
+    /// Every row's current <c>version</c> (gh-#486), keyed by <c>key</c> — the read half of the
+    /// optimistic-concurrency guard <see cref="WriteIfVersionMatchesAsync"/> writes. A key absent
+    /// from the result has no row yet; the caller's own "no row" sentinel (0, matching
+    /// <see cref="WriteIfVersionMatchesAsync"/>'s own expectedVersion=0 branch) applies, not
+    /// anything this repository decides. Any failure (including a <see cref="Npgsql.NpgsqlException"/>)
+    /// propagates to the caller — same posture as <see cref="ReadAllAsync"/>.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, long>> ReadVersionsAsync(CancellationToken ct)
+    {
+        var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+
+        await using var conn = new NpgsqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT key, version FROM station.settings";
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            result[reader.GetString(0)] = reader.GetInt64(1);
+
+        return result;
     }
 
     /// <summary>

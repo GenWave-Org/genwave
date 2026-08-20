@@ -45,7 +45,23 @@ export interface SettingDto {
   unit: string;
   /** The closed set of valid `(value, label)` pairs — present only when `kind` is `"choice"`. */
   choices?: readonly SettingChoice[];
+  /**
+   * Optimistic-concurrency token (gh-#486) — the key's currently stored version, `0` when unset.
+   * Optional so every fixture/test double that predates gh-#486 keeps compiling unchanged; a caller
+   * that omits it when re-submitting the key on `PUT /api/settings` falls back to the pre-gh-#486
+   * unconditional last-write-wins write.
+   */
+  version?: number;
 }
+
+/**
+ * RFC 7807 `type` URI a version-guarded `PUT /api/settings` or `/api/pronunciations` write stamps
+ * on its 409 body (gh-#486, `GenWave.Host.Api.SettingsProblemTypes.VersionConflict` — kept in sync
+ * with that C# constant by hand; both sides are exercised by their own specs) — lets a caller tell
+ * "another editor saved first, refetch" apart from any other 409 cause (e.g.
+ * `PronunciationRulesControl`'s own duplicate-identity conflict) without parsing `detail` text.
+ */
+export const SETTINGS_VERSION_CONFLICT_PROBLEM_TYPE = "https://genwave.radio/problems/settings-version-conflict";
 
 /**
  * Props shape every per-key control-override registry entry receives (SPEC F54.1). Deliberately

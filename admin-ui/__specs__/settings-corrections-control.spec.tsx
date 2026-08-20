@@ -426,3 +426,102 @@ describe("Feature: heteronym context conditions (gh-#161)", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Feature: Tts:Corrections optimistic concurrency (gh-#486)
+// ---------------------------------------------------------------------------
+//
+// gh-#486: Tts:Corrections is a whole-array write with no version guard before this fix — two
+// concurrent editors racing PUT /api/settings silently dropped whichever revision landed first.
+// The GET-time SettingDto.version now rides the PUT batch as expectedVersion; a mismatch 409s
+// instead of overwriting.
+
+describe("Feature: Tts:Corrections optimistic concurrency (gh-#486)", () => {
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.clearAllMocks();
+  });
+
+  describe("Scenario: the GET-time version rides the save", () => {
+    it("the PUT payload carries expectedVersion for a key GET reported a version for", async () => {
+      const mockFetch = makeSequencedFetchMock([
+        { status: 200, body: [] }, // GET /api/tts/corrections-stats
+        { status: 200, body: [makeCorrectionsSetting({ version: 4 })] }, // PUT /api/settings
+      ]);
+      renderWithProviders(<SettingsForm settings={[makeCorrectionsSetting({ version: 3 })]} />);
+
+      const toField = screen.getByLabelText("To text for rule 1") as HTMLInputElement;
+      await editAndSave(toField, "Mick-loud");
+
+      const puts = putCalls(mockFetch);
+      expect(puts).toHaveLength(1);
+      const body = JSON.parse(puts[0]![1].body as string) as Array<{
+        key: string;
+        value: string;
+        expectedVersion?: number;
+      }>;
+      expect(body).toEqual([
+        {
+          key: "Tts:Corrections",
+          value: JSON.stringify([
+            { from: "MacLeod", to: "Mick-loud" },
+            { from: "GenWave", to: "Jen Wave" },
+          ]),
+          expectedVersion: 3,
+        },
+      ]);
+    });
+  });
+
+  describe("Scenario: another editor saved Tts:Corrections first (the lost-update this issue names)", () => {
+    const CONFLICT_RESPONSE = {
+      status: 409,
+      body: {
+        type: "https://genwave.radio/problems/settings-version-conflict",
+        detail: "'Tts:Corrections' was saved by another editor while this request was in flight. Reload and try again.",
+      },
+    };
+
+    it("toasts that the view was stale rather than silently overwriting the concurrent save", async () => {
+      makeSequencedFetchMock([
+        { status: 200, body: [] }, // GET /api/tts/corrections-stats
+        CONFLICT_RESPONSE, // PUT /api/settings
+        { status: 200, body: [makeCorrectionsSetting({ version: 7 })] }, // the 409 handler's own refetch
+      ]);
+      renderWithProviders(<SettingsForm settings={[makeCorrectionsSetting({ version: 3 })]} />);
+
+      const toField = screen.getByLabelText("To text for rule 1") as HTMLInputElement;
+      await editAndSave(toField, "Mick-loud");
+
+      expect(
+        await screen.findByText(/reloaded the latest values.*redo your edit/i)
+      ).toBeInTheDocument();
+    });
+
+    it("re-baselines the form to the refetched values — never a silent merge of the lost edit", async () => {
+      const freshRules = JSON.stringify([{ from: "GenWave", to: "Jen Wave" }]);
+      const mockFetch = makeSequencedFetchMock([
+        { status: 200, body: [] },
+        CONFLICT_RESPONSE,
+        { status: 200, body: [makeCorrectionsSetting({ value: freshRules, version: 7 })] },
+      ]);
+      renderWithProviders(<SettingsForm settings={[makeCorrectionsSetting({ version: 3 })]} />);
+
+      const toField = screen.getByLabelText("To text for rule 1") as HTMLInputElement;
+      await editAndSave(toField, "Mick-loud");
+
+      // Three calls total: the mount-time stats probe, the losing PUT, and the 409 handler's own
+      // refetch — proof the refetch actually happened, not just that a toast rendered.
+      await waitFor(() => expect(mockFetch.mock.calls).toHaveLength(3));
+
+      // The refetched value replaces the lost "Mick-loud" edit — "redo your edit", not a merge.
+      expect(screen.getByLabelText("To text for rule 1")).toHaveValue("Jen Wave");
+    });
+  });
+});

@@ -5,9 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { toast } from "@/components/ui/toast";
-import { readErrorMessage } from "@/lib/problem-details";
+import { readErrorMessage, readProblemDetails } from "@/lib/problem-details";
 import { CELL_INPUT_CLASSES, HEADER_CELL } from "./rule-table-styles";
-import { isValidationProblemDetails } from "./settings-types";
+import { isValidationProblemDetails, SETTINGS_VERSION_CONFLICT_PROBLEM_TYPE } from "./settings-types";
 
 /**
  * One row of `GET /api/pronunciations` — mirrors `GenWave.Host.Api.PronunciationRuleDto` (T144,
@@ -102,7 +102,20 @@ async function interpretWriteFailure(resp: Response): Promise<WriteOutcome> {
     return { kind: "invalid", fieldErrors: {} };
   }
   if (resp.status === 409) {
-    return { kind: "conflict", message: await readErrorMessage(resp) };
+    // gh-#486: TWO different causes share this status. A version-guard conflict (the whole rule
+    // set moved under this write — another tab/editor saved first) gets the SAME "stale" treatment
+    // a 404 already does below (toast + refresh — the list itself may be out of date, not just
+    // this one row). A duplicate-IDENTITY conflict (nothing changed server-side; the operator's
+    // OWN new pattern/word collides with a different existing rule) stays a row-level "conflict" —
+    // distinguished by `type`, never by parsing `detail` text.
+    const { detail, type } = await readProblemDetails(resp);
+    if (type === SETTINGS_VERSION_CONFLICT_PROBLEM_TYPE) {
+      return {
+        kind: "stale",
+        message: "Pronunciation rules changed in another tab while this was saving. The list has been refreshed — redo your edit.",
+      };
+    }
+    return { kind: "conflict", message: detail };
   }
   if (resp.status === 404) {
     return {
@@ -549,7 +562,10 @@ export function PronunciationRulesControl(): ReactNode {
       return;
     }
     if (outcome.kind === "stale") {
-      // Unreachable for an add (no prior identity to go stale) — handled for exhaustiveness.
+      // gh-#486: a version-guard conflict IS reachable here — a concurrent write (from any of the
+      // three mutations, or a raw PUT /api/settings edit to Tts:Pronunciations) can race this
+      // POST's own read-modify-write and lose, even though POST names no prior identity of its
+      // own to go stale. The 404 "no longer exists" cause stays genuinely unreachable for an add.
       toast.error(outcome.message);
       await refresh();
       return;

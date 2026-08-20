@@ -57,9 +57,19 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 
 	-- Key-value overlay store (STORY-042, Epic I). Keys are allowlisted in the C# provider;
 	-- secrets (ConnectionStrings:*, Admin:Password, ICECAST_SOURCE_PASSWORD) are never written here.
+	--
+	-- version (gh-#486): a per-key optimistic-concurrency counter, starting at 1 on first
+	-- insert and incremented on every subsequent write (both the unconditional WriteAsync upsert and
+	-- the version-guarded WriteIfVersionMatchesAsync path — see StationSettingsRepository). A caller
+	-- that read the row at version N may write again only if the row is STILL at version N; a whole-
+	-- array/document write (Tts:Pronunciations, Tts:Corrections) that started from a stale read now
+	-- 409s instead of silently clobbering a concurrent editor's save. expectedVersion=0 means "no row
+	-- existed at read time" — a plain conditional INSERT, not a version comparison, since there is no
+	-- row yet to compare against.
 	CREATE TABLE IF NOT EXISTS station.settings (
 	  key        text        NOT NULL PRIMARY KEY,
 	  value      jsonb       NOT NULL,
+	  version    bigint      NOT NULL DEFAULT 1,
 	  updated_at timestamptz NOT NULL DEFAULT now()
 	);
 
