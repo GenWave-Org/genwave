@@ -31,6 +31,21 @@ const MODE_LABELS: Record<string, string> = { normal: "Normal", soft: "Soft", ha
  * "never drop an unknown kind" discipline STATUS_LABELS/MODE_LABELS already follow). */
 const KIND_LABELS: Record<string, string> = { copy: "Copy", crosstalk: "Crosstalk" };
 
+/** SPEC F139.1, STORY-353, PLAN T334 — WHY this call resolved the way it did
+ * (GenWave.Tts.LlmCallCause), a finer-grained sibling of STATUS_LABELS above. Keyed on the wire's
+ * own lowercase, no-separator enum spelling (mirrors STATUS_LABELS/MODE_LABELS/KIND_LABELS' own
+ * convention); an unstyled cause this UI doesn't specifically label still shows its raw text. */
+const CAUSE_LABELS: Record<string, string> = {
+  success: "Success",
+  timeout: "Timeout",
+  overlength: "Over length",
+  truthgatereject: "Truth-gate reject",
+  connectionfailure: "Connection failure",
+  canceledbywindow: "Canceled by window",
+  emptycompletion: "Empty completion",
+  malformedresponse: "Malformed response",
+};
+
 /** gh-#142: the MODE column is the F69/F70 degradation ladder, which nothing on the page said —
  * a native-title flyover per chip explains the rung without spending any screen real estate.
  * Wording tracks DegradationMode's own docs. gh-#210: these same three lines also feed the Mode
@@ -104,6 +119,14 @@ function KindChip({ kind }: { kind: string }): ReactNode {
   return <Chip tone="neutral">{KIND_LABELS[kind] ?? kind}</Chip>;
 }
 
+/** SPEC F139.1, STORY-353, PLAN T334 — neutral tone, same reasoning as KindChip immediately
+ * above: Cause is supplementary detail alongside the Status chip's already-colored verdict
+ * ("failed" is danger; "timeout" just names which kind of failed it was), never a second,
+ * redundant severity judgment painted onto the same row. */
+function CauseChip({ cause }: { cause: string }): ReactNode {
+  return <Chip tone="neutral">{CAUSE_LABELS[cause] ?? cause}</Chip>;
+}
+
 function ModeChip({ mode }: { mode: string }): ReactNode {
   return (
     <span title={MODE_TITLES[mode]}>
@@ -124,9 +147,10 @@ function DetailField({ label, value }: { label: string; value: string | null }):
 }
 
 /**
- * The LLM call inspector's table (PLAN T41, STORY-196, SPEC F73.1-F73.2; persona column gh-#429):
- * newest-first rows of time / persona / status chip / mode chip / elapsed / a truncated response
- * preview, each expandable to the full system prompt, user prompt, and raw response text —
+ * The LLM call inspector's table (PLAN T41/T334, STORY-196/353, SPEC F73.1-F73.2, F139.1; persona
+ * column gh-#429): newest-first rows of time / persona / kind chip / status chip / cause chip /
+ * mode chip / elapsed / a truncated response preview, each expandable to the full system prompt,
+ * user prompt, and raw response text —
  * admin-only debug detail, never persisted (see GenWave.Tts.LlmCallRing's own remarks). Loading/
  * empty/error idioms match the booth log's own BoothLogFeed (skeleton rows, EmptyState, a quiet
  * unavailable hint on a poll failure that keeps whatever was already loaded).
@@ -180,6 +204,11 @@ export function LlmCallsFeed({ entries, error, timeZone }: LlmCallsFeedProps): R
                 <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Persona</th>
                 <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Kind</th>
                 <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Status</th>
+                {/* SPEC F139.1, STORY-353, PLAN T334 — Cause is Status's own finer-grained sibling
+                    ("failed" -> "timeout"/"connectionfailure"/…), a column of its own rather than
+                    folded into Status so an operator can still scan Status's coarse ok/failed
+                    read without every row's cell text growing. */}
+                <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Cause</th>
                 <th scope="col" className="py-2 pr-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">
                   {/* gh-#210: the header carries the house `?` flyover (gh-#145 pattern) — the
                       per-chip native titles above survive for hover users, but touch and anyone
@@ -226,6 +255,9 @@ export function LlmCallsFeed({ entries, error, timeZone }: LlmCallsFeedProps): R
                         <StatusChip status={entry.status} />
                       </td>
                       <td className="py-2 pr-3">
+                        <CauseChip cause={entry.cause} />
+                      </td>
+                      <td className="py-2 pr-3">
                         <ModeChip mode={entry.mode} />
                       </td>
                       <td className="py-2 pr-3 text-right tabular-nums text-mute">{formatElapsedMs(entry.elapsedMs)}</td>
@@ -245,7 +277,7 @@ export function LlmCallsFeed({ entries, error, timeZone }: LlmCallsFeedProps): R
                     </tr>
                     {isExpanded && (
                       <tr className="border-b border-line last:border-b-0">
-                        <td colSpan={8} className="py-3">
+                        <td colSpan={9} className="py-3">
                           <div className="space-y-3 rounded-[6px] border border-line bg-surface-2 p-3">
                             <DetailField label="System prompt" value={entry.promptSystem} />
                             <DetailField label="User prompt" value={entry.promptUser} />

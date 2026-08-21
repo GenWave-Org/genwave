@@ -158,14 +158,26 @@ using GenWave.Core.Events;
 /// </para>
 ///
 /// <para>
-/// <b>TimeDate elapsed-due expiry (SPEC F124.4, PLAN T269).</b> Before the drain above ever reaches a
-/// <see cref="SpeechDeferralKind.TimeDate"/> deferral, <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s
+/// <b>TimeDate elapsed-due expiry (SPEC F124.4/F141.1, PLAN T269/T326).</b> Before the drain above
+/// ever reaches a <see cref="SpeechDeferralKind.TimeDate"/> deferral, <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s
 /// own expiry check may already have dropped it undrained — a drain landing too far past the armed hour
-/// (the live <c>Station:Imaging:TimeAnnouncementStaleMinutes</c> budget, read fresh once per unit
+/// (the live <c>Station:Imaging:TimeAnnouncementBudgetSeconds</c> budget, read fresh once per unit
 /// through <paramref name="imagingSettings"/>) speaks no hour at all rather than an invented one (the
 /// F71.8 class). <see cref="LogTimeDateExpiry"/> is that check's <c>onExpired</c> callback, logging the
-/// SPEC F124.4 WARN. StationId (idents) are exempt by design — an equally late ident still drains and
-/// airs normally.
+/// SPEC F124.4 WARN, unchanged by SPEC F141. StationId (idents) are exempt by design — an equally late
+/// ident still drains and airs normally.
+/// </para>
+///
+/// <para>
+/// <b>The honest late variant (SPEC F141.2, STORY-355, PLAN T326).</b> A <see cref="SpeechDeferralKind.TimeDate"/>
+/// deferral that survives the expiry check above (still inside the budget) is classified a second time —
+/// on time vs. late — against the fixed 90-second <see cref="TimeDateHonestyThreshold"/>, using the SAME
+/// air-time-lateness formula the expiry check itself uses (real now plus already-queued runtime, minus the
+/// armed hour), read fresh at this SAME drain rather than reused from <c>drainNow</c> (which a straddle/
+/// ceremony caller may have forced ahead of real time — the identical reason <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s
+/// own remarks give for checking its expiry budget against real wall-clock time, never the caller's
+/// <c>now</c>). <see cref="BuildTimeDateRequest"/> stamps the result onto the <see cref="SegmentRequest"/>
+/// it Kicks; <c>PatterTemplateRenderer</c> reads it to choose between the classic and "just past" lines.
 /// </para>
 ///
 /// <para>
@@ -275,7 +287,22 @@ public sealed class Orchestrator(
     /// SPEC knob the way F74.3's own boundary-bias lookahead is — just an implementation seam.
     /// </para>
     /// </summary>
-    static readonly TimeSpan SignOffLeadTime = TimeSpan.FromSeconds(15);
+    // Public (SPEC F142, PLAN T327): GenWave.Host's BoundaryCadenceCovenantPostConfigure reads this
+    // constant as the covenant's signOffLeadTime term. It must never become a config knob (F142.2 —
+    // "no new knobs").
+    public static readonly TimeSpan SignOffLeadTime = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// SPEC F141.2 (STORY-355, PLAN T326) — the honesty threshold: a <see cref="SpeechDeferralKind.TimeDate"/>
+    /// deferral draining within this long of its own armed hour still speaks the classic F110.3 line;
+    /// past it (but still inside the live <c>Station:Imaging:TimeAnnouncementBudgetSeconds</c> budget)
+    /// the honest "just past" variant airs instead. Judged, not spec'd to the second beyond gh-#526's
+    /// own field data (the shallow overruns the fix targets landed 313-362s past Due) — 90 seconds
+    /// comfortably separates "the break just arrived a beat late" from "the break was genuinely late."
+    /// Not a live-tunable SPEC knob, the SAME posture <see cref="SignOffLeadTime"/> immediately above
+    /// carries — just an implementation seam.
+    /// </summary>
+    static readonly TimeSpan TimeDateHonestyThreshold = TimeSpan.FromSeconds(90);
 
     // SPEC F111.2 (PLAN T235) — the straddle seam's drain hold-set: a single-purpose, never-mutated
     // singleton rather than allocating a fresh HashSet per straddle unit, since its one member never
@@ -334,6 +361,20 @@ public sealed class Orchestrator(
     // completely silent (no format-clock schedule wired is a perfectly valid, common station shape,
     // but an operator who DID intend to wire one deserves one loud signal that it never arrived).
     bool scheduleResolverMissingWarned;
+
+    // SPEC F141.1/F141.4 (STORY-355, PLAN T326, review advisory) — the SAME "fires at most once for
+    // the life of this Orchestrator" idiom as scheduleResolverMissingWarned immediately above,
+    // repurposed for a boot-log config echo rather than a missing-dependency WARN: an INFO-level
+    // one-time snapshot of the bound TimeDate honesty budget, logged the first time GetNextAsync
+    // reads it below. Originally a ContextTickerService line (review round-1: wrong altitude — that
+    // class took an IStationImagingSettingsProvider dependency just to print it); this Orchestrator
+    // IS the budget decision's own owner (it computes timeDateStaleBudget and the honesty
+    // classification below), so the echo lives where the value is actually consumed, with no extra
+    // constructor dependency anywhere. Live-editable afterward (imagingSettings.Current is read fresh,
+    // per unit, regardless of this flag) — this line only names what a fresh boot actually bound, so
+    // an operator (or Loki) can confirm a deploy's effective default without reading appsettings.json
+    // off the box.
+    bool timeDateBudgetLoggedOnce;
 
     /// <inheritdoc/>
     public async Task<MediaItem?> GetNextAsync(PlayoutContext ctx, CancellationToken ct)
@@ -965,12 +1006,25 @@ public sealed class Orchestrator(
         // renderBudgetProvider.Current again below this line.
         var renderBudget = renderBudgetProvider.Current;
 
-        // SPEC F124.4 (PLAN T269) — the SAME per-unit-snapshot discipline applied to the live
-        // TimeDate elapsed-due expiry budget: a live Station:Imaging:TimeAnnouncementStaleMinutes edit
-        // must not straddle a single unit's drain. Converted to a TimeSpan here, at the point of use —
-        // GenWave.Orchestration references only GenWave.Core/GenWave.Abstractions and stays
-        // options/config-agnostic, so SpeechDeferralQueue itself never sees the raw minutes shape.
-        var timeDateStaleBudget = TimeSpan.FromMinutes(imagingSettings.Current.TimeAnnouncementStaleMinutes);
+        // SPEC F124.4/F141.1 (PLAN T269/T326) — the SAME per-unit-snapshot discipline applied to the
+        // live TimeDate elapsed-due expiry budget: a live Station:Imaging:TimeAnnouncementBudgetSeconds
+        // edit must not straddle a single unit's drain. Converted to a TimeSpan here, at the point of
+        // use — GenWave.Orchestration references only GenWave.Core/GenWave.Abstractions and stays
+        // options/config-agnostic, so SpeechDeferralQueue itself never sees the raw seconds shape.
+        var timeDateStaleBudget = TimeSpan.FromSeconds(imagingSettings.Current.TimeAnnouncementBudgetSeconds);
+
+        // SPEC F141.1/F141.4 (STORY-355, PLAN T326, review advisory) — the boot-log config echo (see
+        // timeDateBudgetLoggedOnce's own remarks for why it lives here rather than on a bystander
+        // Host service): logs the bound value exactly once, on this Orchestrator's first unit, then
+        // never again — every later unit still reads imagingSettings.Current fresh above, live-edits
+        // included, this flag only silences the REPEAT logging.
+        if (!timeDateBudgetLoggedOnce)
+        {
+            timeDateBudgetLoggedOnce = true;
+            logger.LogInformation(
+                "TimeDate honesty budget bound: {TimeAnnouncementBudgetSeconds}s (SPEC F141.1)",
+                imagingSettings.Current.TimeAnnouncementBudgetSeconds);
+        }
 
         // Each segment's voice+persona-name pair is resolved (a fast, local accessor call — SPEC
         // F35.3, F39.1) immediately before that segment's SegmentRequest is built, so the actual TTS
@@ -1237,12 +1291,31 @@ public sealed class Orchestrator(
                     break;
 
                 case SpeechDeferralKind.TimeDate:
+                {
                     // SPEC F110.3 (STORY-302, PLAN T232) — the clock-anchored time announcement:
                     // always the templated rung (TimeDate is not one of LlmCopyWriter.IsLlmAuthored's
                     // kinds, so there is no LLM rung above it to miss). See BuildTimeDateRequest's
                     // own remarks for why the hour comes from the deferral's Due, not StationLocalNow.
-                    Kick(BuildTimeDateRequest(deferral, identity));
+                    //
+                    // SPEC F141.2 (STORY-355, PLAN T326) — the honesty classification: the SAME
+                    // SpeechDeferralQueue.AirTimeLateness formula TryDequeueDue's own budget-expiry
+                    // check uses (real now plus already-queued runtime, minus the armed hour; the
+                    // shared static, not a re-typed copy — review advisory, connascence of algorithm),
+                    // read fresh here rather than reused from drainNow — a straddle/ceremony caller may
+                    // have forced drainNow ahead of real time, and a forced-forward "now" must never
+                    // make a genuinely punctual TimeDate read as late (the identical reason that queue
+                    // method's own remarks give for checking its expiry budget against real wall-clock
+                    // time, never the caller's now). Always OnTime or Late here: a deferral this stale
+                    // never reaches this arm at all — TryDequeueDue's own expiry check above already
+                    // dropped it, unchanged by this feature (SPEC F141.3/F124.4).
+                    var timeDateLateness = SpeechDeferralQueue.AirTimeLateness(
+                        timeProvider.GetUtcNow(), queuedAhead, deferral.Due);
+                    var timeDateFreshness = timeDateLateness > TimeDateHonestyThreshold
+                        ? TimeAnnouncementFreshness.Late
+                        : TimeAnnouncementFreshness.OnTime;
+                    Kick(BuildTimeDateRequest(deferral, identity, timeDateFreshness));
                     break;
+                }
 
                 case SpeechDeferralKind.Context:
                 {
@@ -1571,9 +1644,16 @@ public sealed class Orchestrator(
     /// acceptance true: the SAME hour always renders the SAME text
     /// (<see cref="PatterTemplateRenderer.Expand"/> reads only the hour component), so a second
     /// drain within that hour hashes identically and hits the forever-cache
-    /// (<c>TtsSegmentSource</c>'s <c>FreshPerAiring=false</c> path) rather than re-synthesizing.
+    /// (<c>TtsSegmentSource</c>'s <c>FreshPerAiring=false</c> path) rather than re-synthesizing — the
+    /// SAME cache-hit reasoning holds for the late variant (SPEC F141.2) too, since the rendered TEXT
+    /// (not <paramref name="freshness"/> itself) is the cache key.
     /// </summary>
-    static SegmentRequest BuildTimeDateRequest(SpeechDeferral deferral, StationIdentity identity) =>
+    /// <param name="freshness">
+    /// SPEC F141.2 (STORY-355, PLAN T326) — the caller's own honesty classification for this drain,
+    /// stamped verbatim onto <see cref="SegmentRequest.TimeDateFreshness"/>; never re-derived here.
+    /// </param>
+    static SegmentRequest BuildTimeDateRequest(
+        SpeechDeferral deferral, StationIdentity identity, TimeAnnouncementFreshness freshness) =>
         new(
             SegmentKind.TimeDate,
             identity.Voice,
@@ -1581,7 +1661,10 @@ public sealed class Orchestrator(
             null,
             deferral.Due,
             identity.Id,
-            PersonaName: null);
+            PersonaName: null)
+        {
+            TimeDateFreshness = freshness,
+        };
 
     /// <summary>
     /// Builds the <see cref="SegmentKind.ContextSegment"/> request for a due

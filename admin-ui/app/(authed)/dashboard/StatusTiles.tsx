@@ -39,6 +39,57 @@ function llmTileVariant(llm: StatusResponse["llm"]): "neutral" | "ok" | "warning
   return llm.lastOutcome === "failed" ? "warning" : "ok";
 }
 
+/**
+ * SPEC F139.2, STORY-353, PLAN T334 — the sentence-ready noun phrase for one dominant-cause count,
+ * singular/plural handled (mirrors `playableTracksCaption`'s own convention one tile over). Keyed
+ * on the wire's own lowercase, no-separator enum spelling (`GenWave.Tts.LlmCallCause.ToString()`,
+ * SPEC F73.1's existing `status`/`mode` convention) — the station's own words for each cause,
+ * rather than the wire's terse identifier leaking straight onto the tile.
+ *
+ * No `success` key: `LlmCallCauseCounters.DominantFailure` (the api-side read this line's own
+ * `dominantCause` comes from) filters `Success` out at the source — `llm.dominantCause` can never
+ * carry it, so a map entry for it would be dead weight, not a missing case.
+ *
+ * `canceledbywindow`/`malformedresponse` ARE kept even though `DominantFailure` is called scoped to
+ * `LlmCallKind.Copy` here (see `StatusController`'s own remarks) and `GenWave.Tts.LlmCopyWriter`
+ * never stamps either cause — only the crosstalk lane (`CrosstalkStockWorker`/
+ * `CrosstalkScriptParser`) does. Both are unreachable on THIS tile today, by construction, not by
+ * omission — left in so this map stays a complete mirror of `LlmCallCause` (the same "never drop an
+ * unknown kind" discipline `CAUSE_LABELS` in `LlmCallsFeed.tsx` already follows for the OTHER,
+ * kind-unscoped surface) rather than something a future edit "fixes" by deleting two lines that look
+ * unused.
+ */
+const DOMINANT_CAUSE_NOUNS: Record<string, [singular: string, plural: string]> = {
+  timeout: ["timeout", "timeouts"],
+  overlength: ["over-length reply", "over-length replies"],
+  truthgatereject: ["truth-gate reject", "truth-gate rejects"],
+  connectionfailure: ["connection failure", "connection failures"],
+  canceledbywindow: ["break-window cancellation", "break-window cancellations"],
+  emptycompletion: ["empty reply", "empty replies"],
+  malformedresponse: ["malformed reply", "malformed replies"],
+};
+
+/**
+ * SPEC F139.2, STORY-353, PLAN T334 — the red tile's "why" line, e.g. "Red: 6 timeouts in the
+ * last 24h, gemma3:12b" (the F139.2 worked example's own shape, sentence-cased per house copy
+ * rule). `null` whenever the api has nothing to explain (`dominantCause`/`dominantCauseCount`/
+ * `dominantCauseModel` travel together — see `StatusResponse.llm`'s own remarks) — the caller only
+ * invokes this once the tile is already red, so a `null` here is simply unused, never rendered as
+ * an empty line. Names the true rolling window (24h, SPEC F139.2's own retention) rather than the
+ * spec's illustrative "last hour" — the tile never claims a narrower window than the counters
+ * actually track.
+ */
+function dominantCauseLine(llm: StatusResponse["llm"]): string | null {
+  const cause = llm.dominantCause;
+  const count = llm.dominantCauseCount;
+  const model = llm.dominantCauseModel;
+  if (cause == null || count == null || model == null) return null;
+
+  const [singular, plural] = DOMINANT_CAUSE_NOUNS[cause] ?? [cause, cause];
+  const noun = count === 1 ? singular : plural;
+  return `Red: ${count} ${noun} in the last 24h, ${model}`;
+}
+
 /** SPEC F99.5, F100.3, STORY-256 AC4 — the Voice tile has no "disabled" state (the primary engine
  * is always configured): "warning" when the cached verdict is unhealthy, "ok" otherwise (including
  * the brief startup window before the first probe cycle completes — a degraded read is never
@@ -125,9 +176,14 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
                 <p className="mt-0.5 text-[0.8rem] text-mute">{status.llm.activePersona}</p>
               )}
               {status.llm.lastOutcome === "failed" && (
-                <p className="mt-1 text-[0.75rem] font-semibold text-danger">
-                  Last completion failed — falling back to templated copy
-                </p>
+                <>
+                  <p className="mt-1 text-[0.75rem] font-semibold text-danger">
+                    Last completion failed — falling back to templated copy
+                  </p>
+                  {/* SPEC F139.2, STORY-353, PLAN T334 — the gh-#365 acceptance ("no SSH, no
+                      Loki, no darts at Llm settings"): a red tile also names WHY, not only THAT. */}
+                  <DominantCauseLine llm={status.llm} />
+                </>
               )}
             </>
           )}
@@ -192,6 +248,15 @@ function TileHeadline({ value, caption }: { value: number; caption: string }): R
       <span className="text-[0.75rem] font-normal text-mute">{caption}</span>
     </p>
   );
+}
+
+/** SPEC F139.2, STORY-353, PLAN T334 — the LLM tile's "why" line, or nothing at all when the api
+ * has no dominant cause to report (see `dominantCauseLine`'s own remarks). A small component
+ * rather than calling `dominantCauseLine` twice at each call site (`null`-check, then render). */
+function DominantCauseLine({ llm }: { llm: StatusResponse["llm"] }): ReactNode {
+  const line = dominantCauseLine(llm);
+  if (line === null) return null;
+  return <p className="mt-0.5 text-[0.75rem] text-danger">{line}</p>;
 }
 
 function TileSkeleton(): ReactNode {

@@ -252,7 +252,9 @@ public static class FeatureContextSegmentsAir
                 new FakeActivePersonaAccessor(),
                 new CapturingLogger<LlmCopyWriter>(),
                 TimeProvider.System,
-                new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                new LlmCallRecorder(
+                    new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                    new LlmCallCauseCounters(TimeProvider.System)),
                 controller);
             var gated = new DegradationGatedCopyWriter(
                 controller, llmWriter, template, new TestOptionsMonitor<DegradationOptions>(new DegradationOptions()),
@@ -366,7 +368,9 @@ public static class FeatureContextSegmentsAir
                 new FakeActivePersonaAccessor(),
                 new CapturingLogger<LlmCopyWriter>(),
                 TimeProvider.System,
-                new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                new LlmCallRecorder(
+                    new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                    new LlmCallCauseCounters(TimeProvider.System)),
                 new FakeDegradationModeReader());
 
         [Fact]

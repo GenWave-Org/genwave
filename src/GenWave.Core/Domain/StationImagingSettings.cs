@@ -16,15 +16,20 @@ namespace GenWave.Core.Domain;
 /// future-dated <c>TimeDate</c> deferral, due at the SAME instant as <see cref="ClockAnchoredIdents"/>'s
 /// own trigger.
 /// </param>
-/// <param name="TimeAnnouncementStaleMinutes">
-/// <c>Station:Imaging:TimeAnnouncementStaleMinutes</c> (SPEC F124.4, PLAN T269) — the elapsed-due
-/// expiry budget: a <c>TimeDate</c> deferral draining more than this many minutes past its own
-/// air-time is dropped undrained rather than airing an hour that has already passed (SpeechDeferralQueue's
-/// own <c>TryDequeueDue</c> remarks carry the exact air-time-lateness formula). Live-editable;
-/// defaults to 5 — the shipped SPEC F124.4 budget, held here as a plain compile-time constant (unlike
+/// <param name="TimeAnnouncementBudgetSeconds">
+/// <c>Station:Imaging:TimeAnnouncementBudgetSeconds</c> (SPEC F124.4, F141.1, PLAN T269/T326) — the
+/// elapsed-due expiry budget: a <c>TimeDate</c> deferral draining more than this many seconds past its
+/// own air-time is dropped undrained rather than airing an hour that has already passed
+/// (SpeechDeferralQueue's own <c>TryDequeueDue</c> remarks carry the exact air-time-lateness formula).
+/// Live-editable; defaults to 420 (SPEC F141.1 — widened from the original F124.4 shipped budget,
+/// 300s/5 minutes, once gh-#526's field data showed every real overrun landing 313-362s past Due,
+/// just past the old ceiling) — held here as a plain compile-time constant (unlike
 /// <see cref="ClockAnchoredIdents"/>/<see cref="TimeAnnouncements"/>, this one has an honest non-off
 /// default: idents are exempt by design, so this budget matters only once an operator opts
-/// <see cref="TimeAnnouncements"/> in — see that param's own remarks).
+/// <see cref="TimeAnnouncements"/> in — see that param's own remarks). Seconds, not minutes (F141.1's
+/// own unit change): a minute-only grain could never express the 90-second F141.2 honesty threshold
+/// that separates the classic on-time line from the honest "just past" one drained inside this SAME
+/// budget.
 /// </param>
 public sealed record StationImagingSettings(
-    bool ClockAnchoredIdents, bool TimeAnnouncements, int TimeAnnouncementStaleMinutes = 5);
+    bool ClockAnchoredIdents, bool TimeAnnouncements, int TimeAnnouncementBudgetSeconds = 420);

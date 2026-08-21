@@ -61,6 +61,19 @@ public sealed class PatterTemplateRenderer
     /// deferral's <c>Due</c> instant (the top of the hour the announcement was ARMED for), never a
     /// fresh drain-time clock read, so the SAME hour always renders the SAME text — the cache-hit half
     /// of F110.3's acceptance.
+    ///
+    /// <para>
+    /// <b>The honest late variant (SPEC F141.2, STORY-355, PLAN T326).</b> When
+    /// <see cref="SegmentRequest.TimeDateFreshness"/> reads <see cref="TimeAnnouncementFreshness.Late"/> —
+    /// a drain landing more than 90 seconds past the armed hour, still inside the live budget — the
+    /// line reads "It's just past {hour} o'clock on {station}." instead: the SAME hour word, the SAME
+    /// station name, one honest qualifier. A deferral drained PAST the live budget never reaches this
+    /// arm (or any <see cref="SegmentRequest"/>) at all — <c>SpeechDeferralQueue.TryDequeueDue</c>'s own
+    /// expiry check drops it first (SPEC F124.4/F141.3), so <see cref="TimeAnnouncementFreshness"/> has
+    /// only these two members to switch on (review round-2 finding F3). Per-hour text still means the
+    /// forever-cache warms in a day: the late line's own cache key (rendered text) simply gains one more
+    /// entry per hour, exactly like the classic one.
+    /// </para>
     /// </summary>
     public string Expand(SegmentRequest request) => request.Kind switch
     {
@@ -83,7 +96,9 @@ public sealed class PatterTemplateRenderer
                                           { } t                    => $"That was {t.Title}.",
                                           null                     => "That was your last track.",
                                       },
-        SegmentKind.TimeDate       => $"It's {HourWord(request.LocalNow.Hour)} o'clock on {request.StationName}.",
+        SegmentKind.TimeDate       => request.TimeDateFreshness == TimeAnnouncementFreshness.Late
+                                          ? $"It's just past {HourWord(request.LocalNow.Hour)} o'clock on {request.StationName}."
+                                          : $"It's {HourWord(request.LocalNow.Hour)} o'clock on {request.StationName}.",
         SegmentKind.SignOff        => request.CounterpartName switch
                                       {
                                           { Length: > 0 } name => $"That's me for now — coming up next, {name}.",

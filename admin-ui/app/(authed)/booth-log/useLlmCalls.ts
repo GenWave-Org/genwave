@@ -9,7 +9,9 @@ import { fetchLlmCalls, type LlmCallEntry } from "@/lib/llm-calls-api";
 const LLM_CALLS_POLL_INTERVAL_MS = 12000;
 
 export interface UseLlmCallsResult {
-  /** Newest-first, exactly as the endpoint returns it. `null` until the first poll resolves. */
+  /** Newest-first, the `calls` half of the endpoint's own `{ calls, causeSummary }` response (SPEC
+   * F139.2, PLAN T334 — `fetchLlmCalls` unwraps it; see that function's own remarks for why
+   * `causeSummary` stops there and never reaches this hook). `null` until the first poll resolves. */
   entries: LlmCallEntry[] | null;
   /** True when the most recent poll failed; `entries` is left untouched (usePoll's contract — a
    * caller renders a quiet degrade, never discards what's already loaded). */

@@ -442,6 +442,9 @@ public static class FeatureSeededDefaults
             Assert.Equal(
                 imagingDefaults.TimeAnnouncements,
                 bool.Parse(RequireValue(config, "Station:Imaging:TimeAnnouncements")));
+            Assert.Equal(
+                imagingDefaults.TimeAnnouncementBudgetSeconds,
+                int.Parse(RequireValue(config, "Station:Imaging:TimeAnnouncementBudgetSeconds"), NumberStyles.Integer, CultureInfo.InvariantCulture));
         }
     }
 

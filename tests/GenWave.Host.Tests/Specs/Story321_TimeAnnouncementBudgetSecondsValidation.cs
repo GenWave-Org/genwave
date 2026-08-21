@@ -2,7 +2,7 @@
 // floor half. The queue/orchestrator half lives in
 // Orchestration.Tests/Specs/Story321_LateTimeCheckDies.cs.
 //
-// BDD specification — xUnit. Round-3 review finding F1: Station:Imaging:TimeAnnouncementStaleMinutes
+// BDD specification — xUnit. Round-3 review finding F1: Station:Imaging:TimeAnnouncementBudgetSeconds
 // must fail boot at 0 (0 would drop EVERY TimeDate deferral undrained, silently killing F110.3,
 // rather than disabling anything the way every "0 = off" knob elsewhere in StationOptionsValidator
 // does) — the [Range(1, int.MaxValue)] on StationImagingOptions is documentation-only (Program.cs's
@@ -10,6 +10,12 @@
 // so StationOptionsValidator.Validate is the seam that actually enforces this at ValidateOnStart.
 // Mirrors Story136_StationIdCadenceValidation.cs's own BuildStationOptionsValidator/ValidOptions
 // idiom.
+//
+// Retargeted at PLAN T326 (SPEC F141.1): the key/shape widened from Station:Imaging:
+// TimeAnnouncementStaleMinutes (minutes, default 5) to Station:Imaging:TimeAnnouncementBudgetSeconds
+// (seconds, default 420) — gh-#526's field data showed every real overrun landing just past the old
+// 300s ceiling. The floor/ceiling shape this file pins is otherwise byte-identical to the F124.4
+// original; only the key, unit, and default number changed.
 
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -18,9 +24,9 @@ using GenWave.Host.Options;
 
 namespace GenWave.Host.Tests.Specs;
 
-public static class FeatureTimeAnnouncementStaleMinutesValidation
+public static class FeatureTimeAnnouncementBudgetSecondsValidation
 {
-    const string Key = "Station:Imaging:TimeAnnouncementStaleMinutes";
+    const string Key = "Station:Imaging:TimeAnnouncementBudgetSeconds";
 
     /// <summary>A minimally-valid StationOptions instance for direct validator construction.</summary>
     static StationOptions ValidOptions() => new()
@@ -50,12 +56,12 @@ public static class FeatureTimeAnnouncementStaleMinutesValidation
         }
 
         [Fact]
-        public void SettingValidatorAcceptsFive() =>
-            Assert.Null(BuildSettingValidator().Validate(Key, "5"));
+        public void SettingValidatorAcceptsFourTwenty() =>
+            Assert.Null(BuildSettingValidator().Validate(Key, "420"));
 
         [Fact]
-        public void TheDefaultRemainsFive() =>
-            Assert.Equal(5, new StationImagingOptions().TimeAnnouncementStaleMinutes);
+        public void TheDefaultRemainsFourTwenty() =>
+            Assert.Equal(420, new StationImagingOptions().TimeAnnouncementBudgetSeconds);
     }
 
     // ── SAD PATH ────────────────────────────────────────────────────────────
@@ -66,7 +72,7 @@ public static class FeatureTimeAnnouncementStaleMinutesValidation
         public void BootValidationRejectsZero()
         {
             var options = ValidOptions();
-            options.Imaging.TimeAnnouncementStaleMinutes = 0;
+            options.Imaging.TimeAnnouncementBudgetSeconds = 0;
 
             var result = BuildStationOptionsValidator().Validate(null, options);
 
@@ -82,7 +88,7 @@ public static class FeatureTimeAnnouncementStaleMinutesValidation
         public void BootValidationRejectsNegativeOne()
         {
             var options = ValidOptions();
-            options.Imaging.TimeAnnouncementStaleMinutes = -1;
+            options.Imaging.TimeAnnouncementBudgetSeconds = -1;
 
             var result = BuildStationOptionsValidator().Validate(null, options);
 

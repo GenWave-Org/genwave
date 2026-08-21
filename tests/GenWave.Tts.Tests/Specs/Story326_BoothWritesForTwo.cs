@@ -62,7 +62,7 @@ public static class FeatureBoothWritesForTwo
                 MaxCopyChars = maxCopyChars,
             }),
             crosstalkMonitor,
-            ring,
+            new LlmCallRecorder(ring, new LlmCallCauseCounters(TimeProvider.System)),
             new FakeDegradationModeReader(),
             logger,
             TimeProvider.System);
@@ -371,9 +371,13 @@ public static class FeatureBoothWritesForTwo
         [Fact]
         public async Task A_script_under_the_duration_target_is_accepted()
         {
-            // Given a validated script well under the 25s default (three short lines)...
+            // Given a validated script well under the shipped 50s default (three short lines) —
+            // built EXPLICITLY off CrosstalkOptions()'s own default (T333 review advisory A5), never
+            // this file's own BuildWriter convenience parameter default (25, an unrelated fixed test
+            // value several OTHER facts in this file use purely to prove the cap/word-budget SCALE
+            // with whatever target is configured) — so "the default" means one thing in this scenario.
             mock.ReplyContent = WellFormedReply;
-            var writer = BuildWriter(mock.BaseUri.ToString());
+            var writer = BuildWriter(mock.BaseUri.ToString(), durationTargetSeconds: new CrosstalkOptions().DurationTargetSeconds);
 
             // When the spoken-duration estimate is computed...
             var result = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
@@ -382,11 +386,12 @@ public static class FeatureBoothWritesForTwo
         }
 
         [Fact]
-        public async Task The_duration_target_is_live_editable_with_a_25s_default()
+        public async Task The_duration_target_is_live_editable_with_the_shipped_default()
         {
-            // Given the shipped default (SPEC F127.4) — 200 chars / 15 chars-per-sec ~= 13.3s, which
-            // fits comfortably under it.
-            Assert.Equal(25, new CrosstalkOptions().DurationTargetSeconds);
+            // Given the shipped default (SPEC F127.4 as amended, PLAN T333) — 200 chars / 15
+            // chars-per-sec ~= 13.3s, which fits comfortably under it.
+            var shippedDefault = new CrosstalkOptions().DurationTargetSeconds;
+            Assert.Equal(50, shippedDefault);
 
             mock.ReplyContent = string.Join('\n', new[]
             {
@@ -394,7 +399,12 @@ public static class FeatureBoothWritesForTwo
                 $"{CrosstalkScriptParser.NeighborTag}: {new string('b', 70)}",
                 $"{CrosstalkScriptParser.HostTag}: {new string('c', 60)}",
             });
-            var (writer, _, _, crosstalkMonitor) = BuildWriterWithRingAndLogger(mock.BaseUri.ToString());
+            // Threads the SAME shippedDefault value read above (T333 review advisory A5) — never
+            // this file's own BuildWriter convenience default (still 25 elsewhere in this file), so
+            // the fact's own "shipped default" assertion and the writer it builds provably agree on
+            // what "the default" means.
+            var (writer, _, _, crosstalkMonitor) = BuildWriterWithRingAndLogger(
+                mock.BaseUri.ToString(), durationTargetSeconds: shippedDefault);
 
             var underDefault = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
             Assert.IsType<CrosstalkWriteResult.Accepted>(underDefault);
@@ -496,6 +506,9 @@ public static class FeatureBoothWritesForTwo
 
             var discarded = Assert.IsType<CrosstalkWriteResult.Discarded>(result);
             Assert.Contains("per-line budget", discarded.Reason, StringComparison.Ordinal);
+            // SPEC F139.1 (PLAN T334 doc pickup): the reply came back and fit no length constraint —
+            // OverLength, the same bucket LlmCopyWriter's own gh-#277 family lands in.
+            Assert.Equal(LlmCallCause.OverLength, discarded.Cause);
         }
 
         [Fact]
@@ -513,6 +526,8 @@ public static class FeatureBoothWritesForTwo
 
             var discarded = Assert.IsType<CrosstalkWriteResult.Discarded>(result);
             Assert.Contains("exceeds", discarded.Reason, StringComparison.Ordinal);
+            // SPEC F139.1 (PLAN T334 doc pickup): an over-target duration estimate is OverLength too.
+            Assert.Equal(LlmCallCause.OverLength, discarded.Cause);
         }
 
         // T282 review finding (F2a): mutation-proven — deleting the both-speakers-present guards
@@ -536,6 +551,25 @@ public static class FeatureBoothWritesForTwo
 
             var discarded = Assert.IsType<CrosstalkWriteResult.Discarded>(result);
             Assert.Contains(CrosstalkScriptParser.NeighborTag, discarded.Reason, StringComparison.Ordinal);
+            // SPEC F139.1 (PLAN T334 doc pickup): a missing required speaker turn is a shape problem
+            // — content arrived, it just never took the required shape — so this is MalformedResponse.
+            Assert.Equal(LlmCallCause.MalformedResponse, discarded.Cause);
+        }
+
+        // SPEC F139.1 amendment (T330 review round 1, 2026-08-20 — the F135.5 precedent): the
+        // reviewer's own exhibit — a reply carrying MORE than MaxLines is not "empty" by any honest
+        // reading, so the whole parser-shape family (this branch included) moved off EmptyCompletion
+        // onto its own MalformedResponse bucket.
+        [Fact]
+        public async Task A_twelve_line_reply_is_a_malformed_response_not_an_empty_one()
+        {
+            mock.ReplyContent = string.Join('\n', Enumerable.Range(1, 12).Select(i =>
+                $"{(i % 2 == 1 ? CrosstalkScriptParser.HostTag : CrosstalkScriptParser.NeighborTag)}: Line {i}."));
+            var writer = BuildWriter(mock.BaseUri.ToString());
+
+            var result = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            Assert.Equal(LlmCallCause.MalformedResponse, Assert.IsType<CrosstalkWriteResult.Discarded>(result).Cause);
         }
     }
 
@@ -565,6 +599,9 @@ public static class FeatureBoothWritesForTwo
             // Then the whole exchange is discarded — never aired truncated.
             var discarded = Assert.IsType<CrosstalkWriteResult.Discarded>(result);
             Assert.Contains("length", discarded.Reason, StringComparison.Ordinal);
+            // SPEC F139.1 (PLAN T334 doc pickup): a finish_reason: length truncation is OverLength —
+            // the reply came back but did not fit, the same family as a per-line/duration overrun.
+            Assert.Equal(LlmCallCause.OverLength, discarded.Cause);
         }
 
         [Fact]

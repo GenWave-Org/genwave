@@ -18,7 +18,8 @@ using Microsoft.Extensions.Options;
 /// <b>One completion, whole exchange (SPEC F127.3).</b> Unlike <see cref="LlmCopyWriter"/>, this
 /// writer NEVER degrades to a template — F127.4 is skip-only: any failure (disabled endpoint,
 /// transport fault, a completion truncated at <c>max_tokens</c>, malformed reply, a line failing
-/// hygiene/budget, an over-target duration estimate) returns <see cref="CrosstalkWriteResult.Discarded"/>
+/// hygiene/budget, an over-target duration estimate, a F138.6 truth-gate violation) returns
+/// <see cref="CrosstalkWriteResult.Discarded"/>
 /// with one reason, logged at Information
 /// (never WARN — banter is optional color, a miss is not an outage) and recorded into
 /// <see cref="LlmCallRing"/> under <see cref="LlmCallKind.Crosstalk"/> so <c>/api/llm-calls</c> can
@@ -44,7 +45,7 @@ public sealed class CrosstalkScriptWriter(
     IHttpClientFactory httpClientFactory,
     IOptionsMonitor<LlmOptions> llmOptions,
     IOptionsMonitor<CrosstalkOptions> crosstalkOptions,
-    LlmCallRing callRing,
+    LlmCallRecorder recorder,
     IDegradationModeReader degradationMode,
     ILogger<CrosstalkScriptWriter> logger,
     TimeProvider timeProvider)
@@ -99,11 +100,26 @@ public sealed class CrosstalkScriptWriter(
 
         var cfg = llmOptions.CurrentValue;
         if (string.IsNullOrEmpty(cfg.Endpoint))
-            return Discard("Llm:Endpoint is not configured", personaName, startedAt, mode, systemPrompt: null, userPrompt: null);
+        {
+            // SPEC F140 review finding F3: this is the archetypal pre-flight refusal — zero I/O,
+            // resolves in microseconds — so it carries GenerationAttempted: false (see
+            // CrosstalkWriteResult.Discarded's own remarks for why a pacing caller cares).
+            //
+            // SPEC F139.1 (T330 review advisory): Cause is a DELIBERATE ConnectionFailure here, not a
+            // default filled just to satisfy the parameter — systemPrompt: null skips the ring/counter
+            // record below (nothing was ever attempted, mirroring GenerationAttempted: false above),
+            // so this value only ever surfaces on the returned Discarded itself, never on a ring row.
+            // ConnectionFailure is the honest answer regardless: an unset Llm:Endpoint IS "nowhere
+            // configured to connect to" — a connection-layer fact, not a shape or a timeout one.
+            return Discard(
+                "Llm:Endpoint is not configured", LlmCallCause.ConnectionFailure, personaName, startedAt, mode,
+                systemPrompt: null, userPrompt: null, cfg.Model, generationAttempted: false);
+        }
 
         var durationTargetSeconds = crosstalkOptions.CurrentValue.DurationTargetSeconds;
 
-        var systemPrompt = CrosstalkPromptBuilder.BuildSystemPrompt(request.HostCard, request.NeighborCard, durationTargetSeconds);
+        var systemPrompt = CrosstalkPromptBuilder.BuildSystemPrompt(
+            request.HostCard, request.NeighborCard, durationTargetSeconds, request.StationLocalNow);
         var userPrompt = CrosstalkPromptBuilder.BuildUserContent(
             request, LlmPromptBuilder.BuildStationClockLine(request.StationLocalNow));
 
@@ -158,15 +174,18 @@ public sealed class CrosstalkScriptWriter(
             {
                 return Discard(
                     "the completion was cut short by max_tokens (finish_reason: length) — a truncated reply is never aired",
-                    personaName, startedAt, mode, systemPrompt, userPrompt, raw);
+                    LlmCallCause.OverLength, personaName, startedAt, mode, systemPrompt, userPrompt, cfg.Model, raw);
             }
 
-            var result = CrosstalkScriptParser.Parse(raw, cfg.MaxCopyChars, durationTargetSeconds);
+            var result = CrosstalkScriptParser.Parse(raw, cfg.MaxCopyChars, durationTargetSeconds, request.StationLocalNow);
             return result switch
             {
-                CrosstalkWriteResult.Accepted => Accept(result, personaName, systemPrompt, userPrompt, raw, startedAt, mode),
+                CrosstalkWriteResult.Accepted => Accept(
+                    result, personaName, systemPrompt, userPrompt, raw, startedAt, mode, cfg.Model),
+                // discarded.Cause was decided once, at the source, inside CrosstalkScriptParser.Parse's
+                // own reject branches (SPEC F139.1) — never re-derived here from discarded.Reason's text.
                 CrosstalkWriteResult.Discarded discarded => Discard(
-                    discarded.Reason, personaName, startedAt, mode, systemPrompt, userPrompt, raw),
+                    discarded.Reason, discarded.Cause, personaName, startedAt, mode, systemPrompt, userPrompt, cfg.Model, raw),
                 _ => throw new System.Diagnostics.UnreachableException($"Unhandled {nameof(CrosstalkWriteResult)} case."),
             };
         }
@@ -178,50 +197,61 @@ public sealed class CrosstalkScriptWriter(
         }
         catch (Exception ex)
         {
-            var (outcome, detail) = LlmCopyWriter.ClassifyForRing(ex);
-            callRing.Record(
+            var (outcome, cause, detail) = LlmCopyWriter.ClassifyForRing(ex);
+
+            // SPEC F140 review finding F3: an HttpRequestException with no StatusCode is .NET's own
+            // signal that no response was ever received (a connect refusal, DNS failure, TLS
+            // failure — thrown by SendAsync itself, before EnsureSuccessStatusCode ever runs) —
+            // milliseconds, no generation attempted. Every other fault reaching this catch block
+            // (a timeout waiting the full Llm:TimeoutSeconds, a non-2xx status AFTER a response
+            // arrived, a malformed body) represents genuine wall-clock time spent on a real attempt,
+            // so it keeps GenerationAttempted's own default of true.
+            var generationAttempted = ex is not HttpRequestException { StatusCode: null };
+
+            recorder.Record(
                 personaName, systemPrompt, userPrompt, response: null, startedAt, ElapsedMs(startedAt),
-                outcome, detail, mode, LlmCallKind.Crosstalk);
+                outcome, detail, mode, cause, cfg.Model, LlmCallKind.Crosstalk);
             logger.LogInformation(
                 "Crosstalk exchange discarded (persona: {PersonaName}): {Detail}",
                 personaName.ReplaceLineEndings(" "), detail.ReplaceLineEndings(" "));
-            return new CrosstalkWriteResult.Discarded(detail);
+            return new CrosstalkWriteResult.Discarded(detail, cause, generationAttempted);
         }
     }
 
     CrosstalkWriteResult Accept(
         CrosstalkWriteResult result, string personaName, string systemPrompt, string userPrompt, string raw,
-        DateTimeOffset startedAt, DegradationMode mode)
+        DateTimeOffset startedAt, DegradationMode mode, string model)
     {
-        callRing.Record(
+        recorder.Record(
             personaName, systemPrompt, userPrompt, raw, startedAt, ElapsedMs(startedAt),
-            LlmCallOutcome.Ok, statusDetail: null, mode, LlmCallKind.Crosstalk);
+            LlmCallOutcome.Ok, statusDetail: null, mode, LlmCallCause.Success, model, LlmCallKind.Crosstalk);
         return result;
     }
 
     /// <summary>
     /// The one discard path every failure funnels through (SPEC F127.4) — records into
-    /// <see cref="LlmCallRing"/> (skipped entirely when <paramref name="systemPrompt"/> is null, i.e.
-    /// nothing was ever attempted — the disabled-endpoint short-circuit, mirroring
+    /// <see cref="LlmCallRecorder"/> (skipped entirely when <paramref name="systemPrompt"/> is null,
+    /// i.e. nothing was ever attempted — the disabled-endpoint short-circuit, mirroring
     /// <see cref="LlmCopyWriter.WriteAsync"/>'s own "disabled means no ring entry" posture) and logs
     /// exactly one Information line (never WARN — F127.4's own posture: a discard is discipline, not
-    /// an outage).
+    /// an outage). <paramref name="cause"/> (SPEC F139.1, PLAN T330) is decided by the CALLER, at the
+    /// point it already knows why — this method never inspects <paramref name="reason"/>'s text.
     /// </summary>
     CrosstalkWriteResult.Discarded Discard(
-        string reason, string personaName, DateTimeOffset startedAt, DegradationMode mode,
-        string? systemPrompt, string? userPrompt, string? raw = null)
+        string reason, LlmCallCause cause, string personaName, DateTimeOffset startedAt, DegradationMode mode,
+        string? systemPrompt, string? userPrompt, string model, string? raw = null, bool generationAttempted = true)
     {
         if (systemPrompt is not null)
         {
-            callRing.Record(
+            recorder.Record(
                 personaName, systemPrompt, userPrompt, raw, startedAt, ElapsedMs(startedAt),
-                LlmCallOutcome.Rejected, reason, mode, LlmCallKind.Crosstalk);
+                LlmCallOutcome.Rejected, reason, mode, cause, model, LlmCallKind.Crosstalk);
         }
 
         logger.LogInformation(
             "Crosstalk exchange discarded (persona: {PersonaName}): {Reason}",
             personaName.ReplaceLineEndings(" "), reason.ReplaceLineEndings(" "));
-        return new CrosstalkWriteResult.Discarded(reason);
+        return new CrosstalkWriteResult.Discarded(reason, cause, generationAttempted);
     }
 
     long ElapsedMs(DateTimeOffset startedAt) => (long)(timeProvider.GetUtcNow() - startedAt).TotalMilliseconds;

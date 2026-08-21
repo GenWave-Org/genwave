@@ -84,16 +84,23 @@ public sealed class TtsSegmentSource(
             // segment, the alternative is PatterTemplateRenderer's inert placeholder ("Here's
             // something worth knowing") standing in for actual facts, which defeats the entire point
             // of a context provider (never airable filler, SPEC F107.6). copy.FreshPerAiring false
-            // here means every writer in the chain missed: LlmCopyWriter's own three degrade paths
-            // (disabled endpoint, timeout/non-2xx/connect, empty-or-over-length after cleanup) AND
-            // DegradationGatedCopyWriter routing straight to TemplateCopyWriter — unconditionally in
-            // Hard mode, or off an unclaimed Soft cadence slot — bypassing LlmCopyWriter entirely.
+            // here means every writer in the chain missed: LlmCopyWriter's own FOUR degrade paths
+            // (disabled endpoint, timeout/non-2xx/connect, empty-or-over-length after cleanup, and —
+            // as of PLAN T332, SPEC F138.2-F138.4 — the truth-gate ladder exhausting its one re-ask)
+            // AND DegradationGatedCopyWriter routing straight to TemplateCopyWriter — unconditionally
+            // in Hard mode, or off an unclaimed Soft cadence slot — bypassing LlmCopyWriter entirely.
             // Every one of those returns template copy rather than throwing (ISegmentCopyWriter's own
             // never-throws contract), which is exactly why PatterTemplateRenderer still needs correct
-            // SignOff/SignOn/ContextSegment arms — they just must never reach air. One WARN, then
-            // null: ITtsSegmentSource already allows null-never-throws, and the Orchestrator's own
-            // drain arm treats a null render exactly like F92.4's "whichever piece rendered airs
-            // (else clean cut)"/F107.6's skip-never-silence posture.
+            // SignOff/SignOn/ContextSegment arms — they just must never reach air for these three
+            // kinds specifically (LeadIn/BackAnnounce carry no such guard below — their own template
+            // rung DOES reach air on a miss, truth-gate exhaustion included, since neither kind's
+            // FIXED PROSE states a weekday/daypart claim on its own; see PatterTemplateRenderer.Expand's
+            // own LeadIn/BackAnnounce arms — the interpolated track title/artist is the one part of
+            // that text NOT gate-checked either way, since a template render never reaches this ladder
+            // to begin with). One WARN, then null:
+            // ITtsSegmentSource already allows null-never-throws, and the Orchestrator's own drain arm
+            // treats a null render exactly like F92.4's "whichever piece rendered airs (else clean
+            // cut)"/F107.6's skip-never-silence posture.
             if (request.Kind is SegmentKind.SignOff or SegmentKind.SignOn or SegmentKind.ContextSegment
                 && !copy.FreshPerAiring)
             {

@@ -35,6 +35,10 @@ interface EntryOverrides {
   promptChars?: number;
   responseChars?: number;
   kind?: string;
+  /** SPEC F139.1, STORY-353, PLAN T334 */
+  cause?: string;
+  /** SPEC F139.2, STORY-353, PLAN T334 */
+  model?: string;
 }
 
 function makeEntry(overrides: EntryOverrides = {}) {
@@ -52,14 +56,20 @@ function makeEntry(overrides: EntryOverrides = {}) {
     promptChars: 100,
     responseChars: 48,
     kind: "copy",
+    cause: "success",
+    model: "test-model",
     ...overrides,
   };
 }
 
 type MockResult = { kind: "ok"; body: unknown } | { kind: "network-error" };
 
-function ok(body: unknown): MockResult {
-  return { kind: "ok", body };
+/** Wraps `calls` in the SPEC F139.2/PLAN T334 response shape (`{ calls, causeSummary }` —
+ * `GenWave.Host.Api.LlmCallsResponseDto`) — every call site below still just hands this the flat
+ * array of entries it always did; `causeSummary` is empty since none of these facts exercise it
+ * (this page doesn't render it — see lib/llm-calls-api.ts's own remarks). */
+function ok(calls: unknown[]): MockResult {
+  return { kind: "ok", body: { calls, causeSummary: [] } };
 }
 
 function networkError(): MockResult {
@@ -206,6 +216,32 @@ describe("Feature: LLM call inspector", () => {
       await flush();
 
       expect(screen.getByText("Copy")).toBeInTheDocument();
+    });
+  });
+
+  // SPEC F139.1, STORY-353, PLAN T334 — Cause is Status's own finer-grained sibling: an operator
+  // can tell a timeout apart from a connection failure without expanding into the raw prompt/
+  // response text.
+  describe("Scenario: rows show why the call resolved the way it did", () => {
+    it("renders a Timeout cause chip", async () => {
+      installFetchMock(ok([makeEntry({ status: "failed", cause: "timeout" })]));
+
+      render(<LlmCallsView timeZone="UTC" />);
+      await flush();
+
+      expect(screen.getByText("Timeout")).toBeInTheDocument();
+    });
+
+    it("renders the raw wire value for a cause this UI has no specific label for", async () => {
+      // The "never drop an unknown kind" discipline STATUS_LABELS/KIND_LABELS already follow — a
+      // taxonomy value shipped by the api ahead of an admin-ui label update still renders,
+      // unstyled, rather than vanishing (SPEC F139.1's own history: eight values as of T330).
+      installFetchMock(ok([makeEntry({ cause: "somenewcause" })]));
+
+      render(<LlmCallsView timeZone="UTC" />);
+      await flush();
+
+      expect(screen.getByText("somenewcause")).toBeInTheDocument();
     });
   });
 
