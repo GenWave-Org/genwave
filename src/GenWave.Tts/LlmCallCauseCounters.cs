@@ -3,8 +3,9 @@ namespace GenWave.Tts;
 /// <summary>
 /// The F139.2 rolling 24h counter store (STORY-353, PLAN T330): how many LLM calls landed on each
 /// (<see cref="LlmCallCause"/>, model, <see cref="LlmCallKind"/>) combination within the last 24 hours
-/// — the seam a LATER task (T334) reads to build the <c>/api/llm-calls</c> counter summary and the red
-/// health tile's "dominant recent cause" line. No persistence of any kind (F139.3, F73.3/F73.4 stand):
+/// — the seam PLAN T334 reads (via <see cref="Snapshot"/> and <see cref="DominantFailure"/>) to build
+/// the <c>/api/llm-calls</c> counter summary and the red health tile's "dominant recent cause" line.
+/// No persistence of any kind (F139.3, F73.3/F73.4 stand):
 /// this class's only dependency is <see cref="TimeProvider"/>, so a process restart clears it by
 /// construction, the exact same posture <see cref="LlmCallRing"/> itself documents.
 ///
@@ -49,9 +50,10 @@ public sealed class LlmCallCauseCounters(TimeProvider timeProvider)
     // guarantee this class never spends.
     readonly Dictionary<DateTimeOffset, Dictionary<(LlmCallCause Cause, string Model, LlmCallKind Kind), int>> buckets = new();
 
-    /// <summary>Counts one resolved call under its current-hour bucket (SPEC F139.2). Called
-    /// alongside <see cref="LlmCallRing.Record"/> at every resolution point — see this class's own
-    /// remarks for why the two stay separate calls rather than one shared method.</summary>
+    /// <summary>Counts one resolved call under its current-hour bucket (SPEC F139.2). Called from
+    /// <see cref="LlmCallRecorder.Record"/> — the one shared method that reunites this call with
+    /// <see cref="LlmCallRing.Record"/> at every resolution point (see that class's own remarks for
+    /// why this store still stays a separate singleton rather than folding into the ring itself).</summary>
     public void Record(LlmCallCause cause, string model, LlmCallKind kind)
     {
         var now = timeProvider.GetUtcNow();
@@ -94,6 +96,32 @@ public sealed class LlmCallCauseCounters(TimeProvider timeProvider)
                 .ToList();
         }
     }
+
+    /// <summary>
+    /// The single highest-count non-<see cref="LlmCallCause.Success"/> row within the rolling 24h
+    /// window, restricted to <paramref name="kind"/> (SPEC F139.2, PLAN T334) — the red health tile's
+    /// "dominant recent cause" line reads directly off this, never re-deriving it from
+    /// <see cref="Snapshot"/> itself. Ties (equal counts) break first by <see cref="LlmCallCause"/>'s
+    /// own declaration order, then by an ordinal comparison of <see cref="LlmCallCauseCount.Model"/> —
+    /// deterministic, never "whichever the dictionary happens to enumerate first".
+    ///
+    /// <para>
+    /// <see langword="null"/> when nothing but <see cref="LlmCallCause.Success"/> (or nothing at all)
+    /// was recorded for <paramref name="kind"/> within the window. Restricted to one <c>kind</c>
+    /// rather than pooling Copy and Crosstalk together: the "LLM" dashboard tile this feeds
+    /// (<c>GenWave.Host.Api.StatusController</c>) reflects <c>LlmCopyStatusHolder</c>'s own
+    /// last-attempt verdict — a copy-writer failure, never a crosstalk one — so its explanation has to
+    /// stay scoped to the SAME kind that made the tile red in the first place, or the line would name
+    /// a cause the operator's own red tile was never actually about.
+    /// </para>
+    /// </summary>
+    public LlmCallCauseCount? DominantFailure(LlmCallKind kind) =>
+        Snapshot()
+            .Where(row => row.Kind == kind && row.Cause != LlmCallCause.Success)
+            .OrderByDescending(row => row.Count)
+            .ThenBy(row => row.Cause)
+            .ThenBy(row => row.Model, StringComparer.Ordinal)
+            .FirstOrDefault();
 
     /// <summary>Drops every bucket more than <see cref="RollingWindow"/> older than <paramref name="nowHour"/>
     /// — called from inside <see cref="gate"/> by both <see cref="Record"/> and <see cref="Snapshot"/>,

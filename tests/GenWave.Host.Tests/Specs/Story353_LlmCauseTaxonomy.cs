@@ -6,16 +6,22 @@
 // CrosstalkWorkerHarness (Support/) — the SAME real CrosstalkStockWorker/CrosstalkScriptWriter/
 // CrosstalkAssembler wiring Story328_CrosstalkStockWorker.cs itself drives — for the break-window
 // abandon. ScenarioCountersRoll is the one PURE-level exception (LlmCallCauseCounters has no I/O of
-// its own to drive through). T334-tagged (the /api/llm-calls surface) and T331-tagged (TruthGateReject)
-// facts stay pending — see docs/PLAN.md.
+// its own to drive through). ScenarioTheSurfaceServesTheTaxonomy (PLAN T334) drives the deployed
+// GET /api/llm-calls endpoint itself, WebApplicationFactory<Program> end to end — mirrors
+// Story196_LlmCallInspector.cs's own AC1 idiom (a Kestrel-backed completions stub, a real
+// POST /api/personas/preview render, then read the admin endpoint back) via the SAME shared
+// Support/LlmCompletionsStub.cs types that file uses (T334 review round 1, advisory a — the two
+// files carried a verbatim ~90-line copy of this stub/factory each before the extraction).
 //
 // gh-#365's acceptance is the dev-station case verbatim: a tile that flaps red every 1–2 hours on an
 // external ollama (gemma-class on a 16GB 4090 laptop) explains itself from the admin UI — no SSH, no
 // Loki, no darts at Llm settings.
 
 using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using GenWave.Core.Domain;
@@ -24,6 +30,25 @@ using GenWave.Host.Tests.Support;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
+
+// ── Wire shapes for ScenarioTheSurfaceServesTheTaxonomy (PLAN T334) ────────────────────────────────
+// The completions stub + web factory themselves are Support/LlmCompletionsStub.cs's
+// LlmCompletionsStub/LlmCompletionsWebFactory, shared with Story196_LlmCallInspector.cs (T334
+// review round 1, advisory a).
+
+/// <summary>Wire shape of one row from <c>GET /api/llm-calls</c> — only the two SPEC F139.1 fields
+/// this scenario cares about (mirrors Story196_LlmCallInspector.cs's own narrower-than-the-DTO
+/// <c>LlmCallRow</c> idiom).</summary>
+file sealed record LlmCallCauseRow(string Cause, string Model);
+
+/// <summary>Wire shape of one <c>causeSummary</c> row (SPEC F139.2, PLAN T334) — mirrors
+/// <see cref="GenWave.Host.Api.LlmCallCauseSummaryDto"/> without depending on it directly.</summary>
+file sealed record LlmCallCauseSummaryRow(string Cause, string Model, string Kind, int Count);
+
+/// <summary>Wire shape of <c>GET /api/llm-calls</c> itself (SPEC F139.2, PLAN T334) — mirrors
+/// <see cref="GenWave.Host.Api.LlmCallsResponseDto"/> without depending on it directly.</summary>
+file sealed record LlmCallsSurfaceResponse(
+    IReadOnlyList<LlmCallCauseRow> Calls, IReadOnlyList<LlmCallCauseSummaryRow> CauseSummary);
 
 public static class FeatureLlmCauseTaxonomy
 {
@@ -235,14 +260,71 @@ public static class FeatureLlmCauseTaxonomy
 
     public static class ScenarioTheSurfaceServesTheTaxonomy
     {
-        // The deployed entry point: /api/llm-calls through WebApplicationFactory<Program>.
-        [Fact(Skip = "pending T334 — surface not extended yet")]
-        public static void Each_call_row_carries_its_cause() =>
-            Assert.Fail("pending T334: a real request through the production pipeline shows the cause per call");
+        static async Task LoginAsync(HttpClient client, string password)
+        {
+            var login = await client.PostAsJsonAsync("/api/auth/login", new { password });
+            Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
+        }
 
-        [Fact(Skip = "pending T334")]
-        public static void The_counter_summary_rides_the_response() =>
-            Assert.Fail("pending T334: the 24h by-cause summary is served alongside the ring");
+        static object DraftPreviewBody() => new
+        {
+            kind = "LeadIn",
+            name = "Neon Nightowl",
+            backstory = "Spins vinyl til dawn.",
+            style = "moody, late-night",
+        };
+
+        // The deployed entry point: /api/llm-calls through WebApplicationFactory<Program> — mirrors
+        // Story196_LlmCallInspector.cs's own AC1 idiom (POST /api/personas/preview drives the real
+        // IPersonaPreviewWriter -> LlmCopyWriter -> RequestCleanedCompletionAsync hand-off, SPEC F35.6).
+        [Fact]
+        public static async Task Each_call_row_carries_its_cause()
+        {
+            // Given a real persona preview render against a real (stub) completions endpoint...
+            await using var stub = await LlmCompletionsStub.StartAsync();
+            await using var factory = new LlmCompletionsWebFactory(stub.BaseUri.ToString());
+            var client = factory.CreateClient();
+            await LoginAsync(client, LlmCompletionsWebFactory.Password);
+
+            var preview = await client.PostAsJsonAsync("/api/personas/preview", DraftPreviewBody());
+            Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+
+            // When the inspector endpoint is read back...
+            var response = await client.GetFromJsonAsync<LlmCallsSurfaceResponse>("/api/llm-calls");
+            Assert.NotNull(response);
+            var row = Assert.Single(response!.Calls);
+
+            // Then the row itself carries the F139.1 cause and the model it resolved against — a
+            // clean completion against a well-formed reply is "success"/"test-model".
+            Assert.Equal("success", row.Cause);
+            Assert.Equal("test-model", row.Model);
+        }
+
+        [Fact]
+        public static async Task The_counter_summary_rides_the_response()
+        {
+            // Given the SAME production render as above...
+            await using var stub = await LlmCompletionsStub.StartAsync();
+            await using var factory = new LlmCompletionsWebFactory(stub.BaseUri.ToString());
+            var client = factory.CreateClient();
+            await LoginAsync(client, LlmCompletionsWebFactory.Password);
+
+            var preview = await client.PostAsJsonAsync("/api/personas/preview", DraftPreviewBody());
+            Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+
+            // When the SAME response is read back...
+            var response = await client.GetFromJsonAsync<LlmCallsSurfaceResponse>("/api/llm-calls");
+            Assert.NotNull(response);
+
+            // Then the 24h by-cause summary rides alongside the ring rows in the SAME response — one
+            // request, not two (the gh-#558 "no new chatty poller" lesson) — grouped by cause/model/kind
+            // exactly as LlmCallCauseCounters.Snapshot() itself groups (ScenarioCountersRoll above).
+            var summaryRow = Assert.Single(response!.CauseSummary);
+            Assert.Equal("success", summaryRow.Cause);
+            Assert.Equal("test-model", summaryRow.Model);
+            Assert.Equal("copy", summaryRow.Kind);
+            Assert.Equal(1, summaryRow.Count);
+        }
     }
 
     public static class SadPathDiscipline

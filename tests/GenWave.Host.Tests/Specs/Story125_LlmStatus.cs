@@ -12,6 +12,11 @@
 // break) but a runtime count of IHttpClientFactory.CreateClient calls across N real polls, proven
 // zero. The tile's UI half is jest (dashboard-llm-tile.spec.tsx).
 //
+// ScenarioDominantCause (SPEC F139.2, STORY-353, PLAN T334) covers the llm aggregate's three newer
+// fields the same way — StatusController constructed directly with a caller-supplied
+// LlmCallCauseCounters, no live stack required. The tile's UI half for THESE fields is jest
+// (health-tile-llm-cause.spec.tsx).
+//
 // See docs/PLAN.md Epic T.
 
 using System.Net;
@@ -143,7 +148,8 @@ public static class FeatureLlmStatus
     static StatusController BuildController(
         LlmOptions? llmOptions = null,
         LlmCopyStatusHolder? statusHolder = null,
-        Persona? activePersona = null)
+        Persona? activePersona = null,
+        LlmCallCauseCounters? causeCounters = null)
     {
         var resolvedLlmOptions = llmOptions ?? new LlmOptions();
         var resolvedStatusHolder = statusHolder ?? new LlmCopyStatusHolder();
@@ -171,6 +177,7 @@ public static class FeatureLlmStatus
             new FakeOptionsMonitor<StationOptions>(BuildStationOptions()),
             llmOptionsMonitor,
             resolvedStatusHolder,
+            causeCounters ?? new LlmCallCauseCounters(TimeProvider.System),
             degradationController,
             voiceHealthReader,
             new FakeActivePersonaAccessor { Persona = activePersona },
@@ -244,6 +251,150 @@ public static class FeatureLlmStatus
             var llm = AsJson(result).GetProperty("llm");
             Assert.Equal("failed", llm.GetProperty("lastOutcome").GetString());
             Assert.Equal(attemptedAt, llm.GetProperty("lastAttemptAt").GetDateTimeOffset());
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // The F139.2 dominant-cause line (SPEC F139.2, STORY-353, PLAN T334) — StatusController's own
+    // read of LlmCallCauseCounters.DominantFailure, riding this SAME response (no new poller).
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioDominantCause
+    {
+        [Fact]
+        public async Task NoFailuresRecordedLeavesTheDominantCauseFieldsNull()
+        {
+            // Given a fresh, unobserved counter store (nothing recorded at all)...
+            var controller = BuildController(
+                llmOptions: new LlmOptions { Endpoint = "https://llm.example/v1", Model = "gpt-4o-mini" },
+                causeCounters: new LlmCallCauseCounters(TimeProvider.System));
+
+            var result = await controller.Get(CancellationToken.None);
+
+            // Then all three fields are absent-as-null — nothing to explain a tile that isn't red.
+            var llm = AsJson(result).GetProperty("llm");
+            Assert.Equal(JsonValueKind.Null, llm.GetProperty("dominantCause").ValueKind);
+            Assert.Equal(JsonValueKind.Null, llm.GetProperty("dominantCauseCount").ValueKind);
+            Assert.Equal(JsonValueKind.Null, llm.GetProperty("dominantCauseModel").ValueKind);
+        }
+
+        [Fact]
+        public async Task RecordedFailuresNameTheHighestCountCauseAndItsModel()
+        {
+            // Given a mix of Copy-kind causes recorded within the rolling 24h window — Success is
+            // the OUTRIGHT numeric majority (5, vs Timeout's 2 and OverLength's 1), so this fact
+            // only discriminates a real Success-exclusion filter: deleting
+            // `&& row.Cause != LlmCallCause.Success` from DominantFailure would make THIS fact
+            // assert "success"/5, not "timeout"/2 — a same-count arrangement (review finding F1)
+            // would pass either way and prove nothing about the filter at all.
+            var counters = new LlmCallCauseCounters(TimeProvider.System);
+            counters.Record(LlmCallCause.Success, "gemma3:12b", LlmCallKind.Copy);
+            counters.Record(LlmCallCause.Success, "gemma3:12b", LlmCallKind.Copy);
+            counters.Record(LlmCallCause.Success, "gemma3:12b", LlmCallKind.Copy);
+            counters.Record(LlmCallCause.Success, "gemma3:12b", LlmCallKind.Copy);
+            counters.Record(LlmCallCause.Success, "gemma3:12b", LlmCallKind.Copy);
+            counters.Record(LlmCallCause.Timeout, "gemma3:12b", LlmCallKind.Copy);
+            counters.Record(LlmCallCause.Timeout, "gemma3:12b", LlmCallKind.Copy);
+            counters.Record(LlmCallCause.OverLength, "gemma3:12b", LlmCallKind.Copy);
+            var controller = BuildController(
+                llmOptions: new LlmOptions { Endpoint = "https://llm.example/v1", Model = "gemma3:12b" },
+                causeCounters: counters);
+
+            var result = await controller.Get(CancellationToken.None);
+
+            // Then the tile's own dominant-cause line names Timeout, its count, and the model it was
+            // recorded against — Success is never a candidate (F139.2's own "why is the tile red")
+            // even though it outnumbers every real failure.
+            var llm = AsJson(result).GetProperty("llm");
+            Assert.Equal("timeout", llm.GetProperty("dominantCause").GetString());
+            Assert.Equal(2, llm.GetProperty("dominantCauseCount").GetInt32());
+            Assert.Equal("gemma3:12b", llm.GetProperty("dominantCauseModel").GetString());
+        }
+
+        [Fact]
+        public async Task AllSuccessLeavesTheDominantCauseFieldsNull()
+        {
+            // Given ONLY Success recorded, Copy kind, no failures at all — the backend half of the
+            // "all three travel together" contract the admin-ui tile already pins on its own side
+            // (health-tile-llm-cause.spec.tsx's "quiet states stay quiet" scenario).
+            var counters = new LlmCallCauseCounters(TimeProvider.System);
+            counters.Record(LlmCallCause.Success, "gemma3:12b", LlmCallKind.Copy);
+            counters.Record(LlmCallCause.Success, "gemma3:12b", LlmCallKind.Copy);
+            counters.Record(LlmCallCause.Success, "gemma3:12b", LlmCallKind.Copy);
+            counters.Record(LlmCallCause.Success, "gemma3:12b", LlmCallKind.Copy);
+            var controller = BuildController(
+                llmOptions: new LlmOptions { Endpoint = "https://llm.example/v1", Model = "gemma3:12b" },
+                causeCounters: counters);
+
+            var result = await controller.Get(CancellationToken.None);
+
+            // Then all three fields stay null — Success alone is nothing to explain.
+            var llm = AsJson(result).GetProperty("llm");
+            Assert.Equal(JsonValueKind.Null, llm.GetProperty("dominantCause").ValueKind);
+            Assert.Equal(JsonValueKind.Null, llm.GetProperty("dominantCauseCount").ValueKind);
+            Assert.Equal(JsonValueKind.Null, llm.GetProperty("dominantCauseModel").ValueKind);
+        }
+
+        [Fact]
+        public async Task TiedCountsBreakByCauseDeclarationOrder()
+        {
+            // Given Timeout and ConnectionFailure tied at 2 apiece, same model — LlmCallCause
+            // declares Timeout before ConnectionFailure (SPEC F139.1's own enum order), so a
+            // deterministic tie-break must always prefer Timeout, never whichever the underlying
+            // dictionary happens to enumerate first (review finding F2).
+            var counters = new LlmCallCauseCounters(TimeProvider.System);
+            counters.Record(LlmCallCause.ConnectionFailure, "gemma3:12b", LlmCallKind.Copy);
+            counters.Record(LlmCallCause.ConnectionFailure, "gemma3:12b", LlmCallKind.Copy);
+            counters.Record(LlmCallCause.Timeout, "gemma3:12b", LlmCallKind.Copy);
+            counters.Record(LlmCallCause.Timeout, "gemma3:12b", LlmCallKind.Copy);
+            var controller = BuildController(
+                llmOptions: new LlmOptions { Endpoint = "https://llm.example/v1", Model = "gemma3:12b" },
+                causeCounters: counters);
+
+            var result = await controller.Get(CancellationToken.None);
+
+            var llm = AsJson(result).GetProperty("llm");
+            Assert.Equal("timeout", llm.GetProperty("dominantCause").GetString());
+        }
+
+        [Fact]
+        public async Task TiedCountsForTheSameCauseBreakByOrdinalModelName()
+        {
+            // Given the SAME cause tied at 2 apiece across two different models — the ordinally
+            // FIRST model name wins ("model-a" < "model-b"), never whichever the dictionary
+            // happens to enumerate first (review finding F2, same method one level down).
+            var counters = new LlmCallCauseCounters(TimeProvider.System);
+            counters.Record(LlmCallCause.Timeout, "model-b", LlmCallKind.Copy);
+            counters.Record(LlmCallCause.Timeout, "model-b", LlmCallKind.Copy);
+            counters.Record(LlmCallCause.Timeout, "model-a", LlmCallKind.Copy);
+            counters.Record(LlmCallCause.Timeout, "model-a", LlmCallKind.Copy);
+            var controller = BuildController(
+                llmOptions: new LlmOptions { Endpoint = "https://llm.example/v1", Model = "model-a" },
+                causeCounters: counters);
+
+            var result = await controller.Get(CancellationToken.None);
+
+            var llm = AsJson(result).GetProperty("llm");
+            Assert.Equal("model-a", llm.GetProperty("dominantCauseModel").GetString());
+        }
+
+        [Fact]
+        public async Task CrosstalkOnlyFailuresNeverNameTheCopyTileSDominantCause()
+        {
+            // Given a Crosstalk-kind failure only — the tile this endpoint's llm.* block feeds
+            // reflects LlmCopyStatusHolder's own Copy-only verdict, never a banter miss...
+            var counters = new LlmCallCauseCounters(TimeProvider.System);
+            counters.Record(LlmCallCause.CanceledByWindow, "gemma3:12b", LlmCallKind.Crosstalk);
+            var controller = BuildController(
+                llmOptions: new LlmOptions { Endpoint = "https://llm.example/v1", Model = "gemma3:12b" },
+                causeCounters: counters);
+
+            var result = await controller.Get(CancellationToken.None);
+
+            // Then the Copy-scoped dominant-cause fields stay null — a crosstalk-only cause never
+            // leaks into a line that would misname why the COPY writer's own tile went red.
+            var llm = AsJson(result).GetProperty("llm");
+            Assert.Equal(JsonValueKind.Null, llm.GetProperty("dominantCause").ValueKind);
         }
     }
 

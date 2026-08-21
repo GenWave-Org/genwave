@@ -35,6 +35,10 @@ namespace GenWave.Tts;
 /// <see cref="IDegradationModeReader"/> in as a dependency here and reading it fresh at record time would
 /// silently relocate that read to the wrong instant for every existing caller — so <paramref name="mode"/>
 /// stays threaded through exactly as it already was, each caller's own already-captured value.
+/// One honest exception: <c>GenWave.Host.Crosstalk.CrosstalkStockWorker.RecordWindowCancellation</c>
+/// reads <see cref="IDegradationModeReader.CurrentMode"/> at RECORD time (after the abandoned attempt
+/// has already unwound), not at its own attempt start — that worker never captured the mode when the
+/// attempt began, so this is the one caller for which the invariant above does not hold.
 /// </para>
 /// </summary>
 public sealed class LlmCallRecorder(LlmCallRing callRing, LlmCallCauseCounters causeCounters)

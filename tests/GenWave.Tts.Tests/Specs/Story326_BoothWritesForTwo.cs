@@ -506,6 +506,9 @@ public static class FeatureBoothWritesForTwo
 
             var discarded = Assert.IsType<CrosstalkWriteResult.Discarded>(result);
             Assert.Contains("per-line budget", discarded.Reason, StringComparison.Ordinal);
+            // SPEC F139.1 (PLAN T334 doc pickup): the reply came back and fit no length constraint —
+            // OverLength, the same bucket LlmCopyWriter's own gh-#277 family lands in.
+            Assert.Equal(LlmCallCause.OverLength, discarded.Cause);
         }
 
         [Fact]
@@ -523,6 +526,8 @@ public static class FeatureBoothWritesForTwo
 
             var discarded = Assert.IsType<CrosstalkWriteResult.Discarded>(result);
             Assert.Contains("exceeds", discarded.Reason, StringComparison.Ordinal);
+            // SPEC F139.1 (PLAN T334 doc pickup): an over-target duration estimate is OverLength too.
+            Assert.Equal(LlmCallCause.OverLength, discarded.Cause);
         }
 
         // T282 review finding (F2a): mutation-proven — deleting the both-speakers-present guards
@@ -546,6 +551,9 @@ public static class FeatureBoothWritesForTwo
 
             var discarded = Assert.IsType<CrosstalkWriteResult.Discarded>(result);
             Assert.Contains(CrosstalkScriptParser.NeighborTag, discarded.Reason, StringComparison.Ordinal);
+            // SPEC F139.1 (PLAN T334 doc pickup): a missing required speaker turn is a shape problem
+            // — content arrived, it just never took the required shape — so this is MalformedResponse.
+            Assert.Equal(LlmCallCause.MalformedResponse, discarded.Cause);
         }
 
         // SPEC F139.1 amendment (T330 review round 1, 2026-08-20 — the F135.5 precedent): the
@@ -591,6 +599,9 @@ public static class FeatureBoothWritesForTwo
             // Then the whole exchange is discarded — never aired truncated.
             var discarded = Assert.IsType<CrosstalkWriteResult.Discarded>(result);
             Assert.Contains("length", discarded.Reason, StringComparison.Ordinal);
+            // SPEC F139.1 (PLAN T334 doc pickup): a finish_reason: length truncation is OverLength —
+            // the reply came back but did not fit, the same family as a per-line/duration overrun.
+            Assert.Equal(LlmCallCause.OverLength, discarded.Cause);
         }
 
         [Fact]

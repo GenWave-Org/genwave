@@ -156,6 +156,7 @@ public static class FeatureStatusEndpoint
             stationMonitor,
             llmOptions,
             statusHolder,
+            new LlmCallCauseCounters(TimeProvider.System),
             degradationController,
             voiceHealthReader,
             new FakeActivePersonaAccessor(),

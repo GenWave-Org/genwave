@@ -22,6 +22,7 @@ public sealed class StatusController(
     IOptionsMonitor<StationOptions> stationMonitor,
     IOptionsMonitor<LlmOptions> llmMonitor,
     LlmCopyStatusHolder llmStatusHolder,
+    LlmCallCauseCounters llmCauseCounters,
     DegradationController degradationController,
     VoiceHealthReader voiceHealthReader,
     IActivePersonaAccessor personaAccessor,
@@ -31,7 +32,7 @@ public sealed class StatusController(
     /// GET /api/status — cookie-auth (covered by the deny-by-default fallback policy when
     /// Admin:Password is set, same as every other <c>/api/*</c> controller). Returns:
     /// <c>{ startedAt, catalog: { ready, enriching, failed, unavailable }, safeScope: { libraryIds, playable },
-    /// llm: { enabled, model, activePersona, lastOutcome, lastAttemptAt },
+    /// llm: { enabled, model, activePersona, lastOutcome, lastAttemptAt, dominantCause, dominantCauseCount, dominantCauseModel },
     /// degradation: { mode, pinned, since, cause },
     /// voice: { engine, degraded, reason, checkedAt } }</c>.
     ///
@@ -53,6 +54,18 @@ public sealed class StatusController(
     /// to null on any miss, F35.5). This endpoint has no <c>IHttpClientFactory</c>/completions
     /// dependency at all, by construction — an idle station polling this endpoint sends the LLM zero
     /// requests.
+    ///
+    /// <c>llm.dominantCause</c>/<c>dominantCauseCount</c>/<c>dominantCauseModel</c> (SPEC F139.2,
+    /// STORY-353, PLAN T334) are <see cref="LlmCallCauseCounters.DominantFailure"/>'s own read,
+    /// restricted to <see cref="LlmCallKind.Copy"/> — the SAME kind <c>lastOutcome</c> above reflects,
+    /// so this never names a crosstalk-only cause for a tile that went red over an ordinary segment
+    /// miss. All three are <see langword="null"/> together whenever nothing but
+    /// <see cref="LlmCallCause.Success"/> (or nothing at all) was recorded for Copy calls in the
+    /// rolling 24h window — the Admin UI only renders the line once <c>lastOutcome == "failed"</c>
+    /// anyway, so a null here on a green tile is simply unused, never a fault. This rides the SAME
+    /// poll as every other <c>llm.*</c> field (no new endpoint, no new poller — the gh-#558 lesson):
+    /// <see cref="LlmCallCauseCounters.DominantFailure"/> is an in-memory read over already-aggregated
+    /// counters, exactly as cheap as <see cref="DegradationController.Evaluate"/> below.
     ///
     /// <c>degradation</c> (SPEC F69.5, STORY-188) comes from
     /// <see cref="DegradationController.Evaluate"/> — called here, not just read from a cached
@@ -80,6 +93,7 @@ public sealed class StatusController(
         var llmConfig = llmMonitor.CurrentValue;
         var llmEnabled = !string.IsNullOrEmpty(llmConfig.Endpoint);
         var lastAttempt = llmStatusHolder.Last;
+        var dominantFailure = llmCauseCounters.DominantFailure(LlmCallKind.Copy);
         var degradation = degradationController.Evaluate();
         var voice = voiceHealthReader.Evaluate();
 
@@ -107,6 +121,9 @@ public sealed class StatusController(
                     ? null
                     : lastAttempt.Outcome == LlmAttemptOutcome.Ok ? "ok" : "failed",
                 lastAttemptAt = lastAttempt?.AttemptedAt,
+                dominantCause = dominantFailure?.Cause.ToString().ToLowerInvariant(),
+                dominantCauseCount = dominantFailure?.Count,
+                dominantCauseModel = dominantFailure?.Model,
             },
             degradation = new
             {

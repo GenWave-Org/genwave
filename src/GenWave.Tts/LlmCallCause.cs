@@ -5,8 +5,8 @@ namespace GenWave.Tts;
 /// did, stamped onto every <see cref="LlmCallRecord"/> alongside its existing, coarser
 /// <see cref="LlmCallOutcome"/> (which stays exactly as it was — F139.1's own "nothing else about F73
 /// changes"). Where <see cref="LlmCallOutcome"/> answers "did the ring show usable text or not",
-/// <see cref="LlmCallCause"/> answers "why is the red tile red" (SPEC F139.2, F139.4) — the taxonomy a
-/// dominant-cause admin surface (a LATER task, T334) groups by, alongside model and
+/// <see cref="LlmCallCause"/> answers "why is the red tile red" (SPEC F139.2, F139.4) — the taxonomy
+/// the dominant-cause admin surface (PLAN T334) groups by, alongside model and
 /// <see cref="LlmCallKind"/>.
 ///
 /// <para>

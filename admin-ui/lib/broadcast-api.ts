@@ -60,6 +60,22 @@ export interface StatusResponse {
     activePersona: string | null;
     lastOutcome: "ok" | "failed" | null;
     lastAttemptAt: string | null;
+    /**
+     * SPEC F139.2, STORY-353, PLAN T334 — the F139 cause taxonomy's own read of "why is the tile
+     * red": the highest-count non-success cause GenWave.Tts.LlmCallCauseCounters recorded for
+     * Copy-kind calls in the rolling 24h window, plus its count and the model it was recorded
+     * against. All three are `null` together whenever there is nothing to explain (nothing but
+     * Success recorded, or nothing at all) — the same "quiet is not a fault" posture `lastOutcome`
+     * above already follows. Optional on the wire (PLAN T334 adds these three fields after several
+     * other spec files already built their own `StatusResponse` fixture literals): every fixture
+     * that omits them still satisfies this type, so this addition never forces an edit onto a file
+     * this task doesn't otherwise touch — mirrors `NowPlayingTrackWire.kind`'s own "one deploy of
+     * backward tolerance" convention above, minus the deploy: this is a same-task compatibility
+     * choice, not a rollout one.
+     */
+    dominantCause?: string | null;
+    dominantCauseCount?: number | null;
+    dominantCauseModel?: string | null;
   };
   /**
    * SPEC F99.5, F100.3, STORY-256 AC4 — the primary voice engine's own cached health verdict.
