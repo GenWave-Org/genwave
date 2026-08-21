@@ -50,6 +50,16 @@ namespace GenWave.Tts;
 /// "the caller's <c>ct</c> fired"); only the stock worker, which owns the linked
 /// <see cref="CancellationTokenSource"/> pair, can honestly distinguish the two.
 /// </para>
+///
+/// <para>
+/// ⚠️ <b>Amended (PLAN T333, 2026-08-20 — SPEC F138.6):</b> <see cref="CrosstalkScriptParser.Parse"/>'s
+/// own truth discard reasons (a frequency/call-sign shape, a weather-condition word, a digit-date
+/// shape, or a <see cref="CopyClaims.CheckClock"/> violation) all stamp <see cref="TruthGateReject"/>
+/// too — the crosstalk seam's own copy of the SAME truth gate <see cref="LlmCopyWriter"/> already
+/// stamps it for (PLAN T331). Deliberately NOT <see cref="MalformedResponse"/>: every one of these
+/// rejects a script that already cleared shape validation (both speakers, alternation, per-line
+/// budget) — the STRUCTURE was fine, the CONTENT lied.
+/// </para>
 /// </summary>
 public enum LlmCallCause
 {
@@ -66,9 +76,9 @@ public enum LlmCallCause
     /// truncation, a per-line budget overrun, an over-target duration estimate).</summary>
     OverLength,
 
-    /// <summary>The copy failed the F138 truth gate (SPEC F138, STORY-350/351) — declared here so the
-    /// taxonomy is complete from T330 onward, but stamped by nobody until PLAN T331 wires the gate
-    /// itself at the <see cref="LlmCopyWriter"/> seam.</summary>
+    /// <summary>The copy failed the F138 truth gate (SPEC F138, STORY-350/351/352): stamped by
+    /// <see cref="LlmCopyWriter"/>'s own ladder (PLAN T331) and by <see cref="CrosstalkScriptParser"/>'s
+    /// mechanical F138.6 discard reasons (PLAN T333) alike.</summary>
     TruthGateReject,
 
     /// <summary>A non-2xx status, a connect failure, a malformed endpoint URI, or bad JSON — any

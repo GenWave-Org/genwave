@@ -371,9 +371,13 @@ public static class FeatureBoothWritesForTwo
         [Fact]
         public async Task A_script_under_the_duration_target_is_accepted()
         {
-            // Given a validated script well under the 25s default (three short lines)...
+            // Given a validated script well under the shipped 50s default (three short lines) —
+            // built EXPLICITLY off CrosstalkOptions()'s own default (T333 review advisory A5), never
+            // this file's own BuildWriter convenience parameter default (25, an unrelated fixed test
+            // value several OTHER facts in this file use purely to prove the cap/word-budget SCALE
+            // with whatever target is configured) — so "the default" means one thing in this scenario.
             mock.ReplyContent = WellFormedReply;
-            var writer = BuildWriter(mock.BaseUri.ToString());
+            var writer = BuildWriter(mock.BaseUri.ToString(), durationTargetSeconds: new CrosstalkOptions().DurationTargetSeconds);
 
             // When the spoken-duration estimate is computed...
             var result = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
@@ -382,11 +386,12 @@ public static class FeatureBoothWritesForTwo
         }
 
         [Fact]
-        public async Task The_duration_target_is_live_editable_with_a_25s_default()
+        public async Task The_duration_target_is_live_editable_with_the_shipped_default()
         {
-            // Given the shipped default (SPEC F127.4) — 200 chars / 15 chars-per-sec ~= 13.3s, which
-            // fits comfortably under it.
-            Assert.Equal(25, new CrosstalkOptions().DurationTargetSeconds);
+            // Given the shipped default (SPEC F127.4 as amended, PLAN T333) — 200 chars / 15
+            // chars-per-sec ~= 13.3s, which fits comfortably under it.
+            var shippedDefault = new CrosstalkOptions().DurationTargetSeconds;
+            Assert.Equal(50, shippedDefault);
 
             mock.ReplyContent = string.Join('\n', new[]
             {
@@ -394,7 +399,12 @@ public static class FeatureBoothWritesForTwo
                 $"{CrosstalkScriptParser.NeighborTag}: {new string('b', 70)}",
                 $"{CrosstalkScriptParser.HostTag}: {new string('c', 60)}",
             });
-            var (writer, _, _, crosstalkMonitor) = BuildWriterWithRingAndLogger(mock.BaseUri.ToString());
+            // Threads the SAME shippedDefault value read above (T333 review advisory A5) — never
+            // this file's own BuildWriter convenience default (still 25 elsewhere in this file), so
+            // the fact's own "shipped default" assertion and the writer it builds provably agree on
+            // what "the default" means.
+            var (writer, _, _, crosstalkMonitor) = BuildWriterWithRingAndLogger(
+                mock.BaseUri.ToString(), durationTargetSeconds: shippedDefault);
 
             var underDefault = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
             Assert.IsType<CrosstalkWriteResult.Accepted>(underDefault);

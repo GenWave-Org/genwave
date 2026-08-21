@@ -1,17 +1,19 @@
 namespace GenWave.Tts;
 
 /// <summary>
-/// The versioned, curated vocabularies <see cref="CopyClaims"/> matches against (SPEC F138.1,
-/// F138.3) — plain data, no I/O, no settings: the same purity posture as the checker itself. Curated,
+/// The versioned, curated vocabularies <see cref="CopyClaims"/> and <see cref="CrosstalkScriptParser"/>
+/// match against (SPEC F138.1, F138.3, F138.6) — plain data, no I/O, no settings: the same purity
+/// posture as the checkers themselves. Curated,
 /// not exhaustive by design (see <see cref="CopyClaims"/>'s own false-positive-posture remarks): a
-/// real weekday/condition/daypart word missing from one of these lists is simply never extracted as a
-/// claim at all, which is the SAFE gap to have — it can neither wrongly pass nor wrongly fail, it is
-/// just invisible to the checker, the same as any word outside these three subjects already is.
+/// real weekday/condition/daypart/month word missing from one of these lists is simply never extracted
+/// as a claim at all, which is the SAFE gap to have — it can neither wrongly pass nor wrongly fail, it
+/// is just invisible to the checker, the same as any word outside these four subjects already is.
 ///
 /// <para>
 /// Each list below is exposed as a single pipe-delimited <c>internal const string</c> "vN" alternation
-/// — the one canonical source of truth <see cref="CopyClaims"/>'s <c>[GeneratedRegex]</c> extraction
-/// patterns interpolate directly (a compile-time-constant expression), so a matching regression can
+/// — the one canonical source of truth <see cref="CopyClaims"/>'s and <see cref="CrosstalkScriptParser"/>'s
+/// own <c>[GeneratedRegex]</c> extraction patterns interpolate directly (a compile-time-constant
+/// expression), so a matching regression can
 /// never drift from the vocabulary that produced it. There is no parallel <c>IReadOnlyList&lt;string&gt;</c>
 /// view of any of these anymore (T329 review round 2): nothing outside the regex patterns themselves
 /// ever needed one, and a second, unread copy is exactly the kind of drift risk this file exists to
@@ -50,6 +52,19 @@ static class ClaimVocabulary
     /// two as interchangeable.
     /// </summary>
     internal const string DaypartWordAlternation = "morning|afternoon|evening|tonight|night";
+
+    /// <summary>
+    /// v1 (PLAN T333 review advisory A2, 2026-08-20) — the twelve Gregorian month names, English
+    /// only, lowercase (matching is always case-insensitive). Moved here from a <see cref="CrosstalkScriptParser"/>-local
+    /// const at review: this class's own "no second list" discipline (see this file's own class
+    /// remarks) applies to the F138.6 digit-date shape exactly as it does to the F138.1/F138.3 three
+    /// — a month word missing from this list is simply never extracted as a date claim, the same
+    /// safe gap every other vocabulary here leaves. <see cref="CrosstalkScriptParser"/>'s own
+    /// DateClaimRx is the only consumer today — a BARE month word is never itself a claim there (see
+    /// that regex's own remarks for why only month-PLUS-day is extracted).
+    /// </summary>
+    internal const string MonthAlternation =
+        "january|february|march|april|may|june|july|august|september|october|november|december";
 
     /// <summary>
     /// Canonical daypart CATEGORY for a daypart word (SPEC F138.3): identity for every word except

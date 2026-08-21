@@ -463,8 +463,9 @@ public static class StationSettingsAllowlist
         // Crosstalk two-voice banter, the duration-fit knob (SPEC F127.4, STORY-326, PLAN T282) —
         // CrosstalkScriptWriter (GenWave.Tts) reads this fresh via IOptionsMonitor<CrosstalkOptions>
         // on every generation attempt, so a PUT here reaches the very next attempt with no api
-        // restart. Defaults to the spec'd 25s; an estimate over target discards the WHOLE exchange
-        // rather than trimming a line (F127.4 — a cut dialogue line breaks the reaction to it).
+        // restart. Defaults to the ratified 50s (PLAN T333 amendment); an estimate over target
+        // discards the WHOLE exchange rather than trimming a line (F127.4 — a cut dialogue line
+        // breaks the reaction to it).
         new("Crosstalk:DurationTargetSeconds",                SettingApplyMode.Live,          SettingKind.Number,     "seconds"),
         // Crosstalk scope/cadence (SPEC F127.8, STORY-328, PLAN T285) — Shows is a JSON array of
         // enabled show SLUGS, never display names (T175's "names slugs, not labels" rule — a rename

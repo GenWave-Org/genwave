@@ -18,7 +18,8 @@ using Microsoft.Extensions.Options;
 /// <b>One completion, whole exchange (SPEC F127.3).</b> Unlike <see cref="LlmCopyWriter"/>, this
 /// writer NEVER degrades to a template — F127.4 is skip-only: any failure (disabled endpoint,
 /// transport fault, a completion truncated at <c>max_tokens</c>, malformed reply, a line failing
-/// hygiene/budget, an over-target duration estimate) returns <see cref="CrosstalkWriteResult.Discarded"/>
+/// hygiene/budget, an over-target duration estimate, a F138.6 truth-gate violation) returns
+/// <see cref="CrosstalkWriteResult.Discarded"/>
 /// with one reason, logged at Information
 /// (never WARN — banter is optional color, a miss is not an outage) and recorded into
 /// <see cref="LlmCallRing"/> under <see cref="LlmCallKind.Crosstalk"/> so <c>/api/llm-calls</c> can
@@ -117,7 +118,8 @@ public sealed class CrosstalkScriptWriter(
 
         var durationTargetSeconds = crosstalkOptions.CurrentValue.DurationTargetSeconds;
 
-        var systemPrompt = CrosstalkPromptBuilder.BuildSystemPrompt(request.HostCard, request.NeighborCard, durationTargetSeconds);
+        var systemPrompt = CrosstalkPromptBuilder.BuildSystemPrompt(
+            request.HostCard, request.NeighborCard, durationTargetSeconds, request.StationLocalNow);
         var userPrompt = CrosstalkPromptBuilder.BuildUserContent(
             request, LlmPromptBuilder.BuildStationClockLine(request.StationLocalNow));
 
@@ -175,7 +177,7 @@ public sealed class CrosstalkScriptWriter(
                     LlmCallCause.OverLength, personaName, startedAt, mode, systemPrompt, userPrompt, cfg.Model, raw);
             }
 
-            var result = CrosstalkScriptParser.Parse(raw, cfg.MaxCopyChars, durationTargetSeconds);
+            var result = CrosstalkScriptParser.Parse(raw, cfg.MaxCopyChars, durationTargetSeconds, request.StationLocalNow);
             return result switch
             {
                 CrosstalkWriteResult.Accepted => Accept(

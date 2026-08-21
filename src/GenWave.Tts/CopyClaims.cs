@@ -356,6 +356,11 @@ public static partial class CopyClaims
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex PresentFrameDaypartRx();
 
+    // Internal, not private (PLAN T333 review advisory A1): CrosstalkScriptParser's own F138.6
+    // weather-condition check reuses this SAME compiled pattern rather than keeping a byte-identical
+    // copy that could silently drift the day either one changes — the one-canonical-source discipline
+    // ClaimVocabulary.ConditionWordAlternation already establishes one level up, extended to the
+    // compiled regex built from it.
     [GeneratedRegex($@"\b(?:{ClaimVocabulary.ConditionWordAlternation})\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex ConditionWordRx();
+    internal static partial Regex ConditionWordRx();
 }
