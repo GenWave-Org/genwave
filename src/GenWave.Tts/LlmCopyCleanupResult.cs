@@ -3,11 +3,12 @@ namespace GenWave.Tts;
 /// <summary>
 /// Outcome of <see cref="LlmCopyWriter.CleanCopy"/>'s hygiene pass plus the F123.2 sentence-boundary
 /// salvage (SPEC F123.2-F123.4, STORY-319, PLAN T263) — mirrors
-/// <see cref="GenWave.Core.Domain.PersonaPreviewResult"/>'s closed-hierarchy shape so the three
-/// outcomes (an exact fit, a salvaged trim, or a full reject) can never be confused with one another
-/// the way a single nullable-string-plus-bool pair could — a trim always carries real text, a reject
-/// never does, by construction rather than by convention. Internal: <see cref="LlmCopyWriter"/> is
-/// this type's only producer and only consumer.
+/// <see cref="GenWave.Core.Domain.PersonaPreviewResult"/>'s closed-hierarchy shape so the outcomes
+/// (an exact fit, a salvaged trim, a full hygiene reject, or — as of PLAN T331 — a
+/// <see cref="TruthGateRejected"/> re-ask) can never be confused with one another the way a single
+/// nullable-string-plus-bool pair could — a trim always carries real text, a reject never does, by
+/// construction rather than by convention. Internal: <see cref="LlmCopyWriter"/> is this type's only
+/// producer and only consumer.
 /// </summary>
 internal abstract record LlmCopyCleanupResult
 {
@@ -40,4 +41,17 @@ internal abstract record LlmCopyCleanupResult
     /// text itself.
     /// </param>
     public sealed record Rejected(bool WasOverLength) : LlmCopyCleanupResult;
+
+    /// <summary>
+    /// The F138.4 ladder's own floor (T331 review finding F3): a re-ask that hygiene would otherwise
+    /// have accepted — it fit, or salvaged to a real sentence — but that STILL failed
+    /// <see cref="CopyClaims.CheckFacts"/> a second time. Distinct from the plain
+    /// <see cref="Rejected"/> case (hygiene itself found nothing usable) precisely so
+    /// <see cref="LlmCopyWriter.WriteAsync"/>'s own failure WARN can name the real cause — the truth
+    /// gate rejected genuinely well-formed copy — rather than the wrong-lever "empty or exceeded
+    /// Llm:MaxCopyChars" message a hygiene reject carries. <see cref="Violations"/> is the re-ask's
+    /// own <see cref="ClaimCheckResult.Violations"/> (SPEC F138.1-F138.2), carried through so that
+    /// WARN can also name the still-unsupported claim.
+    /// </summary>
+    public sealed record TruthGateRejected(IReadOnlyList<ClaimViolation> Violations) : LlmCopyCleanupResult;
 }

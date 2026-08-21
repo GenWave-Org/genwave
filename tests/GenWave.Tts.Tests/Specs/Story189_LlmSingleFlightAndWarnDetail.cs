@@ -157,11 +157,4 @@ public static class FeatureLlmSingleFlight
             }
         }
     }
-
-    /// <summary>Hands every client the SAME shared handler (never disposed by the client) so
-    /// <see cref="ConcurrencyTrackingHandler"/>'s counters observe every call this writer makes.</summary>
-    sealed class SingleHandlerHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
-    }
 }

@@ -329,8 +329,12 @@ public sealed class LlmCopyWriter(
             if (cleaned is null)
             {
                 statusHolder.Record(LlmAttemptOutcome.Failed, attemptedAt);
+                // The reason NAMES the real cause (T331 review finding F3) — a truth-gate exhaustion
+                // is not "empty or exceeded Llm:MaxCopyChars": that wrong-lever WARN sent an operator
+                // at the endpoint/max-tokens settings for a failure those levers cannot fix. See
+                // DescribeNullTextReason's own remarks.
                 LogFailure(request, persona, cfg.Model, attemptedAt, exception: null,
-                    reason: "empty or exceeded Llm:MaxCopyChars after cleanup");
+                    reason: DescribeNullTextReason(cleanup));
                 return await fallback.WriteAsync(request, ct);
             }
 
@@ -482,6 +486,26 @@ public sealed class LlmCopyWriter(
     }
 
     /// <summary>
+    /// One INFORMATION line (SPEC F123.4) whenever a completion's own hygiene pass needed the
+    /// sentence-boundary salvage — a trim is discipline, not an outage, so it gets its own quiet lane
+    /// rather than promoting to <see cref="LogFailure"/>'s WARN. Shared by the first completion and
+    /// the F138.4 re-ask alike (STORY-350, PLAN T331), so a re-ask reply that also needed salvaging
+    /// is observable exactly the same way the first one always was — extracted here so the two call
+    /// sites cannot drift onto two different messages for the same event.
+    /// </summary>
+    void LogIfTrimmed(SegmentRequest request, string? personaName, LlmCopyCleanupResult cleanup)
+    {
+        if (cleanup is not LlmCopyCleanupResult.Trimmed trimmed)
+            return;
+
+        logger.LogInformation(
+            "LLM copy for {Kind} trimmed to the last complete sentence under Llm:MaxCopyChars " +
+            "(persona: {PersonaName}): {CharsBefore} -> {CharsAfter} chars",
+            request.Kind, (personaName ?? "none").ReplaceLineEndings(" "), trimmed.CharsBeforeTrim,
+            trimmed.Text.Length);
+    }
+
+    /// <summary>
     /// SPEC F107.5 (STORY-298, PLAN T225) — the patter lane's ONE pull point in this writer: called
     /// exclusively from <see cref="WriteAsync"/>, and only for the two music-adjacent kinds a patter
     /// fact is meant to season (<see cref="LlmPromptBuilder.IsPatterFactKind"/> — the single source
@@ -551,6 +575,13 @@ public sealed class LlmCopyWriter(
         // preview call never passes through DegradationGatedCopyWriter (SPEC F69.4), so there is no
         // caller-evaluated mode available for that path, and reading IDegradationModeReader
         // uniformly for every path keeps this the one recording point instead of two.
+        //
+        // startedAt is REASSIGNED, not read-only (T331 review finding F4b): it names WHICHEVER call
+        // is currently in flight, mirroring userPrompt's own reassignment below — RunTruthGateLadderAsync
+        // moves it to a re-ask's own dispatch instant the moment that call actually fires, so the
+        // catch-all far below (and this render's OWN success recording, if the ladder never fires at
+        // all) both always attribute a fault/success to the call that actually produced it, never to
+        // an earlier call's timing.
         var startedAt = timeProvider.GetUtcNow();
         var mode = degradationMode.CurrentMode;
         // gh-#429: the SAME card-first-then-legacy-row precedence the prompt's own self-name-mention
@@ -602,8 +633,12 @@ public sealed class LlmCopyWriter(
             // SystemRandomSource already standardize on. The builder enforces the persona gate
             // itself: with no persona section there is no line, however the roll lands.
             var mentionOwnName = Random.Shared.NextDouble() < LlmPromptBuilder.SelfNameMentionProbability;
+            // Captured once (SPEC F138.5, PLAN T331): BuildSystemPrompt's own clock guard line and
+            // BuildUserContent's station clock line below must provably read the SAME instant — the
+            // identical discipline CopyClaims.CheckClock's own remarks already require of its caller.
+            var stationLocalNow = StationLocalNow();
             systemPrompt = LlmPromptBuilder.BuildSystemPrompt(
-                LlmPromptBuilder.BuildPersonaSection(persona, card, mentionOwnName), cfg.MaxCopyChars);
+                LlmPromptBuilder.BuildPersonaSection(persona, card, mentionOwnName), cfg.MaxCopyChars, stationLocalNow);
 
             // Read HERE — after WaitAsync above, i.e. already inside the single-flight critical
             // section — not by the caller before this method was ever invoked (SPEC F83.1, T65
@@ -620,7 +655,7 @@ public sealed class LlmCopyWriter(
             // patterFact above was null (context wins) — BuildUserContent enforces that structurally
             // too (its own defense-in-depth `?? ` fallback), so this call passes both through as-is.
             userPrompt = LlmPromptBuilder.BuildUserContent(
-                request, LlmPromptBuilder.BuildStationClockLine(StationLocalNow()), previouslyVoicedTasteNotes,
+                request, LlmPromptBuilder.BuildStationClockLine(stationLocalNow), previouslyVoicedTasteNotes,
                 patterFact?.Fact, showFlavorFact);
 
             // No boot-frozen BaseAddress (F36.2) — the endpoint is read from CurrentValue above and an
@@ -629,33 +664,7 @@ public sealed class LlmCopyWriter(
             // so a live PUT to Llm:Endpoint applies on the next render.
             var requestUri = EndpointUri.Combine(cfg.Endpoint, "/v1/chat/completions");
 
-            var body = new
-            {
-                model = cfg.Model,
-                messages = new object[]
-                {
-                    new { role = "system", content = systemPrompt },
-                    new { role = "user", content = userPrompt },
-                },
-                max_tokens = DeriveMaxTokens(cfg.MaxCopyChars),
-            };
-
-            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri)
-            {
-                Content = JsonContent.Create(body),
-            };
-
-            // Bearer header rides only when an ApiKey is configured (env-only, F19.3/F34.3).
-            if (!string.IsNullOrEmpty(cfg.ApiKey))
-            {
-                httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.ApiKey);
-            }
-
-            var response = await http.SendAsync(httpRequest, timeoutCts.Token);
-            response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx
-
-            var payload = await response.Content.ReadFromJsonAsync<ChatCompletionResponse>(timeoutCts.Token);
-            var text = payload?.Choices?.FirstOrDefault()?.Message?.Content ?? string.Empty;
+            var text = await PostCompletionAsync(http, requestUri, cfg, systemPrompt, userPrompt, timeoutCts.Token);
 
             // Written HERE, STILL inside the single-flight critical section (SPEC F83.1, T65 review
             // finding) — only for an on-air call (updateTasteMemory), and only once the call has
@@ -671,15 +680,30 @@ public sealed class LlmCopyWriter(
             // point (SPEC F123.2-F123.4, STORY-319, PLAN T263), so a trim is visible to the ring as
             // its own outcome instead of only discoverable by re-reading Response after the fact.
             var cleanup = CleanCopy(text, cfg.MaxCopyChars);
-            if (cleanup is LlmCopyCleanupResult.Trimmed trimmed)
+            LogIfTrimmed(request, personaName, cleanup);
+
+            // SPEC F138.2/F138.4 (STORY-350, PLAN T331) — the context lane's own truth-gate stage.
+            // CheckFacts is asked ONLY for a ContextSegment render carrying a non-empty fact block
+            // (F138.2's own "never even ask" discipline — every other kind, or a blank fact block,
+            // never reaches this branch at all; a blank fact block is not merely "typical" of an
+            // admin preview, it is STRUCTURAL — GenWave.Host.Api.PersonaController.Preview builds its
+            // SegmentRequest with no ContextFacts argument at all, so that parameter's own default
+            // (null) is the only value a preview can ever carry, and the gate is unreachable from
+            // previews by construction, not by convention. See LlmPromptBuilder.BuildContextFactsLine's
+            // own remarks for the prompt-side half of that same story). Also gated on TextOf(cleanup):
+            // hygiene already rejecting the reply outright (empty, or over-length with nothing
+            // salvageable) falls straight through to the unchanged switch/record below — there is no
+            // candidate text to check facts against, and the existing OverLength/EmptyCompletion rung
+            // already covers that case correctly.
+            if (request.Kind == SegmentKind.ContextSegment
+                && request.ContextFacts is { } factBlock && !string.IsNullOrWhiteSpace(factBlock)
+                && TextOf(cleanup) is { } candidate)
             {
-                // One INFORMATION line (F123.4) — a trim is discipline, not an outage, so it gets its
-                // own quiet lane rather than promoting to LogFailure's WARN.
-                logger.LogInformation(
-                    "LLM copy for {Kind} trimmed to the last complete sentence under Llm:MaxCopyChars " +
-                    "(persona: {PersonaName}): {CharsBefore} -> {CharsAfter} chars",
-                    request.Kind, (personaName ?? "none").ReplaceLineEndings(" "), trimmed.CharsBeforeTrim,
-                    trimmed.Text.Length);
+                var ladderResult = await RunTruthGateLadderAsync(
+                    candidateText => CopyClaims.CheckFacts(candidateText, factBlock),
+                    LlmPromptBuilder.BuildFactViolationReaskLine, candidate, text);
+                if (ladderResult is not null)
+                    return ladderResult;
             }
 
             // Ok still records the RAW reply (SPEC F73.1) regardless of outcome — a full reject
@@ -691,18 +715,89 @@ public sealed class LlmCopyWriter(
             // shapes finer still — a Trimmed salvage still aired, so it is Success exactly like an
             // exact Fits; a full Rejected splits on WHY nothing survived (LlmCopyCleanupResult.Rejected's
             // own WasOverLength, decided once at CleanCopy, never re-derived here).
-            var (ringOutcome, cause) = cleanup switch
-            {
-                LlmCopyCleanupResult.Trimmed => (LlmCallOutcome.Trimmed, LlmCallCause.Success),
-                LlmCopyCleanupResult.Fits => (LlmCallOutcome.Ok, LlmCallCause.Success),
-                LlmCopyCleanupResult.Rejected { WasOverLength: true } => (LlmCallOutcome.Ok, LlmCallCause.OverLength),
-                LlmCopyCleanupResult.Rejected { WasOverLength: false } => (LlmCallOutcome.Ok, LlmCallCause.EmptyCompletion),
-                _ => throw new UnreachableException($"Unhandled {nameof(LlmCopyCleanupResult)} case."),
-            };
+            var (ringOutcome, cause) = ClassifyCleanup(cleanup);
             recorder.Record(
                 personaName, systemPrompt, userPrompt, text, startedAt, ElapsedMs(startedAt),
                 ringOutcome, statusDetail: null, mode, cause, cfg.Model);
             return cleanup;
+
+            /// <summary>
+            /// SPEC F138.4 (STORY-350, PLAN T331) — one truth-gate ladder run: gate
+            /// <paramref name="firstCandidate"/> against <paramref name="check"/>, and on a
+            /// violation, exactly ONE re-ask (its added prompt line built by
+            /// <paramref name="buildReaskLine"/>), then reclassify. A LOCAL function (T331 review
+            /// finding — this method was pushing 190 lines with a SECOND ladder, PLAN T332's clock
+            /// check, landing at this exact seam next) — not a private instance method — because it
+            /// needs to REASSIGN <c>userPrompt</c>/<c>startedAt</c> and read <c>http</c>/<c>requestUri</c>/
+            /// <c>timeoutCts</c> exactly the way the enclosing method already does (review finding F4b:
+            /// the SAME reassign-not-shadow discipline <c>userPrompt</c> already followed for its own
+            /// prompt text, now shared by <c>startedAt</c> too, so a fault raised by the re-ask's own
+            /// call is attributed — prompt AND timing alike — to that call, never to the first). A
+            /// second gate (PLAN T332) reuses this SAME gate/re-ask/record/classify choreography by
+            /// supplying its own <paramref name="check"/>/<paramref name="buildReaskLine"/> — zero
+            /// copy-paste of a second ladder. Returns <see langword="null"/> when <paramref name="check"/>
+            /// passed <paramref name="firstCandidate"/> outright — the caller's own signal to fall
+            /// through to its unchanged, non-gated classify/record path above; a non-null return is
+            /// always this ladder's OWN final word, and the caller records nothing further.
+            /// </summary>
+            async Task<LlmCopyCleanupResult?> RunTruthGateLadderAsync(
+                Func<string, ClaimCheckResult> check, Func<IReadOnlyList<ClaimViolation>, string> buildReaskLine,
+                string firstCandidate, string firstRawText)
+            {
+                var gateResult = check(firstCandidate);
+                if (gateResult.Passed)
+                    return null;
+
+                // The rejected first call gets its own honest ring entry (SPEC F138.4: each call in
+                // the ladder is its own call with its own entry) BEFORE the re-ask fires — never
+                // silently folded into whichever entry the re-ask itself produces.
+                recorder.Record(
+                    personaName, systemPrompt, userPrompt, firstRawText, startedAt, ElapsedMs(startedAt),
+                    LlmCallOutcome.Ok, statusDetail: null, mode, LlmCallCause.TruthGateReject, cfg.Model);
+
+                // Exactly ONE re-ask (F138.4), naming the violation. userPrompt AND startedAt are both
+                // REASSIGNED (never shadowed by a new local) so a fault raised by THIS call — timeout,
+                // non-2xx, connect — is attributed by this method's own catch-all below to the
+                // re-ask's own prompt and its own start time, and degrades through the EXACT SAME path
+                // an ordinary single-call failure already does: no new exception handling, no new
+                // "longer hold". Reusing timeoutCts.Token (not a fresh CancelAfter) is what bounds the
+                // whole ladder to this render's existing Llm:TimeoutSeconds budget — whatever the
+                // first call already spent is gone, and a budget that expires mid-reask throws
+                // OperationCanceledException exactly as it always would have for one call.
+                userPrompt = $"{userPrompt}\n{buildReaskLine(gateResult.Violations)}";
+                startedAt = timeProvider.GetUtcNow();
+                var reaskText = await PostCompletionAsync(http, requestUri, cfg, systemPrompt, userPrompt, timeoutCts.Token);
+                var reaskCleanup = CleanCopy(reaskText, cfg.MaxCopyChars);
+                LogIfTrimmed(request, personaName, reaskCleanup);
+
+                // The tri-state (no candidate to even check / checked-and-failed / checked-and-passed)
+                // folds to ONE clear bool (T331 review finding) instead of re-deriving
+                // "is { Passed: false }" at both the classify site and the final-return site below:
+                // reaskViolations is non-null exactly when the gate was actually checked AND failed.
+                var reaskGateResult = TextOf(reaskCleanup) is { } reaskCandidate ? check(reaskCandidate) : null;
+                var reaskViolations = reaskGateResult is { Passed: false } failed ? failed.Violations : null;
+
+                var (reaskOutcome, reaskCause) = reaskViolations is null
+                    ? ClassifyCleanup(reaskCleanup)
+                    : (LlmCallOutcome.Ok, LlmCallCause.TruthGateReject);
+                recorder.Record(
+                    personaName, systemPrompt, userPrompt, reaskText, startedAt, ElapsedMs(startedAt),
+                    reaskOutcome, statusDetail: null, mode, reaskCause, cfg.Model);
+
+                // F138.4's floor: a still-violating re-ask never airs. A TruthGateRejected here is
+                // what makes TextOf(...) null for it (T331 review finding F3 — its own distinct shape
+                // from a hygiene Rejected, so WriteAsync's own failure WARN can name the real cause),
+                // so the caller (WriteAsync/WritePreviewAsync) degrades it exactly like any other
+                // reject — F107.6's EXISTING skip rung for ContextSegment (TtsSegmentSource's own
+                // non-fresh-copy guard drops a template render for this kind rather than airing it),
+                // never a new floor invented here. A re-ask that passed hygiene but still failed the
+                // gate is the only case needing a synthetic TruthGateRejected instead of reaskCleanup
+                // itself: reaskCleanup there still carries real (unusable) text that must never reach
+                // TextOf.
+                return reaskViolations is { } violations
+                    ? new LlmCopyCleanupResult.TruthGateRejected(violations)
+                    : reaskCleanup;
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -713,6 +808,10 @@ public sealed class LlmCopyWriter(
         }
         catch (Exception ex)
         {
+            // userPrompt/startedAt name WHICHEVER call actually faulted (T331 review finding F4b): a
+            // fault raised by RunTruthGateLadderAsync's own re-ask is attributed to the re-ask's own
+            // prompt and dispatch instant, never the first call's, because both were REASSIGNED (not
+            // shadowed) the moment that call fired — see this method's own startedAt remarks above.
             var (outcome, cause, detail) = ClassifyForRing(ex);
             recorder.Record(
                 personaName, systemPrompt, userPrompt, response: null, startedAt, ElapsedMs(startedAt),
@@ -723,6 +822,48 @@ public sealed class LlmCopyWriter(
         {
             singleFlight.Release();
         }
+    }
+
+    /// <summary>
+    /// Posts one chat-completion request and returns the raw reply text (SPEC F34.3, F123.1) — the
+    /// exact wire call both the first completion and the F138.4 re-ask fire (STORY-350, PLAN T331),
+    /// extracted so the ladder's second call is provably the SAME request shape as the first rather
+    /// than a hand-maintained second copy of the body/header/parse logic. <paramref name="ct"/> is
+    /// always <c>timeoutCts.Token</c> from the one caller (<see cref="RequestCleanedCompletionAsync"/>)
+    /// — this method holds no state and starts no clock of its own, so a re-ask sharing that same
+    /// token shares that render's existing budget rather than getting a fresh one (F138.4's "never a
+    /// longer feeder hold").
+    /// </summary>
+    static async Task<string> PostCompletionAsync(
+        HttpClient http, Uri requestUri, LlmOptions cfg, string systemPrompt, string userPrompt, CancellationToken ct)
+    {
+        var body = new
+        {
+            model = cfg.Model,
+            messages = new object[]
+            {
+                new { role = "system", content = systemPrompt },
+                new { role = "user", content = userPrompt },
+            },
+            max_tokens = DeriveMaxTokens(cfg.MaxCopyChars),
+        };
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri)
+        {
+            Content = JsonContent.Create(body),
+        };
+
+        // Bearer header rides only when an ApiKey is configured (env-only, F19.3/F34.3).
+        if (!string.IsNullOrEmpty(cfg.ApiKey))
+        {
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.ApiKey);
+        }
+
+        var response = await http.SendAsync(httpRequest, ct);
+        response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx
+
+        var payload = await response.Content.ReadFromJsonAsync<ChatCompletionResponse>(ct);
+        return payload?.Choices?.FirstOrDefault()?.Message?.Content ?? string.Empty;
     }
 
     long ElapsedMs(DateTimeOffset startedAt) => (long)(timeProvider.GetUtcNow() - startedAt).TotalMilliseconds;
@@ -776,8 +917,9 @@ public sealed class LlmCopyWriter(
     /// Extracts the airable/previewable text from a <see cref="LlmCopyCleanupResult"/> (SPEC
     /// F123.2): an exact fit and a salvaged trim both hand back real copy — the caller cannot tell
     /// (and does not need to) which one it got, since both are genuinely LLM-authored — and only a
-    /// full reject hands back null, so the caller degrades exactly as it did before T263. Shared by
-    /// <see cref="WriteAsync"/> and <see cref="WritePreviewAsync"/> so the two can never read the
+    /// full reject (hygiene's own, or the F138.4 ladder's <see cref="LlmCopyCleanupResult.TruthGateRejected"/>
+    /// floor, PLAN T331) hands back null, so the caller degrades exactly as it did before T263. Shared
+    /// by <see cref="WriteAsync"/> and <see cref="WritePreviewAsync"/> so the two can never read the
     /// closed hierarchy differently.
     /// </summary>
     static string? TextOf(LlmCopyCleanupResult cleanup) => cleanup switch
@@ -785,6 +927,54 @@ public sealed class LlmCopyWriter(
         LlmCopyCleanupResult.Fits fits => fits.Text,
         LlmCopyCleanupResult.Trimmed trimmed => trimmed.Text,
         LlmCopyCleanupResult.Rejected => null,
+        LlmCopyCleanupResult.TruthGateRejected => null,
+        _ => throw new UnreachableException($"Unhandled {nameof(LlmCopyCleanupResult)} case."),
+    };
+
+    /// <summary>
+    /// Names the real cause of a null <see cref="TextOf"/> result for <see cref="WriteAsync"/>'s own
+    /// failure WARN (SPEC F69.7, T331 review finding F3): a hygiene reject splits on
+    /// <see cref="LlmCopyCleanupResult.Rejected.WasOverLength"/> exactly as it always has, but a
+    /// <see cref="LlmCopyCleanupResult.TruthGateRejected"/> floor gets its OWN sentence naming the
+    /// truth gate and the still-unsupported claim — never the hygiene wording ("empty or exceeded
+    /// Llm:MaxCopyChars after cleanup"), which sends an operator at the wrong levers (endpoint,
+    /// max_tokens) for a failure neither lever can fix. Comma-free, sentence-fragment style (matches
+    /// every other <see cref="LogFailure"/> reason) — this never reaches prompt text, only a log line,
+    /// but <see cref="ClaimViolation.Token"/> stays safe to interpolate directly regardless (that
+    /// type's own remarks: provably digit-shaped or closed-vocabulary).
+    /// </summary>
+    static string DescribeNullTextReason(LlmCopyCleanupResult cleanup) => cleanup switch
+    {
+        LlmCopyCleanupResult.Rejected { WasOverLength: true } => "exceeded Llm:MaxCopyChars after cleanup",
+        LlmCopyCleanupResult.Rejected { WasOverLength: false } => "empty after cleanup",
+        LlmCopyCleanupResult.TruthGateRejected truthGate =>
+            "the context fact gate rejected the re-ask too (unsupported claim: " +
+            $"{string.Join(" and ", truthGate.Violations.Select(v => v.Token).Distinct(StringComparer.OrdinalIgnoreCase))})",
+        _ => throw new UnreachableException(
+            $"{nameof(TextOf)} already returns non-null text for any other {nameof(LlmCopyCleanupResult)} case."),
+    };
+
+    /// <summary>
+    /// Maps a <see cref="LlmCopyCleanupResult"/> to its ring outcome/cause pair (SPEC F73.1, F139.1)
+    /// — extracted (STORY-350, PLAN T331) so <see cref="RequestCleanedCompletionAsync"/>'s ordinary
+    /// success path and its F138.4 re-ask path share ONE classification rather than two hand-kept
+    /// copies of the same switch. Ok still records the RAW reply regardless of outcome — a full
+    /// reject (empty/no-sentence-fits) stays Ok exactly as before T263 (a hygiene decision the caller
+    /// makes, not a fact about whether the call itself succeeded; see <see cref="LlmCallOutcome.Ok"/>'s
+    /// own remarks); a trim gets its own finer-grained outcome instead (<see cref="LlmCallOutcome.Trimmed"/>).
+    /// The additive Cause field (STORY-353, PLAN T330) splits the SAME three shapes finer still — a
+    /// Trimmed salvage still aired, so it is Success exactly like an exact Fits; a full Rejected
+    /// splits on WHY nothing survived (<see cref="LlmCopyCleanupResult.Rejected.WasOverLength"/>,
+    /// decided once at <see cref="CleanCopy"/>, never re-derived here). Never called for a cleanup the
+    /// F138.2 truth gate already rejected — that path stamps <see cref="LlmCallCause.TruthGateReject"/>
+    /// itself, bypassing this map entirely (see that call site's own remarks).
+    /// </summary>
+    static (LlmCallOutcome Outcome, LlmCallCause Cause) ClassifyCleanup(LlmCopyCleanupResult cleanup) => cleanup switch
+    {
+        LlmCopyCleanupResult.Trimmed => (LlmCallOutcome.Trimmed, LlmCallCause.Success),
+        LlmCopyCleanupResult.Fits => (LlmCallOutcome.Ok, LlmCallCause.Success),
+        LlmCopyCleanupResult.Rejected { WasOverLength: true } => (LlmCallOutcome.Ok, LlmCallCause.OverLength),
+        LlmCopyCleanupResult.Rejected { WasOverLength: false } => (LlmCallOutcome.Ok, LlmCallCause.EmptyCompletion),
         _ => throw new UnreachableException($"Unhandled {nameof(LlmCopyCleanupResult)} case."),
     };
 

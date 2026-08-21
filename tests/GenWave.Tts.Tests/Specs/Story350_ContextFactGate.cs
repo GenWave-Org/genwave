@@ -10,14 +10,123 @@
 // armor at the LlmCopyWriter seam: prompt asks (F138.5), checker enforces (F138.2),
 // ladder degrades re-ask-once → template (F138.4), never silence (F107.6).
 
+using System.Diagnostics;
+using System.Net;
+using System.Net.Http;
 using System.Reflection;
+using System.Text;
+using System.Text.Json;
+using GenWave.Core.Domain;
 using GenWave.Tts;
+using GenWave.Tts.Tests.Fakes;
 using Xunit;
 
 namespace GenWave.Tts.Tests.Specs;
 
 public static class FeatureContextFactGate
 {
+    // ── Shared fixture for the HTTP-driven ladder scenarios below (mirrors GenWave.Host.Tests'
+    // own Story353 BuildWriter idiom — the ONE constructor arg list every fact in
+    // ScenarioTheLadderDegrades/ScenarioGh434ExhibitEndToEnd/ScenarioNonContextKindIsNeverGated/
+    // ScenarioEmptyFactBlockNeverGates/SadPathCheckerDiscipline shares) — drives the REAL
+    // LlmCopyWriter through a scripted FakeHttpMessageHandler rather than asserting on CopyClaims
+    // in isolation, so the ladder wiring at the LlmCopyWriter seam itself is what is under test.
+
+    const string GhFactBlock = "Edmonton: overcast, 15°C. Today's high 21°C, low 12°C.";
+
+    // gh-#434's own aired exhibit, unchanged: three fabrications in one line, all three F138.1
+    // claim classes at once — a digit run ("6"), a condition word ("sunshine"), and a weekday
+    // ("saturday") — none of them supported by GhFactBlock.
+    const string PoisonedCopy =
+        "It feels like 6 degrees below freezing with plenty of sunshine and today is saturday here in the studio.";
+
+    const string CleanCopy = "It's overcast today at 15 degrees with a high of 21 and a low of 12.";
+
+    // 2026-08-15, station-local — a Saturday morning, so LlmPromptBuilder.BuildClockGuardLine's own
+    // output is a known, assertable literal ("It is Saturday morning...") rather than whatever day
+    // the machine running the test happens to land on.
+    static readonly DateTimeOffset FixedStationLocalNow = new(2026, 8, 15, 9, 0, 0, TimeSpan.Zero);
+
+    static SegmentRequest ContextRequest(string? facts) =>
+        new(SegmentKind.ContextSegment, "af_heart", "GenWave", Track: null, FixedStationLocalNow, "test-station",
+            PersonaName: null, CounterpartName: null, ContextFacts: facts);
+
+    static SegmentRequest LeadInRequest() =>
+        new(SegmentKind.LeadIn, "af_heart", "GenWave",
+            new MediaItem("m1", "/media/x.mp3", "Astral Plane", default, "Valerie June"),
+            FixedStationLocalNow, "test-station");
+
+    /// <summary>Builds a REAL <see cref="LlmCopyWriter"/> against a fake completions handler that
+    /// scripts its reply BY CALL NUMBER (1-based) — <paramref name="respond"/> also sees each call's
+    /// raw request body via the returned <c>RequestBodies</c> list, so a fact can inspect exactly
+    /// what the re-ask's own prompt said. <see cref="FakeStationClockProvider"/> pins the station
+    /// clock to <see cref="FixedStationLocalNow"/> so the F138.5 guard line is a known literal.
+    /// <c>Logger</c> is a real <see cref="CapturingLogger{T}"/> a fact can inspect for the T331
+    /// review finding F3 WARN pin, rather than a value every caller must construct and discard.</summary>
+    static (LlmCopyWriter Writer, LlmCallRing Ring, List<string> RequestBodies, CapturingLogger<LlmCopyWriter> Logger) BuildWriter(
+        Func<int, CancellationToken, Task<HttpResponseMessage>> respond, int timeoutSeconds = 5)
+    {
+        var bodies = new List<string>();
+        var handler = new FakeHttpMessageHandler(async (request, ct) =>
+        {
+            var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct);
+            bodies.Add(body);
+            return await respond(bodies.Count, ct);
+        });
+        var ring = new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions()));
+        var logger = new CapturingLogger<LlmCopyWriter>();
+        var writer = new LlmCopyWriter(
+            new TemplateCopyWriter(new PatterTemplateRenderer()),
+            new SingleHandlerHttpClientFactory(handler),
+            new TestOptionsMonitor<LlmOptions>(new LlmOptions
+            {
+                Endpoint = "http://fake-llm.local", Model = "test-model", TimeoutSeconds = timeoutSeconds,
+                MaxCopyChars = 450,
+            }),
+            new LlmCopyStatusHolder(),
+            new FakeActivePersonaAccessor(),
+            logger,
+            TimeProvider.System,
+            new LlmCallRecorder(ring, new LlmCallCauseCounters(TimeProvider.System)),
+            new FakeDegradationModeReader(),
+            new FakeStationClockProvider(FixedStationLocalNow));
+        return (writer, ring, bodies, logger);
+    }
+
+    static Task<HttpResponseMessage> Ok(string content) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+    {
+        Content = CompletionsBody(content),
+    });
+
+    static async Task<HttpResponseMessage> DelayThenOk(TimeSpan delay, CancellationToken ct, string content = CleanCopy)
+    {
+        await Task.Delay(delay, ct);
+        return await Ok(content);
+    }
+
+    static StringContent CompletionsBody(string content) => new(
+        JsonSerializer.Serialize(new { choices = new[] { new { message = new { content } } } }),
+        Encoding.UTF8, "application/json");
+
+    // Role-keyed, not positional (T331 review finding F6 — the Story119/121/123 precedent): looks
+    // up the message BY its own "role" field rather than trusting messages[0]/messages[1] to stay
+    // system-then-user forever.
+    static string ExtractSystemContent(string requestBodyJson) => ExtractMessageContent(requestBodyJson, "system");
+
+    static string ExtractUserContent(string requestBodyJson) => ExtractMessageContent(requestBodyJson, "user");
+
+    static string ExtractMessageContent(string requestBodyJson, string role)
+    {
+        using var doc = JsonDocument.Parse(requestBodyJson);
+        foreach (var message in doc.RootElement.GetProperty("messages").EnumerateArray())
+        {
+            if (message.GetProperty("role").GetString() == role)
+                return message.GetProperty("content").GetString() ?? "";
+        }
+
+        return "";
+    }
+
     public static class ScenarioSupportedCopyPassesUntouched
     {
         // Given the gh-#434 fact block
@@ -134,23 +243,172 @@ public static class FeatureContextFactGate
 
     public static class ScenarioTheLadderDegrades
     {
-        // Given a first completion that fails the gate (stub LLM serving poisoned copy
-        // through the production LlmCopyWriter seam — the entry-point scenario)
-        [Fact(Skip = "pending T331 — gate not wired at the LlmCopyWriter seam yet")]
-        public static void Exactly_one_reask_is_issued() =>
-            Assert.Fail("pending T331: the writer retries once, never more");
+        [Fact]
+        public static async Task Exactly_one_reask_is_issued()
+        {
+            // Given a first completion that fails the gate (the gh-#434 exhibit) and a second that
+            // finally supports the facts — driven through the real production LlmCopyWriter seam
+            var (writer, _, bodies, _) = BuildWriter((call, _) => Ok(call == 1 ? PoisonedCopy : CleanCopy));
 
-        [Fact(Skip = "pending T331")]
-        public static void The_reask_prompt_names_the_violating_claim() =>
-            Assert.Fail("pending T331: the retry prompt contains the rejected claim text");
+            // When the render goes through WriteAsync -> RequestCleanedCompletionAsync
+            await writer.WriteAsync(ContextRequest(GhFactBlock), CancellationToken.None);
 
-        [Fact(Skip = "pending T331")]
-        public static void A_failing_reask_lands_on_the_template() =>
-            Assert.Fail("pending T331: second violation airs the deterministic template line (F107.6 — never silence)");
+            // Then exactly two completion calls were made — the rejected first, and ONE re-ask, never more
+            Assert.Equal(2, bodies.Count);
+        }
 
-        [Fact(Skip = "pending T331")]
-        public static void The_guard_line_rides_the_prompt() =>
-            Assert.Fail("pending T331: the system prompt carries the comma-free weekday/daypart guard line (F138.5)");
+        [Fact]
+        public static async Task The_reask_prompt_names_the_violating_claim()
+        {
+            // Given the same poisoned-then-clean pair
+            var (writer, ring, bodies, _) = BuildWriter((call, _) => Ok(call == 1 ? PoisonedCopy : CleanCopy));
+
+            // When the render resolves
+            await writer.WriteAsync(ContextRequest(GhFactBlock), CancellationToken.None);
+
+            // Then the SECOND call's own user prompt names one of the rejected claims — the retry
+            // prompt contains the rejected claim text, not a bare "try again" — and it opens with
+            // plain declarative English, never a machine-looking "Re-ask:" label a model could echo
+            // straight back into its own reply (T331 review advisory F5).
+            var reaskPrompt = ExtractUserContent(bodies[1]);
+            Assert.Contains("sunshine", reaskPrompt, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Re-ask:", reaskPrompt, StringComparison.Ordinal);
+
+            // And the RING's own re-ask entry (T331 review finding F4a) — not just the wire — carries
+            // that same re-ask prompt: the newest ring record is the re-ask's own honest entry.
+            var newest = ring.Snapshot()[0];
+            Assert.Contains("sunshine", newest.PromptUser ?? "", StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public static async Task A_failing_reask_lands_on_the_f107_floor()
+        {
+            // Given a first AND second completion that both violate the facts
+            var (writer, _, bodies, logger) = BuildWriter((_, _) => Ok(PoisonedCopy));
+
+            // When the render exhausts the ladder
+            var result = await writer.WriteAsync(ContextRequest(GhFactBlock), CancellationToken.None);
+
+            // Then it degrades to the EXISTING context-lane floor (SPEC F107.6's skip-never-silence
+            // posture) — the same template PatterTemplateRenderer already produces for a
+            // ContextSegment writer that degraded for any other reason, never a new floor invented
+            // for the gate — and never the still-violating LLM text. Still exactly one re-ask, never
+            // a retry storm.
+            Assert.Equal("Here's something worth knowing.", result.Text);
+            Assert.False(result.FreshPerAiring);
+            Assert.Equal(2, bodies.Count);
+
+            // And the failure WARN names the REAL cause (T331 review finding F3) — the truth gate,
+            // and the still-unsupported claim — never the wrong-lever "empty or exceeded
+            // Llm:MaxCopyChars" wording a hygiene reject carries (that message sends an operator at
+            // settings this failure has nothing to do with).
+            Assert.Contains(
+                logger.Warnings,
+                warning => warning.Contains("fact gate", StringComparison.OrdinalIgnoreCase)
+                    && warning.Contains("sunshine", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(
+                logger.Warnings, warning => warning.Contains("empty or exceeded", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public static async Task The_guard_line_rides_the_prompt()
+        {
+            // Given an ordinary completion that never trips the gate at all
+            var (writer, _, bodies, _) = BuildWriter((_, _) => Ok(CleanCopy));
+
+            // When any patter prompt renders
+            await writer.WriteAsync(ContextRequest(GhFactBlock), CancellationToken.None);
+
+            // Then the system prompt carries the F138.5 guard line verbatim (weekday/daypart
+            // substituted for the pinned station clock) — comma-free prompt hardening on every
+            // render, gate or not.
+            var systemPrompt = ExtractSystemContent(bodies[0]);
+            Assert.Contains(LlmPromptBuilder.BuildClockGuardLine(FixedStationLocalNow), systemPrompt);
+        }
+    }
+
+    public static class ScenarioGh434ExhibitEndToEnd
+    {
+        [Fact]
+        public static async Task The_pinned_exhibit_recovers_through_the_reask()
+        {
+            // Given the gh-#434 aired exhibit's own poisoned first reply against the real fact
+            // block, and a clean second reply
+            var (writer, _, bodies, _) = BuildWriter((call, _) => Ok(call == 1 ? PoisonedCopy : CleanCopy));
+
+            // When the render goes through the real ladder end to end
+            var result = await writer.WriteAsync(ContextRequest(GhFactBlock), CancellationToken.None);
+
+            // Then the clean re-ask airs — genuinely LLM-authored, never the invented first reply
+            Assert.Equal(CleanCopy, result.Text);
+            Assert.True(result.FreshPerAiring);
+            Assert.Equal(2, bodies.Count);
+        }
+
+        [Fact]
+        public static async Task Both_calls_failing_the_gate_still_lands_on_the_floor()
+        {
+            // Given the SAME exhibit poisoning both the first reply and the re-ask
+            var (writer, ring, bodies, _) = BuildWriter((_, _) => Ok(PoisonedCopy));
+
+            // When the render exhausts the ladder
+            var result = await writer.WriteAsync(ContextRequest(GhFactBlock), CancellationToken.None);
+
+            // Then the fabricated copy never airs (the F107.6 floor), and BOTH calls left their own
+            // honest ring entry — the rejected first, and the re-ask that violated again — never one
+            // entry standing in for two calls.
+            Assert.False(result.FreshPerAiring);
+            Assert.Equal(2, bodies.Count);
+            Assert.Equal(2, ring.Snapshot().Count);
+            Assert.All(ring.Snapshot(), record => Assert.Equal(LlmCallCause.TruthGateReject, record.Cause));
+        }
+    }
+
+    public static class ScenarioNonContextKindIsNeverGated
+    {
+        [Fact]
+        public static async Task A_lead_in_with_fabricated_claims_is_never_fact_checked()
+        {
+            // Given a LeadIn request (not a context segment) whose only reply fabricates a claim
+            // that would trip CheckFacts if this kind were ever gated
+            var (writer, _, bodies, _) = BuildWriter((_, _) => Ok(PoisonedCopy));
+
+            // When it renders
+            var result = await writer.WriteAsync(LeadInRequest(), CancellationToken.None);
+
+            // Then the copy airs exactly as the model wrote it — F138.2 gates ContextSegment only,
+            // so no re-ask is even attempted for any other kind (the scope pin).
+            Assert.Equal(PoisonedCopy, result.Text);
+            Assert.Single(bodies);
+
+            // And the narrowing to ContextSegment-only is pinned on the REAL LeadIn call's own
+            // system prompt (T331 review finding F2 — the reviewer's own mutation: narrowing
+            // production to context-only survived every fact here because none of them ever looked
+            // at what a non-gated kind's prompt actually carries) — the F138.5 guard line still rides
+            // it regardless, since that line is unconditional across every LLM-authored kind.
+            var systemPrompt = ExtractSystemContent(bodies[0]);
+            Assert.Contains(LlmPromptBuilder.BuildClockGuardLine(FixedStationLocalNow), systemPrompt);
+        }
+    }
+
+    public static class ScenarioEmptyFactBlockNeverGates
+    {
+        [Fact]
+        public static async Task A_context_segment_with_no_fact_block_is_never_fact_checked()
+        {
+            // Given a ContextSegment request whose own ContextFacts is blank (an admin preview's
+            // typical case, per LlmPromptBuilder.BuildContextFactsLine's own remarks) and a reply
+            // fabricating a claim
+            var (writer, _, bodies, _) = BuildWriter((_, _) => Ok(PoisonedCopy));
+
+            // When it renders
+            var result = await writer.WriteAsync(ContextRequest(facts: null), CancellationToken.None);
+
+            // Then CheckFacts is never even invoked — an empty fact block skips the gate entirely,
+            // so the copy airs unchecked with no re-ask.
+            Assert.Equal(PoisonedCopy, result.Text);
+            Assert.Single(bodies);
+        }
     }
 
     public static class SadPathCheckerDiscipline
@@ -175,9 +433,49 @@ public static class FeatureContextFactGate
                 && checkFacts is not null && checkClock is not null);
         }
 
-        [Fact(Skip = "pending T331")]
-        public static void Budget_exhaustion_degrades_to_template_not_a_longer_hold() =>
-            Assert.Fail("pending T331: an exhausted render budget skips the re-ask and airs the template");
+        [Fact]
+        public static async Task Budget_exhaustion_degrades_to_template_not_a_longer_hold()
+        {
+            // Given a first reply that BURNS MOST of this render's Llm:TimeoutSeconds budget before
+            // violating the facts (T331 review finding F1 — an instantly-answering first call left
+            // the shared budget entirely unconsumed, so this fact previously could not tell a
+            // correctly-SHARED clock apart from a re-ask that wrongly got its own fresh one: both
+            // shapes finish in about the same wall-clock time when call 1 is instant), and a re-ask
+            // endpoint that would take 10s regardless of which clock ends up bounding it.
+            var (writer, ring, bodies, _) = BuildWriter(
+                (call, ct) => call == 1
+                    ? DelayThenOk(TimeSpan.FromMilliseconds(1500), ct, PoisonedCopy)
+                    : DelayThenOk(TimeSpan.FromSeconds(10), ct),
+                timeoutSeconds: 2);
+            var stopwatch = Stopwatch.StartNew();
+
+            // When the render's own timeout budget elapses mid-reask — RequestCleanedCompletionAsync's
+            // own timeoutCts, shared by BOTH calls, never a fresh clock for the re-ask
+            var result = await writer.WriteAsync(ContextRequest(GhFactBlock), CancellationToken.None);
+            stopwatch.Stop();
+
+            // Then the render degrades to the template rung — never a longer feeder hold than this
+            // render's own single 2s budget, ~1.5s of which the first call already spent, leaving
+            // only ~0.5s for the re-ask before the SHARED clock fires. Sharing correctly lands at
+            // ~2s total; the reviewer's own mutation (a fresh CreateLinkedTokenSource + CancelAfter
+            // for the re-ask, starting its OWN 2s from ~1.5s in) would run to ~3.5s instead — the
+            // bound below sits strictly between the two, so it reds under that mutation.
+            Assert.Equal("Here's something worth knowing.", result.Text);
+            Assert.False(result.FreshPerAiring);
+            Assert.True(
+                stopwatch.Elapsed < TimeSpan.FromSeconds(3.5),
+                $"took {stopwatch.Elapsed} - a re-ask given its OWN fresh timeout clock (not this " +
+                "render's one shared budget) would run past 3.5s");
+
+            // And the ring shows exactly what happened: the rejected first call, then the re-ask's
+            // own honest Timeout — TWO entries with TWO distinct dispatch times (T331 review finding
+            // F4b: the re-ask's own ring entry must carry its OWN StartedAt, never the first call's —
+            // a catch-all that reused the first call's timing would leave both entries stamped alike).
+            Assert.Equal(2, ring.Snapshot().Count);
+            var rejected = Assert.Single(ring.Snapshot(), record => record.Cause == LlmCallCause.TruthGateReject);
+            var timedOut = Assert.Single(ring.Snapshot(), record => record.Cause == LlmCallCause.Timeout);
+            Assert.NotEqual(rejected.StartedAt, timedOut.StartedAt);
+        }
     }
 
     // Further pure-level pins (PLAN T329) — digit-run tokenization the design constraints called

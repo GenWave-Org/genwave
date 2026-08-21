@@ -68,8 +68,25 @@ static class LlmPromptBuilder
     /// the length instruction with a numeric word figure (see <see cref="CharsPerWordDivisor"/>):
     /// stated, not enforced — the model reads this as a target, while T262's max_tokens cap and
     /// T263's sentence-trim salvage are what actually bound and clean up the reply.
+    ///
+    /// <para>
+    /// <paramref name="stationLocalNow"/> (SPEC F138.5, STORY-350, PLAN T331) appends the
+    /// anti-fabrication clock guard line (see <see cref="BuildClockGuardLine"/>) when supplied — the
+    /// guard line itself is pinned by its own dedicated fact
+    /// (<c>Story350_ContextFactGate.ScenarioTheLadderDegrades.The_guard_line_rides_the_prompt</c>),
+    /// which DOES supply a clock. Optional, default <see langword="null"/> — NOT because the guard
+    /// line is optional in production (<c>LlmCopyWriter.RequestCleanedCompletionAsync</c>, the one
+    /// production call site, always supplies it, so every prompt that actually reaches the model
+    /// carries the line): a REQUIRED parameter would fail every pre-F138 spec call site that already
+    /// constructs this prompt with only <c>personaSection</c>/<c>maxCopyChars</c> (Issue151/152/188/303)
+    /// to COMPILE, since none of them supply a third argument today. (Amended T331 review round 1: the
+    /// earlier "stays byte-identical" framing here was false — those specs pin SUBSTRINGS via
+    /// <c>Assert.Contains</c>, not the whole prompt, so an appended trailing guard line would not have
+    /// broken them at runtime either way; the true, sole reason this stays optional is the compile-time
+    /// one above.)
+    /// </para>
     /// </summary>
-    public static string BuildSystemPrompt(string? personaSection, int maxCopyChars)
+    public static string BuildSystemPrompt(string? personaSection, int maxCopyChars, DateTimeOffset? stationLocalNow = null)
     {
         // gh-#152: "personality-neutral" and a persona section's "Style: bubbly, energetic,
         // expressive" cancelled each other inside the SAME prompt. The neutral framing now applies
@@ -123,9 +140,71 @@ static class LlmPromptBuilder
             "they/them/their unless the provided metadata explicitly states pronouns - never infer " +
             "gender from a name.";
 
+        // SPEC F138.5: appended only when a clock was supplied — see this method's own remarks on
+        // why the parameter is optional. String-concatenated onto scaffoldBody (not a separate
+        // paragraph) so it reads as one more scaffold instruction, exactly like the sentences before it.
+        if (stationLocalNow is { } now)
+            scaffoldBody += " " + BuildClockGuardLine(now);
+
         return string.IsNullOrEmpty(personaSection)
             ? $"{NeutralOpening} {scaffoldBody}"
             : $"{PersonaOpening} {scaffoldBody}\n\n{personaSection}";
+    }
+
+    /// <summary>
+    /// SPEC F138.5 (STORY-350, PLAN T331) — the anti-fabrication clock guard line every patter
+    /// prompt now carries verbatim (weekday/daypart substituted): "It is {weekday} {daypart}. Never
+    /// name another day or time of day." Comma-free (the gh-#303 style lesson — prompt text is style
+    /// the model imitates, so a guard line leaning on commas would argue against itself).
+    ///
+    /// <para>
+    /// <paramref name="stationLocalNow"/> is the SAME instant <see cref="BuildStationClockLine"/>
+    /// renders for this render (the T329 precedent <see cref="CopyClaims.CheckClock"/> already
+    /// established for the checker side of this same clock: prompt and any future check must
+    /// provably read one shared instant, never two separately-computed ones). The weekday spelling
+    /// is <see cref="DateTimeOffset.DayOfWeek"/>'s own <c>ToString()</c> (e.g. "Saturday" — mirrors
+    /// <see cref="ClaimViolation.Expected"/>'s own documented spelling), and the daypart word is
+    /// <see cref="ClaimVocabulary.CategoryForHour"/>'s single canonical category for the hour —
+    /// never <see cref="ClaimVocabulary.HourIsInCategory"/>'s overlapping window set, since a guard
+    /// line states ONE daypart to hold to, not every window the hour happens to satisfy.
+    /// </para>
+    /// </summary>
+    public static string BuildClockGuardLine(DateTimeOffset stationLocalNow) =>
+        $"It is {stationLocalNow.DayOfWeek} {ClaimVocabulary.CategoryForHour(stationLocalNow.Hour)}. " +
+        "Never name another day or time of day.";
+
+    /// <summary>
+    /// SPEC F138.4 (STORY-350, PLAN T331) — the truth-gate ladder's own re-ask line: names the
+    /// claim(s) <see cref="CopyClaims.CheckFacts"/> rejected so the retry has something concrete to
+    /// fix rather than a bare "try again". Comma-free (the gh-#303 style lesson, same as every other
+    /// prompt line in this file) — multiple violations join on " and " rather than a comma-delimited
+    /// list. A violation's own <see cref="ClaimViolation.Token"/> is safe to interpolate directly
+    /// without further escaping (<see cref="ClaimViolation"/>'s own remarks: provably digit-shaped or
+    /// closed-vocabulary, never free text reachable from a fact block or copy).
+    ///
+    /// <see cref="LlmCopyWriter.RequestCleanedCompletionAsync"/> appends this line to the SAME user
+    /// prompt the rejected completion already saw — never a prompt rebuilt from scratch — so the
+    /// re-ask still carries every other instruction (the facts block, segment framing, taste color)
+    /// the original completion had; this method only renders the one added line.
+    ///
+    /// <para>
+    /// Deliberately opens with "Your last reply stated..." rather than a literal "Re-ask:" label
+    /// (T331 review advisory F5): a machine-looking prefix like that is exactly the kind of thing a
+    /// model can echo back verbatim into its own reply, and <see cref="LlmCopyWriter.StripChatPreamble"/>
+    /// has no rule that would ever strip it (that method's own gate is for a MODEL-authored preamble
+    /// "Here's your copy:", not an operator-authored one riding in the prompt itself) — plain
+    /// declarative English carries the same instruction with nothing label-shaped to leak.
+    /// </para>
+    /// </summary>
+    public static string BuildFactViolationReaskLine(IReadOnlyList<ClaimViolation> violations)
+    {
+        var claims = string.Join(
+            " and ",
+            violations.Select(violation => violation.Token).Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(token => $"\"{token}\""));
+
+        return $"Your last reply stated {claims} but the facts above never said that. " +
+            "Write a new reply using only the facts given above and drop that claim entirely.";
     }
 
     /// <summary>

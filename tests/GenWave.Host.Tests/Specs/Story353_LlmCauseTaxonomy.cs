@@ -271,8 +271,35 @@ public static class FeatureLlmCauseTaxonomy
             Assert.Empty(freshCounters.Snapshot());
         }
 
-        [Fact(Skip = "pending T331")]
-        public static void A_truth_gate_rejection_is_its_own_cause() =>
-            Assert.Fail("pending T331: a F138 gate failure records TruthGateReject, distinct from every other cause");
+        [Fact]
+        public static async Task A_truth_gate_rejection_is_its_own_cause()
+        {
+            // Given a ContextSegment render whose first reply fabricates a claim the real fact
+            // block never supports (the gh-#434 exhibit shape), and a re-ask reply that finally
+            // supports it — driven through the real F138.2 gate at the LlmCopyWriter seam (PLAN T331)
+            const string factBlock = "Edmonton: overcast, 15°C. Today's high 21°C, low 12°C.";
+            const string poisonedCopy =
+                "It feels like 6 degrees below freezing with plenty of sunshine and today is saturday here in the studio.";
+            const string cleanCopy = "It's overcast today at 15 degrees with a high of 21 and a low of 12.";
+            var callCount = 0;
+            var (writer, ring, _) = BuildWriter((_, _) =>
+            {
+                callCount++;
+                return Ok(callCount == 1 ? poisonedCopy : cleanCopy);
+            });
+            var request = new SegmentRequest(
+                SegmentKind.ContextSegment, "af_heart", "GenWave", Track: null, DateTimeOffset.UtcNow,
+                "test-station", PersonaName: null, CounterpartName: null, ContextFacts: factBlock);
+
+            // When it renders
+            await writer.WriteAsync(request, CancellationToken.None);
+
+            // Then the ring carries BOTH calls, and the rejected first one is stamped
+            // TruthGateReject — its own cause, distinct from the re-ask's own Success.
+            var records = ring.Snapshot();
+            Assert.Equal(2, records.Count);
+            Assert.Contains(records, record => record.Cause == LlmCallCause.TruthGateReject);
+            Assert.Contains(records, record => record.Cause == LlmCallCause.Success);
+        }
     }
 }
