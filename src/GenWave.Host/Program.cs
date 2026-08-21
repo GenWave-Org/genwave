@@ -18,6 +18,7 @@ using GenWave.Host.Theming;
 using GenWave.MediaLibrary;
 using GenWave.Orchestration;
 using GenWave.Tts;
+using Microsoft.Extensions.Options;
 
 // Composition root for the GenWave control plane — SINGLE STATION. One deployment broadcasts one
 // station, configured entirely from the `Station` config section (no DB-backed station registry,
@@ -165,6 +166,22 @@ builder.Services
     .AddGenWaveAdminApi(cfg)
     // Named OutputCache policies for the public spectator surface (SPEC F62.10, STORY-171/T13).
     .AddGenWaveSpectatorOutputCaching();
+
+// SPEC F142 (STORY-356, PLAN T327, closes gh-#300): the boundary cadence covenant's clamp-up + WARN.
+// Registered HERE, not inside AddGenWaveStationOptions above (GenWave.Host.Options), because
+// BoundaryCadenceCovenantPostConfigure needs PlayoutFeederService.PullInterval
+// (GenWave.Host.Playout) as its worst-case feeder pull gap — Options already can't reach into
+// Playout without opening the cycle gh-#445's namespace-cycle fitness law forbids (Playout depends
+// on Options, never the reverse). This composition root sees both without creating one. Safe
+// regardless of exactly where among these registrations it lands: IPostConfigureOptions<T>
+// registrations are aggregated lazily by OptionsFactory<T> on first StationOptions bind, never
+// eagerly at Add-time — see BoundaryCadenceCovenantPostConfigure's own remarks for the framework
+// ordering guarantee (it always runs before every IValidateOptions<StationOptions>, including
+// StationOptionsValidator, registered by AddGenWaveStationOptions above).
+builder.Services.AddSingleton<IPostConfigureOptions<StationOptions>>(sp =>
+    new BoundaryCadenceCovenantPostConfigure(
+        sp.GetRequiredService<ILogger<BoundaryCadenceCovenantPostConfigure>>(),
+        PlayoutFeederService.PullInterval));
 
 // Public listener config (SPEC F64.1/F64.2, STORY-172): env/compose-only, deliberately absent
 // from StationSettingsAllowlist — flipping Spectator:PublicPort requires a container recreate plus

@@ -29,5 +29,17 @@ public abstract record CrosstalkWriteResult
     /// transport miss) — one string, one source of truth for "why was there no banter" across the log
     /// line, the ring, and this return value.
     /// </summary>
-    public sealed record Discarded(string Reason) : CrosstalkWriteResult;
+    /// <param name="GenerationAttempted">
+    /// SPEC F140 review finding F3 (STORY-354, PLAN T328): <see langword="false"/> ONLY when this
+    /// discard happened WITHOUT ever attempting a generation — <c>Llm:Endpoint</c> unset, or a
+    /// connect-level transport fault (an <see cref="System.Net.Http.HttpRequestException"/> with no
+    /// <see cref="System.Net.Http.HttpRequestException.StatusCode"/>, i.e. no response was ever
+    /// received) — both resolve in milliseconds, never a genuine sample of how long generation takes.
+    /// Defaults to <see langword="true"/> so every OTHER discard (a truncated completion, a line
+    /// failing hygiene/budget, an over-target duration estimate — all AFTER a real round trip) keeps
+    /// its existing shape with no call-site change. A caller pacing itself off how long generation
+    /// takes (<c>GenWave.Host.Crosstalk.CrosstalkStockPacing</c>) reads this to decide whether an
+    /// elapsed time is worth blending into its rolling estimate at all.
+    /// </param>
+    public sealed record Discarded(string Reason, bool GenerationAttempted = true) : CrosstalkWriteResult;
 }

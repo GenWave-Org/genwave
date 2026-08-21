@@ -52,12 +52,26 @@ using Microsoft.Extensions.Options;
 /// </para>
 ///
 /// <para>
-/// Guards <c>Station:Imaging:TimeAnnouncementStaleMinutes</c> (SPEC F124.4, PLAN T269): must be a
-/// positive integer (same "documentation-only <c>[Range(1, int.MaxValue)]</c>, this validator is the
-/// real floor" story as the nested knobs above) — UNLIKE every "0 disables" knob elsewhere in this
-/// validator, 0 here is not a legal off-switch: it would drop every single <c>TimeDate</c> deferral
-/// undrained, silently killing F110.3 rather than disabling anything. <c>SettingValidator</c> mirrors
-/// this same floor (plus an F53.1 ceiling) on the live-edit path.
+/// Guards <c>Station:Imaging:TimeAnnouncementBudgetSeconds</c> (SPEC F124.4/F141.1, PLAN T269/T326):
+/// must be a positive integer (same "documentation-only <c>[Range(1, int.MaxValue)]</c>, this
+/// validator is the real floor" story as the nested knobs above) — UNLIKE every "0 disables" knob
+/// elsewhere in this validator, 0 here is not a legal off-switch: it would drop every single
+/// <c>TimeDate</c> deferral undrained, silently killing F110.3 rather than disabling anything.
+/// <c>SettingValidator</c> mirrors this same floor (plus an F53.1 ceiling) on the live-edit path.
+/// </para>
+///
+/// <para>
+/// Does NOT enforce SPEC F142's boundary cadence covenant (STORY-356, PLAN T327, closes gh-#300):
+/// unlike every guard above, that rule MUTATES <c>Station:BoundaryBias:LookaheadMinutes</c> (clamps
+/// it up, fail-safe, with one WARN) rather than merely accepting or rejecting the value already
+/// bound — the wrong altitude for a pure <see cref="IValidateOptions{TOptions}"/> predicate.
+/// <c>BoundaryCadenceCovenantPostConfigure</c> (an <see cref="IPostConfigureOptions{TOptions}"/>,
+/// registered separately in <c>Program.cs</c> — see that type's own remarks for why it can't share
+/// this project's <c>StationOptionsServiceCollectionExtensions</c> — but run by the framework
+/// BEFORE this validator on every bind regardless of where it was registered) owns that rule; see
+/// that type's own remarks for why, and <see cref="BoundaryCadenceCovenant"/> for the pure math it
+/// wraps. This validator still guards <c>Station:BoundaryBias:LookaheadMinutes</c>'s plain
+/// non-negativity floor immediately below, same as every nested knob above.
 /// </para>
 ///
 /// <para>
@@ -125,9 +139,9 @@ public sealed class StationOptionsValidator(ILogger<StationOptionsValidator> log
                 "Station:Shows:PatterCadenceMinutes must be non-negative " +
                 "(0 disables the show-flavor line).");
 
-        if (options.Imaging.TimeAnnouncementStaleMinutes < 1)
+        if (options.Imaging.TimeAnnouncementBudgetSeconds < 1)
             return ValidateOptionsResult.Fail(
-                "Station:Imaging:TimeAnnouncementStaleMinutes must be a positive integer " +
+                "Station:Imaging:TimeAnnouncementBudgetSeconds must be a positive integer " +
                 "(0 would drop every TimeDate deferral, not disable the feature).");
 
         if (options.SafeScope.LibraryIds.Count == 0)

@@ -95,7 +95,7 @@ public static class OrchestrationServiceCollectionExtensions
         // OptionsMonitorStationImagingProvider wins once registered — mirrors GenWave.Context's own
         // IStationLocationProvider default one project over. SPEC F124.4 (PLAN T269) widens this
         // seam's OTHER reader to Orchestrator's own optional constructor parameter — the SAME
-        // registration, read fresh once per unit for the live TimeAnnouncementStaleMinutes budget.
+        // registration, read fresh once per unit for the live TimeAnnouncementBudgetSeconds budget.
         services.TryAddSingleton<IStationImagingSettingsProvider>(NoOpStationImagingSettingsProvider.Instance);
 
         // The top-of-hour producer itself: no NoOp-replacement semantics — nothing else ever needs a

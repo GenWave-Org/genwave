@@ -18,9 +18,15 @@
 //
 // Facts 1/4/5/6/7 exercise SpeechDeferralQueue directly — the predicate's own home, no Orchestrator
 // needed. Facts 2/3 exercise the full Orchestrator, proving the threading this predicate cannot prove
-// on its own: the live Station:Imaging:TimeAnnouncementStaleMinutes value actually reaches the drain
+// on its own: the live Station:Imaging:TimeAnnouncementBudgetSeconds value actually reaches the drain
 // (fact 3), and a drop actually produces the SPEC F124.4 WARN (fact 2). One assertion per Fact; happy
 // first; sad segregated.
+//
+// Retargeted at PLAN T326 (SPEC F141.1): StationImagingSettings.TimeAnnouncementStaleMinutes (minutes,
+// default 5) widened to TimeAnnouncementBudgetSeconds (seconds, default 420) — gh-#526's field data
+// showed every real overrun landing just past the old 300s ceiling. TryDequeueDue's own signature is
+// untouched (it always took a plain TimeSpan budget, never the raw minutes shape) — only the settings
+// record's own field, and the numbers this file feeds it, changed.
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -100,13 +106,13 @@ public static class FeatureLateTimeCheckDiesQuietly
             var imagingSettings = new FakeStationImagingSettingsProvider
             {
                 Current = new StationImagingSettings(
-                    ClockAnchoredIdents: false, TimeAnnouncements: false, TimeAnnouncementStaleMinutes: 5),
+                    ClockAnchoredIdents: false, TimeAnnouncements: false, TimeAnnouncementBudgetSeconds: 300),
             };
             var orchestrator = BuildOrchestrator(queue, clock, tts, imagingSettings, logger);
 
             var due = new DateTimeOffset(2026, 8, 8, 14, 0, 0, TimeSpan.Zero);
             queue.Enqueue(SpeechDeferralKind.TimeDate, "clock-anchored: station-local top of the hour", due);
-            clock.Advance(TimeSpan.FromMinutes(6)); // 1 minute past the 5-minute budget = 360s lateness
+            clock.Advance(TimeSpan.FromMinutes(6)); // 60s past the 300-second budget = 360s lateness
 
             await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
 
@@ -116,9 +122,9 @@ public static class FeatureLateTimeCheckDiesQuietly
             var warning = Assert.Single(logger.Warnings, w => w.Contains("TimeDate", StringComparison.Ordinal));
             Assert.Contains("14:00", warning); // the armed hour
             // The label→value pairing, not just the bare numbers (round-3 review finding F2): 360s is
-            // labeled as lateness PAST THE ARMED HOUR, and 300s (the 5-minute budget) is separately
-            // labeled as the budget it was judged against — the two must never read as the same number
-            // meaning two different things.
+            // labeled as lateness PAST THE ARMED HOUR, and 300s (the budget) is separately labeled as
+            // the budget it was judged against — the two must never read as the same number meaning two
+            // different things.
             Assert.Contains("360s past its armed hour", warning);
             Assert.Contains("budget 300s", warning);
         }
@@ -135,13 +141,13 @@ public static class FeatureLateTimeCheckDiesQuietly
             var imagingSettings = new FakeStationImagingSettingsProvider
             {
                 Current = new StationImagingSettings(
-                    ClockAnchoredIdents: false, TimeAnnouncements: false, TimeAnnouncementStaleMinutes: 30),
+                    ClockAnchoredIdents: false, TimeAnnouncements: false, TimeAnnouncementBudgetSeconds: 1800),
             };
             // ONE Orchestrator, constructed ONCE — the live-edit below happens on the SAME running
             // instance, never a fresh construction, which is exactly what "no restart" means here.
             var orchestrator = BuildOrchestrator(queue, clock, tts, imagingSettings);
 
-            // Phase 1 — a wide 30-minute budget: a TimeDate draining 10 minutes late still airs.
+            // Phase 1 — a wide 1800-second (30-minute) budget: a TimeDate draining 10 minutes late still airs.
             queue.Enqueue(
                 SpeechDeferralKind.TimeDate, "clock-anchored: station-local top of the hour",
                 new DateTimeOffset(2026, 8, 8, 14, 0, 0, TimeSpan.Zero));
@@ -152,9 +158,10 @@ public static class FeatureLateTimeCheckDiesQuietly
             // genuinely starts a fresh planning pass rather than replaying this unit's buffer.
             await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
 
-            // Phase 2 — the operator narrows the SAME live provider to 1 minute. A fresh TimeDate,
-            // now 3 minutes late, is dropped on the very next drain — no Orchestrator reconstruction.
-            imagingSettings.Current = imagingSettings.Current with { TimeAnnouncementStaleMinutes = 1 };
+            // Phase 2 — the operator narrows the SAME live provider to 60 seconds (1 minute). A fresh
+            // TimeDate, now 3 minutes late, is dropped on the very next drain — no Orchestrator
+            // reconstruction.
+            imagingSettings.Current = imagingSettings.Current with { TimeAnnouncementBudgetSeconds = 60 };
             queue.Enqueue(
                 SpeechDeferralKind.TimeDate, "clock-anchored: station-local top of the hour", clock.GetUtcNow());
             clock.Advance(TimeSpan.FromMinutes(3));
@@ -166,15 +173,15 @@ public static class FeatureLateTimeCheckDiesQuietly
         }
 
         [Fact]
-        public static void The_shipped_default_is_five_minutes()
+        public static void The_shipped_default_is_four_hundred_twenty_seconds()
         {
-            // The domain record's own default IS the shipped SPEC F124.4 budget — pinned directly,
+            // The domain record's own default IS the shipped SPEC F141.1 budget — pinned directly,
             // the Story151_SeededDefaults.cs "pinned against the options-class initializer" idiom
             // applied one project layer down (GenWave.Host.Options.StationImagingOptions' own
-            // TimeAnnouncementStaleMinutes mirrors this SAME 5, seeded verbatim into appsettings.json).
+            // TimeAnnouncementBudgetSeconds mirrors this SAME 420, seeded verbatim into appsettings.json).
             var defaults = new StationImagingSettings(ClockAnchoredIdents: false, TimeAnnouncements: false);
 
-            Assert.Equal(5, defaults.TimeAnnouncementStaleMinutes);
+            Assert.Equal(420, defaults.TimeAnnouncementBudgetSeconds);
         }
     }
 
@@ -194,6 +201,63 @@ public static class FeatureLateTimeCheckDiesQuietly
                 clock.GetUtcNow(), timeDateStaleBudget: TimeSpan.FromMinutes(5));
 
             Assert.Single(result, d => d.Kind == SpeechDeferralKind.StationId);
+        }
+    }
+
+    // SPEC F141.2 (STORY-355, PLAN T326, review round-1 finding F2) — the 90-second honesty threshold
+    // itself: a survivor of the expiry check above (still inside the live budget) is classified a
+    // SECOND time, on-time vs. late, and that classification is what Orchestrator stamps onto the
+    // SegmentRequest it Kicks (SegmentRequest.TimeDateFreshness) — PatterTemplateRenderer's own
+    // Story355 facts only ever prove the renderer's ternary reads that stamp correctly; nothing before
+    // this scenario proved the THRESHOLD itself is ever reached through the real drain path. Both
+    // facts share a wide (300s) budget so neither drain is anywhere near expiry — only the 90-second
+    // honesty line is under test here.
+    public static class ScenarioTheHonestyThresholdClassifiesEachDrain
+    {
+        [Fact]
+        public static async Task Drained_80s_past_Due_stamps_OnTime()
+        {
+            var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 8, 14, 0, 0, TimeSpan.Zero));
+            var queue = new SpeechDeferralQueue(clock);
+            var tts = new FakeTtsSegmentSource();
+            var imagingSettings = new FakeStationImagingSettingsProvider
+            {
+                Current = new StationImagingSettings(
+                    ClockAnchoredIdents: false, TimeAnnouncements: false, TimeAnnouncementBudgetSeconds: 300),
+            };
+            var orchestrator = BuildOrchestrator(queue, clock, tts, imagingSettings);
+
+            var due = new DateTimeOffset(2026, 8, 8, 14, 0, 0, TimeSpan.Zero);
+            queue.Enqueue(SpeechDeferralKind.TimeDate, "clock-anchored: station-local top of the hour", due);
+            clock.Advance(TimeSpan.FromSeconds(80)); // inside the 90s honesty threshold, well inside the 300s budget
+
+            await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            var request = Assert.Single(tts.Requests, r => r.Kind == SegmentKind.TimeDate);
+            Assert.Equal(TimeAnnouncementFreshness.OnTime, request.TimeDateFreshness);
+        }
+
+        [Fact]
+        public static async Task Drained_100s_past_Due_stamps_Late()
+        {
+            var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 8, 14, 0, 0, TimeSpan.Zero));
+            var queue = new SpeechDeferralQueue(clock);
+            var tts = new FakeTtsSegmentSource();
+            var imagingSettings = new FakeStationImagingSettingsProvider
+            {
+                Current = new StationImagingSettings(
+                    ClockAnchoredIdents: false, TimeAnnouncements: false, TimeAnnouncementBudgetSeconds: 300),
+            };
+            var orchestrator = BuildOrchestrator(queue, clock, tts, imagingSettings);
+
+            var due = new DateTimeOffset(2026, 8, 8, 14, 0, 0, TimeSpan.Zero);
+            queue.Enqueue(SpeechDeferralKind.TimeDate, "clock-anchored: station-local top of the hour", due);
+            clock.Advance(TimeSpan.FromSeconds(100)); // past the 90s honesty threshold, well inside the 300s budget
+
+            await orchestrator.GetNextAsync(new PlayoutContext([]), CancellationToken.None);
+
+            var request = Assert.Single(tts.Requests, r => r.Kind == SegmentKind.TimeDate);
+            Assert.Equal(TimeAnnouncementFreshness.Late, request.TimeDateFreshness);
         }
     }
 

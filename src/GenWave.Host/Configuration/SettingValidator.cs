@@ -173,14 +173,15 @@ public sealed partial class SettingValidator
     internal const int ShowsPatterCadenceMinutesMin = 0;
     internal const int ShowsPatterCadenceMinutesMax = 1440;
 
-    // Station:Imaging:TimeAnnouncementStaleMinutes (SPEC F124.4, gh-#469, STORY-321, PLAN T269) —
-    // StationImagingOptions' own documentation-only [Range] (StationOptionsValidator is the real boot
-    // floor, the StationCadenceOptions precedent). Floor is 1, not 0 — unlike the "0 = off" cadence
-    // knobs above, 0 has no honest meaning here (a TimeDate is never NOT stale at 0 minutes, which
-    // would drop every single one undrained — that is not what a live-editable budget is for). Ceiling
-    // is the same generic 1440-minute (24h) F53.1 cap every other "minutes" knob on this list uses.
-    internal const int TimeAnnouncementStaleMinutesMin = 1;
-    internal const int TimeAnnouncementStaleMinutesMax = 1440;
+    // Station:Imaging:TimeAnnouncementBudgetSeconds (SPEC F124.4/F141.1, gh-#469/gh-#526, STORY-321/355,
+    // PLAN T269/T326) — StationImagingOptions' own documentation-only [Range] (StationOptionsValidator
+    // is the real boot floor, the StationCadenceOptions precedent). Floor is 1, not 0 — unlike the
+    // "0 = off" cadence knobs above, 0 has no honest meaning here (a TimeDate is never NOT stale at 0
+    // seconds, which would drop every single one undrained — that is not what a live-editable budget
+    // is for). Ceiling is 86400s (24h) — the same generic one-day cap the "minutes" knobs elsewhere on
+    // this list express as 1440 minutes, translated to this knob's own seconds grain (F141.1).
+    internal const int TimeAnnouncementBudgetSecondsMin = 1;
+    internal const int TimeAnnouncementBudgetSecondsMax = 86400;
 
     // Context:{Key}:PersonaId (SPEC F107.7, PLAN T226) — ContextProviderSettings' own remarks: null,
     // 0, and any negative value all mean "the on-air DJ"; only a positive value names an explicit
@@ -432,10 +433,11 @@ public sealed partial class SettingValidator
             // kill switches, no consumer reads them yet (Station:Audience's own T111 precedent).
             ["Station:Imaging:ClockAnchoredIdents"] = IsBool,
             ["Station:Imaging:TimeAnnouncements"] = IsBool,
-            // TimeDate elapsed-due expiry budget (SPEC F124.4, gh-#469, STORY-321, PLAN T269) — same
-            // "1 minimum, 1440 ceiling" shape as Context:{Key}:SegmentCadenceMinutes above.
-            ["Station:Imaging:TimeAnnouncementStaleMinutes"] =
-                v => IsIntInRange(v, TimeAnnouncementStaleMinutesMin, TimeAnnouncementStaleMinutesMax),
+            // TimeDate elapsed-due expiry budget (SPEC F124.4/F141.1, gh-#469/gh-#526, STORY-321/355,
+            // PLAN T269/T326) — same "1 minimum, 1-day ceiling" shape as Context:{Key}:SegmentCadenceMinutes
+            // above, expressed in seconds (F141.1).
+            ["Station:Imaging:TimeAnnouncementBudgetSeconds"] =
+                v => IsIntInRange(v, TimeAnnouncementBudgetSecondsMin, TimeAnnouncementBudgetSecondsMax),
 
             // Show-flavor patter line cadence (SPEC F116.3, STORY-308, PLAN T249) — same
             // "0 = off, 1440 ceiling" shape as Context:{Key}:PatterCadenceMinutes above.
