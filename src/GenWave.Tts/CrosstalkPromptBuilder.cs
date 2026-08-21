@@ -39,6 +39,26 @@ static class CrosstalkPromptBuilder
     const int MaxSoulChars = 4000;
 
     /// <summary>
+    /// SPEC F138.6's narrow anti-fabrication clause — <see cref="LlmPromptBuilder.BuildClockGuardLine"/>'s
+    /// sibling one project seam over, joining the banter scaffold beside its other style rules (never a
+    /// separate paragraph, exactly like <see cref="LlmPromptBuilder.BuildSystemPrompt"/>'s own F138.5
+    /// guard line one method over). Forbids exactly the shapes <see cref="CrosstalkScriptParser.Parse"/>'s
+    /// own F138.6 mechanical checks look for (a real frequency, call sign, place name, weather
+    /// condition, or date) and explicitly ALLOWS the opposite — invented lore is good radio, not a
+    /// violation, so the prompt says so directly rather than leaving a model to guess whether "the
+    /// legendary DJ Ghost of the Graveyard Shift" is forbidden fabrication or welcome color. Real-place
+    /// invention is prompt-only by design (SPEC F138.6): a checker cannot tell a real city from an
+    /// invented one, so this clause is the ONLY place that half of the rule is ever enforced at all.
+    /// Comma-free (gh-#303 style lesson, <see cref="LlmPromptBuilder.BuildClockGuardLine"/>'s own
+    /// precedent) — one short sentence per forbidden shape rather than a comma-joined list, so the
+    /// prompt asking the model to avoid fabricated specifics does not itself read like one.
+    /// </summary>
+    const string AntiFabricationClause =
+        "Never mention a real radio frequency. Never mention a real call sign. Never mention a real " +
+        "place name. Never mention a real weather condition. Never mention a real date. Invented " +
+        "recurring characters running gags and station mythology are welcome.";
+
+    /// <summary>
     /// The banter scaffold plus both speakers' persona sections (SPEC F127.3). Deliberately never
     /// mentions a track, a song, or "what's playing" — this writer's caller (a LATER task's
     /// <c>CrosstalkPlanner</c>) never hands one in (see <see cref="CrosstalkExchangeRequest"/>'s own
@@ -51,8 +71,24 @@ static class CrosstalkPromptBuilder
     /// not a figure scaled off <see cref="LlmOptions.MaxCopyChars"/> (the per-LINE budget, which has
     /// no fixed relationship to how many lines a script carries).
     /// </para>
+    ///
+    /// <para>
+    /// ⚠️ <b>Amended (PLAN T333 review round 1, 2026-08-20 — probe-proven F2):</b> <paramref name="stationLocalNow"/>
+    /// appends <see cref="LlmPromptBuilder.BuildClockGuardLine"/> beside <see cref="AntiFabricationClause"/>
+    /// — the SAME F138.5 guard line every other patter prompt already carries. Before this amendment,
+    /// crosstalk was the only patter kind whose F138.3 clock check ran with NO prompt-side rule at
+    /// all: the model was told the clock as a fact (the station clock line in the user content) but
+    /// never instructed not to contradict it, then silently discarded for a wrong-day claim with no
+    /// re-ask and no template to fall back on (F127.4) — pure F140-class generation waste on the
+    /// fenced ollama for a mistake the prompt itself never warned against. <paramref name="stationLocalNow"/>
+    /// is the SAME generation-time instant <see cref="CrosstalkScriptWriter.WriteExchangeAsync"/>
+    /// threads into both this guard line and <see cref="CrosstalkScriptParser.Parse"/>'s own clock
+    /// check (<see cref="CrosstalkExchangeRequest.StationLocalNow"/>) — one shared instant, never two
+    /// separately-computed ones.
+    /// </para>
     /// </summary>
-    public static string BuildSystemPrompt(PersonaCard hostCard, PersonaCard neighborCard, int durationTargetSeconds)
+    public static string BuildSystemPrompt(
+        PersonaCard hostCard, PersonaCard neighborCard, int durationTargetSeconds, DateTimeOffset stationLocalNow)
     {
         // Same spoken-rate estimate CrosstalkScriptParser.Parse applies to an accepted script — the
         // STATED word budget asks for what the duration gate will accept, no headroom added (unlike
@@ -72,6 +108,7 @@ static class CrosstalkPromptBuilder
             $"Across the WHOLE exchange use no more than approximately {wordBudget} words total. " +
             "Both DJs must speak at least once. Keep each line short and conversational, no commas, " +
             "no stage directions, no emoji, no markdown formatting. " +
+            AntiFabricationClause + " " + LlmPromptBuilder.BuildClockGuardLine(stationLocalNow) + " " +
             $"To have one speaker briefly cut in over the other's line, tag that one line " +
             $"\"{CrosstalkScriptParser.HostTag} {CrosstalkScriptParser.InterjectionMarker}: <line>\" " +
             $"or \"{CrosstalkScriptParser.NeighborTag} {CrosstalkScriptParser.InterjectionMarker}: " +

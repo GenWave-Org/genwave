@@ -56,7 +56,9 @@ public static class FeatureLlmSingleFlight
                 new FakeActivePersonaAccessor(),
                 new CapturingLogger<LlmCopyWriter>(),
                 TimeProvider.System,
-                new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                new LlmCallRecorder(
+                    new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                    new LlmCallCauseCounters(TimeProvider.System)),
                 new FakeDegradationModeReader());
 
             // When their backend calls are traced (the handler counts overlapping SendAsync calls
@@ -92,7 +94,9 @@ public static class FeatureLlmSingleFlight
                 new FakeActivePersonaAccessor(),
                 logger,
                 TimeProvider.System,
-                new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                new LlmCallRecorder(
+                    new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                    new LlmCallCauseCounters(TimeProvider.System)),
                 new FakeDegradationModeReader());
             var request = LeadInRequest();
 
@@ -152,12 +156,5 @@ public static class FeatureLlmSingleFlight
                 }
             }
         }
-    }
-
-    /// <summary>Hands every client the SAME shared handler (never disposed by the client) so
-    /// <see cref="ConcurrencyTrackingHandler"/>'s counters observe every call this writer makes.</summary>
-    sealed class SingleHandlerHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
     }
 }

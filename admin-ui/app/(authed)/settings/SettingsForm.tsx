@@ -413,7 +413,7 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
   // ── Crosstalk two-voice banter (SPEC F127.4, F127.8) ────────────────────────────────────────
   "Crosstalk:DurationTargetSeconds":
     "The longest a generated two-voice banter exchange may run, in seconds, before it is " +
-    "discarded and skipped rather than aired. Defaults to 25. Accepted range: 5–120.",
+    "discarded and skipped rather than aired. Defaults to 50. Accepted range: 5–120.",
   "Crosstalk:Shows":
     "A JSON array of show SLUGS allowed to carry two-voice banter — a show's stable URL-safe " +
     "identity, not its display name (e.g. \"morning-drive\" for a show named \"Morning Drive\"), " +

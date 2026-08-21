@@ -189,11 +189,12 @@ public sealed partial class SettingValidator
     // a negative value would still resolve safely if it slipped through some other path.
     internal const int ContextPersonaIdMin = 0;
 
-    // Crosstalk:DurationTargetSeconds (SPEC F127.4, STORY-326, PLAN T282) — CrosstalkOptions' own
-    // [Range(1, int.MaxValue)] (boot-enforced via ValidateDataAnnotations, the
-    // Llm:MaxCopyChars precedent); this validator adds the F53.1 settings-API-only ceiling. Floor of
-    // 5s guards a degenerate near-zero target from rejecting every exchange outright; 120s (2
-    // minutes) is comfortably past the spec'd 25s default while still bounding a fat-finger entry.
+    // Crosstalk:DurationTargetSeconds (SPEC F127.4, STORY-326, PLAN T282; amended PLAN T333 to the
+    // ratified 50s default) — CrosstalkOptions' own [Range(1, int.MaxValue)] (boot-enforced via
+    // ValidateDataAnnotations, the Llm:MaxCopyChars precedent); this validator adds the F53.1
+    // settings-API-only ceiling. Floor of 5s guards a degenerate near-zero target from rejecting
+    // every exchange outright; 120s (2 minutes) is comfortably past the ratified 50s default while
+    // still bounding a fat-finger entry.
     internal const int CrosstalkDurationTargetSecondsMin = 5;
     internal const int CrosstalkDurationTargetSecondsMax = 120;
 

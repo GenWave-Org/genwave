@@ -51,7 +51,9 @@ public static class FeatureCrosstalkSupersedesTheGatedLanes
             new FakeActivePersonaAccessor(),
             new CapturingLogger<LlmCopyWriter>(),
             TimeProvider.System,
-            new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+            new LlmCallRecorder(
+                new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                new LlmCallCauseCounters(TimeProvider.System)),
             new FakeDegradationModeReader(),
             stationClock: null,
             patterFactSource: patterFactSource,

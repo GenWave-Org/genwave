@@ -58,7 +58,9 @@ public static class FeatureTasteBecomesAudible
             new FakeActivePersonaAccessor(),
             new CapturingLogger<LlmCopyWriter>(),
             new FakeTimeProvider(FixedLocalNow),
-            new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+            new LlmCallRecorder(
+                new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                new LlmCallCauseCounters(TimeProvider.System)),
             new FakeDegradationModeReader());
 
     static string ExtractMessageContent(string body, string role)

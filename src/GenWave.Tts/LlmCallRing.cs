@@ -43,20 +43,23 @@ public sealed class LlmCallRing(IOptionsMonitor<LlmOptions> options)
     /// <c>Llm:CallRingCapacity</c> trims (or grows) the ring on the very next record.
     /// <paramref name="personaName"/> (gh-#429) is the caller's already-resolved
     /// <see cref="LlmPromptBuilder.ResolveName"/> result — this ring never re-derives a name itself,
-    /// it only stores what it was handed. <paramref name="kind"/> (SPEC F127.11, PLAN T282) defaults
-    /// to <see cref="LlmCallKind.Copy"/> so <see cref="LlmCopyWriter"/>'s own two call sites need no
-    /// change — only <see cref="CrosstalkScriptWriter"/> ever passes <see cref="LlmCallKind.Crosstalk"/>.
+    /// it only stores what it was handed. <paramref name="cause"/>/<paramref name="model"/> (SPEC
+    /// F139.1, PLAN T330) are the additive F139 fields — see <see cref="LlmCallRecord"/>'s own remarks.
+    /// <paramref name="kind"/> (SPEC F127.11, PLAN T282) defaults to <see cref="LlmCallKind.Copy"/> so
+    /// <see cref="LlmCopyWriter"/>'s own two call sites need no change — only <see cref="CrosstalkScriptWriter"/>
+    /// (and, for a break-window abandon, <c>GenWave.Host.Crosstalk.CrosstalkStockWorker</c>) ever pass
+    /// <see cref="LlmCallKind.Crosstalk"/>.
     /// </summary>
     public void Record(
         string? personaName, string? promptSystem, string? promptUser, string? response, DateTimeOffset startedAt,
-        long elapsedMs, LlmCallOutcome outcome, string? statusDetail, DegradationMode mode,
-        LlmCallKind kind = LlmCallKind.Copy)
+        long elapsedMs, LlmCallOutcome outcome, string? statusDetail, DegradationMode mode, LlmCallCause cause,
+        string model, LlmCallKind kind = LlmCallKind.Copy)
     {
         lock (gate)
         {
             var record = new LlmCallRecord(
                 ++nextSeq, personaName, promptSystem, promptUser, response, startedAt, elapsedMs, outcome,
-                statusDetail, mode, kind);
+                statusDetail, mode, cause, model, kind);
             ring.AddFirst(record);   // newest first
 
             var capacity = options.CurrentValue.CallRingCapacity;

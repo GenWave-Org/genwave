@@ -29,6 +29,14 @@ public abstract record CrosstalkWriteResult
     /// transport miss) — one string, one source of truth for "why was there no banter" across the log
     /// line, the ring, and this return value.
     /// </summary>
+    /// <param name="Cause">
+    /// SPEC F139.1 (STORY-353, PLAN T330): the F139 cause this discard stamps into
+    /// <see cref="LlmCallRing"/>, decided once at the SOURCE that already knows why — each
+    /// <see cref="CrosstalkScriptParser.Parse"/> reject branch names its own, and
+    /// <see cref="CrosstalkScriptWriter"/>'s own <c>finish_reason: length</c>/exception-catch discards
+    /// carry theirs — never re-derived downstream from <see cref="Reason"/>'s text. See
+    /// <see cref="LlmCallCause"/>'s own remarks for the full resolution-point map.
+    /// </param>
     /// <param name="GenerationAttempted">
     /// SPEC F140 review finding F3 (STORY-354, PLAN T328): <see langword="false"/> ONLY when this
     /// discard happened WITHOUT ever attempting a generation — <c>Llm:Endpoint</c> unset, or a
@@ -41,5 +49,5 @@ public abstract record CrosstalkWriteResult
     /// takes (<c>GenWave.Host.Crosstalk.CrosstalkStockPacing</c>) reads this to decide whether an
     /// elapsed time is worth blending into its rolling estimate at all.
     /// </param>
-    public sealed record Discarded(string Reason, bool GenerationAttempted = true) : CrosstalkWriteResult;
+    public sealed record Discarded(string Reason, LlmCallCause Cause, bool GenerationAttempted = true) : CrosstalkWriteResult;
 }

@@ -94,7 +94,10 @@ public sealed class CrosstalkStockWorker(
     IOptionsMonitor<TtsOptions> ttsOptions,
     OnAirRenderGate onAirRenderGate,
     ILogger<CrosstalkStockWorker> log,
-    TimeProvider timeProvider) : BackgroundService
+    TimeProvider timeProvider,
+    IOptionsMonitor<LlmOptions> llmOptions,
+    LlmCallRecorder recorder,
+    IDegradationModeReader degradationMode) : BackgroundService
 {
     /// <summary>Outer tick cadence — deliberately much coarser than the 3s feeder tick this is
     /// opportunistic, off-clock work (SPEC F127.7): frequent enough that a freshly-opened stock slot
@@ -253,6 +256,12 @@ public sealed class CrosstalkStockWorker(
             var outcome = await GenerateAndAssembleAsync(attempt, cast, ct);
             RecordPacingOutcome(outcome, attemptStartedAt);
 
+            // SPEC F139.1 (STORY-353, PLAN T330): the ONE place a break-window abandon becomes an
+            // LlmCallRecorder entry — see RecordWindowCancellation's own remarks for why the stamp
+            // has to happen HERE, not inside CrosstalkScriptWriter/CrosstalkAssembler themselves.
+            if (outcome.CancelledByBreakWindow)
+                RecordWindowCancellation(cast, attemptStartedAt);
+
             if (outcome.Assembled is not { } assembled)
             {
                 // PLAN T286 review F4: only a genuine discard costs the show a cooldown — a break
@@ -331,6 +340,42 @@ public sealed class CrosstalkStockWorker(
             pacing.RecordAbandoned(elapsed, now);
         else
             pacing.RecordCompleted(elapsed);
+    }
+
+    /// <summary>
+    /// SPEC F139.1 (STORY-353, PLAN T330) — the ONE place a break-window abandon becomes an
+    /// <see cref="LlmCallRecorder"/> entry (<see cref="LlmCallCause.CanceledByWindow"/>). Neither
+    /// <see cref="CrosstalkScriptWriter"/> nor <see cref="CrosstalkAssembler"/> can record this
+    /// themselves: their own <see cref="OperationCanceledException"/> catches see only "the caller's
+    /// own <c>ct</c> fired", which is IDENTICAL whether that <c>ct</c> came from a break window opening
+    /// (<see cref="WatchBreakWindowAsync"/> cancelling <c>workCts</c>) or from a genuine host shutdown
+    /// (<c>stoppingToken</c>, linked into that same <c>workCts</c>) — see
+    /// <see cref="CrosstalkScriptWriter.WriteExchangeAsync"/>'s own cancellation-handling remarks. Only
+    /// <see cref="GenerateAndAssembleAsync"/>'s own catch, which watches <c>workCts</c>/<c>stoppingToken</c>
+    /// directly, can honestly tell the two apart — SPEC F139's own "reuse the signal, don't re-derive
+    /// it" — so the stamp happens HERE, once <see cref="TickOnceAsync"/> already has the answer
+    /// (<see cref="GenerationOutcome.CancelledByBreakWindow"/>), not inside either Tts-layer writer.
+    ///
+    /// <para>
+    /// <see cref="LlmCallRecord.PromptSystem"/>/<see cref="LlmCallRecord.PromptUser"/>/
+    /// <see cref="LlmCallRecord.Response"/> stay <see langword="null"/> — the abandoned attempt's own
+    /// prompt lived inside <see cref="CrosstalkScriptWriter"/>'s now-unwound stack frame and was never
+    /// captured up here, the same "faulted before this method had it in hand" case
+    /// <see cref="LlmCallRecord"/>'s own remarks already document for other faults.
+    /// <see cref="LlmCallRecord.PersonaName"/> mirrors <see cref="CrosstalkScriptWriter"/>'s own
+    /// "{Host} / {Neighbor}" shape, built from the SAME <paramref name="cast"/> this tick already cast.
+    /// </para>
+    /// </summary>
+    void RecordWindowCancellation(CrosstalkCastResult cast, DateTimeOffset attemptStartedAt)
+    {
+        var personaName = $"{cast.HostCard.Name} / {cast.NeighborCard.Name}";
+        var model = llmOptions.CurrentValue.Model;
+        var elapsedMs = (long)(timeProvider.GetUtcNow() - attemptStartedAt).TotalMilliseconds;
+
+        recorder.Record(
+            personaName, promptSystem: null, promptUser: null, response: null, attemptStartedAt, elapsedMs,
+            LlmCallOutcome.Failed, statusDetail: "a break window opened mid-flight; generation abandoned",
+            degradationMode.CurrentMode, LlmCallCause.CanceledByWindow, model, LlmCallKind.Crosstalk);
     }
 
     /// <summary>

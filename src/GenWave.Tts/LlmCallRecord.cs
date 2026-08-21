@@ -40,6 +40,20 @@ namespace GenWave.Tts;
 /// <param name="Outcome">ok/failed/timeout/trimmed/rejected (SPEC F73.1, F123.2-F123.4, F127.4).</param>
 /// <param name="StatusDetail">The HTTP status or exception type name for a non-<see cref="LlmCallOutcome.Ok"/> outcome; <see langword="null"/> for Ok and for <see cref="LlmCallOutcome.Trimmed"/> alike — a trim is not a fault, so it carries no fault detail either. Carries the discard reason for <see cref="LlmCallOutcome.Rejected"/> (SPEC F127.4, F127.11).</param>
 /// <param name="Mode">The degradation mode active at call time (SPEC F73.1, F69.1) — Normal/Soft/Hard.</param>
+/// <param name="Cause">
+/// WHY this call resolved the way it did (SPEC F139.1, STORY-353, PLAN T330) — a finer-grained,
+/// additive sibling to <see cref="Outcome"/> above (which is unchanged by T330: "nothing else about
+/// F73 changes"). See <see cref="LlmCallCause"/>'s own remarks for the full resolution-point map.
+/// </param>
+/// <param name="Model">
+/// The completions model this call used (SPEC F139.2, PLAN T330) — <c>Llm:Model</c> at call time,
+/// carried here so the rolling cause counters (<see cref="LlmCallCauseCounters"/>) can key on it
+/// without a second lookup. Never <see langword="null"/> (T330 review advisory): unlike
+/// <see cref="PromptSystem"/>, every caller already has <c>LlmOptions.CurrentValue</c> in hand before
+/// it can reach ANY <see cref="LlmCallRecorder.Record"/> call site — <c>LlmOptions.Model</c> itself
+/// defaults to <c>""</c>, never null, so there is no genuine "config not in hand yet" case to document
+/// here.
+/// </param>
 /// <param name="Kind">
 /// Which generation surface produced this call (SPEC F127.11, PLAN T282) — <see cref="LlmCallKind.Copy"/>
 /// for every call <see cref="LlmCopyWriter"/> itself records, <see cref="LlmCallKind.Crosstalk"/> for
@@ -59,4 +73,6 @@ public sealed record LlmCallRecord(
     LlmCallOutcome Outcome,
     string? StatusDetail,
     DegradationMode Mode,
+    LlmCallCause Cause,
+    string Model,
     LlmCallKind Kind = LlmCallKind.Copy);
