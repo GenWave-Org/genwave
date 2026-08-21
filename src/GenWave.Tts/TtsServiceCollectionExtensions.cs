@@ -236,6 +236,18 @@ public static class TtsServiceCollectionExtensions
             // ring — GET /api/llm-calls (GenWave.Host) reads the SAME singleton LlmCopyWriter
             // records into. No persistence dependency of any kind (F73.3) — see its own remarks.
             .AddSingleton<LlmCallRing>()
+            // LlmCallCauseCounters (SPEC F139.2, STORY-353, PLAN T330): the rolling 24h cause
+            // counters, DELIBERATELY a separate singleton from LlmCallRing immediately above rather
+            // than composed inside it — see that class's own remarks for why (LlmCallRing's F73.3
+            // structural proof pins its constructor to exactly one parameter).
+            .AddSingleton<LlmCallCauseCounters>()
+            // LlmCallRecorder (SPEC F139.1/F139.2, STORY-353, PLAN T330 review finding F2): the ONE
+            // Record call site LlmCopyWriter/CrosstalkScriptWriter (both here) and CrosstalkStockWorker
+            // (GenWave.Host, resolved directly) now depend on as a REQUIRED constructor param, in place
+            // of taking LlmCallRing/LlmCallCauseCounters separately — see that class's own remarks for
+            // why folding the two writes into one call site closes the "delete only the counter half"
+            // mutation gap the pre-recorder duplication left open.
+            .AddSingleton<LlmCallRecorder>()
             // LlmCopyWriter also consumes IActivePersonaAccessor (a host-registered seam) —
             // resolved per LLM render only, composing the active persona's backstory + style into
             // the prompt (SPEC F35.2/F35.3). Registered concretely ONCE and exposed under BOTH

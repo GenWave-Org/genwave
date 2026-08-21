@@ -69,7 +69,9 @@ public static class FeaturePersonaPromptAssemblyAndClock
             accessor,
             new CapturingLogger<LlmCopyWriter>(),
             timeProvider ?? TimeProvider.System,
-            new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+            new LlmCallRecorder(
+                new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                new LlmCallCauseCounters(TimeProvider.System)),
             new FakeDegradationModeReader(),
             stationClock);
 

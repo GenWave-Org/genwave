@@ -8,9 +8,9 @@
 // dependencies are even touched: a draft-fields preview never calls IPersonaStore/IAdminMediaLookup,
 // and each is Lazy<NpgsqlDataSource>-backed so merely resolving them via DI opens no connection, see
 // PersonaServiceCollectionExtensions' own remarks) — POST /api/personas/preview against a real
-// Kestrel-backed completions stub (mirrors GenWave.Tts.Tests' MockCompletionsServer; redefined here
-// rather than cross-referencing that test project, same as Story186's own file-scoped doubles), then
-// GET /api/llm-calls and prove the ring shows exactly what the render produced.
+// Kestrel-backed completions stub (Support/LlmCompletionsStub.cs — shared with
+// Story353_LlmCauseTaxonomy.cs since T334 review round 1, advisory a), then GET /api/llm-calls and
+// prove the ring shows exactly what the render produced.
 //
 // AC2 mirrors Story172_PublicListenerIsolation's own idiom for "both listeners": the internal
 // listener (no session -> 401, the same deny-by-default every other admin route gets) and the public
@@ -26,104 +26,25 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using GenWave.Host.Api;
 using GenWave.Host.Tests.Fakes;
+using GenWave.Host.Tests.Support;
 using GenWave.Tts;
 
 namespace GenWave.Host.Tests.Specs;
 
-// ── In-process stub / fakes ──────────────────────────────────────────────────────────────────────
-
-/// <summary>
-/// Minimal Kestrel-backed stub for an OpenAI-compatible <c>POST /v1/chat/completions</c> endpoint —
-/// mirrors <c>GenWave.Tts.Tests.MockCompletionsServer</c> (STORY-119), redefined here since
-/// Host.Tests has no project reference to that test project (same "redefine, don't cross-reference"
-/// convention Story186_CorrectionsObservability's own header note explains). Every request always
-/// serves 200 with <see cref="ReplyContent"/> — this spec has no need for the fuller
-/// Serve/Fail/Delay repertoire the Tts.Tests original carries.
-/// </summary>
-sealed class LlmCompletionsStub : IAsyncDisposable
-{
-    readonly WebApplication app;
-
-    public string ReplyContent { get; set; } = "Great tune coming up, stay tuned.";
-    public Uri BaseUri { get; }
-
-    LlmCompletionsStub(WebApplication app, Uri baseUri)
-    {
-        this.app = app;
-        BaseUri = baseUri;
-    }
-
-    public static async Task<LlmCompletionsStub> StartAsync()
-    {
-        var builder = WebApplication.CreateSlimBuilder();
-        builder.Logging.ClearProviders();
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
-
-        var app = builder.Build();
-        LlmCompletionsStub? stubRef = null;
-
-        app.MapPost("/v1/chat/completions", async (HttpContext ctx) =>
-        {
-            var stub = stubRef;
-            if (stub is null)
-            {
-                ctx.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                return;
-            }
-
-            ctx.Response.StatusCode = StatusCodes.Status200OK;
-            await ctx.Response.WriteAsJsonAsync(
-                new { choices = new[] { new { message = new { content = stub.ReplyContent } } } },
-                ctx.RequestAborted);
-        });
-
-        await app.StartAsync();
-        var stub = new LlmCompletionsStub(app, new Uri(app.Urls.First()));
-        stubRef = stub;
-        return stub;
-    }
-
-    public async ValueTask DisposeAsync() => await app.DisposeAsync();
-}
-
 // ── WebApplicationFactories ──────────────────────────────────────────────────────────────────────
-
-/// <summary>
-/// Boots the real host with a real <c>Llm:Endpoint</c> (a genuine <see cref="LlmCompletionsStub"/>)
-/// so <c>LlmCopyWriter</c>/<c>LlmCallRing</c>/<c>DegradationController</c> are the exact production
-/// singletons <c>AddGenWaveTts</c> wires — nothing about the LLM pipeline is faked. Only hosted
-/// services are removed (no Liquidsoap/Postgres background work during this test); every
-/// Postgres-backed controller dependency <c>PersonaController</c> needs is left as its REAL,
-/// Lazy-backed registration (see the file header) since a draft-fields preview never forces any of
-/// them to actually connect.
-/// </summary>
-file sealed class LlmCallInspectorWebFactory(string llmEndpoint) : WebApplicationFactory<Program>
-{
-    internal const string Password = "test-password-x9k3";
-
-    protected override void ConfigureWebHost(IWebHostBuilder builder)
-    {
-        builder.UseEnvironment("Development");
-        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
-        builder.UseSetting("Admin:Password", Password);
-        builder.UseSetting("Llm:Endpoint", llmEndpoint);
-        builder.UseSetting("Llm:Model", "test-model");
-        builder.ConfigureTestServices(services => services.RemoveAll<IHostedService>());
-    }
-}
+// AC1's completions stub + web factory (Support/LlmCompletionsStub.cs's own LlmCompletionsStub /
+// LlmCompletionsWebFactory) are shared with Story353_LlmCauseTaxonomy.cs — see that file's own
+// header comment for the extraction rationale (T334 review round 1, advisory a).
 
 /// <summary>
 /// Boots the real host with no LLM configured at all (irrelevant to AC2 — nothing here ever calls
@@ -158,6 +79,13 @@ file sealed record LlmCallRow(
     long Seq, string? PersonaName, DateTimeOffset StartedAt, long ElapsedMs, string Status, string? StatusDetail,
     string Mode, string? PromptSystem, string? PromptUser, string? Response, int PromptChars, int ResponseChars);
 
+/// <summary>Wire shape of <c>GET /api/llm-calls</c> itself (SPEC F139.2, PLAN T334) — mirrors
+/// <see cref="GenWave.Host.Api.LlmCallsResponseDto"/> without depending on it directly, same as
+/// <see cref="LlmCallRow"/> does for each entry. AC1/AC3 below only ever assert on
+/// <see cref="Calls"/>; the F139.2 counter summary itself is covered by
+/// Story353_LlmCauseTaxonomy.cs, not re-proven here.</summary>
+file sealed record LlmCallsResponseWire(IReadOnlyList<LlmCallRow> Calls);
+
 public static class FeatureLlmCallInspector
 {
     static async Task LoginAsync(HttpClient client, string password)
@@ -189,9 +117,9 @@ public static class FeatureLlmCallInspector
         {
             // Given a real persona preview render against a real (stub) completions endpoint...
             stub.ReplyContent = "Spinning up something great, stick around.";
-            await using var factory = new LlmCallInspectorWebFactory(stub.BaseUri.ToString());
+            await using var factory = new LlmCompletionsWebFactory(stub.BaseUri.ToString());
             var client = factory.CreateClient();
-            await LoginAsync(client, LlmCallInspectorWebFactory.Password);
+            await LoginAsync(client, LlmCompletionsWebFactory.Password);
 
             // When the preview endpoint is driven — the exact production hand-off
             // (IPersonaPreviewWriter -> the real LlmCopyWriter -> RequestCleanedCompletionAsync) every
@@ -201,9 +129,9 @@ public static class FeatureLlmCallInspector
 
             // Then the inspector endpoint shows exactly one entry, carrying prompt/response/timing/
             // status/mode (SPEC F73.1) — read back as an admin, capped at ring size, newest first.
-            var rows = await client.GetFromJsonAsync<List<LlmCallRow>>("/api/llm-calls");
-            Assert.NotNull(rows);
-            var row = Assert.Single(rows!);
+            var response = await client.GetFromJsonAsync<LlmCallsResponseWire>("/api/llm-calls");
+            Assert.NotNull(response);
+            var row = Assert.Single(response!.Calls);
 
             Assert.True(
                 row.Status == "ok" &&
@@ -305,27 +233,27 @@ public static class FeatureLlmCallInspector
                 await using var stub = await LlmCompletionsStub.StartAsync();
 
                 // Given a ring entry recorded on a first host instance...
-                await using (var factory1 = new LlmCallInspectorWebFactory(stub.BaseUri.ToString()))
+                await using (var factory1 = new LlmCompletionsWebFactory(stub.BaseUri.ToString()))
                 {
                     var client1 = factory1.CreateClient();
-                    await LoginAsync(client1, LlmCallInspectorWebFactory.Password);
+                    await LoginAsync(client1, LlmCompletionsWebFactory.Password);
                     var preview = await client1.PostAsJsonAsync("/api/personas/preview", DraftPreviewBody());
                     Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
 
-                    var rows1 = await client1.GetFromJsonAsync<List<LlmCallRow>>("/api/llm-calls");
-                    Assert.Single(rows1!);
+                    var response1 = await client1.GetFromJsonAsync<LlmCallsResponseWire>("/api/llm-calls");
+                    Assert.Single(response1!.Calls);
                 }
 
                 // When a brand-new host instance stands up — a fresh DI container, standing in for a
                 // process restart (nothing about LlmCallRing could carry state across this boundary;
                 // see the no-persistence-dependency fact above)...
-                await using var factory2 = new LlmCallInspectorWebFactory(stub.BaseUri.ToString());
+                await using var factory2 = new LlmCompletionsWebFactory(stub.BaseUri.ToString());
                 var client2 = factory2.CreateClient();
-                await LoginAsync(client2, LlmCallInspectorWebFactory.Password);
+                await LoginAsync(client2, LlmCompletionsWebFactory.Password);
 
                 // Then its ring is empty (SPEC F73.3) — restart clears it, by construction.
-                var rows2 = await client2.GetFromJsonAsync<List<LlmCallRow>>("/api/llm-calls");
-                Assert.Empty(rows2!);
+                var response2 = await client2.GetFromJsonAsync<LlmCallsResponseWire>("/api/llm-calls");
+                Assert.Empty(response2!.Calls);
             }
         }
     }

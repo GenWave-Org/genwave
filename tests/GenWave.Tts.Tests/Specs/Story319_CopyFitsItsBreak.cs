@@ -63,7 +63,7 @@ public static class FeatureCopyFitsItsBreak
             new FakeActivePersonaAccessor { Persona = persona },
             logger,
             TimeProvider.System,
-            ring,
+            new LlmCallRecorder(ring, new LlmCallCauseCounters(TimeProvider.System)),
             new FakeDegradationModeReader());
         return (writer, ring, logger);
     }

@@ -18,14 +18,19 @@ public sealed class CrosstalkOptions
     /// <summary>
     /// The spoken-duration target a validated <see cref="GenWave.Core.Domain.CrosstalkAiredScript"/> must fit under (SPEC
     /// F127.4) — an estimate over this rejects the WHOLE exchange (never a trim; see
-    /// <see cref="CrosstalkScriptParser"/>'s own remarks). Defaults to the spec'd 25 seconds. Live via
-    /// <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}"/>, read fresh by
-    /// <see cref="CrosstalkScriptWriter"/> on every generation attempt (mirrors every other
-    /// live-adjustable leaf this project's options classes carry), so an operator PUT reaches the
-    /// very next attempt with no api restart.
+    /// <see cref="CrosstalkScriptParser"/>'s own remarks).
+    /// ⚠️ <b>Amended (Dean, 2026-08-20, PLAN T333):</b> defaults to <b>50 seconds</b>, ratified from
+    /// two days of live convergence after the 2026-08-17 live bump (mid-show airs both days; the
+    /// 42-45s class survives; only 53-54s overshoots die) — the shipped default now matches that
+    /// ratified target directly, so the demo's own live override retires (config on the demo box,
+    /// never repo code). The original 25s was the T282 paper-audition posture (12.5% accept — punchy
+    /// but starving). Live via <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}"/>,
+    /// read fresh by <see cref="CrosstalkScriptWriter"/> on every generation attempt (mirrors every
+    /// other live-adjustable leaf this project's options classes carry), so an operator PUT reaches
+    /// the very next attempt with no api restart.
     /// </summary>
     [Range(1, int.MaxValue)]
-    public int DurationTargetSeconds { get; set; } = 25;
+    public int DurationTargetSeconds { get; set; } = 50;
 
     /// <summary>
     /// Raw JSON array of enabled show SLUGS (<c>station.show.slug</c>, db/35's own unique stable

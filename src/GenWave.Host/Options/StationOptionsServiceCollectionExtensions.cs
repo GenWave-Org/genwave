@@ -20,6 +20,15 @@ static class StationOptionsServiceCollectionExtensions
         // StationOptionsValidator (IValidateOptions<StationOptions>) also runs at startup via
         // ValidateOnStart and guards Station:SafeScope:LibraryIds (non-empty, all-positive ids).
         services.AddSingleton<IValidateOptions<StationOptions>, StationOptionsValidator>();
+        // SPEC F142 (STORY-356, PLAN T327): the boundary cadence covenant's clamp-up + WARN
+        // (BoundaryCadenceCovenantPostConfigure, IPostConfigureOptions<StationOptions> — the repo's
+        // first; see that type's own remarks for why it isn't inside StationOptionsValidator above)
+        // is registered in Program.cs, NOT here — it needs PlayoutFeederService.PullInterval
+        // (GenWave.Host.Playout) as its worst-case feeder pull gap, and this method living in
+        // GenWave.Host.Options can't reach into Playout without opening the cycle gh-#445's
+        // namespace-cycle fitness law forbids (Playout already depends on Options the other way).
+        // The framework still runs it before EVERY IValidateOptions<StationOptions> on every
+        // OptionsFactory<StationOptions>.Create call regardless of where it was registered.
         services
             .AddOptions<StationOptions>()
             .Bind(configuration.GetSection(StationOptions.Section))

@@ -16,7 +16,15 @@ namespace GenWave.Host.Playout;
 /// </summary>
 sealed class PlayoutFeederService : IHostedService
 {
-    static readonly TimeSpan Interval = TimeSpan.FromSeconds(3);   // PRD §10 feed poll interval
+    /// <summary>
+    /// The feeder's tick interval (PRD §10 feed poll interval). Internal, not private — SPEC
+    /// F142/PLAN T327's <c>BoundaryCadenceCovenantPostConfigure</c> (<c>GenWave.Host.Options</c>)
+    /// needs the SAME value as its worst-case feeder pull gap. <c>Program.cs</c>, the composition
+    /// root, reads this field and passes it into that type's constructor — neither namespace reaches
+    /// into the other directly (gh-#445's namespace-cycle fitness law: <c>Playout</c> already
+    /// depends on <c>Options</c> the other way, so the reverse would cycle).
+    /// </summary>
+    internal static readonly TimeSpan PullInterval = TimeSpan.FromSeconds(3);
 
     /// <summary>
     /// A refill that held its tick longer than this gets a log line (gh-#184): the render window
@@ -102,7 +110,7 @@ sealed class PlayoutFeederService : IHostedService
         log.LogInformation("Playout feeder started for station {StationId} ({StationName})",
             stationId, identityProvider.Current.Name);
 
-        using var timer = new PeriodicTimer(Interval);
+        using var timer = new PeriodicTimer(PullInterval);
         while (await timer.WaitForNextTickAsync(ct))
         {
             try

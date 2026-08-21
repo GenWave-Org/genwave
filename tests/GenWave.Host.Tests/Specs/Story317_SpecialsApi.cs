@@ -22,6 +22,7 @@
 // GenWave.Orchestration.Tests/Story241_StationFollowsTheClock.cs's own ScenarioSpecialsRideTheCache
 // instead — this file stays scoped to the WIRE mapping described above.
 
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -50,18 +51,26 @@ public static class FeatureSpecialsApi
         [Fact]
         public async Task CreateListsAndDeletesRoundTripThroughTheEndpoints()
         {
-            // Given an authenticated admin session and a known persona/show to reference
+            // Given an authenticated admin session and a known persona/show to reference. The
+            // factory is pinned to the file's own fake Today (hygiene fix, T330 round-2 review): the
+            // ORIGINAL fact never passed now: Today, so it defaulted to the REAL wall clock while
+            // still hardcoding a literal "2026-08-20" as "unambiguously future" — a date bomb that
+            // reds the instant real time reaches it. onDate is now computed off the SAME pinned Today
+            // every other date-sensitive fact in this file already uses, preserving the "5 days
+            // future" intent without depending on when this suite happens to run.
             var persona = new Persona(1, "Nova", "", "", "", DateTime.UtcNow, DateTime.UtcNow);
             var show = new Show(1, "Night Moves", "night-moves", null, null, null, null, DateTime.UtcNow, DateTime.UtcNow);
             var specialStore = new FakeScheduleSpecialStore();
             await using var factory = new SpecialsApiWebFactory(
-                specialStore, personaStore: new FakePersonaStore([persona]), showStore: new FakeShowStore([show]));
+                specialStore, personaStore: new FakePersonaStore([persona]), showStore: new FakeShowStore([show]),
+                now: Today);
             var client = await SpecialsApiWebFactory.LoggedInClientAsync(factory);
+            var onDate = DateOnly.FromDateTime(Today.DateTime).AddDays(5);
 
             // When a special is created, then listed, then deleted via /api/schedule/specials
             var createResponse = await client.PostAsJsonAsync("/api/schedule/specials", new
             {
-                onDate = "2026-08-20",
+                onDate = onDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 startMinute = 540,
                 endMinute = 720,
                 personaId = persona.Id,
@@ -82,7 +91,7 @@ public static class FeatureSpecialsApi
             // Then creation succeeds naming every submitted field, the list carries the new row, and
             // the delete removes it cleanly
             Assert.Equal(
-                (Create: HttpStatusCode.Created, OnDate: new DateOnly(2026, 8, 20), PersonaId: (long?)persona.Id,
+                (Create: HttpStatusCode.Created, OnDate: onDate, PersonaId: (long?)persona.Id,
                  ShowId: (long?)show.Id, Listed: true, Delete: HttpStatusCode.NoContent, GoneAfterDelete: true),
                 (Create: createResponse.StatusCode, created.OnDate, created.PersonaId, created.ShowId,
                  Listed: list!.Any(s => s.Id == created.Id),

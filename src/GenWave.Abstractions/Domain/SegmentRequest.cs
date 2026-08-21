@@ -121,4 +121,20 @@ public sealed record SegmentRequest(
     /// </para>
     /// </summary>
     public bool CrosstalkAiredThisBreak { get; init; }
+
+    /// <summary>
+    /// SPEC F141.2/F141.3 (STORY-355, PLAN T326) — for a <see cref="SegmentKind.TimeDate"/> request,
+    /// how honestly this drain can speak the hour it was armed for; see
+    /// <see cref="TimeAnnouncementFreshness"/>'s own remarks for the full contract.
+    /// <see cref="TimeAnnouncementFreshness.OnTime"/> (the default) for every other kind, and for
+    /// every pre-F141 caller, so this field is diff-free for the whole codebase until the
+    /// Orchestrator's own <c>TimeDate</c> drain arm (the ONLY writer) stamps it.
+    ///
+    /// <para>
+    /// <b>Declared as a defaulted body property, not a 16th primary-constructor parameter</b> — the
+    /// SAME <see cref="CrosstalkAiredThisBreak"/> precedent immediately above, for the identical
+    /// published-NuGet-arity reason (that member's own remarks carry the full rationale).
+    /// </para>
+    /// </summary>
+    public TimeAnnouncementFreshness TimeDateFreshness { get; init; } = TimeAnnouncementFreshness.OnTime;
 }
