@@ -298,13 +298,13 @@ public static class FeatureContextFactGate
             Assert.False(result.FreshPerAiring);
             Assert.Equal(2, bodies.Count);
 
-            // And the failure WARN names the REAL cause (T331 review finding F3) — the truth gate,
-            // and the still-unsupported claim — never the wrong-lever "empty or exceeded
-            // Llm:MaxCopyChars" wording a hygiene reject carries (that message sends an operator at
-            // settings this failure has nothing to do with).
+            // And the failure WARN names the REAL cause (T331 review finding F3, generalized wording
+            // PLAN T332) — the truth gate, and the still-unsupported claim — never the wrong-lever
+            // "empty or exceeded Llm:MaxCopyChars" wording a hygiene reject carries (that message
+            // sends an operator at settings this failure has nothing to do with).
             Assert.Contains(
                 logger.Warnings,
-                warning => warning.Contains("fact gate", StringComparison.OrdinalIgnoreCase)
+                warning => warning.Contains("truth gate", StringComparison.OrdinalIgnoreCase)
                     && warning.Contains("sunshine", StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain(
                 logger.Warnings, warning => warning.Contains("empty or exceeded", StringComparison.OrdinalIgnoreCase));
@@ -459,13 +459,16 @@ public static class FeatureContextFactGate
             // only ~0.5s for the re-ask before the SHARED clock fires. Sharing correctly lands at
             // ~2s total; the reviewer's own mutation (a fresh CreateLinkedTokenSource + CancelAfter
             // for the re-ask, starting its OWN 2s from ~1.5s in) would run to ~3.5s instead — the
-            // bound below sits strictly between the two, so it reds under that mutation.
+            // bound is pinned at the MIDPOINT of the two (T331 pickup, PLAN T332: do NOT widen this
+            // toward 3.5s, and do NOT change either delay above — both would weaken the discriminant),
+            // so it reds under that mutation with room to spare on either side.
             Assert.Equal("Here's something worth knowing.", result.Text);
             Assert.False(result.FreshPerAiring);
             Assert.True(
-                stopwatch.Elapsed < TimeSpan.FromSeconds(3.5),
+                stopwatch.Elapsed < TimeSpan.FromSeconds(2.75),
                 $"took {stopwatch.Elapsed} - a re-ask given its OWN fresh timeout clock (not this " +
-                "render's one shared budget) would run past 3.5s");
+                "render's one shared budget) would run past 2.75s (the midpoint of the correctly-shared " +
+                "~2s and the wrongly-fresh ~3.5s)");
 
             // And the ring shows exactly what happened: the rejected first call, then the re-ask's
             // own honest Timeout — TWO entries with TWO distinct dispatch times (T331 review finding

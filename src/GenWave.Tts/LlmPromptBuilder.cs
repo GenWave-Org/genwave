@@ -174,38 +174,62 @@ static class LlmPromptBuilder
         "Never name another day or time of day.";
 
     /// <summary>
-    /// SPEC F138.4 (STORY-350, PLAN T331) — the truth-gate ladder's own re-ask line: names the
-    /// claim(s) <see cref="CopyClaims.CheckFacts"/> rejected so the retry has something concrete to
-    /// fix rather than a bare "try again". Comma-free (the gh-#303 style lesson, same as every other
-    /// prompt line in this file) — multiple violations join on " and " rather than a comma-delimited
-    /// list. A violation's own <see cref="ClaimViolation.Token"/> is safe to interpolate directly
-    /// without further escaping (<see cref="ClaimViolation"/>'s own remarks: provably digit-shaped or
-    /// closed-vocabulary, never free text reachable from a fact block or copy).
+    /// SPEC F138.4 (STORY-350/351, PLAN T331/T332) — the truth-gate ladder's own re-ask line: names
+    /// every claim <see cref="CopyClaims.CheckFacts"/> and/or <see cref="CopyClaims.CheckClock"/>
+    /// rejected so the retry has something concrete to fix rather than a bare "try again". Generalized
+    /// (PLAN T332 — the original wording named "the facts above" unconditionally, which is wrong for
+    /// a LeadIn/BackAnnounce/SignOff/SignOn re-ask: those prompts carry no fact block at all): each
+    /// violation renders its OWN honest clause (see <see cref="DescribeViolationForReask"/>) — a
+    /// fact-block claim states it was never in the facts, a clock claim states the correct
+    /// weekday/daypart by name — so a ContextSegment re-ask facing BOTH claim families at once (the
+    /// composite check, <c>LlmCopyWriter.CheckTruthGate</c>) still gets ONE re-ask line naming both,
+    /// never a line that misdescribes a clock claim as a missing fact or vice versa. Comma-free (the
+    /// gh-#303 style lesson, same as every other prompt line in this file) — multiple violations join
+    /// on " and " rather than a comma-delimited list. A violation's own <see cref="ClaimViolation.Token"/>
+    /// (and, for a clock claim, its own <see cref="ClaimViolation.Expected"/>) is safe to interpolate
+    /// directly without further escaping (<see cref="ClaimViolation"/>'s own remarks: provably
+    /// digit-shaped or closed-vocabulary, never free text reachable from a fact block or copy).
     ///
     /// <see cref="LlmCopyWriter.RequestCleanedCompletionAsync"/> appends this line to the SAME user
     /// prompt the rejected completion already saw — never a prompt rebuilt from scratch — so the
-    /// re-ask still carries every other instruction (the facts block, segment framing, taste color)
-    /// the original completion had; this method only renders the one added line.
+    /// re-ask still carries every other instruction (the facts block when there is one, the F138.5
+    /// clock guard line, segment framing, taste color) the original completion had; this method only
+    /// renders the one added line.
     ///
     /// <para>
-    /// Deliberately opens with "Your last reply stated..." rather than a literal "Re-ask:" label
-    /// (T331 review advisory F5): a machine-looking prefix like that is exactly the kind of thing a
-    /// model can echo back verbatim into its own reply, and <see cref="LlmCopyWriter.StripChatPreamble"/>
-    /// has no rule that would ever strip it (that method's own gate is for a MODEL-authored preamble
-    /// "Here's your copy:", not an operator-authored one riding in the prompt itself) — plain
-    /// declarative English carries the same instruction with nothing label-shaped to leak.
+    /// Deliberately opens with "Your last reply..." rather than a literal "Re-ask:" label (T331 review
+    /// advisory F5): a machine-looking prefix like that is exactly the kind of thing a model can echo
+    /// back verbatim into its own reply, and <see cref="LlmCopyWriter.StripChatPreamble"/> has no rule
+    /// that would ever strip it (that method's own gate is for a MODEL-authored preamble "Here's your
+    /// copy:", not an operator-authored one riding in the prompt itself) — plain declarative English
+    /// carries the same instruction with nothing label-shaped to leak.
     /// </para>
     /// </summary>
-    public static string BuildFactViolationReaskLine(IReadOnlyList<ClaimViolation> violations)
+    public static string BuildTruthGateReaskLine(IReadOnlyList<ClaimViolation> violations)
     {
         var claims = string.Join(
-            " and ",
-            violations.Select(violation => violation.Token).Distinct(StringComparer.OrdinalIgnoreCase)
-                .Select(token => $"\"{token}\""));
+            " and ", violations.Select(DescribeViolationForReask).Distinct(StringComparer.OrdinalIgnoreCase));
 
-        return $"Your last reply stated {claims} but the facts above never said that. " +
-            "Write a new reply using only the facts given above and drop that claim entirely.";
+        // "the above" (T332 review round-2 advisory), not "every one of those": the closing sentence
+        // must read naturally whether claims names ONE violation or several — "fixes every one of
+        // those" reads as a grammatical stumble for a single claim ("every one" implies more than
+        // one), while "the above" refers to whatever was just stated regardless of count.
+        return $"Your last reply got this wrong: {claims}. " +
+            "Write a new reply that corrects the above and adds nothing else unsupported.";
     }
+
+    /// <summary>
+    /// One violation's own honest re-ask clause (SPEC F138.4, PLAN T332): keys on
+    /// <see cref="ClaimViolation.IsClockClaim"/> (T332 review round-2 finding — the SAME single
+    /// discriminator <c>LlmCopyWriter.DescribeViolationForLog</c> keys its own facts-vs-clock split
+    /// on, one module over) rather than re-testing <see cref="ClaimViolation.Expected"/>'s own
+    /// nullability independently here. A clock violation states the correct weekday/daypart by name,
+    /// since the model has something concrete to correct TO; a fact-block violation states only that
+    /// the claim was never in the facts, since there is no single "correct" fix.
+    /// </summary>
+    static string DescribeViolationForReask(ClaimViolation violation) => violation.IsClockClaim
+        ? $"you said \"{violation.Token}\" but it is actually {violation.Expected}"
+        : $"you said \"{violation.Token}\" but that was never stated";
 
     /// <summary>
     /// gh-#150 — how often a persona-voiced break is asked to work the DJ's own name in. Real

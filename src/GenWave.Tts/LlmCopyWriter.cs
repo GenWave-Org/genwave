@@ -417,8 +417,17 @@ public sealed class LlmCopyWriter(
                 cfg, request, personaOverride, card: null, updateTasteMemory: false, patterFact: null,
                 showFlavorFact: null, queueWaitBudget: TimeSpan.FromSeconds(cfg.PreviewQueueWaitSeconds), ct);
             var cleaned = TextOf(cleanup);
+            // DescribeNullTextReason (review round-2 finding F2, PLAN T332): the SAME reason
+            // WriteAsync's own failure WARN already names, reused here rather than a second, hardcoded
+            // "empty or over-length" message — a truth-gate reject reaching this branch (a preview
+            // exhausting the F138.4 ladder, now reachable since T332 widened the ladder to every kind)
+            // deserves the honest cause too, not the wrong-lever hygiene wording that sends an operator
+            // at settings a truth-gate failure has nothing to do with. Safe to surface on this
+            // authenticated admin surface: every interpolated fragment is either a fixed phrase or a
+            // ClaimViolation.Token, which is provably digit-shaped or closed-vocabulary (that type's
+            // own remarks), never free text.
             return cleaned is null
-                ? new PersonaPreviewResult.Failed("The LLM returned empty or over-length copy.")
+                ? new PersonaPreviewResult.Failed($"The LLM reply was rejected ({DescribeNullTextReason(cleanup)}).")
                 : new PersonaPreviewResult.Success(cleaned);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -682,26 +691,45 @@ public sealed class LlmCopyWriter(
             var cleanup = CleanCopy(text, cfg.MaxCopyChars);
             LogIfTrimmed(request, personaName, cleanup);
 
-            // SPEC F138.2/F138.4 (STORY-350, PLAN T331) — the context lane's own truth-gate stage.
-            // CheckFacts is asked ONLY for a ContextSegment render carrying a non-empty fact block
-            // (F138.2's own "never even ask" discipline — every other kind, or a blank fact block,
-            // never reaches this branch at all; a blank fact block is not merely "typical" of an
-            // admin preview, it is STRUCTURAL — GenWave.Host.Api.PersonaController.Preview builds its
-            // SegmentRequest with no ContextFacts argument at all, so that parameter's own default
-            // (null) is the only value a preview can ever carry, and the gate is unreachable from
-            // previews by construction, not by convention. See LlmPromptBuilder.BuildContextFactsLine's
-            // own remarks for the prompt-side half of that same story). Also gated on TextOf(cleanup):
-            // hygiene already rejecting the reply outright (empty, or over-length with nothing
-            // salvageable) falls straight through to the unchanged switch/record below — there is no
-            // candidate text to check facts against, and the existing OverLength/EmptyCompletion rung
-            // already covers that case correctly.
-            if (request.Kind == SegmentKind.ContextSegment
-                && request.ContextFacts is { } factBlock && !string.IsNullOrWhiteSpace(factBlock)
-                && TextOf(cleanup) is { } candidate)
+            // SPEC F138.2/F138.3/F138.4 (STORY-350, STORY-351, PLAN T331/T332) — the truth-gate
+            // stage, covering every LLM-authored kind, not the context lane alone. Composed as ONE
+            // check (CheckTruthGate below), never two chained ladder runs — the T331 reviewer ruling
+            // RunTruthGateLadderAsync's own remarks restate: a second ladder invocation could never
+            // see the first's own re-ask reply, so a ContextSegment render facing BOTH a fact
+            // violation and a clock violation must clear both in the SAME gate/re-ask cycle. factBlock
+            // is non-null ONLY for a ContextSegment render carrying a non-empty fact block (F138.2's
+            // own "never even ask" discipline for the FACTS half specifically — see below); the clock
+            // half of CheckTruthGate always runs for every kind reaching this point, ContextSegment
+            // included (F138.3's own "all patter kinds": LeadIn, BackAnnounce, and — since they
+            // resolve through this exact same seam — SignOff/SignOn get it for free, no separate
+            // wiring needed).
+            //
+            // No Kind-based whole-gate carve-out for a factless ContextSegment (review round-2
+            // finding F1, PLAN T332 — an earlier revision of this method skipped the WHOLE gate,
+            // clock half included, for that case; deleted): CheckTruthGate's own factBlock is-null
+            // guard already keeps F138.2's "never even ask" scoped to the FACTS half alone, so
+            // deleting the second, Kind-based gate here is strictly less code covering strictly more
+            // spec, not a behavior loss. A factless ContextSegment is structurally unreachable on the
+            // AIR path — Orchestrator.BuildContextSegmentRequestAsync's own blank-facts guard
+            // (Orchestrator.cs, "no segment facts (SPEC F107.6)") never builds a ContextSegment
+            // SegmentRequest without one — but IS reachable from GenWave.Host.Api.PersonaController.Preview
+            // (TryParseKind accepts any SegmentKind name, and a preview never supplies ContextFacts at
+            // all), so a factless ContextSegment preview now gets the clock half exactly like every
+            // other kind, rather than silently skipping it. Also gated on TextOf(cleanup): hygiene
+            // already rejecting the reply outright (empty, or over-length with nothing salvageable)
+            // falls straight through to the unchanged switch/record below — there is no candidate text
+            // to check claims against, and the existing OverLength/EmptyCompletion rung already covers
+            // that case correctly.
+            var factBlock = request.Kind == SegmentKind.ContextSegment
+                && request.ContextFacts is { } contextFacts && !string.IsNullOrWhiteSpace(contextFacts)
+                    ? contextFacts
+                    : null;
+
+            if (TextOf(cleanup) is { } candidate)
             {
                 var ladderResult = await RunTruthGateLadderAsync(
-                    candidateText => CopyClaims.CheckFacts(candidateText, factBlock),
-                    LlmPromptBuilder.BuildFactViolationReaskLine, candidate, text);
+                    candidateText => CheckTruthGate(candidateText, factBlock, stationLocalNow, request.Track?.Title),
+                    LlmPromptBuilder.BuildTruthGateReaskLine, candidate, text);
                 if (ladderResult is not null)
                     return ladderResult;
             }
@@ -721,25 +749,32 @@ public sealed class LlmCopyWriter(
                 ringOutcome, statusDetail: null, mode, cause, cfg.Model);
             return cleanup;
 
-            /// <summary>
-            /// SPEC F138.4 (STORY-350, PLAN T331) — one truth-gate ladder run: gate
-            /// <paramref name="firstCandidate"/> against <paramref name="check"/>, and on a
-            /// violation, exactly ONE re-ask (its added prompt line built by
-            /// <paramref name="buildReaskLine"/>), then reclassify. A LOCAL function (T331 review
-            /// finding — this method was pushing 190 lines with a SECOND ladder, PLAN T332's clock
-            /// check, landing at this exact seam next) — not a private instance method — because it
-            /// needs to REASSIGN <c>userPrompt</c>/<c>startedAt</c> and read <c>http</c>/<c>requestUri</c>/
-            /// <c>timeoutCts</c> exactly the way the enclosing method already does (review finding F4b:
-            /// the SAME reassign-not-shadow discipline <c>userPrompt</c> already followed for its own
-            /// prompt text, now shared by <c>startedAt</c> too, so a fault raised by the re-ask's own
-            /// call is attributed — prompt AND timing alike — to that call, never to the first). A
-            /// second gate (PLAN T332) reuses this SAME gate/re-ask/record/classify choreography by
-            /// supplying its own <paramref name="check"/>/<paramref name="buildReaskLine"/> — zero
-            /// copy-paste of a second ladder. Returns <see langword="null"/> when <paramref name="check"/>
-            /// passed <paramref name="firstCandidate"/> outright — the caller's own signal to fall
-            /// through to its unchanged, non-gated classify/record path above; a non-null return is
-            /// always this ladder's OWN final word, and the caller records nothing further.
-            /// </summary>
+            // SPEC F138.4 (STORY-350, PLAN T331) — one truth-gate ladder run: gate
+            // firstCandidate against check, and on a violation, exactly ONE re-ask (its added
+            // prompt line built by buildReaskLine), then reclassify. A LOCAL function (T331 review
+            // finding — this method was pushing 190 lines with a SECOND ladder, PLAN T332's clock
+            // check, landing at this exact seam next) — not a private instance method — because it
+            // needs to REASSIGN userPrompt/startedAt and read http/requestUri/timeoutCts exactly the
+            // way the enclosing method already does (review finding F4b: the SAME reassign-not-shadow
+            // discipline userPrompt already followed for its own prompt text, now shared by startedAt
+            // too, so a fault raised by the re-ask's own call is attributed — prompt AND timing alike
+            // — to that call, never to the first). Returns null when check passed firstCandidate
+            // outright — the caller's own signal to fall through to its unchanged, non-gated
+            // classify/record path above; a non-null return is always this ladder's OWN final word,
+            // and the caller records nothing further.
+            //
+            // PLAN T332 folds facts and clock into ONE call to this same ladder rather than a second
+            // one (CheckTruthGate, the caller's own composite check, below) — never two chained
+            // ladder runs: a second RunTruthGateLadderAsync invocation could never see the first's
+            // own re-ask reply, so it could only ever check the ORIGINAL candidate a second time,
+            // leaving whatever the first ladder's own re-ask actually said unchecked by the second
+            // check entirely. Composing the two checks into one function, called once, is what keeps
+            // this a single gate/re-ask/reclassify cycle regardless of how many claim classes it
+            // covers.
+            //
+            // Plain // comments, not /// (T331 review finding): a local function's XML doc comment
+            // never renders anywhere doc-gen actually reads it today, and would flag CS1587 the day
+            // a future doc-gen pass enables XML output for this project.
             async Task<LlmCopyCleanupResult?> RunTruthGateLadderAsync(
                 Func<string, ClaimCheckResult> check, Func<IReadOnlyList<ClaimViolation>, string> buildReaskLine,
                 string firstCandidate, string firstRawText)
@@ -788,12 +823,21 @@ public sealed class LlmCopyWriter(
                 // what makes TextOf(...) null for it (T331 review finding F3 — its own distinct shape
                 // from a hygiene Rejected, so WriteAsync's own failure WARN can name the real cause),
                 // so the caller (WriteAsync/WritePreviewAsync) degrades it exactly like any other
-                // reject — F107.6's EXISTING skip rung for ContextSegment (TtsSegmentSource's own
-                // non-fresh-copy guard drops a template render for this kind rather than airing it),
-                // never a new floor invented here. A re-ask that passed hygiene but still failed the
-                // gate is the only case needing a synthetic TruthGateRejected instead of reaskCleanup
-                // itself: reaskCleanup there still carries real (unusable) text that must never reach
-                // TextOf.
+                // reject, straight into fallback.WriteAsync — an EXISTING rung, never a new one
+                // invented here. WHERE that rung actually lands differs by kind, unchanged by this
+                // ladder (PLAN T332 investigation): ContextSegment/SignOff/SignOn never reach air even
+                // as template copy — TtsSegmentSource's own non-fresh-copy guard drops the render
+                // outright (F92.4/F92.5/F107.6's skip-never-silence posture); LeadIn/BackAnnounce carry
+                // no such guard, so PatterTemplateRenderer's deterministic template airs instead — its
+                // FIXED PROSE never states a weekday/daypart on its own (see
+                // PatterTemplateRenderer.Expand's own LeadIn/BackAnnounce arms; it does interpolate the
+                // track's own title/artist verbatim, and a title CAN legally name a day — "Saturday
+                // Night Fever" — but that interpolated text is never gate-checked, since a template
+                // render never passes through this ladder at all), the same F92-era floor a hygiene
+                // reject already degraded those two kinds to before this gate ever existed. A re-ask
+                // that passed hygiene but still failed the gate is the only case needing a synthetic
+                // TruthGateRejected instead of reaskCleanup itself: reaskCleanup there still carries
+                // real (unusable) text that must never reach TextOf.
                 return reaskViolations is { } violations
                     ? new LlmCopyCleanupResult.TruthGateRejected(violations)
                     : reaskCleanup;
@@ -822,6 +866,31 @@ public sealed class LlmCopyWriter(
         {
             singleFlight.Release();
         }
+    }
+
+    /// <summary>
+    /// The composite truth-gate check <see cref="RunTruthGateLadderAsync"/> gates on (SPEC F138.2,
+    /// F138.3, STORY-350, STORY-351, PLAN T332) — kept beside the ladder call site above, deliberately
+    /// small and pure: a straight union of <see cref="CopyClaims.CheckFacts"/>'s violations (only when
+    /// <paramref name="factBlock"/> is non-null — the context lane's own fact-block claim classes,
+    /// meaningless for any kind with no fact block to check against) with
+    /// <see cref="CopyClaims.CheckClock"/>'s violations (unconditional — F138.3's own "all patter
+    /// kinds"), into ONE <see cref="ClaimCheckResult"/>. This is the whole reason a ContextSegment
+    /// render can clear both claim families in a SINGLE gate/re-ask cycle instead of two chained ladder
+    /// runs (the reviewer-ruled constraint <see cref="RunTruthGateLadderAsync"/>'s own remarks
+    /// restate): the ladder only ever sees one <see cref="ClaimCheckResult"/>, never two, so it has no
+    /// way to run twice even by accident. Both source checks stay <see cref="CopyClaims"/>'s own pure
+    /// static functions of their arguments; this method adds no logic beyond composing their two
+    /// violation lists.
+    /// </summary>
+    static ClaimCheckResult CheckTruthGate(string copy, string? factBlock, DateTimeOffset stationLocalNow, string? trackTitle)
+    {
+        var violations = new List<ClaimViolation>();
+        if (factBlock is not null)
+            violations.AddRange(CopyClaims.CheckFacts(copy, factBlock).Violations);
+
+        violations.AddRange(CopyClaims.CheckClock(copy, stationLocalNow, trackTitle).Violations);
+        return new ClaimCheckResult(violations);
     }
 
     /// <summary>
@@ -933,25 +1002,52 @@ public sealed class LlmCopyWriter(
 
     /// <summary>
     /// Names the real cause of a null <see cref="TextOf"/> result for <see cref="WriteAsync"/>'s own
-    /// failure WARN (SPEC F69.7, T331 review finding F3): a hygiene reject splits on
-    /// <see cref="LlmCopyCleanupResult.Rejected.WasOverLength"/> exactly as it always has, but a
-    /// <see cref="LlmCopyCleanupResult.TruthGateRejected"/> floor gets its OWN sentence naming the
-    /// truth gate and the still-unsupported claim — never the hygiene wording ("empty or exceeded
+    /// failure WARN (SPEC F69.7, T331 review finding F3, generalized PLAN T332): a hygiene reject
+    /// splits on <see cref="LlmCopyCleanupResult.Rejected.WasOverLength"/> exactly as it always has,
+    /// but a <see cref="LlmCopyCleanupResult.TruthGateRejected"/> floor gets its OWN sentence naming
+    /// the truth gate and every still-violating claim — never the hygiene wording ("empty or exceeded
     /// Llm:MaxCopyChars after cleanup"), which sends an operator at the wrong levers (endpoint,
-    /// max_tokens) for a failure neither lever can fix. Comma-free, sentence-fragment style (matches
-    /// every other <see cref="LogFailure"/> reason) — this never reaches prompt text, only a log line,
-    /// but <see cref="ClaimViolation.Token"/> stays safe to interpolate directly regardless (that
-    /// type's own remarks: provably digit-shaped or closed-vocabulary).
+    /// max_tokens) for a failure neither lever can fix.
+    ///
+    /// <para>
+    /// No longer names "the context fact gate" specifically (T331 pickup, PLAN T332 — the wording was
+    /// hardcoded for STORY-350's single check before STORY-351's clock check reused this same floor):
+    /// <see cref="DescribeViolationForLog"/> renders each violation HONESTLY per its own class —
+    /// <see cref="ClaimViolation.IsClockClaim"/> true (a weekday) reads "wrong-day claim", true (a
+    /// daypart) reads "wrong-time-of-day claim"; false (a fact-block violation) reads "unsupported
+    /// claim" — so a clock rejection is never misreported as a fact-block one or vice versa, whichever
+    /// kind's ladder floor produced it.
+    /// </para>
+    ///
+    /// Comma-free, sentence-fragment style (matches every other <see cref="LogFailure"/> reason) —
+    /// this never reaches prompt text, only a log line, but <see cref="ClaimViolation.Token"/> stays
+    /// safe to interpolate directly regardless (that type's own remarks: provably digit-shaped or
+    /// closed-vocabulary).
     /// </summary>
     static string DescribeNullTextReason(LlmCopyCleanupResult cleanup) => cleanup switch
     {
         LlmCopyCleanupResult.Rejected { WasOverLength: true } => "exceeded Llm:MaxCopyChars after cleanup",
         LlmCopyCleanupResult.Rejected { WasOverLength: false } => "empty after cleanup",
         LlmCopyCleanupResult.TruthGateRejected truthGate =>
-            "the context fact gate rejected the re-ask too (unsupported claim: " +
-            $"{string.Join(" and ", truthGate.Violations.Select(v => v.Token).Distinct(StringComparer.OrdinalIgnoreCase))})",
+            "the truth gate rejected the re-ask too (" +
+            $"{string.Join(" and ", truthGate.Violations.Select(DescribeViolationForLog).Distinct(StringComparer.OrdinalIgnoreCase))})",
         _ => throw new UnreachableException(
             $"{nameof(TextOf)} already returns non-null text for any other {nameof(LlmCopyCleanupResult)} case."),
+    };
+
+    /// <summary>
+    /// One violation's own honest fragment for <see cref="DescribeNullTextReason"/> (SPEC F138.2,
+    /// F138.3, PLAN T332): <see cref="ClaimViolation.IsClockClaim"/> is the ONE discriminator this
+    /// method (and <see cref="LlmPromptBuilder.DescribeViolationForReask"/>, one module over) keys the
+    /// facts-vs-clock split on — see that property's own remarks. Within the clock branch,
+    /// <paramref name="violation"/>'s own <see cref="ClaimClass"/> still separates the two clock claim
+    /// shapes: a wrong weekday reads "wrong-day claim", a wrong daypart reads "wrong-time-of-day claim".
+    /// </summary>
+    static string DescribeViolationForLog(ClaimViolation violation) => (violation.IsClockClaim, violation.Class) switch
+    {
+        (true, ClaimClass.Daypart) => $"wrong-time-of-day claim: {violation.Token}",
+        (true, _) => $"wrong-day claim: {violation.Token}",
+        (false, _) => $"unsupported claim: {violation.Token}",
     };
 
     /// <summary>

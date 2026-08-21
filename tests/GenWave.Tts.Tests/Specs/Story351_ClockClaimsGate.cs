@@ -1,19 +1,113 @@
 // STORY-351 — Patter can't lie about the clock (SPEC F138.3, F138.5 · PLAN T329/T332)
 //
-// BDD specification — xUnit. PENDING until built (see Story350's header note).
+// BDD specification — xUnit. The pure-checker-level pins below (PLAN T329) were built first;
+// PLAN T332 wires CopyClaims.CheckClock into the real LlmCopyWriter seam for every LLM patter
+// kind, so ScenarioClockLiesAreCaught and everything below it drive the REAL writer, not the
+// pure checker in isolation — see Story350's own BuildWriter idiom, mirrored here.
 //
 // The gh-#438 aired exhibit is the pinned regression: "We're diving into a neon dusk on
 // this Saturday morning... Tonight we flip..." aired at Sunday 11:50 AM while the F117
 // clock line named the correct instant in the prompt. The model isn't missing the
 // information; it ignores it — so the check is mechanical, on EVERY patter kind.
 
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using GenWave.Core.Domain;
 using GenWave.Tts;
+using GenWave.Tts.Tests.Fakes;
 using Xunit;
 
 namespace GenWave.Tts.Tests.Specs;
 
 public static class FeatureClockClaimsGate
 {
+    // ── Shared fixture for the HTTP-driven wiring scenarios below (PLAN T332) — mirrors
+    // Story350_ContextFactGate's own BuildWriter idiom: drives the REAL LlmCopyWriter through a
+    // scripted FakeHttpMessageHandler rather than asserting on CopyClaims in isolation, so the
+    // T332 wiring at the LlmCopyWriter seam itself is what is under test, for kinds beyond
+    // ContextSegment. Every wiring scenario shares ONE clock — Sunday, 11:50 AM station-local —
+    // the exact instant the gh-#438 aired exhibit was rejected against, so "Saturday" and
+    // "tonight" are both known, assertable violations rather than whatever day the machine
+    // running the test happens to land on.
+
+    static readonly DateTimeOffset FixedStationLocalNow = new(2026, 8, 16, 11, 50, 0, TimeSpan.Zero);
+
+    static SegmentRequest LeadInRequest(string trackTitle = "Astral Plane") =>
+        new(SegmentKind.LeadIn, "af_heart", "GenWave",
+            new MediaItem("m1", "/media/x.mp3", trackTitle, default, "Valerie June"),
+            FixedStationLocalNow, "test-station");
+
+    static SegmentRequest BackAnnounceRequest() =>
+        new(SegmentKind.BackAnnounce, "af_heart", "GenWave",
+            new MediaItem("m1", "/media/x.mp3", "Astral Plane", default, "Valerie June"),
+            FixedStationLocalNow, "test-station");
+
+    /// <param name="facts">
+    /// SPEC F107.3 fact block, or <see langword="null"/> for a factless ContextSegment request — the
+    /// ONLY shape that reaches this method from PersonaController.Preview (SPEC F138.2's structural
+    /// exemption is for the FACTS half alone, review round-2 finding F1 — see
+    /// LlmCopyWriter.RequestCleanedCompletionAsync's own remarks; the clock half still applies).
+    /// </param>
+    static SegmentRequest ContextRequest(string? facts) =>
+        new(SegmentKind.ContextSegment, "af_heart", "GenWave", Track: null, FixedStationLocalNow, "test-station",
+            PersonaName: null, CounterpartName: null, ContextFacts: facts);
+
+    /// <summary>Builds a REAL <see cref="LlmCopyWriter"/> against a fake completions handler that
+    /// scripts its reply BY CALL NUMBER (1-based) — see Story350_ContextFactGate's own BuildWriter
+    /// for the full idiom this mirrors. <see cref="CapturingLogger{T}"/> rides along (review round-2
+    /// finding F4) so a fact can pin the exact WARN wording <see cref="LlmCopyWriter"/> produces on an
+    /// exhausted ladder, not just the airable outcome.</summary>
+    static (LlmCopyWriter Writer, List<string> RequestBodies, CapturingLogger<LlmCopyWriter> Logger) BuildWriter(
+        Func<int, CancellationToken, Task<HttpResponseMessage>> respond)
+    {
+        var bodies = new List<string>();
+        var handler = new FakeHttpMessageHandler(async (request, ct) =>
+        {
+            var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(ct);
+            bodies.Add(body);
+            return await respond(bodies.Count, ct);
+        });
+        var ring = new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions()));
+        var logger = new CapturingLogger<LlmCopyWriter>();
+        var writer = new LlmCopyWriter(
+            new TemplateCopyWriter(new PatterTemplateRenderer()),
+            new SingleHandlerHttpClientFactory(handler),
+            new TestOptionsMonitor<LlmOptions>(new LlmOptions
+            {
+                Endpoint = "http://fake-llm.local", Model = "test-model", TimeoutSeconds = 5, MaxCopyChars = 450,
+            }),
+            new LlmCopyStatusHolder(),
+            new FakeActivePersonaAccessor(),
+            logger,
+            TimeProvider.System,
+            new LlmCallRecorder(ring, new LlmCallCauseCounters(TimeProvider.System)),
+            new FakeDegradationModeReader(),
+            new FakeStationClockProvider(FixedStationLocalNow));
+        return (writer, bodies, logger);
+    }
+
+    static Task<HttpResponseMessage> Ok(string content) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+    {
+        Content = CompletionsBody(content),
+    });
+
+    static StringContent CompletionsBody(string content) => new(
+        JsonSerializer.Serialize(new { choices = new[] { new { message = new { content } } } }),
+        Encoding.UTF8, "application/json");
+
+    static string ExtractUserContent(string requestBodyJson)
+    {
+        using var doc = JsonDocument.Parse(requestBodyJson);
+        foreach (var message in doc.RootElement.GetProperty("messages").EnumerateArray())
+        {
+            if (message.GetProperty("role").GetString() == "user")
+                return message.GetProperty("content").GetString() ?? "";
+        }
+
+        return "";
+    }
+
     public static class ScenarioConsistentClaimsPass
     {
         // Given a clock line of Sunday 11:50 AM
@@ -44,17 +138,132 @@ public static class FeatureClockClaimsGate
 
     public static class ScenarioClockLiesAreCaught
     {
-        [Fact(Skip = "pending T332 — check not wired across patter kinds yet")]
-        public static void A_wrong_weekday_in_a_lead_in_is_rejected() =>
-            Assert.Fail("pending T332: 'this Saturday morning' against a Sunday clock line rejects with the weekday violation");
+        // Wrong-weekday and wrong-daypart replies, both under a present-frame marker (SPEC
+        // F138.3's own closed marker set) so they are genuine claims, not displaced/recall
+        // mentions the checker deliberately lets pass. Sunday 11:50 AM (FixedStationLocalNow)
+        // makes "this Saturday" a weekday violation and "it's tonight" a daypart violation
+        // (tonight's own "night" category window is 21:00-04:59, nowhere near 11:00).
+        const string WrongWeekdayCopy = "This Saturday has been one for the books so let's keep it going.";
+        const string WrongDaypartCopy = "It's tonight and this one is going to hit just right.";
+        const string CleanReply = "Coming up next a classic from the vault.";
 
-        [Fact(Skip = "pending T332")]
-        public static void A_wrong_daypart_is_rejected() =>
-            Assert.Fail("pending T332: 'Tonight' at 11:50 AM rejects with the daypart violation");
+        [Fact]
+        public static async Task A_wrong_weekday_in_a_lead_in_is_rejected()
+        {
+            // Given a first lead-in reply asserting the wrong weekday and a clean second reply,
+            // driven through the real production LlmCopyWriter seam
+            var (writer, bodies, _) = BuildWriter((call, _) => Ok(call == 1 ? WrongWeekdayCopy : CleanReply));
 
-        [Fact(Skip = "pending T332")]
-        public static void A_back_announce_is_checked_like_a_lead_in() =>
-            Assert.Fail("pending T332: the gate applies to every LLM patter kind, not the context lane alone");
+            // When the render goes through WriteAsync -> RequestCleanedCompletionAsync
+            var result = await writer.WriteAsync(LeadInRequest(), CancellationToken.None);
+
+            // Then the clean re-ask airs, and exactly one re-ask fired — never the wrong-weekday text
+            Assert.Equal(CleanReply, result.Text);
+            Assert.True(result.FreshPerAiring);
+            Assert.Equal(2, bodies.Count);
+        }
+
+        [Fact]
+        public static async Task A_wrong_daypart_is_rejected()
+        {
+            // Given a first lead-in reply asserting the wrong daypart and a clean second reply
+            var (writer, bodies, _) = BuildWriter((call, _) => Ok(call == 1 ? WrongDaypartCopy : CleanReply));
+
+            var result = await writer.WriteAsync(LeadInRequest(), CancellationToken.None);
+
+            Assert.Equal(CleanReply, result.Text);
+            Assert.True(result.FreshPerAiring);
+            Assert.Equal(2, bodies.Count);
+        }
+
+        [Fact]
+        public static async Task A_back_announce_is_checked_like_a_lead_in()
+        {
+            // Given the SAME wrong-weekday shape, but for BackAnnounce instead of LeadIn — the
+            // gate applies to every LLM patter kind (F138.3), not the context lane or LeadIn alone
+            var (writer, bodies, _) = BuildWriter((call, _) => Ok(call == 1 ? WrongWeekdayCopy : CleanReply));
+
+            var result = await writer.WriteAsync(BackAnnounceRequest(), CancellationToken.None);
+
+            Assert.Equal(CleanReply, result.Text);
+            Assert.True(result.FreshPerAiring);
+            Assert.Equal(2, bodies.Count);
+        }
+    }
+
+    // The truth-gate ladder is reachable from WritePreviewAsync too (review round-2 findings F1-F3,
+    // PLAN T332) — RequestCleanedCompletionAsync is the ONE seam both WriteAsync and
+    // WritePreviewAsync call, and CheckTruthGate/RunTruthGateLadderAsync gate on request.Kind alone,
+    // never on which caller reached them. These facts pin that reachability directly rather than
+    // leaving it as an inference from the production seam's own doc comments. They live HERE, not in
+    // Story123_PersonaPreviewWriter, because they are specifically about the T332 ladder's OWN
+    // preview reachability (a brand-new code path as of this task) — Story123 already owns the
+    // broader, pre-existing "preview never templates" contract (SPEC F35.6) and has no reason to grow
+    // clock/fact-claim fixtures of its own. Reuses this file's own call-scripted BuildWriter fixture
+    // rather than Story123's MockCompletionsServer idiom, since a poisoned-then-clean re-ask needs a
+    // reply that differs BY CALL NUMBER — exactly what BuildWriter already scripts and
+    // MockCompletionsServer's single mutable ReplyContent field does not.
+    public static class ScenarioPreviewReachesTheLadderToo
+    {
+        const string WrongWeekdayCopy = "This Saturday has been one for the books so let's keep it going.";
+        const string CleanReply = "Coming up next a classic from the vault.";
+
+        [Fact]
+        public static async Task A_poisoned_lead_in_preview_reasks_once_and_returns_the_clean_text()
+        {
+            // Given a first preview reply asserting the wrong weekday and a clean second reply
+            var (writer, bodies, _) = BuildWriter((call, _) => Ok(call == 1 ? WrongWeekdayCopy : CleanReply));
+
+            // When the preview goes through WritePreviewAsync -> RequestCleanedCompletionAsync
+            var result = await writer.WritePreviewAsync(LeadInRequest(), personaOverride: null, CancellationToken.None);
+
+            // Then the clean re-ask airs as a Success, exactly one re-ask fired — the SAME ladder
+            // WriteAsync exercises, reachable from the preview seam too
+            var success = Assert.IsType<PersonaPreviewResult.Success>(result);
+            Assert.Equal(CleanReply, success.Text);
+            Assert.Equal(2, bodies.Count);
+        }
+
+        [Fact]
+        public static async Task An_exhausted_ladder_preview_names_the_truth_gate_not_empty_or_over_length()
+        {
+            // Given BOTH the first reply AND the re-ask asserting the wrong weekday
+            var (writer, bodies, _) = BuildWriter((_, _) => Ok(WrongWeekdayCopy));
+
+            // When the preview exhausts the ladder
+            var result = await writer.WritePreviewAsync(LeadInRequest(), personaOverride: null, CancellationToken.None);
+
+            // Then Failed.Detail names the truth gate (review round-2 finding F2 — DescribeNullTextReason
+            // reused here), never the wrong-lever hygiene wording a preview used to report
+            // unconditionally for ANY null TextOf result before this fix
+            var failed = Assert.IsType<PersonaPreviewResult.Failed>(result);
+            Assert.Contains("truth gate", failed.Detail, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("empty or over-length", failed.Detail, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(2, bodies.Count);
+        }
+
+        [Fact]
+        public static async Task A_factless_context_segment_preview_is_still_clock_checked()
+        {
+            // Given a ContextSegment preview with NO fact block at all — the ONLY shape that ever
+            // reaches this seam with ContextFacts null (PersonaController.Preview never supplies
+            // one; the AIR path never builds a factless ContextSegment request at all —
+            // Orchestrator.BuildContextSegmentRequestAsync's own blank-facts guard) — and a first
+            // reply asserting the wrong weekday, which a Kind-based whole-gate exemption (deleted,
+            // review round-2 finding F1) used to let straight through unchecked
+            var (writer, bodies, _) = BuildWriter((call, _) => Ok(call == 1 ? WrongWeekdayCopy : CleanReply));
+
+            // When the preview renders
+            var result = await writer.WritePreviewAsync(
+                ContextRequest(facts: null), personaOverride: null, CancellationToken.None);
+
+            // Then the clock half still gates it — one re-ask, clean text airs — proving the FACTS
+            // half's own "never even ask" (CheckTruthGate's factBlock-is-null guard) is scoped to the
+            // facts half alone, never the whole gate
+            var success = Assert.IsType<PersonaPreviewResult.Success>(result);
+            Assert.Equal(CleanReply, success.Text);
+            Assert.Equal(2, bodies.Count);
+        }
     }
 
     public static class SadPathExemptionsHold
@@ -311,6 +520,147 @@ public static class FeatureClockClaimsGate
             // Then  that same category's own overlapping window always includes the hour it was
             //       derived from — the two structures can never disagree about this hour
             Assert.True(ClaimVocabulary.HourIsInCategory(category, hour));
+        }
+    }
+
+    // The gh-#438 aired exhibit, end to end, through the real production LlmCopyWriter seam (PLAN
+    // T332) — not the pure-checker-level pin ScenarioRealisticPatterAcceptanceSet already holds.
+    public static class ScenarioGh438ExhibitEndToEnd
+    {
+        // The exhibit's own two lines, unchanged: "this Saturday morning" still violates under the
+        // amended present-frame rule (a weekday claim); the bare "Tonight we flip" mention does not
+        // (no greeting/copula marker precedes it — ScenarioRealisticPatterAcceptanceSet's own
+        // A_bare_daypart_mention_with_no_greeting_marker_passes pins that half separately), so this
+        // exhibit's ladder trip is the weekday claim alone.
+        const string PoisonedExhibit =
+            "We're diving into a neon dusk on this Saturday morning. Tonight we flip the switch and keep it going.";
+        const string CleanReply =
+            "We're diving into a neon dusk this evening. Let's flip the switch and keep it going.";
+
+        [Fact]
+        public static async Task The_pinned_exhibit_recovers_through_the_reask()
+        {
+            // Given the gh-#438 exhibit's own poisoned first reply, aired at Sunday 11:50 AM while
+            // the F117 clock line named the correct instant, and a clean second reply
+            var (writer, bodies, _) = BuildWriter((call, _) => Ok(call == 1 ? PoisonedExhibit : CleanReply));
+
+            // When the render goes through the real ladder end to end
+            var result = await writer.WriteAsync(LeadInRequest(), CancellationToken.None);
+
+            // Then the clean re-ask airs — genuinely LLM-authored — never the exhibit's own
+            // invented "this Saturday morning"
+            Assert.Equal(CleanReply, result.Text);
+            Assert.True(result.FreshPerAiring);
+            Assert.Equal(2, bodies.Count);
+        }
+    }
+
+    // The composite check (SPEC F138.2 + F138.3, PLAN T332): a ContextSegment reply violating BOTH
+    // claim families gets exactly ONE re-ask naming both — never two chained ladder runs (the T331
+    // reviewer ruling; see LlmCopyWriter.CheckTruthGate's own remarks).
+    public static class ScenarioCompositeContextChecksBothFamilies
+    {
+        const string FactBlock = "Edmonton: overcast, 15°C. Today's high 21°C, low 12°C.";
+
+        // gh-#434's own exhibit shape, unchanged: a digit run ("6") and a condition word
+        // ("sunshine") the fact block never supports, PLUS — at this file's Sunday clock — "today
+        // is saturday" is now ALSO a clock violation, not merely a fact-block one: the SAME token
+        // trips BOTH CheckFacts (no weekday anywhere in the fact block) and CheckClock (the actual
+        // day is Sunday, not Saturday).
+        const string PoisonedCopy =
+            "It feels like 6 degrees below freezing with plenty of sunshine and today is saturday here in the studio.";
+        const string CleanReply = "It's overcast today at 15 degrees with a high of 21 and a low of 12.";
+
+        [Fact]
+        public static async Task A_context_reply_violating_both_families_gets_one_reask_naming_both()
+        {
+            // Given the composite poisoned reply and a clean second reply
+            var (writer, bodies, _) = BuildWriter((call, _) => Ok(call == 1 ? PoisonedCopy : CleanReply));
+
+            // When the render goes through the real ladder end to end
+            var result = await writer.WriteAsync(ContextRequest(FactBlock), CancellationToken.None);
+
+            // Then the clean re-ask airs, and exactly ONE re-ask fired for BOTH claim families —
+            // never a second, chained ladder run
+            Assert.Equal(CleanReply, result.Text);
+            Assert.True(result.FreshPerAiring);
+            Assert.Equal(2, bodies.Count);
+
+            // And that single re-ask's own prompt names a violation from EACH family: the facts
+            // half ("sunshine", never in the fact block) and the clock half (the correct weekday
+            // named as the FIX, "actually Sunday" — the clock-violation clause shape,
+            // LlmPromptBuilder.DescribeViolationForReask's own Expected-is-set branch, distinct
+            // from a bare "Sunday" mention, which the ambient F71.8 clock line
+            // (LlmPromptBuilder.BuildStationClockLine) would already put in every prompt regardless
+            // of any violation at all) — proof the two checks composed into one gate/re-ask cycle
+            // rather than needing two.
+            var reaskPrompt = ExtractUserContent(bodies[1]);
+            Assert.Contains("sunshine", reaskPrompt, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("actually Sunday", reaskPrompt, StringComparison.Ordinal);
+        }
+    }
+
+    // The track-title exemption (SPEC F138.3), through the real writer rather than CopyClaims in
+    // isolation (SadPathExemptionsHold above already pins the pure-checker level).
+    public static class SadPathTrackTitleExemptionThroughTheRealWriter
+    {
+        const string TrackTitleMention = "Coming up next, it's Saturday Night Fever.";
+
+        [Fact]
+        public static async Task A_lead_in_naming_its_own_track_title_is_not_rejected()
+        {
+            // Given a lead-in whose track IS "Saturday Night Fever", and a reply that names it
+            // under a present-frame marker ("it's Saturday Night Fever") — a claim that would
+            // otherwise violate this file's Sunday clock
+            var (writer, bodies, _) = BuildWriter((_, _) => Ok(TrackTitleMention));
+
+            // When it renders through the real writer
+            var result = await writer.WriteAsync(LeadInRequest(trackTitle: "Saturday Night Fever"), CancellationToken.None);
+
+            // Then the title mention is exempt — the copy airs on the FIRST call, no re-ask ever fired
+            Assert.Equal(TrackTitleMention, result.Text);
+            Assert.True(result.FreshPerAiring);
+            Assert.Single(bodies);
+        }
+    }
+
+    // The per-kind floor (PLAN T332 investigation): LeadIn/BackAnnounce have no F107.6-style
+    // skip-never-silence guard the way ContextSegment/SignOff/SignOn do (TtsSegmentSource's own
+    // non-fresh-copy guard names only those three) — a still-violating re-ask degrades to
+    // PatterTemplateRenderer's deterministic template instead, and that template DOES reach air.
+    public static class SadPathReaskStillViolatingLandsOnTheTemplate
+    {
+        const string WrongWeekdayCopy = "This Saturday has been one for the books so let's keep it going.";
+
+        [Fact]
+        public static async Task A_lead_in_whose_reask_still_violates_lands_on_the_template()
+        {
+            // Given BOTH the first reply AND the re-ask asserting the wrong weekday
+            var (writer, bodies, logger) = BuildWriter((_, _) => Ok(WrongWeekdayCopy));
+
+            // When the render exhausts the ladder
+            var result = await writer.WriteAsync(LeadInRequest(), CancellationToken.None);
+
+            // Then it degrades to the LeadIn template floor (PatterTemplateRenderer.Expand's own
+            // arm, which renders fixed prose with no weekday/daypart word in it for THIS request —
+            // it interpolates the track's own title/artist verbatim, so it is the template's fixed
+            // wording, not a guarantee about arbitrary track metadata, that the floor actually relies
+            // on) — never the still-violating LLM text, and never silence either: unlike
+            // ContextSegment/SignOff/SignOn, this template DOES reach air for LeadIn. Still exactly
+            // one re-ask, never a retry storm.
+            Assert.Equal("Coming up: Astral Plane by Valerie June.", result.Text);
+            Assert.False(result.FreshPerAiring);
+            Assert.Equal(2, bodies.Count);
+
+            // And the failure WARN names this as a WRONG-DAY claim, never an "unsupported claim"
+            // (review round-2 finding F4 — LlmCopyWriter.DescribeViolationForLog's three-way split
+            // was unpinned: a clock violation carries ClaimViolation.Expected, a fact-block violation
+            // never does, and only THIS fact proves the Expected-set branch actually fires rather
+            // than every violation reading as a generic "unsupported claim").
+            Assert.Contains(
+                logger.Warnings, warning => warning.Contains("wrong-day claim", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(
+                logger.Warnings, warning => warning.Contains("unsupported claim", StringComparison.OrdinalIgnoreCase));
         }
     }
 }
