@@ -49,7 +49,9 @@ public static class FeatureLlmCopyWriter
             new FakeActivePersonaAccessor(),
             logger,
             TimeProvider.System,
-            new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+            new LlmCallRecorder(
+                new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                new LlmCallCauseCounters(TimeProvider.System)),
             new FakeDegradationModeReader());
         return (writer, holder, logger);
     }
@@ -149,7 +151,9 @@ public static class FeatureLlmCopyWriter
                 new FakeActivePersonaAccessor(),
                 new CapturingLogger<LlmCopyWriter>(),
                 TimeProvider.System,
-                new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                new LlmCallRecorder(
+                    new LlmCallRing(new TestOptionsMonitor<LlmOptions>(new LlmOptions())),
+                    new LlmCallCauseCounters(TimeProvider.System)),
                 new FakeDegradationModeReader());
 
             var track = new MediaItem(
@@ -400,7 +404,7 @@ public static class FeatureLlmCopyWriter
                 new FakeActivePersonaAccessor { Persona = persona },
                 new CapturingLogger<LlmCopyWriter>(),
                 TimeProvider.System,
-                ring,
+                new LlmCallRecorder(ring, new LlmCallCauseCounters(TimeProvider.System)),
                 new FakeDegradationModeReader());
             return (writer, ring);
         }

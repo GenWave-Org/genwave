@@ -93,7 +93,8 @@ public static class FeatureLlmDegradationModes
         var template = new TemplateCopyWriter(new PatterTemplateRenderer());
         var llmWriter = new LlmCopyWriter(
             template, new FakeHttpClientFactory(), llmOptions, holder, new FakeActivePersonaAccessor(),
-            new CapturingLogger<LlmCopyWriter>(), clock, new LlmCallRing(llmOptions), controller);
+            new CapturingLogger<LlmCopyWriter>(), clock,
+            new LlmCallRecorder(new LlmCallRing(llmOptions), new LlmCallCauseCounters(clock)), controller);
         var writer = new DegradationGatedCopyWriter(controller, llmWriter, template, degradationOptions, clock);
         return (writer, template, controller, holder, health, clock, llmOptions);
     }
@@ -435,7 +436,7 @@ public static class FeatureLlmDegradationModes
             IPersonaPreviewWriter previewWriter = new LlmCopyWriter(
                 new TemplateCopyWriter(new PatterTemplateRenderer()), new FakeHttpClientFactory(), llmOptions,
                 holder, new FakeActivePersonaAccessor(), new CapturingLogger<LlmCopyWriter>(), clock,
-                new LlmCallRing(llmOptions), controller);
+                new LlmCallRecorder(new LlmCallRing(llmOptions), new LlmCallCauseCounters(clock)), controller);
 
             // When an operator triggers an explicit preview/test render
             var result = await previewWriter.WritePreviewAsync(LeadInRequest(), personaOverride: null, CancellationToken.None);

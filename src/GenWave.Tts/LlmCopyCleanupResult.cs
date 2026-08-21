@@ -31,5 +31,13 @@ internal abstract record LlmCopyCleanupResult
     /// FIRST sentence already exceeds the cap (nothing complete to cut at) — the pre-F123 reject
     /// stands, byte-identical to before T263.
     /// </summary>
-    public sealed record Rejected : LlmCopyCleanupResult;
+    /// <param name="WasOverLength">
+    /// SPEC F139.1 (STORY-353, PLAN T330): <see langword="true"/> for the over-length-with-no-salvage
+    /// case (a candidate existed but none survived <c>maxChars</c> — the gh-#277 family,
+    /// <see cref="LlmCallCause.OverLength"/>); <see langword="false"/> when hygiene left an empty
+    /// string outright (<see cref="LlmCallCause.EmptyCompletion"/>). Decided once, here at the source
+    /// (<see cref="LlmCopyWriter.CleanCopy"/>), never re-derived downstream from anything about the
+    /// text itself.
+    /// </param>
+    public sealed record Rejected(bool WasOverLength) : LlmCopyCleanupResult;
 }

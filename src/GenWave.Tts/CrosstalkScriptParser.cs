@@ -81,8 +81,11 @@ static class CrosstalkScriptParser
 
         if (rawLines.Count is < MinLines or > MaxLines)
         {
+            // SPEC F139.1 (T330 review round 1 amendment): a malformed-SHAPE reject — the reply came
+            // back with content, it just never fit the required line count (an over-MaxLines reply is
+            // the amendment's own exhibit: TOO MUCH content is not "empty" by any honest reading).
             return Discarded(
-                $"expected {MinLines}-{MaxLines} speaker-tagged lines, got {rawLines.Count}");
+                $"expected {MinLines}-{MaxLines} speaker-tagged lines, got {rawLines.Count}", LlmCallCause.MalformedResponse);
         }
 
         var lines = new List<CrosstalkAiredLine>(rawLines.Count);
@@ -90,28 +93,39 @@ static class CrosstalkScriptParser
         {
             if (!TryParseLine(rawLine, out var speaker, out var isInterjection, out var rawText))
             {
+                // SPEC F139.1 (T330 review round 1 amendment): an unrecognized speaker tag is a
+                // malformed SHAPE, not empty content.
                 return Discarded(
                     $"line does not match the '{HostTag}:'/'{NeighborTag}:' speaker-tag format: " +
-                    $"\"{TruncateForEcho(rawLine)}\"");
+                    $"\"{TruncateForEcho(rawLine)}\"", LlmCallCause.MalformedResponse);
             }
 
             var cleaned = LlmCopyWriter.ApplyCopyHygiene(rawText);
             if (cleaned.Length == 0)
-                return Discarded($"a {DescribeSpeaker(speaker)} line was empty after cleanup");
+            {
+                // SPEC F139.1 (T330 review round 1 amendment): the ONE parser reject that STAYS
+                // EmptyCompletion — the tag matched correctly (the SHAPE was fine), only the text
+                // after it was empty. See LlmCallCause's own remarks for why this is the deliberate
+                // holdout among the parser's reject branches.
+                return Discarded($"a {DescribeSpeaker(speaker)} line was empty after cleanup", LlmCallCause.EmptyCompletion);
+            }
             if (cleaned.Length > maxLineChars)
             {
                 return Discarded(
                     $"a {DescribeSpeaker(speaker)} line ({cleaned.Length} chars) exceeded the " +
-                    $"{maxLineChars}-char per-line budget — no line is ever trimmed (SPEC F127.4)");
+                    $"{maxLineChars}-char per-line budget — no line is ever trimmed (SPEC F127.4)", LlmCallCause.OverLength);
             }
 
             lines.Add(new CrosstalkAiredLine(speaker, cleaned, isInterjection));
         }
 
+        // SPEC F139.1 (T330 review round 1 amendment): a missing HOST/NEIGHBOR turn is a malformed
+        // SHAPE too — every line matched the speaker-tag format individually, but the exchange as a
+        // whole never took the required two-voice shape.
         if (lines.All(line => line.Speaker != CrosstalkSpeaker.Host))
-            return Discarded($"no {HostTag} line appeared — both speakers must be present");
+            return Discarded($"no {HostTag} line appeared — both speakers must be present", LlmCallCause.MalformedResponse);
         if (lines.All(line => line.Speaker != CrosstalkSpeaker.Neighbor))
-            return Discarded($"no {NeighborTag} line appeared — both speakers must be present");
+            return Discarded($"no {NeighborTag} line appeared — both speakers must be present", LlmCallCause.MalformedResponse);
 
         for (var i = 1; i < lines.Count; i++)
         {
@@ -123,9 +137,12 @@ static class CrosstalkScriptParser
 
             if (lines[i].Speaker == lines[i - 1].Speaker)
             {
+                // SPEC F139.1 (T330 review round 1 amendment): broken alternation is a malformed
+                // SHAPE — see this file's own MinLines/MaxLines check above for the amendment's
+                // full rationale.
                 return Discarded(
                     $"speaker alternation broken at line {i + 1} (mark an overlapping line as " +
-                    $"'{InterjectionMarker}' instead)");
+                    $"'{InterjectionMarker}' instead)", LlmCallCause.MalformedResponse);
             }
         }
 
@@ -135,7 +152,7 @@ static class CrosstalkScriptParser
         {
             return Discarded(
                 $"estimated {estimatedSeconds:F1}s exceeds the {durationTargetSeconds}s " +
-                $"{nameof(CrosstalkOptions.DurationTargetSeconds)} target");
+                $"{nameof(CrosstalkOptions.DurationTargetSeconds)} target", LlmCallCause.OverLength);
         }
 
         return new CrosstalkWriteResult.Accepted(new CrosstalkAiredScript(lines));
@@ -187,5 +204,5 @@ static class CrosstalkScriptParser
     static string TruncateForEcho(string text) =>
         text.Length <= MaxEchoedLineChars ? text : text[..MaxEchoedLineChars] + "…";
 
-    static CrosstalkWriteResult.Discarded Discarded(string reason) => new(reason);
+    static CrosstalkWriteResult.Discarded Discarded(string reason, LlmCallCause cause) => new(reason, cause);
 }

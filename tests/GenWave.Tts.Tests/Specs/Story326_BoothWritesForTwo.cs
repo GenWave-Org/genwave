@@ -62,7 +62,7 @@ public static class FeatureBoothWritesForTwo
                 MaxCopyChars = maxCopyChars,
             }),
             crosstalkMonitor,
-            ring,
+            new LlmCallRecorder(ring, new LlmCallCauseCounters(TimeProvider.System)),
             new FakeDegradationModeReader(),
             logger,
             TimeProvider.System);
@@ -536,6 +536,22 @@ public static class FeatureBoothWritesForTwo
 
             var discarded = Assert.IsType<CrosstalkWriteResult.Discarded>(result);
             Assert.Contains(CrosstalkScriptParser.NeighborTag, discarded.Reason, StringComparison.Ordinal);
+        }
+
+        // SPEC F139.1 amendment (T330 review round 1, 2026-08-20 — the F135.5 precedent): the
+        // reviewer's own exhibit — a reply carrying MORE than MaxLines is not "empty" by any honest
+        // reading, so the whole parser-shape family (this branch included) moved off EmptyCompletion
+        // onto its own MalformedResponse bucket.
+        [Fact]
+        public async Task A_twelve_line_reply_is_a_malformed_response_not_an_empty_one()
+        {
+            mock.ReplyContent = string.Join('\n', Enumerable.Range(1, 12).Select(i =>
+                $"{(i % 2 == 1 ? CrosstalkScriptParser.HostTag : CrosstalkScriptParser.NeighborTag)}: Line {i}."));
+            var writer = BuildWriter(mock.BaseUri.ToString());
+
+            var result = await writer.WriteExchangeAsync(Request(), CancellationToken.None);
+
+            Assert.Equal(LlmCallCause.MalformedResponse, Assert.IsType<CrosstalkWriteResult.Discarded>(result).Cause);
         }
     }
 

@@ -124,7 +124,7 @@ public sealed class LlmCopyWriter(
     IActivePersonaAccessor personaAccessor,
     ILogger<LlmCopyWriter> logger,
     TimeProvider timeProvider,
-    LlmCallRing callRing,
+    LlmCallRecorder recorder,
     IDegradationModeReader degradationMode,
     IStationClockProvider? stationClock = null,
     IContextPatterFactSource? patterFactSource = null,
@@ -686,15 +686,22 @@ public sealed class LlmCopyWriter(
             // (empty/no-sentence-fits) stays Ok exactly as before T263 (a hygiene decision the caller
             // makes, not a fact about whether the call itself succeeded; see LlmCallOutcome.Ok's own
             // remarks); a trim gets its own finer-grained outcome instead (LlmCallOutcome.Trimmed).
-            var ringOutcome = cleanup switch
+            //
+            // SPEC F139.1 (STORY-353, PLAN T330): the additive Cause field splits the SAME three
+            // shapes finer still — a Trimmed salvage still aired, so it is Success exactly like an
+            // exact Fits; a full Rejected splits on WHY nothing survived (LlmCopyCleanupResult.Rejected's
+            // own WasOverLength, decided once at CleanCopy, never re-derived here).
+            var (ringOutcome, cause) = cleanup switch
             {
-                LlmCopyCleanupResult.Trimmed => LlmCallOutcome.Trimmed,
-                LlmCopyCleanupResult.Fits or LlmCopyCleanupResult.Rejected => LlmCallOutcome.Ok,
+                LlmCopyCleanupResult.Trimmed => (LlmCallOutcome.Trimmed, LlmCallCause.Success),
+                LlmCopyCleanupResult.Fits => (LlmCallOutcome.Ok, LlmCallCause.Success),
+                LlmCopyCleanupResult.Rejected { WasOverLength: true } => (LlmCallOutcome.Ok, LlmCallCause.OverLength),
+                LlmCopyCleanupResult.Rejected { WasOverLength: false } => (LlmCallOutcome.Ok, LlmCallCause.EmptyCompletion),
                 _ => throw new UnreachableException($"Unhandled {nameof(LlmCopyCleanupResult)} case."),
             };
-            callRing.Record(
+            recorder.Record(
                 personaName, systemPrompt, userPrompt, text, startedAt, ElapsedMs(startedAt),
-                ringOutcome, statusDetail: null, mode);
+                ringOutcome, statusDetail: null, mode, cause, cfg.Model);
             return cleanup;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -706,10 +713,10 @@ public sealed class LlmCopyWriter(
         }
         catch (Exception ex)
         {
-            var (outcome, detail) = ClassifyForRing(ex);
-            callRing.Record(
+            var (outcome, cause, detail) = ClassifyForRing(ex);
+            recorder.Record(
                 personaName, systemPrompt, userPrompt, response: null, startedAt, ElapsedMs(startedAt),
-                outcome, detail, mode);
+                outcome, detail, mode, cause, cfg.Model);
             throw;
         }
         finally
@@ -728,20 +735,24 @@ public sealed class LlmCopyWriter(
         stationClock?.LocalNow ?? TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), timeProvider.LocalTimeZone);
 
     /// <summary>
-    /// Classifies a completion fault for <see cref="LlmCallRing"/> (SPEC F73.1): the ONE other
+    /// Classifies a completion fault for <see cref="LlmCallRing"/> (SPEC F73.1, F139.1): the ONE other
     /// <see cref="OperationCanceledException"/> source reaching this catch-all (the caller's own
     /// cancellation is already filtered out by the clause above) is <c>RequestCleanedCompletionAsync</c>'s
-    /// own <c>timeoutCts</c> firing — <see cref="LlmCallOutcome.Timeout"/>, distinct from a generic
-    /// <see cref="LlmCallOutcome.Failed"/>. Deliberately independent of <see cref="LogFailure"/>'s
-    /// own <c>detail</c> switch (SPEC F69.7) — that one feeds a WARN line and has no need to split
-    /// out timeout, so duplicating this small a classification is simpler than threading a shared
-    /// helper through two call sites with different needs.
+    /// own <c>timeoutCts</c> firing — <see cref="LlmCallOutcome.Timeout"/>/<see cref="LlmCallCause.Timeout"/>,
+    /// distinct from a generic <see cref="LlmCallOutcome.Failed"/>/<see cref="LlmCallCause.ConnectionFailure"/>.
+    /// The F139 taxonomy has no finer split for "a response arrived but was non-2xx" versus "no
+    /// response ever arrived at all" — both land on <see cref="LlmCallCause.ConnectionFailure"/> here,
+    /// same as they already share <see cref="LlmCallOutcome.Failed"/>. Deliberately independent of
+    /// <see cref="LogFailure"/>'s own <c>detail</c> switch (SPEC F69.7) — that one feeds a WARN line
+    /// and has no need to split out timeout, so duplicating this small a classification is simpler
+    /// than threading a shared helper through two call sites with different needs.
     /// </summary>
-    internal static (LlmCallOutcome Outcome, string Detail) ClassifyForRing(Exception ex) => ex switch
+    internal static (LlmCallOutcome Outcome, LlmCallCause Cause, string Detail) ClassifyForRing(Exception ex) => ex switch
     {
-        OperationCanceledException => (LlmCallOutcome.Timeout, "Llm:TimeoutSeconds exceeded"),
-        HttpRequestException { StatusCode: { } status } => (LlmCallOutcome.Failed, $"HTTP {(int)status}"),
-        _ => (LlmCallOutcome.Failed, ex.GetType().Name),
+        OperationCanceledException => (LlmCallOutcome.Timeout, LlmCallCause.Timeout, "Llm:TimeoutSeconds exceeded"),
+        HttpRequestException { StatusCode: { } status } =>
+            (LlmCallOutcome.Failed, LlmCallCause.ConnectionFailure, $"HTTP {(int)status}"),
+        _ => (LlmCallOutcome.Failed, LlmCallCause.ConnectionFailure, ex.GetType().Name),
     };
 
     /// <summary>
@@ -815,14 +826,14 @@ public sealed class LlmCopyWriter(
         var text = ApplyCopyHygiene(raw);
 
         if (text.Length == 0)
-            return new LlmCopyCleanupResult.Rejected();
+            return new LlmCopyCleanupResult.Rejected(WasOverLength: false);
 
         if (text.Length <= maxChars)
             return new LlmCopyCleanupResult.Fits(text);
 
         var salvaged = TrimToLastCompleteSentence(text, maxChars);
         return salvaged is null
-            ? new LlmCopyCleanupResult.Rejected()
+            ? new LlmCopyCleanupResult.Rejected(WasOverLength: true)
             : new LlmCopyCleanupResult.Trimmed(salvaged, CharsBeforeTrim: text.Length);
     }
 

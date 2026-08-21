@@ -108,6 +108,42 @@ file sealed class NeverCalledCueAnalyzer : ICueAnalyzer
 /// </summary>
 internal static class CrosstalkWorkerHarness
 {
+    /// <summary>
+    /// Hygiene fix (round-N review — the leaked-temp-dir finding): every <see cref="BuildAsync"/> call
+    /// used to hand <see cref="CrosstalkAssembler"/> a FRESH <c>Directory.CreateTempSubdirectory</c>
+    /// root of its own, straight under the OS temp directory, with nothing ever deleting it — hundreds
+    /// of orphaned <c>crosstalk-worker-test-*</c> directories accumulate on a box that has run this
+    /// suite repeatedly (this file alone is called from three spec files, several times each), eventually
+    /// exhausting tmpfs inodes and silently redding unrelated facts across the whole test run. ONE
+    /// shared root for the WHOLE test process instead, created lazily on first use; each
+    /// <see cref="BuildAsync"/> call gets its own uniquely-named SUBdirectory underneath it, and
+    /// <see cref="AppDomain.ProcessExit"/> deletes the entire root, recursively, exactly once, when the
+    /// test host process itself ends — no per-call disposal for every one of the many call sites across
+    /// Story328/Story353/Story354 to thread through.
+    /// </summary>
+    static readonly string SharedTempRoot = CreateSharedTempRoot();
+
+    static string CreateSharedTempRoot()
+    {
+        var root = Directory.CreateTempSubdirectory("crosstalk-worker-tests-").FullName;
+        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+        {
+            try
+            {
+                Directory.Delete(root, recursive: true);
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup — a stray open handle at process teardown never fails the run.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Same — teardown ordering is not guaranteed, so this is advisory, not load-bearing.
+            }
+        };
+        return root;
+    }
+
     static readonly string WellFormedReply = string.Join('\n', new[]
     {
         "HOST: Hey, welcome back to the show.",
@@ -131,12 +167,22 @@ internal static class CrosstalkWorkerHarness
     /// empty string here — <see cref="CrosstalkScriptWriter.WriteExchangeAsync"/>'s own
     /// "Llm:Endpoint is not configured" short-circuit, discarding in milliseconds with NO generation
     /// ever attempted.</param>
+    /// <param name="callRing">
+    /// SPEC F139.1 (STORY-353, PLAN T330): a caller that wants to assert on what
+    /// <see cref="CrosstalkStockWorker"/> stamps into the ring (e.g. a window-cancellation's
+    /// <see cref="LlmCallCause.CanceledByWindow"/>) passes its OWN instance here to read back
+    /// afterward. Defaults to a fresh, unobserved ring — every pre-T330 fact that never cared about
+    /// the ring at all keeps compiling and passing unchanged.
+    /// </param>
+    /// <param name="causeCounters">The SPEC F139.2 sibling of <paramref name="callRing"/> — same
+    /// "supply your own to observe it, otherwise get a fresh unobserved one" shape.</param>
     public static async Task<(
         CrosstalkStockWorker Worker, OnAirRenderGate Gate, FakeTimeProvider TimeProvider,
         NowPlayingService NowPlaying, FakeHttpMessageHandler LlmHandler, BlockingTtsSynthesizer Synthesizer)>
         BuildAsync(
             DateTimeOffset now, string showSlug, string showName, string? replyContent = null,
-            string llmEndpoint = "http://fake-llm.local")
+            string llmEndpoint = "http://fake-llm.local", LlmCallRing? callRing = null,
+            LlmCallCauseCounters? causeCounters = null)
     {
         var timeProvider = new FakeTimeProvider(now);
         var gate = new OnAirRenderGate();
@@ -169,20 +215,33 @@ internal static class CrosstalkWorkerHarness
         {
             Content = new StringContent(wireResponse, System.Text.Encoding.UTF8, "application/json"),
         }));
+        // SPEC F139.1 (PLAN T330): ONE shared LlmOptions monitor for both the script writer and the
+        // worker itself below — the worker's own CanceledByWindow ring stamp reads Model from this
+        // SAME monitor, so a test never sees two different "Llm:Model" answers depending on which
+        // collaborator it asks.
+        var llmOptionsMonitor = new FakeOptionsMonitor<LlmOptions>(new LlmOptions
+        {
+            Endpoint = llmEndpoint, Model = "test-model", TimeoutSeconds = 5, MaxCopyChars = 300,
+        });
+        var ring = callRing ?? new LlmCallRing(new FakeOptionsMonitor<LlmOptions>(new LlmOptions()));
+        var counters = causeCounters ?? new LlmCallCauseCounters(timeProvider);
+        // SPEC F139.1/F139.2 (T330 review finding F2): ONE shared LlmCallRecorder for both the script
+        // writer and the worker below — same reasoning as llmOptionsMonitor immediately above, one
+        // seam over: a test that supplies its own ring/counters gets them fed by whichever collaborator
+        // records first, never two independently-wrapped recorders racing to write the same pair.
+        var recorder = new LlmCallRecorder(ring, counters);
+        var degradationModeReader = new FakeDegradationModeReader();
         var scriptWriter = new CrosstalkScriptWriter(
             new SingleHandlerHttpClientFactory(llmHandler),
-            new FakeOptionsMonitor<LlmOptions>(new LlmOptions
-            {
-                Endpoint = llmEndpoint, Model = "test-model", TimeoutSeconds = 5, MaxCopyChars = 300,
-            }),
+            llmOptionsMonitor,
             new FakeOptionsMonitor<CrosstalkOptions>(new CrosstalkOptions()),
-            new LlmCallRing(new FakeOptionsMonitor<LlmOptions>(new LlmOptions())),
-            new FakeDegradationModeReader(),
+            recorder,
+            degradationModeReader,
             NullLogger<CrosstalkScriptWriter>.Instance,
             timeProvider);
 
         var synthesizer = new BlockingTtsSynthesizer();
-        var cacheRoot = Directory.CreateTempSubdirectory("crosstalk-worker-test-").FullName;
+        var cacheRoot = Directory.CreateDirectory(Path.Combine(SharedTempRoot, Guid.NewGuid().ToString("N"))).FullName;
         var ttsOptions = new FakeOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot, RenderBudgetSeconds = 30 });
         var assembler = new CrosstalkAssembler(
             synthesizer,
@@ -201,7 +260,8 @@ internal static class CrosstalkWorkerHarness
         var worker = new CrosstalkStockWorker(
             planner, scriptWriter, assembler, scheduleResolver, nowPlayingService,
             identityProvider, stationClock, ttsOptions, gate,
-            NullLogger<CrosstalkStockWorker>.Instance, timeProvider);
+            NullLogger<CrosstalkStockWorker>.Instance, timeProvider,
+            llmOptionsMonitor, recorder, degradationModeReader);
 
         return (worker, gate, timeProvider, nowPlayingService, llmHandler, synthesizer);
     }
