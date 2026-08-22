@@ -78,13 +78,18 @@ static class PlayoutServiceCollectionExtensions
             // AddGenWavePlayout.
             .AddSingleton<ArtworkUrlResolver>()
             // The engine-control seam, bound to the configured Liquidsoap host. Station name on
-            // the push path is read live through IStationIdentityProvider (SPEC F44.1).
-            .AddSingleton<ILiquidsoapControl>(sp => new LiquidsoapControl(
-                sp.GetRequiredService<IOptions<LiquidsoapOptions>>().Value,
-                SingleStation.IdString,
-                sp.GetRequiredService<IStationIdentityProvider>(),
-                sp.GetRequiredService<ArtworkUrlResolver>(),
-                sp.GetRequiredService<ILogger<LiquidsoapControl>>()))
+            // the push path is read live through IStationIdentityProvider (SPEC F44.1). Wrapped in
+            // the push-honesty guard (gh-#612): a push whose file is already gone from disk is
+            // declined with a WARN here, api-side, instead of dying silently at engine-side
+            // resolution behind a success-shaped RID reply — see MediaExistencePushGuard's remarks.
+            .AddSingleton<ILiquidsoapControl>(sp => new MediaExistencePushGuard(
+                new LiquidsoapControl(
+                    sp.GetRequiredService<IOptions<LiquidsoapOptions>>().Value,
+                    SingleStation.IdString,
+                    sp.GetRequiredService<IStationIdentityProvider>(),
+                    sp.GetRequiredService<ArtworkUrlResolver>(),
+                    sp.GetRequiredService<ILogger<LiquidsoapControl>>()),
+                sp.GetRequiredService<ILogger<MediaExistencePushGuard>>()))
             // Loudness target/ceiling are deliberate boot-time values (engine-side knobs apply on
             // restart) — snapshot IOptions, not a live monitor.
             .AddSingleton(sp =>

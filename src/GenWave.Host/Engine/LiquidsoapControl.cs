@@ -65,7 +65,7 @@ sealed class LiquidsoapControl(
     public async Task<EngineMetadata> MetadataAsync(string rid, CancellationToken ct)
         => new(await ReadOutputMetadataAsync(ct));
 
-    public async Task<EnginePushResult> PushAsync(MediaItem item, double gainDb, CancellationToken ct)
+    public async Task<EnginePushResult?> PushAsync(MediaItem item, double gainDb, CancellationToken ct)
     {
         // Annotation construction is centralised in LiquidsoapAnnotationBuilder.Build so the
         // safe-track endpoint (K2b) produces byte-identical strings without duplicating logic.

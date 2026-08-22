@@ -26,6 +26,13 @@ public interface ILiquidsoapControl
     /// media id (as <c>track_id</c>), which genwave.liq exports onto the output metadata so the on-air
     /// read can see it. Returns the engine's RID alongside the artwork URL this same push stamped
     /// (SPEC F88.4, F93.3, PLAN T125) — see <see cref="EnginePushResult"/>.
+    /// <para>
+    /// Returns <see langword="null"/> when a guard DECLINED the push without contacting the engine
+    /// (gh-#612 — e.g. the item's file no longer exists on disk, so the engine would only allocate a
+    /// RID and kill the request at resolution, a success-shaped failure the reply cannot reveal). The
+    /// caller must treat null as "nothing was pushed": end the current chain and re-select next tick.
+    /// The engine-backed implementation itself never returns null — declining is a decorator concern.
+    /// </para>
     /// </summary>
-    Task<EnginePushResult> PushAsync(MediaItem item, double gainDb, CancellationToken ct);
+    Task<EnginePushResult?> PushAsync(MediaItem item, double gainDb, CancellationToken ct);
 }
