@@ -12,8 +12,10 @@ using GenWave.MediaLibrary.ExplicitClassification;
 using GenWave.MediaLibrary.Mood;
 using GenWave.MediaLibrary.Options;
 using GenWave.MediaLibrary.Scan;
+using GenWave.MediaLibrary.Station;
 using GenWave.MediaLibrary.Tests.Fakes;
 using GenWave.MediaLibrary.YearLookup;
+using Npgsql;
 using LoudnessMeasurement = GenWave.Core.Domain.Loudness;
 
 namespace GenWave.MediaLibrary.Tests;
@@ -27,6 +29,12 @@ static class Harness
         DatabaseFixture f, Channel<long>? enrichQueue = null, IAudiencePostureProvider? audiencePosture = null) =>
         new(f.DataSource, NullLogger<MediaRepository>.Instance, enrichQueue ?? Channel.CreateUnbounded<long>(),
             new Fakes.FakeSafeScopeProvider(), audiencePosture ?? new Fakes.FakeAudiencePostureProvider());
+
+    /// <summary>Builds an <see cref="AnnouncementRepository"/> over the fixture's own station_svc
+    /// data source (SPEC F143, STORY-357, PLAN T337) — mirrors <see cref="Repo"/>'s own factory shape
+    /// for the library-schema <see cref="MediaRepository"/>, one connection role over.</summary>
+    public static AnnouncementRepository AnnouncementRepo(DatabaseFixture f) =>
+        new(new Lazy<NpgsqlDataSource>(() => f.StationDataSource));
 
     /// <summary>
     /// Builds a <see cref="ScanService"/> against a real repository/media root. <paramref name="missThreshold"/>

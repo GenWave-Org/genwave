@@ -455,4 +455,44 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  token      text        NOT NULL,           -- rotated on write; busts immutable caches
 	  updated_at timestamptz NOT NULL DEFAULT now()
 	);
+
+	-- Announcements: the durable store & lifecycle (SPEC F143, STORY-357, PLAN T337, gh-#384 — the
+	-- House Voice epic). A first-class, durable unit of content with a total state machine — never a
+	-- fire-and-forget string (ARCHITECTURE.md's own design center). id is `generated always as
+	-- identity`, not `serial`/`bigserial` like most tables in this schema — ARCHITECTURE.md's own
+	-- data-model block spells the column out this exact way and this migration mirrors it verbatim.
+	--
+	-- state's five values ARE the whole lifecycle (SPEC F143.2): pending -> claimed -> aired;
+	-- claimed -> pending (re-arm, SPEC F144.5); pending|claimed -> expired (TTL passed);
+	-- pending|claimed -> declined (decline_reason set). No row is ever deleted by the pipeline; every
+	-- transition — including expiry and decline — stamps state_changed_at, so no transition is silent.
+	-- decline_reason is set iff state = 'declined'; requested_voice is an optional persona/voice
+	-- override (SPEC F144.2); source distinguishes an HA/token-authenticated submission from an admin
+	-- session one (SPEC F143.1's "token OR admin session" door). collapse_count starts at 1 and
+	-- increments on every case-folded-identical pending duplicate (SPEC F143.5) — AnnouncementRepository
+	-- (GenWave.MediaLibrary.Station) is the only writer of this table.
+	CREATE TABLE IF NOT EXISTS station.announcement (
+	  id               bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	  message          text        NOT NULL CHECK (char_length(message) <= 280),
+	  verbatim         boolean     NOT NULL DEFAULT false,
+	  requested_voice  text,
+	  source           text        NOT NULL DEFAULT 'token'
+	                     CHECK (source IN ('token', 'session')),
+	  state            text        NOT NULL DEFAULT 'pending'
+	                     CHECK (state IN ('pending', 'claimed', 'aired', 'expired', 'declined')),
+	  decline_reason   text,
+	  collapse_count   int         NOT NULL DEFAULT 1,
+	  created_at       timestamptz NOT NULL DEFAULT now(),
+	  expires_at       timestamptz NOT NULL,
+	  claimed_at       timestamptz,
+	  aired_at         timestamptz,
+	  state_changed_at timestamptz NOT NULL DEFAULT now()
+	);
+
+	-- The one query shape the vend/claim path needs (SPEC F144.1): the oldest deliverable
+	-- (still-pending) announcements. Partial on `state = 'pending'` — every other state is a terminal
+	-- or in-flight outcome this index has no reason to carry.
+	CREATE INDEX IF NOT EXISTS announcement_deliverable
+	  ON station.announcement (created_at)
+	  WHERE state = 'pending';
 	SQL

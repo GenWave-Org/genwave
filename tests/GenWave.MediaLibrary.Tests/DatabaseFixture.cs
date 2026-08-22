@@ -71,6 +71,11 @@ public sealed class DatabaseFixture : IAsyncLifetime
         // directly here, never through that DI extension.
         SqlMapper.AddTypeHandler(DateOnlyTypeHandler.Instance);
 
+        // Same reason again (SPEC F143, STORY-357, PLAN T337): production registers
+        // AnnouncementStateTypeHandler in AddAnnouncementStore — Harness.AnnouncementRepo constructs
+        // AnnouncementRepository directly here, never through that DI extension either.
+        SqlMapper.AddTypeHandler(AnnouncementStateTypeHandler.Instance);
+
         composeFile = LocateComposeFile(out var repoRoot);
         RepoRoot = repoRoot;
         Compose("up", "-d", "--wait");
@@ -245,6 +250,19 @@ public sealed class DatabaseFixture : IAsyncLifetime
         await using var conn = await StationDataSource.OpenConnectionAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "truncate table station.settings";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// Truncate <c>station.announcement</c> and reset its identity (SPEC F143, STORY-357, PLAN T337).
+    /// No FK references this table — it is a leaf table, nothing points into or out of it — so no
+    /// CASCADE is required, the same reasoning <see cref="ResetRequestAsync"/>'s own remarks give.
+    /// </summary>
+    public async Task ResetAnnouncementAsync()
+    {
+        await using var conn = await StationDataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "truncate table station.announcement restart identity";
         await cmd.ExecuteNonQueryAsync();
     }
 
