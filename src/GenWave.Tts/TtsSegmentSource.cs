@@ -76,38 +76,60 @@ public sealed class TtsSegmentSource(
             var cfg = options.CurrentValue;
             var copy = await copyWriter.WriteAsync(request, ct);
 
-            // Design ruling, spec-cited (T123 review finding, extended to ContextSegment at T224):
-            // a handoff piece OR a context segment must NEVER air non-LLM-authored copy. F92.4's
-            // ladder is "two-piece -> whichever piece rendered -> clean cut" — there is no "templated
-            // piece" rung — and F92.5/F107.6 both state this copy IS an LLM-authored blurb, full
-            // stop: for a handoff, the alternative is silently wrong ceremony phrasing; for a context
-            // segment, the alternative is PatterTemplateRenderer's inert placeholder ("Here's
-            // something worth knowing") standing in for actual facts, which defeats the entire point
-            // of a context provider (never airable filler, SPEC F107.6). copy.FreshPerAiring false
-            // here means every writer in the chain missed: LlmCopyWriter's own FOUR degrade paths
-            // (disabled endpoint, timeout/non-2xx/connect, empty-or-over-length after cleanup, and —
-            // as of PLAN T332, SPEC F138.2-F138.4 — the truth-gate ladder exhausting its one re-ask)
-            // AND DegradationGatedCopyWriter routing straight to TemplateCopyWriter — unconditionally
-            // in Hard mode, or off an unclaimed Soft cadence slot — bypassing LlmCopyWriter entirely.
-            // Every one of those returns template copy rather than throwing (ISegmentCopyWriter's own
-            // never-throws contract), which is exactly why PatterTemplateRenderer still needs correct
-            // SignOff/SignOn/ContextSegment arms — they just must never reach air for these three
-            // kinds specifically (LeadIn/BackAnnounce carry no such guard below — their own template
-            // rung DOES reach air on a miss, truth-gate exhaustion included, since neither kind's
-            // FIXED PROSE states a weekday/daypart claim on its own; see PatterTemplateRenderer.Expand's
-            // own LeadIn/BackAnnounce arms — the interpolated track title/artist is the one part of
-            // that text NOT gate-checked either way, since a template render never reaches this ladder
-            // to begin with). One WARN, then null:
+            // Design ruling, spec-cited (T123 review finding, extended to ContextSegment at T224,
+            // extended to Announcement at T338 review): a handoff piece, a context segment, OR an
+            // owner announcement must NEVER air non-LLM-authored copy. F92.4's ladder is "two-piece ->
+            // whichever piece rendered -> clean cut" — there is no "templated piece" rung — and
+            // F92.5/F107.6 both state this copy IS an LLM-authored blurb, full stop: for a handoff,
+            // the alternative is silently wrong ceremony phrasing; for a context segment, the
+            // alternative is PatterTemplateRenderer's inert placeholder ("Here's something worth
+            // knowing") standing in for actual facts, which defeats the entire point of a context
+            // provider (never airable filler, SPEC F107.6); for an announcement, the alternative is
+            // PatterTemplateRenderer's own neutral floor text standing in for the owner's actual
+            // message (SPEC F144.2) — airing that would "deliver" nothing to listeners while still
+            // stamping the announcement as aired, which is worse than a clean cut.
+            //
+            // SPEC F144.4 (STORY-358, PLAN T341/T342) — THE FALLBACK LAW: a degraded announcement
+            // (LLM unreachable, re-ask ladder exhausted, render budget blown) must still air, but
+            // ONLY as a verbatim read of the owner's own words, never as PatterTemplateRenderer's
+            // neutral floor text. That verbatim-read writer is deliberately NOT LlmCopyWriter — F144.4
+            // forbids LLM authorship on this exact degraded path — but it MUST still stamp
+            // SegmentCopy.FreshPerAiring: true on its result, the same as any genuinely LLM-authored
+            // blurb: this guard has no way to tell "inert template floor text" apart from "genuine
+            // owner content read by a non-LLM writer" other than that one field. Per-announcement
+            // owner text is fresh-per-airing by definition (F144.2 — it is the operator's own text,
+            // never a templated fixed phrase) and belongs in the swept blurbs/ dir below, never a
+            // templated kind's evergreen forever-cache. T341 (the verbatim-read writer) and T342
+            // (wiring it behind SegmentKind.Announcement) own that contract; if a future writer for
+            // this kind cannot honor it, the Announcement leg below must be lifted, not left in place
+            // to silently drop every degraded announcement instead of reading it verbatim.
+            //
+            // copy.FreshPerAiring false here means every writer in the chain missed: LlmCopyWriter's own FOUR degrade
+            // paths (disabled endpoint, timeout/non-2xx/connect, empty-or-over-length after cleanup,
+            // and — as of PLAN T332, SPEC F138.2-F138.4 — the truth-gate ladder exhausting its one
+            // re-ask) AND DegradationGatedCopyWriter routing straight to TemplateCopyWriter —
+            // unconditionally in Hard mode, or off an unclaimed Soft cadence slot — bypassing
+            // LlmCopyWriter entirely. Every one of those returns template copy rather than throwing
+            // (ISegmentCopyWriter's own never-throws contract), which is exactly why
+            // PatterTemplateRenderer still needs correct SignOff/SignOn/ContextSegment/Announcement
+            // arms — they just must never reach air for these four kinds specifically (LeadIn/
+            // BackAnnounce carry no such guard below — their own template rung DOES reach air on a
+            // miss, truth-gate exhaustion included, since neither kind's FIXED PROSE states a
+            // weekday/daypart claim on its own; see PatterTemplateRenderer.Expand's own LeadIn/
+            // BackAnnounce arms — the interpolated track title/artist is the one part of that text NOT
+            // gate-checked either way, since a template render never reaches this ladder to begin
+            // with). One WARN, then null:
             // ITtsSegmentSource already allows null-never-throws, and the Orchestrator's own drain arm
             // treats a null render exactly like F92.4's "whichever piece rendered airs (else clean
             // cut)"/F107.6's skip-never-silence posture.
             if (request.Kind is SegmentKind.SignOff or SegmentKind.SignOn or SegmentKind.ContextSegment
+                or SegmentKind.Announcement // widened at T338 — see the F144.4 fallback-law paragraph above
                 && !copy.FreshPerAiring)
             {
                 logger.LogWarning(
                     "Copy for {Kind} on station {StationId} was not LLM-authored (writer degraded to " +
                     "template) — dropping this segment rather than airing non-LLM-authored copy " +
-                    "(SPEC F92.4, F92.5, F107.6)",
+                    "(SPEC F92.4, F92.5, F107.6, F144.2, F144.4)",
                     request.Kind, request.StationId);
                 return null;
             }

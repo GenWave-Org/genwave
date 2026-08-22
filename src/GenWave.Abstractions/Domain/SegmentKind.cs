@@ -38,4 +38,13 @@ public enum SegmentKind
     /// T287's, not this enum's own.
     /// </summary>
     Crosstalk,
+
+    /// <summary>
+    /// An owner announcement, placed after the back-announce (SPEC F144.1, STORY-358) — the
+    /// household's own words reaching the air, either spoken verbatim or given DJ flavor per the
+    /// operator's own choice (SPEC F144.2/F144.3). Additive member, appended to ride the already-
+    /// owed <c>GenWave.Abstractions</c> minor bump binary-compatibly; the wiring that vends a
+    /// <c>SegmentRequest</c> of this kind is a later task's, not this enum's own.
+    /// </summary>
+    Announcement,
 }

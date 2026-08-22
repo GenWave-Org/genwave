@@ -119,9 +119,10 @@ public sealed class PatterTemplateRenderer
         // have under T223 — it returns PersonaPreviewResult.Failed instead (F35.6: a preview never
         // silently substitutes template copy). The sibling Crosstalk arm just below carries no such
         // guarantee: TtsSegmentSource's own non-LLM-authored drop guard (`SignOff or SignOn or
-        // ContextSegment`, TtsSegmentSource.cs:93) does not list Crosstalk, so if a future producer
-        // (T287) ever routes a Crosstalk render through this template rung, "Two voices, one moment."
-        // would become airable filler unless that guard is extended first — the wiring task's call.
+        // ContextSegment or Announcement`, TtsSegmentSource.cs, RenderAsync) does not list Crosstalk,
+        // so if a future producer (T287) ever routes a Crosstalk render through this template rung,
+        // "Two voices, one moment." would become airable filler unless that guard is extended first —
+        // the wiring task's call.
         SegmentKind.ContextSegment => "Here's something worth knowing.",
         // No producer builds a Crosstalk SegmentRequest yet (SPEC F127.1, PLAN T281 — the vend
         // itself is T287's), so this arm never reaches air today. It exists purely so the switch
@@ -130,6 +131,15 @@ public sealed class PatterTemplateRenderer
         // PersonaController.TryParseKind), both need a correct, non-throwing landing spot for this
         // kind now that it exists — the same discipline ContextSegment's arm above was added under.
         SegmentKind.Crosstalk      => "Two voices, one moment.",
+        // No producer builds an Announcement SegmentRequest yet (SPEC F144.2, PLAN T338 review) —
+        // this text is only ever a floor. The real announcement text (the owner's own words) arrives
+        // via the dedicated render path a later task wires (T341), never through this template — the
+        // same discipline the ContextSegment and Crosstalk arms above already establish: this arm
+        // exists purely so the switch below stays total, since Announcement is now a real SegmentKind
+        // name that TryParseKind (PersonaController) accepts and TemplateCopyWriter's own "never
+        // fails for any SegmentRequest" contract still has to hold for it. Neutral, station-voiced,
+        // no fabricated specifics — there is no owner message to read here.
+        SegmentKind.Announcement   => "Here's an announcement from the station.",
         _                          => throw new ArgumentOutOfRangeException(
                                         nameof(request.Kind), request.Kind, message: null),
     };

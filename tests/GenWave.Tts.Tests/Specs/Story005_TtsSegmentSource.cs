@@ -112,11 +112,13 @@ public static class FeatureTtsSegmentSourceRenderMeasureCache
         }
 
         [Fact]
-        public void SegmentKindEnumHasEightCases()
+        public void SegmentKindEnumHasNineCases()
         {
-            // Bumped from seven (STORY-329, PLAN T281): Crosstalk joined the enum (SPEC F127.1).
+            // Bumped from seven to eight (STORY-329, PLAN T281): Crosstalk joined the enum (SPEC
+            // F127.1). Bumped from eight to nine (STORY-358, PLAN T338): Announcement joined the
+            // enum (SPEC F144.1).
             var values = Enum.GetValues<SegmentKind>();
-            Assert.Equal(8, values.Length);
+            Assert.Equal(9, values.Length);
         }
     }
 

@@ -30,6 +30,12 @@ public static class FeatureContextSegmentsAir
         new(SegmentKind.ContextSegment, "af_heart", "GenWave", Track: null, FixedLocalNow, StationId,
             PersonaName: null, CounterpartName: null, ContextFacts: facts);
 
+    // T338: the wiring that vends a real Announcement SegmentRequest (owner text, T341/T342) doesn't
+    // exist yet — this fixture only needs a request whose Kind picks the Announcement arm of the
+    // guard below, mirroring ContextRequest's own minimal shape.
+    static SegmentRequest AnnouncementRequest() =>
+        new(SegmentKind.Announcement, "af_heart", "GenWave", Track: null, FixedLocalNow, StationId);
+
     // -----------------------------------------------------------------------
     // F107.3 — the facts block carries the provider's facts and the news posture
     // -----------------------------------------------------------------------
@@ -186,7 +192,9 @@ public static class FeatureContextSegmentsAir
     // SPEC F107.6 design ruling (T224): a context segment must NEVER air non-LLM-authored copy —
     // facts read as inert template filler ("Here's something worth knowing") defeats the entire
     // point of a context provider. Mirrors Story243's own ScenarioNonLlmAuthoredCopyNeverAirs for the
-    // handoff kinds one epic over.
+    // handoff kinds one epic over. Widened again at T338 (SPEC F144.2, F144.4) to also cover
+    // SegmentKind.Announcement — see TemplateFallbackAnnouncementRendersNull below, same shape as
+    // TemplateFallbackContextSegmentRendersNull.
     // -----------------------------------------------------------------------
 
     public sealed class ScenarioNonLlmAuthoredCopyNeverAirs : IDisposable
@@ -219,6 +227,30 @@ public static class FeatureContextSegmentsAir
 
             var item = await source.RenderAsync(
                 ContextRequest("Sunny and seventy-two degrees."), CancellationToken.None);
+
+            Assert.Null(item);
+            Assert.Single(logger.Warnings);
+        }
+
+        [Fact]
+        public async Task TemplateFallbackAnnouncementRendersNull()
+        {
+            // T338 review finding: the guard above was widened again — ContextSegment -> also
+            // Announcement (SPEC F144.2, F144.4) — with no fact defending the new leg (mutation-
+            // proven: deleting `or SegmentKind.Announcement` from TtsSegmentSource.RenderAsync left
+            // every existing fact green). Homed here, not in Story358_AnnouncementCopyDiscipline.cs:
+            // that file's facts are STORY-358's own AC3/AC4 content-discipline and fallback-writer
+            // claims (T341/T342, still pending, all Skip), a narrower and later concern than this
+            // guard, which predates Announcement entirely (T123, widened at T224, widened again here)
+            // and lives — by this file's own header and the ScenarioNonLlmAuthoredCopyNeverAirs class
+            // above it — wherever the "never air non-LLM-authored copy" ladder's OWN widenings are
+            // pinned, exactly mirroring TemplateFallbackContextSegmentRendersNull's shape one kind over.
+            var logger = new CapturingLogger<TtsSegmentSource>();
+            var copyWriter = new FakeSegmentCopyWriter(
+                "The owner's floor text stands in for their actual message.", freshPerAiring: false);
+            var source = BuildSource(copyWriter, synth, cacheRoot, logger);
+
+            var item = await source.RenderAsync(AnnouncementRequest(), CancellationToken.None);
 
             Assert.Null(item);
             Assert.Single(logger.Warnings);

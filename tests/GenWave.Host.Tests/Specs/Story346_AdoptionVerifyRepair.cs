@@ -179,12 +179,18 @@ public static class FeatureAdoptionVerifyRepair
     /// own shape), so no real daemon is ever needed. Case-matches on the exact joined argv
     /// ("$*") setup.sh's own probes construct — see each probe's own remarks in setup.sh for the
     /// precise command shape each pattern below corresponds to. Every knob defaults to the
-    /// "healthy box" answer; a scenario overrides only what it needs to perturb.</summary>
+    /// "healthy box" answer; a scenario overrides only what it needs to perturb.
+    /// migrationMarkerTable's own default tracks setup.sh's own verify_derive_migration_marker
+    /// (B2, round-2 review) — the newest db/*-migration.sh with a CREATE TABLE, i.e. whatever
+    /// this repo's REAL db/ directory currently derives to. Bumped for PLAN T337/db/40 (gh-#384's
+    /// House Voice epic, SPEC F143): db/40-announcements-migration.sh's `create table if not
+    /// exists station.announcement` is now that newest table-creating migration, moving this
+    /// default off db/37/station.station_image, where it had sat since B2 landed.</summary>
     static string WriteDockerStub(
         string composeArgs = "-f compose.yaml",
         bool dbReachable = true,
         string migrationMarker = "t",
-        string migrationMarkerTable = "station.station_image",
+        string migrationMarkerTable = "station.announcement",
         string? stationNameJson = null,
         string[]? services = null,
         string composeConfigBody = "services:\n  db:\n    image: postgres\n  api:\n    image: genwave/api\n",
@@ -563,13 +569,16 @@ public static class FeatureAdoptionVerifyRepair
         [Fact]
         public void AnUnappliedMigrationIsReportedAgainstTheRepoDbMax()
         {
+            // db/40 (PLAN T337) is this repo's own newest table-creating migration and its own
+            // repo/db max both at once — the derived marker and "repo's db/ max" name the SAME
+            // number here, unlike ScenarioMigrationMarkerDerivation's own scratch gap facts below.
             var envFile = ScratchEnvPath();
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
             var docker = WriteDockerStub(migrationMarker: "f");
 
             var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "", new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
-            Assert.Contains("db/37", stdOut, StringComparison.Ordinal);
+            Assert.Contains("db/40", stdOut, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -835,24 +844,26 @@ public static class FeatureAdoptionVerifyRepair
             // healthy-box verdict instead — proof the plumbing above actually lets compose render
             // (through the stub) rather than merely appearing in the logged argv.
             //
-            // gh-#486 (db/38) and PLAN T326 (db/39) — both column/value-only migrations, no new
-            // table — moved the migration-marker gap: the repo's real db/ max is now 39, but the
-            // marker (the newest CREATE TABLE migration, B2's own derivation) is still db/37, so
-            // the schema-migrations probe's OWN "ordinary" verdict is the honest gap report below,
-            // not a PASS — MakeScratchCheckout() copies the real db/ directory verbatim (this
-            // file's own remarks), so this scratch run sees the same db/38/db/39 the real repo
-            // does. Still proves the T321 plumbing fix: the T321 bug's own symptom ("Could not
-            // reach the db service to check") is absent, and the gap report names db/37 through
-            // db/39 by number (setup.sh's own multi-file range label, verify_migrations) — it
-            // could only do that by actually reaching and querying the stub through the
-            // env-file-carrying compose call this test exists to pin.
+            // gh-#486 (db/38) and PLAN T326 (db/39) opened a migration-marker gap (both
+            // column/value-only, no new table) that PLAN T337's db/40 has since closed: db/40
+            // (station.announcement) is once again this repo's newest CREATE TABLE migration AND
+            // its own db/ max, so the schema-migrations probe's ordinary verdict is back to a
+            // PASS, not the honest gap report ScenarioMigrationMarkerDerivation's own scratch
+            // facts below still pin (those perturb a scratch db/ back into the gap on purpose).
+            // MakeScratchCheckout() copies the real db/ directory verbatim (this file's own
+            // remarks), so this scratch run sees the same db/38-db/40 the real repo does. Still
+            // proves the T321 plumbing fix: the T321 bug's own symptom ("Could not reach the db
+            // service to check") is absent, and the PASS verdict names db/40 and its own marker
+            // table (setup.sh's own verify_migrations wording) — it could only do that by actually
+            // reaching and querying the stub through the env-file-carrying compose call this test
+            // exists to pin.
             Assert.True(
                 exitCode == 0 &&
-                stdOut.Contains("Can't verify past db/37 — db/38-db/39 add no new table", StringComparison.Ordinal) &&
+                stdOut.Contains("Schema is current through db/40 (station.announcement present)", StringComparison.Ordinal) &&
                 !stdOut.Contains("Could not reach the db service", StringComparison.Ordinal) &&
                 stdOut.Contains("No locally-built services in this box's compose config", StringComparison.Ordinal) &&
                 stdOut.Contains("None found for project 'genwave'", StringComparison.Ordinal),
-                $"expected the migrations/image-ages/orphans probes to reach their normal (non-UNKNOWN, or honest-gap for schema-migrations) branches; exit={exitCode} stdout:\n{stdOut}");
+                $"expected the migrations/image-ages/orphans probes to reach their normal (non-UNKNOWN) branches; exit={exitCode} stdout:\n{stdOut}");
         }
     }
 
@@ -1361,21 +1372,23 @@ public static class FeatureAdoptionVerifyRepair
             // composePath argument away.
             //
             // gh-#486 added db/38 (a column-only migration — no new table); PLAN T326 added db/39
-            // (a settings-row VALUE migration — also no new table). Once the repo's real db/ max
-            // moves past the newest CREATE TABLE migration (db/37, this fact's own marker),
-            // verify_migrations() short-circuits to an early UNKNOWN gap report BEFORE ever
-            // touching docker (B2's own derivation, setup.sh's verify_migrations) — which would
-            // silently stop this fact from reaching the psql-as-role query it exists to prove at
-            // all. Runs from a SCRATCH checkout instead (MakeScratchCheckout(), the same
-            // copy-then-perturb shape ScenarioMigrationMarkerDerivation below already uses) with
-            // both no-new-table migrations past db/37 deleted back out, so the scratch db/'s own
-            // max stays AT its marker (db/37) and verify_migrations() still reaches the real
-            // query. WriteRealDbCompose still reads db/01+db/06 from the REAL repo root — those
-            // files are unaffected by this scratch perturbation and unrelated to which migration
+            // (a settings-row VALUE migration — also no new table). Between those two and PLAN
+            // T337's db/40, the repo's real db/ max briefly outran the newest CREATE TABLE
+            // migration (still db/37 in that window) — verify_migrations() short-circuits to an
+            // early UNKNOWN gap report BEFORE ever touching docker the moment that happens (B2's
+            // own derivation, setup.sh's verify_migrations), which would have silently stopped
+            // this fact from reaching the psql-as-role query it exists to prove at all. PLAN
+            // T337's db/40 (station.announcement) closes that gap again — it is once more both
+            // this repo's newest CREATE TABLE migration AND its own db/ max — so this fact no
+            // longer needs to perturb the scratch checkout to reach the real query (unlike
+            // ScenarioMigrationMarkerDerivation below, which deliberately reopens the gap in ITS
+            // own scratch db/ on purpose). Still runs from a scratch checkout (MakeScratchCheckout())
+            // rather than the real repo root, purely so a future re-opening of this same gap (the
+            // next column/value-only migration to land past db/40) has a ready-made perturbation
+            // point here without disturbing any other fact. WriteRealDbCompose still reads
+            // db/01+db/06 from the REAL repo root — those files are unrelated to which migration
             // is the marker.
             var checkoutRoot = MakeScratchCheckout();
-            File.Delete(Path.Combine(checkoutRoot, "db", "38-settings-version-migration.sh"));
-            File.Delete(Path.Combine(checkoutRoot, "db", "39-time-announcement-budget-migration.sh"));
 
             var repoRoot = RepoRoot();
             var projectName = $"genwave-hosttest-story346-{Guid.NewGuid():N}";
@@ -1400,7 +1413,7 @@ public static class FeatureAdoptionVerifyRepair
 
                 Assert.True(
                     stdOut.Contains("Schema migrations", StringComparison.Ordinal) &&
-                    stdOut.Contains("current through db/37", StringComparison.Ordinal) &&
+                    stdOut.Contains("current through db/40", StringComparison.Ordinal) &&
                     !stdOut.Contains("could not determine", StringComparison.Ordinal) &&
                     !stdErr.Contains("role \"root\" does not exist", StringComparison.Ordinal),
                     $"expected the psql probe to succeed as the container's own role, not root; stdout:\n{stdOut}\nstderr:\n{stdErr}");
@@ -1425,12 +1438,15 @@ public static class FeatureAdoptionVerifyRepair
             // B2 (round-2 review): a scratch db/38 that CREATES a table must become the new
             // marker (both the migration number AND the artifact checked) — never left pointing
             // at db/37's own station.station_image once a newer table-creating migration exists.
-            // PLAN T326's real db/39 (also no new table, MakeScratchCheckout's own verbatim copy)
-            // deleted back out — it would otherwise become the repo's real db/ max and reopen the
-            // exact gap this fact proves closed, for a migration number this fact never claims
-            // anything about.
+            // PLAN T326's real db/39 (no new table) AND PLAN T337's real db/40
+            // (station.announcement — this repo's OWN current real marker, MakeScratchCheckout's
+            // own verbatim copy) both deleted back out — left in place, db/40 (a genuine, higher-
+            // numbered CREATE TABLE) would itself remain the derived marker and this fact's own
+            // scratch db/38 could never become it at all, for migration numbers this fact never
+            // claims anything about.
             var checkoutRoot = MakeScratchCheckout();
             File.Delete(Path.Combine(checkoutRoot, "db", "39-time-announcement-budget-migration.sh"));
+            File.Delete(Path.Combine(checkoutRoot, "db", "40-announcements-migration.sh"));
             File.WriteAllText(Path.Combine(checkoutRoot, "db", "38-scratch-migration.sh"),
                 "create table if not exists station.new_thing (id serial primary key);\n");
 
@@ -1455,17 +1471,25 @@ public static class FeatureAdoptionVerifyRepair
             // migration, the shape that went silently stale under the old hand-maintained
             // constant) must never claim "current through db/38" — honest UNKNOWN instead, even
             // though db/37's own marker table is present and would otherwise report PASS. PLAN
-            // T326's real db/39 (also no new table) deleted back out for the same reason the
-            // sibling fact above deletes it — this fact's own "db/38 adds no new table" (singular,
-            // one-file range) assertion needs the gap to stay exactly one file wide.
+            // T326's real db/39 (no new table) AND PLAN T337's real db/40 (station.announcement —
+            // a genuine table-creating migration) both deleted back out for the same reason the
+            // sibling fact above deletes them — left in place, db/40 alone would become the real
+            // derived marker instead of db/37, and this fact's own "db/38 adds no new table"
+            // (singular, one-file range) assertion needs the gap to stay exactly one file wide.
             var checkoutRoot = MakeScratchCheckout();
             File.Delete(Path.Combine(checkoutRoot, "db", "39-time-announcement-budget-migration.sh"));
+            File.Delete(Path.Combine(checkoutRoot, "db", "40-announcements-migration.sh"));
             File.WriteAllText(Path.Combine(checkoutRoot, "db", "38-scratch-migration.sh"),
                 "alter table station.station_image add column if not exists caption text;\n");
 
             var envFile = ScratchEnvPath();
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
-            var docker = WriteDockerStub();   // station.station_image (db/37's marker) present
+            // Explicit pin (not the default): db/37's own marker table, the one this scratch
+            // checkout's own db/38 perturbation deliberately leaves as the highest CREATE TABLE —
+            // WriteDockerStub()'s bare default now tracks the REAL repo's db/40/station.announcement
+            // (see its own doc comment), which is irrelevant here since the gap short-circuits
+            // verify_migrations before any psql query is ever issued.
+            var docker = WriteDockerStub(migrationMarkerTable: "station.station_image");
 
             var (_, stdOut, _) = RunSetupInCheckout(checkoutRoot, MakeBinDir(), envFile, "",
                 new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
