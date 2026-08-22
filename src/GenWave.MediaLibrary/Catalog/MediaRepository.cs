@@ -1154,7 +1154,7 @@ sealed class MediaRepository(
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var rows = await conn.QueryAsync<MediaFingerprint>(new CommandDefinition(
-            "select id, path, size_bytes, mtime, state from library.media", cancellationToken: ct));
+            "select id, path, size_bytes, mtime, state, library_id from library.media", cancellationToken: ct));
         return rows.AsList();
     }
 

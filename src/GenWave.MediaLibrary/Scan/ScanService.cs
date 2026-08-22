@@ -24,6 +24,14 @@ sealed class ScanService(
 {
     readonly SemaphoreSlim singleFlight = new(1, 1);
 
+    /// <summary>
+    /// The library whose rows this scan manages (gh-#611): discovery's own
+    /// <c>InsertDiscoveredAsync</c> writes rely on the schema's <c>library_id</c> default — library
+    /// 'default', id 1 — so that is the one library whose out-of-root rows the quarantine below may
+    /// judge. The safe library (id 2) manages its own rows and is never a scan concern.
+    /// </summary>
+    const long ScannedLibraryId = 1;
+
     // Consecutive-miss counters (SPEC F58, closes gitea-#223), keyed by path — in-memory only, zero
     // schema. Lives on the instance, not a static: a fresh ScanService (process restart) starts
     // every path at zero, so a flip can only be DEFERRED by a restart, never accelerated (F58.2).
@@ -140,6 +148,37 @@ sealed class ScanService(
             var missing = ApplyMissGrace(candidates);
             await repo.MarkUnavailableAsync(missing, ct);
 
+            // Out-of-root ghosts (gh-#611) — scanned-library rows that lie outside MediaRoot AND
+            // outside every exempt root (the F27.7 authored carve-out, now an explicit list). Such a
+            // row can never appear in `seen` under ANY future tick of this configuration, so the F58
+            // miss-grace above would defer it forever — it was discovered by a PREVIOUS root
+            // configuration (the 2026-08-22 doubled-library incident: 9,112 host-path rows sat
+            // `ready` for seven days, every pick of one dying silently at the engine). Quarantine
+            // through the SAME grace counters (a one-scan root misconfiguration must not flip a
+            // whole catalog) but WITHOUT the per-path first-miss log line — thirteen thousand of
+            // those is a log bomb; the single summary below carries the same information. A
+            // quarantined row resurrects through ordinary discovery (the gh-#112 branch above) the
+            // moment its path is sighted under a root again.
+            var exemptRoots = scanOptions.CurrentValue.QuarantineExemptRoots;
+            var ghosts = known.Values
+                .Where(f => f.State != "unavailable" && f.LibraryId == ScannedLibraryId
+                    && !IsUnderMediaRoot(f.Path) && !IsUnderAnyRoot(f.Path, exemptRoots))
+                .ToList();
+            var quarantined = ApplyMissGrace(ghosts, logPerPath: false);
+            await repo.MarkUnavailableAsync(quarantined, ct);
+            if (quarantined.Count > 0)
+                log.LogWarning(
+                    "Scan: quarantined {Quarantined} catalog row(s) lying outside MediaRoot {MediaRoot} "
+                    + "(prefixes: {Prefixes}) — unreachable under this root, likely discovered by a "
+                    + "previous root configuration; they resurrect via normal discovery if the root "
+                    + "moves back (gh-#611).",
+                    quarantined.Count, options.CurrentValue.MediaRoot, SummarizePrefixes(ghosts));
+            else if (ghosts.Count > 0)
+                log.LogInformation(
+                    "Scan: {Ghosts} catalog row(s) lie outside MediaRoot {MediaRoot} (prefixes: "
+                    + "{Prefixes}) — deferring quarantine until the miss grace elapses (gh-#611, SPEC F58)",
+                    ghosts.Count, options.CurrentValue.MediaRoot, SummarizePrefixes(ghosts));
+
             if (discovered > 0 || changed > 0 || missing.Count > 0)
                 log.LogInformation("Scan: {Discovered} new, {Changed} changed, {Missing} missing",
                     discovered, changed, missing.Count);
@@ -158,7 +197,7 @@ sealed class ScanService(
     /// threshold-reaching candidate's counter is removed — it flips now, exactly as today, and is
     /// no longer tracked until it is rediscovered.
     /// </summary>
-    List<long> ApplyMissGrace(IEnumerable<MediaFingerprint> candidates)
+    List<long> ApplyMissGrace(IEnumerable<MediaFingerprint> candidates, bool logPerPath = true)
     {
         var missThreshold = CurrentMissThreshold;
         var missing = new List<long>();
@@ -175,7 +214,10 @@ sealed class ScanService(
             else
             {
                 consecutiveMisses[f.Path] = misses;
-                if (misses == 1)
+                // logPerPath=false is the gh-#611 ghost sweep: its candidates arrive thousands at a
+                // time (a whole catalog discovered under a previous root), so the per-path line is
+                // replaced by that sweep's own one-line summary per pass.
+                if (logPerPath && misses == 1)
                     log.LogInformation(
                         "Scan: {Path} missing from listing (1 of {Threshold}) — deferring unavailable transition (SPEC F58)",
                         f.Path, missThreshold);
@@ -223,9 +265,48 @@ sealed class ScanService(
     /// strings would get this boundary wrong. Ordinal: this is a container filesystem path (Linux,
     /// case-sensitive), never culture text.
     /// </summary>
-    bool IsUnderMediaRoot(string path)
+    bool IsUnderMediaRoot(string path) => IsUnder(path, options.CurrentValue.MediaRoot);
+
+    /// <summary>True when <paramref name="path"/> lies under ANY of <paramref name="roots"/> —
+    /// the gh-#611 exempt-root check, same separator-aware semantics as <see cref="IsUnder"/>.</summary>
+    static bool IsUnderAnyRoot(string path, IReadOnlyList<string> roots)
     {
-        var root = Path.TrimEndingDirectorySeparator(options.CurrentValue.MediaRoot);
-        return path == root || path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+        foreach (var root in roots)
+            if (IsUnder(path, root)) return true;
+        return false;
+    }
+
+    static bool IsUnder(string path, string root)
+    {
+        var trimmed = Path.TrimEndingDirectorySeparator(root);
+        return path == trimmed || path.StartsWith(trimmed + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Up to three distinct top-of-tree prefixes (first two path segments) of the ghost rows, for
+    /// the gh-#611 summary lines — enough to name "/home/dmills" without listing thirteen thousand
+    /// paths.
+    /// </summary>
+    static string SummarizePrefixes(IEnumerable<MediaFingerprint> ghosts)
+    {
+        var prefixes = ghosts
+            .Select(g => TopPrefix(g.Path))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        return prefixes.Count <= 3
+            ? string.Join(", ", prefixes)
+            : $"{string.Join(", ", prefixes.Take(3))}, +{prefixes.Count - 3} more";
+    }
+
+    static string TopPrefix(string path)
+    {
+        var parts = path.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length switch
+        {
+            0 => path,
+            1 => Path.DirectorySeparatorChar + parts[0],
+            _ => Path.DirectorySeparatorChar + parts[0] + Path.DirectorySeparatorChar + parts[1],
+        };
     }
 }

@@ -63,7 +63,7 @@
 | `GenWave.Core.Abstractions.IContextCacheRootProvider` | `GenWave.Host.Options.OptionsMonitorContextCacheRootProvider` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextCacheRootProvider` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IContextSettingsProvider` | `GenWave.Host.Options.ConfigurationContextSettingsProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.ICrosstalkScopeProvider` | `GenWave.Host.Options.OptionsMonitorCrosstalkScopeProvider` | Singleton | — |
-| `GenWave.Core.Abstractions.ILiquidsoapControl` | `GenWave.Host.Engine.LiquidsoapControl` | Singleton | — |
+| `GenWave.Core.Abstractions.ILiquidsoapControl` | `GenWave.Host.Engine.MediaExistencePushGuard` | Singleton | — |
 | `GenWave.Core.Abstractions.IListenerStatsSource` | `GenWave.Host.Stats.IcecastListenerStatsSource` | Singleton | — |
 | `GenWave.Core.Abstractions.ILlmBatchGate` | `GenWave.Host.Enrichment.LlmBatchGate` | Singleton | — |
 | `GenWave.Core.Abstractions.IRenderBudgetProvider` | `GenWave.Host.Options.OptionsMonitorRenderBudgetProvider` | Singleton | — |
