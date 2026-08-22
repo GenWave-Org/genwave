@@ -17,7 +17,10 @@ public sealed class StationSafeOptions
     public string SeedMessage { get; set; } =
         "You're listening to {StationName}. We'll be right back — stay tuned.";
 
-    /// <summary>Writable volume root where authored segments land (F11.12, F27.1).</summary>
+    /// <summary>Writable volume root where authored segments land (F11.12, F27.1). A deployment
+    /// that relocates this volume must also list the new root in
+    /// <c>Library:Scan:QuarantineExemptRoots</c> (gh-#611) — the scanner exempts authored rows from
+    /// its out-of-root quarantine by that list, whose default matches this one.</summary>
     public string AuthoredRoot { get; set; } = "/authored";
 
     /// <summary>Bed attenuation, in dB, relative to the voice in the offline mix (F27.4).</summary>
