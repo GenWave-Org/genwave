@@ -58,10 +58,15 @@ sealed class FakeLiquidsoapControl : ILiquidsoapControl
         return Task.FromResult(new EngineMetadata(map));
     }
 
-    public Task<EnginePushResult> PushAsync(MediaItem item, double gainDb, CancellationToken ct)
+    /// <summary>Ids whose pushes are DECLINED (null result, nothing recorded) — stands in for a
+    /// Host-side guard refusing the push (gh-#612), e.g. MediaExistencePushGuard on a missing file.</summary>
+    public HashSet<string> DeclinePushIds { get; } = new(StringComparer.Ordinal);
+
+    public Task<EnginePushResult?> PushAsync(MediaItem item, double gainDb, CancellationToken ct)
     {
+        if (DeclinePushIds.Contains(item.MediaId)) return Task.FromResult<EnginePushResult?>(null);
         Pushed.Add(item);
         PushedGains.Add(gainDb);
-        return Task.FromResult(new EnginePushResult("rid", pushArtworkUrl));
+        return Task.FromResult<EnginePushResult?>(new EnginePushResult("rid", pushArtworkUrl));
     }
 }

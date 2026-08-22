@@ -43,6 +43,11 @@ sealed class PlayoutFeederService : IHostedService
     CancellationTokenSource? cts;
     Task? executeTask;
 
+    // The last push-loss signal already warned about (gh-#612) — the WARN fires on CHANGE, not on
+    // presence, so a continuing episode re-warns once per replan cycle (the pending count grew)
+    // instead of once per 3s tick. Cleared with the signal itself when a real track reaches air.
+    PushLossSignal? lastWarnedPushLoss;
+
     /// <param name="station">
     /// Boot snapshot supplying the stable <see cref="Station.Id"/> this instance is keyed on.
     /// <see cref="Station.Name"/> is NOT read from here — every log line reads
@@ -123,6 +128,11 @@ sealed class PlayoutFeederService : IHostedService
                 // an already-finished patter for 30-60s at every track start (measured on demo).
                 PublishSnapshot();
 
+                // gh-#612: the feeder is pure and holds no logger, so ITS "pushed but never aired"
+                // diagnostic becomes a log line HERE — before the refill, so the warning never
+                // waits behind a render window either.
+                WarnOnPushLoss();
+
                 if (observed)
                 {
                     var refillStarted = Stopwatch.GetTimestamp();
@@ -158,6 +168,29 @@ sealed class PlayoutFeederService : IHostedService
 
         log.LogInformation("Playout feeder stopped for station {StationId} ({StationName})",
             stationId, identityProvider.Current.Name);
+    }
+
+    /// <summary>
+    /// Logs the feeder's push-loss diagnostic (gh-#612) when it changes: pushes this feeder believed
+    /// succeeded never reached air and the safe rotation is covering — the silent-failure signature
+    /// (engine-side resolution death after a success-shaped RID reply) that ran unlogged for seven
+    /// days in the gh-#610 incident. WARN, not error: never-silent (F1.3) held and the feeder is
+    /// already retrying — this line exists so an operator (and the log sweep) can SEE it happening.
+    /// </summary>
+    void WarnOnPushLoss()
+    {
+        var loss = feeder.PushLoss;
+        if (loss == lastWarnedPushLoss) return;
+        lastWarnedPushLoss = loss;
+        if (loss is null) return;   // the episode ended — a real track reached air; nothing to say
+
+        log.LogWarning(
+            "Pushed chain never reached air for station {StationId} ({StationName}) — safe rotation "
+            + "is covering while {PendingCount} push(es) remain unproven (oldest: {MediaId} '{Title}' "
+            + "by {Artist}). A push likely died at engine-side resolution; check the engine log for "
+            + "'Nonexistent file or ill-formed URI' (gh-#612).",
+            stationId, identityProvider.Current.Name,
+            loss.PendingCount, loss.OldestPendingId, loss.Title, loss.Artist);
     }
 
     void PublishSnapshot()

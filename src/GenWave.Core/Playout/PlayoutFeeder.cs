@@ -148,12 +148,35 @@ public sealed class PlayoutFeeder(
     // repeat push of the same id exactly-once: see DrainPendingAirUpTo's ordering note.
     readonly Queue<string> pendingAirQueue = new();
 
+    /// <summary>
+    /// How many CONSECUTIVE observe ticks the safe rotation must cover — while pushes are still
+    /// unproven — before <see cref="PushLoss"/> arms (gh-#612). One is too twitchy: a legitimate
+    /// sub-tick underrun between a chain's segments (the gitea-#155 blip class) can put the safe
+    /// rotation on air for a single poll without anything being wrong. Three ticks (~9s at the
+    /// 3s poll) outlasts every legitimate blip while still signaling within the first safe-track
+    /// airing of a genuinely dead push. Public constant, not an internal (the T327 review's own
+    /// prod-to-prod-InternalsVisibleTo ruling), so specs pin the exact threshold.
+    /// </summary>
+    public const int SafeCoverTicksBeforePushLossSignal = 3;
+
     string? onAirId;
     string? chainEndId; // the chain's final pushed id (music) — its airing means nothing is queued behind
     bool onAirIsReal;   // is the current on-air item one of ours? false while safe rotation airs
     bool booted;
     int prepared;
     DateTimeOffset onAirStartedAt;  // wall-clock instant the current on-air item was first detected
+    int safeCoverTicks;             // consecutive observe ticks with safe rotation airing (gh-#612)
+
+    /// <summary>
+    /// The "pushed but never aired" diagnostic (gh-#612): non-null once the safe rotation has
+    /// covered <see cref="SafeCoverTicksBeforePushLossSignal"/> consecutive observe ticks while
+    /// claim (d)'s pending-air queue still holds pushes this feeder believed succeeded — the
+    /// signature of a push that died engine-side after a success-shaped RID reply. Cleared the
+    /// moment a real track reaches air. Read by the Host shell after each observe phase (this
+    /// feeder is pure and holds no logger — the shell owns the WARN, exactly as it owns the tick
+    /// timing log); see <see cref="PushLossSignal"/> for why the value is a record.
+    /// </summary>
+    public PushLossSignal? PushLoss { get; private set; }
 
     // The id that just stopped being on-air, when the last observe phase saw an advance —
     // re-checked for liveness (F57.1) in RefillAsync, once that tick's chain/ring writes have
@@ -210,6 +233,16 @@ public sealed class PlayoutFeeder(
             onAirStartedAt = advancedAt;
             var meta = await ls.MetadataAsync(id, ct);
             onAirIsReal = meta.TryGetMediaId(out var mediaId);   // our stamped id present?
+
+            // gh-#612: a real track reaching air ends any push-loss episode — the queue provably
+            // plays again. An advance onto another DRAIN token (rare; the token is normally stable)
+            // deliberately does NOT reset: the safe rotation is still the one on air.
+            if (onAirIsReal)
+            {
+                safeCoverTicks = 0;
+                PushLoss = null;
+            }
+
             if (onAirIsReal)
             {
                 // Feeder-pushed ids (feederOwnedIds) already joined the ring at push time and got
@@ -312,6 +345,22 @@ public sealed class PlayoutFeeder(
             // airing means nothing is prepared, period (PRD §6.3): retry the refill every tick
             // until real content airs.
             prepared = 0;
+
+            // gh-#612: this branch's own opening sentence IS the push-loss signature — but only
+            // once it persists (blip filter, see the threshold's remarks) AND something we pushed
+            // is still unproven (a boot drain with nothing pending is honest, not lost). The
+            // pending queue here holds the CURRENT retry chain — each confirmed-drain refill
+            // stripped the prior chain's claims and pushed a fresh one — so a continuing episode
+            // presents a fresh oldest-pending id per replan cycle, which is exactly what re-arms
+            // the Host shell's change-keyed WARN while the episode continues.
+            safeCoverTicks++;
+            if (safeCoverTicks >= SafeCoverTicksBeforePushLossSignal && pendingAirQueue.Count > 0)
+            {
+                var oldestPendingId = pendingAirQueue.Peek();
+                var oldestMeta = pushedMeta.GetValueOrDefault(oldestPendingId);
+                PushLoss = new PushLossSignal(
+                    oldestPendingId, oldestMeta?.Title, oldestMeta?.Artist, pendingAirQueue.Count);
+            }
         }
 
         PublishOnAirState();
@@ -368,6 +417,19 @@ public sealed class PlayoutFeeder(
 
                 var gainDb = Gain.NormGainDb(item.Loudness, targetLufs, ceilingDbtp);
                 var pushResult = await ls.PushAsync(item, gainDb, ct);
+                if (pushResult is null)
+                {
+                    // gh-#612: a guard declined the push (e.g. the file no longer exists on disk) —
+                    // nothing reached the engine, so NONE of the pushed-state bookkeeping below may
+                    // run: no pushedMeta/feederOwnedIds entry, no claim (d), no chain membership.
+                    // The one write that DOES happen is the anti-repeat ring: without it the very
+                    // next refill's selection re-crowns the same unplayable winner and the chain
+                    // starves in a tight pick/decline loop instead of moving on to a playable track.
+                    // Ending the chain here (not `continue`) keeps the one-ahead shape honest — the
+                    // next tick re-selects with the ring nudged past the dead row.
+                    Remember(item.MediaId);
+                    break;
+                }
                 // Stamped from the MediaItem we already hold — zero DB reads per poll (SPEC F50.2,
                 // F16.6 stands). item.DurationMs carries the tts:* segment's measured cue-derived
                 // duration (F66.1) or the catalog's stored value for music; only an engine-initiated
