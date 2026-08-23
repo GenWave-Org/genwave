@@ -65,7 +65,7 @@ public sealed class AnnounceTokenAuthenticationHandler(
             return AuthenticateResult.NoResult();
 
         var headerValue = headerValues.ToString();
-        if (!headerValue.StartsWith(BearerPrefix, StringComparison.Ordinal))
+        if (!headerValue.StartsWith(BearerPrefix, StringComparison.OrdinalIgnoreCase))
             return AuthenticateResult.NoResult();
 
         var presented = headerValue[BearerPrefix.Length..].Trim();

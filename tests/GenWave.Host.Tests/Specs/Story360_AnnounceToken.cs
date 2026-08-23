@@ -174,6 +174,28 @@ public static class FeatureAnnounceToken
         }
     }
 
+    public sealed class ScenarioSchemeMatchIsCaseInsensitive
+    {
+        [Fact]
+        public async Task ALowercaseBearerHeaderAuthenticates()
+        {
+            // Given a configured token and NO cookie session
+            await using var factory = new AnnounceTokenApiWebFactory(new FakeAnnouncementStore(), new FakeAnnounceTokenStore());
+            var plaintext = await AnnounceTokenApiWebFactory.GenerateTokenAsync(
+                await AnnounceTokenApiWebFactory.LoggedInClientAsync(factory));
+
+            // When a spec-compliant client presents the auth-scheme token in lowercase (RFC 7235 §2.1:
+            // the scheme token is case-insensitive) rather than the canonical "Bearer" casing
+            var client = factory.CreateClient();
+            client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", $"bearer {plaintext}");
+            var response = await client.GetAsync("/api/announcements/now-playing");
+
+            // Then it authenticates exactly as the canonical casing would — the scheme match is
+            // case-insensitive, not merely tolerant of one specific casing
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+    }
+
     public sealed class ScenarioRevocationFailsClosed
     {
         [Fact]
