@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
+using GenWave.Host.Announcements;
 using GenWave.Host.Options;
 using GenWave.MediaLibrary.Station;
 using GenWave.Orchestration;
@@ -174,7 +176,18 @@ static class StationSettingsHostingExtensions
         // PLAN T339 gave it its first Host call site (AnnouncementsController) AND its first seam
         // (IAnnouncementStore) in the same task — see AnnouncementServiceCollectionExtensions' own
         // remarks for why this registration now keys on the interface like every sibling above.
-        builder.Services.AddAnnouncementStore(stationConnStr);
+        //
+        // The vend-only IAnnouncementSource seam (SPEC F144.1, PLAN T341) is registered in the SAME
+        // call (T341 review finding F9 — folded from a separate AddAnnouncementSource call that had
+        // to run AFTER this one, a call-order hazard nothing enforced), wrapped with the SPEC F145.2
+        // SpectatorMode refusal here, at the ONLY layer that is allowed to read Station:SpectatorMode:
+        // neither AnnouncementRepository (MediaLibrary) nor Orchestrator (GenWave.Orchestration) ever
+        // sees it. Mirrors PlayoutServiceCollectionExtensions' own MediaExistencePushGuard wrap
+        // (gh-#612) one project over — see SpectatorModeAnnouncementVendGuard's own remarks.
+        builder.Services.AddAnnouncementStore(
+            stationConnStr,
+            (inner, sp) => new SpectatorModeAnnouncementVendGuard(
+                inner, sp.GetRequiredService<IOptionsMonitor<StationOptions>>()));
 
         return builder;
     }

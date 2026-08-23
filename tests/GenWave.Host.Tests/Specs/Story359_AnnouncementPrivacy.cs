@@ -15,6 +15,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
+using GenWave.Host.Announcements;
+using GenWave.Host.Options;
 using GenWave.Host.Tests.Fakes;
 
 namespace GenWave.Host.Tests.Specs;
@@ -70,6 +73,56 @@ public static class FeatureAnnouncementPrivacy
         [Fact(Skip = "pending T343 (STORY-359 AC3)")]
         public void TheDeclineReasonSaysTheStationWentPublic() { }
     }
+
+    // -------------------------------------------------------------------------
+    // Scenario: the REAL SpectatorModeAnnouncementVendGuard (SPEC F145.2, PLAN T341 review finding
+    // F5) — exercised directly against a mutable IOptionsMonitor<StationOptions>, never through the
+    // WebApplicationFactory round trip above. The two facts above prove the DOOR (F145.1); these two
+    // prove the vend-side refusal itself, live-read, unwrapped from any Host composition — the same
+    // "boot-frozen snapshot would be a silent regression" risk this class's own remarks warn about.
+    // -------------------------------------------------------------------------
+
+    public sealed class ScenarioTheRealGuardReadsSpectatorModeLive
+    {
+        [Fact]
+        public async Task WhileSpectatorModeIsOnTheClaimReadsEmptyAndTheInnerSourceIsNeverCalled()
+        {
+            // Given the real guard wrapping an inner source, with SpectatorMode on...
+            var inner = new FakeInnerAnnouncementSource();
+            var options = new FakeOptionsMonitor<StationOptions>(new StationOptions { SpectatorMode = true });
+            var guard = new SpectatorModeAnnouncementVendGuard(inner, options);
+
+            // When a claim is attempted...
+            var claimed = await guard.ClaimDeliverableAsync(2, CancellationToken.None);
+
+            // Then it reads back empty, AND the inner source was never reached — the refusal is
+            // structural, not merely "the inner source happened to have nothing deliverable".
+            Assert.Empty(claimed);
+            Assert.Equal(0, inner.CallCount);
+        }
+
+        [Fact]
+        public async Task FlippingSpectatorModeOffMidLifeStartsVendingOnTheVeryNextClaim()
+        {
+            // Given the real guard wrapping an inner source with one deliverable item queued, and
+            // SpectatorMode initially on...
+            var inner = new FakeInnerAnnouncementSource();
+            inner.Items.Add(new AnnouncementItem(901, "Dinner's ready", Verbatim: true, RequestedVoice: null));
+            var options = new FakeOptionsMonitor<StationOptions>(new StationOptions { SpectatorMode = true });
+            var guard = new SpectatorModeAnnouncementVendGuard(inner, options);
+            Assert.Empty(await guard.ClaimDeliverableAsync(2, CancellationToken.None));
+
+            // When the station goes private mid-life — the SAME live-read seam a PUT /api/settings
+            // write reaches in production, simulated here by mutating the monitor's own CurrentValue
+            // in place, never by constructing a fresh guard...
+            options.CurrentValue = new StationOptions { SpectatorMode = false };
+
+            // Then the very next claim reaches the inner source and vends — no restart needed.
+            var claimed = await guard.ClaimDeliverableAsync(2, CancellationToken.None);
+            Assert.Single(claimed);
+            Assert.Equal(1, inner.CallCount);
+        }
+    }
 }
 
 // ── Test harness ───────────────────────────────────────────────────────────────────────────────────
@@ -107,5 +160,24 @@ file sealed class AnnouncementPrivacyWebFactory(FakeAnnouncementStore store) : W
         var login = await client.PostAsJsonAsync("/api/auth/login", new { password = Password });
         Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
         return client;
+    }
+}
+
+/// <summary>
+/// Minimal <see cref="IAnnouncementSource"/> double for <c>ScenarioTheRealGuardReadsSpectatorModeLive</c>
+/// (T341 review finding F5) — records whether the REAL <see cref="SpectatorModeAnnouncementVendGuard"/>
+/// ever reached through to it, which the WebApplicationFactory-level facts above cannot observe
+/// (<see cref="FakeAnnouncementStore"/> stands in one seam over, <see cref="IAnnouncementStore"/>, never
+/// this narrower vend-only seam the guard itself wraps).
+/// </summary>
+file sealed class FakeInnerAnnouncementSource : IAnnouncementSource
+{
+    public List<AnnouncementItem> Items { get; } = [];
+    public int CallCount { get; private set; }
+
+    public Task<IReadOnlyList<AnnouncementItem>> ClaimDeliverableAsync(int max, CancellationToken ct)
+    {
+        CallCount++;
+        return Task.FromResult<IReadOnlyList<AnnouncementItem>>(Items.Take(max).ToList());
     }
 }

@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **92 seams across 6 projects.**
+> **94 seams across 6 projects.**
 
 ## GenWave.Context (2 seams)
 
@@ -53,10 +53,11 @@
 | `GenWave.Core.Abstractions.IContextPatterFactSource` | `GenWave.Context.ContextPipeline` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextPatterFactSource` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IContextProvider` | `GenWave.Context.History.HistoryContextProvider` | Singleton | also registered: `GenWave.Context.Weather.WeatherContextProvider` (GenWave.Context) |
 
-## GenWave.Host (27 seams)
+## GenWave.Host (28 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
+| `GenWave.Core.Abstractions.IAnnouncementSource` | `GenWave.Host.Announcements.SpectatorModeAnnouncementVendGuard` | Singleton | — |
 | `GenWave.Core.Abstractions.IAudiencePostureProvider` | `GenWave.Host.Options.OptionsMonitorAudiencePostureProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IBoundaryBiasProvider` | `GenWave.Host.Options.OptionsMonitorBoundaryBiasProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.ICadenceProvider` | `GenWave.Host.Options.OptionsMonitorCadenceProvider` | Singleton | — |
@@ -151,7 +152,7 @@
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |
 
-## GenWave.Tts (12 seams)
+## GenWave.Tts (13 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -161,6 +162,7 @@
 | `GenWave.Core.Abstractions.ITtsSegmentSource` | `GenWave.Tts.TtsSegmentSource` | Singleton | — |
 | `GenWave.Core.Abstractions.ITtsSynthesizer` | `GenWave.Tts.NormalizingTtsSynthesizer` | Singleton | — |
 | `GenWave.Core.Abstractions.ITtsVoiceLister` | `GenWave.Tts.CachedVoiceLister` | Singleton | — |
+| `GenWave.Core.Abstractions.IVerbatimSegmentRenderer` | `GenWave.Tts.TtsSegmentSource` | Singleton | — |
 | `GenWave.Tts.IDegradationModeReader` | `GenWave.Tts.DegradationController` | Singleton | — |
 | `GenWave.Tts.IDependencyHealth` | `GenWave.Tts.DependencyHealthStore` | Singleton | — |
 | `GenWave.Tts.IDependencyProbe` | `GenWave.Tts.PiperHealthProbe` | Singleton | also registered: `GenWave.Tts.OllamaHealthProbe` (GenWave.Tts), `GenWave.Tts.KokoroHealthProbe` (GenWave.Tts) |

@@ -429,6 +429,80 @@ public static class FeatureAnnouncementStoreLifecycle
     }
 
     // ---------------------------------------------------------------------
+    // SPEC F144.1 (PLAN T341, T341 review finding F3) — the vend-side claim: the max<=0 clamp,
+    // proven against the REAL Postgres-backed repository (GenWave.Orchestration.Tests cannot
+    // reference MediaLibrary, so this is the ONLY place that clamp is ever exercised for real), and
+    // field-mapping fidelity from AnnouncementRow onto the narrower AnnouncementItem.
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioClaimDeliverablePinsTheVendSeam(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AMaxOfZeroClaimsNothingAndTouchesNoRowState()
+        {
+            // Given a pending, deliverable announcement...
+            await db.ResetAnnouncementAsync();
+            var repo = Harness.AnnouncementRepo(db);
+            var id = await repo.InsertAsync(
+                "Bins go out tonight", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: null, CancellationToken.None);
+
+            // When the vend seam is asked to claim at most zero...
+            var claimed = await repo.ClaimDeliverableAsync(0, CancellationToken.None);
+
+            // Then nothing comes back, and the row is left exactly as it was — still pending, unclaimed.
+            Assert.Empty(claimed);
+            var row = await ReadRowAsync(db, id);
+            Assert.Equal(AnnouncementState.Pending, row.State);
+            Assert.Null(row.ClaimedAt);
+        }
+
+        [Fact]
+        public async Task ANegativeMaxClaimsNothingRatherThanFaulting()
+        {
+            // Given a pending, deliverable announcement...
+            await db.ResetAnnouncementAsync();
+            var repo = Harness.AnnouncementRepo(db);
+            await repo.InsertAsync(
+                "Bins go out tonight", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: null, CancellationToken.None);
+
+            // When the vend seam is asked to claim at most negative-one — the clamp's own defensive
+            // floor: a raw negative LIMIT is a Postgres error (22003, invalid_row_count_in_limit_clause),
+            // never "none", so a caller mistake here must never surface as an unhandled exception.
+            var claimed = await repo.ClaimDeliverableAsync(-1, CancellationToken.None);
+
+            // Then it degrades to an empty claim — never a PostgresException.
+            Assert.Empty(claimed);
+        }
+
+        [Fact]
+        public async Task AClaimedRowMapsEveryFieldOntoItsOwnAnnouncementItemMember()
+        {
+            // Given a pending announcement with every field distinct from every other — transposition-
+            // proof: Message and RequestedVoice share a type (string), so a copy-paste bug swapping
+            // ToAnnouncementItem's argument order would compile clean and still needs to be caught here.
+            await db.ResetAnnouncementAsync();
+            var repo = Harness.AnnouncementRepo(db);
+            var id = await repo.InsertAsync(
+                "The garage sale starts at nine", verbatim: false, requestedVoice: "nova",
+                source: AnnouncementSource.Token, ttl: null, CancellationToken.None);
+
+            // When it is claimed through the vend seam...
+            var claimed = await repo.ClaimDeliverableAsync(10, CancellationToken.None);
+
+            // Then every AnnouncementItem field carries its OWN column's value, never a neighbor's.
+            var item = Assert.Single(claimed);
+            Assert.Equal(id, item.Id);
+            Assert.Equal("The garage sale starts at nine", item.Message);
+            Assert.False(item.Verbatim);
+            Assert.Equal("nova", item.RequestedVoice);
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // db/40's own DDL: fresh init (db/06's mirror) and in-place migration converge
     // ---------------------------------------------------------------------
 

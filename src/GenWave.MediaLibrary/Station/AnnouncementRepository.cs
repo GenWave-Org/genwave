@@ -25,8 +25,22 @@ namespace GenWave.MediaLibrary.Station;
 /// <see cref="ILiquidsoapControl"/>/<see cref="ShowRepository"/> "the repository implements the port
 /// directly" shape <c>AnnouncementServiceCollectionExtensions</c>'s own remarks now follow too.
 /// </para>
+///
+/// <para>
+/// <b>ALSO implements <see cref="IAnnouncementSource"/> directly (PLAN T341).</b> The narrower
+/// vend-only claim seam this class's own remarks above deferred to "a Host-side adapter" turns out
+/// to need nothing this class doesn't already have — <see cref="ClaimOldestAsync"/>'s own SQL IS the
+/// claim, so <see cref="ClaimDeliverableAsync"/> below is a thin, mapping-only wrapper over it, the
+/// SAME shape <see cref="InsertOrCollapseAsync"/> already is over <see cref="InsertAsync"/>. The
+/// SPEC F145.2 SpectatorMode refusal is deliberately NOT here: it lives behind a Host-side decorator
+/// (the <c>MediaExistencePushGuard</c>/gh-#612 wrap-in-DI shape) registered OVER this class's own
+/// <see cref="IAnnouncementSource"/> registration, so this repository — and every caller of the
+/// narrower seam, including <c>GenWave.Orchestration.Orchestrator</c> — never reads Host privacy
+/// state at all. See <see cref="AnnouncementServiceCollectionExtensions.AddAnnouncementStore"/> for
+/// the registration/decoration split.
+/// </para>
 /// </summary>
-sealed class AnnouncementRepository(Lazy<NpgsqlDataSource> dataSource) : IAnnouncementStore
+sealed class AnnouncementRepository(Lazy<NpgsqlDataSource> dataSource) : IAnnouncementStore, IAnnouncementSource
 {
     /// <summary>The endpoint-facing default TTL (SPEC F143.1) — 15 minutes. A caller that knows a
     /// bounded override (60-3600s, the endpoint's own job to enforce) passes it explicitly; omitting
@@ -223,6 +237,37 @@ sealed class AnnouncementRepository(Lazy<NpgsqlDataSource> dataSource) : IAnnoun
             cancellationToken: ct));
         return rows.AsList();
     }
+
+    /// <summary>
+    /// <see cref="IAnnouncementSource.ClaimDeliverableAsync"/> — the SPEC F144.1 vend, mapping this
+    /// class's own <see cref="AnnouncementRow"/> shape onto the narrower Core-crossing
+    /// <see cref="AnnouncementItem"/> (PLAN T341).
+    ///
+    /// <para>
+    /// <b>The <paramref name="max"/> &lt;= 0 clamp (T338 review carry-forward, reworded T341 review
+    /// finding F3 — the prior wording claimed <c>ClaimOldestAsync</c>'s SQL "interpolates" this value,
+    /// which overstated the risk: <paramref name="max"/> travels as a bound Dapper PARAMETER
+    /// (<c>new { N = n, ... }</c> against <c>limit @N</c>), never string-concatenated into the SQL
+    /// text, so there is no injection surface here to guard against).</b> The clamp exists for a
+    /// narrower, honest reason: Postgres itself rejects a negative <c>LIMIT</c> value outright — even
+    /// arriving as a bound parameter — with 22003 (invalid_row_count_in_limit_clause), rather than
+    /// treating it as "none". Every caller today (<c>Orchestrator</c>'s own fixed vend-cap constant)
+    /// already passes a small positive value, so this clamp exists purely as this seam's own defensive
+    /// floor against a FUTURE caller's mistake, not a workaround for anything reachable today — "vend
+    /// at most zero" is a perfectly answerable request (the empty list below), never an exception.
+    /// </para>
+    /// </summary>
+    public async Task<IReadOnlyList<AnnouncementItem>> ClaimDeliverableAsync(int max, CancellationToken ct)
+    {
+        var clamped = Math.Max(max, 0);
+        if (clamped == 0) return [];
+
+        var claimed = await ClaimOldestAsync(clamped, DateTimeOffset.UtcNow, ct);
+        return claimed.Select(ToAnnouncementItem).ToArray();
+    }
+
+    static AnnouncementItem ToAnnouncementItem(AnnouncementRow row) =>
+        new(row.Id, row.Message, row.Verbatim, row.RequestedVoice);
 
     /// <summary>
     /// <c>claimed -&gt; aired</c> (SPEC F143.3): stamped ONLY on a TrackAired observation of the

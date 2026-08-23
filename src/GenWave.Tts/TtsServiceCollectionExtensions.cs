@@ -259,7 +259,15 @@ public static class TtsServiceCollectionExtensions
             .AddSingleton<IPersonaPreviewWriter>(sp => sp.GetRequiredService<LlmCopyWriter>())
             .AddSingleton<DegradationGatedCopyWriter>()
             .AddSingleton<ISegmentCopyWriter>(sp => sp.GetRequiredService<DegradationGatedCopyWriter>())
-            .AddSingleton<ITtsSegmentSource, TtsSegmentSource>();
+            // TtsSegmentSource registered concretely ONCE and exposed under BOTH seams it implements
+            // (mirrors LlmCopyWriter's ISegmentCopyWriter/IPersonaPreviewWriter split above) —
+            // IVerbatimSegmentRenderer (SPEC F144.2, PLAN T341) is the announcement vend's zero-LLM
+            // render path; ITtsSegmentSource is every ordinary kind's — so an announcement's verbatim
+            // render reuses the exact same caching/loudness/cue/blurb-dir machinery the feeder does,
+            // never a second parallel pipeline.
+            .AddSingleton<TtsSegmentSource>()
+            .AddSingleton<ITtsSegmentSource>(sp => sp.GetRequiredService<TtsSegmentSource>())
+            .AddSingleton<IVerbatimSegmentRenderer>(sp => sp.GetRequiredService<TtsSegmentSource>());
 
         // TTS/voices clients deliberately carry no BaseAddress (SPEC F36.1–F36.2, F36.4) —
         // Tts:Endpoint is read from IOptionsMonitor<TtsOptions>.CurrentValue and an absolute URI is
