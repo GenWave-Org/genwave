@@ -30,6 +30,17 @@ namespace GenWave.Host.Announcements;
 /// </para>
 ///
 /// <para>
+/// <b>The boot case (T343 review, ruled acceptable — no fix landed here).</b> A station that boots
+/// DIRECTLY into <c>Station:SpectatorMode = true</c> with <c>pending</c>/<c>claimed</c> rows left over
+/// from a previous private session never fires <see cref="SettingChanged"/> for this key at all (no
+/// live write happens — the value simply loads as part of configuration binding), so this sink never
+/// declines those rows on boot; they resolve later and VISIBLY, never silently — either
+/// <c>AnnouncementLifecycleGuardianService</c>'s own TTL sweep expires them, or, defense-in-depth,
+/// <c>SpectatorModeAnnouncementVendGuard</c> refuses to vend a private-past row while public regardless
+/// of state, so nothing from before the boot can ever reach air.
+/// </para>
+///
+/// <para>
 /// The actual decline (<see cref="IAnnouncementLifecycle.DeclineAllLiveAsync"/>) is genuine async
 /// Postgres I/O — <see cref="IStationEventSink"/>'s own contract ("MUST NOT throw and MUST return
 /// promptly") means <see cref="Publish"/> only ever does the cheap, synchronous part (the key check

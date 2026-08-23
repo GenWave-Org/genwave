@@ -13,7 +13,9 @@
 // announcement is a leaf table with no FK dependents (DatabaseFixture.ResetAnnouncementAsync's own
 // remarks), so a bare DROP TABLE is the FK-safe equivalent of Story304's own multi-object drop.
 
+using System.Text.RegularExpressions;
 using Dapper;
+using GenWave.Core.Abstractions;
 using GenWave.MediaLibrary.Station;
 using Npgsql;
 
@@ -736,6 +738,72 @@ public static class FeatureAnnouncementStoreLifecycle
     }
 
     // ---------------------------------------------------------------------
+    // T344 review finding F1 — the wire state mapping: IAnnouncementStore.HistoryAsync's explicit
+    // interface implementation (ToStateText's five-way switch, PLAN T344) was exercised by NOTHING
+    // before this fact — every OTHER HistoryAsync-touching fact in this file drives the internal,
+    // AnnouncementRow-returning overload instead, never the narrower Core-crossing seam the endpoint
+    // actually calls. A mutation swapping any of ToStateText's five outputs for garbage must turn
+    // this fact red (the second, cross-language net lives beside
+    // FeatureAnnouncementStoreLifecycle, below, as FeatureAnnouncementStateWireParity).
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTheExplicitHistoryAsyncMapsEveryStateToItsWireText(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task EachOfTheFiveLifecycleStatesReadsBackAsItsOwnLowercaseWireString()
+        {
+            // Given one announcement driven into EACH of the five lifecycle states. Claimed and aired
+            // land FIRST, each claiming the only pending row at that moment — ClaimOldestAsync claims
+            // the OLDEST deliverable rows across the whole table, so the still-pending row below must
+            // land last or it would be claimed out from under this fact.
+            await db.ResetAnnouncementAsync();
+            var repo = Harness.AnnouncementRepo(db);
+
+            var claimedId = await repo.InsertAsync(
+                "Claimed one", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: TimeSpan.FromHours(1), CancellationToken.None);
+            await repo.ClaimOldestAsync(1, DateTimeOffset.UtcNow, CancellationToken.None);
+
+            await repo.InsertAsync(
+                "Aired one", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: TimeSpan.FromHours(1), CancellationToken.None);
+            var toAir = await repo.ClaimOldestAsync(1, DateTimeOffset.UtcNow, CancellationToken.None);
+            var airedId = Assert.Single(toAir).Id;
+            await repo.MarkAiredAsync(airedId, CancellationToken.None);
+
+            var expiredId = await repo.InsertAsync(
+                "Expired one", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: TimeSpan.FromSeconds(-1), CancellationToken.None);
+            await repo.ExpireStaleAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+
+            var declinedId = await repo.InsertAsync(
+                "Declined one", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: TimeSpan.FromHours(1), CancellationToken.None);
+            await repo.MarkDeclinedAsync([declinedId], "station went public", CancellationToken.None);
+
+            var pendingId = await repo.InsertAsync(
+                "Pending one", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: TimeSpan.FromHours(1), CancellationToken.None);
+
+            // When the endpoint-facing seam reads history — the EXPLICIT IAnnouncementStore.HistoryAsync
+            // implementation, not the internal AnnouncementRow-returning overload every other fact in
+            // this file drives...
+            IAnnouncementStore store = repo;
+            var history = await store.HistoryAsync(10, CancellationToken.None);
+
+            // Then each row carries its OWN lowercase wire state string — the exact five ToStateText
+            // produces, not a neighbor's.
+            Assert.Equal("claimed", history.Single(e => e.Id == claimedId).State);
+            Assert.Equal("aired", history.Single(e => e.Id == airedId).State);
+            Assert.Equal("expired", history.Single(e => e.Id == expiredId).State);
+            Assert.Equal("declined", history.Single(e => e.Id == declinedId).State);
+            Assert.Equal("pending", history.Single(e => e.Id == pendingId).State);
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // db/40's own DDL: fresh init (db/06's mirror) and in-place migration converge
     // ---------------------------------------------------------------------
 
@@ -785,6 +853,57 @@ public static class FeatureAnnouncementStoreLifecycle
                       and indexname = 'announcement_deliverable')
                 """);
             Assert.True(hasDeliverableIndex, "station.announcement is missing its announcement_deliverable partial index.");
+        }
+    }
+}
+
+// T344 review finding F1 (second net) — cross-language parity: AnnouncementRepository.ToStateText's
+// five outputs must never drift from admin-ui/lib/announcements-api.ts's own AnnouncementState union
+// literal (the wire type the admin page's state chips switch on) — the same
+// FeaturePersonaSlugParity (Story192_PersonaSlugParity.cs)/Story337 icon-name-contract
+// "repo-content-fact" idiom: string-parse the .ts source directly (no TS toolchain runs inside
+// xUnit), assert the real C# mapping against the parsed set. ToStateText is `internal` (not
+// `private`) for exactly this reason — see its own remarks in AnnouncementRepository.cs.
+public static class FeatureAnnouncementStateWireParity
+{
+    static string RepoRoot =>
+        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+
+    static string AnnouncementsApiTsPath =>
+        Path.Combine(RepoRoot, "admin-ui", "lib", "announcements-api.ts");
+
+    static readonly Regex UnionPattern = new(
+        "export type AnnouncementState = ((?:\"[a-z]+\"(?: \\| )?)+);", RegexOptions.None);
+
+    /// <summary>Extracts every quoted member of the <c>AnnouncementState</c> union literal.</summary>
+    static IReadOnlyList<string> ParseTsAnnouncementStateUnion()
+    {
+        var text = File.ReadAllText(AnnouncementsApiTsPath);
+        var match = UnionPattern.Match(text);
+        Assert.True(match.Success, $"could not find the AnnouncementState union literal in {AnnouncementsApiTsPath}");
+
+        var names = Regex.Matches(match.Groups[1].Value, "\"([a-z]+)\"")
+            .Select(m => m.Groups[1].Value)
+            .ToList();
+        Assert.True(names.Count > 0, $"parsed zero states out of {AnnouncementsApiTsPath}");
+        return names;
+    }
+
+    public sealed class ScenarioToStateTextMatchesTheTsUnion
+    {
+        [Fact]
+        public void ToStateTextsFiveOutputsMatchTheTsAnnouncementStateUnion()
+        {
+            // The C# switch and the TS union literal cannot drift (parity pin, the T68 golden-table
+            // idiom) — every AnnouncementState member's own wire text, compared as a SET against
+            // every state the TS union names.
+            var tsStates = ParseTsAnnouncementStateUnion().OrderBy(s => s, StringComparer.Ordinal).ToList();
+            var csStates = Enum.GetValues<AnnouncementState>()
+                .Select(AnnouncementRepository.ToStateText)
+                .OrderBy(s => s, StringComparer.Ordinal)
+                .ToList();
+
+            Assert.Equal(tsStates, csStates);
         }
     }
 }

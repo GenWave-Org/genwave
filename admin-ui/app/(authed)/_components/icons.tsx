@@ -304,3 +304,17 @@ export function ExplorationIcon(props: IconProps): ReactNode {
     </IconBase>
   );
 }
+
+/** Announcements nav glyph (SPEC F146, STORY-361, PLAN T344) — a megaphone (handle block, horn
+ * body, one sound-wave arc): "a message broadcast to the house" — distinct from {@link PersonaIcon}'s
+ * capsule microphone (the on-air VOICE itself) and {@link LiveIcon}'s dot-plus-arcs pulse (the
+ * broadcast signal). */
+export function AnnouncementsIcon(props: IconProps): ReactNode {
+  return (
+    <IconBase {...props}>
+      <path d="M2.5 6.2v3.6l3-.8V7l-3-.8z" />
+      <path d="M5.5 5.4 11 3v10L5.5 10.6V5.4z" />
+      <path d="M13 6a2.8 2.8 0 0 1 0 4" />
+    </IconBase>
+  );
+}

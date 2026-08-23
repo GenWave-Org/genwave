@@ -33,6 +33,11 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", iconName: "dashboard" },
   { href: "/live", label: "Live", iconName: "live" },
+  // Announcements (SPEC F146, STORY-361, PLAN T344) — the House Voice's own admin page: send a
+  // message, watch its fate, manage the announce token. Placed right after Live (both are "what's
+  // happening on air right now" surfaces) and before Catalog (a library-management surface, a
+  // different concern entirely).
+  { href: "/announcements", label: "Announcements", iconName: "announcements" },
   { href: "/catalog", label: "Catalog", iconName: "catalog" },
   { href: "/safe-content", label: "Station Imaging", iconName: "safe-content" },
   { href: "/personas", label: "Personas", iconName: "persona" },

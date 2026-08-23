@@ -49,7 +49,7 @@ public static class FeatureAnnouncementLifecycleSmoke
             // Given the real host, with only the two Postgres-backed leaves faked...
             var lifecycle = new FakeAnnouncementLifecycle();
             lifecycle.CollapseCountByAnnouncementId[555] = 1;
-            var boothLog = new RecordingBoothLogAppender();
+            var boothLog = new FakeBoothLogAppender();
             await using var factory = new AnnouncementLifecycleSmokeWebFactory(lifecycle, boothLog);
             var services = factory.Services; // builds the host without starting Kestrel
 
@@ -83,7 +83,7 @@ public static class FeatureAnnouncementLifecycleSmoke
             // operator...
             var lifecycle = new FakeAnnouncementLifecycle();
             lifecycle.PendingIds.Add(101);
-            var boothLog = new RecordingBoothLogAppender();
+            var boothLog = new FakeBoothLogAppender();
             await using var factory = new AnnouncementLifecycleSmokeWebFactory(lifecycle, boothLog);
             var client = factory.CreateClient();
 
@@ -165,21 +165,6 @@ file sealed class LiveTestConfigurationProvider : ConfigurationProvider
 file sealed class LiveTestConfigurationSource(LiveTestConfigurationProvider provider) : IConfigurationSource
 {
     public IConfigurationProvider Build(IConfigurationBuilder builder) => provider;
-}
-
-/// <summary>In-memory <see cref="IBoothLogAppender"/> double — records every
-/// <see cref="AppendAsync"/> call instead of touching Postgres. Mirrors
-/// Story217_BoothLogPickStamp.cs's own <c>FakeBoothLogAppender</c> idiom, deliberately re-declared
-/// here (that one is <see langword="file"/>-scoped to its own file).</summary>
-file sealed class RecordingBoothLogAppender : IBoothLogAppender
-{
-    public List<BoothLogAppendRequest> Calls { get; } = [];
-
-    public Task AppendAsync(BoothLogAppendRequest request, CancellationToken ct)
-    {
-        Calls.Add(request);
-        return Task.CompletedTask;
-    }
 }
 
 // ── WebApplicationFactory ─────────────────────────────────────────────────────────────────────────

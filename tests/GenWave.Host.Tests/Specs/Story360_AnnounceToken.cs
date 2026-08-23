@@ -79,15 +79,21 @@ public static class FeatureAnnounceToken
             var plaintext = await AnnounceTokenApiWebFactory.GenerateTokenAsync(client);
 
             // When the same session drives every other in-scope announcements-family response afterward
+            // — including the T344 status read (T340's own carried reveal-once-read-back note, closed
+            // here rather than left open for a later cycle)
             var postResponse = await client.PostAsJsonAsync("/api/announcements", new { message = "Dinner's ready" });
             var nowPlayingResponse = await client.GetAsync("/api/announcements/now-playing");
+            var statusResponse = await client.GetAsync("/api/announcements/token/status");
             var postBody = await postResponse.Content.ReadAsStringAsync();
             var nowPlayingBody = await nowPlayingResponse.Content.ReadAsStringAsync();
+            var statusBody = await statusResponse.Content.ReadAsStringAsync();
 
             // Then neither response ever echoes the plaintext back
             Assert.True(
-                !postBody.Contains(plaintext, StringComparison.Ordinal) && !nowPlayingBody.Contains(plaintext, StringComparison.Ordinal),
-                $"plaintext leaked into a later API response; post: {postBody}, nowPlaying: {nowPlayingBody}");
+                !postBody.Contains(plaintext, StringComparison.Ordinal)
+                    && !nowPlayingBody.Contains(plaintext, StringComparison.Ordinal)
+                    && !statusBody.Contains(plaintext, StringComparison.Ordinal),
+                $"plaintext leaked into a later API response; post: {postBody}, nowPlaying: {nowPlayingBody}, status: {statusBody}");
         }
     }
 
@@ -265,6 +271,24 @@ public static class FeatureAnnounceToken
                 (Revoke: HttpStatusCode.Unauthorized, StillWorks: HttpStatusCode.OK),
                 (Revoke: response.StatusCode, StillWorks: stillWorks.StatusCode));
         }
+
+        [Fact]
+        public async Task ATokenCannotReadItsOwnStatus()
+        {
+            // Given a configured token and NO cookie session
+            await using var factory = new AnnounceTokenApiWebFactory(new FakeAnnouncementStore(), new FakeAnnounceTokenStore());
+            var plaintext = await AnnounceTokenApiWebFactory.GenerateTokenAsync(
+                await AnnounceTokenApiWebFactory.LoggedInClientAsync(factory));
+            var bearerOnlyClient = AnnounceTokenApiWebFactory.BearerClient(factory, plaintext);
+
+            // When that Bearer-only client tries to read its own status (T344 review finding F3)
+            var response = await bearerOnlyClient.GetAsync("/api/announcements/token/status");
+
+            // Then it is refused — the status route is session-only, same as generate/revoke above: a
+            // caller holding only a token has no more business introspecting the credential that scopes
+            // it than minting or revoking one.
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
     }
 
     public sealed class ScenarioLastUsedIsStamped
@@ -297,6 +321,33 @@ public static class FeatureAnnounceToken
 
             // Then last-used was never stamped
             Assert.Equal(0, tokenStore.StampCalls);
+        }
+
+        [Fact]
+        public async Task ARegenerateClearsLastUsedUntilTheNewTokenAuthenticates()
+        {
+            // Given a token that has already authenticated once — status carries a last-used stamp...
+            var tokenStore = new FakeAnnounceTokenStore();
+            await using var factory = new AnnounceTokenApiWebFactory(new FakeAnnouncementStore(), tokenStore);
+            var loggedInClient = await AnnounceTokenApiWebFactory.LoggedInClientAsync(factory);
+            var oldPlaintext = await AnnounceTokenApiWebFactory.GenerateTokenAsync(loggedInClient);
+            await AnnounceTokenApiWebFactory.BearerClient(factory, oldPlaintext).GetAsync("/api/announcements/now-playing");
+            var beforeRegenerate = await loggedInClient.GetFromJsonAsync<AnnounceTokenStatusDto>("/api/announcements/token/status");
+            Assert.NotNull(beforeRegenerate?.LastUsedAt);
+
+            // When the operator regenerates...
+            var newPlaintext = await AnnounceTokenApiWebFactory.GenerateTokenAsync(loggedInClient);
+
+            // Then status shows lastUsed null — the prior token's stamp must die with its credential
+            // (T344 review finding F2), not survive to misreport the brand-new plaintext as already used.
+            var afterRegenerate = await loggedInClient.GetFromJsonAsync<AnnounceTokenStatusDto>("/api/announcements/token/status");
+            Assert.Null(afterRegenerate?.LastUsedAt);
+
+            // And once the NEW token itself authenticates, it stamps again — the timestamp isn't gone
+            // forever, only reset to reflect the new credential's own history.
+            await AnnounceTokenApiWebFactory.BearerClient(factory, newPlaintext).GetAsync("/api/announcements/now-playing");
+            var afterNewTokenUse = await loggedInClient.GetFromJsonAsync<AnnounceTokenStatusDto>("/api/announcements/token/status");
+            Assert.NotNull(afterNewTokenUse?.LastUsedAt);
         }
     }
 

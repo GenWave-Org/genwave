@@ -27,6 +27,17 @@ namespace GenWave.Architecture.Tests.Support;
 /// whose name merely CONTAINS <paramref name="schemeName"/> as a false positive (the same
 /// same-prefix-lookalike hole <see cref="AssemblyReferenceScan.HasFamilyPrefix"/> closes for L1/L5) —
 /// this scan closes the identical hole one field over by never doing a substring check at all.
+///
+/// <b>Scope, precisely (T343 review — documented-unreachable, not closed here).</b> This scan reaches
+/// only what the CLR materializes as an <see cref="AuthorizeAttribute"/> — declarative
+/// <c>[Authorize(AuthenticationSchemes = ...)]</c> on a type or method. It is BLIND to a hypothetical
+/// authentication scheme named through a <see cref="Microsoft.AspNetCore.Authorization.AuthorizationPolicy"/>
+/// object built at runtime (e.g. an <c>AuthorizationPolicyBuilder.AddAuthenticationSchemes(...)</c>
+/// call composed in <c>Program.cs</c> or a policy factory) rather than an attribute — no such policy
+/// exists anywhere in this codebase today (every named policy in <c>AuthorizationPolicies</c> carries
+/// no scheme list of its own), so the gap is real but currently unreachable, not a live hole. A future
+/// policy-object scheme list would need its own, separate fitness law; this one only ever promises to
+/// fence the attribute shape.
 /// </summary>
 internal static class AnnounceSchemeFence
 {

@@ -9,15 +9,15 @@ namespace GenWave.Core.Abstractions;
 /// <c>GenWave.Abstractions</c> surface (that project's own remarks name
 /// <c>ILiquidsoapControl</c>/<c>IShowStore</c>-shaped leaky contracts as staying internal by design).
 ///
-/// <b>Deliberately narrow — exactly what <c>AnnouncementsController</c> (T339) needs.</b>
+/// <b>Deliberately narrow — exactly what <c>AnnouncementsController</c> (T339/T344) needs.</b>
 /// <see cref="IAnnouncementSource"/> already owns the DIFFERENT, vend-side claim seam (PLAN T338/T341);
 /// this port never grows a claim/vend member. Lifecycle transitions (mark-aired, decline, expire,
 /// re-arm) landed on their OWN seam instead (<see cref="IAnnouncementLifecycle"/>, PLAN T343's
-/// guardians) rather than growing this one — see that interface's own remarks for why. The admin
-/// history read (PLAN T344's page) is still a LATER task's own member to add here when a real Host
-/// call site needs one — see <c>GenWave.MediaLibrary.Station.AnnouncementRepository</c>'s own remarks
-/// for the full store; this seam exposes only the slice of it the endpoint family has a caller for
-/// today.
+/// guardians) rather than growing this one — see that interface's own remarks for why.
+/// <see cref="HistoryAsync"/> (PLAN T344) is the one exception to "narrow": the admin page's own
+/// read (SPEC F146.2) is a real Host call site, so it lands here rather than waiting for a
+/// hypothetical later need — see <c>GenWave.MediaLibrary.Station.AnnouncementRepository</c>'s own
+/// remarks for the full store this seam exposes only a slice of.
 /// </summary>
 public interface IAnnouncementStore
 {
@@ -42,4 +42,15 @@ public interface IAnnouncementStore
     /// message).
     /// </summary>
     Task<int> CountPendingAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Newest-first rows across every state, capped at <paramref name="limit"/> (SPEC F146.2,
+    /// STORY-361, PLAN T344) — the F143.2 visible-decline/visible-expiry surface's own read: nothing
+    /// this store transitions is ever hidden from <c>GET /api/announcements</c>, only listed. This
+    /// seam never bounds <paramref name="limit"/> itself — the endpoint owns capping it to its own
+    /// 50-default/200-max policy before calling here, the same "the endpoint enforces the policy,
+    /// this seam just answers the query" split <see cref="CountPendingAsync"/>'s own depth-cap
+    /// caller already keeps.
+    /// </summary>
+    Task<IReadOnlyList<AnnouncementHistoryEntry>> HistoryAsync(int limit, CancellationToken ct);
 }

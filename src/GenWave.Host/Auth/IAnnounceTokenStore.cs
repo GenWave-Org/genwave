@@ -44,4 +44,13 @@ public interface IAnnounceTokenStore
     /// Called once per successful Bearer authentication.
     /// </summary>
     Task StampLastUsedAsync(CancellationToken ct);
+
+    /// <summary>
+    /// The last instant <see cref="StampLastUsedAsync"/> recorded, or <see langword="null"/> if the
+    /// current token (if any) has never authenticated a request yet — the Announcements page's own
+    /// last-used indicator (SPEC F146.3, STORY-361, PLAN T344). Widens the "psql-only" diagnosability
+    /// <see cref="StampLastUsedAsync"/>'s own remarks describe into a real, deliberately narrow read:
+    /// this answers RECENCY only, never the hash or plaintext — reveal-once (SPEC F145.3) is untouched.
+    /// </summary>
+    Task<DateTimeOffset?> ReadLastUsedAsync(CancellationToken ct);
 }

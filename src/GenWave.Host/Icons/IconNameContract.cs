@@ -32,6 +32,7 @@ public static class IconNameContract
     {
         "dashboard",
         "live",
+        "announcements",
         "catalog",
         "safe-content",
         "health",

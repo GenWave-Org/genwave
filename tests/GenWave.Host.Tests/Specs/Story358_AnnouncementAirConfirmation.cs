@@ -62,6 +62,38 @@ public static class FeatureAnnouncementAirConfirmation
         }
 
         [Fact]
+        public async Task AReplayedTrackAiredStampsTwiceButWritesOnlyOneBoothRow()
+        {
+            // Given a claimed announcement whose segment reaches air, drained once for real...
+            var channel = Channel.CreateBounded<AnnouncementAiredSignal>(8);
+            var lifecycle = new FakeAnnouncementLifecycle();
+            var boothLog = new FakeBoothLogAppender();
+            var sink = new AnnouncementAiredEventSink(channel.Writer, NullLogger<AnnouncementAiredEventSink>.Instance);
+            var drain = new AnnouncementAiredDrainService(
+                channel.Reader, lifecycle, boothLog, NullLogger<AnnouncementAiredDrainService>.Instance);
+            var mediaId = AnnouncementMediaId.Wrap(555, "tts:abc");
+            var trackAired = new TrackAired(
+                mediaId, "Dinner's ready", null, 0.0, DateTimeOffset.UtcNow, 4200, SegmentKind: SegmentKind.Announcement);
+            sink.Publish(trackAired);
+            Assert.True(channel.Reader.TryRead(out var firstSignal));
+            await drain.ProcessAsync(firstSignal!, CancellationToken.None);
+
+            // When the SAME wrapped event is published a second time (an engine-level replay) — the
+            // row is no longer 'claimed' in a real store, so MarkAiredAsync's total transition would
+            // now answer null (seeded here via AiredOutcomeIsNull, standing in for that DB fact)...
+            lifecycle.AiredOutcomeIsNull.Add(555);
+            sink.Publish(trackAired);
+            Assert.True(channel.Reader.TryRead(out var secondSignal));
+            await drain.ProcessAsync(secondSignal!, CancellationToken.None);
+
+            // Then the store's aired transition was REACHED both times (observed twice), but the
+            // null second outcome means only the FIRST landed a booth row — the state='claimed' guard
+            // makes a replay a DB no-op, never a duplicate log entry.
+            Assert.Equal(2, lifecycle.MarkAiredCalls.Count(id => id == 555));
+            Assert.Single(boothLog.Calls);
+        }
+
+        [Fact]
         public async Task APushAloneNeverStampsAired()
         {
             // Given the SAME sink/drain pair, with an announcement genuinely claimed (id 555)...
@@ -128,25 +160,5 @@ public static class FeatureAnnouncementAirConfirmation
             Assert.Empty(lifecycle.ReArmCalls);
             Assert.Single(lifecycle.ExpireStaleCalls);
         }
-    }
-}
-
-// ── Test harness ───────────────────────────────────────────────────────────────────────────────────
-
-/// <summary>
-/// In-memory <see cref="GenWave.Core.Abstractions.IBoothLogAppender"/> double — records every
-/// <see cref="AppendAsync"/> call's <see cref="GenWave.Core.Domain.BoothLogAppendRequest"/> instead of
-/// touching Postgres. Mirrors Story217_BoothLogPickStamp.cs's own <c>FakeBoothLogAppender</c> idiom,
-/// deliberately re-declared here (rather than shared) since that one is <see langword="file"/>-scoped
-/// to its own file.
-/// </summary>
-file sealed class FakeBoothLogAppender : GenWave.Core.Abstractions.IBoothLogAppender
-{
-    public List<GenWave.Core.Domain.BoothLogAppendRequest> Calls { get; } = [];
-
-    public Task AppendAsync(GenWave.Core.Domain.BoothLogAppendRequest request, CancellationToken ct)
-    {
-        Calls.Add(request);
-        return Task.CompletedTask;
     }
 }

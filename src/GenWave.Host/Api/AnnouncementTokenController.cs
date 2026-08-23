@@ -66,4 +66,23 @@ public sealed class AnnouncementTokenController(
         logger.LogInformation("Announce token revoked");
         return NoContent();
     }
+
+    /// <summary>
+    /// <c>GET /api/announcements/token/status</c> (SPEC F146.3, STORY-361, PLAN T344) — the
+    /// Announcements page's own token panel: whether a token currently exists, plus the last-used
+    /// stamp <see cref="IAnnounceTokenStore.StampLastUsedAsync"/> writes on every successful Bearer
+    /// authentication (PLAN T340). SESSION ONLY, same as <see cref="GenerateOrRegenerate"/>/
+    /// <see cref="Revoke"/> above — this route is deliberately absent from the class remarks'
+    /// <see cref="AnnounceTokenAuthenticationDefaults.InScopeSchemes"/> list too: a caller holding
+    /// only a token has no more business introspecting the credential that scopes it than minting or
+    /// revoking one. Never returns the hash or plaintext (<see cref="AnnounceTokenStatusDto"/>'s own
+    /// remarks) — reveal-once (SPEC F145.3) stays intact.
+    /// </summary>
+    [HttpGet("status")]
+    public async Task<IActionResult> Status(CancellationToken ct)
+    {
+        var hash = await tokenStore.ReadHashAsync(ct);
+        var lastUsedAt = await tokenStore.ReadLastUsedAsync(ct);
+        return Ok(new AnnounceTokenStatusDto(hash is not null, lastUsedAt));
+    }
 }

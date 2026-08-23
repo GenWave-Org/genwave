@@ -23,6 +23,16 @@ sealed class FakeAnnouncementStore : IAnnouncementStore
     /// (<see cref="IAnnouncementStore.InsertOrCollapseAsync"/>'s own remarks).</summary>
     public bool DeclineNextInsert { get; set; }
 
+    /// <summary>Scripts <see cref="HistoryAsync"/>'s own return (PLAN T344) — a scenario populates
+    /// this to prove <c>AnnouncementsController.GetHistory</c>'s own cap/DTO-projection behavior
+    /// without a real Postgres row to query.</summary>
+    public IReadOnlyList<AnnouncementHistoryEntry> HistoryRows { get; set; } = [];
+
+    /// <summary>Every <c>limit</c> <see cref="HistoryAsync"/> was called with, in call order — proves
+    /// the controller's own capping (50 default, 200 max) reaches this seam rather than passing a
+    /// caller-supplied value straight through.</summary>
+    public List<int> HistoryCalls { get; } = [];
+
     long nextId = 1;
 
     public Task<long?> InsertOrCollapseAsync(
@@ -36,4 +46,10 @@ sealed class FakeAnnouncementStore : IAnnouncementStore
     }
 
     public Task<int> CountPendingAsync(CancellationToken ct) => Task.FromResult(PendingCount);
+
+    public Task<IReadOnlyList<AnnouncementHistoryEntry>> HistoryAsync(int limit, CancellationToken ct)
+    {
+        HistoryCalls.Add(limit);
+        return Task.FromResult(HistoryRows);
+    }
 }

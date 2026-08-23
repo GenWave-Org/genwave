@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -10,16 +11,30 @@ using GenWave.Host.Playout;
 namespace GenWave.Host.Api;
 
 /// <summary>
-/// <c>POST /api/announcements</c> (the House Voice's front door) and
-/// <c>GET /api/announcements/now-playing</c> — SPEC F143.1/.4/.5, F145.1's endpoint half, F145.3/.4's
-/// token door; STORY-357, STORY-359, STORY-360; PLAN T339/T340. Accepts EITHER the admin cookie
-/// session OR the announce Bearer token (<see cref="AnnounceTokenAuthenticationDefaults.InScopeSchemes"/>)
-/// — the Operator plane, the same "keeping the station on air" grouping
+/// <c>POST /api/announcements</c> (the House Voice's front door), <c>GET /api/announcements</c> (the
+/// history read, SPEC F146.2), and <c>GET /api/announcements/now-playing</c> — SPEC F143.1/.4/.5,
+/// F145.1's endpoint half, F145.3/.4's token door; STORY-357, STORY-359, STORY-360, STORY-361; PLAN
+/// T339/T340/T344. Accepts EITHER the admin cookie session OR the announce Bearer token
+/// (<see cref="AnnounceTokenAuthenticationDefaults.InScopeSchemes"/>) — the Operator plane, the same
+/// "keeping the station on air" grouping
 /// <see cref="SafeSegmentsController"/>/<see cref="TtsPreviewController"/>/<see cref="VoicesController"/>
 /// already share (an announcement is content headed for air, exactly like a safe-loop clip or a TTS
 /// preview), now widened to whichever of the two auth doors SPEC F145.4 grants the announcements
-/// family to. <see cref="AnnouncementTokenController"/> (mint/revoke) deliberately does NOT share this
-/// scheme list — session only, so a token can never mint or revoke a token.
+/// family to. <see cref="AnnouncementTokenController"/> (mint/revoke/status) deliberately does NOT
+/// share this scheme list — session only, so a token can never mint, revoke, or introspect a token.
+///
+/// <para>
+/// <b>Per-IP door limiter (PLAN T340 carry-forward, built here).</b> <see cref="EnableRateLimitingAttribute"/>
+/// carries <see cref="RateLimiterPolicies.Announcements"/> — a middleware-level, per-source-IP fixed
+/// window applied to EVERY action on this controller, running BEFORE authentication
+/// (<c>Program.cs</c>'s own pipeline ordering). This is a DIFFERENT budget from the in-action
+/// accepted-rate cap described below: it exists purely to bound the unauthenticated credential-check
+/// DB read (<see cref="AnnounceTokenAuthenticationHandler"/>'s own <see cref="IAnnounceTokenStore.ReadHashAsync"/>
+/// call fires on EVERY Bearer attempt, valid or not) against a junk-Bearer flood from one source,
+/// generously windowed so it never bites the HA sensor's own ≥30s polling cadence or a legitimate UI
+/// session — see <see cref="RateLimiterPolicies"/>'s own remarks for the full rationale and why this
+/// does not repeat T339 review finding F1's mistake.
+/// </para>
 ///
 /// <para>
 /// <b>Gate order (F143.4/F145.1, all enforced BEFORE any row write):</b> SpectatorMode (403, F145.1's
@@ -70,6 +85,7 @@ namespace GenWave.Host.Api;
 [Route("api/announcements")]
 [AdminSurface]
 [Authorize(AuthenticationSchemes = AnnounceTokenAuthenticationDefaults.InScopeSchemes, Policy = AuthorizationPolicies.Operator)]
+[EnableRateLimiting(RateLimiterPolicies.Announcements)]
 public sealed class AnnouncementsController(
     IAnnouncementStore announcementStore,
     AnnouncementAcceptedRateLimiter acceptedRateLimiter,
@@ -92,6 +108,12 @@ public sealed class AnnouncementsController(
     // The store's own DDL CHECK bound (db/40) — see StoreMessageCapProblem's own remarks (T339 review
     // finding F3) for why this is named separately from AnnouncementsOptions.MessageMaxChars.
     const int StoreMessageMaxChars = 280;
+
+    // GetHistory's own caps (SPEC F146.2, PLAN T344, T337 review's unbounded-limit carry-forward) —
+    // fixed, not settings-tunable (mirrors MinTtlSeconds/MaxTtlSeconds/MaxVoiceChars above): the page
+    // has no reason to ever ask for more than a couple hundred rows.
+    const int DefaultHistoryLimit = 50;
+    const int MaxHistoryLimit = 200;
 
     /// <summary>See the class remarks for the full gate order.</summary>
     [HttpPost]
@@ -181,6 +203,50 @@ public sealed class AnnouncementsController(
         logger.LogInformation("Announcement accepted id={Id} verbatim={Verbatim}", id, request.Verbatim ?? false);
         return Ok(new AnnouncementAcceptedDto(id.Value));
     }
+
+    /// <summary>
+    /// <c>GET /api/announcements</c> (SPEC F146.2, STORY-361, PLAN T344) — the history read the
+    /// Announcements page's list renders: newest first, every state F143.2's total machine can reach,
+    /// with the decline reason/collapse count/aired timestamp the visible-decline law promises. No
+    /// parallel read path — this delegates entirely to <see cref="IAnnouncementStore.HistoryAsync"/>
+    /// (the same store <see cref="Post"/> writes through), never a second query built here.
+    ///
+    /// <para>
+    /// <b><paramref name="limit"/> is capped HERE, not left to the store (T337 review's own
+    /// unbounded-limit carry-forward).</b> Omitted or non-positive ⇒ <see cref="DefaultHistoryLimit"/>
+    /// (50); anything above <see cref="MaxHistoryLimit"/> (200) clamps down rather than 400ing — a
+    /// caller asking for "too much history" is a harmless request to shrink, unlike a caller asking
+    /// for an out-of-bounds TTL (<see cref="Post"/>'s own bounds check), which names a genuine
+    /// contract violation. No SpectatorMode gate (mirrors <see cref="NowPlaying"/>'s own remarks
+    /// immediately below): this route is never reachable by a public caller in the first place.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Reachable by the announce token, not just the admin session (T344 review finding F7 —
+    /// documentation only, the surface stays exactly as wide as it is today).</b> This action carries
+    /// no scheme list of its own; it inherits the class-level
+    /// <see cref="AnnounceTokenAuthenticationDefaults.InScopeSchemes"/> authorization, so a caller
+    /// holding only the F145.3 announce token can read the FULL history — every submitter's rows, not
+    /// only its own. This is deliberate, not an oversight: SPEC F145.3 grants the token the whole
+    /// announcements FAMILY (mint excepted — see <see cref="AnnouncementTokenController"/>'s own
+    /// remarks), and STORY-361/PLAN T344 never asked for a narrower, per-submitter read. Least-
+    /// privilege narrowing this route to session-only (or to the calling submitter's own rows) is a
+    /// flagged revisit for a later cycle — the T346 era, with its own SPEC rider — not a gap to close
+    /// silently here.
+    /// </para>
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> GetHistory([FromQuery] int? limit, CancellationToken ct)
+    {
+        var cappedLimit = limit is { } requested and > 0 ? Math.Min(requested, MaxHistoryLimit) : DefaultHistoryLimit;
+
+        var rows = await announcementStore.HistoryAsync(cappedLimit, ct);
+        return Ok(rows.Select(ToHistoryDto).ToArray());
+    }
+
+    static AnnouncementHistoryDto ToHistoryDto(AnnouncementHistoryEntry entry) => new(
+        entry.Id, entry.Message, entry.Verbatim, entry.State, entry.DeclineReason, entry.CollapseCount,
+        entry.CreatedAt, entry.ExpiresAt, entry.AiredAt);
 
     /// <summary>
     /// <c>GET /api/announcements/now-playing</c> (SPEC F145.3, PLAN T340) — the token-reachable

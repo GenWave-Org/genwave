@@ -24,12 +24,18 @@ sealed class FakeAnnounceTokenStore : IAnnounceTokenStore
     public Task SetHashAsync(string hash, CancellationToken ct)
     {
         Hash = hash;
+        // Mirrors the real AnnounceTokenStore's own T344 review fix: a regenerate clears the prior
+        // token's last-used stamp — the new plaintext has authenticated nothing yet.
+        LastUsedAt = null;
         return Task.CompletedTask;
     }
 
     public Task RevokeAsync(CancellationToken ct)
     {
         Hash = null;
+        // Mirrors the real AnnounceTokenStore's own T344 review fix: no current token means no stale
+        // last-used stamp survives to misreport recency for whatever token is generated next.
+        LastUsedAt = null;
         return Task.CompletedTask;
     }
 
@@ -39,4 +45,6 @@ sealed class FakeAnnounceTokenStore : IAnnounceTokenStore
         LastUsedAt = DateTimeOffset.UtcNow;
         return Task.CompletedTask;
     }
+
+    public Task<DateTimeOffset?> ReadLastUsedAsync(CancellationToken ct) => Task.FromResult(LastUsedAt);
 }

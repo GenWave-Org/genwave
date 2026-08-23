@@ -66,12 +66,54 @@ public sealed class AnnounceTokenStore(string connectionString) : IAnnounceToken
     }
 
     /// <inheritdoc/>
-    public Task SetHashAsync(string hash, CancellationToken ct) => repository.WriteAsync(HashKey, hash, ct);
+    ///
+    /// <remarks>
+    /// Clears <see cref="LastUsedAtKey"/> too (T344 review finding F2) — <see cref="ReadLastUsedAsync"/>'s
+    /// own doc comment promises "the CURRENT token", and a regenerate installs a brand-new plaintext
+    /// no request has authenticated with yet; leaving the prior token's stamp in place would misreport
+    /// a token that has never been used as already used.
+    /// </remarks>
+    public async Task SetHashAsync(string hash, CancellationToken ct)
+    {
+        await repository.WriteAsync(HashKey, hash, ct);
+        await repository.DeleteAsync(LastUsedAtKey, ct);
+    }
 
     /// <inheritdoc/>
-    public Task RevokeAsync(CancellationToken ct) => repository.DeleteAsync(HashKey, ct);
+    ///
+    /// <remarks>
+    /// Clears <see cref="LastUsedAtKey"/> too (T344 review finding F2) — <see cref="GenWave.Host.Api.AnnounceTokenStatusDto"/>'s
+    /// own doc comment scopes <c>LastUsedAt</c> to "the current token (if any)"; once revoked there is
+    /// no current token, so a stale stamp from the revoked one must not survive to misreport recency
+    /// for whatever token (if any) is generated next.
+    /// </remarks>
+    public async Task RevokeAsync(CancellationToken ct)
+    {
+        await repository.DeleteAsync(HashKey, ct);
+        await repository.DeleteAsync(LastUsedAtKey, ct);
+    }
 
     /// <inheritdoc/>
     public Task StampLastUsedAsync(CancellationToken ct) =>
         repository.WriteAsync(LastUsedAtKey, DateTimeOffset.UtcNow, ct);
+
+    /// <inheritdoc/>
+    public async Task<DateTimeOffset?> ReadLastUsedAsync(CancellationToken ct)
+    {
+        var stored = await repository.ReadValueAsync(LastUsedAtKey, ct);
+        if (stored is null)
+            return null;
+
+        // Same "undo the one layer of JSON-string encoding WriteAsync applied, fail closed on a
+        // malformed row" posture as ReadHashAsync's own remarks — a malformed row can never have
+        // been written by this class itself.
+        try
+        {
+            return JsonSerializer.Deserialize<DateTimeOffset?>(stored);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 }

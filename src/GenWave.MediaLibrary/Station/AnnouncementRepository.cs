@@ -422,6 +422,16 @@ sealed class AnnouncementRepository(Lazy<NpgsqlDataSource> dataSource)
     /// <summary>
     /// Newest-first rows across every state (SPEC F146.2's history surface) — the visible-decline/
     /// visible-expiry law's own read side: nothing this store transitions is ever hidden, only listed.
+    /// The concrete, <see cref="AnnouncementRow"/>-returning shape — <see cref="GenWave.MediaLibrary.Tests"/>'s
+    /// own Story357_AnnouncementStore.cs drives this directly against a real Postgres fixture (T337);
+    /// <see cref="IAnnouncementStore.HistoryAsync"/>'s explicit interface implementation immediately
+    /// below (PLAN T344) is a thin, mapping-only wrapper over this same method — the
+    /// <see cref="ClaimDeliverableAsync"/>/<see cref="ClaimOldestAsync"/> shape one seam over — rather
+    /// than a second name: <see cref="AnnouncementRow"/> is internal to this assembly, so the
+    /// Core-crossing seam needs its own return type (<see cref="AnnouncementHistoryEntry"/>), and C#
+    /// has no way to overload solely on return type — an explicit interface implementation is the
+    /// idiomatic way to keep both this method's own existing name AND the interface member's identical
+    /// name on one class without a collision.
     /// </summary>
     public async Task<IReadOnlyList<AnnouncementRow>> HistoryAsync(int limit, CancellationToken ct)
     {
@@ -432,4 +442,49 @@ sealed class AnnouncementRepository(Lazy<NpgsqlDataSource> dataSource)
             cancellationToken: ct));
         return rows.AsList();
     }
+
+    /// <summary>
+    /// <see cref="IAnnouncementStore.HistoryAsync"/> (PLAN T344) — maps this class's own
+    /// <see cref="AnnouncementRow"/> rows onto the narrower Core-crossing
+    /// <see cref="AnnouncementHistoryEntry"/>, mirroring <see cref="ClaimDeliverableAsync"/>'s own
+    /// "thin wrapper, explicit conversion at the boundary" shape.
+    /// </summary>
+    async Task<IReadOnlyList<AnnouncementHistoryEntry>> IAnnouncementStore.HistoryAsync(int limit, CancellationToken ct)
+    {
+        var rows = await HistoryAsync(limit, ct);
+        return rows.Select(ToHistoryEntry).ToArray();
+    }
+
+    static AnnouncementHistoryEntry ToHistoryEntry(AnnouncementRow row) => new(
+        row.Id, row.Message, row.Verbatim, ToStateText(row.State), row.DeclineReason, row.CollapseCount,
+        row.CreatedAt, row.ExpiresAt, row.AiredAt);
+
+    /// <summary>Maps <see cref="AnnouncementState"/> to <c>station.announcement.state</c>'s own
+    /// lowercase text values for the wire (PLAN T344) — mirrors <see cref="ToSourceText"/>'s own
+    /// exhaustive, throwing switch immediately above, one column over. A DELIBERATE second copy of
+    /// <see cref="AnnouncementStateTypeHandler"/>'s own identical switch, not a shared call: that
+    /// type's mapping is Dapper-parameter plumbing (a SQL boundary concern), this one is a wire-DTO
+    /// boundary concern — two different reasons to convert the same enum, at two different seams,
+    /// the same restraint this file's own remarks already apply to <see cref="ToSourceText"/>/
+    /// <see cref="ToSource"/>.
+    ///
+    /// <para>
+    /// <b>Internal, not private (T344 review finding F1).</b> The one exception to this file's own
+    /// private-mapper convention: <c>GenWave.MediaLibrary.Tests</c>' own
+    /// <c>FeatureAnnouncementStateWireParity</c> calls this directly to pin its five outputs against
+    /// <c>admin-ui/lib/announcements-api.ts</c>'s <c>AnnouncementState</c> union literal — the same
+    /// "internal, reachable only via the test project's own InternalsVisibleTo grant" shape
+    /// <see cref="LegacyPersonaCardMapper.Slugify"/> already establishes for
+    /// <c>FeaturePersonaSlugParity</c>, one seam over.
+    /// </para>
+    /// </summary>
+    internal static string ToStateText(AnnouncementState state) => state switch
+    {
+        AnnouncementState.Pending => "pending",
+        AnnouncementState.Claimed => "claimed",
+        AnnouncementState.Aired => "aired",
+        AnnouncementState.Expired => "expired",
+        AnnouncementState.Declined => "declined",
+        _ => throw new ArgumentOutOfRangeException(nameof(state), state, "Unmapped AnnouncementState."),
+    };
 }
