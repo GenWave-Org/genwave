@@ -168,6 +168,14 @@ static class StationSettingsHostingExtensions
         builder.Services.AddIconPackStore(stationConnStr);
         builder.Services.AddStationImageStore(stationConnStr);
 
+        // Announcement store (SPEC F143, STORY-357, PLAN T337) — same station_svc connection string
+        // as every registration above; station.announcement lives in the same schema.
+        // AnnouncementRepository shipped dark at T337, keyed on its own concrete type (no seam yet);
+        // PLAN T339 gave it its first Host call site (AnnouncementsController) AND its first seam
+        // (IAnnouncementStore) in the same task — see AnnouncementServiceCollectionExtensions' own
+        // remarks for why this registration now keys on the interface like every sibling above.
+        builder.Services.AddAnnouncementStore(stationConnStr);
+
         return builder;
     }
 }

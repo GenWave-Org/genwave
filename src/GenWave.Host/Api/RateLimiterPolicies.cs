@@ -41,6 +41,18 @@ namespace GenWave.Host.Api;
 /// once from <see cref="IConfiguration"/> at registration time rather than through
 /// <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}"/>.</item>
 /// </list>
+///
+/// <para>
+/// <b>No <c>Announce</c> policy here (T339 review finding F1).</b> <c>POST /api/announcements</c>'s
+/// SPEC F143.4 accepted-rate cap does NOT live in this middleware map — a middleware policy runs
+/// before <c>UseAuthentication()</c> (Program.cs's own deliberate ordering), so it would count every
+/// anonymous 401 and every 403/400/depth-429 refusal against the same budget as a genuine accepted
+/// submission, and the framework's own 429 has no body. See
+/// <c>GenWave.Host.Api.AnnouncementAcceptedRateLimiter</c> — a small singleton
+/// <see cref="System.Threading.RateLimiting.FixedWindowRateLimiter"/> that
+/// <c>AnnouncementsController.Post</c> acquires itself, AFTER every refusal gate, immediately before
+/// the write — for the replacement and the full rationale.
+/// </para>
 /// </summary>
 static class RateLimiterPolicies
 {

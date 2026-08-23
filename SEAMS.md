@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **90 seams across 6 projects.**
+> **91 seams across 6 projects.**
 
 ## GenWave.Context (2 seams)
 
@@ -94,7 +94,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (37 seams)
+## GenWave.MediaLibrary (38 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -103,6 +103,7 @@
 | `GenWave.Core.Abstractions.IAdminMediaQuery` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAdminMediaReenrichment` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAdminMediaWrite` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IAnnouncementStore` | `GenWave.MediaLibrary.Station.AnnouncementRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IArtworkTokenStore` | `GenWave.MediaLibrary.Catalog.ArtworkTokenRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAuthoredCatalogWriter` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAvatarPackStore` | `GenWave.MediaLibrary.Station.AvatarPackRepository` | Singleton | — |

@@ -1,5 +1,7 @@
 using Dapper;
 using Npgsql;
+using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
 
 namespace GenWave.MediaLibrary.Station;
 
@@ -14,20 +16,29 @@ namespace GenWave.MediaLibrary.Station;
 /// parameter (see <see cref="RequestRepository"/>'s own remarks).
 ///
 /// <para>
-/// <b>No <c>GenWave.Core.Abstractions</c> seam yet.</b> T337 has no ordering dependency on T338
-/// (<c>parallel-group: pg-hv-a</c>) and T338's own <c>IAnnouncementSource</c> is a narrower, vend-only
-/// Core seam a Host-side adapter implements OVER this repository (PLAN T341) — not this repository
-/// itself. This class therefore stays internal to this assembly for now, the same "ships dark, first
-/// consumer lands later" shape <see cref="ShowRepository"/>/<see cref="ThemeRepository"/> originally
-/// shipped under.
+/// <b>Implements <see cref="IAnnouncementStore"/> directly (PLAN T339).</b> T337 shipped this class
+/// with no <c>GenWave.Core.Abstractions</c> seam at all — <c>IAnnouncementSource</c> (T338) is a
+/// narrower, vend-only Core seam a Host-side adapter implements OVER this repository (PLAN T341), not
+/// this repository itself, so it didn't apply here. <c>IAnnouncementStore</c> is different: the
+/// endpoint's own needs (insert-or-collapse, pending count) map onto this class's EXISTING members
+/// closely enough that a Host-side adapter would add nothing but indirection — the same
+/// <see cref="ILiquidsoapControl"/>/<see cref="ShowRepository"/> "the repository implements the port
+/// directly" shape <c>AnnouncementServiceCollectionExtensions</c>'s own remarks now follow too.
 /// </para>
 /// </summary>
-sealed class AnnouncementRepository(Lazy<NpgsqlDataSource> dataSource)
+sealed class AnnouncementRepository(Lazy<NpgsqlDataSource> dataSource) : IAnnouncementStore
 {
     /// <summary>The endpoint-facing default TTL (SPEC F143.1) — 15 minutes. A caller that knows a
     /// bounded override (60-3600s, the endpoint's own job to enforce) passes it explicitly; omitting
     /// <c>ttl</c> on <see cref="InsertAsync"/> gets this value.</summary>
     public static readonly TimeSpan DefaultTtl = TimeSpan.FromSeconds(900);
+
+    // Postgres SQLSTATE for check_violation — mirrors ShowRepository's own UniqueViolation/
+    // ForeignKeyViolation constants one column over. station.announcement's only CHECK guarding
+    // untrusted input is the 280-char message cap (db/40); the state/source columns are always
+    // written from a closed C# enum mapping, never straight from a caller, so a 23514 reaching
+    // InsertOrCollapseAsync can only be that cap firing (see that method's own remarks).
+    const string CheckViolation = "23514";
 
     const string SelectColumns =
         """
@@ -114,6 +125,64 @@ sealed class AnnouncementRepository(Lazy<NpgsqlDataSource> dataSource)
         AnnouncementSource.Session => "session",
         _ => throw new ArgumentOutOfRangeException(nameof(source), source, "Unmapped AnnouncementSource."),
     };
+
+    /// <summary>
+    /// <see cref="IAnnouncementStore.InsertOrCollapseAsync"/> — the endpoint's own seam onto
+    /// <see cref="InsertAsync"/> (PLAN T339). Maps the Core-level <see cref="AnnouncementSubmitter"/>
+    /// the caller derived from the AUTHENTICATED PRINCIPAL to this assembly's own
+    /// <see cref="AnnouncementSource"/> (mirrors <see cref="ToSourceText"/>'s own exhaustive, throwing
+    /// switch one enum over — <see cref="AnnouncementSubmitter"/>'s own remarks name why the caller
+    /// must never derive this from the request body).
+    ///
+    /// <para>
+    /// <b>The 280-char CHECK backstop (T337 review carry-forward).</b> The endpoint validates message
+    /// length itself before ever calling this method, so <see cref="CheckViolation"/> should be
+    /// unreachable in practice — this catch exists purely so a misconfigured
+    /// <c>AnnouncementsOptions.MessageMaxChars</c> (set above the DDL's own fixed 280) degrades to a
+    /// declined write (<see langword="null"/>) rather than an unhandled exception surfacing as a raw
+    /// 500 that leaks SQL detail to the caller (mirrors <see cref="ShowRepository.CreateAsync"/>'s own
+    /// PostgresException-to-typed-outcome mapping, one degenerate case simpler: there is no OTHER
+    /// outcome this method's caller needs to distinguish, so a nullable return is enough — the same
+    /// "null means declined without contacting further" shape <see cref="ILiquidsoapControl.PushAsync"/>
+    /// already establishes for this codebase).
+    /// </para>
+    /// </summary>
+    public async Task<long?> InsertOrCollapseAsync(
+        string message, bool verbatim, string? requestedVoice, AnnouncementSubmitter submitter, TimeSpan? ttl, CancellationToken ct)
+    {
+        try
+        {
+            return await InsertAsync(message, verbatim, requestedVoice, ToSource(submitter), ttl, ct);
+        }
+        catch (PostgresException ex) when (ex.SqlState == CheckViolation)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Maps <see cref="AnnouncementSubmitter"/> (Core) to <see cref="AnnouncementSource"/>
+    /// (this assembly's own write-direction enum) — see <see cref="InsertOrCollapseAsync"/>'s own
+    /// remarks for why the two types exist separately rather than sharing one across the assembly
+    /// boundary.</summary>
+    static AnnouncementSource ToSource(AnnouncementSubmitter submitter) => submitter switch
+    {
+        AnnouncementSubmitter.Session => AnnouncementSource.Session,
+        AnnouncementSubmitter.Token => AnnouncementSource.Token,
+        _ => throw new ArgumentOutOfRangeException(nameof(submitter), submitter, "Unmapped AnnouncementSubmitter."),
+    };
+
+    /// <summary><see cref="IAnnouncementStore.CountPendingAsync"/> — every row currently
+    /// <c>state = 'pending'</c>, regardless of <c>expires_at</c> (SPEC F143.4's depth cap counts a
+    /// row from the moment it's accepted; an expired-but-not-yet-swept row still occupies a depth slot
+    /// until PLAN T343's lifecycle guardian reaches it, the same "sweep is a separate concern from the
+    /// count" posture <see cref="ExpireStaleAsync"/>'s own total transition already keeps).</summary>
+    public async Task<int> CountPendingAsync(CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        return await conn.ExecuteScalarAsync<int>(new CommandDefinition(
+            "select count(*)::int from station.announcement where state = 'pending'",
+            cancellationToken: ct));
+    }
 
     /// <summary>
     /// Atomically flips up to <paramref name="n"/> oldest deliverable rows (<c>pending</c>, unexpired

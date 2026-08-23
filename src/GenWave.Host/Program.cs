@@ -255,6 +255,22 @@ builder.Services
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
+// The House Voice's endpoint caps (SPEC F143.4, STORY-357, PLAN T339): env/compose-only, deliberately
+// absent from StationSettingsAllowlist for now — see AnnouncementsOptions' own remarks. ValidateOnStart
+// mirrors RequestsOptions immediately above.
+builder.Services
+    .AddOptions<AnnouncementsOptions>()
+    .Bind(cfg.GetSection(AnnouncementsOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+// The accepted-rate cap itself (SPEC F143.4, T339 review finding F1): a singleton so its
+// FixedWindowRateLimiter's own window is shared by every request, wired to AnnouncementsController.Post
+// directly rather than through the rate-limiter middleware — see AnnouncementAcceptedRateLimiter's own
+// remarks for why. Registered after the ValidateOnStart above so a malformed AcceptedPerMinute fails
+// boot before this ever resolves it.
+builder.Services.AddSingleton<AnnouncementAcceptedRateLimiter>();
+
 // Community-sourced content — currently just the Persona Catalog origin (SPEC F90.1, STORY-234,
 // PLAN T99). Live via IOptionsMonitor<CommunityOptions> (read by CommunityCatalogAccessor, T101's
 // eventual catalog endpoint consumer), so a PUT to Community:CatalogIndexUrl reaches the very next
