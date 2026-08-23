@@ -39,8 +39,19 @@ namespace GenWave.MediaLibrary.Station;
 /// state at all. See <see cref="AnnouncementServiceCollectionExtensions.AddAnnouncementStore"/> for
 /// the registration/decoration split.
 /// </para>
+///
+/// <para>
+/// <b>ALSO implements <see cref="IAnnouncementLifecycle"/> directly (PLAN T343).</b> The three
+/// lifecycle guardians' own seam — every member on it (<see cref="MarkAiredAsync"/>,
+/// <see cref="FindClaimedPastGraceAsync"/>, <see cref="ReArmAsync"/>, <see cref="ExpireStaleAsync"/>,
+/// <see cref="DeclineAllLiveAsync"/>) was ALREADY on this class since T337; T343's own job was
+/// narrower still — give Host a seam to depend on rather than the concrete repository type, the SAME
+/// "repository implements the port directly" shape this class's own remarks already establish twice
+/// above.
+/// </para>
 /// </summary>
-sealed class AnnouncementRepository(Lazy<NpgsqlDataSource> dataSource) : IAnnouncementStore, IAnnouncementSource
+sealed class AnnouncementRepository(Lazy<NpgsqlDataSource> dataSource)
+    : IAnnouncementStore, IAnnouncementSource, IAnnouncementLifecycle
 {
     /// <summary>The endpoint-facing default TTL (SPEC F143.1) — 15 minutes. A caller that knows a
     /// bounded override (60-3600s, the endpoint's own job to enforce) passes it explicitly; omitting
@@ -270,24 +281,55 @@ sealed class AnnouncementRepository(Lazy<NpgsqlDataSource> dataSource) : IAnnoun
         new(row.Id, row.Message, row.Verbatim, row.RequestedVoice);
 
     /// <summary>
-    /// <c>claimed -&gt; aired</c> (SPEC F143.3): stamped ONLY on a TrackAired observation of the
-    /// announcement's own segment — never on push/vend alone (the gh-#612 lesson named in
-    /// ARCHITECTURE.md). A total, idempotent-safe transition: a row not currently <c>claimed</c> (already
-    /// aired, re-armed back to pending, or unknown) leaves the guarded <c>WHERE</c> matching nothing —
-    /// this never throws, it reports <see langword="false"/>.
+    /// <see cref="IAnnouncementLifecycle.MarkAiredAsync"/> — <c>claimed -&gt; aired</c> (SPEC F143.3):
+    /// stamped ONLY on a TrackAired observation of the announcement's own segment — never on
+    /// push/vend alone (the gh-#612 lesson named in ARCHITECTURE.md). A total, idempotent-safe
+    /// transition: a row not currently <c>claimed</c> (already aired, re-armed back to pending, or
+    /// unknown) leaves the guarded <c>WHERE</c> matching nothing — this never throws, it reports
+    /// <see langword="null"/>.
+    ///
+    /// <b>Returns the row's own <c>collapse_count</c> (PLAN T343), not a bare success flag.</b> The
+    /// booth log's own <c>announcement-aired</c> entry carries this count (SPEC F143.3) — reading it
+    /// off the SAME <c>UPDATE ... RETURNING</c> that performs the transition avoids a second round
+    /// trip (and the read-after-write race a separate SELECT would open against a row this same
+    /// statement just changed).
     /// </summary>
-    public async Task<bool> MarkAiredAsync(long id, CancellationToken ct)
+    public async Task<int?> MarkAiredAsync(long id, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-        var affected = await conn.ExecuteAsync(new CommandDefinition(
+        return await conn.ExecuteScalarAsync<int?>(new CommandDefinition(
             """
             update station.announcement
             set state = 'aired', aired_at = now(), state_changed_at = now()
             where id = @Id and state = 'claimed'
+            returning collapse_count
             """,
             new { Id = id },
             cancellationToken: ct));
-        return affected == 1;
+    }
+
+    /// <summary>
+    /// <see cref="IAnnouncementLifecycle.FindClaimedPastGraceAsync"/> — the re-arm sweep's own
+    /// candidate read (SPEC F144.5, PLAN T343): every <c>claimed</c> row whose <c>claimed_at</c> is
+    /// older than <paramref name="now"/> minus <paramref name="grace"/>. A read only — the caller
+    /// (<c>AnnouncementLifecycleGuardianService</c>) drives <see cref="ReArmAsync"/> per candidate
+    /// itself, mirroring <see cref="ClaimOldestAsync"/>'s own read-then-transition split one seam
+    /// over. Callers MUST run <see cref="ExpireStaleAsync"/> first in the same sweep — see that
+    /// member's own remarks and <see cref="IAnnouncementLifecycle.FindClaimedPastGraceAsync"/>'s own
+    /// ordering note for why.
+    /// </summary>
+    public async Task<IReadOnlyList<long>> FindClaimedPastGraceAsync(TimeSpan grace, DateTimeOffset now, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var ids = await conn.QueryAsync<long>(new CommandDefinition(
+            """
+            select id from station.announcement
+            where state = 'claimed' and claimed_at < @Threshold
+            order by claimed_at asc, id asc
+            """,
+            new { Threshold = now - grace },
+            cancellationToken: ct));
+        return ids.AsList();
     }
 
     /// <summary>
@@ -310,6 +352,29 @@ sealed class AnnouncementRepository(Lazy<NpgsqlDataSource> dataSource) : IAnnoun
             where id = any(@Ids) and state in ('pending', 'claimed')
             """,
             new { Ids = ids.ToArray(), Reason = reason },
+            cancellationToken: ct));
+    }
+
+    /// <summary>
+    /// <see cref="IAnnouncementLifecycle.DeclineAllLiveAsync"/> — the private→public flip's own bulk
+    /// sweep (SPEC F145.2, PLAN T343): every row CURRENTLY <c>pending</c> or <c>claimed</c> declines,
+    /// unconditionally, stamping <paramref name="reason"/>. Deliberately not built on
+    /// <see cref="MarkDeclinedAsync"/>'s id-list shape — the flip has no candidate list to hand it, so
+    /// this is its own single <c>UPDATE ... WHERE state IN (...)</c>, the same "finds its own
+    /// candidates" shape <see cref="ExpireStaleAsync"/> already is, rather than a list-then-decline
+    /// round trip that would open a window between the two calls. Returns the number of rows declined
+    /// (zero is a normal outcome — nothing was live at the moment of the flip).
+    /// </summary>
+    public async Task<int> DeclineAllLiveAsync(string reason, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        return await conn.ExecuteAsync(new CommandDefinition(
+            """
+            update station.announcement
+            set state = 'declined', decline_reason = @Reason, state_changed_at = now()
+            where state in ('pending', 'claimed')
+            """,
+            new { Reason = reason },
             cancellationToken: ct));
     }
 

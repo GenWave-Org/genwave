@@ -13,9 +13,9 @@ namespace GenWave.MediaLibrary.Station;
 /// every other station-schema store in this directory uses (<see cref="RequestServiceCollectionExtensions"/>,
 /// <see cref="ShowServiceCollectionExtensions"/>, ...).
 ///
-/// <b>Registered under BOTH <see cref="IAnnouncementStore"/> (PLAN T339) and
-/// <see cref="IAnnouncementSource"/> (PLAN T338/T341) in the ONE call below.</b> T337 shipped this
-/// call keyed on the bare concrete type (no seam existed yet); T339 gave it the
+/// <b>Registered under <see cref="IAnnouncementStore"/> (PLAN T339), <see cref="IAnnouncementSource"/>
+/// (PLAN T338/T341), AND <see cref="IAnnouncementLifecycle"/> (PLAN T343) in the ONE call below.</b>
+/// T337 shipped this call keyed on the bare concrete type (no seam existed yet); T339 gave it the
 /// <see cref="ShowServiceCollectionExtensions.AddShowStore"/>-shaped "key on the
 /// <c>GenWave.Core.Abstractions</c> seam" registration every sibling in this directory uses, then
 /// briefly split <c>IAnnouncementSource</c>'s own registration into a SEPARATE
@@ -65,7 +65,15 @@ public static class AnnouncementServiceCollectionExtensions
         services.AddSingleton(
             _ => new AnnouncementRepository(new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build())));
         services.AddSingleton<IAnnouncementStore>(sp => sp.GetRequiredService<AnnouncementRepository>());
-        return services.AddSingleton<IAnnouncementSource>(
+        services.AddSingleton<IAnnouncementSource>(
             sp => decorate(sp.GetRequiredService<AnnouncementRepository>(), sp));
+
+        // The lifecycle guardians' own seam (SPEC F143.2/.3, F144.5/.6, F145.2; PLAN T343) — no
+        // decoration: unlike IAnnouncementSource's SpectatorMode vend refusal, none of T343's three
+        // guardians (aired confirmation, the re-arm/expiry sweep, the flip's decline sweep) is
+        // itself privacy-conditional — each one already runs at exactly the moment SPEC F143.2/F145.2
+        // name (a genuine TrackAired, a periodic sweep, the flip itself), so there is no Host-side
+        // refusal to wrap this registration in.
+        return services.AddSingleton<IAnnouncementLifecycle>(sp => sp.GetRequiredService<AnnouncementRepository>());
     }
 }

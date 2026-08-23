@@ -65,6 +65,14 @@ internal static class LawId
     /// audition (<see cref="PronunciationResolveSeam"/>).</summary>
     public const string L8 = "L8";
 
+    /// <summary>The AnnounceToken scheme fence (SPEC F145.3/.4, STORY-360, PLAN T340 carry-forward,
+    /// built T343): outside <c>GenWave.Host.Api.AnnouncementsController</c>, no production type names
+    /// <c>AnnounceTokenAuthenticationDefaults.SchemeName</c> inside an <c>AuthorizeAttribute</c>'s own
+    /// <c>AuthenticationSchemes</c> — the T340 review's own mutation-proven gap: a widened schemes list
+    /// anywhere else silently promotes the HA announce token to full admin, with every OTHER test still
+    /// green (<see cref="AnnounceSchemeFence"/>).</summary>
+    public const string L9 = "L9";
+
     /// <summary>Every law id above, discovered by reflection over this type's own <c>public const
     /// string</c> fields rather than hand-listed a second time anywhere. STORY-293's carry-forward
     /// (PLAN T215): this is now the SINGLE source both Story290_DependencyLaws.cs's exemption-id

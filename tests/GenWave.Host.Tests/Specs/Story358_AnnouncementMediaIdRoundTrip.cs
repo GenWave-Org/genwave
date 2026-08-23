@@ -50,4 +50,76 @@ public static class FeatureAnnouncementMediaIdRoundTrip
             Assert.Equal(555L, announcementId);
         }
     }
+
+    // -------------------------------------------------------------------------------------------
+    // PLAN T343 review carry-forward: TryUnwrap tightened now that it is load-bearing (SPEC F143.3
+    // — the aired stamp itself hangs off this unwrap succeeding). Two leniencies T341 shipped as
+    // harmless are closed: a non-digit-only id span, and a bare two-part MediaId with no trailing
+    // inner-id segment (Wrap ALWAYS produces the three-part shape).
+    // -------------------------------------------------------------------------------------------
+
+    public sealed class ScenarioTryUnwrapIsStrict
+    {
+        [Fact]
+        public void ARoundTrippedIdStillUnwraps()
+        {
+            var mediaId = AnnouncementMediaId.Wrap(42, "tts:abc");
+
+            Assert.True(AnnouncementMediaId.TryUnwrap(mediaId, out var id));
+            Assert.Equal(42L, id);
+        }
+
+        [Fact]
+        public void ABareIdWithNoInnerSegmentIsNowRejected()
+        {
+            // Wrap ALWAYS appends ":{renderedMediaId}" — a two-part MediaId is a shape Wrap never
+            // produces, so tolerating it (T341's original leniency) risked accepting a hand-crafted
+            // or truncated id as genuine now that this lookup stamps aired.
+            Assert.False(AnnouncementMediaId.TryUnwrap("tts:announcement:42", out _));
+        }
+
+        [Fact]
+        public void ALeadingSignIsRejected()
+        {
+            Assert.False(AnnouncementMediaId.TryUnwrap("tts:announcement:-42:tts:abc", out _));
+            Assert.False(AnnouncementMediaId.TryUnwrap("tts:announcement:+42:tts:abc", out _));
+        }
+
+        [Fact]
+        public void WhitespacePaddedDigitsAreRejected()
+        {
+            Assert.False(AnnouncementMediaId.TryUnwrap("tts:announcement: 42:tts:abc", out _));
+            Assert.False(AnnouncementMediaId.TryUnwrap("tts:announcement:42 :tts:abc", out _));
+        }
+
+        [Fact]
+        public void AThousandsSeparatorIsRejected()
+        {
+            Assert.False(AnnouncementMediaId.TryUnwrap("tts:announcement:1,234:tts:abc", out _));
+        }
+
+        [Fact]
+        public void ADecimalPointIsRejected()
+        {
+            Assert.False(AnnouncementMediaId.TryUnwrap("tts:announcement:42.0:tts:abc", out _));
+        }
+
+        [Fact]
+        public void AnEmptyIdSpanIsRejected()
+        {
+            Assert.False(AnnouncementMediaId.TryUnwrap("tts:announcement::tts:abc", out _));
+        }
+
+        [Fact]
+        public void WrapFormatsALargeIdAsPlainAsciiDigitsWithNoGrouping()
+        {
+            // Belt-and-braces symmetry proof (Wrap now formats via CultureInfo.InvariantCulture
+            // explicitly, matching TryUnwrap's own invariant parse) — a value large enough that a
+            // thousands-grouped rendering would be visibly different from the plain digit string this
+            // MediaId must actually carry.
+            var mediaId = AnnouncementMediaId.Wrap(1_234_567L, "tts:abc");
+
+            Assert.Equal("tts:announcement:1234567:tts:abc", mediaId);
+        }
+    }
 }

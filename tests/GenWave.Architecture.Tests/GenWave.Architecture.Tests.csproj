@@ -50,6 +50,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- L9 (PLAN T343): the AnnounceToken scheme fence scans real Microsoft.AspNetCore.Authorization
+         AuthorizeAttribute instances (a genuine runtime attribute, unlike a compile-time-inlined
+         const string use) — mirrors GenWave.Host.Tests.csproj's own identical comment/reference one
+         project over. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\..\src\GenWave.Abstractions\GenWave.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\GenWave.Context\GenWave.Context.csproj" />
     <ProjectReference Include="..\..\src\GenWave.Core\GenWave.Core.csproj" />

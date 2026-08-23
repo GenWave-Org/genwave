@@ -8,14 +8,17 @@
 
 using System.Net;
 using System.Net.Http.Json;
+using System.Threading.Channels;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Events;
 using GenWave.Host.Announcements;
 using GenWave.Host.Options;
 using GenWave.Host.Tests.Fakes;
@@ -64,14 +67,73 @@ public static class FeatureAnnouncementPrivacy
 
     public sealed class ScenarioGoingPublicDeclinesTheQueue
     {
-        [Fact(Skip = "pending T343 (STORY-359 AC3)")]
-        public void EveryPendingAnnouncementDeclinesAtThePrivateToPublicFlip() { }
+        [Fact]
+        public async Task EveryPendingAnnouncementDeclinesAtThePrivateToPublicFlip()
+        {
+            // Given a pending announcement (id 101) live at the moment the station goes public...
+            var (sink, drain, lifecycle, channel) = BuildFlipHarness();
+            lifecycle.PendingIds.Add(101);
 
-        [Fact(Skip = "pending T343 (STORY-359 AC3)")]
-        public void EveryClaimedAnnouncementDeclinesAtThePrivateToPublicFlip() { }
+            // When the station writes Station:SpectatorMode=true — the SAME SettingChanged event
+            // StationSettingsStore.WriteAsync publishes for every allowlisted write — and the drain
+            // processes it...
+            sink.Publish(new SettingChanged(AnnouncementPrivacyFlipEventSink.SpectatorModeKey));
+            Assert.True(channel.Reader.TryRead(out var signal));
+            await drain.ProcessAsync(signal!, CancellationToken.None);
 
-        [Fact(Skip = "pending T343 (STORY-359 AC3)")]
-        public void TheDeclineReasonSaysTheStationWentPublic() { }
+            // Then the pending row declines — nothing is held waiting behind the toggle.
+            Assert.Contains(101L, lifecycle.DeclinedIds);
+        }
+
+        [Fact]
+        public async Task EveryClaimedAnnouncementDeclinesAtThePrivateToPublicFlip()
+        {
+            // Given a CLAIMED announcement (id 202) — already vended for delivery — live at the
+            // moment the station goes public...
+            var (sink, drain, lifecycle, channel) = BuildFlipHarness();
+            lifecycle.ClaimedIds.Add(202);
+
+            // When the station goes public...
+            sink.Publish(new SettingChanged(AnnouncementPrivacyFlipEventSink.SpectatorModeKey));
+            Assert.True(channel.Reader.TryRead(out var signal));
+            await drain.ProcessAsync(signal!, CancellationToken.None);
+
+            // Then the claimed row declines too — being already vended is no shelter from the flip.
+            Assert.Contains(202L, lifecycle.DeclinedIds);
+        }
+
+        [Fact]
+        public async Task TheDeclineReasonSaysTheStationWentPublic()
+        {
+            // Given the same flip...
+            var (sink, drain, lifecycle, channel) = BuildFlipHarness();
+            lifecycle.PendingIds.Add(101);
+
+            sink.Publish(new SettingChanged(AnnouncementPrivacyFlipEventSink.SpectatorModeKey));
+            Assert.True(channel.Reader.TryRead(out var signal));
+            await drain.ProcessAsync(signal!, CancellationToken.None);
+
+            // Then the stamped reason is exactly SPEC F145.2's own literal text.
+            Assert.Equal("station went public", lifecycle.LastDeclineReason);
+        }
+
+        /// <summary>Builds the real sink/drain pair over a real bounded channel and a fresh
+        /// <see cref="FakeAnnouncementLifecycle"/> — SpectatorMode starts (and stays, for this
+        /// scenario's own purposes) ON, matching the moment <see cref="AnnouncementPrivacyFlipEventSink.Publish"/>
+        /// itself reads live to decide whether a <c>SettingChanged</c> write is the private→public
+        /// direction.</summary>
+        static (AnnouncementPrivacyFlipEventSink Sink, AnnouncementPrivacyFlipDrainService Drain,
+            FakeAnnouncementLifecycle Lifecycle, Channel<AnnouncementPrivacyFlipSignal> Channel) BuildFlipHarness()
+        {
+            var channel = Channel.CreateBounded<AnnouncementPrivacyFlipSignal>(4);
+            var lifecycle = new FakeAnnouncementLifecycle();
+            var options = new FakeOptionsMonitor<StationOptions>(new StationOptions { SpectatorMode = true });
+            var sink = new AnnouncementPrivacyFlipEventSink(
+                channel.Writer, options, NullLogger<AnnouncementPrivacyFlipEventSink>.Instance);
+            var drain = new AnnouncementPrivacyFlipDrainService(
+                channel.Reader, lifecycle, NullLogger<AnnouncementPrivacyFlipDrainService>.Instance);
+            return (sink, drain, lifecycle, channel);
+        }
     }
 
     // -------------------------------------------------------------------------

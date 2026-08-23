@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Playout;
+using GenWave.Host.Announcements;
 using GenWave.Host.Artwork;
 using GenWave.Host.Engine;
 using GenWave.Host.Options;
@@ -38,16 +39,27 @@ static class PlayoutServiceCollectionExtensions
             .AddSingleton<CrosstalkRetirementEventSink>()
             // The host's event-sink binding (gitea-#246): composes PlayHistoryEventSink
             // (TrackAired -> play history ring), the booth log's BoothLogWriter
-            // (IBoothLogEventConsumer, SPEC F72.1, STORY-195), and CrosstalkRetirementEventSink
-            // (TrackAired -> asset delete, PLAN T287) into the ONE binding every publisher resolves —
+            // (IBoothLogEventConsumer, SPEC F72.1, STORY-195), CrosstalkRetirementEventSink
+            // (TrackAired -> asset delete, PLAN T287), and the announcement lifecycle guardians'
+            // own two sinks (AnnouncementAiredEventSink — TrackAired -> aired stamp, SPEC F143.3;
+            // AnnouncementPrivacyFlipEventSink — SettingChanged -> decline sweep, SPEC F145.2; both
+            // PLAN T343, GenWave.Host.Announcements) into the ONE binding every publisher resolves —
             // see CompositeStationEventSink's own remarks. Deliberately a plain Add (not TryAdd) so it
             // wins over the no-op defaults the library extensions register; a future consumer is added
-            // to the list this factory builds, not by re-wiring any existing sink.
+            // to the list this factory builds, not by re-wiring any existing sink. Both announcement
+            // sinks are auto-constructor-resolved with no factory, exactly like CrosstalkRetirementEventSink
+            // just above — GenWave.Host.Announcements.AnnouncementLifecycleHostServiceCollectionExtensions
+            // registers them (and the channels their constructors need) independently, with no ordering
+            // dependency on when it runs relative to this call (Program.cs happens to call it after,
+            // but nothing here requires that — see CrosstalkRetirementEventSink's own remarks for why
+            // that holds for a lazily-resolved DI singleton regardless).
             .AddSingleton<IStationEventSink>(sp => new CompositeStationEventSink(
                 [
                     sp.GetRequiredService<PlayHistoryEventSink>(),
                     sp.GetRequiredService<IBoothLogEventConsumer>(),
                     sp.GetRequiredService<CrosstalkRetirementEventSink>(),
+                    sp.GetRequiredService<AnnouncementAiredEventSink>(),
+                    sp.GetRequiredService<AnnouncementPrivacyFlipEventSink>(),
                 ],
                 sp.GetRequiredService<ILogger<CompositeStationEventSink>>()))
             // Persona-id -> worn-face token, memoized on a ≤30s TTL (SPEC F129.5, STORY-336, PLAN

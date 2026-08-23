@@ -5,8 +5,8 @@ namespace GenWave.Core.Abstractions;
 /// <summary>
 /// The Orchestrator's pull seam onto pending owner announcements (SPEC F144.1, STORY-358). Exists
 /// only for the single-feeder pull — the lifecycle transitions that mark an announcement aired or
-/// re-arm it belong to their own guardians (a later task's, consuming the MediaLibrary repository
-/// directly), never to this seam.
+/// re-arm it belong to their own guardians (<see cref="IAnnouncementLifecycle"/>, PLAN T343), never
+/// to this seam.
 /// </summary>
 public interface IAnnouncementSource
 {

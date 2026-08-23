@@ -12,10 +12,12 @@ namespace GenWave.Core.Abstractions;
 /// <b>Deliberately narrow — exactly what <c>AnnouncementsController</c> (T339) needs.</b>
 /// <see cref="IAnnouncementSource"/> already owns the DIFFERENT, vend-side claim seam (PLAN T338/T341);
 /// this port never grows a claim/vend member. Lifecycle transitions (mark-aired, decline, expire,
-/// re-arm — PLAN T343's guardians) and the admin history read (PLAN T344's page) are each a LATER
-/// task's own member to add here when a real Host call site needs one — see
-/// <c>GenWave.MediaLibrary.Station.AnnouncementRepository</c>'s own remarks for the full store; this
-/// seam exposes only the slice of it the endpoint family has a caller for today.
+/// re-arm) landed on their OWN seam instead (<see cref="IAnnouncementLifecycle"/>, PLAN T343's
+/// guardians) rather than growing this one — see that interface's own remarks for why. The admin
+/// history read (PLAN T344's page) is still a LATER task's own member to add here when a real Host
+/// call site needs one — see <c>GenWave.MediaLibrary.Station.AnnouncementRepository</c>'s own remarks
+/// for the full store; this seam exposes only the slice of it the endpoint family has a caller for
+/// today.
 /// </summary>
 public interface IAnnouncementStore
 {

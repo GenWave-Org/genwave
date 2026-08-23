@@ -52,6 +52,19 @@ public static class FeatureAnnouncementStoreLifecycle
         return await conn.ExecuteScalarAsync<int>("select count(*)::int from station.announcement");
     }
 
+    /// <summary>Backdates a claimed row's own <c>claimed_at</c> directly — the ONLY way a test can
+    /// put a row genuinely past the re-arm grace without an actual wall-clock wait (PLAN T343). No
+    /// repository member writes <c>claimed_at</c> to an arbitrary instant; this is deliberately raw
+    /// SQL, mirroring <see cref="ReadRowAsync"/>'s own "an independent path proves what the
+    /// repository under test actually persisted" posture one step further.</summary>
+    static async Task SetClaimedAtAsync(DatabaseFixture db, long id, DateTimeOffset claimedAt)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        await conn.ExecuteAsync(
+            "update station.announcement set claimed_at = @ClaimedAt where id = @Id",
+            new { Id = id, ClaimedAt = claimedAt });
+    }
+
     /// <summary>Runs db/40-announcements-migration.sh against the test database via the fixture.
     /// Mirrors Story304/Story305's own RunMigrationScript helper. Safe to call unconditionally — the
     /// script is idempotent (CREATE TABLE/INDEX IF NOT EXISTS).</summary>
@@ -499,6 +512,226 @@ public static class FeatureAnnouncementStoreLifecycle
             Assert.Equal("The garage sale starts at nine", item.Message);
             Assert.False(item.Verbatim);
             Assert.Equal("nova", item.RequestedVoice);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // PLAN T343 — the lifecycle guardians' own repository primitives: MarkAiredAsync's collapse-
+    // count return, FindClaimedPastGraceAsync's grace-filtered read, and DeclineAllLiveAsync's bulk
+    // pending+claimed sweep (SPEC F143.3, F144.5, F145.2).
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioMarkAiredReturnsTheCollapseCount(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task ARowNeverCollapsedIntoReturnsOne()
+        {
+            // Given a claimed announcement that was never a collapse target...
+            await db.ResetAnnouncementAsync();
+            var repo = Harness.AnnouncementRepo(db);
+            await repo.InsertAsync(
+                "Bins go out tonight", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: null, CancellationToken.None);
+            var claimed = await repo.ClaimOldestAsync(1, DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // When it airs...
+            var collapseCount = await repo.MarkAiredAsync(Assert.Single(claimed).Id, CancellationToken.None);
+
+            // Then the booth log's own carry is the DDL's default of 1.
+            Assert.Equal(1, collapseCount);
+        }
+
+        [Fact]
+        public async Task ARowThatCollapsedThreeSubmissionsReturnsThree()
+        {
+            // Given a pending announcement that absorbed two duplicate submissions before it claimed...
+            await db.ResetAnnouncementAsync();
+            var repo = Harness.AnnouncementRepo(db);
+            await repo.InsertAsync(
+                "Dinner's ready", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: null, CancellationToken.None);
+            await repo.InsertAsync(
+                "DINNER'S READY", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: null, CancellationToken.None);
+            await repo.InsertAsync(
+                "dinner's ready", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: null, CancellationToken.None);
+            var claimed = await repo.ClaimOldestAsync(1, DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // When it airs...
+            var collapseCount = await repo.MarkAiredAsync(Assert.Single(claimed).Id, CancellationToken.None);
+
+            // Then the collapse count carries through to the aired stamp.
+            Assert.Equal(3, collapseCount);
+        }
+
+        [Fact]
+        public async Task ARowNotCurrentlyClaimedReturnsNull()
+        {
+            // Given a still-pending announcement, never claimed...
+            await db.ResetAnnouncementAsync();
+            var repo = Harness.AnnouncementRepo(db);
+            var id = await repo.InsertAsync(
+                "Bins go out tonight", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: null, CancellationToken.None);
+
+            // When something calls MarkAiredAsync on it anyway (a stale/duplicate TrackAired signal)...
+            var collapseCount = await repo.MarkAiredAsync(id, CancellationToken.None);
+
+            // Then it reports null — never throws, never silently succeeds against the wrong state.
+            Assert.Null(collapseCount);
+
+            var row = await ReadRowAsync(db, id);
+            Assert.Equal(AnnouncementState.Pending, row.State);
+        }
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioFindClaimedPastGraceReadsOnlyDueCandidates(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AClaimedRowOlderThanTheThresholdIsReturned()
+        {
+            // Given a claimed announcement backdated well past a 6-minute grace...
+            await db.ResetAnnouncementAsync();
+            var repo = Harness.AnnouncementRepo(db);
+            var id = await repo.InsertAsync(
+                "Bins go out tonight", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: TimeSpan.FromHours(1), CancellationToken.None);
+            var claimed = await repo.ClaimOldestAsync(1, DateTimeOffset.UtcNow, CancellationToken.None);
+            Assert.Single(claimed);
+            var now = DateTimeOffset.UtcNow;
+            await SetClaimedAtAsync(db, id, now - TimeSpan.FromMinutes(10));
+
+            // When the guardian sweep reads its own re-arm candidates...
+            var candidates = await repo.FindClaimedPastGraceAsync(TimeSpan.FromMinutes(6), now, CancellationToken.None);
+
+            // Then it is a candidate.
+            Assert.Contains(id, candidates);
+        }
+
+        [Fact]
+        public async Task AClaimedRowWithinTheThresholdIsNotReturned()
+        {
+            // Given a claimed announcement, claimed just now — well inside a 6-minute grace...
+            await db.ResetAnnouncementAsync();
+            var repo = Harness.AnnouncementRepo(db);
+            await repo.InsertAsync(
+                "Bins go out tonight", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: TimeSpan.FromHours(1), CancellationToken.None);
+            await repo.ClaimOldestAsync(1, DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // When the guardian sweep reads its own re-arm candidates...
+            var candidates = await repo.FindClaimedPastGraceAsync(
+                TimeSpan.FromMinutes(6), DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // Then it is not a candidate yet.
+            Assert.Empty(candidates);
+        }
+
+        [Fact]
+        public async Task APendingRowNeverClaimedIsNeverReturnedRegardlessOfAge()
+        {
+            // Given an announcement that has never been claimed at all...
+            await db.ResetAnnouncementAsync();
+            var repo = Harness.AnnouncementRepo(db);
+            await repo.InsertAsync(
+                "Bins go out tonight", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: TimeSpan.FromHours(1), CancellationToken.None);
+
+            // When the guardian sweep reads its own re-arm candidates, with a grace of zero (the
+            // widest possible net)...
+            var candidates = await repo.FindClaimedPastGraceAsync(
+                TimeSpan.Zero, DateTimeOffset.UtcNow, CancellationToken.None);
+
+            // Then a never-claimed row is never a re-arm candidate — only `claimed` rows are.
+            Assert.Empty(candidates);
+        }
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioDeclineAllLiveSweepsPendingAndClaimedTogether(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task APendingRowDeclinesWithTheGivenReason()
+        {
+            // Given a pending announcement live at the moment the station goes public...
+            await db.ResetAnnouncementAsync();
+            var repo = Harness.AnnouncementRepo(db);
+            var id = await repo.InsertAsync(
+                "Dinner's ready", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: null, CancellationToken.None);
+
+            // When the flip sweeps...
+            var declined = await repo.DeclineAllLiveAsync("station went public", CancellationToken.None);
+
+            // Then it declines, reason stamped.
+            Assert.Equal(1, declined);
+            var row = await ReadRowAsync(db, id);
+            Assert.Equal(AnnouncementState.Declined, row.State);
+            Assert.Equal("station went public", row.DeclineReason);
+        }
+
+        [Fact]
+        public async Task AClaimedRowDeclinesInTheSameSweepAsAPendingRow()
+        {
+            // Given one pending AND one claimed announcement, both live at the moment of the flip...
+            await db.ResetAnnouncementAsync();
+            var repo = Harness.AnnouncementRepo(db);
+            var pendingId = await repo.InsertAsync(
+                "Dinner's ready", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: null, CancellationToken.None);
+            var toClaimId = await repo.InsertAsync(
+                "Storm's coming, bring the washing in", verbatim: true, requestedVoice: null,
+                source: AnnouncementSource.Token, ttl: null, CancellationToken.None);
+            var claimed = await repo.ClaimOldestAsync(10, DateTimeOffset.UtcNow, CancellationToken.None);
+            Assert.Contains(claimed, r => r.Id == toClaimId);
+
+            // When the flip sweeps ONCE...
+            var declined = await repo.DeclineAllLiveAsync("station went public", CancellationToken.None);
+
+            // Then BOTH rows decline — the pending one and the claimed one, together.
+            Assert.Equal(2, declined);
+            Assert.Equal(AnnouncementState.Declined, (await ReadRowAsync(db, pendingId)).State);
+            Assert.Equal(AnnouncementState.Declined, (await ReadRowAsync(db, toClaimId)).State);
+        }
+
+        [Fact]
+        public async Task AnAlreadyAiredRowIsNeverTouchedByTheFlip()
+        {
+            // Given an announcement that has already aired before the flip...
+            await db.ResetAnnouncementAsync();
+            var repo = Harness.AnnouncementRepo(db);
+            var airedId = await repo.InsertAsync(
+                "Dinner's ready", verbatim: true, requestedVoice: null, source: AnnouncementSource.Token,
+                ttl: null, CancellationToken.None);
+            var claimed = await repo.ClaimOldestAsync(1, DateTimeOffset.UtcNow, CancellationToken.None);
+            await repo.MarkAiredAsync(Assert.Single(claimed).Id, CancellationToken.None);
+
+            // When the flip sweeps...
+            var declined = await repo.DeclineAllLiveAsync("station went public", CancellationToken.None);
+
+            // Then the already-aired row is untouched — declined counts zero, its own state unchanged.
+            Assert.Equal(0, declined);
+            Assert.Equal(AnnouncementState.Aired, (await ReadRowAsync(db, airedId)).State);
+        }
+
+        [Fact]
+        public async Task NothingLiveMeansAHarmlessZeroCount()
+        {
+            // Given no announcements at all...
+            await db.ResetAnnouncementAsync();
+            var repo = Harness.AnnouncementRepo(db);
+
+            // When the flip sweeps anyway (a redundant re-write of SpectatorMode=true)...
+            var declined = await repo.DeclineAllLiveAsync("station went public", CancellationToken.None);
+
+            // Then it is a normal, silent zero — never an error.
+            Assert.Equal(0, declined);
         }
     }
 
