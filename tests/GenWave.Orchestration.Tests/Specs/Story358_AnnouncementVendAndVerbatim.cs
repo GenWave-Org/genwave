@@ -20,7 +20,8 @@ public static class FeatureAnnouncementVendAndVerbatim
         CadenceConfig? cadence = null,
         FakeTtsVoiceLister? voiceLister = null,
         string stationVoice = "default",
-        ILogger<Orchestrator>? logger = null)
+        ILogger<Orchestrator>? logger = null,
+        FakeAnnouncementCopyWriter? announcementCopyWriter = null)
     {
         var identityProvider = new FakeStationIdentityProvider(new StationIdentity("s1", "GenWave", stationVoice));
         var scopeProvider = new FakeStationScopeProvider(new LibraryScope([1L]));
@@ -42,7 +43,8 @@ public static class FeatureAnnouncementVendAndVerbatim
             TimeProvider.System, new FakeBoundaryBiasProvider(TimeSpan.Zero),
             announcementSource: announcementSource,
             announcementRenderer: announcementRenderer,
-            voiceLister: voiceLister);
+            voiceLister: voiceLister,
+            announcementCopyWriter: announcementCopyWriter);
     }
 
     static MediaReference MakeRef(string id) => new(
@@ -357,23 +359,87 @@ public static class FeatureAnnouncementVendAndVerbatim
     }
 
     // -------------------------------------------------------------------------
-    // Scenario: a flavored announcement takes the SAME verbatim path today (SPEC F144.3, T341 review
-    // finding F4 — the T342 handoff pinned)
+    // Scenario: the flavored path attempts the DEDICATED IAnnouncementCopyWriter seam, never
+    // tts/ISegmentCopyWriter, and THE FALLBACK LAW degrades any miss to the verbatim read (SPEC
+    // F144.3/F144.4, STORY-358, PLAN T342)
+    //
+    // REPLACES the T341-interim ScenarioFlavoredAnnouncementsTakeTheVerbatimPathToo
+    // (AFlavoredAnnouncementStillRendersTheExactTextWithNoLlmCall), which pinned "a flavored
+    // announcement takes the SAME verbatim path today" as a placeholder for the seam this task lands.
+    // That promise is restated honestly, not deleted, across the four facts below: the "never
+    // tts/ISegmentCopyWriter" half survives unchanged in every one of them; the "no LLM call at all"
+    // half was only ever true because T341 had nowhere else to route Verbatim:false — now that
+    // IAnnouncementCopyWriter exists, a flavored announcement DOES attempt it (proven by
+    // AFlavoredAnnouncementRendersTheFlavorWritersReturnedCopyWhenItSucceeds), and only degrades to the
+    // exact-text read when that attempt fails or is never wired at all (the other three facts).
     // -------------------------------------------------------------------------
 
-    public sealed class ScenarioFlavoredAnnouncementsTakeTheVerbatimPathToo
+    public sealed class ScenarioFlavoredAnnouncementsAttemptTheDedicatedFlavorSeam
     {
         [Fact]
-        public async Task AFlavoredAnnouncementStillRendersTheExactTextWithNoLlmCall()
+        public async Task AFlavoredAnnouncementRendersTheFlavorWritersReturnedCopyWhenItSucceeds()
         {
             var announcementSource = new FakeAnnouncementSource();
             announcementSource.Pending.Enqueue(
                 new AnnouncementItem(801, "The garage sale starts at nine.", Verbatim: false, RequestedVoice: null));
             var renderer = new FakeVerbatimSegmentRenderer();
+            var copyWriter = new FakeAnnouncementCopyWriter
+            {
+                Reply = "Hey folks, quick heads up: the garage sale starts at nine!",
+            };
             // `tts` stands in for the ordinary ISegmentCopyWriter-backed pipeline — the ONLY seam an
-            // LLM/DJ-flavor copy writer could ever sit behind, production-side (T342 has not landed
-            // it yet) — asserting it is never called proves Verbatim:false takes the SAME LLM-free
-            // path as Verbatim:true today.
+            // ordinary LLM copy writer sits behind, production-side — asserting it is never called
+            // proves the flavor attempt rides IAnnouncementCopyWriter exclusively, never this one.
+            var tts = new FakeTtsSegmentSource();
+            var orchestrator = BuildOrchestrator(
+                announcementSource, renderer, tts, AnnouncementOnlyCadence, announcementCopyWriter: copyWriter);
+            var ctx = new PlayoutContext([]);
+
+            await orchestrator.GetNextAsync(ctx, CancellationToken.None);
+
+            var call = Assert.Single(renderer.Calls);
+            Assert.Equal("Hey folks, quick heads up: the garage sale starts at nine!", call.Copy.Text);
+            Assert.True(call.Copy.FreshPerAiring);
+            Assert.Equal(0, tts.RenderCallCount);
+            var writerCall = Assert.Single(copyWriter.Calls);
+            Assert.Equal("The garage sale starts at nine.", writerCall.Message);
+        }
+
+        [Fact]
+        public async Task AFlavoredAnnouncementFallsBackToTheVerbatimReadWhenTheWriterDeclines()
+        {
+            var announcementSource = new FakeAnnouncementSource();
+            announcementSource.Pending.Enqueue(
+                new AnnouncementItem(802, "The garage sale starts at nine.", Verbatim: false, RequestedVoice: null));
+            var renderer = new FakeVerbatimSegmentRenderer();
+            // Reply stays null (the default) — every SPEC F144.4 degrade trigger (ladder exhausted,
+            // LLM unreachable, budget blown) resolves to this SAME signal at this seam.
+            var copyWriter = new FakeAnnouncementCopyWriter();
+            var tts = new FakeTtsSegmentSource();
+            var orchestrator = BuildOrchestrator(
+                announcementSource, renderer, tts, AnnouncementOnlyCadence, announcementCopyWriter: copyWriter);
+            var ctx = new PlayoutContext([]);
+
+            await orchestrator.GetNextAsync(ctx, CancellationToken.None);
+
+            // THE FALLBACK LAW: the attempt happened (proving it is not merely skipped) but the
+            // owner's own exact words still air.
+            Assert.Equal(1, copyWriter.CallCount);
+            var call = Assert.Single(renderer.Calls);
+            Assert.Equal("The garage sale starts at nine.", call.Copy.Text);
+            Assert.True(call.Copy.FreshPerAiring);
+            Assert.Equal(0, tts.RenderCallCount);
+        }
+
+        [Fact]
+        public async Task AFlavoredAnnouncementWithNoWiredCopyWriterStillRendersVerbatimWithNoLlmCall()
+        {
+            // No IAnnouncementCopyWriter wired at all (feature dark — the crosstalkPlanner precedent):
+            // a station that never wires the flavor seam keeps T341's own byte-identical behavior.
+            var announcementSource = new FakeAnnouncementSource();
+            announcementSource.Pending.Enqueue(
+                new AnnouncementItem(803, "The garage sale starts at nine.", Verbatim: false, RequestedVoice: null));
+            var renderer = new FakeVerbatimSegmentRenderer();
             var tts = new FakeTtsSegmentSource();
             var orchestrator = BuildOrchestrator(announcementSource, renderer, tts, AnnouncementOnlyCadence);
             var ctx = new PlayoutContext([]);
@@ -383,6 +449,26 @@ public static class FeatureAnnouncementVendAndVerbatim
             var call = Assert.Single(renderer.Calls);
             Assert.Equal("The garage sale starts at nine.", call.Copy.Text);
             Assert.Equal(0, tts.RenderCallCount);
+        }
+
+        [Fact]
+        public async Task AVerbatimAnnouncementNeverAttemptsTheFlavorWriterEvenWhenOneIsWired()
+        {
+            var announcementSource = new FakeAnnouncementSource();
+            announcementSource.Pending.Enqueue(
+                new AnnouncementItem(804, "The garage sale starts at nine.", Verbatim: true, RequestedVoice: null));
+            var renderer = new FakeVerbatimSegmentRenderer();
+            var copyWriter = new FakeAnnouncementCopyWriter { Reply = "should never be used" };
+            var tts = new FakeTtsSegmentSource();
+            var orchestrator = BuildOrchestrator(
+                announcementSource, renderer, tts, AnnouncementOnlyCadence, announcementCopyWriter: copyWriter);
+            var ctx = new PlayoutContext([]);
+
+            await orchestrator.GetNextAsync(ctx, CancellationToken.None);
+
+            var call = Assert.Single(renderer.Calls);
+            Assert.Equal("The garage sale starts at nine.", call.Copy.Text);
+            Assert.Equal(0, copyWriter.CallCount);
         }
     }
 

@@ -241,10 +241,19 @@ using GenWave.Core.Events;
 /// it, because neither <see cref="SegmentRequest"/> nor <see cref="ISegmentCopyWriter"/> can carry a
 /// caller-supplied exact text without either widening the published Abstractions record or forcing
 /// the render through the SAME copy-writer chain an LLM writer sits in front of (see
-/// <see cref="IVerbatimSegmentRenderer"/>'s own remarks). A flavored (<c>Verbatim: false</c>)
-/// announcement takes this SAME verbatim path today — a later task owns the LlmCopyWriter-authored
-/// flavor seam exclusively (the one-source law); until it lands, the verbatim read is the honest
-/// floor every accepted announcement gets. <paramref name="voiceLister"/> (SPEC F144.2's own "when
+/// <see cref="IVerbatimSegmentRenderer"/>'s own remarks).
+///
+/// <b>The flavored path (SPEC F144.3/F144.4, PLAN T342):</b> a <c>Verbatim: false</c> announcement
+/// FIRST attempts <paramref name="announcementCopyWriter"/> — its OWN dedicated seam, the
+/// crosstalkPlanner precedent one feature over (optional, feature-dark whenever null), never
+/// <paramref name="tts"/>/<see cref="ISegmentCopyWriter"/> either. THE FALLBACK LAW is exactly one
+/// <c>??</c> at the vend step below: any failure there (a disabled/unreachable LLM, a blown render
+/// budget, or the F138.4 re-ask ladder exhausting on either a fabrication or the F144.3 containment
+/// check) resolves to <see langword="null"/>, and the owner's own message renders verbatim instead —
+/// through this SAME <paramref name="announcementRenderer"/>, since flavored copy IS exact once
+/// written and needs no different rendering path from a verbatim read. A <c>Verbatim: true</c>
+/// announcement never even asks <paramref name="announcementCopyWriter"/>, the owner having asked for
+/// their own unflavored words. <paramref name="voiceLister"/> (SPEC F144.2's own "when
 /// known" clause) validates <see cref="AnnouncementItem.RequestedVoice"/> — untrusted free text —
 /// against the TTS backend's own installed voice ids before ever stamping it onto a
 /// <see cref="SegmentRequest.Voice"/>; unknown, invalid, or unreachable (the registry itself is a
@@ -279,7 +288,8 @@ public sealed class Orchestrator(
     CrosstalkPlanner? crosstalkPlanner = null,
     IAnnouncementSource? announcementSource = null,
     IVerbatimSegmentRenderer? announcementRenderer = null,
-    ITtsVoiceLister? voiceLister = null) : INextItemProvider, IBoundaryFitLog
+    ITtsVoiceLister? voiceLister = null,
+    IAnnouncementCopyWriter? announcementCopyWriter = null) : INextItemProvider, IBoundaryFitLog
 {
     // gh-#254 — how far from the boundary a candidate may land and still count as a WIN ("±30s of
     // the boundary is a win"), widened as the gh-#253 estimate's confidence tier drops: the fit's
@@ -1257,11 +1267,24 @@ public sealed class Orchestrator(
         {
             async Task<MediaItem?> RenderAnnouncementAsync(SegmentRequest announcementRequest, AnnouncementItem announcement)
             {
+                // SPEC F144.3/F144.4 (STORY-358, PLAN T342) — THE FALLBACK LAW, in one `??`:
+                // Verbatim:false attempts the flavored path FIRST, through the dedicated
+                // IAnnouncementCopyWriter seam (never tts/ISegmentCopyWriter — see this class's own
+                // remarks); ANY failure there (feature dark, a disabled/unreachable LLM, a blown
+                // render budget, or the F138.4 ladder exhausting on either a fabrication or the F144.3
+                // containment check) resolves to null, and the owner's own verbatim message airs
+                // instead. Verbatim:true skips the attempt entirely — the owner asked for their own
+                // unflavored words.
+                var flavoredText = announcement.Verbatim
+                    ? null
+                    : await ResolveFlavoredAnnouncementCopyAsync(announcementRequest, announcement.Message, ct);
+
                 // FreshPerAiring: true is THE contract TtsSegmentSource's own drop guard pins (SPEC
-                // F144.2/F144.4, the T338 review carry-forward): per-announcement owner text is fresh
-                // by definition — the operator's own words, never a templated fixed phrase — and must
-                // land in the swept blurbs/ dir, never the forever-cache.
-                var copy = new SegmentCopy(announcement.Message, FreshPerAiring: true);
+                // F144.2/F144.4, the T338 review carry-forward): per-announcement owner text — flavored
+                // or verbatim alike — is fresh by definition (the operator's own words, or the active
+                // persona's own in-character rendering of them, never a templated fixed phrase) and
+                // must land in the swept blurbs/ dir, never the forever-cache.
+                var copy = new SegmentCopy(flavoredText ?? announcement.Message, FreshPerAiring: true);
                 var rendered = await renderer.RenderAsync(announcementRequest, copy, ct);
 
                 // The announcement id rides the rendered segment's own MediaId (SPEC F144.1's carry
@@ -2392,6 +2415,43 @@ public sealed class Orchestrator(
                 ex,
                 "Announcement voice registry unreachable — falling back to the station voice (SPEC F144.2)");
             return stationVoice;
+        }
+    }
+
+    /// <summary>
+    /// SPEC F144.3/F144.4 (STORY-358, PLAN T342) — attempts the flavored render through
+    /// <see cref="announcementCopyWriter"/>, fault-isolating it the SAME way
+    /// <see cref="ResolveAnnouncementVoiceAsync"/>/<see cref="ClaimAnnouncementsAsync"/> immediately
+    /// above already do (SPEC F12.4): a null seam (no Host wiring — the crosstalkPlanner precedent,
+    /// feature dark) or any exception the writer's own never-throws contract still lets slip both
+    /// degrade to <see langword="null"/>, never a faulted unit.
+    /// <see cref="IAnnouncementCopyWriter.WriteAnnouncementAsync"/> itself already resolves EVERY
+    /// F144.3/F144.4 failure mode (a disabled/unreachable LLM, a blown render budget, an exhausted
+    /// re-ask ladder on either a fabrication or the F144.3 containment check) to
+    /// <see langword="null"/> internally — this wrapper's own catch exists purely as the SAME
+    /// belt-and-suspenders defense every other external seam call in this class already carries, not
+    /// because that contract is expected to be broken.
+    /// </summary>
+    async Task<string?> ResolveFlavoredAnnouncementCopyAsync(
+        SegmentRequest announcementRequest, string message, CancellationToken ct)
+    {
+        if (announcementCopyWriter is not { } writer)
+            return null;
+
+        try
+        {
+            return await writer.WriteAnnouncementAsync(announcementRequest, message, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Announcement flavor render faulted — falling back to the verbatim read (SPEC F144.4)");
+            return null;
         }
     }
 

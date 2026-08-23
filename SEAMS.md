@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **94 seams across 6 projects.**
+> **95 seams across 6 projects.**
 
 ## GenWave.Context (2 seams)
 
@@ -152,10 +152,11 @@
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |
 
-## GenWave.Tts (13 seams)
+## GenWave.Tts (14 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
+| `GenWave.Core.Abstractions.IAnnouncementCopyWriter` | `GenWave.Tts.LlmCopyWriter` | Singleton | — |
 | `GenWave.Core.Abstractions.ICopyBoundsProvider` | `GenWave.Tts.OptionsMonitorCopyBoundsProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaPreviewWriter` | `GenWave.Tts.LlmCopyWriter` | Singleton | — |
 | `GenWave.Core.Abstractions.ISegmentCopyWriter` | `GenWave.Tts.DegradationGatedCopyWriter` | Singleton | wraps: `GenWave.Tts.LlmCopyWriter` (GenWave.Tts), `GenWave.Tts.TemplateCopyWriter` (GenWave.Tts) |

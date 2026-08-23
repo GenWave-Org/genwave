@@ -257,6 +257,12 @@ public static class TtsServiceCollectionExtensions
             // hygiene instance the feeder does, never a second parallel writer.
             .AddSingleton<LlmCopyWriter>()
             .AddSingleton<IPersonaPreviewWriter>(sp => sp.GetRequiredService<LlmCopyWriter>())
+            // IAnnouncementCopyWriter (SPEC F144.3, STORY-358, PLAN T342): the SAME "register
+            // concretely once, expose under every seam it implements" idiom IPersonaPreviewWriter
+            // just established one line up — the Orchestrator's flavored-announcement vend step
+            // reuses this exact writer instance (single-flight gate, LlmCallRing, everything),
+            // never a second parallel LLM client.
+            .AddSingleton<IAnnouncementCopyWriter>(sp => sp.GetRequiredService<LlmCopyWriter>())
             .AddSingleton<DegradationGatedCopyWriter>()
             .AddSingleton<ISegmentCopyWriter>(sp => sp.GetRequiredService<DegradationGatedCopyWriter>())
             // TtsSegmentSource registered concretely ONCE and exposed under BOTH seams it implements

@@ -293,6 +293,63 @@ public static class FeatureClockClaimsGate
             // Then  claim-free copy passes with no violations recorded
             Assert.Empty(result.Violations);
         }
+
+        [Fact]
+        public static void An_owner_message_naming_a_day_is_exempt()
+        {
+            // Given the owner's own announcement message names a present-frame weekday
+            const string message = "Bake sale this Saturday at the community hall.";
+            const string copy = "Hey neighbors, quick note: Bake sale this Saturday at the community hall. See you there!";
+
+            // When  checked against a Wednesday clock, with that message supplied as the
+            //       owner-trusted core (HIGH-2, PLAN T342 round 2)
+            var result = CopyClaims.CheckClock(
+                copy, new DateTimeOffset(2026, 8, 19, 15, 0, 0, TimeSpan.Zero), ownerMessage: message);
+
+            // Then  "this Saturday" falls entirely inside the owner's own literal message text, so
+            //       it never becomes a claim — the owner wrote those words, not the model
+            Assert.Empty(result.Violations);
+        }
+
+        [Fact]
+        public static void An_llm_added_day_claim_outside_the_message_still_rejects()
+        {
+            // Given the owner's message names no day at all
+            const string message = "The garage sale starts at nine.";
+            // And the model adds a weekday claim OUTSIDE any quote of that message
+            const string copy = "Quick note from the station: The garage sale starts at nine. It's Saturday, folks!";
+
+            // When  checked against a Wednesday clock, with the message supplied as the owner-trusted core
+            var result = CopyClaims.CheckClock(
+                copy, new DateTimeOffset(2026, 8, 19, 15, 0, 0, TimeSpan.Zero), ownerMessage: message);
+
+            // Then  the LLM-added "It's Saturday" falls outside the message's own literal span, so
+            //       the owner-trust exemption never reaches it — it still violates
+            var violation = Assert.Single(result.Violations);
+            Assert.Equal(ClaimClass.Weekday, violation.Class);
+            Assert.Equal("Saturday", violation.Token);
+        }
+
+        [Fact]
+        public static void An_echoed_message_plus_the_models_own_same_weekday_claim_still_rejects()
+        {
+            // HIGH-A review finding (the dedupe-slot leak): the owner's message itself names a
+            // present-frame weekday, AND the model appends its own separate present-frame claim of
+            // the identical weekday elsewhere in the copy, OUTSIDE any quote of the message.
+            const string message = "Bake sale this Saturday at the community hall.";
+            const string copy = message + " And by the way it's Saturday today, folks!";
+
+            // When  checked against a Wednesday clock, with the message supplied as the owner-trusted core
+            var result = CopyClaims.CheckClock(
+                copy, new DateTimeOffset(2026, 8, 19, 15, 0, 0, TimeSpan.Zero), ownerMessage: message);
+
+            // Then  the message's own EXEMPT "this Saturday" must never consume the dedupe slot for
+            //       "Saturday" and so suppress the model's LATER, genuine, non-exempt "it's Saturday"
+            //       — exactly one violation rides the ladder, not zero
+            var violation = Assert.Single(result.Violations);
+            Assert.Equal(ClaimClass.Weekday, violation.Class);
+            Assert.Equal("Saturday", violation.Token);
+        }
     }
 
     // Further pure-level pins (PLAN T329) — the hour->daypart boundary CheckClock derives its

@@ -18,6 +18,18 @@ namespace GenWave.Core.Abstractions;
 /// decided <see cref="SegmentCopy"/> directly, so the CALLER (never this seam) decides both the text
 /// and whether it is fresh-per-airing.
 /// </para>
+///
+/// <para>
+/// <b>The flavored path lands here too (SPEC F144.3, PLAN T342 — closes the T341 open question this
+/// remark used to leave open).</b> <see cref="Core.Abstractions.IAnnouncementCopyWriter"/> is the
+/// SEPARATE seam that decides a flavored announcement's text (an LLM completion, the F138.4 re-ask
+/// ladder, and the F144.3 containment check all live there) — but once that decision is made, one way
+/// or the other, the resulting <see cref="SegmentCopy"/> renders through this SAME port, unchanged: a
+/// flavored result is exact once written, and a fallen-back verbatim read is exact by definition, so
+/// neither needs — or gets — a different rendering path from the other. This port itself still never
+/// calls <see cref="IAnnouncementCopyWriter"/>, <see cref="ISegmentCopyWriter"/>, or any LLM; it only
+/// ever renders text a caller has already, fully decided.
+/// </para>
 /// </summary>
 public interface IVerbatimSegmentRenderer
 {
