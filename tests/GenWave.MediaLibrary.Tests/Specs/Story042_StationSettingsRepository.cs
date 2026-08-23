@@ -17,6 +17,10 @@
 // for GenWave.Host.Configuration.StationSettingsConfigurationProvider.Load(), the synchronous
 // IConfigurationProvider contract member — its own coverage is the ScenarioReadAllForBoot section
 // below.
+//
+// PLAN T340 added ReadValueAsync (single-key VALUE read, the raw stored JSON text) and DeleteAsync
+// (unconditional row delete) for GenWave.Host.Auth.AnnounceTokenStore's live per-request hash read
+// and revoke — their own coverage is the ScenarioReadValue/ScenarioDelete sections below.
 
 using System.Text.Json;
 using Dapper;
@@ -491,6 +495,116 @@ public static class FeatureStationSettingsRepository
 
             // Then it reports absent.
             Assert.False(exists);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — ReadValueAsync, the single-key value read (PLAN T340)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioReadValue(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AMissingKeyReadsAsNull()
+        {
+            // Given no row for this key...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+
+            // When its value is read...
+            var value = await repo.ReadValueAsync("Announcements:TokenHash", CancellationToken.None);
+
+            // Then nothing comes back.
+            Assert.Null(value);
+        }
+
+        [Fact]
+        public async Task AWrittenKeyReadsBackItsRawStoredJson()
+        {
+            // Given a plain string written under this key (WriteAsync JSON-serializes it, so the raw
+            // stored text is the JSON string literal, quoted)...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+            await repo.WriteAsync("Announcements:TokenHash", "deadbeef", CancellationToken.None);
+
+            // When its value is read...
+            var value = await repo.ReadValueAsync("Announcements:TokenHash", CancellationToken.None);
+
+            // Then the raw JSON text comes back exactly, same shape ReadAllAsync would return for
+            // that key.
+            Assert.Equal(JsonSerializer.Serialize("deadbeef"), value);
+        }
+
+        [Fact]
+        public async Task ItOnlyReadsTheExactKeyProbedNotOtherRows()
+        {
+            // Given a row written under a different key...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+            await repo.WriteAsync("Loudness:TargetLufs", -14.0, CancellationToken.None);
+
+            // When a different key's value is read...
+            var value = await repo.ReadValueAsync("Announcements:TokenHash", CancellationToken.None);
+
+            // Then nothing comes back.
+            Assert.Null(value);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — DeleteAsync, the unconditional row delete (PLAN T340)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioDelete(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task DeletingAMissingKeyIsANoOp()
+        {
+            // Given no row for this key...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+
+            // When it is deleted...
+            await repo.DeleteAsync("Announcements:TokenHash", CancellationToken.None);
+
+            // Then nothing throws, and the table stays empty.
+            Assert.Equal(0, await CountRowsAsync(db));
+        }
+
+        [Fact]
+        public async Task AWrittenKeyIsGoneAfterDelete()
+        {
+            // Given a row written under this key...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+            await repo.WriteAsync("Announcements:TokenHash", "deadbeef", CancellationToken.None);
+
+            // When it is deleted...
+            await repo.DeleteAsync("Announcements:TokenHash", CancellationToken.None);
+
+            // Then it reads back as absent — the honest "no hash row" state, never an empty-string
+            // sentinel.
+            Assert.Null(await repo.ReadValueAsync("Announcements:TokenHash", CancellationToken.None));
+        }
+
+        [Fact]
+        public async Task ItOnlyDeletesTheExactKeyNotOtherRows()
+        {
+            // Given two rows under different keys...
+            await db.ResetSettingsAsync();
+            var repo = Repo(db);
+            await repo.WriteAsync("Announcements:TokenHash", "deadbeef", CancellationToken.None);
+            await repo.WriteAsync("Loudness:TargetLufs", -14.0, CancellationToken.None);
+
+            // When only one is deleted...
+            await repo.DeleteAsync("Announcements:TokenHash", CancellationToken.None);
+
+            // Then the other survives untouched.
+            Assert.Equal(JsonSerializer.Serialize(-14.0), await repo.ReadValueAsync("Loudness:TargetLufs", CancellationToken.None));
         }
     }
 

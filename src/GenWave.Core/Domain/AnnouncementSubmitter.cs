@@ -11,9 +11,10 @@ namespace GenWave.Core.Domain;
 /// <b>Derivation rule (binding, carried from PLAN T337's review):</b> a caller always picks this from
 /// the AUTHENTICATED PRINCIPAL, never from the request body — the column's own default
 /// (<c>'token'</c>) looks privileged, so trusting a client-supplied value here would let any caller
-/// claim the token door without ever presenting one. <see cref="Session"/> is <c>AnnouncementsController</c>'s
-/// only value today (PLAN T339 ships session auth alone); <see cref="Token"/> is unreachable until the
-/// Bearer scheme lands (PLAN T340).
+/// claim the token door without ever presenting one. As of PLAN T340, <c>AnnouncementsController.Post</c>
+/// derives this by checking <c>GenWave.Host.Auth.AnnounceTokenAuthenticationDefaults.HasAnnouncementsScope</c>
+/// against the authenticated principal: <see cref="Token"/> only for a genuine Bearer success (the
+/// "AnnounceToken" scheme's own scope claim), <see cref="Session"/> for every admin cookie caller.
 /// </summary>
 public enum AnnouncementSubmitter
 {

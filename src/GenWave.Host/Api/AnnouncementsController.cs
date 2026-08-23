@@ -3,19 +3,23 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Host.Auth;
 using GenWave.Host.Options;
+using GenWave.Host.Playout;
 
 namespace GenWave.Host.Api;
 
 /// <summary>
-/// <c>POST /api/announcements</c> — the House Voice's front door (SPEC F143.1/.4/.5, F145.1's endpoint
-/// half; STORY-357, STORY-359; PLAN T339). Session (cookie) auth only today — the Operator plane, the
-/// same "keeping the station on air" grouping <see cref="SafeSegmentsController"/>/
-/// <see cref="TtsPreviewController"/>/<see cref="VoicesController"/> already share (an announcement is
-/// content headed for air, exactly like a safe-loop clip or a TTS preview). Bearer token auth (SPEC
-/// F145.3) is PLAN T340's own addition to this same route — see <see cref="AnnouncementSubmitter"/>'s
-/// own remarks for why <see cref="Post"/> only ever derives <see cref="AnnouncementSubmitter.Session"/>
-/// until then.
+/// <c>POST /api/announcements</c> (the House Voice's front door) and
+/// <c>GET /api/announcements/now-playing</c> — SPEC F143.1/.4/.5, F145.1's endpoint half, F145.3/.4's
+/// token door; STORY-357, STORY-359, STORY-360; PLAN T339/T340. Accepts EITHER the admin cookie
+/// session OR the announce Bearer token (<see cref="AnnounceTokenAuthenticationDefaults.InScopeSchemes"/>)
+/// — the Operator plane, the same "keeping the station on air" grouping
+/// <see cref="SafeSegmentsController"/>/<see cref="TtsPreviewController"/>/<see cref="VoicesController"/>
+/// already share (an announcement is content headed for air, exactly like a safe-loop clip or a TTS
+/// preview), now widened to whichever of the two auth doors SPEC F145.4 grants the announcements
+/// family to. <see cref="AnnouncementTokenController"/> (mint/revoke) deliberately does NOT share this
+/// scheme list — session only, so a token can never mint or revoke a token.
 ///
 /// <para>
 /// <b>Gate order (F143.4/F145.1, all enforced BEFORE any row write):</b> SpectatorMode (403, F145.1's
@@ -28,7 +32,10 @@ namespace GenWave.Host.Api;
 /// <see cref="AnnouncementAcceptedRateLimiter"/> — immediately before the write it protects, and only
 /// after every refusal gate above has already let the request through — never by a rate-limiter
 /// MIDDLEWARE policy upstream of this action: see that type's own remarks for why (an
-/// unauthenticated/refused caller must never spend a permit from this budget).
+/// unauthenticated/refused caller must never spend a permit from this budget). <b>This budget is
+/// SHARED across the session and token doors, by design</b> (PLAN T340 carry-forward) — one station,
+/// one break system, one accepted-rate ceiling regardless of which door a caller authenticated
+/// through; <see cref="Post"/> never branches this acquire on the authenticated principal.
 /// </para>
 ///
 /// <para>
@@ -41,9 +48,11 @@ namespace GenWave.Host.Api;
 /// <para>
 /// <b>Source is derived from the authenticated principal, never the request body</b> (T337 review
 /// carry-forward, <see cref="AnnouncementSubmitter"/>'s own remarks) — <see cref="AnnouncementRequest"/>
-/// carries no <c>source</c>/<c>submitter</c> field for a caller to spoof; the column's own default
-/// (<c>'token'</c>) looks privileged, so trusting anything client-supplied here would let any session
-/// caller claim the unimplemented token door.
+/// carries no <c>source</c>/<c>submitter</c> field for a caller to spoof. PLAN T340 makes this real:
+/// <see cref="Post"/> reads <see cref="AnnounceTokenAuthenticationDefaults.HasAnnouncementsScope"/>
+/// off <see cref="ControllerBase.User"/> — the scope claim <see cref="AnnounceTokenAuthenticationHandler"/>
+/// stamps only on a genuine Bearer success — never anything client-supplied, so a session caller can
+/// never claim the token door by sending a crafted body field.
 /// </para>
 ///
 /// <para>
@@ -60,12 +69,13 @@ namespace GenWave.Host.Api;
 [ApiController]
 [Route("api/announcements")]
 [AdminSurface]
-[Authorize(Policy = AuthorizationPolicies.Operator)]
+[Authorize(AuthenticationSchemes = AnnounceTokenAuthenticationDefaults.InScopeSchemes, Policy = AuthorizationPolicies.Operator)]
 public sealed class AnnouncementsController(
     IAnnouncementStore announcementStore,
     AnnouncementAcceptedRateLimiter acceptedRateLimiter,
     IOptionsMonitor<StationOptions> stationMonitor,
     IOptionsMonitor<AnnouncementsOptions> announcementsMonitor,
+    NowPlayingService nowPlayingService,
     ILogger<AnnouncementsController> logger) : ControllerBase
 {
     // SPEC F143.1's fixed per-request override bound — not settings-tunable (unlike the F143.4 caps
@@ -148,8 +158,15 @@ public sealed class AnnouncementsController(
             return StatusCode(StatusCodes.Status429TooManyRequests, AcceptedRateCapProblem(settings.AcceptedPerMinute));
         }
 
+        // PLAN T340 — derived from the PRINCIPAL (the scope claim AnnounceTokenAuthenticationHandler
+        // stamps only on a genuine Bearer success), never the request body: see this class's own
+        // remarks and AnnouncementSubmitter's own remarks for the binding rule.
+        var submitter = AnnounceTokenAuthenticationDefaults.HasAnnouncementsScope(User)
+            ? AnnouncementSubmitter.Token
+            : AnnouncementSubmitter.Session;
+
         var id = await announcementStore.InsertOrCollapseAsync(
-            message, request.Verbatim ?? false, voice, AnnouncementSubmitter.Session, ttl, ct);
+            message, request.Verbatim ?? false, voice, submitter, ttl, ct);
 
         // The store's own 280-char CHECK backstop (T337 review carry-forward) — unreachable in
         // practice (this action already validated length above against settings.MessageMaxChars),
@@ -163,6 +180,28 @@ public sealed class AnnouncementsController(
 
         logger.LogInformation("Announcement accepted id={Id} verbatim={Verbatim}", id, request.Verbatim ?? false);
         return Ok(new AnnouncementAcceptedDto(id.Value));
+    }
+
+    /// <summary>
+    /// <c>GET /api/announcements/now-playing</c> (SPEC F145.3, PLAN T340) — the token-reachable
+    /// now-playing read F147.3's home-automation sensor consumes. Reuses the SAME in-memory
+    /// <see cref="NowPlayingService"/> read <see cref="LiveController.GetNowPlaying"/> and
+    /// <see cref="SpectatorController.GetNowPlaying"/> already use — no engine telnet call, no DB
+    /// read, no new poller — projected down to <see cref="AnnouncementNowPlayingDto"/>'s minimal
+    /// shape (see that record's own remarks for why it carries only title/artist/DJ name). No
+    /// SpectatorMode gate here (unlike <see cref="Post"/>): this route is never reachable by a public
+    /// caller in the first place — it sits behind <see cref="AdminSurfaceAttribute"/> plus the
+    /// session-or-token authorization every action on this controller already requires, honoring the
+    /// no-listener-text law (SPEC F145.1) by construction rather than by a second runtime check.
+    /// </summary>
+    [HttpGet("now-playing")]
+    public IActionResult NowPlaying()
+    {
+        var snapshot = nowPlayingService.GetSnapshot(SingleStation.IdString);
+        if (snapshot is null || snapshot.IsDrain)
+            return Ok(new AnnouncementNowPlayingDto(null, null, null));
+
+        return Ok(new AnnouncementNowPlayingDto(snapshot.Title, snapshot.Artist, snapshot.DjName));
     }
 
     static ProblemDetails SpectatorModeProblem() => new()

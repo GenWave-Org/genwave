@@ -188,6 +188,49 @@ public sealed class StationSettingsRepository(string connectionString)
     }
 
     /// <summary>
+    /// The raw stored JSON text for <paramref name="key"/>, or <see langword="null"/> if no row
+    /// exists — a single-key value read, added for PLAN T340: <c>GenWave.Host.Auth.AnnounceTokenStore</c>
+    /// reads its hash on EVERY Bearer-authenticated request, so a targeted one-row <c>SELECT</c> (this
+    /// method) is the honest shape rather than <see cref="ReadAllAsync"/>'s full unfiltered table scan
+    /// — the same "narrower than the full scan" reasoning <see cref="ExistsAsync"/>'s own remarks give
+    /// for its own single-key probe. Any failure (including a <see cref="Npgsql.NpgsqlException"/>)
+    /// propagates to the caller — same posture as every other method in this class.
+    /// </summary>
+    public async Task<string?> ReadValueAsync(string key, CancellationToken ct)
+    {
+        await using var conn = new NpgsqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT value FROM station.settings WHERE key = @key";
+        cmd.Parameters.AddWithValue("key", key);
+
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result as string;
+    }
+
+    /// <summary>
+    /// Deletes the row for <paramref name="key"/>, if one exists — a no-op (not an error) when it
+    /// does not. Added for PLAN T340: <c>GenWave.Host.Auth.AnnounceTokenStore</c>'s revoke needs a
+    /// genuine "no hash row" state (fail-closed reads back <see langword="null"/>), which an
+    /// overwritten-to-empty value would not honestly be — the same generic, key-scoped shape as
+    /// <see cref="ExistsAsync"/> immediately above, reused rather than duplicated for a second
+    /// machine-owned key family (mirrors <c>SafeLoopSeedMarkerStore</c>'s own reuse of this
+    /// repository's write side). No allowlist check here, same split every other method in this
+    /// class already keeps from its caller.
+    /// </summary>
+    public async Task DeleteAsync(string key, CancellationToken ct)
+    {
+        await using var conn = new NpgsqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM station.settings WHERE key = @key";
+        cmd.Parameters.AddWithValue("key", key);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
     /// SYNCHRONOUS read of every row in <c>station.settings</c> — the one deliberate sync exception
     /// in this otherwise async-only repository, added for gh-#406 slice 5.
     /// <c>GenWave.Host.Configuration.StationSettingsConfigurationProvider.Load()</c> implements
