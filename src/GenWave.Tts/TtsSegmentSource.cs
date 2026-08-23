@@ -23,7 +23,7 @@ public sealed class TtsSegmentSource(
     ActivePersonaPaceCache personaPace,
     IOptionsMonitor<TtsOptions> options,
     ILogger<TtsSegmentSource> logger,
-    IStationEventSink? events = null) : ITtsSegmentSource
+    IStationEventSink? events = null) : ITtsSegmentSource, IVerbatimSegmentRenderer
 {
     // SegmentGenerated publish seam (gitea-#246); no-op unless the host binds a real sink.
     readonly IStationEventSink events = events ?? NoOpStationEventSink.Instance;
@@ -69,225 +69,60 @@ public sealed class TtsSegmentSource(
     {
         try
         {
-            // Read fresh per render — not a boot-frozen field — so Tts:BlurbRetentionHours
-            // (SPEC F44.2, closes gitea-#197) is live for SweepBlurbs below. CacheRoot/Format are not
-            // operator-editable (deployment topology, F44.4), so reading them from CurrentValue
-            // instead of a frozen snapshot changes nothing observable for them.
-            var cfg = options.CurrentValue;
             var copy = await copyWriter.WriteAsync(request, ct);
 
-            // Design ruling, spec-cited (T123 review finding, extended to ContextSegment at T224):
-            // a handoff piece OR a context segment must NEVER air non-LLM-authored copy. F92.4's
-            // ladder is "two-piece -> whichever piece rendered -> clean cut" — there is no "templated
-            // piece" rung — and F92.5/F107.6 both state this copy IS an LLM-authored blurb, full
-            // stop: for a handoff, the alternative is silently wrong ceremony phrasing; for a context
-            // segment, the alternative is PatterTemplateRenderer's inert placeholder ("Here's
-            // something worth knowing") standing in for actual facts, which defeats the entire point
-            // of a context provider (never airable filler, SPEC F107.6). copy.FreshPerAiring false
-            // here means every writer in the chain missed: LlmCopyWriter's own FOUR degrade paths
-            // (disabled endpoint, timeout/non-2xx/connect, empty-or-over-length after cleanup, and —
-            // as of PLAN T332, SPEC F138.2-F138.4 — the truth-gate ladder exhausting its one re-ask)
-            // AND DegradationGatedCopyWriter routing straight to TemplateCopyWriter — unconditionally
-            // in Hard mode, or off an unclaimed Soft cadence slot — bypassing LlmCopyWriter entirely.
-            // Every one of those returns template copy rather than throwing (ISegmentCopyWriter's own
-            // never-throws contract), which is exactly why PatterTemplateRenderer still needs correct
-            // SignOff/SignOn/ContextSegment arms — they just must never reach air for these three
-            // kinds specifically (LeadIn/BackAnnounce carry no such guard below — their own template
-            // rung DOES reach air on a miss, truth-gate exhaustion included, since neither kind's
-            // FIXED PROSE states a weekday/daypart claim on its own; see PatterTemplateRenderer.Expand's
-            // own LeadIn/BackAnnounce arms — the interpolated track title/artist is the one part of
-            // that text NOT gate-checked either way, since a template render never reaches this ladder
-            // to begin with). One WARN, then null:
+            // Design ruling, spec-cited (T123 review finding, extended to ContextSegment at T224,
+            // extended to Announcement at T338 review): a handoff piece, a context segment, OR an
+            // owner announcement must NEVER air non-LLM-authored copy. F92.4's ladder is "two-piece ->
+            // whichever piece rendered -> clean cut" — there is no "templated piece" rung — and
+            // F92.5/F107.6 both state this copy IS an LLM-authored blurb, full stop: for a handoff,
+            // the alternative is silently wrong ceremony phrasing; for a context segment, the
+            // alternative is PatterTemplateRenderer's inert placeholder ("Here's something worth
+            // knowing") standing in for actual facts, which defeats the entire point of a context
+            // provider (never airable filler, SPEC F107.6); for an announcement, the alternative is
+            // PatterTemplateRenderer's own neutral floor text standing in for the owner's actual
+            // message (SPEC F144.2) — airing that would "deliver" nothing to listeners while still
+            // stamping the announcement as aired, which is worse than a clean cut.
+            //
+            // SPEC F144.4 (STORY-358, PLAN T341/T342) — THE FALLBACK LAW: a degraded announcement
+            // (LLM unreachable, re-ask ladder exhausted, render budget blown) must still air, but
+            // ONLY as a verbatim read of the owner's own words, never as PatterTemplateRenderer's
+            // neutral floor text. That verbatim-read writer is deliberately NOT LlmCopyWriter — F144.4
+            // forbids LLM authorship on this exact degraded path — but it MUST still stamp
+            // SegmentCopy.FreshPerAiring: true on its result, the same as any genuinely LLM-authored
+            // blurb: this guard has no way to tell "inert template floor text" apart from "genuine
+            // owner content read by a non-LLM writer" other than that one field. Per-announcement
+            // owner text is fresh-per-airing by definition (F144.2 — it is the operator's own text,
+            // never a templated fixed phrase) and belongs in the swept blurbs/ dir below, never a
+            // templated kind's evergreen forever-cache. T341 (the verbatim-read writer) and T342
+            // (wiring it behind SegmentKind.Announcement) own that contract; if a future writer for
+            // this kind cannot honor it, the Announcement leg below must be lifted, not left in place
+            // to silently drop every degraded announcement instead of reading it verbatim.
+            //
+            // copy.FreshPerAiring false here means every writer in the chain missed: LlmCopyWriter's own FOUR degrade
+            // paths (disabled endpoint, timeout/non-2xx/connect, empty-or-over-length after cleanup,
+            // and — as of PLAN T332, SPEC F138.2-F138.4 — the truth-gate ladder exhausting its one
+            // re-ask) AND DegradationGatedCopyWriter routing straight to TemplateCopyWriter —
+            // unconditionally in Hard mode, or off an unclaimed Soft cadence slot — bypassing
+            // LlmCopyWriter entirely. Every one of those returns template copy rather than throwing
+            // (ISegmentCopyWriter's own never-throws contract), which is exactly why
+            // PatterTemplateRenderer still needs correct SignOff/SignOn/ContextSegment/Announcement
+            // arms — they just must never reach air for these four kinds specifically (LeadIn/
+            // BackAnnounce carry no such guard below — their own template rung DOES reach air on a
+            // miss, truth-gate exhaustion included, since neither kind's FIXED PROSE states a
+            // weekday/daypart claim on its own; see PatterTemplateRenderer.Expand's own LeadIn/
+            // BackAnnounce arms — the interpolated track title/artist is the one part of that text NOT
+            // gate-checked either way, since a template render never reaches this ladder to begin
+            // with). One WARN, then null:
             // ITtsSegmentSource already allows null-never-throws, and the Orchestrator's own drain arm
             // treats a null render exactly like F92.4's "whichever piece rendered airs (else clean
-            // cut)"/F107.6's skip-never-silence posture.
-            if (request.Kind is SegmentKind.SignOff or SegmentKind.SignOn or SegmentKind.ContextSegment
-                && !copy.FreshPerAiring)
-            {
-                logger.LogWarning(
-                    "Copy for {Kind} on station {StationId} was not LLM-authored (writer degraded to " +
-                    "template) — dropping this segment rather than airing non-LLM-authored copy " +
-                    "(SPEC F92.4, F92.5, F107.6)",
-                    request.Kind, request.StationId);
+            // cut)"/F107.6's skip-never-silence posture. Shared with the verbatim overload below
+            // (T341 review finding F7) via ShouldDropNonFreshGuardedCopy — see that method's own
+            // remarks for why the SAME check now runs on both paths.
+            if (ShouldDropNonFreshGuardedCopy(request, copy))
                 return null;
-            }
 
-            // corrections.ContentHash (station rules) AND personaCorrections.ContentHash (the
-            // active persona card's rules, SPEC F71.7) both fold into the cache key (SPEC F68.5) so
-            // EITHER a corrections rebuild (PUT /api/settings), a card edit, or a
-            // Station:Persona:ActiveId switch re-keys every subsequent cache lookup: the very next
-            // render of the same (text, voice, station) misses, falls through to
-            // synthesizer.SynthesizeAsync below (NormalizingTtsSynthesizer — the only place either
-            // set of corrections actually applies, via SpeechCorrectionProvider.BuildMerged's
-            // persona-over-station merge, F97.4), and lands under a new hash. This class never reads a
-            // correction rule itself, only the two fingerprints saying "these are the rules in
-            // effect on each side of the merge". MergePolicyVersion (see its own remarks above)
-            // folds in alongside them for the third, orthogonal reason a render can change without
-            // either fingerprint moving: the ALGORITHM that resolves an overlap between the two
-            // rule sets changed, not the rules themselves.
-            //
-            // Ordering matters: RefreshIfStaleAsync is awaited BEFORE computing the hash below —
-            // NOT left for NormalizingTtsSynthesizer's own call inside SynthesizeAsync to discover
-            // first — so the key and the eventual render read the SAME generation of
-            // personaCorrections in the common case (this cache is a DI singleton; its own refresh
-            // is idempotent and gated, so NormalizingTtsSynthesizer's later call is just a fast
-            // already-fresh no-op). Reversing this order would let the key capture the PRE-refresh
-            // snapshot while the render — on a cache miss — applies the POST-refresh one: a fresh
-            // synthesis would then land under a hash that no longer matches what was actually
-            // spoken, and the file would sit orphaned until the next render recomputes with the new
-            // snapshot and re-hits it (self-healing next render — same accepted mid-render race
-            // TtsSegmentSource already tolerates elsewhere, just moved to a different trigger).
-            //
-            // A deterministic content fingerprint — NOT SpeechCorrectionProvider.Version (a
-            // process-local counter that resets to 0 at every construction) — is required here: the
-            // TTS cache directory is a named Docker volume and its files are never swept on their
-            // own (only blurbsDir entries are, see SweepBlurbs below), so it outlives any container
-            // redeploy. A counter-based key would let a fresh process's version=0 collide with
-            // orphaned pre-redeploy entries and serve stale pronunciation again; the same rules
-            // always fold to the same fingerprint across restarts, and changed rules always fold to
-            // a new one, so a redeploy can never accidentally resurrect a stale cache entry.
-            // Without SOME such term here, an evergreen StationId/LeadIn/BackAnnounce clip
-            // (FreshPerAiring:false, never GC'd) would keep airing the OLD pronunciation forever.
-            // The file at the stale hash is simply orphaned, never rewritten or deleted — accepted
-            // disk cost on the evergreen stationDir cache (a named volume with no retention sweep of
-            // its own): correctness on the very next spoken line matters more here than reclaiming a
-            // few stale audio files.
-            //
-            // Staleness bound inherited, honestly: personaCorrections.ContentHash can itself lag a
-            // real card edit/persona switch by up to ActivePersonaCorrectionsCache.StalenessBound
-            // (its own refresh is a bounded poll, not an instant subscription — see its class
-            // remarks) — the cache key can never be MORE current than the rules it is keying on. A
-            // station-only deployment (no active persona at all) is unaffected: personaCorrections
-            // always folds to its own stable "no card corrections" sentinel there, so this term
-            // never varies for a station running with no persona feature in play.
-            await personaCorrections.RefreshIfStaleAsync(ct);
-
-            // Pronunciation rules (SPEC F97.3, F97.6): resolved HERE, at the segment source, via ONE
-            // ambient-persona read (personaPronunciations.Current, refreshed just above) — never
-            // re-read from an ambient accessor deeper in the pipeline (ARCHITECTURE.md "Carrying
-            // persona facts to the engine"; see PronunciationRuleSet/TtsRenderContext.Rules).
-            // SegmentRequest carries no persona identity of its own, so this is not "the persona this
-            // request was authored for" resolved by name — it is the SAME posture
-            // ActivePersonaCorrectionsCache already ships for corrections: whichever persona is
-            // active at the moment of this one read is who this render carries forward, immutably,
-            // on TtsRenderContext.Rules to both Kokoro request builders, so a slow render can never
-            // observe a LATER persona flip mid-flight. pronunciations.ContentHash
-            // (station) and personaPronunciations.ContentHash (card) fold into the cache key exactly
-            // like the corrections pair above and for the identical reason: an edited rule must
-            // re-key an evergreen cached clip rather than let it keep airing the old pronunciation.
-            await personaPronunciations.RefreshIfStaleAsync(ct);
-            // PronunciationRuleResolver.ResolveForRender (T274 review finding F3) is the ONE seam
-            // both this render and the admin preview (TtsPreviewController) call — no candidate
-            // layer here (that is a preview-only concept), so this is exactly the plain
-            // station∪persona merge, byte-identical to before that seam existed.
-            var contextRules = PronunciationRuleResolver.ResolveForRender(pronunciations.Current, personaPronunciations.Current);
-
-            // Speaking pace (SPEC F98.1-F98.3, PLAN T140): resolved via the SAME "one
-            // ambient-persona read" discipline Rules just used above — never re-read from an
-            // ambient accessor deeper in the pipeline (ARCHITECTURE.md "Carrying persona facts to
-            // the engine"). personaPace.Current is already validated (TtsPace.Clamp, run inside
-            // ActivePersonaPaceCache's own refresh) — safe to fold into the cache key and safe to
-            // send to Kokoro as-is, with no further checking here.
-            await personaPace.RefreshIfStaleAsync(ct);
-            var pace = personaPace.Current;
-
-            var hash = ComputeHash(
-                copy.Text, request.Voice, request.StationId, corrections.ContentHash, personaCorrections.ContentHash,
-                pronunciations.ContentHash, personaPronunciations.ContentHash, MergePolicyVersion, pace);
-            var stationDir = Path.Combine(cfg.CacheRoot, request.StationId);
-            // Plain FreshPerAiring is the whole test again (F34.6): the guard above already sent a
-            // non-fresh SignOff/SignOn render home before this line, so nothing reaching here needs a
-            // second, kind-based override to land in blurbs/ — a genuinely LLM-authored render of ANY
-            // kind still does, an evergreen template render of any kind still doesn't.
-            var isBlurb = copy.FreshPerAiring;
-            var targetDir = isBlurb ? Path.Combine(stationDir, BlurbsDirName) : stationDir;
-            var path = Path.Combine(targetDir, $"{hash}.{cfg.Format}");
-
-            var fileExists = File.Exists(path);
-            if (!fileExists)
-            {
-                Directory.CreateDirectory(targetDir);
-                // Kind-aware overload (SPEC F70.3, STORY-191): this is the one caller that knows a
-                // real SegmentKind — FallbackTtsSynthesizer reads it to consult Tts:EngineByKind.
-                // Rules carries the merged pronunciation set resolved above (SPEC F97.6); Pace
-                // carries the validated persona rate resolved just above (SPEC F98.2, T140).
-                var synthPath = await synthesizer.SynthesizeAsync(
-                    new TtsRenderContext(copy.Text, request.Voice, request.Kind) { Rules = contextRules, Pace = pace },
-                    ct);
-                // A failed Move (destination directory vanished mid-render, a lost race with a
-                // concurrent sweep, disk pressure) must never leave the engine's transient write
-                // behind as a permanent orphan under CacheRoot's top level, where nothing ever
-                // sweeps it — mirrors SafeSegmentAuthor's own all-or-nothing cleanup discipline.
-                // The Move failure itself still propagates unchanged to the catch below (WARN +
-                // null, F92.4's never-silent posture); this only ensures it never leaves a second,
-                // silent failure (an orphaned file) behind it.
-                try
-                {
-                    File.Move(synthPath, path, overwrite: true);
-                }
-                catch
-                {
-                    DeleteIfExists(synthPath);
-                    throw;
-                }
-            }
-
-            var loudness = await analyzer.AnalyzeAsync(path, ct);
-
-            CuePoints? cuePoints;
-            if (fileExists && cueCache.TryGetValue(hash, out var cached))
-            {
-                cuePoints = cached;
-            }
-            else
-            {
-                cuePoints = await MeasureCueAsync(path, hash, ct);
-            }
-
-            // Duration is measured, never fabricated (SPEC F66.1): stamped from the cue analyzer's
-            // CueOutSec — same derivation SafeSegmentAuthor.BuildInsert uses for authored segments —
-            // and stays null when cue analysis failed (already logged in MeasureCueAsync above).
-            // cuePoints covers BOTH the fresh-render and cache-hit paths above, so a cached segment's
-            // cached cue points stamp the duration here too.
-            var durationMs = cuePoints is not null
-                ? (int?)Math.Round(cuePoints.CueOutSec * 1000.0, MidpointRounding.AwayFromZero)
-                : null;
-
-            // Opportunistic GC (F34.6): only after a render that actually landed in blurbs/ (fresh
-            // copy — the only route left, now that a non-fresh handoff render never reaches this far
-            // at all) — templated kinds' forever-cache is never touched. Best-effort; a sweep failure
-            // must never fail a render that already succeeded.
-            if (isBlurb)
-                SweepBlurbs(targetDir, request.StationId);
-
-            // Display title is the station name, NOT the spoken text (issue gitea-#154) — players would
-            // otherwise show the whole patter script as the now-playing title. Artist credits the
-            // active persona reading the patter when one is active, else the station name (SPEC
-            // F39.2, gitea-#212): while a persona is on air it is that persona's voice reading the
-            // DJ-spoken kinds (TimeDate, LeadIn, BackAnnounce) alike, so the credit follows it.
-            // StationId is the exception (gh-#96): station imaging always arrives with the station's
-            // own voice and PersonaName null, so its credit is the station name by construction. No
-            // active persona falls back to the gitea-#192/gitea-#172 brand rule unchanged (artist = <Station Name>) —
-            // without it every station ID / lead-in / back-announce rendered "Unknown artist" in
-            // the admin UI's now-playing and play-history surfaces. This is per-airing state, not
-            // cached content: the cache key below never includes PersonaName, so a cache-hit render
-            // still carries whichever persona is CURRENTLY active (F39.3).
-            // Render succeeded (cache hit or fresh synthesis) — publish before returning (gitea-#246).
-            events.Publish(new SegmentGenerated($"tts:{hash}", request.Kind.ToString(), request.Voice));
-
-            // DjName (gh-#259) carries the SPEAKER's persona name for Now Playing attribution —
-            // request.PersonaName verbatim, no StationName fallback (unlike the Artist credit line
-            // above): a station-voiced segment has no DJ of its own, and the Orchestrator stamps the
-            // unit's show persona onto StationId segments itself. Per-airing state, same as Artist —
-            // never part of the cache key.
-            // SegmentKind (SPEC F113.1, PLAN T220): stamped from this exact render's own request.Kind —
-            // the demo-hour instrument reads it back off the AIRED track, never re-derived, so a render
-            // that never reaches air (budget-dropped) never carries it into a track-started row at all.
-            LogRenderOutcome(request, OutcomeSuccess, NoCause);
-            return new MediaItem(
-                $"tts:{hash}", path, request.StationName, loudness,
-                Artist: request.PersonaName ?? request.StationName, Cue: cuePoints, DurationMs: durationMs,
-                DjName: request.PersonaName, SegmentKind: request.Kind);
+            return await RenderCopyAsync(request, copy, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -312,6 +147,272 @@ public sealed class TtsSegmentSource(
             LogRenderOutcome(request, OutcomeFailure, ex.GetType().Name);
             return null;
         }
+    }
+
+    /// <summary>
+    /// <see cref="IVerbatimSegmentRenderer.RenderAsync"/> (SPEC F144.2, PLAN T341) — renders copy the
+    /// CALLER already decided, never <see cref="copyWriter"/>: no <see cref="ISegmentCopyWriter.WriteAsync"/>
+    /// call sits anywhere on this path, so no LLM can ever run for it — the "no LLM anywhere on the
+    /// path" half of F144.2. Shares every downstream step (cache-key hashing, synth-or-cache-hit,
+    /// loudness, cue analysis, blurb-dir routing, the <see cref="SegmentGenerated"/> publish) with the
+    /// ordinary <see cref="RenderAsync(SegmentRequest, CancellationToken)"/> above via
+    /// <see cref="RenderCopyAsync"/> — the SAME production pipeline, differing only in where
+    /// <paramref name="copy"/> came from.
+    ///
+    /// <para>
+    /// <b>The guard immediately above the ordinary overload (T341 review finding F7 — closes a guard
+    /// bypass a prior version of this method left open).</b> SignOff/SignOn/ContextSegment/Announcement
+    /// copy that is not fresh-per-airing must never reach air regardless of WHICH path decided that —
+    /// <see cref="ShouldDropNonFreshGuardedCopy"/> below is now the ONE check both overloads run, so a
+    /// caller of THIS overload that fails to stamp <see cref="SegmentCopy.FreshPerAiring"/> true (the
+    /// F144.2 contract the <c>Orchestrator</c>'s own announcement vend step owes) is caught here too,
+    /// never only trusted. Free for today's one production caller, which always passes <c>true</c>.
+    /// </para>
+    /// </summary>
+    public async Task<MediaItem?> RenderAsync(SegmentRequest request, SegmentCopy copy, CancellationToken ct)
+    {
+        try
+        {
+            if (ShouldDropNonFreshGuardedCopy(request, copy))
+                return null;
+
+            return await RenderCopyAsync(request, copy, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Mirrors RenderAsync(SegmentRequest, CancellationToken)'s own identical guard — see that
+            // overload's remarks for the full rationale (genuine cancellation carries no outcome to
+            // attribute a rate to; an uncancelled-token OperationCanceledException falls through to
+            // the catch below instead).
+            return null;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "TTS render failed for {Kind}/{Voice}", request.Kind, request.Voice);
+            LogRenderOutcome(request, OutcomeFailure, ex.GetType().Name);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// SPEC F92.4/F92.5/F107.6/F144.2/F144.4 — the ONE guard both <see cref="RenderAsync(SegmentRequest, CancellationToken)"/>
+    /// and <see cref="RenderAsync(SegmentRequest, SegmentCopy, CancellationToken)"/> consult (T341
+    /// review finding F7): a handoff piece, a context segment, or an owner announcement must NEVER air
+    /// non-LLM-authored copy — see the ordinary overload's own inline remarks (above its call site) for
+    /// the full "why" this ladder has no templated rung for these four kinds. Logs the drop WARN and
+    /// returns <see langword="true"/> when the caller must drop the segment; returns
+    /// <see langword="false"/> (no log) for every other kind, and for these four kinds when
+    /// <paramref name="copy"/> IS fresh-per-airing.
+    /// </summary>
+    bool ShouldDropNonFreshGuardedCopy(SegmentRequest request, SegmentCopy copy)
+    {
+        if (request.Kind is not (SegmentKind.SignOff or SegmentKind.SignOn or SegmentKind.ContextSegment
+            or SegmentKind.Announcement)) // widened at T338 — see the class remarks for the F144.4 fallback law
+            return false;
+        if (copy.FreshPerAiring)
+            return false;
+
+        logger.LogWarning(
+            "Copy for {Kind} on station {StationId} was not LLM-authored (writer degraded to " +
+            "template) — dropping this segment rather than airing non-LLM-authored copy " +
+            "(SPEC F92.4, F92.5, F107.6, F144.2, F144.4)",
+            request.Kind, request.StationId);
+        return true;
+    }
+
+    /// <summary>
+    /// The shared tail both <see cref="RenderAsync(SegmentRequest, CancellationToken)"/> and
+    /// <see cref="RenderAsync(SegmentRequest, SegmentCopy, CancellationToken)"/> call once
+    /// <paramref name="copy"/> is decided — everything from cache-key hashing through the returned
+    /// <see cref="MediaItem"/>, byte-identical regardless of which overload's <paramref name="copy"/>
+    /// this is (a genuinely written one, or one handed in pre-authored). Callers are responsible for
+    /// their own try/catch around this call (SPEC F100.2's outcome logging happens THERE, not here,
+    /// so each overload's own catch can name its own <see cref="OutcomeFailure"/> cause correctly).
+    /// </summary>
+    async Task<MediaItem?> RenderCopyAsync(SegmentRequest request, SegmentCopy copy, CancellationToken ct)
+    {
+        // Read fresh per render — not a boot-frozen field — so Tts:BlurbRetentionHours
+        // (SPEC F44.2, closes gitea-#197) is live for SweepBlurbs below. CacheRoot/Format are not
+        // operator-editable (deployment topology, F44.4), so reading them from CurrentValue
+        // instead of a frozen snapshot changes nothing observable for them.
+        var cfg = options.CurrentValue;
+
+        // corrections.ContentHash (station rules) AND personaCorrections.ContentHash (the
+        // active persona card's rules, SPEC F71.7) both fold into the cache key (SPEC F68.5) so
+        // EITHER a corrections rebuild (PUT /api/settings), a card edit, or a
+        // Station:Persona:ActiveId switch re-keys every subsequent cache lookup: the very next
+        // render of the same (text, voice, station) misses, falls through to
+        // synthesizer.SynthesizeAsync below (NormalizingTtsSynthesizer — the only place either
+        // set of corrections actually applies, via SpeechCorrectionProvider.BuildMerged's
+        // persona-over-station merge, F97.4), and lands under a new hash. This class never reads a
+        // correction rule itself, only the two fingerprints saying "these are the rules in
+        // effect on each side of the merge". MergePolicyVersion (see its own remarks above)
+        // folds in alongside them for the third, orthogonal reason a render can change without
+        // either fingerprint moving: the ALGORITHM that resolves an overlap between the two
+        // rule sets changed, not the rules themselves.
+        //
+        // Ordering matters: RefreshIfStaleAsync is awaited BEFORE computing the hash below —
+        // NOT left for NormalizingTtsSynthesizer's own call inside SynthesizeAsync to discover
+        // first — so the key and the eventual render read the SAME generation of
+        // personaCorrections in the common case (this cache is a DI singleton; its own refresh
+        // is idempotent and gated, so NormalizingTtsSynthesizer's later call is just a fast
+        // already-fresh no-op). Reversing this order would let the key capture the PRE-refresh
+        // snapshot while the render — on a cache miss — applies the POST-refresh one: a fresh
+        // synthesis would then land under a hash that no longer matches what was actually
+        // spoken, and the file would sit orphaned until the next render recomputes with the new
+        // snapshot and re-hits it (self-healing next render — same accepted mid-render race
+        // TtsSegmentSource already tolerates elsewhere, just moved to a different trigger).
+        //
+        // A deterministic content fingerprint — NOT SpeechCorrectionProvider.Version (a
+        // process-local counter that resets to 0 at every construction) — is required here: the
+        // TTS cache directory is a named Docker volume and its files are never swept on their
+        // own (only blurbsDir entries are, see SweepBlurbs below), so it outlives any container
+        // redeploy. A counter-based key would let a fresh process's version=0 collide with
+        // orphaned pre-redeploy entries and serve stale pronunciation again; the same rules
+        // always fold to the same fingerprint across restarts, and changed rules always fold to
+        // a new one, so a redeploy can never accidentally resurrect a stale cache entry.
+        // Without SOME such term here, an evergreen StationId/LeadIn/BackAnnounce clip
+        // (FreshPerAiring:false, never GC'd) would keep airing the OLD pronunciation forever.
+        // The file at the stale hash is simply orphaned, never rewritten or deleted — accepted
+        // disk cost on the evergreen stationDir cache (a named volume with no retention sweep of
+        // its own): correctness on the very next spoken line matters more here than reclaiming a
+        // few stale audio files.
+        //
+        // Staleness bound inherited, honestly: personaCorrections.ContentHash can itself lag a
+        // real card edit/persona switch by up to ActivePersonaCorrectionsCache.StalenessBound
+        // (its own refresh is a bounded poll, not an instant subscription — see its class
+        // remarks) — the cache key can never be MORE current than the rules it is keying on. A
+        // station-only deployment (no active persona at all) is unaffected: personaCorrections
+        // always folds to its own stable "no card corrections" sentinel there, so this term
+        // never varies for a station running with no persona feature in play.
+        await personaCorrections.RefreshIfStaleAsync(ct);
+
+        // Pronunciation rules (SPEC F97.3, F97.6): resolved HERE, at the segment source, via ONE
+        // ambient-persona read (personaPronunciations.Current, refreshed just above) — never
+        // re-read from an ambient accessor deeper in the pipeline (ARCHITECTURE.md "Carrying
+        // persona facts to the engine"; see PronunciationRuleSet/TtsRenderContext.Rules).
+        // SegmentRequest carries no persona identity of its own, so this is not "the persona this
+        // request was authored for" resolved by name — it is the SAME posture
+        // ActivePersonaCorrectionsCache already ships for corrections: whichever persona is
+        // active at the moment of this one read is who this render carries forward, immutably,
+        // on TtsRenderContext.Rules to both Kokoro request builders, so a slow render can never
+        // observe a LATER persona flip mid-flight. pronunciations.ContentHash
+        // (station) and personaPronunciations.ContentHash (card) fold into the cache key exactly
+        // like the corrections pair above and for the identical reason: an edited rule must
+        // re-key an evergreen cached clip rather than let it keep airing the old pronunciation.
+        await personaPronunciations.RefreshIfStaleAsync(ct);
+        // PronunciationRuleResolver.ResolveForRender (T274 review finding F3) is the ONE seam
+        // both this render and the admin preview (TtsPreviewController) call — no candidate
+        // layer here (that is a preview-only concept), so this is exactly the plain
+        // station∪persona merge, byte-identical to before that seam existed.
+        var contextRules = PronunciationRuleResolver.ResolveForRender(pronunciations.Current, personaPronunciations.Current);
+
+        // Speaking pace (SPEC F98.1-F98.3, PLAN T140): resolved via the SAME "one
+        // ambient-persona read" discipline Rules just used above — never re-read from an
+        // ambient accessor deeper in the pipeline (ARCHITECTURE.md "Carrying persona facts to
+        // the engine"). personaPace.Current is already validated (TtsPace.Clamp, run inside
+        // ActivePersonaPaceCache's own refresh) — safe to fold into the cache key and safe to
+        // send to Kokoro as-is, with no further checking here.
+        await personaPace.RefreshIfStaleAsync(ct);
+        var pace = personaPace.Current;
+
+        var hash = ComputeHash(
+            copy.Text, request.Voice, request.StationId, corrections.ContentHash, personaCorrections.ContentHash,
+            pronunciations.ContentHash, personaPronunciations.ContentHash, MergePolicyVersion, pace);
+        var stationDir = Path.Combine(cfg.CacheRoot, request.StationId);
+        // Plain FreshPerAiring is the whole test again (F34.6): the guard above already sent a
+        // non-fresh SignOff/SignOn render home before this line, so nothing reaching here needs a
+        // second, kind-based override to land in blurbs/ — a genuinely LLM-authored render of ANY
+        // kind still does, an evergreen template render of any kind still doesn't.
+        var isBlurb = copy.FreshPerAiring;
+        var targetDir = isBlurb ? Path.Combine(stationDir, BlurbsDirName) : stationDir;
+        var path = Path.Combine(targetDir, $"{hash}.{cfg.Format}");
+
+        var fileExists = File.Exists(path);
+        if (!fileExists)
+        {
+            Directory.CreateDirectory(targetDir);
+            // Kind-aware overload (SPEC F70.3, STORY-191): this is the one caller that knows a
+            // real SegmentKind — FallbackTtsSynthesizer reads it to consult Tts:EngineByKind.
+            // Rules carries the merged pronunciation set resolved above (SPEC F97.6); Pace
+            // carries the validated persona rate resolved just above (SPEC F98.2, T140).
+            var synthPath = await synthesizer.SynthesizeAsync(
+                new TtsRenderContext(copy.Text, request.Voice, request.Kind) { Rules = contextRules, Pace = pace },
+                ct);
+            // A failed Move (destination directory vanished mid-render, a lost race with a
+            // concurrent sweep, disk pressure) must never leave the engine's transient write
+            // behind as a permanent orphan under CacheRoot's top level, where nothing ever
+            // sweeps it — mirrors SafeSegmentAuthor's own all-or-nothing cleanup discipline.
+            // The Move failure itself still propagates unchanged to the catch below (WARN +
+            // null, F92.4's never-silent posture); this only ensures it never leaves a second,
+            // silent failure (an orphaned file) behind it.
+            try
+            {
+                File.Move(synthPath, path, overwrite: true);
+            }
+            catch
+            {
+                DeleteIfExists(synthPath);
+                throw;
+            }
+        }
+
+        var loudness = await analyzer.AnalyzeAsync(path, ct);
+
+        CuePoints? cuePoints;
+        if (fileExists && cueCache.TryGetValue(hash, out var cached))
+        {
+            cuePoints = cached;
+        }
+        else
+        {
+            cuePoints = await MeasureCueAsync(path, hash, ct);
+        }
+
+        // Duration is measured, never fabricated (SPEC F66.1): stamped from the cue analyzer's
+        // CueOutSec — same derivation SafeSegmentAuthor.BuildInsert uses for authored segments —
+        // and stays null when cue analysis failed (already logged in MeasureCueAsync above).
+        // cuePoints covers BOTH the fresh-render and cache-hit paths above, so a cached segment's
+        // cached cue points stamp the duration here too.
+        var durationMs = cuePoints is not null
+            ? (int?)Math.Round(cuePoints.CueOutSec * 1000.0, MidpointRounding.AwayFromZero)
+            : null;
+
+        // Opportunistic GC (F34.6): only after a render that actually landed in blurbs/ (fresh
+        // copy — the only route left, now that a non-fresh handoff render never reaches this far
+        // at all) — templated kinds' forever-cache is never touched. Best-effort; a sweep failure
+        // must never fail a render that already succeeded.
+        if (isBlurb)
+            SweepBlurbs(targetDir, request.StationId);
+
+        // Display title is the station name, NOT the spoken text (issue gitea-#154) — players would
+        // otherwise show the whole patter script as the now-playing title. Artist credits the
+        // active persona reading the patter when one is active, else the station name (SPEC
+        // F39.2, gitea-#212): while a persona is on air it is that persona's voice reading the
+        // DJ-spoken kinds (TimeDate, LeadIn, BackAnnounce) alike, so the credit follows it.
+        // StationId is the exception (gh-#96): station imaging always arrives with the station's
+        // own voice and PersonaName null, so its credit is the station name by construction. No
+        // active persona falls back to the gitea-#192/gitea-#172 brand rule unchanged (artist = <Station Name>) —
+        // without it every station ID / lead-in / back-announce rendered "Unknown artist" in
+        // the admin UI's now-playing and play-history surfaces. This is per-airing state, not
+        // cached content: the cache key below never includes PersonaName, so a cache-hit render
+        // still carries whichever persona is CURRENTLY active (F39.3).
+        // Render succeeded (cache hit or fresh synthesis) — publish before returning (gitea-#246).
+        events.Publish(new SegmentGenerated($"tts:{hash}", request.Kind.ToString(), request.Voice));
+
+        // DjName (gh-#259) carries the SPEAKER's persona name for Now Playing attribution —
+        // request.PersonaName verbatim, no StationName fallback (unlike the Artist credit line
+        // above): a station-voiced segment has no DJ of its own, and the Orchestrator stamps the
+        // unit's show persona onto StationId segments itself. Per-airing state, same as Artist —
+        // never part of the cache key.
+        // SegmentKind (SPEC F113.1, PLAN T220): stamped from this exact render's own request.Kind —
+        // the demo-hour instrument reads it back off the AIRED track, never re-derived, so a render
+        // that never reaches air (budget-dropped) never carries it into a track-started row at all.
+        LogRenderOutcome(request, OutcomeSuccess, NoCause);
+        return new MediaItem(
+            $"tts:{hash}", path, request.StationName, loudness,
+            Artist: request.PersonaName ?? request.StationName, Cue: cuePoints, DurationMs: durationMs,
+            DjName: request.PersonaName, SegmentKind: request.Kind);
     }
 
     /// <summary>

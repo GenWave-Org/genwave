@@ -121,12 +121,23 @@ public static class FeatureBanterOnTheAir
         public static void SegmentKind_Crosstalk_exists_as_an_additive_member()
         {
             // The published Abstractions contract grows by one enum member — minor version, no
-            // binary break. One assertion: the full ordered underlying-value sequence, so
-            // "Crosstalk is additive" (appended last) and "every pre-existing member keeps its
-            // original value" are pinned together, not as separate facts.
+            // binary break. One assertion, pinning (name, underlying int) pairs together (round-2
+            // T338 review): a name-only sequence proves append-only order and declaration order, but
+            // an explicit renumbering that preserved that same order (e.g. inserting a member mid-
+            // sequence and shifting every later member's value by one) would still pass a name-only
+            // assertion while binary-breaking the published NuGet — every caller that stored an int
+            // (a database column, a wire payload) would silently read back the wrong member. Pairing
+            // each name with its live `(int)kind` closes that gap. This one assertion now pins all
+            // three properties the "additive member" claim needs together: append-only (Crosstalk,
+            // then Announcement, land at the END), declaration order (each name sits at the position
+            // its source-file declaration puts it in), and every member's underlying value (0..8,
+            // unchanged and un-renumbered). T338 (SPEC F144.1, STORY-358) appended Announcement the
+            // same way Crosstalk was appended under T281; this pin now covers both additions, and a
+            // future member extends the sequence, never reorders or renumbers it.
             Assert.Equal(
-                [0, 1, 2, 3, 4, 5, 6, 7],
-                Enum.GetValues<SegmentKind>().Select(kind => (int)kind));
+                [("StationId", 0), ("LeadIn", 1), ("BackAnnounce", 2), ("TimeDate", 3), ("SignOff", 4),
+                 ("SignOn", 5), ("ContextSegment", 6), ("Crosstalk", 7), ("Announcement", 8)],
+                Enum.GetValues<SegmentKind>().Select(kind => (kind.ToString(), (int)kind)));
         }
 
         [Fact]

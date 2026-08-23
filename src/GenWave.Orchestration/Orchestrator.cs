@@ -221,6 +221,48 @@ using GenWave.Core.Events;
 /// <see cref="SegmentRequest.CrosstalkAiredThisBreak"/>, stamped onto that unit's own LeadIn/
 /// BackAnnounce requests — see <see cref="EnqueuePatterAsync"/>'s own remarks for the rest.
 /// </para>
+///
+/// <para>
+/// <b>Owner announcements (SPEC F144.1/F144.2, F145.2, STORY-358, PLAN T341):</b> <paramref name="announcementSource"/>
+/// is the crosstalkPlanner precedent one feature over — an optional constructor dependency, feature
+/// dark whenever null (no Host wiring — every pre-T341 construction site, including every unit
+/// test), so this widening is diff-free for every existing caller. <see cref="EnqueuePatterAsync"/>'s
+/// own announcement step vends up to <see cref="AnnouncementVendCap"/> (a constant on THIS class —
+/// <see cref="IAnnouncementSource.ClaimDeliverableAsync"/> places no ceiling of its own, see that
+/// seam's own remarks) oldest deliverable announcements, atomically claimed the moment this unit
+/// decides to vend them, and places each as a <see cref="SegmentKind.Announcement"/> segment after
+/// the back-announce and before the lead-in — exactly like <see cref="SegmentKind.Crosstalk"/>'s own
+/// placement one paragraph up, just a different pair of steps in the SAME unit. The station never
+/// reads <c>Station:SpectatorMode</c> to decide whether to vend (SPEC F145.2's "the Orchestrator
+/// never reads privacy state" ruling): an empty claim — refused because the station is public, or
+/// genuinely nothing pending — looks identical from here, and needs no different handling either way.
+/// <paramref name="announcementRenderer"/> renders each claimed item's exact message text with ZERO
+/// LLM involvement (SPEC F144.2) — a SEPARATE seam from <paramref name="tts"/>, never routed through
+/// it, because neither <see cref="SegmentRequest"/> nor <see cref="ISegmentCopyWriter"/> can carry a
+/// caller-supplied exact text without either widening the published Abstractions record or forcing
+/// the render through the SAME copy-writer chain an LLM writer sits in front of (see
+/// <see cref="IVerbatimSegmentRenderer"/>'s own remarks).
+///
+/// <b>The flavored path (SPEC F144.3/F144.4, PLAN T342):</b> a <c>Verbatim: false</c> announcement
+/// FIRST attempts <paramref name="announcementCopyWriter"/> — its OWN dedicated seam, the
+/// crosstalkPlanner precedent one feature over (optional, feature-dark whenever null), never
+/// <paramref name="tts"/>/<see cref="ISegmentCopyWriter"/> either. THE FALLBACK LAW is exactly one
+/// <c>??</c> at the vend step below: any failure there (a disabled/unreachable LLM, a blown render
+/// budget, or the F138.4 re-ask ladder exhausting on either a fabrication or the F144.3 containment
+/// check) resolves to <see langword="null"/>, and the owner's own message renders verbatim instead —
+/// through this SAME <paramref name="announcementRenderer"/>, since flavored copy IS exact once
+/// written and needs no different rendering path from a verbatim read. A <c>Verbatim: true</c>
+/// announcement never even asks <paramref name="announcementCopyWriter"/>, the owner having asked for
+/// their own unflavored words. <paramref name="voiceLister"/> (SPEC F144.2's own "when
+/// known" clause) validates <see cref="AnnouncementItem.RequestedVoice"/> — untrusted free text —
+/// against the TTS backend's own installed voice ids before ever stamping it onto a
+/// <see cref="SegmentRequest.Voice"/>; unknown, invalid, or unreachable (the registry itself is a
+/// live network call) all degrade to the station's own default voice, never an error and never a
+/// path component of any kind. The announcement id survives onto the rendered segment's own MediaId
+/// (<see cref="AnnouncementMediaId.Wrap"/>) rather than a new member on any published type — see
+/// that helper's own remarks for why a later task's aired-stamp becomes a lookup, not a registry to
+/// keep in sync.
+/// </para>
 /// </summary>
 public sealed class Orchestrator(
     IStationIdentityProvider identityProvider,
@@ -243,7 +285,11 @@ public sealed class Orchestrator(
     IContextSettingsProvider? contextSettings = null,
     IMediaCatalog? catalog = null,
     IStationImagingSettingsProvider? imagingSettings = null,
-    CrosstalkPlanner? crosstalkPlanner = null) : INextItemProvider, IBoundaryFitLog
+    CrosstalkPlanner? crosstalkPlanner = null,
+    IAnnouncementSource? announcementSource = null,
+    IVerbatimSegmentRenderer? announcementRenderer = null,
+    ITtsVoiceLister? voiceLister = null,
+    IAnnouncementCopyWriter? announcementCopyWriter = null) : INextItemProvider, IBoundaryFitLog
 {
     // gh-#254 — how far from the boundary a candidate may land and still count as a WIN ("±30s of
     // the boundary is a win"), widened as the gh-#253 estimate's confidence tier drops: the fit's
@@ -313,6 +359,12 @@ public sealed class Orchestrator(
     // its SignOn ahead of content that has not finished airing).
     static readonly IReadOnlySet<SpeechDeferralKind> HoldSignOnAtStraddle =
         new HashSet<SpeechDeferralKind> { SpeechDeferralKind.SignOn };
+
+    // SPEC F144.1 (STORY-358, PLAN T341) — the vend CEILING belongs to the caller, not the seam:
+    // IAnnouncementSource.ClaimDeliverableAsync places none of its own (see that method's own
+    // remarks). A plain positive constant, the same posture SignOffLeadTime/TimeDateHonestyThreshold
+    // immediately above carry — not a live-tunable SPEC knob.
+    const int AnnouncementVendCap = 2;
 
     // SPEC F92.4 (PLAN T124): the same null-coalesced-default idiom MusicSelectionPolicy's own
     // envelope/persona/request-fulfillment seams use (F112, STORY-295) — a dropped handoff piece
@@ -1055,14 +1107,18 @@ public sealed class Orchestrator(
         // is now plural, not singular (SPEC F117.2, PLAN T250 review finding F1): the estimator keys
         // its Exact tier on (voice, show-or-null), so the plain ident and each show's own templated
         // line each land in their OWN bucket — a pool-first item still observes into NONE of them.
+        // AnnouncementId (T341 review finding F8) rides alongside for exactly one kind — same
+        // shape as ContextProviderKey immediately to its left: null for every other kind's render,
+        // the claimed row's own id for SegmentKind.Announcement's Kick call below, so a drop this
+        // unit's own drain WARN can name WHICH claimed row is still sitting undelivered.
         var pendingRenders =
-            new List<(SegmentRequest Request, Task<MediaItem?> Render, string? ContextProviderKey, bool ObserveDuration)>();
+            new List<(SegmentRequest Request, Task<MediaItem?> Render, string? ContextProviderKey, bool ObserveDuration, long? AnnouncementId)>();
 
         // Starts one render and remembers the request alongside the Task (T124 review simplify) —
         // every call site below used to repeat the Add call verbatim; the render itself is still
         // kicked off immediately, nothing awaited in between.
         void Kick(SegmentRequest request, string? contextProviderKey = null) =>
-            pendingRenders.Add((request, tts.RenderAsync(request, ct), contextProviderKey, true));
+            pendingRenders.Add((request, tts.RenderAsync(request, ct), contextProviderKey, true, null));
 
         // SPEC F110.2 (STORY-301, PLAN T232) — the pool-first sibling of Kick: no render to start,
         // but the SAME ordering guarantee every other segment gets. The render-await loop below
@@ -1072,7 +1128,7 @@ public sealed class Orchestrator(
         // completed Task stands in for the (nonexistent) render, so Task.WhenAny below resolves it
         // instantly, no render-budget delay spent on an item that never needed one.
         void KickResolved(SegmentRequest request, MediaItem item) =>
-            pendingRenders.Add((request, Task.FromResult<MediaItem?>(item), null, false));
+            pendingRenders.Add((request, Task.FromResult<MediaItem?>(item), null, false, null));
 
         // SPEC F127.1/.7/.8/.9 (STORY-329, PLAN T287) — the crosstalk vend attempt: gated on THREE
         // conditions (see this class's own "Crosstalk" remarks above for why the third exists) — next
@@ -1190,6 +1246,68 @@ public sealed class Orchestrator(
             };
             crosstalkPlanner?.MarkVended(crosstalkMediaId, exchangeToAir);
             KickResolved(crosstalkRequest, crosstalkItem);
+        }
+
+        // 1.75. Owner announcements (SPEC F144.1/F144.2, STORY-358, PLAN T341) — up to
+        // AnnouncementVendCap oldest deliverable, atomically claimed the moment this unit decides to
+        // vend them (pending -> claimed, IAnnouncementSource's own SQL), placed after the
+        // back-announce and before the lead-in (F144.1) — Kicked here, after crosstalk, before the
+        // station-id/lead-in steps below, the SAME slot crosstalk's own remarks describe one step up.
+        // A null announcementSource OR announcementRenderer (no Host wiring, or a pre-T341
+        // construction site) makes this whole step a permanent no-op — the crosstalkPlanner
+        // precedent. See this class's own remarks for the full feature (privacy, voice validation,
+        // the id-in-MediaId carry).
+        //
+        // CADENCE-INDEPENDENT (T341 review ruling): this step runs on EVERY unit, gated only on the
+        // two seams being wired — unlike the back-announce/station-id/lead-in steps around it, no
+        // CadenceConfig knob can turn it off or on, so "after the back-announce" degrades to "same
+        // slot in unit order" when the cadence airs no back-announce at all, and the vend also runs
+        // on the ceremony-only unit path. An owner's message must never be hostage to a cadence flag.
+        if (announcementSource is { } source && announcementRenderer is { } renderer)
+        {
+            async Task<MediaItem?> RenderAnnouncementAsync(SegmentRequest announcementRequest, AnnouncementItem announcement)
+            {
+                // SPEC F144.3/F144.4 (STORY-358, PLAN T342) — THE FALLBACK LAW, in one `??`:
+                // Verbatim:false attempts the flavored path FIRST, through the dedicated
+                // IAnnouncementCopyWriter seam (never tts/ISegmentCopyWriter — see this class's own
+                // remarks); ANY failure there (feature dark, a disabled/unreachable LLM, a blown
+                // render budget, or the F138.4 ladder exhausting on either a fabrication or the F144.3
+                // containment check) resolves to null, and the owner's own verbatim message airs
+                // instead. Verbatim:true skips the attempt entirely — the owner asked for their own
+                // unflavored words.
+                var flavoredText = announcement.Verbatim
+                    ? null
+                    : await ResolveFlavoredAnnouncementCopyAsync(announcementRequest, announcement.Message, ct);
+
+                // FreshPerAiring: true is THE contract TtsSegmentSource's own drop guard pins (SPEC
+                // F144.2/F144.4, the T338 review carry-forward): per-announcement owner text — flavored
+                // or verbatim alike — is fresh by definition (the operator's own words, or the active
+                // persona's own in-character rendering of them, never a templated fixed phrase) and
+                // must land in the swept blurbs/ dir, never the forever-cache.
+                var copy = new SegmentCopy(flavoredText ?? announcement.Message, FreshPerAiring: true);
+                var rendered = await renderer.RenderAsync(announcementRequest, copy, ct);
+
+                // The announcement id rides the rendered segment's own MediaId (SPEC F144.1's carry
+                // requirement) rather than a new member on SegmentRequest/MediaItem — see
+                // AnnouncementMediaId's own remarks for why, and for T343's own lookup this enables.
+                return rendered is { } item
+                    ? item with { MediaId = AnnouncementMediaId.Wrap(announcement.Id, item.MediaId) }
+                    : null;
+            }
+
+            void KickAnnouncement(AnnouncementItem announcement, string voice)
+            {
+                var req = new SegmentRequest(
+                    SegmentKind.Announcement, voice, identity.Name, null, StationLocalNow(), identity.Id);
+                pendingRenders.Add((req, RenderAnnouncementAsync(req, announcement), null, true, announcement.Id));
+            }
+
+            var deliverable = await ClaimAnnouncementsAsync(source, ct);
+            foreach (var announcement in deliverable)
+            {
+                var voice = await ResolveAnnouncementVoiceAsync(announcement.RequestedVoice, identity.Voice, ct);
+                KickAnnouncement(announcement, voice);
+            }
         }
 
         // 2. Station ID every N units (checked BEFORE incrementing unitCount). unitCount > 0 joins
@@ -1368,7 +1486,7 @@ public sealed class Orchestrator(
         // faulted," so a ternary keyed on "did renderTask win the race" mislabeled every synth outage
         // that happened to beat the budget delay as "render returned null" instead of "render
         // faulted".
-        foreach (var (request, renderTask, contextProviderKey, observeDuration) in pendingRenders)
+        foreach (var (request, renderTask, contextProviderKey, observeDuration, announcementId) in pendingRenders)
         {
             var kind = request.Kind;
             // The budget delay rides the injected timeProvider (gh-#554) — behavior-identical under
@@ -1382,6 +1500,8 @@ public sealed class Orchestrator(
                     LogHandoffDrop(kind, "render budget exceeded");
                 else if (kind == SegmentKind.ContextSegment)
                     LogContextSegmentDrop(contextProviderKey, "render budget exceeded");
+                else if (kind == SegmentKind.Announcement)
+                    LogAnnouncementDrop(announcementId, "render budget exceeded");
                 continue; // timed out — the still-running render is left unawaited, unchanged behavior
             }
 
@@ -1408,7 +1528,10 @@ public sealed class Orchestrator(
                 // attribution never flickers to "no DJ" for a few seconds of imaging mid-show.
                 // Every other kind already carries its own speaker's name from TtsSegmentSource
                 // (SegmentRequest.PersonaName — the handoff kinds' outgoing/incoming included).
-                if (kind == SegmentKind.StationId)
+                // Announcement (SPEC F144.1, PLAN T341) joins this SAME carve-out for the SAME
+                // reason: it has no DJ of its own either (the station voice, or the owner's own
+                // requested voice — never a persona identity), yet still airs inside the unit's show.
+                if (kind is SegmentKind.StationId or SegmentKind.Announcement)
                     seg = seg with { DjName = unitDjName };
                 buffer.Enqueue(seg);
             }
@@ -1419,6 +1542,10 @@ public sealed class Orchestrator(
             else if (kind == SegmentKind.ContextSegment)
             {
                 LogContextSegmentDrop(contextProviderKey, renderTask.IsFaulted ? "render faulted" : "render returned null");
+            }
+            else if (kind == SegmentKind.Announcement)
+            {
+                LogAnnouncementDrop(announcementId, renderTask.IsFaulted ? "render faulted" : "render returned null");
             }
             // else: renderTask completed with a null segment → silently skip (every other kind)
         }
@@ -2103,6 +2230,30 @@ public sealed class Orchestrator(
             providerKey ?? "(unknown)", cause);
 
     /// <summary>
+    /// SPEC F144.5 (STORY-358, PLAN T341) — an announcement segment that failed to render (budget
+    /// exceeded, faulted, or a null result) never airs and never blocks music: WARN only, mirroring
+    /// <see cref="LogContextSegmentDrop"/>'s own posture one method up — no booth-log entry (a later
+    /// task's mark-aired/re-arm guardian owns that surface, reading <c>station.announcement</c>
+    /// directly; this Orchestrator only ever vends, never transitions the row). The claimed row
+    /// itself is untouched by this drop — SPEC F144.5's own re-arm (claimed -&gt; pending after one
+    /// break cycle with no air) is that guardian's job, not this log line's.
+    ///
+    /// <paramref name="announcementId"/> names WHICH claimed row dropped (T341 review finding F8 —
+    /// the SAME <see cref="LogContextSegmentDrop"/> providerKey precedent immediately above: an
+    /// operator staring at this WARN with more than one announcement claimed this unit needs to know
+    /// which row is still sitting claimed, not merely that "an" announcement dropped), threaded
+    /// through <c>pendingRenders</c> alongside the request exactly like <c>ContextProviderKey</c>
+    /// already is — see that field's own remarks. <see langword="null"/> only for a hypothetical
+    /// caller that reaches this method without ever having claimed a row; today's one call site
+    /// (<c>KickAnnouncement</c>) always supplies the claimed <see cref="AnnouncementItem.Id"/>.
+    /// </summary>
+    void LogAnnouncementDrop(long? announcementId, string cause) =>
+        logger.LogWarning(
+            "Announcement {AnnouncementId} dropped ({Cause}) — the claimed row does not air this unit; " +
+            "music continues (SPEC F144.5).",
+            announcementId?.ToString(CultureInfo.InvariantCulture) ?? "(unknown)", cause);
+
+    /// <summary>
     /// SPEC F124.4 (PLAN T269) — the callback <see cref="EnqueuePatterAsync"/> wires into
     /// <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s own <c>onExpired</c> parameter (closing over
     /// the SAME <c>timeDateStaleBudget</c> that call already threaded in — see that local's own
@@ -2187,6 +2338,121 @@ public sealed class Orchestrator(
         }
 
         return (stationVoice, null);
+    }
+
+    /// <summary>
+    /// SPEC F144.1 (STORY-358, PLAN T341, review finding F1) — fault-isolates the claim itself: an
+    /// <see cref="IAnnouncementSource.ClaimDeliverableAsync"/> fault (a Host-side decorator's own DB
+    /// round trip, or the SpectatorMode guard's <c>IOptionsMonitor</c> read, either of which can throw)
+    /// must never cost the whole unit — the exact SAME "genuinely unreachable degrades, never faults
+    /// unit assembly" shape <see cref="ResolveAnnouncementVoiceAsync"/> immediately below already
+    /// carries for the voice registry (SPEC F12.4's standing defensiveness). Degrades to an empty
+    /// claim — indistinguishable from "nothing deliverable" or a SPEC F145.2 refusal, which is already
+    /// the seam's own documented shape (<see cref="IAnnouncementSource.ClaimDeliverableAsync"/>'s own
+    /// remarks) — so this unit still assembles its music/back-announce/lead-in normally; only the
+    /// announcement step itself goes dark for this one pull, and the next unit's own claim retries.
+    /// </summary>
+    async Task<IReadOnlyList<AnnouncementItem>> ClaimAnnouncementsAsync(IAnnouncementSource source, CancellationToken ct)
+    {
+        try
+        {
+            return await source.ClaimDeliverableAsync(AnnouncementVendCap, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Announcement claim failed — treating as an empty claim this unit; music is unaffected (SPEC F12.4).");
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// SPEC F144.2 (STORY-358, PLAN T341) — resolves the voice an owner announcement airs with:
+    /// <paramref name="requestedVoice"/> (SPEC F143.1's own <c>voice</c> field — UNTRUSTED free text,
+    /// already length-bounded upstream but never otherwise validated) when it names a voice the TTS
+    /// backend's own <see cref="voiceLister"/> currently reports installed, else
+    /// <paramref name="stationVoice"/> — the station's own default, never an error either way. This
+    /// is the ONLY place <see cref="AnnouncementItem.RequestedVoice"/> is ever compared against
+    /// anything: an unknown/invalid value is simply not equal to any entry in the list, so no
+    /// separate "is this shaped like a voice id" check exists, and the raw string is NEVER
+    /// interpolated into a path or any other structural position anywhere downstream — accepted
+    /// verbatim as <see cref="SegmentRequest.Voice"/> only once it has matched a KNOWN id, at which
+    /// point it is no longer meaningfully "untrusted" free text.
+    ///
+    /// <para>
+    /// A null <paramref name="requestedVoice"/> (the "station's own default" submission, F143.1) skips
+    /// the registry entirely — no network call for the common case. A null <see cref="voiceLister"/>
+    /// (no Host wiring) or the registry itself faulting (a live network call —
+    /// <see cref="ITtsVoiceLister.ListVoicesAsync"/>'s own contract, unlike every OTHER per-unit
+    /// accessor this Orchestrator reads) both degrade to the station voice, logged once per
+    /// occurrence: an unreachable voice backend must never cost the announcement its air time, and
+    /// must never surface as an unhandled fault out of unit assembly (SPEC F12.4's standing
+    /// defensiveness, the SAME posture <see cref="ResolvePersonaAsync"/> immediately above carries).
+    /// </para>
+    /// </summary>
+    async Task<string> ResolveAnnouncementVoiceAsync(string? requestedVoice, string stationVoice, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(requestedVoice) || voiceLister is null)
+            return stationVoice;
+
+        try
+        {
+            var known = await voiceLister.ListVoicesAsync(ct);
+            return known.Contains(requestedVoice, StringComparer.Ordinal) ? requestedVoice : stationVoice;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Announcement voice registry unreachable — falling back to the station voice (SPEC F144.2)");
+            return stationVoice;
+        }
+    }
+
+    /// <summary>
+    /// SPEC F144.3/F144.4 (STORY-358, PLAN T342) — attempts the flavored render through
+    /// <see cref="announcementCopyWriter"/>, fault-isolating it the SAME way
+    /// <see cref="ResolveAnnouncementVoiceAsync"/>/<see cref="ClaimAnnouncementsAsync"/> immediately
+    /// above already do (SPEC F12.4): a null seam (no Host wiring — the crosstalkPlanner precedent,
+    /// feature dark) or any exception the writer's own never-throws contract still lets slip both
+    /// degrade to <see langword="null"/>, never a faulted unit.
+    /// <see cref="IAnnouncementCopyWriter.WriteAnnouncementAsync"/> itself already resolves EVERY
+    /// F144.3/F144.4 failure mode (a disabled/unreachable LLM, a blown render budget, an exhausted
+    /// re-ask ladder on either a fabrication or the F144.3 containment check) to
+    /// <see langword="null"/> internally — this wrapper's own catch exists purely as the SAME
+    /// belt-and-suspenders defense every other external seam call in this class already carries, not
+    /// because that contract is expected to be broken.
+    /// </summary>
+    async Task<string?> ResolveFlavoredAnnouncementCopyAsync(
+        SegmentRequest announcementRequest, string message, CancellationToken ct)
+    {
+        if (announcementCopyWriter is not { } writer)
+            return null;
+
+        try
+        {
+            return await writer.WriteAnnouncementAsync(announcementRequest, message, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Announcement flavor render faulted — falling back to the verbatim read (SPEC F144.4)");
+            return null;
+        }
     }
 
     /// <summary>

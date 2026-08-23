@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import {
+  AnnouncementsIcon,
   BoothLogIcon,
   CatalogIcon,
   CloseIcon,
@@ -45,6 +46,7 @@ import { IconPackGlyph } from "./IconPackRenderer";
 const HOUSE_ICONS = {
   dashboard: DashboardIcon,
   live: LiveIcon,
+  announcements: AnnouncementsIcon,
   catalog: CatalogIcon,
   "safe-content": SafeContentIcon,
   health: HealthIcon,

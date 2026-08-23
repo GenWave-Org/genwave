@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **90 seams across 6 projects.**
+> **96 seams across 6 projects.**
 
 ## GenWave.Context (2 seams)
 
@@ -53,10 +53,11 @@
 | `GenWave.Core.Abstractions.IContextPatterFactSource` | `GenWave.Context.ContextPipeline` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextPatterFactSource` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IContextProvider` | `GenWave.Context.History.HistoryContextProvider` | Singleton | also registered: `GenWave.Context.Weather.WeatherContextProvider` (GenWave.Context) |
 
-## GenWave.Host (26 seams)
+## GenWave.Host (28 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
+| `GenWave.Core.Abstractions.IAnnouncementSource` | `GenWave.Host.Announcements.SpectatorModeAnnouncementVendGuard` | Singleton | — |
 | `GenWave.Core.Abstractions.IAudiencePostureProvider` | `GenWave.Host.Options.OptionsMonitorAudiencePostureProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IBoundaryBiasProvider` | `GenWave.Host.Options.OptionsMonitorBoundaryBiasProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.ICadenceProvider` | `GenWave.Host.Options.OptionsMonitorCadenceProvider` | Singleton | — |
@@ -78,6 +79,7 @@
 | `GenWave.Core.Abstractions.IStationImagingSettingsProvider` | `GenWave.Host.Options.OptionsMonitorStationImagingProvider` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpStationImagingSettingsProvider` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IStationLocationProvider` | `GenWave.Host.Options.OptionsMonitorStationLocationProvider` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpStationLocationProvider` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IStationScopeProvider` | `GenWave.Host.Options.OptionsMonitorStationScopeProvider` | Singleton | — |
+| `GenWave.Host.Auth.IAnnounceTokenStore` | `GenWave.Host.Auth.AnnounceTokenStore` | Singleton | — |
 | `GenWave.Host.Catalog.ICatalogPersonaAvatarInstaller` | `GenWave.Host.Catalog.CatalogPersonaAvatarInstaller` | Singleton | — |
 | `GenWave.Host.Configuration.IStationSettingsStore` | `GenWave.Host.Configuration.StationSettingsStore` | Singleton | — |
 | `GenWave.Host.Images.IImageProcessRunner` | `GenWave.Host.Images.FfmpegImageProcessRunner` | Singleton | — |
@@ -94,7 +96,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (37 seams)
+## GenWave.MediaLibrary (39 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -103,6 +105,8 @@
 | `GenWave.Core.Abstractions.IAdminMediaQuery` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAdminMediaReenrichment` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAdminMediaWrite` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IAnnouncementLifecycle` | `GenWave.MediaLibrary.Station.AnnouncementRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IAnnouncementStore` | `GenWave.MediaLibrary.Station.AnnouncementRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IArtworkTokenStore` | `GenWave.MediaLibrary.Catalog.ArtworkTokenRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAuthoredCatalogWriter` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAvatarPackStore` | `GenWave.MediaLibrary.Station.AvatarPackRepository` | Singleton | — |
@@ -149,16 +153,18 @@
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |
 
-## GenWave.Tts (12 seams)
+## GenWave.Tts (14 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
+| `GenWave.Core.Abstractions.IAnnouncementCopyWriter` | `GenWave.Tts.LlmCopyWriter` | Singleton | — |
 | `GenWave.Core.Abstractions.ICopyBoundsProvider` | `GenWave.Tts.OptionsMonitorCopyBoundsProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaPreviewWriter` | `GenWave.Tts.LlmCopyWriter` | Singleton | — |
 | `GenWave.Core.Abstractions.ISegmentCopyWriter` | `GenWave.Tts.DegradationGatedCopyWriter` | Singleton | wraps: `GenWave.Tts.LlmCopyWriter` (GenWave.Tts), `GenWave.Tts.TemplateCopyWriter` (GenWave.Tts) |
 | `GenWave.Core.Abstractions.ITtsSegmentSource` | `GenWave.Tts.TtsSegmentSource` | Singleton | — |
 | `GenWave.Core.Abstractions.ITtsSynthesizer` | `GenWave.Tts.NormalizingTtsSynthesizer` | Singleton | — |
 | `GenWave.Core.Abstractions.ITtsVoiceLister` | `GenWave.Tts.CachedVoiceLister` | Singleton | — |
+| `GenWave.Core.Abstractions.IVerbatimSegmentRenderer` | `GenWave.Tts.TtsSegmentSource` | Singleton | — |
 | `GenWave.Tts.IDegradationModeReader` | `GenWave.Tts.DegradationController` | Singleton | — |
 | `GenWave.Tts.IDependencyHealth` | `GenWave.Tts.DependencyHealthStore` | Singleton | — |
 | `GenWave.Tts.IDependencyProbe` | `GenWave.Tts.PiperHealthProbe` | Singleton | also registered: `GenWave.Tts.OllamaHealthProbe` (GenWave.Tts), `GenWave.Tts.KokoroHealthProbe` (GenWave.Tts) |

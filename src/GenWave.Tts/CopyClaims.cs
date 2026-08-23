@@ -3,14 +3,16 @@ using System.Text.RegularExpressions;
 namespace GenWave.Tts;
 
 /// <summary>
-/// The mechanical claim checker (SPEC F138.1-F138.3, gh-#434, gh-#438): pure and static, no I/O, no
-/// settings reads, zero non-BCL dependencies beyond <see cref="ClaimVocabulary"/>'s own plain data —
-/// the exact <see cref="SpeechText"/> purity posture (F68.6), named by F138.1 itself. Two entry points:
-/// <see cref="CheckFacts"/> (F138.2, the context lane's "did the model invent a fact") and
-/// <see cref="CheckClock"/> (F138.3, every patter kind's "did the model lie about the clock"). Both are
-/// pure functions of their arguments — the re-ask/template ladder (F138.4), the prompt guard line
-/// (F138.5), and every other stateful or config-reading decision live at the call sites this checker is
-/// built for (PLAN T331/T332), never here.
+/// The mechanical claim checker (SPEC F138.1-F138.3, F144.3, gh-#434, gh-#438): pure and static, no
+/// I/O, no settings reads, zero non-BCL dependencies beyond <see cref="ClaimVocabulary"/>'s own plain
+/// data — the exact <see cref="SpeechText"/> purity posture (F68.6), named by F138.1 itself. Three
+/// entry points: <see cref="CheckFacts"/> (F138.2, the context lane's "did the model invent a fact"),
+/// <see cref="CheckClock"/> (F138.3, every patter kind's "did the model lie about the clock"), and —
+/// as of PLAN T342 — <see cref="CheckContainment"/> (F144.3, the announcement lane's own "did the
+/// model keep the owner's actual words", the one check of the three that looks for an ABSENCE rather
+/// than an unsupported addition). All three are pure functions of their arguments — the re-ask/floor
+/// ladder (F138.4/F144.4), the prompt guard line (F138.5), and every other stateful or config-reading
+/// decision live at the call sites this checker is built for (PLAN T331/T332/T342), never here.
 ///
 /// <para>
 /// <b>False-positive posture (governs every ambiguous decision below):</b> when a match is uncertain,
@@ -112,7 +114,7 @@ public static partial class CopyClaims
                 violations.Add(new ClaimViolation(ClaimClass.DigitRun, token));
         }
 
-        foreach (var (token, _, _) in DistinctPresentFrameWeekdays(copy))
+        foreach (var (token, _, _) in DistinctPresentFrameWeekdays(copy, exemptSpans: []))
         {
             if (!ContainsWord(factBlock, token))
                 violations.Add(new ClaimViolation(ClaimClass.Weekday, token));
@@ -173,31 +175,54 @@ public static partial class CopyClaims
     /// </para>
     ///
     /// <para>
+    /// <b>Owner-message exemption (HIGH-2 review finding, SPEC F144.3's own binding owner-trust rule):
+    /// </b> <paramref name="ownerMessage"/> — <see cref="LlmCopyWriter.WriteAnnouncementAsync"/>'s own
+    /// <c>message</c>, passed through from <see cref="LlmCopyWriter.CheckTruthGate"/>'s
+    /// <c>requiredCore</c> — is a SECOND exemption source, span-based exactly like
+    /// <paramref name="trackTitle"/> above (the same <see cref="FindTitleSpans"/>/<see cref="IsExempt"/>
+    /// mechanism, reused rather than duplicated): a weekday/daypart claim whose own matched word falls
+    /// entirely inside a literal occurrence of the owner's own message is never even asked to match the
+    /// station clock, because the message wrote those words, not the model. Without this, CheckClock was
+    /// rejecting the owner's OWN present-frame words ("Bake sale this Saturday", "Happy Friday
+    /// everyone") on every day but the one they happened to name — while the F144.4 verbatim fallback
+    /// airs the identical words unchecked regardless, so the gate was only ever punishing the FLAVORED
+    /// path for repeating what the unflavored path already airs freely. Span-based, exactly like the
+    /// title exemption, is what keeps this narrow: a claim the model ADDS outside any literal quote of
+    /// the message — "It's Saturday" inserted where the message never said so — still rejects, since
+    /// <see cref="FindTitleSpans"/> only ever exempts a claim that falls INSIDE the message's own
+    /// literal text, never the copy at large. <b>This holds even when the model's added claim names the
+    /// SAME weekday the message already does</b> (HIGH-A review finding, fixed): the exempt occurrence
+    /// inside the message must never consume <see cref="DistinctPresentFrameWeekdays"/>'s own dedupe
+    /// slot for that weekday, or it would silently swallow the model's own later, genuine, non-exempt
+    /// occurrence of the identical word — see that method's own remarks for the fix (exemption filters
+    /// out BEFORE dedupe, never after).
+    /// </para>
+    ///
+    /// <para>
     /// <b>Daypart violations dedupe by CATEGORY, not raw word</b> (review finding): "tonight" and
     /// "night" are the SAME claim (<see cref="ClaimVocabulary.CategoryOf"/>), so a line naming both
     /// reports at most one daypart violation, keyed on the first-seen spelling — never two violations
     /// for what is, to a listener, one lie about the same instant.
     /// </para>
     /// </summary>
-    public static ClaimCheckResult CheckClock(string copy, DateTimeOffset stationLocalNow, string? trackTitle = null)
+    public static ClaimCheckResult CheckClock(
+        string copy, DateTimeOffset stationLocalNow, string? trackTitle = null, string? ownerMessage = null)
     {
         ArgumentNullException.ThrowIfNull(copy);
 
-        var titleSpans = FindTitleSpans(copy, trackTitle);
+        var exemptSpans = FindTitleSpans(copy, trackTitle);
+        exemptSpans.AddRange(FindTitleSpans(copy, ownerMessage));
         var violations = new List<ClaimViolation>();
         var expectedWeekday = stationLocalNow.DayOfWeek.ToString();
         var clockHour = stationLocalNow.Hour;
 
-        foreach (var (token, index, length) in DistinctPresentFrameWeekdays(copy))
+        foreach (var (token, _, _) in DistinctPresentFrameWeekdays(copy, exemptSpans))
         {
-            if (IsExempt(index, length, titleSpans))
-                continue;
-
             if (!string.Equals(token, expectedWeekday, StringComparison.OrdinalIgnoreCase))
                 violations.Add(new ClaimViolation(ClaimClass.Weekday, token, expectedWeekday));
         }
 
-        foreach (var (token, _, category) in DistinctPresentFrameDayparts(copy, titleSpans))
+        foreach (var (token, _, category) in DistinctPresentFrameDayparts(copy, exemptSpans))
         {
             if (!ClaimVocabulary.HourIsInCategory(category, clockHour))
                 violations.Add(new ClaimViolation(ClaimClass.Daypart, token, ClaimVocabulary.CategoryForHour(clockHour)));
@@ -207,17 +232,120 @@ public static partial class CopyClaims
     }
 
     /// <summary>
+    /// SPEC F144.3 (STORY-358, PLAN T342) — the announcement-core containment check: the OPPOSITE
+    /// direction from <see cref="CheckFacts"/>/<see cref="CheckClock"/> above (T329's own pure-checker
+    /// posture, extended rather than reused wholesale). Those two extract a claim FROM
+    /// <paramref name="copy"/> and ask whether something else supports it; this one asks whether
+    /// <paramref name="requiredCore"/> — the owner's own announcement text, injected upstream as the
+    /// F144.3 owner-trusted fact — survives INSIDE <paramref name="copy"/> at all. A single violation
+    /// (never more than one — there is exactly one core to check, not a set of extracted claims) when
+    /// it does not.
+    ///
+    /// <para>
+    /// <b>Both sides normalized IDENTICALLY before the substring test (HIGH-1 review finding — the
+    /// mismatched-lanes bug):</b> <paramref name="copy"/> arrives POST-<see cref="LlmCopyWriter.ApplyCopyHygiene"/>
+    /// (this class's own input-assumption remarks above), but <paramref name="requiredCore"/> is the
+    /// RAW owner message, never hygiene-shaped. Left unreconciled, any message carrying an internal
+    /// double space, an embedded newline, markdown emphasis, or a bracketed aside was structurally
+    /// unsatisfiable — hygiene had already collapsed/stripped every one of those shapes out of
+    /// <paramref name="copy"/> by the time it reaches here, but <paramref name="requiredCore"/> still
+    /// carried them raw, so an otherwise byte-for-byte echo could never pass the substring test.
+    /// <paramref name="requiredCore"/> is therefore run through the SAME
+    /// <see cref="LlmCopyWriter.ApplyCopyHygiene"/> pass first — that method is internal precisely for
+    /// a second caller (<c>CrosstalkScriptParser.cs</c>'s own reuse is the existing precedent), never a
+    /// second, hand-maintained hygiene pass here. The curly-vs-straight apostrophe class rides the
+    /// identical fold-both-sides discipline (SPEC F144.3, the F68.4 survival precedent — F68.4 folds
+    /// BOTH sides of its own comparison, never trusting either one to already match the other's form):
+    /// <see cref="LlmCopyWriter.FoldApostrophes"/> runs on <paramref name="copy"/> AND the
+    /// hygiene-shaped <paramref name="requiredCore"/> alike, so a straight apostrophe in the owner's
+    /// message and a curly one in the model's reply (or the inverse) never falsely trips this check —
+    /// the same standing both-forms discipline <see cref="PresentFrameWeekdayRx"/>'s own comment
+    /// documents for this exact glyph pair, one claim class over.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Case-folded, not byte-identical (SPEC F144.3, the F68.4 survival precedent):</b>
+    /// <see cref="StringComparison.OrdinalIgnoreCase"/> — the DJ persona is free to flavor delivery
+    /// AROUND the message (a framing line before or after), but the message's own wording, once
+    /// spoken, must be recognizable letter-for-letter modulo case, exactly the discipline F68.4
+    /// already established for a stylized name's own marks. No fuzzy/paraphrase matching is
+    /// attempted, deliberately: a pure substring test is mechanically checkable and gives the F138.4
+    /// ladder's one re-ask something concrete to fix (say the message, word for word), the same
+    /// bias-toward-false-positive-over-false-negative posture <see cref="CheckFacts"/>'s own class
+    /// remarks describe — here inverted to "when in doubt, still ask for the exact words".
+    /// </para>
+    ///
+    /// <para>
+    /// <see cref="ClaimViolation.Token"/> on the single violation this can produce is a FIXED,
+    /// compile-time literal ("the announcement message"), never a fragment of
+    /// <paramref name="requiredCore"/> itself — unlike <see cref="CheckFacts"/>/<see cref="CheckClock"/>'s
+    /// own closed-vocabulary-or-digit-shaped tokens, <paramref name="requiredCore"/> is 280 chars of
+    /// owner-authored free text (SPEC F143.4) with no vocabulary guarantee at all, so nothing of it is
+    /// safe to splice into a future re-ask prompt line the way those tokens are (see
+    /// <see cref="ClaimViolation.Token"/>'s own remarks) — the re-ask line names the REQUIREMENT, not
+    /// the missing text, and the message itself still rides the SAME user prompt the re-ask appends
+    /// to, so the model never loses sight of it.
+    /// </para>
+    /// </summary>
+    public static ClaimCheckResult CheckContainment(string copy, string requiredCore)
+    {
+        ArgumentNullException.ThrowIfNull(copy);
+        ArgumentNullException.ThrowIfNull(requiredCore);
+
+        var normalizedCopy = LlmCopyWriter.FoldApostrophes(copy);
+        var normalizedCore = LlmCopyWriter.FoldApostrophes(LlmCopyWriter.ApplyCopyHygiene(requiredCore));
+
+        // MEDIUM-B review finding: an all-markup message ("*urgent*", "[Reminder]") hygiene-strips to
+        // an EMPTY normalizedCore, and string.Contains("") is vacuously true for ANY copy — the gate
+        // would silently pass whatever the model wrote, and the owner's own message would never reach
+        // air at all (no violation to ride the ladder, so no F144.4 verbatim floor either). Treat an
+        // empty (or whitespace-only) normalized core as a violation instead: it rides the SAME re-ask
+        // ladder every other containment miss does, and once that ladder exhausts, the caller's F144.4
+        // fallback still airs the RAW (pre-hygiene) message verbatim — the honest outcome, never a
+        // silent no-op.
+        if (string.IsNullOrWhiteSpace(normalizedCore))
+            return new ClaimCheckResult([new ClaimViolation(ClaimClass.AnnouncementCore, AnnouncementCoreToken)]);
+
+        return normalizedCopy.Contains(normalizedCore, StringComparison.OrdinalIgnoreCase)
+            ? new ClaimCheckResult([])
+            : new ClaimCheckResult([new ClaimViolation(ClaimClass.AnnouncementCore, AnnouncementCoreToken)]);
+    }
+
+    /// <summary>The fixed, safe-to-interpolate <see cref="ClaimViolation.Token"/> every
+    /// <see cref="CheckContainment"/> violation carries — see that method's own remarks for why this
+    /// is a literal, never a fragment of the checked message.</summary>
+    const string AnnouncementCoreToken = "the announcement message";
+
+    /// <summary>
     /// Every distinct (case-insensitive, first-occurrence-casing-wins) present-frame weekday claim in
     /// <paramref name="copy"/> — see <see cref="CheckClock"/>'s own remarks for the exact marker set —
     /// as (token, character index, character length) triples, the span covering only the WEEKDAY word
     /// itself, never its marker, so a title-exemption or dedup check tests the claim's own span.
+    /// Excludes any match <paramref name="exemptSpans"/> covers (the track-title/owner-message
+    /// exemptions) — mirrors <see cref="DistinctPresentFrameDayparts"/>'s own <c>titleSpans</c>
+    /// parameter exactly.
+    ///
+    /// <para>
+    /// <b>Exemption is filtered BEFORE the dedupe <c>seen</c> add (HIGH-A review finding, the
+    /// dedupe-slot leak):</b> an EXEMPT occurrence — e.g. the owner's own message quoting "this
+    /// Saturday" — must never consume the one dedupe slot for "Saturday" and so silently suppress a
+    /// LATER, genuine, non-exempt occurrence of the same weekday word. <see cref="CheckClock"/>'s own
+    /// caller relies on this ordering: an owner message that itself names a weekday, echoed by the
+    /// model plus its OWN separate present-frame claim of the same weekday elsewhere in the copy, must
+    /// still report that second claim as a violation — filtering exempt matches out first, then
+    /// deduping only what remains, is what keeps that true.
+    /// </para>
     /// </summary>
-    static IEnumerable<(string Token, int Index, int Length)> DistinctPresentFrameWeekdays(string copy)
+    static IEnumerable<(string Token, int Index, int Length)> DistinctPresentFrameWeekdays(
+        string copy, List<(int Start, int End)> exemptSpans)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (Match match in PresentFrameWeekdayRx().Matches(copy))
         {
             var group = match.Groups["weekday"];
+            if (IsExempt(group.Index, group.Length, exemptSpans))
+                continue;
+
             if (seen.Add(group.Value))
                 yield return (group.Value, group.Index, group.Length);
         }

@@ -1,5 +1,11 @@
 // STORY-358 — The DJ says it: two fidelities, one fallback (SPEC F143.3, F144.5/.6 · PLAN T343)
+using System.Threading.Channels;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
+using GenWave.Core.Domain;
+using GenWave.Core.Events;
+using GenWave.Host.Announcements;
+using GenWave.Host.Tests.Fakes;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -7,22 +13,152 @@ public static class FeatureAnnouncementAirConfirmation
 {
     public sealed class ScenarioAiredMeansObservedOnAir
     {
-        [Fact(Skip = "pending T343 (STORY-358 AC5)")]
-        public void ATrackAiredObservationOfTheSegmentStampsAired() { }
+        [Fact]
+        public async Task ATrackAiredObservationOfTheSegmentStampsAired()
+        {
+            // Given a claimed announcement's own rendered segment about to reach air, wrapped the way
+            // Orchestrator.EnqueuePatterAsync stamps it (SPEC F144.1)...
+            var channel = Channel.CreateBounded<AnnouncementAiredSignal>(8);
+            var lifecycle = new FakeAnnouncementLifecycle();
+            var boothLog = new FakeBoothLogAppender();
+            var sink = new AnnouncementAiredEventSink(channel.Writer, NullLogger<AnnouncementAiredEventSink>.Instance);
+            var drain = new AnnouncementAiredDrainService(
+                channel.Reader, lifecycle, boothLog, NullLogger<AnnouncementAiredDrainService>.Instance);
+            var mediaId = AnnouncementMediaId.Wrap(555, "tts:abc");
 
-        [Fact(Skip = "pending T343 (STORY-358 AC5)")]
-        public void OneBoothLogEntryCarriesTheCollapseCount() { }
+            // When the REAL production event — a genuine TrackAired for that exact segment — publishes...
+            sink.Publish(new TrackAired(
+                mediaId, "Dinner's ready", null, 0.0, DateTimeOffset.UtcNow, 4200, SegmentKind: SegmentKind.Announcement));
+            Assert.True(channel.Reader.TryRead(out var signal));
+            await drain.ProcessAsync(signal!, CancellationToken.None);
 
-        [Fact(Skip = "pending T343 (STORY-358 AC5)")]
-        public void APushAloneNeverStampsAired() { }
+            // Then the store's own aired transition was reached for exactly that announcement id.
+            Assert.Contains(555L, lifecycle.MarkAiredCalls);
+        }
+
+        [Fact]
+        public async Task OneBoothLogEntryCarriesTheCollapseCount()
+        {
+            // Given an announcement that collapsed three submissions into one row before it claimed...
+            var channel = Channel.CreateBounded<AnnouncementAiredSignal>(8);
+            var lifecycle = new FakeAnnouncementLifecycle();
+            lifecycle.CollapseCountByAnnouncementId[555] = 3;
+            var boothLog = new FakeBoothLogAppender();
+            var sink = new AnnouncementAiredEventSink(channel.Writer, NullLogger<AnnouncementAiredEventSink>.Instance);
+            var drain = new AnnouncementAiredDrainService(
+                channel.Reader, lifecycle, boothLog, NullLogger<AnnouncementAiredDrainService>.Instance);
+            var mediaId = AnnouncementMediaId.Wrap(555, "tts:abc");
+
+            // When it airs...
+            sink.Publish(new TrackAired(
+                mediaId, "Dinner's ready", null, 0.0, DateTimeOffset.UtcNow, 4200, SegmentKind: SegmentKind.Announcement));
+            Assert.True(channel.Reader.TryRead(out var signal));
+            await drain.ProcessAsync(signal!, CancellationToken.None);
+
+            // Then exactly one booth_log 'announcement-aired' entry exists, and it carries the collapse count.
+            var entry = Assert.Single(boothLog.Calls);
+            Assert.Equal("announcement-aired", entry.Kind);
+            Assert.Contains("3", entry.Summary, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task AReplayedTrackAiredStampsTwiceButWritesOnlyOneBoothRow()
+        {
+            // Given a claimed announcement whose segment reaches air, drained once for real...
+            var channel = Channel.CreateBounded<AnnouncementAiredSignal>(8);
+            var lifecycle = new FakeAnnouncementLifecycle();
+            var boothLog = new FakeBoothLogAppender();
+            var sink = new AnnouncementAiredEventSink(channel.Writer, NullLogger<AnnouncementAiredEventSink>.Instance);
+            var drain = new AnnouncementAiredDrainService(
+                channel.Reader, lifecycle, boothLog, NullLogger<AnnouncementAiredDrainService>.Instance);
+            var mediaId = AnnouncementMediaId.Wrap(555, "tts:abc");
+            var trackAired = new TrackAired(
+                mediaId, "Dinner's ready", null, 0.0, DateTimeOffset.UtcNow, 4200, SegmentKind: SegmentKind.Announcement);
+            sink.Publish(trackAired);
+            Assert.True(channel.Reader.TryRead(out var firstSignal));
+            await drain.ProcessAsync(firstSignal!, CancellationToken.None);
+
+            // When the SAME wrapped event is published a second time (an engine-level replay) — the
+            // row is no longer 'claimed' in a real store, so MarkAiredAsync's total transition would
+            // now answer null (seeded here via AiredOutcomeIsNull, standing in for that DB fact)...
+            lifecycle.AiredOutcomeIsNull.Add(555);
+            sink.Publish(trackAired);
+            Assert.True(channel.Reader.TryRead(out var secondSignal));
+            await drain.ProcessAsync(secondSignal!, CancellationToken.None);
+
+            // Then the store's aired transition was REACHED both times (observed twice), but the
+            // null second outcome means only the FIRST landed a booth row — the state='claimed' guard
+            // makes a replay a DB no-op, never a duplicate log entry.
+            Assert.Equal(2, lifecycle.MarkAiredCalls.Count(id => id == 555));
+            Assert.Single(boothLog.Calls);
+        }
+
+        [Fact]
+        public async Task APushAloneNeverStampsAired()
+        {
+            // Given the SAME sink/drain pair, with an announcement genuinely claimed (id 555)...
+            var channel = Channel.CreateBounded<AnnouncementAiredSignal>(8);
+            var lifecycle = new FakeAnnouncementLifecycle();
+            var sink = new AnnouncementAiredEventSink(channel.Writer, NullLogger<AnnouncementAiredEventSink>.Instance);
+
+            // When every OTHER event this station's playout ever publishes fires — a music track
+            // starting, and a DIFFERENT segment kind entirely — none of which is a genuine TrackAired
+            // observation of THIS announcement's own segment (there is no "pushed" event at all in
+            // this codebase; the engine push itself never reaches IStationEventSink — only a later,
+            // genuine advance confirmation does)...
+            sink.Publish(new TrackAired("42", "Some Song", "Some Artist", 0.0, DateTimeOffset.UtcNow, 180_000));
+            sink.Publish(new TrackAired(
+                "tts:hash-only", null, null, 0.0, DateTimeOffset.UtcNow, 1200, SegmentKind: SegmentKind.BackAnnounce));
+
+            // Then nothing was ever enqueued for confirmation, and the store's aired transition was
+            // never reached — a push (or any non-matching event) alone can never stamp aired.
+            Assert.False(channel.Reader.TryRead(out _));
+            Assert.Empty(lifecycle.MarkAiredCalls);
+        }
     }
 
     public sealed class ScenarioPushLossReArms
     {
-        [Fact(Skip = "pending T343 (STORY-358 AC6)")]
-        public void AClaimedAnnouncementUnairedPastTheGraceReturnsToPending() { }
+        [Fact]
+        public async Task AClaimedAnnouncementUnairedPastTheGraceReturnsToPending()
+        {
+            // Given a claimed announcement (id 777) whose own claim grace has passed, with TTL still
+            // remaining — the sweep's expiry pass found nothing to expire this tick...
+            var lifecycle = new FakeAnnouncementLifecycle
+            {
+                ClaimedPastGraceResult = [777],
+            };
+            lifecycle.ReArmSucceedsFor.Add(777);
+            var guardian = new AnnouncementLifecycleGuardianService(
+                lifecycle, TimeProvider.System, NullLogger<AnnouncementLifecycleGuardianService>.Instance);
 
-        [Fact(Skip = "pending T343 (STORY-358 AC6)")]
-        public void AReArmWithNoTtlRemainingExpiresVisiblyInstead() { }
+            // When the lifecycle guardian sweeps...
+            await guardian.SweepOnceAsync(CancellationToken.None);
+
+            // Then it returns to pending — ReArmAsync was reached for exactly that id.
+            Assert.Contains(777L, lifecycle.ReArmCalls);
+        }
+
+        [Fact]
+        public async Task AReArmWithNoTtlRemainingExpiresVisiblyInstead()
+        {
+            // Given a claimed announcement whose TTL has ALREADY passed — ExpireStaleAsync (run FIRST
+            // by the guardian's own ordering) would already have expired it, so it is never a member
+            // of FindClaimedPastGraceAsync's own result set...
+            var lifecycle = new FakeAnnouncementLifecycle
+            {
+                ExpireStaleResult = 1,
+                ClaimedPastGraceResult = [],
+            };
+            var guardian = new AnnouncementLifecycleGuardianService(
+                lifecycle, TimeProvider.System, NullLogger<AnnouncementLifecycleGuardianService>.Instance);
+
+            // When the lifecycle guardian sweeps...
+            await guardian.SweepOnceAsync(CancellationToken.None);
+
+            // Then nothing re-arms — the row expired visibly instead, never silently vanished.
+            Assert.Empty(lifecycle.ReArmCalls);
+            Assert.Single(lifecycle.ExpireStaleCalls);
+        }
     }
 }

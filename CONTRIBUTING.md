@@ -4,7 +4,7 @@ Thanks for wanting to make GenWave better. Bug reports, fixes, and features are 
 
 ## 🏛️ Architecture governance
 
-Eight laws, nine ids (L4 has two halves), enforced as fitness tests in `tests/GenWave.Architecture.Tests` (they run inside the normal `dotnet test GenWave.sln` — no separate CI lane). Full rationale for each: the per-law XML doc comments in that project (start at `Support/LawId.cs`) — the maintainer's own design notes cover the same ground (gh-#398) but live outside this shipped repo (`docs/` is gitignored).
+Nine laws, ten ids (L4 has two halves), enforced as fitness tests in `tests/GenWave.Architecture.Tests` (they run inside the normal `dotnet test GenWave.sln` — no separate CI lane). Full rationale for each: the per-law XML doc comments in that project (start at `Support/LawId.cs`) — the maintainer's own design notes cover the same ground (gh-#398) but live outside this shipped repo (`docs/` is gitignored).
 
 | Law | Rule | Why |
 |---|---|---|
@@ -17,6 +17,7 @@ Eight laws, nine ids (L4 has two halves), enforced as fitness tests in `tests/Ge
 | `L6` | `GenWave.Abstractions` never references `GenWave.Core` | Misplaced seams are accidental API commitments |
 | `L7` | No production type outside the two named relays (`NormalizingTtsSynthesizer`, `FallbackTtsSynthesizer`) references `ITtsSynthesizer`'s context-less `SynthesizeAsync(string, string, CancellationToken)` overload directly | Every other caller must carry kind/rules/pace through `TtsRenderContext`, never silently drop them |
 | `L8` | Outside `GenWave.Tts`, no production code calls `PronunciationRuleSet.Merge`/`MergeWithProvenance` or `PronunciationRuleProvider.BuildMerged` directly — `PronunciationsController`'s own `MergeWithProvenance` call (its display-only rules-table projection, never a render) is the one *designed* exemption | `PronunciationRuleResolver.ResolveForRender` is the one resolve seam for air and audition — parity is structural, not a coincidence two call sites agree on today |
+| `L9` | Outside `AnnouncementsController`, no production type names `AnnounceTokenAuthenticationDefaults.SchemeName` inside an `[Authorize(AuthenticationSchemes = ...)]` list | A widened schemes list elsewhere would silently promote the HA announce token to full admin authority, with every other test still green |
 
 Adoption is honest: violations that predate a law are named and dated in the suite's exemption baseline and the laws fail on NEW violations only — never add a baseline entry to make your own change green. (The five debt entries that shipped with adoption were burned down via gh-#406 on 2026-08-13; only designed exemptions remain.)
 

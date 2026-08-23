@@ -257,9 +257,23 @@ public static class TtsServiceCollectionExtensions
             // hygiene instance the feeder does, never a second parallel writer.
             .AddSingleton<LlmCopyWriter>()
             .AddSingleton<IPersonaPreviewWriter>(sp => sp.GetRequiredService<LlmCopyWriter>())
+            // IAnnouncementCopyWriter (SPEC F144.3, STORY-358, PLAN T342): the SAME "register
+            // concretely once, expose under every seam it implements" idiom IPersonaPreviewWriter
+            // just established one line up — the Orchestrator's flavored-announcement vend step
+            // reuses this exact writer instance (single-flight gate, LlmCallRing, everything),
+            // never a second parallel LLM client.
+            .AddSingleton<IAnnouncementCopyWriter>(sp => sp.GetRequiredService<LlmCopyWriter>())
             .AddSingleton<DegradationGatedCopyWriter>()
             .AddSingleton<ISegmentCopyWriter>(sp => sp.GetRequiredService<DegradationGatedCopyWriter>())
-            .AddSingleton<ITtsSegmentSource, TtsSegmentSource>();
+            // TtsSegmentSource registered concretely ONCE and exposed under BOTH seams it implements
+            // (mirrors LlmCopyWriter's ISegmentCopyWriter/IPersonaPreviewWriter split above) —
+            // IVerbatimSegmentRenderer (SPEC F144.2, PLAN T341) is the announcement vend's zero-LLM
+            // render path; ITtsSegmentSource is every ordinary kind's — so an announcement's verbatim
+            // render reuses the exact same caching/loudness/cue/blurb-dir machinery the feeder does,
+            // never a second parallel pipeline.
+            .AddSingleton<TtsSegmentSource>()
+            .AddSingleton<ITtsSegmentSource>(sp => sp.GetRequiredService<TtsSegmentSource>())
+            .AddSingleton<IVerbatimSegmentRenderer>(sp => sp.GetRequiredService<TtsSegmentSource>());
 
         // TTS/voices clients deliberately carry no BaseAddress (SPEC F36.1–F36.2, F36.4) —
         // Tts:Endpoint is read from IOptionsMonitor<TtsOptions>.CurrentValue and an absolute URI is

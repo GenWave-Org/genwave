@@ -128,7 +128,8 @@ public sealed class LlmCopyWriter(
     IDegradationModeReader degradationMode,
     IStationClockProvider? stationClock = null,
     IContextPatterFactSource? patterFactSource = null,
-    IShowFlavorLineSource? showFlavorLineSource = null) : ISegmentCopyWriter, IPersonaPreviewWriter
+    IShowFlavorLineSource? showFlavorLineSource = null)
+    : ISegmentCopyWriter, IPersonaPreviewWriter, IAnnouncementCopyWriter
 {
     /// <summary>Name of the <see cref="IHttpClientFactory"/> client this writer resolves (registered in Program.cs).</summary>
     public const string HttpClientName = "Llm";
@@ -255,6 +256,14 @@ public sealed class LlmCopyWriter(
     /// relies on staying in sync with (see that method's remarks): <see cref="SegmentKind.StationId"/>,
     /// <see cref="SegmentKind.TimeDate"/>, and (as of PLAN T281) <see cref="SegmentKind.Crosstalk"/>
     /// are the three kinds this reports false for today, and none of them ever reach a prompt.
+    ///
+    /// <see cref="SegmentKind.Announcement"/> (PLAN T342) is deliberately NOT a fourth true case here,
+    /// even though its flavored half genuinely does call the LLM: <see cref="WriteAnnouncementAsync"/>
+    /// is its own entry point with its own explicit <c>message</c> parameter, never routed through
+    /// <see cref="WriteAsync"/>'s <see cref="SegmentRequest"/>-only signature at all — a
+    /// <see cref="SegmentRequest"/> cannot carry the owner's message text (see that method's own
+    /// remarks) — so this gate and <see cref="LlmPromptBuilder.BuildSegmentLine"/>'s switch never need
+    /// to know Announcement exists.
     /// </summary>
     static bool IsLlmAuthored(SegmentKind kind) =>
         kind is SegmentKind.LeadIn or SegmentKind.BackAnnounce or SegmentKind.SignOff or SegmentKind.SignOn
@@ -324,7 +333,7 @@ public sealed class LlmCopyWriter(
             // why the field can no longer be touched out here.
             var cleanup = await RequestCleanedCompletionAsync(
                 cfg, request, persona, card, updateTasteMemory: true, patterFact, showFlavorFact,
-                queueWaitBudget: null, ct);
+                queueWaitBudget: null, announcementMessage: null, ct);
             var cleaned = TextOf(cleanup);
             if (cleaned is null)
             {
@@ -415,7 +424,8 @@ public sealed class LlmCopyWriter(
             // merely configured not to.
             var cleanup = await RequestCleanedCompletionAsync(
                 cfg, request, personaOverride, card: null, updateTasteMemory: false, patterFact: null,
-                showFlavorFact: null, queueWaitBudget: TimeSpan.FromSeconds(cfg.PreviewQueueWaitSeconds), ct);
+                showFlavorFact: null, queueWaitBudget: TimeSpan.FromSeconds(cfg.PreviewQueueWaitSeconds),
+                announcementMessage: null, ct);
             var cleaned = TextOf(cleanup);
             // DescribeNullTextReason (review round-2 finding F2, PLAN T332): the SAME reason
             // WriteAsync's own failure WARN already names, reused here rather than a second, hardcoded
@@ -453,8 +463,144 @@ public sealed class LlmCopyWriter(
             // reports it honestly instead of substituting template text (F35.6), and the WARN
             // carries the exception type/status plus call context exactly like WriteAsync's own
             // catch-all (F69.7).
-            LogFailure(request, personaOverride, cfg.Model, attemptedAt, ex, reason: null, previewOnly: true);
+            LogFailure(
+                request, personaOverride, cfg.Model, attemptedAt, ex, reason: null,
+                outcomeKind: LogFailureOutcome.ReportingToPreviewCaller);
             return new PersonaPreviewResult.Failed("The LLM request failed. Check the server logs for details.");
+        }
+    }
+
+    /// <summary>
+    /// <see cref="IAnnouncementCopyWriter"/> (SPEC F144.3/F144.4, STORY-358, PLAN T342) — the flavored
+    /// half of an owner announcement's on-air delivery: the message is injected into a fresh
+    /// completion as an OWNER-TRUSTED fact (mirrors <see cref="SegmentKind.ContextSegment"/>'s own
+    /// fact-block trust, F138.2's "supported by the fact block" contract, now scoped to the owner's
+    /// own words), riding the SAME <see cref="RequestCleanedCompletionAsync"/> machinery (single-flight
+    /// gate, hygiene, the F138.4 re-ask ladder, F139 cause stamping) every other LLM-authored kind
+    /// already shares — plus one ADDITIONAL check no other kind carries: the case-folded message CORE
+    /// must survive in the rendered copy (SPEC F144.3, the F68.4 case-folded-survival precedent),
+    /// checked and re-asked exactly like any other truth-gate violation (see
+    /// <see cref="CheckTruthGate"/>'s own <c>requiredCore</c> parameter).
+    ///
+    /// <para>
+    /// <b>Why NOT <see cref="WriteAsync"/>'s own <see cref="SegmentRequest.Kind"/> routing:</b>
+    /// <see cref="SegmentRequest"/> is a published Abstractions record that cannot gain a "message
+    /// text" member (F144.1's own carry-forward), so <paramref name="message"/> arrives as its OWN
+    /// explicit parameter — this method's signature, never <see cref="SegmentRequest"/>'s. That is
+    /// exactly why <see cref="IsLlmAuthored"/> and <see cref="LlmPromptBuilder.BuildSegmentLine"/> gain
+    /// no <see cref="SegmentKind.Announcement"/> arm: both exist to route
+    /// <see cref="SegmentRequest"/>-ONLY calls (<see cref="WriteAsync"/>, <see cref="WritePreviewAsync"/>)
+    /// that carry no message to flavor in the first place — an Announcement-kind preview would
+    /// otherwise build a facts-free, message-free prompt with nothing to say. This method instead
+    /// composes its own prompt via <see cref="LlmPromptBuilder.BuildAnnouncementUserContent"/>, called
+    /// nowhere else.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>THE FALLBACK LAW (SPEC F144.4) lives here as ONE early return plus the existing ladder's
+    /// existing null floor</b> — this method never throws (except the caller's own cancellation,
+    /// propagated) and never returns partial/violating copy: a disabled writer, an unreachable
+    /// endpoint, a blown render budget, or an exhausted ladder (containment or fact/clock violation)
+    /// all resolve to <see langword="null"/> — the caller's own signal (the Orchestrator's announcement
+    /// vend step) to render <paramref name="message"/> itself, verbatim, through the SAME
+    /// <c>IVerbatimSegmentRenderer</c> F144.2 already uses. The caller's whole fallback is one
+    /// <c>??</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// Deliberately does NOT touch <see cref="statusHolder"/> (SPEC F34.8) — that holder's
+    /// <see cref="LlmCopyStatusHolder.ConsecutiveFailureCount"/> drives
+    /// <see cref="IDegradationModeReader"/>'s STATION-WIDE auto-drop signal for every ordinary patter
+    /// kind (LeadIn/BackAnnounce/SignOff/SignOn/ContextSegment, SPEC F69.2); an announcement's own
+    /// containment reject is a fact about THIS message, not the model's general health, and must never
+    /// itself trip the whole station into Soft/Hard degradation the way a run of genuine
+    /// LeadIn/BackAnnounce misses would. <see cref="LlmCallRing"/>/<see cref="LlmCallCauseCounters"/>
+    /// (via <see cref="recorder"/>, stamped <see cref="LlmCallKind.Announcement"/>) still see every
+    /// attempt — the F139 bench/cause surface must, per SPEC F139.1's own reach, even though the
+    /// degradation signal must not.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>THE HARD-MODE RULING (MEDIUM-4 review finding, PLAN T342 round 2):</b>
+    /// <see cref="TtsServiceCollectionExtensions"/> registers <see cref="IAnnouncementCopyWriter"/>
+    /// straight against this singleton, never through <see cref="DegradationGatedCopyWriter"/> — that
+    /// class's own <see cref="ISegmentCopyWriter"/> contract has no shape for "return null instead of
+    /// template text", so it cannot wrap this seam without bending a contract it was never asked to
+    /// bend. Left unguarded, a Hard-degraded station would still burn 1-2 real completion calls per
+    /// flavored announcement AND hold the shared <see cref="singleFlight"/> gate the feeder path
+    /// needs, in direct tension with <see cref="DegradationMode.Hard"/>'s own "zero LLM calls" contract
+    /// (SPEC F69.1) that <see cref="DegradationGatedCopyWriter"/> already enforces for every ordinary
+    /// LeadIn/BackAnnounce/SignOff/SignOn/ContextSegment render. RULED: in
+    /// <see cref="DegradationMode.Hard"/>, this method skips the flavor attempt entirely and takes the
+    /// F144.4 verbatim floor immediately — the owner's own message still airs, exactly as it would
+    /// after an exhausted ladder; nothing is lost but the DJ's in-character framing. Implemented the
+    /// lightest lawful way: this method already takes <see cref="degradationMode"/>
+    /// (<see cref="IDegradationModeReader"/>) for its own <see cref="LlmCallRing"/> mode stamp — the
+    /// SAME read seam <see cref="DegradationGatedCopyWriter"/> itself reads through
+    /// <see cref="DegradationController"/> — so consulting it here, before any HTTP call or gate
+    /// acquisition, needs no new interface, no wrapper, and no change to
+    /// <see cref="DegradationGatedCopyWriter"/>'s own contract at all. Deliberately silent (no WARN, no
+    /// <see cref="LlmCallRing"/> entry) — this is a planned skip, not a failure to diagnose, mirroring
+    /// <see cref="DegradationGatedCopyWriter.WriteAsync"/>'s own silent Hard-mode routing one seam
+    /// over. Soft and Normal are UNCHANGED by this ruling — both still attempt the flavor render
+    /// exactly as before (Soft's own "minimized calls" cadence lives entirely inside
+    /// <see cref="DegradationGatedCopyWriter"/>'s ordinary <see cref="ISegmentCopyWriter"/> path, never
+    /// this one; nothing about that cadence applies to an announcement, which is not a cadence-gated
+    /// kind — SPEC F144.1's own "cadence-independent" ruling one layer up, at the Orchestrator seam).
+    /// </para>
+    /// </summary>
+    public async Task<string?> WriteAnnouncementAsync(SegmentRequest request, string message, CancellationToken ct)
+    {
+        // MEDIUM-4 ruling (see this method's own remarks above): Hard degradation takes the verbatim
+        // floor immediately, with ZERO LLM calls and no singleFlight hold — checked before anything
+        // else in this method, so a Hard-degraded station never dispatches a request, never queues
+        // behind the feeder path's own gate, and never records a ring entry for a call that was never
+        // attempted.
+        if (degradationMode.CurrentMode == DegradationMode.Hard)
+            return null;
+
+        var attemptedAt = DateTimeOffset.UtcNow;
+        LlmOptions? cfg = null;
+        Persona? persona = null;
+        try
+        {
+            cfg = optionsMonitor.CurrentValue;
+            if (string.IsNullOrEmpty(cfg.Endpoint))
+                return null;
+
+            // Same F35.2/F35.3 posture as WriteAsync — the ACTIVE persona voices the announcement, so
+            // it airs "in character" as F144.3 requires, never a personality-neutral read.
+            persona = await personaAccessor.ResolveAsync(ct);
+            var card = await personaAccessor.ResolveCardAsync(ct);
+
+            var cleanup = await RequestCleanedCompletionAsync(
+                cfg, request, persona, card, updateTasteMemory: false, patterFact: null, showFlavorFact: null,
+                queueWaitBudget: null, announcementMessage: message, ct);
+            var cleaned = TextOf(cleanup);
+            if (cleaned is null)
+            {
+                // The reason names the real cause (T331 review finding F3, extended to the F144.3
+                // containment floor by DescribeNullTextReason's own AnnouncementCore arm) — never the
+                // wrong-lever "empty or exceeded Llm:MaxCopyChars" wording (carry-forward #6).
+                LogFailure(
+                    request, persona, cfg.Model, attemptedAt, exception: null,
+                    reason: DescribeNullTextReason(cleanup), outcomeKind: LogFailureOutcome.FallingBackToVerbatimRead);
+            }
+
+            return cleaned;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The caller cancelled — not our own Llm:TimeoutSeconds budget expiring. Propagate; this
+            // is not a flavoring failure for the caller's fallback law to act on.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogFailure(
+                request, persona, cfg?.Model, attemptedAt, ex, reason: null,
+                outcomeKind: LogFailureOutcome.FallingBackToVerbatimRead);
+            return null;
         }
     }
 
@@ -466,11 +612,13 @@ public sealed class LlmCopyWriter(
     /// call context (segment kind, persona identity if one was in scope, station, model, elapsed
     /// ms) to diagnose the miss from this one line. Deliberately excludes the prompt itself:
     /// backstory/style/user copy is operator content that belongs in the ring inspector (T41), never
-    /// at WARN.
+    /// at WARN. <paramref name="outcomeKind"/> (PLAN T342, widened from a bool) is the ONE varying
+    /// clause across this writer's three failure surfaces — see <see cref="LogFailureOutcome"/>'s own
+    /// remarks for what each value says happens next.
     /// </summary>
     void LogFailure(
         SegmentRequest request, Persona? persona, string? model, DateTimeOffset attemptedAt,
-        Exception? exception, string? reason, bool previewOnly = false)
+        Exception? exception, string? reason, LogFailureOutcome outcomeKind = LogFailureOutcome.FallingBackToTemplate)
     {
         var detail = exception switch
         {
@@ -479,7 +627,12 @@ public sealed class LlmCopyWriter(
             null => reason ?? "unknown failure",
         };
         var elapsedMs = (long)(DateTimeOffset.UtcNow - attemptedAt).TotalMilliseconds;
-        var outcome = previewOnly ? "reporting failure to the preview caller" : "falling back to template";
+        var outcome = outcomeKind switch
+        {
+            LogFailureOutcome.ReportingToPreviewCaller => "reporting failure to the preview caller",
+            LogFailureOutcome.FallingBackToVerbatimRead => "falling back to the verbatim read (SPEC F144.4)",
+            _ => "falling back to template",
+        };
 
         // Operator-authored values (persona name, model, exception-derived detail) are
         // newline-stripped so they can't forge additional log entries (CodeQL cs/log-forging).
@@ -576,8 +729,37 @@ public sealed class LlmCopyWriter(
     async Task<LlmCopyCleanupResult> RequestCleanedCompletionAsync(
         LlmOptions cfg, SegmentRequest request, Persona? persona, PersonaCard? card,
         bool updateTasteMemory, ContextPatterFact? patterFact, ShowFlavorFact? showFlavorFact,
-        TimeSpan? queueWaitBudget, CancellationToken ct)
+        TimeSpan? queueWaitBudget, string? announcementMessage, CancellationToken ct)
     {
+        // LOW-5 (PLAN T342 round 2, parameter-shape finding): announcementMessage carries FOUR
+        // distinct meanings through the rest of this method — which LlmCallKind to stamp, which
+        // prompt builder to call, what factBlock the truth gate's CheckFacts/CheckClock halves see,
+        // and what requiredCore CheckContainment/CheckClock's own owner-trust exemption enforce — each
+        // previously re-derived independently from announcementMessage's own nullability at its own
+        // scattered call site further down this method (a connascence-of-meaning smell: four places
+        // that all had to independently agree announcementMessage's null-ness means "this is an
+        // announcement call", never provably in sync). callKind and factBlock need nothing this
+        // method computes LATER (both depend only on announcementMessage/request, already in scope),
+        // so both resolve fully right here; requiredCore is announcementMessage itself, given its own
+        // name so every later reference — the prompt-selector below, and CheckTruthGate's own
+        // parameter one seam over — reads this ONE local rather than announcementMessage's own
+        // nullability a second, third, or fourth time. Stamped onto every recorder.Record call below
+        // (SPEC F139.1) so a truth-gate reject on THIS lane is visible on the F139 bench/cause surface
+        // as its own kind, never folded into ordinary Copy noise (this task's own carry-forward).
+        var callKind = announcementMessage is not null ? LlmCallKind.Announcement : LlmCallKind.Copy;
+        var requiredCore = announcementMessage;
+        // SPEC F144.3 (PLAN T342): announcementMessage, when present, IS the fact block — the
+        // owner's own words are the mechanical "owner-trusted fact" this gate must not reject as
+        // fabrication (this task's own binding acceptance), the identical CheckFacts "supported by
+        // the fact block" contract ContextSegment already relies on, now scoped to a message instead
+        // of a provider's facts. Mutually exclusive with the ContextSegment branch below by
+        // construction — announcementMessage is only ever non-null for an Announcement-kind request,
+        // which is never a ContextSegment.
+        var factBlock = requiredCore
+            ?? (request.Kind == SegmentKind.ContextSegment
+                && request.ContextFacts is { } contextFacts && !string.IsNullOrWhiteSpace(contextFacts)
+                    ? contextFacts
+                    : null);
         // Captured up front, once, for LlmCallRing (SPEC F73.1, T41) — startedAt mirrors
         // LlmCopyStatusHolder's own attemptedAt semantics (includes any single-flight queueing wait
         // below), and mode is read fresh right here rather than threaded in as a parameter: a
@@ -663,9 +845,19 @@ public sealed class LlmCopyWriter(
             // WriteAsync via TakeDueShowFlavorLineForOnAirRender, and only ever non-null when
             // patterFact above was null (context wins) — BuildUserContent enforces that structurally
             // too (its own defense-in-depth `?? ` fallback), so this call passes both through as-is.
-            userPrompt = LlmPromptBuilder.BuildUserContent(
-                request, LlmPromptBuilder.BuildStationClockLine(stationLocalNow), previouslyVoicedTasteNotes,
-                patterFact?.Fact, showFlavorFact);
+            //
+            // SPEC F144.3 (PLAN T342): an announcement takes its OWN dedicated prompt builder —
+            // BuildAnnouncementUserContent, never BuildUserContent's per-kind switch (see
+            // WriteAnnouncementAsync's own remarks for why Announcement never joins that switch at
+            // all). requiredCore (LOW-5: the same local callKind/factBlock above already derive from)
+            // is non-null on exactly one caller (WriteAnnouncementAsync), so this branch can never
+            // fire for an ordinary WriteAsync/WritePreviewAsync call.
+            userPrompt = requiredCore is { } message
+                ? LlmPromptBuilder.BuildAnnouncementUserContent(
+                    request, LlmPromptBuilder.BuildStationClockLine(stationLocalNow), message)
+                : LlmPromptBuilder.BuildUserContent(
+                    request, LlmPromptBuilder.BuildStationClockLine(stationLocalNow), previouslyVoicedTasteNotes,
+                    patterFact?.Fact, showFlavorFact);
 
             // No boot-frozen BaseAddress (F36.2) — the endpoint is read from CurrentValue above and an
             // absolute URI is built per call (EndpointUri preserves a subpath in Llm:Endpoint, e.g.
@@ -692,7 +884,9 @@ public sealed class LlmCopyWriter(
             LogIfTrimmed(request, personaName, cleanup);
 
             // SPEC F138.2/F138.3/F138.4 (STORY-350, STORY-351, PLAN T331/T332) — the truth-gate
-            // stage, covering every LLM-authored kind, not the context lane alone. Composed as ONE
+            // stage, covering every LLM-authored kind, not the context lane alone (as of PLAN T342,
+            // also the announcement flavor lane below — a call this method itself, not IsLlmAuthored,
+            // routes here). Composed as ONE
             // check (CheckTruthGate below), never two chained ladder runs — the T331 reviewer ruling
             // RunTruthGateLadderAsync's own remarks restate: a second ladder invocation could never
             // see the first's own re-ask reply, so a ContextSegment render facing BOTH a fact
@@ -719,16 +913,14 @@ public sealed class LlmCopyWriter(
             // already rejecting the reply outright (empty, or over-length with nothing salvageable)
             // falls straight through to the unchanged switch/record below — there is no candidate text
             // to check claims against, and the existing OverLength/EmptyCompletion rung already covers
-            // that case correctly.
-            var factBlock = request.Kind == SegmentKind.ContextSegment
-                && request.ContextFacts is { } contextFacts && !string.IsNullOrWhiteSpace(contextFacts)
-                    ? contextFacts
-                    : null;
-
+            // that case correctly. factBlock (LOW-5: hoisted to this method's own top, alongside
+            // callKind/requiredCore) already folds in announcementMessage for exactly this reason —
+            // see that derivation's own remarks.
             if (TextOf(cleanup) is { } candidate)
             {
                 var ladderResult = await RunTruthGateLadderAsync(
-                    candidateText => CheckTruthGate(candidateText, factBlock, stationLocalNow, request.Track?.Title),
+                    candidateText => CheckTruthGate(
+                        candidateText, factBlock, stationLocalNow, request.Track?.Title, requiredCore),
                     LlmPromptBuilder.BuildTruthGateReaskLine, candidate, text);
                 if (ladderResult is not null)
                     return ladderResult;
@@ -746,7 +938,7 @@ public sealed class LlmCopyWriter(
             var (ringOutcome, cause) = ClassifyCleanup(cleanup);
             recorder.Record(
                 personaName, systemPrompt, userPrompt, text, startedAt, ElapsedMs(startedAt),
-                ringOutcome, statusDetail: null, mode, cause, cfg.Model);
+                ringOutcome, statusDetail: null, mode, cause, cfg.Model, callKind);
             return cleanup;
 
             // SPEC F138.4 (STORY-350, PLAN T331) — one truth-gate ladder run: gate
@@ -788,7 +980,7 @@ public sealed class LlmCopyWriter(
                 // silently folded into whichever entry the re-ask itself produces.
                 recorder.Record(
                     personaName, systemPrompt, userPrompt, firstRawText, startedAt, ElapsedMs(startedAt),
-                    LlmCallOutcome.Ok, statusDetail: null, mode, LlmCallCause.TruthGateReject, cfg.Model);
+                    LlmCallOutcome.Ok, statusDetail: null, mode, LlmCallCause.TruthGateReject, cfg.Model, callKind);
 
                 // Exactly ONE re-ask (F138.4), naming the violation. userPrompt AND startedAt are both
                 // REASSIGNED (never shadowed by a new local) so a fault raised by THIS call — timeout,
@@ -817,7 +1009,7 @@ public sealed class LlmCopyWriter(
                     : (LlmCallOutcome.Ok, LlmCallCause.TruthGateReject);
                 recorder.Record(
                     personaName, systemPrompt, userPrompt, reaskText, startedAt, ElapsedMs(startedAt),
-                    reaskOutcome, statusDetail: null, mode, reaskCause, cfg.Model);
+                    reaskOutcome, statusDetail: null, mode, reaskCause, cfg.Model, callKind);
 
                 // F138.4's floor: a still-violating re-ask never airs. A TruthGateRejected here is
                 // what makes TextOf(...) null for it (T331 review finding F3 — its own distinct shape
@@ -859,7 +1051,7 @@ public sealed class LlmCopyWriter(
             var (outcome, cause, detail) = ClassifyForRing(ex);
             recorder.Record(
                 personaName, systemPrompt, userPrompt, response: null, startedAt, ElapsedMs(startedAt),
-                outcome, detail, mode, cause, cfg.Model);
+                outcome, detail, mode, cause, cfg.Model, callKind);
             throw;
         }
         finally
@@ -870,26 +1062,44 @@ public sealed class LlmCopyWriter(
 
     /// <summary>
     /// The composite truth-gate check <see cref="RunTruthGateLadderAsync"/> gates on (SPEC F138.2,
-    /// F138.3, STORY-350, STORY-351, PLAN T332) — kept beside the ladder call site above, deliberately
-    /// small and pure: a straight union of <see cref="CopyClaims.CheckFacts"/>'s violations (only when
-    /// <paramref name="factBlock"/> is non-null — the context lane's own fact-block claim classes,
-    /// meaningless for any kind with no fact block to check against) with
-    /// <see cref="CopyClaims.CheckClock"/>'s violations (unconditional — F138.3's own "all patter
-    /// kinds"), into ONE <see cref="ClaimCheckResult"/>. This is the whole reason a ContextSegment
-    /// render can clear both claim families in a SINGLE gate/re-ask cycle instead of two chained ladder
-    /// runs (the reviewer-ruled constraint <see cref="RunTruthGateLadderAsync"/>'s own remarks
-    /// restate): the ladder only ever sees one <see cref="ClaimCheckResult"/>, never two, so it has no
-    /// way to run twice even by accident. Both source checks stay <see cref="CopyClaims"/>'s own pure
-    /// static functions of their arguments; this method adds no logic beyond composing their two
+    /// F138.3, F144.3, STORY-350, STORY-351, PLAN T332, T342) — kept beside the ladder call site above,
+    /// deliberately small and pure: a straight union of <see cref="CopyClaims.CheckFacts"/>'s
+    /// violations (only when <paramref name="factBlock"/> is non-null — the context/announcement
+    /// lanes' own fact-block claim classes, meaningless for any kind with no fact block to check
+    /// against) with <see cref="CopyClaims.CheckClock"/>'s violations (unconditional — F138.3's own
+    /// "all patter kinds"), plus — as of PLAN T342, only when <paramref name="requiredCore"/> is
+    /// non-null — <see cref="CopyClaims.CheckContainment"/>'s own single violation, into ONE
+    /// <see cref="ClaimCheckResult"/>. This is the whole reason a ContextSegment render can clear both
+    /// claim families (and an announcement render all three) in a SINGLE gate/re-ask cycle instead of
+    /// chained ladder runs (the reviewer-ruled constraint <see cref="RunTruthGateLadderAsync"/>'s own
+    /// remarks restate): the ladder only ever sees one <see cref="ClaimCheckResult"/>, never two, so it
+    /// has no way to run twice even by accident. All three source checks stay <see cref="CopyClaims"/>'s
+    /// own pure static functions of their arguments; this method adds no logic beyond composing their
     /// violation lists.
+    ///
+    /// <para>
+    /// <paramref name="requiredCore"/> ALSO rides <see cref="CopyClaims.CheckClock"/>'s own
+    /// <c>ownerMessage</c> parameter (HIGH-2 review finding, PLAN T342 round 2), not only
+    /// <see cref="CopyClaims.CheckContainment"/>'s: the SAME owner-trusted text is both "the fact this
+    /// reply must contain" and "the source whose OWN present-frame weekday/daypart words the clock
+    /// check must not punish" — SPEC F144.3's binding owner-trust rule, extended to the clock half
+    /// exactly as it already governs the facts half via <paramref name="factBlock"/> above (which,
+    /// for an announcement render, is this SAME string — see this method's own call site remarks).
+    /// </para>
     /// </summary>
-    static ClaimCheckResult CheckTruthGate(string copy, string? factBlock, DateTimeOffset stationLocalNow, string? trackTitle)
+    static ClaimCheckResult CheckTruthGate(
+        string copy, string? factBlock, DateTimeOffset stationLocalNow, string? trackTitle,
+        string? requiredCore = null)
     {
         var violations = new List<ClaimViolation>();
         if (factBlock is not null)
             violations.AddRange(CopyClaims.CheckFacts(copy, factBlock).Violations);
 
-        violations.AddRange(CopyClaims.CheckClock(copy, stationLocalNow, trackTitle).Violations);
+        violations.AddRange(CopyClaims.CheckClock(copy, stationLocalNow, trackTitle, requiredCore).Violations);
+
+        if (requiredCore is not null)
+            violations.AddRange(CopyClaims.CheckContainment(copy, requiredCore).Violations);
+
         return new ClaimCheckResult(violations);
     }
 
@@ -1037,17 +1247,22 @@ public sealed class LlmCopyWriter(
 
     /// <summary>
     /// One violation's own honest fragment for <see cref="DescribeNullTextReason"/> (SPEC F138.2,
-    /// F138.3, PLAN T332): <see cref="ClaimViolation.IsClockClaim"/> is the ONE discriminator this
-    /// method (and <see cref="LlmPromptBuilder.DescribeViolationForReask"/>, one module over) keys the
-    /// facts-vs-clock split on — see that property's own remarks. Within the clock branch,
-    /// <paramref name="violation"/>'s own <see cref="ClaimClass"/> still separates the two clock claim
-    /// shapes: a wrong weekday reads "wrong-day claim", a wrong daypart reads "wrong-time-of-day claim".
+    /// F138.3, F144.3, PLAN T332, T342): <see cref="ClaimViolation.Class"/> is checked FIRST for
+    /// <see cref="ClaimClass.AnnouncementCore"/> (PLAN T342 — the opposite-direction violation, a
+    /// missing requirement rather than an unsupported addition, so it earns its own honest wording
+    /// rather than falling into "unsupported claim"), then <see cref="ClaimViolation.IsClockClaim"/> is
+    /// the discriminator this method (and <see cref="LlmPromptBuilder.DescribeViolationForReask"/>, one
+    /// module over) keys the facts-vs-clock split on for everything else — see that property's own
+    /// remarks. Within the clock branch, <paramref name="violation"/>'s own <see cref="ClaimClass"/>
+    /// still separates the two clock claim shapes: a wrong weekday reads "wrong-day claim", a wrong
+    /// daypart reads "wrong-time-of-day claim".
     /// </summary>
-    static string DescribeViolationForLog(ClaimViolation violation) => (violation.IsClockClaim, violation.Class) switch
+    static string DescribeViolationForLog(ClaimViolation violation) => violation switch
     {
-        (true, ClaimClass.Daypart) => $"wrong-time-of-day claim: {violation.Token}",
-        (true, _) => $"wrong-day claim: {violation.Token}",
-        (false, _) => $"unsupported claim: {violation.Token}",
+        { Class: ClaimClass.AnnouncementCore } => $"dropped announcement core: {violation.Token}",
+        { IsClockClaim: true, Class: ClaimClass.Daypart } => $"wrong-time-of-day claim: {violation.Token}",
+        { IsClockClaim: true } => $"wrong-day claim: {violation.Token}",
+        _ => $"unsupported claim: {violation.Token}",
     };
 
     /// <summary>
@@ -1193,6 +1408,24 @@ public sealed class LlmCopyWriter(
     }
 
     static bool IsApostrophe(char c) => c is '\'' or '’';
+
+    /// <summary>
+    /// Folds the curly apostrophe (U+2019, RIGHT SINGLE QUOTATION MARK) to the straight ASCII one
+    /// (U+0027) — the SAME single-glyph pair <see cref="IsApostrophe"/> already treats as one mark,
+    /// char-by-char, in <see cref="IsAbbreviationBoundary"/> above, mirrored here as a whole-string
+    /// fold rather than a second, differently-shaped apostrophe rule. Internal (HIGH-1, PLAN T342
+    /// review) — <see cref="CopyClaims.CheckContainment"/> is the second caller, reusing this exact
+    /// discipline so its own substring test folds BOTH the aired copy and the owner's required core
+    /// identically before comparing them (that method's own remarks explain why); mirrors
+    /// <see cref="ApplyCopyHygiene"/>'s own "internal precisely for a second caller" posture one
+    /// member up. Deliberately narrower than <see cref="SpeechText.Normalize"/>'s own curly-quote fold
+    /// (which also folds the LEFT single quote, U+2018, and runs downstream of this checker by
+    /// design — this class's own remarks) — only U+2019 ever marks an apostrophe in this writer's own
+    /// prompt/regex vocabulary (<see cref="PresentFrameWeekdayRx"/>/<see cref="PresentFrameDaypartRx"/>'s
+    /// own standing keep-both comments), so this fold stays scoped to that one glyph rather than
+    /// silently adopting a second normalization rule it was never asked to match.
+    /// </summary>
+    internal static string FoldApostrophes(string text) => text.Replace('’', '\'');
 
     /// <summary>
     /// gh-#186, widened by gh-#430: drops a chat preamble in front of the copy — observed live

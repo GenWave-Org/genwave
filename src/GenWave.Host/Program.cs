@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.HttpOverrides;
 using GenWave.Core.Abstractions;
+using GenWave.Host.Announcements;
 using GenWave.Host.Api;
 using GenWave.Host.Artwork;
 using GenWave.Host.Catalog;
@@ -147,6 +148,17 @@ builder.Services
     .AddGenWaveContextHost(cfg)
     // Playout chain: engine control → feeder → feeder service → PlayoutSupervisor (hosted).
     .AddGenWavePlayout()
+    // The announcement lifecycle guardians (SPEC F143.2/.3, F144.5/.6, F145.2; STORY-358/359,
+    // PLAN T343): the aired-confirmation and privacy-flip sinks/drains, plus the periodic
+    // expire/re-arm sweep loop. Registered AFTER .AddGenWavePlayout() so this call's own
+    // GenWave.Host.Announcements namespace narrative reads "the playout chain, then the guardians
+    // that watch it" — resolution itself has no ordering dependency either way, since every
+    // registration below is a lazy DI factory/hosted-service Add (see
+    // AnnouncementLifecycleHostServiceCollectionExtensions' own remarks). Needs IAnnouncementLifecycle
+    // (AddGenWaveStationSettings, above) and IStationEventSink's own two new sink resolutions inside
+    // AddGenWavePlayout's own CompositeStationEventSink factory — both already registered by the time
+    // anything actually resolves IStationEventSink.
+    .AddGenWaveAnnouncementLifecycle()
     // Crosstalk stock-timer loop (SPEC F127.7, STORY-328, PLAN T286): the thin Host shell that
     // wires CrosstalkPlanner (GenWave.Orchestration) to CrosstalkScriptWriter/CrosstalkAssembler
     // (GenWave.Tts). MUST run after .AddGenWaveTts()/.AddGenWaveOrchestration() (both above) and
@@ -254,6 +266,22 @@ builder.Services
     .Bind(cfg.GetSection(RequestsOptions.Section))
     .ValidateDataAnnotations()
     .ValidateOnStart();
+
+// The House Voice's endpoint caps (SPEC F143.4, STORY-357, PLAN T339): env/compose-only, deliberately
+// absent from StationSettingsAllowlist for now — see AnnouncementsOptions' own remarks. ValidateOnStart
+// mirrors RequestsOptions immediately above.
+builder.Services
+    .AddOptions<AnnouncementsOptions>()
+    .Bind(cfg.GetSection(AnnouncementsOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+// The accepted-rate cap itself (SPEC F143.4, T339 review finding F1): a singleton so its
+// FixedWindowRateLimiter's own window is shared by every request, wired to AnnouncementsController.Post
+// directly rather than through the rate-limiter middleware — see AnnouncementAcceptedRateLimiter's own
+// remarks for why. Registered after the ValidateOnStart above so a malformed AcceptedPerMinute fails
+// boot before this ever resolves it.
+builder.Services.AddSingleton<AnnouncementAcceptedRateLimiter>();
 
 // Community-sourced content — currently just the Persona Catalog origin (SPEC F90.1, STORY-234,
 // PLAN T99). Live via IOptionsMonitor<CommunityOptions> (read by CommunityCatalogAccessor, T101's

@@ -38,34 +38,6 @@ using GenWave.Host.Tests.Fakes;
 namespace GenWave.Host.Tests.Specs;
 
 /// <summary>
-/// In-memory <see cref="IBoothLogAppender"/> double: records every <see cref="AppendAsync"/> call's
-/// <see cref="BoothLogAppendRequest"/> instead of touching Postgres — the repository seam
-/// <see cref="BoothLogWriteHarness"/> fakes (mirrors <c>FakeBoothLogReader</c>'s idiom on the read
-/// side, Story195_BoothLog.cs). Releases a signal per call so a scenario can await exactly as many
-/// appends as it published, with no arbitrary sleep.
-/// </summary>
-file sealed class FakeBoothLogAppender : IBoothLogAppender
-{
-    readonly SemaphoreSlim appended = new(0);
-
-    public List<BoothLogAppendRequest> Calls { get; } = [];
-
-    public Task AppendAsync(BoothLogAppendRequest request, CancellationToken ct)
-    {
-        lock (Calls) Calls.Add(request);
-        appended.Release();
-        return Task.CompletedTask;
-    }
-
-    public async Task WaitForCallsAsync(int count, TimeSpan timeout)
-    {
-        using var cts = new CancellationTokenSource(timeout);
-        for (var i = 0; i < count; i++)
-            await appended.WaitAsync(cts.Token);
-    }
-}
-
-/// <summary>
 /// Drives real <see cref="TrackAired"/> events through the REAL production booth-log write path —
 /// <c>BoothLogWriter</c> (the <see cref="IBoothLogEventConsumer"/> that captures a track's
 /// <see cref="PersonaPickDiagnostics"/> synchronously at publish time, SPEC F86.1) and

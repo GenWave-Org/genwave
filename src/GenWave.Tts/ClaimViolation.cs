@@ -24,6 +24,12 @@ using System.Diagnostics.CodeAnalysis;
 /// <see cref="ClaimVocabulary.DaypartWordAlternation"/>'s words — so a future re-ask prompt (SPEC
 /// F138.4, PLAN T331) may interpolate it directly into prompt text without fence-forging risk; rely on
 /// it knowingly rather than re-deriving the guarantee at the call site.
+///
+/// One further, differently-shaped source (PLAN T342): <see cref="CopyClaims.CheckContainment"/>'s
+/// own single <see cref="ClaimClass.AnnouncementCore"/> violation carries a FIXED compile-time literal
+/// ("the announcement message"), never a fragment of the owner's own 280-char free-text message — see
+/// that method's own remarks for why the message itself is never safe to splice in here the way a
+/// closed-vocabulary/digit token is.
 /// </para>
 /// </summary>
 public sealed record ClaimViolation(ClaimClass Class, string Token, string? Expected = null)
