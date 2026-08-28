@@ -94,10 +94,17 @@ static partial class CrosstalkScriptParser
     /// (<see cref="CrosstalkExchangeRequest.StationLocalNow"/>) — never a freshly-read clock, so the
     /// F138.3 clock check below provably judges the script against the SAME clock the prompt stated,
     /// the identical one-shared-instant discipline <see cref="CopyClaims.CheckClock"/>'s own remarks
-    /// require of every other patter kind.
+    /// require of every other patter kind. <paramref name="stationName"/> (SPEC F138.8, PLAN T350,
+    /// gh-#632) is <see cref="CrosstalkExchangeRequest.StationName"/>, threaded into BOTH truth checks
+    /// below: <see cref="CopyClaims.CheckClock"/>'s own <c>stationName</c> exemption (the booth naming
+    /// its own station is never a clock lie), AND (LOW-3 review finding — this half was missing) the
+    /// <see cref="TruthShapeChecks"/> table above it, via <see cref="CopyClaims.FirstNonExemptMatch"/> —
+    /// without it, a station named e.g. "Sunny 101.5" tripped its OWN ConditionWord shape on "Sunny"
+    /// every time the booth said its own name.
     /// </summary>
     public static CrosstalkWriteResult Parse(
-        string rawResponse, int maxLineChars, int durationTargetSeconds, DateTimeOffset stationLocalNow)
+        string rawResponse, int maxLineChars, int durationTargetSeconds, DateTimeOffset stationLocalNow,
+        string? stationName = null)
     {
         var rawLines = rawResponse
             .Split('\n')
@@ -185,10 +192,14 @@ static partial class CrosstalkScriptParser
         // Table-driven (PLAN T333 review advisory A3): four near-identical shape checks, tried in
         // this fixed order, the first match wins. Each pairs a compiled pattern with the honest,
         // operator-facing noun phrase for its own reason line — adding a fifth shape is a one-line
-        // table entry, never a fifth copy-pasted if-block.
+        // table entry, never a fifth copy-pasted if-block. CopyClaims.FirstNonExemptMatch (LOW-3
+        // review finding, SPEC F138.8, PLAN T350, gh-#632), not a bare pattern.Match, so a station
+        // named e.g. "Sunny 101.5" naming ITSELF never trips its own ConditionWord/frequency/call-sign
+        // shape — the SAME FindTitleSpans/IsExempt exemption CheckClock below (and CheckFacts/CheckClock
+        // on every other patter kind) already carries, reused rather than re-implemented.
         foreach (var (pattern, description) in TruthShapeChecks)
         {
-            if (pattern.Match(scriptText) is { Success: true } match)
+            if (CopyClaims.FirstNonExemptMatch(pattern, scriptText, stationName) is { } match)
             {
                 return Discarded(
                     $"the script named {description} (\"{match.Value}\") — " +
@@ -196,7 +207,7 @@ static partial class CrosstalkScriptParser
             }
         }
 
-        var clockResult = CopyClaims.CheckClock(scriptText, stationLocalNow);
+        var clockResult = CopyClaims.CheckClock(scriptText, stationLocalNow, stationName: stationName);
         if (!clockResult.Passed)
         {
             var violation = clockResult.Violations[0];

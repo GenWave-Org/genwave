@@ -6,17 +6,18 @@ using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Auth;
 using GenWave.Host.Options;
-using GenWave.Host.Playout;
 
 namespace GenWave.Host.Api;
 
 /// <summary>
-/// <c>POST /api/announcements</c> (the House Voice's front door), <c>GET /api/announcements</c> (the
-/// history read, SPEC F146.2), and <c>GET /api/announcements/now-playing</c> — SPEC F143.1/.4/.5,
-/// F145.1's endpoint half, F145.3/.4's token door; STORY-357, STORY-359, STORY-360, STORY-361; PLAN
-/// T339/T340/T344. Accepts EITHER the admin cookie session OR the announce Bearer token
-/// (<see cref="AnnounceTokenAuthenticationDefaults.InScopeSchemes"/>) — the Operator plane, the same
-/// "keeping the station on air" grouping
+/// <c>POST /api/announcements</c> (the House Voice's front door) and <c>GET /api/announcements</c>
+/// (the history read, SPEC F146.2) — SPEC F143.1/.4/.5, F145.1's endpoint half, F145.3/.4's token
+/// door; STORY-357, STORY-359, STORY-360, STORY-361; PLAN T339/T340/T344. The now-playing read
+/// (<c>GET /api/announcements/now-playing</c>) moved to its own <see cref="AnnouncementNowPlayingController"/>
+/// at T351 (SPEC F145.6, STORY-366) — see that class's own remarks for why it needed to leave this
+/// controller's <see cref="AdminSurfaceAttribute"/> gate behind. Accepts EITHER the admin cookie
+/// session OR the announce Bearer token (<see cref="AnnounceTokenAuthenticationDefaults.InScopeSchemes"/>)
+/// — the Operator plane, the same "keeping the station on air" grouping
 /// <see cref="SafeSegmentsController"/>/<see cref="TtsPreviewController"/>/<see cref="VoicesController"/>
 /// already share (an announcement is content headed for air, exactly like a safe-loop clip or a TTS
 /// preview), now widened to whichever of the two auth doors SPEC F145.4 grants the announcements
@@ -24,16 +25,19 @@ namespace GenWave.Host.Api;
 /// share this scheme list — session only, so a token can never mint, revoke, or introspect a token.
 ///
 /// <para>
-/// <b>Per-IP door limiter (PLAN T340 carry-forward, built here).</b> <see cref="EnableRateLimitingAttribute"/>
-/// carries <see cref="RateLimiterPolicies.Announcements"/> — a middleware-level, per-source-IP fixed
-/// window applied to EVERY action on this controller, running BEFORE authentication
-/// (<c>Program.cs</c>'s own pipeline ordering). This is a DIFFERENT budget from the in-action
-/// accepted-rate cap described below: it exists purely to bound the unauthenticated credential-check
-/// DB read (<see cref="AnnounceTokenAuthenticationHandler"/>'s own <see cref="IAnnounceTokenStore.ReadHashAsync"/>
-/// call fires on EVERY Bearer attempt, valid or not) against a junk-Bearer flood from one source,
-/// generously windowed so it never bites the HA sensor's own ≥30s polling cadence or a legitimate UI
-/// session — see <see cref="RateLimiterPolicies"/>'s own remarks for the full rationale and why this
-/// does not repeat T339 review finding F1's mistake.
+/// <b>Per-IP door limiter (PLAN T340 carry-forward, built here, still applied post-T351).</b>
+/// <see cref="EnableRateLimitingAttribute"/> carries <see cref="RateLimiterPolicies.Announcements"/> —
+/// a middleware-level, per-source-IP fixed window applied to EVERY action on this controller, running
+/// BEFORE authentication (<c>Program.cs</c>'s own pipeline ordering). This is a DIFFERENT budget from
+/// the in-action accepted-rate cap described below: it exists purely to bound the unauthenticated
+/// credential-check DB read (<see cref="AnnounceTokenAuthenticationHandler"/>'s own
+/// <see cref="IAnnounceTokenStore.ReadHashAsync"/> call fires on EVERY Bearer attempt, valid or not)
+/// against a junk-Bearer flood from one source, generously windowed so it never bites the HA sensor's
+/// own ≥30s polling cadence or a legitimate UI session — see <see cref="RateLimiterPolicies"/>'s own
+/// remarks for the full rationale and why this does not repeat T339 review finding F1's mistake.
+/// <see cref="AnnouncementNowPlayingController"/> carries the SAME policy independently (its own
+/// class carries the attribute, since it is no longer an action on this class) — see that class's
+/// own remarks for why T351 kept it there too.
 /// </para>
 ///
 /// <para>
@@ -91,7 +95,6 @@ public sealed class AnnouncementsController(
     AnnouncementAcceptedRateLimiter acceptedRateLimiter,
     IOptionsMonitor<StationOptions> stationMonitor,
     IOptionsMonitor<AnnouncementsOptions> announcementsMonitor,
-    NowPlayingService nowPlayingService,
     ILogger<AnnouncementsController> logger) : ControllerBase
 {
     // SPEC F143.1's fixed per-request override bound — not settings-tunable (unlike the F143.4 caps
@@ -217,8 +220,8 @@ public sealed class AnnouncementsController(
     /// (50); anything above <see cref="MaxHistoryLimit"/> (200) clamps down rather than 400ing — a
     /// caller asking for "too much history" is a harmless request to shrink, unlike a caller asking
     /// for an out-of-bounds TTL (<see cref="Post"/>'s own bounds check), which names a genuine
-    /// contract violation. No SpectatorMode gate (mirrors <see cref="NowPlaying"/>'s own remarks
-    /// immediately below): this route is never reachable by a public caller in the first place.
+    /// contract violation. No SpectatorMode gate (mirrors <see cref="AnnouncementNowPlayingController.NowPlaying"/>'s
+    /// own remarks): this route is never reachable by a public caller in the first place.
     /// </para>
     ///
     /// <para>
@@ -247,28 +250,6 @@ public sealed class AnnouncementsController(
     static AnnouncementHistoryDto ToHistoryDto(AnnouncementHistoryEntry entry) => new(
         entry.Id, entry.Message, entry.Verbatim, entry.State, entry.DeclineReason, entry.CollapseCount,
         entry.CreatedAt, entry.ExpiresAt, entry.AiredAt);
-
-    /// <summary>
-    /// <c>GET /api/announcements/now-playing</c> (SPEC F145.3, PLAN T340) — the token-reachable
-    /// now-playing read F147.3's home-automation sensor consumes. Reuses the SAME in-memory
-    /// <see cref="NowPlayingService"/> read <see cref="LiveController.GetNowPlaying"/> and
-    /// <see cref="SpectatorController.GetNowPlaying"/> already use — no engine telnet call, no DB
-    /// read, no new poller — projected down to <see cref="AnnouncementNowPlayingDto"/>'s minimal
-    /// shape (see that record's own remarks for why it carries only title/artist/DJ name). No
-    /// SpectatorMode gate here (unlike <see cref="Post"/>): this route is never reachable by a public
-    /// caller in the first place — it sits behind <see cref="AdminSurfaceAttribute"/> plus the
-    /// session-or-token authorization every action on this controller already requires, honoring the
-    /// no-listener-text law (SPEC F145.1) by construction rather than by a second runtime check.
-    /// </summary>
-    [HttpGet("now-playing")]
-    public IActionResult NowPlaying()
-    {
-        var snapshot = nowPlayingService.GetSnapshot(SingleStation.IdString);
-        if (snapshot is null || snapshot.IsDrain)
-            return Ok(new AnnouncementNowPlayingDto(null, null, null));
-
-        return Ok(new AnnouncementNowPlayingDto(snapshot.Title, snapshot.Artist, snapshot.DjName));
-    }
 
     static ProblemDetails SpectatorModeProblem() => new()
     {

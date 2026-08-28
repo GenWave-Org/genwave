@@ -924,7 +924,8 @@ public sealed class LlmCopyWriter(
             {
                 var ladderResult = await RunTruthGateLadderAsync(
                     candidateText => CheckTruthGate(
-                        candidateText, factBlock, stationLocalNow, request.Track?.Title, requiredCore),
+                        candidateText, factBlock, stationLocalNow, request.Track?.Title, request.StationName,
+                        requiredCore),
                     LlmPromptBuilder.BuildTruthGateReaskLine, candidate, text);
                 if (ladderResult is not null)
                     return ladderResult;
@@ -1091,16 +1092,27 @@ public sealed class LlmCopyWriter(
     /// exactly as it already governs the facts half via <paramref name="factBlock"/> above (which,
     /// for an announcement render, is this SAME string — see this method's own call site remarks).
     /// </para>
+    ///
+    /// <para>
+    /// <paramref name="stationName"/> (SPEC F138.8, STORY-364, PLAN T350, gh-#632) rides BOTH
+    /// <see cref="CopyClaims.CheckFacts"/>'s and <see cref="CopyClaims.CheckClock"/>'s own
+    /// <c>stationName</c> parameter — <c>request.StationName</c> at the one call site, never re-derived
+    /// — so the station saying its own name (a digit-run call sign, a present-frame weekday/daypart
+    /// word inside the name) is never flagged as an invented fact or a clock lie, on every kind this
+    /// gate covers.
+    /// </para>
     /// </summary>
     static ClaimCheckResult CheckTruthGate(
-        string copy, string? factBlock, DateTimeOffset stationLocalNow, string? trackTitle,
+        string copy, string? factBlock, DateTimeOffset stationLocalNow, string? trackTitle, string? stationName,
         string? requiredCore = null)
     {
         var violations = new List<ClaimViolation>();
         if (factBlock is not null)
-            violations.AddRange(CopyClaims.CheckFacts(copy, factBlock).Violations);
+            violations.AddRange(CopyClaims.CheckFacts(copy, factBlock, stationName).Violations);
 
-        violations.AddRange(CopyClaims.CheckClock(copy, stationLocalNow, trackTitle, requiredCore).Violations);
+        violations.AddRange(CopyClaims.CheckClock(
+            copy, stationLocalNow, trackTitle: trackTitle, ownerMessage: requiredCore, stationName: stationName)
+            .Violations);
 
         if (requiredCore is not null)
             violations.AddRange(CopyClaims.CheckContainment(copy, requiredCore).Violations);

@@ -62,7 +62,6 @@
 // Postgres fixture by GenWave.MediaLibrary.Tests/Specs/Story357_AnnouncementStore.cs — re-deriving that
 // SQL here would not be a new wire fact.
 
-using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -297,7 +296,7 @@ public sealed class VerbatimAnnouncementArc : IAsyncLifetime
 
         // Render — the real IVerbatimSegmentRenderer; zero LLM anywhere on this path (F144.2).
         var renderer = factory.Services.GetRequiredService<IVerbatimSegmentRenderer>();
-        var request = PaWireProofSupport.AnnouncementRequest();
+        var request = PaWireProofSupport.AnnouncementRequest(factory.Services);
         var rendered = await renderer.RenderAsync(request, new SegmentCopy(item.Message, FreshPerAiring: true), CancellationToken.None)
             ?? throw new InvalidOperationException("verbatim render unexpectedly returned null");
         CapturedSpeechInput = kokoro.Requests.Single().Input;
@@ -343,7 +342,7 @@ public sealed class FlavoredHealthyLlmArc : IAsyncLifetime
 
         // Flavor — the real IAnnouncementCopyWriter (LlmCopyWriter), against a real Kestrel completions
         // stub (Story358's own precedent, extended here into a real render).
-        var request = PaWireProofSupport.AnnouncementRequest();
+        var request = PaWireProofSupport.AnnouncementRequest(factory.Services);
         var copyWriter = factory.Services.GetRequiredService<IAnnouncementCopyWriter>();
         FlavoredCopy = await copyWriter.WriteAnnouncementAsync(request, item.Message, CancellationToken.None);
 
@@ -392,7 +391,7 @@ public sealed class LlmFencedArc : IAsyncLifetime
         var source = factory.Services.GetRequiredService<IAnnouncementSource>();
         var item = (await source.ClaimDeliverableAsync(2, CancellationToken.None)).Single(i => i.Id == id);
 
-        var request = PaWireProofSupport.AnnouncementRequest();
+        var request = PaWireProofSupport.AnnouncementRequest(factory.Services);
         var copyWriter = factory.Services.GetRequiredService<IAnnouncementCopyWriter>();
         FlavoredCopy = await copyWriter.WriteAnnouncementAsync(request, item.Message, CancellationToken.None);
 
@@ -451,7 +450,7 @@ public sealed class HardDegradationArc : IAsyncLifetime
         var source = factory.Services.GetRequiredService<IAnnouncementSource>();
         var item = (await source.ClaimDeliverableAsync(2, CancellationToken.None)).Single(i => i.Id == id);
 
-        var request = PaWireProofSupport.AnnouncementRequest();
+        var request = PaWireProofSupport.AnnouncementRequest(factory.Services);
         var copyWriter = factory.Services.GetRequiredService<IAnnouncementCopyWriter>();
         FlavoredCopy = await copyWriter.WriteAnnouncementAsync(request, item.Message, CancellationToken.None);
         LlmStubRequestCount = llm.Requests.Count;
@@ -503,7 +502,7 @@ public sealed class PrivacyArc : IAsyncLifetime
                 "/api/announcements", new { message = "Row A airs before the flip", verbatim = true }))
             .Content.ReadFromJsonAsync<AnnouncementAcceptedWire>())!.Id;
         var itemA = (await source.ClaimDeliverableAsync(2, CancellationToken.None)).Single(i => i.Id == idA);
-        var requestA = PaWireProofSupport.AnnouncementRequest();
+        var requestA = PaWireProofSupport.AnnouncementRequest(factory.Services);
         var renderedA = await renderer.RenderAsync(requestA, new SegmentCopy(itemA.Message, FreshPerAiring: true), CancellationToken.None)
             ?? throw new InvalidOperationException("row A render unexpectedly returned null");
         await PaWireProofSupport.PublishAiredAndDrainAsync(factory, idA, renderedA);
@@ -591,7 +590,7 @@ public sealed class TokenDoorArc : IAsyncLifetime
         var source = factory.Services.GetRequiredService<IAnnouncementSource>();
         var item = (await source.ClaimDeliverableAsync(2, CancellationToken.None)).Single(i => i.Id == id);
         var renderer = factory.Services.GetRequiredService<IVerbatimSegmentRenderer>();
-        var request = PaWireProofSupport.AnnouncementRequest();
+        var request = PaWireProofSupport.AnnouncementRequest(factory.Services);
         var rendered = await renderer.RenderAsync(request, new SegmentCopy(item.Message, FreshPerAiring: true), CancellationToken.None)
             ?? throw new InvalidOperationException("token-door render unexpectedly returned null");
 
@@ -618,17 +617,17 @@ file static class PaWireProofSupport
 {
     public static string FreshTempDir() => Path.Combine(Path.GetTempPath(), "genwave-pawire-" + Guid.NewGuid().ToString("N"));
 
-    public static async Task LoginAsync(HttpClient client, string password)
-    {
-        var response = await client.PostAsJsonAsync("/api/auth/login", new { password });
-        if (response.StatusCode != HttpStatusCode.NoContent)
-            throw new InvalidOperationException($"login unexpectedly returned {response.StatusCode}");
-    }
+    // Login + the minimal announcement SegmentRequest shape both moved to
+    // Support/AnnouncementWireSupport.cs (T352 review — Story364_TheGateRulesOnTheWire.cs
+    // became a second caller) — thin delegations kept here so every existing call site below reads
+    // unchanged. AnnouncementRequest() now takes the factory's own IServiceProvider (T352 review
+    // round 2, HIGH-1): it reads Station:Name/Voice/Id live off that container instead of a baked
+    // literal, so a factory that ever overrides those keys differently is reflected here too.
+    public static Task LoginAsync(HttpClient client, string password) =>
+        AnnouncementWireSupport.LoginAsync(client, password);
 
-    /// <summary>The SAME minimal SegmentRequest shape Story358_AnnouncementFlavorEndToEnd.cs's own
-    /// AnnouncementRequest() helper builds — station voice/name/id, no track, "now".</summary>
-    public static SegmentRequest AnnouncementRequest() =>
-        new(SegmentKind.Announcement, "af_heart", "GWAV 108.8", Track: null, DateTimeOffset.UtcNow, "genwave-1");
+    public static SegmentRequest AnnouncementRequest(IServiceProvider services) =>
+        AnnouncementWireSupport.AnnouncementRequest(services);
 
     /// <summary>Applies the Orchestrator's own MediaId-wrap (AnnouncementMediaId.Wrap, PLAN T341) —
     /// replicating that one line of glue, not routing around it — then publishes the genuine TrackAired
@@ -661,42 +660,22 @@ file static class PaWireProofSupport
 }
 
 /// <summary>
-/// Brings up a disposable Postgres (the SAME db-compose.yaml GenWave.MediaLibrary.Tests/DatabaseFixture.cs
-/// already uses — the single source of truth: db/01-library.sh + db/06-station-settings-migration.sh,
-/// where db/06 mirrors every station-schema migration through db/40's own announcements table, proven
-/// by that project's ScenarioMigrationConvergence) rather than a second copy of that compose file. A
-/// unique compose project name + an OS-assigned host port per instance (gh-#569/#602's own lesson,
-/// mirrored from DatabaseFixture/KokoroFixture) means every Arc's own ephemeral Postgres is fully
-/// isolated — safe under xUnit's default cross-class parallelization, since no two Arcs ever share a
-/// database, unlike a single collection-shared fixture would.
+/// This file's own thin subclass of the shared <see cref="EphemeralStationDatabase"/> harness
+/// (Support/EphemeralStationDatabase.cs — T351 review hoist; that type's own remarks carry the full
+/// "which compose file, why a unique project name + OS-assigned port" rationale). Supplies only what
+/// genuinely varies for THIS file: the <c>"genwave-pawire"</c> compose project-name prefix, and the
+/// one extra query (<see cref="ReadAnnouncementSourceAsync"/>) no other caller needs.
 /// </summary>
-file sealed class TestStationDatabase : IAsyncDisposable
+file sealed class TestStationDatabase : EphemeralStationDatabase
 {
-    readonly string project;
-    readonly string composeFile;
-    bool disposed;
-
-    public string LibraryConnectionString { get; }
-    public string StationConnectionString { get; }
-
     TestStationDatabase(string project, string composeFile, string libraryConnectionString, string stationConnectionString)
+        : base(project, composeFile, libraryConnectionString, stationConnectionString)
     {
-        this.project = project;
-        this.composeFile = composeFile;
-        LibraryConnectionString = libraryConnectionString;
-        StationConnectionString = stationConnectionString;
     }
 
     public static async Task<TestStationDatabase> StartAsync()
     {
-        var project = $"genwave-pawire-{Guid.NewGuid():N}"[..24];
-        var composeFile = LocateComposeFile();
-        Compose(project, composeFile, "up", "-d", "--wait");
-
-        var port = DiscoverHostPort(project, composeFile);
-        var library = $"Host=localhost;Port={port};Database=genwave;Username=library_svc;Password=libtest;Search Path=library";
-        var station = $"Host=localhost;Port={port};Database=genwave;Username=station_svc;Password=stationtest;Search Path=station";
-
+        var (project, composeFile, library, station) = Provision("genwave-pawire");
         var db = new TestStationDatabase(project, composeFile, library, station);
         await db.WaitForSchemaAsync();
         return db;
@@ -713,77 +692,6 @@ file sealed class TestStationDatabase : IAsyncDisposable
         cmd.Parameters.AddWithValue("id", id);
         return await cmd.ExecuteScalarAsync() as string
             ?? throw new InvalidOperationException($"no station.announcement row for id {id}");
-    }
-
-    async Task WaitForSchemaAsync()
-    {
-        for (var attempt = 0; attempt < 30; attempt++)
-        {
-            try
-            {
-                await using var conn = new NpgsqlConnection(StationConnectionString);
-                await conn.OpenAsync();
-                await using var cmd = conn.CreateCommand();
-                cmd.CommandText = "select 1 from station.settings limit 0";
-                await cmd.ExecuteScalarAsync();
-                return;
-            }
-            catch (NpgsqlException)
-            {
-                await Task.Delay(1000);
-            }
-        }
-
-        throw new InvalidOperationException("station schema not ready on the ephemeral test database");
-    }
-
-    public ValueTask DisposeAsync()
-    {
-        if (disposed) return ValueTask.CompletedTask;
-        disposed = true;
-        try { Compose(project, composeFile, "down", "-v"); } catch { /* best-effort teardown */ }
-        return ValueTask.CompletedTask;
-    }
-
-    static void Compose(string project, string composeFile, params string[] verbAndArgs)
-    {
-        var args = new List<string> { "compose", "-p", project, "-f", composeFile };
-        args.AddRange(verbAndArgs);
-        Run("docker", args);
-    }
-
-    static int DiscoverHostPort(string project, string composeFile)
-    {
-        var output = RunCapture("docker", ["compose", "-p", project, "-f", composeFile, "port", "testdb", "5432"]).Trim();
-        var lastColon = output.LastIndexOf(':');
-        if (lastColon < 0 || !int.TryParse(output[(lastColon + 1)..], out var hostPort))
-            throw new InvalidOperationException($"could not parse a host port from 'docker compose port' output: '{output}'");
-        return hostPort;
-    }
-
-    static void Run(string file, IReadOnlyList<string> args) => RunCapture(file, args);
-
-    static string RunCapture(string file, IReadOnlyList<string> args)
-    {
-        var psi = new ProcessStartInfo(file) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-        foreach (var a in args) psi.ArgumentList.Add(a);
-
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException($"failed to start {file}");
-        var stdout = p.StandardOutput.ReadToEndAsync();
-        var stderr = p.StandardError.ReadToEndAsync();
-        p.WaitForExit();
-        if (p.ExitCode != 0)
-            throw new InvalidOperationException($"{file} {string.Join(' ', args)} failed:\n{stderr.Result}{stdout.Result}");
-        return stdout.Result;
-    }
-
-    static string LocateComposeFile()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "GenWave.sln")))
-            dir = dir.Parent;
-        if (dir is null) throw new InvalidOperationException("repo root (GenWave.sln) not found");
-        return Path.Combine(dir.FullName, "tests", "GenWave.MediaLibrary.Tests", "db-compose.yaml");
     }
 }
 

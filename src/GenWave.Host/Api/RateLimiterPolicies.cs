@@ -64,10 +64,13 @@ static class RateLimiterPolicies
     public const string Requests = "requests";
 
     /// <summary>
-    /// Guards EVERY route on <c>AnnouncementsController</c> — <c>POST /api/announcements</c>,
-    /// <c>GET /api/announcements</c> (history, F146.2), and <c>GET /api/announcements/now-playing</c>
-    /// — with a per-source-IP fixed window (SPEC F145.3/.4, PLAN T340 carry-forward: "a per-IP limiter
-    /// on the Bearer door", built at PLAN T344). Unlike its sibling story (the deleted <c>Announce</c>
+    /// Guards EVERY route across the announcements family — <c>POST /api/announcements</c>,
+    /// <c>GET /api/announcements</c> (history, F146.2), both on <c>AnnouncementsController</c>, and
+    /// <c>GET /api/announcements/now-playing</c> on its own <c>AnnouncementNowPlayingController</c>
+    /// (split out at PLAN T351, SPEC F145.6 — each controller carries this policy independently, since
+    /// <see cref="EnableRateLimitingAttribute"/> only reaches its own type) — with a per-source-IP
+    /// fixed window (SPEC F145.3/.4, PLAN T340 carry-forward: "a per-IP limiter on the Bearer door",
+    /// built at PLAN T344). Unlike its sibling story (the deleted <c>Announce</c>
     /// policy F1 above describes), this one runs BEFORE authentication deliberately: its entire
     /// purpose is to bound <see cref="AnnounceTokenAuthenticationHandler"/>'s
     /// own <see cref="IAnnounceTokenStore.ReadHashAsync"/> call, which fires on EVERY Bearer

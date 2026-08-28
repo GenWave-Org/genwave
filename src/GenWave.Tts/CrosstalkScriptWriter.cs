@@ -181,7 +181,8 @@ public sealed class CrosstalkScriptWriter(
                     LlmCallCause.OverLength, personaName, startedAt, mode, systemPrompt, userPrompt, cfg.Model, raw);
             }
 
-            var result = CrosstalkScriptParser.Parse(raw, cfg.MaxCopyChars, durationTargetSeconds, request.StationLocalNow);
+            var result = CrosstalkScriptParser.Parse(
+                raw, cfg.MaxCopyChars, durationTargetSeconds, request.StationLocalNow, request.StationName);
             return result switch
             {
                 CrosstalkWriteResult.Accepted => Accept(

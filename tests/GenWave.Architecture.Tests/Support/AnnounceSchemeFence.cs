@@ -4,11 +4,17 @@ using Microsoft.AspNetCore.Authorization;
 namespace GenWave.Architecture.Tests.Support;
 
 /// <summary>
-/// L9's detector (PLAN T343, T340 review's own mutation-proven carry-forward): scans every type in
+/// L9's detector (PLAN T343, T340 review's own mutation-proven carry-forward; widened to a SET of
+/// designated carriers at PLAN T351, SPEC F145.6, STORY-366): scans every type in
 /// <paramref name="subjects"/> — class-level AND method-level <see cref="AuthorizeAttribute"/> alike —
-/// for one that names <paramref name="schemeName"/> inside its own
-/// <see cref="AuthorizeAttribute.AuthenticationSchemes"/>, other than
-/// <paramref name="designatedTypeFullName"/>.
+/// for one that names <c>schemeName</c> inside its own
+/// <see cref="AuthorizeAttribute.AuthenticationSchemes"/>, other than a type named in the caller's own
+/// designated set (today, exactly two: <c>AnnouncementsController</c> and
+/// <c>AnnouncementNowPlayingController</c> — see <c>Story360_AnnounceSchemeFence.cs</c>'s and
+/// <c>Story366_AnnounceSchemeFenceTwoCarriers.cs</c>'s own real-host facts). The single-name overload
+/// below is kept — never removed — for callers (this suite's own synthetic-fixture facts) that only
+/// ever need to exclude ONE stand-in type; it is a thin wrapper over the set-based overload, not a
+/// second implementation to keep in sync.
 ///
 /// <b>Plain reflection, not an IL-token walk (unlike L7/L8's own <see cref="MemberCallSiteScan"/>
 /// workaround).</b> <see cref="AuthorizeAttribute"/> is a REAL runtime attribute the CLR materializes
@@ -41,14 +47,31 @@ namespace GenWave.Architecture.Tests.Support;
 /// </summary>
 internal static class AnnounceSchemeFence
 {
+    /// <summary>The real host's own designated carrier set (SPEC F145.6, PLAN T351) — the ONE copy
+    /// <c>Story360_AnnounceSchemeFence.cs</c>'s mechanism-sanity facts and
+    /// <c>Story366_AnnounceSchemeFenceTwoCarriers.cs</c>'s real-host and third-carrier facts all
+    /// share, so the two spec files never risk drifting apart on which types the law designates.</summary>
+    public static readonly IReadOnlyList<string> DesignatedCarriers =
+    [
+        "GenWave.Host.Api.AnnouncementsController",
+        "GenWave.Host.Api.AnnouncementNowPlayingController",
+    ];
+
+    /// <summary>Single-carrier convenience overload — wraps <paramref name="designatedTypeFullName"/>
+    /// in a one-element set and forwards. Kept so a caller excluding only one stand-in type (this
+    /// suite's own synthetic-fixture facts) never has to build a collection literal for it.</summary>
     public static IReadOnlyList<LawViolation> FindViolations(
-        IEnumerable<Type> subjects, string schemeName, string designatedTypeFullName)
+        IEnumerable<Type> subjects, string schemeName, string designatedTypeFullName) =>
+        FindViolations(subjects, schemeName, [designatedTypeFullName]);
+
+    public static IReadOnlyList<LawViolation> FindViolations(
+        IEnumerable<Type> subjects, string schemeName, IReadOnlyCollection<string> designatedTypeFullNames)
     {
         var violations = new List<LawViolation>();
 
         foreach (var type in subjects)
         {
-            if (type.FullName == designatedTypeFullName) continue;
+            if (designatedTypeFullNames.Any(designated => designated == type.FullName)) continue;
 
             var classHit = NamesScheme(type.GetCustomAttributes<AuthorizeAttribute>(inherit: false), schemeName);
 
@@ -63,7 +86,7 @@ internal static class AnnounceSchemeFence
             // same "one violation per outermost declaring type" posture HostNamespaceTripwire's own
             // remarks take for L5.
             if (classHit || methodHit)
-                violations.Add(Violation(type, schemeName));
+                violations.Add(Violation(type, schemeName, designatedTypeFullNames));
         }
 
         return violations;
@@ -73,8 +96,9 @@ internal static class AnnounceSchemeFence
         attributes.Any(a => a.AuthenticationSchemes is { } schemes
             && schemes.Split(',').Select(s => s.Trim()).Contains(schemeName, StringComparer.Ordinal));
 
-    static LawViolation Violation(Type type, string schemeName) => new(
+    static LawViolation Violation(Type type, string schemeName, IReadOnlyCollection<string> designatedTypeFullNames) => new(
         LawId.L9,
         type.FullName ?? type.Name,
-        $"names \"{schemeName}\" inside an [Authorize(AuthenticationSchemes = ...)] list — only the designated type may");
+        $"names \"{schemeName}\" inside an [Authorize(AuthenticationSchemes = ...)] list — only the " +
+        $"designated carriers ({string.Join(", ", designatedTypeFullNames)}) may");
 }
