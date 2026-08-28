@@ -64,6 +64,7 @@ export const SETTINGS_HELP_KEYS = [
   "DependencyHealth:ProbeTimeoutSeconds",
   "DependencyHealth:UnhealthyThreshold",
   "Llm:DegradationPin",
+  "Llm:ReasoningEffort",
   "Community:CatalogIndexUrl",
   "Station:Audience",
   "Station:Timezone",

@@ -54,6 +54,7 @@ const STRING_KEYS = new Set<SettingsHelpKey>([
   "Library:YearLookup:Endpoint",
   "Community:CatalogIndexUrl",
   "Station:Audience",
+  "Llm:ReasoningEffort",
   "Station:Timezone",
   "Station:Location:Latitude",
   "Station:Location:Longitude",

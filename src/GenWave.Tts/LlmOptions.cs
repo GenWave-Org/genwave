@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using GenWave.Core.Llm;
 
 namespace GenWave.Tts;
 
@@ -52,6 +53,17 @@ public sealed class LlmOptions
     /// live <c>PUT /api/settings</c> applies with no api restart.
     /// </summary>
     public string DegradationPin { get; set; } = "auto";
+
+    /// <summary>
+    /// The <c>reasoning_effort</c> every completions request carries (gh-#620): <c>"none"</c>
+    /// (default) tells a thinking-capable model to answer directly instead of spending the whole
+    /// <c>max_tokens</c> budget on chain-of-thought and returning empty content; <c>"low"</c>/
+    /// <c>"medium"</c>/<c>"high"</c> let it think; <c>"omit"</c> sends no field at all (the
+    /// pre-gh-#620 wire shape, for a third-party OpenAI-compatible backend that rejects it).
+    /// Vocabulary and wire mapping live in <see cref="ReasoningEffort"/>; allowlisted and validated
+    /// in <c>GenWave.Host</c> as a live choice setting, read fresh per call like every other leaf here.
+    /// </summary>
+    public string ReasoningEffort { get; set; } = Core.Llm.ReasoningEffort.Default;
 
     /// <summary>
     /// Ring size for the LLM call inspector (SPEC F73.1, STORY-196, T41): <see cref="LlmCallRing"/>

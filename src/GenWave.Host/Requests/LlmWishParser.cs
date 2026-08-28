@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using GenWave.Core.Domain;
+using GenWave.Core.Llm;
 using GenWave.Tts;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -97,11 +98,13 @@ sealed class LlmWishParser(
                     new { role = "system", content = SystemPrompt },
                     new { role = "user", content = BuildUserPrompt(wish) },
                 },
+                // gh-#620 — see ReasoningEffort's own remarks; null ("omit") leaves the member out.
+                reasoning_effort = ReasoningEffort.ToWire(cfg.ReasoningEffort),
             };
 
             using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
             {
-                Content = JsonContent.Create(body),
+                Content = JsonContent.Create(body, options: ChatCompletionRequestJson.Options),
             };
             if (!string.IsNullOrEmpty(cfg.ApiKey))
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.ApiKey);

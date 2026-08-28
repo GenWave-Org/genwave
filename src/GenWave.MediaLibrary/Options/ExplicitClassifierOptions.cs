@@ -1,5 +1,7 @@
 namespace GenWave.MediaLibrary.Options;
 
+using GenWave.Core.Llm;
+
 /// <summary>
 /// The explicit-classification sweep's view of the SAME configured LLM endpoint
 /// <c>GenWave.Tts.LlmOptions</c> and <see cref="MoodTaggerOptions"/> already bind (SPEC F95.3 — "an
@@ -28,4 +30,11 @@ public sealed class ExplicitClassifierOptions
 
     /// <summary>Optional bearer token for the endpoint — env-only per the F19.3 secrets rule.</summary>
     public string ApiKey { get; set; } = "";
+
+    /// <summary>
+    /// The <c>reasoning_effort</c> the request carries (gh-#620) — bound from the same <c>Llm</c>
+    /// section as <c>LlmOptions.ReasoningEffort</c>, so the one live <c>Llm:ReasoningEffort</c> setting
+    /// governs this poster too. Vocabulary and wire mapping: <see cref="Core.Llm.ReasoningEffort"/>.
+    /// </summary>
+    public string ReasoningEffort { get; set; } = Core.Llm.ReasoningEffort.Default;
 }

@@ -1,5 +1,7 @@
 namespace GenWave.MediaLibrary.Options;
 
+using GenWave.Core.Llm;
+
 /// <summary>
 /// The mood tagger's view of the SAME configured LLM endpoint <c>GenWave.Tts.LlmOptions</c> already
 /// binds (SPEC F85.2 — "the configured LLM endpoint", singular, not a second one an operator would
@@ -29,4 +31,11 @@ public sealed class MoodTaggerOptions
 
     /// <summary>Optional bearer token for the endpoint — env-only per the F19.3 secrets rule.</summary>
     public string ApiKey { get; set; } = "";
+
+    /// <summary>
+    /// The <c>reasoning_effort</c> the request carries (gh-#620) — bound from the same <c>Llm</c>
+    /// section as <c>LlmOptions.ReasoningEffort</c>, so the one live <c>Llm:ReasoningEffort</c> setting
+    /// governs this poster too. Vocabulary and wire mapping: <see cref="Core.Llm.ReasoningEffort"/>.
+    /// </summary>
+    public string ReasoningEffort { get; set; } = Core.Llm.ReasoningEffort.Default;
 }
