@@ -1,6 +1,6 @@
 # 📡 GenWave Deployment — Reference Public-Station Topology
 
-> ℹ️ **v5.3 note:** the GHCR image pins moved out of `compose.demo.yaml` into their own
+> ℹ️ **Since v5.3:** the GHCR image pins moved out of `compose.demo.yaml` into their own
 > overlay, `compose.pinned.yaml` (SPEC F136.5). Every pinned/appliance command below is
 > now **three** `-f` files — `compose.yaml` + `compose.pinned.yaml` + `compose.demo.yaml`,
 > in that order. The old two-file `compose.yaml` + `compose.demo.yaml` form still runs,
@@ -132,7 +132,8 @@ only boundary is network isolation) to the internet. `compose.demo.yaml` uses th
 docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml config
 # api.ports must resolve to exactly one entry: host_ip 127.0.0.1, target 8080.
 # No 0.0.0.0, no 8081. Then confirm on the host after `up`:
-ss -ltn     # 127.0.0.1:8080 and 127.0.0.1:3000 only — never 0.0.0.0:8080/:8081/:3000
+ss -ltn     # 127.0.0.1:8080 and 127.0.0.1:3000, plus caddy on 0.0.0.0:80/:443 — and nothing else;
+            # never 0.0.0.0:8080/:8081/:3000
 ```
 
 If your Compose predates the `!override` tag (needs v2.24+), upgrade — don't ship a
@@ -211,6 +212,29 @@ header-identical to an unmapped route.
 
 ---
 
+## 🧙 The wizard and `GW_PRESET` — how a box picks its topology
+
+`./setup.sh` (v5.3.0, SPEC F132) is the first-run path: four questions — prebuilt images or
+build from source, where the music lives, which topology, admin on or off — then it generates
+every secret, writes `.env` in one atomic step, and hands off to `launch.sh`. On a box that
+already has a `.env` it never writes: it verifies the install against the machine (a drift
+report) and `--repair` fixes what it can. The one topology fact it persists is
+**`GW_PRESET`** in `.env`, a closed set:
+
+| `GW_PRESET` | Files | Shape |
+|---|---|---|
+| `home` | `compose.yaml` + `compose.pinned.yaml` | published images, LAN station — no demo overlay, no `PUBLIC_HOST` |
+| `home-piper-only` | + `compose.piper-only.yaml` | the 4 GB-class topology (Piper primary, no kokoro/ollama) |
+| `dev` / `dev-piper-only` | `compose.yaml` (+ piper-only) | the from-source flow |
+
+`launch.sh` is the only reader of the key; an explicit `--pinned` / `--piper-only` flag always
+wins over it, and an unrecognised or retired value (`pinned`, `pinned-piper-only`) exits `2`
+loudly rather than silently remapping. The **public appliance is flag-only** — `./launch.sh
+--pinned` adds `compose.demo.yaml`; no preset does. `GW_PRESET` is not in `.env.example`
+(the wizard writes it); set it by hand only if you skip the wizard.
+
+---
+
 ## 🧯 Appliance checklist & temporary admin access
 
 Appliance boot (`compose.demo.yaml` defaults):
@@ -235,15 +259,26 @@ sanctioned launch/upgrade path — `launch.sh` bare assumes the source-build dev
 ```
 
 Under the hood `--pinned` runs, against `compose.yaml` + `compose.pinned.yaml` +
-`compose.demo.yaml`, and never builds:
+`compose.demo.yaml`, never builds, and is **staged** (SPEC F136): the on-air core comes up
+first, the heavyweights and profile extras converge afterwards. `./launch.sh --pinned --dry-run`
+prints exactly this plan for your file set:
 
 ```bash
-docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml pull
-docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml up -d --no-recreate db   # + health wait
+C="docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml"
+$C pull db icecast engine api            # stage 1: the core only (+ piper when the fallback profile is active)
+$C up -d --no-recreate db                # + poll the db healthcheck (up to 60 s)
 ./migrate.sh -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml
-docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml up -d
-docker image prune -af --filter "until=168h"   # success-path hygiene (gh-#441), + builder prune
+$C up -d --remove-orphans --no-deps db icecast engine api   # ── ON AIR ──
+$C pull                                  # stage 2: everything else (fast no-op for the core layers)
+$C up -d --remove-orphans                # converge every remaining pin + profile-gated extra
+docker image prune -af --filter "until=168h"   # success-path hygiene (gh-#441)
+docker builder prune -af
 ```
+
+(`--piper-only` runs the flat, unstaged form of the same steps — there are no heavyweights
+left to defer.) Exit codes: `0` fully converged · `2` bad invocation · `3` preflight/stage-1
+failure, the stack left exactly as it was · `4` stage 2 failed **after** the core went on air
+— the printed degradation summary names the catch-up command.
 
 The final prune runs **only after a successful `up`** (a failed upgrade leaves the
 previous images untouched — they're what is still running) and keeps everything in use
@@ -260,14 +295,16 @@ migrations pass.
 Every `db/*-migration.sh` is an idempotent in-place upgrade (`ADD COLUMN IF NOT EXISTS`
 and the like), so running it with nothing new to apply is a safe no-op. `--dry-run`
 prints the exact command plan without touching anything — `./launch.sh --pinned --dry-run`
-or, for just the migration step, `./migrate.sh --help`.
+or, for just the migration step, `./migrate.sh --dry-run` (`--keep-going` applies the rest
+after one script fails; `--help` for the flags).
 
 Since gh-#19, `launch.sh` **preflights before touching the stack** (Docker running,
 compose plugin, `.env` secrets present and non-placeholder) and every failure exit says
 how to proceed. On the pinned flow a failed pull or migration explicitly leaves the
-running stack alone, and a part-way `up` is *not* rolled back — whatever is still
-broadcasting keeps broadcasting; the failure report says how to converge. `SKIP_PREFLIGHT=1`
-bypasses the checks.
+running stack alone (exit `3`), and a part-way stage-2 `up` is *not* rolled back — whatever is
+still broadcasting keeps broadcasting and the run exits `4` with the converge command named.
+`SKIP_PREFLIGHT=1` bypasses the checks (⚠️ it also reaches `build.sh`'s own test run if you
+export it — gh-#631).
 
 Combine with `--with` to also activate compose profiles (e.g. `logging`, `tunnel`) on the
 same launch: `./launch.sh --pinned --with logging,tunnel` merges them into whatever
@@ -294,7 +331,7 @@ this doc behave exactly as written.
 
 ⚠️ **Profiles are a separate axis.** `COMPOSE_PROFILES` is deliberately *not* persisted —
 `--with` is per-launch by design — so a bare `down` can still leave profile-gated
-containers (`admin_ui`, `cloudflared`, `alloy`) behind. Use `--remove-orphans`, or set a
+containers (`admin_ui`, `piper`, `cloudflared`, `alloy`) behind. Use `--remove-orphans`, or set a
 standing `COMPOSE_PROFILES` in `.env` (which `launch.sh` already reads as the base for
 `--with`).
 
@@ -402,6 +439,72 @@ internet, no Caddy), none of this file applies — leave `Admin__Enabled` at its
 
 ---
 
+## 🏠 The House Voice — announcements and the announce token (v5.4.0, SPEC F143–F147)
+
+Owner announcements let the DJ work a line into the next break (in character, or read
+**verbatim** — and always verbatim when the in-character copy fails the truth gate). They are
+a durable unit of content (`station.announcement`, db/40) with a visible lifecycle; nothing the
+pipeline touches is ever deleted.
+
+**Deploy knobs — env/compose only, not live settings** (`Announcements__*`, boot-validated):
+
+| Key | Default | What it bounds |
+|---|:---:|---|
+| `Announcements__MessageMaxChars` | 280 | a longer message is a 400 |
+| `Announcements__AcceptedPerMinute` | 6 | station-wide, across both doors (cookie and token); a refusal never spends it |
+| `Announcements__PendingDepthCap` | 12 | pending + claimed rows; deeper is a 429 |
+
+**The announce token** — for automations (Home Assistant) that must not hold the admin cookie:
+
+- Mint on the Announcements page, or `POST /api/announcements/token` (cookie session only).
+  **Reveal-once**: the plaintext is returned exactly once; only its SHA-256 lands in the
+  settings row `Announcements:TokenHash` (machine-written, never listed by the settings API).
+  `POST` again to rotate, `DELETE` to revoke — a revoked token is refused on the very next
+  request (fresh read per call, no cache). `GET /api/announcements/token/status` reports
+  whether one exists and `Announcements:TokenLastUsedAt`.
+- The token is a `Bearer` on **`/api/announcements` only** (submit, history, and the
+  token-authed now-playing read the sensor uses); a fitness law fences the scheme to that
+  controller, so it can never promote to the admin planes.
+- ⚠️ **Transport and reachability — read before wiring HA.** The whole family is an
+  admin-surface route: on the **reference public topology** (`compose.demo.yaml`:
+  `Admin__Enabled: "false"`, api bound to `127.0.0.1:8080`) it 404s and is unreachable from
+  the LAN — an appliance box as shipped cannot be a House Voice station. On the
+  Operator/Standard modes the api listens on `0.0.0.0:8080` over plain HTTP, so the token
+  crosses your LAN in the clear: keep it on a trusted network, or front the api with TLS
+  (Caddy) before pointing an integration at it from anywhere else. Whether the
+  announcements family should stay reachable with the admin plane off is an open ruling for
+  `/design`, not a documented decision.
+- **A public station never carries the house's events**: while `Station:SpectatorMode` is
+  on, submissions are refused with a 403 and pending rows are declined at the flip — the
+  demo station can never demo this by design.
+
+**Home Assistant**: the companion [`genwave-homeassistant`](https://github.com/GenWave-Org/genwave-homeassistant)
+integration (HACS custom repository, MIT; HA 2025.3.0+) takes the station URL and the token,
+and provides the `genwave.announce` service (`message`, `verbatim`, `ttl_seconds`, `voice`), a
+`notify` entity, `sensor.now_playing` (title, artist, DJ), and a blueprint gallery — dinner
+bell, laundry done, morning ramp. Gated live 2026-08-28: a blueprint ring reached the air in
+one break cycle.
+
+---
+
+## 📚 The library scan — a moved root is quarantined, not fed to the engine (gh-#611/#612)
+
+A catalog row whose path lies outside the current `Library:MediaRoot` can never be
+re-verified by the scan (the classic cause: the library was once scanned under a different
+mount, so every file exists twice and half the picks point nowhere). Since v5.4.0 such rows
+are **quarantined** (`state = unavailable`, out of rotation) after `Library:Scan:MissThreshold`
+consecutive scans (default 2 — the same miss grace a vanished file gets, SPEC F58), and
+resurrect through normal discovery if the root moves back. Roots that legitimately live
+outside `MediaRoot` are exempt via `Library:Scan:QuarantineExemptRoots` (default `/authored`,
+the authored-segments volume) — a deployment that relocates that volume must update this and
+`Station:Safe:AuthoredRoot` together. Independently, every push now checks the file exists
+first and declines with a WARN if not, and a chain that was pushed but never aired is surfaced
+rather than silent. Per-service memory fences for every container (kokoro 4 GB, piper 768 MB,
+alloy 256 MB, cloudflared 128 MB, dockerproxy 64 MB) live in HARDWARE.md's "What each service
+needs" table — one source, not two.
+
+---
+
 ## ☁️ Cloudflare tunnel (optional)
 
 An alternative to the Caddy topology above: instead of publishing anything on the host at
@@ -503,7 +606,10 @@ Two Access application shapes cover this stack's two audiences:
   (non-identity), backed by a service token. The client authenticates by sending
   `CF-Access-Client-Id` / `CF-Access-Client-Secret` headers with every push request —
   exactly what the `alloy` logging profile does, sourced from the `LOKI_ACCESS_CLIENT_ID`
-  / `LOKI_ACCESS_CLIENT_SECRET` env vars (`compose.yaml`'s `alloy` service; header
+  / `LOKI_ACCESS_CLIENT_SECRET` env vars — alongside **`LOKI_PUSH_URL`** (the push target;
+  alloy refuses to start, exit 1, while it is empty — SPEC F78.4) and the label pair
+  `ALLOY_STATION_LABEL` / `ALLOY_ENV_LABEL` (`compose.yaml`'s `alloy` service; none of the
+  four are in `.env.example` — add them to `.env` when you enable the profile; header
   attachment lives in `observability/alloy/config.alloy`; label contract in
   `observability/LABELS.md`).
 
