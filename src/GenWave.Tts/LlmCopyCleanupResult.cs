@@ -43,6 +43,14 @@ internal abstract record LlmCopyCleanupResult
     public sealed record Rejected(bool WasOverLength) : LlmCopyCleanupResult;
 
     /// <summary>
+    /// gh-#620: the reply carried no answer but <paramref name="ReasoningChars"/> of chain-of-thought —
+    /// a thinking model spent the <c>max_tokens</c> budget reasoning. Classified for the ring exactly
+    /// like an empty <see cref="Rejected"/> (the F139 taxonomy is unchanged), but the fallback WARN
+    /// names the real cause and the lever (<c>Llm:ReasoningEffort</c>) instead of "empty after cleanup".
+    /// </summary>
+    public sealed record ReasoningOnly(int ReasoningChars, string? FinishReason) : LlmCopyCleanupResult;
+
+    /// <summary>
     /// The F138.4 ladder's own floor (T331 review finding F3): a re-ask that hygiene would otherwise
     /// have accepted — it fit, or salvaged to a real sentence — but that STILL failed
     /// <see cref="CopyClaims.CheckFacts"/> a second time. Distinct from the plain

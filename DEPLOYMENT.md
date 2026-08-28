@@ -175,6 +175,11 @@ cross-IP 429s the day requests launched. Verify after deploy: a login line's
   ~25–30s. Set the (live) setting to `60` — latency is free, renders are ahead of air.
 - The `ollama-init` one-shot pulls `llama3.2:3b` — keep it in lockstep with the
   `Llm:Model` setting, and size the model to the memory fence.
+- **`Llm:ReasoningEffort`** (live, default `none`): thinking-capable models (gemma4, qwen3,
+  deepseek-r1, magistral) otherwise spend the whole copy budget on chain-of-thought and return
+  empty lines — every break falls back to a template while the tile flaps (gh-#620). `none` makes
+  them answer directly; `low`/`medium`/`high` let them think; `omit` sends no field at all, for a
+  third-party OpenAI-compatible backend that rejects it. Ordinary models ignore the field.
 
 ---
 

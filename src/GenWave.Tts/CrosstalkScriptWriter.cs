@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using GenWave.Core.Llm;
 
 /// <summary>
 /// Generates one two-voice banter exchange per call (SPEC F127.3, F127.4, STORY-326) — the
@@ -146,11 +147,14 @@ public sealed class CrosstalkScriptWriter(
                 // remarks). Still reuses LlmCopyWriter.DeriveMaxTokens's chars-to-tokens shape
                 // (divisor/floor/ceiling) rather than a second, independently-tuned formula.
                 max_tokens = DeriveScriptGenerationCap(durationTargetSeconds),
+                // gh-#620 — the same reasoning control LlmCopyWriter.PostCompletionAsync sends; see
+                // ReasoningEffort's own remarks. null ("omit") leaves the member out entirely.
+                reasoning_effort = ReasoningEffort.ToWire(cfg.ReasoningEffort),
             };
 
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri)
             {
-                Content = JsonContent.Create(body),
+                Content = JsonContent.Create(body, options: ChatCompletionRequestJson.Options),
             };
 
             if (!string.IsNullOrEmpty(cfg.ApiKey))

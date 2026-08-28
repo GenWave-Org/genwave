@@ -358,6 +358,11 @@ public sealed partial class SettingValidator
             // DegradationController's parser recognizes; case-insensitive, mirroring that parser.
             ["Llm:DegradationPin"] = IsValidDegradationPin,
 
+            // Reasoning control (gh-#620) — exactly ReasoningEffort.Accepted (none/low/medium/high/
+            // omit), case-insensitive like the pin above; blank is refused (the posture is always
+            // named — "send nothing" is spelled "omit").
+            ["Llm:ReasoningEffort"] = GenWave.Core.Llm.ReasoningEffort.IsValid,
+
             // Station-default segment envelope (SPEC F80.1, F81.1, STORY-212). Genres is a JSON
             // array of non-blank strings; empty ("[]" or blank) is legal — no genre constraint.
             // EnergyMin/EnergyMax are doubles in [0,1]; Min <= Max is checked in ValidateBatch.
@@ -1025,6 +1030,8 @@ public sealed partial class SettingValidator
                "or a same-origin root-relative path starting with a single '/' (not '//'); no '\"', '<', '>', '\\', control characters, or whitespace.",
         var k when k.Equals("Llm:DegradationPin", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be one of: auto, normal, soft, hard.",
+        var k when k.Equals("Llm:ReasoningEffort", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be one of: {string.Join(", ", GenWave.Core.Llm.ReasoningEffort.Accepted)}.",
         var k when k.Equals("Station:Envelope:Genres", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be a JSON array of non-blank genre names, e.g. [] or [\"Rock\",\"Jazz\"].",
         var k when k.Equals("Station:Envelope:EnergyMin", StringComparison.OrdinalIgnoreCase) ||

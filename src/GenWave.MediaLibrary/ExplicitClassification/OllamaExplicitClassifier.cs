@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
+using GenWave.Core.Llm;
 using GenWave.MediaLibrary.Options;
 
 /// <summary>
@@ -84,11 +85,13 @@ public sealed class OllamaExplicitClassifier(HttpClient http, IOptionsMonitor<Ex
                     new { role = "system", content = SystemPrompt },
                     new { role = "user", content = BuildUserPrompt(artist, title) },
                 },
+                // gh-#620 — see ReasoningEffort's own remarks; null ("omit") leaves the member out.
+                reasoning_effort = ReasoningEffort.ToWire(cfg.ReasoningEffort),
             };
 
             using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
             {
-                Content = JsonContent.Create(body),
+                Content = JsonContent.Create(body, options: ChatCompletionRequestJson.Options),
             };
 
             if (!string.IsNullOrEmpty(cfg.ApiKey))

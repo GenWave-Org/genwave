@@ -319,6 +319,14 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "\"auto\" (default) follows automatically; \"normal\", \"soft\", or \"hard\" holds that mode " +
     "until this is set back to \"auto\".",
 
+  // ── Reasoning control (gh-#620) ────────────────────────────────────────────────────────────
+  "Llm:ReasoningEffort":
+    "How much a thinking-capable model (gemma4, qwen3, deepseek-r1, magistral) may think before it " +
+    "answers. \"None\" (default) makes it answer directly — otherwise its chain-of-thought spends " +
+    "the whole copy budget and every line comes back empty. \"Low\"/\"Medium\"/\"High\" let it " +
+    "think, at the cost of time. \"Omit\" sends no reasoning field at all, for a third-party " +
+    "OpenAI-compatible backend that rejects it. Ordinary models ignore this. Changes apply live.",
+
   // ── Persona Catalog (SPEC F90.1, STORY-234) ────────────────────────────────────────────────
   "Community:CatalogIndexUrl":
     "Where the Persona Catalog browses and imports personas from. Leave empty to disable the " +

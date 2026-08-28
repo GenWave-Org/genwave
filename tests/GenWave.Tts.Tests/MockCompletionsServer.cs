@@ -50,6 +50,14 @@ sealed class MockCompletionsServer : IAsyncDisposable
     /// </summary>
     public volatile string? ReplyFinishReason = "stop";
 
+    /// <summary>
+    /// gh-#620 — <c>message.reasoning</c> served alongside <see cref="ReplyContent"/>: null (default)
+    /// omits the field, exactly like every non-thinking model; a value reproduces the thinking-model
+    /// reply shape (chain-of-thought present, <see cref="ReplyContent"/> typically empty and
+    /// <see cref="ReplyFinishReason"/> <c>"length"</c>).
+    /// </summary>
+    public volatile string? ReplyReasoning;
+
     /// <summary>The base URI the stub is listening on (e.g. <c>http://127.0.0.1:12345</c>).</summary>
     public Uri BaseUri { get; }
 
@@ -108,12 +116,12 @@ sealed class MockCompletionsServer : IAsyncDisposable
                 case MockCompletionsMode.Delay:
                     // Longer than any test's Llm:TimeoutSeconds (tests use 1-2s budgets).
                     await Task.Delay(TimeSpan.FromSeconds(30), ctx.RequestAborted);
-                    await WriteReplyAsync(ctx, server.ReplyContent, server.ReplyFinishReason);
+                    await WriteReplyAsync(ctx, server.ReplyContent, server.ReplyFinishReason, server.ReplyReasoning);
                     return;
 
                 case MockCompletionsMode.Serve:
                 default:
-                    await WriteReplyAsync(ctx, server.ReplyContent, server.ReplyFinishReason);
+                    await WriteReplyAsync(ctx, server.ReplyContent, server.ReplyFinishReason, server.ReplyReasoning);
                     return;
             }
         });
@@ -128,11 +136,14 @@ sealed class MockCompletionsServer : IAsyncDisposable
 
     public async ValueTask DisposeAsync() => await app.DisposeAsync();
 
-    static Task WriteReplyAsync(HttpContext ctx, string content, string? finishReason)
+    static Task WriteReplyAsync(HttpContext ctx, string content, string? finishReason, string? reasoning)
     {
         ctx.Response.StatusCode = 200;
+        object message = reasoning is null
+            ? new { content }
+            : new { content, reasoning };
         return ctx.Response.WriteAsJsonAsync(
-            new { choices = new[] { new { message = new { content }, finish_reason = finishReason } } },
+            new { choices = new[] { new { message, finish_reason = finishReason } } },
             ctx.RequestAborted);
     }
 }

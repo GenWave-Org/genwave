@@ -371,6 +371,12 @@ public static class FeatureSeededDefaults
                 llmDefaults.DegradationPin,
                 RequireValue(config, "Llm:DegradationPin"));
 
+            // Llm:ReasoningEffort (gh-#620) — seeded "none" alongside the reasoning control itself,
+            // the same discipline as Llm:DegradationPin just above.
+            Assert.Equal(
+                llmDefaults.ReasoningEffort,
+                RequireValue(config, "Llm:ReasoningEffort"));
+
             Assert.Equal(
                 ttsDefaults.BlurbRetentionHours,
                 int.Parse(RequireValue(config, "Tts:BlurbRetentionHours"), NumberStyles.Integer, CultureInfo.InvariantCulture));

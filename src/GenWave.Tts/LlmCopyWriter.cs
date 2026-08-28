@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Llm;
 
 /// <summary>
 /// LLM-backed <see cref="ISegmentCopyWriter"/> (SPEC F34.2-F34.5, F92.2, F92.5, F107.3): authors
@@ -343,7 +344,7 @@ public sealed class LlmCopyWriter(
                 // at the endpoint/max-tokens settings for a failure those levers cannot fix. See
                 // DescribeNullTextReason's own remarks.
                 LogFailure(request, persona, cfg.Model, attemptedAt, exception: null,
-                    reason: DescribeNullTextReason(cleanup));
+                    reason: DescribeNullTextReason(cleanup, cfg.ReasoningEffort));
                 return await fallback.WriteAsync(request, ct);
             }
 
@@ -437,7 +438,7 @@ public sealed class LlmCopyWriter(
             // ClaimViolation.Token, which is provably digit-shaped or closed-vocabulary (that type's
             // own remarks), never free text.
             return cleaned is null
-                ? new PersonaPreviewResult.Failed($"The LLM reply was rejected ({DescribeNullTextReason(cleanup)}).")
+                ? new PersonaPreviewResult.Failed($"The LLM reply was rejected ({DescribeNullTextReason(cleanup, cfg.ReasoningEffort)}).")
                 : new PersonaPreviewResult.Success(cleaned);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -584,7 +585,7 @@ public sealed class LlmCopyWriter(
                 // wrong-lever "empty or exceeded Llm:MaxCopyChars" wording (carry-forward #6).
                 LogFailure(
                     request, persona, cfg.Model, attemptedAt, exception: null,
-                    reason: DescribeNullTextReason(cleanup), outcomeKind: LogFailureOutcome.FallingBackToVerbatimRead);
+                    reason: DescribeNullTextReason(cleanup, cfg.ReasoningEffort), outcomeKind: LogFailureOutcome.FallingBackToVerbatimRead);
             }
 
             return cleaned;
@@ -865,7 +866,8 @@ public sealed class LlmCopyWriter(
             // so a live PUT to Llm:Endpoint applies on the next render.
             var requestUri = EndpointUri.Combine(cfg.Endpoint, "/v1/chat/completions");
 
-            var text = await PostCompletionAsync(http, requestUri, cfg, systemPrompt, userPrompt, timeoutCts.Token);
+            var reply = await PostCompletionAsync(http, requestUri, cfg, systemPrompt, userPrompt, timeoutCts.Token);
+            var text = reply.Content;
 
             // Written HERE, STILL inside the single-flight critical section (SPEC F83.1, T65 review
             // finding) — only for an on-air call (updateTasteMemory), and only once the call has
@@ -880,7 +882,9 @@ public sealed class LlmCopyWriter(
             // Hygiene + the F123.2 sentence-boundary salvage run HERE, inside the one ring-recording
             // point (SPEC F123.2-F123.4, STORY-319, PLAN T263), so a trim is visible to the ring as
             // its own outcome instead of only discoverable by re-reading Response after the fact.
-            var cleanup = CleanCopy(text, cfg.MaxCopyChars);
+            // gh-#620: a reasoning-only reply is recognised BEFORE hygiene ever sees the (empty) text,
+            // so the fallback WARN can name the real cause; see CleanupOf's own remarks.
+            var cleanup = CleanupOf(reply, cfg.MaxCopyChars);
             LogIfTrimmed(request, personaName, cleanup);
 
             // SPEC F138.2/F138.3/F138.4 (STORY-350, STORY-351, PLAN T331/T332) — the truth-gate
@@ -993,8 +997,9 @@ public sealed class LlmCopyWriter(
                 // OperationCanceledException exactly as it always would have for one call.
                 userPrompt = $"{userPrompt}\n{buildReaskLine(gateResult.Violations)}";
                 startedAt = timeProvider.GetUtcNow();
-                var reaskText = await PostCompletionAsync(http, requestUri, cfg, systemPrompt, userPrompt, timeoutCts.Token);
-                var reaskCleanup = CleanCopy(reaskText, cfg.MaxCopyChars);
+                var reaskReply = await PostCompletionAsync(http, requestUri, cfg, systemPrompt, userPrompt, timeoutCts.Token);
+                var reaskText = reaskReply.Content;
+                var reaskCleanup = CleanupOf(reaskReply, cfg.MaxCopyChars);
                 LogIfTrimmed(request, personaName, reaskCleanup);
 
                 // The tri-state (no candidate to even check / checked-and-failed / checked-and-passed)
@@ -1113,7 +1118,7 @@ public sealed class LlmCopyWriter(
     /// token shares that render's existing budget rather than getting a fresh one (F138.4's "never a
     /// longer feeder hold").
     /// </summary>
-    static async Task<string> PostCompletionAsync(
+    static async Task<CompletionReply> PostCompletionAsync(
         HttpClient http, Uri requestUri, LlmOptions cfg, string systemPrompt, string userPrompt, CancellationToken ct)
     {
         var body = new
@@ -1125,11 +1130,15 @@ public sealed class LlmCopyWriter(
                 new { role = "user", content = userPrompt },
             },
             max_tokens = DeriveMaxTokens(cfg.MaxCopyChars),
+            // gh-#620: "none" by default so a thinking model answers instead of spending max_tokens
+            // on chain-of-thought; null (Llm:ReasoningEffort "omit") leaves the field out entirely —
+            // ChatCompletionRequestJson.Options is what turns that null into an absent member.
+            reasoning_effort = ReasoningEffort.ToWire(cfg.ReasoningEffort),
         };
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri)
         {
-            Content = JsonContent.Create(body),
+            Content = JsonContent.Create(body, options: ChatCompletionRequestJson.Options),
         };
 
         // Bearer header rides only when an ApiKey is configured (env-only, F19.3/F34.3).
@@ -1142,8 +1151,24 @@ public sealed class LlmCopyWriter(
         response.EnsureSuccessStatusCode();   // throws HttpRequestException on non-2xx
 
         var payload = await response.Content.ReadFromJsonAsync<ChatCompletionResponse>(ct);
-        return payload?.Choices?.FirstOrDefault()?.Message?.Content ?? string.Empty;
+        var choice = payload?.Choices?.FirstOrDefault();
+        return new CompletionReply(
+            choice?.Message?.Content ?? string.Empty,
+            choice?.FinishReason,
+            choice?.Message?.Reasoning?.Length ?? 0);
     }
+
+    /// <summary>
+    /// The hygiene entry for one reply (gh-#620): a reasoning-only reply (<see cref="CompletionReply.IsReasoningOnly"/>)
+    /// becomes <see cref="LlmCopyCleanupResult.ReasoningOnly"/> directly — <see cref="CleanCopy"/> would
+    /// only ever see an empty string and report "empty after cleanup", the wrong-lever wording that
+    /// sent the 2026-08-24 bench morning at the endpoint and max_tokens for a failure only
+    /// <c>Llm:ReasoningEffort</c> fixes. Every other reply runs the unchanged hygiene pass.
+    /// </summary>
+    static LlmCopyCleanupResult CleanupOf(CompletionReply reply, int maxCopyChars) =>
+        reply.IsReasoningOnly
+            ? new LlmCopyCleanupResult.ReasoningOnly(reply.ReasoningChars, reply.FinishReason)
+            : CleanCopy(reply.Content, maxCopyChars);
 
     long ElapsedMs(DateTimeOffset startedAt) => (long)(timeProvider.GetUtcNow() - startedAt).TotalMilliseconds;
 
@@ -1206,6 +1231,7 @@ public sealed class LlmCopyWriter(
         LlmCopyCleanupResult.Fits fits => fits.Text,
         LlmCopyCleanupResult.Trimmed trimmed => trimmed.Text,
         LlmCopyCleanupResult.Rejected => null,
+        LlmCopyCleanupResult.ReasoningOnly => null,
         LlmCopyCleanupResult.TruthGateRejected => null,
         _ => throw new UnreachableException($"Unhandled {nameof(LlmCopyCleanupResult)} case."),
     };
@@ -1234,10 +1260,17 @@ public sealed class LlmCopyWriter(
     /// safe to interpolate directly regardless (that type's own remarks: provably digit-shaped or
     /// closed-vocabulary).
     /// </summary>
-    static string DescribeNullTextReason(LlmCopyCleanupResult cleanup) => cleanup switch
+    // reasoningEffort is rendered through ReasoningEffort.ToWire (closed vocabulary), never raw — this
+    // text reaches the authenticated preview surface (WritePreviewAsync's own "never free text" rule).
+    static string DescribeNullTextReason(LlmCopyCleanupResult cleanup, string reasoningEffort) => cleanup switch
     {
         LlmCopyCleanupResult.Rejected { WasOverLength: true } => "exceeded Llm:MaxCopyChars after cleanup",
         LlmCopyCleanupResult.Rejected { WasOverLength: false } => "empty after cleanup",
+        // gh-#620 — names the real cause AND the one lever that fixes it; "empty after cleanup" would
+        // send the operator at the endpoint and max_tokens, neither of which can help.
+        LlmCopyCleanupResult.ReasoningOnly reasoningOnly =>
+            $"no answer, only {reasoningOnly.ReasoningChars} chars of reasoning (finish_reason: {reasoningOnly.FinishReason ?? "n/a"}) — " +
+            $"a thinking model spent max_tokens on chain-of-thought; Llm:ReasoningEffort is '{ReasoningEffort.ToWire(reasoningEffort) ?? ReasoningEffort.Omit}' (\"none\" stops it)",
         LlmCopyCleanupResult.TruthGateRejected truthGate =>
             "the truth gate rejected the re-ask too (" +
             $"{string.Join(" and ", truthGate.Violations.Select(DescribeViolationForLog).Distinct(StringComparer.OrdinalIgnoreCase))})",
@@ -1286,6 +1319,9 @@ public sealed class LlmCopyWriter(
         LlmCopyCleanupResult.Fits => (LlmCallOutcome.Ok, LlmCallCause.Success),
         LlmCopyCleanupResult.Rejected { WasOverLength: true } => (LlmCallOutcome.Ok, LlmCallCause.OverLength),
         LlmCopyCleanupResult.Rejected { WasOverLength: false } => (LlmCallOutcome.Ok, LlmCallCause.EmptyCompletion),
+        // gh-#620: the F139 taxonomy is unchanged — a reasoning-only reply IS an empty completion to
+        // the ring and the tile; the WARN (DescribeNullTextReason) is where the finer cause is named.
+        LlmCopyCleanupResult.ReasoningOnly => (LlmCallOutcome.Ok, LlmCallCause.EmptyCompletion),
         _ => throw new UnreachableException($"Unhandled {nameof(LlmCopyCleanupResult)} case."),
     };
 

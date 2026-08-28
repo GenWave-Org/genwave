@@ -41,6 +41,27 @@ public static class StationSettingsAllowlist
     /// duplicate source of truth; they can only ever diverge from each other in the direction the
     /// runtime catalog growing owner rows adds on top, never in the shipped half.
     /// </summary>
+    /// <summary>
+    /// <c>Llm:ReasoningEffort</c>'s choices (gh-#620), in <see cref="GenWave.Core.Llm.ReasoningEffort.Accepted"/>'s
+    /// own order with <see cref="GenWave.Core.Llm.ReasoningEffort.Default"/> flagged — labels only
+    /// here, so the vocabulary can never drift from the validator's (<see cref="SettingValidator"/>
+    /// checks <see cref="GenWave.Core.Llm.ReasoningEffort.IsValid"/> directly).
+    /// </summary>
+    static readonly IReadOnlyList<SettingChoice> ReasoningEffortChoices =
+        GenWave.Core.Llm.ReasoningEffort.Accepted
+            .Select(value => new SettingChoice(value, ReasoningEffortLabel(value), value == GenWave.Core.Llm.ReasoningEffort.Default))
+            .ToList();
+
+    static string ReasoningEffortLabel(string value) => value switch
+    {
+        GenWave.Core.Llm.ReasoningEffort.None => "None — answer directly (thinking models skip their chain-of-thought)",
+        GenWave.Core.Llm.ReasoningEffort.Low => "Low — think briefly first",
+        GenWave.Core.Llm.ReasoningEffort.Medium => "Medium — think before answering",
+        GenWave.Core.Llm.ReasoningEffort.High => "High — think at length (slow; needs a generous Llm:TimeoutSeconds)",
+        GenWave.Core.Llm.ReasoningEffort.Omit => "Omit — send no reasoning field (for a backend that rejects it)",
+        _ => value,
+    };
+
     static readonly IReadOnlyList<SettingChoice> ShippedThemeChoices =
         ThemeCatalog.LoadShipped().All
             .Select(theme => new SettingChoice(theme.Slug, theme.Name, theme.Slug == ThemeCatalog.ShippedDefaultSlug))
@@ -340,6 +361,12 @@ public static class StationSettingsAllowlist
         // pins/unpins the mode with no api restart. "auto" (the LlmOptions default) leaves the
         // mode fully automatic; "normal"/"soft"/"hard" holds it.
         new("Llm:DegradationPin",                             SettingApplyMode.Live,          SettingKind.String,     ""),
+
+        // Reasoning control (gh-#620) — the THIRD SettingKind.Choice key, and the first with a
+        // STATIC choice list (Station:Theme/Station:IconPack resolve theirs live off a catalog): the
+        // vocabulary is ReasoningEffort.Accepted, fixed at build time, so the frozen list IS the
+        // truth here. Live so a PUT reaches the very next completions request on all five posters.
+        new("Llm:ReasoningEffort",                            SettingApplyMode.Live,          SettingKind.Choice,     "", ReasoningEffortChoices),
 
         // Persona Catalog origin (SPEC F90.1, STORY-234, PLAN T99) — CommunityCatalogAccessor reads
         // this fresh via IOptionsMonitor<CommunityOptions>, so a live PUT here reaches the very next
