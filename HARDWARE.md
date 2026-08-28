@@ -48,7 +48,7 @@ notes, test status — is below it.
 |---|:---:|:---:|---|
 | **Playout + piper TTS** — no kokoro, no LLM | **4 GB** | 🟢 | Measured, not derived: a 4 GB Pi 5 runs this with the whole stack resident and room to spare. Enrichment is the peak and stays under ~500 MiB |
 | **+ kokoro**, no LLM | 8 GB | 🟡 | kokoro's ~1.2 GiB baseline (leaking toward a 4 GB cap) is the biggest single resident. 4 GB is too tight |
-| **+ LLM resident** — the demo shape | 8 GB min, 16 GB comfortable | 🟡 | The 6 GB ollama fence plus kokoro's baseline already crowds an 8 GB box |
+| **+ LLM resident** — the demo shape | 8 GB min, 16 GB comfortable | 🟡 | The 6 GB ollama fence plus kokoro's baseline already crowds an 8 GB box. Which model: any in the [LLM model floor](#-llm-model-floor) table is truthful — size it to the fence |
 
 - 🟢 **CPU** — four cores is enough for playout plus piper TTS. **Enrichment is the constraint, not
   playout**: the ffmpeg analyzers use every core you give them (`Library:EnrichmentConcurrency`,
@@ -76,12 +76,62 @@ notes recorded alongside them.
 | Service | Configured limit | Real footprint | Confidence | Notes |
 |---|:---:|---|:---:|---|
 | `kokoro` (TTS) | 4 GB cap | ~1.2 GiB fresh baseline; leaks toward the cap under render load (upstream `#262`), long renders spike ~+0.5 GiB | 🟢 | Cap is a fail-closed backstop. Live-observed: 3 GB cap = OOM-bounce every ~24–30 h on the demo box, down to ~90 min in heavy render windows (gh-#276); 4 GB buys spike headroom over the leaked baseline |
-| `ollama` (DJ brain, demo profile) | **1 CPU / 6GB fence** | needs > 3 GB with `llama3.2:3b` resident (`KEEP_ALIVE=-1`) | 🟢 | Live-observed: 3 GB fence = constant OOM kills. Cold model load ~25 s+; a full persona prompt on one fenced core takes ~25–30 s even warm — set `Llm:TimeoutSeconds: 60`. Size the model to the fence |
+| `ollama` (DJ brain, demo profile) | **1 CPU / 6GB fence** | needs > 3 GB with `llama3.2:3b` resident (`KEEP_ALIVE=-1`) | 🟢 | Live-observed: 3 GB fence = constant OOM kills. Cold model load ~25 s+; a full persona prompt on one fenced core takes ~25–30 s even warm — set `Llm:TimeoutSeconds: 60`. Size the model to the fence — truthfulness is not the constraint, see [LLM model floor](#-llm-model-floor) |
 | `piper` (fallback TTS) | 768 MB cap | ~165–220 MiB with a "medium" voice | 🟢 | ONNX runtime + `en_US-lessac-medium`, downloaded on first boot. Footprint measured on both x86-64 and arm64 (Pi 5, 2026-08-02) |
 | `api` (incl. enrichment) | *(uncapped)* | ~60 MiB idle; **400–500 MiB during an enrichment burst**, sawtoothing under GC | 🟢 | Measured on the Pi 5 run. RSS stays flat while analyzed bytes climb — transient peaks near 1 GiB are pre-collection, not a floor. Enrichment is by far the heaviest sustained load GenWave produces |
 | `cloudflared` (tunnel profile) | 128 MB cap | ~20–30 MiB idle | 🟢 | |
 | `alloy` (logging profile) | 256 MB cap | — | 🟡 | Single-daemon log-tailing sidecar |
 | `db` / `icecast` / `engine` / `admin_ui` | *(uncapped)* | modest (observed range: 5–130 MB) | 🟡 | No limits configured; none has ever been the memory pressure point |
+
+## 🧠 LLM model floor
+
+**The truth bench — T336, 2026-08-21 → 08-28.** The question (gh-#438): when the DJ named the
+wrong weekday against an explicit clock line, was that model *size*, model *family*, or *prompt
+shape* — and how small a model is safe to run? The method (SPEC F138.7): every gated LLM call
+carries a typed outcome counted per model (F139), so a week of ordinary playout with the model
+rotated on the Settings page *is* the bench — no hand-scored battery. The floor signal is the
+**truth-gate reject share of copy calls**: the gate caught an invented fact, a wrong day, or a
+fabricated verifiable, re-asked once, and counted the miss.
+
+| | |
+|---|---|
+| Build | `main` @ `257c801` (PR #609 merge) — api image built 2026-08-21 12:25Z, up 13:23Z, no restart for the week |
+| Inference | Ollama 0.32.5 on an **RTX 4090** (external `Llm:Endpoint`) — a GPU, so this measures **truthfulness, not capacity** |
+| Settings | `Llm:MaxCopyChars` 750 · `Llm:TimeoutSeconds` 30 · crosstalk target 50 s |
+| Workload | The dev station's normal playout, ~1.1k copy calls/day (replan-inflated by gh-#610's doubled library at the time — constant across the week, so a fair comparison) |
+| Capture | `genwave-T336.sh snapshot` on cron ×2/day → `snapshots.jsonl` (the counters roll on a 24 h window and never persist — F139.3) |
+
+| Model | Bench days | Copy calls | Gate rejects | Share | |
+|---|---|---:|---:|---:|:---:|
+| `llama3.1:8b` | 08-21 → 22 | ~1,137 | 0 | 0.0% | 🟢 |
+| `llama3.2:3b` (the demo default) | 08-22 → 24 | ~2,365 | 7 | 0.30% | 🟢 |
+| `gemma3:12b` | 08-24 → 26 | ~2,152 | 0 | 0.0% | 🟢 |
+| `mistral-nemo:12b` | 08-26 → 27 | ~1,103 | 3 | 0.27% | 🟢 |
+| `mistral:7b` | 08-27 → 28 | ~1,001 | 3 | 0.30% | 🟢 |
+| `gemma4:12b` | 08-24, 31 min | 15 | 15 empty | — | excluded: gh-#620, a client bug (fixed in v5.4.0), not a verdict |
+
+Counts are de-overlapped 24 h windows. The script's `report` sums daily maxima of *trailing*
+windows and over-counts totals by ~1.3–1.5×; the shares are unaffected.
+
+- 🟢 **Every model benched is above the floor — the floor sits below the smallest model tested.**
+  The worst share, 0.3%, is ~3 gate re-asks a day on ~1,100 calls; the gate's single re-ask
+  absorbs those, so copy that actually lands on a template is rarer still.
+- 🟢 **The answer to #438 is prompt shape — not size, not family.** 3B ≈ 7B ≈ 12B at ~0.3%;
+  `llama3.1:8b` and `gemma3:12b` at zero is a real difference statistically and an inaudible one
+  on air. The lever was the F138 truth gate plus the F141 honest clock line, shipped to every
+  model equally.
+- 🟢 **Pick the DJ model by what your ollama fence can hold and answer inside
+  `Llm:TimeoutSeconds` — not by truthfulness.** `llama3.2:3b`, the demo default, is not a
+  compromise on truth.
+- 🟡 **Capacity floor: still the one CPU fact in the table above** (`llama3.2:3b`, ~25–30 s warm
+  on 1 CPU / 6 GB). Zero timeouts and zero over-length rejects all week is a *GPU* result. The
+  homelab bench (gh-#626) runs this same script on a CCX23-class box (4 vCPU / 16 GB / no GPU)
+  under the shipped demo profile and reads both floors from the same counters.
+- 🟡 **Crosstalk lane unmeasured**: 4 calls all week (`llama3.1:8b`, 1 malformed). The
+  malformed-shape floor is an open question.
+- 🔴 **Thinking models** (`gemma4`, `qwen3`, `deepseek-r1`, `magistral`) returned empty
+  completions under this build (gh-#620) — a client limitation, fixed in v5.4.0. `gemma4:12b`'s
+  own verdict — the gh-#365 flap history — waits for a GPU-owner spot-check after that ships.
 
 ## ✅ Software requirements
 
