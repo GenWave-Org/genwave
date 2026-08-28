@@ -429,6 +429,9 @@ station is on air throughout, so this trades catalog-build time for headroom, no
 3. Tunnel in: `ssh -L 3000:127.0.0.1:3000 you@your-box` → `http://localhost:3000`. If
    Cloudflare Access is fronting this box (see "Zero Trust Access (optional)" below),
    prefer that route for routine admin — this SSH tunnel stays as break-glass only.
+   **Home Assistant users: mint (or rotate) the announce token now**, on the Announcements
+   page — it is the only credential that survives the plane going back off (see "The House
+   Voice" below).
 4. When done, revert the flag and re-`up` without the profile. The public surface is
    unaffected throughout — spectators never notice.
 
@@ -439,7 +442,7 @@ internet, no Caddy), none of this file applies — leave `Admin__Enabled` at its
 
 ---
 
-## 🏠 The House Voice — announcements and the announce token (v5.4.0, SPEC F143–F147)
+## 🏠 The House Voice — announcements and the announce token (v5.4.0/v5.4.1, SPEC F143–F147)
 
 Owner announcements let the DJ work a line into the next break (in character, or read
 **verbatim** — and always verbatim when the in-character copy fails the truth gate). They are
@@ -463,17 +466,23 @@ pipeline touches is ever deleted.
   request (fresh read per call, no cache). `GET /api/announcements/token/status` reports
   whether one exists and `Announcements:TokenLastUsedAt`.
 - The token is a `Bearer` on **`/api/announcements` only** (submit, history, and the
-  token-authed now-playing read the sensor uses); a fitness law fences the scheme to that
-  controller, so it can never promote to the admin planes.
-- ⚠️ **Transport and reachability — read before wiring HA.** The whole family is an
-  admin-surface route: on the **reference public topology** (`compose.demo.yaml`:
-  `Admin__Enabled: "false"`, api bound to `127.0.0.1:8080`) it 404s and is unreachable from
-  the LAN — an appliance box as shipped cannot be a House Voice station. On the
+  token-authed now-playing read the sensor uses); a fitness law fences the scheme to exactly
+  those two controllers, so it can never promote to the admin planes.
+- ⚠️ **Reachability — read before wiring HA (ruled v5.4.1, SPEC F145.6).** Submit, history
+  and the token endpoints are admin-surface: with `Admin__Enabled: "false"` (the reference
+  public topology's default) they 404. **The token-authed now-playing read is the one
+  exception** — it answers whenever a token exists, admin plane on or off, public or private,
+  so the Home Assistant sensor works on a shipped appliance; `genwave.announce` does not until
+  the plane is on (the call fails with "Not Found" in the automation trace, no reauth). Mint the
+  token during the temporary-admin window (step 3 above) before turning the plane back off. The
+  read is not a spectator route: point the integration at the **api port** (`:8080`), never the
+  public listener port, or it 404s. The api itself must be reachable from the HA box — on the
+  reference topology it binds to `127.0.0.1:8080`, so a same-host HA or a deliberate LAN bind is
+  the operator's call.
+- ⚠️ **Transport.** The token's guarantee equals the admin cookie's (F145.7): on the
   Operator/Standard modes the api listens on `0.0.0.0:8080` over plain HTTP, so the token
-  crosses your LAN in the clear: keep it on a trusted network, or front the api with TLS
-  (Caddy) before pointing an integration at it from anywhere else. Whether the
-  announcements family should stay reachable with the admin plane off is an open ruling for
-  `/design`, not a documented decision.
+  crosses your LAN in the clear — keep it on a trusted network, or front the api with TLS
+  (Caddy) before pointing an integration at it from anywhere else.
 - **A public station never carries the house's events**: while `Station:SpectatorMode` is
   on, submissions are refused with a 403 and pending rows are declined at the flip — the
   demo station can never demo this by design.
