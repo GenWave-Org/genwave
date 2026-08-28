@@ -296,7 +296,7 @@ public sealed class VerbatimAnnouncementArc : IAsyncLifetime
 
         // Render — the real IVerbatimSegmentRenderer; zero LLM anywhere on this path (F144.2).
         var renderer = factory.Services.GetRequiredService<IVerbatimSegmentRenderer>();
-        var request = PaWireProofSupport.AnnouncementRequest();
+        var request = PaWireProofSupport.AnnouncementRequest(factory.Services);
         var rendered = await renderer.RenderAsync(request, new SegmentCopy(item.Message, FreshPerAiring: true), CancellationToken.None)
             ?? throw new InvalidOperationException("verbatim render unexpectedly returned null");
         CapturedSpeechInput = kokoro.Requests.Single().Input;
@@ -342,7 +342,7 @@ public sealed class FlavoredHealthyLlmArc : IAsyncLifetime
 
         // Flavor — the real IAnnouncementCopyWriter (LlmCopyWriter), against a real Kestrel completions
         // stub (Story358's own precedent, extended here into a real render).
-        var request = PaWireProofSupport.AnnouncementRequest();
+        var request = PaWireProofSupport.AnnouncementRequest(factory.Services);
         var copyWriter = factory.Services.GetRequiredService<IAnnouncementCopyWriter>();
         FlavoredCopy = await copyWriter.WriteAnnouncementAsync(request, item.Message, CancellationToken.None);
 
@@ -391,7 +391,7 @@ public sealed class LlmFencedArc : IAsyncLifetime
         var source = factory.Services.GetRequiredService<IAnnouncementSource>();
         var item = (await source.ClaimDeliverableAsync(2, CancellationToken.None)).Single(i => i.Id == id);
 
-        var request = PaWireProofSupport.AnnouncementRequest();
+        var request = PaWireProofSupport.AnnouncementRequest(factory.Services);
         var copyWriter = factory.Services.GetRequiredService<IAnnouncementCopyWriter>();
         FlavoredCopy = await copyWriter.WriteAnnouncementAsync(request, item.Message, CancellationToken.None);
 
@@ -450,7 +450,7 @@ public sealed class HardDegradationArc : IAsyncLifetime
         var source = factory.Services.GetRequiredService<IAnnouncementSource>();
         var item = (await source.ClaimDeliverableAsync(2, CancellationToken.None)).Single(i => i.Id == id);
 
-        var request = PaWireProofSupport.AnnouncementRequest();
+        var request = PaWireProofSupport.AnnouncementRequest(factory.Services);
         var copyWriter = factory.Services.GetRequiredService<IAnnouncementCopyWriter>();
         FlavoredCopy = await copyWriter.WriteAnnouncementAsync(request, item.Message, CancellationToken.None);
         LlmStubRequestCount = llm.Requests.Count;
@@ -502,7 +502,7 @@ public sealed class PrivacyArc : IAsyncLifetime
                 "/api/announcements", new { message = "Row A airs before the flip", verbatim = true }))
             .Content.ReadFromJsonAsync<AnnouncementAcceptedWire>())!.Id;
         var itemA = (await source.ClaimDeliverableAsync(2, CancellationToken.None)).Single(i => i.Id == idA);
-        var requestA = PaWireProofSupport.AnnouncementRequest();
+        var requestA = PaWireProofSupport.AnnouncementRequest(factory.Services);
         var renderedA = await renderer.RenderAsync(requestA, new SegmentCopy(itemA.Message, FreshPerAiring: true), CancellationToken.None)
             ?? throw new InvalidOperationException("row A render unexpectedly returned null");
         await PaWireProofSupport.PublishAiredAndDrainAsync(factory, idA, renderedA);
@@ -590,7 +590,7 @@ public sealed class TokenDoorArc : IAsyncLifetime
         var source = factory.Services.GetRequiredService<IAnnouncementSource>();
         var item = (await source.ClaimDeliverableAsync(2, CancellationToken.None)).Single(i => i.Id == id);
         var renderer = factory.Services.GetRequiredService<IVerbatimSegmentRenderer>();
-        var request = PaWireProofSupport.AnnouncementRequest();
+        var request = PaWireProofSupport.AnnouncementRequest(factory.Services);
         var rendered = await renderer.RenderAsync(request, new SegmentCopy(item.Message, FreshPerAiring: true), CancellationToken.None)
             ?? throw new InvalidOperationException("token-door render unexpectedly returned null");
 
@@ -617,17 +617,17 @@ file static class PaWireProofSupport
 {
     public static string FreshTempDir() => Path.Combine(Path.GetTempPath(), "genwave-pawire-" + Guid.NewGuid().ToString("N"));
 
-    public static async Task LoginAsync(HttpClient client, string password)
-    {
-        var response = await client.PostAsJsonAsync("/api/auth/login", new { password });
-        if (response.StatusCode != HttpStatusCode.NoContent)
-            throw new InvalidOperationException($"login unexpectedly returned {response.StatusCode}");
-    }
+    // Login + the minimal announcement SegmentRequest shape both moved to
+    // Support/AnnouncementWireSupport.cs (T352 review — Story364_TheGateRulesOnTheWire.cs
+    // became a second caller) — thin delegations kept here so every existing call site below reads
+    // unchanged. AnnouncementRequest() now takes the factory's own IServiceProvider (T352 review
+    // round 2, HIGH-1): it reads Station:Name/Voice/Id live off that container instead of a baked
+    // literal, so a factory that ever overrides those keys differently is reflected here too.
+    public static Task LoginAsync(HttpClient client, string password) =>
+        AnnouncementWireSupport.LoginAsync(client, password);
 
-    /// <summary>The SAME minimal SegmentRequest shape Story358_AnnouncementFlavorEndToEnd.cs's own
-    /// AnnouncementRequest() helper builds — station voice/name/id, no track, "now".</summary>
-    public static SegmentRequest AnnouncementRequest() =>
-        new(SegmentKind.Announcement, "af_heart", "GWAV 108.8", Track: null, DateTimeOffset.UtcNow, "genwave-1");
+    public static SegmentRequest AnnouncementRequest(IServiceProvider services) =>
+        AnnouncementWireSupport.AnnouncementRequest(services);
 
     /// <summary>Applies the Orchestrator's own MediaId-wrap (AnnouncementMediaId.Wrap, PLAN T341) —
     /// replicating that one line of glue, not routing around it — then publishes the genuine TrackAired
