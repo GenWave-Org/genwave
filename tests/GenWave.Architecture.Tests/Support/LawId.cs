@@ -65,13 +65,23 @@ internal static class LawId
     /// audition (<see cref="PronunciationResolveSeam"/>).</summary>
     public const string L8 = "L8";
 
-    /// <summary>The AnnounceToken scheme fence (SPEC F145.3/.4, STORY-360, PLAN T340 carry-forward,
-    /// built T343): outside <c>GenWave.Host.Api.AnnouncementsController</c>, no production type names
-    /// <c>AnnounceTokenAuthenticationDefaults.SchemeName</c> inside an <c>AuthorizeAttribute</c>'s own
-    /// <c>AuthenticationSchemes</c> — the T340 review's own mutation-proven gap: a widened schemes list
-    /// anywhere else silently promotes the HA announce token to full admin, with every OTHER test still
-    /// green (<see cref="AnnounceSchemeFence"/>).</summary>
+    /// <summary>The AnnounceToken scheme fence (SPEC F145.3/.4/.6, STORY-360, STORY-366, PLAN T340
+    /// carry-forward, built T343; widened at T351): outside
+    /// <c>GenWave.Host.Api.AnnouncementsController</c> and <c>GenWave.Host.Api.AnnouncementNowPlayingController</c>
+    /// (the two carriers the now-playing read's split at T351 leaves — see that controller's own
+    /// remarks), no production type names <c>AnnounceTokenAuthenticationDefaults.SchemeName</c> inside
+    /// an <c>AuthorizeAttribute</c>'s own <c>AuthenticationSchemes</c> — the T340 review's own
+    /// mutation-proven gap: a widened schemes list anywhere else silently promotes the HA announce
+    /// token to full admin, with every OTHER test still green (<see cref="AnnounceSchemeFence"/>).</summary>
     public const string L9 = "L9";
+
+    /// <summary>Namespace-level cycle freedom (gh-#445, promoted to a named law at PLAN T351): no
+    /// dependency cycles among <c>GenWave.*</c> namespaces — <see cref="GenWave.Architecture.Tests.Specs.FeatureNamespaceCycleFreedom"/>
+    /// (<c>Gh445_NamespaceCycleFreedom.cs</c>) is the detector, evaluated per project root at the
+    /// first-namespace-segment slice granularity that file's own remarks describe. A cycle is an
+    /// accidental module merge — two subsystems reaching into each other until neither can be
+    /// extracted, exactly the tangle the F105.4 Host-graduation rule assumes never happens.</summary>
+    public const string L10 = "L10";
 
     /// <summary>Every law id above, discovered by reflection over this type's own <c>public const
     /// string</c> fields rather than hand-listed a second time anywhere. STORY-293's carry-forward

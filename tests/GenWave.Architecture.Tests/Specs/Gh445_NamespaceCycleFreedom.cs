@@ -1,4 +1,5 @@
-// gh-#445 — L7: namespace-level cycle freedom (Dean's contributor-proofing ask, 2026-08-09).
+// gh-#445 — L10: namespace-level cycle freedom (Dean's contributor-proofing ask, 2026-08-09;
+// promoted to a named law at the 2026-08-14 /design session, PLAN T351, SPEC F145.6 rider).
 //
 // Project-LEVEL cycles are structurally impossible (MSBuild refuses a circular
 // ProjectReference), so the dependency laws never needed to state them. But cycles BETWEEN
@@ -10,7 +11,14 @@
 // → Api, Engine, Playout, Configuration, …). Flat-namespaced projects (most types directly in
 // the root, e.g. GenWave.Tts) contribute few or no slices and pass vacuously — the law guards
 // wherever internal structure exists, which today is chiefly Host, MediaLibrary, and Context.
-using ArchUnitNET.Fluent.Slices;
+//
+// Detector: NamespaceCycleFence (Support/NamespaceCycleFence.cs) reports through the SAME
+// LawId/ExemptionBaseline mechanism L1–L9 use (DependencyLawAssert.AssertNone), not a law-local
+// baseline dict — the two original 2026-08-09 tangles (GenWave.Core Events->Abstractions,
+// GenWave.Host Api->Stats) were untangled in the same gh-#445 pass, so there was never a live
+// exemption row to carry forward into the shared mechanism.
+using ArchUnitNET.Loader;
+using ArchUnitArchitecture = ArchUnitNET.Domain.Architecture;
 using GenWave.Architecture.Tests.Support;
 
 namespace GenWave.Architecture.Tests.Specs;
@@ -29,50 +37,41 @@ public sealed class FeatureNamespaceCycleFreedom
         "GenWave.Tts",
     ];
 
-    /// <summary>
-    /// Pre-existing tangles recorded 2026-08-09 (gh-#445, where each carries a fix sketch) — the
-    /// guard's job is stopping NEW cycles while these are untangled. Shrink-to-fit: fixing a
-    /// cycle makes its row here STALE and the spec fails until the row is deleted, so this
-    /// baseline can only ever shrink. Mirrors the F105.2 exemption philosophy (named, dated,
-    /// reasoned) without claiming a LawId — law promotion is gh-#445's recorded /design step.
-    /// Both original rows (GenWave.Core Events->Abstractions, GenWave.Host Api->Stats) were
-    /// untangled in the same gh-#445 pass; the baseline is empty until a new cycle earns a row.
-    /// </summary>
-    static readonly IReadOnlyDictionary<string, string[]> BaselinedCycles = new Dictionary<string, string[]>();
-
     public sealed class ScenarioNoNamespaceCyclesWithinAnyProject
     {
         [Theory]
         [MemberData(nameof(ProjectRoots), MemberType = typeof(FeatureNamespaceCycleFreedom))]
         public void Namespaces_below_the_project_root_are_free_of_cycles(string projectRoot)
         {
-            // Evaluate() + hand-rolled assert, not the ArchUnitNET.xUnit Check() extension — the
-            // suite deliberately carries only the core analysis package (Story290's pattern), and
-            // the failure text here lists every cyclic slice pair rather than a generic rule name.
-            var failures = SliceRuleDefinition.Slices()
-                .Matching($"{projectRoot}.(*)")
-                .Should()
-                .BeFreeOfCycles()
-                .Evaluate(ProductionArchitecture.Instance)
-                .Where(result => !result.Passed)
-                .Select(result => result.Description)
-                .ToList();
+            var violations = NamespaceCycleFence.FindViolations(projectRoot, ProductionArchitecture.Instance);
 
-            var baseline = BaselinedCycles.GetValueOrDefault(projectRoot, []);
+            DependencyLawAssert.AssertNone(violations, ExemptionBaseline.Entries);
+        }
+    }
 
-            var unexpected = failures.Where(f => !baseline.Any(f.Contains)).ToList();
-            Assert.True(
-                unexpected.Count == 0,
-                $"NEW namespace cycle(s) in {projectRoot} — not in the gh-#445 baseline, untangle before merging:\n" +
-                string.Join("\n", unexpected));
+    public sealed class ScenarioASyntheticNamespaceCycleIsRed
+    {
+        // A genuine two-slice cycle (Fixtures/L10Probe/SliceA.cs <-> SliceB.cs — a real compiled
+        // property-type edge each way), loaded into its own fixture architecture — never a
+        // production edit, the same "fixture architecture, real ArchUnitNET evaluation" precedent
+        // Story290's L2 probe sets (its own fixtureArchitecture). Proves the mechanism genuinely
+        // reaches a real cycle and attributes it to LawId.L10, not merely that today's real host has
+        // none to find — that fact alone would stay green even if the L10 attribution silently
+        // rotted to some other law id.
+        static readonly ArchUnitArchitecture FixtureArchitecture = new ArchLoader()
+            .LoadAssemblies(typeof(Fixtures.L10Probe.SliceA.TypeA).Assembly)
+            .Build();
 
-            foreach (var marker in baseline)
-            {
-                Assert.True(
-                    failures.Any(f => f.Contains(marker)),
-                    $"stale baseline row '{marker}' for {projectRoot} — that cycle is fixed 🎉; " +
-                    "delete the row from BaselinedCycles so the guard tightens (gh-#445 shrink-to-fit)");
-            }
+        [Fact]
+        public void TheFenceReportsAGenuineCycleTaggedL10()
+        {
+            var violations = NamespaceCycleFence.FindViolations(
+                "GenWave.Architecture.Tests.Fixtures.L10Probe", FixtureArchitecture);
+
+            var violation = Assert.Single(violations);
+            Assert.Equal(LawId.L10, violation.LawId);
+            Assert.Contains("SliceA", violation.Detail, StringComparison.Ordinal);
+            Assert.Contains("SliceB", violation.Detail, StringComparison.Ordinal);
         }
     }
 }

@@ -12,9 +12,10 @@ namespace GenWave.Host.Auth;
 /// authentication scheme — only a controller that explicitly lists it in its own
 /// <c>[Authorize(AuthenticationSchemes = ...)]</c> ever has
 /// <see cref="AnnounceTokenAuthenticationHandler"/> consulted at all. <see cref="InScopeSchemes"/> is
-/// that opt-in list, carried by exactly two places today: <c>AnnouncementsController</c> (the
-/// announcements family, F143 + the now-playing read, F145.3) and nowhere else — every other
-/// Operator-plane controller (<c>SettingsController</c> among them) keeps its bare
+/// that opt-in list, carried by exactly two places today (PLAN T351 widened this from one to two —
+/// SPEC F145.6, STORY-366): <c>AnnouncementsController</c> (submit + history, F143/F146.2) and
+/// <c>AnnouncementNowPlayingController</c> (the now-playing read, F145.3/.6) — and nowhere else;
+/// every other Operator-plane controller (<c>SettingsController</c> among them) keeps its bare
 /// <c>[Authorize(Policy = ...)]</c>, which authenticates against the DEFAULT scheme
 /// (<c>"Cookie"</c>) alone, so a Bearer header on those routes is never even inspected, let alone
 /// accepted — the fence is structural (which schemes a route lists), not a per-route denial check.

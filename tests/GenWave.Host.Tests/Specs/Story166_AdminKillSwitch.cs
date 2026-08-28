@@ -4,6 +4,15 @@
 // fronting-proxy misroute exposes nothing, not even a login form. The flag is env-only and
 // invisible to every API. Red until PLAN T03.
 // Compose `profiles: ["admin"]` (F61.4) is compose-observable only — covered by T17, not here.
+//
+// ONE named, dated, reasoned exception (PLAN T351, SPEC F145.6, STORY-366): `GET
+// /api/announcements/now-playing` deliberately does NOT vanish under the kill switch — it is the
+// one announcements-family route the token door answers on regardless of Admin:Enabled, so the
+// F147.3 home-automation sensor keeps working on the appliance topology. See
+// AnnouncementNowPlayingController's own remarks for why it carries no AdminSurfaceAttribute.
+// EveryApiRouteReturns404IncludingLogin below excludes exactly this one (verb, path) pair from the
+// blanket assertion, then positively asserts it — the SAME "narrow, named exemption, not a silent
+// skip" posture ExemptionBaseline uses for the architecture laws.
 
 using System.Net;
 using System.Net.Http.Json;
@@ -75,12 +84,19 @@ public static class FeatureAdminKillSwitch
 
     public sealed class ScenarioAdminPlaneVanishes
     {
+        // PLAN T351, SPEC F145.6, STORY-366 — the one deliberate carve-out from "every /api/* route
+        // 404s under the kill switch" (see this file's own header remarks).
+        const string NowPlayingVerb = "GET";
+        const string NowPlayingPath = "/api/announcements/now-playing";
+
         [Fact]
         public async Task EveryApiRouteReturns404IncludingLogin()
         {
             await using var factory = new KillSwitchWebFactory(adminEnabled: false, spectatorMode: true);
             var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-            var routes = ApiRoutes(factory.Services);
+            var routes = ApiRoutes(factory.Services)
+                .Where(r => r is not (NowPlayingVerb, NowPlayingPath))
+                .ToList();
             Assert.NotEmpty(routes);
 
             var results = new List<(string Verb, string Path, HttpStatusCode Status)>();
@@ -93,6 +109,17 @@ public static class FeatureAdminKillSwitch
             Assert.All(results, r =>
                 Assert.True(r.Status == HttpStatusCode.NotFound,
                     $"{r.Verb} {r.Path} returned {(int)r.Status} with Admin:Enabled=false — the plane must not exist (F61.2)."));
+        }
+
+        [Fact]
+        public async Task TheNowPlayingReadIsTheOneNamedExceptionAndStillDoesNotVanish()
+        {
+            await using var factory = new KillSwitchWebFactory(adminEnabled: false, spectatorMode: true);
+            var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+            var response = await client.SendAsync(Request(NowPlayingVerb, NowPlayingPath));
+
+            Assert.NotEqual(HttpStatusCode.NotFound, response.StatusCode);
         }
     }
 
