@@ -17,11 +17,23 @@ namespace GenWave.Architecture.Tests.Support;
 /// </summary>
 internal static class PostgresConfinement
 {
-    /// <summary>MediaLibrary's actual repository layer (discovered at T211 adoption): the two
-    /// namespaces every <c>*Repository</c> class lives in and queries from.</summary>
+    /// <summary>MediaLibrary's actual repository layer: the namespaces every <c>*Repository</c>
+    /// class lives in and queries from. Catalog/Station discovered at T211 adoption; Garden added
+    /// at T355 (SPEC F149.1-F149.3, STORY-367, gh-#529) for <c>MediaRotationRepository</c> — the
+    /// Library Gardener's own home per ARCHITECTURE.md, confined by this same law like every other
+    /// repository namespace here.
+    ///
+    /// <para>
+    /// T355 review LOW-3: this allowlist is NAMESPACE-scoped, not TYPE-scoped — a future
+    /// non-repository type dropped into <c>Garden/</c> (e.g. a <c>GardenerService</c>) would open
+    /// Dapper/Npgsql unnoticed, the same gap Catalog/Station have already carried since T211. Left
+    /// as-is for T355; narrowing this law to match <c>*Repository</c> by NAME rather than namespace
+    /// is T357/T372's own scope.
+    /// </para></summary>
     public static readonly IObjectProvider<IType> RepositoryLayer = Types().That()
         .ResideInNamespace("GenWave.MediaLibrary.Catalog")
-        .Or().ResideInNamespace("GenWave.MediaLibrary.Station");
+        .Or().ResideInNamespace("GenWave.MediaLibrary.Station")
+        .Or().ResideInNamespace("GenWave.MediaLibrary.Garden");
 
     /// <summary>Evaluates "<paramref name="subjects"/> must not depend on Npgsql or Dapper" against
     /// <paramref name="architecture"/>, returning one <see cref="LawViolation"/> per offending type.

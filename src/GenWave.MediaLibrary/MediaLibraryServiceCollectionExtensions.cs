@@ -8,6 +8,7 @@ using GenWave.Loudness;
 using GenWave.MediaLibrary.Catalog;
 using GenWave.MediaLibrary.Enrich;
 using GenWave.MediaLibrary.ExplicitClassification;
+using GenWave.MediaLibrary.Garden;
 using GenWave.MediaLibrary.Mood;
 using GenWave.MediaLibrary.Options;
 using GenWave.MediaLibrary.Scan;
@@ -91,6 +92,29 @@ public static class MediaLibraryServiceCollectionExtensions
         // consumer: RatingController (STORY-112).
         services.AddSingleton<MediaRatingRepository>();
         services.AddSingleton<IMediaRating>(sp => sp.GetRequiredService<MediaRatingRepository>());
+
+        // The Library Gardener's rotation ledger (SPEC F149.1-F149.3, STORY-367, PLAN T355,
+        // gh-#529): same library_svc NpgsqlDataSource as MediaRatingRepository just above, same
+        // ISafeScopeProvider (gh-#99, bound by Host's AddGenWaveStationOptions — resolved lazily,
+        // so registration order doesn't matter). Its GetRotationSinceAsync/GetNeverAiredCountAsync
+        // read Gardener:RotationSince through a SECOND, dedicated StationSettingsRepository
+        // instance, composed INSIDE this factory rather than registered as its own container-wide
+        // singleton (T355 review MED finding: a bare public StationSettingsRepository singleton
+        // would be this library extension's first station-schema wiring — its own remarks above
+        // say this module owns only its own library data source — and a last-registration-wins
+        // hazard for any other future station-schema consumer). MediaRotationRepository's own
+        // remarks explain why a second instance is needed at all: library_svc has no grant into
+        // station.settings, and this key must never enter StationSettingsAllowlist/
+        // IStationSettingsStore — the SafeLoopSeedMarkerStore/AnnounceTokenStore precedent,
+        // F27.10. Station connection string degrades to empty the same way every other
+        // station-schema store's own registration does (SafeLoopSeedServiceCollectionExtensions,
+        // AdminApiServiceCollectionExtensions) — a station DB unreachable at boot never prevents
+        // this container from building; GetRotationSinceAsync simply fails when actually called.
+        services.AddSingleton(sp => new MediaRotationRepository(
+            sp.GetRequiredService<NpgsqlDataSource>(),
+            new StationSettingsRepository(configuration.GetConnectionString("Station") ?? string.Empty),
+            sp.GetRequiredService<ISafeScopeProvider>()));
+        services.AddSingleton<IMediaRotationSink>(sp => sp.GetRequiredService<MediaRotationRepository>());
 
         // gh-#99: the narrow cross-schema membership answer the taste-thumb/booth-log surfaces
         // need — resolved on the library connection because station_svc deliberately has no grant

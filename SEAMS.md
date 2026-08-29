@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **96 seams across 6 projects.**
+> **97 seams across 6 projects.**
 
 ## GenWave.Context (2 seams)
 
@@ -96,7 +96,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (39 seams)
+## GenWave.MediaLibrary (40 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -122,6 +122,7 @@
 | `GenWave.Core.Abstractions.IMediaLibraryMembership` | `GenWave.MediaLibrary.Catalog.MediaLibraryMembershipRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaPurge` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaRating` | `GenWave.MediaLibrary.Catalog.MediaRatingRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IMediaRotationSink` | `GenWave.MediaLibrary.Garden.MediaRotationRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMoodTagger` | `GenWave.MediaLibrary.Mood.OllamaMoodTagger` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaAvatarStore` | `GenWave.MediaLibrary.Station.PersonaAvatarRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IPersonaImportStore` | `GenWave.MediaLibrary.Station.PersonaImportRepository` | Singleton | — |
