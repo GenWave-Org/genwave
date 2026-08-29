@@ -12,9 +12,12 @@ namespace GenWave.Orchestration;
 /// <para>
 /// <b>v1 rule (implemented here): BLOCK-LEVEL PERSONA ONLY.</b> <see cref="Resolve"/> always returns
 /// <paramref name="block"/>'s own <c>PersonaId</c> — <paramref name="show"/> is never consulted for it.
-/// This is not an oversight: <see cref="ShowSummary"/> structurally carries no <c>persona_id</c>/
-/// <c>envelope</c> member at all (SPEC F115.2's dormant-columns-unread pin — see that type's own
-/// remarks), so there is nothing on <paramref name="show"/> this function COULD read even if it tried.
+/// This is not an oversight: <see cref="ShowSummary"/> structurally carries no <c>persona_id</c>
+/// member at all (SPEC F115.2's dormant-columns-unread pin — see that type's own remarks), so there is
+/// nothing on <paramref name="show"/> this function COULD read even if it tried. <see cref="ShowSummary.Rotation"/>
+/// is the one exception (SPEC F152.3, PLAN T360) — but that field is layered by
+/// <see cref="ScheduleResolver.BuildSegmentEnvelope"/> directly, not here (see the "Envelope
+/// resolution" paragraph below), so it changes nothing about THIS function's own persona-only rule.
 /// </para>
 ///
 /// <para>
@@ -37,10 +40,13 @@ namespace GenWave.Orchestration;
 ///
 /// <para>
 /// Envelope resolution is deliberately OUT of this function's scope: <see cref="ScheduleResolver.Resolve"/>'s
-/// own <c>BuildSegmentEnvelope</c> already implements the unrelated "segment fields ?? station-default"
-/// fallback (SPEC F91.4) — that chain never involves a show today, so moving it here would be a diff
-/// with no behavior change. The bundle slice's own envelope widening lands in <see cref="Resolve"/>
-/// alongside the persona widening described above, not before.
+/// own <c>BuildSegmentEnvelope</c> implements the "segment fields ?? station-default" fallback (SPEC
+/// F91.4) AND, as of PLAN T360, the show's own <c>Rotation</c> layering (SPEC F152.3) — both stay in
+/// that method, never migrate here, because both already have every piece of resolved state
+/// (<c>segment</c>/<c>show</c>) they need without going through this type's own narrower
+/// <see cref="Resolve"/> shape (<see cref="PersonaId"/> only). The bundle slice's own WIDER
+/// persona/envelope widening (beyond rotation) still lands in <see cref="Resolve"/> alongside the
+/// persona widening described above, not before.
 /// </para>
 /// </summary>
 public sealed record EffectiveAssignment(long? PersonaId, ShowSummary? Show)

@@ -9,6 +9,7 @@
 // DB-half/API-half split: Story224_RequestStore.cs here, Story224_RequestIntake.cs in Host.Tests).
 
 using Dapper;
+using GenWave.Abstractions.Playout;
 using GenWave.Core.Domain;
 using GenWave.MediaLibrary.Station;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -242,8 +243,55 @@ public static class FeatureScheduleStore
             var block = Assert.Single(after.Segments);
             Assert.Equal(blockPersonaId, block.PersonaId);
             Assert.NotNull(block.Show);
+            // PLAN T360 review MED-3: this whole-object equality already pins the "inverse" half of
+            // SPEC F152.3's non-vacuous pairing — the envelope hand-populated above carries NO
+            // "rotation" key, and ShowSummary's own Rotation defaults null on the expected side too,
+            // so a mismatch here would fail the instant the real ->> 'rotation' extraction ever
+            // started returning something for a key that was never there. TheRotationRuleReadsBackFromARealRow
+            // below is this fact's own positive-case pairing (a show WHOSE envelope carries a real
+            // rotation key), proving the read path is actually exercised, not merely coincidentally null.
             Assert.Equal(
                 new ShowSummary(showId, "Night Moves", "Late-night deep cuts", "moody, sparse") { Slug = "night-moves" }, block.Show);
+        }
+
+        [Fact]
+        public async Task TheRotationRuleReadsBackFromARealRow()
+        {
+            // PLAN T360 review MED-3: `sh.envelope ->> 'rotation' as show_rotation_json`
+            // (ScheduleRepository.SelectColumns) had zero live-Postgres coverage — every prior
+            // rotation fact hand-built ShowSummary in memory (Orchestration.Tests) or exercised
+            // ShowRepository directly (Story372_TheShowCarriesTheRotationRule.cs), never this
+            // repository's own LEFT JOIN + Dapper underscore-mapping end to end. Given a show whose
+            // envelope carries a real {"rotation":{"maxPlays":0}} key, referenced by one schedule
+            // block.
+            await db.ResetShowAsync();
+            await db.ResetScheduleAsync();
+
+            long showId;
+            await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+            {
+                showId = await conn.ExecuteScalarAsync<long>(
+                    """
+                    insert into station.show (name, slug, envelope)
+                    values ('Deep Cuts', 'deep-cuts', '{"rotation":{"maxPlays":0}}'::jsonb)
+                    returning id
+                    """);
+                await conn.ExecuteAsync(
+                    """
+                    insert into station.segment_schedule (day_of_week, start_minute, end_minute, show_id)
+                    values (1, 540, 720, @showId)
+                    """,
+                    new { showId });
+            }
+            var repo = Repo(db);
+
+            // When the week is loaded through the real repository (no fixture, no hand-built ShowSummary)
+            var snapshot = await repo.LoadWeekAsync(CancellationToken.None);
+
+            // Then the block's own Show carries the rotation rule, read back through the real SQL +
+            // Dapper mapping, not merely asserted against an in-memory double
+            var block = Assert.Single(snapshot.Segments);
+            Assert.Equal(new RotationPredicate(MaxPlays: 0), block.Show?.Rotation);
         }
 
         [Fact]

@@ -1,3 +1,4 @@
+using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 
@@ -20,6 +21,9 @@ sealed class FakeShowStore : IShowStore
 {
     readonly Dictionary<long, Show> byId;
     long nextId;
+
+    /// <inheritdoc/>
+    public event Action? ShowChanged;
 
     /// <summary>Seeds the store with pre-existing rows (e.g. an IMPORTED show — no writer through
     /// this interface can ever produce one, mirrors how the real repository's own provenance tests
@@ -88,6 +92,7 @@ sealed class FakeShowStore : IShowStore
             UpdatedAt = DateTime.UtcNow,
         };
         byId[id] = updated;
+        ShowChanged?.Invoke();
         return Task.FromResult<ShowWriteResult>(new ShowWriteResult.Updated(updated));
     }
 
@@ -132,6 +137,20 @@ sealed class FakeShowStore : IShowStore
             };
         byId[show.Id] = show;
         return Task.FromResult<Show?>(show);
+    }
+
+    /// <summary>Mirrors <c>ShowRepository.SetRotationAsync</c>'s own Updated/NotFound contract — no
+    /// scripting knob (unlike <see cref="NextCreateResult"/>/<see cref="NextUpdateResult"/>/
+    /// <see cref="NextDeleteResult"/>): no wire-layer spec needs one yet.</summary>
+    public Task<ShowWriteResult> SetRotationAsync(long id, RotationPredicate? rotation, CancellationToken ct)
+    {
+        if (!byId.TryGetValue(id, out var existing))
+            return Task.FromResult<ShowWriteResult>(new ShowWriteResult.NotFound());
+
+        var updated = existing with { Rotation = rotation, UpdatedAt = DateTime.UtcNow };
+        byId[id] = updated;
+        ShowChanged?.Invoke();
+        return Task.FromResult<ShowWriteResult>(new ShowWriteResult.Updated(updated));
     }
 
     // A deterministic, display-only stand-in for the production house Slugify (never accessible from

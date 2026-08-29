@@ -135,7 +135,8 @@ public static class FeatureShowRepository
     /// <summary>The T239 repository under spec, wired the same "Lazy over the fixture's own
     /// StationDataSource" way Story118_PersonaStorage.cs's own <c>Repo</c> helper wires
     /// <c>PersonaRepository</c>.</summary>
-    static ShowRepository Repo(DatabaseFixture db) => new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+    static ShowRepository Repo(DatabaseFixture db) =>
+        new(new Lazy<NpgsqlDataSource>(() => db.StationDataSource), NullLogger<ShowRepository>.Instance);
 
     /// <summary>The show delete guard's own detail-read repository (PLAN T240 review — this method
     /// carried zero live-DB coverage before <see cref="ScenarioDeleteFkGuard"/>'s two round-trip

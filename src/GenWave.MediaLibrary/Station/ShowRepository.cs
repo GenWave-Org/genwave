@@ -1,6 +1,8 @@
 using Dapper;
+using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 
 namespace GenWave.MediaLibrary.Station;
@@ -10,14 +12,15 @@ namespace GenWave.MediaLibrary.Station;
 /// <c>station.show</c>. Connection-per-query against a station_svc-scoped <see cref="NpgsqlDataSource"/>
 /// — mirrors <see cref="PersonaRepository"/>'s own wiring and slug-conflict-via-unique-violation
 /// posture exactly (the closest existing station repository: name + house-Slugify'd slug + provenance
-/// pair). Never selects/binds <c>persona_id</c>/<c>envelope</c> — SPEC F115.2's "unread this epic" law
-/// — so <see cref="Show"/> has no way to carry either even by accident.
+/// pair). Never selects/binds <c>persona_id</c>, or any <c>envelope</c> key beyond <c>rotation</c>
+/// (SPEC F115.2's "unread this epic" law, narrowed by exactly one field at SPEC F152.3/PLAN T360 — see
+/// <see cref="SetRotationAsync"/> and <see cref="RotationEnvelopeCodec"/>).
 ///
 /// <paramref name="dataSource"/> is a <see cref="Lazy{T}"/>, the same "resolving must never be enough
 /// to trigger a connection attempt" reason every other station-schema store in this file's directory
 /// carries one (see <see cref="PersonaRepository"/>'s own remarks in full).
 /// </summary>
-sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource) : IShowStore
+sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ShowRepository> logger) : IShowStore
 {
     // Postgres SQLSTATE for unique_violation — mirrors PersonaRepository's NameConflict mapping; here
     // the only UNIQUE constraint on station.show is show_slug_key (db/06, db/35), so any 23505 this
@@ -33,38 +36,72 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource) : IShowStore
     // blocks; ShowWriteResult.Referenced stays a bare singleton here.
     const string ForeignKeyViolation = "23503";
 
+    /// <inheritdoc/>
+    public event Action? ShowChanged;
+
+    /// <summary>
+    /// Ephemeral Dapper projection of one <c>station.show</c> row — settable properties, not a
+    /// positional record, mirrors this file's own house idiom for a shape one further mapping step
+    /// (<see cref="ToShow"/>) still needs to touch before it becomes the domain type. <see cref="RotationJson"/>
+    /// is the raw text <c>envelope -&gt;&gt; 'rotation'</c> extracted (SPEC F152.3, PLAN T360) — Dapper
+    /// has no built-in jsonb-to-<see cref="RotationPredicate"/> mapping, so <see cref="RotationEnvelopeCodec"/>
+    /// parses it, never this row type itself.
+    /// </summary>
+    sealed record ShowRow
+    {
+        public long Id { get; init; }
+        public string Name { get; init; } = "";
+        public string Slug { get; init; } = "";
+        public string? Tagline { get; init; }
+        public string? Flavor { get; init; }
+        public string? ImportedFrom { get; init; }
+        public DateTime? ImportedAt { get; init; }
+        public DateTime CreatedAt { get; init; }
+        public DateTime UpdatedAt { get; init; }
+        public string? RotationJson { get; init; }
+    }
+
     // id is `serial` (int4) at rest — mirrors PersonaRepository's own SelectColumns comment: every id
     // in this codebase is `long` (bigint) in C#, so it is cast on the way out for a consistent,
-    // single-width C# id type.
+    // single-width C# id type. envelope's own rotation_json column is PLAN T360's own addition (SPEC
+    // F152.3) — the ONLY envelope key this repository ever selects.
     const string SelectColumns =
         "select id::bigint as id, name, slug, tagline, flavor, imported_from, imported_at, " +
-        "created_at, updated_at from station.show";
+        "created_at, updated_at, envelope ->> 'rotation' as rotation_json from station.show";
+
+    // Every write below RETURNs this identical column set (SelectColumns' own list, minus the FROM
+    // clause) so ToShow has one shape to map from regardless of which statement produced the row.
+    const string ReturningColumns =
+        "returning id::bigint as id, name, slug, tagline, flavor, imported_from, imported_at, " +
+        "created_at, updated_at, envelope ->> 'rotation' as rotation_json";
 
     public async Task<IReadOnlyList<Show>> GetAllAsync(CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<Show>(new CommandDefinition(
+        var rows = await conn.QueryAsync<ShowRow>(new CommandDefinition(
             $"{SelectColumns} order by name",
             cancellationToken: ct));
-        return rows.ToList();
+        return rows.Select(ToShow).ToList();
     }
 
     public async Task<Show?> GetByIdAsync(long id, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-        return await conn.QuerySingleOrDefaultAsync<Show>(new CommandDefinition(
+        var row = await conn.QuerySingleOrDefaultAsync<ShowRow>(new CommandDefinition(
             $"{SelectColumns} where id = @id",
             new { id },
             cancellationToken: ct));
+        return row is null ? null : ToShow(row);
     }
 
     public async Task<Show?> GetBySlugAsync(string slug, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-        return await conn.QuerySingleOrDefaultAsync<Show>(new CommandDefinition(
+        var row = await conn.QuerySingleOrDefaultAsync<ShowRow>(new CommandDefinition(
             $"{SelectColumns} where slug = @slug",
             new { slug },
             cancellationToken: ct));
+        return row is null ? null : ToShow(row);
     }
 
     /// <summary>
@@ -76,7 +113,9 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource) : IShowStore
     /// per F115.1): an authored show keeps both NULL by construction; only a future import write path
     /// (PLAN T254) ever sets them. <c>tagline</c>/<c>flavor</c> bind through <see cref="NullIfBlank"/>
     /// — an empty/whitespace-only value persists as <c>NULL</c>, matching <see cref="Show"/>'s own
-    /// "null when the show carries none" contract instead of a stray <c>''</c>.
+    /// "null when the show carries none" contract instead of a stray <c>''</c>. <c>envelope</c> is
+    /// left untouched (stays whatever it already was — NULL for a brand-new row), the same "this
+    /// statement never overwrites the whole document" discipline <see cref="SetRotationAsync"/> keeps.
     /// </summary>
     public async Task<ShowWriteResult> CreateAsync(ShowDraft draft, CancellationToken ct)
     {
@@ -87,16 +126,15 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource) : IShowStore
         try
         {
             await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-            var show = await conn.QuerySingleAsync<Show>(new CommandDefinition(
+            var row = await conn.QuerySingleAsync<ShowRow>(new CommandDefinition(
                 $"""
                 insert into station.show (name, slug, tagline, flavor)
                 values (@Name, @Slug, @Tagline, @Flavor)
-                returning id::bigint as id, name, slug, tagline, flavor, imported_from, imported_at,
-                    created_at, updated_at
+                {ReturningColumns}
                 """,
                 new { draft.Name, Slug = slug, Tagline = NullIfBlank(draft.Tagline), Flavor = NullIfBlank(draft.Flavor) },
                 cancellationToken: ct));
-            return new ShowWriteResult.Created(show);
+            return new ShowWriteResult.Created(ToShow(row));
         }
         catch (PostgresException ex) when (ex.SqlState == UniqueViolation)
         {
@@ -114,6 +152,8 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource) : IShowStore
     /// to an imported show entirely is PLAN T240's SPEC F115.5, not this seam's) — and, like
     /// <see cref="CreateAsync"/>, binds <c>tagline</c>/<c>flavor</c> through <see cref="NullIfBlank"/>
     /// so clearing either field to <c>""</c> in an edit persists <c>NULL</c>, not an empty string.
+    /// Never touches <c>envelope</c> either — an authored name/tagline/flavor edit leaves a show's own
+    /// rotation rule (if any) exactly as <see cref="SetRotationAsync"/> last left it.
     /// </summary>
     public async Task<ShowWriteResult> UpdateAsync(long id, ShowDraft draft, CancellationToken ct)
     {
@@ -124,17 +164,25 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource) : IShowStore
         try
         {
             await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-            var show = await conn.QuerySingleOrDefaultAsync<Show>(new CommandDefinition(
+            var row = await conn.QuerySingleOrDefaultAsync<ShowRow>(new CommandDefinition(
                 $"""
                 update station.show
                 set name = @Name, slug = @Slug, tagline = @Tagline, flavor = @Flavor, updated_at = now()
                 where id = @Id
-                returning id::bigint as id, name, slug, tagline, flavor, imported_from, imported_at,
-                    created_at, updated_at
+                {ReturningColumns}
                 """,
                 new { draft.Name, Slug = slug, Tagline = NullIfBlank(draft.Tagline), Flavor = NullIfBlank(draft.Flavor), Id = id },
                 cancellationToken: ct));
-            return show is null ? new ShowWriteResult.NotFound() : new ShowWriteResult.Updated(show);
+            if (row is null) return new ShowWriteResult.NotFound();
+
+            // PLAN T360 review HIGH-1: this same "cached ShowSummary goes stale" bug already existed
+            // for name/tagline/flavor edits — every one of those fields rides ScheduleRepository/
+            // SpecialsRepository's own LEFT JOIN into the SAME cached ShowSummary Rotation does. It
+            // predates T360 (live since PLAN T241 first joined station.show into the resolver
+            // snapshot); T360 is the first task to add a ShowChanged event at all, so this write gains
+            // the same fix SetRotationAsync gets, closing the gap for every field this store can edit.
+            ShowChanged?.Invoke();
+            return new ShowWriteResult.Updated(ToShow(row));
         }
         catch (PostgresException ex) when (ex.SqlState == UniqueViolation)
         {
@@ -188,25 +236,78 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource) : IShowStore
     /// does. Beyond this ONE gate, this method performs no other validation (mirrors
     /// <c>ThemeRepository.UpsertAsync</c>'s "pure persistence" posture otherwise) — route-slug
     /// shape/reservation and the 2× import budget ceiling already ran in <c>ShowsController.Import</c>
-    /// before this is ever called.
+    /// before this is ever called. Like <see cref="CreateAsync"/>/<see cref="UpdateAsync"/>, never
+    /// touches <c>envelope</c> — a manifest's own optional <c>envelope.rotation</c> (SPEC F152.6) is
+    /// PLAN T363's own write path, not this one's.
     /// </summary>
     public async Task<Show?> ImportAsync(string slug, string name, string? tagline, string? flavor, string importedFrom, CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
-        return await conn.QuerySingleOrDefaultAsync<Show>(new CommandDefinition(
-            """
+        var row = await conn.QuerySingleOrDefaultAsync<ShowRow>(new CommandDefinition(
+            $"""
             insert into station.show (name, slug, tagline, flavor, imported_from, imported_at)
             values (@Name, @Slug, @Tagline, @Flavor, @ImportedFrom, now())
             on conflict (slug) do update
               set name = @Name, tagline = @Tagline, flavor = @Flavor,
                   imported_from = @ImportedFrom, imported_at = now(), updated_at = now()
               where station.show.imported_from is not null
-            returning id::bigint as id, name, slug, tagline, flavor, imported_from, imported_at,
-                created_at, updated_at
+            {ReturningColumns}
             """,
             new { Name = name, Slug = slug, Tagline = NullIfBlank(tagline), Flavor = NullIfBlank(flavor), ImportedFrom = importedFrom },
             cancellationToken: ct));
+        return row is null ? null : ToShow(row);
     }
+
+    /// <summary>
+    /// See <see cref="IShowStore.SetRotationAsync"/>. The jsonb write itself never overwrites the
+    /// whole <c>envelope</c> document (postgres-dba house rule, and SPEC F115.2's own "every other
+    /// key/column stays dormant" pin depends on it): <paramref name="rotation"/> non-null MERGES a
+    /// <c>{"rotation": {...}}</c> fragment in via jsonb <c>||</c>; <see langword="null"/> REMOVES just
+    /// the <c>rotation</c> key via jsonb <c>-</c>. <c>coalesce(envelope, jsonb_build_object())</c>
+    /// handles a still-NULL <c>envelope</c> on a show that has never carried one (every show shipped
+    /// before this task) — <c>jsonb_build_object()</c> with no arguments is Postgres's own <c>{}</c>,
+    /// spelled without a literal brace so it survives this method's own raw interpolated SQL string
+    /// unescaped — both operators need a genuine jsonb value on their left, never a SQL NULL, to behave.
+    /// </summary>
+    public async Task<ShowWriteResult> SetRotationAsync(long id, RotationPredicate? rotation, CancellationToken ct)
+    {
+        var rotationJson = RotationEnvelopeCodec.ToJson(rotation);
+
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<ShowRow>(new CommandDefinition(
+            $"""
+            update station.show
+            set envelope = case
+                  when @RotationJson::text is null then coalesce(envelope, jsonb_build_object()) - 'rotation'
+                  else coalesce(envelope, jsonb_build_object()) || jsonb_build_object('rotation', @RotationJson::jsonb)
+                end,
+                updated_at = now()
+            where id = @Id
+            {ReturningColumns}
+            """,
+            new { Id = id, RotationJson = rotationJson },
+            cancellationToken: ct));
+
+        if (row is null) return new ShowWriteResult.NotFound();
+
+        // PLAN T360 review HIGH-1: CachingScheduleResolver's cached ScheduleWeekSnapshot embeds a
+        // ShowSummary (with THIS Rotation) at LOAD time — that cache has no TTL and, before this
+        // event, only ever dirtied on IScheduleStore.WeekChanged/SpecialsChanged. Without this line an
+        // operator's rotation edit would sit invisible until an unrelated schedule/specials write, or
+        // a process restart, happened to reload it — raised exactly once per successful write, never
+        // on NotFound, mirroring ScheduleRepository.ReplaceWeekAsync/AssignShowAsync's own
+        // WeekChanged?.Invoke() placement.
+        ShowChanged?.Invoke();
+        return new ShowWriteResult.Updated(ToShow(row));
+    }
+
+    /// <summary>Maps one <see cref="ShowRow"/> into the domain <see cref="Show"/>, parsing
+    /// <see cref="ShowRow.RotationJson"/> via <see cref="RotationEnvelopeCodec.Parse"/> — the one
+    /// mapping step every read/write method above shares, so a malformed row WARNs identically
+    /// regardless of which statement produced it.</summary>
+    Show ToShow(ShowRow row) => new(
+        row.Id, row.Name, row.Slug, row.Tagline, row.Flavor, row.ImportedFrom, row.ImportedAt,
+        row.CreatedAt, row.UpdatedAt, RotationEnvelopeCodec.Parse(row.RotationJson, row.Name, logger));
 
     /// <summary>
     /// SPEC F115.1's name-shape guard — pure C#, evaluated before either write method ever opens a

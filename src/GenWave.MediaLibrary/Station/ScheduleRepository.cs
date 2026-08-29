@@ -46,9 +46,11 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<Sched
     /// <para>
     /// <c>ShowId</c>/<c>ShowName</c>/<c>ShowTagline</c>/<c>ShowFlavor</c> (SPEC F116.1, PLAN T241) are
     /// <see cref="SelectColumns"/>'s own LEFT JOIN against <c>station.show</c> — deliberately never
-    /// <c>show.persona_id</c>/<c>show.envelope</c> (SPEC F115.2's dormant-columns-unread pin: this row
-    /// shape has no property to even receive them). All four are null together on an unnamed block
-    /// (no matching join row).
+    /// <c>show.persona_id</c> (SPEC F115.2's dormant-columns-unread pin: this row shape has no property
+    /// to even receive it). All identity columns are null together on an unnamed block (no matching
+    /// join row). <c>ShowRotationJson</c> (SPEC F152.3, PLAN T360) is the ONE <c>show.envelope</c> key
+    /// this join reads — the raw text <c>sh.envelope -&gt;&gt; 'rotation'</c> extracted, parsed by
+    /// <see cref="RotationEnvelopeCodec"/> in <see cref="ToShowSummary"/>, never bound directly.
     /// </para>
     /// </summary>
     sealed record ScheduleRow
@@ -66,26 +68,29 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<Sched
         public string? ShowSlug { get; init; }
         public string? ShowTagline { get; init; }
         public string? ShowFlavor { get; init; }
+        public string? ShowRotationJson { get; init; }
     }
 
-    // SPEC F116.1/F91.3 (PLAN T241); ShowSlug joins PLAN T285 (SPEC F127.8 review F4) — the LEFT
-    // JOIN resolves every block's show identity at THIS one load (LoadWeekAsync/ReplaceWeekAsync's
-    // own post-write reload both share this constant) rather than a per-tick lookup —
-    // ScheduleResolver only ever sees the already-joined ScheduleWeekSnapshot (ARCHITECTURE.md "the
-    // 3s feeder tick performs no schedule query", now extended to show identity too). Selects ONLY
-    // show.id/name/slug/tagline/flavor — never show.persona_id/envelope (SPEC F115.2's
-    // dormant-columns-unread pin), enforced here at the query itself, not merely by ScheduleRow's own
-    // shape above.
+    // SPEC F116.1/F91.3 (PLAN T241); ShowSlug joins PLAN T285 (SPEC F127.8 review F4);
+    // ScheduleShowJoinColumns.Select's own show_rotation_json column joins PLAN T360 (SPEC F152.3) —
+    // the LEFT JOIN resolves every block's show identity (and its one awake envelope field) at THIS
+    // one load (LoadWeekAsync/ReplaceWeekAsync's own post-write reload both share this constant)
+    // rather than a per-tick lookup — ScheduleResolver only ever sees the already-joined
+    // ScheduleWeekSnapshot (ARCHITECTURE.md "the 3s feeder tick performs no schedule query", now
+    // extended to show identity too). PLAN T360 review LOW-5: this JOIN itself is what SPEC F152.3's
+    // "no second lookup, no cache divergence" describes — the resolved Show always agrees with the
+    // block that named it, by construction of a single query. It does NOT mean the cached
+    // ScheduleWeekSnapshot this join populates can never drift from a live station.show write after
+    // the fact; that half is IShowStore.ShowChanged's own job (CachingScheduleResolver's own class
+    // remarks). Selects show.id/name/slug/tagline/flavor and envelope's rotation key ONLY — never
+    // show.persona_id or any other envelope key (SPEC F115.2's dormant-columns-unread pin), enforced
+    // here at the query itself, not merely by ScheduleRow's own shape above.
     const string SelectColumns =
-        """
-        select s.id::bigint as id, s.day_of_week, s.start_minute, s.end_minute,
-               s.persona_id::bigint as persona_id, s.genres,
-               s.energy_min::double precision as energy_min, s.energy_max::double precision as energy_max,
-               sh.id::bigint as show_id, sh.name as show_name, sh.slug as show_slug,
-               sh.tagline as show_tagline, sh.flavor as show_flavor
-        from station.segment_schedule s
-        left join station.show sh on sh.id = s.show_id
-        """;
+        "select s.id::bigint as id, s.day_of_week, s.start_minute, s.end_minute, " +
+        "s.persona_id::bigint as persona_id, s.genres, " +
+        "s.energy_min::double precision as energy_min, s.energy_max::double precision as energy_max, " +
+        ScheduleShowJoinColumns.Select +
+        " from station.segment_schedule s left join station.show sh on sh.id = s.show_id";
 
     public async Task<ScheduleWeekSnapshot> LoadWeekAsync(CancellationToken ct)
     {
@@ -328,7 +333,7 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<Sched
         return dayRows.Skip(start).Take(end - start + 1).Select(r => r.Id).ToList();
     }
 
-    static async Task<IReadOnlyList<ScheduleSegment>> LoadSegmentsAsync(
+    async Task<IReadOnlyList<ScheduleSegment>> LoadSegmentsAsync(
         NpgsqlConnection conn, NpgsqlTransaction? transaction, CancellationToken ct)
     {
         var rows = await conn.QueryAsync<ScheduleRow>(new CommandDefinition(
@@ -415,26 +420,34 @@ sealed class ScheduleRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<Sched
     // PLAN T243 — Show and ShowId are set TOGETHER here, both derived from the same row.ShowId, so a
     // loaded segment's two show fields never disagree (ScheduleSegment's own remarks: Show is the
     // load-time display projection, ShowId is what every writer and ScheduleWeekVersion.Compute read).
-    static ScheduleSegment ToSegment(ScheduleRow row) => new(
+    ScheduleSegment ToSegment(ScheduleRow row) => new(
         row.Id, (DayOfWeek)row.DayOfWeek, row.StartMinute, row.EndMinute, row.PersonaId,
         row.Genres, row.EnergyMin, row.EnergyMax, ToShowSummary(row), row.ShowId);
 
-    /// <summary>SPEC F116.1 (PLAN T241), <c>Slug</c> joins at PLAN T285 (SPEC F127.8 review F4) —
-    /// <see langword="null"/> when the block names no show (the LEFT JOIN found no matching
-    /// <c>station.show</c> row); otherwise the five identity columns <see cref="SelectColumns"/>
-    /// selected, never <c>persona_id</c>/<c>envelope</c> (SPEC F115.2's dormant-columns-unread pin —
-    /// this method has no row data to even attempt reading either from). <c>ShowName</c> is checked
-    /// alongside <c>ShowId</c> purely as belt-and-suspenders null-safety (never the actual guard in
-    /// practice — <c>station.show.name</c> is <c>NOT NULL</c>, so any row the join finds by id always
-    /// carries one): this avoids ever needing the null-forgiving operator to construct
-    /// <see cref="ShowSummary"/> from a row Dapper types every column of as nullable. <c>ShowSlug</c>
-    /// falls back to <see cref="ShowSummary"/>'s own <c>""</c> default rather than a second
-    /// belt-and-suspenders null check — <c>station.show.slug</c> is likewise <c>NOT NULL</c>, so this
-    /// fallback is unreachable in practice too.
+    /// <summary>SPEC F116.1 (PLAN T241), <c>Slug</c> joins at PLAN T285 (SPEC F127.8 review F4),
+    /// <c>Rotation</c> joins at PLAN T360 (SPEC F152.3) — <see langword="null"/> when the block names
+    /// no show (the LEFT JOIN found no matching <c>station.show</c> row); otherwise the five identity
+    /// columns <see cref="SelectColumns"/> selected, never <c>persona_id</c> or any <c>envelope</c> key
+    /// beyond <c>rotation</c> (SPEC F115.2's dormant-columns-unread pin — this method has no row data
+    /// to even attempt reading the rest from). <c>ShowName</c> is checked alongside <c>ShowId</c>
+    /// purely as belt-and-suspenders null-safety (never the actual guard in practice —
+    /// <c>station.show.name</c> is <c>NOT NULL</c>, so any row the join finds by id always carries
+    /// one): this avoids ever needing the null-forgiving operator to construct <see cref="ShowSummary"/>
+    /// from a row Dapper types every column of as nullable. <c>ShowSlug</c> falls back to
+    /// <see cref="ShowSummary"/>'s own <c>""</c> default rather than a second belt-and-suspenders null
+    /// check — <c>station.show.slug</c> is likewise <c>NOT NULL</c>, so this fallback is unreachable in
+    /// practice too. <c>ShowRotationJson</c> is parsed via <see cref="RotationEnvelopeCodec.Parse"/>,
+    /// which WARNs (naming <paramref name="row"/>'s own <c>ShowName</c>) and normalizes to
+    /// <see langword="null"/> rather than throw on a malformed value — this load path must never fail
+    /// a 3s feeder tick over one corrupted show row (F152.4's never-silence posture).
     /// </summary>
-    static ShowSummary? ToShowSummary(ScheduleRow row) =>
+    ShowSummary? ToShowSummary(ScheduleRow row) =>
         row.ShowId is { } showId && row.ShowName is { } showName
-            ? new ShowSummary(showId, showName, row.ShowTagline, row.ShowFlavor) { Slug = row.ShowSlug ?? "" }
+            ? new ShowSummary(showId, showName, row.ShowTagline, row.ShowFlavor)
+            {
+                Slug = row.ShowSlug ?? "",
+                Rotation = RotationEnvelopeCodec.Parse(row.ShowRotationJson, showName, logger),
+            }
             : null;
 
     /// <summary>
