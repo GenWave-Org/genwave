@@ -7,6 +7,8 @@
 // block pair and call ScheduleEnvelopeProvider (Story212_EnvelopeProviderAndLadder.cs's own
 // fixture-free style); AC7–AC9 drive MusicSelectionPolicy over a fake IMediaCatalog pool sized to
 // force each rung (Story212_EnvelopeProviderAndLadder.cs's ladder idiom, ahead of F81.6's rungs).
+using GenWave.Abstractions.Playout;
+
 namespace GenWave.Orchestration.Tests.Specs;
 
 public static class FeatureDeepCutsAndTheRelaxLadder
@@ -19,14 +21,24 @@ public static class FeatureDeepCutsAndTheRelaxLadder
     {
         // Given the Abstractions package, When SegmentEnvelope is constructed the pre-5.5.0 way
         // and Rotation is then set.
-        [Fact(Skip = "pending T356 (STORY-372 AC1)")]
-        public void ThePreExistingConstructorStillCompiles() => Assert.Fail("pending T356");
+        static readonly SegmentEnvelope PreExisting =
+            new(TimeOnly.MinValue, TimeOnly.MaxValue, ["Rock"], EnergyRange.Unconstrained);
 
-        [Fact(Skip = "pending T356 (STORY-372 AC1)")]
-        public void RotationIsNullByDefault() => Assert.Fail("pending T356");
+        [Fact]
+        public void ThePreExistingConstructorStillCompiles() =>
+            Assert.NotNull(PreExisting);
 
-        [Fact(Skip = "pending T356 (STORY-372 AC1)")]
-        public void SettingRotationMaxPlaysZeroIsAdditive() => Assert.Fail("pending T356");
+        [Fact]
+        public void RotationIsNullByDefault() =>
+            Assert.Null(PreExisting.Rotation);
+
+        [Fact]
+        public void SettingRotationMaxPlaysZeroIsAdditive()
+        {
+            var withRotation = PreExisting with { Rotation = new RotationPredicate(MaxPlays: 0) };
+
+            Assert.Equal(PreExisting, withRotation with { Rotation = null });
+        }
     }
 
     public sealed class ScenarioTheShowCarriesTheRule
