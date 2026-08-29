@@ -1,0 +1,71 @@
+// STORY-371 — The nudge in the ranker (SPEC F151.1–F151.4 · PLAN T359, T370)
+//
+// BDD specification — xUnit. PENDING until T359 (AC4, the pool projection's carrier half) and
+// T370 (AC5–AC9, PersonaRanker.Score's additive term). Arrange sketch: pure in-memory
+// arrangement of PersonaRankCandidate/PersonaRanker (Story213_PersonaRanker.cs's own idiom — no
+// I/O, a seeded IRandomSource) plus, for AC7/AC8, the F84.2/Envelope PRD simulation idiom: N
+// picks (500 per STORY-371 AC7/AC8) run in-memory against a fixed candidate pool with nudges set
+// per-track, tallying the winner-share distribution — the same seeded-RNG/iterate/tally/assert-a-
+// bound shape as Story213_PersonaRanker.cs's own exploration-rate simulation.
+namespace GenWave.Orchestration.Tests.Specs;
+
+public static class FeatureTheNudgeInTheRanker
+{
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — the carrier, the term, and its bounds
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioTheCandidateCarriesTheNudge
+    {
+        // Given a pool row with nudge 0.6, When the candidate pool is projected for the ranker.
+        [Fact(Skip = "pending T359 (STORY-371 AC4)")]
+        public void ThePersonaRankCandidateHasNudgeZeroPointSix() => Assert.Fail("pending T359");
+
+        [Fact(Skip = "pending T359 (STORY-371 AC4)")]
+        public void ThePersonaRankCandidateHasPlayCountFromTheLedger() => Assert.Fail("pending T359");
+    }
+
+    public sealed class ScenarioTheRankerTerm
+    {
+        // Given two identical candidates except nudge 0.6 vs 0, NudgeGain 0.5, When they are
+        // scored.
+        [Fact(Skip = "pending T370 (STORY-371 AC5)")]
+        public void TheScoresDifferByExactlyZeroPointThree() => Assert.Fail("pending T370");
+    }
+
+    public sealed class ScenarioRungZeroOnly
+    {
+        // Given the persona layer disabled, When 1,000 picks run with thumbs present.
+        [Fact(Skip = "pending T370 (STORY-371 AC6)")]
+        public void ThePickDistributionMatchesAnEmptyThumbTable() => Assert.Fail("pending T370");
+    }
+
+    public sealed class ScenarioTheBoundSimulated
+    {
+        // Given every track but one at nudge -1 and that one at +1, When 500 picks run.
+        [Fact(Skip = "pending T370 (STORY-371 AC7)")]
+        public void TheFavouredTracksShareStaysAtOrBelowTheExplorationAdjustedCap() =>
+            Assert.Fail("pending T370");
+
+        [Fact(Skip = "pending T370 (STORY-371 AC7)")]
+        public void ExplorationPicksAreAtLeastFivePercent() => Assert.Fail("pending T370");
+    }
+
+    public sealed class ScenarioAUniformNudgeChangesNothing
+    {
+        // Given every track at +1, When 500 picks run.
+        [Fact(Skip = "pending T370 (STORY-371 AC8)")]
+        public void TheDistributionMatchesEveryTrackAtZero() => Assert.Fail("pending T370");
+    }
+
+    public sealed class ScenarioObservability
+    {
+        // Given a pick whose winner had nudge 0.6, When the per-pick log line and the
+        // booth-log chips are read.
+        [Fact(Skip = "pending T370 (STORY-371 AC9)")]
+        public void TheLogLineCarriesTheTopThreeNudges() => Assert.Fail("pending T370");
+
+        [Fact(Skip = "pending T370 (STORY-371 AC9)")]
+        public void TheChipsIncludeARotationChip() => Assert.Fail("pending T370");
+    }
+}
