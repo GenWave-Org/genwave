@@ -26,4 +26,27 @@ public sealed record EnvelopeCandidateRow(
     double? Energy,
     IReadOnlyList<string> Moods,
     bool RepeatedRecent,
-    bool RepeatedArtist);
+    bool RepeatedArtist)
+{
+    /// <summary>
+    /// SPEC F151.1 (STORY-372, PLAN T359, Abstractions 5.5.0) — the <c>library.media_rotation.nudge</c>
+    /// ledger value (<c>[-1, 1]</c>), <c>0</c> for a never-aired track or one with no ledger row at
+    /// all (<c>coalesce(rot.nudge, 0)</c> at the query). This record only CARRIES the value —
+    /// <c>PersonaRanker.Score</c> turning it into an additive scoring term is T370's job, not this
+    /// one's (SPEC F81.2: the envelope filters, the bias/nudge only ever ranks, never filters).
+    /// Deliberately a NON-positional <c>init</c> property, the same convention
+    /// <see cref="GenWave.Abstractions.Playout.SegmentEnvelope.Rotation"/> established (STORY-372
+    /// AC1): every pre-5.5.0 positional <c>new EnvelopeCandidateRow(...)</c> call site — including
+    /// <see cref="Abstractions.IMediaCatalog"/>'s own default-interface fallback — keeps compiling
+    /// unchanged, defaulting to <c>0</c> (no nudge).
+    /// </summary>
+    public double Nudge { get; init; }
+
+    /// <summary>
+    /// SPEC F151.1 — the <c>library.media_rotation.play_count</c> ledger value, <c>0</c> for a
+    /// never-aired track or one with no ledger row. Carried for observability (a future booth-log/
+    /// debug-line chip) rather than any ranking use today. Same non-positional, additive shape as
+    /// <see cref="Nudge"/>.
+    /// </summary>
+    public int PlayCount { get; init; }
+}

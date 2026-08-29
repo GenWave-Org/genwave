@@ -301,6 +301,64 @@ sealed class MediaRepository(
     string ExplicitPredicate() =>
         audiencePosture.Current == AudiencePosture.Mature ? "" : "and not coalesce(m.explicit, false)";
 
+    /// <summary>
+    /// SPEC F152.2, STORY-372, PLAN T359 — the ONE by-construction WHERE fragment for a
+    /// <see cref="SegmentEnvelope.Rotation"/> "deep cuts" rule, shared byte-identical by every
+    /// envelope-aware candidate query that joins in <c>library.media_rotation</c> as <c>rot</c>
+    /// (<see cref="GetEnvelopeCandidateAsync"/>, <see cref="GetEnvelopeCandidatePoolAsync"/>) —
+    /// mirrors <see cref="PlayablePredicate"/>/<see cref="ExplicitPredicate"/>'s own "one definition,
+    /// every caller shares it" idiom. <see langword="null"/> <paramref name="rotation"/> — including
+    /// a both-<see langword="null"/> predicate (T356's read-path note: a genuinely empty
+    /// <see cref="RotationPredicate"/> must behave exactly like no <see cref="RotationPredicate"/> at
+    /// all here too) — returns <c>""</c>: the fragment is OMITTED ENTIRELY, not merely always-true,
+    /// the same construction <see cref="ExplicitPredicate"/> uses on <see cref="AudiencePosture.Mature"/>.
+    /// SPEC F81.2's "the envelope filters; the bias/nudge only ranks" holds by construction here: this
+    /// predicate is the filter half, <see cref="EnvelopeCandidateRow.Nudge"/> the ranked half (T370),
+    /// never the reverse. <see cref="GetRotationCandidateAsync"/> — the SPEC F81.6 never-silence
+    /// terminal rung with no envelope at all — never calls this: there is no
+    /// <see cref="SegmentEnvelope.Rotation"/> to read once the envelope itself has been relaxed away.
+    /// </summary>
+    internal static string RotationPredicateSql(RotationPredicate? rotation)
+    {
+        if (rotation is null) return "";
+
+        var parts = new List<string>(2);
+        if (rotation.MaxPlays is not null)
+            parts.Add("coalesce(rot.play_count, 0) <= @maxPlays");
+        if (rotation.NotAiredWithinDays is not null)
+            parts.Add("(rot.last_aired_at is null or rot.last_aired_at < now() - make_interval(days => @notAiredWithinDays))");
+
+        return parts.Count == 0 ? "" : $"and {string.Join(" and ", parts)}";
+    }
+
+    /// <summary>
+    /// MED-2 (PLAN T359 review) — <see cref="GetEnvelopeCandidateAsync"/> and
+    /// <see cref="GetEnvelopeCandidatePoolAsync"/> MUST filter identically: SPEC F81.5's
+    /// <c>SatisfiesEnvelope</c> trust-but-verify re-check only covers genre + energy, so a rotation
+    /// (or any future) predicate that drifted between the two queries would be invisible to that
+    /// re-check — the persona pool could admit a row the envelope-only ladder would have excluded,
+    /// or vice versa, with nothing catching it. Extracted here so there is exactly ONE place this
+    /// FROM/JOIN/WHERE/ORDER BY text is written, byte-identical for both callers by construction
+    /// rather than by two hand-kept copies; each caller supplies only its own genre/explicit/rotation
+    /// predicate fragments and appends its own SELECT list and LIMIT.
+    /// </summary>
+    static string EnvelopeCandidateFromWhereOrderBySql(string genrePredicate, string explicitPredicate, string rotationPredicate) => $"""
+        from library.media m
+        left join library.media_rating r on r.media_id = m.id
+        left join library.media_rotation rot on rot.media_id = m.id
+        where {PlayablePredicate}
+          and m.library_id = any(@libraryIds)
+          and (m.energy is null or (m.energy >= @energyMin and m.energy <= @energyMax))
+          {genrePredicate}
+          {explicitPredicate}
+          {rotationPredicate}
+        order by
+          repeated_recent asc,
+          repeated_artist asc,
+          coalesce(m.id = @mostRecentId, false) asc,
+          random()
+        """;
+
     /// <summary>Shared recent-id parse for the tiered rotation queries (F41.1): oldest-first list of
     /// opaque string ids, any entry that fails to parse as our bigint id is silently dropped.</summary>
     static List<long> ParseIds(IReadOnlyList<string> ids)
@@ -344,6 +402,14 @@ sealed class MediaRepository(
     /// SPEC F95.4, STORY-250, PLAN T114 — <see cref="ExplicitPredicate"/> ANDs in the SAME
     /// audience-posture fragment <see cref="GetRotationCandidateAsync"/> does, by the same
     /// omitted-entirely-on-Mature construction.
+    ///
+    /// SPEC F152.2, STORY-372, PLAN T359 — <see cref="RotationPredicateSql"/> ANDs in the SAME
+    /// by-construction way, reading <paramref name="envelope"/>'s own <see cref="SegmentEnvelope.Rotation"/>:
+    /// this method backs every rung of the SPEC F81.6 degradation ladder
+    /// (<c>GenWave.Orchestration.MusicSelectionPolicy.SelectEnvelopeLadderAsync</c>), so a rung that
+    /// relaxes rotation-window/energy/genre still carries the SAME <c>Rotation</c> forward (a
+    /// <c>with</c> expression never touches it) — the F152 "deep cuts" rule narrows every one of
+    /// those rungs, never just the first.
     /// </summary>
     public async Task<RotationCandidate?> GetEnvelopeCandidateAsync(
         LibraryScope scope,
@@ -371,6 +437,7 @@ sealed class MediaRepository(
             : null;
         var genrePredicate = genresLower is not null ? "and lower(m.genre) = any(@genresLower)" : "";
         var explicitPredicate = ExplicitPredicate();
+        var rotationPredicate = RotationPredicateSql(envelope.Rotation);
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<RotationCandidateRow>(new CommandDefinition($"""
@@ -388,18 +455,7 @@ sealed class MediaRepository(
                     and lower(trim(rm.artist)) = lower(trim(m.artist))
                 )
               ) as repeated_artist
-            from library.media m
-            left join library.media_rating r on r.media_id = m.id
-            where {PlayablePredicate}
-              and m.library_id = any(@libraryIds)
-              and (m.energy is null or (m.energy >= @energyMin and m.energy <= @energyMax))
-              {genrePredicate}
-              {explicitPredicate}
-            order by
-              repeated_recent asc,
-              repeated_artist asc,
-              coalesce(m.id = @mostRecentId, false) asc,
-              random()
+            {EnvelopeCandidateFromWhereOrderBySql(genrePredicate, explicitPredicate, rotationPredicate)}
             limit 1
             """,
             new
@@ -409,6 +465,8 @@ sealed class MediaRepository(
                 genresLower,
                 energyMin = envelope.EnergyRange.Min,
                 energyMax = envelope.EnergyRange.Max,
+                maxPlays = envelope.Rotation?.MaxPlays,
+                notAiredWithinDays = envelope.Rotation?.NotAiredWithinDays,
             },
             cancellationToken: ct));
 
@@ -433,6 +491,15 @@ sealed class MediaRepository(
     /// audience-posture fragment <see cref="GetRotationCandidateAsync"/>/<see cref="GetEnvelopeCandidateAsync"/>
     /// do, so the ranker's own candidate pool never sees an excluded row either — boundary bias
     /// resamples this SAME query (never a separate one), so it inherits the exclusion for free.
+    ///
+    /// SPEC F152.2/F151.1, STORY-372, PLAN T359 — <see cref="RotationPredicateSql"/> ANDs in the SAME
+    /// by-construction "deep cuts" fragment <see cref="GetEnvelopeCandidateAsync"/> does (this IS the
+    /// query that rung's persona pool draws from). Additionally PROJECTS <c>library.media_rotation</c>'s
+    /// own <c>nudge</c>/<c>play_count</c> onto every row (F151.1's carrier half, T370 consumes them) —
+    /// the ONE candidate query that needs the projection, since it is the only row shape that reaches
+    /// <c>GenWave.Orchestration.PersonaRankCandidate</c> (via <c>RankerPersonaPickProvider.ToRankCandidate</c>);
+    /// <see cref="GetEnvelopeCandidateAsync"/>'s own <see cref="RotationCandidateRow"/> shape never
+    /// does, so it carries the filter half only, never the projection.
     /// </summary>
     public async Task<IReadOnlyList<EnvelopeCandidateRow>> GetEnvelopeCandidatePoolAsync(
         LibraryScope scope,
@@ -458,6 +525,7 @@ sealed class MediaRepository(
             : null;
         var genrePredicate = genresLower is not null ? "and lower(m.genre) = any(@genresLower)" : "";
         var explicitPredicate = ExplicitPredicate();
+        var rotationPredicate = RotationPredicateSql(envelope.Rotation);
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var rows = await conn.QueryAsync<EnvelopeCandidatePoolRow>(new CommandDefinition($"""
@@ -466,6 +534,7 @@ sealed class MediaRepository(
               m.bitrate_kbps, m.artist, m.album, m.genre, m.year, m.integrated_lufs, m.true_peak_dbtp,
               m.measurable, m.cue_in_sec, m.cue_out_sec, m.intro_energy, m.outro_energy,
               m.energy, m.moods,
+              coalesce(rot.nudge, 0) as nudge, coalesce(rot.play_count, 0) as play_count,
               (m.id = any(@recentIds)) as repeated_recent,
               (
                 m.artist is not null and trim(m.artist) <> ''
@@ -476,18 +545,7 @@ sealed class MediaRepository(
                     and lower(trim(rm.artist)) = lower(trim(m.artist))
                 )
               ) as repeated_artist
-            from library.media m
-            left join library.media_rating r on r.media_id = m.id
-            where {PlayablePredicate}
-              and m.library_id = any(@libraryIds)
-              and (m.energy is null or (m.energy >= @energyMin and m.energy <= @energyMax))
-              {genrePredicate}
-              {explicitPredicate}
-            order by
-              repeated_recent asc,
-              repeated_artist asc,
-              coalesce(m.id = @mostRecentId, false) asc,
-              random()
+            {EnvelopeCandidateFromWhereOrderBySql(genrePredicate, explicitPredicate, rotationPredicate)}
             limit @limit
             """,
             new
@@ -497,6 +555,8 @@ sealed class MediaRepository(
                 genresLower,
                 energyMin = envelope.EnergyRange.Min,
                 energyMax = envelope.EnergyRange.Max,
+                maxPlays = envelope.Rotation?.MaxPlays,
+                notAiredWithinDays = envelope.Rotation?.NotAiredWithinDays,
                 limit = Math.Clamp(limit, 1, 200),
             },
             cancellationToken: ct));

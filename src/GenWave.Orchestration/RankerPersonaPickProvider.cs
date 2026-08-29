@@ -108,13 +108,44 @@ public sealed class RankerPersonaPickProvider(
             diagnostics);
     }
 
-    static PersonaRankCandidate ToRankCandidate(EnvelopeCandidateRow row) => new(
+    /// <summary>
+    /// SPEC F82.2 base mapping, extended by SPEC F151.1 (STORY-372, PLAN T359) to carry
+    /// <see cref="EnvelopeCandidateRow.Nudge"/>/<see cref="EnvelopeCandidateRow.PlayCount"/> straight
+    /// onto <see cref="PersonaRankCandidate"/> — no transformation, the pool query already
+    /// <c>coalesce</c>'d both to their zero defaults.
+    ///
+    /// <para>
+    /// MED-1 (PLAN T359 review) — kept <c>internal</c> (not reverted to <c>private</c>) rather than
+    /// driving <see cref="TryPickAsync"/> through the PUBLIC route with a fake <c>IMediaCatalog</c>:
+    /// the public route's ONLY return type is <see cref="RotationCandidate"/>
+    /// (<see cref="IPersonaPickProvider"/>'s pinned contract), and NEITHER
+    /// <see cref="RotationCandidate"/> NOR its own <see cref="PersonaPickDiagnostics"/> carries
+    /// <see cref="PersonaRankCandidate.Nudge"/>/<see cref="PersonaRankCandidate.PlayCount"/> anywhere
+    /// — those two fields exist ONLY on the intermediate <see cref="PersonaRankCandidate"/> this
+    /// method builds, consumed internally by <see cref="PersonaRanker.PickAsync"/> and never
+    /// surfaced back out. Proving "the carrier reaches <see cref="PersonaRankCandidate"/>" through
+    /// the public API would require widening a PUBLISHED production return shape solely to give a
+    /// T359 test an observation point — a bigger, out-of-scope production change (and arguably
+    /// T370's call, once <c>PersonaRanker.Score</c> actually consumes <see cref="PersonaRankCandidate.Nudge"/>
+    /// and has its own reason to surface it) — so the narrow <c>InternalsVisibleTo</c> seam stays:
+    /// same shape <c>LegacyPersonaCardMapper.Slugify</c>/<c>AnnouncementRepository</c>'s own internal
+    /// test seams already use one project over. <c>FeatureTheNudgeInTheRanker</c>'s AC4 facts
+    /// (STORY-371) exercise this exact projection directly via that grant; MED-1's own DB-backed
+    /// facts (<c>FeatureThePoolHonoursTheRotationPredicate.ScenarioThePoolProjectsTheLedgerValues</c>,
+    /// <c>GenWave.MediaLibrary.Tests</c>) separately prove the SQL/Dapper round-trip that produces
+    /// the <see cref="EnvelopeCandidateRow"/> this method reads from — the two facts together cover
+    /// producer (SQL) and consumer (this mapping) without touching a published contract.
+    /// </para>
+    /// </summary>
+    internal static PersonaRankCandidate ToRankCandidate(EnvelopeCandidateRow row) => new(
         MediaId: row.Media.MediaId,
         Artist: row.Media.Artist,
         Genre: row.Media.Genre,
         Moods: row.Moods,
         Energy: row.Energy ?? NeutralEnergyWhenUnknown,
-        RotationScore: RotationScoreOf(row));
+        RotationScore: RotationScoreOf(row),
+        Nudge: row.Nudge,
+        PlayCount: row.PlayCount);
 
     /// <summary>
     /// Folds the pool row's own rotation-preference tiers (SPEC F41.3 — the SAME tiers
