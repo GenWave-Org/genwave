@@ -40,6 +40,20 @@ namespace GenWave.Host.Playout;
 /// engine-initiated play, or an item planned with no DJ on shift. Defaults to null so every
 /// pre-gh-#259 positional construction site keeps compiling unchanged.
 /// </param>
+/// <param name="Airing">
+/// SPEC F149.4/F150.4 (STORY-369, PLAN T358) — the current on-air music item's opaque airing token,
+/// stamped by <see cref="PlayoutFeederService"/> from <see cref="AiringTokenRing.Current"/> at the
+/// SAME construction site as every other field here, so a reader can never observe this token
+/// paired with a different airing's title/artist (see <see cref="AiringTokenRing"/>'s own
+/// "token↔snapshot consistency" remarks). Null BY CONSTRUCTION for a drain, TTS, or before the
+/// first advance (PLAN T358 review MED-1): <see cref="IAiringTokenResolver.Current"/> alone
+/// survives an intervening non-music item (SPEC F150.4's grace — see that property's own remarks),
+/// so <c>PublishSnapshot</c> gates the stamp on <see cref="MusicAiring.IsMusicMediaId"/> rather than
+/// forwarding <c>Current</c> unconditionally — a stale-but-still-resolvable token from a prior track
+/// must never be stamped onto a snapshot describing an ident/patter/crosstalk/announcement/drain.
+/// <see cref="GenWave.Host.Api.SpectatorController"/> only ever surfaces it for a music item.
+/// Defaults to null so every pre-T358 positional construction site keeps compiling unchanged.
+/// </param>
 public sealed record NowPlayingSnapshot(
     string? MediaId,
     string? Title,
@@ -49,4 +63,5 @@ public sealed record NowPlayingSnapshot(
     int? DurationMs,
     bool IsDrain,
     string? ArtworkUrl = null,
-    string? DjName = null);
+    string? DjName = null,
+    string? Airing = null);

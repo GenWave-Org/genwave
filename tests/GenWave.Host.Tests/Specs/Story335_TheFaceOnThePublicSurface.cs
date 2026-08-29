@@ -447,7 +447,7 @@ public static class FeatureTheFaceOnThePublicSurface
                 new HashSet<string>(StringComparer.Ordinal)
                 {
                     "title", "artist", "startedAt", "durationMs", "listeners",
-                    "dj", "djAvatarUrl", "show", "upNext", "artworkUrl", "state", "kind",
+                    "dj", "djAvatarUrl", "show", "upNext", "artworkUrl", "airing", "state", "kind",
                 },
                 properties);
         }

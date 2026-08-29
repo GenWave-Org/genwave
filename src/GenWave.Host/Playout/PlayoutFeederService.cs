@@ -39,6 +39,7 @@ sealed class PlayoutFeederService : IHostedService
     readonly string stationId;
     readonly NowPlayingService? nowPlaying;
     readonly OnAirRenderGate? onAirRenderGate;
+    readonly IAiringTokenResolver? airingTokens;
 
     CancellationTokenSource? cts;
     Task? executeTask;
@@ -63,19 +64,31 @@ sealed class PlayoutFeederService : IHostedService
     /// below, marking the on-air LLM+TTS render window in flight so <c>CrosstalkStockWorker</c> never
     /// competes with it for CPU (see <see cref="OnAirRenderGate"/>'s own remarks).
     /// </param>
+    /// <param name="airingTokens">
+    /// Optional (SPEC F149.4, STORY-369, PLAN T358) — read at the SAME point <see cref="PublishSnapshot"/>
+    /// builds every other field, so the token it stamps is always the one minted for THIS airing
+    /// (see <see cref="AiringTokenRing"/>'s own "token↔snapshot consistency" remarks).
+    /// <see cref="IAiringTokenResolver.Current"/> survives an intervening non-music item (SPEC
+    /// F150.4's grace) — <see cref="PublishSnapshot"/> is the seam that suppresses it back to null
+    /// on <see cref="NowPlayingSnapshot"/> whenever the on-air item itself is not music-shaped, so
+    /// that record's own "null for non-music" contract holds by construction (PLAN T358 review
+    /// MED-1), not merely by the callers downstream of it happening to route it away.
+    /// </param>
     public PlayoutFeederService(
         Station station,
         PlayoutFeeder feeder,
         IStationIdentityProvider identityProvider,
         ILogger<PlayoutFeederService> log,
         NowPlayingService? nowPlaying = null,
-        OnAirRenderGate? onAirRenderGate = null)
+        OnAirRenderGate? onAirRenderGate = null,
+        IAiringTokenResolver? airingTokens = null)
     {
         this.feeder = feeder;
         this.identityProvider = identityProvider;
         this.log = log;
         this.nowPlaying = nowPlaying;
         this.onAirRenderGate = onAirRenderGate;
+        this.airingTokens = airingTokens;
         stationId = station.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
@@ -208,7 +221,16 @@ sealed class PlayoutFeederService : IHostedService
             DurationMs: onAir.DurationMs,
             IsDrain: !onAir.IsReal,
             ArtworkUrl: onAir.ArtworkUrl,
-            DjName: onAir.DjName);
+            DjName: onAir.DjName,
+            // Read AFTER ObserveAsync has already run this tick's TrackAired publish (SPEC F149.4,
+            // PLAN T358) — AiringTokenRing.Current already names THIS airing, never a stale one (see
+            // its own "token↔snapshot consistency" remarks). Gated on MusicAiring.IsMusicMediaId
+            // (PLAN T358 review MED-1): AiringTokenRing.Current alone survives an intervening
+            // non-music item by design (SPEC F150.4's grace — see IAiringTokenResolver's own
+            // remarks), so THIS is the seam that suppresses it back to null the moment the on-air
+            // item itself is not music — a stale-but-still-resolvable token must never be stamped
+            // onto a snapshot describing an ident/patter/crosstalk/announcement/drain.
+            Airing: MusicAiring.IsMusicMediaId(onAir.MediaId) ? airingTokens?.Current : null);
 
         nowPlaying.Update(stationId, snapshot);
     }

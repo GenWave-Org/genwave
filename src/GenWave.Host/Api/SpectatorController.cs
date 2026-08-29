@@ -161,6 +161,13 @@ public sealed class SpectatorController(
     /// <c>upNext</c> already document above, and self-heals the very next poll once the item-truth
     /// <c>dj</c> catches up to the resolver's answer.
     /// </para>
+    /// <para>
+    /// The track shape ALSO carries <c>airing</c> (SPEC F149.4, F150.4, STORY-369, PLAN T358) — the
+    /// current airing's opaque token, straight off <see cref="NowPlayingSnapshot.Airing"/>, never
+    /// re-derived here. Null for patter/standby (those shapes simply have no member for it, F62.9)
+    /// and for a music item before the feeder's first advance. The F67 disclosure inventory grows by
+    /// exactly this one field.
+    /// </para>
     /// </summary>
     [HttpGet("now-playing")]
     [HttpHead("now-playing")]   // gh-#160: HEAD answers with GET's exact status/headers, body suppressed by the server
@@ -188,7 +195,7 @@ public sealed class SpectatorController(
 
         return Ok(new SpectatorTrackNowPlaying(
             snapshot.Title, snapshot.Artist, snapshot.StartedAt, snapshot.DurationMs, listeners,
-            dj, djAvatarUrl, show, upNext, snapshot.ArtworkUrl));
+            dj, djAvatarUrl, show, upNext, snapshot.ArtworkUrl, snapshot.Airing));
     }
 
     /// <summary>
