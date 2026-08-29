@@ -82,6 +82,48 @@ public sealed class FeatureDependencyLaws
             DependencyLawAssert.AssertNone(violations, ExemptionBaseline.Entries);
         }
 
+        // T357's own narrowing (SPEC F155.1, STORY-380, gh-#529; PostgresConfinement.RepositoryLayer's
+        // own remarks carry the full "why a bare .And() tail would have been wrong" rationale). A
+        // fixture-only architecture (never ProductionArchitecture.Instance) so this proof is decoupled
+        // from MediaLibrary's real, live Garden namespace contents. T357 review LOW-4: this is a
+        // DELIBERATE INVERSION of ScenarioViolationsAreRedAndNamed's own L2Probe/RepositoryLike idiom
+        // just below, not a continuation of it — that scenario builds a PROBE-LOCAL repositoryLike/
+        // probeTypes predicate pair pointed at fixtures under GenWave.Architecture.Tests.Fixtures.
+        // L2Probe.*, decoupling the proof entirely from PostgresConfinement.RepositoryLayer itself.
+        // Here the goal is the opposite: prove the REAL, narrowed RepositoryLayer predicate actually
+        // discriminates Repository-named from non-Repository-named types inside Garden — so this
+        // fact reuses PostgresConfinement.RepositoryLayer verbatim and puts its own fixtures in the
+        // literal GenWave.MediaLibrary.Garden namespace (a namespace is independent of assembly)
+        // instead. Never claim this as "the same idiom" as the RepositoryLike precedent.
+        [Fact]
+        public void OnlyRepositoryNamedTypesInsideGardenMayTouchNpgsqlOrDapper()
+        {
+            var fixtureArchitecture = new ArchLoader()
+                .LoadAssemblies(
+                    // The fixtures' own C# namespace is literally GenWave.MediaLibrary.Garden (a
+                    // namespace is independent of assembly) — not GenWave.Architecture.Tests.
+                    // Fixtures.L2Probe.Garden, the folder path they live under — precisely so
+                    // PostgresConfinement.RepositoryLayer's real "GenWave.MediaLibrary.Garden"
+                    // predicate matches them for real, per this fact's own header remark.
+                    typeof(GenWave.MediaLibrary.Garden.CompliantGardenRepository).Assembly,
+                    ProductionAssemblies.Npgsql,
+                    ProductionAssemblies.Dapper)
+                .Build();
+
+            var probeTypes = Types().That()
+                .HaveFullName("GenWave.MediaLibrary.Garden.CompliantGardenRepository")
+                .Or().HaveFullName("GenWave.MediaLibrary.Garden.NonRepositoryTouchesDapper");
+            var subjects = Types().That().Are(probeTypes).And().AreNot(PostgresConfinement.RepositoryLayer);
+
+            var violations = PostgresConfinement.FindViolations(fixtureArchitecture, subjects);
+
+            // The Repository-named fixture never becomes a subject at all (it stays inside the
+            // narrowed allowlist) — proven implicitly by there being exactly ONE violation, not two,
+            // and explicitly by naming which one it is.
+            var violation = Assert.Single(violations);
+            Assert.EndsWith("Garden.NonRepositoryTouchesDapper", violation.Member, StringComparison.Ordinal);
+        }
+
         [Fact]
         public void TheCompositionRootsDataSourceConstructionIsTheOneNamedExemption()
         {

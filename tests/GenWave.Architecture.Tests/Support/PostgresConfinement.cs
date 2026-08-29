@@ -17,23 +17,53 @@ namespace GenWave.Architecture.Tests.Support;
 /// </summary>
 internal static class PostgresConfinement
 {
-    /// <summary>MediaLibrary's actual repository layer: the namespaces every <c>*Repository</c>
-    /// class lives in and queries from. Catalog/Station discovered at T211 adoption; Garden added
-    /// at T355 (SPEC F149.1-F149.3, STORY-367, gh-#529) for <c>MediaRotationRepository</c> — the
-    /// Library Gardener's own home per ARCHITECTURE.md, confined by this same law like every other
-    /// repository namespace here.
+    /// <summary>T357/T372's own narrowing (the T355 review LOW-3 carry-forward
+    /// <see cref="RepositoryLayer"/>'s own remarks name): inside <c>Garden</c>, ONLY a
+    /// <c>*Repository</c>-named type may touch Npgsql/Dapper — closing the gap a future
+    /// non-repository type dropped into <c>Garden/</c> (e.g. a <c>GardenerService</c>) would
+    /// otherwise open unnoticed. Catalog/Station stay NAMESPACE-scoped (not narrowed the same way)
+    /// — see <see cref="RepositoryLayer"/>'s own remarks for why narrowing them too would be
+    /// silently widening what L2 forbids, not what T357 asked for.
     ///
     /// <para>
-    /// T355 review LOW-3: this allowlist is NAMESPACE-scoped, not TYPE-scoped — a future
-    /// non-repository type dropped into <c>Garden/</c> (e.g. a <c>GardenerService</c>) would open
-    /// Dapper/Npgsql unnoticed, the same gap Catalog/Station have already carried since T211. Left
-    /// as-is for T355; narrowing this law to match <c>*Repository</c> by NAME rather than namespace
-    /// is T357/T372's own scope.
+    /// Built as its OWN nested conjunction, composed into <see cref="RepositoryLayer"/> below via
+    /// <c>.Or().Are(...)</c> rather than a bare `.Or().ResideInNamespace(...).And()
+    /// .HaveNameEndingWith(...)` tail. Verified by decompiling <c>PredicateManager&lt;T&gt;
+    /// .GetObjects</c> (TngTech.ArchUnitNET 0.13.4): a <c>GivenTypesConjunction</c> is a flat,
+    /// left-to-right fold — `.And()`/`.Or()` calls have no operator precedence and each one
+    /// combines with the WHOLE running set built so far, not just the immediately preceding term.
+    /// Appending `.And().HaveNameEndingWith("Repository")` to the end of the existing Catalog/
+    /// Station `.Or()` chain would therefore intersect the ENTIRE running set with "ends in
+    /// Repository", wrongly narrowing Catalog/Station too — both namespaces hold plenty of
+    /// non-Repository types that legitimately touch Npgsql/Dapper today (e.g.
+    /// <c>DateOnlyTypeHandler</c>/<c>AnnouncementStateTypeHandler</c> extend
+    /// <c>SqlMapper.TypeHandler&lt;T&gt;</c>; <c>BoothLogServiceCollectionExtensions</c>/
+    /// <c>PersonaServiceCollectionExtensions</c> construct <c>NpgsqlDataSourceBuilder</c> directly).
+    /// <c>.Are(IObjectProvider&lt;IType&gt;)</c> re-evaluates its own nested conjunction
+    /// independently against the architecture and intersects ONLY that result into the running
+    /// set (<c>TypePredicatesDefinition&lt;T&gt;.Are</c>'s own implementation) — the one
+    /// composition primitive here that lets an `.And()` stay scoped to just its own term.
     /// </para></summary>
+    private static readonly IObjectProvider<IType> GardenRepositoriesOnly = Types().That()
+        .ResideInNamespace("GenWave.MediaLibrary.Garden")
+        .And().HaveNameEndingWith("Repository");
+
+    /// <summary>MediaLibrary's actual repository layer: the namespaces (Catalog, Station) or,
+    /// inside Garden, the specific <c>*Repository</c>-named types (<see cref="GardenRepositoriesOnly"/>)
+    /// that may touch Npgsql/Dapper. Catalog/Station discovered at T211 adoption; Garden added at
+    /// T355 (SPEC F149.1-F149.3, STORY-367, gh-#529) for <c>MediaRotationRepository</c> — the
+    /// Library Gardener's own home per ARCHITECTURE.md, confined by this same law like every other
+    /// repository namespace here — then narrowed to TYPE-scoped at T357 (the T355 review LOW-3
+    /// carry-forward <see cref="GardenRepositoriesOnly"/>'s own remarks explain in full): a future
+    /// non-repository type dropped into <c>Garden/</c> now still opens Dapper/Npgsql visibly,
+    /// rather than inheriting the whole namespace's allowance the way Catalog/Station's own
+    /// NAMESPACE-scoped entries still do (unchanged since T211 — narrowing those two the same way
+    /// is not mechanically clean with this law's flat-fold detector; see
+    /// <see cref="GardenRepositoriesOnly"/>'s own remarks for why).</summary>
     public static readonly IObjectProvider<IType> RepositoryLayer = Types().That()
         .ResideInNamespace("GenWave.MediaLibrary.Catalog")
         .Or().ResideInNamespace("GenWave.MediaLibrary.Station")
-        .Or().ResideInNamespace("GenWave.MediaLibrary.Garden");
+        .Or().Are(GardenRepositoriesOnly);
 
     /// <summary>Evaluates "<paramref name="subjects"/> must not depend on Npgsql or Dapper" against
     /// <paramref name="architecture"/>, returning one <see cref="LawViolation"/> per offending type.

@@ -34,6 +34,7 @@ const BOOLEAN_KEYS = new Set<SettingsHelpKey>([
   "Library:YearLookup:Enabled",
   "Station:Requests:Enabled",
   "Station:Requests:OverrideEnvelope",
+  "Station:Thumbs:Enabled",
   "Context:Weather:Enabled",
   "Context:History:Enabled",
   "Station:Imaging:ClockAnchoredIdents",

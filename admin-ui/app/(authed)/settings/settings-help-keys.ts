@@ -36,6 +36,7 @@ export const SETTINGS_HELP_KEYS = [
   "Station:Requests:Enabled",
   "Station:Requests:OverrideEnvelope",
   "Station:Requests:WindowMinutes",
+  "Station:Thumbs:Enabled",
   "Tts:Endpoint",
   "Tts:Corrections",
   "Tts:Pronunciations",

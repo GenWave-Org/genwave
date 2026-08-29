@@ -378,6 +378,10 @@ public sealed partial class SettingValidator
             ["Station:Requests:OverrideEnvelope"] = IsBool,
             ["Station:Requests:WindowMinutes"] = v => IsIntInRange(v, RequestsWindowMinutesMin, RequestsWindowMinutesMax),
 
+            // The station-level rotation signal's Live switch (SPEC F150.2, F155.1, STORY-380, PLAN
+            // T357) — plain bool kill switch, same shape as Station:Requests:Enabled above.
+            ["Station:Thumbs:Enabled"] = IsBool,
+
             // Persona Catalog origin (SPEC F90.1, STORY-234, PLAN T99) — empty is the F90.1 kill
             // switch (catalog endpoints 404, admin UI hides the shelf), mirroring Llm:Endpoint/
             // Tts:Fallback:Endpoint's own "empty legal, else absolute http/https" shape.
@@ -1042,6 +1046,8 @@ public sealed partial class SettingValidator
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Station:Requests:WindowMinutes", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {RequestsWindowMinutesMin} and {RequestsWindowMinutesMax} (minutes).",
+        var k when k.Equals("Station:Thumbs:Enabled", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Community:CatalogIndexUrl", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an absolute http/https URL, or empty to disable the Persona Catalog entirely.",
         var k when k.Equals("Station:Audience", StringComparison.OrdinalIgnoreCase)

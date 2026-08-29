@@ -116,6 +116,18 @@ public static class MediaLibraryServiceCollectionExtensions
             sp.GetRequiredService<ISafeScopeProvider>()));
         services.AddSingleton<IMediaRotationSink>(sp => sp.GetRequiredService<MediaRotationRepository>());
 
+        // The Gardener's own boot-validated knobs (SPEC F155.1, STORY-380, PLAN T357, gh-#529) —
+        // section "Gardener", top-level properties so ValidateDataAnnotations() genuinely enforces
+        // every [Range] at boot (the AnnouncementsOptions "top-level binds, nested don't" shape).
+        // Bound HERE, once, so MediaLibrary's own gardener passes/thumb writes (T365/T372) and the
+        // Host's thumbs route limiter (T366) resolve the SAME IOptions<GardenerOptions> instance
+        // rather than two independently-bound copies of one config section.
+        services
+            .AddOptions<GardenerOptions>()
+            .Bind(configuration.GetSection(GardenerOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         // gh-#99: the narrow cross-schema membership answer the taste-thumb/booth-log surfaces
         // need — resolved on the library connection because station_svc deliberately has no grant
         // on library.media.
