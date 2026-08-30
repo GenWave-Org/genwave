@@ -10,11 +10,16 @@
 // own rationale (the by-construction WHERE predicate is selection SQL, provable only against the
 // real planner).
 
+using System.Text.Json;
+using System.Threading.Channels;
 using Dapper;
 using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Events;
 using GenWave.MediaLibrary.Catalog;
+using GenWave.MediaLibrary.Station;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GenWave.MediaLibrary.Tests.Specs;
 
@@ -223,6 +228,73 @@ public static class FeatureThePoolHonoursTheRotationPredicate
     }
 
     // ---------------------------------------------------------------------
+    // T361 — the R2 diagnostic read (GetPlayCountQuantileAsync)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTheQuantileRead(DatabaseFixture db)
+    {
+        // Given 5 rows with play_counts 0, 1, 2, 10, 50, When the R2 diagnostic read is queried at
+        // two different quantiles — Postgres' own percentile_disc picks the 1-based rank
+        // CEIL(quantile * n) into the ascending-sorted set [0, 1, 2, 10, 50]: 0.1 -> rank
+        // CEIL(0.5) = 1 -> value 0; 0.5 -> rank CEIL(2.5) = 3 -> value 2 (verified directly against a
+        // real Postgres instance). The ladder's own R2 rung only ever asks for 0.1; this fact also
+        // pins 0.5 so a future caller of a different quantile is proven too, not just the one rung
+        // MusicSelectionPolicy happens to use today.
+        async Task SeedFiveRowsAsync()
+        {
+            await db.ResetAsync();
+            var repo = Harness.Repo(db);
+
+            var playCounts = new[] { 0, 1, 2, 10, 50 };
+            for (var i = 0; i < playCounts.Length; i++)
+            {
+                var id = await InsertReadyAsync(repo, $"/rotation/quantile-{i}.flac");
+                await SeedRotationAsync(db, id, playCount: playCounts[i]);
+            }
+        }
+
+        [Fact]
+        public async Task TheTenthPercentileIsZero()
+        {
+            await SeedFiveRowsAsync();
+            var catalog = (IMediaCatalog)Harness.Repo(db);
+            var scope = new LibraryScope([1L]);
+
+            var p10 = await catalog.GetPlayCountQuantileAsync(scope, UnconstrainedEnvelope, 0.1, CancellationToken.None);
+
+            Assert.Equal(0, p10);
+        }
+
+        [Fact]
+        public async Task TheFiftiethPercentileIsTwo()
+        {
+            await SeedFiveRowsAsync();
+            var catalog = (IMediaCatalog)Harness.Repo(db);
+            var scope = new LibraryScope([1L]);
+
+            var p50 = await catalog.GetPlayCountQuantileAsync(scope, UnconstrainedEnvelope, 0.5, CancellationToken.None);
+
+            Assert.Equal(2, p50);
+        }
+
+        // Sad path: nothing to compute a percentile over (an empty pool) answers null — SPEC F152.4's
+        // own "skip R2" signal, never a fabricated 0.
+        [Fact]
+        public async Task AnEmptyPoolAnswersNull()
+        {
+            await db.ResetAsync();
+            var catalog = (IMediaCatalog)Harness.Repo(db);
+            var scope = new LibraryScope([1L]);
+
+            var quantile = await catalog.GetPlayCountQuantileAsync(scope, UnconstrainedEnvelope, 0.1, CancellationToken.None);
+
+            Assert.Null(quantile);
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // SAD PATH — no predicate, no drift
     // ---------------------------------------------------------------------
 
@@ -230,10 +302,60 @@ public static class FeatureThePoolHonoursTheRotationPredicate
     [Trait("Category", "Integration")]
     public sealed class ScenarioNoPredicateNoStamp(DatabaseFixture db)
     {
-        // RotationRelaxIsAbsentFromEveryStamp is T361's own fact (the booth-log stamp doesn't exist
-        // until MusicSelectionPolicy/BoothLogPickStamp land it) — left pending here on purpose.
-        [Fact(Skip = "pending T361 (STORY-372 AC10, the stamp half)")]
-        public void RotationRelaxIsAbsentFromEveryStamp() => Assert.Fail("pending T361");
+        /// <summary>No-op <see cref="IActivePersonaAccessor"/> double — mirrors
+        /// Story329_CrosstalkBoothStamp.cs's own idiom: these two facts assert on <c>pick</c> alone,
+        /// so a fixed "nothing active" answer keeps them focused.</summary>
+        sealed class NullPersonaAccessor : IActivePersonaAccessor
+        {
+            public Task<Persona?> ResolveAsync(CancellationToken ct) => Task.FromResult<Persona?>(null);
+        }
+
+        /// <summary>Publishes <paramref name="evt"/> through the real <see cref="BoothLogWriter"/> and
+        /// reads back the ONE <see cref="BoothLogAppendRequest"/> it queued — no drain, no database
+        /// (mirrors Story329_CrosstalkBoothStamp.cs's own <c>PublishAndCaptureAsync</c>): this fact's
+        /// own concern stops at the stamp <see cref="BoothLogWriter"/> itself builds.</summary>
+        static async Task<BoothLogAppendRequest> PublishAndCaptureAsync(StationEvent evt)
+        {
+            var channel = Channel.CreateBounded<BoothLogAppendRequest>(1);
+            var writer = new BoothLogWriter(channel.Writer, new NullPersonaAccessor(), NullLogger<BoothLogWriter>.Instance);
+
+            writer.Publish(evt);
+
+            return await channel.Reader.ReadAsync();
+        }
+
+        // T361 (STORY-372 AC10, the stamp half): a TrackAired with no PersonaPick, no
+        // CrosstalkScript, and no RotationRelax (envelope.Rotation was never set for this pick — the
+        // byte-identical no-rotation path) stamps NOTHING — the everyday shape every pre-F152 airing
+        // already has, unchanged.
+        [Fact]
+        public async Task RotationRelaxIsAbsentFromEveryStamp()
+        {
+            var musicAiring = new TrackAired("42", "Night Drive", "The Waveforms", -2.5, DateTimeOffset.UtcNow, 214_000);
+
+            var request = await PublishAndCaptureAsync(musicAiring);
+
+            Assert.Null(request.Pick);
+        }
+
+        // The positive twin (T361): a TrackAired carrying RotationRelax 2 — a ladder pick with NO
+        // persona opinion at all (SPEC F81.6's terminal fallback still stamps the relax step,
+        // STORY-372 AC9's own shape) — stamps a pick jsonb with empty firedRules/isExploration:false
+        // plus the relax step, never a lost value.
+        [Fact]
+        public async Task RotationRelaxTwoAppearsInTheStamp()
+        {
+            var laddered = new TrackAired("42", "Night Drive", "The Waveforms", -2.5, DateTimeOffset.UtcNow, 214_000)
+            {
+                RotationRelax = 2,
+            };
+
+            var request = await PublishAndCaptureAsync(laddered);
+
+            Assert.NotNull(request.Pick);
+            using var document = JsonDocument.Parse(request.Pick);
+            Assert.Equal(2, document.RootElement.GetProperty("rotationRelax").GetInt32());
+        }
 
         // LOW-1 (T359 review): renamed from ThePoolSqlIsByteIdenticalToPreF152, which asserted the
         // OPPOSITE of what it said — see the ORCHESTRATOR RULING below for why "byte-identical" was

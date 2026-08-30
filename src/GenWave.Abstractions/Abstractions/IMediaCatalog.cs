@@ -306,6 +306,28 @@ public interface IMediaCatalog
     }
 
     /// <summary>
+    /// SPEC F152.4 (STORY-372, PLAN T361) — the rotation relax ladder's R2 diagnostic read: the
+    /// discrete <paramref name="quantile"/>-th percentile of <c>coalesce(play_count, 0)</c> across
+    /// <paramref name="envelope"/>'s own genre/energy/explicit-constrained playable pool WITHIN
+    /// <paramref name="scope"/> — the rotation predicate itself is deliberately excluded from this
+    /// read (a fixed, unconditional look at the whole envelope-matching pool's play-count
+    /// distribution, never narrowed by whatever bound R0/R1 already tried) — <c>GenWave.Orchestration.MusicSelectionPolicy</c>'s
+    /// own R2 rung then narrows <c>MaxPlays</c> to the result. <see langword="null"/> means "nothing to
+    /// compute a percentile over" (an empty scope, or an empty envelope-matching pool) — the ladder
+    /// reads that as "skip R2, try R3 instead," never a fabricated <c>MaxPlays: 0</c>.
+    ///
+    /// Default-implemented (not abstract) so this addition to a published MIT contract
+    /// (<c>GenWave.Abstractions</c>) stays strictly additive — mirrors <see cref="GetEnvelopeCandidateAsync"/>'s
+    /// own precedent: every pre-F152 implementer (a test double, or a host built against an older SDK
+    /// version) keeps compiling unchanged, reporting "nothing to compute" (null) — R2 simply never
+    /// fires — until it opts in with a real override (the concrete catalog implementation in
+    /// <c>GenWave.MediaLibrary</c> is the only production override).
+    /// </summary>
+    Task<int?> GetPlayCountQuantileAsync(
+        LibraryScope scope, SegmentEnvelope envelope, double quantile, CancellationToken ct) =>
+        Task.FromResult<int?>(null);
+
+    /// <summary>
     /// Paged, filtered list of catalog entries scoped to the given libraries (T041). An empty scope
     /// short-circuits to an empty result without touching the database (default-deny).
     /// </summary>

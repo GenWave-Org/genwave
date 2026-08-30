@@ -87,4 +87,22 @@ public sealed record MediaItem(string MediaId, string Locator, string Title, Lou
     /// </para>
     /// </summary>
     public CrosstalkAiredScript? CrosstalkScript { get; init; }
+
+    /// <summary>
+    /// SPEC F152.4 (STORY-372, PLAN T361) — the SAME <see cref="Core.Domain.RotationCandidate.RotationRelax"/>
+    /// the rotation relax ladder stamped on the winning candidate, carried straight from
+    /// <c>Orchestrator.GetNextAsync</c>'s own <c>RotationCandidate -&gt; MediaItem</c> narrowing (rides the
+    /// SAME carry-through <see cref="PersonaPick"/>/<see cref="RequestFulfilled"/> already use).
+    /// <see langword="null"/> when no <see cref="GenWave.Abstractions.Playout.RotationPredicate"/> was in
+    /// force for this pick at all. Rides through <c>PlayoutFeeder</c>'s push-time metadata into
+    /// <see cref="GenWave.Core.Events.TrackAired.RotationRelax"/> the same way <see cref="CrosstalkScript"/>
+    /// does, so the booth log's <c>track-started</c> row can stamp it (SPEC F86.1's <c>BoothLogPickStamp</c>).
+    ///
+    /// <para>
+    /// A defaulted body property, not a positional constructor parameter — same binary-compatibility
+    /// discipline as <see cref="CrosstalkScript"/>'s own remarks (this record already shipped with a
+    /// fixed ctor/Deconstruct arity in the published Abstractions NuGet).
+    /// </para>
+    /// </summary>
+    public int? RotationRelax { get; init; }
 }

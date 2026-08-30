@@ -75,6 +75,18 @@ public sealed class MusicSelectionPolicy(
     const string DegradationStepGenres = "genres";
     const string DegradationStepTerminal = "terminal";
 
+    /// <summary>
+    /// SPEC F152.4 (STORY-372, PLAN T361) — the rotation relax ladder's top step: R3 (the predicate
+    /// dropped entirely). Also the value <see cref="RotationCandidate.RotationRelax"/> pins to when
+    /// even R3's own rung-0 attempt yields nothing and the existing SPEC F81.6 ladder supplies the
+    /// pick instead (never-silence by construction — see <see cref="SelectRotationRelaxedCandidateAsync"/>'s
+    /// own remarks).
+    /// </summary>
+    const int MaxRotationRelaxStep = 3;
+
+    /// <summary>SPEC F152.4's R2 rung — the bottom DECILE of play_count, i.e. the 10th percentile.</summary>
+    const double BottomDecileQuantile = 0.1;
+
     // Defaults (SPEC F81.2/F81.3): every pre-F81 test/module construction site keeps compiling and
     // behaving exactly as before — no envelope constraint, no persona layer — mirrors the
     // IStationEventSink? events = null → NoOpStationEventSink.Instance idiom used elsewhere in this
@@ -229,6 +241,13 @@ public sealed class MusicSelectionPolicy(
     {
         var log = boundaryFitLog ?? NoOpBoundaryFitLog.Instance;
 
+        // MED-3 (T361 review) — one SPEC F152.4 quantile cache per PICK, shared across every
+        // resample attempt the bias loop below draws (up to BoundarySampleAttempts): the underlying
+        // pool cannot change mid-pick (nothing writes between resamples), so recomputing the R2
+        // percentile_disc read on every attempt was both wasteful (up to 5 extra DB round trips) and
+        // pointless (identical answer every time). See RotationQuantileCache's own remarks.
+        var quantileCache = new RotationQuantileCache();
+
         // Rung -1, once per pick (SPEC F87.6, PLAN T90 review) — see this method's own remarks for
         // why this sits above the bias branch rather than inside the sampler it guards. No boundary
         // ladder governs a request short-circuit (SPEC F111.1) — None, same as no fit at all.
@@ -241,7 +260,8 @@ public sealed class MusicSelectionPolicy(
         // all) — the no-imminent-boundary common case, exactly one catalog call as always.
         if (fit is null)
         {
-            var plain = await SelectEnvelopeAwareCandidateAsync(scope, orderedRecentIds, artistSeparation, ct);
+            var plain = await SelectEnvelopeAwareCandidateAsync(scope, orderedRecentIds, artistSeparation, quantileCache, ct);
+            LogRotationRelaxedOnce(plain);
             return new MusicSelectionResult(plain, BoundaryOutcome.None, CrossesBoundary: false);
         }
 
@@ -253,7 +273,7 @@ public sealed class MusicSelectionPolicy(
 
         for (var attempt = 0; attempt < BoundarySampleAttempts; attempt++)
         {
-            var sample = await SelectEnvelopeAwareCandidateAsync(scope, orderedRecentIds, artistSeparation, ct);
+            var sample = await SelectEnvelopeAwareCandidateAsync(scope, orderedRecentIds, artistSeparation, quantileCache, ct);
             if (sample is null)
             {
                 // Nothing sampled yet at all — a genuine drain (F41.2), not a bias artifact. Still
@@ -287,6 +307,7 @@ public sealed class MusicSelectionPolicy(
                 if (diff <= fit.Tolerance)
                 {
                     log.Log(fit, "win", BoundaryOutcome.Fit, sampled, diff);
+                    LogRotationRelaxedOnce(sample);
                     return new MusicSelectionResult(sample, BoundaryOutcome.Fit, CrossesBoundary: false);
                 }
 
@@ -328,7 +349,21 @@ public sealed class MusicSelectionPolicy(
             || (bestEffective is { } effectiveLength && effectiveLength >= fit.UntilBoundary);
 
         log.Log(fit, best is not null ? "least-late" : "unscored", offToleranceRung, sampled, bestDiff);
-        return new MusicSelectionResult(best ?? firstUnscored, offToleranceRung, crossesBoundary);
+        var chosen = best ?? firstUnscored;
+        LogRotationRelaxedOnce(chosen);
+        return new MusicSelectionResult(chosen, offToleranceRung, crossesBoundary);
+    }
+
+    /// <summary>MED-3 (T361 review) — the ONE place <see cref="LogRotationRelaxed"/> fires per pick,
+    /// called after <see cref="SelectMusicCandidateAsync"/> has settled on its FINAL winning
+    /// candidate (whichever of up to <see cref="BoundarySampleAttempts"/> resamples that turned out
+    /// to be) — never once per resample attempt, and never for a candidate that was sampled but not
+    /// chosen. A <see langword="null"/> candidate or a zero <see cref="RotationCandidate.RotationRelax"/>
+    /// (R0, or no rotation predicate at all) logs nothing.</summary>
+    void LogRotationRelaxedOnce(RotationCandidate? candidate)
+    {
+        if (candidate?.RotationRelax is int relaxStep && relaxStep > 0)
+            LogRotationRelaxed(relaxStep);
     }
 
     // Round-1 review finding F4 (PLAN T267): the off-tolerance classification (ClassifyOffToleranceRung),
@@ -392,9 +427,30 @@ public sealed class MusicSelectionPolicy(
     /// unaffected by this leg — this re-check gained a capability, it did not tighten one that used to
     /// pass everything.
     /// </para>
+    ///
+    /// <para>
+    /// <b>SPEC F152.4 rotation relax ladder (STORY-372, PLAN T361) sits AHEAD of everything above,
+    /// as an outer loop.</b> When <c>envelope.Rotation</c> is non-null,
+    /// <see cref="SelectRotationRelaxedCandidateAsync"/> takes over entirely — it owns rung 0 AND an
+    /// un-relaxed envelope-only attempt at every R step (HIGH-1, T361 review — see
+    /// <see cref="TryRotationStepAsync"/>'s own remarks for why rung 0 alone is not enough), plus the
+    /// SPEC F81.6 ladder, relaxing the F152 predicate through R0→R3 before either. When
+    /// <c>envelope.Rotation</c> is null (no show/block ever set one), this method's own body below is
+    /// BYTE-IDENTICAL to its pre-T361 shape — no outer loop, no <c>RotationRelax</c> stamped (STORY-372
+    /// AC10) — <see cref="TryRungZeroAsync"/> is the same rung-0-plus-F81.5-recheck logic this method
+    /// always ran, only extracted so <see cref="TryRotationStepAsync"/> can share it byte-for-byte at
+    /// every relax step rather than duplicating it. <paramref name="quantileCache"/> is created ONCE
+    /// per <see cref="SelectMusicCandidateAsync"/> pick and threaded through unchanged — MED-3 (T361
+    /// review): the R2 rung's own quantile read must never re-query per boundary-bias resample
+    /// attempt.
+    /// </para>
     /// </summary>
     async Task<RotationCandidate?> SelectEnvelopeAwareCandidateAsync(
-        LibraryScope scope, IReadOnlyList<string> orderedRecentIds, int artistSeparation, CancellationToken ct)
+        LibraryScope scope,
+        IReadOnlyList<string> orderedRecentIds,
+        int artistSeparation,
+        RotationQuantileCache quantileCache,
+        CancellationToken ct)
     {
         var envelope = envelopeProvider.Current;
         // Captured alongside envelope, at the same read point (SPEC F91.7) — a resolver-backed
@@ -404,19 +460,21 @@ public sealed class MusicSelectionPolicy(
         // stale-but-consistent per-pick debug line.
         var envelopeId = envelopeProvider.EnvelopeId;
 
-        var personaPick = await TryPersonaPickAsync(scope, orderedRecentIds, artistSeparation, envelope, ct);
+        // SPEC F152.4 — an outer loop, run ONLY when a rotation predicate is actually in force. With
+        // no predicate this branch is never taken and the method below is untouched (STORY-372 AC10's
+        // "byte-identical no-rotation path"). The pattern match hands the ladder a non-null
+        // RotationPredicate directly — no null-forgiving operator needed on the other side.
+        if (envelope.Rotation is { } rotation)
+        {
+            return await SelectRotationRelaxedCandidateAsync(
+                scope, orderedRecentIds, artistSeparation, envelope, rotation, envelopeId, quantileCache, ct);
+        }
+
+        var personaPick = await TryRungZeroAsync(scope, orderedRecentIds, artistSeparation, envelope, ct);
         if (personaPick is not null)
         {
-            if (SatisfiesEnvelope(personaPick, envelope))
-            {
-                LogPerPickDebugLine(personaPick, DegradationStepNone, envelopeId);
-                return personaPick;
-            }
-
-            logger.LogWarning(
-                "Persona pick {MediaId} violated the segment envelope on re-check ({Violation}) — " +
-                "discarding and re-running envelope-only (SPEC F81.5, trust-but-verify).",
-                personaPick.Media.MediaId, DescribeEnvelopeViolation(personaPick, envelope));
+            LogPerPickDebugLine(personaPick, DegradationStepNone, envelopeId);
+            return personaPick;
         }
 
         var (candidate, degradationStep) =
@@ -424,6 +482,210 @@ public sealed class MusicSelectionPolicy(
         if (candidate is not null)
             LogPerPickDebugLine(candidate, degradationStep, envelopeId);
         return candidate;
+    }
+
+    /// <summary>
+    /// SPEC F81.6 rung 0 — the persona pick over <see cref="IMediaCatalog.GetEnvelopeCandidatePoolAsync"/>'s
+    /// pool query, with the SPEC F81.5 trust-but-verify re-check inline. The ONE attempt shared,
+    /// byte-for-byte, by <see cref="SelectEnvelopeAwareCandidateAsync"/>'s own no-rotation path and
+    /// every rung (R0–R3) of <see cref="SelectRotationRelaxedCandidateAsync"/>'s SPEC F152.4 ladder —
+    /// extracted at PLAN T361 so both read the identical "no persona opinion, or a discarded violation"
+    /// outcome against whichever <paramref name="stepEnvelope"/> the caller is currently trying,
+    /// rather than two hand-kept copies drifting apart. Returns <see langword="null"/> for "nothing at
+    /// THIS envelope" — the caller decides what runs next.
+    /// </summary>
+    async Task<RotationCandidate?> TryRungZeroAsync(
+        LibraryScope scope,
+        IReadOnlyList<string> orderedRecentIds,
+        int artistSeparation,
+        SegmentEnvelope stepEnvelope,
+        CancellationToken ct)
+    {
+        var personaPick = await TryPersonaPickAsync(scope, orderedRecentIds, artistSeparation, stepEnvelope, ct);
+        if (personaPick is null) return null;
+
+        if (SatisfiesEnvelope(personaPick, stepEnvelope)) return personaPick;
+
+        logger.LogWarning(
+            "Persona pick {MediaId} violated the segment envelope on re-check ({Violation}) — " +
+            "discarding and re-running envelope-only (SPEC F81.5, trust-but-verify).",
+            personaPick.Media.MediaId, DescribeEnvelopeViolation(personaPick, stepEnvelope));
+        return null;
+    }
+
+    /// <summary>
+    /// SPEC F152.4's per-rung attempt (HIGH-1, T361 review): rung 0 (persona pick + F81.5 recheck,
+    /// via <see cref="TryRungZeroAsync"/>) FIRST, then — when rung 0 has no opinion at all (no
+    /// persona bound at all, the DEFAULT <see cref="NoOpPersonaPickProvider"/> binding; F91
+    /// music-only segments; a persona-resolve fault; or a real ranker that simply declined) — the
+    /// un-relaxed envelope-only pick (<see cref="IMediaCatalog.GetEnvelopeCandidateAsync"/>) at THIS
+    /// step's own <paramref name="stepEnvelope"/>, by-construction filtered to its genre/energy/
+    /// rotation predicate (SPEC F81.4, F152.2) with NO F81.6 relaxation. Without this second leg,
+    /// every persona-less pick — the common case, since <see cref="NoOpPersonaPickProvider"/> is the
+    /// default — skipped every R step trivially (rung 0 alone always answers null with no persona
+    /// bound) and fell straight through to <see cref="SelectEnvelopeLadderAsync"/> with the F152
+    /// predicate already dropped: Deep Cuts silently became ordinary rotation, and T359's own
+    /// by-construction predicate inside <see cref="IMediaCatalog.GetEnvelopeCandidateAsync"/> was
+    /// unreachable in production. No separate F81.5 re-check applies to the envelope-only leg — its
+    /// own WHERE clause already conforms the row to <paramref name="stepEnvelope"/> by construction,
+    /// the same trust <see cref="SelectEnvelopeLadderAsync"/>'s own rung 1 places in it.
+    /// </summary>
+    async Task<RotationCandidate?> TryRotationStepAsync(
+        LibraryScope scope,
+        IReadOnlyList<string> orderedRecentIds,
+        int artistSeparation,
+        SegmentEnvelope stepEnvelope,
+        CancellationToken ct)
+    {
+        if (await TryRungZeroAsync(scope, orderedRecentIds, artistSeparation, stepEnvelope, ct) is { } personaPick)
+            return personaPick;
+
+        return await catalog.GetEnvelopeCandidateAsync(scope, orderedRecentIds, artistSeparation, stepEnvelope, ct);
+    }
+
+    /// <summary>
+    /// SPEC F152.4 (STORY-372, PLAN T361) — the rotation relax ladder: <see cref="SelectEnvelopeAwareCandidateAsync"/>
+    /// calls here ONLY when <paramref name="envelope"/> carries a <see cref="SegmentEnvelope.Rotation"/>
+    /// predicate, entirely AHEAD of the SPEC F81.6 ladder below it (ARCHITECTURE.md's "Rotation
+    /// predicate WHERE (Deep Cuts) — relax ladder R0→R3 BEFORE the F81.6 rungs"). Each rung tries the
+    /// SAME two-legged attempt <see cref="TryRotationStepAsync"/> already runs (persona rung 0, THEN
+    /// the un-relaxed envelope-only pick — HIGH-1, T361 review) — NEVER the F81.6 rotation-window/
+    /// energy/genre rungs, which stay untouched until every relax step here has failed:
+    /// <list type="bullet">
+    /// <item><b>R0</b> — the predicate exactly as the show configured it.</item>
+    /// <item><b>R1</b> — <c>MaxPlays + 1</c> and <c>NotAiredWithinDays / 2</c> (floored at 1 day),
+    /// leaving whichever bound the show never set alone (still null).</item>
+    /// <item><b>R2</b> — <c>MaxPlays</c> narrowed to the bottom decile of <c>play_count</c> across the
+    /// envelope's own genre/energy-constrained pool (<see cref="IMediaCatalog.GetPlayCountQuantileAsync"/>,
+    /// memoized per pick by <paramref name="quantileCache"/> — MED-3; the rotation predicate itself
+    /// deliberately excluded from THAT read — LOW-2, the caller hands it <c>envelope with { Rotation =
+    /// null }</c> so a third-party override can never make R2 circular by reading it back) — skipped
+    /// outright when the catalog has nothing to compute a percentile over (a pre-F152 implementer's
+    /// DIM default, or a genuinely empty pool), never a fabricated <c>MaxPlays: 0</c>. Also skipped
+    /// (LOW-1) when the computed decile could not possibly admit anything R0 didn't already rule out
+    /// (<c>p10 &lt;= rotation.MaxPlays</c> — a strict subset of that already-failed step; defensive:
+    /// R0 having failed already guarantees every observed play_count exceeds <c>rotation.MaxPlays</c>,
+    /// so this comparison guards a future change to the ladder's own ordering rather than a path
+    /// today's R0/R1 semantics actually reach).</item>
+    /// <item><b>R3</b> — the predicate dropped entirely, still trying the two-legged attempt first.</item>
+    /// </list>
+    /// If R3's own attempt ALSO yields nothing, this falls through to the existing
+    /// <see cref="SelectEnvelopeLadderAsync"/> (rotation-window → energy → genres → the terminal
+    /// pre-envelope query) with R3's predicate-dropped envelope — that ladder's own terminal rung never
+    /// returns null (SPEC F81.6's never-silence floor), so <see cref="RotationCandidate.RotationRelax"/>
+    /// pins to 3 unconditionally once execution reaches this point, regardless of which F81.6 rung
+    /// actually supplied the pick (STORY-372 AC9: "never an unstamped R3").
+    ///
+    /// <para>
+    /// MED-3 (T361 review): this method itself never logs the SPEC F152.4 relax notice any more —
+    /// <see cref="LogRotationRelaxedOnce"/> is the ONE place that fires,
+    /// after the boundary-bias resampler (if any) has settled on its final winning candidate, reading
+    /// the step straight off <see cref="RotationCandidate.RotationRelax"/> rather than this method
+    /// logging once per resample attempt.
+    /// </para>
+    /// </summary>
+    async Task<RotationCandidate?> SelectRotationRelaxedCandidateAsync(
+        LibraryScope scope,
+        IReadOnlyList<string> orderedRecentIds,
+        int artistSeparation,
+        SegmentEnvelope envelope,
+        RotationPredicate rotation,
+        string envelopeId,
+        RotationQuantileCache quantileCache,
+        CancellationToken ct)
+    {
+        if (await TryRotationStepAsync(scope, orderedRecentIds, artistSeparation, envelope, ct) is { } r0)
+            return FinishRotationStep(r0, relaxStep: 0, envelopeId);
+
+        var r1Envelope = envelope with
+        {
+            Rotation = new RotationPredicate(
+                MaxPlays: rotation.MaxPlays is int maxPlays ? maxPlays + 1 : null,
+                NotAiredWithinDays: rotation.NotAiredWithinDays is int days ? Math.Max(1, days / 2) : null),
+        };
+        if (await TryRotationStepAsync(scope, orderedRecentIds, artistSeparation, r1Envelope, ct) is { } r1)
+            return FinishRotationStep(r1, relaxStep: 1, envelopeId);
+
+        // LOW-2 (T361 review): Rotation explicitly nulled on the envelope handed to the quantile
+        // read — the CONTRACT already says implementations must ignore it (see
+        // IMediaCatalog.GetPlayCountQuantileAsync's own remarks), but a caller-side null makes that
+        // unambiguous even for a third-party override that reads envelope.Rotation in general.
+        var bottomDecile = await quantileCache.GetOrComputeAsync(
+            catalog, scope, envelope with { Rotation = null }, BottomDecileQuantile, ct);
+        var skipR2 = rotation.MaxPlays is int r0MaxPlays && bottomDecile <= r0MaxPlays; // LOW-1
+        if (bottomDecile is int p10 && !skipR2)
+        {
+            var r2Envelope = envelope with { Rotation = new RotationPredicate(MaxPlays: p10) };
+            if (await TryRotationStepAsync(scope, orderedRecentIds, artistSeparation, r2Envelope, ct) is { } r2)
+                return FinishRotationStep(r2, relaxStep: 2, envelopeId);
+        }
+
+        var r3Envelope = envelope with { Rotation = null };
+        if (await TryRotationStepAsync(scope, orderedRecentIds, artistSeparation, r3Envelope, ct) is { } r3)
+            return FinishRotationStep(r3, relaxStep: 3, envelopeId);
+
+        // Every attempt across R0..R3 came back empty — fall through to the existing F81.6 ladder
+        // with the predicate fully dropped (R3's envelope), RotationRelax pinned to 3 regardless of
+        // which F81.6 rung the ladder itself resolves to (never-silence by construction: that
+        // ladder's own terminal rung never returns null).
+        var (ladderCandidate, degradationStep) =
+            await SelectEnvelopeLadderAsync(scope, orderedRecentIds, artistSeparation, r3Envelope, ct);
+        if (ladderCandidate is null) return null;
+
+        var stamped = ladderCandidate with { RotationRelax = MaxRotationRelaxStep };
+        LogPerPickDebugLine(stamped, degradationStep, envelopeId);
+        return stamped;
+    }
+
+    /// <summary>Stamps <paramref name="relaxStep"/> onto the winning candidate and fires the SAME
+    /// F82.6 per-pick debug line every other pick already logs. MED-3 (T361 review): no longer logs
+    /// the SPEC F152.4 relax notice itself — <see cref="SelectMusicCandidateAsync"/> does that once,
+    /// after its own resampler has settled on a final winner, reading the step off the returned
+    /// candidate's own <see cref="RotationCandidate.RotationRelax"/>.</summary>
+    RotationCandidate FinishRotationStep(RotationCandidate candidate, int relaxStep, string envelopeId)
+    {
+        var stamped = candidate with { RotationRelax = relaxStep };
+        LogPerPickDebugLine(stamped, DegradationStepNone, envelopeId);
+        return stamped;
+    }
+
+    /// <summary>SPEC F152.4's relax notice, generic — LOW-3 (T361 review): no station-specific
+    /// branding (the show's own name is not a seam this class carries; STORY-373/T362 is where a
+    /// Shows-page-facing surface, if any, would add one). Fired exactly once per pick by
+    /// <see cref="LogRotationRelaxedOnce"/>, never once per relax
+    /// attempt.</summary>
+    void LogRotationRelaxed(int relaxStep) =>
+        logger.LogInformation(
+            "Rotation rule relaxed to step {RotationRelax} (reason: pool empty at R{PreviousStep}) (SPEC F152.4).",
+            relaxStep, relaxStep - 1);
+
+    /// <summary>
+    /// MED-3 (T361 review) — memoizes SPEC F152.4's R2 quantile read
+    /// (<see cref="IMediaCatalog.GetPlayCountQuantileAsync"/>) across
+    /// <see cref="SelectMusicCandidateAsync"/>'s up-to-<see cref="BoundarySampleAttempts"/> resample
+    /// attempts for the SAME pick: the underlying pool cannot change mid-pick (nothing writes between
+    /// resamples), so recomputing it on every attempt was both wasteful (up to 5 extra DB round trips
+    /// per pick) and pointless (an identical answer every time). A single instance is created ONCE
+    /// per <see cref="SelectMusicCandidateAsync"/> call and threaded through every resample attempt —
+    /// never a field on <see cref="MusicSelectionPolicy"/> itself, so nothing leaks between
+    /// concurrent picks or survives past the one that created it.
+    /// </summary>
+    sealed class RotationQuantileCache
+    {
+        bool computed;
+        int? value;
+
+        public async Task<int?> GetOrComputeAsync(
+            IMediaCatalog catalog, LibraryScope scope, SegmentEnvelope envelope, double quantile, CancellationToken ct)
+        {
+            if (!computed)
+            {
+                value = await catalog.GetPlayCountQuantileAsync(scope, envelope, quantile, ct);
+                computed = true;
+            }
+
+            return value;
+        }
     }
 
     /// <summary>
