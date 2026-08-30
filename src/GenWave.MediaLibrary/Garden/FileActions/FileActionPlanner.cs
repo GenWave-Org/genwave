@@ -65,9 +65,11 @@ namespace GenWave.MediaLibrary.Garden.FileActions;
 /// rename/move only; (10) <see cref="FileActionRule.TargetNotADirectory"/> — move only, a
 /// destination directory that isn't already a real directory (missing OR a file — T379 review round
 /// 2 item 3: the planner never implies an mkdir), the ONE point <see cref="IFileSystemProbe.Kind"/>
-/// is first consulted; (11) <see cref="FileActionRule.TargetExists"/> — rename/move, <c>Kind</c>
-/// again; (12) <see cref="FileActionRule.NothingToRetag"/> — retag only, right after step 7 passes
-/// (retag has no steps 8-11 — its destination IS its source).
+/// is first consulted; (11) <see cref="FileActionRule.SymlinkedTarget"/> — move only (T380 review
+/// B6): the destination directory is reached through a symlink, even one that resolves to somewhere
+/// still inside the root; (12) <see cref="FileActionRule.TargetExists"/> — rename/move, <c>Kind</c>
+/// again; (13) <see cref="FileActionRule.NothingToRetag"/> — retag only, right after step 7 passes
+/// (retag has no steps 8-12 — its destination IS its source).
 /// </para>
 /// </summary>
 sealed class FileActionPlanner(
@@ -198,9 +200,24 @@ sealed class FileActionPlanner(
         // A move's destination directory must already EXIST as a directory (T379 review round 2 item
         // 3, ruling) — Missing refuses exactly like File does; the planner never implies an mkdir
         // under the jail.
-        if (moveTargetDirectory is not null
-            && fileSystemProbe.Kind(Path.GetFullPath(moveTargetDirectory)) != FileSystemEntryKind.Directory)
-            return FileActionPlanResult.Refused(FileActionRule.TargetNotADirectory);
+        if (moveTargetDirectory is not null)
+        {
+            var canonicalDir = NormalizePath(Path.GetFullPath(moveTargetDirectory));
+
+            if (fileSystemProbe.Kind(canonicalDir) != FileSystemEntryKind.Directory)
+                return FileActionPlanResult.Refused(FileActionRule.TargetNotADirectory);
+
+            // T380 review B6: a move target directory reached through a symlink is refused outright
+            // — even one that resolves to somewhere still INSIDE the root (gh-#650: two catalog
+            // paths can then name the same physical file, since the scan's own identity model is
+            // path-based, not inode-based). Compared RELATIVE TO THE ROOT on both sides, not the raw
+            // absolute strings, so a root that is ITSELF configured as a symlink (a supported,
+            // unrelated topology — this class's own "resolves once" fixture) never false-positives:
+            // every ordinary subdirectory of such a root differs canonical-vs-resolved only in its
+            // ROOT PREFIX, never in the path past it.
+            if (IsSymlinkedRelativeToRoot(canonicalDir, canonicalRoot, resolvedRoot))
+                return FileActionPlanResult.Refused(FileActionRule.SymlinkedTarget);
+        }
 
         if (fileSystemProbe.Kind(canonicalTo) != FileSystemEntryKind.Missing)
             return FileActionPlanResult.Refused(FileActionRule.TargetExists);
@@ -238,6 +255,35 @@ sealed class FileActionPlanner(
 
     string? Resolve(string canonicalPath) =>
         fileSystemProbe.ResolveLinks(canonicalPath) is { } resolved ? NormalizePath(resolved) : null;
+
+    /// <summary>T380 review B6's own relative comparison — see the <see cref="EvaluateTarget"/> call
+    /// site's own remarks for why this is relative-to-root rather than a raw string compare. Fails
+    /// closed (returns <see langword="true"/>, i.e. "treat as symlinked") whenever either side cannot
+    /// be resolved relative to its own root at all — the same fail-closed posture
+    /// <see cref="IsUnderRoot"/> already uses throughout this class.</summary>
+    bool IsSymlinkedRelativeToRoot(string canonicalDir, string canonicalRoot, string? resolvedRoot)
+    {
+        var resolvedDir = Resolve(canonicalDir);
+        var relativeCanonical = RelativeTo(canonicalDir, canonicalRoot);
+        var relativeResolved = RelativeTo(resolvedDir, resolvedRoot);
+
+        return relativeCanonical is null || relativeResolved is null
+            || !string.Equals(relativeCanonical, relativeResolved, StringComparison.Ordinal);
+    }
+
+    /// <summary><paramref name="path"/>'s own suffix past <paramref name="root"/> (empty string when
+    /// they are equal), or <see langword="null"/> when <paramref name="path"/> is not under
+    /// <paramref name="root"/> at all (or either is <see langword="null"/>) — the same
+    /// separator-aware containment <see cref="IsUnderRoot"/> already checks, just returning the
+    /// remainder instead of a bool.</summary>
+    static string? RelativeTo(string? path, string? root)
+    {
+        if (path is null || root is null) return null;
+        if (string.Equals(path, root, StringComparison.Ordinal)) return "";
+        return path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            ? path[(root.Length + 1)..]
+            : null;
+    }
 
     bool IsUnderAnyExemptRoot(string canonicalPath, string? resolvedPath)
     {

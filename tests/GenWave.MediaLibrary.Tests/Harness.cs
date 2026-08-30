@@ -45,13 +45,14 @@ static class Harness
     /// </summary>
     public static (ScanService scan, Channel<long> queue) Scanner(
         MediaRepository repo, string mediaRoot, int missThreshold = 1,
-        ILogger<ScanService>? logger = null)
+        ILogger<ScanService>? logger = null, IScanGate? gate = null)
     {
         var queue = Channel.CreateUnbounded<long>();
         var scan = new ScanService(repo, queue,
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions { MediaRoot = mediaRoot }),
             logger ?? NullLogger<ScanService>.Instance,
-            new FakeOptionsMonitor<ScanOptions>(new ScanOptions { MissThreshold = missThreshold }));
+            new FakeOptionsMonitor<ScanOptions>(new ScanOptions { MissThreshold = missThreshold }),
+            gate ?? new ScanGate());
         return (scan, queue);
     }
 

@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **105 seams across 6 projects.**
+> **107 seams across 6 projects.**
 
 ## GenWave.Context (2 seams)
 
@@ -97,7 +97,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (47 seams)
+## GenWave.MediaLibrary (49 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -116,6 +116,7 @@
 | `GenWave.Core.Abstractions.IBoothLogReader` | `GenWave.MediaLibrary.Station.BoothLogRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IDeadFileReporter` | `GenWave.MediaLibrary.Garden.DeadFileReporter` | Singleton | — |
 | `GenWave.Core.Abstractions.IExplicitClassifier` | `GenWave.MediaLibrary.ExplicitClassification.OllamaExplicitClassifier` | Singleton | — |
+| `GenWave.Core.Abstractions.IFileActionExecutor` | `GenWave.MediaLibrary.Garden.FileActions.FileActionExecutor` | Singleton | — |
 | `GenWave.Core.Abstractions.IFileActionPlanTokens` | `GenWave.MediaLibrary.Garden.FileActions.HmacFileActionPlanTokens` | Singleton | — |
 | `GenWave.Core.Abstractions.IFileActionPlanner` | `GenWave.MediaLibrary.Garden.FileActions.FileActionPlanner` | Singleton | — |
 | `GenWave.Core.Abstractions.IFileSystemProbe` | `GenWave.MediaLibrary.Garden.FileActions.FileSystemProbe` | Singleton | — |
@@ -140,6 +141,7 @@
 | `GenWave.Core.Abstractions.IRequestCatalogProbe` | `GenWave.MediaLibrary.Catalog.RequestCatalogProbeRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IRequestStore` | `GenWave.MediaLibrary.Station.RequestRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IRotFindingStore` | `GenWave.MediaLibrary.Garden.RotFindingRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IScanGate` | `GenWave.MediaLibrary.Scan.ScanGate` | Singleton | — |
 | `GenWave.Core.Abstractions.IScheduleSpecialStore` | `GenWave.MediaLibrary.Station.SpecialsRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IScheduleStore` | `GenWave.MediaLibrary.Station.ScheduleRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IShowImagingScope` | `GenWave.MediaLibrary.Catalog.ShowImagingScopeRepository` | Singleton | — |

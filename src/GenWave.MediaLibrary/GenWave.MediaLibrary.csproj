@@ -5,6 +5,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Garden.FileActions.LinuxDeviceId's own [LibraryImport("libc")] statx(2) call (SPEC F154.4;
+         T380 review B4) — the source generator's own out-struct marshaling needs this; no unsafe
+         code is hand-written anywhere in this project. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>

@@ -61,4 +61,19 @@ sealed class FileSystemProbe : IFileSystemProbe
 
         return current;
     }
+
+    /// <summary>Linux-only (SPEC F154.4; T380 review B4) — the appliance this codebase ships on is
+    /// always Linux; off Linux (a contributor's own dev workstation) the cross-device check simply
+    /// never runs, per <see cref="IFileSystemProbe.TryGetDeviceId"/>'s own "false = skip" contract.
+    /// </summary>
+    public bool TryGetDeviceId(string path, out ulong deviceId)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            deviceId = 0;
+            return false;
+        }
+
+        return LinuxDeviceId.TryGetDeviceId(path, out deviceId);
+    }
 }

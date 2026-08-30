@@ -11,7 +11,9 @@ namespace GenWave.Core.Domain;
 /// <c>year</c>/<c>genre</c>.</param>
 /// <param name="FileValue">The file's current value for <see cref="Field"/>, or
 /// <see langword="null"/> when the file carries none.</param>
-/// <param name="CatalogValue">The catalog's value for <see cref="Field"/> — never
-/// <see langword="null"/> (a null catalog value never reaches a <see cref="TagChange"/> at all).
-/// </param>
-public sealed record TagChange(string Field, string? FileValue, string? CatalogValue);
+/// <param name="CatalogValue">The catalog's value for <see cref="Field"/> — non-nullable ON
+/// PURPOSE (T380 review N1): the planner never emits a <see cref="TagChange"/> for a null/blank
+/// catalog value in the first place (<c>Garden.FileActions.TagDiffCalculator</c>'s own guard), so
+/// making this non-nullable makes that state unrepresentable at the type level rather than a
+/// doc-only promise a future caller could violate.</param>
+public sealed record TagChange(string Field, string? FileValue, string CatalogValue);

@@ -70,4 +70,32 @@ public enum FileActionRule
     /// <summary>A retag was requested but the catalog and the file's own tags already agree on every
     /// field the catalog has an opinion on — there is nothing to write.</summary>
     NothingToRetag,
+
+    /// <summary>A move's destination directory is reached through a symlink — even one that resolves
+    /// to somewhere still inside the library root (T380 review B6, SPEC F154.3's own rider): an alias
+    /// directory lets the SAME physical file be reachable under two different catalog paths (gh-#650
+    /// — the scan's own path-based identity model has no notion of "same inode, two names"), so the
+    /// jail refuses the move outright rather than let a second, ghost row appear on the very next
+    /// scan tick. Checked relative to the root on both the canonical and link-resolved side, so a
+    /// root that is ITSELF configured as a symlink (a supported, unrelated topology) never
+    /// false-positives here.</summary>
+    SymlinkedTarget,
+
+    /// <summary>The source file and the move's destination directory sit on different filesystem
+    /// devices — OR, on Linux (T380 review R2-3's own ruling), the device could not be determined at
+    /// all, which is folded into this SAME rule rather than a separate one: "proved different" and
+    /// "could not prove same" both refuse identically. A same-device <c>File.Move</c> is an atomic
+    /// rename; a cross-device one would silently become a copy+delete, which is not an atomic
+    /// filesystem operation this jail is willing to perform. Off Linux (a contributor's own dev
+    /// workstation, never the appliance's own deploy target), an undetermined device SKIPS the check
+    /// instead — <c>IFileSystemProbe.TryGetDeviceId</c> always reports "unknown" there, and there is
+    /// no real cross-device risk this codebase's own dev posture needs to enforce.</summary>
+    CrossDevice,
+
+    /// <summary>A retag found a pre-existing <c>*.gwbak</c> sibling for the SAME file (T380 review
+    /// R2-2): a leftover from a prior attempt that never cleaned up after itself (a revert-failure by
+    /// design, a failed delete, or a crash mid-attempt) — refused outright rather than silently
+    /// ignored, so a stuck file is DIAGNOSABLE (an operator resolves it manually) instead of an
+    /// every-future-retag-fails-forever trap with nothing pointing at the cause.</summary>
+    LeftoverBackup,
 }

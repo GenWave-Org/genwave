@@ -35,4 +35,14 @@ public interface IFileSystemProbe
     /// </para>
     /// </summary>
     string? ResolveLinks(string path);
+
+    /// <summary>
+    /// The device <paramref name="path"/> lives on, as a value stable enough to EQUALITY-compare
+    /// against another call's result — never a real kernel device-id encoding a caller should
+    /// interpret (SPEC F154.4; T380 review B4). Backs the executor's own pre-move same-device check
+    /// (a cross-device <c>File.Move</c> is not an atomic rename): <see langword="false"/> means "this
+    /// probe cannot vouch for it" — off Linux, a missing path, or a permission failure — and the
+    /// caller treats that as SKIP the check, never as a refusal from an inconclusive stat.
+    /// </summary>
+    bool TryGetDeviceId(string path, out ulong deviceId);
 }

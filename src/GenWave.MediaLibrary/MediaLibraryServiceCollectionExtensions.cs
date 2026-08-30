@@ -195,6 +195,16 @@ public static class MediaLibraryServiceCollectionExtensions
         services.AddSingleton<IFileActionPlanTokens>(
             _ => new HmacFileActionPlanTokens(RandomNumberGenerator.GetBytes(32)));
 
+        // The executors: retag/rename/move (SPEC F154.4, F154.6-F154.8; STORY-379; PLAN T380,
+        // gh-#529). IScanGate is registered ONCE, singleton, and consumed by BOTH ScanService's own
+        // tick (below) and FileActionExecutor — the same shared mutual-exclusion primitive so a scan
+        // and a file action can never overlap (F154.6). FileActionRepository is Dapper-free's own
+        // exception (L2: it is the ONE *Repository type inside Garden.FileActions permitted to touch
+        // Npgsql/Dapper) — FileActionExecutor itself never references either package.
+        services.AddSingleton<IScanGate, ScanGate>();
+        services.AddSingleton<FileActionRepository>();
+        services.AddSingleton<IFileActionExecutor, FileActionExecutor>();
+
         // gh-#99: the narrow cross-schema membership answer the taste-thumb/booth-log surfaces
         // need — resolved on the library connection because station_svc deliberately has no grant
         // on library.media.

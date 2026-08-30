@@ -70,7 +70,7 @@ public static class FeatureLiveLibraryOptions
             var queue = Channel.CreateUnbounded<long>();
             var options = new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions { ScanIntervalSeconds = 60 });
             var scan = new ScanService(DisconnectedRepo(queue), queue, options, NullLogger<ScanService>.Instance,
-                new FakeOptionsMonitor<ScanOptions>(new ScanOptions()));
+                new FakeOptionsMonitor<ScanOptions>(new ScanOptions()), new ScanGate());
 
             Assert.Equal(TimeSpan.FromSeconds(60), scan.CurrentScanInterval);
 

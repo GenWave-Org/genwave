@@ -1056,6 +1056,68 @@ public static class FeatureFileActionPlannerAndJail
     }
 
     // ---------------------------------------------------------------------
+    // T380 review B6 — a move target reached through a symlink is refused, even one that resolves
+    // to somewhere still inside the root (gh-#650's own "two catalog paths, one physical file" gap)
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioMoveTargetIsASymlinkedDirectory : IDisposable
+    {
+        readonly string root;
+        readonly string subjectPath;
+        readonly string linkDir;
+
+        public ScenarioMoveTargetIsASymlinkedDirectory()
+        {
+            (root, _, subjectPath) = CreateSubjectTree();
+            var innerDir = Path.Combine(root, "inner");
+            Directory.CreateDirectory(innerDir);
+            linkDir = Path.Combine(root, "link");
+            Directory.CreateSymbolicLink(linkDir, innerDir);
+        }
+
+        public void Dispose() => Directory.Delete(root, recursive: true);
+
+        [Fact]
+        public void TheRuleIsSymlinkedTarget()
+        {
+            var planner = BuildPlanner(root);
+
+            var result = planner.Plan(Subject(subjectPath), FileActionVerb.Move, linkDir, Now);
+
+            Assert.Equal(FileActionRule.SymlinkedTarget, result.Refusal!.Value.Rule);
+        }
+    }
+
+    /// <summary>The companion positive fact (T380 review B6's own "keep a planner fact that a REAL
+    /// directory target still plans") — proves <see cref="FileActionRule.SymlinkedTarget"/> only ever
+    /// fires for an ACTUAL symlinked directory, never for an ordinary one.</summary>
+    public sealed class ScenarioMoveTargetIsARealDirectory : IDisposable
+    {
+        readonly string root;
+        readonly string subjectPath;
+        readonly string targetDir;
+
+        public ScenarioMoveTargetIsARealDirectory()
+        {
+            (root, _, subjectPath) = CreateSubjectTree();
+            targetDir = Path.Combine(root, "b");
+            Directory.CreateDirectory(targetDir);
+        }
+
+        public void Dispose() => Directory.Delete(root, recursive: true);
+
+        [Fact]
+        public void APlanIsProduced()
+        {
+            var planner = BuildPlanner(root);
+
+            var result = planner.Plan(Subject(subjectPath), FileActionVerb.Move, targetDir, Now);
+
+            Assert.False(result.IsRefused);
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // Root normalisation — trailing separator, and a root that is itself a symlink
     // ---------------------------------------------------------------------
 

@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace GenWave.MediaLibrary.Options;
 
 /// <summary>
@@ -19,4 +21,18 @@ public sealed class GardenerFileActionsOptions
     /// classes" boot-floor caveat (<see cref="GardenerOptions"/>'s own remarks) costs nothing here.
     /// </summary>
     public bool Enabled { get; set; }
+
+    /// <summary>
+    /// How long <c>Garden.FileActions.FileActionExecutor</c> waits to enter the shared
+    /// <c>IScanGate</c> before reporting <c>FileActionOutcomeKind.Busy</c> (SPEC F154.6; STORY-379;
+    /// PLAN T380). Default 30 seconds, range 1-300 (this task's own choice — SPEC leaves the bound
+    /// unstated): long enough to ride out one ordinary scan tick over a homelab-sized library
+    /// without leaving an admin request hanging for minutes. <c>[Range]</c> is documentation only
+    /// here, the same nested-class caveat <see cref="Enabled"/>'s own remarks give — the executor
+    /// clamps this to 1-300 itself before use (T380 review N5), the same live-value defence
+    /// <c>ScanService.CurrentScanInterval</c>'s own floor already establishes for a value that could
+    /// otherwise slip past boot validation via a live settings write.
+    /// </summary>
+    [Range(1, 300)]
+    public int GateTimeoutSeconds { get; set; } = 30;
 }
