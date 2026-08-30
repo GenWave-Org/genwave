@@ -5,6 +5,8 @@
 // is server-only (it forwards a caller-supplied cookie header that only
 // exists in a Server Component/Route Handler request context).
 
+import type { GardenerStatusSummary } from "@/lib/gardener-api";
+
 interface NowPlayingTrackWire {
   stationId: string;
   mediaId: string;
@@ -105,6 +107,13 @@ export interface StatusResponse {
     notAiredDays90: number;
     rotationSince: string | null;
   };
+  /**
+   * SPEC F153.9, STORY-374 AC8, PLAN T378 — the Library Gardener's own per-kind OPEN totals plus
+   * the grand total, backing the dashboard's Gardener tile. Optional on the wire, the same "one
+   * deploy of backward tolerance" convention `rotation`/`llm.dominantCause` above already follow —
+   * every fixture literal built before this task shipped still satisfies this type.
+   */
+  gardener?: GardenerStatusSummary;
 }
 
 export interface PlayHistoryEntry {

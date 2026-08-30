@@ -60,6 +60,62 @@ public static class FeatureCatalogWriteContracts
         }
     }
 
+    /// <summary>
+    /// T378 review MED-1 — <see cref="IAdminMediaWrite.SetEligibilityAsync(MediaQuery,IReadOnlyList{long}?,bool,LibraryScope,CancellationToken)"/>'s
+    /// own default body must fail LOUD on a double that has not overridden it, never silently widen
+    /// the write by falling through to the four-parameter overload with a non-empty id list ignored.
+    /// </summary>
+    public sealed class ScenarioIdScopedEligibilityDefaultFailsLoudNotOpen
+    {
+        /// <summary>A fake implementing ONLY the interface's REQUIRED members (the historic
+        /// four-parameter <c>SetEligibilityAsync</c> included) — it never overrides the id-scoped
+        /// overload, exactly the shape every one of this codebase's 13 existing test doubles has.</summary>
+        sealed class FakeWriteWithoutIdOverride : IAdminMediaWrite
+        {
+            public Task<MediaUpdateOutcome> UpdateReturningVersionAsync(
+                string id, MediaPatch patch, string expectedVersion, LibraryScope scope, CancellationToken ct) =>
+                throw new NotImplementedException();
+
+            public Task<int> SetEligibilityAsync(MediaQuery filter, bool eligible, LibraryScope scope, CancellationToken ct) =>
+                Task.FromResult(0);
+
+            public Task<int?> BulkReassignAsync(MediaQuery filter, long toLibraryId, LibraryScope scope, CancellationToken ct) =>
+                throw new NotImplementedException();
+        }
+
+        [Fact]
+        public async Task NonEmptyMediaIdsThrowsNotSupportedRatherThanWideningTheWrite()
+        {
+            IAdminMediaWrite fake = new FakeWriteWithoutIdOverride();
+
+            await Assert.ThrowsAsync<NotSupportedException>(() =>
+                fake.SetEligibilityAsync(new MediaQuery(), [1], true, LibraryScope.None, CancellationToken.None));
+        }
+
+        [Fact]
+        public async Task NullMediaIdsStillFallsThroughToTheFourParameterOverload()
+        {
+            IAdminMediaWrite fake = new FakeWriteWithoutIdOverride();
+
+            var affected = await fake.SetEligibilityAsync(new MediaQuery(), null, true, LibraryScope.None, CancellationToken.None);
+
+            Assert.Equal(0, affected);
+        }
+
+        /// <summary>T378 review LOW-A — <see cref="IAdminMediaWrite.SetEligibilityAsync(MediaQuery,IReadOnlyList{long}?,bool,LibraryScope,CancellationToken)"/>'s
+        /// own doc promises "null OR empty" applies no id constraint; the fact above only pins the
+        /// null half — an EMPTY list must fall through exactly like null does, never throw.</summary>
+        [Fact]
+        public async Task EmptyMediaIdsAlsoFallsThroughToTheFourParameterOverload()
+        {
+            IAdminMediaWrite fake = new FakeWriteWithoutIdOverride();
+
+            var affected = await fake.SetEligibilityAsync(new MediaQuery(), [], true, LibraryScope.None, CancellationToken.None);
+
+            Assert.Equal(0, affected);
+        }
+    }
+
     public sealed class ScenarioMediaPatchValueType
     {
         [Fact]

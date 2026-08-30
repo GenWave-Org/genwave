@@ -27,6 +27,12 @@ public sealed class MediaController(
     IStationScopeProvider scopeProvider,
     ILogger<MediaController> logger) : ControllerBase
 {
+    /// <summary>SPEC F153.10 (STORY-376 AC6, PLAN T378) — the Gardener page's "Keep this one" bulk
+    /// action's own ceiling on <see cref="BulkEligibilityFilter.MediaIds"/>: a near-duplicate group
+    /// is a handful of rows, never hundreds, so this cap only ever fires on a malformed/abusive
+    /// request, not a real operator action.</summary>
+    const int MaxBulkEligibilityMediaIds = 500;
+
     /// <summary>
     /// GET /api/media — paged, filtered, station-scoped media list.
     /// Query parameters:
@@ -316,6 +322,9 @@ public sealed class MediaController(
     ///   • Requires Content-Type: application/json — rejects other types with 415 (CSRF guard).
     ///   • Empty station scope → 0 affected (default-deny — never a full-table update).
     ///   • library-id filter is intersected with station scope before reaching the repository.
+    ///   • <c>filter.mediaIds</c> (SPEC F153.10, PLAN T378) longer than
+    ///     <see cref="MaxBulkEligibilityMediaIds"/> → 400 naming only the count, never echoing the
+    ///     caller's own ids (log-forging/reflection posture this whole admin surface holds).
     ///
     /// Returns: 200 { affected: &lt;int&gt; }
     /// </summary>
@@ -325,12 +334,25 @@ public sealed class MediaController(
         [FromBody] BulkEligibilityRequest request,
         CancellationToken ct)
     {
+        if (request.Filter.MediaIds is { Count: > MaxBulkEligibilityMediaIds } mediaIds)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title  = "Too many media ids.",
+                Detail = $"filter.mediaIds carries {mediaIds.Count} ids; at most {MaxBulkEligibilityMediaIds} are allowed.",
+            });
+        }
+
         // Named library-id overrides the station rotation scope (F23.3 / STORY-065): converged on
         // the shared EffectiveScope.Resolve helper; behaviour for the unnamed case is unchanged.
         var (scope, _) = EffectiveScope.Resolve(scopeProvider.Current, request.Filter.LibraryId);
 
         // Map the request filter to the shared MediaQuery type so SetEligibilityAsync reuses
-        // the exact same WHERE-clause builder as ListAdminAsync.
+        // the exact same WHERE-clause builder as ListAdminAsync. MediaIds (F153.10) stays OFF
+        // MediaQuery deliberately — that record is published in GenWave.Abstractions and this id
+        // predicate is Gardener-only — so it is threaded as its own SetEligibilityAsync argument
+        // instead (see BulkEligibilityFilter.MediaIds's own remarks).
         var filter = new MediaQuery(
             State:       request.Filter.State,
             Artist:      request.Filter.Artist,
@@ -342,7 +364,8 @@ public sealed class MediaController(
             AlbumExact:  request.Filter.AlbumExact,
             GenresExact: request.Filter.GenresExact);
 
-        var affected = await adminWrite.SetEligibilityAsync(filter, request.Eligible, scope, ct);
+        var affected = await adminWrite.SetEligibilityAsync(
+            filter, request.Filter.MediaIds, request.Eligible, scope, ct);
 
         logger.LogInformation(
             "BulkSetEligibility eligible={Eligible} filter={Filter} affected={Affected}",
