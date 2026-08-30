@@ -137,6 +137,24 @@ public static class MediaLibraryServiceCollectionExtensions
         services.AddSingleton<MediaThumbRepository>();
         services.AddSingleton<IThumbStore>(sp => sp.GetRequiredService<MediaThumbRepository>());
 
+        // The Library Gardener's self-healing findings queue (SPEC F153.1-F153.3, F153.9;
+        // STORY-374, STORY-375; PLAN T372, gh-#529): same library_svc NpgsqlDataSource as
+        // MediaRotationRepository/MediaThumbRepository just above — a plain constructor-injected
+        // singleton, no cross-schema dependency needed here.
+        services.AddSingleton<RotFindingRepository>();
+        services.AddSingleton<IRotFindingStore>(sp => sp.GetRequiredService<RotFindingRepository>());
+
+        // The dead_file pass (SPEC F153.3, PLAN T372) — first of the five Gardener passes
+        // ARCHITECTURE.md names; the other four (near_duplicate, stale_metadata, shelf_dust,
+        // unreachable) join this AddSingleton<IGardenerPass, ...> fan-out at their own tasks, each
+        // resolved through GardenerService's own IEnumerable<IGardenerPass> in registration order.
+        services.AddSingleton<IGardenerPass, DeadFileGardenerPass>();
+
+        // The tick itself (SPEC F153.2): housekeeping (IThumbStore.RecomputeAllAsync/SweepAsync,
+        // F150.9) then every registered IGardenerPass, log-and-continue per step — the
+        // EnrichmentService bounded-batch backfill-loop shape, one seam over.
+        services.AddHostedService<GardenerService>();
+
         // gh-#99: the narrow cross-schema membership answer the taste-thumb/booth-log surfaces
         // need — resolved on the library connection because station_svc deliberately has no grant
         // on library.media.

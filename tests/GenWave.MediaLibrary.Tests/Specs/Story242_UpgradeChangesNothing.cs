@@ -39,9 +39,10 @@ public static class FeatureUpgradeChangesNothing
     static void RunShowAndSegmentKindMigrationScript(DatabaseFixture db) =>
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "33-show-and-segment-kind-migration.sh"));
 
-    /// <summary>db/41 (the Gardener migration) is the in-place-upgrade path for THREE indexes db/01/db/06
+    /// <summary>db/41 (the Gardener migration) is the in-place-upgrade path for FOUR indexes db/01/db/06
     /// ALSO ship fresh (STORY-373's own <c>booth_log_show_track_started</c>, STORY-376's own
-    /// <c>media_dup_keys</c>, and T366 review MED-1's own <c>media_thumb_listener_created_idx</c>) —
+    /// <c>media_dup_keys</c>, T366 review MED-1's own <c>media_thumb_listener_created_idx</c>, and
+    /// T372 review LOW-2's own <c>rot_finding_kind_state_opened_at</c>) —
     /// <see cref="ScenarioIndexMirrorMatchesTheUpgradePath"/> below drops each
     /// and reruns this script to prove the SAME "db/06/db/01 fresh vs. db/NN in-place-upgrade must build
     /// the byte-identical shape" claim <see cref="ScenarioFreshInstallAndUpgradeProduceTheIdenticalShape"/>
@@ -194,8 +195,9 @@ public static class FeatureUpgradeChangesNothing
     // above (ScenarioFreshInstallAndUpgradeProduceTheIdenticalShape) only ever compared columns/
     // constraints on ONE table, never a single pg_indexes row anywhere — so db/06's own copy of
     // station.booth_log_show_track_started (SPEC F152.5, STORY-373), db/01's own copy of
-    // library.media_dup_keys (SPEC F153.5, STORY-376), and db/01's own copy of
-    // library.media_thumb_listener_created_idx (T366 review MED-1) could drift from db/41's
+    // library.media_dup_keys (SPEC F153.5, STORY-376), db/01's own copy of
+    // library.media_thumb_listener_created_idx (T366 review MED-1), and db/01's own copy of
+    // library.rot_finding_kind_state_opened_at (T372 review LOW-2) could drift from db/41's
     // in-place-upgrade recreation of any of them and nothing here would ever have caught it. Each fact
     // captures the
     // fresh-install index (the CURRENT db/01/db/06's own CREATE INDEX — DatabaseFixture boots from
@@ -257,6 +259,25 @@ public static class FeatureUpgradeChangesNothing
 
             var upgraded = await CaptureIndexAsync(
                 db.DataSource, "library", "media_thumb", "media_thumb_listener_created_idx");
+
+            Assert.Equal(fresh, upgraded);
+        }
+
+        [Fact]
+        public async Task RotFindingKindStateOpenedAtSurvivesADropAndDb41Rerun()
+        {
+            // T372 review LOW-2: the same index-mirror parity, extended to
+            // RotFindingRepository.ListAsync's own supporting index (library.rot_finding).
+            var fresh = await CaptureIndexAsync(
+                db.DataSource, "library", "rot_finding", "rot_finding_kind_state_opened_at");
+
+            await using (var conn = await db.DataSource.OpenConnectionAsync())
+                await conn.ExecuteAsync("drop index library.rot_finding_kind_state_opened_at");
+
+            RunGardenerMigrationScript(db);
+
+            var upgraded = await CaptureIndexAsync(
+                db.DataSource, "library", "rot_finding", "rot_finding_kind_state_opened_at");
 
             Assert.Equal(fresh, upgraded);
         }

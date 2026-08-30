@@ -146,6 +146,11 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	);
 	create index if not exists rot_finding_state_kind on library.rot_finding (state, kind);
 	create index if not exists rot_finding_group_key on library.rot_finding (group_key) where group_key is not null;
+	-- T372 review LOW-2: RotFindingRepository.ListAsync's own access path (an optional kind
+	-- filter, an optional state filter, sorted opened_at desc) — the table has no retention
+	-- (F153.1: one row per media x kind, forever), so this covers that read as it grows rather
+	-- than a sequential scan over an ever-larger table.
+	create index if not exists rot_finding_kind_state_opened_at on library.rot_finding (kind, state, opened_at desc);
 
 	-- The audit of every destructive file action (SPEC F154.7) — verb/from/to/plan token/outcome/
 	-- detail, never the booth log. No verb here ever deletes (F154.1: retag, rename, move only).
