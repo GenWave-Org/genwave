@@ -47,4 +47,19 @@ public interface IBoothLogReader
     /// implementer across this repo now supplies its own (trivial, null-returning) override.
     /// </summary>
     Task<ShowLastAiring?> GetLastAiringAsync(long showId, CancellationToken ct);
+
+    /// <summary>
+    /// SPEC F150.8, STORY-370, PLAN T367 — the station-thumb action's own row read: row
+    /// <paramref name="id"/>'s stamped <c>kind</c>, <c>media_id</c>, and <c>occurred_at</c>, as a
+    /// <see cref="BoothLogAiring"/>. <see langword="null"/> ONLY when <paramref name="id"/> does not
+    /// exist at all (the action's own 404) — an existing row of any OTHER kind, or one with no
+    /// stamped media id, still returns its own <see cref="BoothLogAiring.Kind"/> so the caller's 400
+    /// can name it, deliberately never collapsed into the missing-row <see langword="null"/> the way
+    /// <see cref="GetMediaIdAsync"/> collapses "missing", "non-track", and "predates the column" into
+    /// one uninformative answer. Thumbability itself (kind must be <c>"track-started"</c> AND
+    /// <see cref="BoothLogAiring.MediaId"/> must be non-null) is the CALLER's decision, not this
+    /// method's — a plain row projection, mirroring <see cref="GetMediaIdAsync"/>'s own "read, don't
+    /// judge" shape one field wider.
+    /// </summary>
+    Task<BoothLogAiring?> GetTrackAiringAsync(long id, CancellationToken ct);
 }

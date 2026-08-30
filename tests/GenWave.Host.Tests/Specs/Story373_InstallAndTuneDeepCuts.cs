@@ -449,6 +449,10 @@ file sealed class NeverAiredBoothLogReader : IBoothLogReader
 
     public Task<ShowLastAiring?> GetLastAiringAsync(long showId, CancellationToken ct) =>
         Task.FromResult<ShowLastAiring?>(null);
+
+    /// <summary>T367: IBoothLogReader.GetTrackAiringAsync is now abstract — this file's own facts never touch the station-thumb action, so this double answers "row not found" unconditionally.</summary>
+    public Task<BoothLogAiring?> GetTrackAiringAsync(long id, CancellationToken ct) =>
+        Task.FromResult<BoothLogAiring?>(null);
 }
 
 /// <summary>

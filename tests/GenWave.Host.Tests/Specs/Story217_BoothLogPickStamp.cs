@@ -96,6 +96,10 @@ file sealed class ApiFakeBoothLogReader(IReadOnlyList<BoothLogEntry> rows) : IBo
     /// <summary>T362 review HIGH-2: IBoothLogReader.GetLastAiringAsync is now abstract — this file's own facts never touch a show's last airing, so this double answers "none" unconditionally.</summary>
     public Task<ShowLastAiring?> GetLastAiringAsync(long showId, CancellationToken ct) =>
         Task.FromResult<ShowLastAiring?>(null);
+
+    /// <summary>T367: IBoothLogReader.GetTrackAiringAsync is now abstract — this file's own facts never touch the station-thumb action, so this double answers "row not found" unconditionally.</summary>
+    public Task<BoothLogAiring?> GetTrackAiringAsync(long id, CancellationToken ct) =>
+        Task.FromResult<BoothLogAiring?>(null);
 }
 
 /// <summary>
@@ -109,6 +113,25 @@ file sealed class NotSupportedPersonaTasteAccrualStore : IPersonaTasteAccrualSto
         throw new NotSupportedException("Not exercised by Story217's API-exposure facts.");
 }
 
+/// <summary>T367: none of this file's facts exercise <see cref="BoothLogController.ThumbStation"/> —
+/// only Story217's own API-exposure facts construct <see cref="BoothLogController"/> here.</summary>
+file sealed class NotSupportedThumbStore : IThumbStore
+{
+    public Task<ThumbWriteResult> RecordAsync(
+        long mediaId, DateTimeOffset airingStartedAt, string listenerKey,
+        ThumbDirection direction, ThumbSource source, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story217's API-exposure facts.");
+
+    public Task<int> CountByListenerSinceAsync(string listenerKey, DateTimeOffset since, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story217's API-exposure facts.");
+
+    public Task<int> SweepAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story217's API-exposure facts.");
+
+    public Task RecomputeAllAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by Story217's API-exposure facts.");
+}
+
 /// <summary>
 /// Builds a real <see cref="BoothLogController"/> wired to the given fake reader (Story123's
 /// controller/factory idiom) — the production controller's own mapping/serialization code runs
@@ -118,7 +141,7 @@ file static class BoothLogApiControllerFactory
 {
     public static BoothLogController Build(IBoothLogReader reader) =>
         new(reader, new NotSupportedPersonaTasteAccrualStore(), new FakeMediaLibraryMembership(),
-            new FakeSafeScopeProvider(), NullLogger<BoothLogController>.Instance);
+            new FakeSafeScopeProvider(), new NotSupportedThumbStore(), NullLogger<BoothLogController>.Instance);
 }
 
 /// <summary>
