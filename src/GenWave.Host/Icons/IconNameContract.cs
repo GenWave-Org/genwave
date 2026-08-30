@@ -50,6 +50,8 @@ public static class IconNameContract
         "restore",
         "taste-thumb-up",
         "taste-thumb-down",
+        "station-thumb-up",
+        "station-thumb-down",
         "schedule",
         "shows",
         "wardrobe",

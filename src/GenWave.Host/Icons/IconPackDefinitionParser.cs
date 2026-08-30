@@ -34,7 +34,7 @@ using System.Text.RegularExpressions;
 /// attempt, exactly like <c>CatalogIndexValidator</c>'s own per-kind byte ceilings.
 /// <see cref="MaxIconsPerPack"/> (512) and <see cref="MaxElementsPerIcon"/> (64) exist purely to bound
 /// the O(icons × elements) whitelist walk below against a pack authored to be slow rather than unsafe
-/// — 512 icons is already ~20× the house's own 24-name contract (<see cref="IconNameContract"/>), and
+/// — 512 icons is already ~20× the house's own 26-name contract (<see cref="IconNameContract"/>), and
 /// 64 elements is generously above every shipped house icon's own 2–6-element shape (see
 /// <c>admin-ui/app/(authed)/_components/icons.tsx</c>); a pack legitimately needing more than either is
 /// not a shape this schema is aimed at. <see cref="MaxIconNameChars"/> (64) is a DIFFERENT kind of

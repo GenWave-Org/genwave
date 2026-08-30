@@ -29,6 +29,19 @@ interface NowPlayingCardProps {
    */
   tasteThumbControls?: ReactNode;
   /**
+   * Opt-in station-rotation-thumb slot (SPEC F150.1, F150.8; STORY-370) — omitted entirely by the
+   * Dashboard, same read-only posture as `tasteThumbControls`, supplied by the Live page only and
+   * rendered BESIDE `tasteThumbControls` on the SAME line (not stacked below it) — this card's own
+   * layout choice for satisfying F150.1's "the two read as siblings, distinguishable by glyph and
+   * label" legibility requirement, not literal SPEC text mandating "one row". Like
+   * `tasteThumbControls`, this card has no idea what a station thumb is or how to resolve its row
+   * id — the Live page's `useNowPlayingTasteAttribution` resolution decides whether this slot gets
+   * a node at all; reusing the SAME resolution `tasteThumbControls` uses (rather than a second
+   * one) is the Live page's own choice (see `LiveView`'s own remarks), not a SPEC F150.8
+   * requirement — SPEC F150.8 itself only names "Live now-playing and booth-log track rows".
+   */
+  stationThumbControls?: ReactNode;
+  /**
    * Opt-in why-this-pick slot (SPEC F86.4, STORY-218, PLAN T76) — the caller's `<PickChips />`
    * element, rendered BARE (`{pickChips}`, no wrapper `<div>`), mirroring `BoothLogFeed`'s own
    * bare `<PickChips pick={entry.pick} className="mt-1.5" />` call (PLAN T75). This is load-
@@ -70,6 +83,7 @@ export function NowPlayingCard({
   error,
   ratingControls,
   tasteThumbControls,
+  stationThumbControls,
   pickChips,
 }: NowPlayingCardProps): ReactNode {
   // Track and patter share the whole on-air treatment (pill, elapsed/progress, slots) —
@@ -183,7 +197,12 @@ export function NowPlayingCard({
           )}
 
           {ratingControls && <div className="mt-3">{ratingControls}</div>}
-          {tasteThumbControls && <div className="mt-2">{tasteThumbControls}</div>}
+          {(tasteThumbControls || stationThumbControls) && (
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              {tasteThumbControls}
+              {stationThumbControls}
+            </div>
+          )}
         </div>
       )}
 
