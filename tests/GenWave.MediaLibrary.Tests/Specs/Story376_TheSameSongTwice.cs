@@ -327,17 +327,19 @@ public static class FeatureTheSameSongTwice
         }
 
         [Fact]
-        public async Task TheFreshInitSnapshotIncludesTheFourGardenerFunctions()
+        public async Task TheFreshInitSnapshotIncludesTheFiveGardenerFunctions()
         {
+            // T365 added library.recompute_nudge (SPEC F150.9) to db/41 + this db/01 mirror,
+            // widening this pin from four functions to five.
             await using var conn = await db.DataSource.OpenConnectionAsync();
             var count = await conn.ExecuteScalarAsync<int>(
                 """
                 select count(*)::int from pg_proc
                 where pronamespace = 'library'::regnamespace
-                  and proname in ('fold_key', 'title_variant', 'title_key', 'find_near_duplicates')
+                  and proname in ('fold_key', 'title_variant', 'title_key', 'find_near_duplicates', 'recompute_nudge')
                 """);
 
-            Assert.Equal(4, count);
+            Assert.Equal(5, count);
         }
 
         [Fact]

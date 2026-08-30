@@ -289,6 +289,46 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	    where g.group_size > 1;
 	end;
 	$$;
+
+	-- recompute_nudge (SPEC F150.9, STORY-371, PLAN T365): the age-decayed, saturation-clamped thumb
+	-- aggregate MediaThumbRepository calls after every Recorded/Flipped write and the gardener's own
+	-- hourly RecomputeAllAsync pass applies to every media id that carries a thumb. VOLATILE (it
+	-- writes) — the first side-effecting function in this schema, unlike fold_key/title_key/
+	-- title_variant/find_near_duplicates above, all IMMUTABLE or STABLE. Each thumb's own weight is
+	-- +1 (up) or -1 (down) times an exponential half-life decay on its OWN age
+	-- (`extract(epoch from (now() - created_at)) / 86400.0 / p_half_life_days` — age in days divided
+	-- by the half-life, so the weight halves every p_half_life_days), summed across every
+	-- library.media_thumb row for this media id, then divided by p_saturation and clamped to [-1, 1]
+	-- — the exact F150.9 formula. coalesce(..., 0): a media id with zero (post-sweep) thumb rows
+	-- nudges to a flat 0, not NULL — a swept-clean row still satisfies the `nudge between -1 and 1`
+	-- CHECK. The caller (MediaThumbRepository) is responsible for ensuring a library.media_rotation
+	-- row exists before calling this function — a thumbed-but-never-aired track must carry a nudge
+	-- too (F150.9), but that INSERT ... ON CONFLICT DO NOTHING belongs at the write site, not
+	-- duplicated inside every recompute call (RecomputeAllAsync only ever targets media ids that
+	-- RecordAsync has already ensured a row for). Calling this against a media id with no
+	-- library.media_rotation row is a harmless no-op UPDATE (zero rows matched), never an error.
+	create or replace function library.recompute_nudge(p_media_id bigint, p_half_life_days int, p_saturation int)
+	returns void
+	language plpgsql
+	volatile
+	security invoker
+	set search_path = library, pg_temp
+	as $$
+	begin
+	  update library.media_rotation
+	  set nudge = greatest(-1, least(1, coalesce((
+	          select sum(
+	                   case direction when 'up' then 1 else -1 end
+	                   * power(0.5, extract(epoch from (now() - created_at)) / 86400.0 / p_half_life_days)
+	                 )
+	          from library.media_thumb
+	          where media_id = p_media_id
+	        ), 0) / p_saturation)),
+	      nudge_computed_at = now(),
+	      updated_at = now()
+	  where media_id = p_media_id;
+	end;
+	$$;
 	SQL
 
 # --- station schema: the envelope-is-object CHECK (SPEC F152.3's own read shape) -------------------
