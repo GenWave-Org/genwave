@@ -329,16 +329,22 @@ builder.Services.AddControllers();
 // Liveness endpoint for the compose healthcheck. No checks registered = 200 Healthy when up.
 builder.Services.AddHealthChecks();
 
-// Trust X-Forwarded-For only from an operator-declared proxy network (Proxy:TrustedNetworks,
-// env/compose-only — deferred finding from T04's review, STORY-171/T13). Empty by default: the
-// middleware's own loopback-only KnownNetworks/KnownProxies defaults leave it inert behind a
-// compose-network proxy (e.g. Caddy, PLAN T19's reference topology) until an operator opts in —
-// never trust the header from an unlisted source (a spoofed IP would dodge the per-IP spectator
-// limiter, RateLimiterPolicies.Spectator).
+// Trust X-Forwarded-For AND X-Forwarded-Proto only from an operator-declared proxy network
+// (Proxy:TrustedNetworks, env/compose-only — deferred finding from T04's review, STORY-171/T13;
+// XForwardedProto added at T366 review MED-3). Empty by default: the middleware's own
+// loopback-only KnownNetworks/KnownProxies defaults leave it inert behind a compose-network proxy
+// (e.g. Caddy, PLAN T19's reference topology) until an operator opts in — never trust either
+// header from an unlisted source (a spoofed IP would dodge the per-IP spectator limiter,
+// RateLimiterPolicies.Spectator; a spoofed scheme would falsely mark a cookie Secure or, the other
+// direction, falsely withhold it). Without XForwardedProto, Request.IsHttps (and therefore every
+// CookieSecurePolicy.SameAsRequest / Request.IsHttps-conditioned cookie — the admin session cookie,
+// AdminApiServiceCollectionExtensions, and the genwave-listener cookie, SpectatorThumbsController)
+// never sees the edge's real scheme behind cloudflared -> Caddy: Kestrel itself only ever observes
+// the plain-HTTP hop from Caddy, so Secure would never be stamped on the demo box at all.
 var proxyOptions = cfg.GetSection(ProxyOptions.SectionName).Get<ProxyOptions>() ?? new ProxyOptions();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
-    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor;
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
     foreach (var cidr in proxyOptions.TrustedNetworks)
         options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(cidr));
 

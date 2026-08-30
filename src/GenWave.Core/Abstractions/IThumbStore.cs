@@ -52,6 +52,18 @@ public interface IThumbStore
         ThumbDirection direction, ThumbSource source, CancellationToken ct);
 
     /// <summary>
+    /// The F150.5 PER-LISTENER daily-cap read (STORY-369, PLAN T366): how many
+    /// <c>library.media_thumb</c> rows this <paramref name="listenerKey"/> has accrued since
+    /// <paramref name="since"/> — a plain count over the same table <see cref="RecordAsync"/>
+    /// writes, exact and restart-safe (unlike an in-memory window, this survives an api restart
+    /// honestly). The caller (<c>SpectatorThumbsController</c>) compares the result against
+    /// <c>GardenerOptions.ThumbDailyCap</c> BEFORE calling <see cref="RecordAsync"/> — this method
+    /// itself applies no cap, no <see cref="ISafeScopeProvider"/> exclusion, and never throws for an
+    /// unknown key (an unrecognised or never-seen <paramref name="listenerKey"/> simply counts zero).
+    /// </summary>
+    Task<int> CountByListenerSinceAsync(string listenerKey, DateTimeOffset since, CancellationToken ct);
+
+    /// <summary>
     /// Deletes every <c>library.media_thumb</c> row older than
     /// <c>GardenerOptions.ThumbRetentionDays</c> (SPEC F150.9); returns the row count deleted.
     /// <c>library.media_rotation.thumbs_up</c>/<c>thumbs_down</c>/<c>nudge</c> are untouched — this

@@ -186,6 +186,20 @@ sealed class MediaThumbRepository(
     }
 
     /// <summary>
+    /// The F150.5 per-listener daily-cap read (STORY-369, PLAN T366) — a plain count, no eligibility
+    /// check, no cap applied here: the caller (<c>SpectatorThumbsController</c>) compares the result
+    /// against <c>GardenerOptions.ThumbDailyCap</c> itself, before ever calling <see cref="RecordAsync"/>.
+    /// </summary>
+    public async Task<int> CountByListenerSinceAsync(string listenerKey, DateTimeOffset since, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        return await conn.ExecuteScalarAsync<int>(new CommandDefinition(
+            "select count(*) from library.media_thumb where listener_key = @ListenerKey and created_at >= @Since",
+            new { ListenerKey = listenerKey, Since = since },
+            cancellationToken: ct));
+    }
+
+    /// <summary>
     /// F150.9's retention sweep: deletes every <c>library.media_thumb</c> row older than
     /// <see cref="GardenerOptions.ThumbRetentionDays"/>, read live off <see cref="options"/>. Never
     /// touches <c>library.media_rotation</c> — the lifetime counters and the last-computed

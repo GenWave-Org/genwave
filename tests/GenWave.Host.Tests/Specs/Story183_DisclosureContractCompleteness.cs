@@ -124,6 +124,16 @@ public static class FeatureDisclosureContractCompleteness
             new SpectatorRequestSubmission("more jazz please", "Metal", "dreamy"),
             ["wish", "genre", "mood"]),
 
+        // thumbs (SPEC F150.3, STORY-369, PLAN T366) — the 202 body is fixed/constant regardless of
+        // whether the token resolved, expired, or was gibberish (no oracle); the submission DTO is
+        // blessed too so a future field bound onto it (mass assignment) fails here first.
+        new(typeof(SpectatorThumbAccepted),
+            new SpectatorThumbAccepted(),
+            ["status", "note"]),
+        new(typeof(SpectatorThumbSubmission),
+            new SpectatorThumbSubmission("kZ8mQ2vN5pR1sT4uW7xY9A", "up"),
+            ["airing", "direction"]),
+
         // request-options (gh-#131) — the form pickers' two lists, and nothing else: genres are
         // genre-granularity disclosure ONLY (request-eligible rows, safe-scope excluded), moods are
         // MoodVocabulary.Terms verbatim.
@@ -161,6 +171,11 @@ public static class FeatureDisclosureContractCompleteness
         // rather than "Spectator*" (unlike SpectatorSurfaceAttribute) so it falls outside this
         // scan's own Spectator-prefix filter below — nothing to bless for it here.
         typeof(SpectatorRequestsController),
+        // POST /spectator/api/thumbs (SPEC F150.2, STORY-369, PLAN T366): the controller itself is
+        // never serialized. Its kill-switch marker, ThumbsSurfaceAttribute, is named "Thumbs*" rather
+        // than "Spectator*" — the same RequestsSurfaceAttribute precedent immediately above — so it
+        // falls outside this scan's own Spectator-prefix filter too; nothing to bless for it here.
+        typeof(SpectatorThumbsController),
     ];
 
     public static class ScenarioExactShapesPinned

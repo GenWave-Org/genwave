@@ -39,9 +39,10 @@ public static class FeatureUpgradeChangesNothing
     static void RunShowAndSegmentKindMigrationScript(DatabaseFixture db) =>
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "33-show-and-segment-kind-migration.sh"));
 
-    /// <summary>db/41 (the Gardener migration) is the in-place-upgrade path for two indexes db/01/db/06
+    /// <summary>db/41 (the Gardener migration) is the in-place-upgrade path for THREE indexes db/01/db/06
     /// ALSO ship fresh (STORY-373's own <c>booth_log_show_track_started</c>, STORY-376's own
-    /// <c>media_dup_keys</c>) — <see cref="ScenarioIndexMirrorMatchesTheUpgradePath"/> below drops each
+    /// <c>media_dup_keys</c>, and T366 review MED-1's own <c>media_thumb_listener_created_idx</c>) —
+    /// <see cref="ScenarioIndexMirrorMatchesTheUpgradePath"/> below drops each
     /// and reruns this script to prove the SAME "db/06/db/01 fresh vs. db/NN in-place-upgrade must build
     /// the byte-identical shape" claim <see cref="ScenarioFreshInstallAndUpgradeProduceTheIdenticalShape"/>
     /// already pins for <c>station.segment_schedule</c>'s own columns/constraints, extended to
@@ -192,9 +193,11 @@ public static class FeatureUpgradeChangesNothing
     // SAD PATH — the index mirror: PLAN T363's own T362 carry-forward. This file's own parity pin
     // above (ScenarioFreshInstallAndUpgradeProduceTheIdenticalShape) only ever compared columns/
     // constraints on ONE table, never a single pg_indexes row anywhere — so db/06's own copy of
-    // station.booth_log_show_track_started (SPEC F152.5, STORY-373) and db/01's own copy of
-    // library.media_dup_keys (SPEC F153.5, STORY-376) could drift from db/41's in-place-upgrade
-    // recreation of either and nothing here would ever have caught it. Each fact captures the
+    // station.booth_log_show_track_started (SPEC F152.5, STORY-373), db/01's own copy of
+    // library.media_dup_keys (SPEC F153.5, STORY-376), and db/01's own copy of
+    // library.media_thumb_listener_created_idx (T366 review MED-1) could drift from db/41's
+    // in-place-upgrade recreation of any of them and nothing here would ever have caught it. Each fact
+    // captures the
     // fresh-install index (the CURRENT db/01/db/06's own CREATE INDEX — DatabaseFixture boots from
     // only those two files, so this instant IS the fresh-install world), drops it (simulating a
     // pre-Gardener upgrade box that never had it), reruns db/41 (idempotent — proven convergent
@@ -235,6 +238,25 @@ public static class FeatureUpgradeChangesNothing
             RunGardenerMigrationScript(db);
 
             var upgraded = await CaptureIndexAsync(db.DataSource, "library", "media", "media_dup_keys");
+
+            Assert.Equal(fresh, upgraded);
+        }
+
+        [Fact]
+        public async Task MediaThumbListenerCreatedIdxSurvivesADropAndDb41Rerun()
+        {
+            // T366 review MED-1: the same index-mirror parity, extended to the per-listener daily
+            // cap's own supporting index (library.media_thumb).
+            var fresh = await CaptureIndexAsync(
+                db.DataSource, "library", "media_thumb", "media_thumb_listener_created_idx");
+
+            await using (var conn = await db.DataSource.OpenConnectionAsync())
+                await conn.ExecuteAsync("drop index library.media_thumb_listener_created_idx");
+
+            RunGardenerMigrationScript(db);
+
+            var upgraded = await CaptureIndexAsync(
+                db.DataSource, "library", "media_thumb", "media_thumb_listener_created_idx");
 
             Assert.Equal(fresh, upgraded);
         }

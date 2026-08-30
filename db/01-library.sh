@@ -304,6 +304,9 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	  created_at        timestamptz not null default now(),
 	  unique (media_id, airing_started_at, listener_key)
 	);
+	-- T366 review MED-1 — db/41's own mirror, see that script's own remarks: the F150.5
+	-- per-listener daily cap read filters (listener_key, created_at), not media_id first.
+	create index media_thumb_listener_created_idx on library.media_thumb (listener_key, created_at desc);
 
 	-- One row per (media, kind) forever (SPEC F153.1): a pass opens/re-opens/resolves it, the owner
 	-- dismisses it, `dismissed` is never re-opened — state moves, the row does not multiply.

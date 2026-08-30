@@ -118,6 +118,13 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  unique (media_id, airing_started_at, listener_key)
 	);
 
+	-- T366 review MED-1: MediaThumbRepository.CountByListenerSinceAsync filters
+	-- (listener_key, created_at) — the unique index above leads with media_id, so that query was a
+	-- seq scan on every anonymous write (the F150.5 per-listener daily cap read). Own index, listener
+	-- first (the query's own equality predicate) then created_at desc (the >= @since range half).
+	create index if not exists media_thumb_listener_created_idx
+	  on library.media_thumb (listener_key, created_at desc);
+
 	-- One row per (media, kind) forever (SPEC F153.1): a pass opens/re-opens/resolves it, the owner
 	-- dismisses it, `dismissed` is never re-opened — state moves, the row does not multiply.
 	create table if not exists library.rot_finding (

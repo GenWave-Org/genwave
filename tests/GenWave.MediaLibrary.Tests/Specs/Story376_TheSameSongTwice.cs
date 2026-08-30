@@ -313,6 +313,25 @@ public static class FeatureTheSameSongTwice
         }
 
         [Fact]
+        public async Task TheFreshInitSnapshotIncludesTheThumbListenerIndex()
+        {
+            // T366 review MED-1: the F150.5 per-listener daily cap read filters
+            // (listener_key, created_at) — extends this convergence pin's own index list (this
+            // scenario's class remarks) the same way TheFreshInitSnapshotIncludesThePartialDuplicateKeysIndex
+            // above already covers media_dup_keys.
+            await using var conn = await db.DataSource.OpenConnectionAsync();
+            var exists = await conn.ExecuteScalarAsync<bool>(
+                """
+                select exists(
+                    select 1 from pg_indexes
+                    where schemaname = 'library' and tablename = 'media_thumb'
+                      and indexname = 'media_thumb_listener_created_idx')
+                """);
+
+            Assert.True(exists, "library.media_thumb is missing its media_thumb_listener_created_idx index.");
+        }
+
+        [Fact]
         public async Task TheFreshInitSnapshotIncludesTheFiveGardenerEnumTypes()
         {
             await using var conn = await db.DataSource.OpenConnectionAsync();

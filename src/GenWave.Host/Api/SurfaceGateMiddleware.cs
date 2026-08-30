@@ -51,6 +51,16 @@ public sealed class SurfaceGateMiddleware(
             return;
         }
 
+        // Taste-thumb kill switch (SPEC F150.2, STORY-369, PLAN T366): the same independent,
+        // before-the-limiter shape as RequestsSurfaceAttribute immediately above — see
+        // ThumbsSurfaceAttribute's own remarks.
+        if (endpoint?.Metadata.GetMetadata<ThumbsSurfaceAttribute>() is not null
+            && !stationOptions.CurrentValue.Thumbs.Enabled)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
         // Public listener isolation (SPEC F64.1/F64.2, STORY-172): when the operator has bound a
         // dedicated public port (Spectator:PublicPort > 0) and THIS request arrived on it, only
         // the spectator surface, /health, and /fonts/* may respond — admin, /media/*, /internal/*
