@@ -202,6 +202,11 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "How long an unfulfilled request stays eligible to air before it expires. Accepted range: " +
     "1–1440.",
 
+  // ── Thumbs — the station-level rotation signal (SPEC F150.2, F155.1, STORY-380) ──────────────
+  "Station:Thumbs:Enabled":
+    "Anonymous 👍/👎 on the spectator now-playing card; off = the thumbs endpoint and controls " +
+    "do not exist (404).",
+
   // ── TTS / LLM endpoints (SPEC F36.1–F36.4) ─────────────────────────────────────────────────
   "Tts:Endpoint":
     "The Kokoro TTS service base URL used to render all spoken patter — must be a non-empty " +

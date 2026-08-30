@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
@@ -37,22 +38,48 @@ static class PlayoutServiceCollectionExtensions
             // was never called, with no ordering dependency on when it IS. See
             // CrosstalkRetirementEventSink's own remarks.
             .AddSingleton<CrosstalkRetirementEventSink>()
+            // The rotation ledger (SPEC F149.2, STORY-367, PLAN T355, gh-#529) — mirrors the
+            // announcement lifecycle's own queue/sink/drain shape
+            // (GenWave.Host.Announcements.AnnouncementLifecycleHostServiceCollectionExtensions) one
+            // seam over, wired HERE rather than its own extension: CONTRIBUTING.md L5 keeps every
+            // sink member — and its queue/drain pair — where the rest of this file's own TrackAired
+            // consumers already live, never under a GenWave.Host.Gardener namespace. Bounded 512,
+            // the same "every track start" cadence bound BoothLogWriter's own queue already uses
+            // (that class's own remarks) — every music airing writes here, at most one per advance.
+            .AddSingleton(_ => Channel.CreateBounded<MediaRotationAiredSignal>(
+                new BoundedChannelOptions(512) { FullMode = BoundedChannelFullMode.Wait }))
+            .AddSingleton(sp => sp.GetRequiredService<Channel<MediaRotationAiredSignal>>().Reader)
+            .AddSingleton(sp => sp.GetRequiredService<Channel<MediaRotationAiredSignal>>().Writer)
+            .AddSingleton<MediaRotationEventSink>()
+            .AddHostedService<MediaRotationDrainService>()
+            // The airing token ring (SPEC F149.4, F150.4, STORY-369, PLAN T358) — an in-memory-only
+            // IStationEventSink member (no queue/drain pair: minting is a synchronous CPU-only op,
+            // never I/O), registered under its own read-side seam (IAiringTokenResolver) too, so
+            // PlayoutFeederService below (the token↔snapshot consistency read) and a future consumer
+            // (PLAN T366's thumb-write endpoint) both resolve the SAME singleton instance without
+            // depending on its IStationEventSink write side. See AiringTokenRing's own remarks.
+            .AddSingleton<AiringTokenRing>()
+            .AddSingleton<IAiringTokenResolver>(sp => sp.GetRequiredService<AiringTokenRing>())
             // The host's event-sink binding (gitea-#246): composes PlayHistoryEventSink
             // (TrackAired -> play history ring), the booth log's BoothLogWriter
             // (IBoothLogEventConsumer, SPEC F72.1, STORY-195), CrosstalkRetirementEventSink
-            // (TrackAired -> asset delete, PLAN T287), and the announcement lifecycle guardians'
-            // own two sinks (AnnouncementAiredEventSink — TrackAired -> aired stamp, SPEC F143.3;
+            // (TrackAired -> asset delete, PLAN T287), the announcement lifecycle guardians' own
+            // two sinks (AnnouncementAiredEventSink — TrackAired -> aired stamp, SPEC F143.3;
             // AnnouncementPrivacyFlipEventSink — SettingChanged -> decline sweep, SPEC F145.2; both
-            // PLAN T343, GenWave.Host.Announcements) into the ONE binding every publisher resolves —
-            // see CompositeStationEventSink's own remarks. Deliberately a plain Add (not TryAdd) so it
-            // wins over the no-op defaults the library extensions register; a future consumer is added
-            // to the list this factory builds, not by re-wiring any existing sink. Both announcement
-            // sinks are auto-constructor-resolved with no factory, exactly like CrosstalkRetirementEventSink
-            // just above — GenWave.Host.Announcements.AnnouncementLifecycleHostServiceCollectionExtensions
+            // PLAN T343, GenWave.Host.Announcements), MediaRotationEventSink (TrackAired ->
+            // rotation ledger upsert, SPEC F149.2, PLAN T355), and AiringTokenRing (TrackAired ->
+            // mint the public airing token, SPEC F149.4, PLAN T358) into the ONE binding every
+            // publisher resolves — see CompositeStationEventSink's own remarks. Deliberately a plain
+            // Add (not TryAdd) so it wins over the no-op defaults the library extensions register; a
+            // future consumer is added to the list this factory builds, not by re-wiring any
+            // existing sink. Both announcement sinks are auto-constructor-resolved with no factory,
+            // exactly like CrosstalkRetirementEventSink just above — GenWave.Host.Announcements.AnnouncementLifecycleHostServiceCollectionExtensions
             // registers them (and the channels their constructors need) independently, with no ordering
             // dependency on when it runs relative to this call (Program.cs happens to call it after,
             // but nothing here requires that — see CrosstalkRetirementEventSink's own remarks for why
-            // that holds for a lazily-resolved DI singleton regardless).
+            // that holds for a lazily-resolved DI singleton regardless). MediaRotationEventSink and
+            // AiringTokenRing are both registered by THIS same call, so no such ordering question
+            // exists for either.
             .AddSingleton<IStationEventSink>(sp => new CompositeStationEventSink(
                 [
                     sp.GetRequiredService<PlayHistoryEventSink>(),
@@ -60,6 +87,8 @@ static class PlayoutServiceCollectionExtensions
                     sp.GetRequiredService<CrosstalkRetirementEventSink>(),
                     sp.GetRequiredService<AnnouncementAiredEventSink>(),
                     sp.GetRequiredService<AnnouncementPrivacyFlipEventSink>(),
+                    sp.GetRequiredService<MediaRotationEventSink>(),
+                    sp.GetRequiredService<AiringTokenRing>(),
                 ],
                 sp.GetRequiredService<ILogger<CompositeStationEventSink>>()))
             // Persona-id -> worn-face token, memoized on a ≤30s TTL (SPEC F129.5, STORY-336, PLAN
@@ -147,7 +176,8 @@ static class PlayoutServiceCollectionExtensions
                     identityProvider,
                     sp.GetRequiredService<ILogger<PlayoutFeederService>>(),
                     sp.GetRequiredService<NowPlayingService>(),
-                    sp.GetRequiredService<OnAirRenderGate>());
+                    sp.GetRequiredService<OnAirRenderGate>(),
+                    sp.GetRequiredService<IAiringTokenResolver>());
             })
             // PlayoutSupervisor runs the single station's feeder, bound to the configured engine host.
             .AddHostedService<PlayoutSupervisor>();

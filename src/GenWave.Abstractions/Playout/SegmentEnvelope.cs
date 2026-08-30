@@ -40,4 +40,15 @@ public sealed record SegmentEnvelope(
     /// </summary>
     public static SegmentEnvelope StationDefault { get; } =
         new(TimeOnly.MinValue, TimeOnly.MaxValue, [], EnergyRange.Unconstrained);
+
+    /// <summary>
+    /// The "later additive predicates" F81.1 reserved (SPEC F152.1, STORY-372, Abstractions 5.5.0):
+    /// an optional "deep cuts" style rotation narrowing layered on top of the genre/energy/time-of-day
+    /// fields above. Deliberately a NON-positional <c>init</c> property — added here rather than as a
+    /// constructor parameter so every pre-5.5.0 positional <c>new SegmentEnvelope(...)</c> call site
+    /// keeps compiling unchanged (STORY-372 AC1). Null (the default) means no rotation narrowing;
+    /// <c>ScheduleEnvelopeProvider</c> layers <c>block.Rotation ?? show.Rotation</c> (SPEC F152.3) to
+    /// populate it.
+    /// </summary>
+    public RotationPredicate? Rotation { get; init; }
 }

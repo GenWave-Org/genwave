@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace GenWave.Core.Domain;
 
 /// <summary>
@@ -20,4 +22,21 @@ public sealed record BoothLogPickStamp(IReadOnlyList<BoothLogFiredRuleSummary> F
     public static BoothLogPickStamp FromDiagnostics(PersonaPickDiagnostics diagnostics) => new(
         diagnostics.FiredRules.Select(BoothLogFiredRuleSummary.FromTasteRule).ToList(),
         diagnostics.IsExploration);
+
+    /// <summary>
+    /// The relax step (0–3) the R0→R3 rotation ladder landed on for this pick (SPEC F152.4,
+    /// STORY-372, Abstractions 5.5.0) — <see langword="null"/> when no
+    /// <see cref="GenWave.Abstractions.Playout.RotationPredicate"/> was in force for the airing at
+    /// all, never <c>0</c> for that case (0 means "the predicate was in force and R0 satisfied it
+    /// without relaxing"). Deliberately a NON-positional <c>init</c> property so this addition is
+    /// byte-for-byte additive over every pre-5.5.0 stamp (STORY-372 AC10): <see cref="JsonIgnoreAttribute"/>
+    /// omits it from the wire shape entirely when null (the same per-property opt-in
+    /// <see cref="PersonaCard.Taste"/>/<see cref="PersonaCard.Pronunciations"/> use, rather than a
+    /// blanket <c>DefaultIgnoreCondition</c> on <see cref="BoothLogPickStampSerializer"/>'s shared
+    /// options — this stays a deliberate per-field choice, not an automatic one for whatever field
+    /// is added here next), so every existing persisted <c>station.booth_log.pick</c> row stays
+    /// byte-identical.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RotationRelax { get; init; }
 }

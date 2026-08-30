@@ -248,6 +248,9 @@ public static class FeatureRequestsArtworkGate
             "SpectatorThemeOption.Slug",
             "SpectatorThemesResponse.Active",
             "SpectatorThemesResponse.Options",
+            // SPEC F149.4/F150.4, STORY-369, PLAN T358: the current airing's opaque token — blessed
+            // in Story183's contract table alongside this census.
+            "SpectatorTrackNowPlaying.Airing",
             "SpectatorTrackNowPlaying.Artist",
             "SpectatorTrackNowPlaying.ArtworkUrl",
             "SpectatorTrackNowPlaying.Dj",

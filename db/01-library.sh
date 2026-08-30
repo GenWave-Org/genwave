@@ -261,4 +261,200 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	  never_play boolean not null default false,
 	  updated_at timestamptz not null default now()
 	);
+
+	-- The Library Gardener (gh-#529, SPEC F149.1-F149.3, F153.1, F153.5, F154.7; STORY-367,
+	-- STORY-376; PLAN T354): fresh-init mirror of db/41-gardener-migration.sh's library-schema
+	-- objects — see that script's own header for the full column-by-column rationale. This file only
+	-- ever runs once (first boot), so every statement below is plain, unconditional DDL: no
+	-- IF NOT EXISTS, no pg_type/pg_constraint guard. The one-shot booth-log -> ledger seed is
+	-- deliberately NOT mirrored here (db/27's own "seed-and-delete" precedent: a fresh install has
+	-- nothing to seed from — an empty station.booth_log yields zero ledger rows either way — and
+	-- migrate.sh runs every numbered script, including db/41, against a freshly-initialised database
+	-- too, so the seed still runs exactly once on a genuinely fresh box).
+	create type library.thumb_direction as enum ('up', 'down');
+	create type library.thumb_source    as enum ('spectator', 'operator');
+	create type library.rot_kind  as enum ('dead_file', 'near_duplicate', 'stale_metadata', 'shelf_dust', 'unreachable');
+	create type library.rot_state as enum ('open', 'dismissed', 'resolved');
+	create type library.file_verb as enum ('retag', 'rename', 'move');
+
+	-- postgres-dba Rule-2 deviation, the media_rating precedent immediately above: PK = FK on
+	-- purpose (1:1 extension) — a write here must never bump library.media's own xmin (F18.6, F149.1).
+	create table library.media_rotation (
+	  media_id          bigint primary key references library.media(id) on delete cascade,
+	  play_count        int  not null default 0 check (play_count >= 0),
+	  first_aired_at    timestamptz,            -- null = never aired since the ledger began
+	  last_aired_at     timestamptz,
+	  thumbs_up         int  not null default 0,
+	  thumbs_down       int  not null default 0,
+	  nudge             real not null default 0 check (nudge between -1 and 1),
+	  nudge_computed_at timestamptz,
+	  updated_at        timestamptz not null default now()
+	);
+
+	-- One row per thumb per listener (bigserial: unbounded, swept by ThumbRetentionDays once T365
+	-- wires it). Idempotent per (media, airing, listener); a flip is an UPDATE of direction, never a
+	-- second row.
+	create table library.media_thumb (
+	  id                bigserial primary key,
+	  media_id          bigint not null references library.media(id) on delete cascade,
+	  airing_started_at timestamptz not null,
+	  listener_key      text   not null,        -- sha256(cookie token) or 'operator'; never logged
+	  direction         library.thumb_direction not null,
+	  source            library.thumb_source    not null,
+	  created_at        timestamptz not null default now(),
+	  unique (media_id, airing_started_at, listener_key)
+	);
+
+	-- One row per (media, kind) forever (SPEC F153.1): a pass opens/re-opens/resolves it, the owner
+	-- dismisses it, `dismissed` is never re-opened — state moves, the row does not multiply.
+	create table library.rot_finding (
+	  id          bigserial primary key,
+	  media_id    bigint not null references library.media(id) on delete cascade,
+	  kind        library.rot_kind  not null,
+	  state       library.rot_state not null default 'open',
+	  group_key   text,                          -- nullable: only near_duplicate carries a group
+	  evidence    jsonb not null default '{}' check (jsonb_typeof(evidence) = 'object'),
+	  opened_at   timestamptz not null default now(),
+	  resolved_at timestamptz,
+	  dismissed_at timestamptz,
+	  updated_at  timestamptz not null default now(),
+	  unique (media_id, kind)
+	);
+	create index rot_finding_state_kind on library.rot_finding (state, kind);
+	create index rot_finding_group_key on library.rot_finding (group_key) where group_key is not null;
+
+	-- The audit of every destructive file action (SPEC F154.7) — verb/from/to/plan token/outcome/
+	-- detail, never the booth log. No verb here ever deletes (F154.1: retag, rename, move only).
+	create table library.file_action (
+	  id            bigserial primary key,
+	  media_id      bigint not null references library.media(id) on delete cascade,
+	  verb          library.file_verb not null,
+	  from_path     text not null,
+	  to_path       text,
+	  plan_token    text not null,
+	  performed_at  timestamptz not null default now(),
+	  outcome       text not null,
+	  detail        jsonb not null default '{}'
+	);
+
+	-- Rule 6/7 (postgres-dba): the fold is IMMUTABLE plpgsql, the keys are STORED generated columns.
+	-- fold_key: lower, trim, strip diacritics (fixed Latin-1/Latin-Extended translate() map — no
+	-- unaccent, no CREATE EXTENSION), collapse punctuation/whitespace to single spaces. STRICT: a
+	-- NULL argument returns NULL without the body ever running (STORY-376 AC1's "the fold").
+	create function library.fold_key(p_text text)
+	returns text
+	language plpgsql
+	immutable
+	strict
+	security invoker
+	set search_path = library, pg_temp
+	as $$
+	declare
+	  v_folded text;
+	begin
+	  v_folded := translate(
+	    lower(btrim(p_text)),
+	    'àáâãäåçèéêëìíîïñòóôõöøùúûüýÿąćčďęěğłńňőřśšťůűźżžĺľīū',
+	    'aaaaaaceeeeiiiinoooooouuuuyyaccdeeglnnorsstuuzzzlliu'
+	  );
+	  v_folded := regexp_replace(v_folded, '[^a-z0-9]+', ' ', 'g');
+	  -- nullif(..., ''): a fold with no Latin/digit content at all (Cyrillic, CJK, Greek, blank)
+	  -- must come back NULL, not '' — see db/41's own remarks (T354 review HIGH finding).
+	  return nullif(btrim(v_folded), '');
+	end;
+	$$;
+
+	-- title_variant: the folded content of a trailing "(...)" or "[...]" group, NULL when there is
+	-- none (STORY-376 AC2). Only the LAST such group at the true end of the string matches — the
+	-- pattern is anchored ^...$ over the whole input.
+	create function library.title_variant(p_title text)
+	returns text
+	language plpgsql
+	immutable
+	strict
+	security invoker
+	set search_path = library, pg_temp
+	as $$
+	declare
+	  v_match text[];
+	begin
+	  v_match := regexp_match(p_title, '^.*?[\(\[]([^\(\)\[\]]+)[\)\]]\s*$');
+	  if v_match is null then
+	    return null;
+	  end if;
+	  return library.fold_key(v_match[1]);
+	end;
+	$$;
+
+	-- title_key: fold_key of the title with that SAME trailing group (and its own leading
+	-- whitespace) stripped first — so "Song", "Song (feat. X)", "Song [Live]", and "Song (2011
+	-- Remaster)" all fold to the identical key while title_variant diverges (STORY-376 AC2).
+	create function library.title_key(p_title text)
+	returns text
+	language plpgsql
+	immutable
+	strict
+	security invoker
+	set search_path = library, pg_temp
+	as $$
+	declare
+	  v_stripped text;
+	begin
+	  v_stripped := regexp_replace(p_title, '\s*[\(\[][^\(\)\[\]]+[\)\]]\s*$', '');
+	  return library.fold_key(v_stripped);
+	end;
+	$$;
+
+	alter table library.media
+	  add column artist_key    text generated always as (library.fold_key(artist)) stored,
+	  add column title_key     text generated always as (library.title_key(title))  stored,
+	  add column title_variant text generated always as (library.title_variant(title)) stored;
+
+	create index media_dup_keys on library.media (artist_key, title_key) where state = 'ready';
+
+	-- find_near_duplicates (SPEC F153.5, amended at T354 review): playable rows are the FULL
+	-- MediaRepository.PlayablePredicate, LEFT JOIN library.media_rating included (T354 review MED-1
+	-- finding — see db/41's own header remarks for why the never_play half is not optional). STABLE,
+	-- not IMMUTABLE: its result depends on library.media's contents, not just its own argument.
+	-- Anchored to each group's SHORTEST duration via a window function, not a self-join's pairwise
+	-- distance, so tolerance never chains transitively (T354 review LOW-2, RULED — see db/41's own
+	-- remarks). group_key folds in title_variant (T354 review LOW-1, RULED) so two groups sharing an
+	-- (artist_key, title_key) but differing in variant never share a group_key text; title_variant is
+	-- also returned as its own column. Groups of one are dropped AFTER the tolerance filter.
+	create function library.find_near_duplicates(tolerance_ms int)
+	returns table (media_id bigint, group_key text, title_variant text)
+	language plpgsql
+	stable
+	security invoker
+	set search_path = library, pg_temp
+	as $$
+	begin
+	  return query
+	    with playable as (
+	      select m.id, m.artist_key, m.title_key, coalesce(m.title_variant, '') as variant,
+	             m.title_variant, m.duration_ms
+	      from library.media m
+	      left join library.media_rating r on r.media_id = m.id
+	      where m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)
+	        and m.artist_key is not null and m.title_key is not null and m.duration_ms is not null
+	    ),
+	    anchored as (
+	      select p.*,
+	             min(p.duration_ms) over (partition by p.artist_key, p.title_key, p.variant) as group_min_duration_ms
+	      from playable p
+	    ),
+	    qualifying as (
+	      select * from anchored where duration_ms - group_min_duration_ms <= tolerance_ms
+	    ),
+	    grouped as (
+	      select q.*, count(*) over (partition by q.artist_key, q.title_key, q.variant) as group_size
+	      from qualifying q
+	    )
+	    select g.id as media_id,
+	           g.artist_key || '|' || g.title_key || '|' || g.variant as group_key,
+	           g.title_variant as title_variant
+	    from grouped g
+	    where g.group_size > 1;
+	end;
+	$$;
 SQL

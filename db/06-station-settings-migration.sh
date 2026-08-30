@@ -293,7 +293,13 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  imported_from text,
 	  imported_at   timestamptz,
 	  persona_id    int         REFERENCES station.persona (id),
-	  envelope      jsonb,
+	  -- envelope-is-object (SPEC F152.3, db/41-gardener-migration.sh's own mirror): envelope.rotation
+	  -- is the ONLY field ever read from this column (Deep Cuts, gh-#529), and only ever as a JSON
+	  -- object — never a scalar/array. Named so a fresh-init table (this CREATE) and db/41's own
+	  -- upgraded one land on the identical constraint name, the show_slug_key precedent immediately
+	  -- above (db/35's own remarks).
+	  envelope      jsonb        CONSTRAINT show_envelope_is_object
+	                     CHECK (envelope IS NULL OR jsonb_typeof(envelope) = 'object'),
 	  created_at    timestamptz NOT NULL DEFAULT now(),
 	  updated_at    timestamptz NOT NULL DEFAULT now()
 	);

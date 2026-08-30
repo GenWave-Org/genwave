@@ -6,6 +6,13 @@ namespace GenWave.Host.Api;
 /// one shape with nullable title/artist — so a patter airing can omit the properties entirely
 /// instead of merely nulling them (F62.9 disclosure-by-construction). Excludes media id, file
 /// path, gain/loudness and every admin-only field by simply not having them.
+/// <para>
+/// <see cref="Airing"/> (SPEC F149.4, STORY-369, PLAN T358) is deliberately NOT an id: it is a
+/// 128-bit random, base64url token minted fresh per airing, unique to that one airing, and
+/// meaningless off this box — it cannot be reverse-mapped to a catalog id, unlike
+/// <see cref="ArtworkUrl"/>'s own per-track-forever token. It exists so a listener can thumb the
+/// track currently playing without the payload ever disclosing which catalog row that is.
+/// </para>
 /// </summary>
 /// <param name="Title">Track title.</param>
 /// <param name="Artist">Track artist.</param>
@@ -45,9 +52,17 @@ namespace GenWave.Host.Api;
 /// The F88 token artwork URL for this track (SPEC F93.3, STORY-245, PLAN T125), or null when there
 /// is no art or <c>Station:PublicBaseUrl</c> is unset — the page falls back to the station icon.
 /// </param>
+/// <param name="Airing">
+/// The current airing's opaque token (SPEC F149.4, F150.4, STORY-369, PLAN T358), read straight off
+/// <see cref="GenWave.Host.Playout.NowPlayingSnapshot.Airing"/> — never fabricated here, never
+/// re-derived. Null only when nothing music is currently on air (see
+/// <see cref="GenWave.Host.Playout.AiringTokenRing"/>'s own remarks for the one deliberate caveat: a
+/// safe-loop row still mints one today).
+/// </param>
 public sealed record SpectatorTrackNowPlaying(
     string? Title, string? Artist, DateTimeOffset StartedAt, int? DurationMs, int? Listeners,
-    string? Dj, string? DjAvatarUrl, SpectatorShow? Show, SpectatorUpNext? UpNext, string? ArtworkUrl)
+    string? Dj, string? DjAvatarUrl, SpectatorShow? Show, SpectatorUpNext? UpNext, string? ArtworkUrl,
+    string? Airing)
 {
     public string State => "onAir";
     public string Kind => "track";

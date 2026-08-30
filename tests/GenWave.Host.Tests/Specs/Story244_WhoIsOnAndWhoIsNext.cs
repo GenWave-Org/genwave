@@ -420,7 +420,7 @@ public static class FeatureWhoIsOnAndWhoIsNext
             var properties = body.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
             Assert.Equal(
                 new HashSet<string>(
-                    ["title", "artist", "startedAt", "durationMs", "listeners", "dj", "djAvatarUrl", "show", "upNext", "artworkUrl", "state", "kind"]),
+                    ["title", "artist", "startedAt", "durationMs", "listeners", "dj", "djAvatarUrl", "show", "upNext", "artworkUrl", "airing", "state", "kind"]),
                 properties);
         }
     }

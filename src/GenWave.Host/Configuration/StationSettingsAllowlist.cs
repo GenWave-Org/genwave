@@ -218,6 +218,17 @@ public static class StationSettingsAllowlist
         new("Station:Requests:OverrideEnvelope",               SettingApplyMode.Live,          SettingKind.Boolean,    ""),
         new("Station:Requests:WindowMinutes",                  SettingApplyMode.Live,          SettingKind.Number,     "minutes"),
 
+        // The station-level rotation signal's Live switch (SPEC F150.2, F155.1, STORY-380, PLAN
+        // T357, gh-#529) — the ONE Gardener knob on this allowlist; every other Gardener:* key is
+        // env/compose-only (GenWave.MediaLibrary.Options.GardenerOptions, boot-validated). Default
+        // false: off = the standard F61 surface-off semantics — POST /spectator/api/thumbs 404s and
+        // the spectator page's thumbs controls are absent with the same silence, never a
+        // distinguishable "thumbs are closed" response (the Station:Requests:Enabled precedent just
+        // above). No consumer yet — T366 wires the live read (IOptionsMonitor<StationOptions> by the
+        // thumbs endpoint), so a PUT here reaches the very next request with no api restart once
+        // that read exists; the key/allowlist row itself is what T357 owns.
+        new("Station:Thumbs:Enabled",                         SettingApplyMode.Live,          SettingKind.Boolean,    ""),
+
         // TTS/LLM endpoint liveness (SPEC F36.1–F36.4, T8): KokoroTtsSynthesizer/KokoroVoiceLister
         // and LlmCopyWriter read these via IOptionsMonitor per call (no boot-frozen BaseAddress), so
         // a PUT here reroutes the very next render/voices call — no api restart. Llm:Endpoint is

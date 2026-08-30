@@ -100,6 +100,46 @@ internal abstract class EphemeralStationDatabase : IAsyncDisposable
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>
+    /// Pipes <paramref name="hostScriptPath"/> to <c>bash -s</c> inside this instance's own
+    /// <c>testdb</c> compose service — a deliberate COPY of
+    /// <c>GenWave.MediaLibrary.Tests.DatabaseFixture.RunFileInContainer</c>, body kept identical on
+    /// purpose (T354 review LOW-3: no shared test-support project exists between the two test
+    /// assemblies to hang a single source of truth off of, so this is duplication-by-necessity, not
+    /// a drift risk to pretend away), exposed here so a subclass's own spec (Story367_
+    /// TheStationRemembersEveryAiring.cs, PLAN T354) can run an in-place migration script — db/41's
+    /// own one-shot seed step — against THIS instance's Postgres rather than inventing a second way
+    /// to reach it.
+    /// </summary>
+    public void RunFileInContainer(string hostScriptPath)
+    {
+        var args = new List<string> { "compose", "-p", project, "-f", composeFile, "exec", "-T", "testdb", "bash", "-s" };
+
+        var psi = new ProcessStartInfo("docker")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException("failed to start docker compose exec");
+
+        // Stream the script file into bash's stdin, then close so bash sees EOF.
+        using (var scriptStream = File.OpenRead(hostScriptPath))
+            scriptStream.CopyTo(p.StandardInput.BaseStream);
+        p.StandardInput.Close();
+
+        var stdoutTask = p.StandardOutput.ReadToEndAsync();
+        var stderrTask = p.StandardError.ReadToEndAsync();
+        p.WaitForExit();
+
+        if (p.ExitCode != 0)
+            throw new InvalidOperationException(
+                $"Script {hostScriptPath} failed in container (exit {p.ExitCode}):\n{stderrTask.Result}\n{stdoutTask.Result}");
+    }
+
     static void Compose(string project, string composeFile, params string[] verbAndArgs)
     {
         var args = new List<string> { "compose", "-p", project, "-f", composeFile };
