@@ -58,6 +58,18 @@ namespace GenWave.Host.Api;
 /// token nor the derived <c>listener_key</c> hash is logged, echoed, or returned anywhere in this
 /// class — the <see cref="AiringTokenRing"/> precedent applied to a second secret-shaped value.
 /// </para>
+///
+/// <para>
+/// <b><c>GET /spectator/api/thumbs</c> (SPEC F150.2, STORY-369, PLAN T368 review finding).</b> Not
+/// a read of anything about thumbs — this discloses NOTHING (no counts, no listener state, no body
+/// at all) — its entire purpose is <see cref="ProbeThumbsPresence"/>'s own remarks: the spectator
+/// page's presence probe needs a REAL, correctly-tagged endpoint on this route for GET, because
+/// ASP.NET Core's own synthesized "405 Method Not Allowed" fallback for an unmapped method carries
+/// none of this class's <see cref="SpectatorSurfaceAttribute"/>/<see cref="ThumbsSurfaceAttribute"/>
+/// metadata — proven empirically: without this action, a GET here answers 405 regardless of
+/// <c>Station:Thumbs:Enabled</c>, making the switch invisible to a client that can only ever send a
+/// bare GET. See <see cref="ProbeThumbsPresence"/> for the rate-limiter override.
+/// </para>
 /// </summary>
 [ApiController]
 [Route("spectator/api")]
@@ -150,6 +162,40 @@ public sealed partial class SpectatorThumbsController(
 
         return Accepted(new SpectatorThumbAccepted());
     }
+
+    /// <summary>
+    /// The spectator page's presence probe (app.js <c>probeThumbsPresence</c>, PLAN T368): SurfaceGate
+    /// makes this the standard 404 when <c>Station:Thumbs:Enabled</c> is false (<see cref="ThumbsSurfaceAttribute"/>,
+    /// same as <see cref="PostThumb"/>) — a genuine 404, unlike the framework's own method-mismatch
+    /// fallback the class remarks describe, because this is now a REAL endpoint carrying that
+    /// metadata. Answers 204 with no body when the surface is on; nothing here ever touches
+    /// <see cref="IThumbStore"/>, <see cref="IAiringTokenResolver"/>, or the listener cookie — a
+    /// caller who only ever probes never becomes a listener and is never counted as one.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="RateLimiterPolicies.Spectator"/> here, NOT the class-level <see cref="RateLimiterPolicies.Thumbs"/>
+    /// — an <see cref="EnableRateLimitingAttribute"/> on the ACTION overrides the class-level one for
+    /// this method only (ASP.NET Core resolves the LAST matching metadata entry, and action metadata
+    /// is appended after controller metadata); <see cref="PostThumb"/> is untouched. This matters:
+    /// app.js re-probes every ~5 minutes, and the write path's per-IP daily cap
+    /// (<c>Gardener:ThumbDailyCap</c>, default 60) would be exhausted by probe traffic alone within a
+    /// few hours if the two shared a budget, silently 429-ing every real thumb submission after that.
+    /// <para>
+    /// T368 review LOW-1: <see cref="SpectatorCacheControlAttribute"/> at <see cref="GetNowPlaying"/>'s
+    /// own 5s tier (<see cref="SpectatorController"/>) — a bare 204/404 with no explicit
+    /// <c>Cache-Control</c> is heuristically cacheable by a fronting cache with no bound at all, which
+    /// could pin the OFF state (a stale 404) past app.js's own ~5-minute re-probe. An explicit 5s
+    /// freshness window is comfortably shorter than that cadence, so any external cache re-validates
+    /// long before the next probe would have run anyway. This only ever reaches the ON (204) response
+    /// — the OFF (404) is produced by <see cref="SurfaceGateMiddleware"/> upstream of this action ever
+    /// running, so it carries no header from here; closing that side is a SurfaceGateMiddleware-wide
+    /// change outside this fix's scope.
+    /// </para>
+    /// </remarks>
+    [HttpGet("thumbs")]
+    [SpectatorCacheControl(5)]
+    [EnableRateLimiting(RateLimiterPolicies.Spectator)]
+    public IActionResult ProbeThumbsPresence() => NoContent();
 
     static bool TryParseDirection(string? value, out ThumbDirection direction)
     {

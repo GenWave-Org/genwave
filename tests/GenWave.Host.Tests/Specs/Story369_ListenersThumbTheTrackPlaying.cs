@@ -23,6 +23,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -323,12 +324,50 @@ public static class FeatureListenersThumbTheTrackPlaying
     public sealed class ScenarioThePageShowsThePairAndTheStrip
     {
         // Given the spectator page with thumbs enabled and a track on air, When the listener
-        // presses 👍 — read from the served app.js (Gh258 house pattern), not a browser.
-        [Fact(Skip = "pending T368 (STORY-369 AC8)")]
-        public void TheServedAppJsRendersAYourThumbsStripFromLocalStorage() => Assert.Fail("pending T368");
+        // presses 👍 — read from the served app.js (Gh258/Issue160 house pattern: pin the SOURCE,
+        // never drive a browser here — the orchestrator's own Playwright pass owns the real click).
+        [Fact]
+        public async Task TheServedAppJsRendersAYourThumbsStripFromLocalStorage()
+        {
+            await using var factory = new AiringTokenWebFactory();
+            var client = factory.CreateClient();
 
-        [Fact(Skip = "pending T368 (STORY-369 AC8)")]
-        public void TheServedAppJsResetsThePairOnTheNextTrack() => Assert.Fail("pending T368");
+            var js = await client.GetStringAsync("/spectator/app.js");
+
+            // Distinctive identifiers — the exact selectors the orchestrator's Playwright smoke
+            // targets: the pair's container id, the two buttons' accessible names, the throttle
+            // message's id, and the strip's storage key/container/clear-control ids.
+            Assert.Contains("\"now-playing-thumbs\"", js, StringComparison.Ordinal);
+            Assert.Contains("\"Thumbs up\"", js, StringComparison.Ordinal);
+            Assert.Contains("\"Thumbs down\"", js, StringComparison.Ordinal);
+            Assert.Contains("\"thumbs-message\"", js, StringComparison.Ordinal);
+            Assert.Contains("\"genwave-thumbs\"", js, StringComparison.Ordinal);
+            Assert.Contains("\"thumbs-strip\"", js, StringComparison.Ordinal);
+            Assert.Contains("\"thumbs-strip-list\"", js, StringComparison.Ordinal);
+            Assert.Contains("\"thumbs-strip-clear\"", js, StringComparison.Ordinal);
+            Assert.Contains("localStorage", js, StringComparison.Ordinal);
+
+            // The house no-innerHTML-from-data rule: the served script never assigns to
+            // .innerHTML anywhere — every node (the pair, the strip's rows) is built with
+            // createElement/textContent instead (SPEC F150.10, renderHistory's own precedent).
+            // The word "innerHTML" DOES appear in this file's own remarks explaining that rule —
+            // this only fails on a genuine assignment.
+            Assert.DoesNotMatch(new Regex(@"\.innerHTML\s*="), js);
+        }
+
+        [Fact]
+        public async Task TheServedAppJsResetsThePairOnTheNextTrack()
+        {
+            await using var factory = new AiringTokenWebFactory();
+            var client = factory.CreateClient();
+
+            var js = await client.GetStringAsync("/spectator/app.js");
+
+            // The reset-on-track-change logic (SPEC F150.10): a changed airing token clears both
+            // buttons' pressed state.
+            Assert.Contains("airing !== thumbsAiring", js, StringComparison.Ordinal);
+            Assert.Contains("thumbsPressedDirection = null", js, StringComparison.Ordinal);
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -352,9 +391,102 @@ public static class FeatureListenersThumbTheTrackPlaying
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
 
-        // T368 — the served spectator page renders no thumbs controls when the surface is off.
-        [Fact(Skip = "pending T368 (STORY-369 AC9)")]
-        public void ThePageRendersNoThumbs() => Assert.Fail("pending T368");
+        // T368 — AC9's page half: the served index.html carries NO thumbs markup at all,
+        // regardless of Station:Thumbs:Enabled — the pair only ever exists once app.js's presence
+        // probe (ensureThumbsSection) builds it at runtime. This is therefore true unconditionally
+        // (a static-HTML fact, the Gh258 house pattern), not merely "when off": there is nothing
+        // pre-rendered for the probe to have to un-render either way.
+        [Fact]
+        public async Task ThePageRendersNoThumbs()
+        {
+            await using var factory = new AiringTokenWebFactory(); // Station:Thumbs:Enabled defaults false
+            var client = factory.CreateClient();
+
+            var html = await client.GetStringAsync("/spectator");
+
+            Assert.DoesNotContain("thumbs-up", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("thumbs-down", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("Thumbs up", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("Thumbs down", html, StringComparison.Ordinal);
+            Assert.DoesNotContain("thumbs-strip", html, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// T368 review fix (orchestrator ruling, 2026-08-30): the original build found that a bare GET
+    /// on the POST-only route always answered 405 via ASP.NET Core's own method-mismatch fallback,
+    /// regardless of <c>Station:Thumbs:Enabled</c> — that fallback endpoint carries none of
+    /// <c>SpectatorThumbsController</c>'s attribute metadata, so <see cref="SurfaceGateMiddleware"/>
+    /// never got a chance to gate it. The fix, <c>SpectatorThumbsController.ProbeThumbsPresence</c>,
+    /// maps a REAL <c>[HttpGet("thumbs")]</c> action carrying the same
+    /// <c>[SpectatorSurface]</c>/<c>[ThumbsSurface]</c> tags <c>PostThumb</c> carries, so the surface
+    /// gate now correctly sees it: 404 when off, 204 with no body when on — see that action's own
+    /// remarks for why it also overrides the class-level <see cref="RateLimiterPolicies.Thumbs"/>
+    /// policy down to <see cref="RateLimiterPolicies.Spectator"/> for GET specifically (a 5-minute
+    /// re-probe must never spend the write path's per-IP daily cap).
+    /// </summary>
+    public sealed class ScenarioThePresenceProbe
+    {
+        // Given Station:Thumbs:Enabled false, When a bare GET is made on this route.
+        [Fact]
+        public async Task AGetAnswersFourOhFourWhenThumbsIsOff()
+        {
+            await using var factory = new AiringTokenWebFactory(); // Thumbs:Enabled defaults false
+            var client = factory.CreateClient();
+
+            var response = await client.GetAsync("/spectator/api/thumbs");
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+
+        // Given Station:Thumbs:Enabled true, When the same bare GET is made.
+        [Fact]
+        public async Task AGetAnswersTwoOhFourWhenThumbsIsOn()
+        {
+            await using var factory = new ThumbsPresenceOnWebFactory();
+            var client = factory.CreateClient();
+
+            var response = await client.GetAsync("/spectator/api/thumbs");
+
+            Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        }
+
+        // T368 review LOW-1: a bare 204/404 with no explicit Cache-Control is heuristically
+        // cacheable with no bound, so a fronting cache could pin the ON state past app.js's own
+        // ~5-minute re-probe. Compared directly against a live now-playing GET rather than a
+        // hardcoded string, so this never drifts from GetNowPlaying's own [SpectatorCacheControl(5)]
+        // if that tier ever changes.
+        [Fact]
+        public async Task TheOnResponseCarriesTheSameCacheControlTierAsNowPlaying()
+        {
+            await using var factory = new ThumbsPresenceOnWebFactory();
+            var client = factory.CreateClient();
+
+            var probe = await client.GetAsync("/spectator/api/thumbs");
+            var nowPlaying = await client.GetAsync("/spectator/api/now-playing");
+
+            Assert.Equal(nowPlaying.Headers.CacheControl?.ToString(), probe.Headers.CacheControl?.ToString());
+            Assert.Equal("public, max-age=5", probe.Headers.CacheControl?.ToString());
+        }
+
+        // Given Station:Thumbs:Enabled true, When the probe is made, Then it discloses nothing
+        // (SPEC F150.2 — no read endpoint for thumbs themselves) and never mints the
+        // listener-identity cookie (SPEC F150.6): only POST ever calls ResolveListenerKey, so a
+        // caller who only ever probes never becomes a counted listener.
+        [Fact]
+        public async Task TheProbeCarriesNoBodyAndMintsNoListenerCookie()
+        {
+            await using var factory = new ThumbsPresenceOnWebFactory();
+            var client = factory.CreateClient();
+
+            var response = await client.GetAsync("/spectator/api/thumbs");
+            var body = await response.Content.ReadAsStringAsync();
+
+            Assert.Empty(body);
+            Assert.False(
+                response.Headers.TryGetValues("Set-Cookie", out _),
+                "the presence probe must never mint genwave-listener — only POST does");
+        }
     }
 
     [Collection(ThumbsWriteCollection.Name)]
@@ -476,6 +608,32 @@ file sealed class AiringTokenWebFactory() : WebApplicationFactory<Program>
         builder.UseSetting("Station:SpectatorMode", "true");
         builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
         builder.UseSetting("Admin:Password", "test-password-story369-airing");
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IHostedService>();
+            services.RemoveAll<IMediaCatalog>();
+            services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
+            services.RemoveAll<IActivePersonaAccessor>();
+            services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
+        });
+    }
+}
+
+/// <summary>The AiringTokenWebFactory precedent immediately above, with
+/// <c>Station:Thumbs:Enabled</c> forced true instead of left at its false default — the "on" half
+/// of <see cref="ScenarioThePresenceProbe"/>. Unreachable <c>ConnectionStrings:Library</c> still
+/// suffices: <c>ProbeThumbsPresence</c> is a bare <c>NoContent()</c> that never resolves
+/// <see cref="IThumbStore"/>/<see cref="IAiringTokenResolver"/>, so this needs no real Postgres
+/// either.</summary>
+file sealed class ThumbsPresenceOnWebFactory() : WebApplicationFactory<Program>
+{
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development");
+        builder.UseSetting("Station:SpectatorMode", "true");
+        builder.UseSetting("Station:Thumbs:Enabled", "true");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", "test-password-story369-presence-on");
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<IHostedService>();
