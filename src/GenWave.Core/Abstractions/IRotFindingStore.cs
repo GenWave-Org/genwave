@@ -35,6 +35,36 @@ public interface IRotFindingStore
     Task ReconcileDeadFilesAsync(TimeSpan unavailableGrace, CancellationToken ct);
 
     /// <summary>
+    /// Reconciles every <see cref="RotKind.NearDuplicate"/> finding against
+    /// <c>library.find_near_duplicates(tolerance_ms)</c>'s current result (SPEC F153.5; STORY-376;
+    /// PLAN T374): opens (or re-opens a resolved) finding for every media id the function returns
+    /// right now, resolves an open finding for a media id it no longer returns. A
+    /// <see cref="RotState.Dismissed"/> row is never touched by either half.
+    ///
+    /// <para>
+    /// Evidence is built entirely in SQL: <c>group_key</c>, <c>title_variant</c>, <c>siblings</c>
+    /// (the group's OTHER members — media id + duration, for the future Keep-this-one write), and
+    /// <c>versions</c> (playable rows sharing this row's <c>(artist_key, title_key)</c> but NOT in
+    /// its own group — a different <c>title_variant</c> or beyond tolerance — media id, title,
+    /// variant, and duration, nearest-duration-first, capped at 10).
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Ruled at T374 (2026-08-30), SPEC F153.5's own rider:</b> the function anchors every
+    /// candidate to its PARTITION's shortest duration only — never a second clustering level — so
+    /// 200000/203000/203500 ms at a 2000 ms tolerance opens NO finding even though the last two are
+    /// only 500 ms apart. A known miss, pinned as a regression fact by
+    /// <c>Garden.RotFindingRepository</c>'s own facts, not a bug: gh-#610's shape (exact-duplicate
+    /// doubles) is caught either way, and the risk this epic ranks highest is false alarms, not
+    /// misses (PROJECT.md #3).
+    /// </para>
+    /// </summary>
+    /// <param name="toleranceMs">Duration tolerance in milliseconds — the caller
+    /// (<c>Garden.NearDuplicateGardenerPass</c>) reads <c>Gardener:DuplicateToleranceMs</c> live,
+    /// floored at 0.</param>
+    Task ReconcileNearDuplicatesAsync(int toleranceMs, CancellationToken ct);
+
+    /// <summary>
     /// Opens (or re-opens a resolved) ONE <see cref="RotKind.DeadFile"/> finding for
     /// <paramref name="mediaId"/> — <see cref="IDeadFileReporter"/>'s own write (SPEC F153.4;
     /// STORY-375; PLAN T373): the same open/re-open statement shape

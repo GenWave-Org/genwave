@@ -3,6 +3,7 @@ using Dapper;
 using Npgsql;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.MediaLibrary.Catalog;
 using GenWave.MediaLibrary.Station;
 
 namespace GenWave.MediaLibrary.Garden;
@@ -57,16 +58,6 @@ sealed class MediaRotationRepository(
     /// class's own remarks for why it must never be allowlisted.
     /// </summary>
     public const string RotationSinceKey = "Gardener:RotationSince";
-
-    /// <summary>
-    /// Mirrors <c>Catalog.MediaRepository.PlayablePredicate</c>'s own text verbatim — that constant is
-    /// <c>private</c> to that class (db/41's own <c>find_near_duplicates</c> function mirrors the exact
-    /// same text for the identical reason). Shared by <see cref="GetNeverAiredCountAsync"/> and
-    /// <see cref="GetRotationHealthAsync"/> (PLAN T371) — a row not currently playable is not "waiting
-    /// to air", so it must not inflate either figure.
-    /// </summary>
-    const string PlayablePredicate =
-        "m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)";
 
     /// <summary>
     /// The gh-#99 safe-scope carve-out, shared by every read/write below that needs it
@@ -146,11 +137,11 @@ sealed class MediaRotationRepository(
     /// <summary>
     /// The F149.5 "playable rows with no ledger row or play_count 0" never-aired count (SPEC
     /// F149.3/F149.5, STORY-367 AC7), read beside <see cref="GetRotationSinceAsync"/>'s epoch. Scoped
-    /// to <c>MediaRepository.PlayablePredicate</c>'s own text — <c>m.state = 'ready' and m.measurable
-    /// and m.eligible and not coalesce(r.never_play, false)</c>, mirrored verbatim here (that constant
-    /// is <c>private</c> to <c>Catalog.MediaRepository</c>; db/41's own <c>find_near_duplicates</c>
-    /// function mirrors the exact same text for the identical reason) — an unavailable, ineligible, or
-    /// never-play row is not "waiting to air", so it must not inflate this figure. The gh-#99
+    /// to <see cref="MediaRepository.PlayablePredicate"/> (T374 review ADVISORY: <c>internal</c>,
+    /// referenced directly rather than mirrored — db/41's own <c>find_near_duplicates</c> function
+    /// still mirrors the same text for the identical reason, since SQL functions cannot reference a
+    /// C# constant) — an unavailable, ineligible, or never-play row is not "waiting to air", so it
+    /// must not inflate this figure. The gh-#99
     /// safe-scope exclusion applies here too, the same short-circuiting way
     /// <see cref="RecordAiringAsync"/> applies it.
     /// </summary>
@@ -166,7 +157,7 @@ sealed class MediaRotationRepository(
             from library.media m
             left join library.media_rating r on r.media_id = m.id
             left join library.media_rotation rot on rot.media_id = m.id
-            where {PlayablePredicate}
+            where {MediaRepository.PlayablePredicate}
               and (rot.media_id is null or rot.play_count = 0){safeExclusion}
             """,
             parameters,
@@ -181,7 +172,7 @@ sealed class MediaRotationRepository(
     /// playable-and-in-scope) alongside <see cref="RotationHealth.NeverAired"/>/
     /// <see cref="RotationHealth.AiredOnce"/>/<see cref="RotationHealth.NotAiredDays90"/> in one table
     /// scan, plus <see cref="RotationHealth.RotationSince"/> from <see cref="GetRotationSinceAsync"/>
-    /// (a second, unrelated store — see that method's own remarks). <see cref="PlayablePredicate"/>
+    /// (a second, unrelated store — see that method's own remarks). <see cref="MediaRepository.PlayablePredicate"/>
     /// and the gh-#99 safe-scope exclusion apply exactly as <see cref="GetNeverAiredCountAsync"/>
     /// applies them; the ONE addition here is <c>m.library_id = any(@libraryIds)</c> — the station's
     /// own rotation <paramref name="scope"/>, needing no empty-scope special case: <c>= any('{}')</c>
@@ -207,7 +198,7 @@ sealed class MediaRotationRepository(
                 from library.media m
                 left join library.media_rating r on r.media_id = m.id
                 left join library.media_rotation rot on rot.media_id = m.id
-                where {PlayablePredicate}
+                where {MediaRepository.PlayablePredicate}
                   and m.library_id = any(@libraryIds){safeExclusion}
                 """,
                 parameters,

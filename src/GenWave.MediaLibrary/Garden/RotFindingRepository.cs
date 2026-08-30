@@ -2,6 +2,7 @@ using Dapper;
 using Npgsql;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.MediaLibrary.Catalog;
 
 namespace GenWave.MediaLibrary.Garden;
 
@@ -41,12 +42,23 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
     /// share VERBATIM — a second <c>DeadFilePredicate</c>-style constant so "the SAME shape" this
     /// type's own remarks and <see cref="OpenDeadFileAsync"/>'s own doc comment already claimed is
     /// actually enforced by the compiler rather than by two hand-kept-in-sync copies.
+    ///
+    /// <para>
+    /// T374 review HIGH-1: <c>group_key</c> is refreshed on every re-open, not just stamped once —
+    /// a row whose <c>artist_key</c>/<c>title_key</c>/<c>title_variant</c> change while it STAYS in
+    /// <c>find_near_duplicates</c> (moving to a different group, not dropping out of the function
+    /// entirely) hits this same conflict path with a fresh <c>group_key</c> that must overwrite the
+    /// stale one. Harmless for <see cref="ReconcileDeadFilesAsync"/>/<see cref="OpenDeadFileAsync"/>:
+    /// neither INSERT lists a <c>group_key</c> column, and the column has no <c>DEFAULT</c>, so
+    /// <c>excluded.group_key</c> is NULL for both — the same NULL the column already held.
+    /// </para>
     /// </summary>
     const string OpenOrReopenOnConflict =
         """
         on conflict (media_id, kind) do update
           set state       = 'open',
               evidence    = excluded.evidence,
+              group_key   = excluded.group_key,
               opened_at   = case when library.rot_finding.state = 'resolved'
                                  then excluded.opened_at
                                  else library.rot_finding.opened_at end,
@@ -106,6 +118,115 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
                   where m.id = f.media_id
                     and {DeadFilePredicate}
               )
+            """,
+            parameters,
+            transaction: tx,
+            cancellationToken: ct));
+
+        await tx.CommitAsync(ct);
+    }
+
+    /// <summary>
+    /// <see cref="IRotFindingStore.ReconcileNearDuplicatesAsync"/> (SPEC F153.5; STORY-376; PLAN
+    /// T374): the same set-based, one-transaction, two-statement shape
+    /// <see cref="ReconcileDeadFilesAsync"/> established, over
+    /// <c>library.find_near_duplicates(@tolerance)</c> instead of a state predicate on
+    /// <c>library.media</c> directly.
+    ///
+    /// <para>
+    /// <b>The function runs exactly once PER STATEMENT</b> — <c>with dups as materialized (...)</c>
+    /// forces Postgres to evaluate the (STABLE, not cheap) set-returning function once and reuse the
+    /// tuplestore for every self-correlation inside that one statement (the siblings/versions
+    /// LATERALs below, and the resolve half's own <c>not exists</c>), rather than re-invoking it per
+    /// candidate row. Two statements therefore cost two calls per reconcile — a shared temp table
+    /// across both would only save that second call, and <c>Gardener:IntervalMinutes</c> (default
+    /// 60) makes the saving immaterial.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>group_key IS refreshed on every re-open</b> (T374 review HIGH-1) —
+    /// <see cref="OpenOrReopenOnConflict"/>'s own <c>group_key = excluded.group_key</c> SET column
+    /// overwrites it every time this INSERT's conflict path fires, so a row whose variant moves it
+    /// into a different group while it never drops out of <c>find_near_duplicates</c> gets the new
+    /// group_key, not a stale one.
+    /// </para>
+    /// </summary>
+    public async Task ReconcileNearDuplicatesAsync(int toleranceMs, CancellationToken ct)
+    {
+        var parameters = new DynamicParameters();
+        parameters.Add("tolerance", toleranceMs);
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        await conn.ExecuteAsync(new CommandDefinition(
+            $"""
+            with dups as materialized (
+                select media_id, group_key, title_variant
+                from library.find_near_duplicates(@tolerance)
+            )
+            insert into library.rot_finding (media_id, kind, state, evidence, group_key, opened_at, updated_at)
+            select
+                d.media_id,
+                'near_duplicate'::library.rot_kind,
+                'open'::library.rot_state,
+                jsonb_build_object(
+                    'group_key', d.group_key,
+                    'title_variant', d.title_variant,
+                    'siblings', coalesce(sib.siblings, '[]'::jsonb),
+                    'versions', coalesce(ver.versions, '[]'::jsonb)
+                ),
+                d.group_key,
+                now(),
+                now()
+            from dups d
+            join library.media om on om.id = d.media_id
+            left join lateral (
+                select jsonb_agg(
+                           jsonb_build_object('media_id', s.media_id, 'duration_ms', sm.duration_ms)
+                           order by sm.duration_ms
+                       ) as siblings
+                from dups s
+                join library.media sm on sm.id = s.media_id
+                where s.group_key = d.group_key and s.media_id <> d.media_id
+            ) sib on true
+            left join lateral (
+                select jsonb_agg(
+                           jsonb_build_object(
+                               'media_id', v.media_id, 'title', v.title,
+                               'title_variant', v.title_variant, 'duration_ms', v.duration_ms
+                           ) order by abs(v.duration_ms - om.duration_ms), v.media_id
+                       ) as versions
+                from (
+                    select m.id as media_id, m.title, m.title_variant, m.duration_ms
+                    from library.media m
+                    left join library.media_rating r on r.media_id = m.id
+                    where m.artist_key = om.artist_key
+                      and m.title_key = om.title_key
+                      and m.id <> d.media_id
+                      and not exists (select 1 from dups g where g.media_id = m.id and g.group_key = d.group_key)
+                      and {MediaRepository.PlayablePredicate}
+                    order by abs(m.duration_ms - om.duration_ms), m.id
+                    limit 10
+                ) v
+            ) ver on true
+            {OpenOrReopenOnConflict}
+            """,
+            parameters,
+            transaction: tx,
+            cancellationToken: ct));
+
+        await conn.ExecuteAsync(new CommandDefinition(
+            """
+            with dups as materialized (
+                select media_id
+                from library.find_near_duplicates(@tolerance)
+            )
+            update library.rot_finding f
+            set state = 'resolved', resolved_at = now(), updated_at = now()
+            where f.kind = 'near_duplicate'::library.rot_kind
+              and f.state = 'open'
+              and not exists (select 1 from dups d where d.media_id = f.media_id)
             """,
             parameters,
             transaction: tx,

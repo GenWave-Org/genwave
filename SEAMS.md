@@ -117,7 +117,7 @@
 | `GenWave.Core.Abstractions.IDeadFileReporter` | `GenWave.MediaLibrary.Garden.DeadFileReporter` | Singleton | — |
 | `GenWave.Core.Abstractions.IExplicitClassifier` | `GenWave.MediaLibrary.ExplicitClassification.OllamaExplicitClassifier` | Singleton | — |
 | `GenWave.Core.Abstractions.IFontPackStore` | `GenWave.MediaLibrary.Station.FontPackRepository` | Singleton | — |
-| `GenWave.Core.Abstractions.IGardenerPass` | `GenWave.MediaLibrary.Garden.DeadFileGardenerPass` | Singleton | — |
+| `GenWave.Core.Abstractions.IGardenerPass` | `GenWave.MediaLibrary.Garden.NearDuplicateGardenerPass` | Singleton | also registered: `GenWave.MediaLibrary.Garden.DeadFileGardenerPass` (GenWave.MediaLibrary) |
 | `GenWave.Core.Abstractions.IIconPackStore` | `GenWave.MediaLibrary.Station.IconPackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.ILibraryRepository` | `GenWave.MediaLibrary.Catalog.LibraryRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaCatalog` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |

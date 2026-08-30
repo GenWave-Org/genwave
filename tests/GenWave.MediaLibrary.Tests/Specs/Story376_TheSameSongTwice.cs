@@ -6,13 +6,20 @@
 // functions (see that script's own Gardener remarks) means DatabaseFixture's fresh-init database
 // already carries them with no migration script to run first, the same "call the function directly"
 // posture Story143_TrackEnergyGeneratedColumn.cs takes for its own STORED generated column. AC3–AC5,
-// AC7 (the near_duplicate PASS's own findings/evidence behavior) remain PENDING until T374 — the
-// Scenarios below tagged "T354 review pin" instead drive library.find_near_duplicates directly (the
-// same SQL-only posture as AC1/AC2), proving the FUNCTION's own contract ahead of the pass that will
-// consume it. AC6 (Keep this one) is a Host/Jest concern — the bulk-eligibility click lives in the
-// Admin UI test suite, not here; no fact for it in this file.
+// AC7 (the near_duplicate PASS's own findings/evidence behavior) were PENDING until T374 — WIRED now,
+// driving RotFindingRepository.ReconcileNearDuplicatesAsync directly (no NearDuplicateGardenerPass in
+// most facts; the AC7 scenario is the one exception, since it is about the PASS's own dependency
+// shape, not the repository's SQL). The Scenarios below tagged "T354 review pin" still drive
+// library.find_near_duplicates directly — the FUNCTION's own contract, independent of the pass/
+// repository that consumes it. AC6 (Keep this one) is a Host/Jest concern — the bulk-eligibility click
+// lives in the Admin UI test suite, not here; no fact for it in this file. The T374 ORCHESTRATOR
+// ruling — per-partition anchoring stays, 200000/203000/203500 ms at 2000 ms opens no finding — is
+// pinned as a regression fact by ScenarioTheKnownMissIsPinned below.
 
+using System.Text.Json;
 using Dapper;
+using GenWave.MediaLibrary.Garden;
+using GenWave.MediaLibrary.Options;
 
 namespace GenWave.MediaLibrary.Tests.Specs;
 
@@ -67,6 +74,53 @@ public static class FeatureTheSameSongTwice
     }
 
     // ---------------------------------------------------------------------
+    // T374 helpers — the near_duplicate PASS's own repository (RotFindingRepository) and its
+    // library.rot_finding rows (the Story375_RotFindingFlapGuard.cs "Repo(db) => new(db.DataSource)"
+    // idiom, one seam over).
+    // ---------------------------------------------------------------------
+
+    static RotFindingRepository Repo(DatabaseFixture db) => new(db.DataSource);
+
+    /// <summary>The Keep-this-one shape (STORY-376 AC6, T378's own future write): flips a row
+    /// ineligible directly, bypassing the admin bulk-eligibility endpoint that AC6 itself owns —
+    /// this file only needs the DOWNSTREAM effect on the group's own findings (AC6's own "resolve
+    /// on the next pass" half), not the endpoint.</summary>
+    static async Task SetEligibleFalseAsync(DatabaseFixture db, long mediaId)
+    {
+        await using var conn = await db.DataSource.OpenConnectionAsync();
+        await conn.ExecuteAsync(
+            "update library.media set eligible = false where id = @mediaId", new { mediaId });
+    }
+
+    /// <summary>Retags a row's title in place — <c>artist_key</c>/<c>title_key</c>/
+    /// <c>title_variant</c> are STORED generated columns (db/41), so this alone moves the row into
+    /// a different <c>find_near_duplicates</c> partition without touching any generated column
+    /// directly (T374 review HIGH-1's own group_key-refresh regression fact).</summary>
+    static async Task RetagTitleAsync(DatabaseFixture db, long mediaId, string title)
+    {
+        await using var conn = await db.DataSource.OpenConnectionAsync();
+        await conn.ExecuteAsync(
+            "update library.media set title = @title where id = @mediaId", new { mediaId, title });
+    }
+
+    /// <summary>One <c>near_duplicate</c> finding for <paramref name="mediaId"/>, or
+    /// <see langword="null"/> when none is open/resolved/dismissed yet — the
+    /// <c>ReadRotationAsync</c>/Story371 idiom (a nullable named ValueTuple, positional column
+    /// order). <c>evidence::text</c> keeps the jsonb column opaque to Dapper, exactly like
+    /// <see cref="RotFindingRepository.ListAsync"/>'s own read does in production.</summary>
+    static async Task<(long Id, string State, string? GroupKey, string Evidence, DateTimeOffset OpenedAt)?> ReadFindingAsync(DatabaseFixture db, long mediaId)
+    {
+        await using var conn = await db.DataSource.OpenConnectionAsync();
+        return await conn.QuerySingleOrDefaultAsync<(long, string, string?, string, DateTimeOffset)?>(
+            """
+            select id, state::text, group_key, evidence::text, opened_at
+            from library.rot_finding
+            where media_id = @mediaId and kind = 'near_duplicate'
+            """,
+            new { mediaId });
+    }
+
+    // ---------------------------------------------------------------------
     // HAPPY PATH — the fold, the variant tail, and the duplicate group
     // ---------------------------------------------------------------------
 
@@ -117,29 +171,298 @@ public static class FeatureTheSameSongTwice
         }
     }
 
-    public sealed class ScenarioADuplicateGroup
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioADuplicateGroup(DatabaseFixture db)
     {
         // Given two ready rows, same artist_key/title_key, same variant, durations 200,000 and
-        // 201,500 ms, When the near_duplicate pass runs.
-        [Fact(Skip = "pending T374 (STORY-376 AC3)")]
-        public void BothRowsHaveAnOpenFindingSharingOneGroupKey() => Assert.Fail("pending T374");
+        // 201,500 ms, When the near_duplicate pass runs. Both facts below share this one arrangement
+        // (the Story371_ThumbsAggregateIsBounded.cs "SeedAgedRowAndSweepAsync" idiom: written once,
+        // re-run per fact since xUnit gives each [Fact] its own fresh class instance).
+        async Task<((string A, string B) States, (string? A, string? B) GroupKeys)> ArrangeAsync()
+        {
+            await db.ResetAsync();
+            var rowA = await InsertReadyRowAsync(db, "/gardener/t374-dup-a.flac", "Artist", "Song", 200_000);
+            var rowB = await InsertReadyRowAsync(db, "/gardener/t374-dup-b.flac", "Artist", "Song", 201_500);
+
+            await Repo(db).ReconcileNearDuplicatesAsync(2_000, CancellationToken.None);
+
+            var findingA = await ReadFindingAsync(db, rowA);
+            var findingB = await ReadFindingAsync(db, rowB);
+            return ((findingA!.Value.State, findingB!.Value.State), (findingA.Value.GroupKey, findingB.Value.GroupKey));
+        }
+
+        [Fact]
+        public async Task BothRowsHaveAnOpenFinding()
+        {
+            var (states, _) = await ArrangeAsync();
+            Assert.Equal(("open", "open"), states);
+        }
+
+        [Fact]
+        public async Task TheyShareOneGroupKey()
+        {
+            var (_, groupKeys) = await ArrangeAsync();
+            Assert.Equal(groupKeys.A, groupKeys.B);
+        }
     }
 
-    public sealed class ScenarioVersionsAreNotFlagged
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioEvidenceSiblingsForAPair(DatabaseFixture db)
     {
-        // Given "Song" and "Song [Live]" by the same artist, When the pass runs.
-        [Fact(Skip = "pending T374 (STORY-376 AC4)")]
-        public void NoFindingIsOpened() => Assert.Fail("pending T374");
+        // Given the same duplicate pair as ScenarioADuplicateGroup, When the pass runs, Then row
+        // A's own evidence.siblings names exactly row B — the group's OTHER member, never itself
+        // (T374's own evidence shape, STORY-376 AC3's own "for Keep-this-one" reuse).
+        [Fact]
+        public async Task SiblingsOnRowAIsExactlyRowB()
+        {
+            await db.ResetAsync();
+            var rowA = await InsertReadyRowAsync(db, "/gardener/t374-sib-a.flac", "Artist", "Song", 200_000);
+            var rowB = await InsertReadyRowAsync(db, "/gardener/t374-sib-b.flac", "Artist", "Song", 200_500);
 
-        [Fact(Skip = "pending T374 (STORY-376 AC4)")]
-        public void TheLiveRowIsListedInTheOthersEvidenceVersions() => Assert.Fail("pending T374");
+            await Repo(db).ReconcileNearDuplicatesAsync(2_000, CancellationToken.None);
+
+            var findingA = await ReadFindingAsync(db, rowA);
+            using var evidence = JsonDocument.Parse(findingA!.Value.Evidence);
+            var siblingIds = evidence.RootElement.GetProperty("siblings").EnumerateArray()
+                .Select(e => e.GetProperty("media_id").GetInt64()).ToArray();
+
+            Assert.Equal([rowB], siblingIds);
+        }
     }
 
-    public sealed class ScenarioDurationTolerance
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioVersionsAreNotFlagged(DatabaseFixture db)
+    {
+        // Given "Song" and "Song [Live]" by the same artist — no duplicate PAIR on either side, so
+        // no group ever forms — When the pass runs.
+        [Fact]
+        public async Task NoFindingIsOpened()
+        {
+            await db.ResetAsync();
+            var studio = await InsertReadyRowAsync(db, "/gardener/t374-versions-studio.flac", "Artist", "Song", 200_000);
+            var live = await InsertReadyRowAsync(db, "/gardener/t374-versions-live.flac", "Artist", "Song [Live]", 200_000);
+
+            await Repo(db).ReconcileNearDuplicatesAsync(2_000, CancellationToken.None);
+
+            var (studioFinding, liveFinding) = (await ReadFindingAsync(db, studio), await ReadFindingAsync(db, live));
+            Assert.Equal((false, false), (studioFinding.HasValue, liveFinding.HasValue));
+        }
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioAStudioPairsVersionsListTheLiveRow(DatabaseFixture db)
+    {
+        // Given a studio PAIR (a duplicate group of two) plus one live row of the same song, When
+        // the pass runs, Then the pair's own evidence.versions names exactly the live row — never a
+        // sibling, since the sibling is already covered by evidence.siblings (STORY-376 AC4).
+        [Fact]
+        public async Task TheStudioPairsEvidenceVersionsIsExactlyTheLiveRow()
+        {
+            await db.ResetAsync();
+            var studioA = await InsertReadyRowAsync(db, "/gardener/t374-ac4-studio-a.flac", "Artist", "Song", 200_000);
+            await InsertReadyRowAsync(db, "/gardener/t374-ac4-studio-b.flac", "Artist", "Song", 200_500);
+            var live = await InsertReadyRowAsync(db, "/gardener/t374-ac4-live.flac", "Artist", "Song [Live]", 200_000);
+
+            await Repo(db).ReconcileNearDuplicatesAsync(2_000, CancellationToken.None);
+
+            var findingA = await ReadFindingAsync(db, studioA);
+            using var evidence = JsonDocument.Parse(findingA!.Value.Evidence);
+            var versionIds = evidence.RootElement.GetProperty("versions").EnumerateArray()
+                .Select(e => e.GetProperty("media_id").GetInt64()).ToArray();
+
+            Assert.Equal([live], versionIds);
+        }
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioDurationTolerance(DatabaseFixture db)
     {
         // Given same keys, durations 200,000 and 203,000 ms, When the pass runs.
-        [Fact(Skip = "pending T374 (STORY-376 AC5)")]
-        public void NoFindingIsOpened() => Assert.Fail("pending T374");
+        [Fact]
+        public async Task NoFindingIsOpened()
+        {
+            await db.ResetAsync();
+            var rowA = await InsertReadyRowAsync(db, "/gardener/t374-ac5-a.flac", "Artist", "Song", 200_000);
+            var rowB = await InsertReadyRowAsync(db, "/gardener/t374-ac5-b.flac", "Artist", "Song", 203_000);
+
+            await Repo(db).ReconcileNearDuplicatesAsync(2_000, CancellationToken.None);
+
+            var (findingA, findingB) = (await ReadFindingAsync(db, rowA), await ReadFindingAsync(db, rowB));
+            Assert.Equal((false, false), (findingA.HasValue, findingB.HasValue));
+        }
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTheKnownMissIsPinned(DatabaseFixture db)
+    {
+        // Per-partition anchor, SPEC F153.5's own T374 rider (ORCHESTRATOR ruling, 2026-08-30):
+        // 200000/203000/203500 ms at a 2000 ms tolerance opens NO finding even though the last two
+        // rows are only 500 ms apart — the anchor is the PARTITION's shortest duration (200000)
+        // only, never a second clustering level, so 203000 (Δ3000) and 203500 (Δ3500) both fail to
+        // qualify against that one anchor. A known miss, pinned as a regression fact on purpose —
+        // NOT a bug to fix here.
+        [Fact]
+        public async Task NoFindingIsOpened()
+        {
+            await db.ResetAsync();
+            var rowA = await InsertReadyRowAsync(db, "/gardener/t374-knownmiss-a.flac", "Artist", "Song", 200_000);
+            var rowB = await InsertReadyRowAsync(db, "/gardener/t374-knownmiss-b.flac", "Artist", "Song", 203_000);
+            var rowC = await InsertReadyRowAsync(db, "/gardener/t374-knownmiss-c.flac", "Artist", "Song", 203_500);
+
+            await Repo(db).ReconcileNearDuplicatesAsync(2_000, CancellationToken.None);
+
+            var (findingA, findingB, findingC) = (
+                await ReadFindingAsync(db, rowA), await ReadFindingAsync(db, rowB), await ReadFindingAsync(db, rowC));
+            Assert.Equal((false, false, false), (findingA.HasValue, findingB.HasValue, findingC.HasValue));
+        }
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioKeepThisOneResolvesTheWholeGroup(DatabaseFixture db)
+    {
+        // Given a duplicate group of two, already open, When row B is set ineligible (the
+        // Keep-this-one shape T378 will drive through the admin bulk-eligibility endpoint) and a
+        // second reconcile runs, Then BOTH findings resolve — a group of one is not a group, so row
+        // A's own finding resolves too, not just row B's.
+        [Fact]
+        public async Task BothFindingsResolve()
+        {
+            await db.ResetAsync();
+            var rowA = await InsertReadyRowAsync(db, "/gardener/t374-keep-a.flac", "Artist", "Song", 200_000);
+            var rowB = await InsertReadyRowAsync(db, "/gardener/t374-keep-b.flac", "Artist", "Song", 200_500);
+            var repo = Repo(db);
+            await repo.ReconcileNearDuplicatesAsync(2_000, CancellationToken.None);
+
+            await SetEligibleFalseAsync(db, rowB);
+            await repo.ReconcileNearDuplicatesAsync(2_000, CancellationToken.None);
+
+            var findingA = await ReadFindingAsync(db, rowA);
+            var findingB = await ReadFindingAsync(db, rowB);
+            Assert.Equal(("resolved", "resolved"), (findingA!.Value.State, findingB!.Value.State));
+        }
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioADismissedFindingStaysDismissed(DatabaseFixture db)
+    {
+        // Given an open duplicate-group finding dismissed at the store level, When the SAME group
+        // still qualifies and a second reconcile runs, Then the finding stays dismissed
+        // (dismissed-forever, SPEC F153.2).
+        [Fact]
+        public async Task TheFindingStaysDismissed()
+        {
+            await db.ResetAsync();
+            var rowA = await InsertReadyRowAsync(db, "/gardener/t374-dismiss-a.flac", "Artist", "Song", 200_000);
+            await InsertReadyRowAsync(db, "/gardener/t374-dismiss-b.flac", "Artist", "Song", 200_500);
+            var repo = Repo(db);
+            await repo.ReconcileNearDuplicatesAsync(2_000, CancellationToken.None);
+            var findingId = (await ReadFindingAsync(db, rowA))!.Value.Id;
+            await repo.DismissAsync(findingId, CancellationToken.None);
+
+            await repo.ReconcileNearDuplicatesAsync(2_000, CancellationToken.None);
+
+            Assert.Equal("dismissed", (await ReadFindingAsync(db, rowA))!.Value.State);
+        }
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioAnOpenFindingsOpenedAtIsStable(DatabaseFixture db)
+    {
+        // Given an open duplicate-group finding, When the SAME group reconciles again, Then
+        // opened_at is unchanged — only a genuine resolved -> open transition stamps a fresh one
+        // (F153.2's "as built" amendment, shared with the dead_file pass).
+        [Fact]
+        public async Task OpenedAtIsUnchanged()
+        {
+            await db.ResetAsync();
+            var rowA = await InsertReadyRowAsync(db, "/gardener/t374-stable-a.flac", "Artist", "Song", 200_000);
+            await InsertReadyRowAsync(db, "/gardener/t374-stable-b.flac", "Artist", "Song", 200_500);
+            var repo = Repo(db);
+            await repo.ReconcileNearDuplicatesAsync(2_000, CancellationToken.None);
+            var openedAtFirst = (await ReadFindingAsync(db, rowA))!.Value.OpenedAt;
+
+            await repo.ReconcileNearDuplicatesAsync(2_000, CancellationToken.None);
+
+            Assert.Equal(openedAtFirst, (await ReadFindingAsync(db, rowA))!.Value.OpenedAt);
+        }
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioGroupKeyRefreshesOnRetag(DatabaseFixture db)
+    {
+        // Given a duplicate pair (row 1 + row 2, both "Song", 200,000/200,500 ms) plus a lone
+        // "Song [Live]" row (row 3, 200,000 ms), reconciled once, When row 1 is retagged to
+        // "Song [Live]" — moving it into row 3's group while it never drops out of
+        // find_near_duplicates entirely — and a second reconcile runs (T374 review HIGH-1: the
+        // conflict path's group_key column must refresh, not just evidence). Both facts share this
+        // one arrangement.
+        async Task<(long Row1, long Row2, long Row3)> ArrangeAsync()
+        {
+            await db.ResetAsync();
+            var row1 = await InsertReadyRowAsync(db, "/gardener/t374-retag-1.flac", "Artist", "Song", 200_000);
+            var row2 = await InsertReadyRowAsync(db, "/gardener/t374-retag-2.flac", "Artist", "Song", 200_500);
+            var row3 = await InsertReadyRowAsync(db, "/gardener/t374-retag-3.flac", "Artist", "Song [Live]", 200_000);
+            var repo = Repo(db);
+            await repo.ReconcileNearDuplicatesAsync(2_000, CancellationToken.None);
+
+            await RetagTitleAsync(db, row1, "Song [Live]");
+            await repo.ReconcileNearDuplicatesAsync(2_000, CancellationToken.None);
+
+            return (row1, row2, row3);
+        }
+
+        [Fact]
+        public async Task Row1sGroupKeyColumnEqualsRow3s()
+        {
+            var (row1, _, row3) = await ArrangeAsync();
+            var (finding1, finding3) = (await ReadFindingAsync(db, row1), await ReadFindingAsync(db, row3));
+            Assert.Equal(finding3!.Value.GroupKey, finding1!.Value.GroupKey);
+        }
+
+        [Fact]
+        public async Task Row2Resolves()
+        {
+            var (_, row2, _) = await ArrangeAsync();
+            Assert.Equal("resolved", (await ReadFindingAsync(db, row2))!.Value.State);
+        }
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioVersionsAreOrderedNearestToTheAnchorFirst(DatabaseFixture db)
+    {
+        // Given a duplicate group of two ("Song"/"Song", 200,000/200,500 ms — row A is the group's
+        // own anchor row at 200,000 ms) plus two "Song [Live]" version rows at 100,000 and 201,000
+        // ms, When the pass runs, Then row A's own evidence.versions lists the 201,000 row FIRST —
+        // nearest to the ANCHOR's own duration, not the numerically smallest duration (T374 review
+        // MED-2: absolute order would have surfaced the 100,000 row first).
+        [Fact]
+        public async Task VersionsZeroIsTheNearestRowToTheAnchor()
+        {
+            await db.ResetAsync();
+            var rowA = await InsertReadyRowAsync(db, "/gardener/t374-nearest-a.flac", "Artist", "Song", 200_000);
+            await InsertReadyRowAsync(db, "/gardener/t374-nearest-b.flac", "Artist", "Song", 200_500);
+            await InsertReadyRowAsync(db, "/gardener/t374-nearest-far.flac", "Artist", "Song [Live]", 100_000);
+            var rowNear = await InsertReadyRowAsync(db, "/gardener/t374-nearest-near.flac", "Artist", "Song [Live]", 201_000);
+
+            await Repo(db).ReconcileNearDuplicatesAsync(2_000, CancellationToken.None);
+
+            var findingA = await ReadFindingAsync(db, rowA);
+            using var evidence = JsonDocument.Parse(findingA!.Value.Evidence);
+            var firstVersionId = evidence.RootElement.GetProperty("versions")[0].GetProperty("media_id").GetInt64();
+
+            Assert.Equal(rowNear, firstVersionId);
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -399,13 +722,56 @@ public static class FeatureTheSameSongTwice
     // SAD PATH — no filesystem, no excuse
     // ---------------------------------------------------------------------
 
-    public sealed class ScenarioThePassReadsNoFiles
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioThePassReadsNoFiles(DatabaseFixture db)
     {
-        // Given a library on an unreachable mount, When the pass runs.
-        [Fact(Skip = "pending T374 (STORY-376 AC7)")]
-        public void ThePassCompletesSqlOnly() => Assert.Fail("pending T374");
+        // Given a library on an unreachable mount — NearDuplicateGardenerPass never asks for
+        // Library:MediaRoot at all (unlike DeadFileGardenerPass), so there is nothing to point at a
+        // missing directory here; the constructor's own dependency shape is what makes the mount
+        // irrelevant, pinned structurally by the second fact below — When the near_duplicate PASS
+        // itself runs (NearDuplicateGardenerPass, not the repository directly), Then it completes
+        // and opens findings for both AC3-shaped rows from catalog data alone. ONE assertion over a
+        // homogeneous set (T374 review MED-1): the COUNT of open near_duplicate findings across the
+        // two rows, not a tuple pairing two independently-named claims.
+        [Fact]
+        public async Task ThePassOpensFindingsFromCatalogDataAlone()
+        {
+            await db.ResetAsync();
+            var rowA = await InsertReadyRowAsync(db, "/gardener/t374-ac7-a.flac", "Artist", "Song", 200_000);
+            var rowB = await InsertReadyRowAsync(db, "/gardener/t374-ac7-b.flac", "Artist", "Song", 201_500);
+            var pass = new NearDuplicateGardenerPass(
+                Repo(db), new FakeOptionsMonitor<GardenerOptions>(new GardenerOptions { DuplicateToleranceMs = 2_000 }));
 
-        [Fact(Skip = "pending T374 (STORY-376 AC7)")]
-        public void FindingsOpenFromCatalogDataAlone() => Assert.Fail("pending T374");
+            await pass.RunAsync(CancellationToken.None);
+
+            await using var conn = await db.DataSource.OpenConnectionAsync();
+            var openFindingCount = await conn.ExecuteScalarAsync<int>(
+                """
+                select count(*)::int from library.rot_finding
+                where kind = 'near_duplicate' and state = 'open' and media_id = any(@mediaIds)
+                """,
+                new { mediaIds = new[] { rowA, rowB } });
+
+            Assert.Equal(2, openFindingCount);
+        }
+
+        // Given the pass's own type, When its constructor's dependencies are inspected, Then none
+        // of them come from System.IO or Microsoft.Extensions.FileProviders — "reads no files"
+        // pinned structurally, not just by this scenario's own happy-path behavior above.
+        [Fact]
+        public void TheConstructorAcceptsNoFilesystemDependency()
+        {
+            var parameterNamespaces = typeof(NearDuplicateGardenerPass)
+                .GetConstructors()
+                .Single()
+                .GetParameters()
+                .Select(p => p.ParameterType.Namespace ?? string.Empty)
+                .ToArray();
+
+            Assert.DoesNotContain(parameterNamespaces, ns =>
+                ns.StartsWith("System.IO", StringComparison.Ordinal) ||
+                ns.StartsWith("Microsoft.Extensions.FileProviders", StringComparison.Ordinal));
+        }
     }
 }

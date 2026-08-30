@@ -41,7 +41,12 @@ sealed class MediaRepository(
     // measurable and eligible and not coalesce(r.never_play, false)" text — those two alias columns
     // without the m. prefix, a different (if logically equivalent) string, so folding them in here
     // would NOT be byte-identical SQL output.
-    const string PlayablePredicate =
+    //
+    // T374 review ADVISORY (ruled in): internal, not private — Garden.MediaRotationRepository and
+    // Garden.RotFindingRepository both need the SAME m./r.-aliased text and previously each carried
+    // its own byte-identical copy (three total). One definition now; a future edit here can never
+    // silently desync from either Garden repository's own query.
+    internal const string PlayablePredicate =
         "m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)";
 
     // xmin is a Postgres system column; cast to text so Dapper maps it as a plain string. The
