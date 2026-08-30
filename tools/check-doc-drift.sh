@@ -62,6 +62,16 @@ else
   ok "pins: all compose.pinned.yaml images pinned to ${pins[0]}"
 fi
 
+# --- Pair 4 (gh-#529): Proxy:TrustedNetworks CIDR → stated verbatim in the Proxy trust section. -
+proxy_cidr=$(sed -n 's/.*Proxy__TrustedNetworks__0: *"\([^"]*\)".*/\1/p' compose.demo.yaml | head -1)
+if [[ -z "$proxy_cidr" ]]; then
+  drift "proxy: could not extract Proxy__TrustedNetworks__0 from compose.demo.yaml — update this script's extraction"
+elif grep -qF "$proxy_cidr" DEPLOYMENT.md; then
+  ok "proxy: DEPLOYMENT.md states \"$proxy_cidr\" (compose Proxy__TrustedNetworks__0)"
+else
+  drift "proxy: doc never states \"$proxy_cidr\", compose Proxy__TrustedNetworks__0 is \"$proxy_cidr\""
+fi
+
 if [[ $fail -ne 0 ]]; then
   echo "" >&2
   echo "DEPLOYMENT.md restates compose.demo.yaml values in prose — fix the doc (or the compose" >&2

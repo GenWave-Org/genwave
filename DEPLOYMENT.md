@@ -139,14 +139,18 @@ ss -ltn     # 127.0.0.1:8080 and 127.0.0.1:3000, plus caddy on 0.0.0.0:80/:443 �
 If your Compose predates the `!override` tag (needs v2.24+), upgrade — don't ship a
 public box on an unverified merge.
 
-### Proxy trust: XFF only, honestly
+### Proxy trust: XFF **and** scheme, both real since v5.5.0
 
-`Proxy:TrustedNetworks` only configures `ForwardedHeaders.XForwardedFor` today —
-`X-Forwarded-Proto` is not read, so `Request.Scheme` stays plain HTTP on the internal
-hop. Low-stakes for this topology (admin auth never crosses the TLS boundary — admin
-isn't publicly routed at all), but it stops being low-stakes the moment anyone fronts
-the *admin* plane with TLS. Documented gap: enable `XForwardedProto` in the same
-`ForwardedHeadersOptions` block before doing that.
+`Proxy:TrustedNetworks` configures **both** `ForwardedHeaders.XForwardedFor` **and**
+`ForwardedHeaders.XForwardedProto` (`Program.cs`, T366 review MED-3) — trusting a hop's
+`X-Forwarded-For` now also trusts its `X-Forwarded-Proto`, so `Request.Scheme` reflects the
+edge's real scheme instead of the plain-HTTP hop Kestrel itself sees behind
+cloudflared → Caddy. That is what makes `Secure` real on every scheme-conditioned cookie —
+the admin session cookie and the spectator `genwave-listener` cookie both stamp `Secure`
+only when the edge was actually TLS; without `XForwardedProto`, `Secure` would never be set
+at all on a box behind a plain-HTTP internal hop (or, the other direction, could be falsely
+withheld). Empty by default: the middleware's own loopback-only known-networks/known-proxies
+trust leaves it inert until an operator sets this.
 
 **Both halves of the chain must trust their hop (gh-#129).** The chain is up to two
 proxies deep (cloudflared → Caddy when the optional tunnel fronts the public hostname;
@@ -156,9 +160,20 @@ v2.5+ *strips* inbound `X-Forwarded-For` unless the `Caddyfile` declares
 after ONE hop unless `Proxy:TrustedNetworks` is set (which also lifts the hop limit —
 the walk then runs to the first untrusted address, the real client). Miss either half
 and every public visitor resolves to a container IP: per-IP rate limits (the request
-line, the spectator 120/min) collapse into one shared partition — observed live as
-cross-IP 429s the day requests launched. Verify after deploy: a login line's
-`remote:` must show a real public IP, never `172.x`.
+line, the spectator 120/min, the Gardener's own thumbs) collapse into one shared
+partition — observed live as cross-IP 429s the day requests launched. Verify after deploy:
+a login line's `remote:` must show a real public IP, never `172.x`.
+
+**This is also what makes per-IP partitioning real for the thumb/request lines specifically.**
+`Requests`' and the Gardener's `Thumbs` rate-limiter policies both key on
+`HttpContext.Connection.RemoteIpAddress` — the same address `Proxy:TrustedNetworks` corrects.
+`compose.demo.yaml` sets it (`Proxy__TrustedNetworks__0: "172.28.20.0/24"`, the pinned `core`
+subnet); a self-hoster fronting their own box with a proxy and never setting this collapses
+every listener's thumbs and requests into ONE shared per-IP partition — a station-wide budget
+in practice, not a per-caller one. Concretely: the request line's per-IP daily cap defaults
+to 20 (`Requests:PerIpDailyCap`), and the Gardener's thumbs carry their own daily cap
+(`Gardener:ThumbDailyCap`, below) — either budget shared by a whole audience instead of one
+visitor throttles far sooner than intended, and looks like a broken control, not a busy one.
 
 ---
 
@@ -511,6 +526,85 @@ first and declines with a WARN if not, and a chain that was pushed but never air
 rather than silent. Per-service memory fences for every container (kokoro 4 GB, piper 768 MB,
 alloy 256 MB, cloudflared 128 MB, dockerproxy 64 MB) live in HARDWARE.md's "What each service
 needs" table — one source, not two.
+
+---
+
+## 🌱 The Library Gardener (v5.5.0, SPEC F150–F155, gh-#529)
+
+The Gardener is a housekeeping `BackgroundService` that tends the catalog on a timer:
+five rot passes (`dead_file` / `near_duplicate` / `stale_metadata` / `shelf_dust` /
+`unreachable`) reconcile findings into a queue an operator works from the Gardener page,
+and a listener-thumbs signal nudges rotation toward what actually gets played. Every knob
+below is `Gardener__*` — env/compose-only, never a live setting — **except**
+`Station:Thumbs:Enabled`, the one Live switch (see below). The ten top-level knobs are
+boot-validated (`ValidateDataAnnotations()`): an out-of-range value refuses to start. The
+two `FileActions__*` rows are NOT — `DataAnnotations` validation doesn't recurse into a
+nested options class, so `Enabled` (a plain bool) is just read, and an out-of-range
+`GateTimeoutSeconds` is silently clamped to 1–300 at use rather than rejected at boot; the
+range column for those two rows is documentation only.
+
+| Key | Default | Range | What it bounds |
+|---|:---:|:---:|---|
+| `Gardener__IntervalMinutes` | 60 | 1–1440 | Minutes between `GardenerService` ticks (thumb sweep + every registered pass) |
+| `Gardener__BatchSize` | 500 | 1–10,000 | Reserved — no shipped pass consults it yet. Every pass today reconciles set-based in SQL; only a future *iterative* pass would ever read this |
+| `Gardener__NudgeGain` | 0.5 | 0–2 | Multiplies the rotation nudge into the persona ranker's rung-0 score term; 0 disables the rotation signal outright |
+| `Gardener__HalfLifeDays` | 30 | 1–365 | Exponential half-life, in days, for a single thumb's contribution to the nudge |
+| `Gardener__Saturation` | 5 | 1–100 | Divisor that normalizes the age-decayed thumb sum into the nudge's clamped [-1, 1] range |
+| `Gardener__ThumbCooldownSeconds` | 30 | 1–3600 | Per-IP cooldown on the `thumbs` route rate limiter |
+| `Gardener__ThumbDailyCap` | 60 | 1–10,000 | Per-IP **and** per-listener daily cap on accepted thumb posts |
+| `Gardener__ThumbRetentionDays` | 90 | 1–3650 | Age past which `library.media_thumb` rows are swept; the lifetime up/down counters and the computed nudge survive the sweep |
+| `Gardener__ShelfDustDays` | 90 | 1–3650 | Days since discovery, with zero plays, before a playable row is flagged `shelf_dust` |
+| `Gardener__DuplicateToleranceMs` | 2000 | 0–60,000 | Duration tolerance for the `near_duplicate` grouping, anchored to the group's shortest member |
+| `Gardener__FileActions__Enabled` | `false` | — | The file-actions opt-in (see below) |
+| `Gardener__FileActions__GateTimeoutSeconds` | 30 | 1–300 | How long a file action waits to enter the shared scan gate before reporting Busy |
+
+**`Station:Thumbs:Enabled`** — a *live* allowlisted setting: `PUT` it through the settings
+API/UI, or seed it via `Station__Thumbs__Enabled` at boot. Default off — disabled means
+`POST /spectator/api/thumbs` 404s and the spectator page shows no thumbs controls at all,
+never a distinguishable "thumbs are closed" response. Takes effect on the very next
+request, no `api` restart.
+
+### File actions: opt-in, and the only feature that writes to media
+
+File actions (retag / rename / move — **there is no delete verb**) are OFF by default
+(`Gardener__FileActions__Enabled`, F154.2's fail-closed posture on a stranger's NAS).
+Opting in needs both halves:
+
+```bash
+# .env: Gardener__FileActions__Enabled=true
+docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml -f compose.fileactions.yaml up -d
+```
+
+`launch.sh` has no flag for extra compose files today — run the full `-f` chain above
+directly, or launch normally first and append `:compose.fileactions.yaml` to `COMPOSE_FILE`
+in `.env` (the gh-#309 mechanism above), so every later bare `docker compose` picks it up
+too. `compose.fileactions.yaml` stacks in either order relative to the pin/demo overlays,
+and touches only the `api` service's own `/media` mount — widened to `:rw` (see its own
+header for the mechanism).
+
+Both knobs are independent, and missing one is diagnosable: with the mount still `:ro`
+(this file not stacked), `dry-run` still plans to a 200 — the planner never touches disk —
+but `confirm` always fails at execution instead of completing (the OS refuses the write
+before anything is written, so the outcome is `failed`, never `reverted` — there's nothing
+to revert — and never a clean `done`). With the compose file stacked but `Enabled` left
+off, the endpoints just 404, mount notwithstanding.
+
+⚠️ **`launch.sh` does not remember this overlay.** It rewrites the whole `COMPOSE_FILE=`
+line in `.env` on its own next successful `up` (the gh-#309 mechanism above), so a manually
+appended `:compose.fileactions.yaml` is silently dropped and the mount quietly reverts to
+`:ro` — re-append it after every `launch.sh` run. The confirm-fails-at-execution signature
+above is how you notice.
+
+Every write is jailed under `Library:MediaRoot`, never overwrites an existing path, and a
+retag never touches the live file directly: the original is copied to a same-directory
+temp file, tagged, then swapped in behind a same-directory `.gwbak` backup of the original.
+On success the backup is deleted. **If a revert itself fails** (the backup can't be moved
+back over a failed write), the `.gwbak` is left beside the file as the only surviving
+original — every further retag on that file refuses (`LeftoverBackup`) until an operator
+resolves it manually. Resolving it by hand: `mv 'track.mp3.<suffix>.gwbak' 'track.mp3'`
+restores the pre-retag original over whatever the failed attempt left behind; once you've
+confirmed the current file is the one you want, deleting the `.gwbak` instead is enough —
+either way, the next retag on that file proceeds the moment no `.gwbak` sibling remains.
 
 ---
 
