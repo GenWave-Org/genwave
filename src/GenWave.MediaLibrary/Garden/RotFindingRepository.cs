@@ -36,6 +36,26 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
         "(m.state = 'failed' or (m.state = 'unavailable' and m.unavailable_since < now() - @grace))";
 
     /// <summary>
+    /// T373 review MED-1: the <c>on conflict (media_id, kind) do update</c> tail
+    /// <see cref="ReconcileDeadFilesAsync"/>'s own insert half and <see cref="OpenDeadFileAsync"/>
+    /// share VERBATIM — a second <c>DeadFilePredicate</c>-style constant so "the SAME shape" this
+    /// type's own remarks and <see cref="OpenDeadFileAsync"/>'s own doc comment already claimed is
+    /// actually enforced by the compiler rather than by two hand-kept-in-sync copies.
+    /// </summary>
+    const string OpenOrReopenOnConflict =
+        """
+        on conflict (media_id, kind) do update
+          set state       = 'open',
+              evidence    = excluded.evidence,
+              opened_at   = case when library.rot_finding.state = 'resolved'
+                                 then excluded.opened_at
+                                 else library.rot_finding.opened_at end,
+              resolved_at = null,
+              updated_at  = now()
+          where library.rot_finding.state <> 'dismissed'
+        """;
+
+    /// <summary>
     /// <see cref="RotKind.DeadFile"/> (SPEC F153.3, T372's own state-based half — the push-guard
     /// report reason, <c>push_missing</c>, is T373): a row is dead when <c>library.media.state =
     /// 'failed'</c>, or when it is <c>'unavailable'</c> and has stayed that way past <paramref
@@ -67,15 +87,7 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
                 now()
             from library.media m
             where {DeadFilePredicate}
-            on conflict (media_id, kind) do update
-              set state       = 'open',
-                  evidence    = excluded.evidence,
-                  opened_at   = case when library.rot_finding.state = 'resolved'
-                                     then excluded.opened_at
-                                     else library.rot_finding.opened_at end,
-                  resolved_at = null,
-                  updated_at  = now()
-              where library.rot_finding.state <> 'dismissed'
+            {OpenOrReopenOnConflict}
             """,
             parameters,
             transaction: tx,
@@ -87,6 +99,7 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
             set state = 'resolved', resolved_at = now(), updated_at = now()
             where f.kind = 'dead_file'::library.rot_kind
               and f.state = 'open'
+              and not (coalesce(f.evidence->>'reason', '') = 'push_missing' and f.opened_at > now() - @grace)
               and not exists (
                   select 1
                   from library.media m
@@ -99,6 +112,51 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
             cancellationToken: ct));
 
         await tx.CommitAsync(ct);
+    }
+
+    /// <summary>
+    /// <see cref="IRotFindingStore.OpenDeadFileAsync"/> (SPEC F153.4; STORY-375; PLAN T373): the
+    /// push guard's own single-row report — the SAME open/re-open shape
+    /// <see cref="ReconcileDeadFilesAsync"/>'s own insert half uses (literally: both interpolate
+    /// <see cref="OpenOrReopenOnConflict"/>), narrowed to <paramref name="mediaId"/> via
+    /// <c>where m.id = @mediaId</c> instead of the reconcile's set-based predicate. No resolve half
+    /// here: this write only ever OPENS or RE-OPENS — resolving a push_missing finding is
+    /// <see cref="ReconcileDeadFilesAsync"/>'s own job, subject to the flap guard immediately above
+    /// (ORCHESTRATOR ruling, STORY-375 AC3-AC5).
+    ///
+    /// <para>
+    /// T373 review LOW-4: a report against an ALREADY-<see cref="RotState.Open"/> finding (any
+    /// reason — <c>failed</c>, <c>unavailable</c>, or a prior <c>push_missing</c>) overwrites its
+    /// <c>evidence</c> unconditionally, exactly like <see cref="ReconcileDeadFilesAsync"/>'s own
+    /// insert half does for a state-based re-fire — so a push-guard report against a row the state
+    /// half already opened makes <c>evidence.reason</c> read <c>push_missing</c> until the NEXT
+    /// <see cref="ReconcileDeadFilesAsync"/> tick restores the state-based reason. <c>opened_at</c>
+    /// is NOT bumped for an already-open row (the <c>case when ... = 'resolved'</c> guard inside
+    /// <see cref="OpenOrReopenOnConflict"/>), so this overwrite can never itself re-arm the flap
+    /// guard's own grace window.
+    /// </para>
+    /// </summary>
+    public async Task OpenDeadFileAsync(long mediaId, string reason, CancellationToken ct)
+    {
+        var parameters = new { mediaId, reason };
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await conn.ExecuteAsync(new CommandDefinition(
+            $"""
+            insert into library.rot_finding (media_id, kind, state, evidence, opened_at, updated_at)
+            select
+                m.id,
+                'dead_file'::library.rot_kind,
+                'open'::library.rot_state,
+                jsonb_build_object('reason', @reason, 'since', now()),
+                now(),
+                now()
+            from library.media m
+            where m.id = @mediaId
+            {OpenOrReopenOnConflict}
+            """,
+            parameters,
+            cancellationToken: ct));
     }
 
     /// <summary>

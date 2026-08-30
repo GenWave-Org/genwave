@@ -35,6 +35,29 @@ public interface IRotFindingStore
     Task ReconcileDeadFilesAsync(TimeSpan unavailableGrace, CancellationToken ct);
 
     /// <summary>
+    /// Opens (or re-opens a resolved) ONE <see cref="RotKind.DeadFile"/> finding for
+    /// <paramref name="mediaId"/> — <see cref="IDeadFileReporter"/>'s own write (SPEC F153.4;
+    /// STORY-375; PLAN T373): the same open/re-open statement shape
+    /// <see cref="ReconcileDeadFilesAsync"/>'s own insert half uses, narrowed to a single id
+    /// instead of the reconcile's set-based predicate, with evidence
+    /// <c>{"reason": <paramref name="reason"/>, "since": &lt;now&gt;}</c>. An unknown media id
+    /// matches no row and inserts nothing — never a throw; a <see cref="RotState.Dismissed"/> row
+    /// is left untouched, exactly like the reconcile's own insert half.
+    ///
+    /// <para>
+    /// T373 review LOW-4: calling this against an ALREADY-<see cref="RotState.Open"/> finding
+    /// overwrites its <c>evidence</c> unconditionally — a report against a row
+    /// <see cref="ReconcileDeadFilesAsync"/> already opened for <c>failed</c>/<c>unavailable</c>
+    /// makes <c>evidence.reason</c> read <c>push_missing</c> until the next
+    /// <see cref="ReconcileDeadFilesAsync"/> tick restores the state-based reason. <c>opened_at</c>
+    /// is never bumped for an already-open row (<c>Garden.RotFindingRepository.OpenOrReopenOnConflict</c>'s
+    /// own <c>case when ... = 'resolved'</c> guard), so this overwrite alone can never re-arm the
+    /// flap guard's own grace window.
+    /// </para>
+    /// </summary>
+    Task OpenDeadFileAsync(long mediaId, string reason, CancellationToken ct);
+
+    /// <summary>
     /// Dismisses a finding at the store level (STORY-374 AC4): an <see cref="RotState.Open"/> row
     /// moves to <see cref="RotState.Dismissed"/> with <c>dismissed_at</c> stamped, and returns
     /// <see langword="true"/>. Anything else — an unknown id, or a row that is already

@@ -1,4 +1,3 @@
-using System.Globalization;
 using GenWave.Core.Events;
 
 namespace GenWave.Host.Playout;
@@ -39,8 +38,7 @@ static class MusicAiring
     /// </summary>
     public static bool TryReadMusicAiring(StationEvent evt, out long mediaId, out DateTimeOffset startedAt)
     {
-        if (evt is TrackAired { SegmentKind: null } aired
-            && long.TryParse(aired.MediaId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+        if (evt is TrackAired { SegmentKind: null } aired && MusicMediaId.TryParse(aired.MediaId, out var parsed))
         {
             mediaId = parsed;
             startedAt = aired.StartedAt;
@@ -61,6 +59,23 @@ static class MusicAiring
     /// numeric catalog id. Used to gate <see cref="NowPlayingSnapshot.Airing"/> so that record's
     /// "null for non-music" contract holds BY CONSTRUCTION, never merely by convention.
     /// </summary>
-    public static bool IsMusicMediaId(string? mediaId) =>
-        long.TryParse(mediaId, NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
+    public static bool IsMusicMediaId(string? mediaId) => TryReadMusicMediaId(mediaId, out _);
+
+    /// <summary>
+    /// The SAME numeric-id parse <see cref="IsMusicMediaId"/> already applied (that method now
+    /// delegates here), widened to hand back the parsed id itself — a caller that needs BOTH "is
+    /// this a music-shaped id" and the parsed <see langword="long"/> (e.g.
+    /// <c>Engine.MediaExistencePushGuard</c>, which reports the id to the Gardener) previously had
+    /// no choice but to re-run <see cref="long.TryParse(string?, NumberStyles, IFormatProvider?, out long)"/>
+    /// itself.
+    ///
+    /// <para>
+    /// T373 review LOW-1: this delegates to <see cref="GenWave.Host.MusicMediaId.TryParse"/> — the
+    /// root-namespace home the SAME review pass moved the actual parse to (see that type's own
+    /// remarks) once a direct <c>Engine.MediaExistencePushGuard</c> → here dependency turned out to
+    /// close an L10 namespace cycle against <c>Playout</c>'s existing dependency on <c>Engine</c>.
+    /// This method's own public surface — every existing Playout caller — is unchanged.
+    /// </para>
+    /// </summary>
+    public static bool TryReadMusicMediaId(string? mediaId, out long id) => MusicMediaId.TryParse(mediaId, out id);
 }

@@ -33,11 +33,20 @@ public static class FeatureMediaExistencePushGuard
         }
     }
 
+    /// <summary>T373's own no-op stand-in for the push guard's ctor: this file's own MediaId
+    /// ("m1") is non-numeric, so BeginReportMissing never even calls this — a passive double is
+    /// enough here (STORY-375 AC3/AC4's own dedicated arcs exercise a real, calling reporter).
+    /// </summary>
+    sealed class NoOpDeadFileReporter : IDeadFileReporter
+    {
+        public Task ReportMissingAsync(long mediaId, CancellationToken ct) => Task.CompletedTask;
+    }
+
     static MediaItem Item(string locator) =>
         new("m1", locator, "title-m1", new CoreLoudness(-16.0, -1.0, Measurable: true));
 
     static MediaExistencePushGuard Guard(RecordingControl inner) =>
-        new(inner, NullLogger<MediaExistencePushGuard>.Instance);
+        new(inner, new NoOpDeadFileReporter(), NullLogger<MediaExistencePushGuard>.Instance);
 
     public sealed class ScenarioMissingFile
     {

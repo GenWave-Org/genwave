@@ -144,6 +144,13 @@ public static class MediaLibraryServiceCollectionExtensions
         services.AddSingleton<RotFindingRepository>();
         services.AddSingleton<IRotFindingStore>(sp => sp.GetRequiredService<RotFindingRepository>());
 
+        // The push guard's own report seam (SPEC F153.4; STORY-375; PLAN T373, gh-#529):
+        // Host.Engine.MediaExistencePushGuard's fire-and-forget hook after declining a push for a
+        // missing file, reporting straight through to IRotFindingStore.OpenDeadFileAsync just
+        // registered above — near-instant dead_file visibility instead of waiting on the scan's
+        // own state-based reconcile.
+        services.AddSingleton<IDeadFileReporter, DeadFileReporter>();
+
         // The dead_file pass (SPEC F153.3, PLAN T372) — first of the five Gardener passes
         // ARCHITECTURE.md names; the other four (near_duplicate, stale_metadata, shelf_dust,
         // unreachable) join this AddSingleton<IGardenerPass, ...> fan-out at their own tasks, each
