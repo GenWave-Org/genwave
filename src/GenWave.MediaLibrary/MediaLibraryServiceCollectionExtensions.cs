@@ -152,8 +152,8 @@ public static class MediaLibraryServiceCollectionExtensions
         services.AddSingleton<IDeadFileReporter, DeadFileReporter>();
 
         // The dead_file pass (SPEC F153.3, PLAN T372) — first of the five Gardener passes
-        // ARCHITECTURE.md names; the other three (stale_metadata, shelf_dust, unreachable) join
-        // this AddSingleton<IGardenerPass, ...> fan-out at their own tasks, each resolved through
+        // ARCHITECTURE.md names; the one still unbuilt (unreachable, T376) joins this
+        // AddSingleton<IGardenerPass, ...> fan-out at its own task, resolved through
         // GardenerService's own IEnumerable<IGardenerPass> in registration order.
         services.AddSingleton<IGardenerPass, DeadFileGardenerPass>();
 
@@ -161,6 +161,15 @@ public static class MediaLibraryServiceCollectionExtensions
         // immediately after dead_file so DI registration order matches ARCHITECTURE.md's own pass
         // ordering (dead_file, near_duplicate, stale_metadata, shelf_dust, unreachable).
         services.AddSingleton<IGardenerPass, NearDuplicateGardenerPass>();
+
+        // The stale_metadata pass (SPEC F153.6, PLAN T375) — third of the five, registered
+        // immediately after near_duplicate for the same ordering reason.
+        services.AddSingleton<IGardenerPass, StaleMetadataGardenerPass>();
+
+        // The shelf_dust pass (SPEC F153.7, PLAN T375) — fourth of the five. Last on purpose —
+        // F153.7 excludes rows with an open unreachable finding, so T376's unreachable pass
+        // registers BEFORE this line.
+        services.AddSingleton<IGardenerPass, ShelfDustGardenerPass>();
 
         // The tick itself (SPEC F153.2): housekeeping (IThumbStore.RecomputeAllAsync/SweepAsync,
         // F150.9) then every registered IGardenerPass, log-and-continue per step — the

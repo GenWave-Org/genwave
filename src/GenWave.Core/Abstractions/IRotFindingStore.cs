@@ -65,6 +65,49 @@ public interface IRotFindingStore
     Task ReconcileNearDuplicatesAsync(int toleranceMs, CancellationToken ct);
 
     /// <summary>
+    /// Reconciles every <see cref="RotKind.StaleMetadata"/> finding against
+    /// <c>library.media</c>'s current tag state (SPEC F153.6; STORY-377; PLAN T375): opens (or
+    /// re-opens a resolved) finding for a <c>ready</c>, <c>eligible</c>, non-<c>never_play</c> row
+    /// missing one or more of five fields — <c>artist</c> (blank), <c>title</c> (blank, or the
+    /// "Track NN" family), <c>year</c> (null with a recorded lookup miss), <c>moods</c> (null with
+    /// a recorded tag miss), <c>measurable</c> (explicitly <see langword="false"/>, never a bare
+    /// <see langword="null"/>) — resolves an open finding once none of the five hold. A row with an
+    /// operator-stamped <c>tags_edited_at</c> is exempt for <c>artist</c>/<c>title</c>/<c>year</c>
+    /// only (the three operator-patchable fields); <c>moods</c>/<c>measurable</c> are never exempt.
+    /// A <see cref="RotState.Dismissed"/> row is never touched by either half.
+    ///
+    /// <para>
+    /// Deliberately NOT <c>MediaRepository.PlayablePredicate</c> (ORCHESTRATOR ruling): that
+    /// predicate requires <c>m.measurable</c> true, which would exclude every row this pass exists
+    /// to flag for a <see langword="false"/> <c>measurable</c> value — the scope here is
+    /// <c>state = 'ready' and eligible and not never_play</c> only.
+    /// </para>
+    ///
+    /// <para>
+    /// Evidence is <c>{"fields": [...]}</c> — the subset of <c>artist</c>/<c>title</c>/<c>year</c>/
+    /// <c>moods</c>/<c>measurable</c> currently failing, in that fixed order; a row whose computed
+    /// set is empty gets no finding at all, and one already open resolves.
+    /// </para>
+    /// </summary>
+    Task ReconcileStaleMetadataAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Reconciles every <see cref="RotKind.ShelfDust"/> finding (SPEC F153.7; STORY-377; PLAN
+    /// T375): opens (or re-opens a resolved) finding for a
+    /// <c>Catalog.MediaRepository.PlayablePredicate</c> row with no <c>library.media_rotation</c>
+    /// row (or one with <c>play_count = 0</c>), discovered further back than
+    /// <paramref name="shelfAge"/>, and carrying no currently-<c>open</c>
+    /// <see cref="RotKind.Unreachable"/> finding of its own — resolves an open finding once the row
+    /// airs, stops being playable, or an <c>unreachable</c> finding opens for it. A
+    /// <see cref="RotState.Dismissed"/> row is never touched by either half.
+    /// </summary>
+    /// <param name="shelfAge">How long since <c>discovered_at</c> before a never-aired row counts
+    /// as dust — the caller (<c>Garden.ShelfDustGardenerPass</c>) reads
+    /// <c>Gardener:ShelfDustDays</c> live, floored at 1 day, and bound as a Postgres
+    /// <c>interval</c>.</param>
+    Task ReconcileShelfDustAsync(TimeSpan shelfAge, CancellationToken ct);
+
+    /// <summary>
     /// Opens (or re-opens a resolved) ONE <see cref="RotKind.DeadFile"/> finding for
     /// <paramref name="mediaId"/> — <see cref="IDeadFileReporter"/>'s own write (SPEC F153.4;
     /// STORY-375; PLAN T373): the same open/re-open statement shape

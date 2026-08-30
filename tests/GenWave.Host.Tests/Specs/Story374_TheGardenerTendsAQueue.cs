@@ -325,11 +325,17 @@ public sealed class DeadFileLifecycleArc : IAsyncLifetime
 }
 
 /// <summary>
-/// AC5: a fake, throwing <see cref="IGardenerPass"/> registered BESIDE the real dead_file pass on
-/// the real, ticking <c>GardenerService</c> (kept alive by name, every other hosted service
-/// removed) — one seeded failed row proves the real pass still opened its finding, exactly one
-/// captured WARN names the fake pass's own kind, and waiting past a second tick proves the fake
-/// pass ran again (the loop never gives up on a repeatedly-failing pass).
+/// AC5: a fake, throwing <see cref="IGardenerPass"/> on the real, ticking <c>GardenerService</c>
+/// (kept alive by name, every other hosted service removed). T375 review MED-2: a REAL
+/// <see cref="GenWave.MediaLibrary.Garden.StaleMetadataGardenerPass"/> now shares this container,
+/// so <c>RemoveAll&lt;IGardenerPass&gt;()</c> clears every production pass BEFORE this arc
+/// registers its own two fakes — the throwing one below, plus
+/// <see cref="SucceedingDeadFileGardenerPass"/> standing in for "some other pass in the loop" —
+/// so the resilience loop under test composes ONLY test doubles, never a real pass whose own
+/// behaviour could shift under a future task. One seeded failed row proves the stand-in still
+/// opened its finding, exactly one captured WARN names the fake pass's own kind, and waiting past
+/// a second tick proves the fake pass ran again (the loop never gives up on a repeatedly-failing
+/// pass).
 /// </summary>
 public sealed class ThrowingPassArc : IAsyncLifetime
 {
@@ -359,6 +365,12 @@ public sealed class ThrowingPassArc : IAsyncLifetime
 
         await using var factory = new Story372LiveServiceWebFactory(database, settings, services =>
         {
+            // T375 review MED-2: strip every production IGardenerPass FIRST — the resilience loop
+            // this arc drives is a GardenerService fact, not a real-pass fact, so it must compose
+            // ONLY test doubles regardless of how many real passes the container registers.
+            services.RemoveAll<IGardenerPass>();
+            services.AddSingleton<IGardenerPass>(
+                sp => new SucceedingDeadFileGardenerPass(sp.GetRequiredService<IRotFindingStore>(), mediaId));
             services.AddSingleton<IGardenerPass>(fakePass);
             services.AddSingleton<ILoggerProvider>(logs);
         });
@@ -387,10 +399,12 @@ public sealed class ThrowingPassArc : IAsyncLifetime
 
 /// <summary>
 /// T372 review LOW-3's own pin: a fake <see cref="IGardenerPass"/> that never voluntarily completes
-/// — registered BESIDE the real dead_file pass on the real, ticking <c>GardenerService</c> — proves
-/// the per-pass bounded <see cref="CancellationTokenSource"/> (linked to the current interval) is
-/// what actually ends it, not a cooperative early exit the pass itself never offers: one WARN names
-/// it after the current interval elapses, the real dead_file pass still opens its own finding in the
+/// — proves the per-pass bounded <see cref="CancellationTokenSource"/> (linked to the current
+/// interval) is what actually ends it, not a cooperative early exit the pass itself never offers.
+/// T375 review MED-2: the SAME <c>RemoveAll&lt;IGardenerPass&gt;()</c> + <see cref="SucceedingDeadFileGardenerPass"/>
+/// stand-in <see cref="ThrowingPassArc"/>'s own remarks explain — this arc's real, ticking
+/// <c>GardenerService</c> also composes ONLY test doubles, never a real pass. One WARN names the
+/// hanging pass after the current interval elapses, the stand-in still opens its own finding in the
 /// SAME tick, and a SECOND invocation (proven by waiting past a second tick) is the direct evidence
 /// tick 1's own hang never wedged tick 2.
 /// </summary>
@@ -416,6 +430,11 @@ public sealed class HangingPassArc : IAsyncLifetime
 
         await using var factory = new Story372LiveServiceWebFactory(database, settings, services =>
         {
+            // T375 review MED-2: see ThrowingPassArc's own remarks — strip every production
+            // IGardenerPass, then compose ONLY this arc's own two test doubles.
+            services.RemoveAll<IGardenerPass>();
+            services.AddSingleton<IGardenerPass>(
+                sp => new SucceedingDeadFileGardenerPass(sp.GetRequiredService<IRotFindingStore>(), mediaId));
             services.AddSingleton<IGardenerPass>(fakePass);
             services.AddSingleton<ILoggerProvider>(logs);
         });
@@ -478,10 +497,26 @@ public sealed class ProductionBinaryArc : IAsyncLifetime
 
 // ── Test doubles ─────────────────────────────────────────────────────────────────────────────────
 
+/// <summary>T375 review MED-2: <see cref="ThrowingPassArc"/>/<see cref="HangingPassArc"/> both
+/// <c>RemoveAll&lt;IGardenerPass&gt;()</c> before registering their own fakes, so this type — not
+/// the real <c>DeadFileGardenerPass</c> — is what proves "some OTHER pass in the loop still runs"
+/// despite a throwing/hanging sibling. Reuses <see cref="IRotFindingStore.OpenDeadFileAsync"/>
+/// (T373's own single-row report seam) rather than reimplementing <c>DeadFileGardenerPass</c>'s
+/// own reconcile predicate — a deliberately trivial double, never a second copy of production
+/// logic.</summary>
+file sealed class SucceedingDeadFileGardenerPass(IRotFindingStore store, long mediaId) : IGardenerPass
+{
+    public RotKind Kind => RotKind.DeadFile;
+
+    public Task RunAsync(CancellationToken ct) => store.OpenDeadFileAsync(mediaId, "test-stand-in", ct);
+}
+
 /// <summary>AC5's own fake: always throws, standing in for a real pass failure; carries its own
 /// invocation count so <see cref="ThrowingPassArc"/> can prove the loop retries it on the next
-/// tick. <see cref="Kind"/> is deliberately NOT <see cref="RotKind.DeadFile"/> — a kind the real
-/// dead_file pass never uses, so the captured WARN naming it is unambiguous.</summary>
+/// tick. <see cref="Kind"/>'s value is arbitrary (T375 review MED-2) — the arc's own
+/// <c>RemoveAll&lt;IGardenerPass&gt;()</c> guarantees no real pass shares this container, so no
+/// <see cref="RotKind"/> choice can collide with one; <see cref="RotKind.StaleMetadata"/> is kept
+/// only because it was already here.</summary>
 file sealed class ThrowingGardenerPass : IGardenerPass
 {
     public const string KindText = nameof(RotKind.StaleMetadata);
@@ -503,9 +538,11 @@ file sealed class ThrowingGardenerPass : IGardenerPass
 /// with <see cref="Timeout.Infinite"/> using the SAME <c>ct</c> GardenerService hands it (its own
 /// per-pass linked <see cref="CancellationTokenSource"/>), never the outer shutdown token directly —
 /// this is what proves GardenerService's OWN bounded timeout ends it, not a cooperative early exit
-/// this pass never offers on its own. <see cref="Kind"/> is deliberately
-/// <see cref="RotKind.Unreachable"/> — a kind neither the real dead_file pass nor
-/// <see cref="ThrowingGardenerPass"/> ever uses, so the captured WARN naming it is unambiguous.
+/// this pass never offers on its own. <see cref="Kind"/>'s value is arbitrary (T375 review MED-2,
+/// the SAME <see cref="ThrowingGardenerPass"/> rationale) — <see cref="HangingPassArc"/>'s own
+/// <c>RemoveAll&lt;IGardenerPass&gt;()</c> guarantees no real pass, and no other fake in THIS arc,
+/// shares this container; <see cref="RotKind.Unreachable"/> is kept only because it was already
+/// here.
 /// </summary>
 file sealed class HangingGardenerPass : IGardenerPass
 {

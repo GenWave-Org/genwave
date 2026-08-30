@@ -68,6 +68,68 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
         """;
 
     /// <summary>
+    /// <see cref="RotKind.StaleMetadata"/>'s base row scope (SPEC F153.6; STORY-377; PLAN T375;
+    /// ORCHESTRATOR ruling): deliberately NOT <see cref="MediaRepository.PlayablePredicate"/> — that
+    /// predicate requires <c>m.measurable</c> true, which would exclude every row this pass exists
+    /// to flag for a <see langword="false"/> <c>measurable</c> value. Shared verbatim by the
+    /// insert-select half and the resolve half's own <c>not exists (...)</c>.
+    /// </summary>
+    const string StaleMetadataScope =
+        "m.state = 'ready' and m.eligible and not coalesce(r.never_play, false)";
+
+    /// <summary>
+    /// The five <see cref="RotKind.StaleMetadata"/> fields, in evidence order (SPEC F153.6;
+    /// ORCHESTRATOR ruling): each <c>case</c> contributes its own field name only when that field is
+    /// stale AND, for the three operator-patchable fields, the row has never been operator-edited
+    /// (<c>tags_edited_at is null</c>) — <c>moods</c>/<c>measurable</c> carry no such exemption.
+    /// <c>array_remove(…, null)</c> uses <c>IS NOT DISTINCT FROM</c> semantics, so it drops every
+    /// non-stale field's own NULL contribution; <c>to_jsonb</c> renders whatever remains as a JSON
+    /// array of strings — <c>[]</c>, never <see langword="null"/>, when nothing is stale. Aliased
+    /// <c>sf.fields</c> via a LATERAL join at each call site purely for readability (T375 review
+    /// LOW-1: Postgres flattens the LATERAL — EXPLAIN shows the expression inlined at both the
+    /// filter and the target list, not computed once and reused) — one named expression the scope
+    /// filter and the evidence build both read, rather than the same <c>case</c> block written out
+    /// twice.
+    /// </summary>
+    const string StaleFieldsJson =
+        """
+        to_jsonb(array_remove(array[
+            case when m.tags_edited_at is null and nullif(btrim(m.artist), '') is null
+                 then 'artist' end,
+            case when m.tags_edited_at is null and (
+                     nullif(btrim(m.title), '') is null or m.title ~* '^\s*track\s*0*[0-9]+\s*$'
+                 ) then 'title' end,
+            case when m.tags_edited_at is null and m.year is null and m.year_lookup_missed_at is not null
+                 then 'year' end,
+            case when m.moods is null and m.mood_tag_missed_at is not null
+                 then 'moods' end,
+            case when m.measurable = false
+                 then 'measurable' end
+        ], null))
+        """;
+
+    /// <summary>
+    /// <see cref="RotKind.ShelfDust"/>'s own conditions, layered on top of
+    /// <see cref="MediaRepository.PlayablePredicate"/> at each call site (SPEC F153.7; STORY-377;
+    /// PLAN T375; ORCHESTRATOR ruling): no rotation ledger row, or one with zero plays; discovered
+    /// further back than <c>@shelfAge</c>; and no currently-<see cref="RotState.Open"/>
+    /// <see cref="RotKind.Unreachable"/> finding of its own (T376's own kind — this pass only ever
+    /// READS <c>rot_finding</c> for it, never opens/resolves an <c>unreachable</c> row). Shared
+    /// verbatim by the insert-select half and the resolve half's own <c>not exists (...)</c>.
+    /// </summary>
+    const string ShelfDustPredicate =
+        """
+        (rot.media_id is null or rot.play_count = 0)
+          and m.discovered_at < now() - @shelfAge
+          and not exists (
+              select 1 from library.rot_finding u
+              where u.media_id = m.id
+                and u.kind = 'unreachable'::library.rot_kind
+                and u.state = 'open'::library.rot_state
+          )
+        """;
+
+    /// <summary>
     /// <see cref="RotKind.DeadFile"/> (SPEC F153.3, T372's own state-based half — the push-guard
     /// report reason, <c>push_missing</c>, is T373): a row is dead when <c>library.media.state =
     /// 'failed'</c>, or when it is <c>'unavailable'</c> and has stayed that way past <paramref
@@ -227,6 +289,121 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
             where f.kind = 'near_duplicate'::library.rot_kind
               and f.state = 'open'
               and not exists (select 1 from dups d where d.media_id = f.media_id)
+            """,
+            parameters,
+            transaction: tx,
+            cancellationToken: ct));
+
+        await tx.CommitAsync(ct);
+    }
+
+    /// <summary>
+    /// <see cref="IRotFindingStore.ReconcileStaleMetadataAsync"/> (SPEC F153.6; STORY-377; PLAN
+    /// T375): the same set-based, one-transaction, two-statement shape
+    /// <see cref="ReconcileDeadFilesAsync"/> established, over <see cref="StaleMetadataScope"/> +
+    /// <see cref="StaleFieldsJson"/> instead of a single boolean predicate — a row's own
+    /// <c>sf.fields</c> LATERAL result decides both whether it is in scope for a finding
+    /// (<c>jsonb_array_length(sf.fields) > 0</c>) and what the finding's evidence names.
+    /// </summary>
+    public async Task ReconcileStaleMetadataAsync(CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        await conn.ExecuteAsync(new CommandDefinition(
+            $"""
+            insert into library.rot_finding (media_id, kind, state, evidence, opened_at, updated_at)
+            select
+                m.id,
+                'stale_metadata'::library.rot_kind,
+                'open'::library.rot_state,
+                jsonb_build_object('fields', sf.fields),
+                now(),
+                now()
+            from library.media m
+            left join library.media_rating r on r.media_id = m.id
+            cross join lateral (select {StaleFieldsJson} as fields) sf
+            where {StaleMetadataScope}
+              and jsonb_array_length(sf.fields) > 0
+            {OpenOrReopenOnConflict}
+            """,
+            transaction: tx,
+            cancellationToken: ct));
+
+        await conn.ExecuteAsync(new CommandDefinition(
+            $"""
+            update library.rot_finding f
+            set state = 'resolved', resolved_at = now(), updated_at = now()
+            where f.kind = 'stale_metadata'::library.rot_kind
+              and f.state = 'open'
+              and not exists (
+                  select 1
+                  from library.media m
+                  left join library.media_rating r on r.media_id = m.id
+                  cross join lateral (select {StaleFieldsJson} as fields) sf
+                  where m.id = f.media_id
+                    and {StaleMetadataScope}
+                    and jsonb_array_length(sf.fields) > 0
+              )
+            """,
+            transaction: tx,
+            cancellationToken: ct));
+
+        await tx.CommitAsync(ct);
+    }
+
+    /// <summary>
+    /// <see cref="IRotFindingStore.ReconcileShelfDustAsync"/> (SPEC F153.7; STORY-377; PLAN T375):
+    /// the same set-based, one-transaction, two-statement shape <see cref="ReconcileDeadFilesAsync"/>
+    /// established, over <see cref="MediaRepository.PlayablePredicate"/> + <see cref="ShelfDustPredicate"/>.
+    /// </summary>
+    public async Task ReconcileShelfDustAsync(TimeSpan shelfAge, CancellationToken ct)
+    {
+        var parameters = new DynamicParameters();
+        parameters.Add("shelfAge", shelfAge);
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        await conn.ExecuteAsync(new CommandDefinition(
+            $"""
+            insert into library.rot_finding (media_id, kind, state, evidence, opened_at, updated_at)
+            select
+                m.id,
+                'shelf_dust'::library.rot_kind,
+                'open'::library.rot_state,
+                jsonb_build_object(
+                    'discovered_at', m.discovered_at,
+                    'days_on_shelf', floor(extract(epoch from now() - m.discovered_at) / 86400)::int
+                ),
+                now(),
+                now()
+            from library.media m
+            left join library.media_rating r on r.media_id = m.id
+            left join library.media_rotation rot on rot.media_id = m.id
+            where {MediaRepository.PlayablePredicate}
+              and {ShelfDustPredicate}
+            {OpenOrReopenOnConflict}
+            """,
+            parameters,
+            transaction: tx,
+            cancellationToken: ct));
+
+        await conn.ExecuteAsync(new CommandDefinition(
+            $"""
+            update library.rot_finding f
+            set state = 'resolved', resolved_at = now(), updated_at = now()
+            where f.kind = 'shelf_dust'::library.rot_kind
+              and f.state = 'open'
+              and not exists (
+                  select 1
+                  from library.media m
+                  left join library.media_rating r on r.media_id = m.id
+                  left join library.media_rotation rot on rot.media_id = m.id
+                  where m.id = f.media_id
+                    and {MediaRepository.PlayablePredicate}
+                    and {ShelfDustPredicate}
+              )
             """,
             parameters,
             transaction: tx,
