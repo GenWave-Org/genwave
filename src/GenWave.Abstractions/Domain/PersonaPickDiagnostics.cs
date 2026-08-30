@@ -18,4 +18,17 @@ public sealed record PersonaPickDiagnostics(
     int PoolSize,
     IReadOnlyList<double> TopScores,
     IReadOnlyList<TasteRule> FiredRules,
-    bool IsExploration);
+    bool IsExploration)
+{
+    /// <summary>
+    /// SPEC F151.4 (STORY-371, PLAN T370) — <see cref="TopScores"/>'s own index-aligned sibling: each
+    /// Top-K entry's <c>PersonaRankCandidate.Nudge</c> rather than its score, feeding the SAME F82.6
+    /// per-pick debug line's "nudges top-3" field. Defaults to an empty list (never <see langword="null"/>)
+    /// so every pre-T370 construction site — including this record's own original 4-arg positional
+    /// callers — keeps compiling and behaving exactly as before, the same additive-body-property
+    /// discipline <see cref="RotationCandidate.RotationRelax"/> established for this Abstractions
+    /// surface (this record already shipped with a fixed 4-arg ctor/Deconstruct; a 5th positional
+    /// parameter would silently delete both from the published binary surface).
+    /// </summary>
+    public IReadOnlyList<double> TopNudges { get; init; } = [];
+}

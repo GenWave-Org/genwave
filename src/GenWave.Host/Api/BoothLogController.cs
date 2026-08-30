@@ -139,7 +139,7 @@ public sealed class BoothLogController(
             {
                 return (new BoothLogPickDto(
                     firedRules.Select(rule => new BoothLogFiredRuleDto(rule.Summary, rule.Weight)).ToList(),
-                    stamp.IsExploration), null);
+                    stamp.IsExploration, stamp.Nudge), null);
             }
         }
         catch (JsonException ex)

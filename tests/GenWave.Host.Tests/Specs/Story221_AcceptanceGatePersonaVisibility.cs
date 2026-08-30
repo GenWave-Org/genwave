@@ -171,9 +171,11 @@ public static class FeatureAcceptanceGatePersonaVisibility
             Assert.NotEmpty(spectatorTypes);
 
             // When each type's public instance members are inspected for pick/firedRules/
-            // exploration vocabulary (Story217's own forbidden list) PLUS taste (F86.6) and mood
-            // (F86.8) — both new this epic, neither previously swept...
-            var forbidden = new[] { "pick", "firedrules", "isexploration", "exploration", "taste", "mood" };
+            // exploration vocabulary (Story217's own forbidden list) PLUS taste (F86.6), mood
+            // (F86.8), and nudge (F151.4, STORY-371, MED-5 T370 review) — the rotation-nudge
+            // diagnostic added to the booth-log pick stamp/DTO, admin-only exactly like
+            // pick/firedRules/taste/mood already are...
+            var forbidden = new[] { "pick", "firedrules", "isexploration", "exploration", "taste", "mood", "nudge" };
 
             // gh-#131 exception, blessed by name: the request form's mood picker made the
             // MoodVocabulary WORD LIST itself deliberately public — SpectatorRequestOptions.Moods
@@ -235,9 +237,10 @@ public static class FeatureAcceptanceGatePersonaVisibility
                 .ToList();
             Assert.NotEmpty(hostApiTypes);
 
-            // When each type's public instance properties are inspected for pick/firedRules
-            // vocabulary...
-            var forbidden = new[] { "pick", "firedrules" };
+            // When each type's public instance properties are inspected for pick/firedRules/nudge
+            // vocabulary (MED-5, T370 review — F151.4's rotation chip rides the SAME BoothLogPickDto
+            // this gate already narrows pick-diagnostic vocabulary to)...
+            var forbidden = new[] { "pick", "firedrules", "nudge" };
             var owningTypeNames = hostApiTypes
                 .Where(type => type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
                     .Any(property => forbidden.Any(term =>
@@ -245,11 +248,11 @@ public static class FeatureAcceptanceGatePersonaVisibility
                 .Select(type => type.Name)
                 .ToHashSet();
 
-            // Then only BoothLogEntryDto.Pick and BoothLogPickDto.FiredRules carry it (F86.4) — the
-            // Live card and the booth log both resolve PickChips from that ONE GET /api/booth-log
-            // row (admin-ui's useNowPlayingTasteAttribution: "no second, now-playing-specific
-            // diagnostics fetch"); no independently-shaped now-playing pick field could have drifted
-            // in alongside it.
+            // Then only BoothLogEntryDto.Pick and BoothLogPickDto.FiredRules/Nudge carry it (F86.4,
+            // F151.4) — the Live card and the booth log both resolve PickChips from that ONE GET
+            // /api/booth-log row (admin-ui's useNowPlayingTasteAttribution: "no second,
+            // now-playing-specific diagnostics fetch"); no independently-shaped now-playing pick
+            // field could have drifted in alongside it.
             Assert.Equal(
                 new HashSet<string> { nameof(BoothLogEntryDto), nameof(BoothLogPickDto) },
                 owningTypeNames);

@@ -79,4 +79,21 @@ public sealed record TrackAired(
     /// </para>
     /// </summary>
     public int? RotationRelax { get; init; }
+
+    /// <summary>
+    /// SPEC F151.1/F151.2 (STORY-371, PLAN T370) — the SAME <see cref="RotationCandidate.Nudge"/> the
+    /// feeder's pushed-item metadata carries off <c>MediaItem.Nudge</c>, forwarded the same way
+    /// <see cref="RotationRelax"/> is above. <see langword="null"/> for every engine-initiated advance
+    /// (the feeder never pushed this id, so nothing was ever stamped) and for every pick that never
+    /// reached the persona ranker's rung 0 (F151.2 — the common persona-off case included). The booth
+    /// log's event consumer stamps <c>station.booth_log.pick</c>'s <c>nudge</c> member from exactly
+    /// this value once its magnitude clears the F151.4 chip threshold (<c>|nudge| &gt;= 0.2</c>) —
+    /// omitted entirely, never a sub-threshold value, otherwise.
+    ///
+    /// <para>
+    /// A defaulted body property, not a positional constructor parameter — same binary-compatibility
+    /// discipline as <see cref="CrosstalkScript"/>'s own remarks.
+    /// </para>
+    /// </summary>
+    public double? Nudge { get; init; }
 }

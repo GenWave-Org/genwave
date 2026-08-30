@@ -885,16 +885,17 @@ public sealed class MusicSelectionPolicy(
     }
 
     /// <summary>
-    /// SPEC F82.6/F91.7 — the one per-pick debug line: envelope id, pool size, the winning pick's
-    /// top-3 scores, which taste rules fired, the exploration flag, and which degradation rung (SPEC
-    /// F81.6) actually supplied the pick. Fires on EVERY music pick — persona-off included — so the
-    /// ladder's own degradation step is always visible, mirroring the <c>LiquidsoapControl</c>
-    /// per-command convention (a per-tick line belongs at Debug, not Information — SPEC F82.6's own
-    /// "per-pick" framing puts it in the same high-frequency bucket).
+    /// SPEC F82.6/F91.7/F151.4 — the one per-pick debug line: envelope id, pool size, the winning
+    /// pick's top-3 scores, the SAME Top-K's top-3 nudges (SPEC F151.4, STORY-371, PLAN T370), which
+    /// taste rules fired, the exploration flag, and which degradation rung (SPEC F81.6) actually
+    /// supplied the pick. Fires on EVERY music pick — persona-off included — so the ladder's own
+    /// degradation step is always visible, mirroring the <c>LiquidsoapControl</c> per-command
+    /// convention (a per-tick line belongs at Debug, not Information — SPEC F82.6's own "per-pick"
+    /// framing puts it in the same high-frequency bucket).
     /// <paramref name="candidate"/>'s <see cref="RotationCandidate.PersonaPick"/> is null for every
     /// envelope-only ladder pick (including the common case where no persona is even active) — the
-    /// pool/top3/firedRules/exploration fields all read as empty/false in that case, never omitted
-    /// from the line. <paramref name="envelopeId"/> is <see cref="envelopeProvider"/>'s own
+    /// pool/top3/nudges/firedRules/exploration fields all read as empty/false in that case, never
+    /// omitted from the line. <paramref name="envelopeId"/> is <see cref="envelopeProvider"/>'s own
     /// <see cref="IEnvelopeProvider.EnvelopeId"/> — <c>"segment:{id}"</c> for a live schedule segment,
     /// the station-default sentinel for a gap (SPEC F91.7) — read once by the caller alongside the
     /// envelope itself, never re-read here.
@@ -905,14 +906,19 @@ public sealed class MusicSelectionPolicy(
         var topScores = diagnostics is null
             ? ""
             : string.Join(", ", diagnostics.TopScores.Select(s => s.ToString("F3", CultureInfo.InvariantCulture)));
+        // SPEC F151.4 (STORY-371, PLAN T370) — TopScores' own index-aligned sibling, empty for the
+        // SAME envelope-only/persona-off case TopScores itself reads as empty.
+        var topNudges = diagnostics is null
+            ? ""
+            : string.Join(", ", diagnostics.TopNudges.Select(n => n.ToString("F2", CultureInfo.InvariantCulture)));
         var firedRules = diagnostics is null
             ? ""
             : string.Join("; ", diagnostics.FiredRules.Select(FormatFiredRule));
 
         logger.LogDebug(
-            "Pick — envelope={EnvelopeId} pool={PoolSize} top3=[{TopScores}] firedRules=[{FiredRules}] " +
-            "exploration={IsExploration} degradation={DegradationStep}",
-            envelopeId, diagnostics?.PoolSize ?? 0, topScores, firedRules,
+            "Pick — envelope={EnvelopeId} pool={PoolSize} top3=[{TopScores}] nudges=[{TopNudges}] " +
+            "firedRules=[{FiredRules}] exploration={IsExploration} degradation={DegradationStep}",
+            envelopeId, diagnostics?.PoolSize ?? 0, topScores, topNudges, firedRules,
             diagnostics?.IsExploration ?? false, degradationStep);
     }
 

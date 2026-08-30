@@ -39,4 +39,18 @@ public sealed record BoothLogPickStamp(IReadOnlyList<BoothLogFiredRuleSummary> F
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? RotationRelax { get; init; }
+
+    /// <summary>
+    /// SPEC F151.4 (STORY-371, PLAN T370) — the winning pick's own rotation nudge
+    /// (<c>Core.Domain.RotationCandidate.Nudge</c>), stamped ONLY when its magnitude clears the F86
+    /// "rotation chip" threshold (<c>|nudge| &gt;= 0.2</c>) — <see langword="null"/> below that
+    /// threshold, and for every pick that never reached the persona ranker's rung 0 at all (F151.2).
+    /// The threshold is applied at the ONE write site (<c>GenWave.MediaLibrary.Station.BoothLogWriter</c>);
+    /// this record itself never re-derives it. Deliberately a NON-positional <c>init</c> property, the
+    /// SAME additive convention <see cref="RotationRelax"/> established (STORY-372 AC10) — every
+    /// pre-T370 stamp stays byte-identical, and <see cref="JsonIgnoreAttribute"/> omits it from the
+    /// wire shape entirely when null.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? Nudge { get; init; }
 }

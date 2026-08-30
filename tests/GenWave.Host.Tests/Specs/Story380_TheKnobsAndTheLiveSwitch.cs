@@ -26,6 +26,7 @@ using GenWave.Host.Api;
 using GenWave.Host.Playout;
 using GenWave.Host.Tests.Support;
 using GenWave.MediaLibrary.Options;
+using GenWave.Orchestration;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -110,6 +111,39 @@ public static class FeatureTheKnobsAndTheLiveSwitch
             var options = factory.Services.GetRequiredService<IOptions<GardenerOptions>>().Value;
 
             Assert.True(options.FileActions.Enabled);
+        }
+    }
+
+    // MED-4 (T370 review, SPEC F151.1/F155.1, STORY-371) — no prior fact proved Gardener__NudgeGain
+    // actually reaches PersonaRankerOptions, the Orchestration-side value PersonaRanker.Score reads
+    // (GenWave.Orchestration cannot reference GardenerOptions itself, architecture law L1 — see
+    // PersonaRankerOptionsServiceCollectionExtensions' own remarks). Drives the SAME real composition
+    // root/GardenerKnobsWebFactory this file's ScenarioDefaults already uses — resolving the plain
+    // PersonaRankerOptions singleton (not IOptions<PersonaRankerOptions>: that would read the
+    // PersonaRanker:* section alone, never the Gardener:NudgeGain override) proves the ACTUAL value
+    // PersonaRanker itself is constructed with.
+    public sealed class ScenarioTheRankerReadsTheSameGardenerKnob
+    {
+        // Given no Gardener__* env, When the api boots.
+        [Fact]
+        public void PersonaRankerOptionsNudgeGainDefaultsToZeroPointFive()
+        {
+            using var factory = new GardenerKnobsWebFactory();
+
+            var options = factory.Services.GetRequiredService<PersonaRankerOptions>();
+
+            Assert.Equal(0.5, options.NudgeGain);
+        }
+
+        // Given Gardener__NudgeGain=1.5, When the api boots.
+        [Fact]
+        public void PersonaRankerOptionsNudgeGainReadsTheGardenerOverride()
+        {
+            using var factory = new GardenerKnobsWebFactory(("NudgeGain", "1.5"));
+
+            var options = factory.Services.GetRequiredService<PersonaRankerOptions>();
+
+            Assert.Equal(1.5, options.NudgeGain);
         }
     }
 

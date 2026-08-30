@@ -98,14 +98,25 @@ public sealed class RankerPersonaPickProvider(
             PoolSize: pool.Count,
             TopScores: result.TopScores.Take(TopScoresForDebugLine).ToList(),
             FiredRules: result.FiredRules,
-            IsExploration: result.IsExploration);
+            IsExploration: result.IsExploration)
+        {
+            // SPEC F151.4 (STORY-371, PLAN T370) — same narrowing/ordering as TopScores just above.
+            TopNudges = result.TopNudges.Take(TopScoresForDebugLine).ToList(),
+        };
 
         return new RotationCandidate(
             winningRow.Media,
             winningRow.RepeatedRecent,
             winningRow.RepeatedArtist,
             winningRow.Energy,
-            diagnostics);
+            diagnostics)
+        {
+            // SPEC F151.1/F151.2 (STORY-371, PLAN T370) — the winning row's own ledger nudge, the
+            // SAME value ToRankCandidate mapped onto the PersonaRankCandidate.Score just consumed.
+            // Set here, alongside diagnostics, so "this candidate carries a Nudge" and "this candidate
+            // came from rung 0" are structurally the same fact — no envelope-only rung ever sets it.
+            Nudge = winningRow.Nudge,
+        };
     }
 
     /// <summary>

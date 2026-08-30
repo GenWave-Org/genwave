@@ -558,6 +558,13 @@ public sealed class Orchestrator(
         if (candidate.RotationRelax is int rotationRelax)
             track = track with { RotationRelax = rotationRelax };
 
+        // SPEC F151.1/F151.2 (STORY-371, PLAN T370) — rides the SAME RotationCandidate -> MediaItem
+        // carry-through PersonaPick/RequestFulfilled/RotationRelax use above; null (the pick never
+        // reached the persona ranker's rung 0) omits the stamp member entirely once BoothLogWriter
+        // applies the F151.4 chip threshold.
+        if (candidate.Nudge is double nudge)
+            track = track with { Nudge = nudge };
+
         // gh-#259: stamp Now Playing attribution at PLAN time, onto the item itself — the single
         // per-unit accessor read resolved above (it also warms the F93.1 display-name memo every
         // unit, cadence config regardless). The spectator surface reads this off the AIRING item,

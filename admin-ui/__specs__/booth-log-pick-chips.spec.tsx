@@ -183,6 +183,41 @@ describe("Feature: booth-log why-this-pick chips", () => {
     });
   });
 
+  describe("Scenario: a stamped pick carrying a rotation nudge (SPEC F151.4, STORY-371, PLAN T370)", () => {
+    it("renders a rotation chip when the stamp carries a nudge", async () => {
+      const pick: BoothLogPick = {
+        firedRules: [{ summary: "The Weeknd", weight: 0.6 }],
+        isExploration: false,
+        nudge: 0.6,
+      };
+      installBoothLogFetchMock({
+        head: ok({ entries: [makeBoothLogEntry({ pick })], nextBefore: null }),
+        personas: ok([]),
+      });
+
+      renderBoothLog();
+      await flush();
+
+      expect(screen.getByText("Rotation +0.6")).toBeInTheDocument();
+    });
+
+    it("renders no rotation chip when the stamp carries no nudge", async () => {
+      const pick: BoothLogPick = {
+        firedRules: [{ summary: "The Weeknd", weight: 0.6 }],
+        isExploration: false,
+      };
+      installBoothLogFetchMock({
+        head: ok({ entries: [makeBoothLogEntry({ pick })], nextBefore: null }),
+        personas: ok([]),
+      });
+
+      renderBoothLog();
+      await flush();
+
+      expect(screen.queryByText(/^Rotation /)).not.toBeInTheDocument();
+    });
+  });
+
   describe("Scenario: rows without pick data", () => {
     it("renders an unstamped row without chips, badge, or layout change", async () => {
       installBoothLogFetchMock({
