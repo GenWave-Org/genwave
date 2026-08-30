@@ -45,6 +45,13 @@ namespace GenWave.Core.Domain;
 /// meaning every pre-F117 row carries). The Admin UI resolves this id against its own already-loaded
 /// show roster (<c>GET /api/shows</c>) to display a name; this DTO never joins across the db/22
 /// schema/role boundary to fetch one itself.
+///
+/// <c>Plays</c>/<c>FirstAiredAt</c>/<c>LastAiredAt</c> (SPEC F149.5, STORY-368, PLAN T371) surface
+/// <c>library.media_rotation</c>'s own <c>play_count</c>/<c>first_aired_at</c>/<c>last_aired_at</c> —
+/// all three <see langword="null"/> together for a row that has never aired (no ledger row at all,
+/// never a sentinel 0/false). Only the single-row detail read (<c>GET /api/media/{id}</c>) populates
+/// them; the paged browse projection leaves them null, the same "only populated by projections that
+/// select it" posture <c>Bpm</c>/<c>TrackEnergy</c> already establish above.
 /// </summary>
 public sealed record AdminMediaDto(
     string MediaId,
@@ -73,4 +80,7 @@ public sealed record AdminMediaDto(
     bool? Explicit = null,
     string? ExplicitSource = null,
     string? ImagingKind = null,
-    long? ShowId = null);
+    long? ShowId = null,
+    int? Plays = null,
+    DateTimeOffset? FirstAiredAt = null,
+    DateTimeOffset? LastAiredAt = null);

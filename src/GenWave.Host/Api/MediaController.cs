@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using GenWave.Core.Abstractions;
@@ -61,6 +62,17 @@ public sealed class MediaController(
     ///                  any explicit <c>state</c> filter (<c>state=unavailable</c> must match its
     ///                  rows, not be cancelled out). Browse-only — the bulk endpoints' filters
     ///                  never carry this field, so sweeps still reach unavailable rows.
+    ///   never-aired  — true narrows to rows with no <c>library.media_rotation</c> row at all, or
+    ///                  whose <c>play_count</c> is still 0 (SPEC F149.5); absent or false applies no
+    ///                  filter, mirroring never-play's strictness. BOTH this and <c>aired-before</c>
+    ///                  additionally imply PLAYABLE (ready, measurable, eligible, not flagged
+    ///                  never-play) — an unavailable never-aired row is never returned, since the
+    ///                  dashboard's own rotation-health tile counts the identical posture.
+    ///   aired-before — a <c>yyyy-MM-dd</c> date; narrows to PLAYABLE rows whose
+    ///                  <c>media_rotation.last_aired_at</c> predates midnight UTC of that date (SPEC
+    ///                  F149.5). A never-aired row never matches (no ledger row, or a null
+    ///                  <c>last_aired_at</c>, never satisfies the comparison). A value that does not
+    ///                  parse as <c>yyyy-MM-dd</c> → 400 naming the field.
     ///   page         — 1-based page number (default 1)
     ///   limit        — items per page, clamped to [1, 200] (default 50)
     ///
@@ -96,12 +108,35 @@ public sealed class MediaController(
         [FromQuery(Name = "genre-exact")] string[]? genreExact = null,
         [FromQuery(Name = "mood-exact")] string[]? moodExact = null,
         [FromQuery(Name = "include-unavailable")] bool? includeUnavailable = null,
+        [FromQuery(Name = "never-aired")] bool? neverAired = null,
+        [FromQuery(Name = "aired-before")] string? airedBefore = null,
         [FromQuery] int page = 1,
         [FromQuery] int limit = 50,
         CancellationToken ct = default)
     {
         limit = Math.Clamp(limit, 1, 200);
         page  = Math.Max(1, page);
+
+        // SPEC F149.5 — aired-before is parsed here, not left to model binding, so a bad value 400s
+        // naming the field (the house shape) rather than ASP.NET Core's own generic binding-failure
+        // response. yyyy-MM-dd only, invariant — the SpecialsController house convention for a
+        // date-only query value. Post-review fix: names the field and the expected shape only —
+        // never echoes the caller's own value back into the body (the F87.3/F150 400 posture this
+        // whole epic holds everywhere else: no oracle, no reflection of untrusted input).
+        DateOnly? airedBeforeDate = null;
+        if (airedBefore is not null)
+        {
+            if (!DateOnly.TryParseExact(airedBefore, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedAiredBefore))
+            {
+                return BadRequest(new ProblemDetails
+                {
+                    Status = StatusCodes.Status400BadRequest,
+                    Title  = "Invalid aired-before.",
+                    Detail = "aired-before must be a date in yyyy-MM-dd format.",
+                });
+            }
+            airedBeforeDate = parsedAiredBefore;
+        }
 
         // SPEC F49.1: at most one of year/decade/year-missing=true may be named — each narrows by
         // release year in a mutually incompatible way. Mirrors never-play: only true counts as
@@ -161,10 +196,17 @@ public sealed class MediaController(
         if (outOfScope)
             Response.Headers["X-Out-Of-Scope"] = "true";
 
+        // NeverAired/AiredBefore (SPEC F149.5, PLAN T371) are body init properties, not positional
+        // constructor arguments (CONTRIBUTING.md L4) — set via the object initializer below, never
+        // appended to the positional argument list above.
         var query = new MediaQuery(
             state, artist, genre, libraryId, q, page, limit, eligible, neverPlay,
             year, decade, yearMissing, artistExact, albumExact, genreExact, moodExact,
-            includeUnavailable);
+            includeUnavailable)
+        {
+            NeverAired = neverAired,
+            AiredBefore = airedBeforeDate,
+        };
         var result = await adminQuery.ListAdminAsync(effectiveScope, query, ct);
 
         Response.Headers["X-Pagination"] =
@@ -324,7 +366,9 @@ public sealed class MediaController(
     /// <c>xmin</c> system column for use with PATCH /api/media/{id} (W2 optimistic concurrency).
     /// The payload also carries camelCase <c>score</c>/<c>neverPlay</c> (SPEC F33.10); since rating
     /// writes never touch <c>library.media</c>'s <c>xmin</c> (F33.1), the ETag is unaffected by any
-    /// number of votes or never-play toggles on this row.
+    /// number of votes or never-play toggles on this row. It also carries <c>plays</c>/
+    /// <c>firstAiredAt</c>/<c>lastAiredAt</c> (SPEC F149.5, STORY-368, PLAN T371) — all three
+    /// <see langword="null"/> together for a row that has never aired.
     /// </summary>
     [HttpGet("media/{id:long}")]
     public async Task<IActionResult> GetById(

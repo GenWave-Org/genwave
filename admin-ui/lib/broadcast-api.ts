@@ -89,6 +89,22 @@ export interface StatusResponse {
     reason: string | null;
     checkedAt: string | null;
   };
+  /**
+   * SPEC F149.5, STORY-368, PLAN T371 — the rotation-health aggregate: how much of the playable
+   * catalog has never aired, aired exactly once, or gone stale (90+ days since its last airing),
+   * plus the ledger's own epoch. Optional on the wire (added after several other spec files already
+   * built their own `StatusResponse` fixture literals, mirroring `llm.dominantCause`'s own "one
+   * deploy of backward tolerance" convention above) — every fixture that omits it still satisfies
+   * this type. `rotationSince` is `null` only on a pre-Gardener install whose migration has never
+   * run.
+   */
+  rotation?: {
+    playable: number;
+    neverAired: number;
+    airedOnce: number;
+    notAiredDays90: number;
+    rotationSince: string | null;
+  };
 }
 
 export interface PlayHistoryEntry {

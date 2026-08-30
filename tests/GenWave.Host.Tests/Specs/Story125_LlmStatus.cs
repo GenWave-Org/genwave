@@ -118,6 +118,12 @@ file sealed class LlmStatusWebFactory : WebApplicationFactory<Program>
             services.RemoveAll<IMediaCatalog>();
             services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
 
+            // PLAN T371 (SPEC F149.5) — StatusController now also resolves IMediaRotationSink; the
+            // real MediaRotationRepository requires a live Postgres, same reason IMediaCatalog is
+            // faked above.
+            services.RemoveAll<IMediaRotationSink>();
+            services.AddSingleton<IMediaRotationSink>(new FakeMediaRotationSink());
+
             // Replace IActivePersonaAccessor for the same reason: the real implementation's
             // IPersonaStore constructor dependency would otherwise force a Postgres data source to
             // build against Station's (unset here) connection string.
@@ -174,6 +180,8 @@ public static class FeatureLlmStatus
 
         return new(
             new FakeMediaCatalog(ready: null),
+            new FakeMediaRotationSink(),
+            new FakeStationScopeProvider(LibraryScope.None),
             new FakeOptionsMonitor<StationOptions>(BuildStationOptions()),
             llmOptionsMonitor,
             resolvedStatusHolder,

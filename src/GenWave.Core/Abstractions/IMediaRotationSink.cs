@@ -1,3 +1,5 @@
+using GenWave.Core.Domain;
+
 namespace GenWave.Core.Abstractions;
 
 /// <summary>
@@ -63,4 +65,19 @@ public interface IMediaRotationSink
     /// Gardener should ever count as "waiting to air".
     /// </summary>
     Task<long> GetNeverAiredCountAsync(CancellationToken ct);
+
+    /// <summary>
+    /// The SPEC F149.5 dashboard/catalog aggregate (STORY-368, PLAN T371): never-aired, aired-once,
+    /// and stale (90-day) counts plus the ledger epoch, all in one read. Unlike
+    /// <see cref="GetNeverAiredCountAsync"/> (STORY-367's own narrower figure, kept for that story's
+    /// own facts), every count here is additionally bounded to <paramref name="scope"/> — the
+    /// station's own rotation <see cref="LibraryScope"/>, the same scope every other admin catalog
+    /// read applies (<c>IStationScopeProvider.Current</c>) — so a multi-library station's rotation
+    /// tile never counts a library the operator has scoped away. Playable-row and gh-#99 safe-scope
+    /// posture are otherwise identical to <see cref="GetNeverAiredCountAsync"/>'s own. An empty
+    /// <paramref name="scope"/> needs no special case: implementations apply it the same
+    /// <c>library_id = any(@scope)</c> way <c>MediaRepository.GetStatusCountsAsync</c> does, so every
+    /// count reads 0 without any extra branch (default-deny).
+    /// </summary>
+    Task<RotationHealth> GetRotationHealthAsync(LibraryScope scope, CancellationToken ct);
 }

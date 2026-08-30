@@ -4,6 +4,7 @@ import { apiGet } from "@/lib/api";
 import { EditTrackForm } from "./EditTrackForm";
 import { MoveToLibraryAction } from "./MoveToLibraryAction";
 import { ReanalyzePanel } from "./ReanalyzePanel";
+import { RotationFacts } from "./RotationFacts";
 import { BreadcrumbTitle } from "../../_components/BreadcrumbTitle";
 import type { LibraryDto } from "@/lib/library";
 
@@ -26,6 +27,11 @@ interface AdminMediaDto {
   eligible?: boolean;
   libraryId?: number | null;
   tagsEditedAt?: string | null;
+  /** SPEC F149.5, STORY-368, PLAN T371 — rotation ledger facts; all three null together for a row
+   * that has never aired. Optional so an older cached response (pre-T371) keeps rendering. */
+  plays?: number | null;
+  firstAiredAt?: string | null;
+  lastAiredAt?: string | null;
 }
 
 interface MediaDetailPageProps {
@@ -172,6 +178,12 @@ export default async function MediaDetailPage({
             <tr>
               <th scope="row" className="py-2 pr-4 text-left font-semibold text-accent-2">Locator</th>
               <td className="break-all py-2 text-ink">{item.locator}</td>
+            </tr>
+            <tr>
+              <th scope="row" className="py-2 pr-4 text-left font-semibold text-accent-2">Rotation</th>
+              <td className="py-2 tabular-nums text-ink">
+                <RotationFacts plays={item.plays} firstAiredAt={item.firstAiredAt} lastAiredAt={item.lastAiredAt} />
+              </td>
             </tr>
           </tbody>
         </table>

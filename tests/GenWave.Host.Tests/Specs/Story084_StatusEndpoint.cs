@@ -92,6 +92,12 @@ file sealed class StatusApiWebFactory(IMediaCatalog catalog) : WebApplicationFac
             services.RemoveAll<IMediaCatalog>();
             services.AddSingleton(catalog);
 
+            // PLAN T371 (SPEC F149.5) — StatusController now also resolves IMediaRotationSink; the
+            // real MediaRotationRepository requires a live Postgres, same reason IMediaCatalog is
+            // faked above.
+            services.RemoveAll<IMediaRotationSink>();
+            services.AddSingleton<IMediaRotationSink>(new FakeMediaRotationSink());
+
             // T9 (SPEC F34.8): StatusController resolves IActivePersonaAccessor. The real accessor
             // is OnAirPersonaAccessor (SPEC F91.5, PLAN T120 — Station:Persona:ActiveId this comment
             // used to name is retired), which resolves through CachingScheduleResolver/IScheduleStore
@@ -153,6 +159,8 @@ public static class FeatureStatusEndpoint
 
         return new(
             catalog,
+            new FakeMediaRotationSink(),
+            new FakeStationScopeProvider(LibraryScope.None),
             stationMonitor,
             llmOptions,
             statusHolder,

@@ -591,4 +591,57 @@ public static class FeatureBulkEligibilityByFilter
             Assert.Equal(lib1FlaggedId.ToString(), result.Items[0].MediaId);
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // T371 review LOW-2 — SetEligibilityAsync(NeverAired: true) pins
+    // MediaRepository.RotationPlayableGuard's own correlated-subquery rationale: that predicate is
+    // written as a self-contained correlated subquery, never the browse SELECT's own r/rot join
+    // aliases, SO THAT it also works unmodified inside this method's bare
+    // `UPDATE library.media SET eligible = @eligible WHERE {where}` — no join present there at all.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioNeverAiredFilterFlipsOnlyTheNeverAiredPlayableRow(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task SetEligibilityWithNeverAiredTrueFlipsOnlyTheNeverAiredRow()
+        {
+            await db.ResetAsync();
+            var repo = Harness.Repo(db);
+
+            // Two playable rows in the same library/scope: one never aired (no media_rotation row
+            // at all), one that HAS aired (a media_rotation row, play_count 1) — the predicate must
+            // tell them apart.
+            var neverAiredId = await repo.InsertDiscoveredAsync("/media/rotation-never-aired.flac", "flac", 1, Harness.Mtime, CancellationToken.None);
+            await repo.WriteEnrichmentAsync(neverAiredId, Harness.ReadyResult(measurable: true), CancellationToken.None);
+
+            var airedId = await repo.InsertDiscoveredAsync("/media/rotation-aired.flac", "flac", 1, Harness.Mtime, CancellationToken.None);
+            await repo.WriteEnrichmentAsync(airedId, Harness.ReadyResult(measurable: true), CancellationToken.None);
+
+            await using (var seedConn = await db.DataSource.OpenConnectionAsync())
+            {
+                await seedConn.ExecuteAsync(
+                    "insert into library.media_rotation (media_id, play_count, first_aired_at, last_aired_at) " +
+                    "values (@id, 1, now(), now())",
+                    new { id = airedId });
+            }
+
+            var scope = new LibraryScope([1L]);
+            var filter = new MediaQuery { NeverAired = true };
+
+            var affected = await ((IAdminMediaWrite)repo).SetEligibilityAsync(filter, false, scope, CancellationToken.None);
+
+            Assert.Equal(1, affected);
+
+            await using var readConn = await db.DataSource.OpenConnectionAsync();
+            var neverAiredEligible = await readConn.ExecuteScalarAsync<bool>(
+                "select eligible from library.media where id = @id", new { id = neverAiredId });
+            var airedEligible = await readConn.ExecuteScalarAsync<bool>(
+                "select eligible from library.media where id = @id", new { id = airedId });
+
+            Assert.False(neverAiredEligible);
+            Assert.True(airedEligible);
+        }
+    }
 }

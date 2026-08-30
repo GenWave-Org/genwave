@@ -34,6 +34,12 @@ file sealed class PoliciesWebFactory() : WebApplicationFactory<Program>
             services.RemoveAll<IHostedService>();
             services.RemoveAll<IMediaCatalog>();
             services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
+
+            // PLAN T371 (SPEC F149.5) — StatusController now also resolves IMediaRotationSink; the
+            // real MediaRotationRepository requires a live Postgres, same reason IMediaCatalog is
+            // faked above.
+            services.RemoveAll<IMediaRotationSink>();
+            services.AddSingleton<IMediaRotationSink>(new FakeMediaRotationSink());
             services.RemoveAll<IActivePersonaAccessor>();
             services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
         });

@@ -394,6 +394,9 @@ file sealed class ThrowingMediaRotationSink : IMediaRotationSink
 
     public Task<long> GetNeverAiredCountAsync(CancellationToken ct) =>
         throw new NotSupportedException("unused by this arc");
+
+    public Task<RotationHealth> GetRotationHealthAsync(LibraryScope scope, CancellationToken ct) =>
+        throw new NotSupportedException("unused by this arc");
 }
 
 /// <summary>Captures every Warning+ log entry's message text — the Story164_FailClosedWithoutPassword.cs

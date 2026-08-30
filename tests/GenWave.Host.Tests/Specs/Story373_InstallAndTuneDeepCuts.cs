@@ -434,6 +434,9 @@ file sealed class ScriptedRotationSink(DateTimeOffset? since) : IMediaRotationSi
     public Task<DateTimeOffset?> GetRotationSinceAsync(CancellationToken ct) => Task.FromResult(since);
 
     public Task<long> GetNeverAiredCountAsync(CancellationToken ct) => Task.FromResult(0L);
+
+    public Task<RotationHealth> GetRotationHealthAsync(LibraryScope scope, CancellationToken ct) =>
+        throw new NotSupportedException("unused by this file's own facts");
 }
 
 /// <summary>Unconditionally answers "never aired" (SPEC F152.5, T362 carry-forward) — the T362

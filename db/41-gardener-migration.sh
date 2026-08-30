@@ -51,6 +51,10 @@
 # stamped into station.settings the same key-value shape StationSettingsRepository.WriteAsync already
 # writes (key/value jsonb/updated_at), guarded by `where not exists` rather than an upsert — ONLY IF
 # ABSENT, since a real re-stamp would move the epoch every never-aired count is read beside (F149.3).
+# PLAN T371 carry-forward (b): the seed excludes safe-scope libraries (gh-#99's own Station:SafeScope:
+# LibraryIds row, or a name="safe" library fallback when no such row exists) — see the seed's own
+# SQL block below for the full rationale; a migrated station must not start with inflated safe-row
+# play_counts the same way a LIVE airing never inflates them (F149.2's own RecordAiringAsync guard).
 #
 # station.show's envelope-is-object CHECK (SPEC F152.3's own read shape: `station.show.envelope` is
 # read for `rotation` only, and only ever as a JSON object) has no `add constraint if not exists`
@@ -375,13 +379,60 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 # Runs as the bootstrap superuser this script is already connected as — no SET ROLE — the one place
 # in this migration that reads across the station/library role boundary in a single statement (see
 # this file's own header remarks for why that is safe and deliberate here).
+#
+# PLAN T371 carry-forward (b): a migrated station's booth_log ledger seed had no safe-scope
+# exclusion, so a "safe" library's own airings (station imaging, gh-#99) inflated its rows' play
+# counts exactly the way F149.2's own RecordAiringAsync exclusion already forbids for a live airing.
+# safe_library_ids below mirrors that same exclusion at seed time:
+#   - station.settings holds a Station:SafeScope:LibraryIds row (GenWave.Host.Seeding.SafeLoopSeeder/
+#     an operator PUT /api/settings) whenever the F27.6 boot seed has ever run — StationSettingsRepository
+#     always writes ONE row, its value the JSON array StationSettingsRepository.WriteAsync serializes a
+#     long[] as (e.g. "[3]"), never indexed Station:SafeScope:LibraryIds:0/:1/... keys — so
+#     jsonb_array_elements_text unpacks it directly. A row present with an empty array ("[]") is a
+#     deliberate "safe scope is empty" answer (F25) and excludes nothing, same as ISafeScopeProvider's
+#     own IsEmpty short-circuit — it must NOT fall through to the name-based guess below.
+#   - gh-#645: NO row at all means this station's first-boot seeder has never run (the row is written
+#     at the END of a successful SafeLoopSeeder.SeedAsync, F27.6) — fall back to excluding libraries
+#     named "safe", SafeLoopSeeder.SafeLibraryName's own constant, the ONE name that seeder ever
+#     creates.
+#   - T371 review LOW-1: a row whose value is NOT a JSON array (an object, a scalar/string, or JSON
+#     null — a hand-edited or corrupted row) also falls through to the name-based fallback rather
+#     than aborting the whole migration script — jsonb_array_elements_text() throws on anything but
+#     an array under ON_ERROR_STOP.
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'SQL'
+	with safe_setting as (
+	  select value from station.settings where key = 'Station:SafeScope:LibraryIds'
+	),
+	safe_library_ids as (
+	  select case
+	    -- T371 review LOW-1: jsonb_array_elements_text() throws on any non-array jsonb (an object,
+	    -- a scalar/string, or JSON null all abort this whole script under ON_ERROR_STOP) — a
+	    -- corrupted or hand-edited settings row must degrade to the name-based fallback below, not
+	    -- take the whole migration down. jsonb_typeof(...) = 'array' gates BOTH the WHEN and the
+	    -- array_agg's own FROM so a non-array row never reaches jsonb_array_elements_text at all.
+	    when exists (select 1 from safe_setting where jsonb_typeof(value) = 'array') then coalesce(
+	      (select array_agg(elem::bigint)
+	       from safe_setting, jsonb_array_elements_text(safe_setting.value) as elem
+	       where jsonb_typeof(safe_setting.value) = 'array'),
+	      array[]::bigint[])
+	    else coalesce(
+	      (select array_agg(id) from library.library where name = 'safe'),
+	      array[]::bigint[])
+	  end as ids
+	)
 	insert into library.media_rotation (media_id, play_count, first_aired_at, last_aired_at)
 	select bl.media_id, count(*), min(bl.occurred_at), max(bl.occurred_at)
 	from station.booth_log bl
 	join library.media m on m.id = bl.media_id
+	-- CROSS JOIN, not a correlated `= any((select ...))`: safe_library_ids has exactly one row, so
+	-- this multiplies nothing, but it makes `safe_library_ids.ids` a genuine ARRAY VALUE reference —
+	-- `x = any(<subquery>)` is Postgres's OWN distinct "one row per comparison" grammar form and
+	-- raises "operator does not exist: bigint = bigint[]" against a subquery that itself selects an
+	-- array-typed column (confirmed against a scratch Postgres while building this migration).
+	cross join safe_library_ids
 	where bl.kind = 'track-started' and bl.media_id is not null
-	group by bl.media_id
+	  and not (m.library_id = any(safe_library_ids.ids))
+	group by bl.media_id, safe_library_ids.ids
 	on conflict (media_id) do nothing;
 
 	-- ONLY IF ABSENT: a real re-stamp would move the epoch every never-aired count is read beside
