@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Threading.Channels;
 using Dapper;
 using Microsoft.Extensions.Configuration;
@@ -9,6 +10,7 @@ using GenWave.MediaLibrary.Catalog;
 using GenWave.MediaLibrary.Enrich;
 using GenWave.MediaLibrary.ExplicitClassification;
 using GenWave.MediaLibrary.Garden;
+using GenWave.MediaLibrary.Garden.FileActions;
 using GenWave.MediaLibrary.Mood;
 using GenWave.MediaLibrary.Options;
 using GenWave.MediaLibrary.Scan;
@@ -178,6 +180,20 @@ public static class MediaLibraryServiceCollectionExtensions
         // F150.9) then every registered IGardenerPass, log-and-continue per step — the
         // EnrichmentService bounded-batch backfill-loop shape, one seam over.
         services.AddHostedService<GardenerService>();
+
+        // The Library Gardener's file-action jail (SPEC F154.1-F154.5; STORY-379; PLAN T379,
+        // gh-#529) — pure planner + its own read-only filesystem probe (Kind/ResolveLinks, the ONLY
+        // I/O the jail performs) + the plan-token mint/read seam. IFileActionPlanTokens is
+        // registered with a per-process random 32-byte HMAC key generated once at first resolution
+        // (AddSingleton's factory runs once, so every mint/read in this process shares the same
+        // key) — T381 REPLACES this registration in GenWave.Host with an IDataProtector-backed
+        // implementation; nothing downstream depends on the concrete HMAC shape, only on
+        // IFileActionPlanTokens. The codec itself takes no TimeProvider (T379 review N4 — Mint/
+        // TryRead both take `now` as a parameter instead), so no DI clock dependency here at all.
+        services.AddSingleton<IFileSystemProbe, FileSystemProbe>();
+        services.AddSingleton<IFileActionPlanner, FileActionPlanner>();
+        services.AddSingleton<IFileActionPlanTokens>(
+            _ => new HmacFileActionPlanTokens(RandomNumberGenerator.GetBytes(32)));
 
         // gh-#99: the narrow cross-schema membership answer the taste-thumb/booth-log surfaces
         // need — resolved on the library connection because station_svc deliberately has no grant
