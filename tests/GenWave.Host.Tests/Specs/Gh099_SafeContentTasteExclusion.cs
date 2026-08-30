@@ -67,6 +67,10 @@ file sealed class ExclusionFakeBoothLogReader(IReadOnlyList<BoothLogEntry> rows)
 
     public Task<long?> GetMediaIdAsync(long id, CancellationToken ct) =>
         Task.FromResult(rows.FirstOrDefault(e => e.Id == id)?.MediaId);
+
+    /// <summary>T362 review HIGH-2: IBoothLogReader.GetLastAiringAsync is now abstract — this file's own facts never touch a show's last airing, so this double answers "none" unconditionally.</summary>
+    public Task<ShowLastAiring?> GetLastAiringAsync(long showId, CancellationToken ct) =>
+        Task.FromResult<ShowLastAiring?>(null);
 }
 
 /// <summary>Recording <see cref="IPersonaTasteAccrualStore"/> — every reached call is a fact.</summary>

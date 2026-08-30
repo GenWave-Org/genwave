@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Logging;
@@ -447,8 +448,7 @@ public sealed partial class ShowsController(
         _ => StatusCode(StatusCodes.Status500InternalServerError),
     };
 
-    static ShowDto ToDto(Show show) =>
-        new(show.Id, show.Name, show.Slug, show.Tagline, show.Flavor, show.ImportedFrom, show.ImportedAt);
+    static ShowDto ToDto(Show show) => ShowDto.From(show);
 
     static ShowDraft ToDraft(ShowRequest request) =>
         new(request.Name?.Trim() ?? string.Empty, request.Tagline, request.Flavor);

@@ -32,6 +32,7 @@ const NIGHT_MOVES: ShowDto = {
   flavor: "moody, sparse, low crowd noise",
   importedFrom: null,
   importedAt: null,
+  rotation: null,
 };
 
 const SUNDAY_STATIC: ShowDto = {
@@ -42,6 +43,7 @@ const SUNDAY_STATIC: ShowDto = {
   flavor: null,
   importedFrom: null,
   importedAt: null,
+  rotation: null,
 };
 
 const RETRO_NIGHTS: ShowDto = {
@@ -52,6 +54,7 @@ const RETRO_NIGHTS: ShowDto = {
   flavor: null,
   importedFrom: "midnight-drive-catalog-entry",
   importedAt: "2026-07-21T09:05:00Z",
+  rotation: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -84,14 +87,22 @@ function makeDispatchFetchMock(routes: Record<string, RouteResponseSpec>): jest.
   return fn;
 }
 
-function renderClient(overrides: Partial<ShowsClientProps> = {}): ReturnType<typeof render> {
+// async (T362 carry-forward): every show card now mounts its own ShowRotationRuleEditor, which
+// fires usePoll's immediate mount-time fetch (lib/use-poll.ts's own remarks) — flushed here inside
+// an `act` boundary so that resolution never lands outside one, the same fix
+// shows-rotation-rule.spec.tsx's own renderEditor helper applies for that component directly.
+async function renderClient(overrides: Partial<ShowsClientProps> = {}): Promise<ReturnType<typeof render>> {
   const props: ShowsClientProps = { initialShows: [NIGHT_MOVES, SUNDAY_STATIC], ...overrides };
-  return render(
+  const result = render(
     <ConfirmDialogProvider>
       <ShowsClient {...props} />
       <Toaster />
     </ConfirmDialogProvider>
   );
+  await act(async () => {
+    await Promise.resolve();
+  });
+  return result;
 }
 
 /** Finds a show's own `<li>` card via its dedicated name testid (mirrors personas-page.spec.tsx's
@@ -138,9 +149,9 @@ describe("Feature: The Shows page", () => {
   });
 
   describe("Scenario: authoring in place", () => {
-    it("renders the show list with the provenance line on imported shows", () => {
+    it("renders the show list with the provenance line on imported shows", async () => {
       makeDispatchFetchMock({});
-      renderClient({ initialShows: [NIGHT_MOVES, RETRO_NIGHTS], timeZone: "UTC" });
+      await renderClient({ initialShows: [NIGHT_MOVES, RETRO_NIGHTS], timeZone: "UTC" });
 
       // An authored-in-place show carries no provenance line at all.
       expect(within(cardFor("Night Moves")).queryByText(/^Imported/)).not.toBeInTheDocument();
@@ -161,9 +172,10 @@ describe("Feature: The Shows page", () => {
         flavor: "bright, brief, upbeat",
         importedFrom: null,
         importedAt: null,
+        rotation: null,
       };
       const mockFetch = makeDispatchFetchMock({ "POST /api/shows": { status: 201, body: created } });
-      renderClient({ initialShows: [] });
+      await renderClient({ initialShows: [] });
 
       const nameField = screen.getByLabelText("Name") as HTMLInputElement;
       const taglineField = screen.getByLabelText("Tagline") as HTMLInputElement;
@@ -210,7 +222,7 @@ describe("Feature: The Shows page", () => {
       const mockFetch = makeDispatchFetchMock({
         "PATCH /api/shows/night-moves": { status: 200, body: updated },
       });
-      renderClient({ initialShows: [NIGHT_MOVES, SUNDAY_STATIC] });
+      await renderClient({ initialShows: [NIGHT_MOVES, SUNDAY_STATIC] });
 
       fireEvent.click(within(cardFor("Night Moves")).getByRole("button", { name: "Edit Night Moves" }));
 
@@ -243,12 +255,12 @@ describe("Feature: The Shows page", () => {
       expect(findCall(mockFetch, "PATCH", "/api/shows/night-moves")).toBeDefined();
     });
 
-    it("supports several shows referencing the same persona's blocks (one DJ, many shows)", () => {
+    it("supports several shows referencing the same persona's blocks (one DJ, many shows)", async () => {
       // A show carries no persona reference of its own (that's the schedule block's job, PLAN
       // T243) — this page's own structural claim is simply that it renders more than one show at
       // once with no objection to two rows existing side by side.
       makeDispatchFetchMock({});
-      renderClient({ initialShows: [NIGHT_MOVES, SUNDAY_STATIC] });
+      await renderClient({ initialShows: [NIGHT_MOVES, SUNDAY_STATIC] });
 
       expect(screen.getByTestId("show-name-Night Moves")).toBeInTheDocument();
       expect(screen.getByTestId("show-name-Sunday Static")).toBeInTheDocument();
@@ -260,7 +272,7 @@ describe("Feature: The Shows page", () => {
     it("surfaces the 409 refusal naming the referencing schedule blocks", async () => {
       const detail = '"night-moves" is still scheduled and cannot be deleted: Mon 09:00–12:00.';
       makeDispatchFetchMock({ "DELETE /api/shows/night-moves": { status: 409, body: { detail } } });
-      renderClient({ initialShows: [NIGHT_MOVES, SUNDAY_STATIC] });
+      await renderClient({ initialShows: [NIGHT_MOVES, SUNDAY_STATIC] });
 
       fireEvent.click(within(cardFor("Night Moves")).getByRole("button", { name: "Delete Night Moves" }));
       await confirmInDialog("Delete");
@@ -272,7 +284,7 @@ describe("Feature: The Shows page", () => {
 
     it("deletes an unreferenced show after confirm", async () => {
       const mockFetch = makeDispatchFetchMock({ "DELETE /api/shows/sunday-static": { status: 204 } });
-      renderClient({ initialShows: [NIGHT_MOVES, SUNDAY_STATIC] });
+      await renderClient({ initialShows: [NIGHT_MOVES, SUNDAY_STATIC] });
 
       fireEvent.click(within(cardFor("Sunday Static")).getByRole("button", { name: "Delete Sunday Static" }));
       await confirmInDialog("Delete");
@@ -286,9 +298,9 @@ describe("Feature: The Shows page", () => {
   });
 
   describe("Scenario: coverage stays neutral", () => {
-    it("shows no nudge, badge, or warning anywhere for unnamed blocks (F119.3)", () => {
+    it("shows no nudge, badge, or warning anywhere for unnamed blocks (F119.3)", async () => {
       makeDispatchFetchMock({});
-      renderClient({ initialShows: [NIGHT_MOVES, SUNDAY_STATIC] });
+      await renderClient({ initialShows: [NIGHT_MOVES, SUNDAY_STATIC] });
 
       // No coverage-flavored copy anywhere on the page, and no role="alert"/"status" element at
       // all — F119.3 rules this out structurally, not just as a missing string.
@@ -297,6 +309,36 @@ describe("Feature: The Shows page", () => {
       expect(screen.queryByText(/unnamed block/i)).not.toBeInTheDocument();
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Scenario: the rotation card only polls once expanded (T362 review MED-4b)", () => {
+    it("issues no rotation-pool/last-airing request until the card is opened, then issues exactly one pair on open", async () => {
+      const mockFetch = makeDispatchFetchMock({
+        "GET /api/shows/1/rotation-pool": { status: 200, body: { eligible: 3, since: null } },
+        "GET /api/shows/1/last-airing": { status: 200, body: { airedCount: null, relaxed: null } },
+      });
+      await renderClient({ initialShows: [NIGHT_MOVES, SUNDAY_STATIC] });
+
+      // Given the page has just rendered — neither show's rotation card is open.
+      expect(findCall(mockFetch, "GET", "/api/shows/1/rotation-pool")).toBeUndefined();
+      expect(findCall(mockFetch, "GET", "/api/shows/1/last-airing")).toBeUndefined();
+      expect(screen.queryByLabelText("Rotation rule")).not.toBeInTheDocument();
+
+      // When the operator opens Night Moves's own rotation card...
+      await act(async () => {
+        fireEvent.click(within(cardFor("Night Moves")).getByRole("button", { name: "Show rotation rule for Night Moves" }));
+        await Promise.resolve();
+      });
+
+      // Then exactly that show's own status reads fire, and the editor itself mounts.
+      await waitFor(() => {
+        expect(findCall(mockFetch, "GET", "/api/shows/1/rotation-pool")).toBeDefined();
+      });
+      expect(findCall(mockFetch, "GET", "/api/shows/1/last-airing")).toBeDefined();
+      expect(within(cardFor("Night Moves")).getByLabelText("Rotation rule")).toBeInTheDocument();
+      // And the OTHER show's card is still untouched — expanding one never fans out to every card.
+      expect(findCall(mockFetch, "GET", "/api/shows/2/rotation-pool")).toBeUndefined();
     });
   });
 });

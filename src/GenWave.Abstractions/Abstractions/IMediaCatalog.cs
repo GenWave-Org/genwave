@@ -328,6 +328,29 @@ public interface IMediaCatalog
         Task.FromResult<int?>(null);
 
     /// <summary>
+    /// SPEC F152.5 (STORY-373, PLAN T362) — the Shows page's own "live pool size" read: the count of
+    /// PLAYABLE rows <paramref name="envelope"/>'s genre/energy/explicit/rotation predicate admits
+    /// WITHIN <paramref name="scope"/> — the exact same by-construction filter set
+    /// <see cref="GetEnvelopeCandidateAsync"/>/<see cref="GetEnvelopeCandidatePoolAsync"/> already
+    /// apply (rotation INCLUDED here, unlike <see cref="GetPlayCountQuantileAsync"/>'s own
+    /// deliberately-unconstrained R2 read), just aggregated to a count instead of a candidate row.
+    /// <paramref name="envelope"/>'s <see cref="SegmentEnvelope.Rotation"/> is caller-supplied — the
+    /// Shows page passes a show's own rotation rule layered onto the station-default envelope, so this
+    /// answers "how many tracks would THIS show's rule admit right now," never the station-wide pool.
+    /// <see langword="null"/> means "unknown" (an empty <paramref name="scope"/>) — the page renders
+    /// that as "unknown," never a fabricated zero.
+    ///
+    /// Default-implemented (not abstract) so this addition to a published MIT contract
+    /// (<c>GenWave.Abstractions</c>) stays strictly additive — mirrors
+    /// <see cref="GetPlayCountQuantileAsync"/>'s own precedent one member up: every pre-F152.5
+    /// implementer (a test double, or a host built against an older SDK version) keeps compiling
+    /// unchanged, reporting "unknown" (null) until it opts in with a real override (the concrete
+    /// catalog implementation in <c>GenWave.MediaLibrary</c> is the only production override).
+    /// </summary>
+    Task<int?> GetEnvelopeCandidateCountAsync(LibraryScope scope, SegmentEnvelope envelope, CancellationToken ct) =>
+        Task.FromResult<int?>(null);
+
+    /// <summary>
     /// Paged, filtered list of catalog entries scoped to the given libraries (T041). An empty scope
     /// short-circuits to an empty result without touching the database (default-deny).
     /// </summary>

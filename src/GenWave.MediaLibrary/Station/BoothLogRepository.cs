@@ -160,4 +160,108 @@ sealed class BoothLogRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<Boot
             new { Id = id },
             cancellationToken: ct));
     }
+
+    /// <inheritdoc/>
+    /// <summary>
+    /// See <see cref="IBoothLogReader.GetLastAiringAsync"/> for the "contiguous run" definition this
+    /// query implements — <c>marked</c>/<c>runs</c> assign a monotonically non-decreasing
+    /// <c>run_id</c> that increments the instant either the <c>show_id</c> changes (<c>IS DISTINCT
+    /// FROM</c>, so the very first row — whose <c>lag</c> is <c>NULL</c> — starts its own run rather
+    /// than comparing against nothing) or the gap to the previous row exceeds three hours.
+    ///
+    /// <para>
+    /// <b>Two SEPARATE window-function CTE levels (T362 review HIGH-1), never one nested inside the
+    /// other.</b> The original draft called <c>lag(...) over w</c> INSIDE the argument of
+    /// <c>sum(...) over w</c> in the same <c>select</c> item — Postgres rejects that outright
+    /// ("window function calls cannot be nested", every real station 500s on this route). <c>marked</c>
+    /// computes the boundary flag (one window function, <c>lag</c>) as its own plain column;
+    /// <c>runs</c> then sums THAT column (a second, independent window function, <c>sum</c>) — legal
+    /// because by the time <c>runs</c> runs, <c>boundary</c> is an ordinary materialized column, not a
+    /// window function call.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Bounded, not a 14-day full-table scan (T362 review MED-4).</b> <c>target_anchor</c> finds
+    /// <paramref name="showId"/>'s own most recent <c>"track-started"</c> timestamp FIRST — a single
+    /// indexed lookup (<c>booth_log_show_track_started</c>, <c>(show_id, occurred_at) where kind =
+    /// 'track-started'</c>) — then <c>track_rows</c> narrows to a 48-hour window ending at that anchor,
+    /// ACROSS EVERY SHOW (never scoped to <paramref name="showId"/> alone): a run genuinely ends the
+    /// instant a DIFFERENT show's row lands between two of this show's own airings, even when every
+    /// timestamp involved sits well inside the three-hour gap threshold — narrowing the base rows to
+    /// <paramref name="showId"/> ALONE before computing boundaries would silently lose that
+    /// cross-show interruption (verified: two of this show's own rows either side of another show's,
+    /// all within three hours of each other, must count as TWO runs of the CLICKED show, picks=2, not
+    /// one merged run of 4 — see this method's own MediaLibrary.Tests fact). 48 hours is a generous,
+    /// fixed bound — no real contiguous run (three-hour-gap-free) plausibly spans that long — chosen
+    /// over the full <c>BoothLog:RetentionDays</c> window (14 days by default) specifically so this
+    /// query's own cost stops scaling with retention.
+    /// </para>
+    ///
+    /// The final <c>select</c> finds <paramref name="showId"/>'s own highest <c>run_id</c> within the
+    /// bounded window (its most recent run, since <c>run_id</c> only ever increases with
+    /// <c>occurred_at</c>) and counts every row that run_id carries — which, by construction, all
+    /// share <paramref name="showId"/>, since a run boundary fires on any <c>show_id</c> change.
+    /// <c>count(*)</c>/<c>count(*) filter(...)</c> over no matching rows (an empty <c>runs</c>, a
+    /// <paramref name="showId"/> that has never aired at all — <c>target_anchor.anchor</c> null, so
+    /// <c>track_rows</c> is empty by construction — or one that never appears in the bounded window)
+    /// both return zero, never <see langword="null"/> — an aggregate with no GROUP BY always answers
+    /// exactly one row — so <see cref="ShowLastAiring.Picks"/> of zero is this method's own
+    /// "never aired" signal, mapped to a <see langword="null"/> return just below.
+    /// </summary>
+    public async Task<ShowLastAiring?> GetLastAiringAsync(long showId, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleAsync<LastAiringRow>(new CommandDefinition(
+            """
+            with target_anchor as (
+                select max(occurred_at) as anchor
+                from station.booth_log
+                where kind = 'track-started' and show_id = @ShowId
+            ),
+            track_rows as (
+                select b.show_id, b.occurred_at, (b.pick ->> 'rotationRelax')::int as rotation_relax
+                from station.booth_log b, target_anchor a
+                where b.kind = 'track-started'
+                  and a.anchor is not null
+                  and b.occurred_at between a.anchor - interval '48 hours' and a.anchor
+            ),
+            marked as (
+                select
+                    show_id,
+                    rotation_relax,
+                    occurred_at,
+                    case
+                        when lag(show_id) over w is distinct from show_id
+                          or occurred_at - lag(occurred_at) over w > interval '3 hours'
+                        then 1 else 0
+                    end as boundary
+                from track_rows
+                window w as (order by occurred_at)
+            ),
+            runs as (
+                select
+                    show_id,
+                    rotation_relax,
+                    sum(boundary) over (order by occurred_at) as run_id
+                from marked
+            )
+            select
+                count(*)::int as picks,
+                count(*) filter (where coalesce(rotation_relax, 0) > 0)::int as relaxed
+            from runs
+            where run_id = (select run_id from runs where show_id = @ShowId order by run_id desc limit 1)
+            """,
+            new { ShowId = showId },
+            cancellationToken: ct));
+
+        return row.Picks == 0 ? null : new ShowLastAiring(row.Picks, row.Relaxed);
+    }
+
+    /// <summary>Ephemeral Dapper projection for <see cref="GetLastAiringAsync"/>'s own aggregate
+    /// read — never a public shape, mapped straight to <see cref="ShowLastAiring"/>.</summary>
+    sealed record LastAiringRow
+    {
+        public int Picks { get; init; }
+        public int Relaxed { get; init; }
+    }
 }

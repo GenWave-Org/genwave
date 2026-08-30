@@ -622,6 +622,46 @@ sealed class MediaRepository(
             cancellationToken: ct));
     }
 
+    /// <summary>
+    /// SPEC F152.5, STORY-373, PLAN T362 — <see cref="EnvelopeCandidateFromWhereSql"/>'s SAME
+    /// playable/genre/energy/explicit set <see cref="GetEnvelopeCandidateAsync"/>/
+    /// <see cref="GetEnvelopeCandidatePoolAsync"/> already draw from, this time WITH
+    /// <paramref name="envelope"/>'s own <see cref="RotationPredicateSql"/> fragment INCLUDED (unlike
+    /// <see cref="GetPlayCountQuantileAsync"/>'s deliberately-unconstrained read one member up) —
+    /// aggregated to a plain <c>count(*)</c>, never a row fetch, so the Shows page's own "live pool
+    /// size" read costs nothing beyond one index scan regardless of how large the matching set is. No
+    /// ORDER BY appended, for the identical reason <see cref="GetPlayCountQuantileAsync"/>'s own
+    /// remarks give: an aggregate with no GROUP BY always collapses to exactly one row.
+    /// </summary>
+    public async Task<int?> GetEnvelopeCandidateCountAsync(LibraryScope scope, SegmentEnvelope envelope, CancellationToken ct)
+    {
+        // Default-deny: no scope means no access, no SQL issued.
+        if (scope.IsEmpty) return null;
+
+        var genresLower = envelope.Genres.Count > 0
+            ? envelope.Genres.Select(g => g.ToLowerInvariant()).ToArray()
+            : null;
+        var genrePredicate = genresLower is not null ? "and lower(m.genre) = any(@genresLower)" : "";
+        var explicitPredicate = ExplicitPredicate();
+        var rotationPredicate = RotationPredicateSql(envelope.Rotation);
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        return await conn.QuerySingleAsync<int>(new CommandDefinition($"""
+            select count(*)::int
+            {EnvelopeCandidateFromWhereSql(genrePredicate, explicitPredicate, rotationPredicate)}
+            """,
+            new
+            {
+                libraryIds = scope.LibraryIds.ToArray(),
+                genresLower,
+                energyMin = envelope.EnergyRange.Min,
+                energyMax = envelope.EnergyRange.Max,
+                maxPlays = envelope.Rotation?.MaxPlays,
+                notAiredWithinDays = envelope.Rotation?.NotAiredWithinDays,
+            },
+            cancellationToken: ct));
+    }
+
     public async Task<PagedResult<MediaReference>> ListAsync(LibraryScope scope, MediaQuery query, CancellationToken ct)
     {
         // Default-deny: no scope means no access, no SQL issued.

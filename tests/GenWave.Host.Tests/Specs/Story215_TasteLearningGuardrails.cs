@@ -61,6 +61,10 @@ file sealed class FixedPageBoothLogReader(BoothLogPage page) : IBoothLogReader
 
     public Task<long?> GetMediaIdAsync(long id, CancellationToken ct) =>
         Task.FromResult(page.Entries.FirstOrDefault(e => e.Id == id)?.MediaId);
+
+    /// <summary>T362 review HIGH-2: IBoothLogReader.GetLastAiringAsync is now abstract — this file's own facts never touch a show's last airing, so this double answers "none" unconditionally.</summary>
+    public Task<ShowLastAiring?> GetLastAiringAsync(long showId, CancellationToken ct) =>
+        Task.FromResult<ShowLastAiring?>(null);
 }
 
 /// <summary>One thumbable (or not) booth-log row, as <see cref="FakePersonaTasteAccrualStore"/> sees it.</summary>

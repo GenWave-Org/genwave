@@ -210,6 +210,13 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	CREATE INDEX IF NOT EXISTS booth_log_paging
 	  ON station.booth_log (occurred_at DESC, id DESC);
 
+	-- Last-airing lookup spine (SPEC F152.5, STORY-373, PLAN T362 review MED-4): mirrors db/41's own
+	-- in-place upgrade addition — BoothLogRepository.GetLastAiringAsync's bounded read needs "this
+	-- show's own track-started rows, newest first" fast, not a scan of the whole retention window.
+	CREATE INDEX IF NOT EXISTS booth_log_show_track_started
+	  ON station.booth_log (show_id, occurred_at)
+	  WHERE kind = 'track-started';
+
 	-- Persona taste thumb ledger (SPEC F84.5, STORY-215, PLAN T70): the durable idempotency record
 	-- for an operator taste thumb, keyed (persona_id, booth_log_id, direction) — a double-tap, or a
 	-- now-playing + booth-log tap on the SAME airing/direction, is the exact same row, so
