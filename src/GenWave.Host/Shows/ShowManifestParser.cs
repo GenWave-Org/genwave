@@ -1,6 +1,7 @@
 namespace GenWave.Host.Shows;
 
 using System.Text.Json;
+using GenWave.Abstractions.Playout;
 using GenWave.Context;
 using GenWave.Core.Domain;
 
@@ -93,9 +94,23 @@ using GenWave.Core.Domain;
 /// </summary>
 internal static class ShowManifestParser
 {
-    /// <summary>The one schema major this parser currently accepts (mirrors
+    /// <summary>The one schema MAJOR this parser currently accepts (mirrors
     /// <c>ThemeSchemaVersionGate.CurrentSchemaVersion</c> — see this type's own "SCHEMA-MAJOR" remarks
-    /// for why Show keeps an independent copy rather than sharing that constant).</summary>
+    /// for why Show keeps an independent copy rather than sharing that constant).
+    ///
+    /// <para>
+    /// PLAN T363 (SPEC F152.6): the app's own show-manifest support is now schema **1.1** — the
+    /// optional <c>envelope.rotation</c> addition — but 1.1 is a MINOR bump, not a MAJOR one, so this
+    /// constant stays <c>1</c> unchanged. <c>schemaVersion</c> on the wire is, and always has been,
+    /// this MAJOR-only whole number (see <see cref="ExtractSchemaVersion"/>'s own remarks) — the
+    /// MINOR component lives only in genwave-catalog's own <c>show-manifest.schema.json</c> file
+    /// version (that repo's own T364 lint concern, not a field this app ever reads). A 1.0 manifest
+    /// (no <c>envelope</c>) and a 1.1 manifest (an optional <c>envelope.rotation</c>) both carry
+    /// <c>schemaVersion: 1</c> — or none at all — and both parse here unchanged; an OLDER app reading
+    /// a 1.1 manifest simply never asks for the field it does not know about (SPEC F103.2's forward-
+    /// compat posture, unaffected by this task).
+    /// </para>
+    /// </summary>
     public const int CurrentSchemaVersion = 1;
 
     static readonly JsonSerializerOptions JsonOptions = new()
@@ -156,7 +171,85 @@ internal static class ShowManifestParser
         ValidateImportBudget(source.Name, "tagline", tagline.Length, ShowBudgets.TaglineMaxChars);
         ValidateImportBudget(source.Name, "flavor", flavor.Length, ShowBudgets.FlavorMaxChars);
 
-        return new ShowManifest(name, tagline, flavor);
+        var envelope = ParseEnvelope(source.Name, document.Envelope);
+
+        return new ShowManifest(name, tagline, flavor, envelope);
+    }
+
+    /// <summary>
+    /// The schema 1.1 addition (SPEC F152.6, PLAN T363): reads <paramref name="envelope"/>'s own
+    /// <c>rotation</c> key, if any, and validates it the identical THREE SPEC F152.1/F152.5 rules
+    /// <c>ShowRotationController.ParseRotationBody</c> already enforces at the PUT edge (at least one
+    /// of <c>maxPlays</c>/<c>notAiredWithinDays</c> set, <c>maxPlays</c> ≥ 0, <c>notAiredWithinDays</c>
+    /// 1–3650) — mirrored here rather than shared, the same "Show and Theme version their OWN formats
+    /// independently" posture this type's own SCHEMA-MAJOR remarks already take for
+    /// <see cref="ExtractSchemaVersion"/>: this is a THIRD, narrower gate (one field, one caller) with
+    /// no multi-phase pipeline of its own to justify hoisting a shared validator type. A violation
+    /// throws <see cref="ShowManifestException"/> the same way every other malformed-manifest case
+    /// above does — <see cref="Api.ShowsController.Import"/>'s own 400 mapping is unchanged, and the
+    /// atomic upsert below never sees a partially-valid rotation.
+    ///
+    /// <para>
+    /// Returns <see langword="null"/> — "no rotation opinion," never "clear the existing rule" (see
+    /// <see cref="ShowManifest.Envelope"/>'s own remarks) — for a missing <paramref name="envelope"/>,
+    /// an <paramref name="envelope"/> that is not a JSON object, a missing/JSON-null <c>rotation</c>
+    /// key, or unknown keys inside <c>envelope</c> beyond <c>rotation</c> (forward compat, SPEC F152.6
+    /// — read and discarded, never an error).
+    /// </para>
+    /// </summary>
+    static ShowManifestEnvelope? ParseEnvelope(string sourceName, JsonElement? envelope)
+    {
+        if (envelope is not { } envelopeElement || envelopeElement.ValueKind != JsonValueKind.Object)
+            return null;
+
+        if (!envelopeElement.TryGetProperty("rotation", out var rotationElement)
+            || rotationElement.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (rotationElement.ValueKind != JsonValueKind.Object)
+            throw new ShowManifestException(
+                $"show manifest '{sourceName}' envelope.rotation must be an object or null");
+
+        var maxPlays = ReadOptionalRotationInt(sourceName, rotationElement, "maxPlays");
+        var notAiredWithinDays = ReadOptionalRotationInt(sourceName, rotationElement, "notAiredWithinDays");
+
+        // PLAN T363 review MED-3 — RotationPredicateRules is the ONE shared home for the three SPEC
+        // F152.1/F152.5 rules and their literal bounds (ShowRotationController.ParseRotationBody's own
+        // PUT-edge gate shares it too); this method keeps its own refusal TEXT exactly as it already
+        // was, only naming WHICH field failed off the shared result.
+        switch (RotationPredicateRules.Validate(maxPlays, notAiredWithinDays))
+        {
+            case RotationPredicateField.Rotation:
+                throw new ShowManifestException(
+                    $"show manifest '{sourceName}' envelope.rotation must set at least one of maxPlays or " +
+                    "notAiredWithinDays");
+            case RotationPredicateField.MaxPlays:
+                throw new ShowManifestException(
+                    $"show manifest '{sourceName}' envelope.rotation.maxPlays must be at least 0");
+            case RotationPredicateField.NotAiredWithinDays:
+                throw new ShowManifestException(
+                    $"show manifest '{sourceName}' envelope.rotation.notAiredWithinDays must be between 1 " +
+                    "and 3650");
+        }
+
+        return new ShowManifestEnvelope(new RotationPredicate(maxPlays, notAiredWithinDays));
+    }
+
+    /// <summary>Reads an optional whole-number property off <paramref name="rotation"/> — absent or
+    /// JSON <c>null</c> yields <see langword="null"/> with no error (mirrors
+    /// <c>ShowRotationController.TryReadOptionalInt</c>'s identical PUT-edge shape); present with any
+    /// other <see cref="JsonValueKind"/> (a string, a fraction, an array, …) throws naming
+    /// <paramref name="propertyName"/>.</summary>
+    static int? ReadOptionalRotationInt(string sourceName, JsonElement rotation, string propertyName)
+    {
+        if (!rotation.TryGetProperty(propertyName, out var element) || element.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var parsed))
+            return parsed;
+
+        throw new ShowManifestException(
+            $"show manifest '{sourceName}' envelope.rotation.{propertyName} must be a whole number");
     }
 
     /// <summary>See this type's own "THE 2× HARD CAP" remarks: STRICTLY greater than 2× the authored
@@ -178,5 +271,13 @@ internal static class ShowManifestParser
         public string? Name { get; init; }
         public string? Tagline { get; init; }
         public string? Flavor { get; init; }
+
+        /// <summary>The schema 1.1 addition (SPEC F152.6, PLAN T363) — captured as a raw
+        /// <see cref="JsonElement"/>, never a typed shape, since <see cref="ParseEnvelope"/> needs to
+        /// tell "the <c>rotation</c> key is absent" apart from "it is explicitly JSON <c>null</c>"
+        /// apart from "it is a malformed non-object" — the same reason
+        /// <c>ShowRotationController.ParseRotationBody</c> reads a raw <see cref="JsonElement"/> body
+        /// rather than a typed DTO one route over.</summary>
+        public JsonElement? Envelope { get; init; }
     }
 }

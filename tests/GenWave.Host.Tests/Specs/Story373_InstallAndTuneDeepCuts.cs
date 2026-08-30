@@ -1,26 +1,32 @@
 // STORY-373 — I can install and tune Deep Cuts (SPEC F152.5–F152.7 · PLAN T362/T363)
 //
-// BDD specification — xUnit. AC1/AC2/AC6/AC7 WIRED T362; AC4/AC5 remain PENDING T363. Entry-point
-// discipline: every fact drives the REAL production binary (WebApplicationFactory<Program>).
+// BDD specification — xUnit. AC1/AC2/AC4/AC5/AC6/AC7 all WIRED (T362 shipped AC1/AC2/AC6/AC7; T363
+// un-skips AC4/AC5, plus the T362 review LOW carry-forward's own GET /last-airing wire-shape fact).
+// Entry-point discipline: every fact drives the REAL production binary (WebApplicationFactory<Program>).
 //
-//   * AC1 (the editor saves the rule)/AC2 (the live pool size)/AC7 (validation) drive the real
-//     ShowsController PUT/GET routes over WebApplicationFactory<Program> against FakeShowStore
-//     (mirrors Story305_ShowsApi.cs's own "wire mapping, not re-derived validation" posture — the
-//     real SQL GetEnvelopeCandidateCountAsync/GetRotationSinceAsync issue lives in MediaRepository/
-//     MediaRotationRepository, not re-proven here) — a scripted IMediaCatalog/IMediaRotationSink
-//     stand in for AC2's own "6 never-aired playable rows" (this file's own concern is that the
-//     controller composes the show's rotation rule onto the station-default envelope and relays
-//     whatever the catalog answers, not that the SQL itself counts correctly).
+//   * AC1 (the editor saves the rule)/AC2 (the live pool size)/AC7 (validation)/the T362 carry-forward
+//     (the "never aired" wire shape) drive the real ShowsController/ShowRotationController PUT/GET
+//     routes over WebApplicationFactory<Program> against FakeShowStore (mirrors Story305_ShowsApi.cs's
+//     own "wire mapping, not re-derived validation" posture — the real SQL
+//     GetEnvelopeCandidateCountAsync/GetRotationSinceAsync issue lives in MediaRepository/
+//     MediaRotationRepository, not re-proven here) — a scripted IMediaCatalog/IMediaRotationSink/
+//     IBoothLogReader stand in for AC2's own "6 never-aired playable rows" and the carry-forward's own
+//     "never aired" answer (this file's own concern is that the controller composes/relays correctly,
+//     not that the SQL itself counts or reads correctly).
 //
-//   * AC6 (the framing pin) and the T362 review propagation fact both need the REAL
-//     IShowStore/IScheduleStore/CachingScheduleResolver chain (Support/EphemeralStationDatabase over
-//     a real ephemeral Postgres, the Story366/T351 factory idiom) — AC6 additionally drives the real
-//     ISegmentCopyWriter against a scripted LlmCompletionsStub (the T335/T352 idiom).
+//   * AC4 (a schema 1.1 manifest's envelope.rotation installs the rule)/AC5 (a 1.0 manifest installs
+//     with no rotation opinion), AC6 (the framing pin), and the T362 review propagation fact all need
+//     the REAL IShowStore/ShowRepository.ImportAsync SQL chain (Support/EphemeralStationDatabase over
+//     a real ephemeral Postgres, the Story366/T351 factory idiom) — AC4/AC5 POST a manifest through
+//     the real production import route and read the stored row back off the real IShowStore; AC6
+//     additionally drives the real ISegmentCopyWriter against a scripted LlmCompletionsStub (the
+//     T335/T352 idiom).
 namespace GenWave.Host.Tests.Specs;
 
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -122,18 +128,83 @@ public static class FeatureInstallAndTuneDeepCuts
             new RotationPredicate(0, null));
     }
 
+    // T362 carry-forward (LOW): GET /api/shows/{id}/last-airing's own "never aired" wire shape had
+    // only a jest mock pinning it — this fact drives the real production route/DTO and byte-compares
+    // the response body against the exact JSON string ShowLastAiringDto's own remarks promise
+    // (T362 review MED-3: ALWAYS 200, never a bare Ok(null) that ASP.NET Core's own
+    // HttpNoContentOutputFormatter would silently rewrite to a real, bodyless 204).
+    public sealed class ScenarioLastAiringWireShapeForANeverAiredShow
+    {
+        [Fact]
+        public async Task TheBodyIsExactlyBothFieldsNull()
+        {
+            var store = new FakeShowStore([SeedShow()]);
+            await using var factory = new RotationApiWebFactory(store, boothLogReader: new NeverAiredBoothLogReader());
+            var client = await RotationApiWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.GetAsync("/api/shows/1/last-airing");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadAsStringAsync();
+            Assert.Equal("""{"airedCount":null,"relaxed":null}""", body);
+        }
+
+        static Show SeedShow() =>
+            new(1, "Deep Cuts", "deep-cuts", null, null, null, null, DateTime.UtcNow, DateTime.UtcNow);
+    }
+
     public sealed class ScenarioManifestOneOneImportsTheRule
     {
-        // Given a catalog show manifest with envelope.rotation {maxPlays: 0}, When POST /api/shows/{slug}/import runs.
-        [Fact(Skip = "pending T363 (STORY-373 AC4)")]
-        public void TheInstalledShowsEnvelopeCarriesTheRule() => Assert.Fail("pending T363");
+        // Given a catalog show manifest with envelope.rotation {maxPlays: 0}, When POST /api/shows/{slug}/import runs
+        // through the real production route over a real ephemeral Postgres (SPEC F152.6, PLAN T363) —
+        // mirrors ScenarioARuleEditReachesTheResolverThroughTheContainer's own DeepCutsWebFactory/
+        // DeepCutsStationDatabase harness (the "real IShowStore, real ShowRepository.ImportAsync SQL"
+        // proof neither FakeShowStore nor a mocked catalog fetch could give this fact).
+        [Fact]
+        public async Task TheInstalledShowsEnvelopeCarriesTheRule()
+        {
+            await using var db = await DeepCutsStationDatabase.StartAsync();
+            await using var factory = new DeepCutsWebFactory(db, llmEndpoint: null, patterCadenceMinutes: 0);
+            var client = await DeepCutsWebFactory.LoggedInClientAsync(factory);
+
+            const string manifest = """
+                {"schemaVersion":1,"name":"Deep Cuts","tagline":"Dusting off the shelves",
+                 "flavor":"steady, unhurried","envelope":{"rotation":{"maxPlays":0}}}
+                """;
+            var response = await client.PostAsync(
+                "/api/shows/deep-cuts/import",
+                new StringContent(manifest, Encoding.UTF8, "application/json"));
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+
+            var showStore = factory.Services.GetRequiredService<IShowStore>();
+            var stored = await showStore.GetBySlugAsync("deep-cuts", CancellationToken.None);
+            Assert.Equal(new RotationPredicate(0, null), stored?.Rotation);
+        }
     }
 
     public sealed class ScenarioOlderManifestsStillImport
     {
-        // Given a 1.0 manifest with no envelope, When it is imported.
-        [Fact(Skip = "pending T363 (STORY-373 AC5)")]
-        public void TheShowInstallsWithANullRotationRule() => Assert.Fail("pending T363");
+        // Given a 1.0 manifest with no envelope, When it is imported through the real production route.
+        [Fact]
+        public async Task TheShowInstallsWithANullRotationRule()
+        {
+            await using var db = await DeepCutsStationDatabase.StartAsync();
+            await using var factory = new DeepCutsWebFactory(db, llmEndpoint: null, patterCadenceMinutes: 0);
+            var client = await DeepCutsWebFactory.LoggedInClientAsync(factory);
+
+            const string manifest = """
+                {"schemaVersion":1,"name":"Deep Cuts","tagline":"Dusting off the shelves",
+                 "flavor":"steady, unhurried"}
+                """;
+            var response = await client.PostAsync(
+                "/api/shows/deep-cuts/import",
+                new StringContent(manifest, Encoding.UTF8, "application/json"));
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+
+            var showStore = factory.Services.GetRequiredService<IShowStore>();
+            var stored = await showStore.GetBySlugAsync("deep-cuts", CancellationToken.None);
+            Assert.Null(stored?.Rotation);
+        }
     }
 
     public sealed class ScenarioTheFramingIsTheFlavorLineOnly
@@ -365,14 +436,31 @@ file sealed class ScriptedRotationSink(DateTimeOffset? since) : IMediaRotationSi
     public Task<long> GetNeverAiredCountAsync(CancellationToken ct) => Task.FromResult(0L);
 }
 
+/// <summary>Unconditionally answers "never aired" (SPEC F152.5, T362 carry-forward) — the T362
+/// review's own precedent for <see cref="IBoothLogReader.GetLastAiringAsync"/> doubles across this
+/// suite (e.g. <c>Story195_BoothLog.cs</c>'s own <c>FakeBoothLogReader</c> remarks): every other
+/// member is unreached by this file's own GET /last-airing wire fact.</summary>
+file sealed class NeverAiredBoothLogReader : IBoothLogReader
+{
+    public Task<BoothLogPage> ReadAsync(BoothLogCursor? before, int take, CancellationToken ct) =>
+        Task.FromResult(new BoothLogPage([], NextBefore: null));
+
+    public Task<long?> GetMediaIdAsync(long id, CancellationToken ct) => Task.FromResult<long?>(null);
+
+    public Task<ShowLastAiring?> GetLastAiringAsync(long showId, CancellationToken ct) =>
+        Task.FromResult<ShowLastAiring?>(null);
+}
+
 /// <summary>
 /// AC1/AC2/AC7's own web factory — mirrors Story305_ShowsApi.cs's <c>ShowsApiWebFactory</c> exactly
 /// (this file cannot reference that type: it is <see langword="file"/>-scoped to its own file), with
-/// two additional optional overrides (<paramref name="catalog"/>/<paramref name="rotationSink"/>) for
-/// AC2's own scripted pool read.
+/// three additional optional overrides (<paramref name="catalog"/>/<paramref name="rotationSink"/>/
+/// <paramref name="boothLogReader"/>) for AC2's own scripted pool read and the T362 carry-forward's
+/// own GET /last-airing wire fact.
 /// </summary>
 file sealed class RotationApiWebFactory(
-    FakeShowStore store, IMediaCatalog? catalog = null, IMediaRotationSink? rotationSink = null)
+    FakeShowStore store, IMediaCatalog? catalog = null, IMediaRotationSink? rotationSink = null,
+    IBoothLogReader? boothLogReader = null)
     : WebApplicationFactory<Program>
 {
     internal const string Password = "test-password-story373-rotation";
@@ -409,6 +497,12 @@ file sealed class RotationApiWebFactory(
             {
                 services.RemoveAll<IMediaRotationSink>();
                 services.AddSingleton(rotationSink);
+            }
+
+            if (boothLogReader is not null)
+            {
+                services.RemoveAll<IBoothLogReader>();
+                services.AddSingleton(boothLogReader);
             }
         });
     }

@@ -1034,7 +1034,7 @@ public static class FeatureShowRepository
             // When a show is imported under a fresh slug
             var imported = await repo.ImportAsync(
                 "night-moves", "Night Moves", "Late-night deep cuts", "moody, sparse", "catalog-entry-slug",
-                CancellationToken.None);
+                rotation: null, CancellationToken.None);
 
             // Then it lands whole, provenance stamped, and reads back identically (a fresh slug can
             // never trip the conflict-only WHERE guard — see ImportAsync's own remarks)
@@ -1056,13 +1056,15 @@ public static class FeatureShowRepository
             await db.ResetShowAsync();
             var repo = Repo(db);
             var first = await repo.ImportAsync(
-                "night-moves", "Night Moves", "First cut", "moody", "entry-a", CancellationToken.None);
+                "night-moves", "Night Moves", "First cut", "moody", "entry-a",
+                rotation: null, CancellationToken.None);
             Assert.NotNull(first);
 
             // When it is imported again, under the SAME slug, with different content and provenance —
             // the conflict-only WHERE guard passes (the existing row's own imported_from is non-null)
             var second = await repo.ImportAsync(
-                "night-moves", "Night Moves Redux", "Second cut", "moodier", "entry-b", CancellationToken.None);
+                "night-moves", "Night Moves Redux", "Second cut", "moodier", "entry-b",
+                rotation: null, CancellationToken.None);
 
             // Then the SAME row (id unchanged) is replaced whole — no duplicate insert — and
             // imported_at/updated_at both advance past the first import's own stamp
@@ -1088,7 +1090,7 @@ public static class FeatureShowRepository
 
             // When it is imported
             var imported = await repo.ImportAsync(
-                "night-moves", "Night Moves", "", "   ", "file", CancellationToken.None);
+                "night-moves", "Night Moves", "", "   ", "file", rotation: null, CancellationToken.None);
 
             // Then both collapse to null — the SAME NullIfBlank contract CreateAsync/UpdateAsync
             // already honour (Show's own "null when the show carries none" contract), never a stray
@@ -1116,7 +1118,8 @@ public static class FeatureShowRepository
 
             // When an import targets the SAME slug
             var imported = await repo.ImportAsync(
-                authored.Show.Slug, "Overwritten Show", null, null, "some-catalog-entry", CancellationToken.None);
+                authored.Show.Slug, "Overwritten Show", null, null, "some-catalog-entry",
+                rotation: null, CancellationToken.None);
 
             // Then the conditional upsert declines (null — the WHERE guard's own signal) and the
             // authored row survives completely unchanged, byte for byte.

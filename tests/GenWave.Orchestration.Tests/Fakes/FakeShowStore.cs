@@ -39,7 +39,9 @@ sealed class FakeShowStore : IShowStore
     public Task<ShowWriteResult> DeleteAsync(long id, CancellationToken ct) =>
         throw new NotSupportedException("FakeShowStore is an event-only double for CachingScheduleResolver specs.");
 
-    public Task<Show?> ImportAsync(string slug, string name, string? tagline, string? flavor, string importedFrom, CancellationToken ct) =>
+    public Task<Show?> ImportAsync(
+        string slug, string name, string? tagline, string? flavor, string importedFrom,
+        RotationPredicate? rotation, CancellationToken ct) =>
         throw new NotSupportedException("FakeShowStore is an event-only double for CachingScheduleResolver specs.");
 
     public Task<ShowWriteResult> SetRotationAsync(long id, RotationPredicate? rotation, CancellationToken ct) =>

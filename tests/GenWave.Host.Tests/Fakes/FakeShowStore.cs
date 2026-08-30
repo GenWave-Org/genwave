@@ -116,8 +116,22 @@ sealed class FakeShowStore : IShowStore
     /// <c>WHERE imported_from IS NOT NULL</c> conflict clause produces. No scripting knob otherwise —
     /// the OTHER sad-path import gates (route-slug shape/reservation, budgets) all run in
     /// ShowsController.Import BEFORE this is ever reached, so there is no further store-level outcome
-    /// left to script (mirrors FakeThemeStore.UpsertAsync's own unscripted shape).</summary>
-    public Task<Show?> ImportAsync(string slug, string name, string? tagline, string? flavor, string importedFrom, CancellationToken ct)
+    /// left to script (mirrors FakeThemeStore.UpsertAsync's own unscripted shape).
+    ///
+    /// <para>
+    /// <paramref name="rotation"/> (SPEC F152.6, PLAN T363) mirrors the real repository's own "no
+    /// opinion, never a clear" rule: <see langword="null"/> leaves an existing row's own
+    /// <c>Rotation</c> exactly as it stood (a fresh insert therefore starts at <c>Rotation</c>'s own
+    /// <see langword="null"/> default, the identical "stays whatever it already was" shape
+    /// <c>ShowRepository.CreateAsync</c>'s remarks give the real <c>envelope</c> column); non-null
+    /// replaces it outright, the same "SetRotationAsync</c>-shaped write" the real merge-via-jsonb
+    /// SQL performs (this in-memory double has no sibling <c>envelope</c> keys to preserve, so a plain
+    /// replace is the faithful analogue).
+    /// </para>
+    /// </summary>
+    public Task<Show?> ImportAsync(
+        string slug, string name, string? tagline, string? flavor, string importedFrom,
+        RotationPredicate? rotation, CancellationToken ct)
     {
         var existing = byId.Values.FirstOrDefault(s => s.Slug == slug);
         if (existing is { ImportedFrom: null })
@@ -125,7 +139,9 @@ sealed class FakeShowStore : IShowStore
 
         var now = DateTime.UtcNow;
         var show = existing is null
-            ? new Show(nextId++, name, slug, NullIfBlank(tagline), NullIfBlank(flavor), importedFrom, now, now, now)
+            ? new Show(
+                nextId++, name, slug, NullIfBlank(tagline), NullIfBlank(flavor), importedFrom, now, now, now,
+                rotation)
             : existing with
             {
                 Name = name,
@@ -134,8 +150,10 @@ sealed class FakeShowStore : IShowStore
                 ImportedFrom = importedFrom,
                 ImportedAt = now,
                 UpdatedAt = now,
+                Rotation = rotation ?? existing.Rotation,
             };
         byId[show.Id] = show;
+        ShowChanged?.Invoke();
         return Task.FromResult<Show?>(show);
     }
 

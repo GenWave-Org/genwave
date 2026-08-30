@@ -328,6 +328,57 @@ describe("Feature: The show shelf", () => {
     });
   });
 
+  describe("Scenario: the rotation rule in the confirm (SPEC F152.6, PLAN T363)", () => {
+    it("renders 'aired 0 times' — never 'at most' — for the exact-zero ceiling", async () => {
+      const fetchMock = showFlowFetchMock({
+        entry: makeJsonResponse(200, {
+          ...SHOW_DETAIL_WITH_OFFERABLE_SUGGESTION,
+          card: JSON.stringify({
+            schemaVersion: 1,
+            name: "Morning Drive",
+            tagline: "Wake up right",
+            flavor: "Upbeat, punchy, keep it moving before 9am — never mellow, never slow.",
+            envelope: { rotation: { maxPlays: 0, notAiredWithinDays: 30 } },
+          }),
+        }),
+      });
+      await openMorningDriveReview(fetchMock);
+
+      expect(
+        screen.getByText("Plays tracks aired 0 times and not aired in the last 30 days")
+      ).toBeInTheDocument();
+    });
+
+    // PLAN T363 review LOW-1: maxPlays is a CEILING (play_count <= maxPlays), not an exact count —
+    // "aired 3 times" would misstate a track that has aired anywhere from 0 to 3 times as having
+    // aired exactly 3. Pins the "at most" wording for the N > 0 case the zero-case fact above cannot
+    // exercise (0 reads identically under either wording).
+    it("renders 'aired at most N times' for a positive ceiling", async () => {
+      const fetchMock = showFlowFetchMock({
+        entry: makeJsonResponse(200, {
+          ...SHOW_DETAIL_WITH_OFFERABLE_SUGGESTION,
+          card: JSON.stringify({
+            schemaVersion: 1,
+            name: "Morning Drive",
+            tagline: "Wake up right",
+            flavor: "Upbeat, punchy, keep it moving before 9am — never mellow, never slow.",
+            envelope: { rotation: { maxPlays: 3, notAiredWithinDays: null } },
+          }),
+        }),
+      });
+      await openMorningDriveReview(fetchMock);
+
+      expect(screen.getByText("Plays tracks aired at most 3 times")).toBeInTheDocument();
+    });
+
+    it("renders no rule line when the manifest carries no rotation opinion (a 1.0 manifest)", async () => {
+      const fetchMock = showFlowFetchMock();
+      await openMorningDriveReview(fetchMock);
+
+      expect(screen.queryByText(/^Plays tracks/)).not.toBeInTheDocument();
+    });
+  });
+
   describe("Scenario: the soft hire offer", () => {
     it("offers 'also hire' when the suggested persona is on the shelf and not hired (SPEC F118.3)", async () => {
       const fetchMock = showFlowFetchMock();

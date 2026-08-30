@@ -66,7 +66,11 @@ public sealed class ShowRotationController(
     /// <see cref="ShowRotationBodyResult.Unchanged"/> case — this action never calls
     /// <see cref="Core.Abstractions.IShowStore.SetRotationAsync"/> for it, it simply re-reads and
     /// echoes the show); the property present as JSON <c>null</c> means "remove the rule"
-    /// (<see cref="ShowRotationBodyResult.Cleared"/>).
+    /// (<see cref="ShowRotationBodyResult.Cleared"/>). THIS is the one place a bare <c>rotation: null</c>
+    /// means CLEAR — <see cref="Core.Abstractions.IShowStore.ImportAsync"/>'s own <c>rotation</c>
+    /// parameter (PLAN T363) reads the identical explicit-<c>null</c> shape as NO OPINION instead (an
+    /// operator's own PUT can un-rule a show; a catalog card re-import can not — see that method's own
+    /// remarks for why).
     /// </para>
     ///
     /// <para>
@@ -230,18 +234,20 @@ public sealed class ShowRotationController(
         if (!TryReadOptionalInt(rotationElement, "notAiredWithinDays", out var notAiredWithinDays, out var notAiredError))
             return new ShowRotationBodyResult.Invalid("notAiredWithinDays", notAiredError);
 
-        if (maxPlays is null && notAiredWithinDays is null)
-            return new ShowRotationBodyResult.Invalid(
-                "rotation", "rotation must set at least one of maxPlays or notAiredWithinDays.");
-
-        if (maxPlays is < 0)
-            return new ShowRotationBodyResult.Invalid("maxPlays", "maxPlays must be at least 0.");
-
-        if (notAiredWithinDays is not null && (notAiredWithinDays < 1 || notAiredWithinDays > 3650))
-            return new ShowRotationBodyResult.Invalid(
-                "notAiredWithinDays", "notAiredWithinDays must be between 1 and 3650.");
-
-        return new ShowRotationBodyResult.Valid(new RotationPredicate(maxPlays, notAiredWithinDays));
+        // PLAN T363 review MED-3 — RotationPredicateRules is the ONE shared home for the three SPEC
+        // F152.1/F152.5 rules and their literal bounds (ShowManifestParser.ParseEnvelope's own import-
+        // edge gate shares it too); this action keeps its own refusal TEXT exactly as it already was,
+        // only naming WHICH field failed off the shared result.
+        return RotationPredicateRules.Validate(maxPlays, notAiredWithinDays) switch
+        {
+            RotationPredicateField.Rotation => new ShowRotationBodyResult.Invalid(
+                "rotation", "rotation must set at least one of maxPlays or notAiredWithinDays."),
+            RotationPredicateField.MaxPlays => new ShowRotationBodyResult.Invalid(
+                "maxPlays", "maxPlays must be at least 0."),
+            RotationPredicateField.NotAiredWithinDays => new ShowRotationBodyResult.Invalid(
+                "notAiredWithinDays", "notAiredWithinDays must be between 1 and 3650."),
+            _ => new ShowRotationBodyResult.Valid(new RotationPredicate(maxPlays, notAiredWithinDays)),
+        };
     }
 
     /// <summary>

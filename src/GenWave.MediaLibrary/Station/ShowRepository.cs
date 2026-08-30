@@ -236,26 +236,65 @@ sealed class ShowRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<ShowRepos
     /// does. Beyond this ONE gate, this method performs no other validation (mirrors
     /// <c>ThemeRepository.UpsertAsync</c>'s "pure persistence" posture otherwise) — route-slug
     /// shape/reservation and the 2× import budget ceiling already ran in <c>ShowsController.Import</c>
-    /// before this is ever called. Like <see cref="CreateAsync"/>/<see cref="UpdateAsync"/>, never
-    /// touches <c>envelope</c> — a manifest's own optional <c>envelope.rotation</c> (SPEC F152.6) is
-    /// PLAN T363's own write path, not this one's.
+    /// before this is ever called.
+    ///
+    /// <para>
+    /// <b><paramref name="rotation"/> (SPEC F152.6, PLAN T363) — "no opinion," not
+    /// <see cref="SetRotationAsync"/>'s own "clear."</b> <see langword="null"/> never touches
+    /// <c>envelope</c> at all — the INSERT branch leaves it at its column default (<see langword="null"/>
+    /// for a brand-new row, mirroring <see cref="CreateAsync"/>'s own "stays whatever it already was"
+    /// remark), and the CONFLICT branch's own <c>envelope</c> assignment is a self-reference
+    /// (<c>envelope = station.show.envelope</c>) — a byte-identical no-op write, so an existing show's
+    /// rotation rule (or any other dormant <c>envelope</c> key) survives a re-import that carries no
+    /// rotation opinion untouched. A non-null <paramref name="rotation"/> writes it the identical
+    /// <see cref="RotationEnvelopeCodec"/>/merge-via-jsonb-<c>||</c> way <see cref="SetRotationAsync"/>
+    /// does, on EITHER branch — a single <c>case</c> expression keyed off whether the codec's own JSON
+    /// text is <see langword="null"/> covers both "no opinion" and "write a rule" without two SQL
+    /// statements or a read-then-write pair (the identical atomicity <see cref="IShowStore.ImportAsync"/>'s
+    /// own remarks already promise for the rest of this statement).
+    /// </para>
     /// </summary>
-    public async Task<Show?> ImportAsync(string slug, string name, string? tagline, string? flavor, string importedFrom, CancellationToken ct)
+    public async Task<Show?> ImportAsync(
+        string slug, string name, string? tagline, string? flavor, string importedFrom,
+        RotationPredicate? rotation, CancellationToken ct)
     {
+        var rotationJson = RotationEnvelopeCodec.ToJson(rotation);
+
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<ShowRow>(new CommandDefinition(
             $"""
-            insert into station.show (name, slug, tagline, flavor, imported_from, imported_at)
-            values (@Name, @Slug, @Tagline, @Flavor, @ImportedFrom, now())
+            insert into station.show (name, slug, tagline, flavor, imported_from, imported_at, envelope)
+            values (
+              @Name, @Slug, @Tagline, @Flavor, @ImportedFrom, now(),
+              case when @RotationJson::text is null then null
+                   else jsonb_build_object('rotation', @RotationJson::jsonb)
+              end)
             on conflict (slug) do update
               set name = @Name, tagline = @Tagline, flavor = @Flavor,
-                  imported_from = @ImportedFrom, imported_at = now(), updated_at = now()
+                  imported_from = @ImportedFrom, imported_at = now(), updated_at = now(),
+                  envelope = case when @RotationJson::text is null then station.show.envelope
+                     else coalesce(station.show.envelope, jsonb_build_object())
+                       || jsonb_build_object('rotation', @RotationJson::jsonb)
+                  end
               where station.show.imported_from is not null
             {ReturningColumns}
             """,
-            new { Name = name, Slug = slug, Tagline = NullIfBlank(tagline), Flavor = NullIfBlank(flavor), ImportedFrom = importedFrom },
+            new
+            {
+                Name = name, Slug = slug, Tagline = NullIfBlank(tagline), Flavor = NullIfBlank(flavor),
+                ImportedFrom = importedFrom, RotationJson = rotationJson,
+            },
             cancellationToken: ct));
-        return row is null ? null : ToShow(row);
+
+        if (row is null) return null;
+
+        // SPEC F152.6, PLAN T363 (the T360 review HIGH-1 fix, extended to the import path — see
+        // IShowStore.ShowChanged's own remarks): raised unconditionally on every successful upsert, a
+        // fresh insert as much as a re-import, since either can leave a name/tagline/flavor/rotation
+        // edit an already-cached ScheduleWeekSnapshot needs to know about. Never raised on the declined
+        // (null) authored-collision case above.
+        ShowChanged?.Invoke();
+        return ToShow(row);
     }
 
     /// <summary>

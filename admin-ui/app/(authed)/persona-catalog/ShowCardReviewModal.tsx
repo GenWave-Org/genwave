@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { readErrorMessage } from "@/lib/problem-details";
 import { useRestoreFocus } from "@/lib/use-restore-focus";
 import { BestForChips, MatureBadge } from "./catalog-badges";
-import { parseShowCardReview, type ShowCardReview } from "./show-card-review";
+import { parseShowCardReview, rotationRuleLine, type ShowCardReview } from "./show-card-review";
 import type { CatalogEntryDetailDto } from "./types";
 
 export interface ShowCardReviewImportResult {
@@ -78,7 +78,10 @@ function TextSection({ label, value }: { label: string; value: string }): ReactN
  * folded into this one combined fetch+review+confirm modal rather than a separate always-visible
  * panel (PLAN T255's own dispatch note: a show manifest is three fields — there is no meaningful
  * "browse, then decide to review" step to split out the way a persona card's dozen sections earn
- * one).
+ * one). A schema 1.1 `envelope.rotation` (SPEC F152.6, PLAN T363) renders one plain-text line right
+ * beside flavor — "the rule in words" (e.g. "Plays tracks aired 0 times") — when the manifest
+ * carries one; a 1.0 manifest, or one whose `envelope` carries no rotation, renders nothing extra
+ * here at all.
  */
 function ReviewBody({
   review,
@@ -98,6 +101,9 @@ function ReviewBody({
       </div>
       <TextSection label="Tagline" value={review.tagline} />
       <TextSection label="Flavor (feeds the DJ's prompt)" value={review.flavor} />
+      {review.rotation !== null && (
+        <p className={SECTION_BODY_CLASSES}>{rotationRuleLine(review.rotation)}</p>
+      )}
 
       <BestForChips items={bestFor} />
 
