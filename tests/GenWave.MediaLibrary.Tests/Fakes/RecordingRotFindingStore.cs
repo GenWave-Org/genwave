@@ -42,6 +42,10 @@ public sealed class RecordingRotFindingStore : IRotFindingStore
         RotKind? kind, RotState? state, CancellationToken ct, int limit = 200, int offset = 0) =>
         throw new NotSupportedException("RecordingRotFindingStore only records ReconcileUnreachableAsync.");
 
+    public Task<IReadOnlyList<RotFindingWithMedia>> ListWithMediaAsync(
+        RotKind? kind, RotState? state, int limit, int offset, CancellationToken ct) =>
+        throw new NotSupportedException("RecordingRotFindingStore only records ReconcileUnreachableAsync.");
+
     public Task<IReadOnlyDictionary<RotKind, int>> CountOpenByKindAsync(CancellationToken ct) =>
         throw new NotSupportedException("RecordingRotFindingStore only records ReconcileUnreachableAsync.");
 }

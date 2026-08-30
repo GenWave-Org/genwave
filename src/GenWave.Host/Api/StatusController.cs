@@ -20,6 +20,7 @@ namespace GenWave.Host.Api;
 public sealed class StatusController(
     IMediaCatalog catalog,
     IMediaRotationSink rotationSink,
+    IRotFindingStore rotFindingStore,
     IStationScopeProvider scopeProvider,
     IOptionsMonitor<StationOptions> stationMonitor,
     IOptionsMonitor<LlmOptions> llmMonitor,
@@ -35,6 +36,7 @@ public sealed class StatusController(
     /// Admin:Password is set, same as every other <c>/api/*</c> controller). Returns:
     /// <c>{ startedAt, catalog: { ready, enriching, failed, unavailable }, safeScope: { libraryIds, playable },
     /// rotation: { playable, neverAired, airedOnce, notAiredDays90, rotationSince },
+    /// gardener: { open: { deadFile, nearDuplicate, staleMetadata, shelfDust, unreachable }, total },
     /// llm: { enabled, model, activePersona, lastOutcome, lastAttemptAt, dominantCause, dominantCauseCount, dominantCauseModel },
     /// degradation: { mode, pinned, since, cause },
     /// voice: { engine, degraded, reason, checkedAt } }</c>.
@@ -92,6 +94,16 @@ public sealed class StatusController(
     /// dashboard tile's own denominator ("N of playable never aired"); <c>rotationSince</c> is
     /// ISO-8601 (<see cref="DateTimeOffset"/>'s own default JSON shape), <see langword="null"/> only on
     /// a pre-Gardener install whose migration has never run.
+    ///
+    /// <c>gardener</c> (SPEC F153.9, STORY-374, PLAN T377) is the Gardener tile's own open-findings
+    /// aggregate, sourced from <see cref="IRotFindingStore.CountOpenByKindAsync"/> — the SAME
+    /// live-read-every-call posture <c>rotation</c> above follows. Every <see cref="RotKind"/> is
+    /// always present under <c>gardener.open</c> (<c>0</c> when the dictionary carries no entry for
+    /// it — <see cref="IRotFindingStore.CountOpenByKindAsync"/>'s own "absent, not present with a
+    /// zero" contract is a store-level micro-optimization this endpoint deliberately does NOT leak
+    /// onto the wire, so the Admin UI's own tile never has to special-case a missing key);
+    /// <c>gardener.total</c> is the sum across every kind — the tile's own single "N findings need
+    /// attention" headline number.
     /// </summary>
     [HttpGet("status")]
     public async Task<IActionResult> Get(CancellationToken ct)
@@ -101,6 +113,7 @@ public sealed class StatusController(
 
         var counts = await catalog.GetStatusCountsAsync(safeScope, ct);
         var rotation = await rotationSink.GetRotationHealthAsync(scopeProvider.Current, ct);
+        var gardenerOpenCounts = await rotFindingStore.CountOpenByKindAsync(ct);
         var persona = await personaAccessor.ResolveAsync(ct);
 
         var llmConfig = llmMonitor.CurrentValue;
@@ -132,6 +145,18 @@ public sealed class StatusController(
                 airedOnce = rotation.AiredOnce,
                 notAiredDays90 = rotation.NotAiredDays90,
                 rotationSince = rotation.RotationSince,
+            },
+            gardener = new
+            {
+                open = new
+                {
+                    deadFile = gardenerOpenCounts.GetValueOrDefault(RotKind.DeadFile),
+                    nearDuplicate = gardenerOpenCounts.GetValueOrDefault(RotKind.NearDuplicate),
+                    staleMetadata = gardenerOpenCounts.GetValueOrDefault(RotKind.StaleMetadata),
+                    shelfDust = gardenerOpenCounts.GetValueOrDefault(RotKind.ShelfDust),
+                    unreachable = gardenerOpenCounts.GetValueOrDefault(RotKind.Unreachable),
+                },
+                total = gardenerOpenCounts.Values.Sum(),
             },
             llm = new
             {

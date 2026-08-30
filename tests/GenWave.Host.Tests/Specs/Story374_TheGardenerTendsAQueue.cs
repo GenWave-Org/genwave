@@ -17,6 +17,8 @@
 // test seam — never a direct pass call) are both overridden small so these facts stay fast without
 // ever pretending the loop away.
 
+using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -133,9 +135,22 @@ public static class FeatureTheGardenerTendsAQueue
             Assert.False(arc.DismissOnResolvedRowSucceeded);
         }
 
-        // The HTTP half — T377's own endpoint.
-        [Fact(Skip = "pending T377 (STORY-374 AC4)")]
-        public void TheDismissPostSucceeds() => Assert.Fail("pending T377");
+        // The HTTP half — T377's own endpoint: dismiss a freshly-opened finding over
+        // POST /api/gardener/findings/{id}/dismiss with a real admin session.
+        [Fact]
+        public void TheDismissPostSucceeds()
+        {
+            Assert.Equal(HttpStatusCode.NoContent, arc.DismissPostFirstStatusCode);
+        }
+
+        // Given the SAME finding, already dismissed over HTTP, When the SAME POST is repeated: the
+        // store's own contract (DismissAsync returns false for anything but an OPEN row) surfaces as
+        // 404 the second time — dismiss is forever, never a repeatable no-op 204 (T377).
+        [Fact]
+        public void DismissingAnAlreadyDismissedFindingOverHttpIsNotFound()
+        {
+            Assert.Equal(HttpStatusCode.NotFound, arc.DismissPostSecondStatusCode);
+        }
     }
 
     public sealed class ScenarioTheLoopIsBoundedAndResilient(ThrowingPassArc arc) : IClassFixture<ThrowingPassArc>
@@ -195,21 +210,169 @@ public static class FeatureTheGardenerTendsAQueue
         }
     }
 
-    public sealed class ScenarioFindingsAreListedGrouped
+    [Collection(GardenerFindingsCollection.Name)]
+    public sealed class ScenarioFindingsAreListedGrouped(GardenerFindingsArc arc)
     {
         // Given open findings of three kinds, two near-duplicates sharing a group_key, When GET /api/gardener/findings is called.
-        [Fact(Skip = "pending T377 (STORY-374 AC7)")]
-        public void TheResponseGroupsFindingsByKind() => Assert.Fail("pending T377");
+        [Fact]
+        public void TheResponseIsOk()
+        {
+            Assert.Equal(HttpStatusCode.OK, arc.GroupedListingStatusCode);
+        }
 
-        [Fact(Skip = "pending T377 (STORY-374 AC7)")]
-        public void TheDuplicateGroupListsBothMembersWithPathDurationPlaysAndRating() => Assert.Fail("pending T377");
+        [Fact]
+        public void TheResponseGroupsFindingsByKind()
+        {
+            var kinds = arc.GroupedListing.GetProperty("groups")
+                .EnumerateArray()
+                .Select(g => g.GetProperty("kind").GetString())
+                .ToList();
+
+            Assert.Equal(["dead_file", "near_duplicate", "stale_metadata"], kinds);
+        }
+
+        [Fact]
+        public void TheDuplicateGroupListsBothMembersWithPathDurationPlaysAndRating()
+        {
+            var nearDuplicateGroup = arc.GroupedListing.GetProperty("groups")
+                .EnumerateArray()
+                .Single(g => g.GetProperty("kind").GetString() == "near_duplicate");
+
+            var duplicateGroup = Assert.Single(nearDuplicateGroup.GetProperty("duplicateGroups").EnumerateArray());
+            Assert.Equal("grp-1", duplicateGroup.GetProperty("groupKey").GetString());
+
+            var members = duplicateGroup.GetProperty("members").EnumerateArray()
+                .Select(m => m.GetProperty("media"))
+                .OrderBy(m => m.GetProperty("plays").GetInt32())
+                .ToList();
+
+            Assert.Equal(2, members.Count);
+
+            var withoutLedger = members[0];
+            Assert.Equal("/test/t377-dup2.flac", withoutLedger.GetProperty("path").GetString());
+            Assert.Equal(203000, withoutLedger.GetProperty("durationMs").GetInt32());
+            Assert.Equal(0, withoutLedger.GetProperty("plays").GetInt32());
+            Assert.Equal(JsonValueKind.Null, withoutLedger.GetProperty("rating").ValueKind);
+
+            var withLedger = members[1];
+            Assert.Equal("/test/t377-dup1.flac", withLedger.GetProperty("path").GetString());
+            Assert.Equal(200000, withLedger.GetProperty("durationMs").GetInt32());
+            Assert.Equal(3, withLedger.GetProperty("plays").GetInt32());
+            Assert.Equal(80, withLedger.GetProperty("rating").GetInt32());
+        }
+
+        [Fact]
+        public void EvidenceIsAJsonObjectNotAString()
+        {
+            var deadFileGroup = arc.GroupedListing.GetProperty("groups")
+                .EnumerateArray()
+                .Single(g => g.GetProperty("kind").GetString() == "dead_file");
+
+            var evidence = deadFileGroup.GetProperty("findings").EnumerateArray().Single().GetProperty("evidence");
+
+            Assert.Equal(JsonValueKind.Object, evidence.ValueKind);
+        }
     }
 
-    public sealed class ScenarioStatusCounts
+    [Collection(GardenerFindingsCollection.Name)]
+    public sealed class ScenarioFindingsFilters(GardenerFindingsArc arc)
+    {
+        // Given the same fixture, When GET /api/gardener/findings?kind=near_duplicate is called.
+        [Fact]
+        public void TheKindFilterOnlyReturnsThatKind()
+        {
+            var kinds = arc.KindFiltered.GetProperty("groups").EnumerateArray()
+                .Select(g => g.GetProperty("kind").GetString())
+                .ToList();
+
+            Assert.Equal(["near_duplicate"], kinds);
+        }
+
+        // Given the same fixture, When GET /api/gardener/findings?state=resolved is called.
+        [Fact]
+        public void TheStateFilterOnlyReturnsThatState()
+        {
+            var states = arc.StateFiltered.GetProperty("groups").EnumerateArray()
+                .SelectMany(g => g.GetProperty("findings").EnumerateArray())
+                .Select(f => f.GetProperty("state").GetString())
+                .ToList();
+
+            Assert.Equal(["resolved"], states);
+        }
+    }
+
+    [Collection(GardenerFindingsCollection.Name)]
+    public sealed class ScenarioFindingsPaging(GardenerFindingsArc arc)
+    {
+        // Given four open findings, When GET /api/gardener/findings?state=open&limit=0 is called —
+        // the endpoint's own clamp (never a 400) floors limit to 1.
+        [Fact]
+        public void LimitOfZeroIsClampedToOneRow()
+        {
+            var totalFindings = arc.LimitZeroListing.GetProperty("groups").EnumerateArray()
+                .Sum(g => g.GetProperty("findings").GetArrayLength());
+
+            Assert.Equal(1, totalFindings);
+        }
+
+        // Given the same fixture, When GET /api/gardener/findings?state=open&offset=-5 is called —
+        // clamped to 0, never a 400 (a negative offset would otherwise error in Postgres).
+        [Fact]
+        public void NegativeOffsetIsClampedNotRejected()
+        {
+            Assert.Equal(HttpStatusCode.OK, arc.OffsetNegativeStatusCode);
+        }
+
+        // Given the same fixture, When GET /api/gardener/findings?state=open&limit=5000 is called —
+        // the endpoint clamps to at most 1000 (never re-opening the T372 LOW-2 unbounded read).
+        [Fact]
+        public void HugeLimitSucceeds()
+        {
+            Assert.Equal(HttpStatusCode.OK, arc.LimitHugeStatusCode);
+        }
+
+        [Fact]
+        public void HugeLimitIsClampedBelowAThousand()
+        {
+            var totalFindings = arc.LimitHugeListing.GetProperty("groups").EnumerateArray()
+                .Sum(g => g.GetProperty("findings").GetArrayLength());
+
+            Assert.True(totalFindings <= 1000, $"expected at most 1000 findings, got {totalFindings}");
+        }
+    }
+
+    [Collection(GardenerFindingsCollection.Name)]
+    public sealed class ScenarioFindingsValidation(GardenerFindingsArc arc)
+    {
+        // Given no kind named "not_a_real_kind", When GET /api/gardener/findings?kind=not_a_real_kind is called.
+        [Fact]
+        public void UnknownKindIsBadRequest()
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, arc.UnknownKindStatusCode);
+        }
+
+        [Fact]
+        public void UnknownKindIsNeverEchoedInTheBody()
+        {
+            Assert.DoesNotContain("not_a_real_kind", arc.UnknownKindBody, StringComparison.Ordinal);
+        }
+    }
+
+    [Collection(GardenerFindingsCollection.Name)]
+    public sealed class ScenarioStatusCounts(GardenerFindingsArc arc)
     {
         // Given the findings above, When GET /api/status is called.
-        [Fact(Skip = "pending T377 (STORY-374 AC8)")]
-        public void TheGardenerSectionCarriesOpenCountsPerKind() => Assert.Fail("pending T377");
+        [Fact]
+        public void TheGardenerSectionCarriesOpenCountsPerKind()
+        {
+            var open = arc.StatusRoot.GetProperty("gardener").GetProperty("open");
+
+            Assert.Equal(1, open.GetProperty("deadFile").GetInt32());
+            Assert.Equal(2, open.GetProperty("nearDuplicate").GetInt32());
+            Assert.Equal(1, open.GetProperty("staleMetadata").GetInt32());
+            Assert.Equal(0, open.GetProperty("shelfDust").GetInt32());
+            Assert.Equal(0, open.GetProperty("unreachable").GetInt32());
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -219,8 +382,28 @@ public static class FeatureTheGardenerTendsAQueue
     public sealed class ScenarioAdminSurface
     {
         // Given no session, When GET /api/gardener/findings is called.
-        [Fact(Skip = "pending T377 (STORY-374 AC10)")]
-        public void TheResponseIsFourOhOne() => Assert.Fail("pending T377");
+        [Fact]
+        public async Task TheResponseIsFourOhOne()
+        {
+            await using var factory = new GardenerSurfaceWebFactory();
+            var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+            var response = await client.GetAsync("/api/gardener/findings");
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        // Given no session, When POST /api/gardener/findings/{id}/dismiss is called.
+        [Fact]
+        public async Task TheDismissResponseIsFourOhOne()
+        {
+            await using var factory = new GardenerSurfaceWebFactory();
+            var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+            var response = await client.PostAsync("/api/gardener/findings/1/dismiss", null);
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
     }
 }
 
@@ -259,6 +442,12 @@ public sealed class DeadFileLifecycleArc : IAsyncLifetime
     public DateTimeOffset? DismissedAtAfterDismissAndThreePasses { get; private set; }
     public DateTimeOffset OpenedAtAfterDismissAndThreePasses { get; private set; }
     public DateTimeOffset? ResolvedAtAfterDismissAndThreePasses { get; private set; }
+
+    // AC4's HTTP half (T377) — a FRESH finding, dismissed twice over
+    // POST /api/gardener/findings/{id}/dismiss with a real admin session: first 204, second 404
+    // (the store's own "only an OPEN row dismisses" contract, observed through the wire this time).
+    public HttpStatusCode DismissPostFirstStatusCode { get; private set; }
+    public HttpStatusCode DismissPostSecondStatusCode { get; private set; }
 
     public async Task InitializeAsync()
     {
@@ -319,6 +508,132 @@ public sealed class DeadFileLifecycleArc : IAsyncLifetime
         DismissedAtAfterDismissAndThreePasses = afterDismissAndPasses.DismissedAt;
         OpenedAtAfterDismissAndThreePasses = afterDismissAndPasses.OpenedAt;
         ResolvedAtAfterDismissAndThreePasses = afterDismissAndPasses.ResolvedAt;
+
+        // AC4's HTTP half (T377) — a SECOND, independent media row + finding, so the HTTP-level
+        // dismiss proof never disturbs the store-level lifecycle asserted above.
+        var httpMediaId = await GardenerRotFixtures.InsertMediaRowAsync(
+            database.LibraryConnectionString, "/test/t377-http-dismiss.flac", "failed");
+        await store.OpenDeadFileAsync(httpMediaId, "test-http-dismiss", CancellationToken.None);
+        var httpFinding = await GardenerRotFixtures.ReadFindingAsync(database.LibraryConnectionString, httpMediaId, "dead_file")
+            ?? throw new InvalidOperationException("expected a dead_file finding for the HTTP dismiss check");
+
+        var client = factory.CreateClient();
+        var login = await client.PostAsJsonAsync(
+            "/api/auth/login", new { password = "test-password-t372-gardener-direct" });
+        if (login.StatusCode != HttpStatusCode.NoContent)
+            throw new InvalidOperationException($"login unexpectedly returned {login.StatusCode}");
+
+        var firstDismiss = await client.PostAsync($"/api/gardener/findings/{httpFinding.Id}/dismiss", null);
+        DismissPostFirstStatusCode = firstDismiss.StatusCode;
+
+        var secondDismiss = await client.PostAsync($"/api/gardener/findings/{httpFinding.Id}/dismiss", null);
+        DismissPostSecondStatusCode = secondDismiss.StatusCode;
+    }
+
+    public Task DisposeAsync() => Task.CompletedTask;
+}
+
+// ── Collection definition — AC7/AC8's own findings fixture, shared by every listing/filter/paging/
+// validation/status Scenario above (the SAME "arrange once, many read-only Scenarios" idiom
+// DeadFileLifecycleCollection already establishes). ──
+
+[CollectionDefinition(Name)]
+public sealed class GardenerFindingsCollection : ICollectionFixture<GardenerFindingsArc>
+{
+    public const string Name = "Story377GardenerFindings";
+}
+
+/// <summary>
+/// STORY-374 AC7/AC8 (PLAN T377): five findings across four kinds — one <c>dead_file</c>, two
+/// <c>near_duplicate</c> sharing a <c>group_key</c> (one carrying a <c>media_rotation</c> ledger row
+/// PLUS a rating, the other carrying neither — proving the join's own 0/null defaults), one
+/// <c>stale_metadata</c>, and one RESOLVED <c>shelf_dust</c> (the state-filter fixture) — seeded
+/// directly via raw SQL (<see cref="GardenerRotFixtures"/>; never through a reconcile pass, the same
+/// "independent read of what actually landed" posture this file's own fixtures already establish for
+/// reads), then read back through the REAL production HTTP pipeline
+/// (<c>GET /api/gardener/findings</c>, <c>GET /api/status</c>) over a real admin session — the SAME
+/// <see cref="Story372DirectPassWebFactory"/>/<see cref="Story372GardenerDatabase"/> pair
+/// <see cref="DeadFileLifecycleArc"/> already uses (no kind-specific behavior in either, so reusing
+/// them here is not a second copy of anything).
+/// </summary>
+public sealed class GardenerFindingsArc : IAsyncLifetime
+{
+    public HttpStatusCode GroupedListingStatusCode { get; private set; }
+    public JsonElement GroupedListing { get; private set; }
+    public JsonElement KindFiltered { get; private set; }
+    public JsonElement StateFiltered { get; private set; }
+    public JsonElement LimitZeroListing { get; private set; }
+    public HttpStatusCode OffsetNegativeStatusCode { get; private set; }
+    public HttpStatusCode LimitHugeStatusCode { get; private set; }
+    public JsonElement LimitHugeListing { get; private set; }
+    public HttpStatusCode UnknownKindStatusCode { get; private set; }
+    public string UnknownKindBody { get; private set; } = "";
+    public JsonElement StatusRoot { get; private set; }
+
+    public async Task InitializeAsync()
+    {
+        await using var database = await Story372GardenerDatabase.StartAsync();
+
+        var deadId = await GardenerRotFixtures.InsertPlayableMediaRowAsync(
+            database.LibraryConnectionString, "/test/t377-dead.flac", 200000, "Dead Song", "Artist D");
+        await GardenerRotFixtures.InsertFindingAsync(
+            database.LibraryConnectionString, deadId, "dead_file", "open", null, """{"reason":"failed"}""");
+
+        var dup1Id = await GardenerRotFixtures.InsertPlayableMediaRowAsync(
+            database.LibraryConnectionString, "/test/t377-dup1.flac", 200000, "Song X", "Artist Y");
+        await GardenerRotFixtures.InsertRotationLedgerAsync(database.LibraryConnectionString, dup1Id, playCount: 3);
+        await GardenerRotFixtures.InsertRatingAsync(database.LibraryConnectionString, dup1Id, score: 80);
+        await GardenerRotFixtures.InsertFindingAsync(
+            database.LibraryConnectionString, dup1Id, "near_duplicate", "open", "grp-1", """{"titleVariant":null}""");
+
+        var dup2Id = await GardenerRotFixtures.InsertPlayableMediaRowAsync(
+            database.LibraryConnectionString, "/test/t377-dup2.flac", 203000, "Song X (Live)", "Artist Y");
+        await GardenerRotFixtures.InsertFindingAsync(
+            database.LibraryConnectionString, dup2Id, "near_duplicate", "open", "grp-1", """{"titleVariant":"live"}""");
+
+        var staleId = await GardenerRotFixtures.InsertPlayableMediaRowAsync(
+            database.LibraryConnectionString, "/test/t377-stale.flac", 180000, "", "");
+        await GardenerRotFixtures.InsertFindingAsync(
+            database.LibraryConnectionString, staleId, "stale_metadata", "open", null, """{"fields":["artist","title"]}""");
+
+        var resolvedId = await GardenerRotFixtures.InsertPlayableMediaRowAsync(
+            database.LibraryConnectionString, "/test/t377-resolved.flac", 150000, "Resolved Song", "Artist R");
+        await GardenerRotFixtures.InsertFindingAsync(
+            database.LibraryConnectionString, resolvedId, "shelf_dust", "resolved", null, "{}");
+
+        await using var factory = new Story372DirectPassWebFactory(database);
+        var client = factory.CreateClient();
+        var login = await client.PostAsJsonAsync(
+            "/api/auth/login", new { password = "test-password-t372-gardener-direct" });
+        if (login.StatusCode != HttpStatusCode.NoContent)
+            throw new InvalidOperationException($"login unexpectedly returned {login.StatusCode}");
+
+        var grouped = await client.GetAsync("/api/gardener/findings?state=open");
+        GroupedListingStatusCode = grouped.StatusCode;
+        GroupedListing = JsonDocument.Parse(await grouped.Content.ReadAsStringAsync()).RootElement.Clone();
+
+        var kindFiltered = await client.GetAsync("/api/gardener/findings?kind=near_duplicate");
+        KindFiltered = JsonDocument.Parse(await kindFiltered.Content.ReadAsStringAsync()).RootElement.Clone();
+
+        var stateFiltered = await client.GetAsync("/api/gardener/findings?state=resolved");
+        StateFiltered = JsonDocument.Parse(await stateFiltered.Content.ReadAsStringAsync()).RootElement.Clone();
+
+        var limitZero = await client.GetAsync("/api/gardener/findings?state=open&limit=0");
+        LimitZeroListing = JsonDocument.Parse(await limitZero.Content.ReadAsStringAsync()).RootElement.Clone();
+
+        var offsetNegative = await client.GetAsync("/api/gardener/findings?state=open&offset=-5");
+        OffsetNegativeStatusCode = offsetNegative.StatusCode;
+
+        var limitHuge = await client.GetAsync("/api/gardener/findings?state=open&limit=5000");
+        LimitHugeStatusCode = limitHuge.StatusCode;
+        LimitHugeListing = JsonDocument.Parse(await limitHuge.Content.ReadAsStringAsync()).RootElement.Clone();
+
+        var unknownKind = await client.GetAsync("/api/gardener/findings?kind=not_a_real_kind");
+        UnknownKindStatusCode = unknownKind.StatusCode;
+        UnknownKindBody = await unknownKind.Content.ReadAsStringAsync();
+
+        var status = await client.GetAsync("/api/status");
+        StatusRoot = JsonDocument.Parse(await status.Content.ReadAsStringAsync()).RootElement.Clone();
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -617,6 +932,34 @@ file sealed class Story372DirectPassWebFactory(Story372GardenerDatabase db) : We
 }
 
 /// <summary>
+/// STORY-374 AC10's own DB-less factory: a bogus <c>ConnectionStrings:Library</c> (never actually
+/// reached — the deny-by-default fallback policy 401s before the endpoint's own action, and
+/// therefore <c>GardenerController</c>'s constructor, is ever invoked, the same
+/// <c>StatusApiWebFactory.ScenarioDenyByDefault</c> precedent Story084_StatusEndpoint.cs already
+/// establishes) — no real ephemeral Postgres needed just to prove a 401.
+/// </summary>
+file sealed class GardenerSurfaceWebFactory : WebApplicationFactory<Program>
+{
+    internal const string Password = "test-password-t377-gardener-surface";
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
+        builder.UseSetting("Station:Id", "genwave-1");
+        builder.UseSetting("Station:Name", "GWAV 108.8");
+        builder.UseSetting("Station:Voice", "af_heart");
+        builder.UseSetting("Station:Scope:LibraryIds:0", "1");
+
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IHostedService>();
+        });
+    }
+}
+
+/// <summary>
 /// Boots the real production composition root with EVERY hosted service removed EXCEPT
 /// <c>GardenerService</c> — kept alive by NAME (captured before <c>RemoveAll&lt;IHostedService&gt;()</c>
 /// and re-added), since it is internal to <c>GenWave.MediaLibrary</c> and this test assembly carries
@@ -778,5 +1121,76 @@ public static class GardenerRotFixtures
             if (condition()) return;
             await Task.Delay(TimeSpan.FromSeconds(1));
         }
+    }
+
+    // ── PLAN T377 additions — GardenerFindingsArc's own arrangement helpers: a ready, playable media
+    // row carrying the tag/duration values the listing's own `media` projection surfaces, plus raw
+    // rot_finding/media_rotation/media_rating inserts (never through a reconcile pass — these arcs
+    // read back what the CONTROLLER shows an operator, not what a pass would compute). ──
+
+    public static async Task<long> InsertPlayableMediaRowAsync(
+        string libraryConnectionString, string path, int durationMs, string title, string artist)
+    {
+        await using var conn = new NpgsqlConnection(libraryConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            """
+            insert into library.media (path, format, size_bytes, mtime, state, duration_ms, title, artist, eligible)
+            values (@path, 'flac', 1024, now(), 'ready', @durationMs, @title, @artist, true)
+            returning id
+            """;
+        cmd.Parameters.AddWithValue("path", path);
+        cmd.Parameters.AddWithValue("durationMs", durationMs);
+        cmd.Parameters.AddWithValue("title", title);
+        cmd.Parameters.AddWithValue("artist", artist);
+        return (long)(await cmd.ExecuteScalarAsync() ?? throw new InvalidOperationException("insert returned no id"));
+    }
+
+    public static async Task InsertRotationLedgerAsync(string libraryConnectionString, long mediaId, int playCount)
+    {
+        await using var conn = new NpgsqlConnection(libraryConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "insert into library.media_rotation (media_id, play_count) values (@mediaId, @playCount)";
+        cmd.Parameters.AddWithValue("mediaId", mediaId);
+        cmd.Parameters.AddWithValue("playCount", playCount);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    public static async Task InsertRatingAsync(string libraryConnectionString, long mediaId, int score)
+    {
+        await using var conn = new NpgsqlConnection(libraryConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "insert into library.media_rating (media_id, score) values (@mediaId, @score)";
+        cmd.Parameters.AddWithValue("mediaId", mediaId);
+        cmd.Parameters.AddWithValue("score", score);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary><paramref name="stateText"/> <c>"resolved"</c> stamps <c>resolved_at</c> too, so
+    /// <see cref="GardenerFindingsArc"/>'s own state-filter fixture reads as a genuinely resolved row
+    /// rather than an open one with a misleading state column.</summary>
+    public static async Task<long> InsertFindingAsync(
+        string libraryConnectionString, long mediaId, string kindText, string stateText, string? groupKey, string evidenceJson)
+    {
+        await using var conn = new NpgsqlConnection(libraryConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            """
+            insert into library.rot_finding (media_id, kind, state, group_key, evidence, resolved_at)
+            values (
+                @mediaId, @kind::library.rot_kind, @state::library.rot_state, @groupKey, @evidence::jsonb,
+                case when @state = 'resolved' then now() else null end)
+            returning id
+            """;
+        cmd.Parameters.AddWithValue("mediaId", mediaId);
+        cmd.Parameters.AddWithValue("kind", kindText);
+        cmd.Parameters.AddWithValue("state", stateText);
+        cmd.Parameters.AddWithValue("groupKey", (object?)groupKey ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("evidence", evidenceJson);
+        return (long)(await cmd.ExecuteScalarAsync() ?? throw new InvalidOperationException("insert returned no id"));
     }
 }

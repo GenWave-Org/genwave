@@ -84,6 +84,12 @@ file sealed class VoiceStatusWebFactory : WebApplicationFactory<Program>
             services.RemoveAll<IMediaRotationSink>();
             services.AddSingleton<IMediaRotationSink>(new FakeMediaRotationSink());
 
+            // PLAN T377 (SPEC F153.9) — StatusController now also resolves IRotFindingStore;
+            // the real RotFindingRepository requires a live Postgres, same reason
+            // IMediaRotationSink is faked immediately above.
+            services.RemoveAll<IRotFindingStore>();
+            services.AddSingleton<IRotFindingStore>(new FakeRotFindingStore());
+
             // Replace IActivePersonaAccessor for the same reason: the real implementation resolves
             // through Postgres-backed stores before ever answering.
             services.RemoveAll<IActivePersonaAccessor>();

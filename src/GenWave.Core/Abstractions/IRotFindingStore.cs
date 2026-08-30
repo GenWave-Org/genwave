@@ -173,13 +173,57 @@ public interface IRotFindingStore
     /// Every finding matching the given filters, newest-opened first, bounded to
     /// <paramref name="limit"/> rows starting at <paramref name="offset"/> (T372 review LOW-2: the
     /// table carries findings forever with no retention, so an unbounded read was a live footgun the
-    /// moment the queue had any real depth — T377's admin surface reuses this same paging rather than
-    /// adding its own). <paramref name="kind"/>/<paramref name="state"/> <see langword="null"/> means
-    /// "any". Default <paramref name="limit"/> 200 matches this codebase's other admin-list page
-    /// sizes; callers needing a different page pass it explicitly.
+    /// moment the queue had any real depth). <paramref name="kind"/>/<paramref name="state"/>
+    /// <see langword="null"/> means "any". Default <paramref name="limit"/> 200 matches this
+    /// codebase's other admin-list page sizes; callers needing a different page pass it explicitly.
+    ///
+    /// <para>
+    /// <b>T377 review — the bound is callee-enforced.</b> A negative <paramref name="offset"/> errors
+    /// in Postgres and an unbounded/huge <paramref name="limit"/> re-opens the LOW-2 footgun even
+    /// with a well-behaved caller, so <c>Garden.RotFindingRepository</c> floors both itself
+    /// (<paramref name="limit"/> to at least 1, capped at 1000; <paramref name="offset"/> to at least
+    /// 0) rather than trusting every caller — including <see cref="ListWithMediaAsync"/>'s own callers
+    /// — to have already clamped them. <c>GardenerController</c>'s own endpoint clamp is a courtesy
+    /// (a friendlier response shape), never the only gate.
+    /// </para>
     /// </summary>
     Task<IReadOnlyList<RotFinding>> ListAsync(
         RotKind? kind, RotState? state, CancellationToken ct, int limit = 200, int offset = 0);
+
+    /// <summary>
+    /// <see cref="ListAsync"/>'s own filters and ordering (newest-opened first — a match kind, then
+    /// <see cref="RotFinding.GroupKey"/> so a <see cref="RotKind.NearDuplicate"/> pair's own rows sit
+    /// together, then <see cref="RotFinding.OpenedAt"/> descending), joined out to the
+    /// <c>library.media</c>/<c>library.media_rotation</c>/<c>library.media_rating</c> row each finding
+    /// is about — T377's admin surface (SPEC F153.9, STORY-374 AC7) reuses this same paging AND the
+    /// SAME callee-enforced floor <see cref="ListAsync"/>'s own remarks describe, rather than adding
+    /// its own bound.
+    ///
+    /// <para>
+    /// <b>Rows are paged FLAT, before <c>GardenerController</c> ever groups them by kind (T377
+    /// review MED).</b> The <c>limit</c>/<c>offset</c> window applies to the ROW sequence this method
+    /// returns, not to "N groups" or "N findings per kind" — a caller paging with a small
+    /// <paramref name="limit"/> can see a <see cref="RotKind.NearDuplicate"/> group split across a
+    /// page boundary (its own rows are adjacent within one page thanks to the <c>group_key</c>
+    /// ordering above, but a page edge can still fall inside a group). <c>GardenerController</c>'s
+    /// own default is 200, ceiling 1000 (<see cref="ListAsync"/>'s own bound) — the admin queue is
+    /// small enough in practice that a caller wanting the WHOLE thing in one page (T378's own review
+    /// queue) simply passes <c>limit=1000</c>. Per-kind OPEN totals are <see cref="CountOpenByKindAsync"/>'s
+    /// own job (surfaced on <c>GET /api/status</c>) — a page of THIS method's own result is never the
+    /// right place to derive a total count from, since it is bounded by construction.
+    /// </para>
+    ///
+    /// <para>
+    /// T377 review LOW-2: the <c>order by</c> behind this method is NOT index-covered —
+    /// <c>group_key</c> sits mid-key (between <c>kind</c> and <c>opened_at</c>), and no index on
+    /// <c>library.rot_finding</c> leads with it, so Postgres sorts the whole filtered join result
+    /// before applying <c>LIMIT</c> rather than walking an already-ordered index. The bound above is
+    /// what keeps that sort cheap regardless of table size — see
+    /// <c>Garden.RotFindingRepository.ListWithMediaAsync</c>'s own remarks for the query itself.
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<RotFindingWithMedia>> ListWithMediaAsync(
+        RotKind? kind, RotState? state, int limit, int offset, CancellationToken ct);
 
     /// <summary>
     /// How many <see cref="RotState.Open"/> findings exist per <see cref="RotKind"/> right now — the

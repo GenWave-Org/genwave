@@ -669,30 +669,41 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
     }
 
     /// <summary>
-    /// Bounded, paged (T372 review LOW-2; T377 pages it further for the admin surface, SPEC F153.9)
-    /// — conditional predicates appended only when the matching filter is supplied, the same
-    /// <c>MediaRotationRepository.AppendSafeExclusion</c>-style short-circuit rather than a
-    /// nullable-cast comparison in SQL. <c>evidence::text</c> keeps the jsonb column opaque to
-    /// Dapper (the <c>FontPack.Definition</c> precedent) — this Core-level record never parses it.
-    /// <c>order by opened_at desc</c> is covered by the <c>(kind, state, opened_at desc)</c> index
-    /// (db/41) rather than a sequential scan over the forever-growing table.
+    /// Bounded, paged (T372 review LOW-2) — conditional predicates appended only when the matching
+    /// filter is supplied, the same <c>MediaRotationRepository.AppendSafeExclusion</c>-style
+    /// short-circuit rather than a nullable-cast comparison in SQL. <c>evidence::text</c> keeps the
+    /// jsonb column opaque to Dapper (the <c>FontPack.Definition</c> precedent) — this Core-level
+    /// record never parses it. <c>order by opened_at desc</c> is covered by the
+    /// <c>(kind, state, opened_at desc)</c> index (db/41) rather than a sequential scan over the
+    /// forever-growing table.
+    ///
+    /// <para>
+    /// T377 review — <paramref name="limit"/>/<paramref name="offset"/> are floored HERE
+    /// (<see cref="ClampPaging"/>), not just at <c>GardenerController</c>'s own endpoint: a negative
+    /// <paramref name="offset"/> errors in Postgres's <c>OFFSET</c> clause, and an unbounded/huge
+    /// <paramref name="limit"/> re-opens the exact LOW-2 footgun this method's own bound exists to
+    /// close — the bound is callee-enforced so it holds regardless of what any current or future
+    /// caller passes.
+    /// </para>
     /// </summary>
     public async Task<IReadOnlyList<RotFinding>> ListAsync(
         RotKind? kind, RotState? state, CancellationToken ct, int limit = 200, int offset = 0)
     {
+        (limit, offset) = ClampPaging(limit, offset);
+
         var conditions = new List<string>();
         var parameters = new DynamicParameters();
 
         if (kind is not null)
         {
             conditions.Add("kind = @kind::library.rot_kind");
-            parameters.Add("kind", ToKindText(kind.Value));
+            parameters.Add("kind", RotKindTokens.ToToken(kind.Value));
         }
 
         if (state is not null)
         {
             conditions.Add("state = @state::library.rot_state");
-            parameters.Add("state", ToStateText(state.Value));
+            parameters.Add("state", RotStateTokens.ToToken(state.Value));
         }
 
         parameters.Add("limit", limit);
@@ -715,6 +726,95 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
 
         return rows.Select(ToFinding).ToList();
     }
+
+    /// <summary>
+    /// <see cref="ListAsync"/>'s own filters, joined out to <c>library.media</c>/
+    /// <c>library.media_rotation</c>/<c>library.media_rating</c> for the admin surface's listing
+    /// (SPEC F153.9; STORY-374 AC7; PLAN T377) — <c>GardenerController</c>'s ONE new joined read
+    /// rather than an N-lookup fan-out. Ordered <c>kind, group_key nulls last, opened_at desc, id</c>
+    /// — a <see cref="RotKind.NearDuplicate"/> group's own rows land adjacent (id breaks ties for a
+    /// stable order across pages) so the controller's own grouping never has to re-sort. <c>join</c>
+    /// (not <c>left join</c>) against <c>library.media</c>: a <c>rot_finding</c> row's own FK
+    /// guarantees the media row still exists (<c>on delete cascade</c>, db/41) — a genuine orphan
+    /// would be a data-integrity bug this query should surface as a thrown mapping failure, not paper
+    /// over with a null-media row the controller would then have to special-case. <c>plays</c>
+    /// defaults to 0 (never null) for a media id with no <c>media_rotation</c> row; <c>rating</c>
+    /// stays null (never the F33.2 ledger default of 50) so "never rated" and "rated 50" stay
+    /// distinguishable to an operator triaging a finding.
+    ///
+    /// <para>
+    /// Same callee-enforced <see cref="ClampPaging"/> floor <see cref="ListAsync"/>'s own remarks
+    /// describe — <paramref name="limit"/>/<paramref name="offset"/> are floored here regardless of
+    /// what <c>GardenerController</c>'s own endpoint clamp already did.
+    /// </para>
+    ///
+    /// <para>
+    /// T377 review LOW-2: this <c>order by</c> is NOT index-covered — <c>group_key</c> sits mid-key
+    /// (between <c>kind</c> and <c>opened_at</c>), and no index on this table leads with it, so
+    /// Postgres sorts the whole FILTERED join result before applying <c>LIMIT</c>, rather than
+    /// walking an already-ordered index. The bound (<see cref="ClampPaging"/>'s own 1000-row cap) is
+    /// what keeps that sort cheap regardless of how large <c>library.rot_finding</c> grows — the
+    /// same reason <see cref="ListAsync"/>'s own <c>(kind, state, opened_at desc)</c> index note
+    /// exists, this query just does not get to reuse it once <c>group_key</c> joins the sort key.
+    /// </para>
+    /// </summary>
+    public async Task<IReadOnlyList<RotFindingWithMedia>> ListWithMediaAsync(
+        RotKind? kind, RotState? state, int limit, int offset, CancellationToken ct)
+    {
+        (limit, offset) = ClampPaging(limit, offset);
+
+        var conditions = new List<string>();
+        var parameters = new DynamicParameters();
+
+        if (kind is not null)
+        {
+            conditions.Add("f.kind = @kind::library.rot_kind");
+            parameters.Add("kind", RotKindTokens.ToToken(kind.Value));
+        }
+
+        if (state is not null)
+        {
+            conditions.Add("f.state = @state::library.rot_state");
+            parameters.Add("state", RotStateTokens.ToToken(state.Value));
+        }
+
+        parameters.Add("limit", limit);
+        parameters.Add("offset", offset);
+
+        var where = conditions.Count > 0 ? "where " + string.Join(" and ", conditions) : "";
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<RotFindingWithMediaRow>(new CommandDefinition(
+            $"""
+            select
+                f.id, f.media_id, f.kind::text as kind, f.state::text as state, f.group_key,
+                f.evidence::text as evidence, f.opened_at, f.resolved_at, f.dismissed_at, f.updated_at,
+                m.path as locator, m.title, m.artist, m.duration_ms,
+                coalesce(rot.play_count, 0) as plays, r.score as rating,
+                coalesce(r.never_play, false) as never_play, m.eligible
+            from library.rot_finding f
+            join library.media m on m.id = f.media_id
+            left join library.media_rotation rot on rot.media_id = m.id
+            left join library.media_rating r on r.media_id = m.id
+            {where}
+            order by f.kind, f.group_key nulls last, f.opened_at desc, f.id
+            limit @limit offset @offset
+            """,
+            parameters,
+            cancellationToken: ct));
+
+        return rows.Select(ToFindingWithMedia).ToList();
+    }
+
+    /// <summary>
+    /// T377 review — the ONE place <paramref name="limit"/>/<paramref name="offset"/> are floored,
+    /// shared by <see cref="ListAsync"/> and <see cref="ListWithMediaAsync"/> so the two paged reads
+    /// can never drift apart on the bound: <paramref name="limit"/> to at least 1, capped at 1000
+    /// (the LOW-2 finding's own figure); <paramref name="offset"/> to at least 0 (a negative value
+    /// errors in Postgres's own <c>OFFSET</c> clause rather than clamping there).
+    /// </summary>
+    static (int Limit, int Offset) ClampPaging(int limit, int offset) =>
+        (limit <= 0 ? 1 : Math.Min(limit, 1000), Math.Max(0, offset));
 
     /// <summary>
     /// SPEC F153.9's <c>GET /api/status</c> Gardener tile (T377): one grouped count over
@@ -740,39 +840,26 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
         row.Id, row.MediaId, ParseKind(row.Kind), ParseState(row.State), row.GroupKey, row.Evidence,
         row.OpenedAt, row.ResolvedAt, row.DismissedAt, row.UpdatedAt);
 
-    static string ToKindText(RotKind kind) => kind switch
-    {
-        RotKind.DeadFile => "dead_file",
-        RotKind.NearDuplicate => "near_duplicate",
-        RotKind.StaleMetadata => "stale_metadata",
-        RotKind.ShelfDust => "shelf_dust",
-        RotKind.Unreachable => "unreachable",
-        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unmapped RotKind."),
-    };
+    static RotFindingWithMedia ToFindingWithMedia(RotFindingWithMediaRow row) => new(
+        new RotFinding(
+            row.Id, row.MediaId, ParseKind(row.Kind), ParseState(row.State), row.GroupKey, row.Evidence,
+            row.OpenedAt, row.ResolvedAt, row.DismissedAt, row.UpdatedAt),
+        row.Locator, row.Title, row.Artist, row.DurationMs, row.Plays, row.Rating,
+        row.NeverPlay, row.Eligible);
 
-    static RotKind ParseKind(string kind) => kind switch
-    {
-        "dead_file" => RotKind.DeadFile,
-        "near_duplicate" => RotKind.NearDuplicate,
-        "stale_metadata" => RotKind.StaleMetadata,
-        "shelf_dust" => RotKind.ShelfDust,
-        "unreachable" => RotKind.Unreachable,
-        _ => throw new InvalidOperationException($"Unrecognised library.rot_kind value '{kind}'."),
-    };
+    /// <summary>T377 review BLOCKING: the switch-based map itself now lives ONLY in
+    /// <see cref="RotKindTokens"/> — this is a thin DB-invariant assertion over it (a row read back
+    /// from <c>library.rot_finding</c> whose <c>kind::text</c> does not round-trip is a data-integrity
+    /// bug, not a caller error, so it stays a throw rather than a <see langword="bool"/> the caller
+    /// would have to check).</summary>
+    static RotKind ParseKind(string kind) =>
+        RotKindTokens.TryParse(kind, out var parsed)
+            ? parsed
+            : throw new InvalidOperationException($"Unrecognised library.rot_kind value '{kind}'.");
 
-    static string ToStateText(RotState state) => state switch
-    {
-        RotState.Open => "open",
-        RotState.Dismissed => "dismissed",
-        RotState.Resolved => "resolved",
-        _ => throw new ArgumentOutOfRangeException(nameof(state), state, "Unmapped RotState."),
-    };
-
-    static RotState ParseState(string state) => state switch
-    {
-        "open" => RotState.Open,
-        "dismissed" => RotState.Dismissed,
-        "resolved" => RotState.Resolved,
-        _ => throw new InvalidOperationException($"Unrecognised library.rot_state value '{state}'."),
-    };
+    /// <summary>Same DB-invariant assertion as <see cref="ParseKind"/>, over <see cref="RotStateTokens"/>.</summary>
+    static RotState ParseState(string state) =>
+        RotStateTokens.TryParse(state, out var parsed)
+            ? parsed
+            : throw new InvalidOperationException($"Unrecognised library.rot_state value '{state}'.");
 }
