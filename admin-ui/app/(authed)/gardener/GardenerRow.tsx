@@ -14,6 +14,7 @@ import {
   type GardenerKind,
 } from "@/lib/gardener-api";
 import { NeverPlayControl } from "../catalog/NeverPlayControl";
+import { FileActionDialog } from "./FileActionDialog";
 
 interface GardenerRowProps {
   kind: GardenerKind;
@@ -63,12 +64,17 @@ function fileNameFromPath(path: string): string {
  *
  * Dismiss confirms first (SMOKE-1, SPEC F153.2): a dismissed finding is never re-opened by any
  * pass, so it is the one verb on this row that is not a single click.
+ *
+ * "Fix…" (SPEC F154; STORY-379; PLAN T381, gh-#529) opens {@link FileActionDialog} — every kind
+ * EXCEPT `dead_file` (the file is gone; there is nothing on disk left to retag/rename/move).
  */
 export function GardenerRow({ kind, finding, onChanged, extraAction }: GardenerRowProps): ReactNode {
   const confirm = useConfirm();
   const [pending, setPending] = useState(false);
+  const [fixing, setFixing] = useState(false);
   const media = finding.media;
   const title = media.title ?? fileNameFromPath(media.path);
+  const canFix = kind !== "dead_file";
 
   async function run(action: () => Promise<void>): Promise<void> {
     setPending(true);
@@ -173,10 +179,27 @@ export function GardenerRow({ kind, finding, onChanged, extraAction }: GardenerR
           Re-enrich
         </Button>
 
+        {canFix && (
+          <Button type="button" variant="secondary" disabled={pending} onClick={() => setFixing(true)}>
+            Fix…
+          </Button>
+        )}
+
         <Button type="button" variant="secondary" disabled={pending} onClick={() => void handleDismiss()}>
           Dismiss
         </Button>
       </div>
+
+      {fixing && (
+        <FileActionDialog
+          mediaId={finding.mediaId}
+          onCancel={() => setFixing(false)}
+          onChanged={() => {
+            setFixing(false);
+            onChanged();
+          }}
+        />
+      )}
     </div>
   );
 }

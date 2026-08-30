@@ -3,10 +3,12 @@ namespace GenWave.Core.Domain;
 /// <summary>
 /// The catalog row an <see cref="Abstractions.IFileActionPlanner"/> plans against (SPEC F154.1,
 /// F154.3, F154.5; STORY-379; PLAN T379, gh-#529) — a caller-assembled snapshot: the row itself
-/// (<see cref="MediaId"/>/<see cref="Xmin"/>/<see cref="Path"/>/<see cref="LibraryId"/>), the
-/// catalog's own tag fields, and (for a retag) the file's current tags as the caller last read them.
-/// The planner never queries the database or opens the file itself — every fact it reasons about
-/// arrives on this record.
+/// (<see cref="MediaId"/>/<see cref="Xmin"/>/<see cref="Path"/>/<see cref="LibraryId"/>) and the
+/// catalog's own tag fields. The planner never queries the database itself — every catalog fact it
+/// reasons about arrives on this record — but DOES open the file itself for a retag's own tag diff
+/// (<see cref="Abstractions.IFileActionPlanner"/>'s own remarks: via <see cref="Abstractions.IFileTagReader"/>,
+/// only after the subject's own destination gate has already passed) — T381 review N4 moved that
+/// read off this record and into the planner itself, so a refused subject is never opened at all.
 /// </summary>
 /// <param name="MediaId">The <c>library.media</c> row id — carried onto the resulting plan and, once
 /// minted, onto the plan token (F154.5's <c>(media id, xmin, from, to)</c> binding).</param>
@@ -28,9 +30,6 @@ namespace GenWave.Core.Domain;
 /// the catalog-side <c>library.media.year</c> column's own width, unlike
 /// <see cref="FileTags.Year"/>'s file-tag-side <see cref="uint"/>.</param>
 /// <param name="Genre">The catalog's own genre value, or <see langword="null"/>.</param>
-/// <param name="CurrentFileTags">The file's own tags as the caller last read them (retag's diff
-/// input), or <see langword="null"/> when the caller has no reading (rename/move never need one).
-/// </param>
 public sealed record FileActionSubject(
     long MediaId,
     string Xmin,
@@ -40,5 +39,4 @@ public sealed record FileActionSubject(
     string? Title,
     string? Album,
     int? Year,
-    string? Genre,
-    FileTags? CurrentFileTags);
+    string? Genre);

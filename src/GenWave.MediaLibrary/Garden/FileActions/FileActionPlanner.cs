@@ -7,8 +7,12 @@ namespace GenWave.MediaLibrary.Garden.FileActions;
 
 /// <summary>
 /// The Library Gardener's file-action jail (SPEC F154.1, F154.3, F154.4, F154.5; STORY-379; PLAN
-/// T379, gh-#529) — pure computation over <see cref="FileActionSubject"/> plus whatever
-/// <see cref="IFileSystemProbe"/> answers; no Postgres, no direct file I/O of its own.
+/// T379/T381 review N4, gh-#529) — pure computation over <see cref="FileActionSubject"/> plus
+/// whatever <see cref="IFileSystemProbe"/> answers, and — for retag only, and only AFTER the
+/// subject's own destination gate has already passed — a read through
+/// <see cref="IFileTagReader"/> (T381 review N4: moved here from the caller, so a refused subject
+/// is never opened at all; see <see cref="PlanRetag"/>'s own remarks). No Postgres, no other file
+/// I/O of its own.
 ///
 /// <para>
 /// <b>Root mapping (SPEC F154.3's own amendment ruling):</b> this codebase scans exactly one
@@ -69,13 +73,15 @@ namespace GenWave.MediaLibrary.Garden.FileActions;
 /// B6): the destination directory is reached through a symlink, even one that resolves to somewhere
 /// still inside the root; (12) <see cref="FileActionRule.TargetExists"/> — rename/move, <c>Kind</c>
 /// again; (13) <see cref="FileActionRule.NothingToRetag"/> — retag only, right after step 7 passes
-/// (retag has no steps 8-12 — its destination IS its source).
+/// (retag has no steps 8-12 — its destination IS its source; step 13 is also the FIRST point this
+/// class ever reads the file's own tags, via <see cref="IFileTagReader"/> — T381 review N4).
 /// </para>
 /// </summary>
 sealed class FileActionPlanner(
     IOptionsMonitor<LibraryOptions> libraryOptions,
     IOptionsMonitor<ScanOptions> scanOptions,
-    IFileSystemProbe fileSystemProbe) : IFileActionPlanner
+    IFileSystemProbe fileSystemProbe,
+    IFileTagReader fileTagReader) : IFileActionPlanner
 {
     /// <summary>The one scanned library (SPEC F154.3's amendment ruling) — mirrors
     /// <c>Scan.ScanService.ScannedLibraryId</c> exactly; kept as its own constant here rather than a
@@ -144,9 +150,19 @@ sealed class FileActionPlanner(
         };
     }
 
-    static FileActionPlanResult PlanRetag(FileActionSubject subject, DateTimeOffset now)
+    /// <summary>
+    /// T381 review N4: the file's own CURRENT tags are read HERE — not on the caller's own
+    /// <see cref="FileActionSubject"/> — and only once every earlier rule in <see cref="Plan"/> has
+    /// already let <paramref name="subject"/> through its own destination gate (step 7 of this
+    /// class's own ordered rule list). A subject refused for any earlier reason (NotScannedLibrary,
+    /// ExemptRoot, SubjectOutsideRoot, SymlinkEscape, …) is therefore NEVER opened at all — the
+    /// planner's own "no I/O before refusal" posture now covers this read too, not just the
+    /// filesystem probe.
+    /// </summary>
+    FileActionPlanResult PlanRetag(FileActionSubject subject, DateTimeOffset now)
     {
-        var diff = TagDiffCalculator.Compute(subject);
+        var fileTags = fileTagReader.TryRead(subject.Path);
+        var diff = TagDiffCalculator.Compute(subject, fileTags);
         if (diff.Count == 0)
             return FileActionPlanResult.Refused(FileActionRule.NothingToRetag);
 

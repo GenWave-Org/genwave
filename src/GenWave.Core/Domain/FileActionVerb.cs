@@ -9,8 +9,9 @@ public enum FileActionVerb
 {
     /// <summary>Writes the catalog's artist/title/album/year/genre into the file's own tags via
     /// TagLibSharp; audio bytes are untouched (F154.1). <see cref="Abstractions.IFileActionPlanner"/>
-    /// never opens the file itself — the caller supplies the file's current tags on
-    /// <see cref="FileActionSubject.CurrentFileTags"/>.</summary>
+    /// reads the file's own current tags itself, via <see cref="Abstractions.IFileTagReader"/>, only
+    /// AFTER the subject has already passed the jail's own destination gate (T381 review N4).
+    /// </summary>
     Retag,
 
     /// <summary>Renames the file within its own directory — either the operator-supplied name or the

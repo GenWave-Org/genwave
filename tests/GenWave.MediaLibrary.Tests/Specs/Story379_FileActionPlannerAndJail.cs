@@ -31,11 +31,18 @@ public static class FeatureFileActionPlannerAndJail
     // Shared test scaffolding
     // ---------------------------------------------------------------------
 
-    static FileActionPlanner BuildPlanner(string root, string[]? exemptRoots = null, IFileSystemProbe? probe = null) =>
+    // T381 review N4: fileTagReader defaults to a fresh RecordingFileTagReader answering null (a
+    // tagless read) — every fact that is NOT specifically about the retag diff itself passes no
+    // override and never inspects it; ScenarioRetagDiff's own facts (and the "zero reads on a
+    // refused retag" pin below) build their OWN instance instead, so they can both script the
+    // answer AND assert on ReadCount afterward.
+    static FileActionPlanner BuildPlanner(
+        string root, string[]? exemptRoots = null, IFileSystemProbe? probe = null, IFileTagReader? fileTagReader = null) =>
         new(
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions { MediaRoot = root }),
             new FakeOptionsMonitor<ScanOptions>(new ScanOptions { QuarantineExemptRoots = exemptRoots ?? [] }),
-            probe ?? new FileSystemProbe());
+            probe ?? new FileSystemProbe(),
+            fileTagReader ?? new RecordingFileTagReader());
 
     /// <summary>A root directory containing a real subject file at <c>{root}/a/{fileName}</c> — the
     /// common arrangement every jail fact starts from.</summary>
@@ -58,9 +65,8 @@ public static class FeatureFileActionPlannerAndJail
         string? title = null,
         string? album = null,
         int? year = null,
-        string? genre = null,
-        FileTags? fileTags = null) =>
-        new(mediaId, xmin, path, libraryId, artist, title, album, year, genre, fileTags);
+        string? genre = null) =>
+        new(mediaId, xmin, path, libraryId, artist, title, album, year, genre);
 
     static byte[] TestKey() => Encoding.UTF8.GetBytes("0123456789abcdef0123456789abcdef");
 
@@ -130,20 +136,22 @@ public static class FeatureFileActionPlannerAndJail
     {
         readonly string root;
         readonly string subjectPath;
-        readonly FileActionPlanner planner;
 
         public ScenarioRetagDiff()
         {
             (root, _, subjectPath) = CreateSubjectTree();
-            planner = BuildPlanner(root);
         }
 
         public void Dispose() => Directory.Delete(root, recursive: true);
 
+        // T381 review N4: the file's own tags now arrive via IFileTagReader, read by the planner
+        // itself — each fact below scripts its OWN RecordingFileTagReader answer rather than
+        // passing tags on the subject.
         [Fact]
         public void ADifferingFieldProducesOneTagChange()
         {
-            var subject = Subject(subjectPath, artist: "A", fileTags: new FileTags("B", null, null, null, null));
+            var planner = BuildPlanner(root, fileTagReader: new RecordingFileTagReader(new FileTags("B", null, null, null, null)));
+            var subject = Subject(subjectPath, artist: "A");
 
             var result = planner.Plan(subject, FileActionVerb.Retag, null, Now);
 
@@ -153,7 +161,8 @@ public static class FeatureFileActionPlannerAndJail
         [Fact]
         public void EqualTagsAreRefusedAsNothingToRetag()
         {
-            var subject = Subject(subjectPath, artist: "A", fileTags: new FileTags("A", null, null, null, null));
+            var planner = BuildPlanner(root, fileTagReader: new RecordingFileTagReader(new FileTags("A", null, null, null, null)));
+            var subject = Subject(subjectPath, artist: "A");
 
             var result = planner.Plan(subject, FileActionVerb.Retag, null, Now);
 
@@ -163,9 +172,8 @@ public static class FeatureFileActionPlannerAndJail
         [Fact]
         public void ANullCatalogFieldProducesNoChangeForIt()
         {
-            var subject = Subject(
-                subjectPath, artist: "A", album: null,
-                fileTags: new FileTags("B", null, "SomeFileAlbum", null, null));
+            var planner = BuildPlanner(root, fileTagReader: new RecordingFileTagReader(new FileTags("B", null, "SomeFileAlbum", null, null)));
+            var subject = Subject(subjectPath, artist: "A", album: null);
 
             var result = planner.Plan(subject, FileActionVerb.Retag, null, Now);
 
@@ -176,9 +184,8 @@ public static class FeatureFileActionPlannerAndJail
         [Fact]
         public void AWhitespaceOnlyCatalogFieldProducesNoChangeForIt()
         {
-            var subject = Subject(
-                subjectPath, artist: "   ", title: "T",
-                fileTags: new FileTags("SomeFileArtist", null, null, null, null));
+            var planner = BuildPlanner(root, fileTagReader: new RecordingFileTagReader(new FileTags("SomeFileArtist", null, null, null, null)));
+            var subject = Subject(subjectPath, artist: "   ", title: "T");
 
             var result = planner.Plan(subject, FileActionVerb.Retag, null, Now);
 
@@ -372,6 +379,21 @@ public static class FeatureFileActionPlannerAndJail
             var result = planner.Plan(Subject(subjectPath, artist: "A"), FileActionVerb.Retag, null, Now);
 
             Assert.Equal(FileActionRule.ExemptRoot, result.Refusal!.Value.Rule);
+        }
+
+        // T381 review N4: the file's own tags must never be opened for a subject the destination
+        // gate has already refused — RecordingFileTagReader.ReadCount is the direct proof PlanRetag
+        // was never reached at all, not merely that its RESULT happened to discard whatever it read.
+        [Fact]
+        public void TheFileTagReaderIsNeverCalled()
+        {
+            var reader = new RecordingFileTagReader();
+            var planner = BuildPlanner(root, [exemptDir], fileTagReader: reader);
+
+            var result = planner.Plan(Subject(subjectPath, artist: "A"), FileActionVerb.Retag, null, Now);
+
+            Assert.True(result.IsRefused);
+            Assert.Equal(0, reader.ReadCount);
         }
     }
 

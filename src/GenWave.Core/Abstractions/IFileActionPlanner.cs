@@ -4,17 +4,20 @@ namespace GenWave.Core.Abstractions;
 
 /// <summary>
 /// Plans one of the Library Gardener's three file actions — retag, rename, move (SPEC F154.1,
-/// F154.3; STORY-379; PLAN T379, gh-#529) — and enforces the jail (canonicalise, symlink-resolve,
-/// root-prefix, exempt roots, never-overwrite) before any write is even considered. Pure: no I/O of
-/// its own beyond whatever the implementation's own filesystem probe performs, no database access,
-/// framework-free (L1) — a plan is either produced or refused, in one synchronous call.
+/// F154.3; STORY-379; PLAN T379/T381 review N4, gh-#529) — and enforces the jail (canonicalise,
+/// symlink-resolve, root-prefix, exempt roots, never-overwrite) before any write — or any file
+/// READ — is even considered. No database access, framework-free (L1); no I/O of its own beyond the
+/// implementation's own filesystem probe and — for a retag, and only once the subject has already
+/// passed its own destination gate — a read of the file's CURRENT tags via
+/// <see cref="IFileTagReader"/> (T381 review N4: the caller no longer supplies these; a refused
+/// subject is never opened at all). A plan is either produced or refused, in one synchronous call.
 /// </summary>
 public interface IFileActionPlanner
 {
     /// <summary>
     /// Plans <paramref name="verb"/> against <paramref name="subject"/>, or refuses it and names why.
     /// </summary>
-    /// <param name="subject">The row and its tags, as the caller last read them.</param>
+    /// <param name="subject">The catalog row's own snapshot.</param>
     /// <param name="verb">Which of the three actions to plan.</param>
     /// <param name="target">
     /// For <see cref="FileActionVerb.Rename"/>: an optional operator-supplied file NAME (no

@@ -488,19 +488,184 @@ describe("Feature: the Gardener page (SPEC F153.10)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Feature: Gardener page — file actions (PLAN T381, STORY-379; still pending — F154 is a later
-// task, per SPEC F153.10's own "the page mints no new mutation beyond dismiss" line)
+// Feature: Gardener page — file actions (SPEC F154.1-F154.5, STORY-379, PLAN T381) — the "Fix…"
+// button (excluded for dead_file — see GardenerRow's own remarks) opens FileActionDialog, which
+// posts to the two endpoints below. Fixtures mirror the real GardenerFileActionsController wire
+// shape (files/GenWave.Host/Api/GardenerFileActionsController.cs, PLAN T381).
 // ---------------------------------------------------------------------------
 
-describe("Feature: Gardener page file actions (pending T381)", () => {
+describe("Feature: Gardener page file actions (SPEC F154, STORY-379, PLAN T381)", () => {
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.clearAllMocks();
+  });
+
+  function makeFileActionFetchMock(routes: {
+    dryRun?: RouteResponseSpec;
+    confirm?: RouteResponseSpec;
+  }): jest.MockedFunction<typeof fetch> {
+    const fn = jest.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      const method = init?.method ?? "GET";
+      const url = String(input);
+
+      if (method === "GET" && url.includes("/api/gardener/findings")) {
+        return toResponse({ status: 200, body: FINDINGS_FIXTURE });
+      }
+      if (method === "GET" && url.includes("/api/status")) {
+        return toResponse({ status: 200, body: statusFixture() });
+      }
+      if (method === "POST" && url === "/api/gardener/file-actions/dry-run") {
+        return toResponse(routes.dryRun ?? { status: 200, body: {} });
+      }
+      if (method === "POST" && url === "/api/gardener/file-actions/confirm") {
+        return toResponse(routes.confirm ?? { status: 200, body: {} });
+      }
+      throw new Error(`unexpected fetch call: ${method} ${url}`);
+    });
+    global.fetch = fn as unknown as typeof fetch;
+    return fn;
+  }
+
+  /** Opens the Fix dialog off the (single-row) Stale metadata section — never near_duplicate, whose
+   * rows render through DuplicateGroupCard instead of straight into the section's own row list. */
+  async function openFixDialog(): Promise<HTMLElement> {
+    const section = await screen.findByRole("region", { name: "Stale metadata" });
+    fireEvent.click(within(section).getByRole("button", { name: "Fix…" }));
+    return screen.findByRole("dialog", { name: "Fix this file" });
+  }
+
+  describe("Scenario: dead_file rows never offer Fix (T381 review N5 — the file is gone)", () => {
+    it("the Dead files section renders no Fix button", async () => {
+      makeFileActionFetchMock({});
+      renderPage();
+
+      const section = await screen.findByRole("region", { name: "Dead files" });
+
+      expect(within(section).queryByRole("button", { name: "Fix…" })).not.toBeInTheDocument();
+    });
+  });
+
   describe("Scenario: the file-action dry-run shows the plan before executing", () => {
-    it.todo("choosing a file action on a row renders the returned plan's from and to paths (pending T381, STORY-379 AC2)");
-    it.todo("confirming the plan posts its plan_token to the confirm endpoint (pending T381, STORY-379 AC3)");
+    it("choosing a file action on a row renders the returned plan's from and to paths (STORY-379 AC2)", async () => {
+      makeFileActionFetchMock({
+        dryRun: {
+          status: 200,
+          body: {
+            from: "/media/stale.flac",
+            to: "/media/Artist - Title.flac",
+            tagDiff: [],
+            planToken: "tok-1",
+            expiresAt: "2026-01-01T00:10:00Z",
+          },
+        },
+      });
+      renderPage();
+
+      const dialog = await openFixDialog();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Dry run" }));
+
+      expect(await within(dialog).findByTitle("/media/stale.flac")).toBeInTheDocument();
+      expect(await within(dialog).findByTitle("/media/Artist - Title.flac")).toBeInTheDocument();
+    });
+
+    it("confirming the plan posts its plan_token to the confirm endpoint (STORY-379 AC3)", async () => {
+      const mockFetch = makeFileActionFetchMock({
+        dryRun: {
+          status: 200,
+          body: {
+            from: "/media/stale.flac",
+            to: "/media/stale.flac",
+            tagDiff: [],
+            planToken: "tok-confirm-1",
+            expiresAt: "2026-01-01T00:10:00Z",
+          },
+        },
+        confirm: { status: 200, body: { outcome: "done", to: "/media/stale.flac" } },
+      });
+      renderPage();
+
+      const dialog = await openFixDialog();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Dry run" }));
+      fireEvent.click(await within(dialog).findByRole("button", { name: "Confirm" }));
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          "/api/gardener/file-actions/confirm",
+          expect.objectContaining({ method: "POST", body: JSON.stringify({ planToken: "tok-confirm-1" }) })
+        );
+      });
+    });
   });
 
   describe("Scenario: file actions disabled (sad path)", () => {
-    it.todo(
-      "when the dry-run endpoint 404s, the page shows how to enable Gardener file actions (pending T381, STORY-379 AC1)"
-    );
+    it("when the dry-run endpoint 404s, the page shows how to enable Gardener file actions (STORY-379 AC1)", async () => {
+      makeFileActionFetchMock({
+        dryRun: {
+          status: 404,
+          body: { detail: "Gardener:FileActions:Enabled is false — set it to true to use this endpoint." },
+        },
+      });
+      renderPage();
+
+      const dialog = await openFixDialog();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Dry run" }));
+
+      expect(await within(dialog).findByText(/Gardener__FileActions__Enabled=true/)).toBeInTheDocument();
+    });
+  });
+
+  describe("Scenario: a refusal shows the rule's own message (sad path)", () => {
+    // T381 review N3: Detail is the capitalised operator sentence ALONE (no snake_case rule
+    // prefix — Dean's copy rule); the machine token travels on its own `rule` extension member
+    // instead (GardenerFileActionsController.RefusalProblem's own remarks) — this fixture pins
+    // the ACTUAL wire shape, not the old string-concatenated one.
+    it("a refusal from dry-run shows the rule's message as the dialog's error line", async () => {
+      makeFileActionFetchMock({
+        dryRun: {
+          status: 400,
+          body: {
+            detail: "The catalog and the file's own tags already agree — there is nothing to retag.",
+            rule: "nothing_to_retag",
+          },
+        },
+      });
+      renderPage();
+
+      const dialog = await openFixDialog();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Dry run" }));
+
+      expect(
+        await within(dialog).findByText(
+          "The catalog and the file's own tags already agree — there is nothing to retag."
+        )
+      ).toBeInTheDocument();
+    });
+
+    it("the refusal message never carries the snake_case rule token", async () => {
+      makeFileActionFetchMock({
+        dryRun: {
+          status: 400,
+          body: {
+            detail: "The catalog and the file's own tags already agree — there is nothing to retag.",
+            rule: "nothing_to_retag",
+          },
+        },
+      });
+      renderPage();
+
+      const dialog = await openFixDialog();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Dry run" }));
+      await within(dialog).findByText(
+        "The catalog and the file's own tags already agree — there is nothing to retag."
+      );
+
+      expect(dialog.textContent ?? "").not.toContain("nothing_to_retag:");
+    });
   });
 });

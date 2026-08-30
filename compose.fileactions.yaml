@@ -1,0 +1,24 @@
+# =============================================================================
+# compose.fileactions.yaml — opt-in read-write media mount for the Library Gardener's file
+# actions (SPEC F154; STORY-379; PLAN T381, gh-#529).
+#
+#   docker compose -f compose.yaml -f compose.fileactions.yaml up
+#
+# What it is: ONLY the api service's own /media mount, widened from :ro to :rw so retag/rename/move
+# can actually write. Compose merges `volumes:` entries by target path (compose.yaml:201's own
+# `${MEDIA_DIR:?}:/media:ro`), so this is the whole override — nothing else about the api service,
+# or any other service, is touched. Stack this on top of compose.yaml (and compose.pinned.yaml/
+# compose.demo.yaml, in either order) whenever an operator has ALSO set
+# `Gardener__FileActions__Enabled=true` (default off, F154.2's own fail-closed posture) — the two
+# knobs are independent, and the mount is INVISIBLE to the gate that checks the other one:
+# Gardener__FileActions__Enabled=true alone (this file NOT stacked, mount stays :ro) still plans a
+# dry-run to a 200 — the planner does no filesystem write — but the matching confirm fails at
+# EXECUTION (the OS refuses the write; the executor's own outcome is `failed` or `reverted`, never a
+# clean `done`). This file alone (Enabled left false) does nothing either — the endpoint 404s before
+# the mount would ever matter. Both knobs must be on for a file action to actually complete.
+# =============================================================================
+
+services:
+  api:
+    volumes:
+      - ${MEDIA_DIR:?}:/media:rw                # READ-WRITE: opt-in for the gardener's file actions (F154)

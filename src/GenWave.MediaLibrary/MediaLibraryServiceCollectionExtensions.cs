@@ -195,6 +195,12 @@ public static class MediaLibraryServiceCollectionExtensions
         services.AddSingleton<IFileActionPlanTokens>(
             _ => new HmacFileActionPlanTokens(RandomNumberGenerator.GetBytes(32)));
 
+        // The dry-run endpoint's own read-only tag probe (SPEC F154.1; STORY-379; PLAN T381,
+        // gh-#529) — a retag caller opens the file's CURRENT tags through this port rather than
+        // reaching for TagLibSharp itself; IFileActionPlanner never opens a file (see its own
+        // remarks).
+        services.AddSingleton<IFileTagReader, FileTagReader>();
+
         // The executors: retag/rename/move (SPEC F154.4, F154.6-F154.8; STORY-379; PLAN T380,
         // gh-#529). IScanGate is registered ONCE, singleton, and consumed by BOTH ScanService's own
         // tick (below) and FileActionExecutor — the same shared mutual-exclusion primitive so a scan
@@ -204,6 +210,11 @@ public static class MediaLibraryServiceCollectionExtensions
         services.AddSingleton<IScanGate, ScanGate>();
         services.AddSingleton<FileActionRepository>();
         services.AddSingleton<IFileActionExecutor, FileActionExecutor>();
+        // The dry-run endpoint's own subject read (SPEC F154.1, F154.3; STORY-379; PLAN T381,
+        // gh-#529) — the SAME IAdminMediaLookup/MediaRepository "public port over an internal
+        // repository" shape: GenWave.Host reaches FileActionRepository.ReadSubjectAsync only
+        // through this port, never the concrete (internal) type.
+        services.AddSingleton<IFileActionSubjectReader>(sp => sp.GetRequiredService<FileActionRepository>());
 
         // gh-#99: the narrow cross-schema membership answer the taste-thumb/booth-log surfaces
         // need — resolved on the library connection because station_svc deliberately has no grant

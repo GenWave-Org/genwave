@@ -4,19 +4,23 @@ using GenWave.Core.Domain;
 namespace GenWave.MediaLibrary.Garden.FileActions;
 
 /// <summary>
-/// Builds a retag's tag diff (SPEC F154.1, F154.5; STORY-379; PLAN T379, gh-#529) — split out of
-/// <see cref="FileActionPlanner"/> for cohesion. The catalog value always wins; a
+/// Builds a retag's tag diff (SPEC F154.1, F154.5; STORY-379; PLAN T381 review N4, gh-#529) — split
+/// out of <see cref="FileActionPlanner"/> for cohesion. The catalog value always wins; a
 /// <see langword="null"/> OR EMPTY/WHITESPACE catalog value never produces a <see cref="TagChange"/>
 /// (T379 review N8 — never blanks a tag the catalog has no real opinion on). String fields compare
 /// ordinal; <see cref="FileActionSubject.Year"/>
 /// (catalog, <see cref="int"/>) and <see cref="FileTags.Year"/> (file, <see cref="uint"/>) compare
 /// numerically, never by their string forms.
+///
+/// <paramref name="fileTags"/> is the caller's own reading of the file's CURRENT tags (T381 review
+/// N4 — <see cref="FileActionPlanner"/> reads it via <see cref="GenWave.Core.Abstractions.IFileTagReader"/>
+/// AFTER the subject's own destination gate has already passed, never before), <see langword="null"/>
+/// when the read failed or the file is tagless — treated identically to every field being absent.
 /// </summary>
 static class TagDiffCalculator
 {
-    public static IReadOnlyList<TagChange> Compute(FileActionSubject subject)
+    public static IReadOnlyList<TagChange> Compute(FileActionSubject subject, FileTags? fileTags)
     {
-        var fileTags = subject.CurrentFileTags;
         var changes = new List<TagChange>();
 
         AddIfChanged(changes, "artist", fileTags?.Artist, subject.Artist);

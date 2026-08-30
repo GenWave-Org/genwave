@@ -1,6 +1,7 @@
 using Dapper;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 
 namespace GenWave.MediaLibrary.Garden.FileActions;
@@ -12,8 +13,13 @@ namespace GenWave.MediaLibrary.Garden.FileActions;
 /// <c>GenWave.MediaLibrary.Garden</c> may touch Npgsql/Dapper), connection-per-call against the
 /// library's own <see cref="NpgsqlDataSource"/>, the same shape <c>RotFindingRepository</c>/
 /// <c>MediaThumbRepository</c> already establish one seam over.
+///
+/// Also implements <see cref="IFileActionSubjectReader"/> (PLAN T381) — the ONE read the dry-run
+/// endpoint needs, exposed to <c>GenWave.Host</c> through that public port rather than this
+/// (internal) type itself, the same <c>IAdminMediaLookup</c>/<c>MediaRepository</c> shape.
 /// </summary>
 sealed class FileActionRepository(NpgsqlDataSource dataSource, ILogger<FileActionRepository> logger)
+    : IFileActionSubjectReader
 {
     /// <summary>
     /// Re-reads <paramref name="mediaId"/>'s current <c>(xmin, path)</c> — the executor's own TOCTOU
@@ -28,6 +34,31 @@ sealed class FileActionRepository(NpgsqlDataSource dataSource, ILogger<FileActio
         return await conn.QuerySingleOrDefaultAsync<FileActionBindingRow>(new CommandDefinition(
             "select xmin::text as xmin, path from library.media where id = @mediaId",
             new { mediaId }, cancellationToken: ct));
+    }
+
+    /// <summary>
+    /// Reads <paramref name="mediaId"/>'s current catalog snapshot — the dry-run endpoint's own
+    /// <see cref="FileActionSubject"/> source (SPEC F154.1, F154.3; STORY-379; PLAN T381, gh-#529).
+    /// This repository performs no file I/O of its own (T381 review N4 moved the file's own tag read
+    /// into <see cref="IFileActionPlanner"/> itself, via <see cref="IFileTagReader"/>, AFTER the
+    /// subject's own destination gate — never here). <see langword="null"/> when no row exists with
+    /// this id — the caller's own 404 decision, never echoed here.
+    /// </summary>
+    public async Task<FileActionSubject?> ReadSubjectAsync(long mediaId, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<FileActionSubjectRow>(new CommandDefinition(
+            """
+            select xmin::text as xmin, path, library_id, artist, title, album, year, genre
+            from library.media
+            where id = @mediaId
+            """,
+            new { mediaId }, cancellationToken: ct));
+
+        return row is null
+            ? null
+            : new FileActionSubject(
+                mediaId, row.Xmin, row.Path, row.LibraryId, row.Artist, row.Title, row.Album, row.Year, row.Genre);
     }
 
     /// <summary>

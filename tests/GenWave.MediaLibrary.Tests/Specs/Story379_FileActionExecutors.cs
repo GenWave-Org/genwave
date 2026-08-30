@@ -58,11 +58,15 @@ public static class FeatureFileActionExecutors
     // Shared scaffolding
     // ─────────────────────────────────────────────────────────────────────────
 
+    // T381 review N4: the planner now reads a retag's own file tags itself, via IFileTagReader —
+    // the REAL, production FileTagReader here (not a fake), since every fact in this file already
+    // arranges a REAL mp3 on disk and wants a genuine TagLib read exactly like the endpoint gets.
     static FileActionPlanner BuildPlanner(string root) =>
         new(
             new FakeOptionsMonitor<LibraryOptions>(new LibraryOptions { MediaRoot = root }),
             new FakeOptionsMonitor<ScanOptions>(new ScanOptions()),
-            new FileSystemProbe());
+            new FileSystemProbe(),
+            new FileTagReader());
 
     static FileActionRepository FileRepo(DatabaseFixture db) =>
         new(db.DataSource, NullLogger<FileActionRepository>.Instance);
@@ -116,9 +120,10 @@ public static class FeatureFileActionExecutors
         return (root, subjectDir, subjectPath, mediaId, repo);
     }
 
-    /// <summary>Re-reads the row's <c>(xmin, path, library_id)</c> and pairs it with the file's own
-    /// current tags (read via TagLib, the same open T381's confirm endpoint will perform) to build a
-    /// plan-ready <see cref="FileActionSubject"/>. The catalog fields default to
+    /// <summary>Re-reads the row's <c>(xmin, path, library_id)</c> to build a plan-ready
+    /// <see cref="FileActionSubject"/> — the file's own current tags are no longer carried here
+    /// (T381 review N4: <see cref="FileActionPlanner"/> reads them itself, via
+    /// <see cref="BuildPlanner"/>'s own real <c>FileTagReader</c>). The catalog fields default to
     /// <see cref="ArrangeReadyRowAsync"/>'s own written values — a caller overrides exactly the
     /// field(s) a fact is about; <see langword="null"/> is a real, expressible override (SPEC F154.1:
     /// no catalog opinion on that field), never silently replaced by the row's current value.</summary>
@@ -131,7 +136,7 @@ public static class FeatureFileActionExecutors
         var row = await conn.QuerySingleAsync<(string Xmin, string Path, long LibraryId)>(
             "select xmin::text as xmin, path, library_id from library.media where id = @mediaId", new { mediaId });
 
-        return new FileActionSubject(mediaId, row.Xmin, row.Path, row.LibraryId, artist, title, album, year, genre, ReadFileTags(row.Path));
+        return new FileActionSubject(mediaId, row.Xmin, row.Path, row.LibraryId, artist, title, album, year, genre);
     }
 
     /// <summary>Plans <paramref name="verb"/> against the row's current binding and executes it in

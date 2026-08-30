@@ -1,12 +1,12 @@
 namespace GenWave.Core.Domain;
 
 /// <summary>
-/// A file's OWN tags, as the caller last read them off disk (SPEC F154.1; STORY-379; PLAN T379,
-/// gh-#529) — never read by <see cref="Abstractions.IFileActionPlanner"/> itself, which stays pure;
-/// the caller (the confirm/dry-run endpoint, T381) opens the file via TagLibSharp and hands the
-/// result in on <see cref="FileActionSubject.CurrentFileTags"/>. <see cref="Year"/> is
-/// <see cref="uint"/> to match TagLib's own <c>Tag.Year</c> property exactly, unlike
-/// <see cref="FileActionSubject.Year"/>'s catalog-side <see cref="int"/>.
+/// A file's OWN tags, as read off disk (SPEC F154.1; STORY-379; PLAN T379/T381 review N4, gh-#529)
+/// — <see cref="Abstractions.IFileActionPlanner"/> reads these itself for a retag, via
+/// <see cref="Abstractions.IFileTagReader"/>, only AFTER the subject has already passed the jail's
+/// own destination gate (T381 review N4: moved here from the caller, so a refused subject is never
+/// opened at all). <see cref="Year"/> is <see cref="uint"/> to match TagLib's own <c>Tag.Year</c>
+/// property exactly, unlike <see cref="FileActionSubject.Year"/>'s catalog-side <see cref="int"/>.
 /// </summary>
 /// <param name="Artist">The file's own artist tag, or <see langword="null"/> when absent.</param>
 /// <param name="Title">The file's own title tag, or <see langword="null"/> when absent.</param>
