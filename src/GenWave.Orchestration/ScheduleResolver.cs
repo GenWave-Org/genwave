@@ -245,37 +245,12 @@ public sealed class ScheduleResolver(
         return new OnAirSnapshot(Segment: null, PersonaId: null, envelope, boundaryAt, nextWeekly, Show: null);
     }
 
-    SegmentEnvelope BuildSegmentEnvelope(ScheduleSegment segment)
-    {
-        var stationDefault = defaultEnvelopeSource.Current;
-        return new SegmentEnvelope(
-            ToTimeOnly(segment.StartMinute),
-            ToTimeOnly(segment.EndMinute),
-            segment.Genres ?? stationDefault.Genres,
-            new EnergyRange(
-                segment.EnergyMin ?? stationDefault.EnergyRange.Min,
-                segment.EnergyMax ?? stationDefault.EnergyRange.Max))
-        {
-            // SPEC F152.3 (STORY-372, PLAN T360): Rotation = block.Rotation ?? show.Rotation ?? null.
-            // ResolveRotation's own remarks explain why "block" is always null here in v1.
-            Rotation = ResolveRotation(blockRotation: null, segment.Show),
-        };
-    }
-
-    /// <summary>
-    /// SPEC F152.3's own layering formula (STORY-372, PLAN T360) — the ONE place
-    /// <c>block.Rotation ?? show.Rotation ?? null</c> resolves, mirroring <see cref="EffectiveAssignment.Resolve"/>'s
-    /// own "one chokepoint" shape for persona/show (SPEC F115.2). <paramref name="blockRotation"/> has
-    /// no real v1 source: <c>segment_schedule</c>/<c>schedule_special</c> carry no rotation column, and
-    /// ARCHITECTURE.md's own "Rejected: block-only predicate (the card can't carry the rule)" rules out
-    /// ever giving a block its OWN authorable rule — so <see cref="BuildSegmentEnvelope"/>'s only call
-    /// site always passes <see langword="null"/> here. The parameter exists so this formula, not the
-    /// call site, is where "block always wins" lives — if a future slice ever DOES add a block-level
-    /// source, that widening touches only this method's own body, the same "F115.2 layering is literally
-    /// the code" contract <see cref="EffectiveAssignment"/> already keeps for persona/show.
-    /// </summary>
-    internal static RotationPredicate? ResolveRotation(RotationPredicate? blockRotation, ShowSummary? show) =>
-        blockRotation ?? show?.Rotation;
+    /// <summary>T376 review MED-4: delegates to <see cref="ScheduleSegment.EffectiveEnvelope"/> —
+    /// the per-field-fallback formula extracted there so <c>Garden.UnreachableGardenerPass</c>
+    /// shares it byte-for-byte instead of re-deriving it. <c>tests/GenWave.Orchestration.Tests</c>'s
+    /// existing resolver facts are the proof this delegation changed no observable behaviour.</summary>
+    SegmentEnvelope BuildSegmentEnvelope(ScheduleSegment segment) =>
+        segment.EffectiveEnvelope(defaultEnvelopeSource.Current);
 
     static ScheduleSegment? FindCurrent(IReadOnlyList<ScheduleSegment> segments, DayOfWeek day, int minute) =>
         segments.FirstOrDefault(s => s.Day == day && s.StartMinute <= minute && minute < s.EndMinute);
@@ -449,18 +424,6 @@ public sealed class ScheduleResolver(
     /// </summary>
     static DateTimeOffset ResolveWallClockInstant(DateTime wallClock, TimeZoneInfo zone, DateTimeOffset now) =>
         WallClockInstantResolver.Resolve(wallClock, zone, now);
-
-    /// <summary>Converts a schedule minute-of-day into a display <see cref="TimeOnly"/>. A schema
-    /// <c>EndMinute</c> of <see cref="MinutesPerDay"/> (1440) means "runs to midnight" — but
-    /// <see cref="TimeOnly"/> cannot represent 24:00; naively wrapping it would produce 00:00, making the
-    /// envelope's <c>EndsAt</c> read as BEFORE its own <c>StartsAt</c>. 1440 (and anything at/above it)
-    /// therefore clamps to <see cref="TimeOnly.MaxValue"/> (23:59:59.9999999) instead of wrapping.</summary>
-    static TimeOnly ToTimeOnly(int minute) => minute switch
-    {
-        <= 0 => TimeOnly.MinValue,
-        >= MinutesPerDay => TimeOnly.MaxValue,
-        _ => TimeOnly.FromTimeSpan(TimeSpan.FromMinutes(minute)),
-    };
 
     static int Mod(int value, int modulus) => ((value % modulus) + modulus) % modulus;
 }

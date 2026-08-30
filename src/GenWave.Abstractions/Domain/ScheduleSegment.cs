@@ -1,3 +1,5 @@
+using GenWave.Abstractions.Playout;
+
 namespace GenWave.Core.Domain;
 
 /// <summary>
@@ -50,4 +52,59 @@ public sealed record ScheduleSegment(
     double? EnergyMin,
     double? EnergyMax,
     ShowSummary? Show = null,
-    long? ShowId = null);
+    long? ShowId = null)
+{
+    /// <summary>
+    /// This block's own effective on-air envelope (SPEC F91.4, F152.3; T376 review MED-4 — RULED
+    /// IN: the per-field fallback must be ONE piece of code) — extracted here, byte-for-byte, from
+    /// <c>GenWave.Orchestration.ScheduleResolver.BuildSegmentEnvelope</c> (T119's own original), so
+    /// a second consumer (<c>GenWave.MediaLibrary.Garden.UnreachableGardenerPass</c>, T376) shares
+    /// this ONE formula instead of re-deriving it independently. <see cref="Genres"/> falls back to
+    /// <paramref name="stationDefault"/>'s own <c>Genres</c> when null; <see cref="EnergyMin"/>/
+    /// <see cref="EnergyMax"/> EACH fall back to <paramref name="stationDefault"/>'s own
+    /// <c>EnergyRange.Min</c>/<c>Max</c> independently (this record's own remarks above: "each is
+    /// independently nullable, so a segment may override only one of the three"); <see cref="Show"/>'s
+    /// own <see cref="ShowSummary.Rotation"/> rides straight through as plainly <c>Show?.Rotation</c>
+    /// below — SPEC F152.3's own <c>block.Rotation ?? show.Rotation ?? null</c> formula, with no
+    /// block-level rotation source existing in v1 at all (ARCHITECTURE.md's own "Rejected:
+    /// block-only predicate — the card can't carry the rule"). T376 review round-3 (RULED): THIS is
+    /// now the one and only chokepoint that formula runs through — <c>ScheduleResolver.ResolveRotation</c>,
+    /// the prior internal "block ?? show" chokepoint, was deleted once it had zero production callers
+    /// left; a future slice that DOES add a block-level rotation source widens the
+    /// <c>Rotation = Show?.Rotation</c> line below, and only that line, to <c>blockRotation ?? Show?.Rotation</c>
+    /// — no second place to remember to update.
+    /// <see cref="SegmentEnvelope.StartsAt"/>/<see cref="SegmentEnvelope.EndsAt"/> reproduce
+    /// <c>ScheduleResolver.ToTimeOnly</c>'s own 1440-minute "runs to midnight" clamp — a schema
+    /// <c>EndMinute</c> of 1440 cannot be represented as a <see cref="TimeOnly"/> without wrapping to
+    /// 00:00, which would read as BEFORE <c>StartsAt</c>; clamped to <see cref="TimeOnly.MaxValue"/>
+    /// instead. <c>ScheduleResolver</c> now calls THIS method rather than its own hand-built block —
+    /// <c>tests/GenWave.Orchestration.Tests</c>'s existing resolver facts are the proof the
+    /// extraction changed no observable behaviour.
+    /// </summary>
+    public SegmentEnvelope EffectiveEnvelope(SegmentEnvelope stationDefault) => new(
+        ToTimeOnly(StartMinute),
+        ToTimeOnly(EndMinute),
+        Genres ?? stationDefault.Genres,
+        new EnergyRange(
+            EnergyMin ?? stationDefault.EnergyRange.Min,
+            EnergyMax ?? stationDefault.EnergyRange.Max))
+    {
+        Rotation = Show?.Rotation,
+    };
+
+    /// <summary>A schedule day never carries more minutes than this (SPEC F91.1's own CHECK,
+    /// db/27) — named, not the bare literal <see cref="ToTimeOnly"/> switches on twice.</summary>
+    const int MinutesPerDay = 1440;
+
+    /// <summary>Converts a schedule minute-of-day into a display <see cref="TimeOnly"/> — mirrors
+    /// <c>ScheduleResolver.ToTimeOnly</c> exactly (see that method's own remarks for the
+    /// 1440/midnight clamp rationale). Duplicated rather than shared across assemblies: this
+    /// Abstractions-layer type may not take a dependency on <c>GenWave.Orchestration</c> (L4/L10),
+    /// so <c>ScheduleResolver</c> is the one that now calls INTO this copy instead.</summary>
+    static TimeOnly ToTimeOnly(int minute) => minute switch
+    {
+        <= 0 => TimeOnly.MinValue,
+        >= MinutesPerDay => TimeOnly.MaxValue,
+        _ => TimeOnly.FromTimeSpan(TimeSpan.FromMinutes(minute)),
+    };
+}

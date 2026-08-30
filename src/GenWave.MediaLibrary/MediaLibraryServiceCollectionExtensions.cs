@@ -152,23 +152,26 @@ public static class MediaLibraryServiceCollectionExtensions
         services.AddSingleton<IDeadFileReporter, DeadFileReporter>();
 
         // The dead_file pass (SPEC F153.3, PLAN T372) — first of the five Gardener passes
-        // ARCHITECTURE.md names; the one still unbuilt (unreachable, T376) joins this
-        // AddSingleton<IGardenerPass, ...> fan-out at its own task, resolved through
-        // GardenerService's own IEnumerable<IGardenerPass> in registration order.
+        // ARCHITECTURE.md names, resolved through GardenerService's own IEnumerable<IGardenerPass>
+        // in registration order. All five are built now (unreachable joins below, T376).
         services.AddSingleton<IGardenerPass, DeadFileGardenerPass>();
 
         // The near_duplicate pass (SPEC F153.5, PLAN T374) — second of the five, registered
         // immediately after dead_file so DI registration order matches ARCHITECTURE.md's own pass
-        // ordering (dead_file, near_duplicate, stale_metadata, shelf_dust, unreachable).
+        // ordering (dead_file, near_duplicate, stale_metadata, unreachable, shelf_dust).
         services.AddSingleton<IGardenerPass, NearDuplicateGardenerPass>();
 
         // The stale_metadata pass (SPEC F153.6, PLAN T375) — third of the five, registered
         // immediately after near_duplicate for the same ordering reason.
         services.AddSingleton<IGardenerPass, StaleMetadataGardenerPass>();
 
-        // The shelf_dust pass (SPEC F153.7, PLAN T375) — fourth of the five. Last on purpose —
-        // F153.7 excludes rows with an open unreachable finding, so T376's unreachable pass
-        // registers BEFORE this line.
+        // The unreachable pass (SPEC F153.8, PLAN T376) — fourth of the five, registered BEFORE
+        // shelf_dust on purpose: see the shelf_dust registration immediately below for why.
+        services.AddSingleton<IGardenerPass, UnreachableGardenerPass>();
+
+        // The shelf_dust pass (SPEC F153.7, PLAN T375) — fifth and LAST on purpose: F153.7's own
+        // predicate excludes rows carrying an open unreachable finding, so the unreachable pass
+        // immediately above must reconcile first in every tick.
         services.AddSingleton<IGardenerPass, ShelfDustGardenerPass>();
 
         // The tick itself (SPEC F153.2): housekeeping (IThumbStore.RecomputeAllAsync/SweepAsync,

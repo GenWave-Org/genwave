@@ -109,6 +109,158 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
         """;
 
     /// <summary>
+    /// <see cref="RotKind.Unreachable"/>'s own structural cap on <see cref="ReconcileUnreachableAsync"/>'s
+    /// envelope list (SPEC F153.8; STORY-378; PLAN T376) — the Laws' own "the VALUES list row count
+    /// is the only thing built at runtime; cap it" rule. T376 review MED-3: this is DATABASE-enforced,
+    /// not merely app-side — <c>db/27-segment-schedule-migration.sh</c>'s own
+    /// <c>station.segment_schedule</c> DDL CHECKs <c>start_minute % 30 = 0</c> and
+    /// <c>end_minute % 30 = 0</c> (the 30-minute step) and carries an
+    /// <c>exclude using gist (day_of_week with =, int4range(start_minute, end_minute) with &amp;&amp;)</c>
+    /// constraint (no two rows on the same day may overlap at all), so a full week can never carry
+    /// more than 48 blocks/day &#215; 7 days = 336 raw rows — and DISTINCT effective tuples (this
+    /// method's own input) can never exceed that raw row count. 336 is therefore the true structural
+    /// ceiling the SCHEMA itself admits, not an arbitrary guess or a guess resting only on
+    /// application code; a caller ever exceeding it can only be a bug upstream (a caller reading a
+    /// different/corrupted source entirely), which <see cref="ReconcileUnreachableAsync"/> refuses
+    /// outright rather than building an unbounded VALUES list.
+    /// </summary>
+    internal const int MaxEnvelopeTuples = 336;
+
+    /// <summary>
+    /// <see cref="RotKind.Unreachable"/>'s own per-row admission check against the CTE
+    /// <c>envelopes(genres, energy_min, energy_max)</c> every <see cref="ReconcileUnreachableAsync"/>
+    /// statement builds from the caller's own tuple list (SPEC F153.8; STORY-378; PLAN T376): genre
+    /// passes when a tuple carries no genre constraint at all (<c>cardinality(e.genres) = 0</c>) or
+    /// the row's own lower-cased genre is IN that tuple's own (already lower-cased by the caller,
+    /// T376 ORCHESTRATOR ruling) list — the SAME <c>lower(m.genre) = any(...)</c> idiom
+    /// <c>MediaRepository.GetEnvelopeCandidateAsync</c>'s own genre predicate uses; energy passes
+    /// when the row's own energy is NULL (admitted by every envelope — the SAME NULL-passes
+    /// exemption <see cref="MediaRepository.PlayablePredicate"/>'s own energy-band siblings apply,
+    /// SPEC F81.4) or falls inside <c>[energy_min, energy_max]</c>. <c>genre_admitted</c>/<c>admitted</c>
+    /// are both <c>bool_or</c> aggregates over every tuple (T376 ORCHESTRATOR ruling): the row is
+    /// unreachable when <c>admitted</c> is false; the evidence reason is <c>genre</c> when
+    /// <c>genre_admitted</c> is ALSO false, else <c>energy</c> (genre passed somewhere, energy never
+    /// did for a tuple where it did). The nested <c>per_envelope</c> subquery computes each half ONCE
+    /// per tuple rather than repeating the genre expression inside both aggregates — Postgres
+    /// flattens this the same way <see cref="StaleFieldsJson"/>'s own LATERAL remarks describe (T375
+    /// review LOW-1), so this is purely a readability choice, not a materialization.
+    ///
+    /// <para>
+    /// <b>T376 review BLOCK-1/2: <c>coalesce(..., false)</c> around the genre <c>= any(...)</c>
+    /// comparison</b> — Postgres three-valued logic, not a redundant guard: <c>lower(m.genre) = any(e.genres)</c>
+    /// evaluates to SQL NULL (never <c>false</c>) when <c>m.genre</c> is NULL, so under a
+    /// genre-constrained tuple, an untagged row's own <c>genre_ok</c> would be NULL, its
+    /// <c>bool_or</c> would fold to NULL for that tuple, and <c>UnreachablePredicate</c>'s <c>not
+    /// adm.admitted</c> would itself evaluate to NULL — which Postgres treats as NOT TRUE in a
+    /// WHERE clause. That silently broke BOTH halves: the insert-select's WHERE never matched the
+    /// row (an untagged row against a genre-constrained tuple never gets flagged, even though the
+    /// live pool at <c>MediaRepository.cs:464</c> excludes it from that exact envelope — it IS
+    /// unreachable), and the resolve half's <c>not exists (... and not adm.admitted)</c> flipped to
+    /// TRUE the moment a row's genre went NULL, resolving an already-open finding that never
+    /// actually became reachable. <c>coalesce(..., false)</c> collapses the NULL to a definite
+    /// <see langword="false"/> so an untagged row against a genre-constrained tuple is unambiguously
+    /// NOT admitted by that tuple, exactly matching <c>SegmentEnvelope.Genres</c>'s own documented
+    /// contract ("An untagged (NULL genre) track does not satisfy a non-empty list").
+    /// </para>
+    /// </summary>
+    const string EnvelopeAdmissionLateral =
+        """
+        cross join lateral (
+            select
+                bool_or(per_envelope.genre_ok) as genre_admitted,
+                bool_or(per_envelope.genre_ok and per_envelope.energy_ok) as admitted
+            from (
+                select
+                    (cardinality(e.genres) = 0 or coalesce(lower(m.genre) = any(e.genres), false)) as genre_ok,
+                    (m.energy is null or (m.energy >= e.energy_min and m.energy <= e.energy_max)) as energy_ok
+                from envelopes e
+            ) per_envelope
+        ) adm
+        """;
+
+    /// <summary>
+    /// <see cref="RotKind.Unreachable"/>'s own "no tuple admits this row" predicate — a row is
+    /// unreachable when <see cref="EnvelopeAdmissionLateral"/>'s own <c>adm.admitted</c> aggregate is
+    /// false. Shared verbatim by the insert-select half and the resolve half's own <c>not exists
+    /// (...)</c>, exactly like every sibling predicate in this file.
+    /// </summary>
+    const string UnreachablePredicate = "not adm.admitted";
+
+    /// <summary>
+    /// The <c>with envelopes(...) as (values ...)</c> row list for <paramref name="tupleCount"/>
+    /// tuples — <c>(@g0::text[], @emin0, @emax0), (@g1::text[], @emin1, @emax1), ...</c>. Only the
+    /// ROW COUNT is built at runtime (the Laws' own rule); every value inside a row stays a bound
+    /// parameter, added by <see cref="ReconcileUnreachableAsync"/> under the SAME
+    /// <c>g{i}</c>/<c>emin{i}</c>/<c>emax{i}</c> names this method emits.
+    /// </summary>
+    static string BuildEnvelopesValuesList(int tupleCount) => string.Join(
+        ",\n            ", Enumerable.Range(0, tupleCount).Select(i => $"(@g{i}::text[], @emin{i}, @emax{i})"));
+
+    /// <summary>
+    /// The <c>with envelopes(genres, energy_min, energy_max) as (values ...)</c> CTE header both
+    /// <see cref="BuildUnreachableInsertSql"/> and <see cref="BuildUnreachableResolveSql"/> open
+    /// with (T376 review LOW-2) — extracted so the two statements can never drift on the CTE's own
+    /// column list or indentation, the same "one definition, every caller shares it" idiom this
+    /// file's own predicate constants already follow.
+    /// </summary>
+    static string EnvelopesCte(int tupleCount) => $"""
+        with envelopes(genres, energy_min, energy_max) as (
+            values
+                {BuildEnvelopesValuesList(tupleCount)}
+        )
+        """;
+
+    /// <summary>
+    /// <see cref="ReconcileUnreachableAsync"/>'s own insert-select half, built for
+    /// <paramref name="tupleCount"/> envelope rows. <c>internal static</c>, not <c>private</c>
+    /// (STORY-378 AC6): Story378's own AC6 fact calls this directly and asserts the text never
+    /// contains <c>"station."</c> — the join stays entirely on the library side by construction,
+    /// since envelopes arrive as a bound VALUES list, never a query against
+    /// <c>station.segment_schedule</c>.
+    /// </summary>
+    internal static string BuildUnreachableInsertSql(int tupleCount) => $"""
+        {EnvelopesCte(tupleCount)}
+        insert into library.rot_finding (media_id, kind, state, evidence, opened_at, updated_at)
+        select
+            m.id,
+            'unreachable'::library.rot_kind,
+            'open'::library.rot_state,
+            jsonb_build_object(
+                'reason', case when not adm.genre_admitted then 'genre' else 'energy' end,
+                'envelopes', (select count(*)::int from envelopes)
+            ),
+            now(),
+            now()
+        from library.media m
+        left join library.media_rating r on r.media_id = m.id
+        {EnvelopeAdmissionLateral}
+        where {MediaRepository.PlayablePredicate}
+          and {UnreachablePredicate}
+        {OpenOrReopenOnConflict}
+        """;
+
+    /// <summary>
+    /// <see cref="ReconcileUnreachableAsync"/>'s own resolve half — see
+    /// <see cref="BuildUnreachableInsertSql"/>'s own remarks for why this is <c>internal static</c>.
+    /// </summary>
+    internal static string BuildUnreachableResolveSql(int tupleCount) => $"""
+        {EnvelopesCte(tupleCount)}
+        update library.rot_finding f
+        set state = 'resolved', resolved_at = now(), updated_at = now()
+        where f.kind = 'unreachable'::library.rot_kind
+          and f.state = 'open'
+          and not exists (
+              select 1
+              from library.media m
+              left join library.media_rating r on r.media_id = m.id
+              {EnvelopeAdmissionLateral}
+              where m.id = f.media_id
+                and {MediaRepository.PlayablePredicate}
+                and {UnreachablePredicate}
+          )
+        """;
+
+    /// <summary>
     /// <see cref="RotKind.ShelfDust"/>'s own conditions, layered on top of
     /// <see cref="MediaRepository.PlayablePredicate"/> at each call site (SPEC F153.7; STORY-377;
     /// PLAN T375; ORCHESTRATOR ruling): no rotation ledger row, or one with zero plays; discovered
@@ -348,6 +500,45 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
             """,
             transaction: tx,
             cancellationToken: ct));
+
+        await tx.CommitAsync(ct);
+    }
+
+    /// <summary>
+    /// <see cref="IRotFindingStore.ReconcileUnreachableAsync"/> (SPEC F153.8; STORY-378; PLAN T376):
+    /// the same set-based, one-transaction, two-statement shape <see cref="ReconcileDeadFilesAsync"/>
+    /// established, over a caller-supplied VALUES list instead of a predicate against
+    /// <c>library.media</c>'s own columns or a plpgsql function — see
+    /// <see cref="BuildUnreachableInsertSql"/>/<see cref="BuildUnreachableResolveSql"/> for the
+    /// statement text itself.
+    /// </summary>
+    public async Task ReconcileUnreachableAsync(IReadOnlyList<EnvelopeTuple> envelopes, CancellationToken ct)
+    {
+        if (envelopes.Count == 0)
+            throw new ArgumentException(
+                "At least one envelope tuple is required — the caller's own station-default fallback " +
+                "guarantees one even for an empty schedule grid.",
+                nameof(envelopes));
+        if (envelopes.Count > MaxEnvelopeTuples)
+            throw new ArgumentException(
+                $"At most {MaxEnvelopeTuples} envelope tuples are supported per reconcile.", nameof(envelopes));
+
+        var parameters = new DynamicParameters();
+        for (var i = 0; i < envelopes.Count; i++)
+        {
+            parameters.Add($"g{i}", envelopes[i].GenresLower.ToArray());
+            parameters.Add($"emin{i}", envelopes[i].EnergyMin);
+            parameters.Add($"emax{i}", envelopes[i].EnergyMax);
+        }
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        await conn.ExecuteAsync(new CommandDefinition(
+            BuildUnreachableInsertSql(envelopes.Count), parameters, transaction: tx, cancellationToken: ct));
+
+        await conn.ExecuteAsync(new CommandDefinition(
+            BuildUnreachableResolveSql(envelopes.Count), parameters, transaction: tx, cancellationToken: ct));
 
         await tx.CommitAsync(ct);
     }

@@ -108,6 +108,35 @@ public interface IRotFindingStore
     Task ReconcileShelfDustAsync(TimeSpan shelfAge, CancellationToken ct);
 
     /// <summary>
+    /// Reconciles every <see cref="RotKind.Unreachable"/> finding against a caller-supplied, ALREADY
+    /// DISTINCT set of envelope tuples (SPEC F153.8; STORY-378; PLAN T376): opens (or re-opens a
+    /// resolved) finding for a <c>Catalog.MediaRepository.PlayablePredicate</c> row admitted by NONE
+    /// of <paramref name="envelopes"/>, resolves an open finding once the row is admitted by at
+    /// least one tuple or stops being playable. A <see cref="RotState.Dismissed"/> row is never
+    /// touched by either half.
+    ///
+    /// <para>
+    /// Evidence is <c>{"reason": &lt;"genre"|"energy"&gt;, "envelopes": &lt;tuple count&gt;}</c> —
+    /// <c>"genre"</c> when NO tuple's own genre constraint admits the row at all, else
+    /// <c>"energy"</c> (the row's genre is admitted by at least one tuple, but no tuple that admits
+    /// its genre also admits its energy); a row failing both reads <c>"genre"</c> — genre wins the
+    /// tie (T376 ORCHESTRATOR ruling).
+    /// </para>
+    ///
+    /// <para>
+    /// <b>No station-schema table (STORY-378 AC6)</b> — envelopes arrive purely as caller-supplied
+    /// values; <c>Garden.UnreachableGardenerPass</c> (the one caller) is the only place that ever
+    /// reads the schedule grid, over <see cref="IScheduleStore"/>, an entirely separate seam this
+    /// store's own implementation never touches.
+    /// </para>
+    /// </summary>
+    /// <param name="envelopes">Every DISTINCT effective envelope tuple currently in play — the
+    /// caller's own dedup, never re-derived here. Never empty (the caller's own station-default
+    /// fallback guarantees at least one, even for an empty schedule grid); an empty list is an
+    /// <see cref="ArgumentException"/>, not a silent no-op.</param>
+    Task ReconcileUnreachableAsync(IReadOnlyList<EnvelopeTuple> envelopes, CancellationToken ct);
+
+    /// <summary>
     /// Opens (or re-opens a resolved) ONE <see cref="RotKind.DeadFile"/> finding for
     /// <paramref name="mediaId"/> — <see cref="IDeadFileReporter"/>'s own write (SPEC F153.4;
     /// STORY-375; PLAN T373): the same open/re-open statement shape
