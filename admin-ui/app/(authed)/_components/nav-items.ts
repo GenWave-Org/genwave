@@ -39,6 +39,13 @@ export const NAV_ITEMS: NavItem[] = [
   // different concern entirely).
   { href: "/announcements", label: "Announcements", iconName: "announcements" },
   { href: "/catalog", label: "Catalog", iconName: "catalog" },
+  // Gardener (SPEC F153.10, STORY-374, PLAN T378, gh-#529) — the self-healing rot queue's own admin
+  // page, placed right after Catalog: it curates the SAME library-management surface Catalog owns,
+  // just as a queue of findings rather than a browse table. `restore` (the circular-arrow glyph
+  // already carrying "return this row to a healthy state" everywhere else it appears — NeverPlayControl,
+  // RatingControls, CatalogToolbar) is the closest existing icon-contract fit; this page mints no
+  // new icon name (ORCHESTRATOR ruling 3).
+  { href: "/gardener", label: "Gardener", iconName: "restore" },
   { href: "/safe-content", label: "Station Imaging", iconName: "safe-content" },
   { href: "/personas", label: "Personas", iconName: "persona" },
   { href: "/schedule", label: "Schedule", iconName: "schedule" },

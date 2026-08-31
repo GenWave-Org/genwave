@@ -106,6 +106,12 @@ file sealed class TruthLaneStatusWebFactory(string llmEndpoint) : WebApplication
             services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
             services.RemoveAll<IMediaRotationSink>();
             services.AddSingleton<IMediaRotationSink>(new FakeMediaRotationSink());
+
+            // PLAN T377 (SPEC F153.9) — StatusController now also resolves IRotFindingStore;
+            // the real RotFindingRepository requires a live Postgres, same reason
+            // IMediaRotationSink is faked immediately above.
+            services.RemoveAll<IRotFindingStore>();
+            services.AddSingleton<IRotFindingStore>(new FakeRotFindingStore());
         });
     }
 }

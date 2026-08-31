@@ -123,6 +123,8 @@ static class PlayoutServiceCollectionExtensions
             // the push-honesty guard (gh-#612): a push whose file is already gone from disk is
             // declined with a WARN here, api-side, instead of dying silently at engine-side
             // resolution behind a success-shaped RID reply — see MediaExistencePushGuard's remarks.
+            // IDeadFileReporter (SPEC F153.4, PLAN T373) is bound by AddMediaLibrary, which
+            // Program.cs runs before this call.
             .AddSingleton<ILiquidsoapControl>(sp => new MediaExistencePushGuard(
                 new LiquidsoapControl(
                     sp.GetRequiredService<IOptions<LiquidsoapOptions>>().Value,
@@ -130,6 +132,7 @@ static class PlayoutServiceCollectionExtensions
                     sp.GetRequiredService<IStationIdentityProvider>(),
                     sp.GetRequiredService<ArtworkUrlResolver>(),
                     sp.GetRequiredService<ILogger<LiquidsoapControl>>()),
+                sp.GetRequiredService<IDeadFileReporter>(),
                 sp.GetRequiredService<ILogger<MediaExistencePushGuard>>()))
             // Loudness target/ceiling are deliberate boot-time values (engine-side knobs apply on
             // restart) — snapshot IOptions, not a live monitor.

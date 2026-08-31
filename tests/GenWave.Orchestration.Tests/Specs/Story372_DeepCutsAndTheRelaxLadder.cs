@@ -10,9 +10,11 @@
 // Story372_TheShowCarriesTheRotationRule.cs). AC5 ("a block's own rule wins") has no real v1 block
 // source to drive through that same resolver path — ARCHITECTURE.md's own "Rejected: block-only
 // predicate" and SPEC F152.3's "blocks never set it in v1" rule that out by design — so it instead
-// pins ScheduleResolver.ResolveRotation's own precedence directly, the one internal chokepoint
-// BuildSegmentEnvelope's layering runs through (mirrors EffectiveAssignment.Resolve's own
-// "one function, block always wins" shape for persona/show). AC7–AC9 drive MusicSelectionPolicy
+// pins ScheduleSegment.EffectiveEnvelope's own shipped layering directly (T376 review round-3: the
+// prior ScheduleResolver.ResolveRotation chokepoint this fact used is gone — it had zero production
+// callers once EffectiveEnvelope shipped, so it was deleted rather than kept as untested dead code),
+// proving the show's own rotation rides straight through with no block-side source at all. AC7–AC9
+// drive MusicSelectionPolicy
 // over a fake IMediaCatalog pool sized to force each rung (Story212_EnvelopeProviderAndLadder.cs's
 // ladder idiom, ahead of F81.6's rungs).
 //
@@ -164,29 +166,36 @@ public static class FeatureDeepCutsAndTheRelaxLadder
         }
     }
 
-    public sealed class ScenarioABlocksOwnRuleWins
+    public sealed class ScenarioTheShowsRotationRidesThroughEffectiveEnvelope
     {
-        // Given the same show on a block whose envelope has Rotation MaxPlays 2, When resolved.
+        // Given a show carrying a rotation rule on a block, When ScheduleSegment.EffectiveEnvelope
+        // resolves that block.
         //
         // SPEC F152.3 / ARCHITECTURE.md: no block-level rotation source exists, or is even planned,
         // in v1 ("Rejected: block-only predicate — the card can't carry the rule"; "blocks never set
-        // it in v1") — segment_schedule/schedule_special carry no rotation column, so there is no way
-        // to drive a non-null "block side" through the real ScheduleResolver.Resolve entry point. This
-        // fact instead pins the precedence directly on ScheduleResolver.ResolveRotation — the ONE
-        // internal chokepoint BuildSegmentEnvelope's own layering runs through (F115.2's "F152.3
-        // layering is literally the code" contract) — proving a block-side value, were one to ever
-        // exist, wins over the show's, using the exact expression production code composes.
+        // it in v1") — segment_schedule/schedule_special carry no rotation column, and
+        // EffectiveEnvelope's own shipped formula (T376 review MED-4) reflects that directly:
+        // Rotation = Show?.Rotation, no block-side parameter at all.
+        //
+        // T376 review round-3 (RULED): the prior fact pinned this through ScheduleResolver.ResolveRotation
+        // — an internal "block ?? show" chokepoint that no longer has ANY production caller once
+        // EffectiveEnvelope shipped (BuildSegmentEnvelope now delegates to it directly) — deleted
+        // rather than left as untested dead code. This fact pins the SAME shipped behaviour at its
+        // real, current source instead: the show's own rotation rides straight through.
         [Fact]
-        public void TheEffectiveRotationIsMaxPlaysTwo()
+        public void TheEffectiveRotationIsTheShowsOwn()
         {
             var deepCuts = new ShowSummary(1, "Deep Cuts", null, null)
             {
-                Rotation = new RotationPredicate(MaxPlays: 0),
+                Rotation = new RotationPredicate(MaxPlays: 2),
             };
+            var block = new ScheduleSegment(
+                Id: 1, Day: DayOfWeek.Monday, StartMinute: 0, EndMinute: 30,
+                PersonaId: null, Genres: null, EnergyMin: null, EnergyMax: null, Show: deepCuts);
 
-            var effective = ScheduleResolver.ResolveRotation(new RotationPredicate(MaxPlays: 2), deepCuts);
+            var effective = block.EffectiveEnvelope(SegmentEnvelope.StationDefault);
 
-            Assert.Equal(new RotationPredicate(MaxPlays: 2), effective);
+            Assert.Equal(new RotationPredicate(MaxPlays: 2), effective.Rotation);
         }
     }
 

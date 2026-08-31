@@ -137,6 +137,48 @@ public static class MediaLibraryServiceCollectionExtensions
         services.AddSingleton<MediaThumbRepository>();
         services.AddSingleton<IThumbStore>(sp => sp.GetRequiredService<MediaThumbRepository>());
 
+        // The Library Gardener's self-healing findings queue (SPEC F153.1-F153.3, F153.9;
+        // STORY-374, STORY-375; PLAN T372, gh-#529): same library_svc NpgsqlDataSource as
+        // MediaRotationRepository/MediaThumbRepository just above — a plain constructor-injected
+        // singleton, no cross-schema dependency needed here.
+        services.AddSingleton<RotFindingRepository>();
+        services.AddSingleton<IRotFindingStore>(sp => sp.GetRequiredService<RotFindingRepository>());
+
+        // The push guard's own report seam (SPEC F153.4; STORY-375; PLAN T373, gh-#529):
+        // Host.Engine.MediaExistencePushGuard's fire-and-forget hook after declining a push for a
+        // missing file, reporting straight through to IRotFindingStore.OpenDeadFileAsync just
+        // registered above — near-instant dead_file visibility instead of waiting on the scan's
+        // own state-based reconcile.
+        services.AddSingleton<IDeadFileReporter, DeadFileReporter>();
+
+        // The dead_file pass (SPEC F153.3, PLAN T372) — first of the five Gardener passes
+        // ARCHITECTURE.md names, resolved through GardenerService's own IEnumerable<IGardenerPass>
+        // in registration order. All five are built now (unreachable joins below, T376).
+        services.AddSingleton<IGardenerPass, DeadFileGardenerPass>();
+
+        // The near_duplicate pass (SPEC F153.5, PLAN T374) — second of the five, registered
+        // immediately after dead_file so DI registration order matches ARCHITECTURE.md's own pass
+        // ordering (dead_file, near_duplicate, stale_metadata, unreachable, shelf_dust).
+        services.AddSingleton<IGardenerPass, NearDuplicateGardenerPass>();
+
+        // The stale_metadata pass (SPEC F153.6, PLAN T375) — third of the five, registered
+        // immediately after near_duplicate for the same ordering reason.
+        services.AddSingleton<IGardenerPass, StaleMetadataGardenerPass>();
+
+        // The unreachable pass (SPEC F153.8, PLAN T376) — fourth of the five, registered BEFORE
+        // shelf_dust on purpose: see the shelf_dust registration immediately below for why.
+        services.AddSingleton<IGardenerPass, UnreachableGardenerPass>();
+
+        // The shelf_dust pass (SPEC F153.7, PLAN T375) — fifth and LAST on purpose: F153.7's own
+        // predicate excludes rows carrying an open unreachable finding, so the unreachable pass
+        // immediately above must reconcile first in every tick.
+        services.AddSingleton<IGardenerPass, ShelfDustGardenerPass>();
+
+        // The tick itself (SPEC F153.2): housekeeping (IThumbStore.RecomputeAllAsync/SweepAsync,
+        // F150.9) then every registered IGardenerPass, log-and-continue per step — the
+        // EnrichmentService bounded-batch backfill-loop shape, one seam over.
+        services.AddHostedService<GardenerService>();
+
         // gh-#99: the narrow cross-schema membership answer the taste-thumb/booth-log surfaces
         // need — resolved on the library connection because station_svc deliberately has no grant
         // on library.media.

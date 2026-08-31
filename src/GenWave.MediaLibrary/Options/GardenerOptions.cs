@@ -100,7 +100,16 @@ public sealed class GardenerOptions
     /// (SPEC F153.2). Default 500. Range 1–10,000 (F155.1 leaves this bound unstated, T357's own
     /// choice): mirrors the order of magnitude of this codebase's other backfill batch sizes (e.g.
     /// <c>CueDetectionOptions.BackfillBatchSize</c>), scaled up for a per-row cost that is a
-    /// metadata predicate check, not an ffmpeg/HTTP round-trip.</summary>
+    /// metadata predicate check, not an ffmpeg/HTTP round-trip.
+    ///
+    /// <para>
+    /// <b>As built at T372:</b> a predicate-based pass (<c>dead_file</c> today; <c>stale_metadata</c>,
+    /// <c>shelf_dust</c>, <c>unreachable</c> later) reconciles set-based in ONE two-statement
+    /// transaction with no batch concept at all (postgres-dba rule 7 — SQL does the set-based work,
+    /// this knob has nothing to bound there). This value only ever governs an ITERATIVE pass — today
+    /// only <c>near_duplicate</c>'s own grouping is expected to need one — the same
+    /// <c>EnrichmentService</c> backfill shape the summary above already names.
+    /// </para></summary>
     [Range(1, 10_000)]
     public int BatchSize { get; set; } = 500;
 

@@ -1,10 +1,17 @@
 "use client";
 
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDateStamp, formatUpSince } from "@/lib/format-clock";
 import { cn } from "@/lib/utils";
 import type { StatusResponse } from "@/lib/broadcast-api";
+import {
+  GARDENER_KIND_ORDER,
+  GARDENER_OPEN_COUNT_KEY,
+  gardenerCountPhrase,
+  type GardenerOpenCounts,
+} from "@/lib/gardener-api";
 
 /** SPEC F31.4–F31.5 — non-empty SafeScope with zero playable tracks: the drain would go silent. */
 function isSafeScopeDepleted(status: StatusResponse): boolean {
@@ -132,6 +139,23 @@ function rotationHeadlineCaption(playable: number): string {
  */
 function rotationSecondaryLine(rotation: NonNullable<StatusResponse["rotation"]>): string {
   return `${rotation.airedOnce} aired once · ${rotation.notAiredDays90} stale (90 d)`;
+}
+
+/** SPEC F153.9, STORY-374 AC8, PLAN T378 — the Gardener tile's headline caption ("of N open"),
+ * mirroring `rotationHeadlineCaption`'s own shape one tile over. */
+function gardenerHeadlineCaption(total: number): string {
+  return total === 1 ? "open finding" : "open findings";
+}
+
+/**
+ * SPEC F153.9, STORY-374 AC8, PLAN T378 — the per-kind breakdown line, e.g. "5 dead files · 2 near
+ * duplicates · 0 stale metadata · 0 unreachable · 1 shelf dust", in the SAME fixed section order
+ * the Gardener page itself renders (`GARDENER_KIND_ORDER`). T371's own lesson applies here too
+ * (colour is never the only signal): every count is visible text on the tile, never hover-only, so
+ * a zero-open tile still names every kind at a glance rather than a bare "0".
+ */
+function gardenerBreakdownLine(open: GardenerOpenCounts): string {
+  return GARDENER_KIND_ORDER.map((kind) => gardenerCountPhrase(kind, open[GARDENER_OPEN_COUNT_KEY[kind]])).join(" · ");
 }
 
 interface StatusTilesProps {
@@ -264,6 +288,21 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
             </>
           )}
         </Tile>
+
+        {/* SPEC F153.9, STORY-374 AC8, PLAN T378 — links to the Gardener page itself; the tile
+            names both the total AND the per-kind breakdown (T371's "colour is never the only
+            signal" lesson), so a warning-free neutral tile still reads as informative rather than
+            "nothing to click here". */}
+        <Tile label="Gardener" href="/gardener">
+          {loading && <TileSkeleton />}
+          {(neverLoaded || (status !== null && status.gardener === undefined)) && <TileUnavailable />}
+          {status !== null && status.gardener !== undefined && (
+            <>
+              <TileHeadline value={status.gardener.total} caption={gardenerHeadlineCaption(status.gardener.total)} />
+              <p className="mt-1 text-[0.8rem] text-mute">{gardenerBreakdownLine(status.gardener.open)}</p>
+            </>
+          )}
+        </Tile>
       </div>
 
       {error && status !== null && (
@@ -280,17 +319,46 @@ interface TileProps {
    * (SPEC F31.5); default "neutral" is the shipped border-line treatment.
    */
   variant?: "neutral" | "ok" | "warning";
+  /**
+   * SPEC F153.9, STORY-374 AC8, PLAN T378 — when set, the whole tile becomes a `next/link` to that
+   * route (the Gardener tile's own "links to /gardener" requirement) instead of a plain `role="group"`
+   * div. No other tile passes this today; every tile keeps its non-interactive shape unless it opts in.
+   */
+  href?: string;
   children: ReactNode;
 }
 
-function Tile({ label, variant = "neutral", children }: TileProps): ReactNode {
+function Tile({ label, variant = "neutral", href, children }: TileProps): ReactNode {
   const borderClass =
     variant === "warning" ? "border-danger" : variant === "ok" ? "border-success" : "border-line";
-
-  return (
-    <div role="group" aria-label={label} className={cn("rounded-[6px] border bg-surface p-4", borderClass)}>
+  const baseClass = cn("rounded-[6px] border bg-surface p-4", borderClass);
+  const content = (
+    <>
       <p className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-accent-2">{label}</p>
       <div className="mt-2">{children}</div>
+    </>
+  );
+
+  if (href !== undefined) {
+    // T378 review LOW-1: no `aria-label` override here — the link announces its OWN rendered
+    // content (label + headline + breakdown line), the same way any other in-page link would,
+    // rather than collapsing a screen reader's announcement down to the bare label text alone.
+    return (
+      <Link
+        href={href}
+        className={cn(
+          baseClass,
+          "block transition-colors duration-[120ms] ease-out hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        )}
+      >
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <div role="group" aria-label={label} className={baseClass}>
+      {content}
     </div>
   );
 }

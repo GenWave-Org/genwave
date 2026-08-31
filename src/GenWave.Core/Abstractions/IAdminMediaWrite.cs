@@ -64,6 +64,55 @@ public interface IAdminMediaWrite
         CancellationToken ct);
 
     /// <summary>
+    /// <see cref="SetEligibilityAsync(MediaQuery,bool,LibraryScope,CancellationToken)"/> narrowed to
+    /// an explicit <paramref name="mediaIds"/> set, ANDed with <paramref name="filter"/>'s ordinary
+    /// predicates (SPEC F153.10, STORY-376 AC6, PLAN T378) — the Gardener page's "Keep this one" bulk
+    /// action on a near-duplicate group calls this with the OTHER members' ids so the write lands as
+    /// ONE all-or-nothing statement rather than N per-row PATCHes that can half-fail.
+    /// <see langword="null"/> or an empty <paramref name="mediaIds"/> applies no id constraint —
+    /// identical to the four-parameter overload.
+    ///
+    /// Default-implemented as a pass-through to the four-parameter overload ONLY when
+    /// <paramref name="mediaIds"/> is null/empty — every existing test double keeps compiling
+    /// unchanged for the case none of them ever exercises (the same default-method posture
+    /// <see cref="IAdminMediaQuery.CountUnavailableAsync"/> already holds). <c>MediaLibrary.Catalog.MediaRepository</c>
+    /// overrides this whole method with the real id-scoped SQL; only that concrete type needs to
+    /// know <paramref name="mediaIds"/> exists.
+    ///
+    /// <b>T378 review MED-1: fails LOUD, never open, on a non-empty id set.</b> A double that
+    /// implements ONLY the historic four-parameter overload and receives a non-empty
+    /// <paramref name="mediaIds"/> here has no way to honour it — silently falling through to the
+    /// four-parameter overload would silently WIDEN the write from "these specific ids" to "the
+    /// whole filter/scope match", exactly the kind of correctness bug this id predicate exists to
+    /// prevent (STORY-376 AC6: "Keep this one" flips ONLY the named siblings). Throwing
+    /// <see cref="NotSupportedException"/> instead makes that gap a loud, immediate test failure
+    /// the moment any caller actually passes ids against a double that hasn't overridden this
+    /// method — never a quiet over-write in production, since <c>MediaRepository</c> (the only
+    /// production implementation) always does override it.
+    /// </summary>
+    /// <param name="filter">The same filter criteria used by the admin list view.</param>
+    /// <param name="mediaIds">An explicit id set to additionally narrow the match to; null/empty = no constraint.</param>
+    /// <param name="eligible">The eligibility value to write.</param>
+    /// <param name="scope">Library access scope; empty scope → 0 rows affected, no SQL issued.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Number of rows whose <c>eligible</c> column was updated.</returns>
+    /// <exception cref="NotSupportedException">
+    /// <paramref name="mediaIds"/> is non-empty and the implementing type has not overridden this
+    /// method — honouring it via the four-parameter overload would silently widen the write.
+    /// </exception>
+    Task<int> SetEligibilityAsync(
+        MediaQuery filter,
+        IReadOnlyList<long>? mediaIds,
+        bool eligible,
+        LibraryScope scope,
+        CancellationToken ct) =>
+        mediaIds is { Count: > 0 }
+            ? throw new NotSupportedException(
+                $"{GetType().Name} does not implement the id-scoped SetEligibilityAsync overload; " +
+                "ignoring mediaIds would widen the write to the whole scope.")
+            : SetEligibilityAsync(filter, eligible, scope, ct);
+
+    /// <summary>
     /// Bulk-reassigns every row matching <paramref name="filter"/> within <paramref name="scope"/>
     /// to <paramref name="toLibraryId"/>. Returns the number of rows updated.
     ///

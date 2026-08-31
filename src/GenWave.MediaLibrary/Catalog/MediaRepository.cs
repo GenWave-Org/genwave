@@ -41,7 +41,12 @@ sealed class MediaRepository(
     // measurable and eligible and not coalesce(r.never_play, false)" text — those two alias columns
     // without the m. prefix, a different (if logically equivalent) string, so folding them in here
     // would NOT be byte-identical SQL output.
-    const string PlayablePredicate =
+    //
+    // T374 review ADVISORY (ruled in): internal, not private — Garden.MediaRotationRepository and
+    // Garden.RotFindingRepository both need the SAME m./r.-aliased text and previously each carried
+    // its own byte-identical copy (three total). One definition now; a future edit here can never
+    // silently desync from either Garden repository's own query.
+    internal const string PlayablePredicate =
         "m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)";
 
     // xmin is a Postgres system column; cast to text so Dapper maps it as a plain string. The
@@ -1039,10 +1044,20 @@ sealed class MediaRepository(
     /// regardless of layer, so ignoring it is least-astonishment. <c>GenresExact</c>/<c>MoodsExact</c>
     /// mirror this by dropping blank entries before the count check, so a list of only blanks
     /// (e.g. <c>[""]</c>) also applies no filter.
+    ///
+    /// <paramref name="mediaIds"/> (SPEC F153.10, PLAN T378) is deliberately a separate parameter
+    /// rather than a new <see cref="MediaQuery"/> field: <see cref="MediaQuery"/> is published in the
+    /// <c>GenWave.Abstractions</c> NuGet, and the id predicate is Gardener-page-only (the "Keep this
+    /// one" bulk action) — it never belongs on a browse query. Non-null and non-empty ANDs in
+    /// <c>id = any(@mediaIds)</c> beside every other predicate; <see langword="null"/> or empty
+    /// applies no constraint, same tristate posture as the rest of this builder.
     /// </summary>
-    internal static (string Where, DynamicParameters Params) BuildAdminWhere(MediaQuery query, LibraryScope scope)
+    internal static (string Where, DynamicParameters Params) BuildAdminWhere(
+        MediaQuery query, LibraryScope scope, IReadOnlyList<long>? mediaIds = null)
     {
         var parts = new List<string> { "library_id = any(@libraryIds)" };
+        var mediaIdArray = mediaIds is { Count: > 0 } ? mediaIds.ToArray() : null;
+        if (mediaIdArray is not null) parts.Add("id = any(@mediaIds)");
 
         var artistExact = string.IsNullOrWhiteSpace(query.ArtistExact) ? null : query.ArtistExact;
         var albumExact  = string.IsNullOrWhiteSpace(query.AlbumExact)  ? null : query.AlbumExact;
@@ -1079,6 +1094,7 @@ sealed class MediaRepository(
 
         var p = new DynamicParameters();
         p.Add("libraryIds", scope.LibraryIds.ToArray());
+        p.Add("mediaIds",   mediaIdArray);
         p.Add("state",      query.State);
         p.Add("artist",     query.Artist is not null ? $"%{query.Artist}%" : null);
         p.Add("genre",      query.Genre  is not null ? $"%{query.Genre}%"  : null);
@@ -1263,9 +1279,26 @@ sealed class MediaRepository(
     ///
     /// Scope-bound by <c>library_id = ANY(@libraryIds)</c> — always the first predicate.
     /// Empty scope → 0, no SQL. All filter values are Npgsql parameters; no interpolation.
+    ///
+    /// Thin wrapper over the id-scoped overload below (T378) with <c>mediaIds: null</c> — the SQL
+    /// lives exactly once.
+    /// </summary>
+    public Task<int> SetEligibilityAsync(
+        MediaQuery filter,
+        bool eligible,
+        LibraryScope scope,
+        CancellationToken ct) => SetEligibilityAsync(filter, null, eligible, scope, ct);
+
+    /// <summary>
+    /// The real implementation behind both <see cref="IAdminMediaWrite"/> eligibility overloads
+    /// (SPEC F153.10, PLAN T378) — <paramref name="mediaIds"/> ANDs an <c>id = any(@mediaIds)</c>
+    /// predicate onto <see cref="BuildAdminWhere"/>'s usual set when non-null/non-empty, letting the
+    /// Gardener page's "Keep this one" bulk action flip exactly the OTHER members of a duplicate
+    /// group in one all-or-nothing statement.
     /// </summary>
     public async Task<int> SetEligibilityAsync(
         MediaQuery filter,
+        IReadOnlyList<long>? mediaIds,
         bool eligible,
         LibraryScope scope,
         CancellationToken ct)
@@ -1275,7 +1308,7 @@ sealed class MediaRepository(
 
         // BuildAdminWhere uses @filterEligible for the eligible filter predicate so it cannot
         // collide with @eligible (the SET value written here).
-        var (where, filterParams) = BuildAdminWhere(filter, scope);
+        var (where, filterParams) = BuildAdminWhere(filter, scope, mediaIds);
         filterParams.Add("eligible", eligible);
 
         var sql = $"""
