@@ -96,6 +96,31 @@ public sealed record MediaQuery(
     /// whether a hidden-row count accompanies the page.
     /// </summary>
     public bool HidesUnavailable => State is null && IncludeUnavailable is not true;
+
+    /// <summary>
+    /// SPEC F149.5, STORY-368, PLAN T371 — <c>GET /api/media?never-aired=true</c> (mirrors
+    /// <see cref="NeverPlay"/>'s own tristate posture: only <c>true</c> narrows; <c>null</c>/<c>false</c>
+    /// apply no filter). Body <c>init</c> property, deliberately NOT a positional constructor
+    /// parameter — CONTRIBUTING.md L4: this record is positional and published in
+    /// <c>GenWave.Abstractions</c>, so a new positional slot would silently reorder every existing
+    /// call site's trailing default arguments (the T361 lesson). <c>MediaRepository.BuildAdminWhere</c>'s
+    /// shared WHERE-builder restricts the match to PLAYABLE rows only (the same posture
+    /// <c>GetRotationHealthAsync</c> counts by) — an unavailable, ineligible, or never-play-flagged
+    /// never-aired row is not returned (STORY-368 AC6).
+    /// </summary>
+    public bool? NeverAired { get; init; }
+
+    /// <summary>
+    /// SPEC F149.5, STORY-368, PLAN T371 — <c>GET /api/media?aired-before=&lt;date&gt;</c>: rows whose
+    /// <c>media_rotation.last_aired_at</c> falls before midnight UTC of this date. <c>DateOnly</c>
+    /// mirrors <c>SpecialsController</c>'s own date-only query convention; the controller parses the
+    /// raw <c>yyyy-MM-dd</c> query string itself (400 naming the field on a bad value) before this
+    /// record is ever built. Body <c>init</c> property for the same L4 reason <see cref="NeverAired"/>
+    /// is — never a positional slot. Restricted to PLAYABLE rows, same as <see cref="NeverAired"/>; a
+    /// row with no ledger row at all (never aired) never matches, since a <see langword="null"/>
+    /// <c>last_aired_at</c> never satisfies "&lt; @airedBefore" in SQL.
+    /// </summary>
+    public DateOnly? AiredBefore { get; init; }
 }
 
 /// <summary>A paged result set with total count and page count (T041).</summary>

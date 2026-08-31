@@ -19,6 +19,8 @@ namespace GenWave.Host.Api;
 [Authorize(Policy = AuthorizationPolicies.PlayoutRead)]
 public sealed class StatusController(
     IMediaCatalog catalog,
+    IMediaRotationSink rotationSink,
+    IStationScopeProvider scopeProvider,
     IOptionsMonitor<StationOptions> stationMonitor,
     IOptionsMonitor<LlmOptions> llmMonitor,
     LlmCopyStatusHolder llmStatusHolder,
@@ -32,6 +34,7 @@ public sealed class StatusController(
     /// GET /api/status — cookie-auth (covered by the deny-by-default fallback policy when
     /// Admin:Password is set, same as every other <c>/api/*</c> controller). Returns:
     /// <c>{ startedAt, catalog: { ready, enriching, failed, unavailable }, safeScope: { libraryIds, playable },
+    /// rotation: { playable, neverAired, airedOnce, notAiredDays90, rotationSince },
     /// llm: { enabled, model, activePersona, lastOutcome, lastAttemptAt, dominantCause, dominantCauseCount, dominantCauseModel },
     /// degradation: { mode, pinned, since, cause },
     /// voice: { engine, degraded, reason, checkedAt } }</c>.
@@ -80,6 +83,15 @@ public sealed class StatusController(
     /// <see cref="IDependencyHealth"/> verdict, never a live probe. It answers ONLY "is the engine
     /// down"; <c>degradation</c> above answers "does the DJ have anything to say" — an operator
     /// reading both fields on the same response can always tell the two causes of a quiet DJ apart.
+    ///
+    /// <c>rotation</c> (SPEC F149.5, STORY-368, PLAN T371) comes from
+    /// <see cref="IMediaRotationSink.GetRotationHealthAsync"/>, scoped to
+    /// <see cref="IStationScopeProvider.Current"/> — the same live-read-every-call posture every
+    /// other admin catalog read in this codebase follows (SPEC F30.1) — never <c>safeScope</c> above,
+    /// which answers a different question (is the SAFE loop itself populated). <c>playable</c> is the
+    /// dashboard tile's own denominator ("N of playable never aired"); <c>rotationSince</c> is
+    /// ISO-8601 (<see cref="DateTimeOffset"/>'s own default JSON shape), <see langword="null"/> only on
+    /// a pre-Gardener install whose migration has never run.
     /// </summary>
     [HttpGet("status")]
     public async Task<IActionResult> Get(CancellationToken ct)
@@ -88,6 +100,7 @@ public sealed class StatusController(
         var safeScope = new LibraryScope(safeScopeIds.ToArray());
 
         var counts = await catalog.GetStatusCountsAsync(safeScope, ct);
+        var rotation = await rotationSink.GetRotationHealthAsync(scopeProvider.Current, ct);
         var persona = await personaAccessor.ResolveAsync(ct);
 
         var llmConfig = llmMonitor.CurrentValue;
@@ -111,6 +124,14 @@ public sealed class StatusController(
             {
                 libraryIds = safeScopeIds,
                 playable = counts.Playable,
+            },
+            rotation = new
+            {
+                playable = rotation.Playable,
+                neverAired = rotation.NeverAired,
+                airedOnce = rotation.AiredOnce,
+                notAiredDays90 = rotation.NotAiredDays90,
+                rotationSince = rotation.RotationSince,
             },
             llm = new
             {

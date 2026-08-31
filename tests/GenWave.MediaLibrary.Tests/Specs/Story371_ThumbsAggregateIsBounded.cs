@@ -54,6 +54,26 @@ public static class FeatureThumbsAggregateIsBounded
             new { path, libraryId });
     }
 
+    /// <summary>
+    /// PLAN T371 carry-forward (a): a genuinely PLAYABLE row (<c>state='ready'</c>,
+    /// <c>measurable=true</c>) — <see cref="InsertMediaRowAsync"/>'s own <c>'discovered'</c> rows are
+    /// fine for the write-path facts above (RecordAsync/RecordAiringAsync don't filter on state at
+    /// all) but would silently read as zero playable rows to
+    /// <see cref="GenWave.MediaLibrary.Garden.MediaRotationRepository.GetRotationHealthAsync"/>'s own
+    /// <c>PlayablePredicate</c>.
+    /// </summary>
+    static async Task<long> InsertPlayableMediaRowAsync(DatabaseFixture db, string path, long libraryId = 1)
+    {
+        await using var conn = await db.DataSource.OpenConnectionAsync();
+        return await conn.ExecuteScalarAsync<long>(
+            """
+            insert into library.media (path, format, size_bytes, mtime, state, measurable, library_id)
+            values (@path, 'flac', 1024, now(), 'ready', true, @libraryId)
+            returning id
+            """,
+            new { path, libraryId });
+    }
+
     /// <summary>Ensures a library.media_rotation row exists without going through RecordAsync — the
     /// AC1–AC3/AC10/RecomputeAllAsync facts below are about the AGGREGATE's own contract, not the
     /// upsert write path (which earns its own coverage further down this file).</summary>
@@ -603,6 +623,156 @@ public static class FeatureThumbsAggregateIsBounded
             var mediaId = await ThumbThenAirAsync();
             var rotation = await ReadRotationAsync(db, mediaId);
             Assert.Equal(1, rotation!.Value.PlayCount);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — PLAN T371 carry-forward (a): the EMPTY SafeScope branch
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTheEmptySafeScopeOmitsThePredicate(DatabaseFixture db)
+    {
+        // T355 review carry-forward (PLAN T371) — a fresh install before SafeLoopSeeder has ever run
+        // reads ISafeScopeProvider.Current as LibraryScope.None (empty). MediaRotationRepository's own
+        // AppendSafeExclusion short-circuit must OMIT the "and not (m.library_id = any(@ids))"
+        // predicate entirely for an empty scope — never append "any('{}')", which would evaluate
+        // false for every row and silently drop every airing from the ledger.
+        [Fact]
+        public async Task RecordAiringAsyncStillInsertsWithAnEmptyScope()
+        {
+            await db.ResetAsync();
+            var mediaId = await InsertMediaRowAsync(db, "/rotation/empty-scope.flac");
+
+            await RotationRepo(db, new FakeSafeScopeProvider()).RecordAiringAsync(
+                mediaId, DateTimeOffset.UtcNow, CancellationToken.None);
+
+            var rotation = await ReadRotationAsync(db, mediaId);
+            Assert.NotNull(rotation);
+            Assert.Equal(1, rotation!.Value.PlayCount);
+        }
+
+        // The SPEC F149.5 read side (PLAN T371) shares the identical short-circuit
+        // (AppendSafeExclusion) — an empty safe scope must count every playable, in-scope row
+        // normally, the same "no extra predicate" posture the write side above proves.
+        [Fact]
+        public async Task GetRotationHealthAsyncCountsNormallyWithAnEmptyScope()
+        {
+            await db.ResetAsync();
+            var mediaId = await InsertPlayableMediaRowAsync(db, "/rotation/empty-scope-health.flac");
+            var repo = RotationRepo(db, new FakeSafeScopeProvider());
+            await repo.RecordAiringAsync(mediaId, DateTimeOffset.UtcNow, CancellationToken.None);
+
+            var health = await repo.GetRotationHealthAsync(new LibraryScope([1]), CancellationToken.None);
+
+            Assert.Equal(1, health.Playable);
+            Assert.Equal(1, health.AiredOnce);
+            Assert.Equal(0, health.NeverAired);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — PLAN T371 carry-forward (b): db/41's booth-log seed excludes safe-scope rows
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTheSeedExcludesSafeScopeLibraries(DatabaseFixture db)
+    {
+        /// <summary>Creates a fresh named library — <paramref name="tag"/> keeps the name unique
+        /// across facts, since <see cref="DatabaseFixture.ResetAsync"/> truncates <c>library.media</c>
+        /// only, never <c>library.library</c> (the Story226_RequestMatching.cs precedent).</summary>
+        static async Task<long> CreateLibraryAsync(DatabaseFixture db, string tag)
+        {
+            await using var conn = await db.DataSource.OpenConnectionAsync();
+            return await conn.ExecuteScalarAsync<long>(
+                "insert into library.library (name) values (@name) returning id", new { name = $"safe-{tag}" });
+        }
+
+        static async Task InsertTrackStartedAsync(DatabaseFixture db, long mediaId, DateTimeOffset occurredAt)
+        {
+            await using var conn = await db.StationDataSource.OpenConnectionAsync();
+            await conn.ExecuteAsync(
+                """
+                insert into station.booth_log (occurred_at, kind, summary, media_id)
+                values (@occurredAt, 'track-started', 'seed fixture', @mediaId)
+                """,
+                new { occurredAt, mediaId });
+        }
+
+        /// <summary>
+        /// T371 review LOW-1 — writes a Station:SafeScope:LibraryIds row whose value is NOT a JSON
+        /// array (raw SQL, bypassing StationSettingsRepository.WriteAsync, which only ever
+        /// serializes a real array): the shape a hand-edited or corrupted settings row could take.
+        /// </summary>
+        static async Task WriteGarbageSafeScopeSettingAsync(DatabaseFixture db, string jsonValue)
+        {
+            await using var conn = await db.StationDataSource.OpenConnectionAsync();
+            await conn.ExecuteAsync(
+                """
+                insert into station.settings (key, value, updated_at)
+                values ('Station:SafeScope:LibraryIds', @value::jsonb, now())
+                on conflict (key) do update set value = excluded.value, updated_at = excluded.updated_at
+                """,
+                new { value = jsonValue });
+        }
+
+        // PLAN T371 carry-forward (b), RULED (db/41 amended in place): a migrated station's
+        // booth-log -> ledger seed had no safe-scope exclusion, inflating a "safe" library's own
+        // play_count exactly the way F149.2's own RecordAiringAsync exclusion already forbids for a
+        // LIVE airing. This drives the REAL db/41-gardener-migration.sh script against a real
+        // Postgres (DatabaseFixture.RunFileInContainer, the Story367_TheStationRemembersEveryAiring.cs
+        // idiom one test project over) — never MediaRotationRepository itself, which would only prove
+        // the seed agrees with the repository, not that the migration script's own SQL is correct.
+        [Fact]
+        public async Task OnlyTheMusicRowGetsALedgerRow()
+        {
+            await db.ResetAsync();
+            await db.ResetBoothLogAsync();
+
+            var safeLibraryId = await CreateLibraryAsync(db, $"t371-{Guid.NewGuid():N}");
+            var safeMediaId = await InsertPlayableMediaRowAsync(db, "/rotation/seed-safe.flac", safeLibraryId);
+            var musicMediaId = await InsertPlayableMediaRowAsync(db, "/rotation/seed-music.flac");
+
+            // The exact shape SafeLoopSeeder/StationSettingsRepository.WriteAsync writes: one row,
+            // a JSON array value — never indexed Station:SafeScope:LibraryIds:0/:1/... keys.
+            await new StationSettingsRepository(db.StationConnectionString)
+                .WriteAsync("Station:SafeScope:LibraryIds", new long[] { safeLibraryId }, CancellationToken.None);
+
+            await InsertTrackStartedAsync(db, safeMediaId, DateTimeOffset.UtcNow.AddHours(-1));
+            await InsertTrackStartedAsync(db, musicMediaId, DateTimeOffset.UtcNow.AddHours(-2));
+
+            db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "41-gardener-migration.sh"));
+
+            var safeRotation = await ReadRotationAsync(db, safeMediaId);
+            var musicRotation = await ReadRotationAsync(db, musicMediaId);
+
+            Assert.Null(safeRotation);
+            Assert.NotNull(musicRotation);
+        }
+
+        // T371 review LOW-1: jsonb_array_elements_text() throws on any non-array jsonb — an object,
+        // a scalar/string, or JSON null all abort a plain migration script under ON_ERROR_STOP. A
+        // garbage (hand-edited/corrupted) Station:SafeScope:LibraryIds row must fall through to the
+        // name-based fallback instead — the seed still completes and the music row still lands.
+        [Theory]
+        [InlineData("{\"a\":1}")]
+        [InlineData("\"abc\"")]
+        [InlineData("null")]
+        public async Task TheSeedCompletesWithAGarbageSafeScopeSettingsRow(string garbageJson)
+        {
+            await db.ResetAsync();
+            await db.ResetBoothLogAsync();
+
+            var musicMediaId = await InsertPlayableMediaRowAsync(db, $"/rotation/seed-garbage-{Guid.NewGuid():N}.flac");
+            await WriteGarbageSafeScopeSettingAsync(db, garbageJson);
+            await InsertTrackStartedAsync(db, musicMediaId, DateTimeOffset.UtcNow.AddHours(-1));
+
+            db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "41-gardener-migration.sh"));
+
+            var musicRotation = await ReadRotationAsync(db, musicMediaId);
+            Assert.NotNull(musicRotation);
         }
     }
 }

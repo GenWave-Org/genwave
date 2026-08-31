@@ -50,13 +50,20 @@ sealed class MediaRepository(
     // than null. Mirrors the join style S3 added to GetRandomReadyAsync/GetStatusCountsAsync.
     // xmin must be table-qualified (m.xmin) once a second real table joins in — media_rating has
     // its own xmin system column too, so the unqualified name is only resolvable pre-join.
+    // rot.play_count/first_aired_at/last_aired_at (SPEC F149.5, STORY-368 AC5, PLAN T371) — the
+    // detail read's own rotation facts, LEFT JOINed exactly like media_rating above: a row with no
+    // library.media_rotation entry (never aired) reads plays/firstAiredAt/lastAiredAt all null,
+    // never a sentinel zero/false the way score/never_play coalesce for rating (there IS no honest
+    // default play count other than "no ledger row yet" — coalescing to 0 would erase that fact).
     const string SelectColumnsWithLibrary =
         "select id, library_id, path, format, state, title, duration_ms, sample_rate, channels, bitrate_kbps, " +
         "artist, album, genre, year, integrated_lufs, true_peak_dbtp, measurable, " +
         "cue_in_sec, cue_out_sec, intro_energy, outro_energy, bpm, track_energy, eligible, m.xmin::text as xmin, " +
         "coalesce(r.score, 50) as score, coalesce(r.never_play, false) as never_play, m.moods, " +
-        "m.explicit, m.explicit_source, m.imaging_kind, m.show_id " +
-        "from library.media m left join library.media_rating r on r.media_id = m.id";
+        "m.explicit, m.explicit_source, m.imaging_kind, m.show_id, " +
+        "rot.play_count as plays, rot.first_aired_at, rot.last_aired_at " +
+        "from library.media m left join library.media_rating r on r.media_id = m.id " +
+        "left join library.media_rotation rot on rot.media_id = m.id";
 
     public async Task<MediaReference?> GetByIdAsync(LibraryScope scope, string mediaId, CancellationToken ct)
     {
@@ -966,6 +973,23 @@ sealed class MediaRepository(
     // ── Shared admin WHERE builder ───────────────────────────────────────────────────────────────────
 
     /// <summary>
+    /// SPEC F149.5, STORY-368, PLAN T371 — <see cref="MediaQuery.NeverAired"/>/
+    /// <see cref="MediaQuery.AiredBefore"/>'s own restriction: BOTH filters imply PLAYABLE
+    /// (<c>state='ready'</c>, <c>measurable</c>, <c>eligible</c>, not flagged never-play — the same
+    /// posture <c>Garden.MediaRotationRepository.GetRotationHealthAsync</c> counts by, so a filtered
+    /// browse never disagrees with the dashboard tile's own numbers; STORY-368 AC6). Written as a
+    /// self-contained correlated subquery against <c>library.media_rating</c> — never the browse
+    /// SELECT's own <c>r</c> join alias — because this WHERE fragment also feeds
+    /// <see cref="SetEligibilityAsync"/>/<see cref="BulkReassignAsync"/>'s bare
+    /// <c>UPDATE library.media</c> statements (see <see cref="MediaQuery.NeverPlay"/>'s own remarks
+    /// for the identical undefined-alias hazard); a correlated subquery works unmodified in both the
+    /// joined SELECT and the unjoined UPDATE.
+    /// </summary>
+    const string RotationPlayableGuard =
+        "state = 'ready' and measurable and eligible " +
+        "and not coalesce((select never_play from library.media_rating nr where nr.media_id = id), false)";
+
+    /// <summary>
     /// Builds the shared admin WHERE fragment and its Dapper parameters for a <see cref="MediaQuery"/>.
     /// <see cref="ListAdminAsync"/>, <see cref="SetEligibilityAsync"/>, <see cref="BulkReassignAsync"/>,
     /// and — cross-class — <see cref="MediaRatingRepository"/>'s bulk vote/never-play writes (SPEC F61,
@@ -1040,6 +1064,18 @@ sealed class MediaRepository(
         if (albumExact is not null)     parts.Add("lower(album) = lower(@albumExact)");
         if (genresExact is not null)    parts.Add("lower(genre) = any(@genresExact)");
         if (moodsExact is not null)     parts.Add("exists (select 1 from unnest(moods) as mood where lower(mood) = any(@moodsExact))");
+        // SPEC F149.5 (STORY-368 AC3/AC6) — never-aired: no library.media_rotation row at all, or a
+        // row whose play_count is still 0. Both branches are one NOT EXISTS: a play_count > 0 row
+        // failing to exist covers "no row" AND "row present with play_count 0" in a single predicate.
+        if (query.NeverAired is true)
+            parts.Add($"({RotationPlayableGuard}) and not exists " +
+                      "(select 1 from library.media_rotation rot where rot.media_id = id and rot.play_count > 0)");
+        // SPEC F149.5 (STORY-368 AC4/AC6) — aired-before: a ledger row whose last_aired_at predates
+        // @airedBefore. A never-aired row (no ledger row, or last_aired_at null) never matches — null
+        // never satisfies "<" in SQL, so this is never confused with NeverAired above.
+        if (query.AiredBefore.HasValue)
+            parts.Add($"({RotationPlayableGuard}) and exists " +
+                      "(select 1 from library.media_rotation rot where rot.media_id = id and rot.last_aired_at < @airedBefore)");
 
         var p = new DynamicParameters();
         p.Add("libraryIds", scope.LibraryIds.ToArray());
@@ -1056,6 +1092,9 @@ sealed class MediaRepository(
         p.Add("albumExact",  albumExact);
         p.Add("genresExact", genresExact?.Select(g => g.ToLowerInvariant()).ToArray());
         p.Add("moodsExact",  moodsExact?.Select(m => m.ToLowerInvariant()).ToArray());
+        p.Add("airedBefore", query.AiredBefore.HasValue
+            ? new DateTimeOffset(query.AiredBefore.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero)
+            : (DateTimeOffset?)null);
 
         return (string.Join(" and ", parts), p);
     }

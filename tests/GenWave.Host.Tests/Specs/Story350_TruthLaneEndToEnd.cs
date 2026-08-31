@@ -86,7 +86,9 @@ file sealed record StatusSurfaceResponse(StatusLlmBlock Llm);
 /// factory's bogus <c>ConnectionStrings:Library</c>, 500ing the one scenario below that reads
 /// <c>/api/status</c>. The shared, already-built <c>tests/GenWave.Host.Tests/FakeMediaCatalog.cs</c>
 /// (STORY-084's own "for GET /api/status specs" fake) is the right tool here — no new fake invented
-/// for this file.
+/// for this file. PLAN T371 (SPEC F149.5) adds a SECOND Postgres-backed dependency
+/// <c>StatusController</c> resolves, <c>IMediaRotationSink</c> — faked the identical way, via the
+/// shared <c>tests/GenWave.Host.Tests/FakeMediaRotationSink.cs</c>.
 /// </summary>
 file sealed class TruthLaneStatusWebFactory(string llmEndpoint) : WebApplicationFactory<Program>
 {
@@ -102,6 +104,8 @@ file sealed class TruthLaneStatusWebFactory(string llmEndpoint) : WebApplication
             services.RemoveAll<IHostedService>();
             services.RemoveAll<IMediaCatalog>();
             services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
+            services.RemoveAll<IMediaRotationSink>();
+            services.AddSingleton<IMediaRotationSink>(new FakeMediaRotationSink());
         });
     }
 }

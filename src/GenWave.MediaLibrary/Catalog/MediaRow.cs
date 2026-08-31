@@ -101,6 +101,20 @@ class MediaRow
     public long? ShowId { get; set; }
 
     /// <summary>
+    /// Rotation ledger facts (SPEC F149.5, STORY-368, PLAN T371) — <c>library.media_rotation.play_count</c>
+    /// projected as <c>plays</c>. Null when the row has never aired (no ledger row at all), never a
+    /// sentinel 0 — only populated by the detail projection (<c>MediaRepository.SelectColumnsWithLibrary</c>),
+    /// mirroring <see cref="TrackEnergy"/>'s "only populated by projections that select it" pattern.
+    /// </summary>
+    public int? Plays { get; set; }
+
+    /// <summary>Companion to <see cref="Plays"/> — <c>library.media_rotation.first_aired_at</c>.</summary>
+    public DateTimeOffset? FirstAiredAt { get; set; }
+
+    /// <summary>Companion to <see cref="Plays"/> — <c>library.media_rotation.last_aired_at</c>.</summary>
+    public DateTimeOffset? LastAiredAt { get; set; }
+
+    /// <summary>
     /// Postgres system column <c>xmin</c> — the transaction id that last wrote this row.
     /// Exposed as a string for use as an optimistic-concurrency token (ETag) on the admin write path.
     /// Dapper maps this because <c>MatchNamesWithUnderscores</c> is enabled globally and the column is
@@ -196,5 +210,8 @@ class MediaRow
         Explicit: Explicit,
         ExplicitSource: ExplicitSource,
         ImagingKind: ImagingKind,
-        ShowId: ShowId);
+        ShowId: ShowId,
+        Plays: Plays,
+        FirstAiredAt: FirstAiredAt,
+        LastAiredAt: LastAiredAt);
 }

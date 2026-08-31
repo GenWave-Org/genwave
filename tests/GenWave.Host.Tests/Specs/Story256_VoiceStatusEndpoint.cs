@@ -78,6 +78,12 @@ file sealed class VoiceStatusWebFactory : WebApplicationFactory<Program>
             services.RemoveAll<IMediaCatalog>();
             services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
 
+            // PLAN T371 (SPEC F149.5) — StatusController now also resolves IMediaRotationSink; the
+            // real MediaRotationRepository requires a live Postgres, same reason IMediaCatalog is
+            // faked above.
+            services.RemoveAll<IMediaRotationSink>();
+            services.AddSingleton<IMediaRotationSink>(new FakeMediaRotationSink());
+
             // Replace IActivePersonaAccessor for the same reason: the real implementation resolves
             // through Postgres-backed stores before ever answering.
             services.RemoveAll<IActivePersonaAccessor>();

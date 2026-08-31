@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatUpSince } from "@/lib/format-clock";
+import { formatDateStamp, formatUpSince } from "@/lib/format-clock";
 import { cn } from "@/lib/utils";
 import type { StatusResponse } from "@/lib/broadcast-api";
 
@@ -104,6 +104,36 @@ function displayEngineName(engine: string): string {
   return engine.charAt(0).toUpperCase() + engine.slice(1);
 }
 
+/**
+ * SPEC F149.5, STORY-368, PLAN T371 — the Rotation health tile flips to warning once MORE THAN HALF
+ * the playable catalog has never aired. Reasoned, not fitted: once never-aired is the MAJORITY of
+ * the pool, the envelope/persona/rotation predicates are structurally steering every pick toward the
+ * same minority — the exact "9k library behaving like a 2k one" blind spot this story exists to
+ * surface. A never-aired MINORITY is the ordinary shape of a healthy, growing library (recent
+ * imports simply haven't had their turn yet) — 50% is the natural majority/minority split, not a
+ * number tuned against a fixture. An empty playable pool has nothing to warn about (neutral).
+ */
+function rotationTileVariant(rotation: NonNullable<StatusResponse["rotation"]>): "neutral" | "warning" {
+  if (rotation.playable === 0) return "neutral";
+  return rotation.neverAired / rotation.playable > 0.5 ? "warning" : "neutral";
+}
+
+/** SPEC F149.5 — the headline's caption half: paired with `TileHeadline`'s own `value` (neverAired)
+ * the same way `playableTracksCaption` pairs with the SafeScope tile's headline above. */
+function rotationHeadlineCaption(playable: number): string {
+  return `of ${playable} never aired`;
+}
+
+/**
+ * SPEC F149.5 — the secondary line: "N aired once · M stale (90 d)". `stale` names STORY-368's own
+ * `notAiredDays90` figure — a played-at-least-once track whose last airing is more than 90 days
+ * back. Neither noun phrase pluralizes with the count ("1 aired once" reads fine as-is), unlike
+ * `playableTracksCaption`'s "track"/"tracks" — no singular/plural branch is needed here.
+ */
+function rotationSecondaryLine(rotation: NonNullable<StatusResponse["rotation"]>): string {
+  return `${rotation.airedOnce} aired once · ${rotation.notAiredDays90} stale (90 d)`;
+}
+
 interface StatusTilesProps {
   status: StatusResponse | null;
   error: boolean;
@@ -124,7 +154,7 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
 
   return (
     <section aria-label="Station status">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Tile label="Catalog">
           {loading && <TileSkeleton />}
           {neverLoaded && <TileUnavailable />}
@@ -206,6 +236,30 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
                 </>
               ) : (
                 <p className="mt-1 text-[0.8rem] text-mute">Reachable</p>
+              )}
+            </>
+          )}
+        </Tile>
+
+        <Tile
+          label="Rotation health"
+          variant={status !== null && status.rotation !== undefined ? rotationTileVariant(status.rotation) : "neutral"}
+        >
+          {loading && <TileSkeleton />}
+          {(neverLoaded || (status !== null && status.rotation === undefined)) && <TileUnavailable />}
+          {status !== null && status.rotation !== undefined && (
+            <>
+              <TileHeadline value={status.rotation.neverAired} caption={rotationHeadlineCaption(status.rotation.playable)} />
+              <p className="mt-1 text-[0.8rem] text-mute">{rotationSecondaryLine(status.rotation)}</p>
+              {rotationTileVariant(status.rotation) === "warning" && (
+                <p className="mt-1 text-[0.75rem] font-semibold text-danger">
+                  More than half the playable catalog has never aired
+                </p>
+              )}
+              {status.rotation.rotationSince !== null && (
+                <p className="mt-0.5 text-[0.72rem] text-mute">
+                  Since {formatDateStamp(status.rotation.rotationSince, { timeZone })}
+                </p>
               )}
             </>
           )}

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Dapper;
 using Npgsql;
 using GenWave.Core.Abstractions;
+using GenWave.Core.Domain;
 using GenWave.MediaLibrary.Station;
 
 namespace GenWave.MediaLibrary.Garden;
@@ -58,6 +59,33 @@ sealed class MediaRotationRepository(
     public const string RotationSinceKey = "Gardener:RotationSince";
 
     /// <summary>
+    /// Mirrors <c>Catalog.MediaRepository.PlayablePredicate</c>'s own text verbatim — that constant is
+    /// <c>private</c> to that class (db/41's own <c>find_near_duplicates</c> function mirrors the exact
+    /// same text for the identical reason). Shared by <see cref="GetNeverAiredCountAsync"/> and
+    /// <see cref="GetRotationHealthAsync"/> (PLAN T371) — a row not currently playable is not "waiting
+    /// to air", so it must not inflate either figure.
+    /// </summary>
+    const string PlayablePredicate =
+        "m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)";
+
+    /// <summary>
+    /// The gh-#99 safe-scope carve-out, shared by every read/write below that needs it
+    /// (<see cref="RecordAiringAsync"/>, <see cref="GetNeverAiredCountAsync"/>,
+    /// <see cref="GetRotationHealthAsync"/>): appends the <c>and not (m.library_id = any(...))</c>
+    /// predicate and its parameter onto <paramref name="parameters"/> ONLY when
+    /// <paramref name="scope"/> is non-empty. An empty safe scope short-circuits to no extra predicate
+    /// at all — never <c>any('{}')</c>, which would silently drop every row (mirrors
+    /// <c>MediaRatingRepository.ExcludeSafeContent</c>'s identical short-circuit; PLAN T371
+    /// carry-forward (a) pins this branch with a fact of its own).
+    /// </summary>
+    static string AppendSafeExclusion(DynamicParameters parameters, LibraryScope scope)
+    {
+        if (scope.IsEmpty) return "";
+        parameters.Add("safeLibraryIds", scope.LibraryIds.ToArray());
+        return " and not (m.library_id = any(@safeLibraryIds))";
+    }
+
+    /// <summary>
     /// gh-#99 — the upsert is an <c>INSERT ... SELECT</c> off <c>library.media</c> rather than a bare
     /// <c>INSERT ... VALUES</c> (<see cref="Catalog.MediaRatingRepository.VoteAsync"/>'s own shape):
     /// the SELECT's <c>WHERE</c> is where the safe-scope carve-out lives, so a safe-loop
@@ -81,17 +109,10 @@ sealed class MediaRotationRepository(
     /// </summary>
     public async Task RecordAiringAsync(long mediaId, DateTimeOffset airedAt, CancellationToken ct)
     {
-        var scope = safeScope.Current;
         var parameters = new DynamicParameters();
         parameters.Add("mediaId", mediaId);
         parameters.Add("airedAt", airedAt);
-
-        var safeExclusion = "";
-        if (!scope.IsEmpty)
-        {
-            parameters.Add("safeLibraryIds", scope.LibraryIds.ToArray());
-            safeExclusion = " and not (m.library_id = any(@safeLibraryIds))";
-        }
+        var safeExclusion = AppendSafeExclusion(parameters, safeScope.Current);
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await conn.ExecuteAsync(new CommandDefinition(
@@ -135,15 +156,8 @@ sealed class MediaRotationRepository(
     /// </summary>
     public async Task<long> GetNeverAiredCountAsync(CancellationToken ct)
     {
-        var scope = safeScope.Current;
         var parameters = new DynamicParameters();
-
-        var safeExclusion = "";
-        if (!scope.IsEmpty)
-        {
-            parameters.Add("safeLibraryIds", scope.LibraryIds.ToArray());
-            safeExclusion = " and not (m.library_id = any(@safeLibraryIds))";
-        }
+        var safeExclusion = AppendSafeExclusion(parameters, safeScope.Current);
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         return await conn.ExecuteScalarAsync<long>(new CommandDefinition(
@@ -152,10 +166,54 @@ sealed class MediaRotationRepository(
             from library.media m
             left join library.media_rating r on r.media_id = m.id
             left join library.media_rotation rot on rot.media_id = m.id
-            where m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)
+            where {PlayablePredicate}
               and (rot.media_id is null or rot.play_count = 0){safeExclusion}
             """,
             parameters,
             cancellationToken: ct));
+    }
+
+    /// <summary>
+    /// The SPEC F149.5 dashboard/catalog aggregate (STORY-368, PLAN T371): one grouped query —
+    /// <c>count(*) filter (where ...)</c>, mirroring <c>MediaRepository.GetStatusCountsAsync</c>'s own
+    /// shape — produces <see cref="RotationHealth.Playable"/> (a bare <c>count(*)</c> over the SAME
+    /// WHERE the filtered counts share — every row this query touches at all is, by construction,
+    /// playable-and-in-scope) alongside <see cref="RotationHealth.NeverAired"/>/
+    /// <see cref="RotationHealth.AiredOnce"/>/<see cref="RotationHealth.NotAiredDays90"/> in one table
+    /// scan, plus <see cref="RotationHealth.RotationSince"/> from <see cref="GetRotationSinceAsync"/>
+    /// (a second, unrelated store — see that method's own remarks). <see cref="PlayablePredicate"/>
+    /// and the gh-#99 safe-scope exclusion apply exactly as <see cref="GetNeverAiredCountAsync"/>
+    /// applies them; the ONE addition here is <c>m.library_id = any(@libraryIds)</c> — the station's
+    /// own rotation <paramref name="scope"/>, needing no empty-scope special case: <c>= any('{}')</c>
+    /// matches nothing, so every count reads 0 naturally (the <c>GetStatusCountsAsync</c> precedent).
+    /// <c>NotAiredDays90</c> never double-counts a never-aired row: <c>rot.last_aired_at</c> is
+    /// <see langword="null"/> for one, and <c>null &lt; now() − 90 days</c> is never true in SQL.
+    /// </summary>
+    public async Task<RotationHealth> GetRotationHealthAsync(LibraryScope scope, CancellationToken ct)
+    {
+        var parameters = new DynamicParameters();
+        parameters.Add("libraryIds", scope.LibraryIds.ToArray());
+        var safeExclusion = AppendSafeExclusion(parameters, safeScope.Current);
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var counts = await conn.QuerySingleAsync<RotationHealthCountsRow>(
+            new CommandDefinition(
+                $"""
+                select
+                  count(*)::bigint as playable,
+                  count(*) filter (where rot.media_id is null or rot.play_count = 0)::bigint as never_aired,
+                  count(*) filter (where rot.play_count = 1)::bigint as aired_once,
+                  count(*) filter (where rot.last_aired_at < now() - interval '90 days')::bigint as not_aired_days90
+                from library.media m
+                left join library.media_rating r on r.media_id = m.id
+                left join library.media_rotation rot on rot.media_id = m.id
+                where {PlayablePredicate}
+                  and m.library_id = any(@libraryIds){safeExclusion}
+                """,
+                parameters,
+                cancellationToken: ct));
+
+        var since = await GetRotationSinceAsync(ct);
+        return new RotationHealth(counts.Playable, counts.NeverAired, counts.AiredOnce, counts.NotAiredDays90, since);
     }
 }
