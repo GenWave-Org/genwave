@@ -240,6 +240,140 @@ export async function reenrichMedia(mediaId: number): Promise<ReenrichOutcome> {
   return { ok: false, detail: await readErrorMessage(response) };
 }
 
+// ── File actions (SPEC F154; STORY-379; PLAN T381) ──────────────────────────────────────────────
+
+export type GardenerFileActionVerb = "retag" | "rename" | "move";
+
+/** One tag field a retag would write (SPEC F154.5) — `fileValue` is the file's own CURRENT value
+ * (`null` when the tag is absent), `catalogValue` is what will be written. */
+export interface FileActionTagDiffEntry {
+  field: string;
+  fileValue: string | null;
+  catalogValue: string;
+}
+
+/** `POST /api/gardener/file-actions/dry-run`'s own 200 body (SPEC F154.5) — `from`/`to` are real
+ * paths (this endpoint is AdminOnly; the operator must see what they are about to do before
+ * confirming it). */
+export interface FileActionPlanDto {
+  from: string;
+  to: string;
+  tagDiff: FileActionTagDiffEntry[];
+  planToken: string;
+  expiresAt: string;
+}
+
+function isFileActionPlanDto(raw: unknown): raw is FileActionPlanDto {
+  if (typeof raw !== "object" || raw === null) return false;
+  const candidate = raw as { from?: unknown; to?: unknown; planToken?: unknown; tagDiff?: unknown };
+  return (
+    typeof candidate.from === "string" &&
+    typeof candidate.to === "string" &&
+    typeof candidate.planToken === "string" &&
+    Array.isArray(candidate.tagDiff)
+  );
+}
+
+export type FileActionDryRunOutcome =
+  | { ok: true; plan: FileActionPlanDto }
+  | { ok: false; status: number; detail: string };
+
+/**
+ * `POST /api/gardener/file-actions/dry-run` (SPEC F154.1-F154.3, F154.5; STORY-379; PLAN T381) —
+ * plans one of the three file actions (retag/rename/move) and mints the plan token `confirmFileAction`
+ * presents back. `status` rides along on failure so the dialog can special-case a 404 (file actions
+ * disabled, SPEC F154.2) from an ordinary refusal (400/409) without a second parse.
+ */
+export async function dryRunFileAction(
+  mediaId: number,
+  verb: GardenerFileActionVerb,
+  target: string | null
+): Promise<FileActionDryRunOutcome> {
+  let response: Response;
+  try {
+    response = await fetch("/api/gardener/file-actions/dry-run", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mediaId, verb, target }),
+    });
+  } catch {
+    return { ok: false, status: 0, detail: "Network error — check your connection." };
+  }
+  if (!response.ok) {
+    return { ok: false, status: response.status, detail: await readErrorMessage(response) };
+  }
+  const raw = (await response.json()) as unknown;
+  if (!isFileActionPlanDto(raw)) {
+    return { ok: false, status: response.status, detail: "Unexpected response shape." };
+  }
+  return { ok: true, plan: raw };
+}
+
+export type FileActionConfirmOutcome =
+  | { kind: "done"; to: string }
+  | { kind: "conflict" | "reverted" | "busy" }
+  | { kind: "refused"; rule: string; message: string }
+  | { kind: "error"; detail: string };
+
+interface ConfirmOutcomeBody {
+  outcome: string;
+  to?: string;
+  rule?: string;
+  message?: string;
+}
+
+function isConfirmOutcomeBody(raw: unknown): raw is ConfirmOutcomeBody {
+  return typeof raw === "object" && raw !== null && typeof (raw as { outcome?: unknown }).outcome === "string";
+}
+
+/**
+ * `POST /api/gardener/file-actions/confirm` (SPEC F154.4-F154.8; STORY-379; PLAN T381) — presents a
+ * dry-run's own plan token back. Every status this endpoint can return (200/400/409/500/503) may
+ * carry EITHER the `{ outcome }` wire shape (done/conflict/reverted/refused/busy — the controller's
+ * own status map) or a plain ProblemDetails failure (a missing/expired token, or the generic 500) —
+ * this reads the body once and branches on its ACTUAL shape rather than assuming one from the
+ * status code alone, since a 409 carries either shape depending on why.
+ */
+export async function confirmFileAction(planToken: string): Promise<FileActionConfirmOutcome> {
+  let response: Response;
+  try {
+    response = await fetch("/api/gardener/file-actions/confirm", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ planToken }),
+    });
+  } catch {
+    return { kind: "error", detail: "Network error — check your connection." };
+  }
+
+  const raw = (await response.json().catch(() => null)) as unknown;
+
+  if (isConfirmOutcomeBody(raw)) {
+    switch (raw.outcome) {
+      case "done":
+        return { kind: "done", to: raw.to ?? "" };
+      case "conflict":
+        return { kind: "conflict" };
+      case "reverted":
+        return { kind: "reverted" };
+      case "busy":
+        return { kind: "busy" };
+      case "refused":
+        return { kind: "refused", rule: raw.rule ?? "", message: raw.message ?? "The action was refused." };
+      default:
+        break;
+    }
+  }
+
+  const detail =
+    typeof raw === "object" && raw !== null && typeof (raw as { detail?: unknown }).detail === "string"
+      ? (raw as { detail: string }).detail
+      : `Unexpected error (${response.status}).`;
+  return { kind: "error", detail };
+}
+
 // ── Evidence chips ──────────────────────────────────────────────────────────────────────────────
 
 function isRecord(value: unknown): value is Record<string, unknown> {

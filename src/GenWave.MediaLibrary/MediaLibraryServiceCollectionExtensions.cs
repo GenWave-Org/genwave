@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Threading.Channels;
 using Dapper;
 using Microsoft.Extensions.Configuration;
@@ -9,6 +10,7 @@ using GenWave.MediaLibrary.Catalog;
 using GenWave.MediaLibrary.Enrich;
 using GenWave.MediaLibrary.ExplicitClassification;
 using GenWave.MediaLibrary.Garden;
+using GenWave.MediaLibrary.Garden.FileActions;
 using GenWave.MediaLibrary.Mood;
 using GenWave.MediaLibrary.Options;
 using GenWave.MediaLibrary.Scan;
@@ -178,6 +180,41 @@ public static class MediaLibraryServiceCollectionExtensions
         // F150.9) then every registered IGardenerPass, log-and-continue per step — the
         // EnrichmentService bounded-batch backfill-loop shape, one seam over.
         services.AddHostedService<GardenerService>();
+
+        // The Library Gardener's file-action jail (SPEC F154.1-F154.5; STORY-379; PLAN T379,
+        // gh-#529) — pure planner + its own read-only filesystem probe (Kind/ResolveLinks, the ONLY
+        // I/O the jail performs) + the plan-token mint/read seam. IFileActionPlanTokens is
+        // registered with a per-process random 32-byte HMAC key generated once at first resolution
+        // (AddSingleton's factory runs once, so every mint/read in this process shares the same
+        // key) — T381 REPLACES this registration in GenWave.Host with an IDataProtector-backed
+        // implementation; nothing downstream depends on the concrete HMAC shape, only on
+        // IFileActionPlanTokens. The codec itself takes no TimeProvider (T379 review N4 — Mint/
+        // TryRead both take `now` as a parameter instead), so no DI clock dependency here at all.
+        services.AddSingleton<IFileSystemProbe, FileSystemProbe>();
+        services.AddSingleton<IFileActionPlanner, FileActionPlanner>();
+        services.AddSingleton<IFileActionPlanTokens>(
+            _ => new HmacFileActionPlanTokens(RandomNumberGenerator.GetBytes(32)));
+
+        // The dry-run endpoint's own read-only tag probe (SPEC F154.1; STORY-379; PLAN T381,
+        // gh-#529) — a retag caller opens the file's CURRENT tags through this port rather than
+        // reaching for TagLibSharp itself; IFileActionPlanner never opens a file (see its own
+        // remarks).
+        services.AddSingleton<IFileTagReader, FileTagReader>();
+
+        // The executors: retag/rename/move (SPEC F154.4, F154.6-F154.8; STORY-379; PLAN T380,
+        // gh-#529). IScanGate is registered ONCE, singleton, and consumed by BOTH ScanService's own
+        // tick (below) and FileActionExecutor — the same shared mutual-exclusion primitive so a scan
+        // and a file action can never overlap (F154.6). FileActionRepository is Dapper-free's own
+        // exception (L2: it is the ONE *Repository type inside Garden.FileActions permitted to touch
+        // Npgsql/Dapper) — FileActionExecutor itself never references either package.
+        services.AddSingleton<IScanGate, ScanGate>();
+        services.AddSingleton<FileActionRepository>();
+        services.AddSingleton<IFileActionExecutor, FileActionExecutor>();
+        // The dry-run endpoint's own subject read (SPEC F154.1, F154.3; STORY-379; PLAN T381,
+        // gh-#529) — the SAME IAdminMediaLookup/MediaRepository "public port over an internal
+        // repository" shape: GenWave.Host reaches FileActionRepository.ReadSubjectAsync only
+        // through this port, never the concrete (internal) type.
+        services.AddSingleton<IFileActionSubjectReader>(sp => sp.GetRequiredService<FileActionRepository>());
 
         // gh-#99: the narrow cross-schema membership answer the taste-thumb/booth-log surfaces
         // need — resolved on the library connection because station_svc deliberately has no grant

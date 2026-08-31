@@ -43,9 +43,23 @@ internal static class PostgresConfinement
     /// independently against the architecture and intersects ONLY that result into the running
     /// set (<c>TypePredicatesDefinition&lt;T&gt;.Are</c>'s own implementation) — the one
     /// composition primitive here that lets an `.And()` stay scoped to just its own term.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>T380's own widening:</b> <c>ResideInNamespaceMatching</c> (anchored <c>^...$</c>,
+    /// verified against ArchUnitNET 0.13.4's own decompiled <c>FullNameMatches</c> — a plain,
+    /// un-anchored <see cref="System.Text.RegularExpressions.Regex.IsMatch(string, string)"/>) —
+    /// not the exact-match <c>ResideInNamespace</c> T357 shipped with, which only ever matched the
+    /// literal <c>GenWave.MediaLibrary.Garden</c> namespace itself. <c>Garden.FileActions.FileActionRepository</c>
+    /// (SPEC F154.6, F154.7; STORY-379; PLAN T380, gh-#529) lives one level deeper, in
+    /// <c>GenWave.MediaLibrary.Garden.FileActions</c> — a real, committed sub-namespace this law
+    /// must recognise, not a probe fixture. Matching every CURRENT AND FUTURE sub-namespace of
+    /// Garden is the correct reading of "inside Garden, only a <c>*Repository</c>-named type may
+    /// touch Npgsql/Dapper" (this class's own header line) — the law was never meant to stop at one
+    /// folder depth.
     /// </para></summary>
     private static readonly IObjectProvider<IType> GardenRepositoriesOnly = Types().That()
-        .ResideInNamespace("GenWave.MediaLibrary.Garden")
+        .ResideInNamespaceMatching(@"^GenWave\.MediaLibrary\.Garden(\..+)?$")
         .And().HaveNameEndingWith("Repository");
 
     /// <summary>MediaLibrary's actual repository layer: the namespaces (Catalog, Station) or,

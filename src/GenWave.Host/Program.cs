@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Announcements;
 using GenWave.Host.Api;
@@ -17,6 +18,7 @@ using GenWave.Host.Seeding;
 using GenWave.Host.Stats;
 using GenWave.Host.Theming;
 using GenWave.MediaLibrary;
+using GenWave.MediaLibrary.Options;
 using GenWave.Orchestration;
 using GenWave.Tts;
 using Microsoft.Extensions.Options;
@@ -323,6 +325,24 @@ builder.Services.AddSingleton<CatalogProxyService>();
 // PersonaController's existing direct-construction unit tests need a throwing stub, not this real
 // dependency graph).
 builder.Services.AddSingleton<ICatalogPersonaAvatarInstaller, CatalogPersonaAvatarInstaller>();
+
+// The Library Gardener's file-action jail (SPEC F154.3, F154.5; STORY-379; PLAN T381, gh-#529):
+// swap MediaLibrary's per-process-random-key HmacFileActionPlanTokens for a DataProtection-backed
+// codec keyed the SAME way the admin cookie already is (AddGenWaveAdminApi's own
+// AddDataProtection().PersistKeysToFileSystem(...), already registered above) — a plan token now
+// survives an api container recreate, and IDataProtectionProvider is resolved lazily, so running
+// AFTER .AddMediaLibrary(cfg) (which registers the HMAC default) is what makes this an override,
+// not a race. Replace, not TryAdd/Add — exactly one IFileActionPlanTokens must ever be resolved.
+builder.Services.Replace(
+    ServiceDescriptor.Singleton<IFileActionPlanTokens, DataProtectionFileActionPlanTokens>());
+
+// Boot validation for Library:Scan:QuarantineExemptRoots (SPEC F154.3; STORY-379; PLAN T381,
+// gh-#529) — ScanOptions itself already binds inside .AddMediaLibrary(cfg) above via a plain
+// Configure<T> call (never ValidateDataAnnotations()), so only the validator + its ValidateOnStart
+// trigger are needed here; see ScanOptionsValidator's own remarks for why an un-rooted exempt root
+// must fail boot rather than silently resolve against the process's own working directory.
+builder.Services.AddSingleton<IValidateOptions<ScanOptions>, ScanOptionsValidator>();
+builder.Services.AddOptions<ScanOptions>().ValidateOnStart();
 
 builder.Services.AddControllers();
 

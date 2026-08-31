@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **102 seams across 6 projects.**
+> **109 seams across 6 projects.**
 
 ## GenWave.Context (2 seams)
 
@@ -53,7 +53,7 @@
 | `GenWave.Core.Abstractions.IContextPatterFactSource` | `GenWave.Context.ContextPipeline` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextPatterFactSource` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IContextProvider` | `GenWave.Context.History.HistoryContextProvider` | Singleton | also registered: `GenWave.Context.Weather.WeatherContextProvider` (GenWave.Context) |
 
-## GenWave.Host (29 seams)
+## GenWave.Host (30 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -64,6 +64,7 @@
 | `GenWave.Core.Abstractions.IContextCacheRootProvider` | `GenWave.Host.Options.OptionsMonitorContextCacheRootProvider` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextCacheRootProvider` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IContextSettingsProvider` | `GenWave.Host.Options.ConfigurationContextSettingsProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.ICrosstalkScopeProvider` | `GenWave.Host.Options.OptionsMonitorCrosstalkScopeProvider` | Singleton | — |
+| `GenWave.Core.Abstractions.IFileActionPlanTokens` | `GenWave.Host.Api.DataProtectionFileActionPlanTokens` | Singleton | — |
 | `GenWave.Core.Abstractions.ILiquidsoapControl` | `GenWave.Host.Engine.MediaExistencePushGuard` | Singleton | — |
 | `GenWave.Core.Abstractions.IListenerStatsSource` | `GenWave.Host.Stats.IcecastListenerStatsSource` | Singleton | — |
 | `GenWave.Core.Abstractions.ILlmBatchGate` | `GenWave.Host.Enrichment.LlmBatchGate` | Singleton | — |
@@ -97,7 +98,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (44 seams)
+## GenWave.MediaLibrary (50 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -116,6 +117,11 @@
 | `GenWave.Core.Abstractions.IBoothLogReader` | `GenWave.MediaLibrary.Station.BoothLogRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IDeadFileReporter` | `GenWave.MediaLibrary.Garden.DeadFileReporter` | Singleton | — |
 | `GenWave.Core.Abstractions.IExplicitClassifier` | `GenWave.MediaLibrary.ExplicitClassification.OllamaExplicitClassifier` | Singleton | — |
+| `GenWave.Core.Abstractions.IFileActionExecutor` | `GenWave.MediaLibrary.Garden.FileActions.FileActionExecutor` | Singleton | — |
+| `GenWave.Core.Abstractions.IFileActionPlanner` | `GenWave.MediaLibrary.Garden.FileActions.FileActionPlanner` | Singleton | — |
+| `GenWave.Core.Abstractions.IFileActionSubjectReader` | `GenWave.MediaLibrary.Garden.FileActions.FileActionRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IFileSystemProbe` | `GenWave.MediaLibrary.Garden.FileActions.FileSystemProbe` | Singleton | — |
+| `GenWave.Core.Abstractions.IFileTagReader` | `GenWave.MediaLibrary.Garden.FileActions.FileTagReader` | Singleton | — |
 | `GenWave.Core.Abstractions.IFontPackStore` | `GenWave.MediaLibrary.Station.FontPackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IGardenerPass` | `GenWave.MediaLibrary.Garden.ShelfDustGardenerPass` | Singleton | also registered: `GenWave.MediaLibrary.Garden.DeadFileGardenerPass` (GenWave.MediaLibrary), `GenWave.MediaLibrary.Garden.NearDuplicateGardenerPass` (GenWave.MediaLibrary), `GenWave.MediaLibrary.Garden.StaleMetadataGardenerPass` (GenWave.MediaLibrary), `GenWave.MediaLibrary.Garden.UnreachableGardenerPass` (GenWave.MediaLibrary) |
 | `GenWave.Core.Abstractions.IIconPackStore` | `GenWave.MediaLibrary.Station.IconPackRepository` | Singleton | — |
@@ -137,6 +143,7 @@
 | `GenWave.Core.Abstractions.IRequestCatalogProbe` | `GenWave.MediaLibrary.Catalog.RequestCatalogProbeRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IRequestStore` | `GenWave.MediaLibrary.Station.RequestRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IRotFindingStore` | `GenWave.MediaLibrary.Garden.RotFindingRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IScanGate` | `GenWave.MediaLibrary.Scan.ScanGate` | Singleton | — |
 | `GenWave.Core.Abstractions.IScheduleSpecialStore` | `GenWave.MediaLibrary.Station.SpecialsRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IScheduleStore` | `GenWave.MediaLibrary.Station.ScheduleRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IShowImagingScope` | `GenWave.MediaLibrary.Catalog.ShowImagingScopeRepository` | Singleton | — |

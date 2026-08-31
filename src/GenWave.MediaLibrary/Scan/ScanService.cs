@@ -2,6 +2,7 @@ using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using GenWave.Core.Abstractions;
 using GenWave.MediaLibrary.Catalog;
 using GenWave.MediaLibrary.Options;
 
@@ -20,10 +21,9 @@ sealed class ScanService(
     Channel<long> enrichQueue,
     IOptionsMonitor<LibraryOptions> options,
     ILogger<ScanService> log,
-    IOptionsMonitor<ScanOptions> scanOptions) : BackgroundService
+    IOptionsMonitor<ScanOptions> scanOptions,
+    IScanGate gate) : BackgroundService
 {
-    readonly SemaphoreSlim singleFlight = new(1, 1);
-
     /// <summary>
     /// The library whose rows this scan manages (gh-#611): discovery's own
     /// <c>InsertDiscoveredAsync</c> writes rely on the schema's <c>library_id</c> default — library
@@ -87,8 +87,11 @@ sealed class ScanService(
     // internal for deterministic single-pass integration testing (no timer).
     internal async Task ScanOnceAsync(CancellationToken ct)
     {
-        // Single-flight: if a scan is already running, skip this tick rather than overlap.
-        if (!await singleFlight.WaitAsync(0, ct))
+        // Single-flight: if a scan is already running (or a file action currently holds the SAME
+        // shared gate, SPEC F154.6), skip this tick rather than overlap. TryEnter never waits — the
+        // exact "Scan already in progress; skipping this tick" semantics this line always had, now
+        // over the extracted IScanGate rather than a private SemaphoreSlim field.
+        if (!gate.TryEnter(out var lease))
         {
             log.LogDebug("Scan already in progress; skipping this tick");
             return;
@@ -185,7 +188,7 @@ sealed class ScanService(
         }
         finally
         {
-            singleFlight.Release();
+            lease.Dispose();
         }
     }
 
@@ -249,14 +252,13 @@ sealed class ScanService(
             }
 
             // Truncate mtime to whole seconds so it round-trips through timestamptz exactly and does
-            // not spuriously re-trigger "changed" on sub-second precision differences.
-            var mtime = TruncateToSeconds(info.LastWriteTimeUtc);
+            // not spuriously re-trigger "changed" on sub-second precision differences. Shared with
+            // Garden.FileActions.FileActionExecutor's own post-write re-stat (SPEC F154.6, F154.8,
+            // PLAN T380) — the two must never disagree on what "unchanged" means.
+            var mtime = ScanMtime.TruncateToSeconds(info.LastWriteTimeUtc);
             yield return new MediaFile(path, ext.TrimStart('.'), info.Length, mtime);
         }
     }
-
-    static DateTime TruncateToSeconds(DateTime t) =>
-        new(t.Ticks - t.Ticks % TimeSpan.TicksPerSecond, DateTimeKind.Utc);
 
     /// <summary>
     /// True when <paramref name="path"/> is <see cref="LibraryOptions.MediaRoot"/> itself or nested
