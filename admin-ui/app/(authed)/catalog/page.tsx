@@ -10,6 +10,7 @@ import { PurgeUnavailableAction } from "./PurgeUnavailableAction";
 import { YearFilterControl } from "./YearFilterControl";
 import { FacetFilterControl } from "./FacetFilterControl";
 import { MoodFilterControl } from "./MoodFilterControl";
+import { Pager } from "@/components/ui/pager";
 import { Tooltip } from "@/components/ui/tooltip";
 import type { AdminMediaDto, BulkFilter, Pagination } from "./types";
 
@@ -627,23 +628,7 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps): P
         clearFiltersHref="/catalog"
       />
 
-      {pagination.pages > 1 && (
-        <nav aria-label="Pagination" className="mt-4 flex items-center gap-3 text-[0.82rem] text-mute">
-          {currentPage > 1 && (
-            <Link href={buildPageUrl(sp, currentPage - 1)} className="text-accent hover:underline">
-              Previous
-            </Link>
-          )}
-          <span>
-            Page {currentPage} of {pagination.pages}
-          </span>
-          {currentPage < pagination.pages && (
-            <Link href={buildPageUrl(sp, currentPage + 1)} className="text-accent hover:underline">
-              Next
-            </Link>
-          )}
-        </nav>
-      )}
+      <Pager page={currentPage} pages={pagination.pages} hrefFor={(page) => buildPageUrl(sp, page)} />
     </main>
   );
 }

@@ -18,14 +18,18 @@ export type GardenerKind = "dead_file" | "near_duplicate" | "stale_metadata" | "
 export type GardenerFindingState = "open" | "dismissed" | "resolved";
 
 /** Section order (SPEC F153.10, ORCHESTRATOR ruling 2) — fixed, never derived from whatever order
- * the api response happens to list groups in. */
-export const GARDENER_KIND_ORDER: readonly GardenerKind[] = [
+ * the api response happens to list groups in. `as const satisfies` (T387 review LOW-3) keeps this a
+ * literal tuple — `noUncheckedIndexedAccess` then types `GARDENER_KIND_ORDER[0]` as `GardenerKind`
+ * directly rather than `GardenerKind | undefined`, so a caller needing the founding tab (e.g.
+ * `gardener-paging.ts`) never needs its own runtime empty-array guard for a five-entry constant
+ * that is never actually empty. */
+export const GARDENER_KIND_ORDER = [
   "dead_file",
   "near_duplicate",
   "stale_metadata",
   "unreachable",
   "shelf_dust",
-];
+] as const satisfies readonly GardenerKind[];
 
 /** Section header copy — sentence-cased per Dean's copy rule (capitals open every sentence). */
 export const GARDENER_KIND_LABELS: Record<GardenerKind, string> = {
@@ -144,27 +148,27 @@ export interface GardenerGroupDto {
 
 export interface GardenerFindingsResponse {
   groups: GardenerGroupDto[];
+  /** Present only for a kind-scoped call (SPEC F153.9 rider 2026-08-31; STORY-382 AC6/AC8; PLAN
+   * T386) — the exact count of paging units for that one kind: GROUPS for `near_duplicate`, ROWS
+   * for every other kind (`GardenerController.GetFindings`'s own remarks). Absent for an
+   * un-scoped call — `GardenerController`'s T377 shape stays byte-compatible. */
+  total?: number;
 }
 
-function isGardenerFindingsResponse(raw: unknown): raw is GardenerFindingsResponse {
-  return typeof raw === "object" && raw !== null && Array.isArray((raw as { groups?: unknown }).groups);
-}
-
-/** `GET /api/gardener/findings?state=open&limit=1000` (ORCHESTRATOR ruling 2 — the page's own
- * "whole queue in one page" read, T377's own ceiling). Never throws: a network failure, non-2xx,
- * or off-shape 200 body all resolve to `null` so the page can render its own unavailable state. */
-export async function fetchGardenerFindings(): Promise<GardenerFindingsResponse | null> {
-  try {
-    const response = await fetch("/api/gardener/findings?state=open&limit=1000", {
-      credentials: "include",
-      cache: "no-store",
-    });
-    if (!response.ok) return null;
-    const raw = (await response.json()) as unknown;
-    return isGardenerFindingsResponse(raw) ? raw : null;
-  } catch {
-    return null;
-  }
+/** `GET /api/gardener/findings`'s own path+query for a kind-scoped, open-state read (SPEC F153.10
+ * rider 2026-08-31; STORY-381/382; PLAN T387) — always `state=open` (the Gardener page only ever
+ * shows the live queue) and always kind-scoped, so the response always carries
+ * {@link GardenerFindingsResponse.total}. The page's own server-side `apiGet` call
+ * (`gardener/page.tsx`) is the only caller (T387 review MED-2: the browser-fetcher counterpart this
+ * module used to also export, `fetchGardenerFindings`, had zero call sites once `GardenerView`
+ * retired — deleted rather than kept as unreachable API surface). */
+export function buildGardenerFindingsPath(kind: GardenerKind, limit: number, offset: number): string {
+  const query = new URLSearchParams();
+  query.set("kind", kind);
+  query.set("state", "open");
+  query.set("limit", String(limit));
+  query.set("offset", String(offset));
+  return `/api/gardener/findings?${query.toString()}`;
 }
 
 export type DismissFindingOutcome = { ok: true } | { ok: false; detail: string };

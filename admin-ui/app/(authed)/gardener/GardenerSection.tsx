@@ -1,4 +1,7 @@
+"use client";
+
 import type { ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { PurgeUnavailableAction } from "../_components/PurgeUnavailableAction";
 import {
   GARDENER_KIND_EMPTY_LABELS,
@@ -13,37 +16,54 @@ interface GardenerSectionProps {
   kind: GardenerKind;
   group: GardenerGroupDto;
   /** `GET /api/status`'s own per-kind OPEN total (SPEC F153.9) — `null` when the status fetch
-   * itself failed, in which case the header falls back to this page's own row count. */
+   * itself failed, in which case the header falls back to {@link total}, EXCEPT for
+   * `near_duplicate` (T387 review LOW-2, RULED): `openCount` is a ROW count, but `near_duplicate`'s
+   * own `total` is a GROUP count (STORY-382 AC6/AC8) — falling back to it there would silently swap
+   * units, showing a group count as though it were an open-row count. That one kind suppresses the
+   * header count entirely instead (honest beats unit-swapped); every other kind's `total` is
+   * row-scoped, same unit as `openCount`, so the fallback stays correct there. The old "Showing
+   * first N of M" flat-paging caveat this header used to carry when the two disagreed is GONE
+   * (SPEC F153.10 rider 2026-08-31) — a real pager (`Pager`) replaces it. */
   openCount: number | null;
-  onChanged: () => void;
+  /** The active tab's own exact total (the kind-scoped `GardenerFindingsResponse.total`, STORY-382
+   * AC6/AC8) — the header's fallback source when status failed, and what gates the dead_file Purge
+   * trigger below: a beyond-end page can legitimately render zero rows while the kind itself still
+   * has dead files to purge, so gating on `total` (not this page's own row count) stays correct. */
+  total: number;
 }
 
 /**
- * One kind's section (SPEC F153.10, STORY-374 AC9): a header naming the kind and its open count,
- * a per-kind empty state when nothing qualifies (LOW-2 — "Nothing here." read as generic; each
- * kind now names itself), the "Showing first N of M" flat-paging caveat when this page's own row
- * count for the kind is short of the status total (ORCHESTRATOR ruling 2 — rows are paged FLAT
- * before grouping, so a page's own count for one kind can legitimately be less than that kind's
- * real total), and either a flat row list (every kind but near_duplicate) or one
- * {@link DuplicateGroupCard} per duplicate group (near_duplicate only — STORY-376 AC6).
+ * One kind's section — the tab strip's own content pane (SPEC F153.10 rider 2026-08-31; STORY-381/
+ * 382; PLAN T387, gh-#654/#655/#657): a header naming the kind and its open count, a per-kind empty
+ * state when nothing qualifies (LOW-2 — "Nothing here." read as generic; each kind names itself),
+ * and either a flat row list (every kind but near_duplicate) or one {@link DuplicateGroupCard} per
+ * duplicate group (near_duplicate only — STORY-376 AC6, STORY-383 AC4 whole-cluster rendering).
+ * Exactly ONE kind renders per page load now — the tab strip (`GardenerTabs`) owns which.
  *
- * T378 review LOW-5/LOW-B: the duplicate-group branch renders from `group.duplicateGroups` — never
- * a `kind === "near_duplicate"` check alone — because `duplicateGroups` (not `findings.length`) is
- * the actual data that branch draws from. A group with no `groupKey` is filtered out BEFORE
- * `hasDuplicateGroups` is computed (not inside the render map, LOW-B's own fix) — Keep this one's
- * whole point is "mark the OTHER members of THIS group ineligible", meaningless without a real
- * group identity, and filtering only at render time left `hasDuplicateGroups` true even when every
- * group had been filtered away, rendering an empty header with nothing under it. Filtering first
- * means an all-null set falls through to the flat row list (the SAME fallback every non-
- * near_duplicate kind renders) instead. Never reachable from the real backend today — a
- * near_duplicate finding always carries its own `group_key` — but this keeps a malformed/future
- * response from rendering a Keep-this-one button (or an empty shell) with no group behind it.
+ * This is now the page's own "use client" boundary: `page.tsx` (a Server Component) renders this
+ * directly, mirroring `catalog/CatalogTable.tsx`'s own split — a top-level client component that
+ * owns `useRouter()` and threads a `router.refresh()` closure down to every verb, rather than a
+ * closure passed in as a prop from the server (which RSC cannot serialize). `GardenerView`'s own
+ * client LoadState/fetch-on-mount — the gh-#654 defect — retires with this: every row verb still
+ * re-fetches on success, but by asking Next.js to re-render this Server Component, not by holding
+ * a second client-side copy of the queue. Purge stays dead_file-tab-only, now carrying the gh-#655
+ * verb-object label ("Purge dead tracks…"/"Purge dead tracks") — the old "Purge unavailable…" read
+ * as a status, never naming what the click actually does.
+ *
+ * T378 review LOW-5/LOW-B (carried forward verbatim): the duplicate-group branch renders from
+ * `group.duplicateGroups` — never a `kind === "near_duplicate"` check alone — and a group with no
+ * `groupKey` is filtered out BEFORE `hasDuplicateGroups` is computed, so a malformed/future
+ * response falls through to the flat row list instead of an empty shell with nothing under it.
  */
-export function GardenerSection({ kind, group, openCount, onChanged }: GardenerSectionProps): ReactNode {
+export function GardenerSection({ kind, group, openCount, total }: GardenerSectionProps): ReactNode {
+  const router = useRouter();
+  const onChanged = (): void => router.refresh();
+
   const label = GARDENER_KIND_LABELS[kind];
   const rowCount = group.findings.length;
-  const displayCount = openCount ?? rowCount;
-  const showingFewer = openCount !== null && rowCount < openCount;
+  // LOW-2 (RULED): near_duplicate's own `total` is a GROUP count, not a ROW count like `openCount`
+  // — falling back to it would silently swap units, so that one kind suppresses the count instead.
+  const displayCount: number | null = openCount ?? (kind === "near_duplicate" ? null : total);
   const duplicateGroups = group.duplicateGroups.filter((duplicateGroup) => duplicateGroup.groupKey !== null);
   const hasDuplicateGroups = duplicateGroups.length > 0;
 
@@ -51,18 +71,15 @@ export function GardenerSection({ kind, group, openCount, onChanged }: GardenerS
     <section aria-label={label} className="rounded-[6px] border border-line bg-surface p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-display text-[1.05rem] font-semibold text-ink">
-          {label} <span className="text-[0.85rem] font-normal text-mute">· {displayCount} open</span>
+          {label}
+          {displayCount !== null && (
+            <span className="text-[0.85rem] font-normal text-mute"> · {displayCount} open</span>
+          )}
         </h2>
-        {kind === "dead_file" && rowCount > 0 && (
-          <PurgeUnavailableAction title="Purge unavailable" triggerLabel="Purge unavailable…" onPurged={onChanged} />
+        {kind === "dead_file" && total > 0 && (
+          <PurgeUnavailableAction title="Purge dead tracks" triggerLabel="Purge dead tracks…" onPurged={onChanged} />
         )}
       </div>
-
-      {showingFewer && (
-        <p className="mt-1 text-[0.75rem] text-mute">
-          Showing first {rowCount} of {openCount}
-        </p>
-      )}
 
       {rowCount === 0 && <p className="mt-3 text-[0.85rem] text-mute">{GARDENER_KIND_EMPTY_LABELS[kind]}</p>}
 
