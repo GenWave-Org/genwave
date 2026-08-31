@@ -64,8 +64,8 @@ public sealed class GardenerController(IRotFindingStore store, ILogger<GardenerC
     /// property that sometimes isn't there.
     ///
     /// <para>
-    /// <b>No <c>count</c> field, no <c>X-Pagination</c> header (T377 review MED, RULED).</b> This
-    /// queue is not a browse table: rows are paged FLAT, in the SAME
+    /// <b>No <c>count</c> field, no <c>X-Pagination</c> header, for an UN-SCOPED call (T377 review
+    /// MED, RULED).</b> This queue is not a browse table: rows are paged FLAT, in the SAME
     /// <c>kind, group_key nulls last, opened_at desc, id</c> order
     /// <see cref="IRotFindingStore.ListWithMediaAsync"/>'s own remarks describe, BEFORE this action
     /// ever groups them by kind — a group's own rows are adjacent within a page, but a page boundary
@@ -77,6 +77,19 @@ public sealed class GardenerController(IRotFindingStore store, ILogger<GardenerC
     /// shape. A caller wanting the WHOLE queue in one page (e.g. a future review-queue UI) passes
     /// this endpoint's own ceiling as <c>limit</c> instead of paging — see below for the exact
     /// default/ceiling values.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Rider (SPEC F153.9 rider 2026-08-31; STORY-382 AC6/AC8; PLAN T386): a <c>kind</c>-SCOPED
+    /// call now carries <c>total</c>.</b> The MED finding above stands verbatim for an UN-SCOPED call
+    /// (no <c>kind</c> in the query string) — its response is still EXACTLY <c>{ groups }</c>, no
+    /// <c>total</c> member at all, the T377 shape byte-for-byte. A <c>kind</c>-scoped call gains a
+    /// top-level <c>total</c>: the exact count of matching paging units for that one kind — GROUPS for
+    /// <c>kind=near_duplicate</c> (<see cref="IRotFindingStore.ListWithMediaAsync"/>'s own group-paged
+    /// read, PLAN T385), ROWS for every other kind. This sidesteps the MED finding's own objection
+    /// entirely: once <c>kind</c> pins the read to one paging space, "the count within this page" and
+    /// "the kind's real total" are the SAME query, computed exactly
+    /// (<see cref="RotFindingPage.Total"/>'s own remarks), not a per-page approximation.
     /// </para>
     ///
     /// <c>kind</c>/<c>state</c> are the store's own snake_case wire text (<see cref="RotKindTokens"/>/
@@ -133,7 +146,13 @@ public sealed class GardenerController(IRotFindingStore store, ILogger<GardenerC
             .Select(BuildGroup)
             .ToList();
 
-        return Ok(new { groups });
+        // T386 (SPEC F153.9 rider 2026-08-31; STORY-382 AC6/AC8): page.Total is non-null exactly for a
+        // kind-scoped read (RotFindingPage's own contract) — total rides the wire only when the store
+        // actually computed one, so the kind-less call's response stays byte-compatible with T377's
+        // pinned shape (no "total" member at all, never a null-valued one).
+        return page.Total is int total
+            ? Ok(new { groups, total })
+            : Ok(new { groups });
     }
 
     /// <summary>

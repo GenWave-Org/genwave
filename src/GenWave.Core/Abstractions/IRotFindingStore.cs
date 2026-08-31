@@ -196,22 +196,24 @@ public interface IRotFindingStore
     /// is about — T377's admin surface (SPEC F153.9, STORY-374 AC7), extended at T385 (SPEC F153.9
     /// rider 2026-08-31; STORY-382 AC6, STORY-383) to return <see cref="RotFindingPage.Total"/> of
     /// matching paging units alongside the page, computed against the SAME <paramref name="kind"/>/
-    /// <paramref name="state"/> filter — EXACT for a kind-scoped read; PAGE-LOCAL (never derived from a
-    /// second query) for the kind-less read — see below for exactly which.
+    /// <paramref name="state"/> filter — EXACT for a kind-scoped read; <see langword="null"/> (never
+    /// derived from a second query, T386 review — the type itself now carries "not computed") for the
+    /// kind-less read — see below for exactly which.
     ///
     /// <para>
     /// <b>The kind-LESS read (<paramref name="kind"/> <see langword="null"/>) keeps T377's exact row
-    /// shape, verbatim (regression pin) — but <see cref="RotFindingPage.Total"/> is now PAGE-LOCAL</b>
-    /// (T385 review LOW-2). Rows page FLAT, in <c>kind, group_key nulls last, opened_at desc, id</c>
-    /// order, BEFORE <c>GardenerController</c> ever groups them by kind — a caller paging with a small
-    /// <paramref name="limit"/> can still see a <see cref="RotKind.NearDuplicate"/> group split across a
-    /// page boundary here (its own rows are adjacent within one page thanks to the <c>group_key</c>
-    /// ordering, but a page edge can still fall inside a group). <see cref="RotFindingPage.Total"/> for
-    /// this shape is simply <see cref="RotFindingPage.Items"/>'s own count, NOT the true matching row
-    /// count across every kind — no second query runs to compute one. <c>GardenerController</c> never
-    /// puts <see cref="RotFindingPage.Total"/> on the wire for a kind-less call at all (T377's own
-    /// pinned response shape carries no <c>count</c> field, STORY-382 AC8), so no caller reads this
-    /// value for this shape; it exists only for the interface's own uniform return type.
+    /// shape, verbatim (regression pin) — but <see cref="RotFindingPage.Total"/> is now
+    /// <see langword="null"/></b> (T385 review LOW-2; made an actual <see langword="null"/> rather than
+    /// a same-as-<see cref="RotFindingPage.Items"/>-count stand-in at T386 review). Rows page FLAT, in
+    /// <c>kind, group_key nulls last, opened_at desc, id</c> order, BEFORE <c>GardenerController</c>
+    /// ever groups them by kind — a caller paging with a small <paramref name="limit"/> can still see a
+    /// <see cref="RotKind.NearDuplicate"/> group split across a page boundary here (its own rows are
+    /// adjacent within one page thanks to the <c>group_key</c> ordering, but a page edge can still fall
+    /// inside a group). No second query ever runs to compute a true matching row count across every
+    /// kind for this shape. <c>GardenerController</c> puts <see cref="RotFindingPage.Total"/> on the
+    /// wire as <c>total</c> exactly when it is non-null (T386) — a kind-less call's response therefore
+    /// carries no <c>total</c> member at all (T377's own pinned response shape carries no <c>count</c>
+    /// field either, STORY-382 AC8).
     /// </para>
     ///
     /// <para>

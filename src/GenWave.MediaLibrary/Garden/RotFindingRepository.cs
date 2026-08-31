@@ -818,11 +818,12 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
     ///
     /// <para>
     /// <b>Kind-LESS (<paramref name="kind"/> null): NO count round trip at all</b> (T385 review LOW-2).
-    /// <see cref="RotFindingPage.Total"/> here is simply <see cref="RotFindingPage.Items"/>'s own count
-    /// — PAGE-LOCAL, never a true matching total across every kind, and never read off the wire for
-    /// this shape (<c>GardenerController</c>'s own T377-pinned response carries no <c>count</c> field
-    /// at all for a kind-less call, STORY-382 AC8). The kind-less caller has never needed an exact
-    /// cross-kind total, so the extra round trip bought nothing any reader actually consumes.
+    /// <see cref="RotFindingPage.Total"/> here is <see langword="null"/> (T386 review — the type itself
+    /// now says "not computed" rather than overloading <see cref="RotFindingPage.Items"/>'s own count
+    /// into that meaning), never a true matching total across every kind, and never read off the wire
+    /// for this shape (<c>GardenerController</c>'s own T377-pinned response carries no <c>count</c>
+    /// field at all for a kind-less call, STORY-382 AC8). The kind-less caller has never needed an
+    /// exact cross-kind total, so the extra round trip bought nothing any reader actually consumes.
     /// </para>
     /// </summary>
     async Task<RotFindingPage> ListFlatPageAsync(
@@ -853,7 +854,7 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
             var rows = await conn.QueryAsync<RotFindingWithMediaRow>(new CommandDefinition(
                 pageSql, parameters, cancellationToken: ct));
             var items = rows.Select(ToFindingWithMedia).ToList();
-            return new RotFindingPage(items, items.Count);
+            return new RotFindingPage(items, null);
         }
 
         var countSql = $"select count(*) from library.rot_finding f {where}";
