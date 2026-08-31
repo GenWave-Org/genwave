@@ -1,3 +1,4 @@
+using GenWave.Abstractions.Playout;
 using GenWave.Core.Domain;
 
 namespace GenWave.Core.Abstractions;
@@ -5,9 +6,11 @@ namespace GenWave.Core.Abstractions;
 /// <summary>
 /// SEAM (SPEC F115.1, STORY-305, PLAN T239) — CRUD access to <c>station.show</c>: the named-show
 /// identity package (name/tagline/flavor/provenance) an hour of airtime can carry. Deliberately never
-/// maps, reads, or writes <c>persona_id</c>/<c>envelope</c> (SPEC F115.2 — a law of the epic, not an
-/// oversight); a future schedulable-bundle slice adds that seam separately. No DI registration and no
-/// consumer land with this seam — <c>/api/shows</c> (PLAN T240) is the first.
+/// maps, reads, or writes <c>persona_id</c>, or any <c>envelope</c> key beyond <c>rotation</c> (SPEC
+/// F115.2 — a law of the epic, not an oversight, narrowed by exactly one field at SPEC F152.3/PLAN
+/// T360 — see <see cref="SetRotationAsync"/>); a future schedulable-bundle slice adds a wider seam
+/// separately. No DI registration and no consumer land with this seam — <c>/api/shows</c> (PLAN T240)
+/// is the first.
 /// </summary>
 public interface IShowStore
 {
@@ -93,6 +96,67 @@ public interface IShowStore
     /// <c>IThemeStore.UpsertAsync</c>'s own "pure persistence, no validation" posture, narrowed only by
     /// the ONE gate (authored-vs-imported) this method itself must own to make it atomic.
     /// </para>
+    ///
+    /// <para>
+    /// <b><paramref name="rotation"/> (SPEC F152.6, PLAN T363) — "no opinion," NOT <see cref="SetRotationAsync"/>'s
+    /// own "clear the rule."</b> <see langword="null"/> means the manifest carried no rotation opinion
+    /// at all (a 1.0 manifest with no <c>envelope</c>, a present <c>envelope</c> with no <c>rotation</c>
+    /// key, or an explicit <c>envelope.rotation: null</c> — <c>GenWave.Host.Shows.ShowManifest</c>'s own
+    /// three collapsed cases, that type's own remarks) — an EXISTING show's own rotation rule, if any,
+    /// is left completely untouched by this write, on BOTH the insert and re-import branches. This is
+    /// the one place <see cref="RotationPredicate"/>'s nullability means something DIFFERENT from every
+    /// other seam on this interface: <see cref="SetRotationAsync"/>'s own <see langword="null"/> REMOVES
+    /// an existing rule; this parameter's <see langword="null"/> never removes anything, it simply never
+    /// writes the <c>rotation</c> key at all. A non-null <paramref name="rotation"/> (already validated
+    /// by the caller — <c>GenWave.Host.Shows.ShowManifestParser</c>'s own SPEC F152.1/F152.5 bound
+    /// checks) MERGES into <c>envelope</c> the identical way <see cref="SetRotationAsync"/> does,
+    /// preserving every dormant sibling <c>envelope</c> key.
+    /// </para>
     /// </summary>
-    Task<Show?> ImportAsync(string slug, string name, string? tagline, string? flavor, string importedFrom, CancellationToken ct);
+    Task<Show?> ImportAsync(
+        string slug, string name, string? tagline, string? flavor, string importedFrom,
+        RotationPredicate? rotation, CancellationToken ct);
+
+    /// <summary>
+    /// Persists <paramref name="rotation"/> into <c>station.show.envelope</c>'s <c>rotation</c> key
+    /// (SPEC F152.3, F152.5, STORY-372, PLAN T360) — the ONE write this seam performs against the
+    /// otherwise-dormant <c>envelope</c> column. <paramref name="rotation"/> non-null MERGES a
+    /// <c>{"rotation": {...}}</c> fragment into whatever <c>envelope</c> already holds (jsonb
+    /// <c>||</c>) — every sibling key survives untouched, never a whole-document overwrite;
+    /// <see langword="null"/> REMOVES the <c>rotation</c> key instead (jsonb <c>-</c>), same sibling
+    /// guarantee. Returns <see cref="ShowWriteResult.Updated"/> with the row after the write
+    /// (<c>updated_at</c> advanced) on success, or <see cref="ShowWriteResult.NotFound"/> if no such
+    /// show exists. No other <see cref="ShowWriteResult"/> case applies — this method performs no
+    /// name/slug/budget validation of its own (<paramref name="rotation"/>'s own bound/shape gate is
+    /// PLAN T362's endpoint-layer concern, mirroring how <see cref="CreateAsync"/>/<see cref="UpdateAsync"/>'s
+    /// own budget gates stay app-seam, not store-seam, for every OTHER field).
+    /// </summary>
+    Task<ShowWriteResult> SetRotationAsync(long id, RotationPredicate? rotation, CancellationToken ct);
+
+    /// <summary>
+    /// Raised after a successful <see cref="SetRotationAsync"/>, <see cref="UpdateAsync"/>, or
+    /// <see cref="ImportAsync"/> write (PLAN T363 extends the T360 review HIGH-1 fix to the import path)
+    /// — <see cref="Domain.ShowSummary"/> (the resolver-facing projection
+    /// <c>ScheduleRepository</c>/<c>SpecialsRepository</c> join at LOAD time, never a per-tick lookup)
+    /// carries <c>Name</c>/<c>Tagline</c>/<c>Flavor</c>/<c>Rotation</c> — every one of them now an
+    /// operator-editable, behavioral field an already-cached <c>CachingScheduleResolver</c> snapshot
+    /// can silently go stale against, the same way <see cref="IScheduleStore.WeekChanged"/> already
+    /// guards <c>segment_schedule</c> writes. Mirrors that event's own contract exactly: never raised
+    /// when the write is rejected (<see cref="ShowWriteResult.NotFound"/>, <see cref="ShowWriteResult.InvalidName"/>,
+    /// <see cref="ShowWriteResult.BudgetExceeded"/>, <see cref="ShowWriteResult.SlugConflict"/>, or —
+    /// <see cref="ImportAsync"/>'s own case — a declined authored-collision upsert that returns
+    /// <see langword="null"/>), and carries no payload — a subscriber (<c>CachingScheduleResolver</c>)
+    /// only ever needs to know "the cached snapshot may be stale," never which show or which field
+    /// changed. <see cref="CreateAsync"/> deliberately does NOT raise it: a brand-new show cannot yet be
+    /// referenced by any cached snapshot, so there is nothing for an existing cache to go stale against.
+    /// <see cref="ImportAsync"/> is NOT the same case, and DOES raise it unconditionally on every
+    /// successful upsert (fresh insert or re-import alike) — an import can rewrite name/tagline/flavor
+    /// AND, as of SPEC F152.6/PLAN T363, the rotation rule on an EXISTING show, so the same staleness
+    /// this event already guards for <see cref="UpdateAsync"/>/<see cref="SetRotationAsync"/> applies
+    /// identically to a re-import; raising it unconditionally (rather than only distinguishing "fresh
+    /// insert" from "re-import") keeps this one call site simple and never under-fires. Neither does
+    /// <see cref="DeleteAsync"/> raise it (station.segment_schedule.show_id's own ON DELETE RESTRICT
+    /// already makes deleting a referenced show impossible).
+    /// </summary>
+    event Action? ShowChanged;
 }

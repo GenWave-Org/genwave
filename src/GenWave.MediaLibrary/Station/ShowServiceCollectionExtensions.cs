@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using GenWave.Core.Abstractions;
 using Npgsql;
 
@@ -27,6 +28,7 @@ public static class ShowServiceCollectionExtensions
     /// empty/dev-mode connection string.
     /// </summary>
     public static IServiceCollection AddShowStore(this IServiceCollection services, string connectionString) =>
-        services.AddSingleton<IShowStore>(
-            _ => new ShowRepository(new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build())));
+        services.AddSingleton<IShowStore>(sp => new ShowRepository(
+            new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build()),
+            sp.GetRequiredService<ILogger<ShowRepository>>()));
 }

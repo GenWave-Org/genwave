@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Core.Logging;
@@ -192,12 +193,15 @@ public sealed partial class ShowsController(
     /// naming both versions, even against an otherwise-malformed body —
     /// <see cref="ShowManifestParser.ExtractSchemaVersion"/>, mirrors <c>ThemeWriteGate</c>'s own
     /// two-parse trick) → deserialization-as-validation (400, <see cref="ShowManifestParser.Parse"/> —
-    /// malformed JSON, a missing/blank name, or a field over its 2× import ceiling) → the atomic upsert
-    /// (<see cref="IShowStore.ImportAsync"/>, ONE statement that also OWNS the authored-vs-imported
-    /// collision gate — see below — so there is no separate 409 STEP in this list; the gate and the
-    /// write are the same operation). Unlike <see cref="ThemesImportController.Import"/>, there is no
-    /// in-process catalog cache to rebuild afterwards — <see cref="IShowStore"/> reads straight through
-    /// to Postgres on every call, so an imported show is visible to the very next
+    /// malformed JSON, a missing/blank name, a field over its 2× import ceiling, or — SPEC F152.6, PLAN
+    /// T363 — a present <c>envelope.rotation</c> failing its own at-least-one-bound/range checks) → the
+    /// atomic upsert (<see cref="IShowStore.ImportAsync"/>, ONE statement that also OWNS the
+    /// authored-vs-imported collision gate — see below — so there is no separate 409 STEP in this list;
+    /// the gate and the write are the same operation, and, as of PLAN T363, the same operation ALSO
+    /// writes <see cref="ShowManifest.Envelope"/>'s own rotation opinion, if any — see that method's own
+    /// remarks for the "no opinion, never a clear" rule). Unlike <see cref="ThemesImportController.Import"/>,
+    /// there is no in-process catalog cache to rebuild afterwards — <see cref="IShowStore"/> reads
+    /// straight through to Postgres on every call, so an imported show is visible to the very next
     /// <see cref="Get"/>/<see cref="List"/> with no extra step.
     /// </para>
     ///
@@ -285,7 +289,8 @@ public sealed partial class ShowsController(
         }
 
         var importedFrom = string.IsNullOrEmpty(catalogSlug) ? "file" : catalogSlug;
-        var imported = await showStore.ImportAsync(slug, manifest.Name, manifest.Tagline, manifest.Flavor, importedFrom, ct);
+        var imported = await showStore.ImportAsync(
+            slug, manifest.Name, manifest.Tagline, manifest.Flavor, importedFrom, manifest.Envelope?.Rotation, ct);
 
         // SPEC F115.5's other direction (see this action's own remarks): the atomic upsert above
         // already OWNS the authored-vs-imported collision gate — a null result means it declined
@@ -447,8 +452,7 @@ public sealed partial class ShowsController(
         _ => StatusCode(StatusCodes.Status500InternalServerError),
     };
 
-    static ShowDto ToDto(Show show) =>
-        new(show.Id, show.Name, show.Slug, show.Tagline, show.Flavor, show.ImportedFrom, show.ImportedAt);
+    static ShowDto ToDto(Show show) => ShowDto.From(show);
 
     static ShowDraft ToDraft(ShowRequest request) =>
         new(request.Name?.Trim() ?? string.Empty, request.Tagline, request.Flavor);

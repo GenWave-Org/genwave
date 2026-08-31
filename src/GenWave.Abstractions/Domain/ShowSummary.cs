@@ -1,3 +1,5 @@
+using GenWave.Abstractions.Playout;
+
 namespace GenWave.Core.Domain;
 
 /// <summary>
@@ -11,14 +13,15 @@ namespace GenWave.Core.Domain;
 /// this type is not.
 ///
 /// <para>
-/// Deliberately excludes every <c>station.show</c> column beyond identity/slug:
+/// Deliberately excludes every <c>station.show</c> column beyond identity/slug/rotation:
 /// <c>ImportedFrom</c>/<c>ImportedAt</c>/<c>CreatedAt</c>/<c>UpdatedAt</c> are <c>Show</c>'s own CRUD
 /// concern, never needed on the air. Above all, this type has NO member for the DORMANT
-/// <c>persona_id</c>/<c>envelope</c> bundle columns (SPEC F115.2 — unread this epic, a law not an
-/// oversight): no query that projects a row into this type can even ACCIDENTALLY carry them forward,
-/// and no consumer reading <see cref="GenWave.Abstractions.Playout.OnAirSnapshot.Show"/> can observe them
-/// either — the dormant-columns-unread pin is enforced by this type's own SHAPE, not merely by a
-/// query that happens not to select them today.
+/// <c>persona_id</c> column, or for any <c>envelope</c> key beyond <see cref="Rotation"/> (SPEC
+/// F115.2 — unread this epic, a law not an oversight, narrowed by exactly the one field SPEC
+/// F152.3/PLAN T360 wakes): no query that projects a row into this type can even ACCIDENTALLY carry
+/// the rest forward, and no consumer reading <see cref="GenWave.Abstractions.Playout.OnAirSnapshot.Show"/>
+/// can observe them either — the dormant-columns-unread pin is enforced by this type's own SHAPE for
+/// everything except <see cref="Rotation"/>, not merely by a query that happens not to select them today.
 /// </para>
 ///
 /// <para>
@@ -60,4 +63,17 @@ public sealed record ShowSummary(long Id, string Name, string? Tagline, string? 
     /// default-empty-string sentinel.
     /// </summary>
     public string Slug { get; init; } = "";
+
+    /// <summary>
+    /// The show's own rotation rule (SPEC F152.1, F152.3, STORY-372, PLAN T360) — the ONE
+    /// <c>station.show.envelope</c> key this whole snapshot type reads, resolved at the SAME load
+    /// <c>ScheduleRepository</c>/<c>SpecialsRepository</c> already join <c>station.show</c> on (no
+    /// second lookup, no cache divergence). <c>null</c> for a show with no rule, mirroring
+    /// <see cref="RotationPredicate"/>'s own "both members null means none" contract — never a
+    /// both-null predicate (that normalization happens once, at the read seam, per T356's own review
+    /// note). Declared as a defaulted body property, the same additive shape <see cref="Slug"/> above
+    /// already established for this record (Abstractions 5.5.0 shipped a 4-arg ctor; this stays a
+    /// minor-bump-only widening, joining <see cref="Rotation"/>'s own home type at the same version).
+    /// </summary>
+    public RotationPredicate? Rotation { get; init; }
 }

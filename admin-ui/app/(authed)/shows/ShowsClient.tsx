@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "@/components/ui/toast";
 import { formatDateStamp } from "@/lib/format-clock";
 import { readErrorMessage } from "@/lib/problem-details";
+import { ShowRotationRuleEditor } from "./ShowRotationRuleEditor";
 import type { ScopedImagingRowDto, ShowDeleteResponseDto, ShowDto } from "./types";
 
 export interface ShowsClientProps {
@@ -140,10 +141,29 @@ export function ShowsClient({ initialShows, timeZone }: ShowsClientProps): React
   const [form, setForm] = useState<FormValues>(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  // T362 review MED-4(b): ShowRotationRuleEditor issues two polling GETs per mount — mounting one
+  // per card unconditionally would mean N shows cost N×2 requests every poll tick regardless of
+  // whether an operator is even looking at any of them. Expanded ONLY on demand — a show's own
+  // rotation card mounts (and starts polling) the first time it is opened, and un-mounts (stopping
+  // the poll) the moment it is closed again, mirroring usePoll's own visibility-gated pause one
+  // layer down.
+  const [expandedRotationIds, setExpandedRotationIds] = useState<ReadonlySet<number>>(new Set());
   const confirm = useConfirm();
 
   const isNameBlank = form.name.trim() === "";
   const isEditing = mode.kind === "edit";
+
+  function toggleRotationExpanded(showId: number): void {
+    setExpandedRotationIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(showId)) {
+        next.delete(showId);
+      } else {
+        next.add(showId);
+      }
+      return next;
+    });
+  }
 
   function startEdit(show: ShowDto): void {
     setMode({ kind: "edit", id: show.id, slug: show.slug });
@@ -369,6 +389,18 @@ export function ShowsClient({ initialShows, timeZone }: ShowsClientProps): React
                     <Button
                       type="button"
                       variant="secondary"
+                      aria-label={
+                        expandedRotationIds.has(show.id)
+                          ? `Hide rotation rule for ${show.name}`
+                          : `Show rotation rule for ${show.name}`
+                      }
+                      onClick={() => toggleRotationExpanded(show.id)}
+                    >
+                      {expandedRotationIds.has(show.id) ? "Rotation ▲" : "Rotation ▾"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
                       aria-label={`Delete ${show.name}`}
                       disabled={deletingId === show.id}
                       onClick={() => {
@@ -385,6 +417,10 @@ export function ShowsClient({ initialShows, timeZone }: ShowsClientProps): React
                 )}
                 {show.flavor !== null && show.flavor !== "" && (
                   <p className="mt-2 text-[0.78rem] text-mute">{show.flavor}</p>
+                )}
+
+                {expandedRotationIds.has(show.id) && (
+                  <ShowRotationRuleEditor showId={show.id} initialRotation={show.rotation} />
                 )}
               </li>
             ))}

@@ -35,6 +35,18 @@ namespace GenWave.Core.Domain;
 /// the persisted F86.1 booth-log pick jsonb (<c>BoothLogPickStamp</c>'s shape is pinned) — this field
 /// only ever travels the in-memory Orchestrator → TTS prompt-assembly path.
 /// </para>
+///
+/// <para>
+/// <see cref="RotationRelax"/> (SPEC F152.4, STORY-372, PLAN T361) is the R0–R3 step
+/// <c>GenWave.Orchestration.MusicSelectionPolicy</c>'s rotation relax ladder landed on to produce
+/// THIS candidate — <see langword="null"/> when <c>GenWave.Abstractions.Playout.SegmentEnvelope.Rotation</c>
+/// was never set for the pick at all (no ladder ran), never <c>0</c> for that case; <c>0</c> means the
+/// predicate was in force and satisfied without relaxing. Set on the winning candidate regardless of
+/// whether it came from the rung-0 persona pick (alongside <see cref="PersonaPick"/>) or the terminal
+/// SPEC F81.6 fallback (<see cref="PersonaPick"/> null) — the relax step is a property of the PICK, not
+/// of which rung supplied it. Carried through onto <see cref="MediaItem.RotationRelax"/> the same way
+/// <see cref="PersonaPick"/>/<see cref="RequestFulfilled"/> already are.
+/// </para>
 /// </summary>
 public sealed record RotationCandidate(
     MediaReference Media,
@@ -42,4 +54,17 @@ public sealed record RotationCandidate(
     bool RepeatedArtist,
     double? Energy = null,
     PersonaPickDiagnostics? PersonaPick = null,
-    bool RequestFulfilled = false);
+    bool RequestFulfilled = false)
+{
+    /// <summary>
+    /// MED-4 (PLAN T361 review) — a defaulted BODY property, not an 8th positional constructor
+    /// parameter: <see cref="RotationCandidate"/> already shipped in the 5.4.x Abstractions NuGet
+    /// with a fixed 6-arg ctor/Deconstruct; a 7th positional parameter would silently remove both
+    /// from the published binary surface (IL-confirmed), breaking every already-compiled caller
+    /// regardless of the new parameter's own default value — the exact <see cref="MediaItem.CrosstalkScript"/>/
+    /// <c>GenWave.Core.Events.TrackAired.CrosstalkScript</c> discipline, applied here one cycle late.
+    /// Every construction site that needs to set this uses a <c>with</c> expression, never a
+    /// positional/named constructor argument.
+    /// </summary>
+    public int? RotationRelax { get; init; }
+}

@@ -62,4 +62,21 @@ public sealed record TrackAired(
     /// </para>
     /// </summary>
     public CrosstalkAiredScript? CrosstalkScript { get; init; }
+
+    /// <summary>
+    /// SPEC F152.4 (STORY-372, PLAN T361) — the SAME <see cref="RotationCandidate.RotationRelax"/> the
+    /// feeder's pushed-item metadata carries off <c>MediaItem.RotationRelax</c>, forwarded the same way
+    /// <see cref="CrosstalkScript"/> is above. <see langword="null"/> for every engine-initiated advance
+    /// (the feeder never pushed this id, so nothing was ever stamped) and for every pick whose envelope
+    /// carried no rotation predicate at all. The booth log's event consumer stamps
+    /// <c>station.booth_log.pick</c>'s <c>rotationRelax</c> member from exactly this value (SPEC F86.1's
+    /// <c>BoothLogPickStamp</c>, additive) — omitted entirely, never <c>0</c>, when this is null
+    /// (STORY-372 AC10).
+    ///
+    /// <para>
+    /// A defaulted body property, not a positional constructor parameter — same binary-compatibility
+    /// discipline as <see cref="CrosstalkScript"/>'s own remarks.
+    /// </para>
+    /// </summary>
+    public int? RotationRelax { get; init; }
 }

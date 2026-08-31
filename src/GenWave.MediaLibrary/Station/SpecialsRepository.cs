@@ -1,6 +1,7 @@
 using Dapper;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 
 namespace GenWave.MediaLibrary.Station;
@@ -11,9 +12,10 @@ namespace GenWave.MediaLibrary.Station;
 /// <see cref="ShowRepository"/>'s own wiring; the join/projection shape mirrors
 /// <see cref="ScheduleRepository"/>'s own <c>SelectColumns</c>/<c>ScheduleRow</c> idiom exactly —
 /// <c>station.show</c> LEFT JOINed at load time (SPEC F116.1's same "resolve identity once, never a
-/// per-tick lookup" rule), never <c>show.persona_id</c>/<c>show.envelope</c> (SPEC F115.2's
-/// dormant-columns-unread pin extends to this table too — there is no member on <see cref="SpecialRow"/>
-/// to receive either even if the query tried).
+/// per-tick lookup" rule), never <c>show.persona_id</c> or any <c>envelope</c> key beyond
+/// <c>rotation</c> (SPEC F115.2's dormant-columns-unread pin extends to this table too, narrowed by
+/// the same one field SPEC F152.3/PLAN T360 wakes on <see cref="ScheduleRepository"/> — there is no
+/// member on <see cref="SpecialRow"/> to receive anything else even if the query tried).
 ///
 /// <para>
 /// <see cref="DateOnlyTypeHandler"/> (this repository's own <c>on_date</c> column needs it) is
@@ -39,7 +41,7 @@ namespace GenWave.MediaLibrary.Station;
 /// namespaces, with no baseline exemption for a new controller.
 /// </para>
 /// </summary>
-sealed class SpecialsRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSpecialStore
+sealed class SpecialsRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<SpecialsRepository> logger) : IScheduleSpecialStore
 {
     // Postgres SQLSTATEs db/36's own CHECK/EXCLUDE/FK constraints can raise out of CreateAsync's
     // insert — mirrors ShowRepository's own well-known-constant idiom (no Npgsql.PostgresErrorCodes
@@ -75,23 +77,25 @@ sealed class SpecialsRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSp
         public string? ShowSlug { get; init; }
         public string? ShowTagline { get; init; }
         public string? ShowFlavor { get; init; }
+        public string? ShowRotationJson { get; init; }
     }
 
     // Mirrors ScheduleRepository's own SelectColumns constant, keyed on on_date instead of
-    // day_of_week/start_minute. sh.id/name/slug/tagline/flavor only — never persona_id/envelope.
-    // ShowSlug joins at PLAN T285 (SPEC F127.8 review F4) — a special-covered airing needs the same
-    // stable show identity a weekly block carries, so CrosstalkPlanner.IsShowEnabled works identically
-    // whether "now" resolves to a weekly block or a projected special (ScheduleResolver.ProjectSpecial).
+    // day_of_week/start_minute — ScheduleShowJoinColumns.Select (PLAN T360 review LOW-4) is the
+    // identical show-identity-plus-rotation column list both repositories share (SPEC F115.2/F152.3):
+    // never persona_id or any other envelope key. ShowSlug joins at PLAN T285 (SPEC F127.8 review F4)
+    // — a special-covered airing needs the same stable show identity a weekly block carries, so
+    // CrosstalkPlanner.IsShowEnabled works identically whether "now" resolves to a weekly block or a
+    // projected special (ScheduleResolver.ProjectSpecial). PLAN T360 review LOW-5: this JOIN is
+    // divergence-free by construction (one query, one consistent Show); a live station.show WRITE
+    // reaching an already-cached snapshot is IShowStore.ShowChanged's own job instead (mirrors
+    // ScheduleRepository's own SelectColumns remarks).
     const string SelectColumns =
-        """
-        select s.id::bigint as id, s.on_date, s.start_minute, s.end_minute,
-               s.persona_id::bigint as persona_id, s.genres,
-               s.energy_min::double precision as energy_min, s.energy_max::double precision as energy_max,
-               sh.id::bigint as show_id, sh.name as show_name, sh.slug as show_slug,
-               sh.tagline as show_tagline, sh.flavor as show_flavor
-        from station.schedule_special s
-        left join station.show sh on sh.id = s.show_id
-        """;
+        "select s.id::bigint as id, s.on_date, s.start_minute, s.end_minute, " +
+        "s.persona_id::bigint as persona_id, s.genres, " +
+        "s.energy_min::double precision as energy_min, s.energy_max::double precision as energy_max, " +
+        ScheduleShowJoinColumns.Select +
+        " from station.schedule_special s left join station.show sh on sh.id = s.show_id";
 
     public async Task<IReadOnlyList<ScheduleSpecial>> ListUpcomingAsync(DateOnly fromDate, CancellationToken ct)
     {
@@ -123,7 +127,7 @@ sealed class SpecialsRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSp
         try
         {
             row = await conn.QuerySingleAsync<SpecialRow>(new CommandDefinition(
-                """
+                $"""
                 with ins as (
                     insert into station.schedule_special
                         (on_date, start_minute, end_minute, persona_id, show_id, genres, energy_min, energy_max)
@@ -133,8 +137,7 @@ sealed class SpecialsRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSp
                 select ins.id::bigint as id, ins.on_date, ins.start_minute, ins.end_minute,
                        ins.persona_id::bigint as persona_id, ins.genres,
                        ins.energy_min::double precision as energy_min, ins.energy_max::double precision as energy_max,
-                       sh.id::bigint as show_id, sh.name as show_name, sh.slug as show_slug,
-                       sh.tagline as show_tagline, sh.flavor as show_flavor
+                       {ScheduleShowJoinColumns.Select}
                 from ins
                 left join station.show sh on sh.id = ins.show_id
                 """,
@@ -178,15 +181,21 @@ sealed class SpecialsRepository(Lazy<NpgsqlDataSource> dataSource) : IScheduleSp
         return true;
     }
 
-    static ScheduleSpecial ToSpecial(SpecialRow row) => new(
+    ScheduleSpecial ToSpecial(SpecialRow row) => new(
         row.Id, row.OnDate, row.StartMinute, row.EndMinute, row.PersonaId,
         row.Genres, row.EnergyMin, row.EnergyMax, ToShowSummary(row), row.ShowId);
 
     /// <summary>Mirrors <see cref="ScheduleRepository"/>'s own <c>ToShowSummary</c> — see that
-    /// method's remarks for why <c>ShowName</c> is checked alongside <c>ShowId</c>, and for
-    /// <c>ShowSlug</c>'s own <c>""</c>-default fallback (PLAN T285, SPEC F127.8 review F4).</summary>
-    static ShowSummary? ToShowSummary(SpecialRow row) =>
+    /// method's remarks for why <c>ShowName</c> is checked alongside <c>ShowId</c>, for
+    /// <c>ShowSlug</c>'s own <c>""</c>-default fallback (PLAN T285, SPEC F127.8 review F4), and for
+    /// <c>ShowRotationJson</c>'s own never-throw WARN-and-normalize parse (PLAN T360, SPEC F152.3/
+    /// F152.4).</summary>
+    ShowSummary? ToShowSummary(SpecialRow row) =>
         row.ShowId is { } showId && row.ShowName is { } showName
-            ? new ShowSummary(showId, showName, row.ShowTagline, row.ShowFlavor) { Slug = row.ShowSlug ?? "" }
+            ? new ShowSummary(showId, showName, row.ShowTagline, row.ShowFlavor)
+            {
+                Slug = row.ShowSlug ?? "",
+                Rotation = RotationEnvelopeCodec.Parse(row.ShowRotationJson, showName, logger),
+            }
             : null;
 }

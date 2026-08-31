@@ -551,6 +551,13 @@ public sealed class Orchestrator(
         if (candidate.RequestFulfilled)
             track = track with { RequestFulfilled = true };
 
+        // SPEC F152.4 (STORY-372, PLAN T361) — rides the SAME RotationCandidate -> MediaItem
+        // carry-through PersonaPick/RequestFulfilled use above; null (envelope.Rotation was never set
+        // for this pick, the byte-identical no-rotation path) omits the stamp member entirely once
+        // BoothLogWriter builds it (STORY-372 AC10).
+        if (candidate.RotationRelax is int rotationRelax)
+            track = track with { RotationRelax = rotationRelax };
+
         // gh-#259: stamp Now Playing attribution at PLAN time, onto the item itself — the single
         // per-unit accessor read resolved above (it also warms the F93.1 display-name memo every
         // unit, cadence config regardless). The spectator surface reads this off the AIRING item,

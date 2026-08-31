@@ -16,8 +16,10 @@
 // production counterpart to key the search off of.
 
 using Dapper;
+using GenWave.Abstractions.Playout;
 using GenWave.Core.Domain;
 using GenWave.MediaLibrary.Station;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 
 namespace GenWave.MediaLibrary.Tests.Specs;
@@ -42,7 +44,8 @@ public static class FeatureSpecialsStore
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "33-show-and-segment-kind-migration.sh"));
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "35-show-identity-migration.sh"));
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "36-schedule-special-migration.sh"));
-        return new SpecialsRepository(new Lazy<NpgsqlDataSource>(() => db.StationDataSource));
+        return new SpecialsRepository(
+            new Lazy<NpgsqlDataSource>(() => db.StationDataSource), NullLogger<SpecialsRepository>.Instance);
     }
 
     static async Task<long> InsertShowAsync(DatabaseFixture db, string name, string slug)
@@ -51,6 +54,16 @@ public static class FeatureSpecialsStore
         return await conn.ExecuteScalarAsync<long>(
             "insert into station.show (name, slug) values (@name, @slug) returning id::bigint",
             new { name, slug });
+    }
+
+    /// <summary>PLAN T360 review MED-3 — <see cref="InsertShowAsync"/>'s own sibling for seeding
+    /// <c>envelope</c> directly (raw SQL — <c>SpecialsRepository</c> has no writer for it at all).</summary>
+    static async Task<long> InsertShowWithEnvelopeAsync(DatabaseFixture db, string name, string slug, string envelopeJson)
+    {
+        await using var conn = await db.StationDataSource.OpenConnectionAsync();
+        return await conn.ExecuteScalarAsync<long>(
+            "insert into station.show (name, slug, envelope) values (@name, @slug, @envelope::jsonb) returning id::bigint",
+            new { name, slug, envelope = envelopeJson });
     }
 
     static ScheduleSpecial Draft(
@@ -110,6 +123,64 @@ public static class FeatureSpecialsStore
             Assert.Equal(showId, stored.ShowId);
             Assert.NotNull(stored.Show);
             Assert.Equal("Christmas Eve Countdown", stored.Show.Name);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // HAPPY PATH — the show's own rotation rule rides the specials join too (PLAN T360 review MED-3)
+    //
+    // The production READ path (sh.envelope ->> 'rotation' in SpecialsRepository.SelectColumns/
+    // CreateAsync's own CTE) had zero live-Postgres coverage — every prior specials-side rotation fact
+    // either hand-built ShowSummary in memory (Orchestration.Tests) or never touched Rotation at all.
+    // Both facts below share one show so the pairing is non-vacuous: the SAME code path returns a real
+    // predicate when envelope carries a "rotation" key and null when it carries something else.
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioTheRotationRuleRidesTheJoin(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task ARealRotationKeyReadsBackThroughListUpcomingAsync()
+        {
+            // Given a special naming a show whose envelope carries {"rotation":{"maxPlays":0}}
+            var repo = Repo(db);
+            await db.ResetSpecialsAsync();
+            var showId = await InsertShowWithEnvelopeAsync(
+                db, "Deep Cuts Special", "deep-cuts-special", """{"rotation":{"maxPlays":0}}""");
+            var onDate = new DateOnly(2026, 12, 24);
+            var draft = Draft(onDate, 19 * 60, 21 * 60, showId: showId);
+
+            // When it is written and re-read through the real repository
+            await CreateSpecialAsync(repo, draft);
+            var upcoming = await repo.ListUpcomingAsync(onDate, CancellationToken.None);
+
+            // Then the resolved show carries the rotation rule
+            var stored = Assert.Single(upcoming);
+            Assert.Equal(new RotationPredicate(MaxPlays: 0), stored.Show?.Rotation);
+        }
+
+        [Fact]
+        public async Task ANonRotationEnvelopeKeyLeavesRotationNull()
+        {
+            // Given a DIFFERENT special naming a show whose envelope carries a key that is NOT
+            // "rotation" (SPEC F115.2's dormant-columns-unread pin — this is the "inverse" pairing:
+            // envelope is non-null, but Rotation must still read back null)
+            var repo = Repo(db);
+            await db.ResetSpecialsAsync();
+            var showId = await InsertShowWithEnvelopeAsync(
+                db, "Ordinary Special", "ordinary-special", """{"genres":["Jazz"]}""");
+            var onDate = new DateOnly(2026, 12, 25);
+            var draft = Draft(onDate, 19 * 60, 21 * 60, showId: showId);
+
+            // When it is written and re-read through the real repository
+            await CreateSpecialAsync(repo, draft);
+            var upcoming = await repo.ListUpcomingAsync(onDate, CancellationToken.None);
+
+            // Then the resolved show's Rotation is null — the read path genuinely looks at the
+            // "rotation" key specifically, not just "envelope is non-null"
+            var stored = Assert.Single(upcoming);
+            Assert.Null(stored.Show?.Rotation);
         }
     }
 

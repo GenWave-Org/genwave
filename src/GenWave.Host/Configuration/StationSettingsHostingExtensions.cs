@@ -103,12 +103,16 @@ static class StationSettingsHostingExtensions
         builder.Services.AddScheduleSpecialStore(stationConnStr);
 
         // CachingScheduleResolver MUST be a singleton — its constructor subscribes to
-        // IScheduleStore.WeekChanged AND (PLAN T260) IScheduleSpecialStore.SpecialsChanged, never
-        // unsubscribing from either (no IDisposable), so a scoped/transient registration would leak one
-        // subscription (and both wrapped store references) per instance created (T119 review F6, T119's
-        // own class remarks). ScheduleResolver itself is a pure (snapshot, specials, wall clock)
-        // function with no state of its own — plain AddSingleton is enough, no lifetime hazard either
-        // way.
+        // IScheduleStore.WeekChanged, (PLAN T260) IScheduleSpecialStore.SpecialsChanged, and (PLAN T360
+        // review HIGH-1) IShowStore.ShowChanged, never unsubscribing from any of the three (no
+        // IDisposable), so a scoped/transient registration would leak one subscription (and all three
+        // wrapped store references) per instance created (T119 review F6, T119's own class remarks).
+        // IShowStore is resolved here via plain constructor injection (the optional showStore
+        // parameter's own default is never reached in production — AddShowStore below registers a real
+        // one regardless of registration ORDER, since DI resolves constructor parameters lazily at
+        // first use, long after every Add* call in this method has already run). ScheduleResolver
+        // itself is a pure (snapshot, specials, wall clock) function with no state of its own — plain
+        // AddSingleton is enough, no lifetime hazard either way.
         builder.Services.AddSingleton<ScheduleResolver>();
         builder.Services.AddSingleton<CachingScheduleResolver>();
 

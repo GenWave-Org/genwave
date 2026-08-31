@@ -7,6 +7,9 @@
 // picks (500 per STORY-371 AC7/AC8) run in-memory against a fixed candidate pool with nudges set
 // per-track, tallying the winner-share distribution — the same seeded-RNG/iterate/tally/assert-a-
 // bound shape as Story213_PersonaRanker.cs's own exploration-rate simulation.
+
+using GenWave.Core.Domain;
+
 namespace GenWave.Orchestration.Tests.Specs;
 
 public static class FeatureTheNudgeInTheRanker
@@ -17,12 +20,37 @@ public static class FeatureTheNudgeInTheRanker
 
     public sealed class ScenarioTheCandidateCarriesTheNudge
     {
-        // Given a pool row with nudge 0.6, When the candidate pool is projected for the ranker.
-        [Fact(Skip = "pending T359 (STORY-371 AC4)")]
-        public void ThePersonaRankCandidateHasNudgeZeroPointSix() => Assert.Fail("pending T359");
+        static readonly MediaReference Track = new(
+            MediaId: "nudge-carrier",
+            Locator: "/media/nudge-carrier.mp3",
+            Title: "Nudge Carrier",
+            Loudness: new Loudness(-23.0, -1.0, true),
+            DurationMs: null,
+            SampleRate: null,
+            Channels: null,
+            BitrateKbps: null,
+            Artist: "Artist",
+            Album: null,
+            Genre: "Rock",
+            Year: null);
 
-        [Fact(Skip = "pending T359 (STORY-371 AC4)")]
-        public void ThePersonaRankCandidateHasPlayCountFromTheLedger() => Assert.Fail("pending T359");
+        // Given a pool row with nudge 0.6 and play_count 3 (SPEC F151.1's carrier half, PLAN T359),
+        // projected through RankerPersonaPickProvider.ToRankCandidate — the ONE production mapping
+        // from EnvelopeCandidateRow onto PersonaRankCandidate.
+        readonly PersonaRankCandidate candidate = RankerPersonaPickProvider.ToRankCandidate(
+            new EnvelopeCandidateRow(Track, Energy: 0.5, Moods: [], RepeatedRecent: false, RepeatedArtist: false)
+            {
+                Nudge = 0.6,
+                PlayCount = 3,
+            });
+
+        [Fact]
+        public void ThePersonaRankCandidateHasNudgeZeroPointSix() =>
+            Assert.Equal(0.6, candidate.Nudge);
+
+        [Fact]
+        public void ThePersonaRankCandidateHasPlayCountFromTheLedger() =>
+            Assert.Equal(3, candidate.PlayCount);
     }
 
     public sealed class ScenarioTheRankerTerm

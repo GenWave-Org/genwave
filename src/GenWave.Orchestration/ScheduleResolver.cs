@@ -254,8 +254,28 @@ public sealed class ScheduleResolver(
             segment.Genres ?? stationDefault.Genres,
             new EnergyRange(
                 segment.EnergyMin ?? stationDefault.EnergyRange.Min,
-                segment.EnergyMax ?? stationDefault.EnergyRange.Max));
+                segment.EnergyMax ?? stationDefault.EnergyRange.Max))
+        {
+            // SPEC F152.3 (STORY-372, PLAN T360): Rotation = block.Rotation ?? show.Rotation ?? null.
+            // ResolveRotation's own remarks explain why "block" is always null here in v1.
+            Rotation = ResolveRotation(blockRotation: null, segment.Show),
+        };
     }
+
+    /// <summary>
+    /// SPEC F152.3's own layering formula (STORY-372, PLAN T360) — the ONE place
+    /// <c>block.Rotation ?? show.Rotation ?? null</c> resolves, mirroring <see cref="EffectiveAssignment.Resolve"/>'s
+    /// own "one chokepoint" shape for persona/show (SPEC F115.2). <paramref name="blockRotation"/> has
+    /// no real v1 source: <c>segment_schedule</c>/<c>schedule_special</c> carry no rotation column, and
+    /// ARCHITECTURE.md's own "Rejected: block-only predicate (the card can't carry the rule)" rules out
+    /// ever giving a block its OWN authorable rule — so <see cref="BuildSegmentEnvelope"/>'s only call
+    /// site always passes <see langword="null"/> here. The parameter exists so this formula, not the
+    /// call site, is where "block always wins" lives — if a future slice ever DOES add a block-level
+    /// source, that widening touches only this method's own body, the same "F115.2 layering is literally
+    /// the code" contract <see cref="EffectiveAssignment"/> already keeps for persona/show.
+    /// </summary>
+    internal static RotationPredicate? ResolveRotation(RotationPredicate? blockRotation, ShowSummary? show) =>
+        blockRotation ?? show?.Rotation;
 
     static ScheduleSegment? FindCurrent(IReadOnlyList<ScheduleSegment> segments, DayOfWeek day, int minute) =>
         segments.FirstOrDefault(s => s.Day == day && s.StartMinute <= minute && minute < s.EndMinute);

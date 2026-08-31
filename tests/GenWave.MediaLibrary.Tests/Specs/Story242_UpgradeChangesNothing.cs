@@ -39,6 +39,20 @@ public static class FeatureUpgradeChangesNothing
     static void RunShowAndSegmentKindMigrationScript(DatabaseFixture db) =>
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "33-show-and-segment-kind-migration.sh"));
 
+    /// <summary>db/41 (the Gardener migration) is the in-place-upgrade path for two indexes db/01/db/06
+    /// ALSO ship fresh (STORY-373's own <c>booth_log_show_track_started</c>, STORY-376's own
+    /// <c>media_dup_keys</c>) — <see cref="ScenarioIndexMirrorMatchesTheUpgradePath"/> below drops each
+    /// and reruns this script to prove the SAME "db/06/db/01 fresh vs. db/NN in-place-upgrade must build
+    /// the byte-identical shape" claim <see cref="ScenarioFreshInstallAndUpgradeProduceTheIdenticalShape"/>
+    /// already pins for <c>station.segment_schedule</c>'s own columns/constraints, extended to
+    /// <c>pg_indexes</c> — a shape neither <see cref="CaptureColumnShapeAsync"/> nor
+    /// <see cref="CaptureConstraintShapeAsync"/> can see (PLAN T363 carry-forward from T362 review).
+    /// Idempotent (<c>IF NOT EXISTS</c> throughout, Story376_TheSameSongTwice.cs's own
+    /// <c>ScenarioMigrationConvergence</c> already proves a rerun converges), so rerunning it here is
+    /// safe against every other fact in this shared DatabaseCollection.</summary>
+    static void RunGardenerMigrationScript(DatabaseFixture db) =>
+        db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "41-gardener-migration.sh"));
+
     static void RunFreshInstallScript(DatabaseFixture db) =>
         db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "06-station-settings-migration.sh"));
 
@@ -147,6 +161,83 @@ public static class FeatureUpgradeChangesNothing
             order by contype, definition
             """);
         return rows.ToList();
+    }
+
+    /// <summary>One index, captured via <c>pg_indexes</c> — <c>indexdef</c> is Postgres's own
+    /// reconstructed <c>CREATE INDEX ...</c> text (the full column list, WHERE clause, and opclasses,
+    /// folded into one canonical string regardless of the case/whitespace the DDL that created it
+    /// used), so a byte-for-byte compare here is the index-shaped sibling of <see cref="ColumnShape"/>/
+    /// <see cref="ConstraintShape"/> above (PLAN T363 carry-forward — this file's own parity pin never
+    /// covered <c>pg_indexes</c> before this scenario, per the T362 review note that flagged it).
+    /// </summary>
+    sealed record IndexShape
+    {
+        public string Indexname { get; init; } = "";
+        public string Indexdef { get; init; } = "";
+    }
+
+    static async Task<IndexShape> CaptureIndexAsync(
+        NpgsqlDataSource dataSource, string schema, string table, string indexName)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync();
+        return await conn.QuerySingleAsync<IndexShape>(
+            """
+            select indexname, indexdef from pg_indexes
+            where schemaname = @schema and tablename = @table and indexname = @indexName
+            """,
+            new { schema, table, indexName });
+    }
+
+    // ---------------------------------------------------------------------
+    // SAD PATH — the index mirror: PLAN T363's own T362 carry-forward. This file's own parity pin
+    // above (ScenarioFreshInstallAndUpgradeProduceTheIdenticalShape) only ever compared columns/
+    // constraints on ONE table, never a single pg_indexes row anywhere — so db/06's own copy of
+    // station.booth_log_show_track_started (SPEC F152.5, STORY-373) and db/01's own copy of
+    // library.media_dup_keys (SPEC F153.5, STORY-376) could drift from db/41's in-place-upgrade
+    // recreation of either and nothing here would ever have caught it. Each fact captures the
+    // fresh-install index (the CURRENT db/01/db/06's own CREATE INDEX — DatabaseFixture boots from
+    // only those two files, so this instant IS the fresh-install world), drops it (simulating a
+    // pre-Gardener upgrade box that never had it), reruns db/41 (idempotent — proven convergent
+    // already), and asserts db/41's own recreation is byte-identical to what shipped fresh — expected
+    // GREEN today; a red here means the two scripts' CREATE INDEX text has drifted and the MIRROR
+    // needs fixing, never this fact.
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioIndexMirrorMatchesTheUpgradePath(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task BoothLogShowTrackStartedSurvivesADropAndDb41Rerun()
+        {
+            var fresh = await CaptureIndexAsync(
+                db.StationDataSource, "station", "booth_log", "booth_log_show_track_started");
+
+            await using (var conn = await db.StationDataSource.OpenConnectionAsync())
+                await conn.ExecuteAsync("drop index station.booth_log_show_track_started");
+
+            RunGardenerMigrationScript(db);
+
+            var upgraded = await CaptureIndexAsync(
+                db.StationDataSource, "station", "booth_log", "booth_log_show_track_started");
+
+            Assert.Equal(fresh, upgraded);
+        }
+
+        [Fact]
+        public async Task MediaDupKeysSurvivesADropAndDb41Rerun()
+        {
+            var fresh = await CaptureIndexAsync(db.DataSource, "library", "media", "media_dup_keys");
+
+            await using (var conn = await db.DataSource.OpenConnectionAsync())
+                await conn.ExecuteAsync("drop index library.media_dup_keys");
+
+            RunGardenerMigrationScript(db);
+
+            var upgraded = await CaptureIndexAsync(db.DataSource, "library", "media", "media_dup_keys");
+
+            Assert.Equal(fresh, upgraded);
+        }
     }
 
     // ---------------------------------------------------------------------

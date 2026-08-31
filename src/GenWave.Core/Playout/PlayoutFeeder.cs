@@ -110,17 +110,23 @@ public sealed class PlayoutFeeder(
     // asset (F127.7's single-use stock is feeder-pushed only). TrackAired forwards it verbatim to the
     // booth log's own pick jsonb stamp (SPEC F127.11) — deliberately NOT carried onto OnAirState below
     // (booth-log/admin-only, exactly like PersonaPick and SegmentKind already are).
+    // RotationRelax (SPEC F152.4, STORY-372, PLAN T361) rides the SAME two paths one member further
+    // still: a feeder push captures the MediaItem's own RotationRelax (null unless the pick's envelope
+    // carried a rotation predicate); an engine-initiated advance always carries null — safe rotation
+    // never ran the relax ladder. TrackAired forwards it verbatim to the booth log's own pick jsonb
+    // stamp, same as CrosstalkScript.
     readonly Dictionary<string, PushedItemMeta> pushedMeta = new(StringComparer.Ordinal);
 
     /// <summary>
     /// One <see cref="pushedMeta"/> entry (round-2 review F11 — named record, not an anonymous
     /// nine-member tuple, at the field declaration and both write sites). Title/Artist/GainDb/
-    /// DurationMs/PersonaPick/ArtworkUrl/DjName/SegmentKind/CrosstalkScript all carry the SAME
-    /// remarks the field declaration above documents.
+    /// DurationMs/PersonaPick/ArtworkUrl/DjName/SegmentKind/CrosstalkScript/RotationRelax all carry the
+    /// SAME remarks the field declaration above documents.
     /// </summary>
     sealed record PushedItemMeta(
         string? Title, string? Artist, double GainDb, int? DurationMs, PersonaPickDiagnostics? PersonaPick,
-        string? ArtworkUrl, string? DjName, SegmentKind? SegmentKind, CrosstalkAiredScript? CrosstalkScript);
+        string? ArtworkUrl, string? DjName, SegmentKind? SegmentKind, CrosstalkAiredScript? CrosstalkScript,
+        int? RotationRelax);
 
     // Media ids whose pushedMeta entry is feeder-authoritative — set at PushAsync time from the
     // exact MediaItem we queued, so TickAsync must never overwrite it with an engine-output guess.
@@ -278,7 +284,7 @@ public sealed class PlayoutFeeder(
                         : null;
                     pushedMeta[mediaId] = new PushedItemMeta(
                         title, artist, gainDb, DurationMs: null, PersonaPick: null, ArtworkUrl: artworkUrl,
-                        DjName: null, SegmentKind: null, CrosstalkScript: null);
+                        DjName: null, SegmentKind: null, CrosstalkScript: null, RotationRelax: null);
                 }
                 else
                 {
@@ -298,6 +304,7 @@ public sealed class PlayoutFeeder(
                         pm?.PersonaPick, pm?.SegmentKind)
                     {
                         CrosstalkScript = pm?.CrosstalkScript,
+                        RotationRelax = pm?.RotationRelax,
                     });
                 }
             }
@@ -438,7 +445,7 @@ public sealed class PlayoutFeeder(
                 // stamped, handed back on EnginePushResult — never re-resolved.
                 pushedMeta[item.MediaId] = new PushedItemMeta(
                     item.Title, item.Artist, gainDb, item.DurationMs, item.PersonaPick, pushResult.ArtworkUrl,
-                    item.DjName, item.SegmentKind, item.CrosstalkScript);
+                    item.DjName, item.SegmentKind, item.CrosstalkScript, item.RotationRelax);
                 feederOwnedIds.Add(item.MediaId);
                 MarkPendingAir(item.MediaId);   // claim (d) starts here (SPEC F57.1(d), gh-#88)
                 chainIds.Add(item.MediaId);

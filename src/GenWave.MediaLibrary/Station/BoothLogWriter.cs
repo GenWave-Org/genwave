@@ -73,7 +73,7 @@ sealed class BoothLogWriter(
             // music and kinded TrackAired alike (PLAN T242's own "verify one chokepoint" note).
             TrackAired t => new BoothLogAppendRequest(
                 "track-started", Summarize(t), personaAccessor.ActivePersonaId, t.Artist,
-                BuildPickStamp(t.PersonaPick, t.CrosstalkScript),
+                BuildPickStamp(t.PersonaPick, t.CrosstalkScript, t.RotationRelax),
                 ParseMediaId(t.MediaId), SegmentKind: t.SegmentKind?.ToString(), ShowId: personaAccessor.ActiveShowId),
             SegmentGenerated s => new BoothLogAppendRequest("patter-aired", Summarize(s), PersonaId: null),
             DegradationModeChanged d => new BoothLogAppendRequest("mode-changed", Summarize(d), PersonaId: null),
@@ -91,10 +91,11 @@ sealed class BoothLogWriter(
     }
 
     /// <summary>
-    /// SPEC F86.1 — <see langword="null"/> for every engine-initiated advance and every persona-off
-    /// pick (<paramref name="diagnostics"/> itself is null in both cases); otherwise the F86.1
-    /// jsonb text, narrowed to firedRules/isExploration only (scores, pool size, and the degradation
-    /// step are deliberately never persisted — see <see cref="BoothLogPickStamp"/>'s own remarks).
+    /// SPEC F86.1 — <see langword="null"/> for every engine-initiated advance and every persona-off,
+    /// non-relaxed pick (<paramref name="diagnostics"/> AND <paramref name="rotationRelax"/> both null);
+    /// otherwise the F86.1 jsonb text, narrowed to firedRules/isExploration (scores, pool size, and the
+    /// degradation step are deliberately never persisted — see <see cref="BoothLogPickStamp"/>'s own
+    /// remarks) plus <paramref name="rotationRelax"/> (SPEC F152.4, STORY-372, PLAN T361).
     ///
     /// <para>
     /// SPEC F127.11 (STORY-329, PLAN T287) — the SAME <c>booth_log.pick</c> column carries a
@@ -102,11 +103,30 @@ sealed class BoothLogWriter(
     /// music pick and a crosstalk exchange are mutually exclusive by construction (<paramref name="diagnostics"/>
     /// is a persona-ranker fact, never set for a TTS-kind item), so <paramref name="diagnostics"/> is
     /// checked first — reads as "the ordinary case, then the one narrow exception" — and never both.
+    /// A crosstalk row never carries a rotation relax step either (the ladder only ever runs for a
+    /// music pick), so <paramref name="rotationRelax"/> is ignored once <paramref name="crosstalkScript"/>
+    /// wins.
+    /// </para>
+    ///
+    /// <para>
+    /// SPEC F152.4 — a rung-0 persona pick that ALSO relaxed the rotation predicate carries both: the
+    /// stamp is <see cref="BoothLogPickStamp.FromDiagnostics"/>'s shape with <see cref="BoothLogPickStamp.RotationRelax"/>
+    /// added on top. A ladder pick with no persona opinion at all (<paramref name="diagnostics"/> null,
+    /// SPEC F81.6's terminal fallback) still stamps <paramref name="rotationRelax"/> alone — empty
+    /// <c>firedRules</c>, <c>isExploration: false</c> — rather than losing the relax step entirely
+    /// (STORY-372 AC9, "never an unstamped R3"). <paramref name="rotationRelax"/> null with everything
+    /// else null (the byte-identical no-rotation path, STORY-372 AC10) stays exactly today's
+    /// <see langword="null"/> — no stamp at all.
     /// </para>
     /// </summary>
-    static string? BuildPickStamp(PersonaPickDiagnostics? diagnostics, CrosstalkAiredScript? crosstalkScript) =>
-        diagnostics is not null ? BoothLogPickStampSerializer.Serialize(BoothLogPickStamp.FromDiagnostics(diagnostics))
-        : crosstalkScript is not null ? CrosstalkAiredScriptSerializer.Serialize(crosstalkScript)
+    static string? BuildPickStamp(
+        PersonaPickDiagnostics? diagnostics, CrosstalkAiredScript? crosstalkScript, int? rotationRelax) =>
+        diagnostics is not null
+            ? BoothLogPickStampSerializer.Serialize(BoothLogPickStamp.FromDiagnostics(diagnostics) with { RotationRelax = rotationRelax })
+        : crosstalkScript is not null
+            ? CrosstalkAiredScriptSerializer.Serialize(crosstalkScript)
+        : rotationRelax is not null
+            ? BoothLogPickStampSerializer.Serialize(new BoothLogPickStamp([], false) { RotationRelax = rotationRelax })
         : null;
 
     /// <summary>

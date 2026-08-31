@@ -301,6 +301,78 @@ sealed class MediaRepository(
     string ExplicitPredicate() =>
         audiencePosture.Current == AudiencePosture.Mature ? "" : "and not coalesce(m.explicit, false)";
 
+    /// <summary>
+    /// SPEC F152.2, STORY-372, PLAN T359 — the ONE by-construction WHERE fragment for a
+    /// <see cref="SegmentEnvelope.Rotation"/> "deep cuts" rule, shared byte-identical by every
+    /// envelope-aware candidate query that joins in <c>library.media_rotation</c> as <c>rot</c>
+    /// (<see cref="GetEnvelopeCandidateAsync"/>, <see cref="GetEnvelopeCandidatePoolAsync"/>) —
+    /// mirrors <see cref="PlayablePredicate"/>/<see cref="ExplicitPredicate"/>'s own "one definition,
+    /// every caller shares it" idiom. <see langword="null"/> <paramref name="rotation"/> — including
+    /// a both-<see langword="null"/> predicate (T356's read-path note: a genuinely empty
+    /// <see cref="RotationPredicate"/> must behave exactly like no <see cref="RotationPredicate"/> at
+    /// all here too) — returns <c>""</c>: the fragment is OMITTED ENTIRELY, not merely always-true,
+    /// the same construction <see cref="ExplicitPredicate"/> uses on <see cref="AudiencePosture.Mature"/>.
+    /// SPEC F81.2's "the envelope filters; the bias/nudge only ranks" holds by construction here: this
+    /// predicate is the filter half, <see cref="EnvelopeCandidateRow.Nudge"/> the ranked half (T370),
+    /// never the reverse. <see cref="GetRotationCandidateAsync"/> — the SPEC F81.6 never-silence
+    /// terminal rung with no envelope at all — never calls this: there is no
+    /// <see cref="SegmentEnvelope.Rotation"/> to read once the envelope itself has been relaxed away.
+    /// </summary>
+    internal static string RotationPredicateSql(RotationPredicate? rotation)
+    {
+        if (rotation is null) return "";
+
+        var parts = new List<string>(2);
+        if (rotation.MaxPlays is not null)
+            parts.Add("coalesce(rot.play_count, 0) <= @maxPlays");
+        if (rotation.NotAiredWithinDays is not null)
+            parts.Add("(rot.last_aired_at is null or rot.last_aired_at < now() - make_interval(days => @notAiredWithinDays))");
+
+        return parts.Count == 0 ? "" : $"and {string.Join(" and ", parts)}";
+    }
+
+    /// <summary>
+    /// MED-2 (PLAN T359 review) — <see cref="GetEnvelopeCandidateAsync"/> and
+    /// <see cref="GetEnvelopeCandidatePoolAsync"/> MUST filter identically: SPEC F81.5's
+    /// <c>SatisfiesEnvelope</c> trust-but-verify re-check only covers genre + energy, so a rotation
+    /// (or any future) predicate that drifted between the two queries would be invisible to that
+    /// re-check — the persona pool could admit a row the envelope-only ladder would have excluded,
+    /// or vice versa, with nothing catching it. Extracted here so there is exactly ONE place this
+    /// FROM/JOIN/WHERE text is written, byte-identical for every caller by construction rather than
+    /// by hand-kept copies; each caller supplies only its own genre/explicit/rotation predicate
+    /// fragments and appends its own SELECT list, ORDER BY (<see cref="EnvelopeCandidateOrderBySql"/>
+    /// — split out at PLAN T361 so <see cref="GetPlayCountQuantileAsync"/>'s aggregate read can share
+    /// this FROM/WHERE without an ORDER BY referencing SELECT-list aliases it never projects), and
+    /// LIMIT.
+    /// </summary>
+    static string EnvelopeCandidateFromWhereSql(string genrePredicate, string explicitPredicate, string rotationPredicate) => $"""
+        from library.media m
+        left join library.media_rating r on r.media_id = m.id
+        left join library.media_rotation rot on rot.media_id = m.id
+        where {PlayablePredicate}
+          and m.library_id = any(@libraryIds)
+          and (m.energy is null or (m.energy >= @energyMin and m.energy <= @energyMax))
+          {genrePredicate}
+          {explicitPredicate}
+          {rotationPredicate}
+        """;
+
+    /// <summary>
+    /// The rotation-tier ORDER BY <see cref="GetEnvelopeCandidateAsync"/> and
+    /// <see cref="GetEnvelopeCandidatePoolAsync"/> append after <see cref="EnvelopeCandidateFromWhereSql"/>'s
+    /// own text plus their own SELECT-list — <c>repeated_recent</c>/<c>repeated_artist</c> are aliases
+    /// only THOSE two queries' own SELECT lists project, so this text is never valid appended to a
+    /// query that doesn't also select them (<see cref="GetPlayCountQuantileAsync"/>'s aggregate read
+    /// omits it entirely for exactly that reason).
+    /// </summary>
+    const string EnvelopeCandidateOrderBySql = """
+        order by
+          repeated_recent asc,
+          repeated_artist asc,
+          coalesce(m.id = @mostRecentId, false) asc,
+          random()
+        """;
+
     /// <summary>Shared recent-id parse for the tiered rotation queries (F41.1): oldest-first list of
     /// opaque string ids, any entry that fails to parse as our bigint id is silently dropped.</summary>
     static List<long> ParseIds(IReadOnlyList<string> ids)
@@ -344,6 +416,14 @@ sealed class MediaRepository(
     /// SPEC F95.4, STORY-250, PLAN T114 — <see cref="ExplicitPredicate"/> ANDs in the SAME
     /// audience-posture fragment <see cref="GetRotationCandidateAsync"/> does, by the same
     /// omitted-entirely-on-Mature construction.
+    ///
+    /// SPEC F152.2, STORY-372, PLAN T359 — <see cref="RotationPredicateSql"/> ANDs in the SAME
+    /// by-construction way, reading <paramref name="envelope"/>'s own <see cref="SegmentEnvelope.Rotation"/>:
+    /// this method backs every rung of the SPEC F81.6 degradation ladder
+    /// (<c>GenWave.Orchestration.MusicSelectionPolicy.SelectEnvelopeLadderAsync</c>), so a rung that
+    /// relaxes rotation-window/energy/genre still carries the SAME <c>Rotation</c> forward (a
+    /// <c>with</c> expression never touches it) — the F152 "deep cuts" rule narrows every one of
+    /// those rungs, never just the first.
     /// </summary>
     public async Task<RotationCandidate?> GetEnvelopeCandidateAsync(
         LibraryScope scope,
@@ -371,6 +451,7 @@ sealed class MediaRepository(
             : null;
         var genrePredicate = genresLower is not null ? "and lower(m.genre) = any(@genresLower)" : "";
         var explicitPredicate = ExplicitPredicate();
+        var rotationPredicate = RotationPredicateSql(envelope.Rotation);
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<RotationCandidateRow>(new CommandDefinition($"""
@@ -388,18 +469,8 @@ sealed class MediaRepository(
                     and lower(trim(rm.artist)) = lower(trim(m.artist))
                 )
               ) as repeated_artist
-            from library.media m
-            left join library.media_rating r on r.media_id = m.id
-            where {PlayablePredicate}
-              and m.library_id = any(@libraryIds)
-              and (m.energy is null or (m.energy >= @energyMin and m.energy <= @energyMax))
-              {genrePredicate}
-              {explicitPredicate}
-            order by
-              repeated_recent asc,
-              repeated_artist asc,
-              coalesce(m.id = @mostRecentId, false) asc,
-              random()
+            {EnvelopeCandidateFromWhereSql(genrePredicate, explicitPredicate, rotationPredicate)}
+            {EnvelopeCandidateOrderBySql}
             limit 1
             """,
             new
@@ -409,6 +480,8 @@ sealed class MediaRepository(
                 genresLower,
                 energyMin = envelope.EnergyRange.Min,
                 energyMax = envelope.EnergyRange.Max,
+                maxPlays = envelope.Rotation?.MaxPlays,
+                notAiredWithinDays = envelope.Rotation?.NotAiredWithinDays,
             },
             cancellationToken: ct));
 
@@ -433,6 +506,15 @@ sealed class MediaRepository(
     /// audience-posture fragment <see cref="GetRotationCandidateAsync"/>/<see cref="GetEnvelopeCandidateAsync"/>
     /// do, so the ranker's own candidate pool never sees an excluded row either — boundary bias
     /// resamples this SAME query (never a separate one), so it inherits the exclusion for free.
+    ///
+    /// SPEC F152.2/F151.1, STORY-372, PLAN T359 — <see cref="RotationPredicateSql"/> ANDs in the SAME
+    /// by-construction "deep cuts" fragment <see cref="GetEnvelopeCandidateAsync"/> does (this IS the
+    /// query that rung's persona pool draws from). Additionally PROJECTS <c>library.media_rotation</c>'s
+    /// own <c>nudge</c>/<c>play_count</c> onto every row (F151.1's carrier half, T370 consumes them) —
+    /// the ONE candidate query that needs the projection, since it is the only row shape that reaches
+    /// <c>GenWave.Orchestration.PersonaRankCandidate</c> (via <c>RankerPersonaPickProvider.ToRankCandidate</c>);
+    /// <see cref="GetEnvelopeCandidateAsync"/>'s own <see cref="RotationCandidateRow"/> shape never
+    /// does, so it carries the filter half only, never the projection.
     /// </summary>
     public async Task<IReadOnlyList<EnvelopeCandidateRow>> GetEnvelopeCandidatePoolAsync(
         LibraryScope scope,
@@ -458,6 +540,7 @@ sealed class MediaRepository(
             : null;
         var genrePredicate = genresLower is not null ? "and lower(m.genre) = any(@genresLower)" : "";
         var explicitPredicate = ExplicitPredicate();
+        var rotationPredicate = RotationPredicateSql(envelope.Rotation);
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var rows = await conn.QueryAsync<EnvelopeCandidatePoolRow>(new CommandDefinition($"""
@@ -466,6 +549,7 @@ sealed class MediaRepository(
               m.bitrate_kbps, m.artist, m.album, m.genre, m.year, m.integrated_lufs, m.true_peak_dbtp,
               m.measurable, m.cue_in_sec, m.cue_out_sec, m.intro_energy, m.outro_energy,
               m.energy, m.moods,
+              coalesce(rot.nudge, 0) as nudge, coalesce(rot.play_count, 0) as play_count,
               (m.id = any(@recentIds)) as repeated_recent,
               (
                 m.artist is not null and trim(m.artist) <> ''
@@ -476,18 +560,8 @@ sealed class MediaRepository(
                     and lower(trim(rm.artist)) = lower(trim(m.artist))
                 )
               ) as repeated_artist
-            from library.media m
-            left join library.media_rating r on r.media_id = m.id
-            where {PlayablePredicate}
-              and m.library_id = any(@libraryIds)
-              and (m.energy is null or (m.energy >= @energyMin and m.energy <= @energyMax))
-              {genrePredicate}
-              {explicitPredicate}
-            order by
-              repeated_recent asc,
-              repeated_artist asc,
-              coalesce(m.id = @mostRecentId, false) asc,
-              random()
+            {EnvelopeCandidateFromWhereSql(genrePredicate, explicitPredicate, rotationPredicate)}
+            {EnvelopeCandidateOrderBySql}
             limit @limit
             """,
             new
@@ -497,11 +571,95 @@ sealed class MediaRepository(
                 genresLower,
                 energyMin = envelope.EnergyRange.Min,
                 energyMax = envelope.EnergyRange.Max,
+                maxPlays = envelope.Rotation?.MaxPlays,
+                notAiredWithinDays = envelope.Rotation?.NotAiredWithinDays,
                 limit = Math.Clamp(limit, 1, 200),
             },
             cancellationToken: ct));
 
         return rows.Select(r => r.ToPoolCandidate(logger)).ToList();
+    }
+
+    /// <summary>
+    /// SPEC F152.4 (STORY-372, PLAN T361) — the rotation relax ladder's R2 diagnostic read:
+    /// <c>percentile_disc(@quantile)</c> over <c>coalesce(rot.play_count, 0)</c> across the SAME
+    /// playable/envelope set <see cref="GetEnvelopeCandidateAsync"/>/<see cref="GetEnvelopeCandidatePoolAsync"/>
+    /// draw from (<see cref="EnvelopeCandidateFromWhereSql"/>'s own FROM/JOIN/WHERE, genre/energy/
+    /// explicit predicates included) — with a NULL rotation predicate: the ladder's own R0/R1 bound
+    /// must never leak into this read, since R2's whole point is "what does the UNCONSTRAINED pool's
+    /// play-count distribution look like." <see cref="EnvelopeCandidateOrderBySql"/> is deliberately
+    /// NOT appended — an aggregate query with no GROUP BY collapses to exactly one row regardless, and
+    /// that ORDER BY's own <c>repeated_recent</c>/<c>repeated_artist</c> aliases are never projected
+    /// here. <c>percentile_disc</c> over zero matching rows returns SQL NULL (Postgres aggregates
+    /// always return one row), which maps to <see langword="null"/> here — "nothing to compute" —
+    /// exactly like an empty <paramref name="scope"/>.
+    /// </summary>
+    public async Task<int?> GetPlayCountQuantileAsync(
+        LibraryScope scope, SegmentEnvelope envelope, double quantile, CancellationToken ct)
+    {
+        // Default-deny: no scope means no access, no SQL issued.
+        if (scope.IsEmpty) return null;
+
+        var genresLower = envelope.Genres.Count > 0
+            ? envelope.Genres.Select(g => g.ToLowerInvariant()).ToArray()
+            : null;
+        var genrePredicate = genresLower is not null ? "and lower(m.genre) = any(@genresLower)" : "";
+        var explicitPredicate = ExplicitPredicate();
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<int?>(new CommandDefinition($"""
+            select percentile_disc(@quantile) within group (order by coalesce(rot.play_count, 0))
+            {EnvelopeCandidateFromWhereSql(genrePredicate, explicitPredicate, rotationPredicate: "")}
+            """,
+            new
+            {
+                quantile,
+                libraryIds = scope.LibraryIds.ToArray(),
+                genresLower,
+                energyMin = envelope.EnergyRange.Min,
+                energyMax = envelope.EnergyRange.Max,
+            },
+            cancellationToken: ct));
+    }
+
+    /// <summary>
+    /// SPEC F152.5, STORY-373, PLAN T362 — <see cref="EnvelopeCandidateFromWhereSql"/>'s SAME
+    /// playable/genre/energy/explicit set <see cref="GetEnvelopeCandidateAsync"/>/
+    /// <see cref="GetEnvelopeCandidatePoolAsync"/> already draw from, this time WITH
+    /// <paramref name="envelope"/>'s own <see cref="RotationPredicateSql"/> fragment INCLUDED (unlike
+    /// <see cref="GetPlayCountQuantileAsync"/>'s deliberately-unconstrained read one member up) —
+    /// aggregated to a plain <c>count(*)</c>, never a row fetch, so the Shows page's own "live pool
+    /// size" read costs nothing beyond one index scan regardless of how large the matching set is. No
+    /// ORDER BY appended, for the identical reason <see cref="GetPlayCountQuantileAsync"/>'s own
+    /// remarks give: an aggregate with no GROUP BY always collapses to exactly one row.
+    /// </summary>
+    public async Task<int?> GetEnvelopeCandidateCountAsync(LibraryScope scope, SegmentEnvelope envelope, CancellationToken ct)
+    {
+        // Default-deny: no scope means no access, no SQL issued.
+        if (scope.IsEmpty) return null;
+
+        var genresLower = envelope.Genres.Count > 0
+            ? envelope.Genres.Select(g => g.ToLowerInvariant()).ToArray()
+            : null;
+        var genrePredicate = genresLower is not null ? "and lower(m.genre) = any(@genresLower)" : "";
+        var explicitPredicate = ExplicitPredicate();
+        var rotationPredicate = RotationPredicateSql(envelope.Rotation);
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        return await conn.QuerySingleAsync<int>(new CommandDefinition($"""
+            select count(*)::int
+            {EnvelopeCandidateFromWhereSql(genrePredicate, explicitPredicate, rotationPredicate)}
+            """,
+            new
+            {
+                libraryIds = scope.LibraryIds.ToArray(),
+                genresLower,
+                energyMin = envelope.EnergyRange.Min,
+                energyMax = envelope.EnergyRange.Max,
+                maxPlays = envelope.Rotation?.MaxPlays,
+                notAiredWithinDays = envelope.Rotation?.NotAiredWithinDays,
+            },
+            cancellationToken: ct));
     }
 
     public async Task<PagedResult<MediaReference>> ListAsync(LibraryScope scope, MediaQuery query, CancellationToken ct)

@@ -32,7 +32,10 @@ namespace GenWave.Orchestration;
 /// not just convention, mirroring <c>ScheduleServiceCollectionExtensions.AddScheduleStore</c>'s own
 /// remarks on <see cref="IScheduleStore"/> itself (PLAN T119 review F6): registered as a singleton —
 /// one instance, one subscription, for the life of the process. A scoped/transient registration would
-/// leak one subscription (and the wrapped store reference) per instance created.
+/// leak one subscription (and the wrapped store reference) per instance created. <see cref="IShowStore.ShowChanged"/>
+/// (PLAN T360 review HIGH-1) rides the identical subscribe-once-never-unsubscribe posture — see
+/// <paramref name="showStore"/>'s own remarks below for why it is optional rather than a fourth
+/// required constructor parameter.
 /// </para>
 ///
 /// <para>
@@ -55,9 +58,15 @@ namespace GenWave.Orchestration;
 /// <para>
 /// <b>The specials cache also reloads once a day — NOT for the reason that might look obvious (PLAN
 /// T260 design; review MF1 corrected an earlier, wrong draft of this very paragraph).</b> The week
-/// snapshot above only ever goes stale on a write (<see cref="IScheduleStore.WeekChanged"/>) — its rows
-/// are date-less (a weekly grid repeats forever), so no amount of wall-clock time passing can make a
-/// cached week snapshot wrong. It is tempting to assume the specials list needs a day-rollover reload
+/// snapshot above only ever goes stale on a write — <see cref="IScheduleStore.WeekChanged"/> for the
+/// grid itself, and, as of PLAN T360 review HIGH-1, <see cref="IShowStore.ShowChanged"/> too: a cached
+/// block's own <c>Show</c> is a <see cref="GenWave.Core.Domain.ShowSummary"/> resolved at LOAD time
+/// (SPEC F116.1), so an operator editing that show's name/tagline/flavor/rotation writes through a
+/// DIFFERENT store than the one this cache already watches, and would otherwise sit invisible until an
+/// unrelated schedule write happened to reload it. Wall-clock time passing alone still can never be
+/// the cause, though — segment_schedule's own rows are date-less (a weekly grid repeats forever), so
+/// only an explicit write (of either kind) can ever make a cached week snapshot wrong. It is tempting
+/// to assume the specials list needs a day-rollover reload
 /// for the SAME kind of reason — "a special dated the day after tomorrow only becomes relevant once the
 /// date rolls over" — but that is false: <see cref="IScheduleSpecialStore.ListUpcomingAsync"/> is
 /// unbounded ABOVE its <c>fromDate</c> argument (that method's own remarks), so the very FIRST load
@@ -114,13 +123,31 @@ public sealed class CachingScheduleResolver
     volatile bool specialsDirty = true;
     volatile int specialsLoadedDateNumber = -1;
 
-    public CachingScheduleResolver(IScheduleStore store, ScheduleResolver resolver, IScheduleSpecialStore specialStore)
+    /// <param name="showStore">
+    /// When supplied, <see cref="IShowStore.ShowChanged"/> subscribes into the SAME dirty-on-write
+    /// posture <paramref name="store"/>/<paramref name="specialStore"/> already use (PLAN T360 review
+    /// HIGH-1) —
+    /// see the class remarks' own "no cache divergence" correction. Optional (default
+    /// <see langword="null"/>, mirroring <see cref="ScheduleResolver"/>'s own optional
+    /// <c>IStationClockProvider?</c> collaborator) rather than a fourth required parameter: production
+    /// composition (<c>StationSettingsHostingExtensions</c>) always supplies the real
+    /// <see cref="IShowStore"/> via constructor injection regardless of the default (both singletons are
+    /// registered, so DI resolves it whether or not this parameter is optional) — the default exists so
+    /// the dozens of fixture-style specs across this repo that build a bare (store, resolver,
+    /// specialStore) triple and never touch show identity at all stay unchanged. Omitting it here only
+    /// means an operator's show edit would need an unrelated schedule/specials write (or a restart) to
+    /// reach that ONE fixture's own cache — never a production configuration.
+    /// </param>
+    public CachingScheduleResolver(
+        IScheduleStore store, ScheduleResolver resolver, IScheduleSpecialStore specialStore, IShowStore? showStore = null)
     {
         this.store = store;
         this.resolver = resolver;
         this.specialStore = specialStore;
         store.WeekChanged += OnWeekChanged;
         specialStore.SpecialsChanged += OnSpecialsChanged;
+        if (showStore is not null)
+            showStore.ShowChanged += OnShowChanged;
     }
 
     /// <summary>
@@ -222,4 +249,16 @@ public sealed class CachingScheduleResolver
     void OnWeekChanged() => dirty = true;
 
     void OnSpecialsChanged() => specialsDirty = true;
+
+    // PLAN T360 review HIGH-1: a show edit (name/tagline/flavor/rotation) can land on EITHER the
+    // cached week snapshot's own ShowSummary (a weekly block naming that show) or the cached specials
+    // list's own ShowSummary (a special naming it) — this repository has no way to know which without
+    // re-deriving the store's own join, so both are dirtied unconditionally, the same "cheap, always
+    // correct, worst case one redundant reload" posture ResolveAsync's own remarks already accept for
+    // WeekChanged/SpecialsChanged individually.
+    void OnShowChanged()
+    {
+        dirty = true;
+        specialsDirty = true;
+    }
 }

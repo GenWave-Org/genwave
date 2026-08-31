@@ -1,3 +1,4 @@
+using GenWave.Abstractions.Playout;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 
@@ -20,6 +21,9 @@ sealed class FakeShowStore : IShowStore
 {
     readonly Dictionary<long, Show> byId;
     long nextId;
+
+    /// <inheritdoc/>
+    public event Action? ShowChanged;
 
     /// <summary>Seeds the store with pre-existing rows (e.g. an IMPORTED show — no writer through
     /// this interface can ever produce one, mirrors how the real repository's own provenance tests
@@ -88,6 +92,7 @@ sealed class FakeShowStore : IShowStore
             UpdatedAt = DateTime.UtcNow,
         };
         byId[id] = updated;
+        ShowChanged?.Invoke();
         return Task.FromResult<ShowWriteResult>(new ShowWriteResult.Updated(updated));
     }
 
@@ -111,8 +116,22 @@ sealed class FakeShowStore : IShowStore
     /// <c>WHERE imported_from IS NOT NULL</c> conflict clause produces. No scripting knob otherwise —
     /// the OTHER sad-path import gates (route-slug shape/reservation, budgets) all run in
     /// ShowsController.Import BEFORE this is ever reached, so there is no further store-level outcome
-    /// left to script (mirrors FakeThemeStore.UpsertAsync's own unscripted shape).</summary>
-    public Task<Show?> ImportAsync(string slug, string name, string? tagline, string? flavor, string importedFrom, CancellationToken ct)
+    /// left to script (mirrors FakeThemeStore.UpsertAsync's own unscripted shape).
+    ///
+    /// <para>
+    /// <paramref name="rotation"/> (SPEC F152.6, PLAN T363) mirrors the real repository's own "no
+    /// opinion, never a clear" rule: <see langword="null"/> leaves an existing row's own
+    /// <c>Rotation</c> exactly as it stood (a fresh insert therefore starts at <c>Rotation</c>'s own
+    /// <see langword="null"/> default, the identical "stays whatever it already was" shape
+    /// <c>ShowRepository.CreateAsync</c>'s remarks give the real <c>envelope</c> column); non-null
+    /// replaces it outright, the same "SetRotationAsync</c>-shaped write" the real merge-via-jsonb
+    /// SQL performs (this in-memory double has no sibling <c>envelope</c> keys to preserve, so a plain
+    /// replace is the faithful analogue).
+    /// </para>
+    /// </summary>
+    public Task<Show?> ImportAsync(
+        string slug, string name, string? tagline, string? flavor, string importedFrom,
+        RotationPredicate? rotation, CancellationToken ct)
     {
         var existing = byId.Values.FirstOrDefault(s => s.Slug == slug);
         if (existing is { ImportedFrom: null })
@@ -120,7 +139,9 @@ sealed class FakeShowStore : IShowStore
 
         var now = DateTime.UtcNow;
         var show = existing is null
-            ? new Show(nextId++, name, slug, NullIfBlank(tagline), NullIfBlank(flavor), importedFrom, now, now, now)
+            ? new Show(
+                nextId++, name, slug, NullIfBlank(tagline), NullIfBlank(flavor), importedFrom, now, now, now,
+                rotation)
             : existing with
             {
                 Name = name,
@@ -129,9 +150,25 @@ sealed class FakeShowStore : IShowStore
                 ImportedFrom = importedFrom,
                 ImportedAt = now,
                 UpdatedAt = now,
+                Rotation = rotation ?? existing.Rotation,
             };
         byId[show.Id] = show;
+        ShowChanged?.Invoke();
         return Task.FromResult<Show?>(show);
+    }
+
+    /// <summary>Mirrors <c>ShowRepository.SetRotationAsync</c>'s own Updated/NotFound contract — no
+    /// scripting knob (unlike <see cref="NextCreateResult"/>/<see cref="NextUpdateResult"/>/
+    /// <see cref="NextDeleteResult"/>): no wire-layer spec needs one yet.</summary>
+    public Task<ShowWriteResult> SetRotationAsync(long id, RotationPredicate? rotation, CancellationToken ct)
+    {
+        if (!byId.TryGetValue(id, out var existing))
+            return Task.FromResult<ShowWriteResult>(new ShowWriteResult.NotFound());
+
+        var updated = existing with { Rotation = rotation, UpdatedAt = DateTime.UtcNow };
+        byId[id] = updated;
+        ShowChanged?.Invoke();
+        return Task.FromResult<ShowWriteResult>(new ShowWriteResult.Updated(updated));
     }
 
     // A deterministic, display-only stand-in for the production house Slugify (never accessible from

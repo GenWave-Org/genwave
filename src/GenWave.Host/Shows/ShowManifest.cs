@@ -4,7 +4,9 @@ namespace GenWave.Host.Shows;
 /// A show import manifest's parsed, trusted content (SPEC F118.1/F118.2, PLAN T254) — the
 /// <c>&lt;slug&gt;.show.json</c> shape genwave-catalog's own <c>show-manifest.schema.json</c> pins:
 /// <see cref="Name"/>/<see cref="Tagline"/>/<see cref="Flavor"/>, the exact three fields
-/// <see cref="Core.Domain.Show"/> itself carries as authored content.
+/// <see cref="Core.Domain.Show"/> itself carries as authored content, plus the optional
+/// <see cref="Envelope"/> schema **1.1** adds (SPEC F152.6, STORY-373, PLAN T363 — see that type's own
+/// remarks for the collapsed "no rotation opinion" representation).
 ///
 /// <para>
 /// NO EMBEDDED <c>slug</c> — deliberately, mirrors <see cref="Core.Domain.PersonaCard"/>'s own shape,
@@ -22,4 +24,12 @@ namespace GenWave.Host.Shows;
 /// prompt, only the admin editor and the spectator disclosure surface (SPEC F115.3).
 /// </para>
 /// </summary>
-public sealed record ShowManifest(string Name, string Tagline, string Flavor);
+/// <param name="Envelope">
+/// The manifest's optional <c>envelope</c> object (SPEC F152.6, PLAN T363) — <see langword="null"/> for
+/// a 1.0 manifest (no <c>envelope</c> key at all), an <c>envelope</c> carrying no <c>rotation</c>, or an
+/// explicit <c>envelope.rotation: null</c> — every one of those reads as "this manifest has no rotation
+/// opinion," not "clear the show's existing rule" (<see cref="Api.ShowsController.Import"/>'s own
+/// remarks name the write-side consequence: an existing show's rotation rule is left untouched unless a
+/// manifest carries a genuinely present, validated <c>rotation</c> object).
+/// </param>
+public sealed record ShowManifest(string Name, string Tagline, string Flavor, ShowManifestEnvelope? Envelope);

@@ -311,6 +311,19 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	end $$;
 	SQL
 
+# --- station.booth_log: the last-airing index (SPEC F152.5, STORY-373, PLAN T362 review MED-4) ----
+# GetLastAiringAsync's own bounded read (GenWave.MediaLibrary.Station.BoothLogRepository) needs
+# "this show's own track-started rows, newest first" fast — this partial index carries exactly that
+# access path, idempotent (IF NOT EXISTS) like every other index in this file.
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'SQL'
+	set role station_svc;
+	set search_path = station;
+
+	create index if not exists booth_log_show_track_started
+	  on station.booth_log (show_id, occurred_at)
+	  where kind = 'track-started';
+	SQL
+
 # --- the one-shot booth-log -> ledger seed (SPEC F149.3, STORY-367 AC5/AC6) ------------------------
 # Runs as the bootstrap superuser this script is already connected as — no SET ROLE — the one place
 # in this migration that reads across the station/library role boundary in a single statement (see

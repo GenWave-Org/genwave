@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using GenWave.Core.Abstractions;
 using Npgsql;
 
@@ -30,6 +31,7 @@ public static class SpecialsServiceCollectionExtensions
     /// an empty/dev-mode connection string.
     /// </summary>
     public static IServiceCollection AddScheduleSpecialStore(this IServiceCollection services, string connectionString) =>
-        services.AddSingleton<IScheduleSpecialStore>(
-            _ => new SpecialsRepository(new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build())));
+        services.AddSingleton<IScheduleSpecialStore>(sp => new SpecialsRepository(
+            new Lazy<NpgsqlDataSource>(() => new NpgsqlDataSourceBuilder(connectionString).Build()),
+            sp.GetRequiredService<ILogger<SpecialsRepository>>()));
 }
