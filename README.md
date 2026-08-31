@@ -252,4 +252,4 @@ GenWave ships in two editions:
 - **GenWave Home** — this repository. Licensed under the [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). GenWave Home is AGPL and always will be.
 - **GenWave Business** — a commercial edition built on the same core, licensed separately. Development of Home is funded by GenWave Business.
 
-**One deliberate exception:** the module contract surface in [`src/GenWave.Abstractions/`](src/GenWave.Abstractions/) (published as the `GenWave.Abstractions` nuget package — 5.4.1 at v5.4.1, additive across 5.x) is **MIT-licensed** — see [its LICENSE](src/GenWave.Abstractions/LICENSE) — so any module, open or commercial, can link the contracts freely. Everything else in this repository is AGPL-3.0-only.
+**One deliberate exception:** the module contract surface in [`src/GenWave.Abstractions/`](src/GenWave.Abstractions/) (published as the `GenWave.Abstractions` nuget package — 5.5.0 at v5.5.0, additive across 5.x) is **MIT-licensed** — see [its LICENSE](src/GenWave.Abstractions/LICENSE) — so any module, open or commercial, can link the contracts freely. Everything else in this repository is AGPL-3.0-only.
