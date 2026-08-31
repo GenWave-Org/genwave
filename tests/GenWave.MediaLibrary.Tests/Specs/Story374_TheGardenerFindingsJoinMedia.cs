@@ -75,7 +75,7 @@ public static class FeatureTheGardenerFindingsJoinMedia
             await InsertRatingAsync(db, mediaId, score: 80);
             await InsertFindingAsync(db, mediaId, "dead_file");
 
-            var rows = await Repo(db).ListWithMediaAsync(RotKind.DeadFile, RotState.Open, 200, 0, CancellationToken.None);
+            var rows = (await Repo(db).ListWithMediaAsync(RotKind.DeadFile, RotState.Open, 200, 0, CancellationToken.None)).Items;
 
             Assert.Equal(3, Assert.Single(rows).Plays);
         }
@@ -89,7 +89,7 @@ public static class FeatureTheGardenerFindingsJoinMedia
             await InsertRatingAsync(db, mediaId, score: 80);
             await InsertFindingAsync(db, mediaId, "dead_file");
 
-            var rows = await Repo(db).ListWithMediaAsync(RotKind.DeadFile, RotState.Open, 200, 0, CancellationToken.None);
+            var rows = (await Repo(db).ListWithMediaAsync(RotKind.DeadFile, RotState.Open, 200, 0, CancellationToken.None)).Items;
 
             Assert.Equal(80, Assert.Single(rows).Rating);
         }
@@ -104,7 +104,7 @@ public static class FeatureTheGardenerFindingsJoinMedia
             var mediaId = await InsertReadyRowAsync(db, "/gardener/t377-join-b.flac", "Artist", "Song B", 200_000);
             await InsertFindingAsync(db, mediaId, "dead_file");
 
-            var rows = await Repo(db).ListWithMediaAsync(RotKind.DeadFile, RotState.Open, 200, 0, CancellationToken.None);
+            var rows = (await Repo(db).ListWithMediaAsync(RotKind.DeadFile, RotState.Open, 200, 0, CancellationToken.None)).Items;
 
             Assert.Equal(0, Assert.Single(rows).Plays);
         }
@@ -116,7 +116,7 @@ public static class FeatureTheGardenerFindingsJoinMedia
             var mediaId = await InsertReadyRowAsync(db, "/gardener/t377-join-b2.flac", "Artist", "Song B2", 200_000);
             await InsertFindingAsync(db, mediaId, "dead_file");
 
-            var rows = await Repo(db).ListWithMediaAsync(RotKind.DeadFile, RotState.Open, 200, 0, CancellationToken.None);
+            var rows = (await Repo(db).ListWithMediaAsync(RotKind.DeadFile, RotState.Open, 200, 0, CancellationToken.None)).Items;
 
             Assert.Null(Assert.Single(rows).Rating);
         }
@@ -137,7 +137,7 @@ public static class FeatureTheGardenerFindingsJoinMedia
             await InsertFindingAsync(db, firstId, "dead_file");
             await InsertFindingAsync(db, secondId, "stale_metadata");
 
-            var rows = await Repo(db).ListWithMediaAsync(null, RotState.Open, limit: 0, offset: 0, ct: CancellationToken.None);
+            var rows = (await Repo(db).ListWithMediaAsync(null, RotState.Open, limit: 0, offset: 0, ct: CancellationToken.None)).Items;
 
             Assert.Single(rows);
         }
@@ -152,7 +152,7 @@ public static class FeatureTheGardenerFindingsJoinMedia
             var mediaId = await InsertReadyRowAsync(db, "/gardener/t377-floor-c.flac", "Artist", "Song C", 200_000);
             await InsertFindingAsync(db, mediaId, "dead_file");
 
-            var rows = await Repo(db).ListWithMediaAsync(null, RotState.Open, limit: 200, offset: -1, ct: CancellationToken.None);
+            var rows = (await Repo(db).ListWithMediaAsync(null, RotState.Open, limit: 200, offset: -1, ct: CancellationToken.None)).Items;
 
             Assert.Single(rows);
         }

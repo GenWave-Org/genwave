@@ -126,9 +126,9 @@ public sealed class GardenerController(IRotFindingStore store, ILogger<GardenerC
         var effectiveLimit = Math.Clamp(limit ?? DefaultLimit, 1, MaxLimit);
         var effectiveOffset = Math.Max(offset ?? 0, 0);
 
-        var rows = await store.ListWithMediaAsync(kindFilter, stateFilter, effectiveLimit, effectiveOffset, ct);
+        var page = await store.ListWithMediaAsync(kindFilter, stateFilter, effectiveLimit, effectiveOffset, ct);
 
-        var groups = rows
+        var groups = page.Items
             .GroupBy(row => row.Finding.Kind)
             .Select(BuildGroup)
             .ToList();

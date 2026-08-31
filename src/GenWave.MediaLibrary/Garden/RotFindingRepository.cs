@@ -669,6 +669,34 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
     }
 
     /// <summary>
+    /// The <c>kind</c>/<c>state</c> "omitted means any" condition list every paged read in this file
+    /// needs (T385 review MED-2/LOW-4) — <see cref="ListAsync"/>, <see cref="ListFlatPageAsync"/>, and
+    /// <see cref="ListNearDuplicateGroupPageAsync"/>'s own count/group-CTE pair each hand-rolled this
+    /// same "if given, add a condition and bind it" shape before T385, with only the column ALIAS
+    /// differing between an unaliased read (<see cref="ListAsync"/>, the group CTE) and one joined
+    /// under an alias (<see cref="ListFlatPageAsync"/>'s <c>f.</c>, the near-duplicate member join's
+    /// own <c>f.</c>) — <paramref name="columnPrefix"/> parameterises exactly that difference, one
+    /// spelling for the rest. Mutates <paramref name="conditions"/>/<paramref name="parameters"/> in
+    /// place (the caller's own accumulators, already built up this way at every call site) rather than
+    /// returning a second pair the caller would have to merge.
+    /// </summary>
+    static void AppendKindStateConditions(
+        List<string> conditions, DynamicParameters parameters, string columnPrefix, RotKind? kind, RotState? state)
+    {
+        if (kind is not null)
+        {
+            conditions.Add($"{columnPrefix}kind = @kind::library.rot_kind");
+            parameters.Add("kind", RotKindTokens.ToToken(kind.Value));
+        }
+
+        if (state is not null)
+        {
+            conditions.Add($"{columnPrefix}state = @state::library.rot_state");
+            parameters.Add("state", RotStateTokens.ToToken(state.Value));
+        }
+    }
+
+    /// <summary>
     /// Bounded, paged (T372 review LOW-2) — conditional predicates appended only when the matching
     /// filter is supplied, the same <c>MediaRotationRepository.AppendSafeExclusion</c>-style
     /// short-circuit rather than a nullable-cast comparison in SQL. <c>evidence::text</c> keeps the
@@ -693,18 +721,7 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
 
         var conditions = new List<string>();
         var parameters = new DynamicParameters();
-
-        if (kind is not null)
-        {
-            conditions.Add("kind = @kind::library.rot_kind");
-            parameters.Add("kind", RotKindTokens.ToToken(kind.Value));
-        }
-
-        if (state is not null)
-        {
-            conditions.Add("state = @state::library.rot_state");
-            parameters.Add("state", RotStateTokens.ToToken(state.Value));
-        }
+        AppendKindStateConditions(conditions, parameters, columnPrefix: "", kind, state);
 
         parameters.Add("limit", limit);
         parameters.Add("offset", offset);
@@ -728,82 +745,257 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
     }
 
     /// <summary>
-    /// <see cref="ListAsync"/>'s own filters, joined out to <c>library.media</c>/
-    /// <c>library.media_rotation</c>/<c>library.media_rating</c> for the admin surface's listing
-    /// (SPEC F153.9; STORY-374 AC7; PLAN T377) — <c>GardenerController</c>'s ONE new joined read
-    /// rather than an N-lookup fan-out. Ordered <c>kind, group_key nulls last, opened_at desc, id</c>
-    /// — a <see cref="RotKind.NearDuplicate"/> group's own rows land adjacent (id breaks ties for a
-    /// stable order across pages) so the controller's own grouping never has to re-sort. <c>join</c>
-    /// (not <c>left join</c>) against <c>library.media</c>: a <c>rot_finding</c> row's own FK
-    /// guarantees the media row still exists (<c>on delete cascade</c>, db/41) — a genuine orphan
-    /// would be a data-integrity bug this query should surface as a thrown mapping failure, not paper
-    /// over with a null-media row the controller would then have to special-case. <c>plays</c>
-    /// defaults to 0 (never null) for a media id with no <c>media_rotation</c> row; <c>rating</c>
-    /// stays null (never the F33.2 ledger default of 50) so "never rated" and "rated 50" stay
-    /// distinguishable to an operator triaging a finding.
-    ///
-    /// <para>
-    /// Same callee-enforced <see cref="ClampPaging"/> floor <see cref="ListAsync"/>'s own remarks
-    /// describe — <paramref name="limit"/>/<paramref name="offset"/> are floored here regardless of
-    /// what <c>GardenerController</c>'s own endpoint clamp already did.
-    /// </para>
-    ///
-    /// <para>
-    /// T377 review LOW-2: this <c>order by</c> is NOT index-covered — <c>group_key</c> sits mid-key
-    /// (between <c>kind</c> and <c>opened_at</c>), and no index on this table leads with it, so
-    /// Postgres sorts the whole FILTERED join result before applying <c>LIMIT</c>, rather than
-    /// walking an already-ordered index. The bound (<see cref="ClampPaging"/>'s own 1000-row cap) is
-    /// what keeps that sort cheap regardless of how large <c>library.rot_finding</c> grows — the
-    /// same reason <see cref="ListAsync"/>'s own <c>(kind, state, opened_at desc)</c> index note
-    /// exists, this query just does not get to reuse it once <c>group_key</c> joins the sort key.
-    /// </para>
+    /// <see cref="RotFindingWithMediaRow"/>'s own join — <c>library.rot_finding</c> joined out to
+    /// <c>library.media</c>/<c>library.media_rotation</c>/<c>library.media_rating</c> (SPEC F153.9;
+    /// STORY-374 AC7; PLAN T377) — shared verbatim by <see cref="ListFlatPageAsync"/>'s own select
+    /// list and <see cref="ListNearDuplicateGroupPageAsync"/>'s own member-row select (T385: one
+    /// definition, both statements, the <c>DeadFilePredicate</c> idiom applied to a select list
+    /// instead of a predicate). <c>join</c> (not <c>left join</c>) against <c>library.media</c>: a
+    /// <c>rot_finding</c> row's own FK guarantees the media row still exists (<c>on delete cascade</c>,
+    /// db/41) — a genuine orphan would be a data-integrity bug this query should surface as a thrown
+    /// mapping failure, not paper over with a null-media row the controller would then have to
+    /// special-case. <c>plays</c> defaults to 0 (never null) for a media id with no
+    /// <c>media_rotation</c> row; <c>rating</c> stays null (never the F33.2 ledger default of 50) so
+    /// "never rated" and "rated 50" stay distinguishable to an operator triaging a finding.
     /// </summary>
-    public async Task<IReadOnlyList<RotFindingWithMedia>> ListWithMediaAsync(
+    const string FindingWithMediaSelectList =
+        """
+        f.id, f.media_id, f.kind::text as kind, f.state::text as state, f.group_key,
+        f.evidence::text as evidence, f.opened_at, f.resolved_at, f.dismissed_at, f.updated_at,
+        m.path as locator, m.title, m.artist, m.duration_ms,
+        coalesce(rot.play_count, 0) as plays, r.score as rating,
+        coalesce(r.never_play, false) as never_play, m.eligible
+        """;
+
+    /// <summary>
+    /// <see cref="FindingWithMediaSelectList"/>'s own join tail, shared verbatim by both this method's
+    /// callers so the two statements can never drift on which ledger/rating row a finding joins to.
+    /// </summary>
+    const string FindingWithMediaJoins =
+        """
+        join library.media m on m.id = f.media_id
+        left join library.media_rotation rot on rot.media_id = m.id
+        left join library.media_rating r on r.media_id = m.id
+        """;
+
+    /// <summary>
+    /// <see cref="IRotFindingStore.ListWithMediaAsync"/> (SPEC F153.9 rider 2026-08-31; STORY-382 AC6,
+    /// STORY-383; PLAN T385) — <see cref="RotKind.NearDuplicate"/> pages by GROUP
+    /// (<see cref="ListNearDuplicateGroupPageAsync"/>); every other kind, and the kind-less read,
+    /// page FLAT rows exactly as <see cref="ListFlatPageAsync"/>'s own T377 shape already did. Both
+    /// halves clamp <paramref name="limit"/>/<paramref name="offset"/> through the SAME
+    /// <see cref="ClampPaging"/> floor <see cref="ListAsync"/>'s own remarks describe.
+    /// </summary>
+    public Task<RotFindingPage> ListWithMediaAsync(
         RotKind? kind, RotState? state, int limit, int offset, CancellationToken ct)
     {
         (limit, offset) = ClampPaging(limit, offset);
 
+        return kind == RotKind.NearDuplicate
+            ? ListNearDuplicateGroupPageAsync(state, limit, offset, ct)
+            : ListFlatPageAsync(kind, state, limit, offset, ct);
+    }
+
+    /// <summary>
+    /// The kind-less read's T377 shape, verbatim (regression pin), plus every OTHER kind's own
+    /// kind-scoped flat paging (T385) — ordered <c>kind, group_key nulls last, opened_at desc, id</c>,
+    /// a <see cref="RotKind.NearDuplicate"/> group's own rows landing adjacent (id breaks ties for a
+    /// stable order across pages) even though this branch never runs for <c>kind = near_duplicate</c>
+    /// itself once a kind is given (that goes to <see cref="ListNearDuplicateGroupPageAsync"/>
+    /// instead) — the ordering still matters for the kind-LESS call, where a near_duplicate group can
+    /// appear alongside every other kind.
+    ///
+    /// <para>
+    /// <b>Kind-scoped (<paramref name="kind"/> non-null): <see cref="RotFindingPage.Total"/> is the
+    /// exact matching row count</b>, read via ONE Dapper <c>QueryMultipleAsync</c> round trip carrying
+    /// the <c>count(*)</c> statement and the page <c>select</c> back to back (T385 review LOW-3 — same
+    /// connection, same snapshot-adjacent read, half the awaited round trips of two separate calls).
+    /// Still a genuinely SEPARATE statement, never a <c>count(*) over()</c> window (T377's own
+    /// rationale, unchanged by T385): a page whose <paramref name="offset"/> lands past the end returns
+    /// ZERO rows, and a window function computed per-row would then carry no total at all — STORY-383
+    /// AC3's own "total is exact on every page" demands a total that survives an empty page.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Kind-LESS (<paramref name="kind"/> null): NO count round trip at all</b> (T385 review LOW-2).
+    /// <see cref="RotFindingPage.Total"/> here is simply <see cref="RotFindingPage.Items"/>'s own count
+    /// — PAGE-LOCAL, never a true matching total across every kind, and never read off the wire for
+    /// this shape (<c>GardenerController</c>'s own T377-pinned response carries no <c>count</c> field
+    /// at all for a kind-less call, STORY-382 AC8). The kind-less caller has never needed an exact
+    /// cross-kind total, so the extra round trip bought nothing any reader actually consumes.
+    /// </para>
+    /// </summary>
+    async Task<RotFindingPage> ListFlatPageAsync(
+        RotKind? kind, RotState? state, int limit, int offset, CancellationToken ct)
+    {
         var conditions = new List<string>();
         var parameters = new DynamicParameters();
+        AppendKindStateConditions(conditions, parameters, columnPrefix: "f.", kind, state);
 
-        if (kind is not null)
-        {
-            conditions.Add("f.kind = @kind::library.rot_kind");
-            parameters.Add("kind", RotKindTokens.ToToken(kind.Value));
-        }
-
-        if (state is not null)
-        {
-            conditions.Add("f.state = @state::library.rot_state");
-            parameters.Add("state", RotStateTokens.ToToken(state.Value));
-        }
+        var where = conditions.Count > 0 ? "where " + string.Join(" and ", conditions) : "";
 
         parameters.Add("limit", limit);
         parameters.Add("offset", offset);
 
-        var where = conditions.Count > 0 ? "where " + string.Join(" and ", conditions) : "";
-
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        var rows = await conn.QueryAsync<RotFindingWithMediaRow>(new CommandDefinition(
-            $"""
-            select
-                f.id, f.media_id, f.kind::text as kind, f.state::text as state, f.group_key,
-                f.evidence::text as evidence, f.opened_at, f.resolved_at, f.dismissed_at, f.updated_at,
-                m.path as locator, m.title, m.artist, m.duration_ms,
-                coalesce(rot.play_count, 0) as plays, r.score as rating,
-                coalesce(r.never_play, false) as never_play, m.eligible
+        var pageSql = $"""
+            select {FindingWithMediaSelectList}
             from library.rot_finding f
-            join library.media m on m.id = f.media_id
-            left join library.media_rotation rot on rot.media_id = m.id
-            left join library.media_rating r on r.media_id = m.id
+            {FindingWithMediaJoins}
             {where}
             order by f.kind, f.group_key nulls last, f.opened_at desc, f.id
             limit @limit offset @offset
-            """,
-            parameters,
-            cancellationToken: ct));
+            """;
 
-        return rows.Select(ToFindingWithMedia).ToList();
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+
+        if (kind is null)
+        {
+            var rows = await conn.QueryAsync<RotFindingWithMediaRow>(new CommandDefinition(
+                pageSql, parameters, cancellationToken: ct));
+            var items = rows.Select(ToFindingWithMedia).ToList();
+            return new RotFindingPage(items, items.Count);
+        }
+
+        var countSql = $"select count(*) from library.rot_finding f {where}";
+
+        await using var multi = await conn.QueryMultipleAsync(new CommandDefinition(
+            $"{countSql};\n{pageSql}", parameters, cancellationToken: ct));
+
+        var total = await multi.ReadSingleAsync<int>();
+        var pageRows = await multi.ReadAsync<RotFindingWithMediaRow>();
+
+        return new RotFindingPage(pageRows.Select(ToFindingWithMedia).ToList(), total);
+    }
+
+    /// <summary>
+    /// <see cref="RotKind.NearDuplicate"/>'s own group-paged read (SPEC F153.9 rider 2026-08-31's own
+    /// binding contract; STORY-383; PLAN T385) — the PAGING UNIT is the GROUP, not the row:
+    /// <c>matching_groups</c> selects DISTINCT <c>group_key</c> for every near_duplicate group with at
+    /// least one member matching <paramref name="state"/> (see below), ordered ascending (ORDER IS
+    /// SEMANTICS — <c>group_key asc</c> is what keeps page 2 disjoint from page 1 regardless of write
+    /// activity between the two calls), and <paramref name="limit"/>/<paramref name="offset"/> apply to
+    /// THAT distinct set. The outer select then joins back to EVERY <c>rot_finding</c> row sharing one
+    /// of the selected group_keys — every member row of every selected group, never a partial one,
+    /// exactly STORY-383 AC1/AC4's own contract.
+    ///
+    /// <para>
+    /// <b>RULED (T385 review HIGH-1, proven live): <paramref name="state"/> scopes which GROUPS
+    /// qualify, never which MEMBER rows render.</b> A group qualifies the moment ANY ONE of its members
+    /// matches <c>kind = near_duplicate</c> + <paramref name="state"/>; once a group qualifies, EVERY
+    /// member row of it renders regardless of that member's OWN state — SPEC F153.9 rider's own binding
+    /// text, "the response returns every member row of every selected group", is unconditional. A
+    /// group where NO member matches <paramref name="state"/> (e.g. every member dismissed, under
+    /// <c>state=open</c>) still correctly does not qualify — it never enters <c>matching_groups</c>, so
+    /// it consumes no page slot and does not count into <see cref="RotFindingPage.Total"/>. The member
+    /// join filters <c>f.kind = 'near_duplicate'</c> — kept explicit even though a <c>group_key</c>
+    /// value is written solely by <see cref="ReconcileNearDuplicatesAsync"/>'s own insert, so in
+    /// practice it is redundant with the join key alone — NEVER <paramref name="state"/>: an earlier
+    /// build also repeated the state filter on the member join, which truncated a mixed-state group
+    /// down to only its matching members (a live 3-member group with one dismissed rendered 2 rows
+    /// under <c>state=open</c>) — exactly the split-cluster bug this whole read exists to prevent.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>RULED (round-2 review HIGH-2): the member join ALSO excludes a RESOLVED row outright,
+    /// regardless of <paramref name="state"/>.</b> The near-duplicate resolve half
+    /// (<see cref="ReconcileNearDuplicatesAsync"/>) never clears a row's own <c>group_key</c> when it
+    /// resolves it — so a member that left <c>find_near_duplicates</c> on its own (an operator retagged
+    /// it; it is genuinely no longer a duplicate, still eligible, still in rotation) keeps rendering
+    /// inside its OLD group forever without this exclusion, and the UI's Keep-this-one bulk write would
+    /// then pull that distinct, in-rotation track out of rotation by mistake. <b>dismissed = the
+    /// operator closed the finding while the media is still a duplicate → render; resolved = the system
+    /// closed it because the media is no longer a duplicate → don't render.</b> A group with e.g. two
+    /// open members and one resolved member still qualifies (its two still-duplicate members are what
+    /// render) exactly as before.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>RULED (round-3 review MED-6, fix verified live): <c>matching_groups</c>' own qualification
+    /// ALSO excludes a RESOLVED row</b> — <c>state &lt;&gt; 'resolved'::library.rot_state</c> sits
+    /// beside <c>group_key is not null</c> in the same <paramref name="conditions"/> list, so
+    /// qualification and member rendering agree about resolved. Without it, a FULLY-resolved group
+    /// (every member resolved, <c>group_key</c> still intact — permanently, since resolve never clears
+    /// it) would still enter <c>matching_groups</c> whenever <paramref name="state"/> is
+    /// <see langword="null"/> (the endpoint's documented "any" default) — consuming a page slot and a
+    /// <see cref="RotFindingPage.Total"/> count while rendering ZERO member rows, a phantom that never
+    /// clears itself. <paramref name="state"/><c>=open</c> stays byte-identical (an open-scoped
+    /// qualification already excludes resolved rows); <paramref name="state"/><c>=resolved</c> now
+    /// self-consistently returns an empty page (<see cref="RotFindingPage.Total"/> 0, zero rows) rather
+    /// than a Total with no matching member rows behind it — resolved near-duplicate groups are not
+    /// browsable as clusters.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>matching_groups</c>' own <c>where</c> also requires <c>group_key is not null</c> (T385 review
+    /// LOW-1): <c>select distinct</c> and <c>count(distinct)</c> both treat SQL NULL as a distinct-able
+    /// value, so a phantom NULL <c>group_key</c> row could otherwise make the two aggregates disagree
+    /// (proven live: 4 slots vs. a total of 3) even though no genuine <see cref="RotKind.NearDuplicate"/>
+    /// finding carries one today.
+    /// </para>
+    ///
+    /// <para>
+    /// <see cref="RotFindingPage.Total"/> is <c>count(distinct group_key)</c> over the SAME filter
+    /// <c>matching_groups</c> uses, read via ONE Dapper <c>QueryMultipleAsync</c> round trip alongside
+    /// the group+member select (T385 review LOW-3 — same rationale as <see cref="ListFlatPageAsync"/>'s
+    /// own remarks: a genuinely separate statement, not a window function, so an <paramref name="offset"/>
+    /// past the last group still returns the true total over an empty page, STORY-383 AC3).
+    /// </para>
+    /// </summary>
+    async Task<RotFindingPage> ListNearDuplicateGroupPageAsync(
+        RotState? state, int limit, int offset, CancellationToken ct)
+    {
+        var conditions = new List<string>();
+        var parameters = new DynamicParameters();
+        AppendKindStateConditions(conditions, parameters, columnPrefix: "", RotKind.NearDuplicate, state);
+        conditions.Add("group_key is not null");
+        // MED-6 (round 3): qualification agrees with the member join below about resolved — a group
+        // qualifies on its NON-resolved members only, so a fully-resolved group (every member
+        // resolved, group_key still intact) never consumes a page slot or a Total count while
+        // rendering zero rows.
+        conditions.Add("state <> 'resolved'::library.rot_state");
+
+        var where = "where " + string.Join(" and ", conditions);
+
+        // HIGH-1: the member join scopes to the kind only — state is what decides which GROUPS
+        // qualify (above), never which member rows of a qualifying group render. HIGH-2 (round 2):
+        // still excludes a RESOLVED member outright — the resolve half never clears group_key, so a
+        // member that left find_near_duplicates on its own (no longer a duplicate, still eligible,
+        // still in rotation) must not render inside its old group. dismissed = the operator closed
+        // the finding while the media is still a duplicate → render; resolved = the system closed it
+        // because the media is no longer a duplicate → don't render.
+        var memberConditions = new List<string>();
+        AppendKindStateConditions(memberConditions, parameters, columnPrefix: "f.", RotKind.NearDuplicate, state: null);
+        memberConditions.Add("f.state <> 'resolved'::library.rot_state");
+        var memberWhere = string.Join(" and ", memberConditions);
+
+        parameters.Add("limit", limit);
+        parameters.Add("offset", offset);
+
+        var countSql = $"select count(distinct group_key) from library.rot_finding {where}";
+        var pageSql = $"""
+            with matching_groups as materialized (
+                select distinct group_key
+                from library.rot_finding
+                {where}
+                order by group_key
+                limit @limit offset @offset
+            )
+            select {FindingWithMediaSelectList}
+            from matching_groups mg
+            join library.rot_finding f
+                on f.group_key = mg.group_key and {memberWhere}
+            {FindingWithMediaJoins}
+            order by mg.group_key, f.opened_at desc, f.id
+            """;
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var multi = await conn.QueryMultipleAsync(new CommandDefinition(
+            $"{countSql};\n{pageSql}", parameters, cancellationToken: ct));
+
+        var totalGroups = await multi.ReadSingleAsync<int>();
+        var rows = await multi.ReadAsync<RotFindingWithMediaRow>();
+
+        return new RotFindingPage(rows.Select(ToFindingWithMedia).ToList(), totalGroups);
     }
 
     /// <summary>
@@ -812,6 +1004,20 @@ sealed class RotFindingRepository(NpgsqlDataSource dataSource) : IRotFindingStor
     /// can never drift apart on the bound: <paramref name="limit"/> to at least 1, capped at 1000
     /// (the LOW-2 finding's own figure); <paramref name="offset"/> to at least 0 (a negative value
     /// errors in Postgres's own <c>OFFSET</c> clause rather than clamping there).
+    ///
+    /// <para>
+    /// <b>T385 review MED-4: the cap counts ROWS everywhere except <see cref="RotKind.NearDuplicate"/>,
+    /// where it counts GROUPS.</b> For every other kind (and the kind-less read), 1000 is still the true
+    /// row ceiling. For <see cref="ListNearDuplicateGroupPageAsync"/>, <paramref name="limit"/> bounds
+    /// the number of DISTINCT <c>group_key</c>s selected — the ROW envelope for that page is at most
+    /// 1000 groups × each group's own member count, not 1000 rows outright (a per-row cap would force a
+    /// partial group onto a page, which STORY-383's own whole-cluster contract forbids). In practice
+    /// this envelope stays small: a near-duplicate group is 2–5 members (this file's own
+    /// <c>find_near_duplicates</c> callers never see larger clusters in a real library), and
+    /// <c>GardenerController</c>'s own admin UI caps the size picker at 250 groups/page — so the
+    /// realistic near-duplicate page tops out in the low thousands of rows, never the unbounded shape a
+    /// naive "1000 rows always" reading would suggest.
+    /// </para>
     /// </summary>
     static (int Limit, int Offset) ClampPaging(int limit, int offset) =>
         (limit <= 0 ? 1 : Math.Min(limit, 1000), Math.Max(0, offset));
