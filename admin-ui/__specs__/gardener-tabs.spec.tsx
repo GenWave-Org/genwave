@@ -9,6 +9,8 @@
 //
 // gh-#655 rides this story (AC6): the purge trigger's verb-object label is pinned here.
 
+import { describe, it } from "@jest/globals";
+
 describe("Feature: Gardener kind tabs", () => {
   describe("Scenario: five tabs, badged from status", () => {
     it.todo("renders five tabs in the fixed kind order");

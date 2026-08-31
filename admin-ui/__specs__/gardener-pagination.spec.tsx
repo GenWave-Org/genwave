@@ -6,6 +6,8 @@
 // size picker 25/50/100/250 living in ?limit= only. /build-loop turns each todo into a real
 // spec with one assertion; the production arc is T387's browser smoke.
 
+import { describe, it } from "@jest/globals";
+
 describe("Feature: Gardener pagination", () => {
   describe("Scenario: the default page", () => {
     it.todo("renders 25 rows for a 60-row kind with no paging params");
