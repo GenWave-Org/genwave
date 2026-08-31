@@ -313,6 +313,25 @@ public static class FeatureTheSameSongTwice
         }
 
         [Fact]
+        public async Task TheFreshInitSnapshotIncludesTheThumbListenerIndex()
+        {
+            // T366 review MED-1: the F150.5 per-listener daily cap read filters
+            // (listener_key, created_at) — extends this convergence pin's own index list (this
+            // scenario's class remarks) the same way TheFreshInitSnapshotIncludesThePartialDuplicateKeysIndex
+            // above already covers media_dup_keys.
+            await using var conn = await db.DataSource.OpenConnectionAsync();
+            var exists = await conn.ExecuteScalarAsync<bool>(
+                """
+                select exists(
+                    select 1 from pg_indexes
+                    where schemaname = 'library' and tablename = 'media_thumb'
+                      and indexname = 'media_thumb_listener_created_idx')
+                """);
+
+            Assert.True(exists, "library.media_thumb is missing its media_thumb_listener_created_idx index.");
+        }
+
+        [Fact]
         public async Task TheFreshInitSnapshotIncludesTheFiveGardenerEnumTypes()
         {
             await using var conn = await db.DataSource.OpenConnectionAsync();
@@ -327,17 +346,19 @@ public static class FeatureTheSameSongTwice
         }
 
         [Fact]
-        public async Task TheFreshInitSnapshotIncludesTheFourGardenerFunctions()
+        public async Task TheFreshInitSnapshotIncludesTheFiveGardenerFunctions()
         {
+            // T365 added library.recompute_nudge (SPEC F150.9) to db/41 + this db/01 mirror,
+            // widening this pin from four functions to five.
             await using var conn = await db.DataSource.OpenConnectionAsync();
             var count = await conn.ExecuteScalarAsync<int>(
                 """
                 select count(*)::int from pg_proc
                 where pronamespace = 'library'::regnamespace
-                  and proname in ('fold_key', 'title_variant', 'title_key', 'find_near_duplicates')
+                  and proname in ('fold_key', 'title_variant', 'title_key', 'find_near_duplicates', 'recompute_nudge')
                 """);
 
-            Assert.Equal(4, count);
+            Assert.Equal(5, count);
         }
 
         [Fact]

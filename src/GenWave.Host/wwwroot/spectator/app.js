@@ -35,7 +35,7 @@ const STALL_CONFIRM_MS = 2000;
 // art slot is exactly the fuzzy DJ-break art of gh-#258.
 const STATION_ICON_PATH = "/spectator/logo.png";
 
-/** @type {{kind: "standby"} | {kind: "track"|"patter", title?: string, artist?: string, startedAt: Date, durationMs: number|null, dj?: string|null, djAvatarUrl?: string|null, show?: {name: string, tagline: string|null}|null, upNext?: {startsAt: string, dj: string|null}|null, artworkUrl?: string|null}} */
+/** @type {{kind: "standby"} | {kind: "track"|"patter", title?: string, artist?: string, startedAt: Date, durationMs: number|null, dj?: string|null, djAvatarUrl?: string|null, show?: {name: string, tagline: string|null}|null, upNext?: {startsAt: string, dj: string|null}|null, artworkUrl?: string|null, airing?: string|null}} */
 let nowPlaying = { kind: "standby" };
 let stationName = "GenWave";
 
@@ -83,6 +83,10 @@ async function pollNowPlaying() {
             show: payload.show ?? null,
             upNext: payload.upNext ?? null,
             artworkUrl: payload.artworkUrl ?? null,
+            // SPEC F149.4/F150.10, STORY-369: undefined for a patter airing (SpectatorPatterNowPlaying
+            // simply has no member for it, F62.9's own absence-by-construction), normalized to null —
+            // the same shape null already carries for "no music airing to thumb".
+            airing: payload.airing ?? null,
           }
         : { kind: "standby" };
     // A changed artwork URL means a new track (or a transition to/from standby) — the previous
@@ -132,6 +136,7 @@ function renderNowPlaying() {
     renderDjCard(null, null, null, false);
     meta.hidden = true;
     renderUpNextLine(upNext, null);
+    renderThumbs();
     return;
   }
 
@@ -174,6 +179,7 @@ function renderNowPlaying() {
   }
 
   renderUpNextLine(upNext, nowPlaying.upNext ?? null);
+  renderThumbs();
 }
 
 /**
@@ -696,6 +702,394 @@ function initRequestForm() {
   });
 }
 
+// ── Thumbs (SPEC F150.10, STORY-369) ─────────────────────────────────────────
+//
+// Thumbs discloses nothing over a read (SPEC F150.6's "no read endpoint" — this probe carries no
+// counts, no state, nothing about thumbs at all) — GET /spectator/api/thumbs
+// (SpectatorThumbsController.ProbeThumbsPresence) exists purely so SurfaceGateMiddleware has a
+// real, correctly-tagged endpoint to gate: 404 when Station:Thumbs:Enabled is false (the same F61
+// kill-switch semantics every surface on this page uses), 204 with no body when it's true. Rides
+// the Spectator read budget (120/min/IP), never the write path's per-IP daily cap — a 5-minute
+// re-probe must never spend that budget (see the controller's own remarks). Anything other than
+// exactly 204/404 (a network hiccup, an unexpected status) leaves thumbsPresent at its last known
+// value rather than guessing. Re-probed every THUMBS_PRESENCE_POLL_MS so an operator flipping the
+// switch live is honoured without a reload, the same "no reload needed" posture NOW_PLAYING_POLL_MS
+// already gives the rest of the card.
+//
+// The pair is keyed on `airing` (SPEC F149.4): a changed token means a new track, which resets
+// both buttons' aria-pressed state (F150.10 "reset on track change") and clears any pending
+// throttle message left over from the previous track. A click always POSTs the token the pair
+// CURRENTLY holds (thumbsAiring) — captured synchronously before the fetch, so a track change
+// mid-flight can never smuggle the wrong token into the request. The response is checked against
+// that SAME captured token before marking a button pressed: the F150.4 grace means a thumb for the
+// track that just ended still lands against its own media, but the pair may already have reset
+// for the NEW token by the time the response arrives, and that new pair must never show as
+// pressed for a click that was about the old one.
+//
+// The response BODY is never read as an oracle (SPEC F150.3) — only the STATUS decides what the
+// page does: 404 means the switch flipped off mid-session (hide), 429 shows a quiet constant
+// message, and every other status (the fixed 202, or the 400 this well-formed client should never
+// actually trigger) marks the click as landed. localStorage is this page's own record, never the
+// server's — every read/write is try/caught (private browsing can throw on either), and nodes are
+// built with textContent only, the same no-innerHTML-from-data discipline renderHistory follows.
+
+const THUMBS_PRESENCE_POLL_MS = 5 * 60 * 1000;
+const THUMBS_STORAGE_KEY = "genwave-thumbs";
+const THUMBS_STORAGE_LIMIT = 10;
+const THUMBS_THROTTLE_MESSAGE = "Thanks — one thumb at a time.";
+const THUMBS_MESSAGE_DURATION_MS = 4000;
+
+/** @type {boolean} — true once a presence probe has answered anything other than 404. */
+let thumbsPresent = false;
+/** @type {string|null} — the airing token the rendered pair currently holds. */
+let thumbsAiring = null;
+/** @type {"up"|"down"|null} */
+let thumbsPressedDirection = null;
+/** @type {number|null} */
+let thumbsMessageTimer = null;
+let thumbsSectionBuilt = false;
+
+async function probeThumbsPresence() {
+  try {
+    const response = await fetch("/spectator/api/thumbs", { method: "GET", credentials: "same-origin" });
+    // A real, correctly-gated GET now exists on this route (SpectatorThumbsController.ProbeThumbsPresence):
+    // 204 means the surface is on, 404 means the switch is off — the SurfaceGate's standard F61
+    // silence. Anything else (a network hiccup below, or an unexpected status this client has no
+    // opinion about) leaves thumbsPresent at its last known value rather than guessing either way.
+    if (response.status === 204) thumbsPresent = true;
+    else if (response.status === 404) thumbsPresent = false;
+  } catch (error) {
+    console.error(error);
+  }
+  renderThumbs();
+  renderThumbsStrip();
+}
+
+/**
+ * Builds the pair + strip DOM once, the first time thumbsPresent is confirmed true — the served
+ * index.html carries none of this markup (STORY-369 AC9): it exists only after this runs, never
+ * pre-rendered. Inserted into now-playing__body between now-playing__meta and
+ * now-playing__upnext, the same structural slot the DJ card/meta/upnext trio already occupies.
+ */
+function ensureThumbsSection() {
+  if (thumbsSectionBuilt) return;
+  thumbsSectionBuilt = true;
+
+  const meta = document.getElementById("now-playing-meta");
+  const upNext = document.getElementById("now-playing-upnext");
+
+  const pair = document.createElement("div");
+  pair.className = "thumbs";
+  pair.id = "now-playing-thumbs";
+  pair.hidden = true;
+
+  const buttons = document.createElement("div");
+  buttons.className = "thumbs__buttons";
+  buttons.setAttribute("role", "group");
+  buttons.setAttribute("aria-label", "Rate this track");
+
+  const upButton = document.createElement("button");
+  upButton.type = "button";
+  upButton.id = "thumbs-up";
+  upButton.className = "thumbs__button";
+  upButton.setAttribute("aria-label", "Thumbs up");
+  upButton.setAttribute("aria-pressed", "false");
+  upButton.textContent = "👍";
+  upButton.addEventListener("click", () => submitThumb("up"));
+
+  const downButton = document.createElement("button");
+  downButton.type = "button";
+  downButton.id = "thumbs-down";
+  downButton.className = "thumbs__button";
+  downButton.setAttribute("aria-label", "Thumbs down");
+  downButton.setAttribute("aria-pressed", "false");
+  downButton.textContent = "👎";
+  downButton.addEventListener("click", () => submitThumb("down"));
+
+  buttons.appendChild(upButton);
+  buttons.appendChild(downButton);
+
+  const message = document.createElement("p");
+  message.id = "thumbs-message";
+  message.className = "thumbs__message";
+  message.setAttribute("aria-live", "polite");
+  message.setAttribute("role", "status");
+
+  pair.appendChild(buttons);
+  pair.appendChild(message);
+
+  const strip = document.createElement("div");
+  strip.className = "thumbs-strip";
+  strip.id = "thumbs-strip";
+  strip.hidden = true;
+
+  const header = document.createElement("div");
+  header.className = "thumbs-strip__header";
+
+  const heading = document.createElement("span");
+  heading.className = "thumbs-strip__heading";
+  heading.textContent = "Your thumbs";
+
+  const clear = document.createElement("button");
+  clear.type = "button";
+  clear.id = "thumbs-strip-clear";
+  clear.className = "thumbs-strip__clear";
+  clear.textContent = "Clear";
+  clear.addEventListener("click", clearThumbsHistory);
+
+  header.appendChild(heading);
+  header.appendChild(clear);
+
+  const list = document.createElement("ul");
+  list.id = "thumbs-strip-list";
+  list.className = "thumbs-strip__list";
+
+  strip.appendChild(header);
+  strip.appendChild(list);
+
+  meta.parentNode.insertBefore(pair, upNext);
+  meta.parentNode.insertBefore(strip, upNext);
+}
+
+/**
+ * Shows/hides the pair and keeps its aria-pressed state in sync with the CURRENT airing token —
+ * called from renderNowPlaying on every 1s tick, so it must be cheap and idempotent, the same
+ * discipline renderArt/renderDjAvatar already follow. Absent entirely (thumbsPresent false, the
+ * probe's own 404 answer) or no music airing right now (nowPlaying.airing null/missing) both hide
+ * the pair without touching its state; a CHANGED airing token resets aria-pressed on both buttons
+ * and clears any pending throttle message from the previous track.
+ */
+function renderThumbs() {
+  if (!thumbsPresent) {
+    hideThumbsSection();
+    return;
+  }
+  ensureThumbsSection();
+
+  const airing = nowPlaying.kind === "standby" ? null : nowPlaying.airing ?? null;
+  const pair = document.getElementById("now-playing-thumbs");
+
+  if (airing === null) {
+    pair.hidden = true;
+    return;
+  }
+
+  if (airing !== thumbsAiring) {
+    thumbsAiring = airing;
+    thumbsPressedDirection = null;
+    clearThumbsMessage();
+  }
+
+  pair.hidden = false;
+  document.getElementById("thumbs-up").setAttribute("aria-pressed", String(thumbsPressedDirection === "up"));
+  document.getElementById("thumbs-down").setAttribute("aria-pressed", String(thumbsPressedDirection === "down"));
+}
+
+/** SPEC F150.2's "absent with the same silence" extended to the whole feature: when the presence
+ * probe answers 404, the pair AND the strip both disappear together, not just the pair. */
+function hideThumbsSection() {
+  const pair = document.getElementById("now-playing-thumbs");
+  const strip = document.getElementById("thumbs-strip");
+  if (pair) pair.hidden = true;
+  if (strip) strip.hidden = true;
+}
+
+/** @param {"up"|"down"} direction */
+async function submitThumb(direction) {
+  const airing = thumbsAiring;
+  if (!airing) return;
+
+  // Snapshotted BEFORE the request, not read again after — a poll landing mid-flight must never
+  // change what gets written to localStorage for THIS click's token.
+  const title = nowPlaying.kind === "standby" ? "" : nowPlaying.title || "Untitled";
+  const artist = nowPlaying.kind === "standby" ? "" : nowPlaying.artist || "";
+
+  // T368 review MED-1(b): disabled for the whole request, not just filtered after the fact — a
+  // double-click's second POST must never even get SENT inside the server's own 30s cooldown.
+  // aria-disabled mirrors the native attribute for AT users on a control the DOM still exposes.
+  setThumbsButtonsDisabled(true);
+  try {
+    let response;
+    try {
+      response = await fetch("/spectator/api/thumbs", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ airing, direction }),
+      });
+    } catch (error) {
+      console.error(error);
+      return;
+    }
+
+    if (response.status === 404) {
+      thumbsPresent = false;
+      renderThumbs();
+      return;
+    }
+
+    if (response.status === 429) {
+      showThumbsMessage(THUMBS_THROTTLE_MESSAGE);
+      return;
+    }
+
+    // T368 review MED-1(c): only a genuine 2xx (the fixed 202) ever reaches the local record or
+    // marks a button pressed — a refused thumb (429/404 above, or any other non-2xx this
+    // well-formed client should never actually trigger) must never be asserted locally; the local
+    // strip only ever mirrors what the server actually accepted.
+    if (!response.ok) return;
+
+    // T368 review MED-1(a): captured BEFORE marking pressed — a flip (👍 then 👎 on the SAME
+    // airing) must REPLACE the one local entry for that airing rather than add a second,
+    // contradictory row: the server holds exactly one row per (media, airing, listener) too (SPEC
+    // F150.7's own upsert). Checked against the SAME captured token this click was sent for: a
+    // track change mid-flight already reset thumbsAiring/thumbsPressedDirection for the NEW pair
+    // (renderThumbs, above), and this late-arriving response must not un-reset it.
+    const alreadyRecorded = thumbsAiring === airing && thumbsPressedDirection !== null;
+    if (thumbsAiring === airing) thumbsPressedDirection = direction;
+    recordThumbLocally(direction, title, artist, alreadyRecorded);
+    renderThumbsStrip();
+    renderThumbs();
+  } finally {
+    setThumbsButtonsDisabled(false);
+  }
+}
+
+/** T368 review MED-1(b). @param {boolean} disabled */
+function setThumbsButtonsDisabled(disabled) {
+  for (const id of ["thumbs-up", "thumbs-down"]) {
+    const button = document.getElementById(id);
+    if (!button) continue;
+    button.disabled = disabled;
+    button.setAttribute("aria-disabled", String(disabled));
+  }
+}
+
+function showThumbsMessage(text) {
+  const message = document.getElementById("thumbs-message");
+  if (!message) return;
+  message.textContent = text;
+  if (thumbsMessageTimer !== null) clearTimeout(thumbsMessageTimer);
+  thumbsMessageTimer = setTimeout(() => {
+    message.textContent = "";
+    thumbsMessageTimer = null;
+  }, THUMBS_MESSAGE_DURATION_MS);
+}
+
+function clearThumbsMessage() {
+  const message = document.getElementById("thumbs-message");
+  if (message) message.textContent = "";
+  if (thumbsMessageTimer !== null) {
+    clearTimeout(thumbsMessageTimer);
+    thumbsMessageTimer = null;
+  }
+}
+
+// ── Thumbs strip (localStorage, client-only, never fetched — SPEC F150.10) ───────────────────
+
+/**
+ * T368 review MED-1(a): one entry per airing. When the pair already holds a pressed direction for
+ * THIS SAME airing (a flip — 👍 then 👎 without a track change between them), the existing entry
+ * at history[0] is the one this airing already wrote; REPLACE it instead of unshifting a second,
+ * contradictory row for the same track. A genuinely new airing (alreadyRecorded false) unshifts as
+ * before.
+ * @param {"up"|"down"} direction @param {string} title @param {string} artist @param {boolean} alreadyRecorded
+ */
+function recordThumbLocally(direction, title, artist, alreadyRecorded) {
+  const entry = { title, artist, direction, at: new Date().toISOString() };
+  const history = loadThumbsHistory();
+  if (alreadyRecorded && history.length > 0) history[0] = entry;
+  else history.unshift(entry);
+  saveThumbsHistory(history.slice(0, THUMBS_STORAGE_LIMIT));
+}
+
+function clearThumbsHistory() {
+  try {
+    localStorage.removeItem(THUMBS_STORAGE_KEY);
+  } catch (error) {
+    console.error(error);
+  }
+  renderThumbsStrip();
+}
+
+/** @returns {{title: string, artist: string, direction: "up"|"down", at: string}[]} */
+function loadThumbsHistory() {
+  try {
+    const raw = localStorage.getItem(THUMBS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(isValidThumbEntry) : [];
+  } catch (error) {
+    console.error(error);
+    return [];
+  }
+}
+
+/** @param {unknown[]} entries */
+function saveThumbsHistory(entries) {
+  try {
+    localStorage.setItem(THUMBS_STORAGE_KEY, JSON.stringify(entries));
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+/** @param {unknown} entry */
+function isValidThumbEntry(entry) {
+  return (
+    entry !== null &&
+    typeof entry === "object" &&
+    typeof entry.title === "string" &&
+    typeof entry.artist === "string" &&
+    (entry.direction === "up" || entry.direction === "down") &&
+    typeof entry.at === "string"
+  );
+}
+
+/**
+ * Renders the "your thumbs" strip from localStorage — never from the network. Hidden when the
+ * feature itself is absent (thumbsPresent false) or the history is empty; every node is built
+ * with textContent only, never innerHTML, the same discipline renderHistory follows for
+ * server-sourced text.
+ */
+function renderThumbsStrip() {
+  const strip = document.getElementById("thumbs-strip");
+  const list = document.getElementById("thumbs-strip-list");
+  if (!strip || !list) return;
+
+  const history = loadThumbsHistory();
+  list.textContent = "";
+
+  if (!thumbsPresent || history.length === 0) {
+    strip.hidden = true;
+    return;
+  }
+
+  strip.hidden = false;
+  for (const entry of history) {
+    const row = document.createElement("li");
+    row.className = "thumbs-strip__row";
+
+    const glyph = document.createElement("span");
+    glyph.className = "thumbs-strip__glyph";
+    glyph.setAttribute("aria-hidden", "true");
+    glyph.textContent = entry.direction === "down" ? "👎" : "👍";
+
+    const label = document.createElement("span");
+    label.className = "thumbs-strip__label";
+    // T368 review LOW-2: `at` was stored and validated but never rendered — the existing safe
+    // formatTimeOfDay (already used for history/up-next) turns it into a local clock reading, e.g.
+    // "Title — Artist · 21:14" (Dean's copy rule: capital-first — Title/Artist are user data, not
+    // a copy string, so this needs no capitalization of its own).
+    const titleArtist = entry.artist ? `${entry.title} — ${entry.artist}` : entry.title;
+    label.textContent = `${titleArtist} · ${formatTimeOfDay(entry.at)}`;
+
+    row.appendChild(glyph);
+    row.appendChild(label);
+    list.appendChild(row);
+  }
+}
+
 // ── Wiring ───────────────────────────────────────────────────────────────────
 
 function init() {
@@ -708,6 +1102,7 @@ function init() {
   pollHistory();
   pollStats();
   initRequestForm();
+  probeThumbsPresence();
 
   setInterval(pollNowPlaying, NOW_PLAYING_POLL_MS);
   setInterval(() => {
@@ -715,6 +1110,7 @@ function init() {
     pollStats();
   }, HISTORY_STATS_POLL_MS);
   setInterval(renderNowPlaying, CLOCK_TICK_MS);
+  setInterval(probeThumbsPresence, THUMBS_PRESENCE_POLL_MS);
 }
 
 init();

@@ -17,6 +17,13 @@ namespace GenWave.Host.Api;
 /// itself (F84.1), never whichever persona happens to be active now, so a now-playing thumb is
 /// simply "resolve to the latest track-start booth-log row, then call this same route" (T71's job;
 /// no second endpoint shape exists for it to diverge from this one).
+///
+/// And the station-level rotation-nudge sibling (SPEC F150.1, F150.8; STORY-370, PLAN T367):
+/// <c>POST /api/booth-log/{id}/station-thumb</c>, sitting BESIDE <see cref="ThumbTaste"/> on the same
+/// row with its own distinct glyph (T369, admin-ui) — the two never share a click, and never share a
+/// write path: <see cref="ThumbStation"/> reaches <see cref="IThumbStore"/> only, never
+/// <see cref="IPersonaTasteAccrualStore"/> or the F33 rating ledger (F155.3's disjointness pin,
+/// GenWave.Architecture.Tests, proves this at the IL level for this exact action method).
 /// </summary>
 [ApiController]
 [Route("api/booth-log")]
@@ -27,10 +34,19 @@ public sealed class BoothLogController(
     IPersonaTasteAccrualStore accrual,
     IMediaLibraryMembership membership,
     ISafeScopeProvider safeScope,
+    IThumbStore thumbStore,
     ILogger<BoothLogController> logger) : ControllerBase
 {
     const int DefaultTake = 50;
     const int MaxTake = 200;
+
+    /// <summary>SPEC F150.8's own row-kind gate — a station thumb applies to an aired track only.</summary>
+    const string TrackStartedKind = "track-started";
+
+    /// <summary>SPEC F150.7 — every operator thumb, from either surface (now-playing or booth log),
+    /// carries this exact <c>listener_key</c>; idempotency for an operator thumb is therefore per
+    /// (media, airing), the same triple a spectator's own hashed cookie key uses one field over.</summary>
+    const string OperatorListenerKey = "operator";
 
     /// <summary>
     /// GET /api/booth-log?before=&amp;take= — newest-first keyset page (SPEC F72.2). <c>before</c> is
@@ -123,7 +139,7 @@ public sealed class BoothLogController(
             {
                 return (new BoothLogPickDto(
                     firedRules.Select(rule => new BoothLogFiredRuleDto(rule.Summary, rule.Weight)).ToList(),
-                    stamp.IsExploration), null);
+                    stamp.IsExploration, stamp.Nudge), null);
             }
         }
         catch (JsonException ex)
@@ -219,4 +235,119 @@ public sealed class BoothLogController(
                 return false;
         }
     }
+
+    /// <summary>
+    /// POST /api/booth-log/{id}/station-thumb — the station-level rotation-nudge sibling of
+    /// <see cref="ThumbTaste"/> (SPEC F150.1, F150.7, F150.8; STORY-370, PLAN T367). Body:
+    /// <c>{ "direction": "up" | "down" }</c>. Unknown row id → 404. A row that is not a
+    /// <c>"track-started"</c> row, or carries no stamped catalog media id, → 400 NAMING the row's own
+    /// kind (F150.8) — a station thumb only ever applies to a specific aired track.
+    ///
+    /// <para>
+    /// <b>The airing key (T367 review MED-4, corrected).</b> <see cref="IThumbStore.RecordAsync"/> is
+    /// keyed <c>(media_id, airing_started_at, listener_key)</c> — this action uses row
+    /// <paramref name="id"/>'s OWN <c>occurred_at</c> as <c>airing_started_at</c>. That is
+    /// DELIBERATELY NOT the same instant a listener's own airing token keys against
+    /// (<c>AiringTokenRing</c>'s <c>StartedAt</c>, stamped synchronously off <c>TrackAired</c>):
+    /// <c>BoothLogRepository</c>'s own insert omits <c>occurred_at</c> from its column list entirely,
+    /// so the row takes the column's <c>DEFAULT now()</c> — the Postgres SERVER's own wall clock at
+    /// DRAIN time (whenever the booth-log queue actually flushes this row), not the ring's own
+    /// earlier, in-process stamp. An operator thumb (keyed off this drain-time DB stamp) and a
+    /// listener thumb on the SAME physical airing (keyed off the ring's own, earlier `StartedAt`)
+    /// therefore land as TWO DIFFERENT <c>library.media_thumb</c> rows — different
+    /// <c>airing_started_at</c> values, and in any case different <c>listener_key</c>s
+    /// (<c>"operator"</c> vs. a spectator's own hashed cookie key, F150.7) — never the SAME row
+    /// merged across sources. This is harmless: <c>library.recompute_nudge</c> aggregates every
+    /// <c>media_thumb</c> row for a <c>media_id</c> regardless of which <c>airing_started_at</c> it
+    /// carries (<c>MediaThumbRepository</c>'s own remarks), so both rows count toward the SAME
+    /// track's <c>nudge</c> either way — the split key changes accounting granularity, never
+    /// correctness.
+    /// </para>
+    ///
+    /// <para>
+    /// <b><see cref="ThumbWriteResult.Ignored"/> is still 200 (SPEC F150.1, F150.8).</b> Unlike the
+    /// public spectator surface's no-oracle constant-202 (F150.3 — a public-surface rule only), the
+    /// operator MAY be told a thumb landed on safe-scope/unknown content: every
+    /// <see cref="ThumbWriteResult"/> outcome answers 200 with its OWN <see cref="StationThumbResponse.Result"/>
+    /// token, never collapsed to one shared body.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Disjointness (SPEC F150.1, F155.3).</b> This method reaches <see cref="IThumbStore"/> only —
+    /// never <see cref="IPersonaTasteAccrualStore"/>, never any type writing <c>library.media_rating</c>
+    /// or <c>station.persona_taste</c>. GenWave.Architecture.Tests' three-way disjointness pin proves
+    /// this by walking the real IL call graph from this exact action; do not add a call here to
+    /// either without reading that fact's own remarks first.
+    /// </para>
+    /// </summary>
+    [HttpPost("{id:long}/station-thumb")]
+    [Consumes("application/json")]
+    [Authorize(Policy = AuthorizationPolicies.Curation)]
+    public async Task<IActionResult> ThumbStation(long id, [FromBody] StationThumbRequest request, CancellationToken ct)
+    {
+        if (!TryParseThumbDirection(request.Direction, out var direction))
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title  = "Invalid direction.",
+                Detail = "direction must be \"up\" or \"down\".",
+            });
+        }
+
+        var airing = await store.GetTrackAiringAsync(id, ct);
+        if (airing is null)
+        {
+            return NotFound(new ProblemDetails
+            {
+                Status = StatusCodes.Status404NotFound,
+                Title  = "Not found.",
+                Detail = $"No booth-log row with id {id} exists.",
+            });
+        }
+
+        if (airing.Kind != TrackStartedKind || airing.MediaId is not long mediaId)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title  = "Not thumbable.",
+                Detail = $"Booth-log row {id} is a \"{airing.Kind}\" row, not a track airing — station thumbs apply to aired tracks only (F150.8).",
+            });
+        }
+
+        var result = await thumbStore.RecordAsync(
+            mediaId, airing.OccurredAt, OperatorListenerKey, direction, ThumbSource.Operator, ct);
+
+        return Ok(new StationThumbResponse(ToResultText(result)));
+    }
+
+    /// <summary>Case-insensitive match against the only two valid direction values — the
+    /// <see cref="ThumbDirection"/>-typed sibling of <see cref="TryParseDirection"/>, kept as its own
+    /// method rather than a shared helper: the two enums are deliberately distinct types
+    /// (<see cref="StationThumbRequest"/>'s own remarks).</summary>
+    static bool TryParseThumbDirection(string? direction, out ThumbDirection parsed)
+    {
+        switch (direction?.Trim().ToLowerInvariant())
+        {
+            case "up":
+                parsed = ThumbDirection.Up;
+                return true;
+            case "down":
+                parsed = ThumbDirection.Down;
+                return true;
+            default:
+                parsed = default;
+                return false;
+        }
+    }
+
+    static string ToResultText(ThumbWriteResult result) => result switch
+    {
+        ThumbWriteResult.Recorded => "recorded",
+        ThumbWriteResult.Unchanged => "unchanged",
+        ThumbWriteResult.Flipped => "flipped",
+        ThumbWriteResult.Ignored => "ignored",
+        _ => throw new ArgumentOutOfRangeException(nameof(result), result, "Unmapped ThumbWriteResult."),
+    };
 }

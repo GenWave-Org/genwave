@@ -73,7 +73,7 @@ sealed class BoothLogWriter(
             // music and kinded TrackAired alike (PLAN T242's own "verify one chokepoint" note).
             TrackAired t => new BoothLogAppendRequest(
                 "track-started", Summarize(t), personaAccessor.ActivePersonaId, t.Artist,
-                BuildPickStamp(t.PersonaPick, t.CrosstalkScript, t.RotationRelax),
+                BuildPickStamp(t.PersonaPick, t.CrosstalkScript, t.RotationRelax, t.Nudge),
                 ParseMediaId(t.MediaId), SegmentKind: t.SegmentKind?.ToString(), ShowId: personaAccessor.ActiveShowId),
             SegmentGenerated s => new BoothLogAppendRequest("patter-aired", Summarize(s), PersonaId: null),
             DegradationModeChanged d => new BoothLogAppendRequest("mode-changed", Summarize(d), PersonaId: null),
@@ -95,7 +95,13 @@ sealed class BoothLogWriter(
     /// non-relaxed pick (<paramref name="diagnostics"/> AND <paramref name="rotationRelax"/> both null);
     /// otherwise the F86.1 jsonb text, narrowed to firedRules/isExploration (scores, pool size, and the
     /// degradation step are deliberately never persisted — see <see cref="BoothLogPickStamp"/>'s own
-    /// remarks) plus <paramref name="rotationRelax"/> (SPEC F152.4, STORY-372, PLAN T361).
+    /// remarks) plus <paramref name="rotationRelax"/> (SPEC F152.4, STORY-372, PLAN T361) and
+    /// <paramref name="nudge"/> (SPEC F151.4, STORY-371, PLAN T370) — the ONE place
+    /// <see cref="NudgeChipThreshold"/> is applied: a rung-0 pick's raw nudge rides
+    /// <see cref="GenWave.Core.Events.TrackAired.Nudge"/> unconditionally (SPEC F151.4's per-pick
+    /// debug line wants every value, threshold-free), but the PERSISTED stamp only ever carries it
+    /// once its magnitude clears the chip threshold — sub-threshold and rung-1+ picks alike stamp
+    /// <see langword="null"/>, never a near-zero value nobody asked to see.
     ///
     /// <para>
     /// SPEC F127.11 (STORY-329, PLAN T287) — the SAME <c>booth_log.pick</c> column carries a
@@ -116,18 +122,30 @@ sealed class BoothLogWriter(
     /// <c>firedRules</c>, <c>isExploration: false</c> — rather than losing the relax step entirely
     /// (STORY-372 AC9, "never an unstamped R3"). <paramref name="rotationRelax"/> null with everything
     /// else null (the byte-identical no-rotation path, STORY-372 AC10) stays exactly today's
-    /// <see langword="null"/> — no stamp at all.
+    /// <see langword="null"/> — no stamp at all. <paramref name="nudge"/> only ever accompanies
+    /// <paramref name="diagnostics"/> (SPEC F151.2 — nothing sets <c>RotationCandidate.Nudge</c>
+    /// outside a rung-0 pick), so it is threaded through the FIRST branch alone.
     /// </para>
     /// </summary>
     static string? BuildPickStamp(
-        PersonaPickDiagnostics? diagnostics, CrosstalkAiredScript? crosstalkScript, int? rotationRelax) =>
+        PersonaPickDiagnostics? diagnostics, CrosstalkAiredScript? crosstalkScript, int? rotationRelax, double? nudge) =>
         diagnostics is not null
-            ? BoothLogPickStampSerializer.Serialize(BoothLogPickStamp.FromDiagnostics(diagnostics) with { RotationRelax = rotationRelax })
+            ? BoothLogPickStampSerializer.Serialize(
+                BoothLogPickStamp.FromDiagnostics(diagnostics) with { RotationRelax = rotationRelax, Nudge = ThresholdNudge(nudge) })
         : crosstalkScript is not null
             ? CrosstalkAiredScriptSerializer.Serialize(crosstalkScript)
         : rotationRelax is not null
             ? BoothLogPickStampSerializer.Serialize(new BoothLogPickStamp([], false) { RotationRelax = rotationRelax })
         : null;
+
+    /// <summary>
+    /// SPEC F151.4 (STORY-371, PLAN T370) — the F86 "why this pick" rotation chip's own gate: a
+    /// nudge below this magnitude reads as noise, not a signal worth an operator's attention.
+    /// </summary>
+    const double NudgeChipThreshold = 0.2;
+
+    static double? ThresholdNudge(double? nudge) =>
+        nudge is double n && Math.Abs(n) >= NudgeChipThreshold ? n : null;
 
     /// <summary>
     /// gh-#99 — the aired row's numeric catalog id, or <see langword="null"/> for a non-catalog id

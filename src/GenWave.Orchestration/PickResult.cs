@@ -13,9 +13,13 @@ namespace GenWave.Orchestration;
 /// PLAN T64) — that line slices to the first three; this record carries the full scored Top-K so a
 /// future consumer is not limited to three. T65 forwards <see cref="Candidate"/>/
 /// <see cref="IsExploration"/>/<see cref="FiredRules"/> to the copywriter prompt unchanged.
+/// <see cref="TopNudges"/> (SPEC F151.4, STORY-371, PLAN T370) is <see cref="TopScores"/>'s own
+/// index-aligned sibling — each Top-K entry's <c>Candidate.Nudge</c> rather than its score — feeding
+/// the SAME debug line's "nudges top-3" field.
 /// </summary>
 public sealed record PickResult(
     PersonaRankCandidate Candidate,
     bool IsExploration,
     IReadOnlyList<TasteRule> FiredRules,
-    IReadOnlyList<double> TopScores);
+    IReadOnlyList<double> TopScores,
+    IReadOnlyList<double> TopNudges);

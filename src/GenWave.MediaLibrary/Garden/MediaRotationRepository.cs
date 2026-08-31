@@ -67,6 +67,17 @@ sealed class MediaRotationRepository(
     /// cached), so a live SafeScope edit governs the very next airing. An empty safe scope short-circuits
     /// to the pre-#99 shape: no extra predicate, no extra parameter (mirrors
     /// <c>MediaRatingRepository.ExcludeSafeContent</c>'s identical short-circuit).
+    ///
+    /// <para>
+    /// <b>T365 review HIGH-2 fix</b>: <c>first_aired_at = coalesce(library.media_rotation.first_aired_at,
+    /// excluded.first_aired_at)</c> on the DO UPDATE branch — since T365, <c>MediaThumbRepository</c> can
+    /// also be the FIRST writer of a <c>library.media_rotation</c> row (a thumb on a never-aired track),
+    /// always with <c>first_aired_at</c> NULL by construction. Before this fix, this method's own DO
+    /// UPDATE never touched that column at all, so a thumbed-then-aired track's row stayed permanently
+    /// NULL on <c>first_aired_at</c> despite a nonzero <c>play_count</c>. <c>coalesce(existing, new)</c>
+    /// sets it exactly once — on whichever call is the row's TRUE first airing — and never overwrites an
+    /// already-stamped value on every airing after that.
+    /// </para>
     /// </summary>
     public async Task RecordAiringAsync(long mediaId, DateTimeOffset airedAt, CancellationToken ct)
     {
@@ -90,9 +101,10 @@ sealed class MediaRotationRepository(
             from library.media m
             where m.id = @mediaId{safeExclusion}
             on conflict (media_id) do update
-              set play_count    = library.media_rotation.play_count + 1,
-                  last_aired_at = excluded.last_aired_at,
-                  updated_at    = now()
+              set play_count     = library.media_rotation.play_count + 1,
+                  first_aired_at = coalesce(library.media_rotation.first_aired_at, excluded.first_aired_at),
+                  last_aired_at  = excluded.last_aired_at,
+                  updated_at     = now()
             """,
             parameters,
             cancellationToken: ct));

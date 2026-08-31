@@ -17,3 +17,7 @@ tsconfig.specs.tsbuildinfo
 .env
 .env*.local
 npm-debug.log*
+
+# Next.js dev server writes these agent-guidance files into the app dir (nextjs-agent-rules) — tooling noise, never source
+AGENTS.md
+CLAUDE.md

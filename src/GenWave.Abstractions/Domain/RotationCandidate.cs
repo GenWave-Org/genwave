@@ -67,4 +67,24 @@ public sealed record RotationCandidate(
     /// positional/named constructor argument.
     /// </summary>
     public int? RotationRelax { get; init; }
+
+    /// <summary>
+    /// SPEC F151.1/F151.2 (STORY-371, PLAN T370) — the winning candidate's own
+    /// <c>EnvelopeCandidateRow.Nudge</c>, carried straight through by
+    /// <c>GenWave.Orchestration.RankerPersonaPickProvider</c> the moment it narrows the pool row that
+    /// won <c>GenWave.Orchestration.PersonaRanker</c>'s rung-0 score (SPEC F82.2's own
+    /// <c>+nudge·nudgeGain</c> term).
+    /// <see langword="null"/> for every envelope-only ladder pick, including the common persona-off
+    /// case — rung 0 only, by construction: no envelope-only rung ever sets this property at all
+    /// (F151.2), so its mere presence already answers "did the persona ranker supply this pick."
+    /// Carried onto <see cref="MediaItem.Nudge"/> the same two-path discipline
+    /// <see cref="PersonaPick"/>/<see cref="RotationRelax"/> already use.
+    ///
+    /// <para>
+    /// A defaulted body property, not a positional constructor parameter — same binary-compatibility
+    /// discipline as <see cref="RotationRelax"/>'s own remarks (this record already shipped with a
+    /// fixed ctor/Deconstruct arity in the published Abstractions NuGet).
+    /// </para>
+    /// </summary>
+    public double? Nudge { get; init; }
 }

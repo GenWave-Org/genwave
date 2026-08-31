@@ -80,6 +80,10 @@ public sealed class StationOptions
     /// <summary>The three live-editable listener-request knobs (SPEC F87.2, F87.6, STORY-224). Bound to <c>Station:Requests</c>.</summary>
     public StationRequestsOptions Requests { get; set; } = new();
 
+    /// <summary>The Library Gardener's one live-editable knob (SPEC F150.2, F155.1, STORY-380,
+    /// STORY-369, PLAN T357/T366). Bound to <c>Station:Thumbs</c>.</summary>
+    public StationThumbsOptions Thumbs { get; set; } = new();
+
     /// <summary>
     /// Audience posture (SPEC F95.1, STORY-250, PLAN T111): <c>"everyone"</c> (default,
     /// fail-closed) or <c>"mature"</c> (case-insensitive — mirrors <c>Llm:DegradationPin</c>'s

@@ -128,6 +128,15 @@ public static class MediaLibraryServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // The Library Gardener's taste-thumb store (SPEC F150.1, F150.7, F150.9; STORY-371,
+        // STORY-369; PLAN T365, gh-#529): same library_svc NpgsqlDataSource + ISafeScopeProvider as
+        // MediaRotationRepository just above, plus the GardenerOptions binding immediately above it
+        // (HalfLifeDays/Saturation/ThumbRetentionDays) — a plain constructor-injected singleton
+        // (unlike MediaRotationRepository, this type needs no second, hand-built cross-schema
+        // dependency, so no factory lambda is required).
+        services.AddSingleton<MediaThumbRepository>();
+        services.AddSingleton<IThumbStore>(sp => sp.GetRequiredService<MediaThumbRepository>());
+
         // gh-#99: the narrow cross-schema membership answer the taste-thumb/booth-log surfaces
         // need — resolved on the library connection because station_svc deliberately has no grant
         // on library.media.

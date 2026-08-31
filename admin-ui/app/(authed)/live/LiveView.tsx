@@ -8,6 +8,7 @@ import { NowPlayingCard } from "../_components/NowPlayingCard";
 import { PersonaTasteThumbs } from "../_components/PersonaTasteThumbs";
 import { PickChips } from "../_components/PickChips";
 import { RatingControls, type RatingControlsValue } from "../_components/RatingControls";
+import { StationThumbs } from "../_components/StationThumbs";
 import { PlayHistoryTable } from "./PlayHistoryTable";
 import { DEFAULT_RATING, useLiveRatings } from "./useLiveRatings";
 import { useNowPlayingTasteAttribution } from "./useNowPlayingTasteAttribution";
@@ -44,6 +45,16 @@ interface LiveViewProps {
  * falls back to "whichever persona is active now". `key={attribution.boothLogRowId}` forces the
  * control to remount (and its own settled-direction state to reset) whenever a new track's row
  * swaps in, rather than inheriting the previous track's disabled buttons.
+ *
+ * Station rotation thumb (SPEC F150.1, F150.8; STORY-370): the now-playing card also gets an
+ * opt-in `stationThumbControls` slot, resolved from the SAME `useNowPlayingTasteAttribution`
+ * result as `tasteThumbControls`. SPEC F150.8 itself only requires the station thumb on "Live
+ * now-playing and booth-log track rows" — reusing this page's existing attribution resolution
+ * (rather than running a second one) is this page's OWN choice, not a SPEC requirement, so the
+ * station thumb happens to appear only where the taste thumb also does (a persona-stamped,
+ * non-safe-scope track). `key={boothLogRowId}` mirrors `tasteThumbControls`' own
+ * remount-on-new-row discipline, but the two controls are otherwise fully independent: separate
+ * component, separate endpoint, separate settled state.
  *
  * Why this pick (SPEC F86.4, STORY-218, PLAN T76): the now-playing card also gets an opt-in
  * `pickChips` slot, sourced from that SAME `useNowPlayingTasteAttribution` resolution's `pick`
@@ -90,6 +101,11 @@ export function LiveView({ timeZone }: LiveViewProps = {}): ReactNode {
       />
     ) : undefined;
 
+  const nowPlayingStationThumbControls =
+    nowPlaying.data?.kind === "track" && tasteAttribution !== null ? (
+      <StationThumbs key={tasteAttribution.boothLogRowId} boothLogRowId={tasteAttribution.boothLogRowId} />
+    ) : undefined;
+
   const nowPlayingPickChips =
     nowPlaying.data?.kind === "track" ? <PickChips pick={tasteAttribution?.pick} className="mt-2" /> : undefined;
 
@@ -100,6 +116,7 @@ export function LiveView({ timeZone }: LiveViewProps = {}): ReactNode {
         error={nowPlaying.error}
         ratingControls={nowPlayingRatingControls}
         tasteThumbControls={nowPlayingTasteThumbControls}
+        stationThumbControls={nowPlayingStationThumbControls}
         pickChips={nowPlayingPickChips}
       />
       <PlayHistoryTable

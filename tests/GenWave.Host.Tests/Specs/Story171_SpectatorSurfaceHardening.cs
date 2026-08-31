@@ -150,9 +150,14 @@ public static class FeatureSpectatorSurfaceHardening
                 // Spectator policy (F60.2 demands no cookie) but is gated by its own kill switch
                 // (RequestsSurfaceAttribute) and dedicated cooldown+daily-cap limiter instead of by
                 // being read-only. Its own contract lives in Story224_RequestIntake.cs.
-                var isRequestsIntake = endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()
-                    is { ControllerName: "SpectatorRequests" };
-                if (isRequestsIntake)
+                //
+                // POST /spectator/api/thumbs (SPEC F150.2, STORY-369, PLAN T366) is the SECOND —
+                // the same exception shape one seam over: ThumbsSurfaceAttribute + the dedicated
+                // Thumbs cooldown+daily-cap limiter chain stand in for GET-only here too. Its own
+                // contract lives in Story369_ListenersThumbTheTrackPlaying.cs.
+                var isWriteIntake = endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()
+                    is { ControllerName: "SpectatorRequests" or "SpectatorThumbs" };
+                if (isWriteIntake)
                     return;
 
                 var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? [];

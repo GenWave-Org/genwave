@@ -105,4 +105,22 @@ public sealed record MediaItem(string MediaId, string Locator, string Title, Lou
     /// </para>
     /// </summary>
     public int? RotationRelax { get; init; }
+
+    /// <summary>
+    /// SPEC F151.1/F151.2 (STORY-371, PLAN T370) — the SAME <see cref="Core.Domain.RotationCandidate.Nudge"/>
+    /// the persona ranker's rung-0 score consumed for this pick, carried straight from
+    /// <c>Orchestrator.GetNextAsync</c>'s own <c>RotationCandidate -&gt; MediaItem</c> narrowing (rides
+    /// the SAME carry-through <see cref="PersonaPick"/>/<see cref="RotationRelax"/> already use).
+    /// <see langword="null"/> for every envelope-only ladder pick, including the common persona-off
+    /// case — rung 0 only, by construction. Rides through <c>PlayoutFeeder</c>'s push-time metadata
+    /// into <see cref="GenWave.Core.Events.TrackAired.Nudge"/> the same way <see cref="RotationRelax"/>
+    /// does, so the booth log's <c>track-started</c> row can stamp it (SPEC F86.1's
+    /// <c>BoothLogPickStamp</c>) once its magnitude clears the F151.4 chip threshold.
+    ///
+    /// <para>
+    /// A defaulted body property, not a positional constructor parameter — same binary-compatibility
+    /// discipline as <see cref="CrosstalkScript"/>'s own remarks.
+    /// </para>
+    /// </summary>
+    public double? Nudge { get; init; }
 }

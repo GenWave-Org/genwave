@@ -44,6 +44,10 @@ file sealed class ApiFakeBoothLogReader(IReadOnlyList<BoothLogEntry> rows) : IBo
     /// <summary>T362 review HIGH-2: IBoothLogReader.GetLastAiringAsync is now abstract — this file's own facts never touch a show's last airing, so this double answers "none" unconditionally.</summary>
     public Task<ShowLastAiring?> GetLastAiringAsync(long showId, CancellationToken ct) =>
         Task.FromResult<ShowLastAiring?>(null);
+
+    /// <summary>T367: IBoothLogReader.GetTrackAiringAsync is now abstract — this file's own facts never touch the station-thumb action, so this double answers "row not found" unconditionally.</summary>
+    public Task<BoothLogAiring?> GetTrackAiringAsync(long id, CancellationToken ct) =>
+        Task.FromResult<BoothLogAiring?>(null);
 }
 
 /// <summary>Minimal <see cref="ILogger{T}"/> that collects every logged message, tagged with its
@@ -69,6 +73,25 @@ file sealed class NotSupportedPersonaTasteAccrualStore : IPersonaTasteAccrualSto
         throw new NotSupportedException("Not exercised by this file's facts.");
 }
 
+/// <summary>T367: none of this file's facts exercise <see cref="BoothLogController.ThumbStation"/> —
+/// only the read/pick-projection facts construct <see cref="BoothLogController"/> here.</summary>
+file sealed class NotSupportedThumbStore : IThumbStore
+{
+    public Task<ThumbWriteResult> RecordAsync(
+        long mediaId, DateTimeOffset airingStartedAt, string listenerKey,
+        ThumbDirection direction, ThumbSource source, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by this file's facts.");
+
+    public Task<int> CountByListenerSinceAsync(string listenerKey, DateTimeOffset since, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by this file's facts.");
+
+    public Task<int> SweepAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by this file's facts.");
+
+    public Task RecomputeAllAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by this file's facts.");
+}
+
 file static class BoothLogApiControllerFactory
 {
     public static (BoothLogController Controller, CapturingLogger<BoothLogController> Logger) Build(IBoothLogReader reader)
@@ -76,7 +99,7 @@ file static class BoothLogApiControllerFactory
         var logger = new CapturingLogger<BoothLogController>();
         var controller = new BoothLogController(
             reader, new NotSupportedPersonaTasteAccrualStore(), new FakeMediaLibraryMembership(),
-            new FakeSafeScopeProvider(), logger);
+            new FakeSafeScopeProvider(), new NotSupportedThumbStore(), logger);
         return (controller, logger);
     }
 }

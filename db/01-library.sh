@@ -304,6 +304,9 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	  created_at        timestamptz not null default now(),
 	  unique (media_id, airing_started_at, listener_key)
 	);
+	-- T366 review MED-1 — db/41's own mirror, see that script's own remarks: the F150.5
+	-- per-listener daily cap read filters (listener_key, created_at), not media_id first.
+	create index media_thumb_listener_created_idx on library.media_thumb (listener_key, created_at desc);
 
 	-- One row per (media, kind) forever (SPEC F153.1): a pass opens/re-opens/resolves it, the owner
 	-- dismisses it, `dismissed` is never re-opened — state moves, the row does not multiply.
@@ -455,6 +458,35 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	           g.title_variant as title_variant
 	    from grouped g
 	    where g.group_size > 1;
+	end;
+	$$;
+
+	-- recompute_nudge (SPEC F150.9, STORY-371, PLAN T365): db/41's own fresh-init mirror — see that
+	-- script's own remarks for the full rationale. VOLATILE (it writes); the age-decayed,
+	-- saturation-clamped thumb aggregate MediaThumbRepository calls after every write and the
+	-- gardener's hourly RecomputeAllAsync pass applies to every thumbed media id. A media id with no
+	-- library.media_rotation row is a harmless no-op (zero rows matched) — the caller ensures the row
+	-- exists first.
+	create function library.recompute_nudge(p_media_id bigint, p_half_life_days int, p_saturation int)
+	returns void
+	language plpgsql
+	volatile
+	security invoker
+	set search_path = library, pg_temp
+	as $$
+	begin
+	  update library.media_rotation
+	  set nudge = greatest(-1, least(1, coalesce((
+	          select sum(
+	                   case direction when 'up' then 1 else -1 end
+	                   * power(0.5, extract(epoch from (now() - created_at)) / 86400.0 / p_half_life_days)
+	                 )
+	          from library.media_thumb
+	          where media_id = p_media_id
+	        ), 0) / p_saturation)),
+	      nudge_computed_at = now(),
+	      updated_at = now()
+	  where media_id = p_media_id;
 	end;
 	$$;
 SQL

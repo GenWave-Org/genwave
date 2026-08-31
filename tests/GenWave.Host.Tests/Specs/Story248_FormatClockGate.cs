@@ -197,6 +197,13 @@ public static class FeatureFormatClockGate
             "SpectatorThemeOption.Slug",
             "SpectatorThemesResponse.Active",
             "SpectatorThemesResponse.Options",
+            // SPEC F150.3, STORY-369, PLAN T366: the thumbs 202 body's fixed shape and the
+            // request DTO it's bound from — both blessed in Story183's contract table alongside
+            // this census.
+            "SpectatorThumbAccepted.Note",
+            "SpectatorThumbAccepted.Status",
+            "SpectatorThumbSubmission.Airing",
+            "SpectatorThumbSubmission.Direction",
             // SPEC F149.4/F150.4, STORY-369, PLAN T358: the current airing's opaque token — blessed
             // in Story183's contract table alongside this census.
             "SpectatorTrackNowPlaying.Airing",

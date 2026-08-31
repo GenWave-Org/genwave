@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **98 seams across 6 projects.**
+> **99 seams across 6 projects.**
 
 ## GenWave.Context (2 seams)
 
@@ -97,7 +97,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (40 seams)
+## GenWave.MediaLibrary (41 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -140,6 +140,7 @@
 | `GenWave.Core.Abstractions.IShowStore` | `GenWave.MediaLibrary.Station.ShowRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IStationImageStore` | `GenWave.MediaLibrary.Station.StationImageRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IThemeStore` | `GenWave.MediaLibrary.Station.ThemeRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IThumbStore` | `GenWave.MediaLibrary.Garden.MediaThumbRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IYearLookup` | `GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup` | Singleton | — |
 
 ## GenWave.Orchestration (8 seams)

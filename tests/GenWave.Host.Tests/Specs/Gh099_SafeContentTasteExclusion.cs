@@ -71,6 +71,10 @@ file sealed class ExclusionFakeBoothLogReader(IReadOnlyList<BoothLogEntry> rows)
     /// <summary>T362 review HIGH-2: IBoothLogReader.GetLastAiringAsync is now abstract — this file's own facts never touch a show's last airing, so this double answers "none" unconditionally.</summary>
     public Task<ShowLastAiring?> GetLastAiringAsync(long showId, CancellationToken ct) =>
         Task.FromResult<ShowLastAiring?>(null);
+
+    /// <summary>T367: IBoothLogReader.GetTrackAiringAsync is now abstract — this file's own facts never touch the station-thumb action, so this double answers "row not found" unconditionally.</summary>
+    public Task<BoothLogAiring?> GetTrackAiringAsync(long id, CancellationToken ct) =>
+        Task.FromResult<BoothLogAiring?>(null);
 }
 
 /// <summary>Recording <see cref="IPersonaTasteAccrualStore"/> — every reached call is a fact.</summary>
@@ -83,6 +87,26 @@ file sealed class RecordingAccrualStore : IPersonaTasteAccrualStore
         ThumbCalls.Add((boothLogId, direction));
         return Task.FromResult<TasteThumbOutcome>(new TasteThumbOutcome.Nudged(PersonaId: 7, Weight: 0.2));
     }
+}
+
+/// <summary>T367: none of this file's facts exercise <see cref="BoothLogController.ThumbStation"/> —
+/// only the gh-#99 safe-content exclusion facts for <c>ThumbTaste</c>/rating construct
+/// <see cref="BoothLogController"/> here.</summary>
+file sealed class NotSupportedThumbStore : IThumbStore
+{
+    public Task<ThumbWriteResult> RecordAsync(
+        long mediaId, DateTimeOffset airingStartedAt, string listenerKey,
+        ThumbDirection direction, ThumbSource source, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by the gh-#99 safe-content exclusion facts.");
+
+    public Task<int> CountByListenerSinceAsync(string listenerKey, DateTimeOffset since, CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by the gh-#99 safe-content exclusion facts.");
+
+    public Task<int> SweepAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by the gh-#99 safe-content exclusion facts.");
+
+    public Task RecomputeAllAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not exercised by the gh-#99 safe-content exclusion facts.");
 }
 
 /// <summary>Shared fixture wiring for the booth-log facts: library 9 is the safe library.</summary>
@@ -111,6 +135,7 @@ file static class ExclusionFixture
             [MusicMediaId] = MusicLibraryId,
         }),
         new FakeSafeScopeProvider(SafeLibraryId),
+        new NotSupportedThumbStore(),
         NullLogger<BoothLogController>.Instance);
 }
 

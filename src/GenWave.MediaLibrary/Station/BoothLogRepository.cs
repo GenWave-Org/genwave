@@ -162,6 +162,28 @@ sealed class BoothLogRepository(Lazy<NpgsqlDataSource> dataSource, IOptions<Boot
     }
 
     /// <inheritdoc/>
+    public async Task<BoothLogAiring?> GetTrackAiringAsync(long id, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<TrackAiringRow>(new CommandDefinition(
+            "select kind, media_id, occurred_at from station.booth_log where id = @Id",
+            new { Id = id },
+            cancellationToken: ct));
+
+        return row is null
+            ? null
+            : new BoothLogAiring(row.Kind, row.MediaId, new DateTimeOffset(DateTime.SpecifyKind(row.OccurredAt, DateTimeKind.Utc)));
+    }
+
+    /// <summary>Ephemeral Dapper projection for <see cref="GetTrackAiringAsync"/> — <c>occurred_at</c>
+    /// reads back as <see cref="DateTime"/> (Dapper's own reader-inferred type for <c>timestamptz</c>,
+    /// the same <see cref="BoothLogEntry.OccurredAt"/> convention every other booth-log read in this
+    /// class already follows — a <see cref="DateTimeOffset"/>-typed constructor parameter here fails
+    /// Dapper's constructor match outright, proven at T367 review). Converted to
+    /// <see cref="DateTimeOffset"/> only at the boundary <see cref="BoothLogAiring"/> itself promises.</summary>
+    sealed record TrackAiringRow(string Kind, long? MediaId, DateTime OccurredAt);
+
+    /// <inheritdoc/>
     /// <summary>
     /// See <see cref="IBoothLogReader.GetLastAiringAsync"/> for the "contiguous run" definition this
     /// query implements — <c>marked</c>/<c>runs</c> assign a monotonically non-decreasing

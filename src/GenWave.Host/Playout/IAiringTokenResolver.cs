@@ -1,12 +1,17 @@
 namespace GenWave.Host.Playout;
 
 /// <summary>
-/// Read-side seam over <see cref="AiringTokenRing"/> (SPEC F149.4, F150.4, STORY-369, PLAN T358) —
-/// a small Host-internal interface so a future write path (PLAN T366's spectator thumbs endpoint)
-/// can resolve a caller-submitted token via DI without depending on the concrete ring or its
+/// Read-side seam over <see cref="AiringTokenRing"/> (SPEC F149.4, F150.4, STORY-369, PLAN T358) — a
+/// small interface so a write path (PLAN T366's <see cref="Api.SpectatorThumbsController"/>) can
+/// resolve a caller-submitted token via DI without depending on the concrete ring or its
 /// <see cref="GenWave.Core.Abstractions.IStationEventSink"/> write side.
+///
+/// <b>Public, not internal (T366 review — promoted from this type's original PLAN T358 shape):</b> a
+/// public MVC controller's constructor cannot declare a parameter of a less-accessible type (CS0051)
+/// — <see cref="AiringTokenRing"/>, the only implementation, stays internal, since the interface
+/// alone is what any consumer (in or out of this assembly) is ever meant to depend on.
 /// </summary>
-interface IAiringTokenResolver
+public interface IAiringTokenResolver
 {
     /// <summary>
     /// <b>Current is the last music airing's token and survives an intervening non-music item; the

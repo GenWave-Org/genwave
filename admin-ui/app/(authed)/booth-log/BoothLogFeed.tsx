@@ -9,6 +9,7 @@ import type { BoothLogEntry } from "@/lib/booth-log-api";
 import { cn } from "@/lib/utils";
 import { PersonaTasteThumbs } from "../_components/PersonaTasteThumbs";
 import { PickChips } from "../_components/PickChips";
+import { StationThumbs } from "../_components/StationThumbs";
 
 interface BoothLogFeedProps {
   entries: BoothLogEntry[] | null;
@@ -79,6 +80,14 @@ function BoothLogKindBadge({ kind }: { kind: string }): ReactNode {
  * `PickChips` below the row's own text — a separate cell from the Taste column's
  * `PersonaTasteThumbs`, so the two affordances never visually merge. `PickChips` itself renders
  * nothing for a row whose `pick` is absent, so an unstamped row's Summary cell is unchanged.
+ *
+ * Station rotation thumb (SPEC F150.1, F150.8; STORY-370): the Taste column's cell also renders
+ * `StationThumbs` beside `PersonaTasteThumbs`, gated by the exact same `isThumbable` check. SPEC
+ * F150.8 itself only requires the station thumb on "Live now-playing and booth-log track rows" —
+ * reusing `isThumbable` (rather than a second gate) is this feed's OWN choice, not a SPEC
+ * requirement, so the station thumb happens to appear only where the taste thumb also does (a
+ * track-started, non-safe-scope row). The two controls share the cell for layout only; neither
+ * shares a click handler, endpoint, or piece of state with the other.
  */
 export function BoothLogFeed({
   entries,
@@ -164,7 +173,10 @@ export function BoothLogFeed({
                   </td>
                   <td className="py-2">
                     {isThumbable(entry) && (
-                      <PersonaTasteThumbs boothLogRowId={entry.id} personaName={personaName(entry.personaId)} />
+                      <div className="flex flex-wrap items-center gap-3">
+                        <PersonaTasteThumbs boothLogRowId={entry.id} personaName={personaName(entry.personaId)} />
+                        <StationThumbs boothLogRowId={entry.id} />
+                      </div>
                     )}
                   </td>
                 </tr>

@@ -232,6 +232,36 @@ export function TasteThumbDownIcon(props: IconProps): ReactNode {
   );
 }
 
+/** Station rotation-thumb-up glyph (SPEC F150.1, F150.8; STORY-370; T369 review HIGH-1) — a
+ * tuning-dial needle deflected up, NOT {@link VoteUpIcon}'s straight chevron and NOT
+ * {@link TasteThumbUpIcon}'s hand silhouette: a station thumb reads as the receiver's own dial
+ * moving, distinct from both the controls it can render beside (`RatingControls`' catalog vote,
+ * `PersonaTasteThumbs`' persona-taste pair) at a glance, per the Wireless dial-marking motif
+ * (`.claude/skills/design-aesthetic`) already used elsewhere in the chrome (the now-playing
+ * card's own tuning-scale ticks). */
+export function StationThumbUpIcon(props: IconProps): ReactNode {
+  return (
+    <IconBase {...props}>
+      <circle cx="8" cy="9.4" r="4" />
+      <path d="M8 9.4L10.8 4.6" />
+      <circle cx="8" cy="9.4" r="0.9" fill="currentColor" stroke="none" />
+    </IconBase>
+  );
+}
+
+/** Station rotation-thumb-down glyph — the same tuning-dial face with its needle mirrored to
+ * deflect down, the same pairing convention {@link TasteThumbDownIcon} uses against
+ * {@link TasteThumbUpIcon}. */
+export function StationThumbDownIcon(props: IconProps): ReactNode {
+  return (
+    <IconBase {...props}>
+      <circle cx="8" cy="6.6" r="4" />
+      <path d="M8 6.6L10.8 11.4" />
+      <circle cx="8" cy="6.6" r="0.9" fill="currentColor" stroke="none" />
+    </IconBase>
+  );
+}
+
 /** Schedule nav glyph (PLAN T129, SPEC F94.3) — a clock face (the "format clock"), distinct from
  * {@link PersonaIcon}'s microphone (the roster itself) and {@link DashboardIcon}'s 2×2 grid: this
  * page is WHEN each DJ is on, not who they are. */

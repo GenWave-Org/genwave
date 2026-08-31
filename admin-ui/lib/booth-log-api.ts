@@ -15,10 +15,16 @@ export interface BoothLogFiredRule {
  * — mirrors `BoothLogPickDto`. `isExploration` and a non-empty `firedRules` never co-occur: an
  * exploration pick's rules are always empty by the ranker's own contract (F83.2), and this shape
  * is consumed accordingly (`PickChips` treats them as mutually exclusive by construction, not by
- * trusting that invariant). */
+ * trusting that invariant).
+ *
+ * `nudge` (SPEC F151.4, STORY-371, PLAN T370) is absent (never `null`) unless the winning pick's
+ * rotation nudge cleared the `|nudge| >= 0.2` chip threshold — `BoothLogWriter`'s own gate, never
+ * re-applied here. Independent of `isExploration`/`firedRules`: a rotation chip can render
+ * alongside either. */
 export interface BoothLogPick {
   firedRules: BoothLogFiredRule[];
   isExploration: boolean;
+  nudge?: number;
 }
 
 /** One narrative row (SPEC F72.1) — `kind` is a plain string on the wire (BoothLogEntryDto), not

@@ -6,9 +6,13 @@
 // purely off IConfiguration, with no repository/table read on the path either AC exercises) reading
 // GardenerOptions off the booted host's DI container. AC2/AC5 (T366) drive Station:Thumbs:Enabled
 // through the real PUT /api/settings surface, which DOES need the ephemeral station+library Postgres
-// (tests/GenWave.Host.Tests/Support/EphemeralStationDatabase) — left skipped here for T366 to build.
+// (tests/GenWave.Host.Tests/Support/EphemeralStationDatabase) — see ThumbsLiveSwitchArc at the bottom
+// of this file (the Story366/369 "one ephemeral db, one Arc, Facts just assert" shape).
 // AC3 (the L5 reserved-namespace pin) and AC4 (the three-way disjointness pin) live in
 // GenWave.Architecture.Tests, written by another agent — not this file.
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -16,7 +20,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using GenWave.Core.Abstractions;
+using GenWave.Core.Events;
+using GenWave.Host.Api;
+using GenWave.Host.Playout;
+using GenWave.Host.Tests.Support;
 using GenWave.MediaLibrary.Options;
+using GenWave.Orchestration;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -104,21 +114,74 @@ public static class FeatureTheKnobsAndTheLiveSwitch
         }
     }
 
-    public sealed class ScenarioTheLiveSwitch
+    // MED-4 (T370 review, SPEC F151.1/F155.1, STORY-371) — no prior fact proved Gardener__NudgeGain
+    // actually reaches PersonaRankerOptions, the Orchestration-side value PersonaRanker.Score reads
+    // (GenWave.Orchestration cannot reference GardenerOptions itself, architecture law L1 — see
+    // PersonaRankerOptionsServiceCollectionExtensions' own remarks). Drives the SAME real composition
+    // root/GardenerKnobsWebFactory this file's ScenarioDefaults already uses — resolving the plain
+    // PersonaRankerOptions singleton (not IOptions<PersonaRankerOptions>: that would read the
+    // PersonaRanker:* section alone, never the Gardener:NudgeGain override) proves the ACTUAL value
+    // PersonaRanker itself is constructed with.
+    public sealed class ScenarioTheRankerReadsTheSameGardenerKnob
     {
-        // Given Station:Thumbs:Enabled false, When PUT /api/settings sets it true.
-        [Fact(Skip = "pending T366 (STORY-380 AC2)")]
-        public void TheNextThumbPostIsAcceptedWithNoRestart() => Assert.Fail("pending T366");
+        // Given no Gardener__* env, When the api boots.
+        [Fact]
+        public void PersonaRankerOptionsNudgeGainDefaultsToZeroPointFive()
+        {
+            using var factory = new GardenerKnobsWebFactory();
+
+            var options = factory.Services.GetRequiredService<PersonaRankerOptions>();
+
+            Assert.Equal(0.5, options.NudgeGain);
+        }
+
+        // Given Gardener__NudgeGain=1.5, When the api boots.
+        [Fact]
+        public void PersonaRankerOptionsNudgeGainReadsTheGardenerOverride()
+        {
+            using var factory = new GardenerKnobsWebFactory(("NudgeGain", "1.5"));
+
+            var options = factory.Services.GetRequiredService<PersonaRankerOptions>();
+
+            Assert.Equal(1.5, options.NudgeGain);
+        }
     }
 
-    public sealed class ScenarioDisclosure
+    [Collection(ThumbsLiveSwitchCollection.Name)]
+    public sealed class ScenarioTheLiveSwitch(ThumbsLiveSwitchArc arc)
+    {
+        // Given Station:Thumbs:Enabled false, When PUT /api/settings sets it true.
+        [Fact]
+        public void TheNextThumbPostIsAcceptedWithNoRestart()
+        {
+            Assert.Equal(HttpStatusCode.NotFound, arc.StatusBeforeSwitch);
+            Assert.Equal(HttpStatusCode.OK, arc.PutStatus);
+            Assert.Equal(HttpStatusCode.Accepted, arc.StatusAfterSwitch);
+        }
+    }
+
+    [Collection(ThumbsLiveSwitchCollection.Name)]
+    public sealed class ScenarioDisclosure(ThumbsLiveSwitchArc arc)
     {
         // Given thumbs enabled, When the F67 disclosure suites run.
-        [Fact(Skip = "pending T366 (STORY-380 AC5)")]
-        public void TheNowPlayingContractIsThePinnedSetPlusAiring() => Assert.Fail("pending T366");
+        [Fact]
+        public void TheNowPlayingContractIsThePinnedSetPlusAiring()
+        {
+            var expected = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "title", "artist", "startedAt", "durationMs", "listeners", "dj", "djAvatarUrl",
+                "show", "upNext", "artworkUrl", "airing", "state", "kind",
+            };
 
-        [Fact(Skip = "pending T366 (STORY-380 AC5)")]
-        public void TheThumbsTwoOhTwoBodyIsThePinnedConstant() => Assert.Fail("pending T366");
+            Assert.True(expected.SetEquals(arc.NowPlayingPropertyNames),
+                $"expected exactly {{{string.Join(", ", expected)}}}, got {{{string.Join(", ", arc.NowPlayingPropertyNames)}}}");
+        }
+
+        [Fact]
+        public void TheThumbsTwoOhTwoBodyIsThePinnedConstant() =>
+            Assert.Equal(
+                JsonSerializer.Serialize(new SpectatorThumbAccepted(), new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+                arc.ThumbsAcceptedBodyText);
     }
 
     // ---------------------------------------------------------------------
@@ -179,5 +242,139 @@ public static class FeatureTheKnobsAndTheLiveSwitch
 
             Assert.Throws<OptionsValidationException>(() => factory.Services);
         }
+    }
+}
+
+// ── T366 write-path harness — AC2/AC5's own ephemeral station+library Postgres (the Story366/369
+// EphemeralStationDatabase idiom); GardenerKnobsWebFactory above stays DB-free, unaffected. ────────
+
+[CollectionDefinition(Name)]
+public sealed class ThumbsLiveSwitchCollection : ICollectionFixture<ThumbsLiveSwitchArc>
+{
+    public const string Name = "Story380ThumbsLiveSwitch";
+}
+
+/// <summary>
+/// AC2 + AC5: one logged-in session, one PUT /api/settings flip, one thumb POST, one now-playing
+/// read — all against the SAME running host, proving the Live switch reaches the thumbs surface
+/// with no api restart, and that turning it on changes nothing about either payload's own pinned
+/// shape (SPEC F155.1's disjointness half). Every real POST in this arc runs exactly once, so the
+/// per-IP Thumbs cooldown never trips between steps (unlike ThumbsWriteArc in Story369, which needs
+/// several independent factories for exactly that reason).
+/// </summary>
+public sealed class ThumbsLiveSwitchArc : IAsyncLifetime
+{
+    public HttpStatusCode StatusBeforeSwitch { get; private set; }
+    public HttpStatusCode PutStatus { get; private set; }
+    public HttpStatusCode StatusAfterSwitch { get; private set; }
+    public string ThumbsAcceptedBodyText { get; private set; } = "";
+    public IReadOnlyList<string> NowPlayingPropertyNames { get; private set; } = [];
+
+    public async Task InitializeAsync()
+    {
+        await using var db = await ThumbsLiveSwitchStationDatabase.StartAsync();
+        var mediaId = await GardenerSeedFixtures.InsertMediaRowAsync(db.LibraryConnectionString, "/test/thumbs-live-switch.flac");
+
+        await using var factory = new ThumbsLiveSwitchWebFactory(db);
+        var client = factory.CreateClient();
+
+        // Given Station:Thumbs:Enabled false (the deployment default, left unset below)...
+        var beforeResponse = await client.PostAsJsonAsync(
+            "/spectator/api/thumbs", new { airing = "AAAAAAAAAAAAAAAAAAAAAA", direction = "up" });
+        StatusBeforeSwitch = beforeResponse.StatusCode;
+
+        var login = await client.PostAsJsonAsync(
+            "/api/auth/login", new { password = ThumbsLiveSwitchWebFactory.Password });
+        if (login.StatusCode != HttpStatusCode.NoContent)
+            throw new InvalidOperationException($"login unexpectedly returned {login.StatusCode}");
+
+        // When the REAL PUT /api/settings flips Station:Thumbs:Enabled — the genuine
+        // SettingsController -> StationSettingsStore.WriteAsync path, real Postgres row + reload.
+        var put = await client.PutAsJsonAsync("/api/settings", new[]
+        {
+            new { key = "Station:Thumbs:Enabled", value = "true" },
+        });
+        PutStatus = put.StatusCode;
+
+        // Then the very NEXT thumb post is accepted — same running process, no restart.
+        var sink = factory.Services.GetRequiredService<IStationEventSink>();
+        var resolver = factory.Services.GetRequiredService<IAiringTokenResolver>();
+        var startedAt = DateTimeOffset.Parse("2026-08-01T14:00:00Z");
+        sink.Publish(new TrackAired(mediaId.ToString(), "Live Switch Song", "Live Switch Artist", 0.0, startedAt, 180_000));
+        var token = resolver.Current ?? throw new InvalidOperationException("expected a minted token");
+
+        var afterResponse = await client.PostAsJsonAsync(
+            "/spectator/api/thumbs", new { airing = token, direction = "up" });
+        StatusAfterSwitch = afterResponse.StatusCode;
+        ThumbsAcceptedBodyText = await afterResponse.Content.ReadAsStringAsync();
+
+        // AC5's now-playing half — the pinned property set is unaffected by thumbs being on. The
+        // read needs NowPlayingService's own snapshot (the thumbs POST above never touches it).
+        var store = factory.Services.GetRequiredService<NowPlayingService>();
+        store.Update(SingleStation.IdString, new NowPlayingSnapshot(
+            MediaId: mediaId.ToString(), Title: "Live Switch Song", Artist: "Live Switch Artist",
+            GainDb: 0, StartedAt: startedAt, DurationMs: 180_000, IsDrain: false, Airing: token));
+
+        var nowPlayingResponse = await client.GetAsync("/spectator/api/now-playing");
+        var nowPlayingBody = JsonDocument.Parse(await nowPlayingResponse.Content.ReadAsStringAsync()).RootElement;
+        NowPlayingPropertyNames = nowPlayingBody.EnumerateObject().Select(p => p.Name).ToList();
+    }
+
+    public Task DisposeAsync() => Task.CompletedTask;
+}
+
+/// <summary>This file's own <see cref="EphemeralStationDatabase"/> subclass — supplies only the
+/// compose project-name prefix (the Story366/369 hoist precedent).</summary>
+file sealed class ThumbsLiveSwitchStationDatabase : EphemeralStationDatabase
+{
+    ThumbsLiveSwitchStationDatabase(string project, string composeFile, string libraryConnectionString, string stationConnectionString)
+        : base(project, composeFile, libraryConnectionString, stationConnectionString)
+    {
+    }
+
+    public static async Task<ThumbsLiveSwitchStationDatabase> StartAsync()
+    {
+        var (project, composeFile, library, station) = Provision("genwave-thumbslive");
+        var db = new ThumbsLiveSwitchStationDatabase(project, composeFile, library, station);
+        await db.WaitForSchemaAsync();
+        return db;
+    }
+}
+
+/// <summary>
+/// Boots the real production composition root against a real ephemeral Postgres, with
+/// <c>Station:Thumbs:Enabled</c> deliberately UNSET (the deployment default, false) — AC2's own
+/// "given the switch starts off" precondition; the arc's own PUT /api/settings is what flips it.
+/// </summary>
+file sealed class ThumbsLiveSwitchWebFactory(ThumbsLiveSwitchStationDatabase db) : WebApplicationFactory<Program>
+{
+    internal const string Password = "test-password-story380-live-switch";
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", db.LibraryConnectionString);
+        builder.UseSetting("ConnectionStrings:Station", db.StationConnectionString);
+        builder.UseSetting("Admin:Password", Password);
+        builder.UseSetting("Station:SpectatorMode", "true");
+
+        // The exact four Station:* keys compose.yaml itself overrides in production (Story366/369's
+        // own precedent) — every other Station:* leaf rides appsettings.json's own shipped default.
+        builder.UseSetting("Station:Id", "genwave-1");
+        builder.UseSetting("Station:Name", "GWAV 108.8");
+        builder.UseSetting("Station:Voice", "af_heart");
+        builder.UseSetting("Station:Scope:LibraryIds:0", "1");
+        // gh-#99: every media row this file seeds lands in the DEFAULT library (id 1,
+        // db/01-library.sh's own `library_id ... default 1`) — Station:SafeScope:LibraryIds
+        // defaults to [1] too (appsettings.json), which would silently exclude every one of
+        // them from IThumbStore.RecordAsync as "safe scope" (ThumbWriteResult.Ignored). Point
+        // the safe scope at a library id nothing here ever uses instead (the Story367
+        // RotationNonMusicArc/Story355WebFactory own `safeLibraryId` precedent).
+        builder.UseSetting("Station:SafeScope:LibraryIds:0", "999999");
+
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IHostedService>();
+        });
     }
 }

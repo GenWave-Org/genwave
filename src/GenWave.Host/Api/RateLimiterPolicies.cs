@@ -2,6 +2,7 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
 using GenWave.Host.Auth;
 using GenWave.Host.Options;
+using GenWave.MediaLibrary.Options;
 
 namespace GenWave.Host.Api;
 
@@ -29,18 +30,26 @@ namespace GenWave.Host.Api;
 ///   have absorbed it. Simpler than teaching the limiter about cache hits, and still correct: a
 ///   caller that floods a cached route is still a caller worth throttling.</item>
 ///   <item><see cref="Requests"/> guards <c>POST /spectator/api/requests</c> (SPEC F87.3,
-/// STORY-224, PLAN T87) — the codebase's first public anonymous WRITE endpoint. Two independent
-/// per-IP fixed windows chained with <see cref="RateLimiter.CreateChained(RateLimiter[])"/> so BOTH
-/// must permit: a 1-permit-per-<c>Requests:PerIpCooldownMinutes</c> cooldown window (skipped
-/// entirely when that value is 0 — <see cref="FixedWindowRateLimiterOptions.Window"/> must be
-/// greater than zero, so "0 disables the cooldown" is implemented by omission rather than a
-/// degenerate window) and a <c>Requests:PerIpDailyCap</c>-permit-per-day window. Both windows are
-/// built once per partition key (the first time a source IP is seen) and reused by the framework
-/// for every later request from that IP — same source-IP partitioning (and no-remote-ip fallback)
-/// idiom as <see cref="Login"/>/<see cref="Spectator"/>. <c>Requests</c> is env/compose-only
-/// (<see cref="RequestsOptions"/> is never live-reloaded, matching its own remarks), so it is read
-/// once from <see cref="IConfiguration"/> at registration time rather than through
-/// <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}"/>.</item>
+/// STORY-224, PLAN T87) — the codebase's first public anonymous WRITE endpoint — and
+/// <see cref="Thumbs"/> guards <c>POST /spectator/api/thumbs</c> (SPEC F150.5, STORY-369, PLAN T366)
+/// — the SECOND, one seam over. Both share ONE shape (T366 review LOW-2: the two builders used to be
+/// near-identical copies): <see cref="CreateChainedCooldownAndDailyCap"/> chains a 1-permit cooldown
+/// window with a permit-per-day window via <see cref="RateLimiter.CreateChained(RateLimiter[])"/> so
+/// BOTH must permit, built once per partition key (the first time a source IP is seen) and reused by
+/// the framework for every later request from that IP — same source-IP partitioning (and
+/// no-remote-ip fallback) idiom as <see cref="Login"/>/<see cref="Spectator"/>. A null cooldown
+/// <see cref="TimeSpan"/> skips the cooldown window entirely — <c>Requests</c>'s own
+/// <c>Requests:PerIpCooldownMinutes</c> is 0-disables-it (<see cref="RequestsOptions.PerIpCooldownMinutes"/>'s
+/// own <c>[Range(0, int.MaxValue)]</c>), while <c>Thumbs</c>'s own
+/// <c>Gardener:ThumbCooldownSeconds</c> never reaches null (its <c>[Range(1, 3600)]</c> floor is 1 —
+/// boot fails first, <c>ValidateOnStart</c>), so its cooldown window is unconditionally built.
+/// <see cref="RequestsOptions"/> and <see cref="GardenerOptions"/> are both boot-validated,
+/// env/compose-only, and never live-reloaded (their own remarks) — each read once from
+/// <see cref="IConfiguration"/> at registration time, never through
+/// <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}"/>. <see cref="Thumbs"/>'s
+/// F150.5 PER-LISTENER daily cap is a DIFFERENT budget — like <see cref="Announcements"/>'s own
+/// accepted-rate cap, it is enforced IN <c>SpectatorThumbsController</c>'s own action, not here (a
+/// middleware policy cannot see the listener-cookie identity a request may not carry yet).</item>
 /// </list>
 ///
 /// <para>
@@ -62,6 +71,7 @@ static class RateLimiterPolicies
     public const string Login = "login";
     public const string Spectator = "spectator";
     public const string Requests = "requests";
+    public const string Thumbs = "thumbs";
 
     /// <summary>
     /// Guards EVERY route across the announcements family — <c>POST /api/announcements</c>,
@@ -121,6 +131,11 @@ static class RateLimiterPolicies
         var requestsOptions = configuration.GetSection(RequestsOptions.Section).Get<RequestsOptions>()
             ?? new RequestsOptions();
 
+        // Read once, at registration time — see this type's own <see cref="Thumbs"/> remarks for why
+        // this isn't IOptionsMonitor<GardenerOptions>.
+        var gardenerOptions = configuration.GetSection(GardenerOptions.SectionName).Get<GardenerOptions>()
+            ?? new GardenerOptions();
+
         services.AddRateLimiter(options =>
         {
             // The framework default rejection status is 503 (service unavailable) — SPEC F61.5
@@ -147,9 +162,17 @@ static class RateLimiterPolicies
                     QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                 }));
 
+            var requestsCooldown = requestsOptions.PerIpCooldownMinutes > 0
+                ? TimeSpan.FromMinutes(requestsOptions.PerIpCooldownMinutes)
+                : (TimeSpan?)null;
             options.AddPolicy(Requests, httpContext => RateLimitPartition.Get(
                 partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? NoRemoteIpPartitionKey,
-                factory: _ => CreateCooldownAndDailyCapLimiter(requestsOptions)));
+                factory: _ => CreateChainedCooldownAndDailyCap(requestsCooldown, requestsOptions.PerIpDailyCap)));
+
+            var thumbsCooldown = TimeSpan.FromSeconds(gardenerOptions.ThumbCooldownSeconds);
+            options.AddPolicy(Thumbs, httpContext => RateLimitPartition.Get(
+                partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? NoRemoteIpPartitionKey,
+                factory: _ => CreateChainedCooldownAndDailyCap(thumbsCooldown, gardenerOptions.ThumbDailyCap)));
 
             options.AddPolicy(Announcements, httpContext => RateLimitPartition.GetFixedWindowLimiter(
                 partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? NoRemoteIpPartitionKey,
@@ -166,30 +189,34 @@ static class RateLimiterPolicies
     }
 
     /// <summary>
-    /// One IP's combined cooldown + daily-cap budget (SPEC F87.3) — see <see cref="Requests"/>'s
-    /// own remarks for the chaining rationale.
+    /// One IP's combined cooldown + daily-cap budget — shared by <see cref="Requests"/> (SPEC
+    /// F87.3) and <see cref="Thumbs"/> (SPEC F150.5); see <see cref="Requests"/>'s own remarks for
+    /// the chaining rationale (T366 review LOW-2: this used to be two near-identical builders, one
+    /// per policy). <paramref name="cooldown"/> null skips the cooldown window entirely — the
+    /// "0 disables it" branch each caller's own options class expresses differently (see
+    /// <see cref="Requests"/>'s own remarks for which of the two callers can ever pass null).
     /// </summary>
-    static RateLimiter CreateCooldownAndDailyCapLimiter(RequestsOptions requestsOptions)
+    static RateLimiter CreateChainedCooldownAndDailyCap(TimeSpan? cooldown, int dailyCap)
     {
-        var dailyCap = new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
+        var dailyCapLimiter = new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
         {
-            PermitLimit = requestsOptions.PerIpDailyCap,
+            PermitLimit = dailyCap,
             Window = TimeSpan.FromDays(1),
             QueueLimit = 0,
             QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
         });
 
-        if (requestsOptions.PerIpCooldownMinutes <= 0)
-            return dailyCap;
+        if (cooldown is not { } cooldownWindow)
+            return dailyCapLimiter;
 
-        var cooldown = new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
+        var cooldownLimiter = new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
         {
             PermitLimit = 1,
-            Window = TimeSpan.FromMinutes(requestsOptions.PerIpCooldownMinutes),
+            Window = cooldownWindow,
             QueueLimit = 0,
             QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
         });
 
-        return RateLimiter.CreateChained(cooldown, dailyCap);
+        return RateLimiter.CreateChained(cooldownLimiter, dailyCapLimiter);
     }
 }
