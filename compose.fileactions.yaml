@@ -13,8 +13,9 @@
 # knobs are independent, and the mount is INVISIBLE to the gate that checks the other one:
 # Gardener__FileActions__Enabled=true alone (this file NOT stacked, mount stays :ro) still plans a
 # dry-run to a 200 — the planner does no filesystem write — but the matching confirm fails at
-# EXECUTION (the OS refuses the write; the executor's own outcome is `failed` or `reverted`, never a
-# clean `done`). This file alone (Enabled left false) does nothing either — the endpoint 404s before
+# EXECUTION (the OS refuses the write before anything is written; the executor's own outcome is
+# always `failed` — never `reverted`, there's nothing to revert — and never a clean `done`). This
+# file alone (Enabled left false) does nothing either — the endpoint 404s before
 # the mount would ever matter. Both knobs must be on for a file action to actually complete.
 # =============================================================================
 

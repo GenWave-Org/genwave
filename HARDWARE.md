@@ -83,6 +83,13 @@ notes recorded alongside them.
 | `alloy` (logging profile) | 256 MB cap | — | 🟡 | Single-daemon log-tailing sidecar |
 | `db` / `icecast` / `engine` / `admin_ui` | *(uncapped)* | modest (observed range: 5–130 MB) | 🟡 | No limits configured; none has ever been the memory pressure point |
 
+> 🟢 **The Library Gardener (v5.5.0) adds no Pi risk.** Every rot pass (`dead_file` /
+> `near_duplicate` / `stale_metadata` / `shelf_dust` / `unreachable`) reconciles set-based
+> in SQL against already-scanned catalog rows — no file reads of its own; dead-file evidence
+> comes from the scanner's existing stat pass. File actions (retag/rename/move) are the one
+> opt-in exception (`Gardener__FileActions__Enabled` plus the `compose.fileactions.yaml`
+> read-write mount) and the only Gardener feature that touches media — see DEPLOYMENT.md.
+
 ## 🧠 LLM model floor
 
 **The truth bench — T336, 2026-08-21 → 08-28.** The question (gh-#438): when the DJ named the
