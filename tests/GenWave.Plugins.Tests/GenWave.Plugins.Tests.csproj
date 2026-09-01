@@ -20,7 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- T391 adds: <ProjectReference Include="..\..\src\GenWave.Plugins\GenWave.Plugins.csproj" /> -->
+    <ProjectReference Include="..\..\src\GenWave.Plugins\GenWave.Plugins.csproj" />
     <ProjectReference Include="..\..\src\GenWave.Abstractions\GenWave.Abstractions.csproj" />
   </ItemGroup>
 
