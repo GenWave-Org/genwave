@@ -28,10 +28,19 @@ namespace GenWave.Plugins;
 /// </param>
 /// <param name="AssemblyFileName">
 /// A bare file name — never a path (SPEC F156.2: "a file name, no path separators — reject
-/// otherwise"). <see cref="PluginManifestParser"/> rejects any value containing <c>/</c>, <c>\</c>, or
-/// <c>..</c>; it does not additionally require a <c>.dll</c> extension, since SPEC F156.2 does not rule
-/// that, and requiring it would buy nothing a corrupt or wrong-extension file wouldn't also fail at
-/// load time anyway (the loader's own F156.4 WARN+skip posture, PLAN T392).
+/// otherwise"). <see cref="PluginManifestParser"/> enforces the FULL structural rule (T392 review
+/// carry-forward B — this doc previously named only three of its terms): no <c>/</c> or <c>\</c>
+/// anywhere, no <c>..</c> substring (a traversal shape, whether or not it sits beside a separator),
+/// the value must round-trip unchanged through <see cref="Path.GetFileName(string)"/>, it must not be
+/// the bare string <c>"."</c>, it must carry no leading, trailing, OR EMBEDDED whitespace — so
+/// <c>"My Plugin.dll"</c>, a name a human plugin author might genuinely reach for, is REJECTED, by
+/// design, not an oversight: this field is resolved straight into an on-disk path, never displayed,
+/// and SPEC F156.2 names no exception for an internal space — it must not contain <c>:</c> (the
+/// Windows drive/NTFS-stream separator shape), and it must not contain any character
+/// <see cref="Path.GetInvalidFileNameChars"/> itself names. It does not additionally require a
+/// <c>.dll</c> extension, since SPEC F156.2 does not rule that, and requiring it would buy nothing a
+/// corrupt or wrong-extension file wouldn't also fail at load time anyway (the loader's own F156.4
+/// WARN+skip posture, PLAN T392).
 /// </param>
 /// <param name="EntryType">
 /// The full name of the <c>IGenWavePlugin</c> implementation the loader activates (SPEC F156.2). Only

@@ -127,10 +127,16 @@ public static class PluginManifestParser
     // itself carries — otherwise every fallthrough read below would need a null-forgiving `!`.
     static bool IsBlank([NotNullWhen(false)] string? value) => string.IsNullOrWhiteSpace(value);
 
+    // T392 review carry-forward C (T391 r2): the "or .." arm this line used to carry was dead code,
+    // never the deciding disjunct — ContainsPathSeparatorOrTraversal's own `.Contains("..")` check
+    // above already matches the EXACT string ".." (a string trivially contains itself as a
+    // substring), so short-circuit evaluation means execution never reaches this line still needing
+    // to catch it. "." has no such cover (it contains neither "/", "\\", nor ".."), so that half of
+    // the equality check stays.
     static bool IsInvalidAssemblyFileName(string assemblyFileName) =>
         ContainsPathSeparatorOrTraversal(assemblyFileName)
         || Path.GetFileName(assemblyFileName) != assemblyFileName
-        || assemblyFileName is "." or ".."
+        || assemblyFileName is "."
         || assemblyFileName.Any(char.IsWhiteSpace)
         || assemblyFileName.Contains(':')
         || assemblyFileName.IndexOfAny(InvalidFileNameChars) >= 0;
@@ -144,16 +150,10 @@ public static class PluginManifestParser
     // ALL of them through here, rather than sanitizing individual call sites, means a future reject
     // reason can never forget the neutralization step. Strips, never rejects on, a control character:
     // a reject reason must still name the field (SPEC F156.2's "one WARN names the field"), so a
-    // crafted value earns a single-line Detail, not a swapped-out generic one.
+    // crafted value earns a single-line Detail, not a swapped-out generic one. The actual stripping
+    // moved to ControlCharacterNeutralizer at T392, so PluginLoadReport's own Detail gets the
+    // identical treatment through the same code, not a second hand-rolled copy (that type's own
+    // remarks).
     static PluginManifestParseResult Reject(PluginManifestField field, string detail) =>
-        PluginManifestParseResult.Failure(field, NeutralizeControlCharacters(detail));
-
-    // Widened past CR/LF alone (GenWave.Core.Logging.LogSanitize's own choice) to every control
-    // character: a raw manifest value or JsonException.Message could carry any of them, and "strip,
-    // don't replace" is that same house idiom's own choice, applied here rather than a reference to it
-    // — GenWave.Plugins deliberately stays off GenWave.Core (see the csproj's own reference-rationale
-    // comment), so this is a small, self-contained floor, not a substitute for the caller's own
-    // LogSanitize.Strip pass before an actual log line (PluginManifestParseResult.Detail's own remarks).
-    static string NeutralizeControlCharacters(string value) =>
-        value.Any(char.IsControl) ? new string(value.Where(c => !char.IsControl(c)).ToArray()) : value;
+        PluginManifestParseResult.Failure(field, ControlCharacterNeutralizer.Strip(detail));
 }
