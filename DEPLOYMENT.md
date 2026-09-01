@@ -276,7 +276,7 @@ sanctioned launch/upgrade path — `launch.sh` bare assumes the source-build dev
 Under the hood `--pinned` runs, against `compose.yaml` + `compose.pinned.yaml` +
 `compose.demo.yaml`, never builds, and is **staged** (SPEC F136): the on-air core comes up
 first, the heavyweights and profile extras converge afterwards. `./launch.sh --pinned --dry-run`
-prints exactly this plan for your file set:
+prints the full plan for your file set — its heart is:
 
 ```bash
 C="docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml"
@@ -289,6 +289,9 @@ $C up -d --remove-orphans                # converge every remaining pin + profil
 docker image prune -af --filter "until=168h"   # success-path hygiene (gh-#441)
 docker builder prune -af
 ```
+
+(The dry-run also shows the bookkeeping between these lines: the db healthcheck poll, the
+`COMPOSE_FILE` record into `.env` (gh-#309), a final `ps`, and the pinned-tag report.)
 
 (`--piper-only` runs the flat, unstaged form of the same steps — there are no heavyweights
 left to defer.) Exit codes: `0` fully converged · `2` bad invocation · `3` preflight/stage-1
@@ -318,8 +321,10 @@ compose plugin, `.env` secrets present and non-placeholder) and every failure ex
 how to proceed. On the pinned flow a failed pull or migration explicitly leaves the
 running stack alone (exit `3`), and a part-way stage-2 `up` is *not* rolled back — whatever is
 still broadcasting keeps broadcasting and the run exits `4` with the converge command named.
-`SKIP_PREFLIGHT=1` bypasses the checks (⚠️ it also reaches `build.sh`'s own test run if you
-export it — gh-#631).
+`SKIP_PREFLIGHT=1` bypasses the checks in both `launch.sh` and `build.sh` — needed on dev
+relaunches until gh-#631 lands (the port check doesn't recognise the stack's own published
+ports when docker collapses them into a range). It never touches tests: `SKIP_TESTS=1` is
+the separate knob that skips `build.sh`'s pre-image test run.
 
 Combine with `--with` to also activate compose profiles (e.g. `logging`, `tunnel`) on the
 same launch: `./launch.sh --pinned --with logging,tunnel` merges them into whatever
@@ -464,7 +469,11 @@ Owner announcements let the DJ work a line into the next break (in character, or
 a durable unit of content (`station.announcement`, db/40) with a visible lifecycle; nothing the
 pipeline touches is ever deleted.
 
-**Deploy knobs — env/compose only, not live settings** (`Announcements__*`, boot-validated):
+**Deploy knobs — env/compose only, not live settings** (`Announcements__*`, boot-validated).
+⚠️ *Env/compose-only* here (and for every `Gardener__*` knob below) means the **`api`
+service's `environment:` block** — on a pinned appliance, a small local overlay file. The
+root `.env` alone never reaches a container unless `compose.yaml` interpolates that exact
+variable, and none of these are interpolated:
 
 | Key | Default | What it bounds |
 |---|:---:|---|
@@ -524,8 +533,8 @@ the authored-segments volume) — a deployment that relocates that volume must u
 `Station:Safe:AuthoredRoot` together. Independently, every push now checks the file exists
 first and declines with a WARN if not, and a chain that was pushed but never aired is surfaced
 rather than silent. Per-service memory fences for every container (kokoro 4 GB, piper 768 MB,
-alloy 256 MB, cloudflared 128 MB, dockerproxy 64 MB) live in HARDWARE.md's "What each service
-needs" table — one source, not two.
+alloy 256 MB, cloudflared 128 MB, dockerproxy 64 MB, and — demo overlay only — ollama 1 CPU /
+6 GB) live in HARDWARE.md's "What each service needs" table — one source, not two.
 
 ---
 
@@ -533,9 +542,15 @@ needs" table — one source, not two.
 
 The Gardener is a housekeeping `BackgroundService` that tends the catalog on a timer:
 five rot passes (`dead_file` / `near_duplicate` / `stale_metadata` / `shelf_dust` /
-`unreachable`) reconcile findings into a queue an operator works from the Gardener page,
-and a listener-thumbs signal nudges rotation toward what actually gets played. Every knob
-below is `Gardener__*` — env/compose-only, never a live setting — **except**
+`unreachable`) reconcile findings into a queue an operator works from the Gardener page
+(since v5.5.1: five badged kind tabs, server-paged `?tab=&page=&limit=` — default 25,
+picker 25/50/100/250, near-duplicates always paged by whole cluster), and a
+listener-thumbs signal nudges rotation toward what actually gets played. Schema is
+**db/41** (`library.media_rotation`, `media_thumb`, `rot_finding`, `file_action` + the
+`rot_kind`/`rot_state` enums) — `migrate.sh` applies it on the way up, so a `--pinned`
+upgrade runs one migration here. Every knob below is `Gardener__*` — env/compose-only
+(the api `environment:` block, per the House Voice note above), never a live setting —
+**except**
 `Station:Thumbs:Enabled`, the one Live switch (see below). The ten top-level knobs are
 boot-validated (`ValidateDataAnnotations()`): an out-of-range value refuses to start. The
 two `FileActions__*` rows are NOT — `DataAnnotations` validation doesn't recurse into a
@@ -559,7 +574,8 @@ range column for those two rows is documentation only.
 | `Gardener__FileActions__GateTimeoutSeconds` | 30 | 1–300 | How long a file action waits to enter the shared scan gate before reporting Busy |
 
 **`Station:Thumbs:Enabled`** — a *live* allowlisted setting: `PUT` it through the settings
-API/UI, or seed it via `Station__Thumbs__Enabled` at boot. Default off — disabled means
+API/UI, or seed it at boot via `Station__Thumbs__Enabled` in the api service's
+`environment:` block. Default off — disabled means
 `POST /spectator/api/thumbs` 404s and the spectator page shows no thumbs controls at all,
 never a distinguishable "thumbs are closed" response. Takes effect on the very next
 request, no `api` restart.
@@ -571,8 +587,12 @@ File actions (retag / rename / move — **there is no delete verb**) are OFF by 
 Opting in needs both halves:
 
 ```bash
-# .env: Gardener__FileActions__Enabled=true
-docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml -f compose.fileactions.yaml up -d
+# knob 1 — the setting, in the api service's environment: block (the root .env alone
+#          never reaches the container — on a pinned box use a small local overlay):
+#          services: { api: { environment: { Gardener__FileActions__Enabled: "true" } } }
+# knob 2 — the mount, via the shipped overlay:
+docker compose -f compose.yaml -f compose.pinned.yaml -f compose.demo.yaml \
+  -f compose.local.yaml -f compose.fileactions.yaml up -d
 ```
 
 `launch.sh` has no flag for extra compose files today — run the full `-f` chain above
@@ -712,7 +732,7 @@ Two Access application shapes cover this stack's two audiences:
   / `LOKI_ACCESS_CLIENT_SECRET` env vars — alongside **`LOKI_PUSH_URL`** (the push target;
   alloy refuses to start, exit 1, while it is empty — SPEC F78.4) and the label pair
   `ALLOY_STATION_LABEL` / `ALLOY_ENV_LABEL` (`compose.yaml`'s `alloy` service; none of the
-  four are in `.env.example` — add them to `.env` when you enable the profile; header
+  five are in `.env.example` — add them to `.env` when you enable the profile; header
   attachment lives in `observability/alloy/config.alloy`; label contract in
   `observability/LABELS.md`).
 
