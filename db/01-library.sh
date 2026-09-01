@@ -222,9 +222,14 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	-- selects on it, and the Orchestrator's top-of-hour StationId drain queries it directly --
 	-- playout and the /internal/safe-track predicate still never read it (that remains F110.4:
 	-- only StationId gained a selection role this cycle, no other kind).
+	--
+	-- 'ad' (gh-#380, SPEC F159.1, PLAN T389): db/42-ads-migration.sh's fresh-init mirror of its own
+	-- CHECK widen -- an authored spot in the seeded 'ads' library stamps this kind so the F158.4
+	-- rotation fence (PlayablePredicate's `imaging_kind is null`) makes it structurally invisible to
+	-- music rotation the same way every other imaging kind already is.
 	alter table library.media
 	  add column imaging_kind text
-	    check (imaging_kind is null or imaging_kind in ('liner', 'station_id', 'jingle', 'promo'));
+	    check (imaging_kind is null or imaging_kind in ('liner', 'station_id', 'jingle', 'promo', 'ad'));
 
 	-- show_id (SPEC F119.4, STORY-305/STORY-310, PLAN T238): scopes an authored imaging row to a
 	-- station.show. Crosses the db/22 schema-role boundary (station_svc has no grant into library) the
