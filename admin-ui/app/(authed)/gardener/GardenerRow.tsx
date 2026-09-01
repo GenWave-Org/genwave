@@ -20,7 +20,7 @@ interface GardenerRowProps {
   kind: GardenerKind;
   finding: GardenerFindingDto;
   /** Re-fetch trigger — called after any successful verb (SPEC F153.10: re-fetch, never a local
-   * patch — see GardenerView's own remarks). */
+   * patch — see GardenerSection's own remarks; PLAN T387 wires this to `router.refresh()`). */
   onChanged: () => void;
   /** A near-duplicate group's own "Keep this one" button (DuplicateGroupCard's slot) — absent for
    * every other kind, and for a duplicate group's own row when rendered standalone would never

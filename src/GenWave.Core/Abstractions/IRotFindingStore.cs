@@ -191,38 +191,93 @@ public interface IRotFindingStore
         RotKind? kind, RotState? state, CancellationToken ct, int limit = 200, int offset = 0);
 
     /// <summary>
-    /// <see cref="ListAsync"/>'s own filters and ordering (newest-opened first — a match kind, then
-    /// <see cref="RotFinding.GroupKey"/> so a <see cref="RotKind.NearDuplicate"/> pair's own rows sit
-    /// together, then <see cref="RotFinding.OpenedAt"/> descending), joined out to the
+    /// <see cref="ListAsync"/>'s own filters, joined out to the
     /// <c>library.media</c>/<c>library.media_rotation</c>/<c>library.media_rating</c> row each finding
-    /// is about — T377's admin surface (SPEC F153.9, STORY-374 AC7) reuses this same paging AND the
-    /// SAME callee-enforced floor <see cref="ListAsync"/>'s own remarks describe, rather than adding
-    /// its own bound.
+    /// is about — T377's admin surface (SPEC F153.9, STORY-374 AC7), extended at T385 (SPEC F153.9
+    /// rider 2026-08-31; STORY-382 AC6, STORY-383) to return <see cref="RotFindingPage.Total"/> of
+    /// matching paging units alongside the page, computed against the SAME <paramref name="kind"/>/
+    /// <paramref name="state"/> filter — EXACT for a kind-scoped read; <see langword="null"/> (never
+    /// derived from a second query, T386 review — the type itself now carries "not computed") for the
+    /// kind-less read — see below for exactly which.
     ///
     /// <para>
-    /// <b>Rows are paged FLAT, before <c>GardenerController</c> ever groups them by kind (T377
-    /// review MED).</b> The <c>limit</c>/<c>offset</c> window applies to the ROW sequence this method
-    /// returns, not to "N groups" or "N findings per kind" — a caller paging with a small
-    /// <paramref name="limit"/> can see a <see cref="RotKind.NearDuplicate"/> group split across a
-    /// page boundary (its own rows are adjacent within one page thanks to the <c>group_key</c>
-    /// ordering above, but a page edge can still fall inside a group). <c>GardenerController</c>'s
-    /// own default is 200, ceiling 1000 (<see cref="ListAsync"/>'s own bound) — the admin queue is
-    /// small enough in practice that a caller wanting the WHOLE thing in one page (T378's own review
-    /// queue) simply passes <c>limit=1000</c>. Per-kind OPEN totals are <see cref="CountOpenByKindAsync"/>'s
-    /// own job (surfaced on <c>GET /api/status</c>) — a page of THIS method's own result is never the
-    /// right place to derive a total count from, since it is bounded by construction.
+    /// <b>The kind-LESS read (<paramref name="kind"/> <see langword="null"/>) keeps T377's exact row
+    /// shape, verbatim (regression pin) — but <see cref="RotFindingPage.Total"/> is now
+    /// <see langword="null"/></b> (T385 review LOW-2; made an actual <see langword="null"/> rather than
+    /// a same-as-<see cref="RotFindingPage.Items"/>-count stand-in at T386 review). Rows page FLAT, in
+    /// <c>kind, group_key nulls last, opened_at desc, id</c> order, BEFORE <c>GardenerController</c>
+    /// ever groups them by kind — a caller paging with a small <paramref name="limit"/> can still see a
+    /// <see cref="RotKind.NearDuplicate"/> group split across a page boundary here (its own rows are
+    /// adjacent within one page thanks to the <c>group_key</c> ordering, but a page edge can still fall
+    /// inside a group). No second query ever runs to compute a true matching row count across every
+    /// kind for this shape. <c>GardenerController</c> puts <see cref="RotFindingPage.Total"/> on the
+    /// wire as <c>total</c> exactly when it is non-null (T386) — a kind-less call's response therefore
+    /// carries no <c>total</c> member at all (T377's own pinned response shape carries no <c>count</c>
+    /// field either, STORY-382 AC8).
     /// </para>
     ///
     /// <para>
-    /// T377 review LOW-2: the <c>order by</c> behind this method is NOT index-covered —
-    /// <c>group_key</c> sits mid-key (between <c>kind</c> and <c>opened_at</c>), and no index on
-    /// <c>library.rot_finding</c> leads with it, so Postgres sorts the whole filtered join result
-    /// before applying <c>LIMIT</c> rather than walking an already-ordered index. The bound above is
-    /// what keeps that sort cheap regardless of table size — see
-    /// <c>Garden.RotFindingRepository.ListWithMediaAsync</c>'s own remarks for the query itself.
+    /// <b>A kind-scoped read (<paramref name="kind"/> non-<see langword="null"/>) pages WITHIN that
+    /// kind, and <see cref="RotFindingPage.Total"/> IS the exact matching count.</b> For every kind
+    /// except <see cref="RotKind.NearDuplicate"/>, this is the SAME flat row paging, narrowed by
+    /// <c>kind</c> — <see cref="RotFindingPage.Total"/> is the exact matching row count. For
+    /// <see cref="RotKind.NearDuplicate"/>, the PAGING UNIT is the GROUP: <paramref name="limit"/>/
+    /// <paramref name="offset"/> count DISTINCT <c>group_key</c>s, ordered ascending (stable across
+    /// pages), and <see cref="RotFindingPage.Items"/> carries EVERY member row of every SELECTED group
+    /// — a page can never hold a partial group, so a caller acting on a whole cluster (Keep-this-one)
+    /// never sees a truncated one. Row order within a near-duplicate page stays <c>group_key asc,
+    /// opened_at desc, id</c> — the SAME relative order the flat kind-scoped shape's own <c>group_key,
+    /// opened_at desc, id</c> tail gives a kind already narrowed to one value, so
+    /// <c>GardenerController</c>'s own grouping-by-<c>group_key</c> logic keeps working unchanged
+    /// either way. <see cref="RotFindingPage.Total"/> here is the exact count of DISTINCT matching
+    /// <c>group_key</c>s, never the row count of the returned page.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>RULED (T385 review HIGH-1): for the <see cref="RotKind.NearDuplicate"/> group-paged shape,
+    /// <paramref name="state"/> scopes which GROUPS qualify, never which MEMBER rows render.</b> A
+    /// group qualifies the moment ANY ONE of its members matches <c>kind = near_duplicate</c> +
+    /// <paramref name="state"/>; once a group qualifies, ALL of its member rows render in
+    /// <see cref="RotFindingPage.Items"/> regardless of each member's own individual state — the
+    /// whole-cluster contract above ("a page can never hold a partial group") is unconditional, per SPEC
+    /// F153.9 rider's own binding text: "the response returns every member row of every selected
+    /// group". A group where NO member matches <paramref name="state"/> (every member dismissed, under
+    /// <c>state=open</c>) does not qualify at all — it consumes no page slot and does not count into
+    /// <see cref="RotFindingPage.Total"/>.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>RULED (round-2 review HIGH-2): a RESOLVED member row never renders inside its group, even
+    /// though its own <c>group_key</c> survives a resolve untouched.</b> A near-duplicate member that
+    /// left <c>library.find_near_duplicates</c> on its own (an operator retagged it; it is genuinely no
+    /// longer a duplicate, still eligible, still in rotation) must not keep appearing inside its old
+    /// group — a caller's Keep-this-one bulk write would otherwise pull that distinct, in-rotation track
+    /// out of rotation. <b>dismissed = the operator closed the finding while the media is still a
+    /// duplicate → render; resolved = the system closed it because the media is no longer a duplicate →
+    /// don't render.</b> This exclusion is member-side only — it never changes which GROUPS qualify
+    /// above.
+    /// </para>
+    ///
+    /// <para>
+    /// T385 review MED-4: the shared <c>ClampPaging</c> cap (1000, see <c>Garden.RotFindingRepository</c>'s
+    /// own remarks) counts ROWS for every kind (and the kind-less read) but counts GROUPS for
+    /// <see cref="RotKind.NearDuplicate"/> — <paramref name="limit"/> there bounds the number of
+    /// DISTINCT <c>group_key</c>s, so the row envelope for that page is at most 1000 groups × each
+    /// group's own member count (typically 2–5), never a flat 1000-row cap; a per-row cap would force a
+    /// partial group onto a page, which the whole-cluster contract above forbids.
+    /// </para>
+    ///
+    /// <para>
+    /// T377 review LOW-2 (unaffected by T385): the flat shape's own <c>order by</c> is NOT
+    /// index-covered — <c>group_key</c> sits mid-key (between <c>kind</c> and <c>opened_at</c>), and
+    /// no index on <c>library.rot_finding</c> leads with it, so Postgres sorts the whole filtered join
+    /// result before applying <c>LIMIT</c> rather than walking an already-ordered index. The
+    /// <see cref="ListAsync"/> bound (<c>ClampPaging</c>'s own 1000-row cap) is what keeps that sort
+    /// cheap regardless of table size — see <c>Garden.RotFindingRepository.ListWithMediaAsync</c>'s
+    /// own remarks for the query text itself.
     /// </para>
     /// </summary>
-    Task<IReadOnlyList<RotFindingWithMedia>> ListWithMediaAsync(
+    Task<RotFindingPage> ListWithMediaAsync(
         RotKind? kind, RotState? state, int limit, int offset, CancellationToken ct);
 
     /// <summary>

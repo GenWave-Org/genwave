@@ -47,7 +47,7 @@ sealed class FakeRotFindingStore : IRotFindingStore
         RotKind? kind, RotState? state, CancellationToken ct, int limit = 200, int offset = 0) =>
         throw new NotSupportedException("unused by this double's current callers");
 
-    public Task<IReadOnlyList<RotFindingWithMedia>> ListWithMediaAsync(
+    public Task<RotFindingPage> ListWithMediaAsync(
         RotKind? kind, RotState? state, int limit, int offset, CancellationToken ct) =>
         throw new NotSupportedException("unused by this double's current callers");
 }
