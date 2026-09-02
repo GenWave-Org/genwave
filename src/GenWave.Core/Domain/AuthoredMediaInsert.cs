@@ -54,6 +54,15 @@ namespace GenWave.Core.Domain;
 /// Dean, 2026-08-10: a deliberate product call, not just builder judgment); widening to another
 /// kind is additive once that kind has a scoped consumer, same as this one did.
 /// </param>
+/// <param name="Eligible">
+/// The row's <c>eligible</c> column (SPEC F161.3, STORY-391, PLAN T401). Defaults
+/// <see langword="true"/> — every pre-F161 caller (<c>SafeSegmentAuthor</c>) keeps landing
+/// immediately airable, zero behavior change. A caller whose OWN bookkeeping is not yet consistent
+/// with this insert (the ad-spot two-round-trip: <c>station.ad_spot</c> lives behind a separate
+/// db/22 role this seam never crosses) passes <see langword="false"/> instead, and later calls
+/// <see cref="Abstractions.IAuthoredCatalogWriter.SetEligibleAsync"/> once that confirmation lands
+/// — see that method's own remarks for the full ordering and the orphan it exists to prevent.
+/// </param>
 public sealed record AuthoredMediaInsert(
     string Path,
     string Format,
@@ -69,4 +78,5 @@ public sealed record AuthoredMediaInsert(
     short? Channels,
     int? BitrateKbps,
     ImagingKind Kind = ImagingKind.Liner,
-    long? ShowId = null);
+    long? ShowId = null,
+    bool Eligible = true);

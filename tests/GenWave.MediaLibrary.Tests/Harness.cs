@@ -396,7 +396,8 @@ static class Harness
         CuePoints? cue = null,
         EnergyPoints? energy = null,
         ImagingKind kind = ImagingKind.Liner,
-        long? showId = null) =>
+        long? showId = null,
+        bool eligible = true) =>
         new(
             Path: path ?? "/authored/probe.wav",
             Format: "wav",
@@ -412,7 +413,18 @@ static class Harness
             Channels: 2,
             BitrateKbps: 1_000,
             Kind: kind,
-            ShowId: showId);
+            ShowId: showId,
+            Eligible: eligible);
+
+    /// <summary>SPEC F161.3, STORY-391, PLAN T401 review (the T362 loop law — new SQL earns its own
+    /// live-Postgres read): the raw <c>eligible</c> column for a row, straight off Postgres, never
+    /// through <see cref="MediaRepository"/>'s own read projections.</summary>
+    public static async Task<bool> EligibleOfAsync(DatabaseFixture f, long id)
+    {
+        await using var conn = await f.DataSource.OpenConnectionAsync();
+        return await conn.ExecuteScalarAsync<bool>(
+            "select eligible from library.media where id = @id", new { id });
+    }
 
     public static async Task<(double? IntegratedLufs, double? TruePeakDbtp, bool? Measurable,
         double? CueInSec, double? CueOutSec, double? IntroEnergy, double? OutroEnergy)>

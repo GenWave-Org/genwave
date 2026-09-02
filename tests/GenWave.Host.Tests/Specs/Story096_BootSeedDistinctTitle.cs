@@ -165,6 +165,8 @@ file sealed class RecordingCatalogWriter : IAuthoredCatalogWriter
         LastInsert = insert;
         return Task.FromResult(NextId);
     }
+
+    public Task<bool> SetEligibleAsync(long mediaId, bool eligible, CancellationToken ct) => Task.FromResult(true);
 }
 
 /// <summary><see cref="ILibraryRepository"/> stub that only knows the given ids — enough for

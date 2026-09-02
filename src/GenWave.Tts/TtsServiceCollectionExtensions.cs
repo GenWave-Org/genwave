@@ -126,6 +126,20 @@ public static class TtsServiceCollectionExtensions
         // the first (a LATER task).
         services.AddSingleton<CrosstalkAssembler>();
 
+        // The widened cast-render authoring tail (SPEC F161.2, F161.3; STORY-391; PLAN T401) — the
+        // SafeSegmentAuthor/ISafeSegmentAuthor precedent immediately above generalized for a 1-3
+        // voice cast and a caller-confirmed eligibility flip: registered behind ICastSegmentAuthor
+        // too (T401 review F1) so GenWave.Ads' AdRenderService (this seam's one caller, across the
+        // project boundary) can be exercised in unit tests with a fake, the exact reason
+        // ISafeSegmentAuthor exists one sibling over. A plain singleton with zero eager I/O in its
+        // constructor (Story125's zero-I/O invariant): CrosstalkAssembler/IAuthoredCatalogWriter/
+        // ILogger are each already cheap seams. Never referenced FROM this project (GenWave.Tts must
+        // never reference GenWave.Ads, the AdScriptWriter/AdScriptValidator precedent above already
+        // documents why) — only resolved BY it, through the Host composition root.
+        services
+            .AddSingleton<CastSegmentAuthor>()
+            .AddSingleton<ICastSegmentAuthor>(sp => sp.GetRequiredService<CastSegmentAuthor>());
+
         // Ad spot script writer (SPEC F160.1, F160.2, STORY-390, PLAN T400) — needs no options
         // binding of its own: every live value AdScriptWriter's prompt/generation-cap math reads
         // (SpotSeconds, Posture, MaxLineChars, ToleranceRatio) arrives per-call on AdScriptWriteRequest,

@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **114 seams across 7 projects.**
+> **115 seams across 7 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -176,7 +176,7 @@
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |
 
-## GenWave.Tts (14 seams)
+## GenWave.Tts (15 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -188,6 +188,7 @@
 | `GenWave.Core.Abstractions.ITtsSynthesizer` | `GenWave.Tts.NormalizingTtsSynthesizer` | Singleton | — |
 | `GenWave.Core.Abstractions.ITtsVoiceLister` | `GenWave.Tts.CachedVoiceLister` | Singleton | — |
 | `GenWave.Core.Abstractions.IVerbatimSegmentRenderer` | `GenWave.Tts.TtsSegmentSource` | Singleton | — |
+| `GenWave.Tts.ICastSegmentAuthor` | `GenWave.Tts.CastSegmentAuthor` | Singleton | — |
 | `GenWave.Tts.IDegradationModeReader` | `GenWave.Tts.DegradationController` | Singleton | — |
 | `GenWave.Tts.IDependencyHealth` | `GenWave.Tts.DependencyHealthStore` | Singleton | — |
 | `GenWave.Tts.IDependencyProbe` | `GenWave.Tts.PiperHealthProbe` | Singleton | also registered: `GenWave.Tts.OllamaHealthProbe` (GenWave.Tts), `GenWave.Tts.KokoroHealthProbe` (GenWave.Tts) |

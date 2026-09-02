@@ -57,11 +57,24 @@ public static class AdsServiceCollectionExtensions
         // something it can enforce internally.
         services.AddSingleton<IAdSpotSource, LibraryAdSpotSource>();
 
+        // Registered as a singleton VALUE (not resolved as a service) so AdSpotPipeline's own factory
+        // just below and AdRenderService's DI-injected ctor param (SPEC F161.2, PLAN T401) share the
+        // SAME resolved roots rather than each re-reading IConfiguration independently.
         var locatorRoots = AdSpotLocatorRoots.FromConfiguration(configuration);
+        services.AddSingleton(locatorRoots);
+
         services.AddSingleton(sp => new AdSpotPipeline(
             sp.GetServices<IAdSpotSource>(),
             locatorRoots,
             sp.GetRequiredService<ILogger<AdSpotPipeline>>()));
+
+        // The render seam (SPEC F161.1-F161.3; STORY-391; PLAN T401) — a plain singleton with zero
+        // eager I/O in its constructor (Story125's zero-I/O invariant): every dependency here is
+        // itself a cheap seam (CastSegmentAuthor, the Core store/lookup/repository abstractions,
+        // options, a logger). T402's AdSpotWorker (a LATER task, a BackgroundService) is this seam's
+        // one caller — it claims a spot via IAdSpotStore.ClaimNextApprovedAsync, then calls
+        // AdRenderService.RenderAsync with what it claimed; nothing resolves this seam yet.
+        services.AddSingleton<AdRenderService>();
 
         // PLAN T397 — the drain seam: overrides AddGenWaveOrchestration's own
         // TryAddSingleton<IAdSpotVend>(NoOpAdSpotVend.Instance) default (the override-after-the-
