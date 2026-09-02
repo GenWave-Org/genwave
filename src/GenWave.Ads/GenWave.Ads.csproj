@@ -24,4 +24,9 @@
   <ItemGroup>
     <InternalsVisibleTo Include="GenWave.Ads.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- PLAN T399: AdBrandBlocklist/AdProfanityList (SPEC F160.3) — "the list ships embedded in
+         GenWave.Ads, is data not config, and grows by PR". -->
+    <EmbeddedResource Include="Data\*.txt" />
+  </ItemGroup>
 </Project>
