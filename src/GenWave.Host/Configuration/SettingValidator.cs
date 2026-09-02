@@ -892,6 +892,23 @@ public sealed partial class SettingValidator
     /// — <c>kokoro</c> or <c>piper</c> (also case-insensitive). An empty object, or a blank value,
     /// is legal — "no per-kind overrides configured", identical to pre-feature routing (F70.3's
     /// empty-map contract).
+    ///
+    /// <para>
+    /// <b>Document-accept ruling for <see cref="SegmentKind.Ad"/> (PLAN T396, T390 review carry-
+    /// forward 3).</b> <c>{"Ad":"piper"}</c> validates green here — deliberately NOT special-cased
+    /// to reject it, unlike <c>GenWave.Tts.TtsEngineByKindProvider.Build</c>, which DOES reject it
+    /// (that class's own remarks carry the full ruling). This method's one job is JSON-shape/enum-
+    /// membership validation — "is this key a real <see cref="SegmentKind"/> name and this value a
+    /// real engine" — never "does this kind currently have a live per-kind TTS consumer", a domain
+    /// fact only <c>TtsEngineByKindProvider</c> (the actual reader) knows. Coupling THIS validator to
+    /// that fact would coincidentally still be truthful today, but is the wrong layer for it: it
+    /// would need updating every time a FUTURE <see cref="SegmentKind"/> similarly opts out of
+    /// per-kind TTS routing, purely to keep accepting a config value that is genuinely, harmlessly
+    /// inert — the settings-shape check and the render-routing check are two different concerns that
+    /// happen to read the same JSON blob. The provider's own WARN log is the operator's real signal;
+    /// this validator staying generic is what keeps it truthful for every OTHER kind without special
+    /// cases.
+    /// </para>
     /// </summary>
     static bool IsValidEngineByKindMap(string v)
     {

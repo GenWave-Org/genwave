@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- PLAN T396: the ads seam (AdSpotPipeline, LibraryAdSpotSource, the boot seeder) needs
+         Hosting (BackgroundService), Options (bind+validate AdsOptions), DI (AddGenWaveAds),
+         Logging, and Configuration — all from the shared framework, unpinned, the same shape
+         GenWave.MediaLibrary's/GenWave.Tts's own FrameworkReference comments already document.
+         This project never references Npgsql/Dapper (L2 confinement) or any Microsoft.AspNetCore.*
+         type directly, so it stays an L1 framework-free inner project despite the FrameworkReference
+         — L1's own detector reads the compiled assembly's DIRECT reference table, which only grows
+         an entry when code actually uses a type from it (see
+         AssemblyReferenceScan's remarks in GenWave.Architecture.Tests). LibraryAdSpotSource reaches
+         the catalog only through IMediaCatalog/ILibraryRepository/IAdminLibraryWrite
+         (GenWave.Core.Abstractions) — GenWave.MediaLibrary owns the one Postgres-backed
+         implementation of each, wired in at Program.cs (T397), never referenced from here. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\GenWave.Core\GenWave.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="GenWave.Ads.Tests" />
+  </ItemGroup>
+</Project>

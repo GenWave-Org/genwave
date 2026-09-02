@@ -73,6 +73,29 @@ public sealed class TtsEngineByKindProvider : IDisposable
                     continue;
                 }
 
+                // PLAN T396 ruling (SPEC F158.3 — "no render at air time, ever"; T390 review carry-
+                // forward 3): SegmentKind.Ad is a real, defined name (F158.1's Abstractions append),
+                // so IsDefinedSegmentKindName above legally accepts the JSON key — and
+                // SettingValidator.IsValidEngineByKindMap accepts it too (that check's own remarks
+                // pin why it stays generic). But an ad spot NEVER reaches this router's per-kind
+                // routing at all: it renders OFFLINE, through the widened crosstalk-mixer assembler
+                // (PLAN T401), never through FallbackTtsSynthesizer. An operator-set "Ad" override
+                // would therefore sit here FOREVER, accepted and silently never consulted — worse
+                // than the unknown-kind WARN just above, which at least tells the operator their key
+                // was rejected outright. This provider is the one place that actually KNOWS whether a
+                // kind has a live per-kind TTS consumer, so it is the one place that rejects; teaching
+                // the generic, shape-only settings validator this same domain fact would mean every
+                // future SegmentKind that opts out of per-kind TTS routing needs a SettingValidator
+                // edit just to keep accepting a config value that is genuinely, harmlessly inert.
+                if (kind == SegmentKind.Ad)
+                {
+                    logger.LogWarning(
+                        "Tts:EngineByKind entry for '{Kind}' is accepted by settings validation but never " +
+                        "applies — ad spots render offline (SPEC F158.3), never through per-kind TTS " +
+                        "routing; ignoring it", kind);
+                    continue;
+                }
+
                 if (string.IsNullOrWhiteSpace(engine))
                 {
                     logger.LogWarning(

@@ -66,6 +66,19 @@ public static class FeatureImagingNeverAirsAsMusic
             "insert into library.media_rating (media_id, never_play) values (@mediaId, true)", new { mediaId });
     }
 
+    /// <summary>Stamps a row's explicit flag directly (PLAN T396, T395 review carry-forward 1) —
+    /// mirrors Story250_ExplicitPoolExclusion.cs's own WriteEnrichmentAsync-based classification, but
+    /// as a raw update: an authored imaging row (InsertAuthoredAsync) has no enrichment pass of its
+    /// own to route the flag through, so a direct write is the simplest honest way to stamp one
+    /// explicit for this fixture, the same way SetEligibleAsync/SetNeverPlayAsync above already do
+    /// for their own columns.</summary>
+    static async Task SetExplicitAsync(DatabaseFixture db, long mediaId, bool explicitFlag)
+    {
+        await using var conn = await db.DataSource.OpenConnectionAsync();
+        await conn.ExecuteAsync(
+            "update library.media set explicit = @explicitFlag where id = @mediaId", new { mediaId, explicitFlag });
+    }
+
     /// <summary>MediaRotationRepository, wired the SAME way production wires it (own
     /// StationSettingsRepository instance over the fixture's own station connection string) — mirrors
     /// Story371_ThumbsAggregateIsBounded.cs's own RotationRepo helper.</summary>
@@ -253,6 +266,32 @@ public static class FeatureImagingNeverAirsAsMusic
                 var result = await catalog.GetRandomReadyAdSpotAsync(DefaultScope, [], CancellationToken.None);
                 Assert.NotNull(result);
                 Assert.Equal(readyAdId.ToString(), result.MediaId);
+            }
+        }
+
+        [Fact]
+        public async Task AnExplicitMarkedAdRowNeverVendsOnAnEveryoneStation()
+        {
+            // PLAN T395 review carry-forward, RULED: the ads-pool read's ExplicitPredicate() term
+            //   ANDs in exactly like every other pool-predicate query (Story250's own
+            //   ScenarioEveryoneExcludesAtThePool mirror) — an ad read has no dead-air excuse to
+            //   trade it for; null is IAdSpotSource.GetNextSpotAsync's own always-legal answer, so
+            //   excluding an explicit-flagged spot costs nothing but a floor miss (PLAN T396).
+            await db.ResetAsync();
+            var repo = Harness.Repo(db, audiencePosture: new FakeAudiencePostureProvider(AudiencePosture.Everyone));
+
+            var explicitAdId = await InsertReadyImagingAsync(repo, "/fence/ads-pool-explicit.wav", ImagingKind.Ad);
+            await SetExplicitAsync(db, explicitAdId, true);
+
+            var admittedAdId = await InsertReadyImagingAsync(repo, "/fence/ads-pool-admitted.wav", ImagingKind.Ad);
+
+            var catalog = (IMediaCatalog)repo;
+            for (var i = 0; i < 10; i++)
+            {
+                var result = await catalog.GetRandomReadyAdSpotAsync(DefaultScope, [], CancellationToken.None);
+                Assert.NotNull(result);
+                Assert.Equal(admittedAdId.ToString(), result.MediaId);
+                Assert.NotEqual(explicitAdId.ToString(), result.MediaId);
             }
         }
     }

@@ -1,4 +1,13 @@
-// STORY-388 — An ad airs every N units, from whichever source answers first (F158.2/.3/.5 · pending T396/T397)
+// STORY-388 — An ad airs every N units, from whichever source answers first (F158.2/.3/.5 · pending T397)
+//
+// PLAN T396 moved this file's own AC3/AC4/AC6 facts (ScenarioThePipelineOrder, ScenarioAntiRepeat,
+// AThrowingSourceIsWarnSkippedAndTheFloorStillAnswers) to GenWave.Ads.Tests: AdSpotPipeline and
+// LibraryAdSpotSource — the classes those facts exercise — live in GenWave.Ads, which
+// GenWave.Orchestration.Tests does not (and should not) reference. See
+// GenWave.Ads.Tests/Specs/Story388_AdSpotPipeline.cs and
+// GenWave.Ads.Tests/Specs/Story388_LibraryAdSpotSource.cs — the story tag traveled with them, green
+// there. What remains here is PLAN T397's own: the Orchestrator cadence wiring (the deferral, the
+// drain, the KickResolved vend) this pipeline plugs into.
 
 namespace GenWave.Orchestration.Tests.Specs;
 
@@ -33,32 +42,6 @@ public static class FeatureAdCadenceAndPipeline
         }
     }
 
-    public sealed class ScenarioThePipelineOrder
-    {
-        [Fact(Skip = "Pending T396 — see docs/PLAN.md")]
-        public void FirstNonNullWinsInRegistrationOrder()
-        {
-            // Source A (null), source B (spot), floor C (spot): B's spot vends.
-            Assert.Fail("pending T396");
-        }
-
-        [Fact(Skip = "Pending T396 — see docs/PLAN.md")]
-        public void TheLibraryFloorAnswersWhenEveryPluginIsNull()
-        {
-            Assert.Fail("pending T396");
-        }
-    }
-
-    public sealed class ScenarioAntiRepeat
-    {
-        [Fact(Skip = "Pending T396 — see docs/PLAN.md")]
-        public void NoSpotRepeatsInsideTheWindow()
-        {
-            // AntiRepeatWindow=5, six ready spots, six vends: all distinct.
-            Assert.Fail("pending T396");
-        }
-    }
-
     // ---------------------------------------------------------------------
     // SAD PATH
     // ---------------------------------------------------------------------
@@ -76,12 +59,6 @@ public static class FeatureAdCadenceAndPipeline
         {
             // Null answer = a normal day one (F158.3).
             Assert.Fail("pending T397");
-        }
-
-        [Fact(Skip = "Pending T396 — see docs/PLAN.md")]
-        public void AThrowingSourceIsWarnSkippedAndTheFloorStillAnswers()
-        {
-            Assert.Fail("pending T396");
         }
     }
 }
