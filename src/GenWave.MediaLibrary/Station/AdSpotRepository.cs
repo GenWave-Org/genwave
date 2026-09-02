@@ -90,6 +90,16 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
         return ToAdSpot(row);
     }
 
+    /// <summary><see cref="IAdSpotStore.GetByIdAsync"/> — a plain, unguarded read; any state, any
+    /// row.</summary>
+    public async Task<AdSpot?> GetByIdAsync(long id, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<AdSpotRow>(new CommandDefinition(
+            $"{SelectColumns} where id = @id", new { id }, cancellationToken: ct));
+        return row is null ? null : ToAdSpot(row);
+    }
+
     /// <summary><see cref="IAdSpotStore.ApproveAsync"/> — <see cref="AdState.Draft"/> to
     /// <see cref="AdState.Approved"/>, xmin-guarded.</summary>
     public Task<AdSpotTransitionOutcome> ApproveAsync(long id, string expectedVersion, CancellationToken ct) =>
@@ -118,20 +128,80 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
             """,
             new { id, expectedVersion }, id, ct);
 
-    /// <summary><see cref="IAdSpotStore.RetireAsync"/> — <see cref="AdState.Ready"/> OR
-    /// <see cref="AdState.Draft"/> to <see cref="AdState.Retired"/>, xmin-guarded, stamping
-    /// <c>retired_at</c>.</summary>
+    /// <summary><see cref="IAdSpotStore.RetireAsync"/> — <see cref="AdState.Ready"/>,
+    /// <see cref="AdState.Draft"/>, <see cref="AdState.Approved"/>, or <see cref="AdState.Failed"/> to
+    /// <see cref="AdState.Retired"/> (SPEC F159.2's as-built rider, PLAN T403 — widened from
+    /// ready|draft only: see the interface's own remarks for the discard-gap ruling), xmin-guarded,
+    /// stamping <c>retired_at</c>. <see cref="AdState.Rendering"/> is deliberately absent from this
+    /// list — it stays undiscardable. Clears <c>fail_reason</c> as part of the SAME statement — a
+    /// Failed row carries a non-null one, and db/43's own <c>ad_spot_fail_reason_iff_failed</c> CHECK
+    /// demands it be null the instant <c>state</c> is no longer Failed (the <see cref="RetryAsync"/>
+    /// precedent, one transition over); harmless for every other FROM state, where it is already
+    /// null.</summary>
     public Task<AdSpotTransitionOutcome> RetireAsync(long id, string expectedVersion, CancellationToken ct) =>
         RunGuardedTransitionAsync(
             $"""
             update station.ad_spot
-            set state = 'retired'::station.ad_state, state_changed_at = now(), retired_at = now()
+            set state = 'retired'::station.ad_state, fail_reason = null, state_changed_at = now(),
+                retired_at = now()
             where id = @id
-              and state in ('ready'::station.ad_state, 'draft'::station.ad_state)
+              and state in (
+                'ready'::station.ad_state, 'draft'::station.ad_state,
+                'approved'::station.ad_state, 'failed'::station.ad_state)
               and xmin = @expectedVersion::xid
             returning {Columns}
             """,
             new { id, expectedVersion }, id, ct);
+
+    /// <summary><see cref="IAdSpotStore.UpdateAsync"/> — a sparse content edit, legal only against
+    /// <see cref="AdState.Draft"/> or <see cref="AdState.Failed"/>, xmin-guarded. Builds its own
+    /// <c>SET</c> clause from only <paramref name="edit"/>'s non-null fields (the
+    /// <c>Catalog.MediaRepository.UpdateCoreAsync</c> precedent) rather than <c>COALESCE</c> — the
+    /// same reason that method gives: a dynamic clause list never emits a redundant self-assignment
+    /// for a column the caller left untouched. Never changes <c>state</c>/<c>state_changed_at</c>
+    /// itself (this is a content edit, not a transition).</summary>
+    public Task<AdSpotTransitionOutcome> UpdateAsync(
+        long id, AdSpotEdit edit, string expectedVersion, CancellationToken ct)
+    {
+        var setClauses = new List<string>();
+        if (edit.Brand is not null) setClauses.Add("brand = @brand");
+        if (edit.Title is not null) setClauses.Add("title = @title");
+        if (edit.Brief is not null) setClauses.Add("brief = @brief");
+        if (edit.Script is not null) setClauses.Add("script = @script");
+        if (edit.VoicePlan is not null) setClauses.Add("voice_plan = @voicePlan::jsonb");
+        if (edit.SpotSeconds is not null) setClauses.Add("spot_seconds = @spotSeconds");
+        if (edit.BedMediaId is not null) setClauses.Add("bed_media_id = @bedMediaId");
+
+        // AdsController enforces "at least one field present" at the HTTP door (400) — this store
+        // stays honest either way rather than trusting the caller: an empty edit still runs the
+        // SAME guarded existence/state/version check via a plain SELECT, never a 0-column UPDATE
+        // (Postgres itself rejects `set` with no assignments).
+        var sql = setClauses.Count == 0
+            ? $"""
+              {SelectColumns}
+              where id = @id
+                and state in ('draft'::station.ad_state, 'failed'::station.ad_state)
+                and xmin = @expectedVersion::xid
+              """
+            : $"""
+              update station.ad_spot
+              set {string.Join(", ", setClauses)}
+              where id = @id
+                and state in ('draft'::station.ad_state, 'failed'::station.ad_state)
+                and xmin = @expectedVersion::xid
+              returning {Columns}
+              """;
+
+        return RunGuardedTransitionAsync(
+            sql,
+            new
+            {
+                id, expectedVersion,
+                brand = edit.Brand, title = edit.Title, brief = edit.Brief, script = edit.Script,
+                voicePlan = edit.VoicePlan, spotSeconds = edit.SpotSeconds, bedMediaId = edit.BedMediaId,
+            },
+            id, ct);
+    }
 
     /// <summary>
     /// Opens its own connection, runs one xmin-guarded transition <paramref name="sql"/>, and

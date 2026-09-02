@@ -55,6 +55,16 @@ public interface IAdSpotStore
     /// </summary>
     Task<AdSpot> CreateAsync(NewAdSpot spot, CancellationToken ct);
 
+    /// <summary>
+    /// Single-row lookup by id (PLAN T403's own <c>GET /api/ads/{id}</c>) — <see langword="null"/>
+    /// when no row exists, the same "absence is a normal answer" shape <see cref="ClaimNextApprovedAsync"/>
+    /// already uses for "nothing approved". Any existing row is reachable regardless of
+    /// <see cref="AdState"/> (the <c>MediaController.GetById</c>/F43.1 IDOR-safe precedent: an
+    /// operator opening a Failed spot to read why it failed is exactly this call) — the CALLER decides
+    /// what to do with a state it does not expect, never this method.
+    /// </summary>
+    Task<AdSpot?> GetByIdAsync(long id, CancellationToken ct);
+
     /// <summary><see cref="AdState.Draft"/> to <see cref="AdState.Approved"/> (SPEC F159.2: operator,
     /// or PLAN T400's own automatic path under <c>Station:Ads:AutoApprove</c>) —
     /// xmin-guarded.</summary>
@@ -65,12 +75,37 @@ public interface IAdSpotStore
     /// different, and only, legal source state.</summary>
     Task<AdSpotTransitionOutcome> RetryAsync(long id, string expectedVersion, CancellationToken ct);
 
-    /// <summary><see cref="AdState.Ready"/> to <see cref="AdState.Retired"/> (refresh or operator) OR
-    /// <see cref="AdState.Draft"/> to <see cref="AdState.Retired"/> (operator discard) — SPEC F159.2's
-    /// two retirement paths share one method: both reach the same terminal state, and neither needs
-    /// its own distinguishing side effect at the store level. Stamps <c>retired_at</c>.
-    /// xmin-guarded.</summary>
+    /// <summary>
+    /// To <see cref="AdState.Retired"/> from <see cref="AdState.Ready"/> (refresh or operator),
+    /// <see cref="AdState.Draft"/> (operator discard), <see cref="AdState.Approved"/>, or
+    /// <see cref="AdState.Failed"/> (SPEC F159.2's as-built rider, PLAN T403, 2026-09-02 — the discard
+    /// gap: an operator needs an exit from a spot that will never render cleanly, or one they simply
+    /// changed their mind about before it ever rendered; the announcements decline precedent). All
+    /// four share one method: every path reaches the same terminal state with the same side effect
+    /// (stamping <c>retired_at</c>), and none needs its own distinguishing behavior at the store
+    /// level. <see cref="AdState.Rendering"/> is deliberately EXCLUDED — it stays undiscardable: it is
+    /// transient by construction (<see cref="ReArmAsync"/>'s own guardian re-arms it to
+    /// <see cref="AdState.Approved"/> within one grace), so a caller wanting to discard a stuck render
+    /// waits for that re-arm, then retires from <see cref="AdState.Approved"/>. xmin-guarded.
+    /// </summary>
     Task<AdSpotTransitionOutcome> RetireAsync(long id, string expectedVersion, CancellationToken ct);
+
+    /// <summary>
+    /// Sparse content edit (PLAN T403's own owner editor <c>PATCH /api/ads/{id}</c>) — brand, title,
+    /// brief, script, voice plan, spot length, bed. Legal ONLY against a row currently
+    /// <see cref="AdState.Draft"/> or <see cref="AdState.Failed"/> (PLAN T403's own ruling: editing an
+    /// <see cref="AdState.Approved"/> spot would invalidate a render already in flight or already
+    /// landed, and every OTHER state either has no content left to edit
+    /// (<see cref="AdState.Ready"/>/<see cref="AdState.Retired"/>) or is mid-flight
+    /// (<see cref="AdState.Rendering"/>) — a Failed spot's script is exactly what an operator fixes
+    /// before <see cref="ApproveAsync"/>-via-<c>RetryAsync</c>, the SAME reasoning
+    /// <see cref="RetryAsync"/>'s own remarks give for why Failed is its one legal FROM state). This
+    /// never changes <see cref="AdSpot.State"/> itself — a caller wanting Failed→Approved calls
+    /// <see cref="RetryAsync"/> separately, after this edit. xmin-guarded, mirrors every other
+    /// operator-facing transition on this store. <see cref="AdSpotEdit"/>'s own remarks describe the
+    /// sparse-field ("<see langword="null"/> means unchanged") contract in full.
+    /// </summary>
+    Task<AdSpotTransitionOutcome> UpdateAsync(long id, AdSpotEdit edit, string expectedVersion, CancellationToken ct);
 
     /// <summary>
     /// <see cref="AdState.Approved"/> to <see cref="AdState.Rendering"/> (PLAN T402's own worker

@@ -333,6 +333,50 @@ public static class FeatureAdSpotLifecycleStore
             Assert.Equal(AdSpotWriteResult.Updated, outcome.Result);
             Assert.Equal(AdState.Retired, outcome.Spot!.State);
         }
+
+        [Fact]
+        public async Task ApprovedToRetiredStampsStateChangedAt()
+        {
+            // Given an approved spot (PLAN T403's own discard-gap ruling: an operator changing their
+            // mind before it ever renders)...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
+
+            // When it is retired...
+            var outcome = await repo.RetireAsync(spot.Id, spot.Version, CancellationToken.None);
+
+            // Then it moved to Retired directly from Approved, state_changed_at moved forward.
+            Assert.Equal(AdSpotWriteResult.Updated, outcome.Result);
+            Assert.Equal(AdState.Retired, outcome.Spot!.State);
+            Assert.True(outcome.Spot.StateChangedAt > spot.StateChangedAt);
+        }
+
+        [Fact]
+        public async Task FailedToRetiredStampsStateChangedAt()
+        {
+            // Given a failed spot (PLAN T403's own discard-gap ruling: a permanently-failing spot
+            // needs an exit)...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(
+                Draft() with { InitialState = AdState.Failed, FailReason = "brand_collision" },
+                CancellationToken.None);
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
+
+            // When it is retired...
+            var outcome = await repo.RetireAsync(spot.Id, spot.Version, CancellationToken.None);
+
+            // Then it moved to Retired directly from Failed, state_changed_at moved forward, and
+            // fail_reason is cleared (db/43's own ad_spot_fail_reason_iff_failed CHECK demands it —
+            // a Failed row's own non-null reason would otherwise violate the CHECK the instant state
+            // is no longer Failed; RetireAsync's own remarks).
+            Assert.Equal(AdSpotWriteResult.Updated, outcome.Result);
+            Assert.Equal(AdState.Retired, outcome.Spot!.State);
+            Assert.True(outcome.Spot.StateChangedAt > spot.StateChangedAt);
+            Assert.Null(outcome.Spot.FailReason);
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -627,6 +671,26 @@ public static class FeatureAdSpotLifecycleStore
             // first).
             Assert.Equal(AdSpotWriteResult.NotFound, outcome.Result);
         }
+
+        [Fact]
+        public async Task RetiringARenderingSpotIsRefused()
+        {
+            // Given a spot claimed into Rendering (PLAN T403's own discard-gap ruling: Rendering
+            // stays undiscardable — it is transient by construction, the guardian re-arms it to
+            // Approved within one grace, and the discard happens from there)...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
+
+            // When a retire is attempted against it anyway...
+            var outcome = await repo.RetireAsync(claimed.Id, claimed.Version, CancellationToken.None);
+
+            // Then it is refused (Conflict) and the row is left exactly as it was.
+            Assert.Equal(AdSpotWriteResult.Conflict, outcome.Result);
+            var row = await ReadRowAsync(db, claimed.Id);
+            Assert.Equal("rendering", row.State);
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -889,6 +953,202 @@ public static class FeatureAdSpotLifecycleStore
             // Then only the stale spot is a candidate.
             Assert.Contains(candidates, s => s.Id == staleId);
             Assert.DoesNotContain(candidates, s => s.Id == freshId);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // T362 loop law — GetByIdAsync's own live facts (T403's GET /api/ads/{id})
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioGetByIdAsyncReadsAnyRowRegardlessOfState(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AnExistingRowIsReturned()
+        {
+            // Given a draft spot...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+
+            // When it is read back by id...
+            var found = await repo.GetByIdAsync(spot.Id, CancellationToken.None);
+
+            // Then the exact row comes back.
+            Assert.NotNull(found);
+            Assert.Equal(spot.Id, found!.Id);
+            Assert.Equal(spot.Brand, found.Brand);
+        }
+
+        [Fact]
+        public async Task AnUnknownIdReturnsNull()
+        {
+            // Given no spot with this id...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+
+            // When it is read back by id...
+            var found = await repo.GetByIdAsync(999_999, CancellationToken.None);
+
+            // Then nothing comes back — a legal answer, never an error.
+            Assert.Null(found);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // T362 loop law — UpdateAsync's own live facts (T403's owner editor PATCH)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioUpdateAsyncEditsDraftAndFailedOnly(DatabaseFixture db)
+    {
+        static AdSpotEdit Edit(
+            string? brand = null, string? title = null, string? brief = null, string? script = null,
+            string? voicePlan = null, int? spotSeconds = null, long? bedMediaId = null) =>
+            new(brand, title, brief, script, voicePlan, spotSeconds, bedMediaId);
+
+        [Fact]
+        public async Task EditingADraftSpotUpdatesTheGivenFields()
+        {
+            // Given a draft spot...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+
+            // When brand and title are edited...
+            var outcome = await repo.UpdateAsync(
+                spot.Id, Edit(brand: "New Brand", title: "New Title"), spot.Version, CancellationToken.None);
+
+            // Then the given fields moved and the state stayed Draft (a content edit, not a
+            // transition).
+            Assert.Equal(AdSpotWriteResult.Updated, outcome.Result);
+            Assert.Equal("New Brand", outcome.Spot!.Brand);
+            Assert.Equal("New Title", outcome.Spot.Title);
+            Assert.Equal(AdState.Draft, outcome.Spot.State);
+        }
+
+        [Fact]
+        public async Task FieldsLeftNullAreUnchanged()
+        {
+            // Given a draft spot with a known brief...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(Draft(brand: "Original Brand"), CancellationToken.None);
+
+            // When only the title is edited...
+            var outcome = await repo.UpdateAsync(
+                spot.Id, Edit(title: "New Title"), spot.Version, CancellationToken.None);
+
+            // Then brand/brief are untouched.
+            Assert.Equal(AdSpotWriteResult.Updated, outcome.Result);
+            Assert.Equal("Original Brand", outcome.Spot!.Brand);
+            Assert.Equal(spot.Brief, outcome.Spot.Brief);
+        }
+
+        [Fact]
+        public async Task EditingAFailedSpotSucceeds()
+        {
+            // Given a failed spot (the "fix the script before retry" path)...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(
+                Draft() with { InitialState = AdState.Failed, FailReason = "brand_collision" },
+                CancellationToken.None);
+
+            // When its script is edited...
+            var outcome = await repo.UpdateAsync(
+                spot.Id, Edit(script: "ANNOUNCER: A brand new, honest line.\nVOICE1: Call today."),
+                spot.Version, CancellationToken.None);
+
+            // Then it succeeds, script moved, state stays Failed (edit ≠ retry).
+            Assert.Equal(AdSpotWriteResult.Updated, outcome.Result);
+            Assert.Equal(AdState.Failed, outcome.Spot!.State);
+            Assert.Equal("ANNOUNCER: A brand new, honest line.\nVOICE1: Call today.", outcome.Spot.Script);
+        }
+
+        [Fact]
+        public async Task EditingAnApprovedSpotIsRefused()
+        {
+            // Given an approved spot (PLAN T403's own ruling: editing an approved spot would
+            // invalidate a render already in flight)...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+
+            // When an edit is attempted against it anyway...
+            var outcome = await repo.UpdateAsync(spot.Id, Edit(title: "New Title"), spot.Version, CancellationToken.None);
+
+            // Then it is refused (Conflict) and the row is left exactly as it was.
+            Assert.Equal(AdSpotWriteResult.Conflict, outcome.Result);
+            var row = await ReadRowAsync(db, spot.Id);
+            Assert.Equal("approved", row.State);
+        }
+
+        [Fact]
+        public async Task EditingAReadySpotIsRefused()
+        {
+            // Given a ready spot...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
+            await repo.MarkReadyAsync(claimed.Id, mediaId: 1, CancellationToken.None);
+            var ready = (await repo.ListByStateAsync(AdState.Ready, 10, 0, CancellationToken.None)).Items.Single();
+
+            // When an edit is attempted against it...
+            var outcome = await repo.UpdateAsync(ready.Id, Edit(title: "New Title"), ready.Version, CancellationToken.None);
+
+            // Then it is refused (Conflict) — a rendered spot's content is no longer editable.
+            Assert.Equal(AdSpotWriteResult.Conflict, outcome.Result);
+        }
+
+        [Fact]
+        public async Task AStaleVersionIsRefusedAsAConflict()
+        {
+            // Given a draft spot, edited once (its own version now stale)...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            await repo.UpdateAsync(spot.Id, Edit(title: "First edit"), spot.Version, CancellationToken.None);
+
+            // When a SECOND edit is attempted with the ORIGINAL (now stale) version...
+            var outcome = await repo.UpdateAsync(spot.Id, Edit(title: "Second edit"), spot.Version, CancellationToken.None);
+
+            // Then it is refused as a Conflict.
+            Assert.Equal(AdSpotWriteResult.Conflict, outcome.Result);
+        }
+
+        [Fact]
+        public async Task EditingAnUnknownIdReturnsNotFound()
+        {
+            // Given no spot with this id...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+
+            // When an edit is attempted against it...
+            var outcome = await repo.UpdateAsync(999_999, Edit(title: "New Title"), "1", CancellationToken.None);
+
+            // Then it reports NotFound, distinctly from Conflict.
+            Assert.Equal(AdSpotWriteResult.NotFound, outcome.Result);
+        }
+
+        [Fact]
+        public async Task StateChangedAtIsUntouchedByAContentEdit()
+        {
+            // Given a draft spot...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
+
+            // When it is edited...
+            var outcome = await repo.UpdateAsync(spot.Id, Edit(title: "New Title"), spot.Version, CancellationToken.None);
+
+            // Then state_changed_at is untouched — an edit is not a transition (unlike every
+            // ApproveAsync/RetryAsync/RetireAsync fact above, which all assert the opposite).
+            Assert.Equal(spot.StateChangedAt, outcome.Spot!.StateChangedAt);
         }
     }
 }
