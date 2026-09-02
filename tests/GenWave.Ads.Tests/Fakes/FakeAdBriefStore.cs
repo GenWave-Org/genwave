@@ -8,7 +8,9 @@ namespace GenWave.Ads.Tests.Fakes;
 /// deterministic in-memory brief pool. <see cref="SampleEnabledAsync"/> returns the FIRST enabled brief
 /// (never actually random) so a scenario can assert exactly which brief a generation attempt used,
 /// mirroring <see cref="FakeAdSpotCatalog"/>'s own "deterministic, not random" precedent one file over.
-/// <see cref="UpsertAsync"/> is unreachable from <see cref="AdSpotWorker"/> and throws if ever called.
+/// <see cref="UpsertAsync"/>/<see cref="ListAllAsync"/>/<see cref="CreateOwnerAsync"/>/
+/// <see cref="SetEnabledAsync"/> (PLAN T403b's own Briefs-admin widening) are all unreachable from
+/// <see cref="AdSpotWorker"/> and throw if ever called.
 /// </summary>
 public sealed class FakeAdBriefStore : IAdBriefStore
 {
@@ -38,5 +40,15 @@ public sealed class FakeAdBriefStore : IAdBriefStore
     public Task<AdBrief> UpsertAsync(
         string? packSlug, string brand, string? premise, string? tone, string? structure, bool enabled,
         CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdSpotWorker.");
+
+    public Task<IReadOnlyList<AdBrief>> ListAllAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdSpotWorker.");
+
+    public Task<AdBrief?> CreateOwnerAsync(
+        string brand, string? premise, string? tone, string? structure, bool enabled, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdSpotWorker.");
+
+    public Task<AdBrief?> SetEnabledAsync(long id, bool enabled, CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdSpotWorker.");
 }

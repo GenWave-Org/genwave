@@ -3,11 +3,13 @@ using GenWave.Core.Domain;
 namespace GenWave.Core.Abstractions;
 
 /// <summary>
-/// The <c>station.ad_brief</c> seam (SPEC F159.1, F162.2; STORY-389; PLAN T398) — deliberately
-/// narrow, exactly <see cref="IAdSpotStore"/>'s own "Core-level port a MediaLibrary repository
-/// implements directly" placement, one table over. Read members are deferred to whichever future task
-/// first needs one (PLAN T400's own prompt sampler, T404's Briefs tab) — this seam ships with only
-/// the write every future consumer already needs the SAME way (STORY-389 AC1's own upsert fact).
+/// The <c>station.ad_brief</c> seam (SPEC F159.1, F162.2; STORY-389, STORY-392; PLAN T398, T403b) —
+/// deliberately narrow, exactly <see cref="IAdSpotStore"/>'s own "Core-level port a MediaLibrary
+/// repository implements directly" placement, one table over. <see cref="UpsertAsync"/>/
+/// <see cref="SampleEnabledAsync"/> shipped with T398 (STORY-389 AC1's own upsert fact, T400's own
+/// prompt sampler); <see cref="ListAllAsync"/>/<see cref="CreateOwnerAsync"/>/
+/// <see cref="SetEnabledAsync"/> widen the seam additively for T403b's Briefs admin surface (SPEC
+/// F162.1) — every prior member's contract is untouched.
 /// </summary>
 public interface IAdBriefStore
 {
@@ -43,4 +45,37 @@ public interface IAdBriefStore
     /// over for picking which ready spot airs next.
     /// </summary>
     Task<AdBrief?> SampleEnabledAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Every brief, pack and owner alike, newest-created-first (SPEC F162.1's Briefs tab — PLAN
+    /// T403b) — no paging. The brief universe is an operator-curated catalog, dozens not thousands,
+    /// the SAME "small catalog" reasoning <see cref="SampleEnabledAsync"/>'s own remarks already give
+    /// for skipping a more elaborate scheme one query over; a full list is the honest shape rather
+    /// than page/limit/offset ceremony no caller needs yet (T403b's own YAGNI call, documented at the
+    /// implementation).
+    /// </summary>
+    Task<IReadOnlyList<AdBrief>> ListAllAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Creates a NEW owner-authored brief (<c>pack_slug</c> forced <see langword="null"/>) — refuses,
+    /// never silently updates, when an owner brief for <paramref name="brand"/> already exists (the
+    /// ratified one-owner-brief-per-brand cap, <see cref="UpsertAsync"/>'s own remarks; SPEC F159.1
+    /// rider). Atomic: the INSERT's own <c>ON CONFLICT ... DO NOTHING</c> IS the check — no separate
+    /// exists-then-insert round trip, so no race window between two concurrent creates for the same
+    /// brand. Returns the created row, or <see langword="null"/> when the cap already holds — the
+    /// caller's own signal to surface 409 (PLAN T403b's own ruling). Deliberately a SEPARATE member
+    /// from <see cref="UpsertAsync"/>, which stays reachable, unabridged, for a future pack-install
+    /// caller that legitimately wants insert-or-update semantics.
+    /// </summary>
+    Task<AdBrief?> CreateOwnerAsync(
+        string brand, string? premise, string? tone, string? structure, bool enabled, CancellationToken ct);
+
+    /// <summary>
+    /// Flips <c>enabled</c> on any brief by id — pack or owner alike (PLAN T403b: enable/disable is
+    /// the operator's own lever over pack content too; only CREATE is owner-only). Returns the
+    /// updated row, or <see langword="null"/> for an unknown id — the caller's own 404 signal, never
+    /// an exception (the <c>AnnouncementRepository.ReArmAsync</c> "guarded WHERE, total" precedent,
+    /// one return shape richer since a caller here wants the fresh row back, not just a bool).
+    /// </summary>
+    Task<AdBrief?> SetEnabledAsync(long id, bool enabled, CancellationToken ct);
 }

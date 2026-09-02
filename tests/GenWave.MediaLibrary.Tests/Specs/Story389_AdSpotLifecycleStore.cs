@@ -1151,4 +1151,223 @@ public static class FeatureAdSpotLifecycleStore
             Assert.Equal(spot.StateChangedAt, outcome.Spot!.StateChangedAt);
         }
     }
+
+    // ---------------------------------------------------------------------
+    // T362 loop law — ListAllAsync's own live facts (T403b's GET /api/ad-briefs)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioListAllAsyncReturnsEveryBriefNewestFirst(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task BothPackAndOwnerBriefsComeBack()
+        {
+            // Given one owner brief and one pack brief...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            await repo.UpsertAsync(
+                packSlug: null, brand: "Owner Brand", premise: null, tone: null, structure: null,
+                enabled: true, CancellationToken.None);
+            await repo.UpsertAsync(
+                packSlug: "genwave-catalog", brand: "Pack Brand", premise: null, tone: null,
+                structure: null, enabled: true, CancellationToken.None);
+
+            // When every brief is listed...
+            var briefs = await repo.ListAllAsync(CancellationToken.None);
+
+            // Then both come back — pack and owner alike.
+            Assert.Equal(2, briefs.Count);
+            Assert.Contains(briefs, b => b.Brand == "Owner Brand" && b.PackSlug is null);
+            Assert.Contains(briefs, b => b.Brand == "Pack Brand" && b.PackSlug == "genwave-catalog");
+        }
+
+        [Fact]
+        public async Task DisabledBriefsAreListedToo()
+        {
+            // Given a disabled brief — SampleEnabledAsync would skip it, but the admin list must not.
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            await repo.UpsertAsync(
+                packSlug: null, brand: "Disabled Brand", premise: null, tone: null, structure: null,
+                enabled: false, CancellationToken.None);
+
+            // When every brief is listed...
+            var briefs = await repo.ListAllAsync(CancellationToken.None);
+
+            // Then the disabled row still comes back.
+            Assert.Contains(briefs, b => b.Brand == "Disabled Brand" && !b.Enabled);
+        }
+
+        [Fact]
+        public async Task ResultsOrderNewestCreatedFirst()
+        {
+            // Given two briefs, the second created after the first...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            await repo.UpsertAsync(
+                packSlug: null, brand: "Older Brand", premise: null, tone: null, structure: null,
+                enabled: true, CancellationToken.None);
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
+            await repo.UpsertAsync(
+                packSlug: null, brand: "Newer Brand", premise: null, tone: null, structure: null,
+                enabled: true, CancellationToken.None);
+
+            // When every brief is listed...
+            var briefs = await repo.ListAllAsync(CancellationToken.None);
+
+            // Then the newest-created row leads.
+            Assert.Equal("Newer Brand", briefs[0].Brand);
+            Assert.Equal("Older Brand", briefs[1].Brand);
+        }
+
+        [Fact]
+        public async Task NoBriefsListsEmpty()
+        {
+            // Given no briefs at all...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+
+            // When every brief is listed...
+            var briefs = await repo.ListAllAsync(CancellationToken.None);
+
+            // Then the list is empty — a legal answer, never an error.
+            Assert.Empty(briefs);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // T362 loop law — CreateOwnerAsync's own live facts (T403b's POST /api/ad-briefs)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioCreateOwnerAsyncRefusesADuplicateBrandAtomically(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AFirstCreateLandsOneRowWithPackSlugNull()
+        {
+            // Given no prior briefs...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+
+            // When an owner brief is created...
+            var created = await repo.CreateOwnerAsync(
+                brand: "Bramble & Fitch", premise: "A cozy hardware shop", tone: "warm", structure: null,
+                enabled: true, CancellationToken.None);
+
+            // Then it lands, pack_slug null, exactly one row.
+            Assert.NotNull(created);
+            Assert.Null(created!.PackSlug);
+            Assert.Equal("Bramble & Fitch", created.Brand);
+            Assert.Equal(1, await CountAllBriefRowsAsync(db));
+        }
+
+        [Fact]
+        public async Task ASecondCreateForTheSameBrandIsRefusedAndTheRowUnchanged()
+        {
+            // Given an existing owner brief for a brand...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            var first = await repo.CreateOwnerAsync(
+                brand: "Bramble & Fitch", premise: "First premise", tone: "warm", structure: null,
+                enabled: true, CancellationToken.None);
+
+            // When a SECOND owner brief is created for the SAME brand...
+            var second = await repo.CreateOwnerAsync(
+                brand: "Bramble & Fitch", premise: "Second premise", tone: "dry", structure: null,
+                enabled: true, CancellationToken.None);
+
+            // Then it is refused (null back) — never a silent update, never a second row — and the
+            // original row's own premise is untouched (the exact behavior UpsertAsync would NOT give:
+            // this is why CreateOwnerAsync exists as its own member).
+            Assert.NotNull(first);
+            Assert.Null(second);
+            Assert.Equal(1, await CountAllBriefRowsAsync(db));
+            var rows = await repo.ListAllAsync(CancellationToken.None);
+            Assert.Equal("First premise", rows.Single().Premise);
+        }
+
+        [Fact]
+        public async Task ACreateForABrandThatOnlyHasAPackBriefSucceeds()
+        {
+            // Given a PACK brief for a brand (the cap is scoped to (pack_slug, brand), not brand
+            // alone — the Story389 upsert fact's own coexistence pin, one member over)...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            await repo.UpsertAsync(
+                packSlug: "genwave-catalog", brand: "Bramble & Fitch", premise: "Pack's own premise",
+                tone: "dry", structure: null, enabled: true, CancellationToken.None);
+
+            // When an OWNER brief is created for the SAME brand name...
+            var created = await repo.CreateOwnerAsync(
+                brand: "Bramble & Fitch", premise: "Owner's own premise", tone: "warm", structure: null,
+                enabled: true, CancellationToken.None);
+
+            // Then it succeeds — two separate rows, the pack row untouched.
+            Assert.NotNull(created);
+            Assert.Equal(2, await CountAllBriefRowsAsync(db));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // T362 loop law — SetEnabledAsync's own live facts (T403b's PATCH /api/ad-briefs/{id})
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioSetEnabledAsyncTogglesAnyBriefById(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task DisablingAnEnabledOwnerBriefFlipsIt()
+        {
+            // Given an enabled owner brief...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            var brief = await repo.CreateOwnerAsync(
+                brand: "Bramble & Fitch", premise: null, tone: null, structure: null, enabled: true,
+                CancellationToken.None);
+
+            // When it is disabled...
+            var updated = await repo.SetEnabledAsync(brief!.Id, enabled: false, CancellationToken.None);
+
+            // Then the row comes back with enabled flipped.
+            Assert.NotNull(updated);
+            Assert.False(updated!.Enabled);
+        }
+
+        [Fact]
+        public async Task EnablingAPackBriefFlipsItToo()
+        {
+            // Given a disabled pack brief — the toggle is the operator's own lever over pack content
+            // too, not owner-only (PLAN T403b's own reading of F162.1).
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            var brief = await repo.UpsertAsync(
+                packSlug: "genwave-catalog", brand: "Pack Brand", premise: null, tone: null,
+                structure: null, enabled: false, CancellationToken.None);
+
+            // When it is enabled...
+            var updated = await repo.SetEnabledAsync(brief.Id, enabled: true, CancellationToken.None);
+
+            // Then it flips, pack_slug untouched.
+            Assert.NotNull(updated);
+            Assert.True(updated!.Enabled);
+            Assert.Equal("genwave-catalog", updated.PackSlug);
+        }
+
+        [Fact]
+        public async Task AnUnknownIdReturnsNull()
+        {
+            // Given no brief with this id...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+
+            // When it is toggled...
+            var updated = await repo.SetEnabledAsync(999_999, enabled: true, CancellationToken.None);
+
+            // Then nothing comes back — a legal 404 signal, never an error.
+            Assert.Null(updated);
+        }
+    }
 }
