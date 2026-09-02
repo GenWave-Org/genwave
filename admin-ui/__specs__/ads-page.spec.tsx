@@ -13,16 +13,16 @@
 // (the editor, row verbs, the ready-spot preview, the briefs tab) renders its own client component
 // directly with RTL, mirroring `gardener-page.spec.tsx`'s `renderSection` posture.
 //
-// Two design decisions this suite pins (both PLAN T404's own judgment calls, documented at their
-// source too — `AdsTabs.tsx`, `AdSpotRow.tsx`):
+// One design decision this suite pins (PLAN T404's own judgment call, documented at its source too
+// — `AdsTabs.tsx`):
 //   - Tabs are deliberately UNBADGED (no `/api/status` ads block exists to badge them from honestly
 //     without a six-call fan-out) — the active tab's own EXACT total renders in its section header
 //     instead. The "badges every state tab with its count" title from the original pending stub is
 //     replaced with "shows the active tab's own total, leaving every tab unbadged" to match.
-//   - A `ready` spot's "Preview" reveals an HONEST notice, never a fabricated `<audio>` player — no
-//     endpoint in this codebase streams a persisted `library.media` row's bytes to the browser (see
-//     `AdSpotRow.tsx`'s own remarks for the full finding). The "plays the rendered artifact in the
-//     browser" title is replaced with what this build actually does.
+//   - A `ready` spot's "Preview" now reveals a real `<audio>` player (PLAN T404b: `GET
+//     /api/media/{id}/audio` now streams the persisted bytes — see `AdSpotRow.tsx`'s own remarks).
+//     T404's own "reveals an honest no-playback-yet notice" title is retired; the original pending
+//     stub's title ("plays the rendered artifact in the browser") is restored below, now true.
 
 jest.mock("next/headers", () => ({
   cookies: jest
@@ -594,7 +594,7 @@ describe("Feature: The Ads page", () => {
   });
 
   describe("Scenario: ready spots preview", () => {
-    it("reveals an honest no-playback-yet notice, never a fabricated <audio> element", () => {
+    it("plays the rendered artifact in the browser", () => {
       const readySpot = adSpot({ id: 5, state: "ready", mediaId: 555, spotSeconds: 30, version: "50" });
 
       const { container } = render(
@@ -603,11 +603,16 @@ describe("Feature: The Ads page", () => {
         </ConfirmDialogProvider>
       );
 
+      // No <audio> element before Preview is clicked — the reveal interaction still gates it.
+      expect(container.querySelector("audio")).toBeNull();
+
       fireEvent.click(screen.getByRole("button", { name: "Preview" }));
 
-      expect(screen.getByText(/Rendered to media #555/)).toBeInTheDocument();
-      expect(screen.getByText(/playback isn't wired into this console yet/)).toBeInTheDocument();
-      expect(container.querySelector("audio")).toBeNull();
+      const audio = container.querySelector("audio");
+      expect(audio).toBeInTheDocument();
+      expect(audio).toHaveAttribute("src", "/api/media/555/audio");
+      expect(audio).toHaveAttribute("controls");
+      expect(audio).toHaveAttribute("preload", "none");
     });
   });
 

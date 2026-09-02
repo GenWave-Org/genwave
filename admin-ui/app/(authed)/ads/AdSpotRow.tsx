@@ -30,25 +30,23 @@ interface AdSpotRowProps {
 }
 
 /**
- * One ad spot row (SPEC F162.1; STORY-392 AC3/AC4; PLAN T404) — brand/length, the verbs legal for
- * its CURRENT state (mirrors `AdsController`'s own transition guards exactly, so no button here
- * ever fires a request the api would only 409), and — for a `ready` row — the preview affordance.
+ * One ad spot row (SPEC F162.1; STORY-392 AC3/AC4; PLAN T404/T404b) — brand/length, the verbs legal
+ * for its CURRENT state (mirrors `AdsController`'s own transition guards exactly, so no button here
+ * ever fires a request the api would only 409), and — for a `ready` row — a real preview player.
  *
- * <b>The preview affordance is honest, not a real player (PLAN T404's own finding — see the class
- * remarks below).</b> No endpoint in this codebase streams a persisted `library.media` row's bytes
- * to the browser: `GET /media/{id}` (`MediaEndpoints`, the anonymous hot path Liquidsoap/the
- * Orchestrator use) returns a `MediaReference` — title/loudness/duration METADATA, never a byte
- * stream — and `GET /api/media/{id}` (`MediaController`) is the same shape again, behind auth.
- * `PersonaPreview`'s own `<audio>` tag (the only in-browser playback anywhere in this admin UI)
- * plays an EPHEMERAL render from `POST /api/tts/preview`, not a persisted row. Wiring
- * `<audio src="/media/{id}">` here would render a broken player (that path 404s through this app's
- * own `next.config.ts` rewrite table besides — only `/api/*` and `/fonts/*` are proxied) that LOOKS
- * functional and silently fails; that is worse than admitting the gap. STORY-392 AC4 ("the rendered
- * artifact plays in the browser") is therefore NOT fully met by this task — closing it for real
- * needs a backend byte-serving route (and the matching `next.config.ts` rewrite), which is outside
- * this task's owned surface (the admin-ui TSX half only). Filed here rather than silently shipped:
- * the honest affordance below states exactly that, using only fields this row already carries
- * (`mediaId`, `spotSeconds`) — no fetch, nothing that could itself fail.
+ * <b>The preview plays real bytes (PLAN T404b closes the T404 finding below).</b> `GET
+ * /api/media/{id}/audio` (`MediaController.GetAudio`) now streams the persisted `library.media` row's
+ * on-disk bytes with range support, so `<audio src="/api/media/{mediaId}/audio">` is a real player,
+ * not a broken one — `next.config.ts`'s existing `/api/:path*` rewrite already carries it to the
+ * backend, same as every other `/api/*` call this app makes; no rewrite-table change was needed.
+ * `preload="none"` keeps a row that is merely rendered on screen (never opened) from ever issuing the
+ * byte request — the player only fetches once an operator actually reveals it.
+ *
+ * (T404's own finding, for history: no endpoint served persisted media bytes at all at that point —
+ * `GET /media/{id}` returns `MediaReference` metadata for Liquidsoap/the Orchestrator, and `GET
+ * /api/media/{id}` is the same shape again behind auth. Wiring an `<audio>` tag at either would have
+ * rendered a broken player that looked functional and silently failed, so T404 shipped an honest
+ * notice instead and split the byte route out as T404b.)
  */
 export function AdSpotRow({ spot, onChanged, onEdit }: AdSpotRowProps): ReactNode {
   const confirm = useConfirm();
@@ -162,11 +160,8 @@ export function AdSpotRow({ spot, onChanged, onEdit }: AdSpotRowProps): ReactNod
         )}
       </div>
 
-      {previewOpen && canPreview && (
-        <p className="w-full text-[0.8rem] text-mute">
-          Rendered to media #{spot.mediaId ?? "?"} · {spot.spotSeconds}s — playback isn&apos;t wired into
-          this console yet; the spot airs on schedule.
-        </p>
+      {previewOpen && canPreview && spot.mediaId !== null && (
+        <audio className="w-full" controls preload="none" src={`/api/media/${spot.mediaId}/audio`} />
       )}
     </div>
   );

@@ -537,6 +537,120 @@ public sealed class MediaController(
     }
 
     /// <summary>
+    /// GET /api/media/{id}/audio — streams the row's on-disk bytes for in-browser preview (STORY-392
+    /// AC4, PLAN T404b: split off T404 because no endpoint served persisted <c>library.media</c>
+    /// bytes to the admin UI at all).
+    ///
+    /// ELIGIBILITY POSTURE (deliberate ruling, PLAN T404b): this route does NOT gate on
+    /// <c>state</c>/<c>eligible</c>/<c>never_play</c>. <see cref="GetById"/> already discloses a
+    /// quarantined or ineligible row's FULL metadata to anyone who can reach this controller — the
+    /// bytes behind that same row sit on the identical trust plane, not a stricter one. An operator
+    /// auditing why a row was flagged, why an ad render failed, or what a discovered-but-unenriched
+    /// file actually sounds like is a legitimate curation action, not a leak: ANY row this admin
+    /// surface can already browse by id is also playable by id. Reachability mirrors
+    /// <see cref="GetById"/> exactly (SPEC F43.1: scope is a curation filter, not an access gate) —
+    /// no station-scope check, no state check, nothing beyond "does the row exist and does its file
+    /// exist on disk".
+    ///
+    /// Security contract (path-traversal safe, security-api hard rule #1 — IDOR):
+    ///   • The physical path served is ALWAYS <c>row.Locator</c>, read straight from
+    ///     <c>library.media.path</c> via <see cref="IAdminMediaLookup"/> — <paramref name="id"/> is
+    ///     the only caller-supplied input, and it only ever selects a row by primary key through a
+    ///     parameterized lookup. No caller-supplied value is ever concatenated into, or interpreted
+    ///     as, a filesystem path.
+    ///   • Unknown id → 404 (no data in the response or logs — the same IDOR-safe posture as
+    ///     <see cref="GetById"/>).
+    ///   • Row exists but its file is missing from disk (the dead-file class) → 404, not 500,
+    ///     covering BOTH the common case (the <see cref="System.IO.File.Exists"/> pre-check below)
+    ///     AND the narrow TOCTOU race where the file vanishes between that check and the actual open
+    ///     (the Gardener's own sweep window) — caught explicitly around <see cref="FileStream"/>'s own
+    ///     constructor, since a controller-level try/catch can never observe
+    ///     <c>PhysicalFileResultExecutor</c>'s own deferred open: that runs in a separate stack frame,
+    ///     inside MVC's own result-execution pipeline, AFTER this action has already returned — proven
+    ///     by removing the pre-check and watching the framework's own throw reach an unhandled 500.
+    ///     This route deliberately never distinguishes "unknown id" from "known id, dead file" in its
+    ///     own response either way — surfacing THAT distinction as an operator-facing signal is the
+    ///     Gardener's job, not this preview route's.
+    ///   • Content-Type is resolved from a small closed map keyed on the row's own <c>format</c>
+    ///     column (never from the request, never by sniffing the file) via
+    ///     <see cref="ContentTypeForFormat"/> — an unrecognized format falls back to
+    ///     <c>application/octet-stream</c> rather than refusing the read outright, since a byte
+    ///     stream a browser can still download (even if it won't play inline) is more useful here
+    ///     than a 415.
+    ///   • <c>Cache-Control: no-store</c> + <c>X-Content-Type-Options: nosniff</c> are stamped
+    ///     EXPLICITLY, before the file result is returned — NOT left to <c>NoCacheApiMiddleware</c>
+    ///     alone (the <see cref="CatalogController.AssetFileResult"/> F5 review precedent, same
+    ///     codebase-wide finding applied here): that middleware only writes its own stamp
+    ///     <c>if (!Response.HasStarted)</c>, and a streamed file body has already started by the time
+    ///     it runs on the way back out — verified empirically: a bare GET/206 carried NO Cache-Control
+    ///     at all under middleware-only, while a bodyless HEAD on the very same route kept the stamp
+    ///     (one route, two postures). <c>nosniff</c> has no admin-plane-wide middleware equivalent at
+    ///     all, so it is stamped here unconditionally.
+    ///   • <c>enableRangeProcessing: true</c> — ASP.NET Core's own RFC 7233 range-request handling: a
+    ///     bare GET returns the full file with <c>Accept-Ranges: bytes</c>; a <c>Range:</c> header
+    ///     returns 206 Partial Content with the requested slice — what an HTML <c>&lt;audio&gt;</c>
+    ///     element's own seek bar needs to scrub without re-downloading the whole file.
+    ///   • HEAD does NOT come free from <c>[HttpGet]</c> alone (verified: MVC's own method-constraint
+    ///     routing 405s a HEAD request against a GET-only action) — mapped explicitly below, mirroring
+    ///     <see cref="SpectatorArtworkController"/>'s and <c>FontEndpoints</c>' own precedent for every
+    ///     other byte-serving route in this codebase.
+    /// </summary>
+    [HttpGet("media/{id:long}/audio")]
+    [HttpHead("media/{id:long}/audio")]
+    public async Task<IActionResult> GetAudio(long id, CancellationToken ct)
+    {
+        var found = await adminLookup.GetByIdWithLibraryAsync(id, ct);
+        if (found is null)
+            return NotFound();
+
+        var (row, _) = found.Value;
+
+        if (!System.IO.File.Exists(row.Locator))
+            return NotFound();
+
+        // Opened HERE (not handed to PhysicalFile's own deferred executor) so the TOCTOU race below
+        // is a plain, catchable exception on THIS stack frame — see this action's own SECURITY
+        // CONTRACT remarks above for why a try/catch around a PhysicalFileResult return could never
+        // observe the framework's later, separate open.
+        FileStream stream;
+        try
+        {
+            stream = new FileStream(
+                row.Locator, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true);
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return NotFound();
+        }
+
+        // Explicit, not left to NoCacheApiMiddleware alone — see this action's own CACHING remarks
+        // above. Stamped before the body ever streams, so both the GET/206 and the HEAD carry it.
+        Response.Headers.CacheControl = "no-store";
+        Response.Headers.XContentTypeOptions = "nosniff";
+
+        return File(stream, ContentTypeForFormat(row.Format), enableRangeProcessing: true);
+    }
+
+    /// <summary>
+    /// The closed <c>library.media.format</c> → MIME-type map <see cref="GetAudio"/> serves from
+    /// (PLAN T404b) — the formats this codebase's own scanner (<c>LibraryOptions.SupportedExtensions</c>,
+    /// mp3/flac by default) and TTS/authored render pipeline (wav) actually produce, plus ogg. Anything
+    /// outside this closed set falls back to the generic binary type rather than refusing to serve.
+    /// </summary>
+    static string ContentTypeForFormat(string format) => format.ToLowerInvariant() switch
+    {
+        "mp3"  => "audio/mpeg",
+        "flac" => "audio/flac",
+        "wav"  => "audio/wav",
+        "ogg"  => "audio/ogg",
+        _      => "application/octet-stream",
+    };
+
+    /// <summary>
     /// Strips the weak ETag wrapper so the raw xmin token can be passed to the repository.
     /// Accepts <c>W/"&lt;token&gt;"</c> (RFC 7232 weak) or plain <c>"&lt;token&gt;"</c>.
     /// Returns the input unchanged if neither wrapper is present (graceful: the UPDATE will
