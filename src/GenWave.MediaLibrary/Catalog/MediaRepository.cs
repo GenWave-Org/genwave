@@ -46,8 +46,19 @@ sealed class MediaRepository(
     // Garden.RotFindingRepository both need the SAME m./r.-aliased text and previously each carried
     // its own byte-identical copy (three total). One definition now; a future edit here can never
     // silently desync from either Garden repository's own query.
+    //
+    // SPEC F158.4, PLAN T395 — "and m.imaging_kind is null" is the rotation fence: every stamped
+    // imaging row (liner/station_id/jingle/promo/ad) becomes structurally invisible to every
+    // consumer of THIS predicate — GetRotationCandidateAsync, the envelope candidate family (via
+    // EnvelopeCandidateFromWhereSql), GetRandomPlayableAsync (the /media/random-backing read), and
+    // Garden.MediaRotationRepository's GetNeverAiredCountAsync/GetRotationHealthAsync, all for free,
+    // by construction, with no separate edit anywhere else — "one predicate string = one seam".
+    // Deliberately NOT threaded into GetRandomReadyAsync (the F4.4 safe-track floor, which hand-rolls
+    // its own unqualified text and is not this constant's caller) or GetRandomReadyByImagingKindAsync
+    // (which SELECTS FOR a specific imaging kind — the opposite intent).
     internal const string PlayablePredicate =
-        "m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)";
+        "m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false) " +
+        "and m.imaging_kind is null";
 
     // xmin is a Postgres system column; cast to text so Dapper maps it as a plain string. The
     // LEFT JOIN + COALESCE resolves rating state (SPEC F33.10) — an unrated row (no
@@ -118,13 +129,21 @@ sealed class MediaRepository(
         //
         // No ExplicitPredicate() here: this backs /internal/safe-track, the operator-curated safe scope
         // (gh-#99) — a separate universe from main rotation — and the never-silence floor must not trade
-        // a curation mistake for dead air. This is the ONE selection path over library.media that
-        // deliberately never calls ExplicitPredicate() — see that method's own remarks for the full
-        // enumeration of paths that do (T232 added a fourth: GetRandomReadyByImagingKindAsync).
-        var exclude = new List<long>(excludeIds.Count);
-        foreach (var s in excludeIds)
-            if (long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v))
-                exclude.Add(v);
+        // a curation mistake for dead air. See that method's own remarks for the full enumeration of
+        // every OTHER pool-predicate query that DOES call it (T232 added a fourth:
+        // GetRandomReadyByImagingKindAsync; PLAN T395 review finding-1 added a fifth,
+        // GetRandomReadyAdSpotAsync — an ad read has no dead-air excuse, null being its own
+        // always-legal answer, so F95.6 stays absolute there too). This method and its own
+        // /media/random sibling immediately below are now the only TWO callers that skip it — see
+        // that sibling's own remarks for why ITS skip is not a new exemption, merely an unchanged one.
+        //
+        // SPEC F158.4, PLAN T395 — this predicate ALSO deliberately never gains "and imaging_kind is
+        // null": this is the ONE method behind /internal/safe-track, and the F4.4 never-silence floor
+        // must skip the rotation fence by design (STORY-387 AC4) — an operator-curated safe-scope row
+        // stamped with an imaging kind (there is no such row today, but nothing forbids it) must still
+        // answer here exactly as it always has. GetRandomPlayableAsync, immediately below, is the
+        // SEPARATE, genuinely fenced sibling that backs /media/random instead.
+        var exclude = ParseIds(excludeIds);
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<MediaRow>(new CommandDefinition(
@@ -133,6 +152,58 @@ sealed class MediaRepository(
             "where state = 'ready' and measurable and eligible and not coalesce(r.never_play, false) " +
             "and id <> all(@exclude) and library_id = any(@libraryIds) " +
             "order by random() limit 1",
+            new { exclude, libraryIds = scope.LibraryIds.ToArray() }, cancellationToken: ct));
+        return row?.ToReference(logger);
+    }
+
+    /// <summary>
+    /// SPEC F158.4, PLAN T395 — the fenced sibling of <see cref="GetRandomReadyAsync"/>: the SAME
+    /// "one random ready row, excluding recent repeats" shape, backing <c>GET /media/random</c>
+    /// specifically (<c>GenWave.Host.Api.MediaEndpoints</c>), composing <see cref="PlayablePredicate"/>
+    /// (m.-qualified) rather than <see cref="GetRandomReadyAsync"/>'s own hand-rolled, fence-exempt
+    /// text — so an <c>imaging_kind</c>-stamped row (a liner, a station id, an ad spot) never surfaces
+    /// here regardless of which library an operator scopes into <c>Station:Scope:LibraryIds</c>
+    /// (STORY-387 AC1/AC2, "retro-fixing the standing imaging-in-music-scope leak"). Deliberately a
+    /// NEW member rather than <see cref="GetRandomReadyAsync"/> widened in place: that method is the
+    /// F4.4 safe-track floor too (<c>GET /internal/safe-track</c>), which must skip the fence by
+    /// design (STORY-387 AC4) — the two endpoints cannot share one predicate any more once only one of
+    /// them may see the fence.
+    /// <para>
+    /// <b>Posture parity, PLAN T395 review finding-1 (RULED)</b>: no <see cref="ExplicitPredicate"/>
+    /// term here, DELIBERATELY IDENTICAL to pre-T395 <c>/media/random</c> — before this task,
+    /// <c>/media/random</c> and <c>/internal/safe-track</c> shared <see cref="GetRandomReadyAsync"/>
+    /// as literally the same call, and that method has never applied <see cref="ExplicitPredicate"/>
+    /// (see its own remarks). F158.4's own scope is the imaging fence alone; this split must not
+    /// silently WIDEN or NARROW <c>/media/random</c>'s audience-posture behavior as a side effect —
+    /// it stays exactly what it always was: unfiltered by posture. Widening it for real is SPEC F95.4
+    /// territory, a separate task this one does not touch.
+    /// </para>
+    /// <para>
+    /// Default-implemented (not abstract) on <see cref="Abstractions.IMediaCatalog"/> so this addition
+    /// to a published MIT contract (<c>GenWave.Abstractions</c>) stays strictly additive — mirrors
+    /// <see cref="GetRandomReadyByImagingKindAsync(LibraryScope,ImagingKind,CancellationToken)"/>'s own
+    /// precedent: a pre-F158.4 implementer keeps compiling unchanged, falling back to
+    /// <see cref="GetRandomReadyAsync"/>'s own (unfenced) answer until it opts in with a real override
+    /// — the concrete catalog implementation in <c>GenWave.MediaLibrary</c> is the only production
+    /// override.
+    /// </para>
+    /// </summary>
+    public async Task<MediaReference?> GetRandomPlayableAsync(LibraryScope scope, IReadOnlyList<string> excludeIds, CancellationToken ct)
+    {
+        // Default-deny: no scope means no access, no SQL issued.
+        if (scope.IsEmpty) return null;
+
+        var exclude = ParseIds(excludeIds);
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<MediaRow>(new CommandDefinition(
+            $"""
+            {SelectColumns} m
+            left join library.media_rating r on r.media_id = m.id
+            where {PlayablePredicate}
+              and m.id <> all(@exclude) and m.library_id = any(@libraryIds)
+            order by random() limit 1
+            """,
             new { exclude, libraryIds = scope.LibraryIds.ToArray() }, cancellationToken: ct));
         return row?.ToReference(logger);
     }
@@ -210,6 +281,63 @@ sealed class MediaRepository(
             $"{explicitPredicate} " +
             "order by coalesce(show_id = @showId, false) desc, random() limit 1",
             new { kind = ImagingKindTokens.ToToken(kind), libraryIds = scope.LibraryIds.ToArray(), showId },
+            cancellationToken: ct));
+        return row?.ToReference(logger);
+    }
+
+    /// <summary>
+    /// SPEC F158.5, PLAN T395 — the ads-pool read <c>Ads.LibraryAdSpotSource</c> (PLAN T396) draws
+    /// from: one random <c>imaging_kind = 'ad'</c> row that is <c>ready + measurable + eligible + not
+    /// never_play</c> within <paramref name="scope"/> (the operator-named ads library), excluding
+    /// <paramref name="excludeIds"/> — the anti-repeat ring <c>Station:Ads:AntiRepeatWindow</c> tracks
+    /// in memory (F158.5's own "the feeder precedent"), passed straight through the same way
+    /// <see cref="GetRandomReadyAsync"/>'s own <c>excludeIds</c> already works. Mirrors
+    /// <see cref="GetRandomReadyByImagingKindAsync(LibraryScope,ImagingKind,CancellationToken)"/>'s
+    /// exact <c>ready + measurable + eligible + not never_play + imaging_kind = @kind</c> predicate
+    /// shape (hand-rolled, unqualified text — NOT <see cref="PlayablePredicate"/>, which excludes
+    /// every imaging row rather than selecting one kind of it) with the recency exclusion
+    /// <see cref="GetRandomReadyAsync"/> already carries.
+    /// <para>
+    /// <b><see cref="ExplicitPredicate"/> ANDs in too (PLAN T395 review finding-1, RULED)</b>: F95.6's
+    /// "nothing explicit airs on an everyone station" stays absolute for ads exactly like every other
+    /// pool-predicate query on this interface — an ad read has no dead-air excuse to trade it for,
+    /// since <see langword="null"/> ("no spot this break") is already
+    /// <c>IAdSpotSource.GetNextSpotAsync</c>'s own always-legal answer (F158.1): excluding an
+    /// explicit-flagged spot costs nothing but a fallback to the next source in
+    /// <c>AdSpotPipeline</c>, never dead air. The LLM explicit-classification sweep (SPEC F95.3) can
+    /// flag an authored ad row exactly like any other authored row, so this is a real, reachable case,
+    /// not a defensive no-op.
+    /// </para>
+    /// Null on an empty pool (no ready ad after the exclusion and posture filter) or an empty
+    /// <paramref name="scope"/> (default-deny) — either way "no spot" is
+    /// <c>IAdSpotSource.GetNextSpotAsync</c>'s own always-legal answer (F158.1).
+    /// <para>
+    /// Default-implemented (not abstract) on <see cref="Abstractions.IMediaCatalog"/> so this addition
+    /// to a published MIT contract (<c>GenWave.Abstractions</c>) stays strictly additive — the same
+    /// DIM discipline every F110+ addition to this interface already follows: a pre-F158.5
+    /// implementer keeps compiling unchanged, reporting "no pool" (null) until it opts in with a real
+    /// override (the concrete catalog implementation in <c>GenWave.MediaLibrary</c> is the only
+    /// production override).
+    /// </para>
+    /// </summary>
+    public async Task<MediaReference?> GetRandomReadyAdSpotAsync(
+        LibraryScope scope, IReadOnlyList<string> excludeIds, CancellationToken ct)
+    {
+        // Default-deny: no scope means no access, no SQL issued.
+        if (scope.IsEmpty) return null;
+
+        var explicitPredicate = ExplicitPredicate();
+        var exclude = ParseIds(excludeIds);
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<MediaRow>(new CommandDefinition(
+            $"{SelectColumns} m " +
+            "left join library.media_rating r on r.media_id = m.id " +
+            "where state = 'ready' and measurable and eligible and not coalesce(r.never_play, false) " +
+            "and imaging_kind = @kind and id <> all(@exclude) and library_id = any(@libraryIds) " +
+            $"{explicitPredicate} " +
+            "order by random() limit 1",
+            new { kind = ImagingKindTokens.ToToken(ImagingKind.Ad), exclude, libraryIds = scope.LibraryIds.ToArray() },
             cancellationToken: ct));
         return row?.ToReference(logger);
     }
@@ -980,19 +1108,24 @@ sealed class MediaRepository(
     /// <summary>
     /// SPEC F149.5, STORY-368, PLAN T371 — <see cref="MediaQuery.NeverAired"/>/
     /// <see cref="MediaQuery.AiredBefore"/>'s own restriction: BOTH filters imply PLAYABLE
-    /// (<c>state='ready'</c>, <c>measurable</c>, <c>eligible</c>, not flagged never-play — the same
-    /// posture <c>Garden.MediaRotationRepository.GetRotationHealthAsync</c> counts by, so a filtered
-    /// browse never disagrees with the dashboard tile's own numbers; STORY-368 AC6). Written as a
-    /// self-contained correlated subquery against <c>library.media_rating</c> — never the browse
-    /// SELECT's own <c>r</c> join alias — because this WHERE fragment also feeds
+    /// (<c>state='ready'</c>, <c>measurable</c>, <c>eligible</c>, not flagged never-play, and — since
+    /// PLAN T395 review finding-2 — not a stamped imaging row either (SPEC F158.4) — the same posture
+    /// <c>Garden.MediaRotationRepository.GetRotationHealthAsync</c> counts by (that read composes
+    /// <c>MediaRepository.PlayablePredicate</c> directly, so it already carries the fence for free),
+    /// so a filtered browse never disagrees with the dashboard tile's own numbers; STORY-368 AC6).
+    /// Written as a self-contained correlated subquery against <c>library.media_rating</c> — never
+    /// the browse SELECT's own <c>r</c> join alias — because this WHERE fragment also feeds
     /// <see cref="SetEligibilityAsync"/>/<see cref="BulkReassignAsync"/>'s bare
     /// <c>UPDATE library.media</c> statements (see <see cref="MediaQuery.NeverPlay"/>'s own remarks
     /// for the identical undefined-alias hazard); a correlated subquery works unmodified in both the
-    /// joined SELECT and the unjoined UPDATE.
+    /// joined SELECT and the unjoined UPDATE — <c>imaging_kind is null</c> is a plain, unqualified
+    /// <c>library.media</c> column reference, so it resolves in both contexts for the identical
+    /// reason (deliberately NOT the m.-qualified <see cref="PlayablePredicate"/> text, which would not).
     /// </summary>
     const string RotationPlayableGuard =
         "state = 'ready' and measurable and eligible " +
-        "and not coalesce((select never_play from library.media_rating nr where nr.media_id = id), false)";
+        "and not coalesce((select never_play from library.media_rating nr where nr.media_id = id), false) " +
+        "and imaging_kind is null";
 
     /// <summary>
     /// Builds the shared admin WHERE fragment and its Dapper parameters for a <see cref="MediaQuery"/>.
@@ -2024,10 +2157,14 @@ sealed class MediaRepository(
                 introEnergy = insert.Energy?.IntroEnergy,
                 outroEnergy = insert.Energy?.OutroEnergy,
                 // gh-#149 — the Station Imaging content kind, always stamped for authored rows
-                // (scanned rows stay NULL). SPEC F110.2 (PLAN T231) is the first selection reader —
-                // see GetRandomReadyByImagingKindAsync's own imaging_kind = @kind predicate — so this
-                // insert is no longer metadata-only for the StationId kind specifically; every other
-                // kind (Liner/Jingle/Promo) is still stamped but unread until its own selector lands.
+                // (scanned rows stay NULL). SPEC F110.2 (PLAN T231) was the first selection reader —
+                // see GetRandomReadyByImagingKindAsync's own imaging_kind = @kind predicate — and
+                // SPEC F158.1/F158.5 (PLAN T395/T396) added Ad's own selector
+                // (GetRandomReadyAdSpotAsync). Every kind is now READ by at least one query: every
+                // non-null kind (Liner/StationId/Jingle/Promo/Ad alike) is additionally excluded from
+                // music rotation by construction via PlayablePredicate's "and imaging_kind is null"
+                // fence (SPEC F158.4) — "unread until its own selector lands" no longer describes any
+                // kind stamped through this insert.
                 imagingKind = ImagingKindTokens.ToToken(insert.Kind),
                 // SPEC F117.1, STORY-313, PLAN T246 — the show scope the authoring UI's picker chose;
                 // null (the default) is station-wide. No FK, no validation here — see

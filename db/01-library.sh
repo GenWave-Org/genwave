@@ -425,9 +425,13 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 
 	create index media_dup_keys on library.media (artist_key, title_key) where state = 'ready';
 
-	-- find_near_duplicates (SPEC F153.5, amended at T354 review): playable rows are the FULL
-	-- MediaRepository.PlayablePredicate, LEFT JOIN library.media_rating included (T354 review MED-1
-	-- finding — see db/41's own header remarks for why the never_play half is not optional). STABLE,
+	-- find_near_duplicates (SPEC F153.5, amended at T354 review): playable rows WERE the FULL
+	-- MediaRepository.PlayablePredicate as of T354, LEFT JOIN library.media_rating included (T354
+	-- review MED-1 finding — see db/41's own header remarks for why the never_play half is not
+	-- optional). KNOWN DRIFT (PLAN T395 review, carried forward as PLAN T406): PlayablePredicate
+	-- itself gained "and imaging_kind is null" at T395 (SPEC F158.4) — this fresh-init mirror was
+	-- deliberately left un-widened by T395 (see db/41's own header remarks for the full rationale);
+	-- an authored imaging row can still surface in a near-duplicate finding here today. STABLE,
 	-- not IMMUTABLE: its result depends on library.media's contents, not just its own argument.
 	-- Anchored to each group's SHORTEST duration via a window function, not a self-join's pairwise
 	-- distance, so tolerance never chains transitively (T354 review LOW-2, RULED — see db/41's own

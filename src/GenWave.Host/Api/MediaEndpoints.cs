@@ -25,13 +25,19 @@ static class MediaEndpoints
                 : Results.NotFound());
 
         // GET /media/random?exclude=id1,id2 -> one ready MediaReference (404 if none ready).
+        // SPEC F158.4, PLAN T395 — GetRandomPlayableAsync, not GetRandomReadyAsync: this endpoint is
+        // named explicitly in the rotation fence ("structurally invisible ... regardless of scope
+        // config"), unlike GET /internal/safe-track (InternalEndpoints.HandleSafeTrackAsync), which
+        // stays on GetRandomReadyAsync — the F4.4 never-silence floor that must skip the fence by
+        // design (STORY-387 AC4). The two endpoints shared one repository call before this cycle;
+        // they no longer can, now that only one of them may see the fence.
         group.MapGet("/random", async (string? exclude, IMediaCatalog catalog, IStationScopeProvider scopeProvider, CancellationToken ct) =>
         {
             var excludeIds = string.IsNullOrWhiteSpace(exclude)
                 ? Array.Empty<string>()
                 : exclude.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-            return await catalog.GetRandomReadyAsync(scopeProvider.Current, excludeIds, ct) is { } reference
+            return await catalog.GetRandomPlayableAsync(scopeProvider.Current, excludeIds, ct) is { } reference
                 ? Results.Ok(reference)
                 : Results.NotFound();
         });

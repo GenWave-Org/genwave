@@ -199,4 +199,28 @@ public static class FeatureImagingKindEndpoint
             Assert.Equal(0, author.CallCount);
         }
     }
+
+    // ---------------------------------------------------------------------
+    // SAD PATH — "ad" parses generically but is refused HERE (SPEC F158.5/F161.3, PLAN T395
+    // review finding-4, RULED): ads are born only through the F161 authored ad-spot tail, never
+    // through this generic Station Imaging endpoint.
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioAdKindIsRejectedEvenThoughItParsesGenerically
+    {
+        [Fact]
+        public async Task AdReturns400AndNeverReachesTheAuthor()
+        {
+            var (controller, author) = Gh149ControllerFactory.Build();
+
+            var result = await controller.Create(
+                new SafeSegmentCreateRequest("Text.", 1, Kind: "ad"), CancellationToken.None);
+
+            var bad = Assert.IsType<BadRequestObjectResult>(result);
+            var problem = Assert.IsType<ProblemDetails>(bad.Value);
+            Assert.Equal(StatusCodes.Status400BadRequest, problem.Status);
+            Assert.Contains("liner, station_id, jingle, promo", problem.Detail);
+            Assert.Equal(0, author.CallCount);
+        }
+    }
 }
