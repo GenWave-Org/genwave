@@ -28,6 +28,16 @@ sealed class AdBriefRepository(Lazy<NpgsqlDataSource> dataSource) : IAdBriefStor
     const int MaxUnpagedRows = 1000;
 
     /// <summary>
+    /// The <c>on conflict</c> update clause EVERY upsert path on this class shares — deliberately
+    /// omits <c>enabled</c> (T405 review RULING, corrects the T398-shipped shape): <c>enabled</c> is
+    /// set ONLY by the INSERT half's own values list (a brand-new row), never touched again by an
+    /// UPDATE — see <see cref="IAdBriefStore.UpsertAsync"/>'s own remarks for the full PRESERVE-on-
+    /// conflict contract this enforces. One shared literal so <see cref="UpsertAsync"/> and
+    /// <see cref="UpsertAllAsync"/> can never drift apart on this rule.
+    /// </summary>
+    const string ConflictUpdateSet = "premise = excluded.premise, tone = excluded.tone, structure = excluded.structure";
+
+    /// <summary>
     /// <see cref="IAdBriefStore.UpsertAsync"/> — one round trip IS the check (the
     /// <c>Catalog.ArtworkTokenRepository</c>/<c>AnnouncementRepository.InsertAsync</c> lazy-upsert
     /// precedent): <c>on conflict (pack_slug, brand)</c> infers <c>station.ad_brief</c>'s own
@@ -36,7 +46,10 @@ sealed class AdBriefRepository(Lazy<NpgsqlDataSource> dataSource) : IAdBriefStor
     /// <c>(pack_slug, brand)</c> pair — including two owner-authored calls for the same brand, both
     /// carrying a NULL <c>pack_slug</c> — updates the existing row in place rather than raising
     /// 23505 or forking a duplicate. <c>created_at</c> is never in the <c>SET</c> list, so the update
-    /// half leaves it untouched.
+    /// half leaves it untouched — and, as of the T405 review ruling, neither is <c>enabled</c> (see
+    /// <see cref="ConflictUpdateSet"/>'s own remarks): <paramref name="enabled"/> only ever lands on
+    /// the INSERT half's own values list, so a second call's <paramref name="enabled"/> argument is
+    /// silently irrelevant to an EXISTING row — the interface's own remarks name why.
     /// </summary>
     public async Task<AdBrief> UpsertAsync(
         string? packSlug, string brand, string? premise, string? tone, string? structure, bool enabled,
@@ -48,12 +61,52 @@ sealed class AdBriefRepository(Lazy<NpgsqlDataSource> dataSource) : IAdBriefStor
             insert into station.ad_brief (pack_slug, brand, premise, tone, structure, enabled)
             values (@packSlug, @brand, @premise, @tone, @structure, @enabled)
             on conflict (pack_slug, brand) do update
-            set premise = excluded.premise, tone = excluded.tone, structure = excluded.structure,
-                enabled = excluded.enabled
+            set {ConflictUpdateSet}
             returning {Columns}
             """,
             new { packSlug, brand, premise, tone, structure, enabled },
             cancellationToken: ct));
+    }
+
+    /// <summary>
+    /// <see cref="IAdBriefStore.UpsertAllAsync"/> — ONE connection, ONE <see cref="NpgsqlTransaction"/>
+    /// wrapping one upsert round trip per declared brief (the <see cref="AvatarPackRepository.UpsertAsync"/>/
+    /// <see cref="FontPackRepository.UpsertAsync"/> "single-transaction multi-write install" precedent,
+    /// applied here per-row rather than delete-then-reinsert — a brief's own <c>enabled</c> flag is
+    /// exactly the per-row state a blanket delete-then-reinsert would destroy, the reason this method
+    /// upserts each brief individually inside the shared transaction instead). A failure on ANY brief
+    /// (the connection never reaches <see cref="NpgsqlTransaction.CommitAsync"/>) rolls back every
+    /// row this call would otherwise have written — never a partially-installed pack. Every INSERT
+    /// half hardcodes <c>enabled = true</c> (a brand-new pack brief is always born live, SPEC
+    /// F162.2) — never a per-brief parameter, since <see cref="AdBriefUpsertInput"/> deliberately
+    /// carries none (that record's own remarks); the SAME <see cref="ConflictUpdateSet"/>
+    /// <see cref="UpsertAsync"/> shares keeps an EXISTING row's own <c>enabled</c> untouched.
+    /// </summary>
+    public async Task<IReadOnlyList<AdBrief>> UpsertAllAsync(
+        string packSlug, IReadOnlyList<AdBriefUpsertInput> briefs, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        var results = new List<AdBrief>(briefs.Count);
+        foreach (var brief in briefs)
+        {
+            var row = await conn.QuerySingleAsync<AdBrief>(new CommandDefinition(
+                $"""
+                insert into station.ad_brief (pack_slug, brand, premise, tone, structure, enabled)
+                values (@packSlug, @brand, @premise, @tone, @structure, true)
+                on conflict (pack_slug, brand) do update
+                set {ConflictUpdateSet}
+                returning {Columns}
+                """,
+                new { packSlug, brief.Brand, brief.Premise, brief.Tone, brief.Structure },
+                transaction: tx,
+                cancellationToken: ct));
+            results.Add(row);
+        }
+
+        await tx.CommitAsync(ct);
+        return results;
     }
 
     /// <summary><see cref="IAdBriefStore.SampleEnabledAsync"/> — Postgres' own <c>order by random()</c>,

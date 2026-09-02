@@ -11,8 +11,9 @@ export type CatalogAudience = "everyone" | "mature";
  * stays routed to nothing (the shelf's own exhaustive-switch `default` arms already degrade an
  * unrecognised kind to "renders nothing" rather than misrouting it as a persona card — see
  * `PersonaCatalogClient.renderShelfEntry`'s own remarks) until T304 gives it a tab and a card of its
- * own to replace this "still-hidden" placeholder with. */
-export type CatalogEntryKind = "persona" | "theme" | "font" | "show" | "avatar" | "icon";
+ * own to replace this "still-hidden" placeholder with. Widened again to `"ad-pack"` at
+ * F162.2/STORY-393/T405 — data only, no audio/binary assets of any kind. */
+export type CatalogEntryKind = "persona" | "theme" | "font" | "show" | "avatar" | "icon" | "ad-pack";
 
 /** One mode's five shelf-chip swatches (SPEC F103.4, PLAN T185) — see Host's
  * `CatalogShelfSwatchSetDto`. `"accent-2"` keeps its hyphenated wire name (the app's own
@@ -90,16 +91,21 @@ export interface CatalogIndexResponseDto {
  * `GET /api/catalog/entries/{slug}/assets/{file}` the same way `fontSpecimenFile` already does for a
  * font pack's specimen face. `null` for every non-persona entry, when unreachable, or when this
  * persona entry declares no face — see Host's `CatalogEntryResponse.PersonaAvatarFile`.
- * `packName` (PLAN T304 rider 4) is an AVATAR entry's own manifest display name, parsed off `card`
- * at zero extra cost — `null` for every non-avatar entry, when unreachable, or on the (should-never-
- * happen) chance the manifest fails to parse; see `AvatarDetailPanel`'s own remarks for where this
- * closes the T294 "no pack-name field on the wire" stated deviation.
+ * `packName` (PLAN T304 rider 4, widened at F162.2/T405) is an AVATAR OR AD-PACK entry's own manifest
+ * display name, parsed off `card` at zero extra cost — `null` for every non-avatar/non-ad-pack
+ * entry, when unreachable, or on the (should-never-happen) chance the manifest fails to parse; see
+ * `AvatarDetailPanel`'s own remarks for where this closes the T294 "no pack-name field on the wire"
+ * stated deviation.
  * `iconCount` (PLAN T304 rider 4) is an ICON entry's own declared icon count, re-validated off
  * `card` at zero extra cost — `null` for every non-icon entry, when unreachable, or when the
  * manifest fails the whitelist gate (the safe renderer, `IconDetailPanel`, still draws whatever it
  * defensively can from `card` regardless of whether this count resolved). An icon pack carries no
  * `packName` at all (SPEC F130.1 — no pack-level display-name field exists), the reason these two
- * fields are separate rather than one shared slot. */
+ * fields are separate rather than one shared slot.
+ * `adPackBriefs` (SPEC F162.2, STORY-393, PLAN T405) is an AD-PACK entry's own brand briefs, parsed
+ * off `card` (the pack's `.ad-pack.json` manifest) at zero extra cost — `null` for every non-ad-pack
+ * entry, when unreachable, or when the manifest fails to parse. See `CatalogAdPackBriefDto`'s own
+ * remarks. */
 export interface CatalogEntryDetailDto {
   card: string | null;
   meta: string | null;
@@ -121,6 +127,7 @@ export interface CatalogEntryDetailDto {
   personaAvatarFile: string | null;
   packName: string | null;
   iconCount: number | null;
+  adPackBriefs: CatalogAdPackBriefDto[] | null;
 }
 
 /**
@@ -139,6 +146,20 @@ export interface CatalogAvatarItemDto {
   name: string;
   file: string | null;
   suggestedPersona: string | null;
+}
+
+/**
+ * One brief on an ad-pack entry's detail wire (SPEC F162.2, STORY-393, PLAN T405) — mirrors Host's
+ * `CatalogAdPackBriefDto`, itself the wire projection of one hash-verified `.ad-pack.json` manifest
+ * brief. READ-ONLY here: `AdPackDetailPanel` only ever LISTS these for review before an explicit
+ * install confirms — nothing on this shape is editable, and nothing is written anywhere until
+ * `POST /api/ad-packs/{slug}/install` is confirmed.
+ */
+export interface CatalogAdPackBriefDto {
+  brand: string;
+  premise: string | null;
+  tone: string | null;
+  structure: string | null;
 }
 
 /**

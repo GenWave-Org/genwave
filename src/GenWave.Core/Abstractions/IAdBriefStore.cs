@@ -3,13 +3,15 @@ using GenWave.Core.Domain;
 namespace GenWave.Core.Abstractions;
 
 /// <summary>
-/// The <c>station.ad_brief</c> seam (SPEC F159.1, F162.2; STORY-389, STORY-392; PLAN T398, T403b) —
-/// deliberately narrow, exactly <see cref="IAdSpotStore"/>'s own "Core-level port a MediaLibrary
-/// repository implements directly" placement, one table over. <see cref="UpsertAsync"/>/
+/// The <c>station.ad_brief</c> seam (SPEC F159.1, F162.2; STORY-389, STORY-392; PLAN T398, T403b,
+/// T405) — deliberately narrow, exactly <see cref="IAdSpotStore"/>'s own "Core-level port a
+/// MediaLibrary repository implements directly" placement, one table over. <see cref="UpsertAsync"/>/
 /// <see cref="SampleEnabledAsync"/> shipped with T398 (STORY-389 AC1's own upsert fact, T400's own
 /// prompt sampler); <see cref="ListAllAsync"/>/<see cref="CreateOwnerAsync"/>/
 /// <see cref="SetEnabledAsync"/> widen the seam additively for T403b's Briefs admin surface (SPEC
-/// F162.1) — every prior member's contract is untouched.
+/// F162.1); <see cref="UpsertAllAsync"/> widens it again for T405's ad-pack install (SPEC F162.2) —
+/// every prior member's contract is untouched, save <see cref="UpsertAsync"/>'s own <c>enabled</c>
+/// semantics, RULED at T405 review (see that member's own remarks).
 /// </summary>
 public interface IAdBriefStore
 {
@@ -18,8 +20,19 @@ public interface IAdBriefStore
     /// <c>station.ad_brief</c>'s <c>UNIQUE NULLS NOT DISTINCT (pack_slug, brand)</c> constraint,
     /// db/42). A SECOND call with the SAME <paramref name="packSlug"/>/<paramref name="brand"/> pair
     /// updates the existing row's <paramref name="premise"/>/<paramref name="tone"/>/
-    /// <paramref name="structure"/>/<paramref name="enabled"/> in place — never a duplicate row, and
-    /// <c>created_at</c> is untouched by the update half.
+    /// <paramref name="structure"/> in place — never a duplicate row, and <c>created_at</c> is
+    /// untouched by the update half.
+    ///
+    /// <para>
+    /// <b>RULED at T405 review — <paramref name="enabled"/> is PRESERVE-on-conflict, never
+    /// overwrite.</b> <paramref name="enabled"/> only ever sets the value for a BRAND-NEW row (the
+    /// INSERT half); a SECOND call for an EXISTING <c>(pack_slug, brand)</c> pair leaves that row's
+    /// own <c>enabled</c> flag exactly as it was, no matter what <paramref name="enabled"/> the
+    /// caller passes on that second call. <c>enabled</c> is the operator's OWN lever
+    /// (<see cref="SetEnabledAsync"/>, SPEC F162.1) — a content-refresh upsert (a pack reinstall,
+    /// SPEC F162.2) must never silently re-enable a brief the operator deliberately disabled, or
+    /// silently disable one the operator deliberately re-enabled.
+    /// </para>
     ///
     /// <para>
     /// <b>Ratified by Dean 2026-09-02 (SPEC F159.1 rider, PLAN T398): the owner-brief cap.</b>
@@ -32,6 +45,21 @@ public interface IAdBriefStore
     Task<AdBrief> UpsertAsync(
         string? packSlug, string brand, string? premise, string? tone, string? structure, bool enabled,
         CancellationToken ct);
+
+    /// <summary>
+    /// Upserts EVERY brief in <paramref name="briefs"/> for ONE <paramref name="packSlug"/>, inside a
+    /// SINGLE transaction (SPEC F162.2, PLAN T405) — either every declared brief lands, or none does
+    /// (a failure partway through rolls back the whole batch, never a partially-installed pack). The
+    /// SAME PRESERVE-on-conflict contract <see cref="UpsertAsync"/> carries applies per brief: a
+    /// brand-new <c>(packSlug, brief.Brand)</c> pair lands <c>enabled: true</c> (SPEC F162.2's
+    /// "installed briefs are live by default"); an EXISTING one has its
+    /// <see cref="AdBriefUpsertInput.Premise"/>/<see cref="AdBriefUpsertInput.Tone"/>/
+    /// <see cref="AdBriefUpsertInput.Structure"/> REPLACED but its own <c>enabled</c> flag left
+    /// exactly as the operator last set it. Returns every upserted row, in <paramref name="briefs"/>'
+    /// own order.
+    /// </summary>
+    Task<IReadOnlyList<AdBrief>> UpsertAllAsync(
+        string packSlug, IReadOnlyList<AdBriefUpsertInput> briefs, CancellationToken ct);
 
     /// <summary>
     /// Picks ONE row at random from every currently <c>enabled</c> brief (SPEC F160.2's own "one

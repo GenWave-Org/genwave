@@ -594,6 +594,115 @@ public static class FeatureAdSpotLifecycleStore
             // Then created_at is untouched by the update half.
             Assert.Equal(first.CreatedAt, second.CreatedAt);
         }
+
+        [Fact]
+        public async Task AReinstallNeverFlipsAnExistingRowsEnabledFlag()
+        {
+            // Given a disabled brief — T405 review RULING (corrects the T398-shipped shape): enabled
+            // is PRESERVE-on-conflict, never overwrite; the operator's own lever, never a content
+            // upsert's business...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            await repo.UpsertAsync(
+                packSlug: "genwave-catalog", brand: "Bramble & Fitch", premise: "First premise",
+                tone: "warm", structure: null, enabled: false, CancellationToken.None);
+
+            // When it is upserted again with enabled: true...
+            var second = await repo.UpsertAsync(
+                packSlug: "genwave-catalog", brand: "Bramble & Fitch", premise: "Second premise",
+                tone: "warm", structure: null, enabled: true, CancellationToken.None);
+
+            // Then the row STAYS disabled — the second call's own `enabled` argument is silently
+            // irrelevant to an EXISTING row — while the content still refreshed.
+            Assert.False(second.Enabled);
+            Assert.Equal("Second premise", second.Premise);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // T405 review F4 — UpsertAllAsync batches every declared brief in ONE transaction
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioUpsertAllAsyncBatchesInOneTransaction(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AFirstBatchLandsEveryDeclaredBriefEnabled()
+        {
+            // Given no prior briefs...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            var briefs = new List<AdBriefUpsertInput>
+            {
+                new("Bramble & Fitch", "A cozy hardware shop", "warm", "hook-offer-cta"),
+                new("Acme Filing Co", "Bureaucracy, but faster", null, null),
+                new("Nike", "The signature swoosh line", null, null),
+            };
+
+            // When the whole pack is upserted in one batch...
+            var result = await repo.UpsertAllAsync("genwave-catalog", briefs, CancellationToken.None);
+
+            // Then every declared brief landed, ALL enabled (SPEC F162.2's "installed briefs are
+            // live by default" — a brand-new pack brief is always born enabled).
+            Assert.Equal(3, result.Count);
+            Assert.Equal(3, await CountAllBriefRowsAsync(db));
+            Assert.All(result, brief => Assert.True(brief.Enabled));
+        }
+
+        [Fact]
+        public async Task AReinstallBatchPreservesDisabledAndRefreshesContent()
+        {
+            // Given a batch-installed brief, later disabled by the operator...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            await repo.UpsertAllAsync(
+                "genwave-catalog",
+                [new AdBriefUpsertInput("Bramble & Fitch", "First premise", "warm", null)],
+                CancellationToken.None);
+            var briefRow = (await repo.ListAllAsync(CancellationToken.None)).Single();
+            await repo.SetEnabledAsync(briefRow.Id, enabled: false, CancellationToken.None);
+
+            // When the SAME pack reinstalls with a revised premise...
+            var reinstalled = await repo.UpsertAllAsync(
+                "genwave-catalog",
+                [new AdBriefUpsertInput("Bramble & Fitch", "Second premise", "warm", null)],
+                CancellationToken.None);
+
+            // Then the SAME row updated in place — content refreshed, the operator's own disable
+            // survived — "content refreshes, operator state persists," one property.
+            var row = Assert.Single(reinstalled);
+            Assert.False(row.Enabled);
+            Assert.Equal("Second premise", row.Premise);
+            Assert.Equal(1, await CountAllBriefRowsAsync(db));
+        }
+
+        [Fact]
+        public async Task AFailingBriefMidBatchRollsBackEveryRowInTheBatch()
+        {
+            // Given a three-brief batch whose SECOND brief carries a null brand — bypassing this
+            // store's own C# non-nullable contract deliberately (test-only fault injection, mirrors
+            // ScenarioTheDbChecksRefuseIllegalRowsEvenBypassingTheStore's own "reach the real
+            // constraint" idiom one section up): station.ad_brief.brand is NOT NULL at the DB layer,
+            // and this is the one honest way to prove UpsertAllAsync's own transaction rolls
+            // EVERYTHING back, never just the offending row...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            var briefs = new List<AdBriefUpsertInput>
+            {
+                new("First Brand", null, null, null),
+                new(null!, null, null, null),
+                new("Third Brand", null, null, null),
+            };
+
+            // When the batch upsert is attempted...
+            await Assert.ThrowsAsync<PostgresException>(
+                () => repo.UpsertAllAsync("genwave-catalog", briefs, CancellationToken.None));
+
+            // Then NOTHING landed — not even the first, otherwise-valid brief; the whole batch is
+            // one transaction.
+            Assert.Equal(0, await CountAllBriefRowsAsync(db));
+        }
     }
 
     // ---------------------------------------------------------------------

@@ -15,6 +15,8 @@ import { readErrorMessage } from "@/lib/problem-details";
 import { useRestoreFocus } from "@/lib/use-restore-focus";
 import { cn } from "@/lib/utils";
 import { PersonaCardReviewModal, type PersonaCardReviewImportResult } from "../_components/PersonaCardReviewModal";
+import { AdPackDetailPanel } from "./AdPackDetailPanel";
+import { AdPackInstallModal, type AdPackInstallResult } from "./AdPackInstallModal";
 import { AvatarDetailPanel } from "./AvatarDetailPanel";
 import { AvatarInstallModal, type AvatarInstallResult } from "./AvatarInstallModal";
 import { BestForChips, MatureBadge } from "./catalog-badges";
@@ -48,6 +50,7 @@ const KIND_TAB_NOUN: Record<CatalogEntryKind, string> = {
   show: "shows",
   avatar: "avatar packs",
   icon: "icons",
+  "ad-pack": "ad packs",
 };
 
 interface PersonaCatalogClientProps {
@@ -192,6 +195,7 @@ export function PersonaCatalogClient({
   const [installingFont, setInstallingFont] = useState(false);
   const [installingAvatar, setInstallingAvatar] = useState(false);
   const [installingIcon, setInstallingIcon] = useState(false);
+  const [installingAdPack, setInstallingAdPack] = useState(false);
   // Which show entry (if any) has its combined detail/review modal open (PLAN T255) — a show never
   // routes through `detail`/`loadDetail` at all (see `ShowCardReviewModal`'s own remarks for why),
   // so this is its own, independent piece of state.
@@ -381,6 +385,26 @@ export function PersonaCatalogClient({
   }
 
   /**
+   * SPEC F162.2's success path — mirrors `handleIconInstalled`'s own shape, minus the local
+   * installed-slug flip: this kind carries no dedicated per-pack listing endpoint this task adds
+   * (`AdPackController`'s own class remarks), so `AdPackDetailPanel` has no "Installed" chip to flip
+   * in the first place — closing the modal and toasting the brief count is the whole client-side
+   * job. Toasts the pack's own display name when present, falling back to the brief count alone
+   * (SPEC F162.2's own `packName` is genuinely optional on this kind, unlike an avatar pack's own
+   * required one).
+   */
+  function handleAdPackInstalled(result: AdPackInstallResult): void {
+    setInstallingAdPack(false);
+    const briefCount = result.brands.length;
+    const briefWord = `${briefCount} brief${briefCount === 1 ? "" : "s"}`;
+    toast.success(
+      result.packName !== null
+        ? `"${clampPackDisplayText(result.packName)}" installed (${briefWord}).`
+        : `Ad pack installed (${briefWord}).`
+    );
+  }
+
+  /**
    * A show entry's OPTIONAL `suggestedPersona` (SPEC F118.3, PLAN T255) is on the shelf when the
    * ALREADY-fetched index carries a persona entry under that exact slug — never a further catalog
    * fetch just to answer this. An absent/unknown suggestion (no such persona entry at all) reads
@@ -504,18 +528,30 @@ export function PersonaCatalogClient({
         );
       case "avatar":
         return (
-          <AvatarShelfCard
+          <KindMarkerShelfCard
             key={entry.slug}
             entry={entry}
+            marker="Avatar pack"
             selected={entry.slug === selectedSlug}
             onSelect={() => handleCardClick(entry.slug)}
           />
         );
       case "icon":
         return (
-          <IconShelfCard
+          <KindMarkerShelfCard
             key={entry.slug}
             entry={entry}
+            marker="Icon pack"
+            selected={entry.slug === selectedSlug}
+            onSelect={() => handleCardClick(entry.slug)}
+          />
+        );
+      case "ad-pack":
+        return (
+          <KindMarkerShelfCard
+            key={entry.slug}
+            entry={entry}
+            marker="Ad pack"
             selected={entry.slug === selectedSlug}
             onSelect={() => handleCardClick(entry.slug)}
           />
@@ -597,6 +633,14 @@ export function PersonaCatalogClient({
             detail={loaded.detail}
             isInstalled={installedIconPackSlugs.has(loaded.slug)}
             onInstallClick={() => setInstallingIcon(true)}
+          />
+        );
+      case "ad-pack":
+        return (
+          <AdPackDetailPanel
+            slug={loaded.slug}
+            detail={loaded.detail}
+            onInstallClick={() => setInstallingAdPack(true)}
           />
         );
       default:
@@ -707,6 +751,16 @@ export function PersonaCatalogClient({
         />
       )}
 
+      {/* Cancel = no-op (mirrors the icon block immediately above, the SAME "no request body"
+          shape — AdPackInstallModal posts no body of its own either). */}
+      {installingAdPack && detail.kind === "loaded" && selectedEntry?.kind === "ad-pack" && (
+        <AdPackInstallModal
+          slug={detail.slug}
+          onCancel={() => setInstallingAdPack(false)}
+          onInstalled={handleAdPackInstalled}
+        />
+      )}
+
       {/* Cancel = no-op (mirrors the theme/font blocks above): closing this modal by any path just
           resets `reviewingShowSlug`, never touching the network — see ShowCardReviewModal's own
           remarks. Independent of `detail`/`selectedEntry` entirely (PLAN T255) — this modal owns
@@ -806,6 +860,8 @@ function detailSectionAriaLabel(kind: CatalogEntryKind | undefined): string {
       return "Avatar pack details";
     case "icon":
       return "Icon pack details";
+    case "ad-pack":
+      return "Ad pack details";
     case "persona":
     default:
       return "Persona details";
@@ -1045,30 +1101,26 @@ function FontShelfCard({
 }
 
 /**
- * An avatar pack entry's shelf card (SPEC F128.1, F128.3, PLAN T294) — mirrors `FontShelfCard`'s own
- * shape one level up: a title, the 18+ badge, a small brass "Avatar pack" kind marker (this kind has
- * no swatches/art either), and `bestFor` chips — all painted straight off the entry's already-fetched
- * index row, no manifest or asset fetch, ever, while browsing (the SAME zero-cost-browse contract
- * every other kind's shelf card already holds to).
- *
- * The title reads `prettifySlug(entry.slug)`, NOT a pack-name field: `CatalogShelfEntryDto` (the
- * INDEX row this SHELF card paints from, no fetch of its own) carries no avatar-kind display-name
- * field at all — only the DETAIL wire gained one (`CatalogEntryResponse.PackName`, PLAN T304 rider
- * 4, see `AvatarDetailPanel`'s own remarks for where THAT reads it), and widening the shelf's own
- * zero-cost INDEX projection to match would mean fetching a manifest for every card just to browse
- * — the exact cost this row is built to avoid. This is the SAME slug-derived fallback `ShelfCard`/
- * `ThemeShelfCard` already use as their own title outright (not merely a fallback for them,
- * `FontShelfCard`'s own `??` chain, which has an index-level `fontFamily` to fall back FROM).
- *
- * No item-count line either, for the identical reason: `CatalogShelfEntryDto` has no such field for
- * this kind. The pack's own item COUNT is what opening the card's face grid shows.
+ * The shared "kind-marker" shelf card shape (T405 review F7 fold): `AvatarShelfCard`/`IconShelfCard`/
+ * `AdPackShelfCard` were three byte-identical copies of this exact markup, differing only in their
+ * own kind-marker text ("Avatar pack"/"Icon pack"/"Ad pack") — none of the three kinds' own
+ * `CatalogShelfEntryDto` carries a kind-specific shelf field to paint (see each former component's
+ * own now-removed remarks for why: an avatar/icon/ad pack's own display name/count lives only on
+ * the DETAIL wire, never the zero-cost INDEX row this card paints from), so there was never a real
+ * per-kind difference here to keep as three separate components. A title (slug-derived — none of
+ * these three kinds has an index-level display name to prefer over it), the 18+ badge, one
+ * `marker` line, and `bestFor` chips — all painted straight off the entry's already-fetched index
+ * row, no manifest or asset fetch, ever, while browsing (the SAME zero-cost-browse contract every
+ * kind's shelf card holds to).
  */
-function AvatarShelfCard({
+function KindMarkerShelfCard({
   entry,
+  marker,
   selected,
   onSelect,
 }: {
   entry: CatalogShelfEntryDto;
+  marker: string;
   selected: boolean;
   onSelect: () => void;
 }): ReactNode {
@@ -1087,50 +1139,7 @@ function AvatarShelfCard({
           <span className="font-display text-[1.05rem] text-ink">{prettifySlug(entry.slug)}</span>
           {entry.audience === "mature" && <MatureBadge />}
         </div>
-        <p className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Avatar pack</p>
-        <BestForChips items={entry.bestFor} />
-      </button>
-    </li>
-  );
-}
-
-/**
- * An icon pack entry's shelf card (SPEC F130.1, F130.6, STORY-337, PLAN T304) — mirrors
- * `AvatarShelfCard`'s own shape one level up: a title, the 18+ badge, a small brass "Icon pack"
- * kind marker, and `bestFor` chips — all painted straight off the entry's already-fetched INDEX
- * row, no manifest fetch while browsing. The title reads `prettifySlug(entry.slug)` unconditionally
- * — SPEC F130.1's `gw-icon-pack` document has no pack-level display name at ANY altitude (unlike
- * an avatar pack's own `packName`), so there is no manifest field this card could ever fall back
- * FROM even at the detail wire, let alone the index. No icon-count line either, the same
- * "CatalogShelfEntryDto has no such field for this kind" reasoning `AvatarShelfCard`'s own remarks
- * give — the pack's own declared count is what opening the card's specimen row shows
- * (`IconDetailPanel`).
- */
-function IconShelfCard({
-  entry,
-  selected,
-  onSelect,
-}: {
-  entry: CatalogShelfEntryDto;
-  selected: boolean;
-  onSelect: () => void;
-}): ReactNode {
-  return (
-    <li>
-      <button
-        type="button"
-        onClick={onSelect}
-        aria-expanded={selected}
-        className={cn(
-          "flex w-full flex-col items-start gap-2 rounded-[6px] border p-4 text-left transition-colors duration-[120ms] ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
-          selected ? "border-accent bg-surface-2" : "border-line bg-surface hover:bg-surface-2"
-        )}
-      >
-        <div className="flex w-full items-center justify-between gap-2">
-          <span className="font-display text-[1.05rem] text-ink">{prettifySlug(entry.slug)}</span>
-          {entry.audience === "mature" && <MatureBadge />}
-        </div>
-        <p className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">Icon pack</p>
+        <p className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">{marker}</p>
         <BestForChips items={entry.bestFor} />
       </button>
     </li>
