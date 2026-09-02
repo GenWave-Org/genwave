@@ -23,10 +23,10 @@ import { render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import type { useRouter } from "next/navigation";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
+import { PageSizePicker } from "@/components/ui/page-size-picker";
 import { Toaster } from "@/components/ui/toast";
-import { GardenerPageSizePicker } from "../app/(authed)/gardener/GardenerPageSizePicker";
 import { GardenerTabs } from "../app/(authed)/gardener/GardenerTabs";
-import { resolveGardenerPageSize } from "../app/(authed)/gardener/gardener-paging";
+import { buildGardenerHref, GARDENER_PAGE_SIZES, resolveGardenerPageSize } from "../app/(authed)/gardener/gardener-paging";
 import type { GardenerDuplicateGroupDto, GardenerFindingDto, GardenerKind, GardenerOpenCounts } from "@/lib/gardener-api";
 
 const mockedUseRouter = jest
@@ -169,7 +169,7 @@ describe("Feature: Gardener page size resolution", () => {
 describe("Feature: the Gardener rows-per-page picker", () => {
   describe("Scenario: the size picker", () => {
     it("offers exactly 25, 50, 100, and 250", () => {
-      render(<GardenerPageSizePicker kind="dead_file" limit={25} />);
+      render(<PageSizePicker sizes={GARDENER_PAGE_SIZES} limit={25} hrefFor={(size) => buildGardenerHref("dead_file", size)} />);
 
       const group = screen.getByRole("group", { name: "Rows per page" });
       const links = within(group).getAllByRole("link");
@@ -177,7 +177,7 @@ describe("Feature: the Gardener rows-per-page picker", () => {
     });
 
     it("writes limit=100 to the URL when 100 is picked", () => {
-      render(<GardenerPageSizePicker kind="dead_file" limit={25} />);
+      render(<PageSizePicker sizes={GARDENER_PAGE_SIZES} limit={25} hrefFor={(size) => buildGardenerHref("dead_file", size)} />);
 
       const group = screen.getByRole("group", { name: "Rows per page" });
       expect(within(group).getByRole("link", { name: "100" })).toHaveAttribute("href", "/gardener?limit=100");
