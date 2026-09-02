@@ -36,6 +36,18 @@ static class Harness
     public static AnnouncementRepository AnnouncementRepo(DatabaseFixture f) =>
         new(new Lazy<NpgsqlDataSource>(() => f.StationDataSource));
 
+    /// <summary>Builds an <see cref="AdSpotRepository"/> over the fixture's own station_svc data
+    /// source (SPEC F159.1, F159.2; STORY-389; PLAN T398) — mirrors <see cref="AnnouncementRepo"/>'s
+    /// own factory shape one station-schema store over.</summary>
+    public static AdSpotRepository AdSpotRepo(DatabaseFixture f) =>
+        new(new Lazy<NpgsqlDataSource>(() => f.StationDataSource));
+
+    /// <summary>Builds an <see cref="AdBriefRepository"/> over the fixture's own station_svc data
+    /// source (SPEC F159.1, F162.2; STORY-389; PLAN T398) — mirrors <see cref="AnnouncementRepo"/>'s
+    /// own factory shape one table over.</summary>
+    public static AdBriefRepository AdBriefRepo(DatabaseFixture f) =>
+        new(new Lazy<NpgsqlDataSource>(() => f.StationDataSource));
+
     /// <summary>
     /// Builds a <see cref="ScanService"/> against a real repository/media root. <paramref name="missThreshold"/>
     /// defaults to 1 — the pre-F58 single-miss behavior — so every pre-existing spec built on this

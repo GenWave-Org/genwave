@@ -266,6 +266,22 @@ public sealed class DatabaseFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
+    /// <summary>
+    /// Truncate <c>station.ad_spot</c> and <c>station.ad_brief</c> and reset their identities (SPEC
+    /// F159.1; STORY-389; PLAN T398). No FK references either table — <c>bed_media_id</c>/
+    /// <c>media_id</c> are plain, no-FK columns (the db/22 schema-role boundary, db/42's own header)
+    /// and nothing else in the <c>station</c> schema points at either — so no CASCADE is required, the
+    /// same reasoning <see cref="ResetAnnouncementAsync"/>'s own remarks give. One statement, both
+    /// tables: independent of each other, but truncated together for one round trip per test reset.
+    /// </summary>
+    public async Task ResetAdsAsync()
+    {
+        await using var conn = await StationDataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "truncate table station.ad_spot, station.ad_brief restart identity";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     async Task WaitForSchemaAsync()
     {
         for (var attempt = 0; attempt < 30; attempt++)

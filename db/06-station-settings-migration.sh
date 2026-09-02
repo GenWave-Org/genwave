@@ -549,8 +549,19 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  created_at       timestamptz NOT NULL DEFAULT now(),
 	  state_changed_at timestamptz NOT NULL DEFAULT now(),
 	  rendered_at      timestamptz,
-	  retired_at       timestamptz
+	  retired_at       timestamptz,
+	  -- Both CHECKs mirror db/43-ad-spot-invariants-migration.sh's own ALTER TABLE pair (PLAN T398,
+	  -- SPEC F159.2's "ready requires media_id" / "fail_reason iff failed" invariants) — inline here
+	  -- since a fresh install never sees db/43 (only 01+06 run via docker-entrypoint-initdb.d).
+	  CONSTRAINT ad_spot_ready_requires_media_id
+	    CHECK (state <> 'ready'::station.ad_state OR media_id IS NOT NULL),
+	  CONSTRAINT ad_spot_fail_reason_iff_failed
+	    CHECK ((state = 'failed'::station.ad_state) = (fail_reason IS NOT NULL))
 	);
+
+	-- Mirrors db/43's own index — see that script's own header for why one (state, state_changed_at)
+	-- index covers every query shape PLAN T398's store writes.
+	CREATE INDEX IF NOT EXISTS ad_spot_state_changed_at ON station.ad_spot (state, state_changed_at);
 
 	CREATE TABLE IF NOT EXISTS station.ad_brief (
 	  id         bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
