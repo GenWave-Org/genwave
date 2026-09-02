@@ -31,6 +31,12 @@ static class PlayoutServiceCollectionExtensions
             // CrosstalkStockWorker (GenWave.Host.Crosstalk) so it never generates while a real
             // on-air LLM+TTS render is running. See OnAirRenderGate's own remarks.
             .AddSingleton<OnAirRenderGate>()
+            // The SAME signal, exposed to GenWave.Ads' own AdSpotWorker via the Core seam that
+            // project must use instead of referencing OnAirRenderGate's concrete Host type (SPEC
+            // F161.1, PLAN T402 — see IOnAirRenderSignal's own remarks for the full layering
+            // rationale). Resolves the SAME singleton OnAirRenderGate instance registered just
+            // above — never a second gate.
+            .AddSingleton<IOnAirRenderSignal>(sp => sp.GetRequiredService<OnAirRenderGate>())
             .AddSingleton<PlayHistoryEventSink>()
             // Crosstalk retire-at-air (SPEC F127.7, STORY-329, PLAN T287) — auto-constructor-resolved
             // (no factory), so its own optional CrosstalkPlanner? ctor param degrades to null (a

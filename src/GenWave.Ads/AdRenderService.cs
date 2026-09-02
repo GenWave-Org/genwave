@@ -50,11 +50,11 @@ public sealed class AdRenderService(
 {
     static readonly JsonSerializerOptions VoicePlanJsonOptions = new(JsonSerializerDefaults.Web);
 
-    public async Task RenderAsync(AdSpot spot, CancellationToken ct)
+    public async Task<AdRenderOutcome> RenderAsync(AdSpot spot, CancellationToken ct)
     {
         try
         {
-            await RenderCoreAsync(spot, ct);
+            return await RenderCoreAsync(spot, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -63,11 +63,11 @@ public sealed class AdRenderService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Ad spot {Id} render failed unexpectedly", spot.Id);
-            await TryMarkFailedAsync(spot.Id, $"render: unexpected {ex.GetType().Name}", ct);
+            return await FailAsync(spot.Id, $"render: unexpected {ex.GetType().Name}", ct);
         }
     }
 
-    async Task RenderCoreAsync(AdSpot spot, CancellationToken ct)
+    async Task<AdRenderOutcome> RenderCoreAsync(AdSpot spot, CancellationToken ct)
     {
         // A structural re-parse only (int.MaxValue as the per-line ceiling — the length rule was
         // already enforced at write time; re-checking it here would be re-validation, not rendering).
@@ -77,23 +77,16 @@ public sealed class AdRenderService(
             var reason = parsed is AdScriptValidationResult.Refused refused
                 ? refused.Violation.Reason
                 : "unparseable script";
-            await TryMarkFailedAsync(spot.Id, $"render: stored script no longer parses ({reason})", ct);
-            return;
+            return await FailAsync(spot.Id, $"render: stored script no longer parses ({reason})", ct);
         }
 
         var (bed, bedFailure) = await ResolveBedAsync(spot.BedMediaId, ct);
         if (bedFailure is not null)
-        {
-            await TryMarkFailedAsync(spot.Id, bedFailure, ct);
-            return;
-        }
+            return await FailAsync(spot.Id, bedFailure, ct);
 
         var libraryId = await ResolveLibraryIdAsync(ct);
         if (libraryId is null)
-        {
-            await TryMarkFailedAsync(spot.Id, "render: the ads library does not exist yet", ct);
-            return;
-        }
+            return await FailAsync(spot.Id, "render: the ads library does not exist yet", ct);
 
         var cast = ResolveCast(spot, script);
         var lines = script.Lines.Select(line => new CastLine(line.Tag, line.Text)).ToList();
@@ -110,7 +103,9 @@ public sealed class AdRenderService(
             ct);
 
         if (!result.Succeeded)
-            await TryMarkFailedAsync(spot.Id, $"render: {result.FailureReason} — {result.FailureDetail}", ct);
+            return await FailAsync(spot.Id, $"render: {result.FailureReason} — {result.FailureDetail}", ct);
+
+        return AdRenderOutcome.Rendered;
     }
 
     /// <summary>
@@ -271,10 +266,34 @@ public sealed class AdRenderService(
             Kind: ImagingKind.Ad);
     }
 
-    /// <summary>The one MarkFailedAsync call site every failure path above funnels through — never
-    /// throws itself (the <c>AdsLibrarySeeder</c> "any failure degrades to WARN" posture): a Postgres
-    /// blip recording the FAILURE must not itself crash T402's own per-tick worker loop.</summary>
-    async Task TryMarkFailedAsync(long spotId, string reason, CancellationToken ct)
+    /// <summary>
+    /// The ONE place every failure path above turns a reason into an <see cref="AdRenderOutcome"/>
+    /// (PLAN T402 review F5a — collapses five identical <c>TryMarkFailedAsync(...) ? Failed :
+    /// ClaimConflict</c> ternaries into a single decision with one home): <see cref="AdRenderOutcome.Failed"/>
+    /// when the Failed transition actually applied, <see cref="AdRenderOutcome.ClaimConflict"/> when
+    /// <see cref="TryMarkFailedAsync"/> reports it did not (the guardian-re-arm race — see that
+    /// outcome's own remarks).
+    /// </summary>
+    async Task<AdRenderOutcome> FailAsync(long spotId, string reason, CancellationToken ct) =>
+        await TryMarkFailedAsync(spotId, reason, ct) ? AdRenderOutcome.Failed : AdRenderOutcome.ClaimConflict;
+
+    /// <summary>
+    /// The one MarkFailedAsync call site every failure path above funnels through — never throws
+    /// itself (the <c>AdsLibrarySeeder</c> "any failure degrades to WARN" posture): a Postgres blip
+    /// recording the FAILURE must not itself crash T402's own per-tick worker loop.
+    ///
+    /// <para>
+    /// <b>Returns whether the Failed transition actually applied (PLAN T402, T401 review F1).</b>
+    /// <see langword="false"/> covers BOTH a clean "no longer Rendering" report from
+    /// <see cref="IAdSpotStore.MarkFailedAsync"/> (the guardian-re-arm race — see
+    /// <see cref="AdRenderOutcome.ClaimConflict"/>'s own remarks) AND a genuine exception attempting
+    /// the write — either way, <see cref="RenderAsync"/>'s own caller cannot trust the row is
+    /// <see cref="AdState.Failed"/>, and <see cref="AdRenderOutcome.ClaimConflict"/> is the honest
+    /// "something kept this from landing cleanly" signal for both, distinguishable only by which WARN
+    /// line above actually fired.
+    /// </para>
+    /// </summary>
+    async Task<bool> TryMarkFailedAsync(long spotId, string reason, CancellationToken ct)
     {
         // LogSanitize.Strip (T401 review F11, the CodeQL cs/log-forging family): reason can carry an
         // echoed fragment of the stored script (AdScriptParser's own EchoForReason already bounds
@@ -285,8 +304,10 @@ public sealed class AdRenderService(
         logger.LogWarning("Ad spot {Id} render failed: {Reason}", spotId, LogSanitize.Strip(reason));
         try
         {
-            if (!await spotStore.MarkFailedAsync(spotId, reason, ct))
+            var applied = await spotStore.MarkFailedAsync(spotId, reason, ct);
+            if (!applied)
                 logger.LogWarning("Ad spot {Id} MarkFailedAsync found it no longer Rendering", spotId);
+            return applied;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -295,6 +316,7 @@ public sealed class AdRenderService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Ad spot {Id} MarkFailedAsync itself failed", spotId);
+            return false;
         }
     }
 }

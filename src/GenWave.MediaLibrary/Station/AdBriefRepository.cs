@@ -42,4 +42,23 @@ sealed class AdBriefRepository(Lazy<NpgsqlDataSource> dataSource) : IAdBriefStor
             new { packSlug, brand, premise, tone, structure, enabled },
             cancellationToken: ct));
     }
+
+    /// <summary><see cref="IAdBriefStore.SampleEnabledAsync"/> — Postgres' own <c>order by random()</c>,
+    /// the SAME "let the database pick" shape <c>LibraryAdSpotSource</c>'s own live-Postgres random
+    /// read uses one project over; the brief universe is small (an operator-curated catalog, not a
+    /// media library), so a full-table <c>ORDER BY random()</c> costs nothing worth a more elaborate
+    /// sampling scheme here.</summary>
+    public async Task<AdBrief?> SampleEnabledAsync(CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        return await conn.QuerySingleOrDefaultAsync<AdBrief?>(new CommandDefinition(
+            """
+            select id, pack_slug, brand, premise, tone, structure, enabled, created_at
+            from station.ad_brief
+            where enabled
+            order by random()
+            limit 1
+            """,
+            cancellationToken: ct));
+    }
 }

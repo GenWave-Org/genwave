@@ -61,4 +61,10 @@ public sealed class FakeAdSpotStore : IAdSpotStore
 
     public Task<IReadOnlyList<AdSpot>> ListReadyOlderThanAsync(TimeSpan age, CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdRenderService.");
+
+    public Task<IReadOnlyList<long>> FindRenderingPastGraceAsync(TimeSpan grace, DateTimeOffset now, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
+
+    public Task<bool> ReArmAsync(long id, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
 }

@@ -71,4 +71,22 @@ public sealed class AdsOptions
     /// id on every vend. Default "ads" (SPEC F163.2's own explicit default).
     /// </summary>
     public string LibraryName { get; set; } = "ads";
+
+    /// <summary>
+    /// The worst-case wall-clock budget <c>AdSpotWorker</c> (PLAN T402) gives ONE render attempt,
+    /// via a linked <see cref="System.Threading.CancellationTokenSource.CancelAfter(TimeSpan)"/> on
+    /// that tick's own claim — a wedged Kokoro (or a stalled ffmpeg mix) must not hang the worker's
+    /// tick loop forever. Deliberately NOT <c>Tts:RenderBudgetSeconds</c> (the crosstalk stock
+    /// worker's own knob, default 30s): that budget governs a DIFFERENT concern — the ON-AIR
+    /// <c>PlayoutFeeder.RefillAsync</c> substitution window (gh-#184) — and an ad spot's own render
+    /// genuinely needs more headroom (up to 3 voices, up to a 60s script, plus an optional bed mix)
+    /// than a single on-air line ever does. Default 180 (three minutes — comfortably above the
+    /// slowest realistic 3-voice/60s spot on modest hardware, per T402's own build-time sizing note;
+    /// see <c>AdSpotLifecycleGuardianService</c>'s own remarks for how the guardian's re-arm grace is
+    /// PINNED to always exceed this value, not merely tuned near it). Range 10-1800 (T402's own
+    /// choice, the <c>GardenerOptions.IntervalMinutes</c> shape): under 10s could not realistically
+    /// complete even a 15s single-voice spot; half an hour is already far past any sane render.
+    /// </summary>
+    [Range(10, 1800)]
+    public int RenderBudgetSeconds { get; set; } = 180;
 }

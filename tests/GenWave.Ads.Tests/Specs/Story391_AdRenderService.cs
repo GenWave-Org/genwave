@@ -269,4 +269,34 @@ public static class FeatureAdRenderService
             Assert.Contains("confirmation declined", store.LastMarkFailedReason, StringComparison.Ordinal);
         }
     }
+
+    // ---------------------------------------------------------------------
+    // SAD PATH — the guardian-race claim conflict (PLAN T402 review F2(4), F5a)
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioTheClaimConflictOutcome
+    {
+        [Fact]
+        public async Task WhenMarkFailedAlsoFindsTheRowNoLongerRenderingTheOutcomeIsClaimConflict()
+        {
+            // The guardian-re-arm race: this render's own confirmAsync (MarkReadyAsync) declines, AND
+            // the follow-up MarkFailedAsync ALSO reports "no longer Rendering" — the row moved out of
+            // Rendering from under this render entirely (the guardian already re-armed it elsewhere).
+            // AdRenderService must report ClaimConflict — the ONE decision FailAsync now owns for
+            // every one of its five call sites (PLAN T402 review F5a) — never silently collapse this
+            // into an ordinary Failed transition it never actually recorded.
+            var (service, author, store, _, _, _) = Build();
+            author.InvokeDelegates = false;
+            author.Result = CastSegmentAuthorResult.Failure(CastSegmentFailureReason.ConfirmationFailed, "confirmation declined");
+            store.MarkFailedResult = false;
+            var spot = MakeSpot(id: 77);
+
+            var outcome = await service.RenderAsync(spot, CancellationToken.None);
+
+            Assert.Equal(AdRenderOutcome.ClaimConflict, outcome);
+            // Attempted, but reported "no longer Rendering" — no orphan row: the store's own guarded
+            // WHERE simply matched nothing, exactly as MarkReadyAsync's own decline already did.
+            Assert.Equal(1, store.MarkFailedCalls);
+        }
+    }
 }

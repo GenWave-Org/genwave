@@ -517,18 +517,29 @@ public static class StationSettingsAllowlist
         new("Crosstalk:Shows",                                SettingApplyMode.Live,          SettingKind.String,     ""),
         new("Crosstalk:EveryNthAiring",                       SettingApplyMode.Live,          SettingKind.Number,     "airings"),
 
-        // The ads seam's five Live knobs (SPEC F158.3, F159.3, F159.4, F163.1, STORY-388, PLAN
-        // T397). EveryNUnits is the StationIdEveryNUnits twin — read live through IAdCadenceProvider
-        // by Orchestrator's own cadence check, so a PUT here reaches the very next unit with no api
-        // restart; 0 (the default) disables the trigger entirely. TargetCount/RefreshDays/
-        // AutoApprove have no consumer wired yet (T400-T402's own job — the Station:Audience/
-        // Station:Imaging precedent: the allowlist row lands ahead of its first reader);
-        // AntiRepeatWindow is already read live by GenWave.Ads.LibraryAdSpotSource's in-memory ring
-        // (PLAN T396) via IOptionsMonitor<AdSpotAntiRepeatOptions>, this row is what gives it a live
-        // PUT surface. All five share the SAME Station:Ads:* namespace but bind through THREE
-        // independent seams (OptionsMonitorAdCadenceProvider for EveryNUnits,
-        // AdSpotAntiRepeatOptions for AntiRepeatWindow, raw IConfiguration reads for the other
-        // three) — see StationAdsOptions' own remarks for why that split is deliberate, not drift.
+        // The ads seam's five Live knobs (SPEC F158.3, F159.3, F159.4, F163.1, STORY-388/389/391,
+        // PLAN T397/T402). EveryNUnits is the StationIdEveryNUnits twin — read live through
+        // IAdCadenceProvider by Orchestrator's own cadence check, so a PUT here reaches the very next
+        // unit with no api restart; 0 (the default) disables the trigger entirely. TargetCount/
+        // RefreshDays/AutoApprove are now GenWave.Ads.AdSpotWorker's own stock-pass reads (PLAN T402,
+        // raw IConfiguration, re-read fresh every tick — no bound options class, see
+        // AdStockSettingsReader's own remarks for why); AntiRepeatWindow is read live by
+        // GenWave.Ads.LibraryAdSpotSource's in-memory ring (PLAN T396) via
+        // IOptionsMonitor<AdSpotAntiRepeatOptions>, this row is what gives it a live PUT surface. All
+        // five share the SAME Station:Ads:* namespace but bind through THREE independent seams
+        // (OptionsMonitorAdCadenceProvider for EveryNUnits, AdSpotAntiRepeatOptions for
+        // AntiRepeatWindow, raw IConfiguration reads for the other three) — see StationAdsOptions' own
+        // remarks for why that split is deliberate, not drift.
+        //
+        // An ad spot's own `library.media` eligibility is NOT one of these five knobs (PLAN T402
+        // review F1c, window-corrected at review F6) — never_play and the ad spot's own retire verb
+        // (T403's future editor; today, AdSpotWorker's own RefreshDays sweep) are an OPERATOR's levers
+        // for taking a ready spot off the air, and they are RESPECTED: AdSpotWorker.RepairReadyEligibilityAsync
+        // only ever re-enables a Ready spot's media row within roughly one WorkerIntervalMinutes tick
+        // interval PLUS the guardian's own grace of its OWN ready transition (AdSpotRepairWindow,
+        // GenWave.Ads — wider than the guardian's own grace alone, since the repair sweep cannot see a
+        // spot before the tick AFTER it went ready) — an aged, operator-disabled ready ad row past
+        // that window is left exactly as the operator set it, forever.
         new("Station:Ads:EveryNUnits",                        SettingApplyMode.Live,          SettingKind.Number,     "count"),
         new("Station:Ads:TargetCount",                        SettingApplyMode.Live,          SettingKind.Number,     "spots"),
         new("Station:Ads:RefreshDays",                        SettingApplyMode.Live,          SettingKind.Number,     "days"),

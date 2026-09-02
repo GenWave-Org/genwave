@@ -294,6 +294,40 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
         return rows.Select(ToAdSpot).ToList();
     }
 
+    /// <summary><see cref="IAdSpotStore.FindRenderingPastGraceAsync"/> — the stuck-render guardian's
+    /// own candidate read (PLAN T402), mirrors <see cref="AnnouncementRepository.FindClaimedPastGraceAsync"/>'s
+    /// exact shape one table over. Bounded at <see cref="MaxUnpagedRows"/>, the SAME ceiling
+    /// <see cref="ListReadyOlderThanAsync"/> already applies to its own unpaged read.</summary>
+    public async Task<IReadOnlyList<long>> FindRenderingPastGraceAsync(TimeSpan grace, DateTimeOffset now, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var ids = await conn.QueryAsync<long>(new CommandDefinition(
+            """
+            select id from station.ad_spot
+            where state = 'rendering'::station.ad_state and state_changed_at < @threshold
+            order by state_changed_at asc, id asc
+            limit @limit
+            """,
+            new { threshold = now - grace, limit = MaxUnpagedRows }, cancellationToken: ct));
+        return ids.AsList();
+    }
+
+    /// <summary><see cref="IAdSpotStore.ReArmAsync"/> — <see cref="AdState.Rendering"/> to
+    /// <see cref="AdState.Approved"/>, total, mirrors <see cref="MarkReadyAsync"/>/<see cref="MarkFailedAsync"/>'s
+    /// own posture exactly (no xmin — see this store's own interface remarks).</summary>
+    public async Task<bool> ReArmAsync(long id, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var affected = await conn.ExecuteAsync(new CommandDefinition(
+            """
+            update station.ad_spot
+            set state = 'approved'::station.ad_state, state_changed_at = now()
+            where id = @id and state = 'rendering'::station.ad_state
+            """,
+            new { id }, cancellationToken: ct));
+        return affected == 1;
+    }
+
     /// <summary>
     /// The one ceiling every unbounded-by-caller read in this file shares — <see cref="ClampPaging"/>'s
     /// own cap and <see cref="ListReadyOlderThanAsync"/>'s own <c>limit</c> both read this constant

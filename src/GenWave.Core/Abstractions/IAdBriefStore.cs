@@ -30,4 +30,17 @@ public interface IAdBriefStore
     Task<AdBrief> UpsertAsync(
         string? packSlug, string brand, string? premise, string? tone, string? structure, bool enabled,
         CancellationToken ct);
+
+    /// <summary>
+    /// Picks ONE row at random from every currently <c>enabled</c> brief (SPEC F160.2's own "one
+    /// brief sampled from enabled ad_brief rows"; PLAN T402, <c>AdSpotWorker</c>'s first read of this
+    /// store) — <see langword="null"/> when no brief is enabled, a normal, silent outcome (an empty
+    /// brief universe, or every one disabled) this call's caller treats as "nothing to generate this
+    /// tick", never an error. Random, not oldest/round-robin: unlike <c>ad_spot</c>'s own
+    /// oldest-first render claim (a genuine work QUEUE), briefs are a standing catalog with no
+    /// per-row "already used" state to rotate through — the SAME "no memory needed" reasoning
+    /// <c>LibraryAdSpotSource</c>'s own <c>GetRandomReadyAdSpotAsync</c> already applies one seam
+    /// over for picking which ready spot airs next.
+    /// </summary>
+    Task<AdBrief?> SampleEnabledAsync(CancellationToken ct);
 }

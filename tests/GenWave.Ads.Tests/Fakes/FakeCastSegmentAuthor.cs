@@ -25,6 +25,26 @@ public sealed class FakeCastSegmentAuthor : ICastSegmentAuthor
     /// never reaches the authored tail at all.</summary>
     public bool InvokeDelegates { get; set; } = true;
 
+    /// <summary>
+    /// PLAN T402 (<see cref="AdSpotWorker"/>'s own cancel-in-flight specs) — when true,
+    /// <see cref="AuthorAsync"/> signals <see cref="Entered"/> and then blocks on its own
+    /// <paramref name="ct"/> forever, mirroring the CrosstalkWorkerHarness fake synthesizer's own
+    /// "genuinely in flight, cancellable" shape (GenWave.Host.Tests, PLAN T286): a spec awaits
+    /// <see cref="Entered"/> to know a render has genuinely started, then drives the cancellation it
+    /// means to prove, then asserts <see cref="WasCancelled"/>.
+    /// </summary>
+    public bool BlockUntilCancelled { get; set; }
+
+    /// <summary>Completes the instant <see cref="AuthorAsync"/> is called, ONLY when
+    /// <see cref="BlockUntilCancelled"/> is set — the positive-control signal a spec awaits before
+    /// driving its own cancellation.</summary>
+    public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Whether the <paramref name="ct"/> <see cref="AuthorAsync"/> was called with was
+    /// genuinely observed cancelled — only meaningful when <see cref="BlockUntilCancelled"/> was
+    /// set.</summary>
+    public bool WasCancelled { get; private set; }
+
     /// <summary>The media id handed to <c>confirmAsync</c> — a fixed, caller-controllable stand-in
     /// for what a real <c>InsertAuthoredAsync</c> would have returned.</summary>
     public long MediaIdToConfirm { get; set; } = 4200;
@@ -39,6 +59,20 @@ public sealed class FakeCastSegmentAuthor : ICastSegmentAuthor
         CancellationToken ct)
     {
         LastRequest = assemblyRequest;
+
+        if (BlockUntilCancelled)
+        {
+            Entered.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                WasCancelled = true;
+                throw;
+            }
+        }
 
         if (InvokeDelegates)
         {

@@ -131,4 +131,35 @@ public interface IAdSpotStore
     /// deprioritized — the stock pass (PLAN T402) never sees one here to retire by mistake.
     /// </summary>
     Task<IReadOnlyList<AdSpot>> ListReadyOlderThanAsync(TimeSpan age, CancellationToken ct);
+
+    /// <summary>
+    /// Every currently <see cref="AdState.Rendering"/> row whose <c>state_changed_at</c> is older
+    /// than <paramref name="now"/> minus <paramref name="grace"/> — the stuck-render guardian's own
+    /// candidate read (PLAN T402, the <c>IAnnouncementLifecycle.FindClaimedPastGraceAsync</c>
+    /// precedent one seam over). A read only — the caller (<c>AdSpotLifecycleGuardianService</c>)
+    /// drives <see cref="ReArmAsync"/> per candidate itself, mirroring
+    /// <see cref="ClaimNextApprovedAsync"/>'s own read-then-transition split. <paramref name="grace"/>
+    /// MUST exceed <c>AdSpotWorker</c>'s own per-render budget for this read to only ever catch a
+    /// genuinely abandoned row (a crashed process, never a render still honestly in flight) — see
+    /// <c>AdSpotLifecycleGuardianService</c>'s own remarks for how that relation is pinned, not merely
+    /// documented.
+    /// </summary>
+    Task<IReadOnlyList<long>> FindRenderingPastGraceAsync(TimeSpan grace, DateTimeOffset now, CancellationToken ct);
+
+    /// <summary>
+    /// <see cref="AdState.Rendering"/> to <see cref="AdState.Approved"/> for one row (PLAN T402) — the
+    /// SAME target state <see cref="ApproveAsync"/> reaches from <see cref="AdState.Draft"/>, reached
+    /// here from a DIFFERENT source state by a DIFFERENT, system-driven caller: the stuck-render
+    /// guardian (a row past <see cref="FindRenderingPastGraceAsync"/>'s own grace) AND
+    /// <c>AdSpotWorker</c>'s own break-window yield (a render this worker abandoned deliberately,
+    /// never a failure — the row simply gets another attempt once the window closes, no operator
+    /// retry required). No xmin: identical reasoning to <see cref="ClaimNextApprovedAsync"/>/
+    /// <see cref="MarkReadyAsync"/>/<see cref="MarkFailedAsync"/> — no caller here ever holds a
+    /// "previous read" of the row to carry a version from. Total: a row not currently
+    /// <see cref="AdState.Rendering"/> (already resolved by the render itself, or a concurrent guardian
+    /// sweep) leaves the guarded <c>WHERE</c> matching nothing and reports <see langword="false"/>,
+    /// never throws — the exact claim-conflict shape <c>AdSpotWorker</c>'s own render-outcome handling
+    /// is built to tolerate.
+    /// </summary>
+    Task<bool> ReArmAsync(long id, CancellationToken ct);
 }
