@@ -175,7 +175,8 @@ public static class FeatureStatusEndpoint
             degradationController,
             voiceHealthReader,
             new FakeActivePersonaAccessor(),
-            new ProcessStartTime(startedAt ?? new DateTimeOffset(2026, 7, 11, 9, 30, 0, TimeSpan.Zero)))
+            new ProcessStartTime(startedAt ?? new DateTimeOffset(2026, 7, 11, 9, 30, 0, TimeSpan.Zero)),
+            new PluginStatusAccessor())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

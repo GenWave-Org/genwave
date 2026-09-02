@@ -15,7 +15,7 @@ public sealed class PluginLoadResult
 {
     public PluginLoadResult(
         IReadOnlyList<PluginLoadReport> reports,
-        IReadOnlyList<IContextProvider> contextProviders,
+        IReadOnlyList<ValidatedContextProvider> contextProviders,
         IReadOnlyList<IAdSpotSource> adSpotSources)
     {
         ArgumentNullException.ThrowIfNull(reports);
@@ -31,13 +31,17 @@ public sealed class PluginLoadResult
     /// yielded, in the same ascending-slug order — loaded or skipped, never omitted.</summary>
     public IReadOnlyList<PluginLoadReport> Reports { get; }
 
-    /// <summary>Every <see cref="IContextProvider"/> committed by a plugin that loaded, in
-    /// plugin-then-registration order, already pre-validated against key collisions
+    /// <summary>Every <see cref="IContextProvider"/> committed by a plugin that loaded, PAIRED with
+    /// the exact key string <see cref="PluginLoader"/> already validated for it (T394 review HIGH-2 —
+    /// see <see cref="ValidatedContextProvider"/>'s own remarks for why a bare provider list is unsafe
+    /// here), in plugin-then-registration order, already pre-validated against key collisions
     /// (<see cref="PluginLoadFailureReason.ContextProviderKeyCollision"/>/
     /// <see cref="PluginLoadFailureReason.ContextProviderKeyInvalid"/>) — safe to hand straight into
     /// <c>ContextPipeline</c>'s constructor alongside the built-ins; that constructor's own fail-fast
-    /// duplicate-key check is never expected to fire on any of these (F156.6).</summary>
-    public IReadOnlyList<IContextProvider> ContextProviders { get; }
+    /// duplicate-key check is never expected to fire on any of these (F156.6), PROVIDED the caller
+    /// reads <see cref="ValidatedContextProvider.ValidatedKey"/> rather than the wrapped provider's
+    /// own <c>Key</c> getter a second time.</summary>
+    public IReadOnlyList<ValidatedContextProvider> ContextProviders { get; }
 
     /// <summary>Every <see cref="IAdSpotSource"/> committed by a plugin that loaded, in
     /// plugin-then-registration order.</summary>

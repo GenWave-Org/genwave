@@ -11,6 +11,7 @@
   <ItemGroup>
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
@@ -28,6 +29,18 @@
     <ProjectReference Include="..\..\src\GenWave.Host\GenWave.Host.csproj" />
     <!-- Direct reference so T016 can construct FfmpegLoudnessAnalyzer without going through Host. -->
     <ProjectReference Include="..\..\src\GenWave.Loudness\GenWave.Loudness.csproj" />
+    <!-- Direct reference (PLAN T394, STORY-386) so Support/ExamplePluginBuildOutput.cs and the
+         plugin-door specs can name GenWave.Plugins types (PluginLoadReport, PluginLoadState) without
+         going through Host — mirrors GenWave.Loudness's own reference immediately above. -->
+    <ProjectReference Include="..\..\src\GenWave.Plugins\GenWave.Plugins.csproj" />
+    <!-- Builds the example plugin as part of THIS project's own build order (PLAN T393/T394,
+         STORY-386) — same ReferenceOutputAssembly="false"/Private="false" hermetic trick
+         GenWave.Plugins.Tests.csproj's own comment explains in full: `dotnet test` always has a
+         fresh examples/genwave-plugin-example/bin/.../ output to mount as a real plugin
+         (Support/ExamplePluginBuildOutput.cs), without ever loading its assembly into THIS test
+         process's own AssemblyLoadContext.Default — the plugin loads for real, once, inside its own
+         dedicated context, exactly the way a real operator's mount would. -->
+    <ProjectReference Include="..\..\examples\genwave-plugin-example\ExamplePlugin.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 
 </Project>

@@ -72,7 +72,7 @@ public sealed partial class PluginLoader
         ArgumentNullException.ThrowIfNull(builtInContextProviderKeys);
 
         var reports = new List<PluginLoadReport>();
-        var contextProviders = new List<IContextProvider>();
+        var contextProviders = new List<ValidatedContextProvider>();
         var adSpotSources = new List<IAdSpotSource>();
 
         // Seeded with the built-ins, then grows with each plugin that commits (F156.6's "earlier
@@ -119,7 +119,7 @@ public sealed partial class PluginLoader
     /// </summary>
     PluginLoadReport LoadOne(
         PluginManifestCandidate candidate, HashSet<string> keysInUse,
-        List<IContextProvider> contextProviders, List<IAdSpotSource> adSpotSources)
+        List<ValidatedContextProvider> contextProviders, List<IAdSpotSource> adSpotSources)
     {
         string? name = null;
         string? version = null;
@@ -271,7 +271,14 @@ public sealed partial class PluginLoader
             foreach (var key in validatedKeys)
                 keysInUse.Add(key);
 
-            contextProviders.AddRange(contextProviderSnapshot);
+            // T394 review HIGH-2: pair each provider with its VALIDATED key here, at commit — never
+            // a bare provider list a caller might later re-read .Key from. validatedKeys and
+            // contextProviderSnapshot are index-aligned (TryValidateContextProviderKeys' own
+            // contract: "hands the validated strings back... in the same order"), so this zip is the
+            // one and only place a provider and its validated identity are ever joined.
+            for (var i = 0; i < contextProviderSnapshot.Length; i++)
+                contextProviders.Add(new ValidatedContextProvider(validatedKeys[i], contextProviderSnapshot[i]));
+
             adSpotSources.AddRange(adSpotSourceSnapshot);
 
             // T392 review advisory 5: allocated here, after the validation gate, not alongside the

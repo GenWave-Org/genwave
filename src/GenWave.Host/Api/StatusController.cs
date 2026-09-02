@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
 using GenWave.Host.Options;
+using GenWave.Plugins;
 using GenWave.Tts;
 
 namespace GenWave.Host.Api;
@@ -29,7 +30,8 @@ public sealed class StatusController(
     DegradationController degradationController,
     VoiceHealthReader voiceHealthReader,
     IActivePersonaAccessor personaAccessor,
-    ProcessStartTime startTime) : ControllerBase
+    ProcessStartTime startTime,
+    PluginStatusAccessor pluginStatus) : ControllerBase
 {
     /// <summary>
     /// GET /api/status — cookie-auth (covered by the deny-by-default fallback policy when
@@ -39,7 +41,8 @@ public sealed class StatusController(
     /// gardener: { open: { deadFile, nearDuplicate, staleMetadata, shelfDust, unreachable }, total },
     /// llm: { enabled, model, activePersona, lastOutcome, lastAttemptAt, dominantCause, dominantCauseCount, dominantCauseModel },
     /// degradation: { mode, pinned, since, cause },
-    /// voice: { engine, degraded, reason, checkedAt } }</c>.
+    /// voice: { engine, degraded, reason, checkedAt },
+    /// plugins: [{ name, version, contracts, state, reason? }] }</c>.
     ///
     /// <c>Station:SafeScope:LibraryIds</c> is read via <see cref="IOptionsMonitor{TOptions}.CurrentValue"/>
     /// on every call — not a boot-time snapshot — so a live <c>PUT /api/settings</c> edit
@@ -104,6 +107,20 @@ public sealed class StatusController(
     /// onto the wire, so the Admin UI's own tile never has to special-case a missing key);
     /// <c>gardener.total</c> is the sum across every kind — the tile's own single "N findings need
     /// attention" headline number.
+    ///
+    /// <c>plugins</c> (SPEC F156.7, STORY-385/386, PLAN T394) is the boot-time plugin loader's own
+    /// outcome list, read from <see cref="PluginStatusAccessor"/> — an in-memory snapshot, never a
+    /// live re-scan (SPEC F156.1: loading happens once, at boot; a plugin-set change is a restart).
+    /// Empty when the plugin door is closed (either boot knob missing) — the SAME empty array whether
+    /// the door was never opened or a mount held zero valid plugins, since neither case has anything
+    /// to report. <c>name</c>/<c>version</c> are the plugin manifest's own raw text, carried verbatim
+    /// (the JSON serializer escapes them; see <c>IGenWavePlugin.Name</c>'s own remarks on why
+    /// "verbatim" is deliberate here even though the SAME text is stripped before it ever reaches an
+    /// <c>ILogger</c> line or a booth-log row — two different surfaces, two different rules).
+    /// <c>state</c> is <c>"loaded"</c> or <c>"skipped"</c> (F156.7's own two-value contract — a
+    /// <c>RootUnreadable</c> outcome reports as <c>"skipped"</c> too, with <c>name</c>/<c>version</c>
+    /// both null); <c>reason</c> is present only when <c>state</c> is <c>"skipped"</c>, naming the
+    /// failed stage plus the already-neutralized detail text.
     /// </summary>
     [HttpGet("status")]
     public async Task<IActionResult> Get(CancellationToken ct)
@@ -185,6 +202,22 @@ public sealed class StatusController(
                 reason = voice.Reason,
                 checkedAt = voice.CheckedAt,
             },
+            plugins = pluginStatus.Reports.Select(ToPluginDto),
         });
     }
+
+    /// <summary>
+    /// Projects one <see cref="PluginLoadReport"/> onto <c>plugins[]</c>'s own wire shape (SPEC
+    /// F156.7) — <c>name</c>/<c>version</c> carried verbatim (this method's own doc remarks explain
+    /// why), <c>reason</c> combining the failed stage and the already-neutralized detail text, present
+    /// only on a skipped outcome.
+    /// </summary>
+    static object ToPluginDto(PluginLoadReport report) => new
+    {
+        name = report.Name,
+        version = report.Version,
+        contracts = report.Contracts,
+        state = report.State == PluginLoadState.Loaded ? "loaded" : "skipped",
+        reason = report.State == PluginLoadState.Loaded ? null : $"{report.Reason}: {report.Detail}",
+    };
 }

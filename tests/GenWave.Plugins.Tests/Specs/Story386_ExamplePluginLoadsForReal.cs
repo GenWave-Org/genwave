@@ -44,9 +44,10 @@ public static class FeatureExamplePluginLoadsForReal
             Assert.Equal(new[] { nameof(IContextProvider) }, report.Contracts);
 
             // ...and the committed provider carries the exact Key the example's own README
-            // documents.
-            var provider = Assert.Single(result.ContextProviders);
-            Assert.Equal("example-dice", provider.Key);
+            // documents — read from the loader's own VALIDATED value (T394 review HIGH-2), never a
+            // second live call to the provider's own Key getter.
+            var pair = Assert.Single(result.ContextProviders);
+            Assert.Equal("example-dice", pair.ValidatedKey);
         }
 
         [Fact]
@@ -56,14 +57,14 @@ public static class FeatureExamplePluginLoadsForReal
             ExamplePluginPayload.CopyInto(root, "dice-roll-example");
             var loader = new PluginLoader(settingKey => null);
             var result = loader.LoadAll(root, new HashSet<string>());
-            var provider = Assert.Single(result.ContextProviders);
+            var pair = Assert.Single(result.ContextProviders);
 
             // Then it loaded into its OWN AssemblyLoadContext, never Default (SPEC F156.3) — the
             // same isolation proof Story385's emitted-assembly facts already pin, now against a
             // REAL, on-disk third-party build rather than a Roslyn throwaway. Kept as its own Fact
             // (not folded into the commit-shape assertions above) so a future isolation regression
             // fails under its own unambiguous name.
-            var loadContext = AssemblyLoadContext.GetLoadContext(provider.GetType().Assembly);
+            var loadContext = AssemblyLoadContext.GetLoadContext(pair.Provider.GetType().Assembly);
             Assert.NotNull(loadContext);
             Assert.NotSame(AssemblyLoadContext.Default, loadContext);
         }

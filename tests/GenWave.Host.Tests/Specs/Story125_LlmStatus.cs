@@ -196,7 +196,8 @@ public static class FeatureLlmStatus
             degradationController,
             voiceHealthReader,
             new FakeActivePersonaAccessor { Persona = activePersona },
-            new ProcessStartTime(new DateTimeOffset(2026, 7, 11, 9, 30, 0, TimeSpan.Zero)))
+            new ProcessStartTime(new DateTimeOffset(2026, 7, 11, 9, 30, 0, TimeSpan.Zero)),
+            new PluginStatusAccessor())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() },
         };

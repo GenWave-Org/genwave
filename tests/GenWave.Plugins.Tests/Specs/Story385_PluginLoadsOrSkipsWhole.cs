@@ -515,7 +515,7 @@ public static class FeaturePluginLoadsOrSkipsWhole
             // ...each in its OWN AssemblyLoadContext — never Default, and never shared with the
             // other plugin (SPEC F156.3, STORY-385 AC3).
             var loadContexts = result.ContextProviders
-                .Select(provider => AssemblyLoadContext.GetLoadContext(provider.GetType().Assembly))
+                .Select(pair => AssemblyLoadContext.GetLoadContext(pair.Provider.GetType().Assembly))
                 .ToList();
 
             Assert.All(loadContexts, context => Assert.NotNull(context));
@@ -544,8 +544,8 @@ public static class FeaturePluginLoadsOrSkipsWhole
             // ...and the committed provider's own IContextProvider interface resolves to the SAME
             // Assembly object as the host's (this test project's own) typeof(IContextProvider) —
             // direct proof the carried copy was ignored, not merely an inference from "it loaded".
-            var provider = Assert.Single(result.ContextProviders);
-            var resolvedContractAssembly = provider.GetType().GetInterface(nameof(IContextProvider))?.Assembly;
+            var pair = Assert.Single(result.ContextProviders);
+            var resolvedContractAssembly = pair.Provider.GetType().GetInterface(nameof(IContextProvider))?.Assembly;
             Assert.Same(typeof(IContextProvider).Assembly, resolvedContractAssembly);
         }
 
@@ -564,9 +564,10 @@ public static class FeaturePluginLoadsOrSkipsWhole
             Assert.Equal(PluginLoadState.Loaded, report.State);
             Assert.Equal(new[] { nameof(IContextProvider) }, report.Contracts);
 
-            // ...and the collector holds exactly that one registration.
-            var provider = Assert.Single(result.ContextProviders);
-            Assert.Equal("sample-plugin-key", provider.Key);
+            // ...and the collector holds exactly that one registration, paired with its VALIDATED
+            // key (T394 review HIGH-2 — never re-read from the provider's own Key getter).
+            var pair = Assert.Single(result.ContextProviders);
+            Assert.Equal("sample-plugin-key", pair.ValidatedKey);
         }
 
         [Fact]
@@ -620,15 +621,15 @@ public static class FeaturePluginLoadsOrSkipsWhole
             var report = Assert.Single(result.Reports);
             Assert.Equal(PluginLoadState.Loaded, report.State);
             Assert.Equal(new[] { nameof(IContextProvider) }, report.Contracts);
-            var provider = Assert.Single(result.ContextProviders);
-            Assert.Equal("retained-host-key", provider.Key);
+            var pair = Assert.Single(result.ContextProviders);
+            Assert.Equal("retained-host-key", pair.ValidatedKey);
 
             // ...and reflecting into the plugin's own ALC to reach the host it retained (safe:
             // IPluginHost itself unifies to the host's own type, the same mechanism
             // AbstractionsTypesUnifyWithTheHost proves) — a LATE Add* call, attempted directly from
             // this test rather than a race-prone background thread inside the plugin, after Register
             // already returned and the loader already sealed the buffer...
-            var entryType = provider.GetType().Assembly.GetType("TestPlugin.EntryPoint")
+            var entryType = pair.Provider.GetType().Assembly.GetType("TestPlugin.EntryPoint")
                 ?? throw new InvalidOperationException("TestPlugin.EntryPoint was not found in the emitted assembly.");
             var retainedHostProperty = entryType.GetProperty("RetainedHost", BindingFlags.Public | BindingFlags.Static)
                 ?? throw new InvalidOperationException("TestPlugin.EntryPoint.RetainedHost was not found via reflection.");
@@ -925,8 +926,8 @@ public static class FeaturePluginLoadsOrSkipsWhole
             Assert.Equal(PluginLoadState.Skipped, bravoReport.State);
             Assert.Equal(PluginLoadFailureReason.ContextProviderKeyCollision, bravoReport.Reason);
 
-            var provider = Assert.Single(result.ContextProviders);
-            Assert.Equal("shared-key", provider.Key);
+            var pair = Assert.Single(result.ContextProviders);
+            Assert.Equal("shared-key", pair.ValidatedKey);
         }
 
         [Fact]

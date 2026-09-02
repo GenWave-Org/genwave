@@ -181,6 +181,13 @@ builder.Services
     // Named OutputCache policies for the public spectator surface (SPEC F62.10, STORY-171/T13).
     .AddGenWaveSpectatorOutputCaching();
 
+// The plugin door (SPEC F156, STORY-385/386, PLAN T394) — run AFTER every AddGenWave* registration
+// above, BEFORE builder.Build() (F156.8's own ordering requirement: a committed plugin's
+// registrations must already be in the container the instant the host finishes building). See
+// PluginDoorServiceCollectionExtensions' own remarks for the two-knob gate and the closed-door
+// inertness guarantee.
+builder.Services.AddGenWavePluginDoor(cfg);
+
 // SPEC F142 (STORY-356, PLAN T327, closes gh-#300): the boundary cadence covenant's clamp-up + WARN.
 // Registered HERE, not inside AddGenWaveStationOptions above (GenWave.Host.Options), because
 // BoundaryCadenceCovenantPostConfigure needs PlayoutFeederService.PullInterval
@@ -383,6 +390,14 @@ var app = builder.Build();
 
 // Fail-closed admin gate (SPEC F60.4/STORY-164): loudly warn if the admin plane is locked down.
 app.WarnIfAdminPasswordMissing();
+
+// The plugin door's own boot narrative (SPEC F156.4/F156.7, PLAN T394): the ILogger WARN/INFO line
+// and the booth-log row(s) PluginDoorServiceCollectionExtensions.AddGenWavePluginDoor's own
+// PluginStatusAccessor recorded above — deferred to here because neither an ILogger nor an
+// IBoothLogAppender exists until the host has finished building. No-op when the door never ran.
+// ApplicationStopping (never CancellationToken.None), matching every other boot-time host token in
+// this file — a shutdown mid-narration cancels the booth-log write cleanly instead of racing it.
+await app.NarratePluginDoorAsync(app.Lifetime.ApplicationStopping);
 
 // ── Middleware pipeline ──────────────────────────────────────────────────────
 // Forwarded-headers processing runs first — anything downstream that reads Connection.RemoteIpAddress

@@ -94,6 +94,16 @@ internal sealed class PluginRegistrationBuffer : IPluginHost
         }
     }
 
+    /// <summary>
+    /// SPEC F157.2; null/blank-<paramref name="key"/> decision pinned at PLAN T394 (the T390 r2 review
+    /// note). A null or blank <paramref name="key"/> is never guarded specially — C#'s string
+    /// concatenation treats a null <paramref name="key"/> as empty, so the lookup collapses to this
+    /// plugin's own bare <c>Plugins:{slug}:</c> segment prefix, which no real deployment ever
+    /// configures a value for directly. The real, <c>IConfiguration</c>-backed setting reader
+    /// PLAN T394 supplies never throws for an unusual key either (its own indexer's documented
+    /// contract) — so the answer for a null/blank key is null, exactly the same "nothing configured"
+    /// answer any other unset key gets, never an exception.
+    /// </summary>
     public string? Setting(string key) => settingReader(settingsPrefix + key);
 
     /// <summary>

@@ -44,7 +44,11 @@ public interface IPluginHost
     /// for a value this method returns, so a plugin that needs config to change without a restart must
     /// poll this itself.
     /// </summary>
-    /// <param name="key">The setting's name beneath this plugin's own <c>Plugins:{name}:</c> segment.</param>
-    /// <returns>The configured value, or null when nothing is set for <paramref name="key"/>.</returns>
+    /// <param name="key">The setting's name beneath this plugin's own <c>Plugins:{name}:</c> segment. A
+    /// null or blank <paramref name="key"/> is never a fault (T390 r2 review, pinned at PLAN T394): it
+    /// resolves the plugin's own bare <c>Plugins:{name}:</c> segment prefix, which nothing configures
+    /// directly, so the answer is null exactly like any other unset key — never an exception.</param>
+    /// <returns>The configured value, or null when nothing is set for <paramref name="key"/> (including
+    /// a null or blank <paramref name="key"/> itself).</returns>
     string? Setting(string key);
 }
