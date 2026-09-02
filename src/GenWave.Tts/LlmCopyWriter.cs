@@ -866,7 +866,8 @@ public sealed class LlmCopyWriter(
             // so a live PUT to Llm:Endpoint applies on the next render.
             var requestUri = EndpointUri.Combine(cfg.Endpoint, "/v1/chat/completions");
 
-            var reply = await PostCompletionAsync(http, requestUri, cfg, systemPrompt, userPrompt, timeoutCts.Token);
+            var reply = await PostChatCompletionAsync(
+                http, requestUri, cfg, systemPrompt, userPrompt, DeriveMaxTokens(cfg.MaxCopyChars), timeoutCts.Token);
             var text = reply.Content;
 
             // Written HERE, STILL inside the single-flight critical section (SPEC F83.1, T65 review
@@ -998,7 +999,8 @@ public sealed class LlmCopyWriter(
                 // OperationCanceledException exactly as it always would have for one call.
                 userPrompt = $"{userPrompt}\n{buildReaskLine(gateResult.Violations)}";
                 startedAt = timeProvider.GetUtcNow();
-                var reaskReply = await PostCompletionAsync(http, requestUri, cfg, systemPrompt, userPrompt, timeoutCts.Token);
+                var reaskReply = await PostChatCompletionAsync(
+                    http, requestUri, cfg, systemPrompt, userPrompt, DeriveMaxTokens(cfg.MaxCopyChars), timeoutCts.Token);
                 var reaskText = reaskReply.Content;
                 var reaskCleanup = CleanupOf(reaskReply, cfg.MaxCopyChars);
                 LogIfTrimmed(request, personaName, reaskCleanup);
@@ -1121,17 +1123,37 @@ public sealed class LlmCopyWriter(
     }
 
     /// <summary>
-    /// Posts one chat-completion request and returns the raw reply text (SPEC F34.3, F123.1) — the
-    /// exact wire call both the first completion and the F138.4 re-ask fire (STORY-350, PLAN T331),
-    /// extracted so the ladder's second call is provably the SAME request shape as the first rather
-    /// than a hand-maintained second copy of the body/header/parse logic. <paramref name="ct"/> is
-    /// always <c>timeoutCts.Token</c> from the one caller (<see cref="RequestCleanedCompletionAsync"/>)
-    /// — this method holds no state and starts no clock of its own, so a re-ask sharing that same
-    /// token shares that render's existing budget rather than getting a fresh one (F138.4's "never a
-    /// longer feeder hold").
+    /// Posts one chat-completion request and returns the raw reply (SPEC F34.3, F123.1) — the exact
+    /// wire call both this writer's first completion and its own F138.4 re-ask fire (STORY-350, PLAN
+    /// T331), extracted so the ladder's second call is provably the SAME request shape as the first
+    /// rather than a hand-maintained second copy of the body/header/parse logic.
+    ///
+    /// <para>
+    /// Widened to <see langword="internal"/> and given an explicit <paramref name="maxTokens"/>
+    /// parameter (PLAN T400 review F5) — the SAME seam <see cref="CrosstalkScriptWriter"/> and
+    /// <see cref="AdScriptWriter"/> now call directly rather than each hand-rolling their own copy of
+    /// this body/header/parse block (a THIRD hand-rolled copy in <see cref="AdScriptWriter"/> is what
+    /// caused review finding F1 — the duplicate never got this class's own established per-line
+    /// hygiene discipline). <paramref name="maxTokens"/> used to be derived internally from
+    /// <see cref="LlmOptions.MaxCopyChars"/> unconditionally, which was fine while this writer was the
+    /// only caller — <see cref="CrosstalkScriptWriter"/>'s and <see cref="AdScriptWriter"/>'s own cap
+    /// derivations both scale off a DURATION target instead (see each one's own
+    /// <c>DeriveScriptGenerationCap</c> remarks), so the derivation moved to every call site instead;
+    /// this writer's own two call sites (<see cref="RequestCleanedCompletionAsync"/>'s first call and
+    /// its F138.4 re-ask) both now pass <see cref="DeriveMaxTokens"/>-of-<see cref="LlmOptions.MaxCopyChars"/>
+    /// explicitly, so behavior here is byte-identical to before this widening.
+    /// </para>
+    ///
+    /// <paramref name="ct"/> is always <c>timeoutCts.Token</c> from the one caller in THIS class
+    /// (<see cref="RequestCleanedCompletionAsync"/>) — this method holds no state and starts no clock
+    /// of its own, so a re-ask sharing that same token shares that render's existing budget rather
+    /// than getting a fresh one (F138.4's "never a longer feeder hold"); <see cref="AdScriptWriter"/>'s
+    /// own SPEC F160.3 re-ask mirrors this exact discipline, sharing ONE <c>timeoutCts</c> across both
+    /// of its own attempts for the identical reason.
     /// </summary>
-    static async Task<CompletionReply> PostCompletionAsync(
-        HttpClient http, Uri requestUri, LlmOptions cfg, string systemPrompt, string userPrompt, CancellationToken ct)
+    internal static async Task<CompletionReply> PostChatCompletionAsync(
+        HttpClient http, Uri requestUri, LlmOptions cfg, string systemPrompt, string userPrompt, int maxTokens,
+        CancellationToken ct)
     {
         var body = new
         {
@@ -1141,7 +1163,7 @@ public sealed class LlmCopyWriter(
                 new { role = "system", content = systemPrompt },
                 new { role = "user", content = userPrompt },
             },
-            max_tokens = DeriveMaxTokens(cfg.MaxCopyChars),
+            max_tokens = maxTokens,
             // gh-#620: "none" by default so a thinking model answers instead of spending max_tokens
             // on chain-of-thought; null (Llm:ReasoningEffort "omit") leaves the field out entirely —
             // ChatCompletionRequestJson.Options is what turns that null into an absent member.

@@ -29,7 +29,11 @@ public static class FeatureAdSpotPipeline
     static readonly AdSpotLocatorRoots DefaultRoots = new("/media", "/authored");
 
     static MediaItem Spot(string id, string locator = "/authored/ads/spot.wav") =>
-        new(id, locator, $"Spot {id}", new Loudness(-14.0, -1.0, true));
+        // Fully qualified (PLAN T400 review F2 — GenWave.Tts ProjectReference added to this test
+        // project pulls in GenWave.Loudness transitively, and that project's own root namespace now
+        // shadows the unqualified "Loudness" identifier at the enclosing-namespace tier, ahead of the
+        // `using GenWave.Core.Domain;` import that used to resolve it unambiguously).
+        new(id, locator, $"Spot {id}", new GenWave.Core.Domain.Loudness(-14.0, -1.0, true));
 
     static AdSpotPipeline BuildPipeline(IEnumerable<GenWave.Core.Abstractions.IAdSpotSource> sources, AdSpotLocatorRoots? roots = null) =>
         new(sources, roots ?? DefaultRoots, NullLogger<AdSpotPipeline>.Instance);
