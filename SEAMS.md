@@ -44,7 +44,14 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **109 seams across 6 projects.**
+> **112 seams across 7 projects.**
+
+## GenWave.Ads (2 seams)
+
+| Port | Adapter | Lifetime | Notes |
+|---|---|---|---|
+| `GenWave.Core.Abstractions.IAdSpotSource` | `GenWave.Ads.LibraryAdSpotSource` | Singleton | — |
+| `GenWave.Core.Abstractions.IAdSpotVend` | `GenWave.Ads.AdSpotPipeline` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpAdSpotVend` (GenWave.Core) |
 
 ## GenWave.Context (2 seams)
 
@@ -53,10 +60,11 @@
 | `GenWave.Core.Abstractions.IContextPatterFactSource` | `GenWave.Context.ContextPipeline` | Singleton | also registered: `GenWave.Core.Abstractions.NoOpContextPatterFactSource` (GenWave.Core) |
 | `GenWave.Core.Abstractions.IContextProvider` | `GenWave.Context.History.HistoryContextProvider` | Singleton | also registered: `GenWave.Context.Weather.WeatherContextProvider` (GenWave.Context) |
 
-## GenWave.Host (30 seams)
+## GenWave.Host (31 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
+| `GenWave.Core.Abstractions.IAdCadenceProvider` | `GenWave.Host.Options.OptionsMonitorAdCadenceProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IAnnouncementSource` | `GenWave.Host.Announcements.SpectatorModeAnnouncementVendGuard` | Singleton | — |
 | `GenWave.Core.Abstractions.IAudiencePostureProvider` | `GenWave.Host.Options.OptionsMonitorAudiencePostureProvider` | Singleton | — |
 | `GenWave.Core.Abstractions.IBoundaryBiasProvider` | `GenWave.Host.Options.OptionsMonitorBoundaryBiasProvider` | Singleton | — |

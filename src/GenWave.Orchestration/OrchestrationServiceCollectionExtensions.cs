@@ -98,6 +98,17 @@ public static class OrchestrationServiceCollectionExtensions
         // registration, read fresh once per unit for the live TimeAnnouncementBudgetSeconds budget.
         services.TryAddSingleton<IStationImagingSettingsProvider>(NoOpStationImagingSettingsProvider.Instance);
 
+        // SPEC F158.3 (STORY-388, PLAN T397): the ad cadence trigger's own live knob seam — same
+        // TryAdd-a-NoOp-default idiom as IStationImagingSettingsProvider immediately above. TryAdd
+        // so the Host's OptionsMonitorAdCadenceProvider (registered by AddGenWaveStationOptions,
+        // which always runs BEFORE this method in Program.cs) wins.
+        services.TryAddSingleton<IAdCadenceProvider>(NoOpAdCadenceProvider.Instance);
+
+        // SPEC F158.2/F158.3 (STORY-388, PLAN T397): the ad drain's own vend seam — same idiom.
+        // TryAdd so GenWave.Ads' AddGenWaveAds (registered LATER in Program.cs, after this method)
+        // wins with the real AdSpotPipeline.
+        services.TryAddSingleton<IAdSpotVend>(NoOpAdSpotVend.Instance);
+
         // The top-of-hour producer itself: no NoOp-replacement semantics — nothing else ever needs a
         // different ClockAnchoredImagingProducer swapped in, so a plain AddSingleton, not TryAdd
         // (contrast MusicSelectionPolicy/IPersonaPickProvider above, both of which exist precisely so

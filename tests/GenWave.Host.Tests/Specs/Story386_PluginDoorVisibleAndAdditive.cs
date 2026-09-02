@@ -11,13 +11,8 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using GenWave.Context;
 using GenWave.Core.Abstractions;
 using GenWave.Host.Api;
@@ -27,90 +22,12 @@ using GenWave.Host.Tests.Support;
 namespace GenWave.Host.Tests.Specs;
 
 // ── Shared web factory ──────────────────────────────────────────────────────
-
-/// <summary>Captures every log entry of Warning or above so a spec can assert on the plugin door's
-/// own narration — mirrors <c>Story164_FailClosedWithoutPassword.CapturingWarningLoggerProvider</c>'s
-/// own idiom (that file's own remarks explain the shape).</summary>
-file sealed class CapturingLoggerProvider : ILoggerProvider
-{
-    readonly List<string> messages = [];
-    public IReadOnlyList<string> Messages { get { lock (messages) return messages.ToList(); } }
-
-    public ILogger CreateLogger(string categoryName) => new Logger(this);
-    public void Dispose() { }
-
-    void Add(string message) { lock (messages) messages.Add(message); }
-
-    sealed class Logger(CapturingLoggerProvider owner) : ILogger
-    {
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Warning;
-        public void Log<TState>(
-            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-            Func<TState, Exception?, string> formatter)
-        {
-            if (IsEnabled(logLevel)) owner.Add(formatter(state, exception));
-        }
-    }
-}
-
-/// <summary>
-/// <see cref="WebApplicationFactory{TEntryPoint}"/> for the plugin-door scenarios — mirrors
-/// <c>Story084_StatusEndpoint.StatusApiWebFactory</c>'s own shape (fakes for every Postgres-backed
-/// <c>StatusController</c>/booth-log dependency, every hosted service removed), plus the two plugin-door
-/// knobs (<c>Plugins:Enabled</c>/<c>Plugins:Root</c>) and any per-plugin setting a scenario needs
-/// (<c>Plugins:{slug}:{key}</c>). <see langword="null"/> for either knob means "leave it unset" — the
-/// closed-door scenarios' own distinction from "explicitly false".
-/// </summary>
-file sealed class PluginDoorWebFactory(
-    string? pluginsRoot, bool? enabled, IReadOnlyDictionary<string, string>? pluginSettings = null)
-    : WebApplicationFactory<Program>
-{
-    internal const string Password = "test-password-plugin-door";
-
-    internal FakeBoothLogAppender BoothLog { get; } = new();
-    internal CapturingLoggerProvider Logs { get; } = new();
-
-    protected override void ConfigureWebHost(IWebHostBuilder builder)
-    {
-        builder.UseEnvironment("Development");
-        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
-        builder.UseSetting("Admin:Password", Password);
-
-        if (pluginsRoot is not null)
-            builder.UseSetting("Plugins:Root", pluginsRoot);
-        if (enabled is not null)
-            builder.UseSetting("Plugins:Enabled", enabled.Value ? "true" : "false");
-        foreach (var (key, value) in pluginSettings ?? new Dictionary<string, string>())
-            builder.UseSetting(key, value);
-
-        builder.ConfigureTestServices(services =>
-        {
-            // No Liquidsoap/DB connections during this test — mirrors StatusApiWebFactory exactly.
-            services.RemoveAll<IHostedService>();
-
-            services.RemoveAll<IMediaCatalog>();
-            services.AddSingleton<IMediaCatalog>(new FakeMediaCatalog(ready: null));
-
-            services.RemoveAll<IMediaRotationSink>();
-            services.AddSingleton<IMediaRotationSink>(new FakeMediaRotationSink());
-
-            services.RemoveAll<IRotFindingStore>();
-            services.AddSingleton<IRotFindingStore>(new FakeRotFindingStore());
-
-            services.RemoveAll<IActivePersonaAccessor>();
-            services.AddSingleton<IActivePersonaAccessor>(new FakeActivePersonaAccessor());
-
-            // The booth-log narrative row this suite's own facts assert on (STORY-386 AC4) — a
-            // Postgres-backed IBoothLogAppender would otherwise fail Program.cs's own post-Build
-            // NarratePluginDoorAsync call in this DB-free test.
-            services.RemoveAll<IBoothLogAppender>();
-            services.AddSingleton<IBoothLogAppender>(BoothLog);
-
-            services.AddSingleton<ILoggerProvider>(Logs);
-        });
-    }
-}
+//
+// PluginDoorWebFactory/CapturingLoggerProvider moved to tests/GenWave.Host.Tests/Support/ (PLAN T397
+// review fold): Story388_AdSpotSourceRegistrationOrder.cs needs the IDENTICAL "real plugin door, real
+// WebApplicationFactory<Program>" composition this file's own copies used to provide, and a `file`
+// type cannot cross files — see PluginDoorWebFactory's own remarks for the full rationale. Both
+// classes are unchanged in shape; only their location (and accessibility, file -> internal) moved.
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
 

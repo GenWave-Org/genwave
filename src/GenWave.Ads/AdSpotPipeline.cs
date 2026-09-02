@@ -25,8 +25,18 @@ namespace GenWave.Ads;
 /// source — rather than ever reaching the caller. A source that only ever answers from the
 /// authored/media roots (every shipped source, today and after T401) never trips it.
 /// </para>
+///
+/// <para>
+/// <b>Implements <see cref="IAdSpotVend"/> (SPEC F158.2/F158.3, PLAN T397).</b> This is the ONE
+/// implementation of that seam — <c>AddGenWaveAds</c> registers it as
+/// <see cref="IAdSpotVend"/> too, alongside its own concrete-type registration, so
+/// <c>GenWave.Orchestration</c>'s <c>Orchestrator</c> can drain the whole fan-out through a single
+/// method without ever referencing this project (see <see cref="IAdSpotVend"/>'s own remarks for the
+/// full L10 acyclicity argument). <see cref="GetNextSpotAsync"/>'s own signature already matches that
+/// interface's shape exactly — no adapter needed.
+/// </para>
 /// </summary>
-public sealed class AdSpotPipeline
+public sealed class AdSpotPipeline : IAdSpotVend
 {
     readonly IReadOnlyList<IAdSpotSource> sources;
     readonly IReadOnlyList<string> canonicalRoots;

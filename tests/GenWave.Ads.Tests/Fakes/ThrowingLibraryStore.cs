@@ -15,6 +15,9 @@ public sealed class ThrowingLibraryStore : ILibraryRepository, IAdminLibraryWrit
     public Task<IReadOnlyList<LibraryAdminInfo>> GetAllWithMediaCountAsync(CancellationToken ct) =>
         throw new InvalidOperationException("simulated DB failure");
 
+    public Task<LibraryAdminInfo?> GetByNameAsync(string name, CancellationToken ct) =>
+        throw new InvalidOperationException("simulated DB failure");
+
     public Task<LibraryWriteResult> CreateAsync(string name, CancellationToken ct) =>
         throw new InvalidOperationException("simulated DB failure");
 

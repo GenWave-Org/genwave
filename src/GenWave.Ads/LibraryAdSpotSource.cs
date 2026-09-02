@@ -53,16 +53,9 @@ public sealed class LibraryAdSpotSource(
 
     async Task<long?> ResolveAdsLibraryIdAsync(CancellationToken ct)
     {
-        var libraries = await libraryRepository.GetAllWithMediaCountAsync(ct).ConfigureAwait(false);
         var name = adsOptions.CurrentValue.LibraryName;
-
-        foreach (var library in libraries)
-        {
-            if (string.Equals(library.Name, name, StringComparison.Ordinal))
-                return library.Id;
-        }
-
-        return null;
+        var library = await libraryRepository.GetByNameAsync(name, ct).ConfigureAwait(false);
+        return library?.Id;
     }
 
     /// <summary>

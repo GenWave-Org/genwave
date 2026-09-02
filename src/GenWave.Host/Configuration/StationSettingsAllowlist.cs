@@ -516,6 +516,24 @@ public static class StationSettingsAllowlist
         // vend gate).
         new("Crosstalk:Shows",                                SettingApplyMode.Live,          SettingKind.String,     ""),
         new("Crosstalk:EveryNthAiring",                       SettingApplyMode.Live,          SettingKind.Number,     "airings"),
+
+        // The ads seam's five Live knobs (SPEC F158.3, F159.3, F159.4, F163.1, STORY-388, PLAN
+        // T397). EveryNUnits is the StationIdEveryNUnits twin — read live through IAdCadenceProvider
+        // by Orchestrator's own cadence check, so a PUT here reaches the very next unit with no api
+        // restart; 0 (the default) disables the trigger entirely. TargetCount/RefreshDays/
+        // AutoApprove have no consumer wired yet (T400-T402's own job — the Station:Audience/
+        // Station:Imaging precedent: the allowlist row lands ahead of its first reader);
+        // AntiRepeatWindow is already read live by GenWave.Ads.LibraryAdSpotSource's in-memory ring
+        // (PLAN T396) via IOptionsMonitor<AdSpotAntiRepeatOptions>, this row is what gives it a live
+        // PUT surface. All five share the SAME Station:Ads:* namespace but bind through THREE
+        // independent seams (OptionsMonitorAdCadenceProvider for EveryNUnits,
+        // AdSpotAntiRepeatOptions for AntiRepeatWindow, raw IConfiguration reads for the other
+        // three) — see StationAdsOptions' own remarks for why that split is deliberate, not drift.
+        new("Station:Ads:EveryNUnits",                        SettingApplyMode.Live,          SettingKind.Number,     "count"),
+        new("Station:Ads:TargetCount",                        SettingApplyMode.Live,          SettingKind.Number,     "spots"),
+        new("Station:Ads:RefreshDays",                        SettingApplyMode.Live,          SettingKind.Number,     "days"),
+        new("Station:Ads:AutoApprove",                        SettingApplyMode.Live,          SettingKind.Boolean,    ""),
+        new("Station:Ads:AntiRepeatWindow",                   SettingApplyMode.Live,          SettingKind.Number,     "spots"),
     };
 
     /// <summary>All operator-editable settings, keyed by configuration key.</summary>

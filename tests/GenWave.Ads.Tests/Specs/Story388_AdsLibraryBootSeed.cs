@@ -142,6 +142,9 @@ public static class FeatureAdsLibraryBootSeed
             Task.FromResult<IReadOnlyList<LibraryAdminInfo>>(
                 createAttempted ? [new LibraryAdminInfo(1, "ads", 0)] : []);
 
+        public Task<LibraryAdminInfo?> GetByNameAsync(string name, CancellationToken ct) =>
+            Task.FromResult<LibraryAdminInfo?>(createAttempted ? new LibraryAdminInfo(1, "ads", 0) : null);
+
         public Task<LibraryWriteResult> CreateAsync(string name, CancellationToken ct)
         {
             createAttempted = true;

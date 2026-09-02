@@ -41,4 +41,21 @@ sealed class LibraryRepository(NpgsqlDataSource dataSource) : ILibraryRepository
 
         return rows.Select(r => new LibraryAdminInfo(r.Id, r.Name, r.MediaCount)).ToList();
     }
+
+    public async Task<LibraryAdminInfo?> GetByNameAsync(string name, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<(long Id, string Name, int MediaCount)?>(new CommandDefinition(
+            """
+            select l.id, l.name, coalesce(cast(count(m.id) as int), 0) as media_count
+            from library.library l
+            left join library.media m on m.library_id = l.id
+            where l.name = @name
+            group by l.id, l.name
+            """,
+            new { name },
+            cancellationToken: ct));
+
+        return row is { } r ? new LibraryAdminInfo(r.Id, r.Name, r.MediaCount) : null;
+    }
 }

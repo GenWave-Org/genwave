@@ -7,11 +7,13 @@ using GenWave.Core.Abstractions;
 namespace GenWave.Ads;
 
 /// <summary>
-/// SPEC F158.2/F159.1 (STORY-388, PLAN T396) — composes the ads seam: <see cref="AdsOptions"/>
+/// SPEC F158.2/F159.1 (STORY-388, PLAN T396/T397) — composes the ads seam: <see cref="AdsOptions"/>
 /// (env-only, boot-validated) and <see cref="AdSpotAntiRepeatOptions"/> (Live-shaped, unvalidated
 /// here — see that class's own remarks), <see cref="AdsLibrarySeeder"/> + its hosted-service shell
 /// (the marker-gated boot seed), and <see cref="AdSpotPipeline"/> with its floor source
-/// <see cref="LibraryAdSpotSource"/>.
+/// <see cref="LibraryAdSpotSource"/> — additionally registered as
+/// <see cref="Core.Abstractions.IAdSpotVend"/> (PLAN T397), the seam <c>Orchestrator</c>'s ad drain
+/// actually consumes.
 ///
 /// <para>
 /// <b>Registration order is load-bearing (F158.2's "the floor registers last" idiom).</b> The BCL's
@@ -22,15 +24,11 @@ namespace GenWave.Ads;
 /// F158.2) therefore depends entirely on THIS method being called AFTER every plugin/business
 /// <see cref="IAdSpotSource"/> registration in <c>Program.cs</c> — concretely, the plugin door
 /// (<c>AddGenWavePluginDoor</c>, PLAN T394, which registers a loaded plugin's own
-/// <see cref="IAdSpotSource"/> implementations) MUST run BEFORE this call. <b>PLAN T397 owns the
-/// actual <c>Program.cs</c> call sequence</b> and must preserve that order — this method can compose
-/// correctly given ANY prior registrations, but cannot itself enforce where in that sequence it is
-/// called; a DI-order fitness law is future work this task does not add.
-/// </para>
-///
-/// <para>
-/// Does NOT touch <c>Program.cs</c> (PLAN T397's own line) — building and testing this extension so
-/// that ordering works, ahead of it being wired in, is this task's whole scope.
+/// <see cref="IAdSpotSource"/> implementations) MUST run BEFORE this call. <b>PLAN T397's own
+/// <c>Program.cs</c> line</b> calls this method immediately after <c>AddGenWavePluginDoor</c>,
+/// preserving that order — a DI-order fitness fact (<c>Story388_AdSpotSourceRegistrationOrder</c>,
+/// GenWave.Host.Tests) pins it against a real <c>WebApplicationFactory&lt;Program&gt;</c> boot with a
+/// fake plugin source, so a future reordering fails loudly rather than silently inverting the floor.
 /// </para>
 /// </summary>
 public static class AdsServiceCollectionExtensions
@@ -64,6 +62,15 @@ public static class AdsServiceCollectionExtensions
             sp.GetServices<IAdSpotSource>(),
             locatorRoots,
             sp.GetRequiredService<ILogger<AdSpotPipeline>>()));
+
+        // PLAN T397 — the drain seam: overrides AddGenWaveOrchestration's own
+        // TryAddSingleton<IAdSpotVend>(NoOpAdSpotVend.Instance) default (the override-after-the-
+        // default idiom IStationImagingSettingsProvider's own registration already establishes one
+        // project over). A plain AddSingleton resolving the SAME AdSpotPipeline singleton just
+        // registered above — never a second instance — mirrors Program.cs's own
+        // AddSingleton<IListenerStatsSource>(sp => sp.GetRequiredService<IcecastListenerStatsSource>())
+        // "expose an additional interface over an existing singleton" idiom.
+        services.AddSingleton<IAdSpotVend>(sp => sp.GetRequiredService<AdSpotPipeline>());
 
         return services;
     }

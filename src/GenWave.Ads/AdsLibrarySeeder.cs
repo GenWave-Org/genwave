@@ -27,7 +27,7 @@ namespace GenWave.Ads;
 /// would mean a new Postgres write path this project cannot own anyway (L2 confinement keeps
 /// Npgsql/Dapper out of <c>GenWave.Ads</c> entirely — the marker table SafeLoopSeeder's own
 /// <c>ISafeLoopSeedMarkerStore</c> talks to lives behind a Postgres-backed implementation in
-/// <c>GenWave.Host</c>), purely to re-derive a fact <see cref="ILibraryRepository.GetAllWithMediaCountAsync"/>
+/// <c>GenWave.Host</c>), purely to re-derive a fact <see cref="ILibraryRepository.GetByNameAsync"/>
 /// already gives for free.
 /// </para>
 ///
@@ -62,7 +62,7 @@ public sealed class AdsLibrarySeeder(
 
         try
         {
-            var existing = await FindAsync(name, ct).ConfigureAwait(false);
+            var existing = await libraryRepository.GetByNameAsync(name, ct).ConfigureAwait(false);
             if (existing is not null)
             {
                 logger.LogInformation(
@@ -83,7 +83,7 @@ public sealed class AdsLibrarySeeder(
                 // An operator's own POST /api/libraries, or a concurrent boot on another replica,
                 // raced this create — re-look-up and reuse rather than fail (mirrors
                 // SafeLoopSeeder.EnsureSafeLibraryAsync's identical race handling).
-                var afterRace = await FindAsync(name, ct).ConfigureAwait(false);
+                var afterRace = await libraryRepository.GetByNameAsync(name, ct).ConfigureAwait(false);
                 if (afterRace is not null)
                 {
                     logger.LogInformation(
@@ -109,17 +109,5 @@ public sealed class AdsLibrarySeeder(
                 "Boot seed: ads library seed failed — host starting normally, will retry on next boot");
             return AdsLibrarySeedOutcome.Failed;
         }
-    }
-
-    async Task<LibraryAdminInfo?> FindAsync(string name, CancellationToken ct)
-    {
-        var libraries = await libraryRepository.GetAllWithMediaCountAsync(ct).ConfigureAwait(false);
-        foreach (var library in libraries)
-        {
-            if (string.Equals(library.Name, name, StringComparison.Ordinal))
-                return library;
-        }
-
-        return null;
     }
 }
