@@ -155,11 +155,11 @@ sealed class MediaRotationRepository(
     /// that ONE definition — including F158.4's own "and imaging_kind is null" rotation fence, PLAN
     /// T395) — an unavailable, ineligible, never-play, or (since T395) imaging-stamped row is not
     /// "waiting to air", so it must not inflate this figure. db/41's own <c>find_near_duplicates</c>
-    /// function is the ONE place that still carries a STALE, pre-T395 copy of this text — a SQL
-    /// function cannot reference the C# constant, so it needs its own edit; T395 deliberately left it
-    /// (Gardener near-duplicate detection, not a selection-path leak) — see that function's own header
-    /// remarks (PLAN T406 carry-forward). The gh-#99
-    /// safe-scope exclusion applies here too, the same short-circuiting way
+    /// function carried a STALE, pre-T395 copy of this text (a SQL function cannot reference the C#
+    /// constant, so it needed its own edit; T395 deliberately left it — Gardener near-duplicate
+    /// detection, not a selection-path leak) until PLAN T406 closed the drift via
+    /// <c>db/44-near-duplicates-imaging-fence-migration.sh</c> — see that script's own header remarks.
+    /// The gh-#99 safe-scope exclusion applies here too, the same short-circuiting way
     /// <see cref="RecordAiringAsync"/> applies it.
     /// </summary>
     public async Task<long> GetNeverAiredCountAsync(CancellationToken ct)

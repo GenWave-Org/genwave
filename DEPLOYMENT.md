@@ -608,6 +608,88 @@ either way, the next retag on that file proceeds the moment no `.gwbak` sibling 
 
 ---
 
+## 🔌 Plugins (v5.6.0, SPEC F156–F157, gh-#380)
+
+Third-party code loads in-process through one narrow door — see [PLUGINS.md](PLUGINS.md)
+for the licensing posture and the how-to. Both knobs below are env/compose-only, never a
+live setting:
+
+| Key | Default | What it does |
+|---|:---:|---|
+| `Plugins__Enabled` | `false` | The opt-in flag. `false` (or unset) means the loader never runs — F156.1's fail-closed posture |
+| `Plugins__Root` | `/plugins` | Where the loader looks for one `<slug>/plugin.json` directory per plugin |
+
+⚠️ **`Plugins__Enabled` only accepts exactly `true` or `false` (case-insensitive) — a
+malformed *value* fails the boot, it does not degrade to closed.** This is `.NET`'s own
+`IConfiguration.GetValue<bool>`, called before the host finishes composing: `"yes"`, `"1"`,
+`"0"`, and an **empty string** all throw `InvalidOperationException` and crash the `api`
+container at startup. The subtlety is which compose shapes actually *produce* that empty
+string versus which ones never reach the container at all (verified against real
+`docker compose config`/`run` output, not assumed):
+- **Crashes** — anything that resolves to a literal empty string: the list form
+  `- Plugins__Enabled=` (nothing after `=`), or a map entry interpolated from a variable
+  that IS defined but empty **or undefined** (`Plugins__Enabled: "${SOME_VAR}"` with
+  `SOME_VAR=` in `.env`/the shell, or `SOME_VAR` never set at all — both interpolate to
+  `""`). All of these land inside the container as `Plugins__Enabled=` — present, empty,
+  fatal.
+- **No crash** — a bare, **valueless** map entry (`Plugins__Enabled:` with nothing after
+  the colon and no same-named shell variable to pass through) is **omitted from the
+  container entirely**, not set to empty; `GetValue<bool>` then sees an absent key and
+  defaults quietly to `false`, same as the key never appearing at all.
+
+Only an entirely absent/omitted key defaults quietly to `false`; any key that reaches the
+container carrying a non-`true`/`false` value — empty string included — is a boot failure,
+not a closed door.
+
+Both knobs must be true or the door stays closed, with one INFO line naming whichever half
+is missing. `compose.plugins.yaml` mounts `./plugins` read-only at `Plugins__Root`'s own
+default:
+
+```bash
+docker compose -f compose.yaml -f compose.plugins.yaml up
+```
+
+As with `compose.fileactions.yaml` above, the `.env` file itself never reaches a container
+un-interpolated — `Plugins__Enabled` belongs in a service's own `environment:` block (a
+local `compose.local.yaml` stacked last), not `.env`. There is no live toggle: the plugin
+set loads once, at boot; adding, removing, or updating a plugin under `./plugins` is a
+restart. Load outcomes surface on `GET /api/status`'s `plugins[]` array, the admin
+dashboard's Plugins tile (shown once at least one plugin has been discovered — loaded or
+skipped; an unopened door or a mount with zero valid plugins shows no tile at all), and one
+booth-log row per plugin at boot.
+
+---
+
+## 📻 Ads (v5.6.0, SPEC F158–F163, gh-#380)
+
+The station authors and airs its own ad spots — a `GenWave.Ads.AdsOptions` env/compose-only
+knob set (`Ads__*`, boot-validated via `ValidateDataAnnotations()`) plus five `Station:Ads:*`
+Live settings (allowlisted, PUT-able through the settings API/UI, no `api` restart needed).
+
+| Key | Default | Range | What it bounds |
+|---|:---:|:---:|---|
+| `Ads__DurationToleranceRatio` | 0.4 | 0.0–2.0 | Allowed fractional deviation between a script's estimated read time and its target duration before the validator refuses it as over |
+| `Ads__WorkerIntervalMinutes` | 10 | 1–1440 | How often `AdSpotWorker`'s render tick runs |
+| `Ads__BedDuckDb` | -12.0 | -60.0–0.0 | Bed attenuation, in dB, relative to the voice in an offline ad mix |
+| `Ads__LibraryName` | `ads` | — | Display name of the seeded ads library `AdsLibrarySeeder` creates if absent at boot |
+| `Ads__RenderBudgetSeconds` | 180 | 10–1800 | Wall-clock budget the worker gives one render attempt before cancelling it |
+
+| Key | Default | Range | What it bounds |
+|---|:---:|:---:|---|
+| `Station:Ads:EveryNUnits` | 0 (disabled) | 0–1000 | Units between ad triggers — the `Station:Cadence:StationIdEveryNUnits` twin; `0` disables the trigger entirely |
+| `Station:Ads:TargetCount` | 12 | 0–100 | How many `ready` spots the stock pass tries to keep on hand |
+| `Station:Ads:RefreshDays` | 30 | 1–365 | Age, in days, past which a `ready` spot is retired and re-drafted |
+| `Station:Ads:AutoApprove` | `false` | — | Whether a freshly drafted spot skips the operator approval step |
+| `Station:Ads:AntiRepeatWindow` | 5 | 0–50 | How many recently aired spots `LibraryAdSpotSource` excludes from its next pick |
+
+No compose overlay is needed to turn ads on — the seam is always registered; `Station:Ads:EveryNUnits=0`
+is what keeps it silent on every existing station until an operator opts in. The Admin UI's
+Ads page (`/ads`) is where spots are drafted, approved, retried, retired, and previewed; a
+first-party ad pack installs like any other catalog pack (the `ad-pack` kind) and seeds
+`station.ad_brief` rows the worker drafts scripts from.
+
+---
+
 ## ☁️ Cloudflare tunnel (optional)
 
 An alternative to the Caddy topology above: instead of publishing anything on the host at

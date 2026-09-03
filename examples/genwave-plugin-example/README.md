@@ -111,18 +111,19 @@ in a couple of minutes, real enough that `GenWave.Plugins.PluginLoader` actually
    valid `{Plugins:Root}/<slug>/` payload, no packaging step. Your own project's build output works
    the same way once `plugin.json` is set to copy alongside it.
 
-## Enabling a plugin (two independent knobs) — forthcoming
+## Enabling a plugin (two independent knobs)
 
 The loader itself (`GenWave.Plugins.PluginLoader`, PLAN T392) is real and this example loads through
-it today (see this repo's own `GenWave.Plugins.Tests`). The station-level wiring described below —
-the two-knob gate in `Program.cs`, the INFO line naming a missing knob, `plugins[]` on
-`GET /api/status`, the dashboard tile, and the booth-log narrative rows — is **forthcoming, PLAN
-T394**, not live yet. Once it lands, both of these will need to be true, or the door stays closed:
+it today (see this repo's own `GenWave.Plugins.Tests`). The station-level wiring — the two-knob gate
+in `Program.cs`, the INFO line naming a missing knob, `plugins[]` on `GET /api/status`, the dashboard
+tile, and the booth-log narrative rows (PLAN T394) — is live. Both of these must be true, or the door
+stays closed:
 
 1. `Plugins:Enabled=true` — env/compose-only, never on the live settings allowlist.
 2. `Plugins:Root` mounted to a directory containing one subdirectory per plugin slug, each holding
-   that plugin's `plugin.json` + assembly. The `compose.plugins.yaml` overlay that mounts this
-   (read-only) is also forthcoming — see PLAN T394.
+   that plugin's `plugin.json` + assembly. The `compose.plugins.yaml` overlay mounts this
+   (read-only) at `Plugins:Root`'s own default — see [DEPLOYMENT.md](../../DEPLOYMENT.md)'s Plugins
+   section for the full compose recipe.
 
 There is no live toggle: the plugin set loads once, at boot. Changing it is a restart.
 
@@ -140,4 +141,4 @@ bound exists).
 Compiling against `GenWave.Abstractions` is MIT-clean for anyone. A plugin loaded in-process runs
 inside GenWave's own AGPL process, so a **distributed** plugin binary needs an AGPL-compatible
 license; a private, undistributed plugin (the personal-station case) carries no obligation. See
-`/PLUGINS.md` (forthcoming, SPEC F157.3) for the full posture.
+[`/PLUGINS.md`](../../PLUGINS.md) (SPEC F157.3) for the full posture.
