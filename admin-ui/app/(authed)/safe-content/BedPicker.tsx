@@ -28,6 +28,15 @@ interface BedPickerProps {
   onSelect: (candidate: BedCandidate) => void;
   onClear: () => void;
   disabled: boolean;
+  /** Whether the "Clear" affordance renders at all once a bed is selected — default `true` (every
+   * pre-existing caller: the Generate form has no sparse-PATCH gap, clearing a not-yet-saved field
+   * is always honest). PLAN T404 review F1 — the Ads editor's own edit mode passes `false` for a
+   * bed that is already committed server-side: `PATCH /api/ads/{id}` treats a `null` `bedMediaId`
+   * as "leave unchanged" (`AdSpotEdit`'s sparse-update contract), so a Clear click there would
+   * silently fail to remove the bed while the UI implied it had. Hiding the button is the honest
+   * disclosure of that gap (a recorded carry-forward, not fixed here) — never a Clear that's
+   * present but a silent no-op. */
+  allowClear?: boolean;
 }
 
 /** Shape of a GET /api/media row — only the fields the bed picker renders. */
@@ -67,7 +76,7 @@ const FIELD_INPUT_CLASSES =
  * Mouse users can still click a row's own Select button. Selection reports the candidate's
  * numeric id up to the parent, which submits it as `bedMediaId` (F27.3).
  */
-export function BedPicker({ selected, onSelect, onClear, disabled }: BedPickerProps): ReactNode {
+export function BedPicker({ selected, onSelect, onClear, disabled, allowClear = true }: BedPickerProps): ReactNode {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<BedCandidate[]>([]);
   const [status, setStatus] = useState<SearchStatus>({ kind: "idle" });
@@ -152,9 +161,11 @@ export function BedPicker({ selected, onSelect, onClear, disabled }: BedPickerPr
       {selected !== null ? (
         <div className="flex items-center gap-2 rounded-[6px] border border-line bg-surface-2 px-3 py-2 text-[0.85rem] text-ink">
           <span className="flex-1">{candidateLabel(selected)}</span>
-          <Button type="button" variant="secondary" onClick={onClear} disabled={disabled}>
-            Clear
-          </Button>
+          {allowClear && (
+            <Button type="button" variant="secondary" onClick={onClear} disabled={disabled}>
+              Clear
+            </Button>
+          )}
         </div>
       ) : (
         <div className="relative">

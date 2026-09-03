@@ -333,6 +333,50 @@ public static class FeatureAdSpotLifecycleStore
             Assert.Equal(AdSpotWriteResult.Updated, outcome.Result);
             Assert.Equal(AdState.Retired, outcome.Spot!.State);
         }
+
+        [Fact]
+        public async Task ApprovedToRetiredStampsStateChangedAt()
+        {
+            // Given an approved spot (PLAN T403's own discard-gap ruling: an operator changing their
+            // mind before it ever renders)...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
+
+            // When it is retired...
+            var outcome = await repo.RetireAsync(spot.Id, spot.Version, CancellationToken.None);
+
+            // Then it moved to Retired directly from Approved, state_changed_at moved forward.
+            Assert.Equal(AdSpotWriteResult.Updated, outcome.Result);
+            Assert.Equal(AdState.Retired, outcome.Spot!.State);
+            Assert.True(outcome.Spot.StateChangedAt > spot.StateChangedAt);
+        }
+
+        [Fact]
+        public async Task FailedToRetiredStampsStateChangedAt()
+        {
+            // Given a failed spot (PLAN T403's own discard-gap ruling: a permanently-failing spot
+            // needs an exit)...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(
+                Draft() with { InitialState = AdState.Failed, FailReason = "brand_collision" },
+                CancellationToken.None);
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
+
+            // When it is retired...
+            var outcome = await repo.RetireAsync(spot.Id, spot.Version, CancellationToken.None);
+
+            // Then it moved to Retired directly from Failed, state_changed_at moved forward, and
+            // fail_reason is cleared (db/43's own ad_spot_fail_reason_iff_failed CHECK demands it —
+            // a Failed row's own non-null reason would otherwise violate the CHECK the instant state
+            // is no longer Failed; RetireAsync's own remarks).
+            Assert.Equal(AdSpotWriteResult.Updated, outcome.Result);
+            Assert.Equal(AdState.Retired, outcome.Spot!.State);
+            Assert.True(outcome.Spot.StateChangedAt > spot.StateChangedAt);
+            Assert.Null(outcome.Spot.FailReason);
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -550,6 +594,115 @@ public static class FeatureAdSpotLifecycleStore
             // Then created_at is untouched by the update half.
             Assert.Equal(first.CreatedAt, second.CreatedAt);
         }
+
+        [Fact]
+        public async Task AReinstallNeverFlipsAnExistingRowsEnabledFlag()
+        {
+            // Given a disabled brief — T405 review RULING (corrects the T398-shipped shape): enabled
+            // is PRESERVE-on-conflict, never overwrite; the operator's own lever, never a content
+            // upsert's business...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            await repo.UpsertAsync(
+                packSlug: "genwave-catalog", brand: "Bramble & Fitch", premise: "First premise",
+                tone: "warm", structure: null, enabled: false, CancellationToken.None);
+
+            // When it is upserted again with enabled: true...
+            var second = await repo.UpsertAsync(
+                packSlug: "genwave-catalog", brand: "Bramble & Fitch", premise: "Second premise",
+                tone: "warm", structure: null, enabled: true, CancellationToken.None);
+
+            // Then the row STAYS disabled — the second call's own `enabled` argument is silently
+            // irrelevant to an EXISTING row — while the content still refreshed.
+            Assert.False(second.Enabled);
+            Assert.Equal("Second premise", second.Premise);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // T405 review F4 — UpsertAllAsync batches every declared brief in ONE transaction
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioUpsertAllAsyncBatchesInOneTransaction(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AFirstBatchLandsEveryDeclaredBriefEnabled()
+        {
+            // Given no prior briefs...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            var briefs = new List<AdBriefUpsertInput>
+            {
+                new("Bramble & Fitch", "A cozy hardware shop", "warm", "hook-offer-cta"),
+                new("Acme Filing Co", "Bureaucracy, but faster", null, null),
+                new("Nike", "The signature swoosh line", null, null),
+            };
+
+            // When the whole pack is upserted in one batch...
+            var result = await repo.UpsertAllAsync("genwave-catalog", briefs, CancellationToken.None);
+
+            // Then every declared brief landed, ALL enabled (SPEC F162.2's "installed briefs are
+            // live by default" — a brand-new pack brief is always born enabled).
+            Assert.Equal(3, result.Count);
+            Assert.Equal(3, await CountAllBriefRowsAsync(db));
+            Assert.All(result, brief => Assert.True(brief.Enabled));
+        }
+
+        [Fact]
+        public async Task AReinstallBatchPreservesDisabledAndRefreshesContent()
+        {
+            // Given a batch-installed brief, later disabled by the operator...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            await repo.UpsertAllAsync(
+                "genwave-catalog",
+                [new AdBriefUpsertInput("Bramble & Fitch", "First premise", "warm", null)],
+                CancellationToken.None);
+            var briefRow = (await repo.ListAllAsync(CancellationToken.None)).Single();
+            await repo.SetEnabledAsync(briefRow.Id, enabled: false, CancellationToken.None);
+
+            // When the SAME pack reinstalls with a revised premise...
+            var reinstalled = await repo.UpsertAllAsync(
+                "genwave-catalog",
+                [new AdBriefUpsertInput("Bramble & Fitch", "Second premise", "warm", null)],
+                CancellationToken.None);
+
+            // Then the SAME row updated in place — content refreshed, the operator's own disable
+            // survived — "content refreshes, operator state persists," one property.
+            var row = Assert.Single(reinstalled);
+            Assert.False(row.Enabled);
+            Assert.Equal("Second premise", row.Premise);
+            Assert.Equal(1, await CountAllBriefRowsAsync(db));
+        }
+
+        [Fact]
+        public async Task AFailingBriefMidBatchRollsBackEveryRowInTheBatch()
+        {
+            // Given a three-brief batch whose SECOND brief carries a null brand — bypassing this
+            // store's own C# non-nullable contract deliberately (test-only fault injection, mirrors
+            // ScenarioTheDbChecksRefuseIllegalRowsEvenBypassingTheStore's own "reach the real
+            // constraint" idiom one section up): station.ad_brief.brand is NOT NULL at the DB layer,
+            // and this is the one honest way to prove UpsertAllAsync's own transaction rolls
+            // EVERYTHING back, never just the offending row...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            var briefs = new List<AdBriefUpsertInput>
+            {
+                new("First Brand", null, null, null),
+                new(null!, null, null, null),
+                new("Third Brand", null, null, null),
+            };
+
+            // When the batch upsert is attempted...
+            await Assert.ThrowsAsync<PostgresException>(
+                () => repo.UpsertAllAsync("genwave-catalog", briefs, CancellationToken.None));
+
+            // Then NOTHING landed — not even the first, otherwise-valid brief; the whole batch is
+            // one transaction.
+            Assert.Equal(0, await CountAllBriefRowsAsync(db));
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -626,6 +779,26 @@ public static class FeatureAdSpotLifecycleStore
             // Then it reports NotFound, distinctly from Conflict (IDOR-safe: existence is checked
             // first).
             Assert.Equal(AdSpotWriteResult.NotFound, outcome.Result);
+        }
+
+        [Fact]
+        public async Task RetiringARenderingSpotIsRefused()
+        {
+            // Given a spot claimed into Rendering (PLAN T403's own discard-gap ruling: Rendering
+            // stays undiscardable — it is transient by construction, the guardian re-arms it to
+            // Approved within one grace, and the discard happens from there)...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
+
+            // When a retire is attempted against it anyway...
+            var outcome = await repo.RetireAsync(claimed.Id, claimed.Version, CancellationToken.None);
+
+            // Then it is refused (Conflict) and the row is left exactly as it was.
+            Assert.Equal(AdSpotWriteResult.Conflict, outcome.Result);
+            var row = await ReadRowAsync(db, claimed.Id);
+            Assert.Equal("rendering", row.State);
         }
     }
 
@@ -889,6 +1062,421 @@ public static class FeatureAdSpotLifecycleStore
             // Then only the stale spot is a candidate.
             Assert.Contains(candidates, s => s.Id == staleId);
             Assert.DoesNotContain(candidates, s => s.Id == freshId);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // T362 loop law — GetByIdAsync's own live facts (T403's GET /api/ads/{id})
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioGetByIdAsyncReadsAnyRowRegardlessOfState(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AnExistingRowIsReturned()
+        {
+            // Given a draft spot...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+
+            // When it is read back by id...
+            var found = await repo.GetByIdAsync(spot.Id, CancellationToken.None);
+
+            // Then the exact row comes back.
+            Assert.NotNull(found);
+            Assert.Equal(spot.Id, found!.Id);
+            Assert.Equal(spot.Brand, found.Brand);
+        }
+
+        [Fact]
+        public async Task AnUnknownIdReturnsNull()
+        {
+            // Given no spot with this id...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+
+            // When it is read back by id...
+            var found = await repo.GetByIdAsync(999_999, CancellationToken.None);
+
+            // Then nothing comes back — a legal answer, never an error.
+            Assert.Null(found);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // T362 loop law — UpdateAsync's own live facts (T403's owner editor PATCH)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioUpdateAsyncEditsDraftAndFailedOnly(DatabaseFixture db)
+    {
+        static AdSpotEdit Edit(
+            string? brand = null, string? title = null, string? brief = null, string? script = null,
+            string? voicePlan = null, int? spotSeconds = null, long? bedMediaId = null) =>
+            new(brand, title, brief, script, voicePlan, spotSeconds, bedMediaId);
+
+        [Fact]
+        public async Task EditingADraftSpotUpdatesTheGivenFields()
+        {
+            // Given a draft spot...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+
+            // When brand and title are edited...
+            var outcome = await repo.UpdateAsync(
+                spot.Id, Edit(brand: "New Brand", title: "New Title"), spot.Version, CancellationToken.None);
+
+            // Then the given fields moved and the state stayed Draft (a content edit, not a
+            // transition).
+            Assert.Equal(AdSpotWriteResult.Updated, outcome.Result);
+            Assert.Equal("New Brand", outcome.Spot!.Brand);
+            Assert.Equal("New Title", outcome.Spot.Title);
+            Assert.Equal(AdState.Draft, outcome.Spot.State);
+        }
+
+        [Fact]
+        public async Task FieldsLeftNullAreUnchanged()
+        {
+            // Given a draft spot with a known brief...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(Draft(brand: "Original Brand"), CancellationToken.None);
+
+            // When only the title is edited...
+            var outcome = await repo.UpdateAsync(
+                spot.Id, Edit(title: "New Title"), spot.Version, CancellationToken.None);
+
+            // Then brand/brief are untouched.
+            Assert.Equal(AdSpotWriteResult.Updated, outcome.Result);
+            Assert.Equal("Original Brand", outcome.Spot!.Brand);
+            Assert.Equal(spot.Brief, outcome.Spot.Brief);
+        }
+
+        [Fact]
+        public async Task EditingAFailedSpotSucceeds()
+        {
+            // Given a failed spot (the "fix the script before retry" path)...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(
+                Draft() with { InitialState = AdState.Failed, FailReason = "brand_collision" },
+                CancellationToken.None);
+
+            // When its script is edited...
+            var outcome = await repo.UpdateAsync(
+                spot.Id, Edit(script: "ANNOUNCER: A brand new, honest line.\nVOICE1: Call today."),
+                spot.Version, CancellationToken.None);
+
+            // Then it succeeds, script moved, state stays Failed (edit ≠ retry).
+            Assert.Equal(AdSpotWriteResult.Updated, outcome.Result);
+            Assert.Equal(AdState.Failed, outcome.Spot!.State);
+            Assert.Equal("ANNOUNCER: A brand new, honest line.\nVOICE1: Call today.", outcome.Spot.Script);
+        }
+
+        [Fact]
+        public async Task EditingAnApprovedSpotIsRefused()
+        {
+            // Given an approved spot (PLAN T403's own ruling: editing an approved spot would
+            // invalidate a render already in flight)...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+
+            // When an edit is attempted against it anyway...
+            var outcome = await repo.UpdateAsync(spot.Id, Edit(title: "New Title"), spot.Version, CancellationToken.None);
+
+            // Then it is refused (Conflict) and the row is left exactly as it was.
+            Assert.Equal(AdSpotWriteResult.Conflict, outcome.Result);
+            var row = await ReadRowAsync(db, spot.Id);
+            Assert.Equal("approved", row.State);
+        }
+
+        [Fact]
+        public async Task EditingAReadySpotIsRefused()
+        {
+            // Given a ready spot...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            var claimed = (await repo.ClaimNextApprovedAsync(CancellationToken.None))!;
+            await repo.MarkReadyAsync(claimed.Id, mediaId: 1, CancellationToken.None);
+            var ready = (await repo.ListByStateAsync(AdState.Ready, 10, 0, CancellationToken.None)).Items.Single();
+
+            // When an edit is attempted against it...
+            var outcome = await repo.UpdateAsync(ready.Id, Edit(title: "New Title"), ready.Version, CancellationToken.None);
+
+            // Then it is refused (Conflict) — a rendered spot's content is no longer editable.
+            Assert.Equal(AdSpotWriteResult.Conflict, outcome.Result);
+        }
+
+        [Fact]
+        public async Task AStaleVersionIsRefusedAsAConflict()
+        {
+            // Given a draft spot, edited once (its own version now stale)...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            await repo.UpdateAsync(spot.Id, Edit(title: "First edit"), spot.Version, CancellationToken.None);
+
+            // When a SECOND edit is attempted with the ORIGINAL (now stale) version...
+            var outcome = await repo.UpdateAsync(spot.Id, Edit(title: "Second edit"), spot.Version, CancellationToken.None);
+
+            // Then it is refused as a Conflict.
+            Assert.Equal(AdSpotWriteResult.Conflict, outcome.Result);
+        }
+
+        [Fact]
+        public async Task EditingAnUnknownIdReturnsNotFound()
+        {
+            // Given no spot with this id...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+
+            // When an edit is attempted against it...
+            var outcome = await repo.UpdateAsync(999_999, Edit(title: "New Title"), "1", CancellationToken.None);
+
+            // Then it reports NotFound, distinctly from Conflict.
+            Assert.Equal(AdSpotWriteResult.NotFound, outcome.Result);
+        }
+
+        [Fact]
+        public async Task StateChangedAtIsUntouchedByAContentEdit()
+        {
+            // Given a draft spot...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            var spot = await repo.CreateAsync(Draft(), CancellationToken.None);
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
+
+            // When it is edited...
+            var outcome = await repo.UpdateAsync(spot.Id, Edit(title: "New Title"), spot.Version, CancellationToken.None);
+
+            // Then state_changed_at is untouched — an edit is not a transition (unlike every
+            // ApproveAsync/RetryAsync/RetireAsync fact above, which all assert the opposite).
+            Assert.Equal(spot.StateChangedAt, outcome.Spot!.StateChangedAt);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // T362 loop law — ListAllAsync's own live facts (T403b's GET /api/ad-briefs)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioListAllAsyncReturnsEveryBriefNewestFirst(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task BothPackAndOwnerBriefsComeBack()
+        {
+            // Given one owner brief and one pack brief...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            await repo.UpsertAsync(
+                packSlug: null, brand: "Owner Brand", premise: null, tone: null, structure: null,
+                enabled: true, CancellationToken.None);
+            await repo.UpsertAsync(
+                packSlug: "genwave-catalog", brand: "Pack Brand", premise: null, tone: null,
+                structure: null, enabled: true, CancellationToken.None);
+
+            // When every brief is listed...
+            var briefs = await repo.ListAllAsync(CancellationToken.None);
+
+            // Then both come back — pack and owner alike.
+            Assert.Equal(2, briefs.Count);
+            Assert.Contains(briefs, b => b.Brand == "Owner Brand" && b.PackSlug is null);
+            Assert.Contains(briefs, b => b.Brand == "Pack Brand" && b.PackSlug == "genwave-catalog");
+        }
+
+        [Fact]
+        public async Task DisabledBriefsAreListedToo()
+        {
+            // Given a disabled brief — SampleEnabledAsync would skip it, but the admin list must not.
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            await repo.UpsertAsync(
+                packSlug: null, brand: "Disabled Brand", premise: null, tone: null, structure: null,
+                enabled: false, CancellationToken.None);
+
+            // When every brief is listed...
+            var briefs = await repo.ListAllAsync(CancellationToken.None);
+
+            // Then the disabled row still comes back.
+            Assert.Contains(briefs, b => b.Brand == "Disabled Brand" && !b.Enabled);
+        }
+
+        [Fact]
+        public async Task ResultsOrderNewestCreatedFirst()
+        {
+            // Given two briefs, the second created after the first...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            await repo.UpsertAsync(
+                packSlug: null, brand: "Older Brand", premise: null, tone: null, structure: null,
+                enabled: true, CancellationToken.None);
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
+            await repo.UpsertAsync(
+                packSlug: null, brand: "Newer Brand", premise: null, tone: null, structure: null,
+                enabled: true, CancellationToken.None);
+
+            // When every brief is listed...
+            var briefs = await repo.ListAllAsync(CancellationToken.None);
+
+            // Then the newest-created row leads.
+            Assert.Equal("Newer Brand", briefs[0].Brand);
+            Assert.Equal("Older Brand", briefs[1].Brand);
+        }
+
+        [Fact]
+        public async Task NoBriefsListsEmpty()
+        {
+            // Given no briefs at all...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+
+            // When every brief is listed...
+            var briefs = await repo.ListAllAsync(CancellationToken.None);
+
+            // Then the list is empty — a legal answer, never an error.
+            Assert.Empty(briefs);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // T362 loop law — CreateOwnerAsync's own live facts (T403b's POST /api/ad-briefs)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioCreateOwnerAsyncRefusesADuplicateBrandAtomically(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task AFirstCreateLandsOneRowWithPackSlugNull()
+        {
+            // Given no prior briefs...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+
+            // When an owner brief is created...
+            var created = await repo.CreateOwnerAsync(
+                brand: "Bramble & Fitch", premise: "A cozy hardware shop", tone: "warm", structure: null,
+                enabled: true, CancellationToken.None);
+
+            // Then it lands, pack_slug null, exactly one row.
+            Assert.NotNull(created);
+            Assert.Null(created!.PackSlug);
+            Assert.Equal("Bramble & Fitch", created.Brand);
+            Assert.Equal(1, await CountAllBriefRowsAsync(db));
+        }
+
+        [Fact]
+        public async Task ASecondCreateForTheSameBrandIsRefusedAndTheRowUnchanged()
+        {
+            // Given an existing owner brief for a brand...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            var first = await repo.CreateOwnerAsync(
+                brand: "Bramble & Fitch", premise: "First premise", tone: "warm", structure: null,
+                enabled: true, CancellationToken.None);
+
+            // When a SECOND owner brief is created for the SAME brand...
+            var second = await repo.CreateOwnerAsync(
+                brand: "Bramble & Fitch", premise: "Second premise", tone: "dry", structure: null,
+                enabled: true, CancellationToken.None);
+
+            // Then it is refused (null back) — never a silent update, never a second row — and the
+            // original row's own premise is untouched (the exact behavior UpsertAsync would NOT give:
+            // this is why CreateOwnerAsync exists as its own member).
+            Assert.NotNull(first);
+            Assert.Null(second);
+            Assert.Equal(1, await CountAllBriefRowsAsync(db));
+            var rows = await repo.ListAllAsync(CancellationToken.None);
+            Assert.Equal("First premise", rows.Single().Premise);
+        }
+
+        [Fact]
+        public async Task ACreateForABrandThatOnlyHasAPackBriefSucceeds()
+        {
+            // Given a PACK brief for a brand (the cap is scoped to (pack_slug, brand), not brand
+            // alone — the Story389 upsert fact's own coexistence pin, one member over)...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            await repo.UpsertAsync(
+                packSlug: "genwave-catalog", brand: "Bramble & Fitch", premise: "Pack's own premise",
+                tone: "dry", structure: null, enabled: true, CancellationToken.None);
+
+            // When an OWNER brief is created for the SAME brand name...
+            var created = await repo.CreateOwnerAsync(
+                brand: "Bramble & Fitch", premise: "Owner's own premise", tone: "warm", structure: null,
+                enabled: true, CancellationToken.None);
+
+            // Then it succeeds — two separate rows, the pack row untouched.
+            Assert.NotNull(created);
+            Assert.Equal(2, await CountAllBriefRowsAsync(db));
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // T362 loop law — SetEnabledAsync's own live facts (T403b's PATCH /api/ad-briefs/{id})
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioSetEnabledAsyncTogglesAnyBriefById(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task DisablingAnEnabledOwnerBriefFlipsIt()
+        {
+            // Given an enabled owner brief...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            var brief = await repo.CreateOwnerAsync(
+                brand: "Bramble & Fitch", premise: null, tone: null, structure: null, enabled: true,
+                CancellationToken.None);
+
+            // When it is disabled...
+            var updated = await repo.SetEnabledAsync(brief!.Id, enabled: false, CancellationToken.None);
+
+            // Then the row comes back with enabled flipped.
+            Assert.NotNull(updated);
+            Assert.False(updated!.Enabled);
+        }
+
+        [Fact]
+        public async Task EnablingAPackBriefFlipsItToo()
+        {
+            // Given a disabled pack brief — the toggle is the operator's own lever over pack content
+            // too, not owner-only (PLAN T403b's own reading of F162.1).
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+            var brief = await repo.UpsertAsync(
+                packSlug: "genwave-catalog", brand: "Pack Brand", premise: null, tone: null,
+                structure: null, enabled: false, CancellationToken.None);
+
+            // When it is enabled...
+            var updated = await repo.SetEnabledAsync(brief.Id, enabled: true, CancellationToken.None);
+
+            // Then it flips, pack_slug untouched.
+            Assert.NotNull(updated);
+            Assert.True(updated!.Enabled);
+            Assert.Equal("genwave-catalog", updated.PackSlug);
+        }
+
+        [Fact]
+        public async Task AnUnknownIdReturnsNull()
+        {
+            // Given no brief with this id...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdBriefRepo(db);
+
+            // When it is toggled...
+            var updated = await repo.SetEnabledAsync(999_999, enabled: true, CancellationToken.None);
+
+            // Then nothing comes back — a legal 404 signal, never an error.
+            Assert.Null(updated);
         }
     }
 }

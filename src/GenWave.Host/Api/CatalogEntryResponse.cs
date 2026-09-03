@@ -107,14 +107,15 @@ namespace GenWave.Host.Api;
 /// for every non-persona entry, when unreachable, or when this persona entry declares no face.
 /// </param>
 /// <param name="PackName">
-/// An avatar pack's own manifest display name (SPEC F128.1, PLAN T304 rider 4 — closes the "no
-/// pack-name field on the wire" gap the admin-ui's <c>AvatarDetailPanel</c> used to document as a
-/// stated deviation, PLAN T294) — parsed off <see cref="Card"/> at ZERO extra network cost, the SAME shape
-/// <see cref="FontFamily"/> already has for a font pack. <see langword="null"/> for every non-avatar
-/// entry, when unreachable, or when the manifest fails to parse (degrades — never a 500). An icon
-/// entry never carries one: SPEC F130.1's <c>gw-icon-pack</c> document has no pack-level display-name
-/// field at all (see <see cref="IconPackSummaryDto"/>'s own remarks) — <see cref="IconCount"/> is
-/// that kind's own honest projection instead.
+/// An avatar OR ad-pack entry's own manifest display name (SPEC F128.1, F162.2; PLAN T304 rider
+/// 4/T405 — the same field, shared across both kinds rather than a second, kind-specific slot, since
+/// only one of the two kinds a given entry is can ever be non-null on any real row) — parsed off
+/// <see cref="Card"/> at ZERO extra network cost, the SAME shape <see cref="FontFamily"/> already has
+/// for a font pack. <see langword="null"/> for every non-avatar/non-ad-pack entry, when unreachable,
+/// or when the manifest fails to parse (degrades — never a 500). An icon entry never carries one:
+/// SPEC F130.1's <c>gw-icon-pack</c> document has no pack-level display-name field at all (see
+/// <see cref="IconPackSummaryDto"/>'s own remarks) — <see cref="IconCount"/> is that kind's own
+/// honest projection instead.
 /// </param>
 /// <param name="IconCount">
 /// An icon pack entry's own declared icon count (SPEC F130.1, PLAN T294 rider 3), re-validated off
@@ -123,6 +124,16 @@ namespace GenWave.Host.Api;
 /// (never a 500; the Wardrobe/shelf specimen renderer, PLAN T304, still draws whatever it can from
 /// the raw <see cref="Card"/> text defensively regardless of this count). <see langword="null"/> for
 /// every non-icon entry or when unreachable.
+/// </param>
+/// <param name="AdPackBriefs">
+/// An ad-pack's own brand briefs (SPEC F162.2, STORY-393, PLAN T405), parsed off <see cref="Card"/>
+/// (the pack's own <c>.ad-pack.json</c> manifest, already fetched and hash-verified to build this
+/// same response, via <see cref="Catalog.CatalogAdPackManifestSerializer.Deserialize"/>) at ZERO
+/// extra network cost — the SAME "parse the already-fetched manifest" shape <see cref="AvatarItems"/>
+/// already has for an avatar pack. READ-ONLY here: the shelf's own <c>AdPackDetailPanel</c> only
+/// lists these for review before an explicit install confirms (SPEC F90.7's trust ruling, one kind
+/// over). <see langword="null"/> for every non-ad-pack entry, when unreachable, or when the manifest
+/// fails to parse (degrades — never a 500).
 /// </param>
 public sealed record CatalogEntryResponse(
     string? Card,
@@ -145,7 +156,8 @@ public sealed record CatalogEntryResponse(
     IReadOnlyList<CatalogAvatarItemDto>? AvatarItems,
     string? PersonaAvatarFile,
     string? PackName,
-    int? IconCount)
+    int? IconCount,
+    IReadOnlyList<CatalogAdPackBriefDto>? AdPackBriefs)
 {
     /// <summary>
     /// The graceful "catalog currently unreachable" shape (SPEC F90.4, <see cref="Unreachable"/> =
@@ -185,5 +197,6 @@ public sealed record CatalogEntryResponse(
         AvatarItems: null,
         PersonaAvatarFile: null,
         PackName: null,
-        IconCount: null);
+        IconCount: null,
+        AdPackBriefs: null);
 }

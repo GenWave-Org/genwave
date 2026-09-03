@@ -84,7 +84,39 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
     {
         RetireCallCount++;
         return Task.FromResult(
-            GuardedTransition(id, expectedVersion, [AdState.Ready, AdState.Draft], AdState.Retired, stampRetired: true));
+            GuardedTransition(
+                id, expectedVersion,
+                [AdState.Ready, AdState.Draft, AdState.Approved, AdState.Failed],
+                AdState.Retired, stampRetired: true, clearFailReason: true));
+    }
+
+    public Task<AdSpot?> GetByIdAsync(long id, CancellationToken ct) =>
+        Task.FromResult(spots.FirstOrDefault(s => s.Id == id));
+
+    public Task<AdSpotTransitionOutcome> UpdateAsync(long id, AdSpotEdit edit, string expectedVersion, CancellationToken ct)
+    {
+        var index = spots.FindIndex(s => s.Id == id);
+        if (index < 0)
+            return Task.FromResult(new AdSpotTransitionOutcome(AdSpotWriteResult.NotFound, null));
+
+        var current = spots[index];
+        var legalFromState = current.State is AdState.Draft or AdState.Failed;
+        if (!string.Equals(current.Version, expectedVersion, StringComparison.Ordinal) || !legalFromState)
+            return Task.FromResult(new AdSpotTransitionOutcome(AdSpotWriteResult.Conflict, null));
+
+        var updated = current with
+        {
+            Brand = edit.Brand ?? current.Brand,
+            Title = edit.Title ?? current.Title,
+            Brief = edit.Brief ?? current.Brief,
+            Script = edit.Script ?? current.Script,
+            VoicePlan = edit.VoicePlan ?? current.VoicePlan,
+            SpotSeconds = edit.SpotSeconds ?? current.SpotSeconds,
+            BedMediaId = edit.BedMediaId ?? current.BedMediaId,
+            Version = NextVersion(),
+        };
+        spots[index] = updated;
+        return Task.FromResult(new AdSpotTransitionOutcome(AdSpotWriteResult.Updated, updated));
     }
 
     public Task<AdSpot?> ClaimNextApprovedAsync(CancellationToken ct)
