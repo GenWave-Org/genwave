@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
@@ -20,8 +21,24 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- T396 adds: <ProjectReference Include="..\..\src\GenWave.Ads\GenWave.Ads.csproj" /> -->
+    <!-- PLAN T396: AdsLibrarySeeder/LibraryAdSpotSource/AdSpotPipeline specs construct
+         Microsoft.Extensions.Options/Logging fakes directly — same shared-framework shape as
+         GenWave.MediaLibrary.Tests's/GenWave.Tts.Tests's own FrameworkReference. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\..\src\GenWave.Abstractions\GenWave.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Ads\GenWave.Ads.csproj" />
+    <!-- PLAN T400 review F2: the real-crossing proof — GenWave.Tts.AdScriptWriter wired to the REAL
+         GenWave.Ads.AdScriptValidator through the delegate. No L-law forbids a TEST project
+         referencing two sibling src projects (see GenWave.Architecture.Tests's own graph, which
+         references nearly every production assembly to scan it); the DIRECTION matters, not the test
+         reference itself. This is deliberately the mirror image of GenWave.Tts.Tests referencing
+         GenWave.Ads: GenWave.Tts must never reference GenWave.Ads in PRODUCTION code (L10) — but
+         GenWave.Ads referencing GenWave.Tts is a dependency PLAN T402's own AdSpotWorker (this
+         project) will genuinely carry once it exists, closing over AdScriptWriter/AdScriptWriteRequest/
+         AdScriptValidationOutcome exactly the way this test's own delegate adapter previews. Putting
+         the real-crossing fact here, not in GenWave.Tts.Tests, keeps every reference in this repo
+         pointing the same direction the shipped dependency graph will. -->
+    <ProjectReference Include="..\..\src\GenWave.Tts\GenWave.Tts.csproj" />
   </ItemGroup>
 
 </Project>

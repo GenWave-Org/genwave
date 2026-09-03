@@ -236,6 +236,10 @@ internal static partial class CatalogInstallShell
         CatalogEntryKind.Show => "show",
         CatalogEntryKind.Avatar => "avatar",
         CatalogEntryKind.Icon => "icon",
+        // "ad" (not "ad-pack") — every Problem factory on this type appends its own literal " pack"
+        // (e.g. "{Capitalize(kind)} pack unavailable.", "Malformed {NounFor(kind)} pack manifest.");
+        // a noun that already contains the word "pack" would double it ("ad-pack pack unavailable.").
+        CatalogEntryKind.AdPack => "ad",
         _ => throw new UnreachableException($"Unhandled {nameof(CatalogEntryKind)} value: {kind}."),
     };
 

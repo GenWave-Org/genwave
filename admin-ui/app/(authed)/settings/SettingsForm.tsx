@@ -435,6 +435,23 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
   "Crosstalk:EveryNthAiring":
     "How many eligible airings of an enabled show pass before one carries banter — 1 (the " +
     "default) airs every time. Accepted range: 1–100.",
+
+  // ── Ads seam (SPEC F158.3, F159.3, F159.4, F163.1) ──────────────────────────────────────────
+  "Station:Ads:EveryNUnits":
+    "A ready ad spot airs every N units, the same cadence shape as the station-ID count above — " +
+    "0 (the default) disables ad spots entirely. Accepted range: 0–1000.",
+  "Station:Ads:TargetCount":
+    "How many ready spots the ad-spot worker keeps in stock, refilling as spots retire. " +
+    "Defaults to 12. Accepted range: 0–100.",
+  "Station:Ads:RefreshDays":
+    "A ready spot older than this many days is retired and the stock refills — keeps ad copy " +
+    "from going stale. Defaults to 30. Accepted range: 1–365.",
+  "Station:Ads:AutoApprove":
+    "When off (the default), a freshly generated spot waits in draft for the owner's approval " +
+    "before it can ever air. When on, generation flows straight to approved.",
+  "Station:Ads:AntiRepeatWindow":
+    "How many of the most recently aired spots are excluded from the next pick, so the same ad " +
+    "does not repeat back to back. Defaults to 5. Accepted range: 0–50.",
 };
 
 /**

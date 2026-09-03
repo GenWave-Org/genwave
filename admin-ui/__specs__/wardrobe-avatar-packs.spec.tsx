@@ -96,6 +96,7 @@ const AVATAR_DETAIL: CatalogEntryDetailDto = {
   // slug-derived match (see the "reads the manifest's own packName" fact below).
   packName: "Warm Grins & Co.",
   iconCount: null,
+  adPackBriefs: null,
 };
 
 const ENTRY_URL = "/api/catalog/entries/warm-grins";

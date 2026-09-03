@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDateStamp, formatUpSince } from "@/lib/format-clock";
 import { cn } from "@/lib/utils";
-import type { StatusResponse } from "@/lib/broadcast-api";
+import type { PluginStatusEntry, StatusResponse } from "@/lib/broadcast-api";
 import {
   GARDENER_KIND_ORDER,
   GARDENER_OPEN_COUNT_KEY,
@@ -158,6 +158,22 @@ function gardenerBreakdownLine(open: GardenerOpenCounts): string {
   return GARDENER_KIND_ORDER.map((kind) => gardenerCountPhrase(kind, open[GARDENER_OPEN_COUNT_KEY[kind]])).join(" · ");
 }
 
+/** SPEC F156.7, STORY-385/386, PLAN T394 — the Plugins tile's own headline caption, singular/plural
+ * handled (mirrors `playableTracksCaption`'s own convention two tiles up). Counts LOADED plugins only
+ * — a skipped one is still listed below, but never inflates the headline number. */
+function pluginsHeadlineCaption(loadedCount: number): string {
+  return loadedCount === 1 ? "plugin loaded" : "plugins loaded";
+}
+
+/** SPEC F156.7 — one line per plugin outcome, in the api's own report order: a loaded plugin names
+ * itself and its version; a skipped one adds why (T371's "colour is never the only signal" lesson,
+ * one tile over — a skip reason is always visible text, never hover-only). */
+function pluginLine(plugin: PluginStatusEntry): string {
+  const name = plugin.name ?? "(unnamed plugin)";
+  const label = plugin.version !== null ? `${name} ${plugin.version}` : name;
+  return plugin.state === "loaded" ? label : `${label} — skipped${plugin.reason ? `: ${plugin.reason}` : ""}`;
+}
+
 interface StatusTilesProps {
   status: StatusResponse | null;
   error: boolean;
@@ -303,6 +319,19 @@ export function StatusTiles({ status, error, timeZone }: StatusTilesProps): Reac
             </>
           )}
         </Tile>
+
+        {/* SPEC F156.7, STORY-385/386 AC3, PLAN T394 — no tile at all when plugins[] is empty (a
+            closed door, or a mount with zero valid plugins): non-empty implies the door is open, so
+            rendering is gated on length rather than a loading/undefined check the way every OTHER
+            tile above needs (this one simply has nothing to show, ever, on a closed-door install). */}
+        {status !== null && status.plugins !== undefined && status.plugins.length > 0 && (
+          <Tile
+            label="Plugins"
+            variant={status.plugins.some((plugin) => plugin.state === "skipped") ? "warning" : "ok"}
+          >
+            <PluginsTileBody plugins={status.plugins} />
+          </Tile>
+        )}
       </div>
 
       {error && status !== null && (
@@ -379,6 +408,26 @@ function DominantCauseLine({ llm }: { llm: StatusResponse["llm"] }): ReactNode {
   const line = dominantCauseLine(llm);
   if (line === null) return null;
   return <p className="mt-0.5 text-[0.75rem] text-danger">{line}</p>;
+}
+
+/** SPEC F156.7, STORY-385/386, PLAN T394 — the Plugins tile's own body, pulled into its own
+ * component (the `DominantCauseLine` precedent one function up) so `loadedCount` is computed ONCE,
+ * not re-filtered for the headline value and its caption separately. */
+function PluginsTileBody({ plugins }: { plugins: readonly PluginStatusEntry[] }): ReactNode {
+  const loadedCount = plugins.filter((plugin) => plugin.state === "loaded").length;
+
+  return (
+    <>
+      <TileHeadline value={loadedCount} caption={pluginsHeadlineCaption(loadedCount)} />
+      <div className="mt-1 space-y-0.5">
+        {plugins.map((plugin, index) => (
+          <p key={index} className={cn("text-[0.75rem]", plugin.state === "skipped" ? "text-danger" : "text-mute")}>
+            {pluginLine(plugin)}
+          </p>
+        ))}
+      </div>
+    </>
+  );
 }
 
 function TileSkeleton(): ReactNode {

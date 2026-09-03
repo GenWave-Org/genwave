@@ -28,12 +28,14 @@ public sealed class FeatureNamespaceCycleFreedom
     public static readonly TheoryData<string> ProjectRoots =
     [
         "GenWave.Abstractions",
+        "GenWave.Ads",
         "GenWave.Core",
         "GenWave.Context",
         "GenWave.Host",
         "GenWave.Loudness",
         "GenWave.MediaLibrary",
         "GenWave.Orchestration",
+        "GenWave.Plugins",
         "GenWave.Tts",
     ];
 

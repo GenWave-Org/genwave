@@ -165,6 +165,63 @@ public interface IMediaCatalog
     Task<MediaReference?> GetRandomReadyAsync(LibraryScope scope, IReadOnlyList<string> excludeIds, CancellationToken ct);
 
     /// <summary>
+    /// SPEC F158.4 (PLAN T395) — <see cref="GetRandomReadyAsync"/>'s fenced sibling: the SAME "one
+    /// random ready row, excluding recent repeats" shape, but structurally invisible to any row
+    /// carrying a non-null <c>imaging_kind</c> (a liner, a station id, an ad spot) — the fence
+    /// <c>MediaRepository.PlayablePredicate</c> gains this cycle. Backs <c>GET /media/random</c>
+    /// specifically: <see cref="GetRandomReadyAsync"/> stays the ONE method behind
+    /// <c>GET /internal/safe-track</c>, the F4.4 never-silence floor that must skip this fence by
+    /// design (STORY-387 AC4) — the two endpoints cannot share one predicate any more once only one
+    /// of them may see it. Null on an empty (post-fence) pool or an empty <paramref name="scope"/>
+    /// (default-deny), same contract as <see cref="GetRandomReadyAsync"/>.
+    /// <para>
+    /// <b>Posture term (PLAN T395 review finding-1, RULED)</b>: carries NO audience-posture
+    /// (SPEC F95.4) predicate — DELIBERATELY IDENTICAL to <c>/media/random</c>'s own PRE-T395
+    /// behavior, which called <see cref="GetRandomReadyAsync"/> directly and never applied one
+    /// either. This method's own fence is the imaging fence (F158.4) alone; the split that created
+    /// it must not silently widen or narrow <c>/media/random</c>'s posture behavior as a side
+    /// effect. Widening it for real is separate SPEC F95.4 work this member does not do.
+    /// </para>
+    /// <para>
+    /// Default-implemented (not abstract) so this addition to a published MIT contract
+    /// (<c>GenWave.Abstractions</c>) stays strictly additive — mirrors
+    /// <see cref="GetRandomReadyByImagingKindAsync(LibraryScope,ImagingKind,CancellationToken)"/>'s own
+    /// precedent: a pre-F158.4 implementer keeps compiling unchanged, falling back to
+    /// <see cref="GetRandomReadyAsync"/>'s own (unfenced) answer until it opts in with a real,
+    /// fenced override — the concrete catalog implementation in <c>GenWave.MediaLibrary</c> is the
+    /// only production override.
+    /// </para>
+    /// </summary>
+    Task<MediaReference?> GetRandomPlayableAsync(LibraryScope scope, IReadOnlyList<string> excludeIds, CancellationToken ct) =>
+        GetRandomReadyAsync(scope, excludeIds, ct);
+
+    /// <summary>
+    /// SPEC F158.5 (PLAN T395) — the ads-pool read <c>Ads.LibraryAdSpotSource</c> (PLAN T396) draws
+    /// from: one random <c>imaging_kind = 'ad'</c> row that is ready, measurable, eligible, and not
+    /// never-play within <paramref name="scope"/> (the operator-named ads library), excluding
+    /// <paramref name="excludeIds"/> — the in-memory anti-repeat ring
+    /// <c>Station:Ads:AntiRepeatWindow</c> tracks (F158.5's own "the feeder precedent"). Mirrors
+    /// <see cref="GetRandomReadyByImagingKindAsync(LibraryScope,ImagingKind,CancellationToken)"/>'s
+    /// predicate shape fixed to <see cref="ImagingKind.Ad"/>, plus the same recency exclusion
+    /// <see cref="GetRandomReadyAsync"/> already carries. ALSO carries the SAME audience-posture
+    /// predicate that method applies (SPEC F95.4/F95.6, PLAN T395 review finding-1, RULED): an ad
+    /// read has no dead-air excuse — null ("no spot this break") is this member's own always-legal
+    /// answer regardless — so an explicit-flagged ad spot (the LLM sweep, SPEC F95.3, can flag one
+    /// like any other authored row) is excluded exactly like every other pool-predicate query, never
+    /// carved out. Null on an empty pool or an empty <paramref name="scope"/> (default-deny) —
+    /// either way "no spot this break" is <c>IAdSpotSource.GetNextSpotAsync</c>'s own always-legal
+    /// answer (F158.1).
+    /// <para>
+    /// Default-implemented (not abstract), the same additive-contract discipline as every other DIM
+    /// on this interface: a pre-F158.5 implementer keeps compiling unchanged, reporting "no pool"
+    /// (null) until it opts in with a real override (the concrete catalog implementation in
+    /// <c>GenWave.MediaLibrary</c> is the only production override).
+    /// </para>
+    /// </summary>
+    Task<MediaReference?> GetRandomReadyAdSpotAsync(LibraryScope scope, IReadOnlyList<string> excludeIds, CancellationToken ct) =>
+        Task.FromResult<MediaReference?>(null);
+
+    /// <summary>
     /// SPEC F110.2 (STORY-301, PLAN T231) — one random ready authored Station Imaging row of
     /// <paramref name="kind"/> (the gh-#149 <c>imaging_kind</c> column), the pool the top-of-hour
     /// <c>StationId</c> drain prefers over its templated TTS fallback whenever it is non-empty

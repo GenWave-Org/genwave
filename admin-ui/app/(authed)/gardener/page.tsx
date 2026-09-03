@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { cookies } from "next/headers";
 import { apiGet } from "@/lib/api";
 import { Pager } from "@/components/ui/pager";
+import { PageSizePicker } from "@/components/ui/page-size-picker";
 import {
   buildGardenerFindingsPath,
   GARDENER_OPEN_COUNT_KEY,
@@ -12,9 +13,10 @@ import {
 } from "@/lib/gardener-api";
 import { GardenerTabs } from "./GardenerTabs";
 import { GardenerSection } from "./GardenerSection";
-import { GardenerPageSizePicker } from "./GardenerPageSizePicker";
 import {
+  buildGardenerHref,
   buildGardenerPageHref,
+  GARDENER_PAGE_SIZES,
   resolveGardenerPageCount,
   resolveGardenerPaging,
   type GardenerSearchParams,
@@ -103,7 +105,7 @@ export default async function GardenerPage({ searchParams }: GardenerPageProps):
       </div>
 
       <Pager page={page} pages={pages} hrefFor={(target) => buildGardenerPageHref(tab, limit, target)} />
-      <GardenerPageSizePicker kind={tab} limit={limit} />
+      <PageSizePicker sizes={GARDENER_PAGE_SIZES} limit={limit} hrefFor={(size) => buildGardenerHref(tab, size)} />
     </main>
   );
 }

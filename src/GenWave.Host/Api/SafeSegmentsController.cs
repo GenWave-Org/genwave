@@ -101,7 +101,19 @@ public sealed class SafeSegmentsController(
         // gh-#149 — the Station Imaging content kind. Absent defaults to liner (pre-kind
         // behavior); an unknown token is a 400 with nothing rendered (F27.3's validate-first
         // discipline). Metadata-only: the kind changes nothing about the render below.
-        if (!ImagingKindTokens.TryParse(request.Kind, out var kind))
+        //
+        // RULED (SPEC F158.5/F161.3, PLAN T395 review finding-4): ImagingKindTokens.TryParse itself
+        // stays generic and DOES accept "ad" (it is a real, published token — F158.1) — the refusal
+        // lives HERE, at this one endpoint, not in the shared parser. Ads are born ONLY through the
+        // F161 authored ad-spot tail (the ad state machine itself stamps imaging_kind='ad' once a
+        // spot renders ready — PLAN T398); this generic Station Imaging endpoint must never be a
+        // second, ungoverned door to the same column value. The concrete danger a hand-planted
+        // kind:"ad" row would open: an operator could author it into a library that is ALSO the
+        // gh-#99 SafeScope, where GetRandomReadyAsync (the F4.4 never-silence floor) deliberately
+        // skips the F158.4 rotation fence by design (STORY-387 AC4) — a row the fence would keep out
+        // of music rotation everywhere else would still air on the safe loop. Rejecting "ad" here
+        // closes that door without touching the fence itself or TryParse's own generic contract.
+        if (!ImagingKindTokens.TryParse(request.Kind, out var kind) || kind == ImagingKind.Ad)
         {
             return BadRequest(new ProblemDetails
             {

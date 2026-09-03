@@ -82,8 +82,11 @@ public static class FeatureTwoVoicesOneClip
         var crosstalkMonitor = new TestOptionsMonitor<CrosstalkOptions>(
             new CrosstalkOptions { DurationTargetSeconds = durationTargetSeconds });
         var ttsMonitor = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = cacheRoot });
+        // A FakeAudioMixer that is never called: the two-voice AssembleAsync path (this suite's own
+        // subject) never touches IAudioMixer at all — only the widened cast path (Story391,
+        // AssembleCastAsync) does. Present here purely to satisfy the constructor.
         var assembler = new CrosstalkAssembler(
-            synth, pronunciations, loudnessAnalyzer, cueAnalyzer, ttsMonitor, crosstalkMonitor, logger);
+            synth, pronunciations, loudnessAnalyzer, cueAnalyzer, new FakeAudioMixer(), ttsMonitor, crosstalkMonitor, logger);
         return (assembler, synth, loudnessAnalyzer, cueAnalyzer, logger, cacheRoot);
     }
 

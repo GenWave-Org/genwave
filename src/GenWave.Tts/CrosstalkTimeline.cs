@@ -63,6 +63,22 @@ static class CrosstalkTimeline
     }
 
     /// <summary>
+    /// <see cref="ComputeSeed(CrosstalkAiredScript)"/>'s own widened sibling, over
+    /// <see cref="CastLine"/>s (SPEC F161.2, STORY-391, PLAN T401) — the SAME "identical content plans
+    /// identical timing" contract, folding tag/text instead of speaker/interjection/text since a cast
+    /// line carries no interjection concept (see <see cref="CastLine"/>'s own remarks).
+    /// </summary>
+    internal static int ComputeSeed(IReadOnlyList<CastLine> lines)
+    {
+        var content = new StringBuilder();
+        foreach (var line in lines)
+            content.Append(line.Tag).Append('|').Append(line.Text).Append('\n');
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(content.ToString()));
+        return BitConverter.ToInt32(hash, 0);
+    }
+
+    /// <summary>
     /// One jittered gap per line TRANSITION (<paramref name="transitionCount"/> = line count - 1,
     /// SPEC F127.6), each in [<see cref="MinGapSeconds"/>, <see cref="MaxGapSeconds"/>], drawn in
     /// order from one <paramref name="seed"/>-derived <see cref="Random"/> — so the SAME script

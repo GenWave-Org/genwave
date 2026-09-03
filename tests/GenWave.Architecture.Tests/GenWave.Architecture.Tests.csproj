@@ -61,11 +61,16 @@
     <ProjectReference Include="..\..\src\GenWave.Loudness\GenWave.Loudness.csproj" />
     <ProjectReference Include="..\..\src\GenWave.MediaLibrary\GenWave.MediaLibrary.csproj" />
     <ProjectReference Include="..\..\src\GenWave.Orchestration\GenWave.Orchestration.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Plugins\GenWave.Plugins.csproj" />
     <ProjectReference Include="..\..\src\GenWave.Tts\GenWave.Tts.csproj" />
     <ProjectReference Include="..\..\src\GenWave.Host\GenWave.Host.csproj" />
     <!-- T216 (SEAMS.md generator, STORY-294): the SAME generation code the tool writes SEAMS.md
          with — see SeamIndexDocument's own remarks. -->
     <ProjectReference Include="..\..\tools\SeamIndexGenerator\SeamIndexGenerator.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GenWave.Ads\GenWave.Ads.csproj" />
   </ItemGroup>
 
 </Project>

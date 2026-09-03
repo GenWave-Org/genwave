@@ -34,6 +34,20 @@ using GenWave.Host.Theming;
 /// </para>
 ///
 /// <para>
+/// WIDENED TO <c>"ad-pack"</c> (SPEC F162.2, STORY-393, PLAN T405): the SIMPLEST kind yet — the same
+/// minimal <c>{manifest, meta}</c> shape a show/icon entry has, no binary <c>assets[]</c> arm at all
+/// (an ad-pack's whole body, <c>briefs[]</c>, is manifest DATA, never a file the index declares
+/// separately). Everything this class checks about an ad-pack entry is the SAME belt-and-braces path/
+/// slug/directory shape every other kind already gets — <see cref="AdPackManifestPathPattern"/>,
+/// picked once <see cref="TryResolveKind"/> resolves <c>"ad-pack"</c>. The manifest's own DEEPER
+/// shape (brief count/field-length caps, since installed briefs become durable
+/// <c>station.ad_brief</c> rows) is <see cref="CatalogAdPackManifestSerializer"/>'s job, consulted
+/// only once this class's own shape gate already passed — the SAME "index validator proves shape,
+/// manifest serializer proves content" split <see cref="CatalogFontManifestSerializer"/> already has
+/// one kind over.
+/// </para>
+///
+/// <para>
 /// WIDENED TO <c>"avatar"</c> AND <c>"icon"</c> (SPEC F128.1, F130.6, PLAN T292): an avatar pack is
 /// the SECOND assets-carrying kind — one PNG per pack item riding <c>assets[]</c>, the exact same
 /// all-or-nothing "a pack IS its files" posture <see cref="CatalogEntryKind.Font"/> already has (see
@@ -92,32 +106,35 @@ internal static partial class CatalogIndexValidator
     // the new one is what it serves after the move). When the folder IS present it must name the
     // entry's OWN kind — a persona manifest under entries/shows/ is a lie about what the file is,
     // not an alternative layout, and fails the persona pattern outright. The folder set is CLOSED
-    // (the six kinds this app recognises, widened from four by F128.1/F130.6/T292), mirroring
-    // TryResolveKind: an unrecognised-kind entry is already skipped before any path pattern is
-    // consulted, so an unrecognised kind FOLDER can only ever appear on a known-kind entry — where it
-    // is exactly the mismatch case above.
+    // (the SEVEN kinds this app recognises, widened from four by F128.1/F130.6/T292 and from six by
+    // F162.2/T405), mirroring TryResolveKind: an unrecognised-kind entry is already skipped before
+    // any path pattern is consulted, so an unrecognised kind FOLDER can only ever appear on a
+    // known-kind entry — where it is exactly the mismatch case above.
     const string PersonaFolderText = "(?:personas/)?";
     const string ThemeFolderText = "(?:themes/)?";
     const string FontFolderText = "(?:fonts/)?";
     const string ShowFolderText = "(?:shows/)?";
     const string AvatarFolderText = "(?:avatars/)?";
     const string IconFolderText = "(?:icons/)?";
-    const string AnyKindFolderText = "(?:(?:personas|themes|fonts|shows|avatars|icons)/)?";
+    const string AdPackFolderText = "(?:ad-packs/)?";
+    const string AnyKindFolderText = "(?:(?:personas|themes|fonts|shows|avatars|icons|ad-packs)/)?";
 
-    // entries/[<kind-plural>/]<slug>/<name>.persona.json (and .theme/.font/.show/.avatar/.icon) — the
-    // per-kind manifest shape (SPEC F103.2, F104.1, F118.1, F128.1, F130.6): the filename segment is
-    // the SAME shape as the slug segment (SPEC F90.2/F89.2: schemas/index.schema.json's card/meta
-    // path patterns use this one shape for both segments, not the looser "any run of [a-z0-9-]" a
-    // prior version allowed here, which would have tolerated a leading/trailing/doubled hyphen the
-    // real schema rejects). The meta pattern alone takes the ANY-kind folder alternation — a meta
-    // filename carries no kind of its own — with the manifest-directory equality check in
-    // TryValidateEntry pinning it to the one folder its entry actually lives in.
+    // entries/[<kind-plural>/]<slug>/<name>.persona.json (and .theme/.font/.show/.avatar/.icon/
+    // .ad-pack) — the per-kind manifest shape (SPEC F103.2, F104.1, F118.1, F128.1, F130.6, F162.2):
+    // the filename segment is the SAME shape as the slug segment (SPEC F90.2/F89.2:
+    // schemas/index.schema.json's card/meta path patterns use this one shape for both segments, not
+    // the looser "any run of [a-z0-9-]" a prior version allowed here, which would have tolerated a
+    // leading/trailing/doubled hyphen the real schema rejects). The meta pattern alone takes the
+    // ANY-kind folder alternation — a meta filename carries no kind of its own — with the
+    // manifest-directory equality check in TryValidateEntry pinning it to the one folder its entry
+    // actually lives in.
     const string PersonaManifestPathText = @"\Aentries/" + PersonaFolderText + SlugSegment + "/" + SlugSegment + @"\.persona\.json\z";
     const string ThemeManifestPathText = @"\Aentries/" + ThemeFolderText + SlugSegment + "/" + SlugSegment + @"\.theme\.json\z";
     const string FontManifestPathText = @"\Aentries/" + FontFolderText + SlugSegment + "/" + SlugSegment + @"\.font\.json\z";
     const string ShowManifestPathText = @"\Aentries/" + ShowFolderText + SlugSegment + "/" + SlugSegment + @"\.show\.json\z";
     const string AvatarManifestPathText = @"\Aentries/" + AvatarFolderText + SlugSegment + "/" + SlugSegment + @"\.avatar\.json\z";
     const string IconManifestPathText = @"\Aentries/" + IconFolderText + SlugSegment + "/" + SlugSegment + @"\.icon\.json\z";
+    const string AdPackManifestPathText = @"\Aentries/" + AdPackFolderText + SlugSegment + "/" + SlugSegment + @"\.ad-pack\.json\z";
     const string MetaPathText = @"\Aentries/" + AnyKindFolderText + SlugSegment + "/" + SlugSegment + @"\.meta\.json\z";
 
     // entries/<slug>/<filename> — a pack's binary asset (SPEC F104.1, F128.1): a font pack's 1-2
@@ -194,6 +211,9 @@ internal static partial class CatalogIndexValidator
 
     [GeneratedRegex(IconManifestPathText)]
     private static partial Regex IconManifestPathPattern();
+
+    [GeneratedRegex(AdPackManifestPathText)]
+    private static partial Regex AdPackManifestPathPattern();
 
     [GeneratedRegex(MetaPathText)]
     private static partial Regex MetaPathPattern();
@@ -849,7 +869,7 @@ internal static partial class CatalogIndexValidator
     /// matched a pattern whose shape guarantees at least one <c>/</c>.</summary>
     static string DirectoryOf(string path) => path[..path.LastIndexOf('/')];
 
-    /// <summary>A missing <c>kind</c> defaults to persona (back-compat, F103.1/AC2); any value other than <c>"persona"</c>/<c>"theme"</c>/<c>"font"</c>/<c>"show"</c>/<c>"avatar"</c>/<c>"icon"</c> is unrecognised.</summary>
+    /// <summary>A missing <c>kind</c> defaults to persona (back-compat, F103.1/AC2); any value other than <c>"persona"</c>/<c>"theme"</c>/<c>"font"</c>/<c>"show"</c>/<c>"avatar"</c>/<c>"icon"</c>/<c>"ad-pack"</c> is unrecognised.</summary>
     static bool TryResolveKind(string? raw, out CatalogEntryKind kind)
     {
         switch (raw)
@@ -873,6 +893,9 @@ internal static partial class CatalogIndexValidator
             case "icon":
                 kind = CatalogEntryKind.Icon;
                 return true;
+            case "ad-pack":
+                kind = CatalogEntryKind.AdPack;
+                return true;
             default:
                 kind = default;
                 return false;
@@ -887,6 +910,7 @@ internal static partial class CatalogIndexValidator
         CatalogEntryKind.Show => ShowManifestPathPattern(),
         CatalogEntryKind.Avatar => AvatarManifestPathPattern(),
         CatalogEntryKind.Icon => IconManifestPathPattern(),
+        CatalogEntryKind.AdPack => AdPackManifestPathPattern(),
         _ => throw new UnreachableException($"Unhandled {nameof(CatalogEntryKind)} value: {kind}."),
     };
 

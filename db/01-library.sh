@@ -425,15 +425,22 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 
 	create index media_dup_keys on library.media (artist_key, title_key) where state = 'ready';
 
-	-- find_near_duplicates (SPEC F153.5, amended at T354 review): playable rows are the FULL
-	-- MediaRepository.PlayablePredicate, LEFT JOIN library.media_rating included (T354 review MED-1
-	-- finding — see db/41's own header remarks for why the never_play half is not optional). STABLE,
-	-- not IMMUTABLE: its result depends on library.media's contents, not just its own argument.
-	-- Anchored to each group's SHORTEST duration via a window function, not a self-join's pairwise
-	-- distance, so tolerance never chains transitively (T354 review LOW-2, RULED — see db/41's own
-	-- remarks). group_key folds in title_variant (T354 review LOW-1, RULED) so two groups sharing an
-	-- (artist_key, title_key) but differing in variant never share a group_key text; title_variant is
-	-- also returned as its own column. Groups of one are dropped AFTER the tolerance filter.
+	-- find_near_duplicates (SPEC F153.5, amended at T354 review, F158.4 fence closed at T406):
+	-- playable rows are the FULL MediaRepository.PlayablePredicate as of T406, LEFT JOIN
+	-- library.media_rating included (T354 review MED-1 finding — see db/41's own header remarks for
+	-- why the never_play half is not optional). CLOSED (PLAN T395 review, carried forward as PLAN
+	-- T406, landed as db/44): PlayablePredicate gained "and imaging_kind is null" at T395 (SPEC
+	-- F158.4, the rotation fence) — a SQL function cannot reference the C# constant, so this
+	-- fresh-init mirror carries its own copy of the fence term, kept byte-identical to db/44's
+	-- upgrade-path version (see that script's own header for the full T406 rationale) — an authored
+	-- imaging row (a liner, a station id, an ad spot) can no longer surface in a near-duplicate
+	-- finding. STABLE, not IMMUTABLE: its result depends on library.media's contents, not just its
+	-- own argument. Anchored to each group's SHORTEST duration via a window function, not a
+	-- self-join's pairwise distance, so tolerance never chains transitively (T354 review LOW-2,
+	-- RULED — see db/41's own remarks). group_key folds in title_variant (T354 review LOW-1, RULED)
+	-- so two groups sharing an (artist_key, title_key) but differing in variant never share a
+	-- group_key text; title_variant is also returned as its own column. Groups of one are dropped
+	-- AFTER the tolerance filter.
 	create function library.find_near_duplicates(tolerance_ms int)
 	returns table (media_id bigint, group_key text, title_variant text)
 	language plpgsql
@@ -449,6 +456,7 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 	      from library.media m
 	      left join library.media_rating r on r.media_id = m.id
 	      where m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)
+	        and m.imaging_kind is null
 	        and m.artist_key is not null and m.title_key is not null and m.duration_ms is not null
 	    ),
 	    anchored as (

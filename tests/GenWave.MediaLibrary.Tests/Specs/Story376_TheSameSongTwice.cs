@@ -41,17 +41,22 @@ public static class FeatureTheSameSongTwice
     /// <summary>Inserts a ready + measurable + eligible (default) row carrying the given
     /// artist/title/duration — the minimal shape find_near_duplicates' own playable predicate needs,
     /// written directly (not via MediaRepository.WriteEnrichmentAsync) since these facts drive the
-    /// SQL function alone, not the enrichment pipeline.</summary>
-    static async Task<long> InsertReadyRowAsync(DatabaseFixture db, string path, string artist, string title, int durationMs)
+    /// SQL function alone, not the enrichment pipeline. <paramref name="imagingKind"/> defaults to
+    /// <see langword="null"/> (an ordinary music row) — every pre-T406 call site keeps that default;
+    /// passing e.g. <c>"ad"</c> is PLAN T406's own MED-2(a) addition, exercising the SAME
+    /// <c>imaging_kind is null</c> fence <see cref="MediaRepository.PlayablePredicate"/> carries in
+    /// C#, now mirrored inside <c>library.find_near_duplicates</c> itself (db/44).</summary>
+    static async Task<long> InsertReadyRowAsync(
+        DatabaseFixture db, string path, string artist, string title, int durationMs, string? imagingKind = null)
     {
         await using var conn = await db.DataSource.OpenConnectionAsync();
         return await conn.ExecuteScalarAsync<long>(
             """
-            insert into library.media (path, format, size_bytes, mtime, state, measurable, duration_ms, artist, title)
-            values (@path, 'flac', 1024, now(), 'ready', true, @durationMs, @artist, @title)
+            insert into library.media (path, format, size_bytes, mtime, state, measurable, duration_ms, artist, title, imaging_kind)
+            values (@path, 'flac', 1024, now(), 'ready', true, @durationMs, @artist, @title, @imagingKind)
             returning id
             """,
-            new { path, durationMs, artist, title });
+            new { path, durationMs, artist, title, imagingKind });
     }
 
     /// <summary>Flags a row never_play — the one predicate leg find_near_duplicates must honor
@@ -514,6 +519,31 @@ public static class FeatureTheSameSongTwice
 
     [Collection(DatabaseCollection.Name)]
     [Trait("Category", "Integration")]
+    public sealed class ScenarioImagingIsExcludedFromGrouping(DatabaseFixture db)
+    {
+        // PLAN T406 review MED-2(a): find_near_duplicates carried a STALE, pre-T395 copy of
+        // MediaRepository.PlayablePredicate — missing the F158.4 "and imaging_kind is null" rotation
+        // fence T395 added to the real predicate — until db/44's `create or replace` closed the drift
+        // (this file's own db/41 header remarks). The SAME shape as ScenarioNeverPlayIsExcludedFromGrouping
+        // immediately above, one predicate leg over: an authored imaging row (a liner, a station id, an
+        // ad spot) is never playable, so a pair of them — near-identical duration, same artist/title —
+        // must never seed or join a duplicate group. Mutant-verified: deleting "and m.imaging_kind is
+        // null" from library.find_near_duplicates reds this fact (both rows come back grouped).
+        [Fact]
+        public async Task AnAdImagingPairIsNotGrouped()
+        {
+            await db.ResetAsync();
+            var adA = await InsertReadyRowAsync(db, "/gardener/t406-imaging-ad-a.flac", "Artist", "Title", 15_000, imagingKind: "ad");
+            var adB = await InsertReadyRowAsync(db, "/gardener/t406-imaging-ad-b.flac", "Artist", "Title", 15_200, imagingKind: "ad");
+
+            var groups = await FindNearDuplicatesAsync(db, 2_000);
+
+            Assert.DoesNotContain(groups, g => g.MediaId == adA || g.MediaId == adB);
+        }
+    }
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
     public sealed class ScenarioVariantsFormSeparateGroups(DatabaseFixture db)
     {
         // T354 review pin (LOW-1, "F153.5 amended at T354 review", RULED): group_key must fold in
@@ -715,6 +745,68 @@ public static class FeatureTheSameSongTwice
                 """);
 
             Assert.True(restored, "library.media.artist_key was not restored after dropping and re-running db/41 twice.");
+
+            // PLAN T406 review MED-2(b) — the convergence landmine: db/41's own find_near_duplicates
+            // body is the STALE, pre-fence copy (db/44's own header remarks) — its `create or replace`
+            // above just reverted this SHARED collection fixture's function back to un-fenced for
+            // every fact that runs after this one, exactly what a bare re-run of db/41 alone (this
+            // fact's own scenario) does on a real box too. migrate.sh's own glob always runs db/44
+            // AFTER db/41 in filename order on any real deploy or upgrade — reproduced here rather
+            // than merely asserted, so the fixture this fact hands back to the collection is never
+            // left un-fenced (STORY-387's ScenarioImagingIsExcludedFromGrouping fact above already
+            // covers the fence's own behavior; this is the OTHER half — a shared-fixture regression a
+            // per-fact behavioral pin alone can never catch, since it depends on RUN ORDER across
+            // facts, not any one fact's own inputs).
+            db.RunFileInContainer(Path.Combine(db.RepoRoot, "db", "44-near-duplicates-imaging-fence-migration.sh"));
+
+            var fenced = await verifyConn.ExecuteScalarAsync<string>(
+                "select pg_get_functiondef('library.find_near_duplicates(int)'::regprocedure)");
+
+            Assert.Contains("and m.imaging_kind is null", fenced, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void TheDb01MirrorAndDb44AreByteIdenticalBeyondTheCreateClause()
+        {
+            // PLAN T406 review Fold 2 — the same hand-sync class of drift that let db/41's own
+            // find_near_duplicates fall a full cycle behind the real PlayablePredicate (the T395/
+            // T406 saga this file's own remarks above tell): the fence term alone is covered from
+            // both sides by ScenarioImagingIsExcludedFromGrouping (behavior, against whichever
+            // script actually ran) and TheMigrationScriptConvergesAfterADropAndTwoReruns (text,
+            // against db/44 specifically) — neither would notice a DIFFERENT divergence, e.g. the
+            // tolerance window, the group_key expression, or the anchor/qualifying/grouped CTE
+            // shape drifting between db/01's fresh-init mirror and db/44's upgrade-path copy while
+            // both still happened to keep the fence term. This fact pins the two texts equal
+            // wholesale — everything from the shared `returns table (...)` signature through the
+            // closing `$$;`, deliberately EXCLUDING only the one line that must legitimately differ
+            // (`create function` in db/01 vs `create or replace function` in db/44, db/44's own
+            // header explains why `create or replace` is required there).
+            var db01Text = File.ReadAllText(Path.Combine(db.RepoRoot, "db", "01-library.sh"));
+            var db44Text = File.ReadAllText(Path.Combine(db.RepoRoot, "db", "44-near-duplicates-imaging-fence-migration.sh"));
+
+            var db01Definition = ExtractFindNearDuplicatesDefinition(db01Text);
+            var db44Definition = ExtractFindNearDuplicatesDefinition(db44Text);
+
+            Assert.Equal(db01Definition, db44Definition);
+        }
+
+        /// <summary>Extracts <c>library.find_near_duplicates</c>' full definition from the shared
+        /// <c>returns table (...)</c> signature through the closing <c>$$;</c> — everything EXCEPT
+        /// the leading <c>create function</c>/<c>create or replace function</c> line, the one
+        /// legitimate difference between db/01's fresh-init mirror and db/44's upgrade-path copy.
+        /// </summary>
+        static string ExtractFindNearDuplicatesDefinition(string scriptText)
+        {
+            const string anchor = "returns table (media_id bigint, group_key text, title_variant text)";
+            var start = scriptText.IndexOf(anchor, StringComparison.Ordinal);
+            if (start < 0)
+                throw new InvalidOperationException("find_near_duplicates' return-shape anchor was not found.");
+
+            var end = scriptText.IndexOf("$$;", start, StringComparison.Ordinal);
+            if (end < 0)
+                throw new InvalidOperationException("find_near_duplicates' closing '$$;' was not found.");
+
+            return scriptText[start..(end + 3)];
         }
     }
 

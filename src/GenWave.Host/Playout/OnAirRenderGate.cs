@@ -1,3 +1,5 @@
+using GenWave.Core.Abstractions;
+
 namespace GenWave.Host.Playout;
 
 /// <summary>
@@ -35,8 +37,15 @@ namespace GenWave.Host.Playout;
 /// in flight right now" — a reader observing a write a few nanoseconds late costs nothing worse than
 /// one extra stock-timer tick's discard (SPEC F127.7's own "opportunistic, off the clock" framing).
 /// </para>
+///
+/// <para>
+/// <b>Also implements <see cref="IOnAirRenderSignal"/> (PLAN T402).</b> <c>GenWave.Ads</c>' own
+/// <c>AdSpotWorker</c> needs this exact fact but must never reference <c>GenWave.Host</c> (L5/L10) —
+/// see that interface's own remarks for the full layering rationale and where the two are mapped
+/// together in DI.
+/// </para>
 /// </summary>
-public sealed class OnAirRenderGate
+public sealed class OnAirRenderGate : IOnAirRenderSignal
 {
     volatile bool inFlight;
 

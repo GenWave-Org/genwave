@@ -267,6 +267,7 @@ public sealed partial class CatalogController(
         CatalogEntryKind.Show => "show",
         CatalogEntryKind.Avatar => "avatar",
         CatalogEntryKind.Icon => "icon",
+        CatalogEntryKind.AdPack => "ad-pack",
         _ => throw new UnreachableException($"Unhandled {nameof(CatalogEntryKind)} value: {kind}."),
     };
 
@@ -292,8 +293,10 @@ public sealed partial class CatalogController(
         var isAvatar = ok.Content.Kind == CatalogEntryKind.Avatar;
         var isPersona = ok.Content.Kind == CatalogEntryKind.Persona;
         var isIcon = ok.Content.Kind == CatalogEntryKind.Icon;
+        var isAdPack = ok.Content.Kind == CatalogEntryKind.AdPack;
         var fontManifest = isFont ? CatalogFontManifestSerializer.Deserialize(ok.Content.ManifestJson) : null;
         var avatarManifest = isAvatar ? CatalogAvatarPackManifestSerializer.Deserialize(ok.Content.ManifestJson) : null;
+        var adPackManifest = isAdPack ? CatalogAdPackManifestSerializer.Deserialize(ok.Content.ManifestJson) : null;
         var iconDefinition = isIcon ? ResolveIconCount(ok.Content.ManifestJson) : null;
         return new CatalogEntryResponse(
             ok.Content.ManifestJson,
@@ -315,9 +318,17 @@ public sealed partial class CatalogController(
             SuggestedPersona: isShow ? ValidateSuggestedPersonaShape(meta.SuggestedPersona) : null,
             AvatarItems: avatarManifest?.Items.Select(item => ToAvatarItemDto(item, ok.Content.Assets)).ToArray(),
             PersonaAvatarFile: isPersona ? ResolvePersonaAvatarFile(ok.Content.Assets) : null,
-            PackName: avatarManifest?.PackName,
-            IconCount: iconDefinition);
+            PackName: avatarManifest?.PackName ?? adPackManifest?.PackName,
+            IconCount: iconDefinition,
+            AdPackBriefs: adPackManifest?.Briefs.Select(ToAdPackBriefDto).ToArray());
     }
+
+    /// <summary>One ad-pack brief, projected onto the wire (SPEC F162.2, PLAN T405) — a straight,
+    /// already-validated field-for-field copy; nothing here needs the cross-reference/shape-degrade
+    /// treatment <see cref="ToAvatarItemDto"/> applies to a manifest-declared FILENAME, since a brief
+    /// carries no file reference of any kind.</summary>
+    static CatalogAdPackBriefDto ToAdPackBriefDto(CatalogAdPackBrief brief) =>
+        new(brief.Brand, brief.Premise, brief.Tone, brief.Structure);
 
     /// <summary>
     /// An icon pack entry's own declared icon count (SPEC F130.1, PLAN T304 rider 4) — re-validates

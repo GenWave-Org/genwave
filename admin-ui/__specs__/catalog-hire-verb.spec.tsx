@@ -89,6 +89,7 @@ const LENA_DETAIL: CatalogEntryDetailDto = {
   personaAvatarFile: null,
   packName: null,
   iconCount: null,
+  adPackBriefs: null,
 };
 
 function makeJsonResponse(status: number, body: unknown): Response {

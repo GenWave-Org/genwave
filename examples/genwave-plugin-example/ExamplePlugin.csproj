@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>ExamplePlugin</AssemblyName>
+    <RootNamespace>ExamplePlugin</RootNamespace>
+    <!-- PLAN T393, STORY-386: this is the plugin SPI's reference CONSUMER, written the way a
+         third party actually would — deliberately NOT under the house's own GenWave.* assembly/
+         namespace prefix. It lives outside src/ (examples/) so no Dockerfile COPY ever bundles it
+         into a shipped image, and it is NEVER added to GenWave.Architecture.Tests'
+         ProductionAssemblies list — the fitness laws stay blind to it on purpose, exactly like any
+         other third-party plugin the house never authored. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- A REAL third-party plugin references the PUBLISHED NuGet package instead:
+             <PackageReference Include="GenWave.Abstractions" Version="5.6.0" />
+         (see README.md's own Quickstart, which shows exactly that line). This example uses a
+         ProjectReference instead so `dotnet build GenWave.sln` always compiles it against the
+         CURRENT, in-repo contract surface — a PackageReference here would pin to whatever version
+         last shipped to nuget.org and let this reference consumer silently rot the moment
+         IContextProvider/IGenWavePlugin/IPluginHost grows a member this file never learns about. -->
+    <ProjectReference Include="..\..\src\GenWave.Abstractions\GenWave.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- SPEC F156.2: plugin.json sits BESIDE the compiled assembly at {Plugins:Root}/<slug>/.
+         Copying it into this project's own build output means `dotnet build` alone produces one
+         directory (bin/Debug/net10.0/) that is already a valid plugin payload — no separate
+         packaging step, and no drift between the manifest checked in here and the one actually
+         shipped. PreserveNewest, not Always: a rebuild with no manifest edit shouldn't touch its
+         file time. -->
+    <None Include="plugin.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
