@@ -31,6 +31,9 @@ file sealed class FakeLibraryRepository(IReadOnlyList<LibraryAdminInfo> librarie
 
     public Task<IReadOnlyList<LibraryAdminInfo>> GetAllWithMediaCountAsync(CancellationToken ct) =>
         Task.FromResult(libraries);
+
+    public Task<LibraryAdminInfo?> GetByNameAsync(string name, CancellationToken ct) =>
+        Task.FromResult(libraries.FirstOrDefault(l => string.Equals(l.Name, name, StringComparison.Ordinal)));
 }
 
 /// <summary>

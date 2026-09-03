@@ -508,4 +508,73 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	CREATE INDEX IF NOT EXISTS announcement_deliverable
 	  ON station.announcement (created_at)
 	  WHERE state = 'pending';
+
+	-- The plugin door & the Ads library (gh-#380, SPEC F159.1, STORY-389, PLAN T389): fresh-init
+	-- mirror of db/42-ads-migration.sh's station-schema objects — see that script's own header for
+	-- the full column-by-column rationale (id-as-identity to match station.announcement above rather
+	-- than db/41's library-schema bigserial tables; bed_media_id/media_id deliberately plain bigint,
+	-- NO FK, across the same db/22 schema-role boundary station.announcement's siblings already
+	-- respect; ad_brief's NULLS NOT DISTINCT upsert key). UNLIKE 01-library.sh (mounted into
+	-- docker-entrypoint-initdb.d only, never re-run), THIS file's own name matches migrate.sh's
+	-- `db/*-migration.sh` glob too, so it is re-executed on every migrate.sh run against a box
+	-- already on a newer db/06 -- it must stay fully idempotent forever, not just at first boot.
+	-- `CREATE TYPE` has no `IF NOT EXISTS` clause, so the enums get the same pg_type-guarded DO
+	-- block db/42's own migration uses; the tables use plain `IF NOT EXISTS` like every other table
+	-- in this file.
+	DO $$
+	BEGIN
+	  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ad_source' AND typnamespace = 'station'::regnamespace) THEN
+	    CREATE TYPE station.ad_source AS ENUM ('llm', 'owner', 'pack');
+	  END IF;
+	  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ad_state' AND typnamespace = 'station'::regnamespace) THEN
+	    CREATE TYPE station.ad_state AS ENUM ('draft', 'approved', 'rendering', 'ready', 'failed', 'retired');
+	  END IF;
+	END $$;
+
+	CREATE TABLE IF NOT EXISTS station.ad_spot (
+	  id               bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	  brand            text        NOT NULL,
+	  title            text        NOT NULL,
+	  brief            text,
+	  script           text,
+	  source           station.ad_source NOT NULL,
+	  pack_slug        text,
+	  spot_seconds     int         NOT NULL DEFAULT 30 CHECK (spot_seconds IN (15, 30, 60)),
+	  voice_plan       jsonb,
+	  bed_media_id     bigint,     -- NO FK: crosses the db/22 schema-role boundary, see db/42's header
+	  state            station.ad_state NOT NULL DEFAULT 'draft',
+	  fail_reason      text,
+	  media_id         bigint,     -- NO FK: crosses the db/22 schema-role boundary, see db/42's header
+	  generation       int         NOT NULL DEFAULT 1,
+	  created_at       timestamptz NOT NULL DEFAULT now(),
+	  state_changed_at timestamptz NOT NULL DEFAULT now(),
+	  rendered_at      timestamptz,
+	  retired_at       timestamptz,
+	  -- Both CHECKs mirror db/43-ad-spot-invariants-migration.sh's own ALTER TABLE pair (PLAN T398,
+	  -- SPEC F159.2's "ready requires media_id" / "fail_reason iff failed" invariants) — inline here
+	  -- since a fresh install never sees db/43 (only 01+06 run via docker-entrypoint-initdb.d).
+	  CONSTRAINT ad_spot_ready_requires_media_id
+	    CHECK (state <> 'ready'::station.ad_state OR media_id IS NOT NULL),
+	  CONSTRAINT ad_spot_fail_reason_iff_failed
+	    CHECK ((state = 'failed'::station.ad_state) = (fail_reason IS NOT NULL))
+	);
+
+	-- Mirrors db/43's own index — see that script's own header for why one (state, state_changed_at)
+	-- index covers every query shape PLAN T398's store writes.
+	CREATE INDEX IF NOT EXISTS ad_spot_state_changed_at ON station.ad_spot (state, state_changed_at);
+
+	CREATE TABLE IF NOT EXISTS station.ad_brief (
+	  id         bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	  pack_slug  text,
+	  brand      text        NOT NULL,
+	  premise    text,
+	  tone       text,
+	  structure  text,
+	  enabled    boolean     NOT NULL DEFAULT true,
+	  created_at timestamptz NOT NULL DEFAULT now(),
+	  -- NULLS NOT DISTINCT (PG15+, this stack pins 16.4): the F162.2 upsert key, made to actually
+	  -- catch an owner-authored brief collision on brand alone since pack_slug is NULL for those
+	  -- rows — see db/42's own header remarks.
+	  CONSTRAINT ad_brief_pack_slug_brand_key UNIQUE NULLS NOT DISTINCT (pack_slug, brand)
+	);
 	SQL

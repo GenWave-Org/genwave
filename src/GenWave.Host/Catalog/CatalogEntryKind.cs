@@ -54,4 +54,17 @@ public enum CatalogEntryKind
     /// <c>{manifest, meta}</c> shape <see cref="Show"/> already has.
     /// </summary>
     Icon,
+
+    /// <summary>
+    /// An ad-pack (SPEC F162.2, STORY-393, PLAN T405) — manifest <c>&lt;slug&gt;.ad-pack.json</c> +
+    /// the usual meta, DATA ONLY: pack metadata plus <c>briefs[]</c> (brand/premise/tone/structure,
+    /// <see cref="CatalogAdPackBrief"/>), the same minimal <c>{manifest, meta}</c> shape
+    /// <see cref="Icon"/> already has — no binary <c>assets[]</c> at all, and (unlike every other
+    /// pack-shaped kind) no script/audio/code of any kind ever crosses this trust boundary. Install
+    /// (<see cref="Api.AdPackController"/>) upserts each declared brief into
+    /// <c>station.ad_brief</c>, keyed <c>(pack_slug, brand)</c> — a DURABLE write no other catalog
+    /// kind's install route performs; every installed brief still faces SPEC F160.3's
+    /// <c>AdScriptValidator</c> at generation time, exactly like an owner-authored one.
+    /// </summary>
+    AdPack,
 }

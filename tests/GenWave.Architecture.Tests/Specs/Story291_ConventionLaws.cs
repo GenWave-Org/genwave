@@ -1,5 +1,4 @@
 // STORY-291 — The convention laws run red-on-violation (SPEC F105.1 · PLAN T212, T213)
-using System.Text.RegularExpressions;
 using GenWave.Architecture.Tests.Support;
 
 namespace GenWave.Architecture.Tests.Specs;
@@ -92,15 +91,16 @@ public sealed class FeatureConventionLaws
         // structurally, not textually. Pinned by source text instead — the one thing that can catch a
         // 4th registration, an AllowAutoRedirect=true regression, or a bypass-the-DI-container raw
         // client neither the metadata scan nor a type-count assertion would notice (STORY-291 review).
-        private static string ReadProgramText() =>
-            File.ReadAllText(Path.Combine(SolutionLocator.Root(), "src", "GenWave.Host", "Program.cs"));
+        // The read + the registration count are ProgramHttpClientRegistrations (Support/ — PLAN T406
+        // review MED-4): Story394_ShipHonestPins.cs's own independent AddHttpClient re-pin calls the
+        // SAME detector rather than keeping a second copy of the regex to drift apart.
 
         [Fact]
         public void ProgramRegistersExactlyThreeHttpClientsAndDisablesAutoRedirectOnTheNamedOne()
         {
-            var programText = ReadProgramText();
+            var programText = ProgramHttpClientRegistrations.ReadProgramText();
 
-            var registrationCount = Regex.Matches(programText, @"\bAddHttpClient(<[^>]+>)?\(").Count;
+            var registrationCount = ProgramHttpClientRegistrations.CountAddHttpClientRegistrations(programText);
             Assert.Equal(3, registrationCount);
 
             // F90.2's no-redirect guarantee (CatalogProxyService's named client): a redirect response
@@ -110,7 +110,7 @@ public sealed class FeatureConventionLaws
 
         [Fact]
         public void ProgramNeverHandRollsAClientOutsideTheThreeRegistrations() =>
-            Assert.DoesNotContain("new HttpClient(", ReadProgramText());
+            Assert.DoesNotContain("new HttpClient(", ProgramHttpClientRegistrations.ReadProgramText());
     }
 
     public sealed class ScenarioL4Immutability

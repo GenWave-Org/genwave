@@ -97,6 +97,19 @@ sealed class MediaRotationRepository(
     /// sets it exactly once — on whichever call is the row's TRUE first airing — and never overwrites an
     /// already-stamped value on every airing after that.
     /// </para>
+    ///
+    /// <para>
+    /// <b>SPEC F158.4/F158.5, PLAN T395 — the <c>and m.imaging_kind is null</c> guard</b>: the SAME
+    /// "INSERT ... SELECT off library.media, empty WHERE = no-op" shape the gh-#99 safe-scope carve-out
+    /// above already uses, one more term. In production an ad's own <c>TrackAired</c> carries a non-null
+    /// <see cref="Core.Domain.SegmentKind"/> (F158.1), so <c>MusicAiring.TryReadMusicAiring</c> already
+    /// refuses it before this method is ever reached (mirrors idents/patter/crosstalk/announcements) —
+    /// this guard is the second, write-time line of defense <see cref="RecordAiringAsync"/> already
+    /// keeps for the gh-#99 safe loop one term over: an <c>imaging_kind</c>-stamped <paramref name="mediaId"/>
+    /// reaching this method by ANY path (a future caller, a defensive test) still leaves
+    /// <c>library.media_rotation</c> byte-identical (STORY-387 AC3) rather than trusting the caller's own
+    /// discrimination alone.
+    /// </para>
     /// </summary>
     public async Task RecordAiringAsync(long mediaId, DateTimeOffset airedAt, CancellationToken ct)
     {
@@ -111,7 +124,7 @@ sealed class MediaRotationRepository(
             insert into library.media_rotation (media_id, play_count, first_aired_at, last_aired_at)
             select @mediaId, 1, @airedAt, @airedAt
             from library.media m
-            where m.id = @mediaId{safeExclusion}
+            where m.id = @mediaId and m.imaging_kind is null{safeExclusion}
             on conflict (media_id) do update
               set play_count     = library.media_rotation.play_count + 1,
                   first_aired_at = coalesce(library.media_rotation.first_aired_at, excluded.first_aired_at),
@@ -138,11 +151,15 @@ sealed class MediaRotationRepository(
     /// The F149.5 "playable rows with no ledger row or play_count 0" never-aired count (SPEC
     /// F149.3/F149.5, STORY-367 AC7), read beside <see cref="GetRotationSinceAsync"/>'s epoch. Scoped
     /// to <see cref="MediaRepository.PlayablePredicate"/> (T374 review ADVISORY: <c>internal</c>,
-    /// referenced directly rather than mirrored — db/41's own <c>find_near_duplicates</c> function
-    /// still mirrors the same text for the identical reason, since SQL functions cannot reference a
-    /// C# constant) — an unavailable, ineligible, or never-play row is not "waiting to air", so it
-    /// must not inflate this figure. The gh-#99
-    /// safe-scope exclusion applies here too, the same short-circuiting way
+    /// referenced directly rather than mirrored, so THIS read stays byte-current with every edit to
+    /// that ONE definition — including F158.4's own "and imaging_kind is null" rotation fence, PLAN
+    /// T395) — an unavailable, ineligible, never-play, or (since T395) imaging-stamped row is not
+    /// "waiting to air", so it must not inflate this figure. db/41's own <c>find_near_duplicates</c>
+    /// function carried a STALE, pre-T395 copy of this text (a SQL function cannot reference the C#
+    /// constant, so it needed its own edit; T395 deliberately left it — Gardener near-duplicate
+    /// detection, not a selection-path leak) until PLAN T406 closed the drift via
+    /// <c>db/44-near-duplicates-imaging-fence-migration.sh</c> — see that script's own header remarks.
+    /// The gh-#99 safe-scope exclusion applies here too, the same short-circuiting way
     /// <see cref="RecordAiringAsync"/> applies it.
     /// </summary>
     public async Task<long> GetNeverAiredCountAsync(CancellationToken ct)

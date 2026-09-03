@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GenWave.Plugins\GenWave.Plugins.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Abstractions\GenWave.Abstractions.csproj" />
+    <!-- PLAN T393/T394 (STORY-386): builds the example plugin as part of THIS project's own build
+         order — so `dotnet test` always has a fresh examples/genwave-plugin-example/bin/.../
+         output to copy from (Support/ExamplePluginPayload.cs) — WITHOUT referencing its assembly.
+         ReferenceOutputAssembly=false means MSBuild still orders/builds the example project first
+         but never adds ExamplePlugin.dll to this project's own compile references or its copied
+         output — a plugin's assembly must load ONLY through GenWave.Plugins.PluginLoader's own
+         dedicated AssemblyLoadContext (SPEC F156.3), the exact isolation this suite exists to
+         prove; referencing it directly here would let it load into the TEST PROCESS'S OWN
+         AssemblyLoadContext.Default instead, silently defeating that isolation for this one fact.
+         Private="false" closes the one gap ReferenceOutputAssembly=false alone leaves open: MSBuild's
+         own transitive "GetCopyToOutputDirectoryItems" walk copies a referenced project's
+         CopyToOutputDirectory items (the example's own plugin.json — its csproj's None/
+         CopyToOutputDirectory item) into EVERY project that references it, REGARDLESS of
+         ReferenceOutputAssembly — verified empirically: with only ReferenceOutputAssembly=false set,
+         a stray, unused plugin.json still landed in this project's own bin/. That propagation is
+         gated on the ProjectReference item's own Private metadata (MSBuild's CopyLocal flag, default
+         true), not on NuGet's IncludeAssets/ExcludeAssets metadata — ExcludeAssets="all" was tried
+         first and, verified empirically, does NOT stop it (ExcludeAssets governs NuGet restore-asset
+         selection; this propagation is a plain MSBuild target, unrelated to restore). Private="false"
+         leaves this ProjectReference exactly what it's for: a build-order edge, nothing more. -->
+    <ProjectReference Include="..\..\examples\genwave-plugin-example\ExamplePlugin.csproj"
+                       ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+</Project>

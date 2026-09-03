@@ -27,5 +27,9 @@ internal static class HostReservedNamespaces
             "GenWave.Host.Gardener",
             "F155.2",
             "the Library Gardener is born OUTSIDE Host, in GenWave.MediaLibrary/Garden (gh-#529)"),
+        new HostNamespaceReservation(
+            "GenWave.Host.Plugins",
+            "F157.4",
+            "the plugin loader is born OUTSIDE Host, in GenWave.Plugins (gh-#380 epic)"),
     };
 }

@@ -1,9 +1,10 @@
 namespace GenWave.Core.Domain;
 
 /// <summary>
-/// Wire/storage tokens for <see cref="ImagingKind"/> (gh-#149): the snake_case strings the
+/// Wire/storage tokens for <see cref="ImagingKind"/> (gh-#149, gh-#380): the snake_case strings the
 /// <c>library.media.imaging_kind</c> check constraint admits and the admin API round-trips —
-/// <c>liner</c>, <c>station_id</c>, <c>jingle</c>, <c>promo</c>. Mirrors
+/// <c>liner</c>, <c>station_id</c>, <c>jingle</c>, <c>promo</c>, <c>ad</c> (SPEC F158.1, PLAN T395;
+/// db/42 widened the CHECK ahead of this token landing). Mirrors
 /// <c>PersonaTasteRepository.ToSourceText</c>'s enum↔token idiom.
 /// </summary>
 public static class ImagingKindTokens
@@ -15,6 +16,7 @@ public static class ImagingKindTokens
         ImagingKind.StationId => "station_id",
         ImagingKind.Jingle    => "jingle",
         ImagingKind.Promo     => "promo",
+        ImagingKind.Ad        => "ad",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "unknown imaging kind"),
     };
 
@@ -45,6 +47,9 @@ public static class ImagingKindTokens
                 return true;
             case "promo":
                 kind = ImagingKind.Promo;
+                return true;
+            case "ad":
+                kind = ImagingKind.Ad;
                 return true;
             default:
                 kind = ImagingKind.Liner;

@@ -15,6 +15,13 @@ namespace GenWave.Host.Api;
 /// an unknown value is a 400, nothing rendered. Metadata-only: it never changes how the segment
 /// renders or plays.
 ///
+/// <c>ad</c> (SPEC F158.1) is a real <c>ImagingKindTokens</c> token — <c>TryParse</c> itself
+/// accepts it — but <see cref="SafeSegmentsController"/> REFUSES it with the same 400 as an
+/// unrecognized token (SPEC F158.5/F161.3, PLAN T395 review finding-4, RULED): an ad spot is born
+/// ONLY through the F161 authored ad-spot tail, never through this generic endpoint — see that
+/// controller's own remarks for why a hand-planted <c>ad</c> row here would be a real fence
+/// bypass, not merely an unintended kind.
+///
 /// <see cref="ShowId"/> (SPEC F117.1, STORY-313, PLAN T246) is the optional show scope the
 /// authoring UI's scope picker chose — station-wide when absent/null (today's only behavior for
 /// every pre-F117 request). A non-null value referencing no <c>station.show</c> row is a 400,

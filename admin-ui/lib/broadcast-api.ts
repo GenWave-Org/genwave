@@ -114,6 +114,25 @@ export interface StatusResponse {
    * every fixture literal built before this task shipped still satisfies this type.
    */
   gardener?: GardenerStatusSummary;
+  /**
+   * SPEC F156.7, STORY-385/386, PLAN T394 — every plugin outcome the boot-time loader recorded:
+   * loaded or skipped, with a reason on the latter. Empty when the plugin door is closed (either
+   * boot knob missing) — "no tile" and "empty array" are the same fact read two ways (AC3). Optional
+   * on the wire, the same "one deploy of backward tolerance" convention `rotation`/`gardener` above
+   * already follow.
+   */
+  plugins?: PluginStatusEntry[];
+}
+
+/** SPEC F156.7 — one `plugins[]` entry. `name`/`version` are the plugin manifest's own raw text,
+ * carried verbatim by the api (its own serializer escapes it); null only for the rare root-unreadable
+ * outcome, where no plugin was ever identified. `reason` is present only when `state` is `"skipped"`. */
+export interface PluginStatusEntry {
+  name: string | null;
+  version: string | null;
+  contracts: string[];
+  state: "loaded" | "skipped";
+  reason?: string | null;
 }
 
 export interface PlayHistoryEntry {

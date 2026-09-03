@@ -43,12 +43,13 @@ const PERSONA_ENTRY: CatalogShelfEntryDto = {
 describe("Feature: the shelf silos kinds by tab (gh-#372)", () => {
   describe("Scenario: ?kind= resolves to a shelf kind", () => {
     it("maps the plural URL values to the wire kinds", () => {
-      expect(["themes", "fonts", "shows", "avatars", "icons"].map(resolveCatalogKind)).toEqual([
+      expect(["themes", "fonts", "shows", "avatars", "icons", "ad-packs"].map(resolveCatalogKind)).toEqual([
         "theme",
         "font",
         "show",
         "avatar",
         "icon",
+        "ad-pack",
       ]);
     });
 
@@ -60,7 +61,7 @@ describe("Feature: the shelf silos kinds by tab (gh-#372)", () => {
   });
 
   describe("Scenario: the tab strip lists every kind, always", () => {
-    it("renders all six tabs with their ?kind= hrefs", () => {
+    it("renders all seven tabs with their ?kind= hrefs", () => {
       render(<PersonaCatalogTabs activeKind="persona" />);
 
       const nav = screen.getByRole("navigation", { name: "Catalog kinds" });
@@ -70,6 +71,7 @@ describe("Feature: the shelf silos kinds by tab (gh-#372)", () => {
       expect(within(nav).getByRole("link", { name: "Shows" })).toHaveAttribute("href", "/persona-catalog?kind=shows");
       expect(within(nav).getByRole("link", { name: "Avatars" })).toHaveAttribute("href", "/persona-catalog?kind=avatars");
       expect(within(nav).getByRole("link", { name: "Icons" })).toHaveAttribute("href", "/persona-catalog?kind=icons");
+      expect(within(nav).getByRole("link", { name: "Ad packs" })).toHaveAttribute("href", "/persona-catalog?kind=ad-packs");
     });
 
     it("marks only the active tab with aria-current", () => {

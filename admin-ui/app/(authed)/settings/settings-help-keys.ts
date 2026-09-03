@@ -89,6 +89,11 @@ export const SETTINGS_HELP_KEYS = [
   "Crosstalk:DurationTargetSeconds",
   "Crosstalk:Shows",
   "Crosstalk:EveryNthAiring",
+  "Station:Ads:EveryNUnits",
+  "Station:Ads:TargetCount",
+  "Station:Ads:RefreshDays",
+  "Station:Ads:AutoApprove",
+  "Station:Ads:AntiRepeatWindow",
 ] as const;
 
 export type SettingsHelpKey = (typeof SETTINGS_HELP_KEYS)[number];

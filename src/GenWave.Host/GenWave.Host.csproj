@@ -11,6 +11,12 @@
          rolling a second Process.Start shape. Declared explicitly rather than leaning on the
          transitive reference MediaLibrary already carries. -->
     <ProjectReference Include="..\GenWave.Loudness\GenWave.Loudness.csproj" />
+    <!-- The plugin door (SPEC F156, STORY-385/386, PLAN T394): Program.cs's own composition-root
+         glue calls straight into PluginLoader/KeyMemoizedContextProvider — GenWave.Plugins is born
+         OUTSIDE Host (F157.4, L5's own reservation for GenWave.Host.Plugins), this reference is what
+         lets the composition root reach it without landing any of its own logic in that namespace. -->
+    <ProjectReference Include="..\GenWave.Plugins\GenWave.Plugins.csproj" />
+    <ProjectReference Include="..\GenWave.Ads\GenWave.Ads.csproj" />
   </ItemGroup>
 
   <ItemGroup>

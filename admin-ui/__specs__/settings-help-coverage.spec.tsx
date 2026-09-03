@@ -39,6 +39,7 @@ const BOOLEAN_KEYS = new Set<SettingsHelpKey>([
   "Context:History:Enabled",
   "Station:Imaging:ClockAnchoredIdents",
   "Station:Imaging:TimeAnnouncements",
+  "Station:Ads:AutoApprove",
 ]);
 
 const NUMBER_LIST_KEYS = new Set<SettingsHelpKey>([

@@ -212,6 +212,24 @@ public sealed partial class SettingValidator
     // real station names anywhere close to this many shows.
     internal const int CrosstalkShowsMaxCount = 50;
 
+    // Station:Ads:* (SPEC F158.3, F159.3, F163.1, STORY-388, PLAN T397) — every bound literally per
+    // F163.1's own table, not a judged F53.1 ceiling like most pairs above: EveryNUnits mirrors
+    // StationIdEveryNUnitsMax's own 0-1000 shape exactly (documentation-only [Range] on
+    // StationAdsOptions; StationOptionsValidator is the real boot floor, the identical nested-class
+    // story every knob above carries). TargetCount/RefreshDays/AntiRepeatWindow have no bound
+    // options class at all (TargetCount/RefreshDays: no consumer wired yet, T400-T402's own job;
+    // AntiRepeatWindow: GenWave.Ads.AdSpotAntiRepeatOptions is deliberately Live-shaped/unvalidated,
+    // that class's own remarks) — this validator is their ONLY floor, the GW_XFADE_MIN/
+    // Admin:PlayHistoryCapacity precedent.
+    internal const int AdsEveryNUnitsMin = 0;
+    internal const int AdsEveryNUnitsMax = 1000;
+    internal const int AdsTargetCountMin = 0;
+    internal const int AdsTargetCountMax = 100;
+    internal const int AdsRefreshDaysMin = 1;
+    internal const int AdsRefreshDaysMax = 365;
+    internal const int AdsAntiRepeatWindowMin = 0;
+    internal const int AdsAntiRepeatWindowMax = 50;
+
     // Maps each allowlisted key to a per-key (range + type) validator. An instance method (not a
     // static field) purely because the Station:Theme entry below closes over the constructor's own
     // themeCatalog — every other entry is a plain static delegate exactly as before.
@@ -470,6 +488,15 @@ public sealed partial class SettingValidator
             // CrosstalkOptions' own [Range(1, int.MaxValue)]; F53.1 adds the ceiling.
             ["Crosstalk:EveryNthAiring"] =
                 v => IsIntInRange(v, CrosstalkEveryNthAiringMin, CrosstalkEveryNthAiringMax),
+
+            // Station:Ads:* (SPEC F158.3, F159.3, F163.1, STORY-388, PLAN T397) — every range lands
+            // straight off F163.1's own table (see this class's own Ads consts remarks above).
+            ["Station:Ads:EveryNUnits"] = v => IsIntInRange(v, AdsEveryNUnitsMin, AdsEveryNUnitsMax),
+            ["Station:Ads:TargetCount"] = v => IsIntInRange(v, AdsTargetCountMin, AdsTargetCountMax),
+            ["Station:Ads:RefreshDays"] = v => IsIntInRange(v, AdsRefreshDaysMin, AdsRefreshDaysMax),
+            ["Station:Ads:AutoApprove"] = IsBool,
+            ["Station:Ads:AntiRepeatWindow"] =
+                v => IsIntInRange(v, AdsAntiRepeatWindowMin, AdsAntiRepeatWindowMax),
         };
 
     // ── Per-key validation ─────────────────────────────────────────────────────────────────────
@@ -892,6 +919,23 @@ public sealed partial class SettingValidator
     /// — <c>kokoro</c> or <c>piper</c> (also case-insensitive). An empty object, or a blank value,
     /// is legal — "no per-kind overrides configured", identical to pre-feature routing (F70.3's
     /// empty-map contract).
+    ///
+    /// <para>
+    /// <b>Document-accept ruling for <see cref="SegmentKind.Ad"/> (PLAN T396, T390 review carry-
+    /// forward 3).</b> <c>{"Ad":"piper"}</c> validates green here — deliberately NOT special-cased
+    /// to reject it, unlike <c>GenWave.Tts.TtsEngineByKindProvider.Build</c>, which DOES reject it
+    /// (that class's own remarks carry the full ruling). This method's one job is JSON-shape/enum-
+    /// membership validation — "is this key a real <see cref="SegmentKind"/> name and this value a
+    /// real engine" — never "does this kind currently have a live per-kind TTS consumer", a domain
+    /// fact only <c>TtsEngineByKindProvider</c> (the actual reader) knows. Coupling THIS validator to
+    /// that fact would coincidentally still be truthful today, but is the wrong layer for it: it
+    /// would need updating every time a FUTURE <see cref="SegmentKind"/> similarly opts out of
+    /// per-kind TTS routing, purely to keep accepting a config value that is genuinely, harmlessly
+    /// inert — the settings-shape check and the render-routing check are two different concerns that
+    /// happen to read the same JSON blob. The provider's own WARN log is the operator's real signal;
+    /// this validator staying generic is what keeps it truthful for every OTHER kind without special
+    /// cases.
+    /// </para>
     /// </summary>
     static bool IsValidEngineByKindMap(string v)
     {
@@ -1092,6 +1136,16 @@ public sealed partial class SettingValidator
                "entries, e.g. [] or [\"morning-drive\"]. Empty means the feature is off.",
         var k when k.Equals("Crosstalk:EveryNthAiring", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {CrosstalkEveryNthAiringMin} and {CrosstalkEveryNthAiringMax} (airings).",
+        var k when k.Equals("Station:Ads:EveryNUnits", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {AdsEveryNUnitsMin} and {AdsEveryNUnitsMax} (0 disables ad spots).",
+        var k when k.Equals("Station:Ads:TargetCount", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {AdsTargetCountMin} and {AdsTargetCountMax} (spots).",
+        var k when k.Equals("Station:Ads:RefreshDays", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {AdsRefreshDaysMin} and {AdsRefreshDaysMax} (days).",
+        var k when k.Equals("Station:Ads:AutoApprove", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
+        var k when k.Equals("Station:Ads:AntiRepeatWindow", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {AdsAntiRepeatWindowMin} and {AdsAntiRepeatWindowMax} (spots).",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }

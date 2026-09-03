@@ -85,6 +85,7 @@ const SHOW_DETAIL_WITH_OFFERABLE_SUGGESTION: CatalogEntryDetailDto = {
   personaAvatarFile: null,
   packName: null,
   iconCount: null,
+  adPackBriefs: null,
 };
 
 const SHOW_DETAIL_NO_SUGGESTION: CatalogEntryDetailDto = {
@@ -141,6 +142,7 @@ const FLIP_DETAIL: CatalogEntryDetailDto = {
   personaAvatarFile: null,
   packName: null,
   iconCount: null,
+  adPackBriefs: null,
 };
 
 /** A SECOND, unrelated persona entry (PLAN T255 review finding F1) — "the next card clicked" in

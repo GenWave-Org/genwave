@@ -80,6 +80,9 @@ file sealed class MinimalLibraryStore : ILibraryRepository, IAdminLibraryWrite
     public Task<IReadOnlyList<LibraryAdminInfo>> GetAllWithMediaCountAsync(CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<LibraryAdminInfo>>(libraries.ToList());
 
+    public Task<LibraryAdminInfo?> GetByNameAsync(string name, CancellationToken ct) =>
+        Task.FromResult(libraries.FirstOrDefault(l => string.Equals(l.Name, name, StringComparison.Ordinal)));
+
     public Task<LibraryWriteResult> CreateAsync(string name, CancellationToken ct)
     {
         var id = nextId++;
@@ -162,6 +165,8 @@ file sealed class RecordingCatalogWriter : IAuthoredCatalogWriter
         LastInsert = insert;
         return Task.FromResult(NextId);
     }
+
+    public Task<bool> SetEligibleAsync(long mediaId, bool eligible, CancellationToken ct) => Task.FromResult(true);
 }
 
 /// <summary><see cref="ILibraryRepository"/> stub that only knows the given ids — enough for
@@ -174,6 +179,9 @@ file sealed class StubLibraryRepository(params long[] knownIds) : ILibraryReposi
 
     public Task<IReadOnlyList<LibraryAdminInfo>> GetAllWithMediaCountAsync(CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<LibraryAdminInfo>>([]);
+
+    public Task<LibraryAdminInfo?> GetByNameAsync(string name, CancellationToken ct) =>
+        Task.FromResult<LibraryAdminInfo?>(null);
 }
 
 /// <summary><see cref="IAdminMediaLookup"/> that reads back whatever the real

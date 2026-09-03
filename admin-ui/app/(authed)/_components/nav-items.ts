@@ -47,6 +47,17 @@ export const NAV_ITEMS: NavItem[] = [
   // new icon name (ORCHESTRATOR ruling 3).
   { href: "/gardener", label: "Gardener", iconName: "restore" },
   { href: "/safe-content", label: "Station Imaging", iconName: "safe-content" },
+  // Ads (SPEC F162.1, STORY-392, PLAN T404) — the ad-spot library's own admin page, placed right
+  // after Station Imaging: both are authored-audio library surfaces (voice + optional bed,
+  // generate/render pipeline) rather than a browse of pre-existing tracks. `exploration` (the
+  // three-pip die glyph, otherwise only PickChips' exploration badge) is the closest UNCLAIMED icon
+  // in the house contract (SPEC F130.2's fixed 26-name set — this task cannot mint a new one, that
+  // needs a matching `GenWave.Host.Icons.IconNameContract` change on the backend side) that isn't
+  // already another nav item's own glyph; the more obviously "on-brand" megaphone
+  // (`AnnouncementsIcon`) is deliberately NOT reused here — it already IS the Announcements nav
+  // item's glyph, and two sidebar entries sharing one icon reads as a rendering bug, not a theme
+  // (the Gardener/`restore` precedent reused a CONTROL icon, never another nav item's own).
+  { href: "/ads", label: "Ads", iconName: "exploration" },
   { href: "/personas", label: "Personas", iconName: "persona" },
   { href: "/schedule", label: "Schedule", iconName: "schedule" },
   // Shows (SPEC F119.1, STORY-312, PLAN T244) sits immediately after Schedule — the format-clock

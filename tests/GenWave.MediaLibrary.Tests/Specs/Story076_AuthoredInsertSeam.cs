@@ -171,6 +171,85 @@ public static class FeatureAuthoredInsertSeam
     }
 
     // ---------------------------------------------------------------------
+    // HAPPY PATH — the F161.3 eligible column (SPEC F161.3, STORY-391, PLAN T401 review — the T362
+    // loop law: SetEligibleAsync is new SQL, so it earns its own live-Postgres read here)
+    // ---------------------------------------------------------------------
+
+    [Collection(DatabaseCollection.Name)]
+    [Trait("Category", "Integration")]
+    public sealed class ScenarioEligibleColumn(DatabaseFixture db)
+    {
+        [Fact]
+        public async Task InsertDefaultsEligibleTrue()
+        {
+            // Every pre-F161 caller (SafeSegmentAuthor) lands immediately airable — zero behavior
+            // change for a caller that never sets AuthoredMediaInsert.Eligible at all.
+            await db.ResetAsync();
+            IAuthoredCatalogWriter writer = Harness.Repo(db);
+
+            var id = await writer.InsertAuthoredAsync(Harness.AuthoredInsert(), CancellationToken.None);
+
+            Assert.True(await Harness.EligibleOfAsync(db, id));
+        }
+
+        [Fact]
+        public async Task InsertHonorsEligibleFalse()
+        {
+            // The F161.3 authored-tail's own first round trip: an ad-spot render lands ineligible.
+            await db.ResetAsync();
+            IAuthoredCatalogWriter writer = Harness.Repo(db);
+
+            var id = await writer.InsertAuthoredAsync(
+                Harness.AuthoredInsert(eligible: false), CancellationToken.None);
+
+            Assert.False(await Harness.EligibleOfAsync(db, id));
+        }
+
+        [Fact]
+        public async Task SetEligibleAsyncFlipsFalseToTrueAndReportsSuccess()
+        {
+            // The F161.3 authored-tail's own SECOND round trip: the post-confirmation flip.
+            await db.ResetAsync();
+            IAuthoredCatalogWriter writer = Harness.Repo(db);
+            var id = await writer.InsertAuthoredAsync(
+                Harness.AuthoredInsert(eligible: false), CancellationToken.None);
+
+            var result = await writer.SetEligibleAsync(id, eligible: true, CancellationToken.None);
+
+            Assert.True(result);
+            Assert.True(await Harness.EligibleOfAsync(db, id));
+        }
+
+        [Fact]
+        public async Task SetEligibleAsyncFlipsTrueToFalseAndReportsSuccess()
+        {
+            // The OTHER direction (SPEC F159.3's own refresh-retire flip, T401 review F7's widening
+            // reason to accept a bool rather than a fixed "always true" method).
+            await db.ResetAsync();
+            IAuthoredCatalogWriter writer = Harness.Repo(db);
+            var id = await writer.InsertAuthoredAsync(Harness.AuthoredInsert(), CancellationToken.None);
+
+            var result = await writer.SetEligibleAsync(id, eligible: false, CancellationToken.None);
+
+            Assert.True(result);
+            Assert.False(await Harness.EligibleOfAsync(db, id));
+        }
+
+        [Fact]
+        public async Task SetEligibleAsyncOnAnUnknownIdReportsFalseAndTouchesNoRow()
+        {
+            // Total: never throws for a benign "no such row" (the IAdSpotStore.MarkReadyAsync/
+            // MarkFailedAsync posture one seam over).
+            await db.ResetAsync();
+            IAuthoredCatalogWriter writer = Harness.Repo(db);
+
+            var result = await writer.SetEligibleAsync(999_999L, eligible: true, CancellationToken.None);
+
+            Assert.False(result);
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // SAD PATH — unknown library id
     // ---------------------------------------------------------------------
 
