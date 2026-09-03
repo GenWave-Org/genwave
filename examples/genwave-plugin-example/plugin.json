@@ -1,0 +1,7 @@
+{
+  "name": "Dice Roll Example Plugin",
+  "version": "1.0.0",
+  "assembly": "ExamplePlugin.dll",
+  "entryType": "ExamplePlugin.DiceRollPlugin",
+  "abstractions": "5.6.0"
+}

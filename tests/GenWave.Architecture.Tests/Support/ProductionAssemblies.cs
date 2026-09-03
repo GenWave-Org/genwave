@@ -17,6 +17,7 @@ internal static class ProductionAssemblies
     public static readonly Assembly MediaLibrary = typeof(GenWave.MediaLibrary.MediaLibraryServiceCollectionExtensions).Assembly;
     public static readonly Assembly Host = typeof(GenWave.Host.Api.BulkRatingController).Assembly;
     public static readonly Assembly Abstractions = typeof(GenWave.Abstractions.Playout.EnergyRange).Assembly;
+    public static readonly Assembly Plugins = typeof(GenWave.Plugins.PluginManifestDiscovery).Assembly;
     public static readonly Assembly Npgsql = typeof(global::Npgsql.NpgsqlConnection).Assembly;
     public static readonly Assembly Dapper = typeof(global::Dapper.SqlMapper).Assembly;
 
@@ -31,11 +32,16 @@ internal static class ProductionAssemblies
         // GenWave.Context joins at T222/STORY-296: the context seam pipeline is born outside Host
         // (F105.4, gh-#378) and must stay framework-free like every other inner project here.
         ("GenWave.Context", Context),
+        // GenWave.Plugins joins at T391 (SPEC F156.2, STORY-385, gh-#380 epic): the plugin manifest
+        // model + pure parser + discovery reference only GenWave.Abstractions, framework-free like
+        // every other inner project here.
+        ("GenWave.Plugins", Plugins),
     };
 
     /// <summary>Every GenWave production assembly, once (STORY-291 review carry-forward): L2 and L3
-    /// each independently built this same eight-assembly list inline (F105.4/T222 grew it from seven
-    /// with <see cref="Context"/>'s addition) — a genuine copy, not two
+    /// each independently built this same nine-assembly list inline (F105.4/T222 grew it from seven
+    /// with <see cref="Context"/>'s addition; T391 grew it again to nine with <see cref="Plugins"/>'s)
+    /// — a genuine copy, not two
     /// different lists that happen to look alike, so a project F105.4 adds later could go missing
     /// from one law's subjects and stay silently unchecked. A method, not a static-readonly field:
     /// L2 folds the result into an ArchUnitNET <c>GivenTypesConjunction</c>, whose fluent builders
@@ -48,7 +54,7 @@ internal static class ProductionAssemblies
     /// two.</summary>
     public static IReadOnlyList<Assembly> AllProductionAssemblies() => new[]
     {
-        Core, Orchestration, Tts, Loudness, Context, MediaLibrary, Host, Abstractions,
+        Core, Orchestration, Tts, Loudness, Context, MediaLibrary, Host, Abstractions, Plugins,
     };
 
     /// <summary>Whether <paramref name="name"/> resolves to something real in

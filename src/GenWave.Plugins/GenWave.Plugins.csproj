@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- SPEC F156.2/F157.1 (STORY-385, gh-#380 epic, PLAN T391/T392): T391's manifest model + pure
+         parser don't touch IGenWavePlugin/IPluginHost as real types, only in doc comments —
+         GenWave.Abstractions is referenced for the loader (PLAN T392, landing in this SAME project)
+         that DOES: activating a manifest-named IGenWavePlugin and calling its Register(IPluginHost)
+         is real work, not a doc-comment nicety, so this reference is forward provisioning for that,
+         not decoration for this task. Plus the BCL's System.Text.Json (implicitly referenced by the
+         SDK, no PackageReference needed) today, and AssemblyLoadContext/AssemblyDependencyResolver
+         (also BCL) once T392 lands — deliberately NOT Microsoft.Extensions.* and NOT ASP.NET Core,
+         unlike GenWave.Context/GenWave.Orchestration's own inner-project csproj shape. This dependency
+         surface is expected to stay this small for the whole project, not just this task. -->
+    <ProjectReference Include="..\GenWave.Abstractions\GenWave.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,38 @@
+# =============================================================================
+# compose.plugins.yaml — opt-in third-party plugin mount for the GenWave.Plugins loader (SPEC
+# F156.1; STORY-385/386; PLAN T394, gh-#380 epic).
+#
+#   docker compose -f compose.yaml -f compose.plugins.yaml up
+#
+# What it is: ONLY the api service's own read-only bind mount at /plugins — Plugins:Root's own
+# default (env Plugins__Root, unset = /plugins). Nothing else about the api service, or any other
+# service, is touched. Stack this on top of compose.yaml (and compose.pinned.yaml/compose.demo.yaml,
+# in either order) whenever an operator has ALSO set Plugins__Enabled=true (default off, F156.1's
+# own fail-closed posture) — the two knobs are independent: Plugins__Enabled=true alone (this file
+# NOT stacked) finds nothing under the unmounted default directory and logs one INFO line naming the
+# missing mount; this file alone (Plugins__Enabled left unset/false) mounts a directory the loader
+# never even looks at. Both knobs must be on for a plugin to actually load. No live toggle either
+# way — the loader runs once, at boot; changing the plugin set (adding/removing a directory under
+# ./plugins, or flipping the flag) is a restart (F156.1).
+#
+# The root `.env` file never reaches a container un-interpolated (the DEPLOYMENT /document finding
+# that also corrected the file-actions recipe) — Plugins__Enabled belongs in the api service's OWN
+# `environment:` block, not `.env`. A local, uncommitted override is the working recipe:
+#
+#   # compose.local.yaml (or any third -f file stacked after this one)
+#   services:
+#     api:
+#       environment:
+#         Plugins__Enabled: "true"
+#
+#   docker compose -f compose.yaml -f compose.plugins.yaml -f compose.local.yaml up -d
+#
+# Each plugin lives in its own subdirectory under ./plugins, named for its slug —
+# ./plugins/<slug>/plugin.json plus the assembly it names (SPEC F156.2). PLUGINS.md carries the
+# licensing posture for anything mounted here.
+# =============================================================================
+
+services:
+  api:
+    volumes:
+      - ./plugins:/plugins:ro                   # READ-ONLY: opt-in third-party plugin mount (F156)
