@@ -14,15 +14,16 @@ namespace GenWave.MediaLibrary.Catalog;
 /// wiring — singleton-safe with no captive dependency.
 ///
 /// <para>
-/// One query, one round trip. The WHERE clause is the exact <c>GetRandomReadyAsync</c>/
-/// <c>RandomSelectionProvider</c> selectability predicate (<c>state = 'ready' and measurable and
-/// eligible and not coalesce(never_play, false)</c> — operator vetoes are law, SPEC F87.5; a
-/// matched-but-unmeasurable row is not selectable and must not idle a request to expiry) AND'd with an
-/// ILIKE contains-match against whichever of <paramref name="artist"/>/<paramref name="title"/> the
-/// caller actually supplied. An exact case-insensitive match (<c>lower(col) = lower(@value)</c>) ranks
-/// ahead of a mere substring hit; ties break on rating score, then at random — the same
-/// "score never enters selection odds beyond a tie-break" posture <c>GetRandomReadyAsync</c> already
-/// established (SPEC F33.8).
+/// One query, one round trip. The WHERE clause composes <see cref="MediaRepository.PlayablePredicate"/>
+/// (<c>state = 'ready' and measurable and eligible and not coalesce(never_play, false)</c> — operator
+/// vetoes are law, SPEC F87.5; a matched-but-unmeasurable row is not selectable and must not idle a
+/// request to expiry — PLUS <c>imaging_kind is null</c>, SPEC F158.4/PLAN T395: a request must never
+/// resolve to a liner/station-id/ad row either, closing the same fence <c>GetRotationCandidateAsync</c>
+/// gained) AND'd with an ILIKE contains-match against whichever of <paramref name="artist"/>/
+/// <paramref name="title"/> the caller actually supplied. An exact case-insensitive match
+/// (<c>lower(col) = lower(@value)</c>) ranks ahead of a mere substring hit; ties break on rating
+/// score, then at random — the same "score never enters selection odds beyond a tie-break" posture
+/// <c>GetRandomReadyAsync</c> already established (SPEC F33.8).
 /// </para>
 ///
 /// <para>
@@ -54,13 +55,10 @@ sealed class RequestCatalogProbeRepository(
         if (artist is null && title is null)
             return null;
 
-        var whereParts = new List<string>
-        {
-            "m.state = 'ready'",
-            "m.measurable",
-            "m.eligible",
-            "not coalesce(r.never_play, false)",
-        };
+        // SPEC F158.4, PLAN T395 — composes MediaRepository.PlayablePredicate (now including the
+        // "imaging_kind is null" fence) rather than a hand-rolled copy of its four terms, so a future
+        // edit to that ONE definition can never silently desync this query again.
+        var whereParts = new List<string> { MediaRepository.PlayablePredicate };
         // SPEC F95.4, STORY-250, PLAN T114 — the SAME audience-posture exclusion the rotation/envelope
         // queries apply, threaded here the same way never-play is: an extra WHERE fragment, present
         // only on AudiencePosture.Everyone (mature admits everything, unmasked).
@@ -233,19 +231,14 @@ sealed class RequestCatalogProbeRepository(
 
     /// <summary>
     /// The law + safe-scope WHERE fragment shared by both T90 probe methods above (canonical
-    /// selectability — ready/measurable/eligible/not-never-play/not-explicit-on-Everyone — plus the
+    /// selectability — <see cref="MediaRepository.PlayablePredicate"/> (ready/measurable/eligible/
+    /// not-never-play/not-imaging, SPEC F158.4/PLAN T395) plus not-explicit-on-Everyone and the
     /// gh-#99 exclusion). <see cref="FindBestAsync"/> keeps its own inline copy: its exact-vs-substring
     /// match scoring shape doesn't fit this helper's callers, and it predates this extraction.
     /// </summary>
     List<string> LawAndSafeScopeWhereParts(DynamicParameters parameters)
     {
-        var whereParts = new List<string>
-        {
-            "m.state = 'ready'",
-            "m.measurable",
-            "m.eligible",
-            "not coalesce(r.never_play, false)",
-        };
+        var whereParts = new List<string> { MediaRepository.PlayablePredicate };
 
         // SPEC F95.4, STORY-250, PLAN T114 — re-applied here for T90 parity with FindBestAsync's own
         // match-time check: a request matched before an operator/sweep later stamps the row explicit

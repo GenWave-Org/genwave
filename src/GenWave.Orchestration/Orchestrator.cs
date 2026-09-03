@@ -263,6 +263,29 @@ using GenWave.Core.Events;
 /// that helper's own remarks for why a later task's aired-stamp becomes a lookup, not a registry to
 /// keep in sync.
 /// </para>
+///
+/// <para>
+/// <b>Ad cadence (SPEC F158.2/F158.3, STORY-388, PLAN T397):</b> <paramref name="adCadenceProvider"/>
+/// is <paramref name="cadenceProvider"/>'s twin one seam over — read fresh, once, inside
+/// <c>EnqueuePatterAsync</c> (never hoisted alongside <c>cadence</c>/<c>identity</c> at the top of
+/// <see cref="GetNextAsync"/>: unlike the StationId trigger, no boundary-fit estimate ever needs to
+/// account for an ad's patter length ahead of the drain — the vend is pre-rendered, its duration
+/// already fixed the instant it airs, and a null answer costs the boundary nothing to plan around).
+/// <c>unitCount % EveryNUnits == 0</c>, unit 0 never fires — <c>cadence.StationIdEveryNUnits</c>'s own
+/// guard, mirrored exactly. The trigger enqueues a <see cref="SpeechDeferralKind.Ad"/> deferral,
+/// never builds a segment directly (the SAME F74.1/F74.2 queue-not-inline discipline the StationId
+/// trigger already follows); the SAME drain loop picks it up and vends through
+/// <paramref name="adSpotVend"/> — <see cref="IAdSpotVend.GetNextSpotAsync"/>'s pre-rendered
+/// <see cref="MediaItem"/>, routed through <c>KickResolved</c> (zero render at air, the pool-first
+/// StationId item's own precedent). <see cref="SpeechDeferralKind.Ad"/>'s own declared-LAST position
+/// in that enum is what actually orders "ident → spot → back to the music" (SPEC F158.3) whenever
+/// both cadences coincide on the SAME unit — see that member's own remarks for the full tiebreak
+/// argument. <paramref name="adSpotVend"/> throwing is caught at this drain arm's own boundary (WARN,
+/// no ad this break, never a faulted unit); a null answer is one INFO, never a WARN — an empty Ads
+/// library is a normal day (F158.3). Both seams default to a permanent no-op (zero/null) for any
+/// composition that never wires <c>GenWave.Ads</c>' own <c>AddGenWaveAds</c> — every pre-T397
+/// construction site, including every unit test, stays byte-identical.
+/// </para>
 /// </summary>
 public sealed class Orchestrator(
     IStationIdentityProvider identityProvider,
@@ -289,7 +312,9 @@ public sealed class Orchestrator(
     IAnnouncementSource? announcementSource = null,
     IVerbatimSegmentRenderer? announcementRenderer = null,
     ITtsVoiceLister? voiceLister = null,
-    IAnnouncementCopyWriter? announcementCopyWriter = null) : INextItemProvider, IBoundaryFitLog
+    IAnnouncementCopyWriter? announcementCopyWriter = null,
+    IAdCadenceProvider? adCadenceProvider = null,
+    IAdSpotVend? adSpotVend = null) : INextItemProvider, IBoundaryFitLog
 {
     // gh-#254 — how far from the boundary a candidate may land and still count as a WIN ("±30s of
     // the boundary is a win"), widened as the gh-#253 estimate's confidence tier drops: the fit's
@@ -390,6 +415,20 @@ public sealed class Orchestrator(
     // pre-T269 construction site, including every unit test) reads back NoOpStationImagingSettingsProvider's
     // both-false/5-minute answer — the shipped SPEC F124.4 default — never a null-check, never a stall.
     readonly IStationImagingSettingsProvider imagingSettings = imagingSettings ?? NoOpStationImagingSettingsProvider.Instance;
+
+    // SPEC F158.3 (STORY-388, PLAN T397): the ad cadence trigger's own live knob
+    // (Station:Ads:EveryNUnits) — same null-coalesced-default idiom as imagingSettings immediately
+    // above. A host that has not yet wired the real IOptionsMonitor-backed implementation (every
+    // pre-T397 construction site, including every unit test) reads back NoOpAdCadenceProvider's own
+    // zero (disabled) answer — never a null-check, never a stall.
+    readonly IAdCadenceProvider adCadenceProvider = adCadenceProvider ?? NoOpAdCadenceProvider.Instance;
+
+    // SPEC F158.2/F158.3 (STORY-388, PLAN T397): the ad drain's own vend seam — same
+    // null-coalesced-default idiom immediately above. A host that has not yet wired GenWave.Ads'
+    // real AdSpotPipeline (every pre-T397 construction site, including every unit test) reads back
+    // NoOpAdSpotVend's own permanent-null answer — "no ad ever airs" — never a null-check, never a
+    // stall.
+    readonly IAdSpotVend adSpotVend = adSpotVend ?? NoOpAdSpotVend.Instance;
 
     readonly Queue<MediaItem> buffer = new();
     MediaItem? previousTrack;
@@ -1344,6 +1383,27 @@ public sealed class Orchestrator(
             deferralQueue.Enqueue(SpeechDeferralKind.StationId, "cadence: Station:Cadence:StationIdEveryNUnits");
         }
 
+        // 2.25. Ad cadence every N units (SPEC F158.3, STORY-388, PLAN T397) — the StationId
+        // trigger's own twin, one field up: SAME unitCount > 0 boot-guard, SAME "enqueue a deferral,
+        // let the drain immediately below pick it up" shape (F74.1/F74.2's queue-not-inline
+        // discipline applies here too). Read into a local ONCE — never adCadenceProvider.Current
+        // twice — and reuse it for both the guard and the divisor: a second, independent read here
+        // could race a live Station:Ads:EveryNUnits reload between the two (5 -> 0), turning
+        // `unitCount % adCadenceProvider.Current` into a DivideByZeroException the guard just
+        // proved wouldn't happen. SpeechDeferralKind.Ad is declared LAST in that enum specifically
+        // so its own Kind tiebreak sorts AFTER StationId whenever both fire on the exact same
+        // instant (the common case: both triggers enqueue with Due = now on THIS unit) — see that
+        // enum member's own remarks for why that, not enqueue-call order, is what actually orders
+        // the drain "ident → spot".
+        var adEveryNUnits = adCadenceProvider.Current;
+        if (next is not null
+            && adEveryNUnits > 0
+            && unitCount > 0
+            && unitCount % adEveryNUnits == 0)
+        {
+            deferralQueue.Enqueue(SpeechDeferralKind.Ad, "cadence: Station:Ads:EveryNUnits");
+        }
+
         // Drain every deferral due at this boundary — BEFORE the handoff producer below runs (T124
         // review finding). Reads the SAME injected clock GetNextAsync compares NextDue against
         // (SPEC F74.3) — one clock for both halves of this seam, never a mix of a real and a fake
@@ -1407,6 +1467,61 @@ public sealed class Orchestrator(
                     // ORIGINAL plain ident — byte-identical to F110.2, the required outside-show
                     // posture.
                     Kick(currentShow is { } show ? stationIdReq with { ShowName = show.Name } : stationIdReq);
+                    break;
+                }
+
+                case SpeechDeferralKind.Ad:
+                {
+                    // SPEC F158.2/F158.3 (STORY-388, PLAN T397) — the vend IS the whole segment: a
+                    // pre-rendered MediaItem, zero render at air, routed through KickResolved exactly
+                    // like the pool-first StationId item above (the SAME buffer-ordering guarantee,
+                    // so an ad can never jump ahead of a back-announce Kicked earlier this unit, nor
+                    // behind the lead-in Kicked below). A throwing vend is caught HERE, at this
+                    // seam's own boundary — never letting an IAdSpotVend fault this whole unit — and
+                    // logged WARN with no ad this break (F158.3's own "never a failed unit" contract);
+                    // AdSpotPipeline itself already never throws (every source's own exception is
+                    // WARN-skipped inside the pipeline), but this drain arm does not assume today's
+                    // one implementation is the only one that will ever back this seam.
+                    //
+                    // Review fold: SegmentKind is stamped HERE, defensively, on the vended item
+                    // itself (the SAME `with` expression BuildPooledStationIdItem uses one arm up) —
+                    // never trusted from the vend alone. AdSpotPipeline's own floor
+                    // (LibraryAdSpotSource) already stamps it, but IAdSpotVend is a seam a future
+                    // second implementation (a plugin-backed source, or a different pipeline) could
+                    // back too; an unstamped item reaching this line would silently miss the
+                    // render-await loop's own DjName carve-out (`kind is SegmentKind.StationId or
+                    // Announcement or Ad`) below — a booth-log/now-playing honesty gap, not a
+                    // playability one (SPEC F158.4's own DB-level rotation fence is enforced at the
+                    // SQL layer regardless of what this in-memory stamp holds).
+                    MediaItem? spot;
+                    try
+                    {
+                        spot = await adSpotVend.GetNextSpotAsync(ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        throw; // Caller cancellation, not a vend fault.
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(
+                            ex, "Ad spot vend threw {ExceptionType}; no ad this break (SPEC F158.3)",
+                            ex.GetType().Name);
+                        spot = null;
+                    }
+
+                    if (spot is null)
+                    {
+                        // F158.3: a null answer is a normal day, one INFO — never a WARN. An empty
+                        // Ads library (or no AddGenWaveAds wiring at all, the NoOpAdSpotVend default)
+                        // is not an error.
+                        logger.LogInformation(
+                            "No ad spot available this break — the ads library is empty or has " +
+                            "nothing ready (SPEC F158.3).");
+                        break;
+                    }
+
+                    KickResolved(BuildAdRequest(identity), spot with { SegmentKind = SegmentKind.Ad });
                     break;
                 }
 
@@ -1545,7 +1660,9 @@ public sealed class Orchestrator(
                 // Announcement (SPEC F144.1, PLAN T341) joins this SAME carve-out for the SAME
                 // reason: it has no DJ of its own either (the station voice, or the owner's own
                 // requested voice — never a persona identity), yet still airs inside the unit's show.
-                if (kind is SegmentKind.StationId or SegmentKind.Announcement)
+                // Ad (SPEC F158.2/F158.3, PLAN T397) joins on the identical reasoning one more time:
+                // it is imaging, not DJ content (F161.4), yet still airs inside the unit's show.
+                if (kind is SegmentKind.StationId or SegmentKind.Announcement or SegmentKind.Ad)
                     seg = seg with { DjName = unitDjName };
                 buffer.Enqueue(seg);
             }
@@ -1616,6 +1733,27 @@ public sealed class Orchestrator(
     /// </summary>
     static MediaItem BuildPooledStationIdItem(MediaReference pooled) =>
         pooled.ToMediaItem() with { SegmentKind = SegmentKind.StationId };
+
+    /// <summary>
+    /// SPEC F158.2/F158.3 (STORY-388, PLAN T397) — the ONE <see cref="SegmentKind.Ad"/> request
+    /// shape, the <see cref="BuildStationIdRequest"/> precedent one member up: station's own voice
+    /// and credit, never the active persona's (an ad is imaging, not DJ content — F161.4's own
+    /// "parody spots are visibly station content" ruling). Deliberately no
+    /// <see cref="ResolvePersonaAsync"/> call. Every field past <see cref="SegmentRequest.Kind"/>
+    /// goes unread by the render-await loop below — this request is routed through
+    /// <c>KickResolved</c>, whose loop reads only <c>Kind</c> off a resolved item (the SAME "honest,
+    /// non-garbage tag" posture <see cref="BuildStationIdRequest"/>'s own remarks describe for its
+    /// pool-first rung).
+    /// </summary>
+    SegmentRequest BuildAdRequest(StationIdentity identity) =>
+        new(
+            SegmentKind.Ad,
+            identity.Voice,
+            identity.Name,
+            null,
+            StationLocalNow(),
+            identity.Id,
+            PersonaName: null);
 
     /// <summary>
     /// Builds a <see cref="SegmentKind.SignOff"/>/<see cref="SegmentKind.SignOn"/> request from the

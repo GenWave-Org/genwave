@@ -68,6 +68,15 @@ static class StationOptionsServiceCollectionExtensions
             // IOptionsMonitor<StationOptions> and re-reads CurrentValue on every call, so a live
             // PUT /api/settings cadence edit applies without an api restart.
             .AddSingleton<ICadenceProvider, OptionsMonitorCadenceProvider>()
+            // Live ad-cadence seam (SPEC F158.3, STORY-388, PLAN T397): Station:Ads:EveryNUnits is
+            // advertised Live in the settings allowlist — the ICadenceProvider/StationIdEveryNUnits
+            // precedent immediately above, one knob over. Wraps IOptionsMonitor<StationOptions> and
+            // re-reads CurrentValue on every call. Overrides AddGenWaveOrchestration's own
+            // TryAddSingleton<IAdCadenceProvider>(NoOpAdCadenceProvider.Instance) default — this
+            // method runs BEFORE AddGenWaveOrchestration in Program.cs, so the "AddSingleton first,
+            // TryAdd no-ops later" mechanism this class's own IShowFlavorLineSource remarks describe
+            // applies here too.
+            .AddSingleton<IAdCadenceProvider, OptionsMonitorAdCadenceProvider>()
             // Live rotation seam (SPEC F41.6, same F30.1/gitea-#211 precedent): Station:Rotation:* is
             // advertised Live in the settings allowlist. Consumed by the Orchestrator (artist
             // separation) and PlayoutFeeder (anti-repeat window) — the SAME instance, so a live

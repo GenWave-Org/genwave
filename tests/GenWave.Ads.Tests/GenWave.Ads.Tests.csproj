@@ -20,8 +20,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- T396 adds: <ProjectReference Include="..\..\src\GenWave.Ads\GenWave.Ads.csproj" /> -->
+    <!-- PLAN T396: AdsLibrarySeeder/LibraryAdSpotSource/AdSpotPipeline specs construct
+         Microsoft.Extensions.Options/Logging fakes directly — same shared-framework shape as
+         GenWave.MediaLibrary.Tests's/GenWave.Tts.Tests's own FrameworkReference. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\..\src\GenWave.Abstractions\GenWave.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\GenWave.Ads\GenWave.Ads.csproj" />
   </ItemGroup>
 
 </Project>

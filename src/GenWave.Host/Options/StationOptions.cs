@@ -150,4 +150,9 @@ public sealed class StationOptions
     /// <summary>Show-domain knobs (SPEC F116.3, STORY-308, PLAN T249) — see
     /// <see cref="StationShowsOptions"/>'s own remarks. Bound to <c>Station:Shows</c>.</summary>
     public StationShowsOptions Shows { get; set; } = new();
+
+    /// <summary>The ad cadence trigger's own knob (SPEC F158.3, STORY-388, PLAN T397) — see
+    /// <see cref="StationAdsOptions"/>'s own remarks for why this binds only ONE of the five
+    /// <c>Station:Ads:*</c> allowlisted keys. Bound to <c>Station:Ads</c>.</summary>
+    public StationAdsOptions Ads { get; set; } = new();
 }

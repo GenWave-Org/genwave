@@ -84,11 +84,14 @@ class MediaRow
     public string? ExplicitSource { get; set; }
 
     /// <summary>
-    /// Station Imaging content kind (gh-#149) — <c>library.media.imaging_kind</c>, one of
-    /// <c>liner</c>/<c>station_id</c>/<c>jingle</c>/<c>promo</c> for an authored row; null for
-    /// scanned rows and authored rows that predate the column. Only populated by projections that
-    /// select it (the admin queries), mirroring <see cref="Moods"/>'s pattern. Metadata-only:
-    /// playout never reads it.
+    /// Station Imaging content kind (gh-#149, SPEC F158.1) — <c>library.media.imaging_kind</c>, one
+    /// of <c>liner</c>/<c>station_id</c>/<c>jingle</c>/<c>promo</c>/<c>ad</c> for an authored row;
+    /// null for scanned rows and authored rows that predate the column. Only populated by
+    /// projections that select it (the admin queries), mirroring <see cref="Moods"/>'s pattern. On
+    /// THIS row shape it is display-only, but it is no longer true that playout never reads the
+    /// column at all — <c>StationId</c> already drove its own selector (F110.2), and SPEC F158.4
+    /// (PLAN T395) now fences every non-null kind, <c>ad</c> included, out of music rotation
+    /// entirely (<c>MediaRepository.PlayablePredicate</c>, a different query shape than this row's own).
     /// </summary>
     public string? ImagingKind { get; set; }
 

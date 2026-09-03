@@ -20,4 +20,15 @@ public interface ILibraryRepository
     /// NOT filtered by station scope — returns the global library catalogue.
     /// </summary>
     Task<IReadOnlyList<LibraryAdminInfo>> GetAllWithMediaCountAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Resolves a single <c>library.library</c> row by its exact (ordinal, case-sensitive) name, or
+    /// <see langword="null"/> when no row carries that name (PLAN T396 review carry-forward F3, an
+    /// additive member — the plain-addition posture this interface's own T395 history already
+    /// established): the right altitude for a name-keyed lookup —
+    /// <see cref="GetAllWithMediaCountAsync"/>-then-scan-in-memory is the wrong one, the exact shape
+    /// this member replaces at both of its callers (<c>GenWave.Ads.AdsLibrarySeeder</c>,
+    /// <c>GenWave.Ads.LibraryAdSpotSource</c>).
+    /// </summary>
+    Task<LibraryAdminInfo?> GetByNameAsync(string name, CancellationToken ct);
 }

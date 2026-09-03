@@ -69,4 +69,8 @@
     <ProjectReference Include="..\..\tools\SeamIndexGenerator\SeamIndexGenerator.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GenWave.Ads\GenWave.Ads.csproj" />
+  </ItemGroup>
+
 </Project>

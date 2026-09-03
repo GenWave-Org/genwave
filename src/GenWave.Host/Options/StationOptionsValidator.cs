@@ -52,6 +52,13 @@ using Microsoft.Extensions.Options;
 /// </para>
 ///
 /// <para>
+/// Guards <c>Station:Ads:EveryNUnits</c> (SPEC F158.3, STORY-388, PLAN T397): must be non-negative
+/// (0 disables the ad cadence trigger) — same "documentation-only [Range], this validator is the
+/// real floor" story as the nested knobs above, the <c>Station:Cadence:StationIdEveryNUnits</c>
+/// precedent one field over.
+/// </para>
+///
+/// <para>
 /// Guards <c>Station:Imaging:TimeAnnouncementBudgetSeconds</c> (SPEC F124.4/F141.1, PLAN T269/T326):
 /// must be a positive integer (same "documentation-only <c>[Range(1, int.MaxValue)]</c>, this
 /// validator is the real floor" story as the nested knobs above) — UNLIKE every "0 disables" knob
@@ -102,6 +109,11 @@ public sealed class StationOptionsValidator(ILogger<StationOptionsValidator> log
             return ValidateOptionsResult.Fail(
                 "Station:Cadence:StationIdEveryNUnits must be non-negative " +
                 "(0 disables station IDs).");
+
+        if (options.Ads.EveryNUnits < 0)
+            return ValidateOptionsResult.Fail(
+                "Station:Ads:EveryNUnits must be non-negative " +
+                "(0 disables ad spots).");
 
         if (options.Rotation.RecentWindow < 0)
             return ValidateOptionsResult.Fail(

@@ -35,10 +35,13 @@ namespace GenWave.Core.Domain;
 /// projection only; no classification pipeline writes them yet (T110), and nothing enforces or
 /// filters on them here — <c>Explicit</c> is orthogonal to the F95.5 never-play verdict.
 ///
-/// <c>ImagingKind</c> (gh-#149) surfaces the Station Imaging content kind of an authored segment
-/// as its storage token — <c>liner</c>/<c>station_id</c>/<c>jingle</c>/<c>promo</c> — and is
-/// <see langword="null"/> for scanned rows and for authored rows that predate db/30. Metadata-only:
-/// playout and the safe loop ignore it entirely (a future issue wires kind-aware rotation).
+/// <c>ImagingKind</c> (gh-#149, SPEC F158.1) surfaces the Station Imaging content kind of an
+/// authored segment as its storage token — <c>liner</c>/<c>station_id</c>/<c>jingle</c>/
+/// <c>promo</c>/<c>ad</c> — and is <see langword="null"/> for scanned rows and for authored rows
+/// that predate db/30. Display-only from THIS projection's own perspective; it is no longer true
+/// that playout ignores the column entirely — <c>StationId</c> already drove its own selector
+/// (F110.2), and SPEC F158.4 (PLAN T395) now fences every non-null kind, <c>ad</c> included, out of
+/// music rotation/envelopes/requests/<c>/media/random</c> regardless of scope.
 ///
 /// <c>ShowId</c> (SPEC F117.1, STORY-313, PLAN T246) surfaces <c>library.media.show_id</c> — the
 /// show an authored imaging row is scoped to, or <see langword="null"/> for station-wide (the only

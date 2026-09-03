@@ -61,4 +61,27 @@ public enum SpeechDeferralKind
     /// cadence, the same supersede shape every pre-F107 kind carries (SPEC F107.4).
     /// </summary>
     TimeDate,
+
+    /// <summary>
+    /// A pre-rendered ad-spot vend (SPEC F158.3, STORY-388, PLAN T397) — enqueued by
+    /// <see cref="Orchestrator"/>'s own unit-count cadence check (<c>Station:Ads:EveryNUnits</c>,
+    /// the <see cref="StationId"/> trigger's twin: <c>unitCount % EveryNUnits == 0</c>, unit 0
+    /// never fires), due immediately (the <see cref="StationId"/> shape — trigger and boundary
+    /// decision are the same per-unit planning pass). Discriminator is always
+    /// <see langword="null"/> — one-pending-per-station, the same pre-F107 supersede shape.
+    ///
+    /// <para>
+    /// <b>Drain order (SPEC F158.3's own "ident → spot → back to the music").</b> This member is
+    /// declared LAST in this enum deliberately: <see cref="SpeechDeferralQueue.TryDequeueDue"/>'s
+    /// own Due-ascending, THEN-Kind tiebreak (declaration order) is what actually guarantees a
+    /// same-instant <see cref="StationId"/> and <see cref="Ad"/> pair drains StationId first — both
+    /// this cadence check and the StationId one above enqueue with <c>Due = now</c> on the SAME
+    /// unit whenever both cadences happen to coincide, so the tiebreak alone (not enqueue-call
+    /// order, which the queue's own dictionary storage does not preserve) is what orders them. The
+    /// drain itself vends via <c>KickResolved</c> — the pipeline's pre-rendered <c>MediaItem</c>,
+    /// zero render at air — placed after the <see cref="StationId"/> arm and before the lead-in in
+    /// <see cref="Orchestrator"/>'s own <c>EnqueuePatterAsync</c>.
+    /// </para>
+    /// </summary>
+    Ad,
 }

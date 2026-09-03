@@ -26,13 +26,23 @@
 # STRICT is also why library.media's artist_key/title_key/title_variant generated columns below stay
 # NULL for a NULL artist/title without any CASE in the generation expression itself.
 #
-# find_near_duplicates(tolerance_ms) (SPEC F153.5): the playable predicate is the FULL
-# MediaRepository.PlayablePredicate (src/GenWave.MediaLibrary/Catalog/MediaRepository.cs) —
+# find_near_duplicates(tolerance_ms) (SPEC F153.5): the playable predicate WAS the FULL
+# MediaRepository.PlayablePredicate (src/GenWave.MediaLibrary/Catalog/MediaRepository.cs) as of
+# T354 —
 # "m.state = 'ready' and m.measurable and m.eligible and not coalesce(r.never_play, false)",
 # LEFT JOIN library.media_rating included (T354 review MED-1 finding: an earlier draft of this
 # function omitted the never_play half on the theory that curation was out of scope for a SQL-only
 # pass — wrong, since PlayablePredicate has exactly ONE definition and a near-duplicate finding
-# against a track nobody will ever hear is noise, not signal). STABLE, not IMMUTABLE: its result
+# against a track nobody will ever hear is noise, not signal).
+#
+# KNOWN DRIFT (PLAN T395 review, carried forward as PLAN T406): PlayablePredicate itself gained
+# "and m.imaging_kind is null" at T395 (SPEC F158.4, the rotation fence) — this function's own copy,
+# a SQL function, cannot reference the C# constant, and was deliberately left AS-IS by T395 (Gardener
+# near-duplicate detection is housekeeping, not a music-rotation/request/`/media/random` leak, so it
+# was out of that task's scope). Today an authored imaging row (a liner, a station id, an ad spot)
+# CAN still surface in a near-duplicate finding here even though it is now structurally invisible to
+# every real selection path — PLAN T406 is the follow-up to add the same term here. STABLE, not
+# IMMUTABLE: its result
 # depends on the CONTENTS of library.media (and library.media_rating) at call time, not just its
 # own arguments. Tolerance never chains transitively (T354 review LOW-2, RULED): every candidate is
 # measured against its OWN group's shortest duration (a window function, not the self-join this

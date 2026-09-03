@@ -204,6 +204,43 @@ public static class FeaturePerKindEngineOverride
         }
     }
 
+    public static class ScenarioAdKindIsRejected
+    {
+        [Fact]
+        public static void An_Ad_kind_entry_never_compiles_into_the_map()
+        {
+            // PLAN T396 ruling (SPEC F158.3, T390 review carry-forward 3): SegmentKind.Ad is a real,
+            //   defined name — IsDefinedSegmentKindName legally accepts the JSON key, and
+            //   SettingValidator.IsValidEngineByKindMap accepts the whole entry too (document-accept,
+            //   that class's own remarks) — but an ad spot never renders through this router at all
+            //   (it renders offline, T401's widened assembler). An "Ad" override must therefore never
+            //   reach TtsEngineOverrideMap.Resolve, so a real render can never silently see it.
+            var overrides = BuildOverrides("""{"Ad":"piper"}""");
+
+            Assert.Null(overrides.Current.Resolve(SegmentKind.Ad));
+        }
+
+        [Fact]
+        public static async Task An_Ad_kind_entry_falls_through_to_the_default_engine_if_ever_asked()
+        {
+            // Belt-and-suspenders: even though F158.3 means an Ad-kind render request never reaches
+            //   this router in production, proving the ROUTER's own behavior matches ScenarioNumericKindKey's
+            //   "ignored key falls through" shape closes the loop end-to-end, not just at the map.
+            var primary = new FakeTtsSynthesizer();
+            var fallback = new FakeProfileRenderer(DependencyNames.Piper);
+            var health = new FakeDependencyHealth();
+            var overrides = BuildOverrides("""{"Ad":"piper"}""");
+            var router = BuildRouter(primary, fallback, health, overrides);
+
+            var adContext = new TtsRenderContext("A spot", "af_heart", SegmentKind.Ad);
+            var path = await router.SynthesizeAsync(adContext, CancellationToken.None);
+
+            Assert.NotNull(path);
+            Assert.Equal(1, primary.CallCount);
+            Assert.Equal(0, fallback.CallCount);
+        }
+    }
+
     public static class ScenarioNumericKindKey
     {
         [Fact]

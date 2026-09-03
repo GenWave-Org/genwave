@@ -56,6 +56,9 @@ file sealed class FakeLibraryRepository(params long[] knownIds) : ILibraryReposi
 
     public Task<IReadOnlyList<LibraryAdminInfo>> GetAllWithMediaCountAsync(CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<LibraryAdminInfo>>([]);
+
+    public Task<LibraryAdminInfo?> GetByNameAsync(string name, CancellationToken ct) =>
+        Task.FromResult<LibraryAdminInfo?>(null);
 }
 
 file sealed class FakeAdminMediaLookup : IAdminMediaLookup
