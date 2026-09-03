@@ -130,13 +130,14 @@ public static class FeatureBanterOnTheAir
             // each name with its live `(int)kind` closes that gap. This one assertion now pins all
             // three properties the "additive member" claim needs together: append-only (Crosstalk,
             // then Announcement, land at the END), declaration order (each name sits at the position
-            // its source-file declaration puts it in), and every member's underlying value (0..8,
+            // its source-file declaration puts it in), and every member's underlying value (0..9,
             // unchanged and un-renumbered). T338 (SPEC F144.1, STORY-358) appended Announcement the
-            // same way Crosstalk was appended under T281; this pin now covers both additions, and a
-            // future member extends the sequence, never reorders or renumbers it.
+            // same way Crosstalk was appended under T281; T390 (SPEC F158.1, STORY-384) appended Ad
+            // the same way; this pin now covers all three additions, and a future member extends the
+            // sequence, never reorders or renumbers it.
             Assert.Equal(
                 [("StationId", 0), ("LeadIn", 1), ("BackAnnounce", 2), ("TimeDate", 3), ("SignOff", 4),
-                 ("SignOn", 5), ("ContextSegment", 6), ("Crosstalk", 7), ("Announcement", 8)],
+                 ("SignOn", 5), ("ContextSegment", 6), ("Crosstalk", 7), ("Announcement", 8), ("Ad", 9)],
                 Enum.GetValues<SegmentKind>().Select(kind => (kind.ToString(), (int)kind)));
         }
 

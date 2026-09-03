@@ -47,4 +47,13 @@ public enum SegmentKind
     /// <c>SegmentRequest</c> of this kind is a later task's, not this enum's own.
     /// </summary>
     Announcement,
+
+    /// <summary>
+    /// A pre-rendered ad spot, vended by the <c>Abstractions.IAdSpotSource</c> pipeline at the
+    /// <c>Station:Ads:EveryNUnits</c> cadence (SPEC F158.1/F158.3, STORY-384, gh-#380 epic) — drains
+    /// after the StationId arm and before the lead-in, with no render at air time. Additive member,
+    /// appended to ride the Abstractions 5.6.0 minor bump binary-compatibly; the wiring that vends a
+    /// <c>SegmentRequest</c> of this kind is a later task's, not this enum's own.
+    /// </summary>
+    Ad,
 }

@@ -30,6 +30,19 @@ namespace GenWave.Core.Domain;
 /// breaking change once this ships in a tagged release — the same discipline every other publicly
 /// referenced Abstractions type already carries.
 /// </para>
+///
+/// <para>
+/// <see cref="Ad"/> (SPEC F158.1, STORY-384, gh-#380 epic) is the fifth token, appended last with
+/// the prior four values untouched — the DB CHECK constraint on <c>library.media.imaging_kind</c>
+/// widened to admit its <c>ad</c> token in the same change (db/42). SPEC F158.4 will later fence
+/// every non-null <c>imaging_kind</c> — <see cref="Ad"/> included — out of music rotation, envelopes,
+/// Deep Cuts, requests, and <c>/media/random</c> regardless of scope config; the wiring that actually
+/// makes that fence true (<c>PlayablePredicate</c>, PLAN T395) is a later task's, not this enum's own
+/// — appending this token today does not by itself change what selects. Once that fence lands, a
+/// switch written against the pre-5.6.0 four values that assumed "any imaging kind is exempt from
+/// music selection" will already hold for the fifth without needing an update; only a switch that
+/// branches by SPECIFIC kind needs a new arm.
+/// </para>
 /// </summary>
 public enum ImagingKind
 {
@@ -47,4 +60,13 @@ public enum ImagingKind
 
     /// <summary>Promotes a show, event, or station feature.</summary>
     Promo,
+
+    /// <summary>
+    /// A pre-rendered ad spot (SPEC F158.1, STORY-384, gh-#380 epic) — vended by
+    /// <c>Abstractions.IAdSpotSource</c> rather than selected as music. Stored as the <c>ad</c>
+    /// snake_case token (db/42). Will be structurally fenced out of music rotation by SPEC F158.4
+    /// like every other imaging kind once that fence's own wiring lands (see this type's own
+    /// remarks) — not yet true of this member on its own.
+    /// </summary>
+    Ad,
 }

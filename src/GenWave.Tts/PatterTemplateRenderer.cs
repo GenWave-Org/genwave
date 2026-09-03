@@ -140,6 +140,14 @@ public sealed class PatterTemplateRenderer
         // fails for any SegmentRequest" contract still has to hold for it. Neutral, station-voiced,
         // no fabricated specifics — there is no owner message to read here.
         SegmentKind.Announcement   => "Here's an announcement from the station.",
+        // No producer builds an Ad SegmentRequest yet (SPEC F158.3, PLAN T390) — and by design never
+        // will: ads are pre-rendered spots vended already-resolved by Abstractions.IAdSpotSource, so
+        // this kind never renders at air time (F158.3). This arm exists purely so the switch below
+        // stays total, since Ad is now a real SegmentKind name that TryParseKind (PersonaController)
+        // accepts and TemplateCopyWriter's own "never fails for any SegmentRequest" contract still has
+        // to hold for it — the same discipline the ContextSegment, Crosstalk, and Announcement arms
+        // above already establish. The text below is a floor that should never air.
+        SegmentKind.Ad             => "Here's a word from our sponsor.",
         _                          => throw new ArgumentOutOfRangeException(
                                         nameof(request.Kind), request.Kind, message: null),
     };
