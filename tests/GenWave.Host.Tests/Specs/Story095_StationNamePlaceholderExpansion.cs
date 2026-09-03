@@ -99,6 +99,8 @@ file sealed class RecordingCatalogWriter : IAuthoredCatalogWriter
         LastInsert = insert;
         return Task.FromResult(NextId);
     }
+
+    public Task<bool> SetEligibleAsync(long mediaId, bool eligible, CancellationToken ct) => Task.FromResult(true);
 }
 
 /// <summary>Assembles the REAL <see cref="SafeSegmentAuthor"/> with fakes at every I/O seam except

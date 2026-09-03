@@ -1,0 +1,33 @@
+# AdScriptValidator profanity list (SPEC F160.3, STORY-390 AC6) — the house's FIRST profanity list.
+# Guards ONLY ad copy, and only under the 'everyone' Station:Audience posture (skipped under
+# 'mature'). Same format/folding/matching as BrandBlocklist.txt — see that file's own header.
+#
+# MODEST BY DESIGN: the standard strong set plus its common derived forms (AdCopyFold already handles
+# case/leet-speak/spacing variants of each entry below, so only distinct WORDS need listing, not every
+# spelling). Mild interjections (damn, hell, crap) are deliberately excluded — they collide too often
+# with ordinary DJ patter ("hell of a show", "a damn good time") for a cheap word-boundary filter to
+# carry safely; the strong set below has no comparable everyday double meaning.
+
+fuck
+fucker
+fucking
+motherfucker
+shit
+bullshit
+bitch
+ass
+asshole
+bastard
+dick
+cock
+pussy
+cunt
+whore
+slut
+piss
+bollocks
+twat
+wanker
+dumbass
+jackass
+douchebag

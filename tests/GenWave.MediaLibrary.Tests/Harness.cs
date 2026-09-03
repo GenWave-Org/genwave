@@ -36,6 +36,18 @@ static class Harness
     public static AnnouncementRepository AnnouncementRepo(DatabaseFixture f) =>
         new(new Lazy<NpgsqlDataSource>(() => f.StationDataSource));
 
+    /// <summary>Builds an <see cref="AdSpotRepository"/> over the fixture's own station_svc data
+    /// source (SPEC F159.1, F159.2; STORY-389; PLAN T398) — mirrors <see cref="AnnouncementRepo"/>'s
+    /// own factory shape one station-schema store over.</summary>
+    public static AdSpotRepository AdSpotRepo(DatabaseFixture f) =>
+        new(new Lazy<NpgsqlDataSource>(() => f.StationDataSource));
+
+    /// <summary>Builds an <see cref="AdBriefRepository"/> over the fixture's own station_svc data
+    /// source (SPEC F159.1, F162.2; STORY-389; PLAN T398) — mirrors <see cref="AnnouncementRepo"/>'s
+    /// own factory shape one table over.</summary>
+    public static AdBriefRepository AdBriefRepo(DatabaseFixture f) =>
+        new(new Lazy<NpgsqlDataSource>(() => f.StationDataSource));
+
     /// <summary>
     /// Builds a <see cref="ScanService"/> against a real repository/media root. <paramref name="missThreshold"/>
     /// defaults to 1 — the pre-F58 single-miss behavior — so every pre-existing spec built on this
@@ -384,7 +396,8 @@ static class Harness
         CuePoints? cue = null,
         EnergyPoints? energy = null,
         ImagingKind kind = ImagingKind.Liner,
-        long? showId = null) =>
+        long? showId = null,
+        bool eligible = true) =>
         new(
             Path: path ?? "/authored/probe.wav",
             Format: "wav",
@@ -400,7 +413,18 @@ static class Harness
             Channels: 2,
             BitrateKbps: 1_000,
             Kind: kind,
-            ShowId: showId);
+            ShowId: showId,
+            Eligible: eligible);
+
+    /// <summary>SPEC F161.3, STORY-391, PLAN T401 review (the T362 loop law — new SQL earns its own
+    /// live-Postgres read): the raw <c>eligible</c> column for a row, straight off Postgres, never
+    /// through <see cref="MediaRepository"/>'s own read projections.</summary>
+    public static async Task<bool> EligibleOfAsync(DatabaseFixture f, long id)
+    {
+        await using var conn = await f.DataSource.OpenConnectionAsync();
+        return await conn.ExecuteScalarAsync<bool>(
+            "select eligible from library.media where id = @id", new { id });
+    }
 
     public static async Task<(double? IntegratedLufs, double? TruePeakDbtp, bool? Measurable,
         double? CueInSec, double? CueOutSec, double? IntroEnergy, double? OutroEnergy)>

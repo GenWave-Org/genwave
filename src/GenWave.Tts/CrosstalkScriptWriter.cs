@@ -1,10 +1,7 @@
 namespace GenWave.Tts;
 
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using GenWave.Core.Llm;
 
 /// <summary>
 /// Generates one two-voice banter exchange per call (SPEC F127.3, F127.4, STORY-326) — the
@@ -132,40 +129,19 @@ public sealed class CrosstalkScriptWriter(
             var http = httpClientFactory.CreateClient(LlmCopyWriter.HttpClientName);
             var requestUri = EndpointUri.Combine(cfg.Endpoint, "/v1/chat/completions");
 
-            var body = new
-            {
-                model = cfg.Model,
-                messages = new object[]
-                {
-                    new { role = "system", content = systemPrompt },
-                    new { role = "user", content = userPrompt },
-                },
-                // SPEC F127.3 (T283 paper-audition reconciliation, gh-#385): the cap derives from
-                // Crosstalk:DurationTargetSeconds — the ONE knob that already describes a whole
-                // exchange — not from Llm:MaxCopyChars (that stayed blurb-scaled and starved a
-                // multi-line script on the first live run; see DeriveScriptGenerationCap's own
-                // remarks). Still reuses LlmCopyWriter.DeriveMaxTokens's chars-to-tokens shape
-                // (divisor/floor/ceiling) rather than a second, independently-tuned formula.
-                max_tokens = DeriveScriptGenerationCap(durationTargetSeconds),
-                // gh-#620 — the same reasoning control LlmCopyWriter.PostCompletionAsync sends; see
-                // ReasoningEffort's own remarks. null ("omit") leaves the member out entirely.
-                reasoning_effort = ReasoningEffort.ToWire(cfg.ReasoningEffort),
-            };
-
-            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri)
-            {
-                Content = JsonContent.Create(body, options: ChatCompletionRequestJson.Options),
-            };
-
-            if (!string.IsNullOrEmpty(cfg.ApiKey))
-                httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.ApiKey);
-
-            var response = await http.SendAsync(httpRequest, timeoutCts.Token);
-            response.EnsureSuccessStatusCode();
-
-            var payload = await response.Content.ReadFromJsonAsync<ChatCompletionResponse>(timeoutCts.Token);
-            var choice = payload?.Choices?.FirstOrDefault();
-            var raw = choice?.Message?.Content ?? string.Empty;
+            // PLAN T400 review F5: the wire call itself (body/header/parse) is
+            // LlmCopyWriter.PostChatCompletionAsync — the ONE seam this writer and AdScriptWriter both
+            // call, rather than each hand-rolling its own copy (a third hand-rolled copy is what
+            // caused that review's own F1). SPEC F127.3 (T283 paper-audition reconciliation, gh-#385):
+            // the cap derives from Crosstalk:DurationTargetSeconds — the ONE knob that already
+            // describes a whole exchange — not from Llm:MaxCopyChars (that stayed blurb-scaled and
+            // starved a multi-line script on the first live run; see DeriveScriptGenerationCap's own
+            // remarks). Still reuses LlmCopyWriter.DeriveMaxTokens's chars-to-tokens shape
+            // (divisor/floor/ceiling) rather than a second, independently-tuned formula.
+            var reply = await LlmCopyWriter.PostChatCompletionAsync(
+                http, requestUri, cfg, systemPrompt, userPrompt, DeriveScriptGenerationCap(durationTargetSeconds),
+                timeoutCts.Token);
+            var raw = reply.Content;
 
             // SPEC F127.4, F127.11 (gh-#424 class, one seam over): a completion the backend cut
             // short at its own max_tokens cap leaves a truncated last line that can still PARSE
@@ -174,7 +150,7 @@ public sealed class CrosstalkScriptWriter(
             // parser to maybe catch by accident. finish_reason is the OpenAI/ollama-compatible
             // signal for exactly this (see ChatCompletionChoice.FinishReason's own remarks); "stop"
             // (or a missing field, from an endpoint that predates it) never trips this check.
-            if (choice?.FinishReason == "length")
+            if (reply.FinishReason == "length")
             {
                 return Discard(
                     "the completion was cut short by max_tokens (finish_reason: length) — a truncated reply is never aired",

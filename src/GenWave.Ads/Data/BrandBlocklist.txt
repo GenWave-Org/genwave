@@ -1,0 +1,248 @@
+# AdScriptValidator brand blocklist (SPEC F160.3, STORY-390 AC4) — real-world brand names an ad
+# script must never name. Data, not config: this file grows by PR, no code change required.
+#
+# Format: one phrase per line, `#`-prefixed and blank lines are comments. Every phrase is folded
+# (AdCopyFold.Fold — case, leet-speak, separator-punctuation collapsed to single-space tokens) at load
+# and matched word-boundary against the SAME folding of the script text (FoldedWordListMatcher).
+#
+# PRECISION BIAS (deliberate, documented): entries favor multi-word/distinctive forms ("coca cola",
+# "mcdonald's") over bare single-word brand names. A bare single word that ALSO reads as ordinary
+# English (apple, target, visa, amazon, marvel, crest, jeep, barbie, intel, snickers) is the noisy
+# false-positive class — those are either qualified into a multi-word phrase here ("target corp",
+# "visa card", "amazon.com", "marvel studios", "crest toothpaste", "jeep wrangler", "barbie doll",
+# "intel corp", "snickers bar") or left off the list entirely (bare "apple" is intentionally absent —
+# "iphone"/"macbook"/"apple inc" cover the brand without colliding with the fruit; see the pinned
+# negative fact for "applesauce"). Single-word entries that DO stay bare are names with no ordinary
+# dictionary sense (nike, toyota, spotify, ...) — a cheap, honest precision/recall tradeoff, not a
+# claim of completeness.
+
+# Drinks
+coca cola
+coke
+pepsi
+mountain dew
+dr pepper
+fanta
+gatorade
+red bull
+budweiser
+heineken
+guinness
+jack daniels
+jim beam
+johnnie walker
+absolut vodka
+smirnoff
+starbucks
+dunkin donuts
+folgers
+maxwell house
+nespresso
+keurig
+
+# Fast food
+mcdonald's
+burger king
+wendy's
+kfc
+taco bell
+subway restaurants
+domino's pizza
+pizza hut
+chipotle
+chick fil a
+popeyes
+arby's
+dairy queen
+sonic drive in
+panera bread
+five guys
+
+# Tech
+google
+microsoft
+apple inc
+iphone
+macbook
+amazon.com
+facebook
+instagram
+twitter
+tiktok
+snapchat
+linkedin
+netflix
+spotify
+nintendo
+playstation
+xbox
+samsung
+sony
+nvidia
+intel corp
+amd
+qualcomm
+cisco systems
+oracle corporation
+salesforce
+adobe systems
+ibm
+dell computers
+hp inc
+lenovo
+asus
+paypal
+venmo
+zelle
+robinhood investing
+bitcoin
+ethereum
+uber
+lyft
+airbnb
+tesla motors
+spacex
+
+# Autos
+toyota
+honda
+nissan
+bmw
+audi
+ford motor
+chevrolet
+subaru
+mazda
+hyundai
+kia motors
+volkswagen
+porsche
+ferrari
+lamborghini
+mclaren
+jaguar cars
+land rover
+dodge ram
+cadillac
+lincoln motors
+buick
+gmc trucks
+mitsubishi motors
+harley davidson
+ducati
+yamaha motors
+
+# Apparel & retail
+# NOTE (PLAN T399 review F4): "h&m" is deliberately absent — it folds to the bare two-letter blob
+# "hm" (the "&" is a separator, not a token character), which word-boundary-matches the ordinary
+# interjection "Hm, ..." on its own. No qualified alternative is worth the collision; drop it.
+nike
+adidas
+levi's
+gap inc
+zara
+gucci
+prada
+versace
+chanel
+louis vuitton
+calvin klein
+tommy hilfiger
+ralph lauren
+walmart
+target corp
+costco
+ikea
+home depot
+lowes
+best buy
+gamestop
+lego
+mattel
+hasbro
+barbie doll
+nerf
+hot wheels
+
+# Finance
+visa card
+mastercard
+american express
+chase bank
+wells fargo
+goldman sachs
+
+# Media
+disney
+pixar
+marvel studios
+hulu
+espn
+cnn
+fox news
+nbc universal
+warner bros
+universal pictures
+sony pictures
+paramount pictures
+hbo max
+
+# Shipping
+fedex
+ups shipping
+dhl
+
+# Airlines
+american airlines
+delta airlines
+united airlines
+southwest airlines
+boeing
+
+# Household & personal care
+gillette
+colgate
+crest toothpaste
+dove soap
+nivea
+loreal
+maybelline
+pampers
+kleenex
+tupperware
+dyson
+kitchenaid
+cuisinart
+
+# Candy & snacks
+hershey's
+mars candy
+snickers bar
+kit kat
+reeses
+m&m's
+skittles
+starburst candy
+oreo
+pringles
+doritos
+lay's chips
+cheetos
+trident gum
+juicy fruit gum
+# "tic tac" alone (PLAN T399 review F4) word-boundary-matches inside "tic tac toe" (the substring
+# "tic tac" sits at a genuine word boundary on both ends of that phrase too) — qualified to the
+# mint's own full name instead.
+tic tac mints
+altoids
+monster energy
+5 hour energy
+
+# Near-miss spellings (SPEC F160.3 as-built rider, PLAN T399 review F5) — deliberate, curated DATA,
+# never edit-distance/fuzzy matching: a handful of common misspellings that would otherwise dodge the
+# primary entries above (the exact SPEC F160.3 exhibit, "Coka-Cola presents", lands here).
+coka cola
+koka kola
+pepsee
+macdonalds
+adiddas

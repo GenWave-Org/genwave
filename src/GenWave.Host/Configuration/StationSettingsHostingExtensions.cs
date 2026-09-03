@@ -193,6 +193,15 @@ static class StationSettingsHostingExtensions
             (inner, sp) => new SpectatorModeAnnouncementVendGuard(
                 inner, sp.GetRequiredService<IOptionsMonitor<StationOptions>>()));
 
+        // The ad spot lifecycle store + brief store (SPEC F159.1, F159.2, F162.2; STORY-389; PLAN
+        // T398) — same station_svc connection string as every registration above;
+        // station.ad_spot/station.ad_brief live in the same schema. Both ship dark at T398 (neither
+        // Add* call registers a consumer): PLAN T400-T403's writer/render/worker/API tasks are the
+        // first Host call sites — the same "seam before consumer" way station.show (T239) and the
+        // visual layer's four stores (T290) shipped above.
+        builder.Services.AddAdSpotStore(stationConnStr);
+        builder.Services.AddAdBriefStore(stationConnStr);
+
         return builder;
     }
 }

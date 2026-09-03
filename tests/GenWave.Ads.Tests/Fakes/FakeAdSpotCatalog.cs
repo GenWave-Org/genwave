@@ -23,8 +23,11 @@ public sealed class FakeAdSpotCatalog : IMediaCatalog
 
     public FakeAdSpotCatalog AddReady(string mediaId, string locator = "/authored/ads/spot.wav")
     {
+        // Fully qualified (PLAN T400 review F2 — see Story388_AdSpotPipeline.Spot's own remarks: the
+        // GenWave.Tts ProjectReference this project gained pulls in GenWave.Loudness transitively,
+        // whose root namespace now shadows the unqualified "Loudness" identifier).
         pool.Add(new MediaReference(
-            mediaId, locator, $"Spot {mediaId}", new Loudness(-14.0, -1.0, true),
+            mediaId, locator, $"Spot {mediaId}", new GenWave.Core.Domain.Loudness(-14.0, -1.0, true),
             DurationMs: 30_000, SampleRate: 44_100, Channels: 2, BitrateKbps: 1000,
             Artist: "Station Name", Album: null, Genre: null, Year: null));
         return this;

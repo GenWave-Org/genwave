@@ -12,7 +12,11 @@ namespace GenWave.Tts;
 /// flavored-copy attempt (<see cref="LlmCopyWriter.WriteAnnouncementAsync"/>) stamps this instead of
 /// <see cref="Copy"/>, so a <see cref="LlmCallCause.TruthGateReject"/> caused by a dropped announcement
 /// core is visible as its OWN lane on the F139 bench/cause surface, never folded into ordinary
-/// LeadIn/BackAnnounce copy noise.
+/// LeadIn/BackAnnounce copy noise. <see cref="AdScript"/> (SPEC F160.1, PLAN T400) is the SAME split
+/// again, one lane further: <see cref="AdScriptWriter"/>'s own completion calls (both its first attempt
+/// and its SPEC F160.3 one re-ask) stamp this, never <see cref="Copy"/>, so "why was there no new spot"
+/// answers from its own dedicated F139 lane exactly the way <see cref="Crosstalk"/> already does for
+/// "why was there no banter".
 /// </summary>
 public enum LlmCallKind
 {
@@ -24,4 +28,7 @@ public enum LlmCallKind
 
     /// <summary>An owner announcement's flavored-copy completion (<see cref="LlmCopyWriter.WriteAnnouncementAsync"/>, SPEC F144.3, PLAN T342).</summary>
     Announcement,
+
+    /// <summary>An ad spot script completion (<see cref="AdScriptWriter"/>, SPEC F160.1, PLAN T400).</summary>
+    AdScript,
 }

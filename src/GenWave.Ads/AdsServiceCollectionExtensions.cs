@@ -57,11 +57,34 @@ public static class AdsServiceCollectionExtensions
         // something it can enforce internally.
         services.AddSingleton<IAdSpotSource, LibraryAdSpotSource>();
 
+        // Registered as a singleton VALUE (not resolved as a service) so AdSpotPipeline's own factory
+        // just below and AdRenderService's DI-injected ctor param (SPEC F161.2, PLAN T401) share the
+        // SAME resolved roots rather than each re-reading IConfiguration independently.
         var locatorRoots = AdSpotLocatorRoots.FromConfiguration(configuration);
+        services.AddSingleton(locatorRoots);
+
         services.AddSingleton(sp => new AdSpotPipeline(
             sp.GetServices<IAdSpotSource>(),
             locatorRoots,
             sp.GetRequiredService<ILogger<AdSpotPipeline>>()));
+
+        // The render seam (SPEC F161.1-F161.3; STORY-391; PLAN T401) — a plain singleton with zero
+        // eager I/O in its constructor (Story125's zero-I/O invariant): every dependency here is
+        // itself a cheap seam (CastSegmentAuthor, the Core store/lookup/repository abstractions,
+        // options, a logger). AdSpotWorker (below) is this seam's one caller — it claims a spot via
+        // IAdSpotStore.ClaimNextApprovedAsync, then calls AdRenderService.RenderAsync with what it
+        // claimed.
+        services.AddSingleton<AdRenderService>();
+
+        // The off-air-clock tick loop + its stuck-rendering guardian (SPEC F159.3, F159.4, F161.1;
+        // STORY-389, STORY-391; PLAN T402) — both live in THIS project (unlike CrosstalkStockWorker/
+        // AnnouncementLifecycleGuardianService, which are GenWave.Host types registered from a
+        // Host-side extension method), so both self-register here rather than needing a matching
+        // Host-side wiring call. Every dependency either resolves within GenWave.Ads itself or through
+        // a Core seam a Host-side registration (elsewhere in Program.cs) satisfies — see
+        // IOnAirRenderSignal's own remarks for the one that closes the Host-layering gap.
+        services.AddHostedService<AdSpotWorker>();
+        services.AddHostedService<AdSpotLifecycleGuardianService>();
 
         // PLAN T397 — the drain seam: overrides AddGenWaveOrchestration's own
         // TryAddSingleton<IAdSpotVend>(NoOpAdSpotVend.Instance) default (the override-after-the-

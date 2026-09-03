@@ -2120,7 +2120,7 @@ sealed class MediaRepository(
               year_lookup_at,
               year_lookup_missed_at,
               enriched_at,
-              imaging_kind, show_id
+              imaging_kind, show_id, eligible
             ) values (
               @path, @format, @sizeBytes, @mtime, 'ready', @libraryId,
               @durationMs, @sampleRate, @channels, @bitrateKbps,
@@ -2132,7 +2132,7 @@ sealed class MediaRepository(
               now(),
               now(),
               now(),
-              @imagingKind, @showId
+              @imagingKind, @showId, @eligible
             )
             returning id
             """,
@@ -2170,8 +2170,31 @@ sealed class MediaRepository(
                 // null (the default) is station-wide. No FK, no validation here — see
                 // AuthoredMediaInsert.ShowId's own remarks.
                 showId = insert.ShowId,
+                // SPEC F161.3, STORY-391, PLAN T401 — defaults true (every pre-F161 caller lands
+                // immediately airable, unchanged); an ad-spot render passes false so the row cannot
+                // air until SetEligibleAsync below confirms the caller's own bookkeeping caught up
+                // (see that method's own remarks for the full two-round-trip ordering).
+                eligible = insert.Eligible,
             },
             cancellationToken: ct));
+    }
+
+    /// <summary>
+    /// <see cref="IAuthoredCatalogWriter.SetEligibleAsync"/> — sets <c>eligible</c> directly on the
+    /// row <paramref name="mediaId"/> names (widened at T401 review F7 to carry the value both
+    /// directions: the F161.3 authored-tail flip to true, and F159.3's own refresh-retire flip to
+    /// false). Unconditional on the row's CURRENT eligible value (no guarded FROM-state, unlike
+    /// <c>station.ad_spot</c>'s own transitions): this column carries no state machine of its own
+    /// here, so "set eligible to X" is the whole contract. Total: a <paramref name="mediaId"/>
+    /// matching no row returns <see langword="false"/>, never throws.
+    /// </summary>
+    public async Task<bool> SetEligibleAsync(long mediaId, bool eligible, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var affected = await conn.ExecuteAsync(new CommandDefinition(
+            "update library.media set eligible = @eligible where id = @mediaId",
+            new { mediaId, eligible }, cancellationToken: ct));
+        return affected == 1;
     }
 
     // ── Re-enrichment scheduling (IAdminMediaReenrichment — Epic J, STORY-051) ─────────────────────

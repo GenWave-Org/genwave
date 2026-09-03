@@ -827,6 +827,17 @@ public static class FeatureAdoptionVerifyRepair
             // cwd), and envFile lives in a WHOLLY SEPARATE scratch dir — the exact "GW_ENV_FILE
             // points outside the checkout" shape the wire ran under.
             var checkoutRoot = MakeScratchCheckout();
+
+            // PLAN T398's db/43 (the ad_spot CHECK constraints + index — no new table) reopens
+            // the SAME migration-marker gap gh-#486/T326 once did (see this fact's own remarks
+            // below): left in the scratch checkout, repo db/ max would outrun db/42's own marker
+            // again and the schema-migrations probe would degrade to UNKNOWN before ever reaching
+            // the stub. Deleted here for the identical reason the sibling
+            // ScenarioMigrationMarkerDerivation facts below delete their own perturbing files —
+            // this fact's own job is the env-file plumbing, not the migration-marker derivation
+            // itself, so it needs the gap CLOSED, not reopened.
+            File.Delete(Path.Combine(checkoutRoot, "db", "43-ad-spot-invariants-migration.sh"));
+
             var envFile = ScratchEnvPath();
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
 
@@ -863,7 +874,8 @@ public static class FeatureAdoptionVerifyRepair
             // service to check") is absent, and the PASS verdict names db/42 and its own marker
             // table (setup.sh's own verify_migrations wording) — it could only do that by
             // actually reaching and querying the stub through the env-file-carrying compose call
-            // this test exists to pin.
+            // this test exists to pin. (PLAN T398's db/43 — see this method's own deletion above
+            // — would otherwise reopen this exact gap.)
             Assert.True(
                 exitCode == 0 &&
                 stdOut.Contains("Schema is current through db/42 (station.ad_brief present)", StringComparison.Ordinal) &&
@@ -1385,18 +1397,23 @@ public static class FeatureAdoptionVerifyRepair
             // early UNKNOWN gap report BEFORE ever touching docker the moment that happens (B2's
             // own derivation, setup.sh's verify_migrations), which would have silently stopped
             // this fact from reaching the psql-as-role query it exists to prove at all. PLAN
-            // T389's db/42 (station.ad_brief) is this repo's current newest CREATE TABLE
-            // migration AND its own db/ max — so this fact no longer needs to perturb the scratch
-            // checkout to reach the real query (unlike ScenarioMigrationMarkerDerivation below,
-            // which deliberately reopens the gap in ITS own scratch db/ on purpose). Still runs
-            // from a scratch checkout (MakeScratchCheckout()) rather than the real repo root,
-            // purely so a future re-opening of this same gap (the next column/value-only
-            // migration to land past db/42) has a ready-made perturbation point here without
-            // disturbing any other fact. WriteRealDbCompose still reads db/01+db/06 from the REAL
+            // T389's db/42 (station.ad_brief) was this repo's newest CREATE TABLE migration AND
+            // its own db/ max for a while — the exact "no perturbation needed" window this
+            // comment used to describe — until PLAN T398's db/43 (the ad_spot CHECK constraints +
+            // index, no new table) reopened the SAME gap, exactly as this comment's own prior
+            // wording anticipated ("a future re-opening of this same gap... has a ready-made
+            // perturbation point here"): db/43 is now deleted from the scratch checkout below so
+            // this fact still reaches the real psql-as-role query it exists to prove, rather than
+            // short-circuiting to an UNKNOWN gap report before docker is ever touched (unlike
+            // ScenarioMigrationMarkerDerivation below, which deliberately REOPENS a gap in ITS own
+            // scratch db/ on purpose). WriteRealDbCompose still reads db/01+db/06 from the REAL
             // repo root — those files are unrelated to which migration is the marker (db/06 now
-            // also carries the fresh-init mirror of db/42's own station.ad_spot/ad_brief, so the
-            // real container this fact stands up actually has station.ad_brief present too).
+            // also carries the fresh-init mirror of db/42's own station.ad_spot/ad_brief AND
+            // db/43's own CHECK constraints/index, so the real container this fact stands up
+            // actually has station.ad_brief present too, regardless of db/43's own deletion here
+            // from the SCRATCH checkout's db/ directory only).
             var checkoutRoot = MakeScratchCheckout();
+            File.Delete(Path.Combine(checkoutRoot, "db", "43-ad-spot-invariants-migration.sh"));
 
             var repoRoot = RepoRoot();
             var projectName = $"genwave-hosttest-story346-{Guid.NewGuid():N}";
@@ -1447,17 +1464,19 @@ public static class FeatureAdoptionVerifyRepair
             // marker (both the migration number AND the artifact checked) — never left pointing
             // at db/37's own station.station_image once a newer table-creating migration exists.
             // PLAN T326's real db/39 (no new table), PLAN T337's real db/40 (station.announcement),
-            // PLAN T354's real db/41 (library.file_action), AND PLAN T389's real db/42
-            // (station.ad_brief — this repo's OWN current real marker, MakeScratchCheckout's own
-            // verbatim copy) all deleted back out — left in place, db/41 or db/42 (each a
-            // genuine, higher-numbered CREATE TABLE) would itself remain the derived marker and
-            // this fact's own scratch db/38 could never become it at all, for migration numbers
-            // this fact never claims anything about.
+            // PLAN T354's real db/41 (library.file_action), PLAN T389's real db/42
+            // (station.ad_brief — this repo's own real marker for a while), AND PLAN T398's real
+            // db/43 (the ad_spot CHECK constraints + index, no new table — this repo's CURRENT
+            // real db/ max, MakeScratchCheckout's own verbatim copy) all deleted back out — left
+            // in place, db/41, db/42, or db/43 (each higher-numbered than this fact's own scratch
+            // db/38) would either become the derived marker itself or widen the "no new table"
+            // gap this fact never claims anything about.
             var checkoutRoot = MakeScratchCheckout();
             File.Delete(Path.Combine(checkoutRoot, "db", "39-time-announcement-budget-migration.sh"));
             File.Delete(Path.Combine(checkoutRoot, "db", "40-announcements-migration.sh"));
             File.Delete(Path.Combine(checkoutRoot, "db", "41-gardener-migration.sh"));
             File.Delete(Path.Combine(checkoutRoot, "db", "42-ads-migration.sh"));
+            File.Delete(Path.Combine(checkoutRoot, "db", "43-ad-spot-invariants-migration.sh"));
             File.WriteAllText(Path.Combine(checkoutRoot, "db", "38-scratch-migration.sh"),
                 "create table if not exists station.new_thing (id serial primary key);\n");
 
@@ -1483,17 +1502,20 @@ public static class FeatureAdoptionVerifyRepair
             // constant) must never claim "current through db/38" — honest UNKNOWN instead, even
             // though db/37's own marker table is present and would otherwise report PASS. PLAN
             // T326's real db/39 (no new table), PLAN T337's real db/40 (station.announcement),
-            // PLAN T354's real db/41 (library.file_action), AND PLAN T389's real db/42
-            // (station.ad_brief — every one a genuine table-creating migration) all deleted back
-            // out for the same reason the sibling fact above deletes them — left in place, db/41
-            // or db/42 alone would become the real derived marker instead of db/37, and this
-            // fact's own "db/38 adds no new table" (singular, one-file range) assertion needs the
-            // gap to stay exactly one file wide.
+            // PLAN T354's real db/41 (library.file_action), PLAN T389's real db/42
+            // (station.ad_brief), AND PLAN T398's real db/43 (the ad_spot CHECK constraints +
+            // index, no new table — every table-creating one of these a genuine higher-numbered
+            // migration, db/43 itself a genuine higher-numbered no-table one) all deleted back out
+            // for the same reason the sibling fact above deletes them — left in place, db/41 or
+            // db/42 would become the real derived marker instead of db/37, and db/43 would widen
+            // this fact's own "db/38 adds no new table" (singular, one-file range) assertion,
+            // which needs the gap to stay exactly one file wide.
             var checkoutRoot = MakeScratchCheckout();
             File.Delete(Path.Combine(checkoutRoot, "db", "39-time-announcement-budget-migration.sh"));
             File.Delete(Path.Combine(checkoutRoot, "db", "40-announcements-migration.sh"));
             File.Delete(Path.Combine(checkoutRoot, "db", "41-gardener-migration.sh"));
             File.Delete(Path.Combine(checkoutRoot, "db", "42-ads-migration.sh"));
+            File.Delete(Path.Combine(checkoutRoot, "db", "43-ad-spot-invariants-migration.sh"));
             File.WriteAllText(Path.Combine(checkoutRoot, "db", "38-scratch-migration.sh"),
                 "alter table station.station_image add column if not exists caption text;\n");
 

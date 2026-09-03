@@ -95,6 +95,16 @@ file sealed class NeverCalledCueAnalyzer : ICueAnalyzer
     public Task<CuePoints?> AnalyzeAsync(string path, CancellationToken ct) => throw new NotSupportedException();
 }
 
+/// <summary>The two-voice crosstalk path (<see cref="CrosstalkAssembler.AssembleAsync"/>, this
+/// harness's own subject) never touches <see cref="IAudioMixer"/> at all — only the widened cast path
+/// (Story391, <c>AssembleCastAsync</c>) does — so this satisfies the constructor without ever being
+/// called, the <see cref="NeverCalledLoudnessAnalyzer"/>/<see cref="NeverCalledCueAnalyzer"/> idiom
+/// immediately above.</summary>
+file sealed class NeverCalledAudioMixer : IAudioMixer
+{
+    public Task MixAsync(AudioMixRequest request, CancellationToken ct) => throw new NotSupportedException();
+}
+
 /// <summary>
 /// Builds a REAL <see cref="CrosstalkStockWorker"/> — real <see cref="CrosstalkPlanner"/>/
 /// <see cref="CrosstalkScriptWriter"/>/<see cref="CrosstalkAssembler"/>/<see cref="CachingScheduleResolver"/>/
@@ -250,6 +260,7 @@ internal static class CrosstalkWorkerHarness
                 NullLogger<PronunciationRuleProvider>.Instance),
             new NeverCalledLoudnessAnalyzer(),
             new NeverCalledCueAnalyzer(),
+            new NeverCalledAudioMixer(),
             ttsOptions,
             new FakeOptionsMonitor<CrosstalkOptions>(new CrosstalkOptions()),
             NullLogger<CrosstalkAssembler>.Instance);

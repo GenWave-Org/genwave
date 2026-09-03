@@ -63,9 +63,9 @@ internal static class HttpClientSeams
     ///
     /// One entry per production type this suite's detector finds depending on the
     /// <see cref="ForbiddenTypes"/> family: TTS/LLM (typed-client injection; Kokoro/Piper/Ollama
-    /// synthesis, voice listing, health probes, LLM copywriting, PLAN T282's crosstalk script
-    /// writing — it reuses <c>LlmCopyWriter</c>'s own named client rather than minting a second one,
-    /// same shape as <c>LlmWishParser</c> below) plus its composition root
+    /// synthesis, voice listing, health probes, LLM copywriting, PLAN T282's crosstalk script writing,
+    /// and PLAN T400's ad-script writing — the latter two each reuse <c>LlmCopyWriter</c>'s own named
+    /// client rather than minting a second one, same shape as <c>LlmWishParser</c> below) plus its composition root
     /// (<c>TtsServiceCollectionExtensions</c>, whose <c>AddHttpClient&lt;T&gt;</c> calls are the
     /// construction site the DI container itself never exposes); MediaLibrary's Ollama
     /// mood/explicit enrichment and MusicBrainz year lookup (same shape) plus its composition root
@@ -98,6 +98,12 @@ internal static class HttpClientSeams
         "GenWave.Tts.OllamaHealthProbe",
         "GenWave.Tts.LlmCopyWriter",
         "GenWave.Tts.CrosstalkScriptWriter",
+        // PLAN T400's ad-script writer (SPEC F160.1) — the SAME "own authoring flow, own completion
+        // call" shape CrosstalkScriptWriter established immediately above (never ISegmentCopyWriter);
+        // it reuses LlmCopyWriter's own named client (HttpClientName) rather than minting a second
+        // one, but the type ITSELF still directly asks IHttpClientFactory for a working client, so it
+        // is its own designated seam, exactly like CrosstalkScriptWriter is.
+        "GenWave.Tts.AdScriptWriter",
         "GenWave.Tts.TtsServiceCollectionExtensions",
 
         // MediaLibrary enrichment (Ollama mood/explicit, MusicBrainz year lookup).

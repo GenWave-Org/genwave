@@ -78,6 +78,7 @@ public sealed class CrosstalkAssembler(
     PronunciationRuleProvider pronunciations,
     ILoudnessAnalyzer loudnessAnalyzer,
     ICueAnalyzer cueAnalyzer,
+    IAudioMixer mixer,
     IOptionsMonitor<TtsOptions> ttsOptions,
     IOptionsMonitor<CrosstalkOptions> crosstalkOptions,
     ILogger<CrosstalkAssembler> logger)
@@ -131,11 +132,15 @@ public sealed class CrosstalkAssembler(
         var lineFiles = new List<string>(script.Lines.Count);
         try
         {
-            var renderFailure = await RenderLinesAsync(script, request.HostCard, request.NeighborCard, lineFiles, ct);
+            var renderLines = script.Lines
+                .Select(line => (line.Speaker.ToString(), BuildCardContext(line, request.HostCard, request.NeighborCard)))
+                .ToList();
+            var renderFailure = await RenderLinesAsync(renderLines, lineFiles, "Crosstalk exchange", ct);
             if (renderFailure is not null)
                 return renderFailure;
 
-            await MixAsync(lineFiles, script.Lines, CrosstalkTimeline.ComputeSeed(script), outputPath, ct);
+            var isInterjections = script.Lines.Select(line => line.IsInterjection).ToArray();
+            await MixAsync(lineFiles, isInterjections, CrosstalkTimeline.ComputeSeed(script), outputPath, ct);
 
             var estimatedSeconds = script.Lines.Sum(line => line.Text.Length) / CrosstalkScriptParser.CharsPerSecond;
             var actualSeconds = await FfmpegProcess.ProbeDurationSecondsAsync(outputPath, ct);
@@ -144,7 +149,7 @@ public sealed class CrosstalkAssembler(
             if (CeilingViolationReason(actualSeconds, estimatedSeconds, targetSeconds) is { } ceilingReason)
             {
                 DeleteIfExists(outputPath);
-                return Discard(ceilingReason, lineFiles);
+                return Discard(ceilingReason, lineFiles, "Crosstalk exchange");
             }
 
             var (loudness, cue, durationMs) = await MeasureAssembledAsync(outputPath, ct);
@@ -168,30 +173,156 @@ public sealed class CrosstalkAssembler(
     }
 
     /// <summary>
-    /// Renders every line of <paramref name="script"/> in order, appending each successful render's
+    /// The widened sibling of <see cref="AssembleAsync"/> (SPEC F161.2, F161.3; STORY-391; PLAN T401):
+    /// a 1-3 voice cast (bare <see cref="VoiceSpec"/>s, never persona cards) instead of a fixed
+    /// two-persona-card crosstalk exchange, a caller-supplied duration ceiling instead of
+    /// <see cref="CrosstalkOptions.DurationTargetSeconds"/>, and an optional bed mixed in via the
+    /// existing <see cref="GenWave.Core.Abstractions.IAudioMixer"/> seam. Reuses every timeline/mix/
+    /// measure internal <see cref="AssembleAsync"/> itself uses (<see cref="RenderLinesAsync"/>,
+    /// <see cref="MixAsync"/>, <see cref="MeasureAssembledAsync"/>, <see cref="Discard"/>) — widened,
+    /// never forked; <see cref="AssembleAsync"/>'s own two-voice path is untouched by this method's
+    /// existence.
+    ///
+    /// <para>
+    /// <b>Pipeline:</b> render every line (F99's "the whole cast or nobody" — any one line's render
+    /// failure discards everything rendered so far); mix the cast onto one shared timeline exactly
+    /// like a crosstalk exchange (<c>adelay</c>/<c>amix</c>/<c>alimiter</c>, ad copy never carries an
+    /// interjection so every transition is an "ordinary line" gap); pass that raw mix through
+    /// <see cref="mixer"/> ONCE MORE — even with no <see cref="CastAssemblyRequest.Bed"/> — so brand
+    /// tags land in the file exactly like <c>SafeSegmentAuthor</c>'s own "voice-only still goes
+    /// through the mixer once" posture (tag-embedding stays in exactly one place, F161.3); measure the
+    /// ceiling against the FINAL (bed-included) artifact's real, ffprobe'd duration — never the
+    /// pre-bed raw mix, since <see cref="CastAssemblyRequest.BedPadSeconds"/> padding can itself push
+    /// the final artifact past the ceiling; measure loudness/cue on that same final artifact.
+    /// </para>
+    /// </summary>
+    public async Task<CrosstalkAssemblyResult> AssembleCastAsync(CastAssemblyRequest request, CancellationToken ct)
+    {
+        ValidateCastRequest(request);
+
+        var cfg = ttsOptions.CurrentValue;
+        Directory.CreateDirectory(request.OutputDirectory);
+        var rawMixPath = Path.Combine(request.OutputDirectory, $"{Guid.NewGuid():N}.raw.{cfg.Format}");
+        var finalPath = Path.Combine(request.OutputDirectory, $"{Guid.NewGuid():N}.{cfg.Format}");
+
+        var castByTag = request.Cast.ToDictionary(member => member.Tag, member => member.Voice, StringComparer.Ordinal);
+        var renderLines = request.Lines
+            .Select(line => (line.Tag, BuildCastContext(line, castByTag[line.Tag])))
+            .ToList();
+
+        var lineFiles = new List<string>(request.Lines.Count);
+        try
+        {
+            var renderFailure = await RenderLinesAsync(renderLines, lineFiles, "Cast segment", ct);
+            if (renderFailure is not null)
+                return renderFailure;
+
+            // Ad copy never overlaps two voices (see CastLine's own remarks) — every transition is
+            // an "ordinary line" gap, the same shape MixAsync already computes for crosstalk's own
+            // non-interjecting lines.
+            var isInterjections = new bool[lineFiles.Count];
+            await MixAsync(lineFiles, isInterjections, CrosstalkTimeline.ComputeSeed(request.Lines), rawMixPath, ct);
+
+            await mixer.MixAsync(
+                new AudioMixRequest(rawMixPath, request.Bed, request.Tags, request.BedDuckDb, request.BedPadSeconds, finalPath),
+                ct);
+            DeleteIfExists(rawMixPath);
+
+            var actualSeconds = await FfmpegProcess.ProbeDurationSecondsAsync(finalPath, ct);
+            if (CastCeilingViolationReason(actualSeconds, request.CeilingSeconds) is { } ceilingReason)
+            {
+                DeleteIfExists(finalPath);
+                return Discard(ceilingReason, lineFiles, "Cast segment");
+            }
+
+            var (loudness, cue, durationMs) = await MeasureAssembledAsync(finalPath, ct);
+            DeleteAll(lineFiles);
+
+            return new CrosstalkAssemblyResult.Assembled(finalPath, loudness, cue, durationMs);
+        }
+        catch (Exception)
+        {
+            // Mirrors AssembleAsync's own identical posture (see its remarks) — ANY exception past
+            // this point leaves no per-line render, no raw pre-bed mix, and no final artifact behind.
+            DeleteAll(lineFiles);
+            DeleteIfExists(rawMixPath);
+            DeleteIfExists(finalPath);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Fail-fast validation for <see cref="AssembleCastAsync"/> (the <see cref="AssembleAsync"/>
+    /// T284 review F7 precedent: <see cref="CastAssemblyRequest"/> is a public, unvalidated record) —
+    /// before any render, mix, or ffmpeg call. SPEC F160.3's own format rule already guarantees 1-3
+    /// distinct tags with an accepted script; this is the defensive backstop for a caller that hands
+    /// this method a request bypassing that rule.
+    /// </summary>
+    static void ValidateCastRequest(CastAssemblyRequest request)
+    {
+        if (request.Lines.Count < 1)
+        {
+            throw new ArgumentException(
+                "A voice-cast assembly needs at least 1 line to render.", nameof(request));
+        }
+
+        if (request.Cast.Count is < 1 or > 3)
+        {
+            throw new ArgumentException(
+                $"A voice cast must carry 1-3 members; got {request.Cast.Count}.", nameof(request));
+        }
+
+        var castTags = request.Cast.Select(member => member.Tag).ToList();
+        if (castTags.Distinct(StringComparer.Ordinal).Count() != castTags.Count)
+            throw new ArgumentException("Cast tags must be distinct.", nameof(request));
+
+        var castTagSet = new HashSet<string>(castTags, StringComparer.Ordinal);
+        var missing = request.Lines.FirstOrDefault(line => !castTagSet.Contains(line.Tag));
+        if (missing is not null)
+        {
+            throw new ArgumentException(
+                $"Line tag \"{missing.Tag}\" has no matching cast member.", nameof(request));
+        }
+    }
+
+    /// <summary>
+    /// <see langword="null"/> when <paramref name="actualSeconds"/> is within
+    /// <paramref name="ceilingSeconds"/>; otherwise the one discard reason naming the ceiling
+    /// (SPEC F161.2's own "over-ceiling → discard + failed, fail_reason names the ceiling" — the
+    /// <see cref="CeilingViolationReason"/> sibling above's own text, without a global
+    /// <see cref="CrosstalkOptions"/> target to also report — <paramref name="ceilingSeconds"/> here
+    /// is already the caller's whole, final number).
+    /// </summary>
+    static string? CastCeilingViolationReason(double actualSeconds, double ceilingSeconds)
+    {
+        if (actualSeconds <= ceilingSeconds)
+            return null;
+
+        return
+            $"assembled duration {actualSeconds:F1}s exceeds the {ceilingSeconds:F1}s ceiling " +
+            "— the estimate lied";
+    }
+
+    /// <summary>
+    /// Renders every entry of <paramref name="lines"/> in order, appending each successful render's
     /// path to <paramref name="lineFiles"/> (T284 review F10 — split out of <see cref="AssembleAsync"/>
     /// so that method's own three concerns — render, ceiling, measure — read as three paragraphs, not
-    /// one). Returns a <see cref="CrosstalkAssemblyResult.Discarded"/> the instant any one line fails
-    /// the F99 right-voice bar (SPEC F127.5's "both voices or nobody" — see the class remarks); returns
-    /// <see langword="null"/> once every line has rendered.
+    /// one). Shared by BOTH the two-voice crosstalk path (SPEC F127.5's "both voices or nobody") and
+    /// the widened voice-cast path (SPEC F161.2, STORY-391, PLAN T401 — "the whole cast or nobody",
+    /// the identical posture one level up) — reused, not forked: each caller resolves its own
+    /// per-line <see cref="TtsRenderContext"/> up front (<see cref="BuildCardContext"/> for a cast
+    /// card, <see cref="BuildCastContext"/> for a bare <see cref="VoiceSpec"/>) and hands this method
+    /// only the already-resolved (label, context) pairs it needs to actually render and discard on
+    /// failure. Returns a <see cref="CrosstalkAssemblyResult.Discarded"/> the instant any one line
+    /// fails the F99 right-voice bar; returns <see langword="null"/> once every line has rendered.
     /// </summary>
     async Task<CrosstalkAssemblyResult.Discarded?> RenderLinesAsync(
-        CrosstalkAiredScript script, PersonaCard hostCard, PersonaCard neighborCard, List<string> lineFiles, CancellationToken ct)
+        IReadOnlyList<(string Label, TtsRenderContext Context)> lines, List<string> lineFiles, string subject,
+        CancellationToken ct)
     {
-        for (var i = 0; i < script.Lines.Count; i++)
+        for (var i = 0; i < lines.Count; i++)
         {
-            var line = script.Lines[i];
-            var card = line.Speaker == CrosstalkSpeaker.Host ? hostCard : neighborCard;
-
-            // SPEC F127.5: this line's OWN speaker's resolved rules/pace — the resolver seam
-            // (see the class remarks for law L8's actual scope), never the ambient active-persona
-            // caches (see class remarks).
-            var contextRules = PronunciationRuleResolver.ResolveForRender(pronunciations.Current, ToCardRules(card));
-            var context = new TtsRenderContext(line.Text, card.Voice.VoiceId, SegmentKind.Crosstalk)
-            {
-                Rules = contextRules,
-                Pace = TtsPace.Clamp(card.Voice.Pace),
-            };
+            var (label, context) = lines[i];
 
             string linePath;
             try
@@ -204,20 +335,71 @@ public sealed class CrosstalkAssembler(
             }
             catch (Exception ex)
             {
-                // SPEC F127.5: F99's right-voice bar failing on ANY one line discards the WHOLE
-                // exchange — no single-voice salvage. Every line rendered so far is cleaned up
+                // SPEC F127.5/F161.2: F99's right-voice bar failing on ANY one line discards the
+                // WHOLE exchange — no single-voice salvage. Every line rendered so far is cleaned up
                 // before returning. The render exception itself rides along into the discard log
                 // (T284 review F8) so a 503, a timeout, and an outright bad-voice rejection each
                 // leave a distinguishable trace, not just this one collapsed type name.
                 return Discard(
-                    $"{line.Speaker} line {i + 1} of {script.Lines.Count} failed to render ({ex.GetType().Name})",
-                    lineFiles, ex);
+                    $"{label} line {i + 1} of {lines.Count} failed to render ({ex.GetType().Name})",
+                    lineFiles, subject, ex);
             }
 
             lineFiles.Add(linePath);
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Resolves a crosstalk line's <see cref="TtsRenderContext"/> from its cast card (SPEC F127.5) —
+    /// exactly the logic <see cref="RenderLinesAsync"/> used to inline before it was widened to share
+    /// with the cast path (see that method's own remarks); byte-identical behavior, just relocated so
+    /// it can be built once, up front, for every line before rendering starts.
+    /// </summary>
+    TtsRenderContext BuildCardContext(CrosstalkAiredLine line, PersonaCard hostCard, PersonaCard neighborCard)
+    {
+        var card = line.Speaker == CrosstalkSpeaker.Host ? hostCard : neighborCard;
+
+        // SPEC F127.5: this line's OWN speaker's resolved rules/pace — the resolver seam (see the
+        // class remarks for law L8's actual scope), never the ambient active-persona caches (see
+        // class remarks).
+        var contextRules = PronunciationRuleResolver.ResolveForRender(pronunciations.Current, ToCardRules(card));
+        return new TtsRenderContext(line.Text, card.Voice.VoiceId, SegmentKind.Crosstalk)
+        {
+            Rules = contextRules,
+            Pace = TtsPace.Clamp(card.Voice.Pace),
+        };
+    }
+
+    /// <summary>
+    /// Resolves a cast line's <see cref="TtsRenderContext"/> from its bare <see cref="VoiceSpec"/>
+    /// (SPEC F161.2's own rider, PLAN T401 design note). A cast render has no persona card at all —
+    /// ad voices are actors, not the station's DJs — so pronunciation rules resolve from the STATION
+    /// layer alone, empty card layer, no candidates: <c>SafeSegmentAuthor</c>'s own precedent one
+    /// project-internal seam over (see that class's remarks), never <see cref="BuildCardContext"/>'s
+    /// card-cast merge, which has no card here to merge from.
+    ///
+    /// <para>
+    /// <see cref="TtsRenderContext.IsAudition"/> = <see langword="true"/>, mirroring
+    /// <c>SafeSegmentAuthor</c>'s own posture, not crosstalk's: this render produces a REPLAYED
+    /// artifact (an ad spot airs many times after one render), not an on-air moment in itself — the
+    /// same "authoring is not airing" reasoning <see cref="TtsRenderContext.IsAudition"/>'s own
+    /// remarks state, extended here from safe segments to cast segments. Crosstalk's own
+    /// <see cref="BuildCardContext"/> never sets it because a crosstalk exchange airs exactly once,
+    /// immediately — its render genuinely IS the on-air moment.
+    /// </para>
+    /// </summary>
+    TtsRenderContext BuildCastContext(CastLine line, VoiceSpec voice)
+    {
+        var contextRules = PronunciationRuleResolver.ResolveForRender(
+            pronunciations.Current, cardRules: [], candidates: null);
+        return new TtsRenderContext(line.Text, voice.VoiceId, SegmentKind.Ad)
+        {
+            Rules = contextRules,
+            Pace = TtsPace.Clamp(voice.Pace),
+            IsAudition = true,
+        };
     }
 
     /// <summary>
@@ -268,15 +450,20 @@ public sealed class CrosstalkAssembler(
     /// rides along as the log entry's exception object (T284 review F8) — SPEC F127.5's "both voices
     /// or nobody" discard would otherwise read identically whether the underlying fault was a 503, a
     /// timeout, or an outright bad-voice rejection; the ceiling-exceeded discard has no such cause
-    /// and passes none.
+    /// and passes none. <paramref name="subject"/> is REQUIRED (T401 review F10 — no silent default to
+    /// drift out of sync): every <see cref="AssembleAsync"/> call site names "Crosstalk exchange"
+    /// explicitly, so <see cref="AssembleCastAsync"/>'s own calls (SPEC F161.2, PLAN T401) can name
+    /// what actually discarded ("Cast segment") instead of misreporting an ad render as a two-persona
+    /// exchange it never was.
     /// </summary>
-    CrosstalkAssemblyResult.Discarded Discard(string reason, IReadOnlyList<string> lineFiles, Exception? cause = null)
+    CrosstalkAssemblyResult.Discarded Discard(
+        string reason, IReadOnlyList<string> lineFiles, string subject, Exception? cause = null)
     {
         DeleteAll(lineFiles);
         if (cause is not null)
-            logger.LogInformation(cause, "Crosstalk exchange discarded: {Reason}", LogSanitize.Strip(reason));
+            logger.LogInformation(cause, "{Subject} discarded: {Reason}", subject, LogSanitize.Strip(reason));
         else
-            logger.LogInformation("Crosstalk exchange discarded: {Reason}", LogSanitize.Strip(reason));
+            logger.LogInformation("{Subject} discarded: {Reason}", subject, LogSanitize.Strip(reason));
 
         return new CrosstalkAssemblyResult.Discarded(reason);
     }
@@ -332,7 +519,7 @@ public sealed class CrosstalkAssembler(
     /// </para>
     /// </summary>
     static async Task MixAsync(
-        IReadOnlyList<string> lineFiles, IReadOnlyList<CrosstalkAiredLine> lines, int seed, string outputPath, CancellationToken ct)
+        IReadOnlyList<string> lineFiles, IReadOnlyList<bool> isInterjections, int seed, string outputPath, CancellationToken ct)
     {
         var gaps = CrosstalkTimeline.ComputeGapsSeconds(lineFiles.Count - 1, seed);
         var starts = new double[lineFiles.Count];
@@ -340,7 +527,7 @@ public sealed class CrosstalkAssembler(
         {
             var previousDuration = await FfmpegProcess.ProbeDurationSecondsAsync(lineFiles[i - 1], ct);
             var previousEnd = starts[i - 1] + previousDuration;
-            starts[i] = CrosstalkTimeline.ComputeLineStartSeconds(previousEnd, lines[i].IsInterjection, gaps[i - 1]);
+            starts[i] = CrosstalkTimeline.ComputeLineStartSeconds(previousEnd, isInterjections[i], gaps[i - 1]);
         }
 
         var filterStages = new List<string>();
