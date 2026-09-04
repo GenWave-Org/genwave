@@ -12,6 +12,17 @@ updates:
     schedule:
       interval: weekly
     labels: [dependencies]
+    # The jest family is one release train: every jest package pins its siblings to the exact
+    # same version (@jest/globals 30.5.1 demands @jest/expect 30.5.1), so a single-package bump
+    # nests a second copy of the family under the bumped package and the spec typecheck loses
+    # the jest-dom matcher augmentation (PR #682, 2026-09-04; the same rule bit the 29→30 move).
+    # One grouped PR per train instead. ts-jest rides its own 29.x cadence and stays out.
+    groups:
+      jest:
+        patterns:
+          - "jest"
+          - "@jest/*"
+          - "jest-environment-*"
   - package-ecosystem: github-actions
     directory: /
     schedule:
