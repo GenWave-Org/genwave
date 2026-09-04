@@ -272,8 +272,10 @@ public sealed class ReporterNeverBlocksArc : IAsyncLifetime
         faultStopwatch.Stop();
         FaultDeclineElapsed = faultStopwatch.Elapsed;
 
-        // The throw happens on a discarded background task, off this method's own call stack — poll
-        // for the SPECIFIC reporter-failure WARN it must produce (T373 review LOW-3: not "any WARN"
+        // The throw happens on a discarded background task, off this method's own call stack (the
+        // scripted reporter yields before it throws — see ThrowsForOneMediaId for why that matters
+        // to the stopwatch above) — poll for the SPECIFIC reporter-failure WARN it must produce
+        // (T373 review LOW-3: not "any WARN"
         // — the guard's own "Declined push of..." WARN fires synchronously on every one of the
         // three pushes above and would satisfy a bare Count > 0 well before the background reporter
         // task ever runs, undercutting this very wait).
@@ -381,9 +383,27 @@ file static class PushGuardPolling
 /// </summary>
 file sealed class ThrowsForOneMediaId(long throwsForMediaId) : IDeadFileReporter
 {
-    public Task ReportMissingAsync(long mediaId, CancellationToken ct) => mediaId == throwsForMediaId
-        ? throw new InvalidOperationException("simulated dead-file report failure (STORY-375 AC4)")
-        : Task.CompletedTask;
+    public async Task ReportMissingAsync(long mediaId, CancellationToken ct)
+    {
+        // Yield FIRST, on EVERY call, then throw only for the fault id. The guard's
+        // BeginReportMissing invokes its report method directly (no Task.Run), so an async method
+        // runs synchronously up to its first incomplete await — a reporter that throws BEFORE
+        // yielding puts the throw, the catch, and the exception-carrying WARN on the push's own
+        // stack, inside AC4's stopwatch. The console logger formats that exception's stack trace on
+        // the calling thread, and the FIRST such format in a test process costs ~20-25ms cold
+        // (2026-09-04 CI: 24.5ms against a ~21ms budget, whenever xUnit's parallel ordering makes
+        // this arc the first to log an exception). Yielding here makes the arc's own claim true:
+        // the failure surfaces on a discarded background task, off the push's stack, and the timing
+        // assertion measures only what F153.4 actually promises. Yielding on the no-op ids too
+        // keeps the baseline the same shape as the fault (the real DeadFileReporter yields at its
+        // first Npgsql I/O as well) and lets the arc's warmup push pay the first thread-pool hop
+        // instead of the timed fault push.
+        await Task.Yield();
+        if (mediaId == throwsForMediaId)
+        {
+            throw new InvalidOperationException("simulated dead-file report failure (STORY-375 AC4)");
+        }
+    }
 }
 
 /// <summary>Captures every Warning+ log entry's message text — the Story164_FailClosedWithoutPassword.cs/
