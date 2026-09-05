@@ -40,6 +40,11 @@ sealed class MockCompletionsServer : IAsyncDisposable
     /// <summary>Completion text served in <see cref="MockCompletionsMode.Serve"/>/<see cref="MockCompletionsMode.Delay"/>.</summary>
     public volatile string ReplyContent = "Great tune coming up, stay tuned.";
 
+    /// <summary>Milliseconds to wait before serving in <see cref="MockCompletionsMode.Serve"/> — a SLOW
+    /// success, distinct from <see cref="MockCompletionsMode.Delay"/>'s never-answers hang (gh-#696: the
+    /// per-attempt timeout budget spec needs a backend that answers, just late).</summary>
+    public volatile int ServeDelayMs;
+
     /// <summary>
     /// <c>finish_reason</c> served alongside <see cref="ReplyContent"/> (SPEC F127.4, F127.11,
     /// PLAN T282) — the OpenAI/ollama-compatible per-choice field (see
@@ -121,6 +126,8 @@ sealed class MockCompletionsServer : IAsyncDisposable
 
                 case MockCompletionsMode.Serve:
                 default:
+                    if (server.ServeDelayMs > 0)
+                        await Task.Delay(server.ServeDelayMs, ctx.RequestAborted);
                     await WriteReplyAsync(ctx, server.ReplyContent, server.ReplyFinishReason, server.ReplyReasoning);
                     return;
             }

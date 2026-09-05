@@ -340,4 +340,137 @@ public static class FeatureAdScriptWriter
             Assert.Equal(2, mock.RequestCount);
         }
     }
+
+    public sealed class ScenarioThePromptNamesRealVoicesNeverAPlaceholder
+    {
+        [Fact]
+        public async Task TheSystemPromptSpellsTheExampleWithTheRealTags()
+        {
+            // gh-#696: "TAG: <line>" was copied verbatim by the reference model; the crosstalk shape
+            // (real tag names inside the quoted example) is what survives a 3B model.
+            await using var mock = await MockCompletionsServer.StartAsync();
+            mock.ReplyContent = "ANNOUNCER: Cravin's Diner, open late. Call 555-0142.";
+            var writer = BuildWriter(mock.BaseUri.ToString());
+
+            await writer.WriteAsync(Request(), AlwaysAccepts(), CancellationToken.None);
+
+            var systemPrompt = ExtractSystemPrompt(mock.Requests[0].Body);
+            Assert.Contains("\"ANNOUNCER: <line>\"", systemPrompt, StringComparison.Ordinal);
+            Assert.Contains("\"VOICE1: <line>\"", systemPrompt, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"TAG:", systemPrompt, StringComparison.Ordinal);
+            Assert.Contains("never a beat name", systemPrompt, StringComparison.Ordinal);
+            Assert.Contains("ANNOUNCER MUST speak at least one line", systemPrompt, StringComparison.Ordinal);
+        }
+    }
+
+    public sealed class ScenarioTheRawReplyIsNormalisedBeforeTheValidator
+    {
+        // gh-#696: the reference model's shape quirks, each folded deterministically BEFORE the
+        // fail-closed validator sees the script (the LLM path only — owner text stays verbatim).
+
+        [Fact]
+        public void AWellFormedScriptPassesThroughByteForByte()
+        {
+            const string script = "ANNOUNCER: Cravin's Diner, open late.\nVOICE1: Call 555-0142 today.";
+            Assert.Equal(script, AdScriptWriter.ApplyLineAwareHygiene(script));
+        }
+
+        [Fact]
+        public void WrappingQuotesAndTheLiteralTagPlaceholderFoldToTheAnnouncer()
+        {
+            // The demo's own first failure: every line wrapped in quotes, tagged with the prompt's literal TAG.
+            var raw = "\"TAG: Imagine a personal chef at your beck and call.\"\n\"TAG: Book now: 555-0142\"";
+            Assert.Equal(
+                "ANNOUNCER: Imagine a personal chef at your beck and call.\nANNOUNCER: Book now: 555-0142",
+                AdScriptWriter.ApplyLineAwareHygiene(raw));
+        }
+
+        [Fact]
+        public void TagCaseSpacingApostrophesAndParentheticalsFold()
+        {
+            var raw = "Announcer: One.\nVOICE 1: Two.\nPRUETT'S: Three.\nLARRY (YELLING): Four.";
+            Assert.Equal(
+                "ANNOUNCER: One.\nVOICE1: Two.\nPRUETTS: Three.\nLARRY: Four.",
+                AdScriptWriter.ApplyLineAwareHygiene(raw));
+        }
+
+        [Fact]
+        public void ABeatLabelUsedAsTheSpeakerIsTheAnnouncer()
+        {
+            var raw = "HOOK: Tired of the same old lawn?\nTagline: Hushabye. Sleep through the mowing.\nCTA: Call 555-0142.";
+            Assert.Equal(
+                "ANNOUNCER: Tired of the same old lawn?\nANNOUNCER: Hushabye. Sleep through the mowing.\nANNOUNCER: Call 555-0142.",
+                AdScriptWriter.ApplyLineAwareHygiene(raw));
+        }
+
+        [Fact]
+        public void UntaggedLinesJoinThePreviousVoiceAndFillABareTag()
+        {
+            var raw = "ANNOUNCER:\nHello there.\nVOICE1: Hi.\nAnd welcome back.";
+            Assert.Equal(
+                "ANNOUNCER: Hello there.\nVOICE1: Hi. And welcome back.",
+                AdScriptWriter.ApplyLineAwareHygiene(raw));
+        }
+
+        [Fact]
+        public void TitlesDirectionsHeadersAndBulletsAreNotSpoken()
+        {
+            var raw = "Lumbago Larry's Discount Mattress Barn - 30 second spot\n# Script\n[Upbeat music]\n- ANNOUNCER: Final sale!\n(sound of a mattress)\n* VOICE1: Ninth year running.";
+            Assert.Equal(
+                "ANNOUNCER: Final sale!\nVOICE1: Ninth year running.",
+                AdScriptWriter.ApplyLineAwareHygiene(raw));
+        }
+
+        [Fact]
+        public void WhenNobodyIsTheAnnouncerTheLeadVoiceIs()
+        {
+            var raw = "NARRATOR: One.\nLARRY: Two.\nNARRATOR: Three.";
+            Assert.Equal(
+                "ANNOUNCER: One.\nLARRY: Two.\nANNOUNCER: Three.",
+                AdScriptWriter.ApplyLineAwareHygiene(raw));
+        }
+
+        [Fact]
+        public void AColonInsideProseIsNotATag()
+        {
+            // A colon more than 40 characters in is prose, never a tag — the line joins the previous voice.
+            var raw = "ANNOUNCER: Everything must go.\nRemember this one thing about our store, folks: we never close.";
+            Assert.Equal(
+                "ANNOUNCER: Everything must go. Remember this one thing about our store, folks: we never close.",
+                AdScriptWriter.ApplyLineAwareHygiene(raw));
+        }
+
+        [Fact]
+        public void AStillEmptyTagStaysVisibleForTheValidator()
+        {
+            // The T400 posture holds where nothing fills the tag: the validator names it, never a silent drop.
+            Assert.Equal("ANNOUNCER: Hi.\nVOICE1:", AdScriptWriter.ApplyLineAwareHygiene("ANNOUNCER: Hi.\nVOICE1:"));
+        }
+    }
+
+    public sealed class ScenarioEachAttemptHasItsOwnTimeoutBudget
+    {
+        [Fact]
+        public async Task ASlowFirstDraftDoesNotStarveTheReask()
+        {
+            // gh-#696 (the first-contact finding): with ONE Llm:TimeoutSeconds budget shared across both
+            // attempts, a first draft that spent most of it left the re-ask nothing — on the reference
+            // station's CPU-bound 3B model that was 49 s of 90 s, so the re-ask timed out on every tick.
+            // Given a 3-second budget, a backend that answers after 1.8 s, and a validator that refuses
+            // the first draft (a shared budget would leave the re-ask 1.2 s — a timeout)...
+            await using var mock = await MockCompletionsServer.StartAsync();
+            mock.ReplyContent = "ANNOUNCER: Cravin's Diner, open late. Call 555-0142.";
+            mock.ServeDelayMs = 1800;
+            var (writer, _, _) = BuildWriterWithRingAndLogger(mock.BaseUri.ToString(), timeoutSeconds: 3);
+
+            // When the write runs...
+            var result = await writer.WriteAsync(
+                Request(), RefusesOnceThenAccepts("format", "voice tag \"TAG\" is not uppercase-alphanumeric"),
+                CancellationToken.None);
+
+            // Then the re-ask completes inside ITS OWN budget — a success, two completions made.
+            Assert.IsType<AdScriptWriteResult.Success>(result);
+            Assert.Equal(2, mock.Requests.Count);
+        }
+    }
 }

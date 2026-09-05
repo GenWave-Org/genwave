@@ -1,6 +1,7 @@
 namespace GenWave.Tts;
 
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -54,9 +55,13 @@ using Microsoft.Extensions.Options;
 /// gate here, the SAME reasoning <see cref="CrosstalkScriptWriter"/>'s own remarks give: ad generation
 /// happens entirely off the on-air clock (T401's <c>AdSpotWorker</c> tick, SPEC F161.1) — the natural
 /// place to coordinate backend concurrency if that ever proves necessary; adding a shared gate here
-/// now, with no caller yet, would be speculative. ONE <c>timeoutCts</c> spans BOTH attempts (mirrors
-/// <see cref="LlmCopyWriter.PostChatCompletionAsync"/>'s own re-ask callers) — a re-ask shares this
-/// render's existing <c>Llm:TimeoutSeconds</c> budget, never a fresh one.
+/// now, with no caller yet, would be speculative. EACH attempt gets its OWN <c>Llm:TimeoutSeconds</c>
+/// budget (gh-#696, the first-contact finding — <see cref="NewAttemptBudget"/>): the on-air writers
+/// (<see cref="LlmCopyWriter.PostChatCompletionAsync"/>'s re-ask callers) share one budget across a
+/// re-ask because the break they write for is imminent, but this writer runs entirely off the air
+/// clock — the same fact that justifies the missing single-flight gate — and on the reference
+/// station's CPU-bound 3B model one completion took 49 of a 90-second shared budget, so the re-ask
+/// timed out by construction on every tick and the stock pass yielded nothing.
 /// </para>
 ///
 /// <para>
@@ -65,7 +70,7 @@ using Microsoft.Extensions.Options;
 /// here is itself a cheap seam, so constructing this class never touches the network.
 /// </para>
 /// </summary>
-public sealed class AdScriptWriter(
+public sealed partial class AdScriptWriter(
     IHttpClientFactory httpClientFactory,
     IOptionsMonitor<LlmOptions> llmOptions,
     LlmCallRecorder recorder,
@@ -126,27 +131,36 @@ public sealed class AdScriptWriter(
         var systemPrompt = AdScriptPromptBuilder.BuildSystemPrompt(request);
         var userPrompt = AdScriptPromptBuilder.BuildUserContent(request);
 
-        // ONE timeout budget spans BOTH attempts (mirrors LlmCopyWriter.PostChatCompletionAsync's own
-        // re-ask callers, its own remarks) — a re-ask shares whatever this render's Llm:TimeoutSeconds
-        // budget has left, never a fresh one. The client/URI/generation cap are likewise resolved ONCE:
-        // both attempts target the same endpoint with the same cap.
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(cfg.TimeoutSeconds));
+        // EACH attempt gets its OWN Llm:TimeoutSeconds budget (gh-#696 — see the class remarks: this
+        // writer is off the air clock, so the on-air writers' shared-budget shape starved the re-ask).
+        // The client/URI/generation cap are still resolved ONCE: both attempts target the same
+        // endpoint with the same cap.
         var http = httpClientFactory.CreateClient(LlmCopyWriter.HttpClientName);
         var requestUri = EndpointUri.Combine(cfg.Endpoint, "/v1/chat/completions");
         var maxTokens = DeriveScriptGenerationCap(request);
 
+        using var firstBudget = NewAttemptBudget(cfg, ct);
         var firstAttempt = await AttemptAsync(
-            http, requestUri, cfg, request, systemPrompt, userPrompt, maxTokens, validate, mode, ct, timeoutCts.Token);
+            http, requestUri, cfg, request, systemPrompt, userPrompt, maxTokens, validate, mode, ct, firstBudget.Token);
         if (firstAttempt is not AdScriptAttemptOutcome.ValidatorRefused refused)
             return ResultOf(firstAttempt); // Success, or a transport/generation fault — never re-asked (skip-only).
 
         // SPEC F160.3's ladder shape: exactly ONE re-ask, naming the violated rule, appended to the
         // SAME user prompt the rejected draft already saw.
         var reaskUserPrompt = userPrompt + "\n\n" + AdScriptPromptBuilder.BuildReaskLine(refused.RuleId, refused.Reason);
+        using var reaskBudget = NewAttemptBudget(cfg, ct);
         var secondAttempt = await AttemptAsync(
-            http, requestUri, cfg, request, systemPrompt, reaskUserPrompt, maxTokens, validate, mode, ct, timeoutCts.Token);
+            http, requestUri, cfg, request, systemPrompt, reaskUserPrompt, maxTokens, validate, mode, ct, reaskBudget.Token);
         return ResultOf(secondAttempt);
+    }
+
+    /// <summary>One attempt's own <c>Llm:TimeoutSeconds</c> budget, linked to the caller's token
+    /// (gh-#696) — a fresh one per attempt, never shared across the re-ask; see the class remarks.</summary>
+    static CancellationTokenSource NewAttemptBudget(LlmOptions cfg, CancellationToken ct)
+    {
+        var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(TimeSpan.FromSeconds(cfg.TimeoutSeconds));
+        return budget;
     }
 
     static AdScriptWriteResult ResultOf(AdScriptAttemptOutcome outcome) => outcome switch
@@ -359,37 +373,126 @@ public sealed class AdScriptWriter(
     /// violation). A line whose text is empty after hygiene keeps its own bare <c>TAG:</c> (never
     /// silently dropped whole) — so <c>AdScriptValidator</c> reports the honest, specific "the {tag}
     /// line has no spoken text" reason rather than a misleading "no {tag} line appeared" for a line that
-    /// DID arrive, just empty.
+    /// DID arrive, just empty — unless an untagged continuation line follows and fills it (below).
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The first-contact widening (gh-#696, 2026-09-05).</b> The reference station's own model
+    /// (<c>llama3.2:3b</c>, HARDWARE.md) passed the raw format rule on 29% of completions in a 24-run
+    /// bench, and every failure was one of a handful of SHAPE quirks the re-ask ladder above was paying
+    /// a whole second completion (and, on a CPU box, its whole budget) to correct: the tag wrapped in
+    /// quotes (the prompt's own <c>"TAG: &lt;line&gt;"</c> placeholder copied verbatim — see
+    /// <see cref="AdScriptPromptBuilder"/>), a mixed-case or spaced or apostrophed tag
+    /// (<c>Announcer</c>, <c>VOICE 1</c>, <c>PRUETT'S</c>), a stage direction inside the tag
+    /// (<c>LARRY (YELLING)</c>), a beat label used as the speaker (<c>HOOK:</c>, <c>TAGLINE:</c>), a
+    /// tag on one line with its words on the next, a title or bracketed direction line with no speaker
+    /// at all, and a cast that never used the required ANNOUNCER tag. Each is normalised here,
+    /// deterministically, BEFORE the (still pure, still fail-closed) validator ever sees the script:
+    /// wrapping quotes/bullets/emphasis are stripped from the whole line (<see cref="FoldTag"/> then
+    /// keeps only <c>[A-Za-z0-9]</c> of the tag, upper-cased, parentheticals dropped — never the
+    /// chat-preamble heuristic, which the paragraph above rules out for tags); a beat-label tag becomes
+    /// <see cref="AdScriptPromptBuilder.AnnouncerTag"/>; an untagged line joins the previous voice's
+    /// text (or fills its bare tag); a leading untagged line, a <c>[bracketed]</c>/<c>(parenthesised)</c>
+    /// whole-line direction, and a <c>#</c> header are dropped; and when NO line is tagged ANNOUNCER,
+    /// the most frequent voice (first on ties) IS the announcer — for a generated spot every tag maps
+    /// to the station voice anyway (<c>AdRenderService</c> with a null voice plan), so nothing audible
+    /// changes. Owner-typed scripts never pass through here (SPEC F160.4: verbatim, validator at save),
+    /// so the widening is confined to the one path that needed it.
     /// </para>
     /// </summary>
-    static string ApplyLineAwareHygiene(string raw)
+    internal static string ApplyLineAwareHygiene(string raw)
     {
-        var lines = new List<string>();
+        var lines = new List<(string Tag, string Text)>();
 
         foreach (var rawLine in raw.Split('\n'))
         {
-            var trimmedLine = rawLine.Trim();
-            if (trimmedLine.Length == 0)
+            var line = LineDecorationPattern().Replace(rawLine.Trim(), string.Empty).Trim(LineWrapperChars);
+            if (line.Length == 0 || IsWholeLineDirectionOrHeader(line))
                 continue;
 
-            var colonIndex = trimmedLine.IndexOf(':');
-            if (colonIndex <= 0)
+            var colonIndex = line.IndexOf(':');
+            var tagRaw = colonIndex > 0 ? line[..colonIndex] : string.Empty;
+            var text = colonIndex > 0 ? line[(colonIndex + 1)..] : line;
+
+            var tag = FoldTag(tagRaw);
+            if (colonIndex > 0 && (tag.Length == 0 || tagRaw.Length > MaxRawTagChars))
             {
-                // No tag-shaped prefix on this line at all — nothing for hygiene to accidentally eat,
-                // so the whole line runs through the ordinary single-line hygiene pass, unchanged.
-                var cleanedWhole = LlmCopyWriter.ApplyCopyHygiene(trimmedLine);
-                if (cleanedWhole.Length > 0)
-                    lines.Add(cleanedWhole);
+                // A colon that is not a tag — prose with a colon inside it, or a decorative prefix that
+                // folded to nothing — is spoken text with no speaker of its own.
+                tag = string.Empty;
+                text = line;
+            }
+
+            var cleanedText = LlmCopyWriter.ApplyCopyHygiene(text);
+            if (tag.Length == 0)
+            {
+                // No speaker: continuation prose joins the previous voice's line (filling a bare tag);
+                // a leading line with nobody to join — a title, a chat preamble — is dropped.
+                if (lines.Count > 0 && cleanedText.Length > 0)
+                    lines[^1] = (lines[^1].Tag, $"{lines[^1].Text} {cleanedText}".Trim());
                 continue;
             }
 
-            var tag = trimmedLine[..colonIndex].Trim();
-            var cleanedText = LlmCopyWriter.ApplyCopyHygiene(trimmedLine[(colonIndex + 1)..]);
-            lines.Add(cleanedText.Length == 0 ? $"{tag}:" : $"{tag}: {cleanedText}");
+            lines.Add((tag, cleanedText));
         }
 
-        return string.Join('\n', lines);
+        if (lines.Count > 0 && lines.TrueForAll(l => l.Tag != AdScriptPromptBuilder.AnnouncerTag))
+        {
+            var lead = lines
+                .GroupBy(l => l.Tag, StringComparer.Ordinal)
+                .OrderByDescending(g => g.Count())
+                .ThenBy(g => lines.FindIndex(l => l.Tag == g.Key))
+                .First().Key;
+            for (var i = 0; i < lines.Count; i++)
+            {
+                if (lines[i].Tag == lead)
+                    lines[i] = (AdScriptPromptBuilder.AnnouncerTag, lines[i].Text);
+            }
+        }
+
+        return string.Join('\n', lines.Select(l => l.Text.Length == 0 ? $"{l.Tag}:" : $"{l.Tag}: {l.Text}"));
     }
+
+    /// <summary>A raw tag longer than this is a sentence with a colon in it, never a voice.</summary>
+    const int MaxRawTagChars = 40;
+
+    /// <summary>Quote marks, asterisks, and underscores a model wraps a whole line in — trimmed from
+    /// both ends BEFORE the tag is split off, so a quoted <c>"TAG: line"</c> yields the tag, not
+    /// <c>"TAG</c>.</summary>
+    static readonly char[] LineWrapperChars = ['"', '\u201C', '\u201D', '*', '_', ' '];
+
+    /// <summary>Beat labels (<see cref="AdScriptPromptBuilder.Beats"/>, folded) plus the placeholder
+    /// words a model lifts from the prompt — as a SPEAKER they mean "the announcer says this".</summary>
+    static readonly HashSet<string> BeatLabelTags = new(
+        AdScriptPromptBuilder.Beats.Select(FoldTagCharacters).Concat(["TAG", "CTA"]), StringComparer.Ordinal);
+
+    /// <summary>The tag's identity, folded: parentheticals dropped, only letters and digits kept,
+    /// upper-cased (<see cref="FoldTagCharacters"/>); a beat label becomes
+    /// <see cref="AdScriptPromptBuilder.AnnouncerTag"/>. Never the chat-preamble heuristic (see the
+    /// hygiene remarks).</summary>
+    static string FoldTag(string tagRaw)
+    {
+        var folded = FoldTagCharacters(tagRaw);
+        return BeatLabelTags.Contains(folded) ? AdScriptPromptBuilder.AnnouncerTag : folded;
+    }
+
+    /// <summary>The character fold alone — split out so <see cref="BeatLabelTags"/>' own initialiser can
+    /// use it without consulting itself.</summary>
+    static string FoldTagCharacters(string tagRaw) =>
+        TagNonAlphanumericPattern().Replace(TagParentheticalPattern().Replace(tagRaw, string.Empty), string.Empty)
+            .ToUpperInvariant();
+
+    static bool IsWholeLineDirectionOrHeader(string line) =>
+        (line[0] == '[' && line[^1] == ']') || (line[0] == '(' && line[^1] == ')') || line[0] == '#';
+
+    [GeneratedRegex(@"^(?:[-*\u2022]\s+|\d+[.)]\s+)")]
+    private static partial Regex LineDecorationPattern();
+
+    [GeneratedRegex(@"\([^)]*\)")]
+    private static partial Regex TagParentheticalPattern();
+
+    [GeneratedRegex("[^A-Za-z0-9]")]
+    private static partial Regex TagNonAlphanumericPattern();
 
     long ElapsedMs(DateTimeOffset startedAt) => (long)(timeProvider.GetUtcNow() - startedAt).TotalMilliseconds;
 }

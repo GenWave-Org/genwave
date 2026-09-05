@@ -42,10 +42,10 @@ static class AdScriptPromptBuilder
     /// <summary>The one voice tag every spot must carry (SPEC F160.3) — duplicated from
     /// <c>AdScriptParser.AnnouncerTag</c> (GenWave.Ads, unreachable from here — see this class's own
     /// remarks) rather than referenced.</summary>
-    const string AnnouncerTag = "ANNOUNCER";
+    internal const string AnnouncerTag = "ANNOUNCER";
 
     /// <summary>The four synthesized beats every spot states, in order (this class's own remarks).</summary>
-    static readonly string[] Beats = ["hook", "pitch", "tagline", "call-to-action"];
+    internal static readonly string[] Beats = ["hook", "pitch", "tagline", "call-to-action"];
 
     /// <summary>Cap for an operator-authored brief field (<see cref="AdScriptWriteRequest.Brand"/>/
     /// <see cref="AdScriptWriteRequest.Premise"/>/<see cref="AdScriptWriteRequest.Tone"/>) before it
@@ -60,9 +60,16 @@ static class AdScriptPromptBuilder
         var beatList = string.Join(", ", Beats);
 
         var scaffold =
+            // gh-#696: the placeholder "TAG: <line>" was copied verbatim by the reference station's 3B
+            // model (tag "TAG, quotes included). The CrosstalkPromptBuilder shape — the REAL tag names
+            // inside the example — is what that writer gets away with; benched on llama3.2:3b, 24 runs:
+            // this wording passes the raw format rule 79% of the time against 0-29% for the placeholder.
             $"You write a {request.SpotSeconds}-second radio ad spot script for a FICTIONAL sponsor, " +
             "in this EXACT wire format, one line per turn, nothing else before or after: " +
-            "\"TAG: <line>\". Use 1-3 distinct voice tags, ALL CAPS, and " +
+            $"\"{AnnouncerTag}: <line>\" for the announcer, and \"VOICE1: <line>\" or \"VOICE2: <line>\" " +
+            "for up to two other voices. The word before the colon is always the VOICE speaking - " +
+            $"{AnnouncerTag}, VOICE1, or VOICE2 - in capital letters with no quotes, no parentheses, and " +
+            "no stage directions; never a beat name like Hook or Tagline, and never the brand name. " +
             $"{AnnouncerTag} MUST speak at least one line. " +
             $"Keep every line under {request.MaxLineChars} characters. " +
             $"Write exactly four beats in this order - {beatList} - each roughly " +
