@@ -329,15 +329,17 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
         return new AdSpotPage(rows.Select(ToAdSpot).ToList(), total);
     }
 
-    /// <summary><see cref="IAdSpotStore.CountReadyGeneratedAsync"/> — the SPEC F159.3 stock
-    /// count.</summary>
-    public async Task<int> CountReadyGeneratedAsync(CancellationToken ct)
+    /// <summary><see cref="IAdSpotStore.CountStockGeneratedAsync"/> — the SPEC F159.3 stock count,
+    /// draft through ready (gh-#689: the ready shelf alone left the draft pile unbounded under
+    /// <c>AutoApprove=false</c>).</summary>
+    public async Task<int> CountStockGeneratedAsync(CancellationToken ct)
     {
         await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
         return await conn.ExecuteScalarAsync<int>(new CommandDefinition(
             """
             select count(*)::int from station.ad_spot
-            where state = 'ready'::station.ad_state
+            where state in ('draft'::station.ad_state, 'approved'::station.ad_state,
+                            'rendering'::station.ad_state, 'ready'::station.ad_state)
               and source in ('llm'::station.ad_source, 'pack'::station.ad_source)
             """,
             cancellationToken: ct));

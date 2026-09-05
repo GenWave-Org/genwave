@@ -697,7 +697,7 @@ Live settings (allowlisted, PUT-able through the settings API/UI, no `api` resta
 | Key | Default | Range | What it bounds |
 |---|:---:|:---:|---|
 | `Station:Ads:EveryNUnits` | 0 (disabled) | 0–1000 | Units between ad triggers — the `Station:Cadence:StationIdEveryNUnits` twin; `0` disables the trigger entirely |
-| `Station:Ads:TargetCount` | 12 | 0–100 | How many `ready` spots the stock pass tries to keep on hand |
+| `Station:Ads:TargetCount` | 12 | 0–100 | How many generated spots (llm/pack, `draft` through `ready`) the stock pass keeps in the pipeline; owner spots never count |
 | `Station:Ads:RefreshDays` | 30 | 1–365 | Age, in days, past which a `ready` spot is retired and re-drafted |
 | `Station:Ads:AutoApprove` | `false` | — | Whether a freshly drafted spot skips the operator approval step |
 | `Station:Ads:AntiRepeatWindow` | 5 | 0–50 | How many recently aired spots `LibraryAdSpotSource` excludes from its next pick |

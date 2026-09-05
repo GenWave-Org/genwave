@@ -441,7 +441,8 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "A ready ad spot airs every N units, the same cadence shape as the station-ID count above — " +
     "0 (the default) disables ad spots entirely. Accepted range: 0–1000.",
   "Station:Ads:TargetCount":
-    "How many ready spots the ad-spot worker keeps in stock, refilling as spots retire. " +
+    "How many generated spots the ad-spot worker keeps in the pipeline — draft, approved, rendering, " +
+    "or ready — refilling as spots retire or are discarded. Your own spots never count. " +
     "Defaults to 12. Accepted range: 0–100.",
   "Station:Ads:RefreshDays":
     "A ready spot older than this many days is retired and the stock refills — keeps ad copy " +

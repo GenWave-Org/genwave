@@ -7,8 +7,9 @@ namespace GenWave.Ads;
 /// specifically stay raw <see cref="Microsoft.Extensions.Configuration.IConfiguration"/> reads, the
 /// split <c>StationAdsOptions</c>' own PLAN T397 remarks already document).
 /// </summary>
-/// <param name="TargetCount">SPEC F159.3's <c>Station:Ads:TargetCount</c> — how many ready
-/// llm/pack spots the stock pass holds the library at. Default 12.</param>
+/// <param name="TargetCount">SPEC F159.3's <c>Station:Ads:TargetCount</c> — how many generated
+/// (llm/pack) spots the stock pass keeps in the pipeline, draft through ready (gh-#689's rider — never
+/// the ready shelf alone). Default 12.</param>
 /// <param name="RefreshDays">SPEC F159.3's <c>Station:Ads:RefreshDays</c> — a ready spot older than
 /// this many days retires. Default 30.</param>
 /// <param name="AutoApprove">SPEC F159.4's <c>Station:Ads:AutoApprove</c> — whether a freshly

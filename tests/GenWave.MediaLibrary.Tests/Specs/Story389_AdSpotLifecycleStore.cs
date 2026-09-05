@@ -1014,7 +1014,7 @@ public static class FeatureAdSpotLifecycleStore
         }
 
         [Fact]
-        public async Task CountReadyGeneratedAsyncCountsLlmAndPackButNotOwner()
+        public async Task CountStockGeneratedAsyncCountsLlmAndPackButNotOwner()
         {
             // Given one ready llm spot, one ready pack spot, and one ready OWNER spot...
             await db.ResetAdsAsync();
@@ -1024,10 +1024,35 @@ public static class FeatureAdSpotLifecycleStore
             await MakeReadySpotAsync(db, repo, AdSource.Owner);
 
             // When the stock count is read...
-            var count = await repo.CountReadyGeneratedAsync(CancellationToken.None);
+            var count = await repo.CountStockGeneratedAsync(CancellationToken.None);
 
             // Then only the llm + pack spots count — owner is excluded (SPEC F159.3).
             Assert.Equal(2, count);
+        }
+
+        [Fact]
+        public async Task CountStockGeneratedAsyncSpansDraftThroughReadyButNotFailedOrRetired()
+        {
+            // Given one llm spot in EACH state — ready, rendering, approved, draft, failed, retired
+            // (gh-#689: the ready shelf alone left the draft pile unbounded under AutoApprove=false)...
+            await db.ResetAdsAsync();
+            var repo = Harness.AdSpotRepo(db);
+            await MakeReadySpotAsync(db, repo, AdSource.Llm);                                                      // ready
+            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);
+            Assert.NotNull(await repo.ClaimNextApprovedAsync(CancellationToken.None));                            // rendering
+            await repo.CreateAsync(Draft() with { InitialState = AdState.Approved }, CancellationToken.None);      // approved
+            await repo.CreateAsync(Draft(), CancellationToken.None);                                              // draft
+            await repo.CreateAsync(
+                Draft() with { InitialState = AdState.Failed, FailReason = "format" }, CancellationToken.None);    // failed
+            var doomed = await repo.CreateAsync(Draft(), CancellationToken.None);
+            await repo.RetireAsync(doomed.Id, doomed.Version, CancellationToken.None);                            // retired
+            Assert.Equal(6, await CountAllSpotRowsAsync(db));
+
+            // When the stock count is read...
+            var count = await repo.CountStockGeneratedAsync(CancellationToken.None);
+
+            // Then exactly the four pipeline states count — failed and retired never do.
+            Assert.Equal(4, count);
         }
 
         [Fact]
