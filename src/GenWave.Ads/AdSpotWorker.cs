@@ -30,10 +30,11 @@ using GenWave.Tts;
 /// deliberately WIDER than the guardian's own grace alone, see that class's own remarks for why a
 /// narrower window is mathematically unreachable at production defaults) — never an unconditional,
 /// every-tick write. Running this FIRST, every tick, still means <see cref="RefillIfNeededAsync"/>'s
-/// own <see cref="IAdSpotStore.CountReadyGeneratedAsync"/> read never needs to change its own SQL to
+/// own <see cref="IAdSpotStore.CountStockGeneratedAsync"/> read never needs to change its own SQL to
 /// stay honest — by the time it runs, every FRESH <see cref="AdState.Ready"/> row this pass could
-/// still repair has already been. The repair MAKES the "does CountReady overcount" question moot for a
-/// fresh row, rather than answering it a second, more complicated way; an OLD ineligible ready row
+/// still repair has already been. The repair MAKES the "does the stock count overcount" question
+/// moot for a fresh row, rather than answering it a second, more complicated way; an OLD ineligible
+/// ready row
 /// (past the window) is left alone outright — see <see cref="RepairReadyEligibilityAsync"/>'s own
 /// remarks for why that is operator intent, not a bug.</item>
 /// <item><b>Retire</b> (SPEC F159.3) — every <see cref="AdState.Ready"/> llm/pack spot older than
@@ -42,7 +43,10 @@ using GenWave.Tts;
 /// review block 3) — never deleted (F159.1). <see cref="AdSource.Owner"/> spots never appear here at
 /// all: <see cref="IAdSpotStore.ListReadyOlderThanAsync"/> excludes them at the store (SPEC F159.3's
 /// exemption, STORY-389 AC5).</item>
-/// <item><b>Refill</b> (SPEC F159.3) — when the POST-repair, POST-retire ready count sits below
+/// <item><b>Refill</b> (SPEC F159.3, as-built rider gh-#689) — when the POST-repair, POST-retire
+/// STOCK count (llm/pack spots in draft, approved, rendering, or ready — every generated spot that is
+/// stock or on its way to it; never the ready shelf alone, which under <c>AutoApprove=false</c> stays
+/// at zero while drafts pile up one per tick, forever) sits below
 /// <c>Station:Ads:TargetCount</c>, samples one enabled brief and generates ONE new spot (never a
 /// catch-up loop within a single tick — the SAME "opportunistic, paced by the tick cadence, never a
 /// burst" posture <c>CrosstalkStockWorker</c> already keeps for banter). Lands <c>draft</c> or
@@ -228,20 +232,21 @@ public sealed class AdSpotWorker(
         }
     }
 
-    /// <summary>SPEC F159.3's stock half — one generation attempt when the ready count sits below
-    /// target, never a catch-up burst (this class's own remarks).</summary>
+    /// <summary>SPEC F159.3's stock half — one generation attempt when the stock count (draft through
+    /// ready, llm/pack — gh-#689's rider, see the class remarks) sits below target, never a catch-up
+    /// burst (this class's own remarks).</summary>
     async Task RefillIfNeededAsync(AdStockSettings settings, CancellationToken ct)
     {
-        var readyCount = await spotStore.CountReadyGeneratedAsync(ct);
-        if (readyCount >= settings.TargetCount)
+        var stockCount = await spotStore.CountStockGeneratedAsync(ct);
+        if (stockCount >= settings.TargetCount)
             return;
 
         var brief = await briefStore.SampleEnabledAsync(ct);
         if (brief is null)
         {
             logger.LogInformation(
-                "Ad stock below target ({ReadyCount}/{TargetCount}) but no enabled brief to sample from",
-                readyCount, settings.TargetCount);
+                "Ad stock below target ({StockCount}/{TargetCount}) but no enabled brief to sample from",
+                stockCount, settings.TargetCount);
             return;
         }
 

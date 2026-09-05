@@ -150,12 +150,17 @@ public interface IAdSpotStore
     Task<AdSpotPage> ListByStateAsync(AdState? state, int limit, int offset, CancellationToken ct);
 
     /// <summary>
-    /// How many <see cref="AdState.Ready"/> spots exist with <see cref="AdSource.Llm"/> or
-    /// <see cref="AdSource.Pack"/> source (SPEC F159.3's own <c>Station:Ads:TargetCount</c> stock
-    /// count) — <see cref="AdSource.Owner"/> spots never count toward the target the stock pass
-    /// refills.
+    /// How many generated spots (<see cref="AdSource.Llm"/> or <see cref="AdSource.Pack"/> source) sit
+    /// anywhere in the stock pipeline — <see cref="AdState.Draft"/>, <see cref="AdState.Approved"/>,
+    /// <see cref="AdState.Rendering"/>, or <see cref="AdState.Ready"/> (SPEC F159.3's own
+    /// <c>Station:Ads:TargetCount</c> stock count, as-built rider gh-#689). A draft waiting for the
+    /// owner's eye under <c>AutoApprove=false</c> IS stock on its way — counting only the ready shelf
+    /// left that pile unbounded (one new draft per tick, forever). <see cref="AdState.Failed"/> never
+    /// counts (it waits for an operator retry or discard and must never block refill),
+    /// <see cref="AdState.Retired"/> is terminal, and <see cref="AdSource.Owner"/> spots never count
+    /// toward the target the stock pass refills.
     /// </summary>
-    Task<int> CountReadyGeneratedAsync(CancellationToken ct);
+    Task<int> CountStockGeneratedAsync(CancellationToken ct);
 
     /// <summary>
     /// Every <see cref="AdState.Ready"/> spot whose <c>state_changed_at</c> (the moment it entered

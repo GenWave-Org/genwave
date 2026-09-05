@@ -119,6 +119,86 @@ public static class FeatureAdStockKeeping
         }
     }
 
+    public sealed class ScenarioTheStockCountSpansThePipeline
+    {
+        // gh-#689: the first cut counted the READY shelf alone. Under AutoApprove=false (the shipped
+        // default) a generated spot waits in draft and never reached that count, so every tick wrote
+        // one more draft, forever. The stock count is now draft|approved|rendering|ready, llm/pack.
+
+        [Fact]
+        public async Task AWaitingDraftCountsTowardTheTarget()
+        {
+            // Given TargetCount=1, AutoApprove=false, one llm draft already waiting for the owner's
+            // eye, and an enabled brief (kills the ready-shelf-only count, which never saw the draft)...
+            var harness = AdSpotWorkerHarness.Build(
+                Now, Settings(targetCount: 1, autoApprove: false),
+                llmHandler: AdSpotWorkerHarness.ServeSameReplyEveryTime(WellFormedReply));
+            harness.Store.AddSpot(1, AdState.Draft, AdSource.Llm);
+            harness.Briefs.AddEnabled("Cravin's Diner", premise: "A retro diner with a twist", tone: "warm and playful");
+
+            // When the stock pass runs...
+            await harness.Worker.TickOnceAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+            // Then nothing new is generated — the draft IS the stock, on its way; no brief was sampled.
+            Assert.Equal(0, harness.Store.CreateCallCount);
+            Assert.Equal(0, harness.Briefs.SampleCallCount);
+        }
+
+        [Fact]
+        public async Task ARenderingSpotCountsTowardTheTarget()
+        {
+            // Given TargetCount=1, one llm spot mid-render (well inside the guardian grace), and an
+            // enabled brief...
+            var harness = AdSpotWorkerHarness.Build(
+                Now, Settings(targetCount: 1),
+                llmHandler: AdSpotWorkerHarness.ServeSameReplyEveryTime(WellFormedReply));
+            harness.Store.AddSpot(1, AdState.Rendering, AdSource.Llm, stateChangedAt: Now.UtcDateTime.AddMinutes(-1));
+            harness.Briefs.AddEnabled("Cravin's Diner", premise: "A retro diner with a twist", tone: "warm and playful");
+
+            // When the stock pass runs...
+            await harness.Worker.TickOnceAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+            // Then nothing new is generated — a render in flight is stock on its way too.
+            Assert.Equal(0, harness.Store.CreateCallCount);
+        }
+
+        [Fact]
+        public async Task AFailedSpotNeverBlocksRefill()
+        {
+            // Given TargetCount=1, one llm spot in failed (waiting on an operator retry or discard),
+            // and an enabled brief...
+            var harness = AdSpotWorkerHarness.Build(
+                Now, Settings(targetCount: 1),
+                llmHandler: AdSpotWorkerHarness.ServeSameReplyEveryTime(WellFormedReply));
+            harness.Store.AddSpot(1, AdState.Failed, AdSource.Llm, failReason: "format");
+            harness.Briefs.AddEnabled("Cravin's Diner", premise: "A retro diner with a twist", tone: "warm and playful");
+
+            // When the stock pass runs...
+            await harness.Worker.TickOnceAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+            // Then one generation happens — failed is never stock.
+            Assert.Equal(1, harness.Store.CreateCallCount);
+        }
+
+        [Fact]
+        public async Task AnOwnerDraftNeverCountsTowardTheTarget()
+        {
+            // Given TargetCount=1, one OWNER draft, and an enabled brief (SPEC F159.3: owner spots
+            // never count toward the target)...
+            var harness = AdSpotWorkerHarness.Build(
+                Now, Settings(targetCount: 1),
+                llmHandler: AdSpotWorkerHarness.ServeSameReplyEveryTime(WellFormedReply));
+            harness.Store.AddSpot(1, AdState.Draft, AdSource.Owner);
+            harness.Briefs.AddEnabled("Cravin's Diner", premise: "A retro diner with a twist", tone: "warm and playful");
+
+            // When the stock pass runs...
+            await harness.Worker.TickOnceAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+            // Then one generation happens — the owner's draft is theirs, not the worker's stock.
+            Assert.Equal(1, harness.Store.CreateCallCount);
+        }
+    }
+
     // ---------------------------------------------------------------------
     // SAD PATH
     // ---------------------------------------------------------------------

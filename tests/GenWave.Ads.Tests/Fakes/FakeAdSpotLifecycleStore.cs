@@ -172,8 +172,10 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
         return Task.FromResult(new AdSpotPage(page, ordered.Count));
     }
 
-    public Task<int> CountReadyGeneratedAsync(CancellationToken ct) =>
-        Task.FromResult(spots.Count(s => s.State == AdState.Ready && s.Source is AdSource.Llm or AdSource.Pack));
+    public Task<int> CountStockGeneratedAsync(CancellationToken ct) =>
+        Task.FromResult(spots.Count(s =>
+            (s.State is AdState.Draft or AdState.Approved or AdState.Rendering or AdState.Ready)
+            && (s.Source is AdSource.Llm or AdSource.Pack)));
 
     public Task<IReadOnlyList<AdSpot>> ListReadyOlderThanAsync(TimeSpan age, CancellationToken ct)
     {
