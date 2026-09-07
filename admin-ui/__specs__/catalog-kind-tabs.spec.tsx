@@ -43,14 +43,9 @@ const PERSONA_ENTRY: CatalogShelfEntryDto = {
 describe("Feature: the shelf silos kinds by tab (gh-#372)", () => {
   describe("Scenario: ?kind= resolves to a shelf kind", () => {
     it("maps the plural URL values to the wire kinds", () => {
-      expect(["themes", "fonts", "shows", "avatars", "icons", "ad-packs"].map(resolveCatalogKind)).toEqual([
-        "theme",
-        "font",
-        "show",
-        "avatar",
-        "icon",
-        "ad-pack",
-      ]);
+      expect(
+        ["themes", "fonts", "shows", "avatars", "icons", "ad-packs", "voices", "jingles"].map(resolveCatalogKind)
+      ).toEqual(["theme", "font", "show", "avatar", "icon", "ad-pack", "voice-pack", "jingle-pack"]);
     });
 
     it("defaults to persona when absent or unrecognised", () => {
@@ -61,7 +56,7 @@ describe("Feature: the shelf silos kinds by tab (gh-#372)", () => {
   });
 
   describe("Scenario: the tab strip lists every kind, always", () => {
-    it("renders all seven tabs with their ?kind= hrefs", () => {
+    it("renders all nine tabs with their ?kind= hrefs", () => {
       render(<PersonaCatalogTabs activeKind="persona" />);
 
       const nav = screen.getByRole("navigation", { name: "Catalog kinds" });
@@ -72,6 +67,8 @@ describe("Feature: the shelf silos kinds by tab (gh-#372)", () => {
       expect(within(nav).getByRole("link", { name: "Avatars" })).toHaveAttribute("href", "/persona-catalog?kind=avatars");
       expect(within(nav).getByRole("link", { name: "Icons" })).toHaveAttribute("href", "/persona-catalog?kind=icons");
       expect(within(nav).getByRole("link", { name: "Ad packs" })).toHaveAttribute("href", "/persona-catalog?kind=ad-packs");
+      expect(within(nav).getByRole("link", { name: "Voices" })).toHaveAttribute("href", "/persona-catalog?kind=voices");
+      expect(within(nav).getByRole("link", { name: "Jingles" })).toHaveAttribute("href", "/persona-catalog?kind=jingles");
     });
 
     it("marks only the active tab with aria-current", () => {
@@ -93,6 +90,24 @@ describe("Feature: the shelf silos kinds by tab (gh-#372)", () => {
 
       expect(screen.getByText("No shows on the shelf")).toBeInTheDocument();
       expect(screen.queryByRole("list", { name: "Community catalog entries" })).not.toBeInTheDocument();
+    });
+
+    it("names the kind for the voice-pack and jingle-pack tabs too (PLAN T418)", () => {
+      const { rerender } = render(
+        <PersonaCatalogClient
+          activeKind="voice-pack"
+          initialIndex={{ entries: [PERSONA_ENTRY], fetchedAt: "2026-08-12T00:00:00Z", unreachable: false }}
+        />
+      );
+      expect(screen.getByText("No voice packs on the shelf")).toBeInTheDocument();
+
+      rerender(
+        <PersonaCatalogClient
+          activeKind="jingle-pack"
+          initialIndex={{ entries: [PERSONA_ENTRY], fetchedAt: "2026-08-12T00:00:00Z", unreachable: false }}
+        />
+      );
+      expect(screen.getByText("No jingle packs on the shelf")).toBeInTheDocument();
     });
 
     it("keeps the whole-shelf empty state when the index itself is empty", () => {

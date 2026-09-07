@@ -258,6 +258,17 @@ public static class FeatureThemeCatalogIsolation
         // every prior addition to this set already followed) rather than left for a future
         // disclosure re-audit to discover it first. It carries the SAME class-level
         // AdminSurface+Settings pairing this file's next Fact asserts on every discovered endpoint.
+        // GET api/voice-packs (T418, STORY-397) is VoicePackController's OWN library-listing
+        // route — the T200/T203 review's own N7 obligation, applied to the sixth prefix: pinned
+        // here the moment it exists, joining its sibling install/uninstall pair under the SAME
+        // class-level AdminSurface+Settings pairing this file's next Fact asserts on every
+        // discovered endpoint. Deliberate, admin-gated: the catalog shelf's own "Installed" chip
+        // and detail panel are this route's only consumer (SPEC F164 UI clauses; see
+        // InstalledPackSummaryDto's own remarks for the full wire contract). GET
+        // api/jingle-packs (T418, STORY-397) is JinglePackController's own library-listing route
+        // — the SAME N7 obligation, applied to the eighth prefix, joining ITS sibling
+        // install/uninstall pair under the SAME class-level AdminSurface+Settings pairing, for
+        // the SAME shelf/detail-panel consumer (SPEC F165 UI clauses).
         static readonly IReadOnlySet<(string Verb, string Route)> KnownCatalogAndThemeRoutes =
             new HashSet<(string Verb, string Route)>
             {
@@ -284,6 +295,8 @@ public static class FeatureThemeCatalogIsolation
                 ("POST", "api/ad-packs/{slug}/install"),
                 ("POST", "api/jingle-packs/{slug}/install"),
                 ("DELETE", "api/jingle-packs/{slug}"),
+                ("GET", "api/voice-packs"),
+                ("GET", "api/jingle-packs"),
             };
 
         // All EIGHT controllers are ROOTED at their own bare prefix ([Route("api/catalog")],

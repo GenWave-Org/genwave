@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Logging;
 using GenWave.Host.Catalog;
 using GenWave.Host.Options;
 using GenWave.Tts;
@@ -119,6 +120,51 @@ public sealed class VoicePackController(
     // own File.Move/WriteAllBytes make no cross-platform promise about the mode a new file lands with.
     static readonly UnixFileMode VoiceFileMode =
         UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+
+    /// <summary>
+    /// GET /api/voice-packs (STORY-397, PLAN T418) — every installed voice pack's slug and display
+    /// name, for the catalog shelf's own "Installed" chip and detail panel; nothing else (no voice
+    /// roster, no engine, no preview file name — the shelf already has those off the catalog entry
+    /// itself, this route exists only to say WHICH slugs are installed). A row whose stored
+    /// <c>definition</c> fails <see cref="CatalogVoicePackManifestSerializer.Deserialize"/> still
+    /// appears, with <see cref="InstalledPackSummaryDto.PackName"/> falling back to the slug itself
+    /// and a WARN logged naming the slug (see that type's own remarks for why this differs from
+    /// <c>AttributionsController</c>'s skip-and-log posture) — never a 500, never a silently missing
+    /// row.
+    ///
+    /// <para>
+    /// <b>Route-set obligation (T200 review finding N7, mirrored at T418).</b> This is the first
+    /// <c>GET</c> under <c>api/voice-packs</c> — <c>Story278_ThemeCatalogIsolation.cs</c>'s own
+    /// route-set pin (its <c>ScenarioNoNewPublicRoute.KnownCatalogAndThemeRoutes</c>) is extended to
+    /// include it, with the SAME class-level <see cref="AdminSurfaceAttribute"/>+
+    /// <see cref="AuthorizationPolicies.Settings"/> pairing every route on this controller already
+    /// carries — a plain <c>[HttpGet]</c> action change would otherwise trip that file's exact-match
+    /// assertion, exactly as the finding asked for.
+    /// </para>
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> List(CancellationToken ct)
+    {
+        var rows = await voicePackStore.ListAsync(ct);
+        var summaries = rows
+            .OrderBy(row => row.Slug, StringComparer.Ordinal)
+            .Select(row =>
+            {
+                var manifest = CatalogVoicePackManifestSerializer.Deserialize(row.DefinitionJson);
+                if (manifest is null)
+                {
+                    logger.LogWarning(
+                        "Voice pack listing found a stored definition that failed to re-parse slug={Slug} — " +
+                        "the row still lists, with packName falling back to the slug itself",
+                        LogSanitize.Strip(row.Slug));
+                }
+
+                return new InstalledPackSummaryDto(row.Slug, manifest?.PackName ?? row.Slug);
+            })
+            .ToArray();
+
+        return Ok(summaries);
+    }
 
     /// <summary>
     /// POST /api/voice-packs/{slug}/install — see this class's own remarks for the full gate order and

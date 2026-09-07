@@ -47,7 +47,8 @@ export async function readProblemDetails(
  * Extracts the ProblemDetails `detail` message from a failed response, falling back to a generic
  * `"Unexpected error (status)"` message — the detail-first convention every CRUD mutation, the
  * persona import flow, and the Persona Catalog detail-panel fetch all share (contrast
- * `PersonaPreview`'s own title-first reader, which has its own documented reason to differ).
+ * `PersonaPreview`'s own title-first `readPreviewFailureMessage` and `VoicePackInstallModal`'s own
+ * title-first `readInstallFailureTitle`, both of which have their own documented reason to differ).
  * Hoisted here (T102 review) so this one small, deterministic reader has a single house
  * implementation instead of a per-feature-folder copy.
  */

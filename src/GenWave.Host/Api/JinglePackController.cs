@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using GenWave.Ads;
 using GenWave.Core.Abstractions;
 using GenWave.Core.Domain;
+using GenWave.Core.Logging;
 using GenWave.Host.Catalog;
 using GenWave.Host.Options;
 
@@ -126,6 +127,47 @@ public sealed class JinglePackController(
     const string InUseType = "jingle_pack_in_use";
     const string AssetUnreadableType = "jingle_asset_unreadable";
     const string InstallFailedType = "jingle_pack_install_failed";
+
+    /// <summary>
+    /// GET /api/jingle-packs (STORY-397, PLAN T418) — every installed jingle pack's slug and display
+    /// name, mirroring <see cref="VoicePackController.List"/>'s own contract exactly (see that
+    /// method's own remarks and <see cref="InstalledPackSummaryDto"/>'s own remarks for why a
+    /// re-parse failure still surfaces the row, name falling back to the slug and a WARN logged
+    /// naming the slug, rather than being skipped the way <c>AttributionsController</c> skips one).
+    ///
+    /// <para>
+    /// <b>Route-set obligation (T200 review finding N7, mirrored at T418).</b> This is the first
+    /// <c>GET</c> under <c>api/jingle-packs</c> — <c>Story278_ThemeCatalogIsolation.cs</c>'s own
+    /// route-set pin (its <c>ScenarioNoNewPublicRoute.KnownCatalogAndThemeRoutes</c>) is extended to
+    /// include it, with the SAME class-level <see cref="AdminSurfaceAttribute"/>+
+    /// <see cref="AuthorizationPolicies.Settings"/> pairing every route on this controller already
+    /// carries — a plain <c>[HttpGet]</c> action change would otherwise trip that file's exact-match
+    /// assertion, exactly as the finding asked for.
+    /// </para>
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> List(CancellationToken ct)
+    {
+        var rows = await jinglePackStore.ListAsync(ct);
+        var summaries = rows
+            .OrderBy(row => row.Slug, StringComparer.Ordinal)
+            .Select(row =>
+            {
+                var manifest = CatalogJinglePackManifestSerializer.Deserialize(row.DefinitionJson);
+                if (manifest is null)
+                {
+                    logger.LogWarning(
+                        "Jingle pack listing found a stored definition that failed to re-parse slug={Slug} — " +
+                        "the row still lists, with packName falling back to the slug itself",
+                        LogSanitize.Strip(row.Slug));
+                }
+
+                return new InstalledPackSummaryDto(row.Slug, manifest?.PackName ?? row.Slug);
+            })
+            .ToArray();
+
+        return Ok(summaries);
+    }
 
     /// <summary>
     /// POST /api/jingle-packs/{slug}/install — see this class's own remarks for the full gate order

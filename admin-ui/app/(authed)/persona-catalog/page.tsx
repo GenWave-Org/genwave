@@ -99,6 +99,34 @@ async function fetchInstalledIconSlugs(cookieHeader: string): Promise<string[]> 
   return fetchSlugs<InstalledIconPackRow>("/api/icon-packs", cookieHeader);
 }
 
+/** Wire shape of a `GET /api/voice-packs` or `GET /api/jingle-packs` row (STORY-397, PLAN T418) —
+ * only the one field this page reads; mirrors `InstalledIconPackRow`'s own narrow-cast idiom above
+ * for the SAME reasoning, two different endpoints sharing one shape (`InstalledPackSummaryDto`). */
+interface InstalledSummaryPackRow {
+  slug: string;
+}
+
+/**
+ * Every already-installed voice pack's slug (STORY-397, PLAN T418) — mirrors
+ * `fetchInstalledAvatarSlugs`'s own remarks verbatim, applied to the voice-pack kind: fetched
+ * ALONGSIDE the index, in the SAME server component, so `VoicePackDetailPanel` never has to guess
+ * whether a slug it is about to offer "Install" for is already live on the shared voices volume.
+ * Every row counts (no predicate): a voice pack has only one provenance path (SPEC F164.5), so
+ * "installed" and "genuinely installed by this route" are the same thing.
+ */
+async function fetchInstalledVoicePackSlugs(cookieHeader: string): Promise<string[]> {
+  return fetchSlugs<InstalledSummaryPackRow>("/api/voice-packs", cookieHeader);
+}
+
+/**
+ * Every already-installed jingle pack's slug (STORY-397, PLAN T418) — the jingle-pack sibling of
+ * `fetchInstalledVoicePackSlugs` immediately above, same reasoning, a different endpoint (SPEC
+ * F165.5's own single provenance path).
+ */
+async function fetchInstalledJinglePackSlugs(cookieHeader: string): Promise<string[]> {
+  return fetchSlugs<InstalledSummaryPackRow>("/api/jingle-packs", cookieHeader);
+}
+
 /** Wire shape of one `Station:Theme` choice, off `GET /api/settings` (SPEC F103.11, PLAN T187) —
  * only the fields this page reads; mirrors `InstalledFontPackRow`'s own narrow-cast idiom above
  * rather than importing `settings/settings-types.ts`'s full `SettingChoice` for three fields. */
@@ -231,6 +259,8 @@ export default async function PersonaCatalogPage({ searchParams }: PersonaCatalo
     hiredPersonaSlugs,
     installedAvatarSlugs,
     installedIconSlugs,
+    installedVoicePackSlugs,
+    installedJinglePackSlugs,
   ] = await Promise.all([
     apiGet("/api/catalog/index", { cookies: cookieHeader }),
     fetchInstalledFontSlugs(cookieHeader),
@@ -239,6 +269,8 @@ export default async function PersonaCatalogPage({ searchParams }: PersonaCatalo
     fetchHiredPersonaSlugs(cookieHeader),
     fetchInstalledAvatarSlugs(cookieHeader),
     fetchInstalledIconSlugs(cookieHeader),
+    fetchInstalledVoicePackSlugs(cookieHeader),
+    fetchInstalledJinglePackSlugs(cookieHeader),
   ]);
 
   // Disabled (SPEC F90.1): CatalogController serves a bare, zero-byte 404 here — the same
@@ -281,6 +313,8 @@ export default async function PersonaCatalogPage({ searchParams }: PersonaCatalo
           hiredPersonaSlugs={hiredPersonaSlugs}
           installedAvatarSlugs={installedAvatarSlugs}
           installedIconSlugs={installedIconSlugs}
+          installedVoicePackSlugs={installedVoicePackSlugs}
+          installedJinglePackSlugs={installedJinglePackSlugs}
           activeKind={activeKind}
         />
       </div>

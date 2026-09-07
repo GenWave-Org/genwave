@@ -16,6 +16,8 @@ const TABS: TabStripTab<CatalogEntryKind>[] = [
   { id: "avatar", label: "Avatars", href: "/persona-catalog?kind=avatars" },
   { id: "icon", label: "Icons", href: "/persona-catalog?kind=icons" },
   { id: "ad-pack", label: "Ad packs", href: "/persona-catalog?kind=ad-packs" },
+  { id: "voice-pack", label: "Voices", href: "/persona-catalog?kind=voices" },
+  { id: "jingle-pack", label: "Jingles", href: "/persona-catalog?kind=jingles" },
 ];
 
 /**
@@ -37,14 +39,19 @@ export function resolveCatalogKind(raw: string | string[] | undefined): CatalogE
       return "icon";
     case "ad-packs":
       return "ad-pack";
+    case "voices":
+      return "voice-pack";
+    case "jingles":
+      return "jingle-pack";
     default:
       return "persona";
   }
 }
 
 /**
- * Personas | Themes | Fonts | Shows | Avatars | Icons | Ad packs tab strip for the Community Catalog
- * shelf (gh-#372, widened at PLAN T294/T304/T405) — URL-driven via `?kind=`, the shared `TabStrip`
+ * Personas | Themes | Fonts | Shows | Avatars | Icons | Ad packs | Voices | Jingles tab strip for the
+ * Community Catalog shelf (gh-#372, widened at PLAN T294/T304/T405/T418) — URL-driven via `?kind=`,
+ * the shared `TabStrip`
  * markup (gh-#393's extraction). One tab per kind: the flat mixed grid gave no way to tell a persona
  * card from a show card without opening it (the issue's own complaint — neither kind carries a
  * badge), and the pile got worse with every kind the shelf gained. Every tab renders even when its

@@ -25,6 +25,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using GenWave.Core.Abstractions;
+using GenWave.Host.Api;
 using GenWave.Host.Catalog;
 using GenWave.Host.Tests.Fakes;
 
@@ -977,6 +978,79 @@ public static class FeatureVoicePackInstallGoesLiveWithoutARestart
             Assert.Null(manifest);
         }
     }
+
+    // ---------------------------------------------------------------------
+    // LISTING ROUTE (PLAN T418, STORY-397 — GET /api/voice-packs feeds the catalog shelf's own
+    // "Installed" chip and detail panel; see InstalledPackSummaryDto's own remarks for the full
+    // contract).
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioTheInstalledPacksListing
+    {
+        [Fact]
+        public async Task ReturnsEveryInstalledPacksSlugAndDisplayName()
+        {
+            // Given a pack installed through the normal install route (so its manifest lives in
+            // the store exactly as a real install would leave it, not a hand-built fixture row),
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+            var install = await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+            Assert.True(install.IsSuccessStatusCode, await install.Content.ReadAsStringAsync());
+
+            // When the listing route is asked for the installed packs,
+            var response = await client.GetAsync("/api/voice-packs");
+
+            // Then it reports 200 with exactly that one slug and the manifest's own display name —
+            // never the voice roster, engine, or preview file (this route's whole job is "which
+            // slugs are installed", the shelf already has the rest off the catalog entry itself).
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var summaries = await response.Content.ReadFromJsonAsync<InstalledPackSummaryDto[]>() ?? [];
+            var summary = Assert.Single(summaries);
+            Assert.Equal(VoicePackInstallFixtures.InstallSlug, summary.Slug);
+            Assert.Equal("Test Pack", summary.PackName);
+        }
+
+        [Fact]
+        public async Task AMalformedStoredDefinitionListsWithPackNameFallingBackToTheSlug()
+        {
+            // Given a row whose stored `definition` fails to re-parse (seeded directly through the
+            // store, bypassing Install's own manifest validation — a hand-edited or
+            // migration-corrupted row, not something the install route itself could ever write —
+            // InstalledPackSummaryDto's own remarks: this listing never drops such a row the way
+            // AttributionsController's own skip-and-log posture does),
+            var store = new FakeVoicePackStore();
+            await store.UpsertAsync(
+                VoicePackInstallFixtures.MalformedSlug, "kokoro", "{}", "test", [], CancellationToken.None);
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+
+            // When the listing route is asked for the installed packs,
+            var response = await client.GetAsync("/api/voice-packs");
+
+            // Then it still reports 200 with that row, its display name falling back to the slug
+            // itself rather than the row vanishing or the request 500ing.
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var summaries = await response.Content.ReadFromJsonAsync<InstalledPackSummaryDto[]>() ?? [];
+            var summary = Assert.Single(summaries);
+            Assert.Equal(VoicePackInstallFixtures.MalformedSlug, summary.Slug);
+            Assert.Equal(VoicePackInstallFixtures.MalformedSlug, summary.PackName);
+        }
+
+        [Fact]
+        public async Task DoesNotExistWithAdminDisabled()
+        {
+            // SPEC F61.2 (STORY-166) — the admin kill switch applies to every AdminSurface route,
+            // this new listing route included: 404, not merely 401, with the plane switched off.
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store, adminEnabled: false);
+            var client = factory.CreateClient();
+
+            var response = await client.GetAsync("/api/voice-packs");
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+    }
 }
 
 /// <summary>
@@ -995,12 +1069,16 @@ file sealed class VoicePackInstallWebFactory : WebApplicationFactory<Program>
     readonly FakeVoicePackStore store;
     readonly FakeHttpMessageHandler handler;
     readonly bool ownsVoicesRoot;
+    readonly bool adminEnabled;
 
     public string VoicesRoot { get; }
 
-    public VoicePackInstallWebFactory(FakeVoicePackStore store)
+    /// <summary><paramref name="adminEnabled"/> (PLAN T418) lets this file's own installed-packs
+    /// listing scenario reuse this factory for its kill-switch fact rather than standing up a
+    /// parallel one — every other caller leaves it at its default (true, the app's own default).</summary>
+    public VoicePackInstallWebFactory(FakeVoicePackStore store, bool adminEnabled = true)
         : this(store, Directory.CreateTempSubdirectory("t413-story395-voices-").FullName,
-            VoicePackInstallFixtures.FirstPtBytes, VoicePackInstallFixtures.SecondPtBytes, ownsVoicesRoot: true)
+            VoicePackInstallFixtures.FirstPtBytes, VoicePackInstallFixtures.SecondPtBytes, ownsVoicesRoot: true, adminEnabled)
     {
     }
 
@@ -1015,16 +1093,18 @@ file sealed class VoicePackInstallWebFactory : WebApplicationFactory<Program>
     /// both instances.
     /// </summary>
     public VoicePackInstallWebFactory(FakeVoicePackStore store, string voicesRoot, byte[] firstPtBytes, byte[] secondPtBytes)
-        : this(store, voicesRoot, firstPtBytes, secondPtBytes, ownsVoicesRoot: false)
+        : this(store, voicesRoot, firstPtBytes, secondPtBytes, ownsVoicesRoot: false, adminEnabled: true)
     {
     }
 
     VoicePackInstallWebFactory(
-        FakeVoicePackStore store, string voicesRoot, byte[] firstPtBytes, byte[] secondPtBytes, bool ownsVoicesRoot)
+        FakeVoicePackStore store, string voicesRoot, byte[] firstPtBytes, byte[] secondPtBytes, bool ownsVoicesRoot,
+        bool adminEnabled)
     {
         this.store = store;
         VoicesRoot = voicesRoot;
         this.ownsVoicesRoot = ownsVoicesRoot;
+        this.adminEnabled = adminEnabled;
         handler = VoicePackInstallFixtures.BuildRoutedHandler(voicesRoot, firstPtBytes, secondPtBytes);
     }
 
@@ -1033,6 +1113,7 @@ file sealed class VoicePackInstallWebFactory : WebApplicationFactory<Program>
         builder.UseEnvironment("Development");
         builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
         builder.UseSetting("Admin:Password", Password);
+        builder.UseSetting("Admin:Enabled", adminEnabled ? "true" : "false");
         builder.UseSetting("Community:CatalogIndexUrl", VoicePackInstallFixtures.IndexUrl);
         builder.UseSetting("Packs:VoicesRoot", VoicesRoot);
 
@@ -1078,6 +1159,10 @@ file static class VoicePackInstallFixtures
 
     public const string InstallSlug = "install-test-pack";
     public const string BrokenSlug = "broken-pack";
+    // T418 review round 1 finding O3 — a row seeded with a stored definition that fails to
+    // re-parse, never installed through the real route (see ScenarioTheInstalledPacksListing's own
+    // AMalformedStoredDefinitionListsWithPackNameFallingBackToTheSlug).
+    public const string MalformedSlug = "malformed-voice-pack";
 
     public static readonly byte[] FirstPtBytes = Encoding.UTF8.GetBytes("first-voice-bytes-story395");
     public static readonly byte[] SecondPtBytes = Encoding.UTF8.GetBytes("second-voice-bytes-story395");

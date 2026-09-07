@@ -23,6 +23,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Npgsql;
 using GenWave.Core.Abstractions;
+using GenWave.Host.Api;
 using GenWave.Host.Catalog;
 using GenWave.Host.Tests.Fakes;
 using GenWave.Host.Tests.Support;
@@ -145,6 +146,60 @@ public static class FeatureJinglePackInstallPutsBedsInTheLibrary
             Assert.Null(CatalogJinglePackManifestSerializer.Deserialize(json));
         }
     }
+
+    // ---------------------------------------------------------------------
+    // LISTING ROUTE (PLAN T418, STORY-397 — GET /api/jingle-packs feeds the catalog shelf's own
+    // "Installed" chip and detail panel; see InstalledPackSummaryDto's own remarks for the full
+    // contract).
+    // ---------------------------------------------------------------------
+
+    [Collection(JinglePackInstallCollection.Name)]
+    public sealed class ScenarioTheInstalledPacksListing(JinglePackInstallArc arc)
+    {
+        [Fact]
+        public void ReturnsTheInstalledPacksSlugAndDisplayName()
+        {
+            // This route's whole job is "which slugs are installed" — never the asset roster,
+            // license, or role, all of which the shelf already has off the catalog entry itself.
+            var summary = Assert.Single(arc.ListingAfterInstall);
+            Assert.Equal(JinglePackInstallFixtures.Slug, summary.Slug);
+            Assert.Equal(JinglePackInstallFixtures.PackName, summary.PackName);
+        }
+
+        [Fact]
+        public void AMalformedStoredDefinitionListsWithPackNameFallingBackToTheSlug()
+        {
+            // A row whose stored definition fails to re-parse (seeded directly via raw SQL,
+            // bypassing Install's own manifest validation — InstalledPackSummaryDto's own remarks:
+            // this listing never drops such a row the way AttributionsController's own
+            // skip-and-log posture does) still lists with a 200, its display name falling back to
+            // the slug itself.
+            Assert.Equal(HttpStatusCode.OK, arc.MalformedListingStatus);
+            var summary = arc.MalformedListingSummary;
+            Assert.NotNull(summary);
+            Assert.Equal(JinglePackInstallFixtures.MalformedSlug, summary.Slug);
+            Assert.Equal(JinglePackInstallFixtures.MalformedSlug, summary.PackName);
+        }
+    }
+
+    public sealed class ScenarioTheListingRouteUnderAdminOff
+    {
+        [Fact]
+        public async Task DoesNotExistWithAdminDisabled()
+        {
+            // SPEC F61.2 (STORY-166) — the admin kill switch applies to every AdminSurface route,
+            // this new listing route included: 404, not merely 401, with the plane switched off. No
+            // real Postgres here — the request never reaches the controller (or IJinglePackStore),
+            // so a real database would only add cost this fact has no need of (Story166's own
+            // KillSwitchWebFactory takes the same "Host=nowhere, nothing ever dials it" posture).
+            await using var factory = new JinglePackListingAdminOffWebFactory();
+            var client = factory.CreateClient();
+
+            var response = await client.GetAsync("/api/jingle-packs");
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+    }
 }
 
 // ── The DB-backed arc — one real Postgres, one running app, one installed pack, three real assets ──
@@ -185,6 +240,24 @@ public sealed class JinglePackInstallArc : IAsyncLifetime
     /// DB-backed fact is computed HERE, never re-queried by a Scenario after the fact).</summary>
     public IReadOnlyList<long> BedPoolIds { get; private set; } = [];
 
+    /// <summary>PLAN T418 (STORY-397) — <c>GET /api/jingle-packs</c>'s own answer read straight after
+    /// this arc's own install, over the SAME logged-in client, before the app is torn down — never
+    /// re-queried by a Scenario later (this type's own "compute every DB/HTTP-backed fact HERE"
+    /// discipline).</summary>
+    public IReadOnlyList<InstalledPackSummaryDto> ListingAfterInstall { get; private set; } = [];
+
+    /// <summary>T418 review round 1 finding O3 — the listing route's own answer for a SECOND row
+    /// whose <c>station.jingle_pack.definition</c> was seeded directly via raw SQL as <c>{}</c>
+    /// (never through the real install route, which would refuse a manifest this malformed —
+    /// exactly the "hand-edited or migration-corrupted row" InstalledPackSummaryDto's own remarks
+    /// describe), read on a SECOND call to <c>GET /api/jingle-packs</c> over the SAME client/app so
+    /// <see cref="ListingAfterInstall"/>'s own single-row assertion stays untouched.</summary>
+    public HttpStatusCode MalformedListingStatus { get; private set; }
+
+    /// <summary>The malformed row's own listing entry, or <see langword="null"/> if the listing
+    /// somehow dropped it (which would itself be the bug this fact exists to catch).</summary>
+    public InstalledPackSummaryDto? MalformedListingSummary { get; private set; }
+
     public async Task InitializeAsync()
     {
         await using var database = await JinglePackInstallDatabase.StartAsync();
@@ -218,6 +291,17 @@ public sealed class JinglePackInstallArc : IAsyncLifetime
             var random = await client.GetAsync("/media/random");
             RandomAfterInstallStatus = random.StatusCode;
 
+            var listing = await client.GetAsync("/api/jingle-packs");
+            ListingAfterInstall = await listing.Content.ReadFromJsonAsync<InstalledPackSummaryDto[]>() ?? [];
+
+            await SeedMalformedDefinitionAsync(database.StationConnectionString);
+            var malformedListing = await client.GetAsync("/api/jingle-packs");
+            MalformedListingStatus = malformedListing.StatusCode;
+            var afterMalformedInsert =
+                await malformedListing.Content.ReadFromJsonAsync<InstalledPackSummaryDto[]>() ?? [];
+            MalformedListingSummary = afterMalformedInsert
+                .SingleOrDefault(summary => summary.Slug == JinglePackInstallFixtures.MalformedSlug);
+
             BedPoolIds = await factory.Services.GetRequiredService<IAdBedPool>()
                 .ListReadyBedIdsAsync(AdsLibraryId, CancellationToken.None);
         }
@@ -238,6 +322,24 @@ public sealed class JinglePackInstallArc : IAsyncLifetime
         // JinglePackInstallWebFactory's Station:Scope:LibraryIds set below. Read back rather than
         // assumed, so F6.3's own fact pins the real value the install route actually resolved.
         return await conn.ExecuteScalarAsync<long>("insert into library.library (name) values ('ads') returning id");
+    }
+
+    /// <summary>T418 review round 1 finding O3 — writes a <c>station.jingle_pack</c> row with a
+    /// stored <c>definition</c> that fails <see cref="CatalogJinglePackManifestSerializer.Deserialize"/>
+    /// (an empty object, no <c>packName</c>/<c>assets</c>), bypassing the real install route entirely
+    /// — a hand-edited or migration-corrupted row is the only realistic way this shape reaches the
+    /// table, since <c>JinglePackController.Install</c> itself refuses a manifest this malformed
+    /// before it ever calls <see cref="IJinglePackStore.UpsertAsync"/>.</summary>
+    static async Task SeedMalformedDefinitionAsync(string stationConnectionString)
+    {
+        await using var conn = new NpgsqlConnection(stationConnectionString);
+        await conn.OpenAsync();
+        await conn.ExecuteAsync(
+            """
+            insert into station.jingle_pack (slug, definition, imported_from, imported_at)
+            values (@slug, '{}'::jsonb, @importedFrom, now())
+            """,
+            new { slug = JinglePackInstallFixtures.MalformedSlug, importedFrom = JinglePackInstallFixtures.IndexUrl });
     }
 
     static async Task<IReadOnlyList<InstalledJingleRow>> ReadInstalledRowsAsync(string libraryConnectionString)
@@ -341,6 +443,26 @@ file sealed class JinglePackInstallWebFactory(JinglePackInstallDatabase database
 }
 
 /// <summary>
+/// PLAN T418's own admin-off kill-switch fact needs nothing this file's real-Postgres
+/// <see cref="JinglePackInstallWebFactory"/> exists for — the request never reaches the controller
+/// (or <c>IJinglePackStore</c>), so this is a bare app instance with no database ever dialed
+/// (mirrors <c>FeatureAdminKillSwitch</c>'s own <c>KillSwitchWebFactory</c> in
+/// Story166_AdminKillSwitch.cs — same "Host=nowhere" posture, one route instead of every route).
+/// </summary>
+file sealed class JinglePackListingAdminOffWebFactory : WebApplicationFactory<Program>
+{
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", "test-password-story399-jingle-listing-admin-off");
+        builder.UseSetting("Admin:Enabled", "false");
+
+        builder.ConfigureTestServices(services => services.RemoveAll<IHostedService>());
+    }
+}
+
+/// <summary>
 /// A one-entry fake catalog origin serving one jingle pack with three real, ffmpeg-generated WAV
 /// assets — one of each closed-set role (<c>bed</c>, <c>sting</c>, <c>station_id</c>). Every asset's
 /// bytes are generated ONCE, into a scratch directory this class alone owns and deletes again
@@ -355,6 +477,11 @@ file static class JinglePackInstallFixtures
     public const string IndexUrl = "https://catalog.test/repo/jingle-install-index.json";
     const string Origin = "https://catalog.test/repo/";
     public const string PackName = "Story399 Test Pack";
+    // T418 review round 1 finding O3 — a row seeded directly via raw SQL with a stored definition
+    // that fails to re-parse, never installed through the real route (see JinglePackInstallArc's
+    // own SeedMalformedDefinitionAsync and ScenarioTheInstalledPacksListing's own
+    // AMalformedStoredDefinitionListsWithPackNameFallingBackToTheSlug).
+    public const string MalformedSlug = "malformed-jingle-pack";
 
     static readonly (string File, string Title, string Role)[] AssetDefs =
     [
