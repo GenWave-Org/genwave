@@ -287,6 +287,38 @@ sealed class AdSpotRepository(Lazy<NpgsqlDataSource> dataSource) : IAdSpotStore
         return row is null ? null : ToAdSpot(row);
     }
 
+    /// <summary>
+    /// <see cref="IAdSpotStore.StampBedIfNullAsync"/>'s SQL, exposed so
+    /// <c>tests/GenWave.MediaLibrary.Tests/Specs/Story403_AdSpotStampBedSql.cs</c> can assert the
+    /// never-overwrite <c>coalesce</c> and the <c>rendering</c>-only guard directly — the
+    /// <see cref="StampVoicePlanSql"/> precedent, one column over. <c>internal</c> —
+    /// <c>InternalsVisibleTo</c> already grants <c>GenWave.MediaLibrary.Tests</c> (see this project's
+    /// own .csproj). <c>static readonly</c>, not <c>const</c> — a raw-string interpolating
+    /// <see cref="Columns"/> cannot itself be a compile-time constant.
+    /// </summary>
+    internal static readonly string StampBedSql = $"""
+        update station.ad_spot
+        set bed_media_id = coalesce(bed_media_id, @bedMediaId)
+        where id = @id and state = 'rendering'::station.ad_state
+        returning {Columns}
+        """;
+
+    /// <summary>
+    /// <see cref="IAdSpotStore.StampBedIfNullAsync"/> — never-overwrite enforced by
+    /// <see cref="StampBedSql"/>'s own <c>coalesce</c>, not merely by the caller checking
+    /// <see cref="AdSpot.BedMediaId"/> first. Total: see this interface method's own remarks.
+    /// </summary>
+    public async Task<AdSpot?> StampBedIfNullAsync(long id, long bedMediaId, CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var row = await conn.QuerySingleOrDefaultAsync<AdSpotRow>(new CommandDefinition(
+            StampBedSql,
+            new { id, bedMediaId },
+            cancellationToken: ct));
+
+        return row is null ? null : ToAdSpot(row);
+    }
+
     /// <summary><see cref="IAdSpotStore.MarkReadyAsync"/> — <see cref="AdState.Rendering"/> to
     /// <see cref="AdState.Ready"/>, stamping <paramref name="mediaId"/> and <c>rendered_at</c>. Total:
     /// see this method's own interface remarks.</summary>

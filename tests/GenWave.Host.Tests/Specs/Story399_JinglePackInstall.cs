@@ -6,8 +6,9 @@
 // three-asset jingle pack (bed/sting/station_id), each asset a real, small ffmpeg-generated WAV
 // (JingleTestAudio) so the REAL ILoudnessAnalyzer/ICueAnalyzer/TagLib read genuinely measurable
 // audio — never faked bytes standing in for what enrichment is actually supposed to prove.
-// ScenarioBedPoolQueryFindsTheBeds stays its own pending stub — its own bed-pool query is PLAN
-// T416's own surface, not this task's.
+// ScenarioBedPoolQueryFindsTheBeds now reads the REAL IAdBedPool (resolved off this arc's own
+// WebApplicationFactory, the SAME DI graph the install route itself ran through) against these
+// same three installed rows — PLAN T416's own AC4, wired the moment T416's bed-pool query landed.
 
 using System.Net;
 using System.Net.Http.Json;
@@ -21,6 +22,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Npgsql;
+using GenWave.Core.Abstractions;
 using GenWave.Host.Catalog;
 using GenWave.Host.Tests.Fakes;
 using GenWave.Host.Tests.Support;
@@ -94,11 +96,20 @@ public static class FeatureJinglePackInstallPutsBedsInTheLibrary
             Assert.All(arc.InstalledRows, row => Assert.True(row.CueInSec is not null && row.CueOutSec is not null));
     }
 
-    public sealed class ScenarioBedPoolQueryFindsTheBeds
+    [Collection(JinglePackInstallCollection.Name)]
+    public sealed class ScenarioBedPoolQueryFindsTheBeds(JinglePackInstallArc arc)
     {
         [Fact]
         public void TheBedPoolQueryReturnsExactlyTheBedRoleRows()
-            => Assert.Fail("pending: T416 ad-worker bed-pool query — AC4 (this task, T414, only lands the rows a pool query will read)");
+        {
+            var bedRowId = arc.InstalledRows.Single(row => row.JingleRole == "bed").Id;
+
+            // AC4: of the three rows this arc's own pack install wrote (bed/sting/station_id), the
+            // pool holds ONLY the bed row — proving IAdBedPool.ListReadyBedIdsAsync's own
+            // jingle_role = 'bed' predicate (AdBedPoolRepository.PoolSql) actually excludes sting and
+            // station_id, not just that it returns something non-empty.
+            Assert.Equal([bedRowId], arc.BedPoolIds);
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -167,6 +178,13 @@ public sealed class JinglePackInstallArc : IAsyncLifetime
     public HttpStatusCode RandomAfterInstallStatus { get; private set; }
     public long AdsLibraryId { get; private set; }
 
+    /// <summary>The REAL <see cref="IAdBedPool"/>'s own answer for <see cref="AdsLibraryId"/>,
+    /// resolved off <see cref="JinglePackInstallWebFactory.Services"/> — the SAME DI graph (and so
+    /// the SAME <c>AdBedPoolRepository</c> production wiring) the install route itself ran through —
+    /// read here, before <c>database</c> goes out of scope below (see this type's own remarks: every
+    /// DB-backed fact is computed HERE, never re-queried by a Scenario after the fact).</summary>
+    public IReadOnlyList<long> BedPoolIds { get; private set; } = [];
+
     public async Task InitializeAsync()
     {
         await using var database = await JinglePackInstallDatabase.StartAsync();
@@ -199,6 +217,9 @@ public sealed class JinglePackInstallArc : IAsyncLifetime
 
             var random = await client.GetAsync("/media/random");
             RandomAfterInstallStatus = random.StatusCode;
+
+            BedPoolIds = await factory.Services.GetRequiredService<IAdBedPool>()
+                .ListReadyBedIdsAsync(AdsLibraryId, CancellationToken.None);
         }
         finally
         {

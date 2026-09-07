@@ -136,6 +136,23 @@ public interface IAdSpotStore
     Task<AdSpot?> StampVoicePlanIfNullAsync(long id, string voicePlanJson, CancellationToken ct);
 
     /// <summary>
+    /// Stamps <paramref name="bedMediaId"/> onto a currently <see cref="AdState.Rendering"/> row —
+    /// PLAN T416's own bed-pick seam, run once between <see cref="ClaimNextApprovedAsync"/> and the
+    /// render itself (the SAME seam <see cref="StampVoicePlanIfNullAsync"/> already occupies, SPEC
+    /// F168.1). Never-overwrite is enforced HERE, in SQL, not merely by the caller checking
+    /// <see cref="AdSpot.BedMediaId"/> first (SPEC F168.6's own guarantee that an owner's explicit bed
+    /// — set at approval time, or stamped by a previous pick — survives untouched): the
+    /// implementation's own <c>coalesce(bed_media_id, ...)</c> means a row that already carries a bed
+    /// is returned unchanged, at the SQL layer, even under a race the C#-side null check alone
+    /// couldn't close. Total: a row not currently <see cref="AdState.Rendering"/> (already resolved or
+    /// reclaimed by a concurrent tick) leaves the guarded <c>WHERE</c> matching nothing — returns
+    /// <see langword="null"/>, never throws, mirroring <see cref="StampVoicePlanIfNullAsync"/>'s own
+    /// posture. The caller renders whatever this returns; a <see langword="null"/> here is a benign,
+    /// if unlikely, race — never a reason to abort the tick.
+    /// </summary>
+    Task<AdSpot?> StampBedIfNullAsync(long id, long bedMediaId, CancellationToken ct);
+
+    /// <summary>
     /// <see cref="AdState.Rendering"/> to <see cref="AdState.Ready"/> (SPEC F159.2), stamping
     /// <paramref name="mediaId"/> and <c>rendered_at</c> — PLAN T401's own render-success seam. See
     /// this interface's own remarks for why this never opens a cross-schema transaction with the

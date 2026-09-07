@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **119 seams across 7 projects.**
+> **120 seams across 7 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -107,10 +107,11 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (54 seams)
+## GenWave.MediaLibrary (55 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
+| `GenWave.Core.Abstractions.IAdBedPool` | `GenWave.MediaLibrary.Catalog.AdBedPoolRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAdBriefStore` | `GenWave.MediaLibrary.Station.AdBriefRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAdSpotStore` | `GenWave.MediaLibrary.Station.AdSpotRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAdminLibraryWrite` | `GenWave.MediaLibrary.Catalog.AdminLibraryRepository` | Singleton | — |

@@ -22,6 +22,12 @@
          specs (Story142_AubioBpmAnalyzer.cs) can exercise them directly without invoking the real
          binary (SPEC F46.5 — CI runners don't carry aubio). -->
     <InternalsVisibleTo Include="GenWave.MediaLibrary.Tests" />
+    <!-- FfmpegAudioMixer.BuildFadeSuffix is `internal` so Story391_AdRenderAssembly.cs can exercise
+         the bed tail-fade filter string directly, without a real ffmpeg binary (SPEC F168.3;
+         STORY-403; PLAN T416 — the SAME "pure logic, tested without the process" reason as the aubio
+         grant immediately above). GenWave.Tts.Tests already carries a ProjectReference to this
+         project (it references GenWave.Loudness's IAudioMixer implementation directly). -->
+    <InternalsVisibleTo Include="GenWave.Tts.Tests" />
   </ItemGroup>
 
 </Project>

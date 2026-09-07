@@ -31,7 +31,12 @@ public static class FeatureAdCastPickerBuildsAVoicePlan
             CreatedAt: DateTime.UtcNow, StateChangedAt: DateTime.UtcNow, RenderedAt: null, RetiredAt: null,
             Version: "1");
 
-    static AdLiveSettings Settings(string announcerVoice, params string[] castVoices) => new(announcerVoice, castVoices);
+    // PLAN T416 review F3+O3: AdLiveSettings.BedFadeMs no longer defaults (that record's own remarks
+    // — AdLiveSettingsReader is the ONE construction site with a real default) — this helper is not
+    // that reader, so it names the reader's own DefaultBedFadeMs constant explicitly rather than
+    // re-inventing 300 as a second magic number nobody but this file would ever see.
+    static AdLiveSettings Settings(string announcerVoice, params string[] castVoices) =>
+        new(announcerVoice, castVoices, AdLiveSettingsReader.DefaultBedFadeMs);
 
     static string EntryFor(AdCastPick pick, string tag) => pick.Entries.Single(e => e.Tag == tag).VoiceId;
 

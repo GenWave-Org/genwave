@@ -78,6 +78,8 @@ public sealed class AdSpotWorker(
     IAudiencePostureProvider audiencePosture,
     IAuthoredCatalogWriter catalogWriter,
     IAdminMediaLookup adminLookup,
+    IAdBedPool bedPool,
+    ILibraryRepository libraryRepository,
     IOnAirRenderSignal onAirRenderSignal,
     IStationIdentityProvider stationIdentity,
     IOptionsMonitor<AdsOptions> adsOptions,
@@ -374,6 +376,14 @@ public sealed class AdSpotWorker(
     /// the SAME call above and so takes the SAME single cast-pick step — there is no separate branch
     /// for "who wrote this spot".
     /// </para>
+    ///
+    /// <para>
+    /// <b>Bed pick happens here too (SPEC F168; STORY-403; PLAN T416)</b> — right after the cast stamp,
+    /// via <see cref="StampBedIfNeededAsync"/>, the SAME "stamp the just-claimed row, once, before the
+    /// render call" shape as the cast pick immediately above: no separate branch for "who wrote this
+    /// spot", and an owner's own explicit <see cref="AdSpot.BedMediaId"/> is never second-guessed
+    /// (SPEC F168.2).
+    /// </para>
     /// </summary>
     async Task RenderOneIfDueAsync(AdLiveSettings liveSettings, CancellationToken stoppingToken)
     {
@@ -383,7 +393,8 @@ public sealed class AdSpotWorker(
         if (await spotStore.ClaimNextApprovedAsync(stoppingToken) is not { } claimed)
             return;
 
-        var spot = await StampCastIfNeededAsync(claimed, liveSettings, stoppingToken);
+        var castStamped = await StampCastIfNeededAsync(claimed, liveSettings, stoppingToken);
+        var spot = await StampBedIfNeededAsync(castStamped, stoppingToken);
 
         using var budgetCts = new CancellationTokenSource(
             TimeSpan.FromSeconds(adsOptions.CurrentValue.RenderBudgetSeconds), timeProvider);
@@ -395,7 +406,7 @@ public sealed class AdSpotWorker(
 
         try
         {
-            var outcome = await renderService.RenderAsync(spot, renderCts.Token);
+            var outcome = await renderService.RenderAsync(spot, liveSettings, renderCts.Token);
             LogOutcome(spot.Id, outcome);
         }
         catch (OperationCanceledException) when (renderCts.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
@@ -471,6 +482,45 @@ public sealed class AdSpotWorker(
                     spot.Id, LogSanitize.Strip(spot.Brand));
                 break;
         }
+    }
+
+    /// <summary>
+    /// SPEC F168.1, F168.2, F168.5; STORY-403; PLAN T416 — picks <see cref="AdBedPicker"/> exactly
+    /// once, ONLY when <paramref name="spot"/> does not already carry a bed (an owner's own explicit
+    /// <see cref="AdSpot.BedMediaId"/>, or a pick a previous stamp already wrote, is never re-picked —
+    /// the SAME never-overwrite posture <see cref="StampCastIfNeededAsync"/> already keeps for a voice
+    /// plan, doubled by <see cref="IAdSpotStore.StampBedIfNullAsync"/>'s own SQL <c>coalesce</c>).
+    /// Resolves the ads library id itself (<see cref="AdRenderService"/> resolves it again later for
+    /// the render call proper — the two owners never share a request-scoped cache, so no shared state
+    /// crosses this method boundary): when the library does not exist yet, this method has nothing to
+    /// pick against and returns <paramref name="spot"/> unchanged — <see cref="AdRenderService"/>'s own
+    /// <c>ResolveLibraryIdAsync</c> reaches the SAME "the ads library does not exist yet" failure a
+    /// moment later and fails the render with the honest reason, so nothing is lost by staying silent
+    /// here. An empty pool degrades to an unbedded render with one INFO line (SPEC F168.5's own honest
+    /// fallback) rather than a failure — the SAME "render dry, don't refuse" posture an empty cast pool
+    /// already gets.
+    /// </summary>
+    async Task<AdSpot> StampBedIfNeededAsync(AdSpot spot, CancellationToken ct)
+    {
+        if (spot.BedMediaId is not null)
+            return spot;
+
+        var library = await libraryRepository.GetByNameAsync(adsOptions.CurrentValue.LibraryName, ct);
+        if (library is null)
+            return spot;
+
+        var pool = await bedPool.ListReadyBedIdsAsync(library.Id, ct);
+        var pick = AdBedPicker.Pick(spot.Id, pool);
+        if (pick is null)
+        {
+            logger.LogInformation(
+                "No background music is installed; spot {Id} ({Brand}) renders without it",
+                spot.Id, LogSanitize.Strip(spot.Brand));
+            return spot;
+        }
+
+        var stamped = await spotStore.StampBedIfNullAsync(spot.Id, pick.Value, ct);
+        return stamped ?? spot;
     }
 
     /// <summary>

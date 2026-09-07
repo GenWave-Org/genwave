@@ -25,9 +25,30 @@ internal static class AdLiveSettingsReader
 {
     internal const string DefaultAnnouncerVoice = "";
 
+    /// <summary>SPEC F168.3's own default — matches <c>appsettings.json</c>'s <c>Station:Ads:BedFadeMs</c>
+    /// seed and <c>GenWave.Host.Configuration.SettingValidator</c>'s own range (T417) exactly (plain
+    /// text, not a <c>cref</c> — GenWave.Ads never references GenWave.Host, L10).</summary>
+    internal const int DefaultBedFadeMs = 300;
+
+    /// <summary>
+    /// The SAME 100-1000 range <c>SettingValidator.AdsBedFadeMsMin</c>/<c>AdsBedFadeMsMax</c>
+    /// already enforces at PUT-time (GenWave.Host, T417) — hardcoded here rather than referenced
+    /// (L10: GenWave.Ads must never reference GenWave.Host) as a defensive second gate: a value that
+    /// somehow reached this table unvalidated (a direct DB edit, a future write path that skips the
+    /// validator) still clamps to a sane render before it ever reaches ffmpeg — the same
+    /// "belt-and-suspenders, not redundant" posture the ad-spot store's own never-overwrite
+    /// <c>coalesce</c> guards apply one seam over (plain text, not a <c>cref</c>: GenWave.Ads does not
+    /// reference GenWave.MediaLibrary.Station).
+    /// </summary>
+    internal const int MinBedFadeMs = 100;
+    internal const int MaxBedFadeMs = 1000;
+
     public static AdLiveSettings Read(IConfiguration configuration) => new(
         AnnouncerVoice: ReadString(configuration, "Station:Ads:AnnouncerVoice", DefaultAnnouncerVoice).Trim(),
-        CastVoices: ParseCastVoices(ReadString(configuration, "Station:Ads:CastVoices", "")));
+        CastVoices: ParseCastVoices(ReadString(configuration, "Station:Ads:CastVoices", "")),
+        BedFadeMs: Math.Clamp(
+            AdSettingsRead.OrDefault(configuration, "Station:Ads:BedFadeMs", DefaultBedFadeMs), MinBedFadeMs,
+            MaxBedFadeMs));
 
     static string ReadString(IConfiguration configuration, string key, string fallback)
     {
@@ -37,9 +58,11 @@ internal static class AdLiveSettingsReader
         }
         catch (InvalidOperationException)
         {
-            // Mirrors AdStockSettingsReader.ReadOrDefault: GetValue<T> throws only when the key IS
-            // present but fails to convert — never expected for a string-typed value, kept for the
-            // SAME "one stray operator typo must never crash a worker tick" reason.
+            // Mirrors AdSettingsRead.OrDefault's own guard (this class's own struct-typed reads go
+            // through that shared helper directly; string is not a struct, so this copy stays): GetValue<T>
+            // throws only when the key IS present but fails to convert — never expected for a
+            // string-typed value, kept for the SAME "one stray operator typo must never crash a worker
+            // tick" reason.
             return fallback;
         }
     }

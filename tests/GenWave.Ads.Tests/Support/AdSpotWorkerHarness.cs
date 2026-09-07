@@ -31,6 +31,7 @@ internal static class AdSpotWorkerHarness
         FakeOptionsMonitor<AdsOptions> AdsOptions,
         FakeAuthoredCatalogWriter CatalogWriter,
         FakeAdminMediaLookup AdminLookup,
+        FakeAdBedPool BedPool,
         FakeHttpMessageHandler LlmHandler,
         long AdsLibraryId);
 
@@ -87,6 +88,7 @@ internal static class AdSpotWorkerHarness
         var adminLookup = new FakeAdminMediaLookup();
         var libraries = new FakeAdsLibraryStore();
         var adsLibraryId = libraries.AddExisting("ads");
+        var bedPool = new FakeAdBedPool();
         var catalogWriter = new FakeAuthoredCatalogWriter();
         var stationIdentity = new FakeStationIdentityProvider(new StationIdentity("station-1", StationName, StationVoice));
         var audiencePosture = new FakeAudiencePostureProvider();
@@ -103,6 +105,14 @@ internal static class AdSpotWorkerHarness
         });
         var locatorRoots = new AdSpotLocatorRoots("/media", "/authored");
 
+        // PLAN T416 review F3+O3: AdSpotWorker's own cast/bed pick needs the live configuration —
+        // built once, here, before it. AdRenderService no longer carries its own IConfiguration; the
+        // worker hands it the SAME AdLiveSettingsReader.Read result each tick instead (see
+        // AdSpotWorker.cs's own remarks).
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(stationSettings ?? new Dictionary<string, string?>())
+            .Build();
+
         var renderService = new AdRenderService(
             author, store, adminLookup, libraries, stationIdentity, adsOptions, locatorRoots,
             new NoOpLogger<AdRenderService>());
@@ -115,20 +125,16 @@ internal static class AdSpotWorkerHarness
             new SingleHandlerHttpClientFactory(handler), llmOptions, recorder, new FakeDegradationModeReader(),
             new NoOpLogger<AdScriptWriter>(), timeProvider);
 
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(stationSettings ?? new Dictionary<string, string?>())
-            .Build();
-
         var worker = new AdSpotWorker(
             store, briefs, scriptWriter, renderService, durationEstimator, audiencePosture, catalogWriter,
-            adminLookup, gate, stationIdentity, adsOptions, llmOptions, configuration, timeProvider,
-            workerLogger ?? new NoOpLogger<AdSpotWorker>());
+            adminLookup, bedPool, libraries, gate, stationIdentity, adsOptions, llmOptions, configuration,
+            timeProvider, workerLogger ?? new NoOpLogger<AdSpotWorker>());
 
         var guardian = new AdSpotLifecycleGuardianService(
             store, adsOptions, timeProvider, new NoOpLogger<AdSpotLifecycleGuardianService>());
 
         return new Harness(
             worker, guardian, store, briefs, gate, author, timeProvider, adsOptions, catalogWriter, adminLookup,
-            handler, adsLibraryId);
+            bedPool, handler, adsLibraryId);
     }
 }

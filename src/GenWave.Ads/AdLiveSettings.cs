@@ -1,11 +1,9 @@
 namespace GenWave.Ads;
 
 /// <summary>
-/// The two <c>Station:Ads:*</c> Live knobs <see cref="AdCastPicker.Pick"/> needs on every render claim
-/// (SPEC F167.1, F167.2; STORY-402; PLAN T415) — <see cref="AdLiveSettingsReader.Read"/>'s own return
-/// shape, the <see cref="AdStockSettings"/> precedent applied to the cast-pool pair beside it.
-/// <c>Station:Ads:BedFadeMs</c> (a THIRD knob in the same namespace) is not carried here — it belongs
-/// to a later task's own bed-mix concern, not this one's cast pick.
+/// The <c>Station:Ads:*</c> Live knobs read once per render claim (SPEC F167.1, F167.2, F168.3;
+/// STORY-402, STORY-403; PLAN T415, T416) — <see cref="AdLiveSettingsReader.Read"/>'s own return
+/// shape, the <see cref="AdStockSettings"/> precedent applied to this cast-pool/bed-fade trio.
 /// </summary>
 /// <param name="AnnouncerVoice">SPEC F167.1's <c>Station:Ads:AnnouncerVoice</c> — a Kokoro voice id, or
 /// <c>""</c> (the default) meaning "use the station's own voice"
@@ -14,4 +12,11 @@ namespace GenWave.Ads;
 /// <see cref="AdCastPicker"/> casts <c>VOICE1</c>/<c>VOICE2</c> from, already split/trimmed/de-duped by
 /// <see cref="AdLiveSettingsReader"/>, order preserved. Empty means the pool is genuinely empty
 /// (SPEC F167.4).</param>
-internal sealed record AdLiveSettings(string AnnouncerVoice, IReadOnlyList<string> CastVoices);
+/// <param name="BedFadeMs">SPEC F168.3's <c>Station:Ads:BedFadeMs</c> — how long, in milliseconds, the
+/// background music fades to silence across the render's trailing tail. No default (PLAN T416 review
+/// F3+O3): <see cref="AdLiveSettingsReader.Read"/> is the ONE construction site this record has —
+/// every other caller builds it explicitly (that reader's own <c>DefaultBedFadeMs</c> constant is
+/// where the 300ms default actually lives, and the only place clamping to
+/// <c>MinBedFadeMs</c>/<c>MaxBedFadeMs</c> happens); a second default here would protect zero real
+/// callers and hide a value already owned elsewhere.</param>
+internal sealed record AdLiveSettings(string AnnouncerVoice, IReadOnlyList<string> CastVoices, int BedFadeMs);

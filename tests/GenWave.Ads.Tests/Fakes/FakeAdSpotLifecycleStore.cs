@@ -28,6 +28,7 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
     public int MarkFailedCallCount { get; private set; }
     public int ClaimCallCount { get; private set; }
     public int StampVoicePlanCallCount { get; private set; }
+    public int StampBedCallCount { get; private set; }
 
     /// <summary>Every argument a caller passed to <see cref="CreateAsync"/>, in call order — lets a
     /// spec assert the exact <see cref="AdSource"/>/<see cref="AdState"/> generation actually chose
@@ -154,6 +155,27 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
             return Task.FromResult<AdSpot?>(null);
 
         var updated = Replace(id, s => s with { VoicePlan = s.VoicePlan ?? voicePlanJson, Version = NextVersion() });
+        return Task.FromResult<AdSpot?>(updated);
+    }
+
+    /// <summary>
+    /// Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.StampBedSql"/>'s own two guards
+    /// in plain C#, the SAME shape <see cref="StampVoicePlanIfNullAsync"/> already keeps for the voice
+    /// plan a member above: never-overwrite (<c>current.BedMediaId ?? bedMediaId</c>, the coalesce) and
+    /// rendering-only (a row not currently <see cref="AdState.Rendering"/> returns
+    /// <see langword="null"/>, no state mutated) — <see cref="StampBedCallCount"/> counts every
+    /// INVOCATION regardless of outcome, so a spec asserting "the worker never even calls this for a
+    /// spot that already carries a bed" (PLAN T416 review R3) can tell that apart from "it called in
+    /// and the coalesce declined to overwrite".
+    /// </summary>
+    public Task<AdSpot?> StampBedIfNullAsync(long id, long bedMediaId, CancellationToken ct)
+    {
+        StampBedCallCount++;
+        var index = spots.FindIndex(s => s.Id == id);
+        if (index < 0 || spots[index].State != AdState.Rendering)
+            return Task.FromResult<AdSpot?>(null);
+
+        var updated = Replace(id, s => s with { BedMediaId = s.BedMediaId ?? bedMediaId, Version = NextVersion() });
         return Task.FromResult<AdSpot?>(updated);
     }
 
