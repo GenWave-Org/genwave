@@ -48,8 +48,6 @@ public sealed class AdRenderService(
     AdSpotLocatorRoots locatorRoots,
     ILogger<AdRenderService> logger)
 {
-    static readonly JsonSerializerOptions VoicePlanJsonOptions = new(JsonSerializerDefaults.Web);
-
     public async Task<AdRenderOutcome> RenderAsync(AdSpot spot, CancellationToken ct)
     {
         try
@@ -166,7 +164,7 @@ public sealed class AdRenderService(
         IReadOnlyList<AdVoicePlanEntry>? deserialized;
         try
         {
-            deserialized = JsonSerializer.Deserialize<IReadOnlyList<AdVoicePlanEntry>>(voicePlanJson, VoicePlanJsonOptions);
+            deserialized = JsonSerializer.Deserialize<IReadOnlyList<AdVoicePlanEntry>>(voicePlanJson, AdVoicePlanJson.Options);
         }
         catch (JsonException)
         {

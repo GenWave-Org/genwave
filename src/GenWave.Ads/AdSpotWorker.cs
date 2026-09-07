@@ -79,6 +79,7 @@ public sealed class AdSpotWorker(
     IAuthoredCatalogWriter catalogWriter,
     IAdminMediaLookup adminLookup,
     IOnAirRenderSignal onAirRenderSignal,
+    IStationIdentityProvider stationIdentity,
     IOptionsMonitor<AdsOptions> adsOptions,
     IOptionsMonitor<LlmOptions> llmOptions,
     IConfiguration configuration,
@@ -127,11 +128,12 @@ public sealed class AdSpotWorker(
         try
         {
             var settings = AdStockSettingsReader.Read(configuration);
+            var liveSettings = AdLiveSettingsReader.Read(configuration);
 
             await RepairReadyEligibilityAsync(stoppingToken);
             await RetireStaleAsync(settings.RefreshDays, stoppingToken);
             await RefillIfNeededAsync(settings, stoppingToken);
-            await RenderOneIfDueAsync(stoppingToken);
+            await RenderOneIfDueAsync(liveSettings, stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -364,14 +366,24 @@ public sealed class AdSpotWorker(
     /// retry is the right next step for a systematically wedged backend), while a break-window yield
     /// re-arms it straight back to <see cref="AdState.Approved"/> via <see cref="IAdSpotStore.ReArmAsync"/>
     /// so the very next tick — no operator required — resumes it (STORY-391 AC4's own third fact).
+    ///
+    /// <para>
+    /// <b>Cast pick happens here (SPEC F167; STORY-402; PLAN T415 review R1)</b> — between the claim
+    /// and the render call, on the just-claimed row, via <see cref="StampCastIfNeededAsync"/>. Every
+    /// path that reaches <see cref="AdState.Approved"/> (owner draft, pack spot, LLM spot) is claimed by
+    /// the SAME call above and so takes the SAME single cast-pick step — there is no separate branch
+    /// for "who wrote this spot".
+    /// </para>
     /// </summary>
-    async Task RenderOneIfDueAsync(CancellationToken stoppingToken)
+    async Task RenderOneIfDueAsync(AdLiveSettings liveSettings, CancellationToken stoppingToken)
     {
         if (onAirRenderSignal.InFlight)
             return;
 
-        if (await spotStore.ClaimNextApprovedAsync(stoppingToken) is not { } spot)
+        if (await spotStore.ClaimNextApprovedAsync(stoppingToken) is not { } claimed)
             return;
+
+        var spot = await StampCastIfNeededAsync(claimed, liveSettings, stoppingToken);
 
         using var budgetCts = new CancellationTokenSource(
             TimeSpan.FromSeconds(adsOptions.CurrentValue.RenderBudgetSeconds), timeProvider);
@@ -411,6 +423,52 @@ public sealed class AdSpotWorker(
                 logger.LogWarning(
                     "Ad spot {Id} claim conflict — the guardian likely re-armed it mid-render; stopping this tick without retry",
                     spotId);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// SPEC F167; STORY-402; PLAN T415 review R1/R2/R5 — casts <see cref="AdCastPicker"/> exactly once,
+    /// ONLY when <paramref name="spot"/> does not already carry a plan (an owner draft's own explicit
+    /// <see cref="AdSpot.VoicePlan"/>, or a plan a previous stamp already wrote, is never re-cast; the
+    /// C# check here is doubled by <see cref="IAdSpotStore.StampVoicePlanIfNullAsync"/>'s own SQL
+    /// <c>coalesce</c> — belt-and-suspenders, not redundant, since the SQL guard is what closes a race
+    /// this C# check alone cannot). Returns the row <see cref="RenderOneIfDueAsync"/> should actually
+    /// render: the freshly stamped row when the store returned one, or the ORIGINAL claimed row when it
+    /// returned <see langword="null"/> — a benign race (the row left <see cref="AdState.Rendering"/>
+    /// between claim and stamp) that must never abort a render; <see cref="AdRenderService"/>'s own
+    /// <c>ResolveCast</c> already degrades gracefully from a null <see cref="AdSpot.VoicePlan"/>.
+    /// </summary>
+    async Task<AdSpot> StampCastIfNeededAsync(AdSpot spot, AdLiveSettings liveSettings, CancellationToken ct)
+    {
+        if (spot.VoicePlan is not null)
+            return spot;
+
+        var pick = AdCastPicker.Pick(spot, liveSettings, stationIdentity.Current.Voice);
+        LogCastOutcome(spot, pick.Outcome);
+
+        var stamped = await spotStore.StampVoicePlanIfNullAsync(spot.Id, AdVoicePlanJson.Serialize(pick.Entries), ct);
+        return stamped ?? spot;
+    }
+
+    /// <summary>PLAN T415 review R8: one INFO line for a degraded pick, never for the happy path — and
+    /// never more than once per tick BY CONSTRUCTION, since <see cref="RenderOneIfDueAsync"/> claims and
+    /// renders at most one spot per tick, so no rate-limit state is kept here (YAGNI).</summary>
+    void LogCastOutcome(AdSpot spot, AdCastOutcome outcome)
+    {
+        switch (outcome)
+        {
+            case AdCastOutcome.Cast:
+                break;
+            case AdCastOutcome.ThinPool:
+                logger.LogInformation(
+                    "Ad cast pool has only one non-announcer voice for spot {Id} ({Brand}); the same voice reads every part",
+                    spot.Id, LogSanitize.Strip(spot.Brand));
+                break;
+            case AdCastOutcome.EmptyPool:
+                logger.LogInformation(
+                    "Ad cast pool is empty for spot {Id} ({Brand}); every part uses the station voice",
+                    spot.Id, LogSanitize.Strip(spot.Brand));
                 break;
         }
     }

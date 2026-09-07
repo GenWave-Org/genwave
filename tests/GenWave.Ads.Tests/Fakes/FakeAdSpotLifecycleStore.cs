@@ -27,6 +27,7 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
     public int MarkReadyCallCount { get; private set; }
     public int MarkFailedCallCount { get; private set; }
     public int ClaimCallCount { get; private set; }
+    public int StampVoicePlanCallCount { get; private set; }
 
     /// <summary>Every argument a caller passed to <see cref="CreateAsync"/>, in call order — lets a
     /// spec assert the exact <see cref="AdSource"/>/<see cref="AdState"/> generation actually chose
@@ -133,6 +134,26 @@ public sealed class FakeAdSpotLifecycleStore : IAdSpotStore
         {
             State = AdState.Rendering, StateChangedAt = DateTime.UtcNow, Version = NextVersion(),
         });
+        return Task.FromResult<AdSpot?>(updated);
+    }
+
+    /// <summary>
+    /// Mirrors <see cref="GenWave.MediaLibrary.Station.AdSpotRepository.StampVoicePlanSql"/>'s own two
+    /// guards in plain C#: never-overwrite (<c>current.VoicePlan ?? voicePlanJson</c>, the coalesce) and
+    /// rendering-only (a row not currently <see cref="AdState.Rendering"/> returns
+    /// <see langword="null"/>, no state mutated) — <see cref="StampVoicePlanCallCount"/> counts every
+    /// INVOCATION regardless of outcome, so a spec asserting "the worker never even calls this for an
+    /// owner draft that already carries a plan" (PLAN T415 review R11(b)) can tell that apart from "it
+    /// called in and the coalesce declined to overwrite".
+    /// </summary>
+    public Task<AdSpot?> StampVoicePlanIfNullAsync(long id, string voicePlanJson, CancellationToken ct)
+    {
+        StampVoicePlanCallCount++;
+        var index = spots.FindIndex(s => s.Id == id);
+        if (index < 0 || spots[index].State != AdState.Rendering)
+            return Task.FromResult<AdSpot?>(null);
+
+        var updated = Replace(id, s => s with { VoicePlan = s.VoicePlan ?? voicePlanJson, Version = NextVersion() });
         return Task.FromResult<AdSpot?>(updated);
     }
 

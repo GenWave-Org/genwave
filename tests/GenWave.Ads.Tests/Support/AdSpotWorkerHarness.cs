@@ -10,6 +10,7 @@ using GenWave.Ads.Tests.Fakes;
 using GenWave.Core.Domain;
 using GenWave.Tts;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 
 namespace GenWave.Ads.Tests.Support;
@@ -69,9 +70,14 @@ internal static class AdSpotWorkerHarness
     /// handler that throws if ever invoked (a scenario that never means to generate should never
     /// reach it silently); a scenario that DOES mean to generate passes
     /// <see cref="ServeSameReplyEveryTime"/> or its own custom handler.</param>
+    /// <param name="workerLogger">Defaults to <see cref="NoOpLogger{T}"/> — a scenario asserting on a
+    /// specific log line (PLAN T415, STORY-402 AC7's own INFO-per-tick fact) passes its own
+    /// <see cref="GenWave.Ads.Tests.Fakes.CapturingLogger{T}"/> and keeps the reference to read back
+    /// after the tick.</param>
     public static Harness Build(
         DateTimeOffset now, IReadOnlyDictionary<string, string?>? stationSettings = null,
-        int renderBudgetSeconds = 300, double durationToleranceRatio = 0.4, FakeHttpMessageHandler? llmHandler = null)
+        int renderBudgetSeconds = 300, double durationToleranceRatio = 0.4, FakeHttpMessageHandler? llmHandler = null,
+        ILogger<AdSpotWorker>? workerLogger = null)
     {
         var timeProvider = new FakeTimeProvider(now);
         var store = new FakeAdSpotLifecycleStore();
@@ -115,7 +121,8 @@ internal static class AdSpotWorkerHarness
 
         var worker = new AdSpotWorker(
             store, briefs, scriptWriter, renderService, durationEstimator, audiencePosture, catalogWriter,
-            adminLookup, gate, adsOptions, llmOptions, configuration, timeProvider, new NoOpLogger<AdSpotWorker>());
+            adminLookup, gate, stationIdentity, adsOptions, llmOptions, configuration, timeProvider,
+            workerLogger ?? new NoOpLogger<AdSpotWorker>());
 
         var guardian = new AdSpotLifecycleGuardianService(
             store, adsOptions, timeProvider, new NoOpLogger<AdSpotLifecycleGuardianService>());

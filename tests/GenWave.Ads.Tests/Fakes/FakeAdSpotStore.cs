@@ -59,6 +59,9 @@ public sealed class FakeAdSpotStore : IAdSpotStore
     public Task<AdSpot?> ClaimNextApprovedAsync(CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdRenderService.");
 
+    public Task<AdSpot?> StampVoicePlanIfNullAsync(long id, string voicePlanJson, CancellationToken ct) =>
+        throw new NotSupportedException("Not used by AdRenderService.");
+
     public Task<AdSpotPage> ListByStateAsync(AdState? state, int limit, int offset, CancellationToken ct) =>
         throw new NotSupportedException("Not used by AdRenderService.");
 

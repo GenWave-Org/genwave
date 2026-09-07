@@ -87,12 +87,6 @@ public sealed class AdsController(
 
     static readonly IReadOnlyList<int> AllowedSpotSeconds = [15, 30, 60];
 
-    /// <summary>The exact wire shape <see cref="AdRenderService"/>'s own <c>VoicePlanJsonOptions</c>
-    /// parses back — <see cref="AdVoicePlanEntry"/>'s reserialized-here text MUST round-trip through
-    /// that reader unchanged, so this is the SAME preset (<see cref="JsonSerializerDefaults.Web"/>),
-    /// never a divergent one.</summary>
-    static readonly JsonSerializerOptions VoicePlanJsonOptions = new(JsonSerializerDefaults.Web);
-
     // -----------------------------------------------------------------------
     // GET /api/ads — paged, state-scoped list
     // -----------------------------------------------------------------------
@@ -472,7 +466,7 @@ public sealed class AdsController(
     }
 
     static string? SerializeVoicePlan(IReadOnlyList<AdVoicePlanEntry>? plan) =>
-        plan is null or { Count: 0 } ? null : JsonSerializer.Serialize(plan, VoicePlanJsonOptions);
+        plan is null or { Count: 0 } ? null : AdVoicePlanJson.Serialize(plan);
 
     /// <summary>Best-effort, never-throws read of <see cref="AdSpot.VoicePlan"/>'s opaque jsonb text
     /// back into wire shape — malformed/unparseable degrades to <see langword="null"/> rather than
@@ -485,7 +479,7 @@ public sealed class AdsController(
 
         try
         {
-            return JsonSerializer.Deserialize<IReadOnlyList<AdVoicePlanEntry>>(json, VoicePlanJsonOptions);
+            return JsonSerializer.Deserialize<IReadOnlyList<AdVoicePlanEntry>>(json, AdVoicePlanJson.Options);
         }
         catch (JsonException)
         {
