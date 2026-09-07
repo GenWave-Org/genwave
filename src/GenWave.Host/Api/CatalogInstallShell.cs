@@ -242,6 +242,8 @@ internal static partial class CatalogInstallShell
         CatalogEntryKind.AdPack => "ad",
         // Same double-"pack" avoidance as AdPack above ("{Capitalize(kind)} pack unavailable.").
         CatalogEntryKind.VoicePack => "voice",
+        // Same double-"pack" avoidance (PLAN T414).
+        CatalogEntryKind.JinglePack => "jingle",
         _ => throw new UnreachableException($"Unhandled {nameof(CatalogEntryKind)} value: {kind}."),
     };
 
@@ -272,8 +274,29 @@ internal static partial class CatalogInstallShell
     /// <see cref="PackFetchPolicy.MaxPackBytes"/>, and <see cref="PackFetchPolicy.MaxPackBytesSpecRef"/>.
     /// </para>
     /// </summary>
-    public static async Task<(IActionResult? Error, Dictionary<string, CatalogFetchedAsset>? Assets)> FetchAllAssetsAsync(
-        CatalogProxyService catalogProxyService, string slug, CatalogEntryContent content, PackFetchPolicy policy, CancellationToken ct)
+    public static Task<(IActionResult? Error, Dictionary<string, CatalogFetchedAsset>? Assets)> FetchAllAssetsAsync(
+        CatalogProxyService catalogProxyService, string slug, CatalogEntryContent content, PackFetchPolicy policy, CancellationToken ct) =>
+        FetchAssetsAsync(slug, content, policy, (file, token) => catalogProxyService.GetAssetAsync(slug, file, token), ct);
+
+    /// <summary>
+    /// Same policy, same per-asset <see cref="CatalogAssetFetchResult"/> switch, as
+    /// <see cref="FetchAllAssetsAsync"/> above — but fetches every asset via
+    /// <see cref="CatalogProxyService.GetAssetUncachedAsync"/> rather than
+    /// <see cref="CatalogProxyService.GetAssetAsync"/>, for a kind whose assets must never occupy a
+    /// slot in the bounded asset cache (PLAN T414; see <see cref="CatalogProxyService.GetAssetUncachedAsync"/>'s
+    /// and <c>CatalogProxyService.MaxCachedAssets</c>'s own remarks — a 5 MiB jingle asset at 64 cached
+    /// slots would be 320 MiB, far past this admin-only surface's own cache bound). The two callers
+    /// share the SAME fetch-loop/policy/error-mapping body (<see cref="FetchAssetsAsync"/>, private
+    /// below) — only the per-file fetch call itself differs — so that body stays a single source of
+    /// truth rather than two independently-drifting copies of the same switch.
+    /// </summary>
+    public static Task<(IActionResult? Error, Dictionary<string, CatalogFetchedAsset>? Assets)> FetchAllAssetsUncachedAsync(
+        CatalogProxyService catalogProxyService, string slug, CatalogEntryContent content, PackFetchPolicy policy, CancellationToken ct) =>
+        FetchAssetsAsync(slug, content, policy, (file, token) => catalogProxyService.GetAssetUncachedAsync(slug, file, token), ct);
+
+    static async Task<(IActionResult? Error, Dictionary<string, CatalogFetchedAsset>? Assets)> FetchAssetsAsync(
+        string slug, CatalogEntryContent content, PackFetchPolicy policy,
+        Func<string, CancellationToken, Task<CatalogAssetFetchResult>> fetchOne, CancellationToken ct)
     {
         var noun = NounFor(policy.Kind);
         var fetched = new Dictionary<string, CatalogFetchedAsset>(StringComparer.Ordinal);
@@ -282,7 +305,7 @@ internal static partial class CatalogInstallShell
         foreach (var assetRef in content.Assets)
         {
             var file = Path.GetFileName(assetRef.Path);
-            var result = await catalogProxyService.GetAssetAsync(slug, file, ct);
+            var result = await fetchOne(file, ct);
             switch (result)
             {
                 case CatalogAssetFetchResult.Ok ok:

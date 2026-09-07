@@ -5,7 +5,11 @@
 // AdPackKindArc idiom, one pack-kind over: "arrange once, many read-only Scenarios") — station.ad_spot
 // and station.persona rows are inserted with raw SQL to simulate a reference existing at delete time,
 // exactly the situation VoicePackRepository.DeleteAsync's own single-statement guard has to catch. The
-// jingle-pack facts (PLAN T414) are untouched by this task — still their own pending stubs.
+// jingle-pack facts (PLAN T414) drive the same real DELETE route through their own arc
+// (JinglePackUninstallArc, below) — a station.ad_spot.bed_media_id row is inserted with raw SQL to
+// simulate a live reference the same way, exactly the situation JinglePackRepository.DeleteAsync's own
+// guard-read-then-delete (a two-connection sequence, not one in-statement guard — see that type's own
+// remarks) has to catch.
 
 using System.Net;
 using System.Net.Http.Json;
@@ -58,15 +62,16 @@ public static class FeaturePackUninstallRefusesOnActiveReferences
             => Assert.Contains(VoicePackUninstallArc.PersonaGuardPersonaName, arc.PersonaGuardDeleteBody, StringComparison.Ordinal);
     }
 
-    public sealed class ScenarioJinglePackRefusesOnActiveBedMediaId
+    [Collection(JinglePackUninstallCollection.Name)]
+    public sealed class ScenarioJinglePackRefusesOnActiveBedMediaId(JinglePackUninstallArc arc)
     {
         [Fact]
         public void UninstallReturns409WhenAPackMediaIdSitsInAReadyAdSpotsBedMediaId()
-            => Assert.Fail("pending: T414 jingle-pack DELETE guard — AC4");
+            => Assert.Equal(HttpStatusCode.Conflict, arc.BedGuardDeleteStatus);
 
         [Fact]
         public void The409ProblemDetailsListsTheReferencingAdSpotIds()
-            => Assert.Fail("pending: T414 ProblemDetails body — AC4");
+            => Assert.Contains(arc.BedGuardAdSpotId.ToString(), arc.BedGuardDeleteBody, StringComparison.Ordinal);
     }
 
     [Collection(VoicePackUninstallCollection.Name)]
@@ -87,6 +92,35 @@ public static class FeaturePackUninstallRefusesOnActiveReferences
         [Fact]
         public void The404BodyNamesTheUnknownSlug()
             => Assert.Contains("never-installed-pack", arc.UnknownSlugDeleteBody, StringComparison.Ordinal);
+    }
+
+    // F7 (T414 review round 2) — the jingle-pack arm of the same unknown-slug 404, unpinned in round 1.
+    [Collection(JinglePackUninstallCollection.Name)]
+    public sealed class ScenarioJinglePackUnknownSlugRefuses(JinglePackUninstallArc arc)
+    {
+        [Fact]
+        public void UninstallReturns404ForASlugThatWasNeverInstalled()
+            => Assert.Equal(HttpStatusCode.NotFound, arc.UnknownSlugDeleteStatus);
+
+        [Fact]
+        public void The404BodyNamesTheUnknownSlugAndCarriesTheNotFoundType()
+        {
+            Assert.Contains("never-installed", arc.UnknownSlugDeleteBody, StringComparison.Ordinal);
+            Assert.Contains("\"jingle_pack_not_found\"", arc.UnknownSlugDeleteBody, StringComparison.Ordinal);
+        }
+    }
+
+    // F6.7 (T414 review round 2) — neither install nor uninstall is reachable without a session.
+    [Collection(JinglePackUninstallCollection.Name)]
+    public sealed class ScenarioJinglePackRoutesRefuseAnUnauthenticatedCaller(JinglePackUninstallArc arc)
+    {
+        [Fact]
+        public void InstallReturns401WithoutASession()
+            => Assert.Equal(HttpStatusCode.Unauthorized, arc.UnauthenticatedInstallStatus);
+
+        [Fact]
+        public void UninstallReturns401WithoutASession()
+            => Assert.Equal(HttpStatusCode.Unauthorized, arc.UnauthenticatedDeleteStatus);
     }
 
     [Collection(VoicePackUninstallCollection.Name)]
@@ -131,19 +165,20 @@ public static class FeaturePackUninstallRefusesOnActiveReferences
             => Assert.True(arc.CleanPackAndVoiceRowsGone);
     }
 
-    public sealed class ScenarioJinglePackUninstallSucceedsOtherwise
+    [Collection(JinglePackUninstallCollection.Name)]
+    public sealed class ScenarioJinglePackUninstallSucceedsOtherwise(JinglePackUninstallArc arc)
     {
         [Fact]
         public void UninstallReturns204WithNoActiveReferences()
-            => Assert.Fail("pending: T414 happy path — AC5");
+            => Assert.Equal(HttpStatusCode.NoContent, arc.CleanDeleteStatus);
 
         [Fact]
         public void TheAuthoredJinglePacksSlugFolderIsGone()
-            => Assert.Fail("pending: T414 file cleanup — AC5");
+            => Assert.True(arc.CleanSlugFolderGone);
 
         [Fact]
         public void EveryAssociatedLibraryMediaRowIsDeleted()
-            => Assert.Fail("pending: T414 media row delete — AC5");
+            => Assert.True(arc.CleanMediaRowsGone);
     }
 }
 
@@ -460,6 +495,307 @@ file static class VoicePackUninstallFixtures
                     Content = JsonContent.Create(new { voices }),
                 });
             }
+
+            if (assetBytesByUrl.TryGetValue(absoluteUri, out var assetBytes))
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(assetBytes) });
+
+            return Task.FromResult(
+                routes.TryGetValue(absoluteUri, out var body)
+                    ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") }
+                    : new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
+    }
+}
+
+// ── The jingle-pack DB-backed arc (PLAN T414) — one real Postgres, one running app, two installed
+//    packs, a raw-SQL station.ad_spot.bed_media_id reference ──────────────────────────────────────
+
+[CollectionDefinition(Name)]
+public sealed class JinglePackUninstallCollection : ICollectionFixture<JinglePackUninstallArc>
+{
+    public const string Name = "Story401JinglePackUninstall";
+}
+
+/// <summary>
+/// Arranges every DB-backed fact this file's own jingle-pack Scenarios read (the
+/// <see cref="VoicePackUninstallArc"/> idiom, above, one pack kind over): boots ONE real ephemeral
+/// Postgres and ONE real, hosted-service-free app instance, seeds the <c>ads</c> library
+/// <c>AdsOptions.LibraryName</c> resolves at install time, installs two fixture packs through the REAL
+/// <c>POST /api/jingle-packs/{slug}/install</c> route, inserts a <c>station.ad_spot</c> row whose own
+/// <c>bed_media_id</c> names <c>bed-guard-pack</c>'s one asset (simulating "something already points at
+/// this background music" without a second HTTP surface this task does not own), then calls the REAL
+/// <c>DELETE /api/jingle-packs/{slug}</c> route against both packs — the guarded one first, the clean
+/// one second.
+/// </summary>
+public sealed class JinglePackUninstallArc : IAsyncLifetime
+{
+    public HttpStatusCode BedGuardDeleteStatus { get; private set; }
+    public string BedGuardDeleteBody { get; private set; } = "";
+    public long BedGuardAdSpotId { get; private set; }
+
+    public HttpStatusCode CleanDeleteStatus { get; private set; }
+    public bool CleanSlugFolderGone { get; private set; }
+    public bool CleanMediaRowsGone { get; private set; }
+
+    public HttpStatusCode UnknownSlugDeleteStatus { get; private set; }
+    public string UnknownSlugDeleteBody { get; private set; } = "";
+
+    public HttpStatusCode UnauthenticatedInstallStatus { get; private set; }
+    public HttpStatusCode UnauthenticatedDeleteStatus { get; private set; }
+
+    public async Task InitializeAsync()
+    {
+        await using var database = await JinglePackUninstallDatabase.StartAsync();
+        var jingleRoot = Directory.CreateTempSubdirectory("t414-story401-jingle-").FullName;
+        try
+        {
+            await SeedAdsLibraryAsync(database.LibraryConnectionString);
+
+            await using var factory = new JinglePackUninstallWebFactory(database, jingleRoot);
+
+            // F6.7 (T414 review round 2) — install/uninstall both sit behind
+            // [Authorize(Policy = AuthorizationPolicies.Settings)]; a client that never logged in must
+            // be turned away before either route runs. A slug that was never installed is fine here —
+            // auth denial happens in ASP.NET Core's own middleware, before the action (and so before
+            // any 404 the controller itself would answer) ever runs.
+            var unauthenticatedClient = factory.CreateClient();
+            var unauthenticatedInstall = await unauthenticatedClient.PostAsync("/api/jingle-packs/never-installed-jingle-pack/install", null);
+            UnauthenticatedInstallStatus = unauthenticatedInstall.StatusCode;
+            var unauthenticatedDelete = await unauthenticatedClient.DeleteAsync("/api/jingle-packs/never-installed-jingle-pack");
+            UnauthenticatedDeleteStatus = unauthenticatedDelete.StatusCode;
+
+            var client = await JinglePackUninstallWebFactory.LoggedInClientAsync(factory);
+
+            foreach (var slug in JinglePackUninstallFixtures.AllSlugs)
+            {
+                var install = await client.PostAsync($"/api/jingle-packs/{slug}/install", null);
+                if (!install.IsSuccessStatusCode)
+                    throw new InvalidOperationException(
+                        $"fixture install of '{slug}' failed: {await install.Content.ReadAsStringAsync()}");
+            }
+
+            // ── AC4 — an active ad_spot's own bed_media_id blocks the guard pack ──
+            var bedMediaId = await ReadMediaIdAsync(
+                database.LibraryConnectionString, JinglePackUninstallFixtures.BedGuardSlug, JinglePackUninstallFixtures.BedGuardTitle);
+            BedGuardAdSpotId = await InsertAdSpotAsync(database.StationConnectionString, state: "approved", bedMediaId: bedMediaId);
+
+            var bedGuardResponse = await client.DeleteAsync($"/api/jingle-packs/{JinglePackUninstallFixtures.BedGuardSlug}");
+            BedGuardDeleteStatus = bedGuardResponse.StatusCode;
+            BedGuardDeleteBody = await bedGuardResponse.Content.ReadAsStringAsync();
+
+            // ── AC5 — no active reference uninstalls cleanly ──
+            var cleanResponse = await client.DeleteAsync($"/api/jingle-packs/{JinglePackUninstallFixtures.CleanSlug}");
+            CleanDeleteStatus = cleanResponse.StatusCode;
+            CleanSlugFolderGone = !Directory.Exists(Path.Combine(jingleRoot, JinglePackUninstallFixtures.CleanSlug));
+            CleanMediaRowsGone = await CountMediaRowsAsync(database.LibraryConnectionString, JinglePackUninstallFixtures.CleanSlug) == 0;
+
+            // F7 (T414 review round 2) — a slug that was never installed refuses 404, never a 204.
+            var unknownSlugResponse = await client.DeleteAsync("/api/jingle-packs/never-installed-jingle-pack");
+            UnknownSlugDeleteStatus = unknownSlugResponse.StatusCode;
+            UnknownSlugDeleteBody = await unknownSlugResponse.Content.ReadAsStringAsync();
+        }
+        finally
+        {
+            try { Directory.Delete(jingleRoot, recursive: true); }
+            catch (IOException) { /* best-effort cleanup */ }
+            catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+        }
+    }
+
+    static async Task SeedAdsLibraryAsync(string libraryConnectionString)
+    {
+        await using var conn = new NpgsqlConnection(libraryConnectionString);
+        await conn.OpenAsync();
+        await conn.ExecuteAsync("insert into library.library (name) values ('ads')");
+    }
+
+    static async Task<long> ReadMediaIdAsync(string libraryConnectionString, string slug, string title)
+    {
+        await using var conn = new NpgsqlConnection(libraryConnectionString);
+        await conn.OpenAsync();
+        return await conn.ExecuteScalarAsync<long>(
+            "select id from library.media where pack_slug = @slug and title = @title", new { slug, title });
+    }
+
+    static async Task<long> InsertAdSpotAsync(string stationConnectionString, string state, long bedMediaId)
+    {
+        await using var conn = new NpgsqlConnection(stationConnectionString);
+        await conn.OpenAsync();
+        return await conn.ExecuteScalarAsync<long>(
+            """
+            insert into station.ad_spot (brand, title, source, state, bed_media_id)
+            values ('Test Brand', 'Test Spot', 'owner'::station.ad_source, @State::station.ad_state, @BedMediaId)
+            returning id
+            """,
+            new { State = state, BedMediaId = bedMediaId });
+    }
+
+    static async Task<int> CountMediaRowsAsync(string libraryConnectionString, string slug)
+    {
+        await using var conn = new NpgsqlConnection(libraryConnectionString);
+        await conn.OpenAsync();
+        return await conn.ExecuteScalarAsync<int>(
+            "select count(*)::int from library.media where pack_slug = @slug", new { slug });
+    }
+
+    public Task DisposeAsync() => Task.CompletedTask;
+}
+
+/// <summary>This file's own thin subclass of the shared <see cref="EphemeralStationDatabase"/>
+/// harness — see that type's own remarks. Supplies only the <c>"genwave-t414-401"</c> compose
+/// project-name prefix this file's own jingle-pack arc needs (distinct from
+/// <see cref="VoicePackUninstallDatabase"/>'s own <c>"genwave-t413-401"</c> prefix, above, and from
+/// Story399_JinglePackInstall.cs's own <c>"genwave-t414-399"</c> prefix — every ephemeral Postgres
+/// instance in this test project is fully isolated by construction).</summary>
+file sealed class JinglePackUninstallDatabase : EphemeralStationDatabase
+{
+    JinglePackUninstallDatabase(string project, string composeFile, string libraryConnectionString, string stationConnectionString)
+        : base(project, composeFile, libraryConnectionString, stationConnectionString)
+    {
+    }
+
+    public static async Task<JinglePackUninstallDatabase> StartAsync()
+    {
+        var (project, composeFile, library, station) = Provision("genwave-t414-401");
+        var db = new JinglePackUninstallDatabase(project, composeFile, library, station);
+        await db.WaitForSchemaAsync();
+        return db;
+    }
+}
+
+/// <summary>
+/// <see cref="WebApplicationFactory{TEntryPoint}"/> for <see cref="JinglePackUninstallArc"/> — boots
+/// the real Program.cs graph against a REAL ephemeral Postgres (<paramref name="database"/>) with every
+/// hosted service removed (no background reach into <c>library.media</c>/<c>station.ad_spot</c> racing
+/// this arc's own installs/deletes), the REAL <c>IJinglePackStore</c> (never swapped — this file's
+/// whole point is proving the REAL <c>JinglePackRepository.DeleteAsync</c> guard), and
+/// <c>Community:CatalogIndexUrl</c> pointed at a fake catalog origin serving two non-colliding fixture
+/// packs.
+/// </summary>
+file sealed class JinglePackUninstallWebFactory(JinglePackUninstallDatabase database, string jingleRoot)
+    : WebApplicationFactory<Program>
+{
+    internal const string Password = "test-password-story401-jinglepack-uninstall";
+
+    readonly FakeHttpMessageHandler handler = JinglePackUninstallFixtures.BuildRoutedHandler();
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", database.LibraryConnectionString);
+        builder.UseSetting("ConnectionStrings:Station", database.StationConnectionString);
+        builder.UseSetting("Admin:Password", Password);
+        builder.UseSetting("Station:Id", "genwave-1");
+        builder.UseSetting("Station:Name", "GWAV 108.8");
+        builder.UseSetting("Station:Voice", "af_heart");
+        builder.UseSetting("Station:Scope:LibraryIds:0", "1");
+        builder.UseSetting("Station:Scope:LibraryIds:1", "2");
+        builder.UseSetting("Community:CatalogIndexUrl", JinglePackUninstallFixtures.IndexUrl);
+        builder.UseSetting("Packs:JingleRoot", jingleRoot);
+
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IHostedService>();
+            services.RemoveAll<IHttpClientFactory>();
+            services.AddSingleton<IHttpClientFactory>(new SingleHandlerHttpClientFactory(handler));
+        });
+    }
+
+    public static async Task<HttpClient> LoggedInClientAsync(WebApplicationFactory<Program> factory)
+    {
+        var client = factory.CreateClient();
+        var login = await client.PostAsJsonAsync("/api/auth/login", new { password = Password });
+        Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
+        return client;
+    }
+}
+
+/// <summary>
+/// A two-entry fake catalog origin (mirrors <see cref="VoicePackUninstallFixtures"/>'s own idiom, one
+/// pack kind over): <c>bed-guard-pack</c>/<c>Bed Guard Asset</c> for the reference-guard Scenario,
+/// <c>clean-jingle-pack</c>/<c>Clean Asset</c> for the happy-path Scenario. Each pack ships exactly one
+/// real, ffmpeg-generated WAV asset — mirrors <c>JingleTestAudio</c>'s bytes-are-defined-once idiom in
+/// Story399_JinglePackInstall.cs's own <c>JinglePackInstallFixtures</c>.
+/// </summary>
+file static class JinglePackUninstallFixtures
+{
+    public const string IndexUrl = "https://catalog.test/repo/jingle-uninstall-index.json";
+    const string Origin = "https://catalog.test/repo/";
+    const string PackName = "Test Pack";
+
+    public const string BedGuardSlug = "bed-guard-pack";
+    public const string BedGuardTitle = "Bed Guard Asset";
+    public const string CleanSlug = "clean-jingle-pack";
+
+    static readonly (string Slug, string File, string Title, string Role)[] Packs =
+    [
+        (BedGuardSlug, "bed-guard-asset.wav", BedGuardTitle, "bed"),
+        (CleanSlug, "clean-asset.wav", "Clean Asset", "sting"),
+    ];
+
+    public static readonly IReadOnlyList<string> AllSlugs = Packs.Select(p => p.Slug).ToList();
+
+    static readonly IReadOnlyDictionary<string, byte[]> assetBytesByFile = GenerateAssetBytes();
+
+    static IReadOnlyDictionary<string, byte[]> GenerateAssetBytes()
+    {
+        var dir = JingleTestAudio.NewTempDir();
+        try
+        {
+            return Packs.ToDictionary(
+                p => p.File, p => File.ReadAllBytes(JingleTestAudio.CreateBedShapedTone(dir, p.File)), StringComparer.Ordinal);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); }
+            catch (IOException) { /* best-effort cleanup */ }
+            catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+        }
+    }
+
+    static byte[] AssetBytes(string file) => assetBytesByFile[file];
+
+    static string Sha256Hex(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+    static string Sha256Hex(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
+
+    static string ManifestJson(string file, string title, string role) => $$"""
+        { "packName": "{{PackName}}",
+          "assets": [ { "file": "{{file}}", "sha256": "{{Sha256Hex(AssetBytes(file))}}", "role": "{{role}}", "title": "{{title}}", "license": "CC0" } ] }
+        """;
+
+    const string MetaJson = """
+        {"author":"Test Fixture","description":"A jingle pack for the uninstall-guard specs.","audience":"everyone"}
+        """;
+
+    static string EntryJson(string slug, string file, string title, string role) => $$"""
+        { "slug": "{{slug}}", "kind": "jingle-pack", "audience": "everyone",
+          "manifest": { "path": "entries/{{slug}}/{{slug}}.jingle-pack.json", "sha256": "{{Sha256Hex(ManifestJson(file, title, role))}}" },
+          "meta": { "path": "entries/{{slug}}/{{slug}}.meta.json", "sha256": "{{Sha256Hex(MetaJson)}}" },
+          "assets": [
+            { "path": "entries/{{slug}}/{{file}}", "sha256": "{{Sha256Hex(AssetBytes(file))}}", "bytes": {{AssetBytes(file).Length}} }
+          ] }
+        """;
+
+    static string IndexJson() => $$"""
+        { "generatedAt": "2026-09-06", "entries": [
+            {{string.Join(", ", Packs.Select(p => EntryJson(p.Slug, p.File, p.Title, p.Role)))}}
+          ] }
+        """;
+
+    public static FakeHttpMessageHandler BuildRoutedHandler()
+    {
+        var routes = new Dictionary<string, string>(StringComparer.Ordinal) { [IndexUrl] = IndexJson() };
+        var assetBytesByUrl = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        foreach (var (slug, file, title, role) in Packs)
+        {
+            routes[Origin + $"entries/{slug}/{slug}.jingle-pack.json"] = ManifestJson(file, title, role);
+            routes[Origin + $"entries/{slug}/{slug}.meta.json"] = MetaJson;
+            assetBytesByUrl[Origin + $"entries/{slug}/{file}"] = AssetBytes(file);
+        }
+
+        return new((request, _) =>
+        {
+            var absoluteUri = request.RequestUri!.AbsoluteUri;
 
             if (assetBytesByUrl.TryGetValue(absoluteUri, out var assetBytes))
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(assetBytes) });

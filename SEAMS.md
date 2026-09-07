@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **118 seams across 7 projects.**
+> **119 seams across 7 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -107,7 +107,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (53 seams)
+## GenWave.MediaLibrary (54 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -136,6 +136,7 @@
 | `GenWave.Core.Abstractions.IFontPackStore` | `GenWave.MediaLibrary.Station.FontPackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IGardenerPass` | `GenWave.MediaLibrary.Garden.ShelfDustGardenerPass` | Singleton | also registered: `GenWave.MediaLibrary.Garden.DeadFileGardenerPass` (GenWave.MediaLibrary), `GenWave.MediaLibrary.Garden.NearDuplicateGardenerPass` (GenWave.MediaLibrary), `GenWave.MediaLibrary.Garden.StaleMetadataGardenerPass` (GenWave.MediaLibrary), `GenWave.MediaLibrary.Garden.UnreachableGardenerPass` (GenWave.MediaLibrary) |
 | `GenWave.Core.Abstractions.IIconPackStore` | `GenWave.MediaLibrary.Station.IconPackRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IJinglePackStore` | `GenWave.MediaLibrary.Station.JinglePackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.ILibraryRepository` | `GenWave.MediaLibrary.Catalog.LibraryRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaCatalog` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaExplicitOverride` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
