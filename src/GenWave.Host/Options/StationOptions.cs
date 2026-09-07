@@ -152,7 +152,7 @@ public sealed class StationOptions
     public StationShowsOptions Shows { get; set; } = new();
 
     /// <summary>The ad cadence trigger's own knob (SPEC F158.3, STORY-388, PLAN T397) — see
-    /// <see cref="StationAdsOptions"/>'s own remarks for why this binds only ONE of the five
+    /// <see cref="StationAdsOptions"/>'s own remarks for why this binds only ONE of the eight
     /// <c>Station:Ads:*</c> allowlisted keys. Bound to <c>Station:Ads</c>.</summary>
     public StationAdsOptions Ads { get; set; } = new();
 }

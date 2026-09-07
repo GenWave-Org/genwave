@@ -130,13 +130,14 @@ public static class FeatureShipHonestPins
     public sealed class ScenarioTheSettingsSplitHolds
     {
         [Fact]
-        public void TheFiveStationAdsKeysAreLiveWithValidatorsAndHelpText()
+        public void TheEightStationAdsKeysAreLiveWithValidatorsAndHelpText()
         {
-            // EveryNUnits/TargetCount/RefreshDays/AutoApprove/AntiRepeatWindow — allowlisted,
-            //   validated, three-way help parity (F163.1). Help-text coverage/parity is guarded by
-            //   the admin-ui jest suite (settings-help-coverage.spec.tsx) — this fact pins the two
+            // EveryNUnits/TargetCount/RefreshDays/AutoApprove/AntiRepeatWindow (F163.1) plus
+            //   AnnouncerVoice/CastVoices/BedFadeMs (F170.1, STORY-405, PLAN T417) — allowlisted,
+            //   validated, three-way help parity. Help-text coverage/parity is guarded by the
+            //   admin-ui jest suite (settings-help-coverage.spec.tsx) — this fact pins the two
             //   halves a C# suite can actually see: the allowlist row shape and the validator's
-            //   enforced range.
+            //   enforced range/shape.
             var expected = new (string Key, SettingKind Kind)[]
             {
                 ("Station:Ads:EveryNUnits", SettingKind.Number),
@@ -144,6 +145,9 @@ public static class FeatureShipHonestPins
                 ("Station:Ads:RefreshDays", SettingKind.Number),
                 ("Station:Ads:AutoApprove", SettingKind.Boolean),
                 ("Station:Ads:AntiRepeatWindow", SettingKind.Number),
+                ("Station:Ads:AnnouncerVoice", SettingKind.String),
+                ("Station:Ads:CastVoices", SettingKind.String),
+                ("Station:Ads:BedFadeMs", SettingKind.Number),
             };
 
             foreach (var (key, kind) in expected)
@@ -155,20 +159,39 @@ public static class FeatureShipHonestPins
                 Assert.Equal(kind, setting.Kind);
             }
 
-            // The validator enforces a real numeric range on every non-boolean row — the ceiling
-            // itself passes, one past it fails (SettingValidator's own AdsEveryNUnitsMin/Max etc.
-            // are `internal` with no InternalsVisibleTo grant into this project, so the bounds are
-            // re-asserted here as bare numbers, matched against SettingValidator.cs's own comment —
-            // change one, change the other).
+            // The validator enforces a real numeric range on every non-boolean, non-string row — the
+            // ceiling itself passes, one past it fails (SettingValidator's own AdsEveryNUnitsMin/Max
+            // etc. are `internal` with no InternalsVisibleTo grant into this project, so the bounds
+            // are re-asserted here as bare numbers, matched against SettingValidator.cs's own
+            // comment — change one, change the other).
             var validator = new SettingValidator(new ConfigurationBuilder().Build());
 
             AssertRangeEnforced(validator, "Station:Ads:EveryNUnits", min: 0, max: 1000);
             AssertRangeEnforced(validator, "Station:Ads:TargetCount", min: 0, max: 100);
             AssertRangeEnforced(validator, "Station:Ads:RefreshDays", min: 1, max: 365);
             AssertRangeEnforced(validator, "Station:Ads:AntiRepeatWindow", min: 0, max: 50);
+            AssertRangeEnforced(validator, "Station:Ads:BedFadeMs", min: 100, max: 1000);
 
             Assert.Null(validator.Validate("Station:Ads:AutoApprove", "true"));
             Assert.NotNull(validator.Validate("Station:Ads:AutoApprove", "not-a-bool"));
+
+            // AnnouncerVoice: empty (station voice) or one voice id is valid; a comma list or a
+            // malformed id is not (F170.1's "empty or ONE id" shape — never a list, that's CastVoices).
+            Assert.Null(validator.Validate("Station:Ads:AnnouncerVoice", ""));
+            Assert.Null(validator.Validate("Station:Ads:AnnouncerVoice", "af_nova"));
+            Assert.NotNull(validator.Validate("Station:Ads:AnnouncerVoice", "af_nova,am_michael"));
+            Assert.NotNull(validator.Validate("Station:Ads:AnnouncerVoice", "AF_NOVA"));
+            // A voice id becomes a filesystem path segment at install (db/45's own CHECK,
+            // SettingValidator.VoiceIdFormat) — `.` and `/` must refuse, not just uppercase.
+            Assert.NotNull(validator.Validate("Station:Ads:AnnouncerVoice", "af/../nova"));
+
+            // CastVoices: 1..16 unique comma-separated voice ids; blank, a duplicate, or a
+            // malformed/whitespace-padded entry all refuse (F170.1's no-silent-trim rule).
+            Assert.Null(validator.Validate("Station:Ads:CastVoices", "af_nova,am_michael,bf_alice,am_onyx"));
+            Assert.NotNull(validator.Validate("Station:Ads:CastVoices", ""));
+            Assert.NotNull(validator.Validate("Station:Ads:CastVoices", "af_nova,af_nova"));
+            Assert.NotNull(validator.Validate("Station:Ads:CastVoices", "af_nova, am_michael"));
+            Assert.NotNull(validator.Validate("Station:Ads:CastVoices", "af.nova,am_michael"));
         }
 
         static void AssertRangeEnforced(SettingValidator validator, string key, int min, int max)
@@ -185,7 +208,7 @@ public static class FeatureShipHonestPins
             // Plugins:* and Ads:* never appear in StationSettingsAllowlist (F156.1/F163.2) —
             // Plugins:{name}:* is env/compose-only (IPluginHost.Setting reads IConfiguration
             // directly, F157.2); GenWave.Ads.AdsOptions' own Ads:* section is the identical
-            // env/compose-only posture. Only Station:Ads:* (five rows, asserted above) is Live.
+            // env/compose-only posture. Only Station:Ads:* (eight rows, asserted above) is Live.
             foreach (var setting in StationSettingsAllowlist.All)
             {
                 Assert.False(

@@ -545,6 +545,26 @@ public static class StationSettingsAllowlist
         new("Station:Ads:RefreshDays",                        SettingApplyMode.Live,          SettingKind.Number,     "days"),
         new("Station:Ads:AutoApprove",                        SettingApplyMode.Live,          SettingKind.Boolean,    ""),
         new("Station:Ads:AntiRepeatWindow",                   SettingApplyMode.Live,          SettingKind.Number,     "spots"),
+
+        // The ads cast/bed settings split (SPEC F170.1, STORY-405, PLAN T417): three MORE
+        // Station:Ads:* Live knobs, alongside the five above — the jingle/voice-pack ROOTS and byte
+        // ceilings these three sit next to (PacksOptions, Program.cs) stay env/compose-only on
+        // purpose (deployment topology, not an operator dial), the identical Plugins:*/AdsOptions
+        // split NoPluginsOrAdsInfraKeyIsAllowlisted already pins. AnnouncerVoice names the Kokoro
+        // voice id the ad writer casts as the announcer/narrator role; empty (the default) means
+        // "use the station's own voice" (Station:Voice) rather than a second, redundant voice
+        // knob — read live by T415's cast-picker step (F167.2) in AdSpotWorker. CastVoices is the
+        // comma-separated pool of Kokoro voice ids the ad writer may cast OTHER speaking roles from
+        // (T415); the seeded four (af_nova, am_michael, bf_alice, am_onyx) are deliberately distinct
+        // from every persona catalog default and from the station voice itself, so a fresh deploy's
+        // ad cast never sounds like an existing DJ. BedFadeMs is the background-music fade-in/out
+        // duration the offline ad mixer (T416's AdRenderService, F168) applies around the voice
+        // track, in milliseconds — 300 (the default) mirrors a typical radio ad's bed fade, 100-1000
+        // keeps an operator from setting a fade so short it clicks or so long it swallows the whole
+        // spot.
+        new("Station:Ads:AnnouncerVoice",                     SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Station:Ads:CastVoices",                         SettingApplyMode.Live,          SettingKind.String,     ""),
+        new("Station:Ads:BedFadeMs",                          SettingApplyMode.Live,          SettingKind.Number,     "ms"),
     };
 
     /// <summary>All operator-editable settings, keyed by configuration key.</summary>

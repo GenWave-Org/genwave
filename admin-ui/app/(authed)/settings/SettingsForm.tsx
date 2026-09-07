@@ -453,6 +453,15 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
   "Station:Ads:AntiRepeatWindow":
     "How many of the most recently aired spots are excluded from the next pick, so the same ad " +
     "does not repeat back to back. Defaults to 5. Accepted range: 0–50.",
+  "Station:Ads:AnnouncerVoice":
+    "The Kokoro voice cast as an ad's announcer. Empty (the default) uses the station's own " +
+    "voice instead of a separate one. Accepted value: empty, or a single voice id (e.g. af_nova).",
+  "Station:Ads:CastVoices":
+    "The pool of Kokoro voices an ad may cast for its other speaking roles, as a comma-separated " +
+    "list of voice ids with no spaces, up to 16 ids. Defaults to af_nova,am_michael,bf_alice,am_onyx.",
+  "Station:Ads:BedFadeMs":
+    "How long the background music fades in and out around the voice in a generated ad, in " +
+    "milliseconds. Defaults to 300. Accepted range: 100–1000.",
 };
 
 /**

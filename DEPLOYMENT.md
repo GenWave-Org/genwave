@@ -485,6 +485,18 @@ installed voice pack goes live with no restart.
 `--piper-only` boxes skip all of this: Kokoro (and therefore `voice-seed`) is
 disabled on that topology, and Piper needs no voice files of its own.
 
+### Jingle-pack and voice-pack roots (SPEC F164–F170, gh-#709)
+
+Four more env/compose-only knobs, never a live setting — the same posture as `Plugins__*`
+in the "Plugins" section below:
+
+| Key | Default | What it does |
+|---|:---:|---|
+| `Packs__JingleRoot` | `/authored/jingle-packs` | Where installed jingle-pack assets land, under the `authored` volume |
+| `Packs__VoicesRoot` | `/voices` | Where installed voice-pack `.pt` files land — the shared `voices` volume described just above |
+| `Packs__PreviewMaxBytes` | 153600 | Maximum accepted size, in bytes, of a single voice-pack preview clip |
+| `Packs__JingleAssetMaxBytes` | 5242880 | Maximum accepted size, in bytes, of a single jingle-pack asset file |
+
 ---
 
 ## 🏠 The House Voice — announcements and the announce token (v5.4.0/v5.4.1, SPEC F143–F147)
@@ -708,7 +720,7 @@ booth-log row per plugin at boot.
 ## 📻 Ads (v5.6.0, SPEC F158–F163, gh-#380)
 
 The station authors and airs its own ad spots — a `GenWave.Ads.AdsOptions` env/compose-only
-knob set (`Ads__*`, boot-validated via `ValidateDataAnnotations()`) plus five `Station:Ads:*`
+knob set (`Ads__*`, boot-validated via `ValidateDataAnnotations()`) plus eight `Station:Ads:*`
 Live settings (allowlisted, PUT-able through the settings API/UI, no `api` restart needed).
 
 | Key | Default | Range | What it bounds |
@@ -726,6 +738,9 @@ Live settings (allowlisted, PUT-able through the settings API/UI, no `api` resta
 | `Station:Ads:RefreshDays` | 30 | 1–365 | Age, in days, past which a `ready` spot is retired and re-drafted |
 | `Station:Ads:AutoApprove` | `false` | — | Whether a freshly drafted spot skips the operator approval step |
 | `Station:Ads:AntiRepeatWindow` | 5 | 0–50 | How many recently aired spots `LibraryAdSpotSource` excludes from its next pick |
+| `Station:Ads:AnnouncerVoice` | `` (empty) | — | Kokoro voice id cast as an ad's announcer; empty uses the station's own voice (`Station:Voice`) |
+| `Station:Ads:CastVoices` | `af_nova,am_michael,bf_alice,am_onyx` | 1–16 ids | Comma-separated pool of Kokoro voice ids an ad may cast for its other speaking roles |
+| `Station:Ads:BedFadeMs` | 300 | 100–1000 | Background-music fade-in/out duration around the voice in a generated ad, in milliseconds |
 
 No compose overlay is needed to turn ads on — the seam is always registered; `Station:Ads:EveryNUnits=0`
 is what keeps it silent on every existing station until an operator opts in. The Admin UI's

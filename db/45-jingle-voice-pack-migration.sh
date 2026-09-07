@@ -75,9 +75,13 @@
 # `CatalogIndexValidator.SlugSegment`) — the database must never reject a slug the app already
 # accepted, so the DB pattern (`^[a-z0-9][a-z0-9-]*$`) is a strictly looser superset (it also admits
 # a trailing hyphen or a doubled hyphen the app-side regex itself refuses, which is fine — a belt,
-# not a second identical buckle). `voice_id` has no existing app-side regex to match against yet
-# (PLAN T413, the first voice-pack install route, has not landed) — the CHECK admits kokoro's own
-# stock id shape (`af_nova`, `am_adam`: lowercase, digits, underscore, hyphen).
+# not a second identical buckle). `voice_id` mirrors the app's own gate,
+# `GenWave.Host.Configuration.SettingValidator.VoiceIdFormat()` (`\A[a-z0-9][a-z0-9_-]*\z`, PLAN
+# T417) — unlike the slug fence above, this is the SAME character class, not a looser superset: the
+# DB pattern (`^[a-z0-9][a-z0-9_-]*$`) and the app-side pattern differ only in their anchors
+# (`^`/`$` in SQL, `\A`/`\z` in .NET), which mean the same thing here (no embedded newline can occur
+# in a value that already passed either pattern). The CHECK admits kokoro's own stock id shape
+# (`af_nova`, `am_adam`: lowercase, digits, underscore, hyphen).
 #
 # Safe to run multiple times: every CREATE is IF NOT EXISTS, both ADD COLUMNs are IF NOT EXISTS, and
 # the new UNIQUE constraint is guarded by a pg_constraint existence check inside a DO block — the

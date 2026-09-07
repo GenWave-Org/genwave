@@ -61,6 +61,8 @@ const STRING_KEYS = new Set<SettingsHelpKey>([
   "Station:Location:Latitude",
   "Station:Location:Longitude",
   "Station:Location:SpokenName",
+  "Station:Ads:AnnouncerVoice",
+  "Station:Ads:CastVoices",
 ]);
 
 function kindAndUnitFor(key: SettingsHelpKey): Pick<SettingDto, "kind" | "unit"> {
