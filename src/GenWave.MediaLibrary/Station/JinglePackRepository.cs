@@ -61,6 +61,19 @@ sealed class JinglePackRepository(
         where slug = @slug
         """;
 
+    /// <summary>
+    /// Backs <see cref="ListAsync"/> (SPEC F169.2, STORY-404, PLAN T419) — every installed jingle
+    /// pack's slug and raw <c>definition</c> jsonb text, ordered by slug so the attributions endpoint
+    /// need not re-sort. <c>internal</c> — pinned directly by
+    /// <c>GenWave.MediaLibrary.Tests</c>'s <c>Story404_PackListSql.cs</c> (no Postgres needed to catch
+    /// a dropped <c>order by</c>).
+    /// </summary>
+    internal static readonly string ListSql = """
+        select slug, definition::text as definition_json
+        from station.jingle_pack
+        order by slug
+        """;
+
     public async Task<IReadOnlyList<string>> FindPathsForPackAsync(string slug, CancellationToken ct)
     {
         await using var conn = await libraryDataSource.Value.OpenConnectionAsync(ct);
@@ -329,5 +342,14 @@ sealed class JinglePackRepository(
         await stationConn.ExecuteAsync(new CommandDefinition(DeletePackSql, new { slug }, cancellationToken: ct));
 
         return new JinglePackDeleteResult.Deleted(paths);
+    }
+
+    public async Task<IReadOnlyList<InstalledPackDefinition>> ListAsync(CancellationToken ct)
+    {
+        await using var conn = await stationDataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<InstalledPackDefinition>(new CommandDefinition(
+            ListSql, cancellationToken: ct));
+
+        return rows.ToList();
     }
 }

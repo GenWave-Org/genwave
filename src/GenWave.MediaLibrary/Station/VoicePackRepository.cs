@@ -51,6 +51,19 @@ sealed class VoicePackRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<Voic
         returning vp.id
         """;
 
+    /// <summary>
+    /// Backs <see cref="ListAsync"/> (SPEC F169.2, STORY-404, PLAN T419) — every installed voice
+    /// pack's slug and raw <c>definition</c> jsonb text, ordered by slug. Mirrors
+    /// <see cref="JinglePackRepository.ListSql"/>'s own shape and its
+    /// <c>GenWave.MediaLibrary.Tests</c> text-pin discipline. <c>internal</c> —
+    /// <c>InternalsVisibleTo</c> already grants <c>GenWave.MediaLibrary.Tests</c>.
+    /// </summary>
+    internal static readonly string ListSql = """
+        select slug, definition::text as definition_json
+        from station.voice_pack
+        order by slug
+        """;
+
     public async Task<IReadOnlyList<VoicePackVoiceOwner>> FindInstalledVoiceIdsAsync(
         IReadOnlyList<string> voiceIds, string excludingSlug, CancellationToken ct)
     {
@@ -254,5 +267,14 @@ sealed class VoicePackRepository(Lazy<NpgsqlDataSource> dataSource, ILogger<Voic
 
         await tx.CommitAsync(ct);
         return new VoicePackDeleteResult.Referenced(adSpotIds, personaNames);
+    }
+
+    public async Task<IReadOnlyList<InstalledPackDefinition>> ListAsync(CancellationToken ct)
+    {
+        await using var conn = await dataSource.Value.OpenConnectionAsync(ct);
+        var rows = await conn.QueryAsync<InstalledPackDefinition>(new CommandDefinition(
+            ListSql, cancellationToken: ct));
+
+        return rows.ToList();
     }
 }

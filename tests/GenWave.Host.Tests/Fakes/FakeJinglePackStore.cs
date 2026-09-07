@@ -89,4 +89,10 @@ sealed class FakeJinglePackStore : IJinglePackStore
     /// pack/title is installed.</summary>
     public long? TryGetMediaId(string slug, string title) =>
         bySlug.TryGetValue(slug, out var pack) && pack.MediaIdsByTitle.TryGetValue(title, out var id) ? id : null;
+
+    public Task<IReadOnlyList<InstalledPackDefinition>> ListAsync(CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<InstalledPackDefinition>>(bySlug
+            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .Select(kv => new InstalledPackDefinition(kv.Key, kv.Value.Definition))
+            .ToList());
 }

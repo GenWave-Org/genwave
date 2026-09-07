@@ -15,12 +15,9 @@ namespace GenWave.Host.Tests.Fakes;
 /// <c>EphemeralStationDatabase</c> + the real <c>VoicePackRepository</c>, never this fake).
 ///
 /// <para>
-/// Deliberately narrower than <see cref="FakeFontPackStore"/>, matching
-/// <see cref="IVoicePackStore"/>'s own narrower seam (no <c>GetAllAsync</c> — see that interface's
-/// own YAGNI remarks): this fake exposes test-only accessors (<see cref="PackCount"/>,
-/// <see cref="TryGetVoices"/>) in place of a listing method with no production caller.
 /// <see cref="DeleteAsync"/> here never refuses — every Story395/396/398 Fact against this fake only
-/// ever exercises install, never the reference guard.
+/// ever exercises install, never the reference guard. <see cref="ListAsync"/> (PLAN T419) widened this
+/// fake alongside <see cref="IVoicePackStore"/>'s own seam — see that interface's remarks.
 /// </para>
 /// </summary>
 sealed class FakeVoicePackStore : IVoicePackStore
@@ -111,4 +108,10 @@ sealed class FakeVoicePackStore : IVoicePackStore
     /// <paramref name="slug"/>, or <see langword="null"/> if no such pack is installed.</summary>
     public IReadOnlyList<VoicePackVoiceInput>? TryGetVoices(string slug) =>
         bySlug.TryGetValue(slug, out var pack) ? pack.Voices : null;
+
+    public Task<IReadOnlyList<InstalledPackDefinition>> ListAsync(CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<InstalledPackDefinition>>(bySlug
+            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .Select(kv => new InstalledPackDefinition(kv.Key, kv.Value.Definition))
+            .ToList());
 }

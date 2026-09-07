@@ -15,10 +15,12 @@ namespace GenWave.Core.Abstractions;
 /// (de)serializes at its own edge.
 ///
 /// <para>
-/// Deliberately narrower than <see cref="IFontPackStore"/>: no <c>GetAllAsync</c>/read-model method,
-/// because PLAN T413 ships no listing route — a future task adding one (T418's shelf wiring, or
-/// similar) is the right place to widen this seam, not a speculative method with no caller today
-/// (YAGNI).
+/// PLAN T413 shipped no listing route, so this seam originally carried no <c>GetAllAsync</c>/read-model
+/// method (YAGNI). PLAN T419 widened it with <see cref="ListAsync"/> for the attributions endpoint —
+/// narrower than <see cref="IFontPackStore.GetAllAsync"/>'s own richer <c>FontPack</c> projection: this
+/// store still hands back only the raw <c>definition</c> text, never a voice roster, since the
+/// attributions surface (SPEC F169.2) needs only the pack-level manifest to reconstitute at its own
+/// edge.
 /// </para>
 /// </summary>
 public interface IVoicePackStore
@@ -83,4 +85,13 @@ public interface IVoicePackStore
     /// </para>
     /// </summary>
     Task<VoicePackDeleteResult> DeleteAsync(string slug, CancellationToken ct);
+
+    /// <summary>
+    /// Every installed voice pack's <see cref="InstalledPackDefinition.Slug"/> and raw
+    /// <c>definition</c> jsonb text, ordered by slug (SPEC F169.2, STORY-404, PLAN T419) — the read
+    /// model the attributions endpoint reconstitutes into <c>CatalogVoicePackManifest</c> at its own
+    /// edge. See this interface's own remarks on why this widened a seam PLAN T413 had deliberately
+    /// left narrow.
+    /// </summary>
+    Task<IReadOnlyList<InstalledPackDefinition>> ListAsync(CancellationToken ct);
 }

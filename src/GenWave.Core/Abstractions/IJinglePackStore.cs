@@ -70,4 +70,13 @@ public interface IJinglePackStore
     /// two single-schema deletes — see this interface's own "Honest boundary" remarks.
     /// </summary>
     Task<JinglePackDeleteResult> DeleteAsync(string slug, CancellationToken ct);
+
+    /// <summary>
+    /// Every installed jingle pack's <see cref="InstalledPackDefinition.Slug"/> and raw
+    /// <c>definition</c> jsonb text, ordered by slug (SPEC F169.2, STORY-404, PLAN T419) — the read
+    /// model the attributions endpoint reconstitutes into <c>CatalogJinglePackManifest</c> at its own
+    /// edge, mirroring <see cref="IFontPackStore.GetAllAsync"/>'s own "raw serialized definition
+    /// string" discipline rather than <see cref="FindPathsForPackAsync"/>'s narrower per-slug scope.
+    /// </summary>
+    Task<IReadOnlyList<InstalledPackDefinition>> ListAsync(CancellationToken ct);
 }
