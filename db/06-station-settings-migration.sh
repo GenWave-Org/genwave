@@ -588,9 +588,12 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	-- db/45-jingle-voice-pack-migration.sh's own station-schema block -- see that script's own header
 	-- for the fuller design rationale and its ARCHITECTURE.md citation.
 	--
-	-- Both packs' `slug` and voice_pack_voice's `voice_id` carry a defense-in-depth CHECK: both
-	-- become filesystem path segments at install (T413/T414 write `/voices/{slug}/{voiceId}.pt` and
-	-- `/authored/jingle-packs/{slug}/{file}`), so the schema refuses a value that could ever read as
+	-- Both packs' `slug` and voice_pack_voice's `voice_id` carry a defense-in-depth CHECK. The
+	-- jingle-pack `slug` and every `voice_id` genuinely become filesystem path segments at install:
+	-- T414 writes `/authored/jingle-packs/{slug}/{file}`, and T413 writes each voice pack's `.pt`
+	-- file flat as `<Packs:VoicesRoot>/{voiceId}.pt` (T412's flat-layout ruling -- `slug` never
+	-- becomes a path segment there; `voice_pack.slug`'s own CHECK is kept anyway for defense-in-depth
+	-- consistency with `jingle_pack.slug`). So the schema refuses a value that could ever read as
 	-- a path separator or traversal segment. The pattern is deliberately NO STRICTER than
 	-- CatalogInstallShell.SlugFormat's own app-side gate (`[a-z0-9]+(-[a-z0-9]+)*`, GenWave.Host) --
 	-- the DB must never reject a slug the app already accepted.
@@ -607,7 +610,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	-- One row per voice a voice_pack ships (SPEC F164.1/F164.5). `pack_id bigint` matches
 	-- station.voice_pack.id's own type (a FK column must match its referenced column's type).
 	-- FK CASCADE: uninstalling a pack removes its own roster rows with it (F164.6). `file` is the
-	-- `/voices/<pack_slug>/<voiceId>.pt` path voice-pack install (T413) writes; kokoro's own
+	-- flat `<voiceId>.pt` name voice-pack install (T413) writes directly under `Packs:VoicesRoot`
+	-- (T412's flat-layout ruling -- never nested under the pack's own slug); kokoro's own
 	-- per-request rescan (SPEC F166.3) makes each new voice live with no restart.
 	CREATE TABLE IF NOT EXISTS station.voice_pack_voice (
 	  id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

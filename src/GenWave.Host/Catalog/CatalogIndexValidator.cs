@@ -106,8 +106,9 @@ internal static partial class CatalogIndexValidator
     // the new one is what it serves after the move). When the folder IS present it must name the
     // entry's OWN kind — a persona manifest under entries/shows/ is a lie about what the file is,
     // not an alternative layout, and fails the persona pattern outright. The folder set is CLOSED
-    // (the SEVEN kinds this app recognises, widened from four by F128.1/F130.6/T292 and from six by
-    // F162.2/T405), mirroring TryResolveKind: an unrecognised-kind entry is already skipped before
+    // (the EIGHT kinds this app recognises, widened from four by F128.1/F130.6/T292, from six by
+    // F162.2/T405, and from seven by F164.1/T413), mirroring TryResolveKind: an unrecognised-kind
+    // entry is already skipped before
     // any path pattern is consulted, so an unrecognised kind FOLDER can only ever appear on a
     // known-kind entry — where it is exactly the mismatch case above.
     const string PersonaFolderText = "(?:personas/)?";
@@ -117,10 +118,12 @@ internal static partial class CatalogIndexValidator
     const string AvatarFolderText = "(?:avatars/)?";
     const string IconFolderText = "(?:icons/)?";
     const string AdPackFolderText = "(?:ad-packs/)?";
-    const string AnyKindFolderText = "(?:(?:personas|themes|fonts|shows|avatars|icons|ad-packs)/)?";
+    const string VoicePackFolderText = "(?:voice-packs/)?";
+    const string AnyKindFolderText = "(?:(?:personas|themes|fonts|shows|avatars|icons|ad-packs|voice-packs)/)?";
 
     // entries/[<kind-plural>/]<slug>/<name>.persona.json (and .theme/.font/.show/.avatar/.icon/
-    // .ad-pack) — the per-kind manifest shape (SPEC F103.2, F104.1, F118.1, F128.1, F130.6, F162.2):
+    // .ad-pack/.voice-pack) — the per-kind manifest shape (SPEC F103.2, F104.1, F118.1, F128.1,
+    // F130.6, F162.2, F164.1):
     // the filename segment is the SAME shape as the slug segment (SPEC F90.2/F89.2:
     // schemas/index.schema.json's card/meta path patterns use this one shape for both segments, not
     // the looser "any run of [a-z0-9-]" a prior version allowed here, which would have tolerated a
@@ -135,6 +138,7 @@ internal static partial class CatalogIndexValidator
     const string AvatarManifestPathText = @"\Aentries/" + AvatarFolderText + SlugSegment + "/" + SlugSegment + @"\.avatar\.json\z";
     const string IconManifestPathText = @"\Aentries/" + IconFolderText + SlugSegment + "/" + SlugSegment + @"\.icon\.json\z";
     const string AdPackManifestPathText = @"\Aentries/" + AdPackFolderText + SlugSegment + "/" + SlugSegment + @"\.ad-pack\.json\z";
+    const string VoicePackManifestPathText = @"\Aentries/" + VoicePackFolderText + SlugSegment + "/" + SlugSegment + @"\.voice-pack\.json\z";
     const string MetaPathText = @"\Aentries/" + AnyKindFolderText + SlugSegment + "/" + SlugSegment + @"\.meta\.json\z";
 
     // entries/<slug>/<filename> — a pack's binary asset (SPEC F104.1, F128.1): a font pack's 1-2
@@ -152,8 +156,14 @@ internal static partial class CatalogIndexValidator
     // (F128.1) — never a format the other kind doesn't actually ship.
     const string FontAssetFileNameText = @"[A-Za-z0-9][A-Za-z0-9._-]*\.(?:woff2|txt)";
     const string AvatarAssetFileNameText = @"[A-Za-z0-9][A-Za-z0-9._-]*\.png";
+    // A voice pack's own asset set (SPEC F164.1/F164.4): one Kokoro `.pt` file per declared voice
+    // plus a single required `.mp3` preview clip — the THIRD pack-shaped kind's own extension set,
+    // split per kind exactly like Font/Avatar above (a voice pack never ships a woff2/png, and vice
+    // versa).
+    const string VoicePackAssetFileNameText = @"[A-Za-z0-9][A-Za-z0-9._-]*\.(?:pt|mp3)";
     const string FontAssetPathText = @"\Aentries/" + FontFolderText + SlugSegment + "/" + FontAssetFileNameText + @"\z";
     const string AvatarAssetPathText = @"\Aentries/" + AvatarFolderText + SlugSegment + "/" + AvatarAssetFileNameText + @"\z";
+    const string VoicePackAssetPathText = @"\Aentries/" + VoicePackFolderText + SlugSegment + "/" + VoicePackAssetFileNameText + @"\z";
 
     // entries/[personas/]<slug>/<slug>.avatar.png — a PERSONA entry's OWN optional avatar sidecar
     // (SPEC F128.2), UNLIKE a pack's own free-named asset above: the filename segment MUST equal the
@@ -215,6 +225,9 @@ internal static partial class CatalogIndexValidator
     [GeneratedRegex(AdPackManifestPathText)]
     private static partial Regex AdPackManifestPathPattern();
 
+    [GeneratedRegex(VoicePackManifestPathText)]
+    private static partial Regex VoicePackManifestPathPattern();
+
     [GeneratedRegex(MetaPathText)]
     private static partial Regex MetaPathPattern();
 
@@ -223,6 +236,9 @@ internal static partial class CatalogIndexValidator
 
     [GeneratedRegex(AvatarAssetPathText)]
     private static partial Regex AvatarAssetPathPattern();
+
+    [GeneratedRegex(VoicePackAssetPathText)]
+    private static partial Regex VoicePackAssetPathPattern();
 
     [GeneratedRegex(PersonaAvatarAssetPathText)]
     private static partial Regex PersonaAvatarAssetPathPattern();
@@ -425,19 +441,20 @@ internal static partial class CatalogIndexValidator
             return EntryValidationOutcome.Reject;
         }
 
-        // F104.1/F128.1/F128.2: font AND avatar entries carry assets[] with the SAME all-or-nothing
-        // "a pack IS its files" posture (TryValidateAssets); a persona entry's own assets[] is
-        // GENUINELY OPTIONAL (at most one sidecar face, TryValidatePersonaAvatarAsset); theme/show/
-        // icon entries always resolve to the empty list (CatalogEntrySummary.Assets's own "absent
-        // means empty" remarks) — an icon manifest carries its whole vector document inline, F130.1,
-        // never a binary asset.
+        // F104.1/F128.1/F128.2/F164.1: font, avatar, AND voice-pack entries carry assets[] with the
+        // SAME all-or-nothing "a pack IS its files" posture (TryValidateAssets); a persona entry's
+        // own assets[] is GENUINELY OPTIONAL (at most one sidecar face,
+        // TryValidatePersonaAvatarAsset); theme/show/icon entries always resolve to the empty list
+        // (CatalogEntrySummary.Assets's own "absent means empty" remarks) — an icon manifest carries
+        // its whole vector document inline, F130.1, never a binary asset.
         IReadOnlyList<CatalogAssetRef> assets;
         switch (kind)
         {
             case CatalogEntryKind.Font:
             case CatalogEntryKind.Avatar:
-                // A font/avatar entry whose assets[] is missing, empty, or contains anything
-                // malformed is skipped OUTRIGHT (never rejects the whole index) — see
+            case CatalogEntryKind.VoicePack:
+                // A font/avatar/voice-pack entry whose assets[] is missing, empty, or contains
+                // anything malformed is skipped OUTRIGHT (never rejects the whole index) — see
                 // TryValidateAssets's own remarks for why this is a whole-entry skip rather than a
                 // field-level degrade like Preview.
                 if (!TryValidateAssets(raw.Assets, slug, entryDirectory, directory, kind, out var packAssets))
@@ -869,7 +886,7 @@ internal static partial class CatalogIndexValidator
     /// matched a pattern whose shape guarantees at least one <c>/</c>.</summary>
     static string DirectoryOf(string path) => path[..path.LastIndexOf('/')];
 
-    /// <summary>A missing <c>kind</c> defaults to persona (back-compat, F103.1/AC2); any value other than <c>"persona"</c>/<c>"theme"</c>/<c>"font"</c>/<c>"show"</c>/<c>"avatar"</c>/<c>"icon"</c>/<c>"ad-pack"</c> is unrecognised.</summary>
+    /// <summary>A missing <c>kind</c> defaults to persona (back-compat, F103.1/AC2); any value other than <c>"persona"</c>/<c>"theme"</c>/<c>"font"</c>/<c>"show"</c>/<c>"avatar"</c>/<c>"icon"</c>/<c>"ad-pack"</c>/<c>"voice-pack"</c> is unrecognised.</summary>
     static bool TryResolveKind(string? raw, out CatalogEntryKind kind)
     {
         switch (raw)
@@ -896,6 +913,9 @@ internal static partial class CatalogIndexValidator
             case "ad-pack":
                 kind = CatalogEntryKind.AdPack;
                 return true;
+            case "voice-pack":
+                kind = CatalogEntryKind.VoicePack;
+                return true;
             default:
                 kind = default;
                 return false;
@@ -911,19 +931,21 @@ internal static partial class CatalogIndexValidator
         CatalogEntryKind.Avatar => AvatarManifestPathPattern(),
         CatalogEntryKind.Icon => IconManifestPathPattern(),
         CatalogEntryKind.AdPack => AdPackManifestPathPattern(),
+        CatalogEntryKind.VoicePack => VoicePackManifestPathPattern(),
         _ => throw new UnreachableException($"Unhandled {nameof(CatalogEntryKind)} value: {kind}."),
     };
 
     /// <summary>
-    /// The pack-shaped kinds' own asset path pattern (PLAN T292) — the two <see cref="CatalogEntryKind"/>
-    /// members <see cref="TryValidateAssets"/> is ever called for; a persona's own sidecar face uses
-    /// <see cref="PersonaAvatarAssetPathPattern"/> directly instead (its filename is slug-shaped, not
-    /// free-named like a pack item).
+    /// The pack-shaped kinds' own asset path pattern (PLAN T292, widened by T413) — the three
+    /// <see cref="CatalogEntryKind"/> members <see cref="TryValidateAssets"/> is ever called for; a
+    /// persona's own sidecar face uses <see cref="PersonaAvatarAssetPathPattern"/> directly instead
+    /// (its filename is slug-shaped, not free-named like a pack item).
     /// </summary>
     static Regex AssetPathPattern(CatalogEntryKind kind) => kind switch
     {
         CatalogEntryKind.Font => FontAssetPathPattern(),
         CatalogEntryKind.Avatar => AvatarAssetPathPattern(),
+        CatalogEntryKind.VoicePack => VoicePackAssetPathPattern(),
         _ => throw new UnreachableException($"{kind} entries do not carry a pack-shaped assets[]."),
     };
 
@@ -940,18 +962,29 @@ internal static partial class CatalogIndexValidator
     internal const int MaxPngAssetBytes = 512 * 1024;
 
     /// <summary>
-    /// The pack-shaped kinds' own asset-declared-size ceiling (review finding, PLAN T292) — SPLIT PER
-    /// KIND, unlike the single shared check every kind used to get (the bug this fixes, see
-    /// <see cref="TryValidateAssetRef"/>'s own remarks): a font pack's woff2/txt items stay pinned to
-    /// <see cref="CatalogProxyService.MaxAssetBytes"/> (256 KiB, unaffected by this widening), while
-    /// an avatar pack's items — and, via <see cref="TryValidatePersonaAvatarAsset"/>'s own direct call,
-    /// a persona's own sidecar face — get <see cref="MaxPngAssetBytes"/> (512 KiB, SPEC F128.1's own
-    /// number).
+    /// Declared-size ceiling for a single voice-pack asset — a Kokoro <c>.pt</c> file or the pack's
+    /// own preview clip (SPEC F164.5, PLAN T413). The stock kokoro-fastapi <c>.pt</c> files measured
+    /// 523,341–524,479 bytes on the pinned image; 1 MiB is a generous, round ceiling above that
+    /// measured floor, well clear of <see cref="CatalogProxyService.MaxAssetBytes"/>'s own 256 KiB
+    /// (a font pack's woff2/txt number, far too small for a voice tensor).
+    /// </summary>
+    internal const int MaxVoiceFileBytes = 1024 * 1024;
+
+    /// <summary>
+    /// The pack-shaped kinds' own asset-declared-size ceiling (review finding, PLAN T292; widened by
+    /// T413) — SPLIT PER KIND, unlike the single shared check every kind used to get (the bug this
+    /// fixes, see <see cref="TryValidateAssetRef"/>'s own remarks): a font pack's woff2/txt items stay
+    /// pinned to <see cref="CatalogProxyService.MaxAssetBytes"/> (256 KiB, unaffected by this
+    /// widening), an avatar pack's items — and, via <see cref="TryValidatePersonaAvatarAsset"/>'s own
+    /// direct call, a persona's own sidecar face — get <see cref="MaxPngAssetBytes"/> (512 KiB, SPEC
+    /// F128.1's own number), and a voice pack's <c>.pt</c>/preview assets get
+    /// <see cref="MaxVoiceFileBytes"/> (SPEC F164.5).
     /// </summary>
     static long AssetByteCeiling(CatalogEntryKind kind) => kind switch
     {
         CatalogEntryKind.Font => CatalogProxyService.MaxAssetBytes,
         CatalogEntryKind.Avatar => MaxPngAssetBytes,
+        CatalogEntryKind.VoicePack => MaxVoiceFileBytes,
         _ => throw new UnreachableException($"{kind} entries do not carry a pack-shaped assets[]."),
     };
 

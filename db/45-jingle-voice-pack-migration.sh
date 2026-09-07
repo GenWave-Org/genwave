@@ -26,9 +26,10 @@
 #
 # station.voice_pack_voice — the roster of voice_ids a voice pack ships (SPEC F164.1/F164.5): one
 # row per voice, FK'd to its owning pack with ON DELETE CASCADE so uninstall (F164.6) removes the
-# whole roster with the pack row. `file` is the `/voices/<pack_slug>/<voiceId>.pt` path install
-# (PLAN T413) writes; kokoro's own per-request rescan (SPEC F166.3) makes a newly-installed voice
-# live on the very next render, no restart. `voice_id` carries the collision fence (SPEC F166.4,
+# whole roster with the pack row. `file` is the flat `<voiceId>.pt` name install (PLAN T413) writes
+# directly under `Packs:VoicesRoot` (T412's flat-layout ruling — never nested under the pack's own
+# slug); kokoro's own per-request rescan (SPEC F166.3) makes a newly-installed voice live on the very
+# next render, no restart. `voice_id` carries the collision fence (SPEC F166.4,
 # enforced at install by PLAN T413): a voice_id may live in only ONE installed pack at a time, or
 # kokoro would serve whichever `.pt` its directory scan happened to see last — nondeterministic. The
 # fence is a separate named UNIQUE INDEX (not an inline column constraint) because ARCHITECTURE.md's
@@ -66,11 +67,14 @@
 # exactly F165.5's key, no broader. The same index also gives F165.6's uninstall-by-pack_slug scan
 # something to use.
 #
-# `slug` on both pack tables and `voice_id` on voice_pack_voice each carry a defense-in-depth CHECK:
-# both become filesystem path segments at install (PLAN T413/T414 write
-# `/voices/{slug}/{voiceId}.pt` and `/authored/jingle-packs/{slug}/{file}`), so the schema itself
-# refuses a value that could ever read as a path separator or a traversal segment. The pattern is
-# deliberately NO STRICTER than the app's own gate,
+# `slug` on both pack tables and `voice_id` on voice_pack_voice each carry a defense-in-depth CHECK.
+# The jingle-pack `slug` and every `voice_id` genuinely become filesystem path segments at install:
+# PLAN T414 writes `/authored/jingle-packs/{slug}/{file}`, and PLAN T413 writes each voice pack's
+# `.pt` file flat as `<Packs:VoicesRoot>/{voiceId}.pt` (T412's flat-layout ruling — `slug` never
+# becomes a path segment there). `voice_pack.slug`'s own CHECK is retained anyway, purely for
+# defense-in-depth consistency with `jingle_pack.slug` and because nothing stops a future engine from
+# nesting voice files under it. So the schema itself refuses a value that could ever read as a path
+# separator or a traversal segment. The pattern is deliberately NO STRICTER than the app's own gate,
 # `GenWave.Host.Api.CatalogInstallShell.SlugFormat` (`\A[a-z0-9]+(-[a-z0-9]+)*\z`, composed from
 # `CatalogIndexValidator.SlugSegment`) — the database must never reject a slug the app already
 # accepted, so the DB pattern (`^[a-z0-9][a-z0-9-]*$`) is a strictly looser superset (it also admits
@@ -110,7 +114,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  id           bigint generated always as identity primary key,
 	  pack_id      bigint not null references station.voice_pack(id) on delete cascade,
 	  voice_id     text not null check (voice_id ~ '^[a-z0-9][a-z0-9_-]*$'), -- kokoro id, unique across ALL installed
-	  file         text not null,                       -- /voices/<pack_slug>/<voice_id>.pt
+	  file         text not null,                       -- flat <voice_id>.pt under Packs:VoicesRoot
 	  gender_hint  text,
 	  age_hint     text,
 	  preview_sha  text                                 -- clip hash, informational (bytes live in catalog)

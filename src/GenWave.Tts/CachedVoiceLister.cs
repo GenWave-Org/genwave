@@ -21,7 +21,7 @@ using GenWave.Core.Abstractions;
 /// elapsed.
 /// </summary>
 public sealed class CachedVoiceLister(
-    ITtsVoiceLister inner, IOptionsMonitor<TtsOptions> optionsMonitor, TimeSpan ttl) : ITtsVoiceLister
+    ITtsVoiceLister inner, IOptionsMonitor<TtsOptions> optionsMonitor, TimeSpan ttl) : ITtsVoiceLister, IVoiceListingCache
 {
     readonly object gate = new();
     IReadOnlyList<string>? cached;
@@ -44,6 +44,19 @@ public sealed class CachedVoiceLister(
         }
 
         return voices;
+    }
+
+    /// <summary>SPEC F166.4/PLAN T413 — a voice-pack install/uninstall calls this (through
+    /// <see cref="IVoiceListingCache"/>) right after kokoro's own directory it scans has changed, so
+    /// the very next <see cref="ListVoicesAsync"/> re-fetches instead of serving a stale list for up
+    /// to <c>ttl</c> longer.</summary>
+    public void Invalidate()
+    {
+        lock (gate)
+        {
+            cached = null;
+            cachedEndpoint = null;
+        }
     }
 
     bool TryGetFresh(string currentEndpoint, out IReadOnlyList<string> voices)

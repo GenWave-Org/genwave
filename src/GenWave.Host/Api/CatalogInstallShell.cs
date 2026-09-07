@@ -240,6 +240,8 @@ internal static partial class CatalogInstallShell
         // (e.g. "{Capitalize(kind)} pack unavailable.", "Malformed {NounFor(kind)} pack manifest.");
         // a noun that already contains the word "pack" would double it ("ad-pack pack unavailable.").
         CatalogEntryKind.AdPack => "ad",
+        // Same double-"pack" avoidance as AdPack above ("{Capitalize(kind)} pack unavailable.").
+        CatalogEntryKind.VoicePack => "voice",
         _ => throw new UnreachableException($"Unhandled {nameof(CatalogEntryKind)} value: {kind}."),
     };
 

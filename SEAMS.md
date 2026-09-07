@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **116 seams across 7 projects.**
+> **118 seams across 7 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -107,7 +107,7 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (52 seams)
+## GenWave.MediaLibrary (53 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -162,6 +162,7 @@
 | `GenWave.Core.Abstractions.IStationImageStore` | `GenWave.MediaLibrary.Station.StationImageRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IThemeStore` | `GenWave.MediaLibrary.Station.ThemeRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IThumbStore` | `GenWave.MediaLibrary.Garden.MediaThumbRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IVoicePackStore` | `GenWave.MediaLibrary.Station.VoicePackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IYearLookup` | `GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup` | Singleton | — |
 
 ## GenWave.Orchestration (8 seams)
@@ -177,7 +178,7 @@
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |
 
-## GenWave.Tts (15 seams)
+## GenWave.Tts (16 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -196,3 +197,4 @@
 | `GenWave.Tts.IFallbackProfileRenderer` | `GenWave.Tts.KokoroFallbackRenderer` | Singleton | also registered: `GenWave.Tts.PiperTtsSynthesizer` (GenWave.Tts) |
 | `GenWave.Tts.ISafeSegmentAuthor` | `GenWave.Tts.SafeSegmentAuthor` | Singleton | — |
 | `GenWave.Tts.ISpeechNormalizationPreview` | `GenWave.Tts.NormalizingTtsSynthesizer` | Singleton | — |
+| `GenWave.Tts.IVoiceListingCache` | `GenWave.Tts.CachedVoiceLister` | Singleton | — |

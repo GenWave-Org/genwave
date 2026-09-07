@@ -202,6 +202,14 @@ static class StationSettingsHostingExtensions
         builder.Services.AddAdSpotStore(stationConnStr);
         builder.Services.AddAdBriefStore(stationConnStr);
 
+        // Voice pack store (SPEC F164.5/F164.6/F166.4; STORY-395/396/398/401; PLAN T413) — same
+        // station_svc connection string as every registration above; station.voice_pack(+_voice)
+        // lives in the same schema. VoicePackRepository shipped dark up to this point (no consumer
+        // yet): VoicePackController's install/uninstall routes (PLAN T413, this same task) are the
+        // first Host call site — the same "seam before consumer" way station.font_pack (T198) and
+        // the ad-spot/brief stores just above shipped.
+        builder.Services.AddVoicePackStore(stationConnStr);
+
         return builder;
     }
 }

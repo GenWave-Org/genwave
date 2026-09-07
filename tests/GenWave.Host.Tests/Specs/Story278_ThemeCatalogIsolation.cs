@@ -244,6 +244,14 @@ public static class FeatureThemeCatalogIsolation
         // dropdown's own data source and the future T304 renderer's client-side read respectively —
         // both joining their sibling install/uninstall pair under the SAME class-level
         // AdminSurface+Settings pairing this file's next Fact asserts on every discovered endpoint.
+        // POST api/voice-packs/{slug}/install + DELETE api/voice-packs/{slug} (T413, SPEC F164.5/
+        // F164.6) are VoicePackController's own install/uninstall pair, and POST
+        // api/ad-packs/{slug}/install (T407) is AdPackController's own single install route — the
+        // SIXTH and SEVENTH guarded prefixes joining the five above, pinned here the moment they
+        // exist (T413 review round 1 — the SAME "the moment it exists" precedent every prior
+        // addition to this set already followed) rather than left for a future disclosure re-audit
+        // to discover them first. Both controllers carry the SAME class-level AdminSurface+Settings
+        // pairing this file's next Fact asserts on every discovered endpoint.
         static readonly IReadOnlySet<(string Verb, string Route)> KnownCatalogAndThemeRoutes =
             new HashSet<(string Verb, string Route)>
             {
@@ -265,20 +273,25 @@ public static class FeatureThemeCatalogIsolation
                 ("DELETE", "api/icon-packs/{slug}"),
                 ("GET", "api/icon-packs"),
                 ("GET", "api/icon-packs/active"),
+                ("POST", "api/voice-packs/{slug}/install"),
+                ("DELETE", "api/voice-packs/{slug}"),
+                ("POST", "api/ad-packs/{slug}/install"),
             };
 
-        // All FIVE controllers are ROOTED at their own bare prefix ([Route("api/catalog")],
-        // [Route("api/themes")], [Route("api/fonts")], [Route("api/avatar-packs")], [Route("api/icon-packs")]
-        // — review finding F2, extended to the third prefix at N4, the fourth at S5, and the fifth at
-        // PLAN T303): GuardedRouteInspector.DiscoverEndpoints's own segment-bounded match — the prefix
-        // itself, or the prefix followed by a '/', never a bare substring match — is what makes that
-        // safe. Extracted to GenWave.Host.Tests.Fakes.GuardedRouteInspector (PLAN T209 review finding
-        // N3, the extract-on-third-copy precedent) once Story283_InstalledFontServing.cs and
+        // All SEVEN controllers are ROOTED at their own bare prefix ([Route("api/catalog")],
+        // [Route("api/themes")], [Route("api/fonts")], [Route("api/avatar-packs")], [Route("api/icon-packs")],
+        // [Route("api/voice-packs")], [Route("api/ad-packs")] — review finding F2, extended to the
+        // third prefix at N4, the fourth at S5, the fifth at PLAN T303, and the sixth/seventh at T413
+        // review round 1): GuardedRouteInspector.DiscoverEndpoints's own segment-bounded match — the
+        // prefix itself, or the prefix followed by a '/', never a bare substring match — is what makes
+        // that safe. Extracted to GenWave.Host.Tests.Fakes.GuardedRouteInspector (PLAN T209 review
+        // finding N3, the extract-on-third-copy precedent) once Story283_InstalledFontServing.cs and
         // Story289_WardrobeIsolation.cs each carried their own near-verbatim copy of this discovery +
         // AdminSurface/Settings shape check.
         static List<RouteEndpoint> DiscoverCatalogAndThemeEndpoints(IServiceProvider services) =>
             GuardedRouteInspector.DiscoverEndpoints(
-                services, "api/catalog", "api/themes", "api/fonts", "api/avatar-packs", "api/icon-packs");
+                services, "api/catalog", "api/themes", "api/fonts", "api/avatar-packs", "api/icon-packs",
+                "api/voice-packs", "api/ad-packs");
 
         [Fact]
         public void TheDiscoveredRouteSetMatchesTheKnownDeliberateSet()
@@ -302,8 +315,8 @@ public static class FeatureThemeCatalogIsolation
         {
             var added = discovered.Except(KnownCatalogAndThemeRoutes).ToArray();
             var removed = KnownCatalogAndThemeRoutes.Except(discovered).ToArray();
-            return "The api/catalog/* + api/themes/* + api/fonts/* + api/avatar-packs/* + api/icon-packs/* " +
-                "route set no longer matches the known, deliberate set. " +
+            return "The api/catalog/* + api/themes/* + api/fonts/* + api/avatar-packs/* + api/icon-packs/* + " +
+                "api/voice-packs/* + api/ad-packs/* route set no longer matches the known, deliberate set. " +
                 (added.Length > 0 ? $"Newly present: [{string.Join(", ", added)}]. " : "") +
                 (removed.Length > 0 ? $"No longer present: [{string.Join(", ", removed)}]. " : "") +
                 "A new route under any of these prefixes is a disclosure decision (SPEC F103.12) — " +

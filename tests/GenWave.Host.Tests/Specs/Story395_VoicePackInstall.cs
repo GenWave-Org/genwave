@@ -13,7 +13,20 @@
 // image's own listing, so a kokoro version bump changing that count never breaks this spec.
 
 using System.Diagnostics;
+using System.Net;
+using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using GenWave.Core.Abstractions;
+using GenWave.Host.Catalog;
+using GenWave.Host.Tests.Fakes;
 
 namespace GenWave.Host.Tests.Specs;
 
@@ -375,37 +388,373 @@ public static class FeatureVoicePackInstallGoesLiveWithoutARestart
         }
 
         [Fact]
-        public void KokoroReturnsANewVoiceIdInItsVoicesListing()
-            => Assert.Fail("pending: T413 — AC2");
+        public async Task KokoroReturnsANewVoiceIdInItsVoicesListing()
+        {
+            // Given a fresh install of a pack declaring "af_first"/"af_second",
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+            var install = await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+            Assert.True(install.IsSuccessStatusCode, await install.Content.ReadAsStringAsync());
+
+            // When the live voice listing is asked for again,
+            var response = await client.GetAsync("/api/voices");
+            var voices = await response.Content.ReadFromJsonAsync<string[]>() ?? [];
+
+            // Then it already carries the new id (AC2) — kokoro rescans its voices directory
+            // per request, no restart involved.
+            Assert.Contains("af_first", voices);
+            Assert.Contains("af_second", voices);
+        }
+    }
+
+    public sealed class ScenarioReinstallingTheSameSlugUpserts
+    {
+        [Fact]
+        public async Task ASecondInstallOfTheSameSlugSucceedsInsteadOfRefusingAsStock()
+        {
+            // Given a pack already installed once — its voice ids now live on the shared flat
+            // volume, so kokoro's own dynamic /v1/audio/voices listing above reports them as
+            // "stock" too (T412's flat layout, see BuildRoutedHandler's own remarks),
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+            var first = await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+            Assert.True(first.IsSuccessStatusCode, await first.Content.ReadAsStringAsync());
+
+            // When the SAME slug is installed again,
+            var second = await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+
+            // Then it succeeds as an upsert (F1 regression guard) — never a 409 "used by stock", the
+            // pack's own already-installed ids must never be mistaken for a genuine collision.
+            Assert.True(second.IsSuccessStatusCode, await second.Content.ReadAsStringAsync());
+            Assert.Equal(1, store.PackCount);
+            Assert.Equal(2, store.UpsertCallCount);
+        }
+
+        [Fact]
+        public async Task TheReinstalledFilesAreRewrittenWithNoOrphanTmpLeftBehind()
+        {
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+            await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+
+            var second = await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+            Assert.True(second.IsSuccessStatusCode, await second.Content.ReadAsStringAsync());
+
+            // The fixture's own manifest/asset bytes are identical both times, so the second
+            // install's atomic write REWRITES each .pt file with the same bytes — proven by
+            // re-hashing rather than merely "still exists" (the file is genuinely written again,
+            // not skipped).
+            var firstBytes = await File.ReadAllBytesAsync(Path.Combine(factory.VoicesRoot, "af_first.pt"));
+            Assert.Equal(
+                Convert.ToHexStringLower(SHA256.HashData(VoicePackInstallFixtures.FirstPtBytes)),
+                Convert.ToHexStringLower(SHA256.HashData(firstBytes)));
+
+            // No orphan .tmp sibling survives the atomic rename on either install.
+            Assert.Empty(Directory.EnumerateFiles(factory.VoicesRoot, "*.tmp"));
+        }
+
+        [Fact]
+        public async Task NoPrevSiblingSurvivesASuccessfulReinstall()
+        {
+            // T413 review round 2 finding B1(b) — a successful re-install displaces the first
+            // install's own live file aside to make room for its own atomic rename, then deletes
+            // that displaced sibling for good once the DB transaction commits; nothing named
+            // `*.prev-*` should ever be left behind by a re-install that actually succeeded.
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+            await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+
+            var second = await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+            Assert.True(second.IsSuccessStatusCode, await second.Content.ReadAsStringAsync());
+
+            Assert.Empty(Directory.EnumerateFiles(factory.VoicesRoot, "*.prev-*"));
+        }
+    }
+
+    public sealed class ScenarioAFailedReinstallLeavesThePreviousInstallUntouched
+    {
+        [Fact]
+        public async Task ThePreviousInstallsPtBytesSurviveAFailedReinstall()
+        {
+            // Given a pack already installed once, its .pt files genuinely live on the shared
+            // volume,
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+            var first = await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+            Assert.True(first.IsSuccessStatusCode, await first.Content.ReadAsStringAsync());
+
+            var firstHash = Convert.ToHexStringLower(SHA256.HashData(
+                await File.ReadAllBytesAsync(Path.Combine(factory.VoicesRoot, "af_first.pt"))));
+
+            // When a re-install of the SAME slug fails AFTER its own writes displaced the first
+            // install's files aside (T413 review round 2 finding B1 — this is the exact scenario the
+            // round 2 review reproduced: a re-install's own store failure used to delete the
+            // PREVIOUS install's own live bytes while its DB row survived),
+            store.ThrowOnUpsert = new InvalidOperationException("simulated 23514");
+            var second = await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+            Assert.Equal(HttpStatusCode.InternalServerError, second.StatusCode);
+
+            // Then the previous install's own bytes are back in place, unchanged — never merely gone.
+            var restoredHash = Convert.ToHexStringLower(SHA256.HashData(
+                await File.ReadAllBytesAsync(Path.Combine(factory.VoicesRoot, "af_first.pt"))));
+            Assert.Equal(firstHash, restoredHash);
+        }
+
+        [Fact]
+        public async Task TheDbRowFromTheFirstInstallSurvivesAFailedReinstall()
+        {
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+            await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+            Assert.Equal(1, store.PackCount);
+
+            store.ThrowOnUpsert = new InvalidOperationException("simulated 23514");
+            await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+
+            // The first install's own row is exactly where it was — never rolled back to zero
+            // packs, since it was never touched by the failed re-install attempt.
+            Assert.Equal(1, store.PackCount);
+        }
+
+        [Fact]
+        public async Task NoTmpOrPrevSiblingSurvivesAFailedReinstall()
+        {
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+            await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+
+            store.ThrowOnUpsert = new InvalidOperationException("simulated 23514");
+            await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+
+            Assert.Empty(Directory.EnumerateFiles(factory.VoicesRoot, "*.tmp"));
+            Assert.Empty(Directory.EnumerateFiles(factory.VoicesRoot, "*.prev-*"));
+        }
+
+        [Fact]
+        public async Task ACancelledUpsertDuringAReinstallLeavesThePreviousInstallUntouched()
+        {
+            // T413 review round 3 finding F1 — before this fix, both unwind paths filtered
+            // OperationCanceledException OUT of the catch (`when (ex is not
+            // OperationCanceledException)`), so a cancelled upsert — HttpContext.RequestAborted
+            // firing on any client disconnect, or Npgsql surfacing command cancellation as the same
+            // exception type — escaped with the write-loop's own displaced-aside `.prev-<guid>`
+            // copy and the fresh overwrite left in place: the previous install's bytes were gone,
+            // replaced by writes the store never committed a row for. The fix unwinds on
+            // cancellation exactly like any other store failure, THEN rethrows, so this fake proves
+            // the unwind ran before propagating the cancellation — not that the HTTP call itself
+            // returns any particular status.
+            //
+            // T413 review round 4 finding L2 — the reinstall's own asset bytes must genuinely DIFFER
+            // from the first install's (mirrors AdPackKindArc's own two-instance idiom in
+            // Story393_AdPackKind.cs): a SINGLE factory/client pair would serve the SAME bytes for
+            // both installs, so the sha256 asserts below could never fail no matter whether the
+            // unwind ran — the previous install's bytes and the "new" bytes would be identical either
+            // way. A SECOND, fresh factory instance is also what a real cancelled-reinstall needs —
+            // CatalogProxyService's own 15-minute cache means only a cold cache (a fresh app instance)
+            // actually re-fetches instead of replaying the FIRST install's own cached asset bytes.
+            var voicesRoot = Directory.CreateTempSubdirectory("t413-story395-voices-reinstall-").FullName;
+            try
+            {
+                var store = new FakeVoicePackStore();
+                string firstHash, secondHash;
+                await using (var firstFactory = new VoicePackInstallWebFactory(
+                    store, voicesRoot, VoicePackInstallFixtures.FirstPtBytes, VoicePackInstallFixtures.SecondPtBytes))
+                {
+                    var firstClient = await VoicePackInstallWebFactory.LoggedInClientAsync(firstFactory);
+                    var first = await firstClient.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+                    Assert.True(first.IsSuccessStatusCode, await first.Content.ReadAsStringAsync());
+
+                    firstHash = Convert.ToHexStringLower(SHA256.HashData(
+                        await File.ReadAllBytesAsync(Path.Combine(voicesRoot, "af_first.pt"))));
+                    secondHash = Convert.ToHexStringLower(SHA256.HashData(
+                        await File.ReadAllBytesAsync(Path.Combine(voicesRoot, "af_second.pt"))));
+                }
+
+                store.ThrowOnUpsert = new OperationCanceledException("simulated client disconnect mid-upsert");
+                await using (var secondFactory = new VoicePackInstallWebFactory(
+                    store, voicesRoot,
+                    VoicePackInstallFixtures.SecondInstallFirstPtBytes, VoicePackInstallFixtures.SecondInstallSecondPtBytes))
+                {
+                    var secondClient = await VoicePackInstallWebFactory.LoggedInClientAsync(secondFactory);
+                    try
+                    {
+                        await secondClient.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Rethrowing past the action (rather than answering with a 500) is the fix's
+                        // own point — the client genuinely disconnected, so there is no one left to
+                        // answer. TestServer resurfaces that unhandled exception at the call site;
+                        // either way, the disk/DB state asserted below is what this fact pins.
+                    }
+                }
+
+                var restoredFirstHash = Convert.ToHexStringLower(SHA256.HashData(
+                    await File.ReadAllBytesAsync(Path.Combine(voicesRoot, "af_first.pt"))));
+                var restoredSecondHash = Convert.ToHexStringLower(SHA256.HashData(
+                    await File.ReadAllBytesAsync(Path.Combine(voicesRoot, "af_second.pt"))));
+                Assert.Equal(firstHash, restoredFirstHash);
+                Assert.Equal(secondHash, restoredSecondHash);
+                Assert.Equal(1, store.PackCount);
+                Assert.Empty(Directory.EnumerateFiles(voicesRoot, "*.tmp"));
+                Assert.Empty(Directory.EnumerateFiles(voicesRoot, "*.prev-*"));
+            }
+            finally
+            {
+                try { Directory.Delete(voicesRoot, recursive: true); }
+                catch (IOException) { /* best-effort cleanup */ }
+                catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+            }
+        }
+    }
+
+    public sealed class ScenarioAStoreFailureAfterTheWritesOrphansNothing
+    {
+        [Fact]
+        public async Task AStoreFailureAfterTheWritesReturns500WithAGenericBody()
+        {
+            // Given a store that fails AFTER the .pt writes would already have landed on disk —
+            // e.g. db/45's own `check (engine in ('kokoro'))` tripping on a non-kokoro engine that
+            // reached the store (F2's own reachability note; this fake throws directly rather than
+            // standing up a real 23514 to prove the CONTROLLER'S unwind, independent of which
+            // SQLSTATE triggered it),
+            var store = new FakeVoicePackStore { ThrowOnUpsert = new InvalidOperationException("simulated 23514") };
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+
+            // When install is attempted,
+            var response = await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+            var body = await response.Content.ReadAsStringAsync();
+
+            // Then it is a generic 500 — no internal detail (F15.7), never the store's own
+            // exception text.
+            Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+            Assert.DoesNotContain("simulated 23514", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("InvalidOperationException", body, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task NoPtFileSurvivesUnderTheVoicesRootAfterAStoreFailure()
+        {
+            var store = new FakeVoicePackStore { ThrowOnUpsert = new InvalidOperationException("simulated 23514") };
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+
+            await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+
+            // F2 — the store failure unwinds every file this attempt itself wrote (no orphan on the
+            // shared volume kokoro would otherwise serve with no backing DB row).
+            Assert.False(File.Exists(Path.Combine(factory.VoicesRoot, "af_first.pt")));
+            Assert.False(File.Exists(Path.Combine(factory.VoicesRoot, "af_second.pt")));
+        }
+
+        [Fact]
+        public async Task NoTmpSiblingSurvivesAStoreFailureEither()
+        {
+            var store = new FakeVoicePackStore { ThrowOnUpsert = new InvalidOperationException("simulated 23514") };
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+
+            await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+
+            Assert.Empty(Directory.EnumerateFiles(factory.VoicesRoot, "*.tmp"));
+        }
+
+        [Fact]
+        public async Task TheStoreIsNeverLeftHoldingAPackRow()
+        {
+            var store = new FakeVoicePackStore { ThrowOnUpsert = new InvalidOperationException("simulated 23514") };
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+
+            await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+
+            Assert.Equal(0, store.PackCount);
+        }
     }
 
     public sealed class ScenarioInstallWritesPtBytesToTheVolume
     {
         [Fact]
-        public void EveryVoicesPtFileLandsAtTheExpectedPath()
-            => Assert.Fail("pending: T413 install writes /voices/{slug}/{voiceId}.pt — AC3");
+        public async Task EveryVoicesPtFileLandsAtTheExpectedPath()
+        {
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+
+            var install = await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+            Assert.True(install.IsSuccessStatusCode, await install.Content.ReadAsStringAsync());
+
+            // AC3 — the flat layout (T412 ruling): every .pt lands directly at
+            // <Packs:VoicesRoot>/<voiceId>.pt, never under a per-pack subfolder.
+            Assert.True(File.Exists(Path.Combine(factory.VoicesRoot, "af_first.pt")));
+            Assert.True(File.Exists(Path.Combine(factory.VoicesRoot, "af_second.pt")));
+        }
 
         [Fact]
-        public void EveryPtFilesSha256MatchesTheManifestsPin()
-            => Assert.Fail("pending: T413 hash verify — AC3");
+        public async Task EveryPtFilesSha256MatchesTheManifestsPin()
+        {
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+
+            var install = await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+            Assert.True(install.IsSuccessStatusCode, await install.Content.ReadAsStringAsync());
+
+            // AC3 — every byte written is exactly what the catalog index pinned, never merely
+            // "a file exists" — proven against the SAME sha256 the fixture's own index declares.
+            var firstBytes = await File.ReadAllBytesAsync(Path.Combine(factory.VoicesRoot, "af_first.pt"));
+            var secondBytes = await File.ReadAllBytesAsync(Path.Combine(factory.VoicesRoot, "af_second.pt"));
+            Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(VoicePackInstallFixtures.FirstPtBytes)), Convert.ToHexStringLower(SHA256.HashData(firstBytes)));
+            Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(VoicePackInstallFixtures.SecondPtBytes)), Convert.ToHexStringLower(SHA256.HashData(secondBytes)));
+        }
     }
 
     public sealed class ScenarioInstallPersistsMetadata
     {
         [Fact]
-        public void StationVoicePackHoldsExactlyOneRowKeyedBySlug()
-            => Assert.Fail("pending: T413 upsert — AC4");
+        public async Task StationVoicePackHoldsExactlyOneRowKeyedBySlug()
+        {
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+
+            var install = await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+            Assert.True(install.IsSuccessStatusCode, await install.Content.ReadAsStringAsync());
+
+            // AC4 — exactly one pack row, keyed by the catalog slug.
+            Assert.Equal(1, store.PackCount);
+        }
 
         [Fact]
-        public void StationVoicePackVoiceHoldsOneRowPerManifestVoice()
-            => Assert.Fail("pending: T413 upsert — AC4");
+        public async Task StationVoicePackVoiceHoldsOneRowPerManifestVoice()
+        {
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+
+            var install = await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.InstallSlug}/install", null);
+            Assert.True(install.IsSuccessStatusCode, await install.Content.ReadAsStringAsync());
+
+            // AC4 — one voice_pack_voice row per manifest voice, in manifest order.
+            var voices = store.TryGetVoices(VoicePackInstallFixtures.InstallSlug);
+            Assert.NotNull(voices);
+            Assert.Equal(["af_first", "af_second"], voices!.Select(v => v.VoiceId));
+        }
     }
 
     public sealed class ScenarioTheNewVoiceIsLiveWithoutARestart
     {
         [Fact]
         public void TheNextRenderRequestNamingThePackVoiceReceivesAudio()
-            => Assert.Fail("pending: T413 + T421 wire — AC5 (kokoro rescan-per-request, no bounce)");
+            => Assert.Fail("pending: T421 — AC5 (kokoro rescan-per-request wiring is proven above by KokoroReturnsANewVoiceIdInItsVoicesListing; render-time voice selection is T421's own concern)");
     }
 
     // ---------------------------------------------------------------------
@@ -415,15 +764,432 @@ public static class FeatureVoicePackInstallGoesLiveWithoutARestart
     public sealed class ScenarioABrokenPackRefusesCleanly
     {
         [Fact]
-        public void ANoBytesAreWrittenWhenAPtSha256Mismatches()
-            => Assert.Fail("pending: T413 hash-mismatch guard — AC6");
+        public async Task ANoBytesAreWrittenWhenAPtSha256Mismatches()
+        {
+            // Given a pack whose index PINS the real hash of "af_broken.pt", but whose asset
+            // ROUTE serves corrupted bytes instead (a mid-transport tamper/corruption stand-in),
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+
+            // When install is attempted,
+            await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.BrokenSlug}/install", null);
+
+            // Then nothing was ever written (AC6) — fail-closed integrity verification.
+            Assert.False(File.Exists(Path.Combine(factory.VoicesRoot, "af_broken.pt")));
+        }
 
         [Fact]
-        public void StationVoicePackIsUnchangedOnRefusal()
-            => Assert.Fail("pending: T413 all-or-nothing install — AC6");
+        public async Task StationVoicePackIsUnchangedOnRefusal()
+        {
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+
+            await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.BrokenSlug}/install", null);
+
+            // AC6 — all-or-nothing: no row for the broken pack was ever upserted.
+            Assert.Equal(0, store.PackCount);
+        }
 
         [Fact]
-        public void TheResponseIsA502IntegrityProblemDetails()
-            => Assert.Fail("pending: T413 catalog transport integrity mapping — AC6");
+        public async Task TheResponseIsA502IntegrityProblemDetails()
+        {
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+
+            var response = await client.PostAsync($"/api/voice-packs/{VoicePackInstallFixtures.BrokenSlug}/install", null);
+            var body = await response.Content.ReadAsStringAsync();
+
+            // AC6 — the catalog transport's own integrity mapping (CatalogInstallShell's
+            // WithheldProblem): 502, never a 400 client-input error.
+            Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+            Assert.Contains("Voice pack unavailable.", body, StringComparison.Ordinal);
+            Assert.Contains("integrity check", body, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// The serializer's own reject arms (mirrors <c>Story393_AdPackKind.cs</c>'s own
+    /// <c>ScenarioTheManifestSerializerCapsRejectHonestly</c> idiom one pack-kind over) — pure,
+    /// in-process, no DB/HTTP: drives <see cref="CatalogVoicePackManifestSerializer.Deserialize"/>
+    /// directly against SPEC F164.3's own synthetic/sourceRef gate, the voice-id shape/length fence
+    /// (SPEC F166.4, PLAN T417's <c>SettingValidator.VoiceIdFormat</c>, reused here rather than
+    /// re-declared), the duplicate-id fence, and the <see cref="CatalogVoicePackManifestSerializer.MaxVoicesPerPack"/>
+    /// cap — every one of these gates degrades the WHOLE manifest to <see langword="null"/>, the same
+    /// all-or-nothing posture the happy-path Scenarios above install against.
+    /// </summary>
+    public sealed class ScenarioTheManifestSerializerCapsRejectHonestly
+    {
+        static string ManifestJson(
+            string voicesArrayJson, bool synthetic = true, string? sourceRef = null, string preview = "test-pack.preview.mp3",
+            string engine = "kokoro") =>
+            $$"""
+            { "packName": "Test Pack", "engine": "{{engine}}", "synthetic": {{(synthetic ? "true" : "false")}},
+              "sourceRef": {{(sourceRef is null ? "null" : $"\"{sourceRef}\"")}},
+              "preview": "{{preview}}",
+              "voices": {{voicesArrayJson}} }
+            """;
+
+        static string Voice(string voiceId) => $$"""{ "voiceId": "{{voiceId}}" }""";
+
+        [Fact]
+        public void SyntheticFalseFailsToParse()
+        {
+            // SPEC F164.3 — synthetic must be DECLARED true; an explicit false is refused exactly
+            // like an omitted field, never silently accepted as "not synthetic, but fine".
+            var manifest = CatalogVoicePackManifestSerializer.Deserialize(
+                ManifestJson($"[{Voice("af_test")}]", synthetic: false));
+
+            Assert.Null(manifest);
+        }
+
+        [Fact]
+        public void ANonNullSourceRefFailsToParse()
+        {
+            // SPEC F164.3 — sourceRef must be absent or JSON null; ANY other value (even a plausible
+            // attribution URL) fails the whole manifest.
+            var manifest = CatalogVoicePackManifestSerializer.Deserialize(
+                ManifestJson($"[{Voice("af_test")}]", sourceRef: "https://example.test/voice-origin"));
+
+            Assert.Null(manifest);
+        }
+
+        [Fact]
+        public void AMissingPreviewFailsToParse()
+        {
+            var manifest = CatalogVoicePackManifestSerializer.Deserialize(
+                $$"""
+                { "packName": "Test Pack", "engine": "kokoro", "synthetic": true, "sourceRef": null,
+                  "voices": [{{Voice("af_test")}}] }
+                """);
+
+            Assert.Null(manifest);
+        }
+
+        [Theory]
+        [InlineData("../x")]
+        [InlineData("a/b")]
+        [InlineData("AF_TEST")]
+        public void ABadlyShapedVoiceIdFailsToParse(string voiceId)
+        {
+            // The voice id becomes a bare filesystem path segment at install (PLAN T413's own flat
+            // `<voiceId>.pt` layout) — a traversal segment, an embedded separator, or an uppercase
+            // character (SettingValidator.VoiceIdFormat is lowercase-only) all fail the whole
+            // manifest, never merely that one voice.
+            var manifest = CatalogVoicePackManifestSerializer.Deserialize(ManifestJson($"[{Voice(voiceId)}]"));
+
+            Assert.Null(manifest);
+        }
+
+        [Fact]
+        public void A64CharacterVoiceIdIsAccepted()
+        {
+            // The T417-reviewer-mandated boundary (CatalogVoicePackManifestSerializer.MaxVoiceIdLength)
+            // — exactly at the cap parses cleanly.
+            var voiceId = "a" + new string('f', CatalogVoicePackManifestSerializer.MaxVoiceIdLength - 1);
+            Assert.Equal(CatalogVoicePackManifestSerializer.MaxVoiceIdLength, voiceId.Length);
+
+            var manifest = CatalogVoicePackManifestSerializer.Deserialize(ManifestJson($"[{Voice(voiceId)}]"));
+
+            Assert.NotNull(manifest);
+        }
+
+        [Fact]
+        public void A65CharacterVoiceIdFailsToParse()
+        {
+            // One character OVER the same cap fails the whole manifest — the boundary's other side.
+            var voiceId = "a" + new string('f', CatalogVoicePackManifestSerializer.MaxVoiceIdLength);
+            Assert.Equal(CatalogVoicePackManifestSerializer.MaxVoiceIdLength + 1, voiceId.Length);
+
+            var manifest = CatalogVoicePackManifestSerializer.Deserialize(ManifestJson($"[{Voice(voiceId)}]"));
+
+            Assert.Null(manifest);
+        }
+
+        [Fact]
+        public void ADuplicateVoiceIdWithinOneManifestFailsToParse()
+        {
+            var manifest = CatalogVoicePackManifestSerializer.Deserialize(
+                ManifestJson($"[{Voice("af_test")}, {Voice("af_test")}]"));
+
+            Assert.Null(manifest);
+        }
+
+        [Fact]
+        public void MoreThanTheVoiceCountCapFailsToParse()
+        {
+            var voices = string.Join(
+                ", ", Enumerable.Range(0, CatalogVoicePackManifestSerializer.MaxVoicesPerPack + 1).Select(i => Voice($"af_test{i}")));
+
+            var manifest = CatalogVoicePackManifestSerializer.Deserialize(ManifestJson($"[{voices}]"));
+
+            Assert.Null(manifest);
+        }
+
+        [Fact]
+        public void MalformedJsonDegradesToNullNeverThrows()
+        {
+            var manifest = CatalogVoicePackManifestSerializer.Deserialize("not json at all");
+
+            Assert.Null(manifest);
+        }
+
+        [Fact]
+        public void AnEngineOutsideTheClosedSetStillParsesCleanly()
+        {
+            // T413 review round 2 finding B2 — reverses round 1 finding F2's own narrowing: engine
+            // is a SHAPE gate only here now (a safe lowercase token), never closed-set membership.
+            // Whether "piper" is actually SUPPORTED is Api.VoicePackController's own closed-set gate
+            // (SupportedEngines, mirroring db/45's `check (engine in ('kokoro'))`) — see
+            // Story396_VoicePackWrongEngineRefused.cs's own HTTP-level fact for that refusal, which
+            // this manifest must reach unparsed-null-free in order to exercise.
+            var manifest = CatalogVoicePackManifestSerializer.Deserialize(
+                ManifestJson($"[{Voice("af_test")}]", engine: "piper"));
+
+            Assert.NotNull(manifest);
+            Assert.Equal("piper", manifest.Engine);
+        }
+
+        [Fact]
+        public void AnUppercaseEngineFailsToParse()
+        {
+            // The shape gate (EngineFormat) is lowercase-only, so "Kokoro" fails to parse even
+            // though "kokoro" is the one engine this station actually runs — a SHAPE failure, never
+            // the controller's own closed-set one.
+            var manifest = CatalogVoicePackManifestSerializer.Deserialize(
+                ManifestJson($"[{Voice("af_test")}]", engine: "Kokoro"));
+
+            Assert.Null(manifest);
+        }
+
+        [Fact]
+        public void AnEngineOverTheLengthCapFailsToParse()
+        {
+            // F6 — defense in depth: an over-length engine token fails outright rather than being
+            // echoed anywhere, even though nothing this long could ever equal "kokoro" and pass the
+            // closed-set check above either.
+            var engine = new string('k', CatalogVoicePackManifestSerializer.MaxEngineLength + 1);
+            var manifest = CatalogVoicePackManifestSerializer.Deserialize(
+                ManifestJson($"[{Voice("af_test")}]", engine: engine));
+
+            Assert.Null(manifest);
+        }
+    }
+}
+
+/// <summary>
+/// A two-entry fake catalog origin (mirrors <c>FontPackInstallWebFactory</c>'s own shape): a clean
+/// two-voice pack ("install-test-pack") for the happy-path facts, and a pack whose asset route
+/// deliberately serves bytes that do NOT match its own index-pinned sha256 ("broken-pack") for the
+/// hash-mismatch sad path — plus a fresh, per-instance temp <c>Packs:VoicesRoot</c>, and a Kokoro
+/// <c>GET /v1/audio/voices</c> route that dynamically lists whatever <c>.pt</c> files that root
+/// actually holds (the same "kokoro rescans, no restart" idiom <c>Story398_VoiceIdCollisionRefused.cs</c>
+/// uses for its own rename fact).
+/// </summary>
+file sealed class VoicePackInstallWebFactory : WebApplicationFactory<Program>
+{
+    internal const string Password = "test-password-story395-voicepack-install";
+
+    readonly FakeVoicePackStore store;
+    readonly FakeHttpMessageHandler handler;
+    readonly bool ownsVoicesRoot;
+
+    public string VoicesRoot { get; }
+
+    public VoicePackInstallWebFactory(FakeVoicePackStore store)
+        : this(store, Directory.CreateTempSubdirectory("t413-story395-voices-").FullName,
+            VoicePackInstallFixtures.FirstPtBytes, VoicePackInstallFixtures.SecondPtBytes, ownsVoicesRoot: true)
+    {
+    }
+
+    /// <summary>
+    /// The reinstall-with-different-content shape (T413 review round 4 finding L2 — mirrors
+    /// <c>AdPackInstallWebFactory</c>'s own two-instance idiom in <c>Story393_AdPackKind.cs</c>): a
+    /// SECOND factory instance over the SAME <paramref name="voicesRoot"/> and the SAME
+    /// <paramref name="store"/> a FIRST factory already installed into — a fresh app instance is what
+    /// actually bypasses <c>CatalogProxyService</c>'s 15-minute cache, so this instance's own fake
+    /// handler's DIFFERENT <c>.pt</c> bytes are genuinely what gets fetched and written. Never deletes
+    /// <paramref name="voicesRoot"/> on dispose — the caller owns that directory's lifetime across
+    /// both instances.
+    /// </summary>
+    public VoicePackInstallWebFactory(FakeVoicePackStore store, string voicesRoot, byte[] firstPtBytes, byte[] secondPtBytes)
+        : this(store, voicesRoot, firstPtBytes, secondPtBytes, ownsVoicesRoot: false)
+    {
+    }
+
+    VoicePackInstallWebFactory(
+        FakeVoicePackStore store, string voicesRoot, byte[] firstPtBytes, byte[] secondPtBytes, bool ownsVoicesRoot)
+    {
+        this.store = store;
+        VoicesRoot = voicesRoot;
+        this.ownsVoicesRoot = ownsVoicesRoot;
+        handler = VoicePackInstallFixtures.BuildRoutedHandler(voicesRoot, firstPtBytes, secondPtBytes);
+    }
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development");
+        builder.UseSetting("ConnectionStrings:Library", "Host=nowhere;Database=test");
+        builder.UseSetting("Admin:Password", Password);
+        builder.UseSetting("Community:CatalogIndexUrl", VoicePackInstallFixtures.IndexUrl);
+        builder.UseSetting("Packs:VoicesRoot", VoicesRoot);
+
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IHostedService>();
+            services.RemoveAll<IHttpClientFactory>();
+            services.AddSingleton<IHttpClientFactory>(new SingleHandlerHttpClientFactory(handler));
+
+            services.RemoveAll<IVoicePackStore>();
+            services.AddSingleton<IVoicePackStore>(store);
+        });
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && ownsVoicesRoot)
+        {
+            try { Directory.Delete(VoicesRoot, recursive: true); }
+            catch (IOException) { /* best-effort cleanup */ }
+            catch (UnauthorizedAccessException) { /* best-effort cleanup */ }
+        }
+
+        base.Dispose(disposing);
+    }
+
+    public static async Task<HttpClient> LoggedInClientAsync(WebApplicationFactory<Program> factory)
+    {
+        var client = factory.CreateClient();
+        var login = await client.PostAsJsonAsync("/api/auth/login", new { password = Password });
+        Assert.Equal(HttpStatusCode.NoContent, login.StatusCode);
+        return client;
+    }
+}
+
+file static class VoicePackInstallFixtures
+{
+    public const string IndexUrl = "https://catalog.test/repo/voice-install-index.json";
+    const string Origin = "https://catalog.test/repo/";
+    // Tts:Endpoint under the "Development" ASP.NET environment this factory uses (see
+    // appsettings.Development.json) is "http://localhost:8880", not the production default.
+    const string KokoroVoicesUrl = "http://localhost:8880/v1/audio/voices";
+
+    public const string InstallSlug = "install-test-pack";
+    public const string BrokenSlug = "broken-pack";
+
+    public static readonly byte[] FirstPtBytes = Encoding.UTF8.GetBytes("first-voice-bytes-story395");
+    public static readonly byte[] SecondPtBytes = Encoding.UTF8.GetBytes("second-voice-bytes-story395");
+    // A reinstall's own DIFFERENT content (T413 review round 4 finding L2) — genuinely different
+    // bytes from FirstPtBytes/SecondPtBytes so a sha256 assertion pinning "the previous install's
+    // bytes survived" can actually fail when they don't (see
+    // ACancelledUpsertDuringAReinstallLeavesThePreviousInstallUntouched, the one fact that uses
+    // these).
+    public static readonly byte[] SecondInstallFirstPtBytes = Encoding.UTF8.GetBytes("reinstall-first-voice-bytes-story395");
+    public static readonly byte[] SecondInstallSecondPtBytes = Encoding.UTF8.GetBytes("reinstall-second-voice-bytes-story395");
+    static readonly byte[] RealBrokenPtBytes = Encoding.UTF8.GetBytes("the-real-broken-voice-bytes");
+    static readonly byte[] CorruptedBrokenPtBytes = Encoding.UTF8.GetBytes("NOT-the-bytes-the-index-pinned");
+    // The index's own "bytes" field for af_broken.pt below is deliberately
+    // CorruptedBrokenPtBytes.Length, NOT RealBrokenPtBytes.Length: CatalogProxyService bounds its
+    // streamed read at min(declared bytes, per-kind cap) BEFORE it ever compares the hash
+    // (CatalogProxyService.FetchAndVerifyAssetAsync), so an undersized declared length would trip
+    // "exceeded its size limit" first and this fixture would never reach the hash-mismatch path it
+    // exists to prove. Only the pinned sha256 is wrong here — the declared size is honest.
+    static readonly byte[] PreviewBytes = Encoding.UTF8.GetBytes("fake-preview-bytes-for-story395");
+
+    static string ManifestJson(string slug, params string[] voiceIds) => $$"""
+        { "packName": "Test Pack", "engine": "kokoro", "synthetic": true, "sourceRef": null,
+          "preview": "{{slug}}.preview.mp3",
+          "voices": [ {{string.Join(", ", voiceIds.Select(id => $$"""{ "voiceId": "{{id}}" }"""))}} ] }
+        """;
+
+    const string MetaJson = """
+        {"author":"Test Fixture","description":"A voice pack for the install specs.","audience":"everyone"}
+        """;
+
+    static string Sha256Hex(string text) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+    static string Sha256Hex(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
+
+    // firstPtBytes/secondPtBytes are parameters (T413 review round 4 finding L2), NOT the
+    // FirstPtBytes/SecondPtBytes constants directly — a reinstall fact needs the index's own pinned
+    // hashes to match WHATEVER bytes that instance's handler actually serves, so a SECOND
+    // BuildRoutedHandler call can serve genuinely different, still-verifying content for the SAME
+    // voice ids (see VoicePackInstallWebFactory's own two-instance constructor).
+    static string IndexJson(byte[] firstPtBytes, byte[] secondPtBytes) => $$"""
+        { "generatedAt": "2026-09-06", "entries": [
+          { "slug": "{{InstallSlug}}", "kind": "voice-pack", "audience": "everyone",
+            "manifest": { "path": "entries/{{InstallSlug}}/{{InstallSlug}}.voice-pack.json", "sha256": "{{Sha256Hex(ManifestJson(InstallSlug, "af_first", "af_second"))}}" },
+            "meta": { "path": "entries/{{InstallSlug}}/{{InstallSlug}}.meta.json", "sha256": "{{Sha256Hex(MetaJson)}}" },
+            "assets": [
+              { "path": "entries/{{InstallSlug}}/af_first.pt", "sha256": "{{Sha256Hex(firstPtBytes)}}", "bytes": {{firstPtBytes.Length}} },
+              { "path": "entries/{{InstallSlug}}/af_second.pt", "sha256": "{{Sha256Hex(secondPtBytes)}}", "bytes": {{secondPtBytes.Length}} },
+              { "path": "entries/{{InstallSlug}}/{{InstallSlug}}.preview.mp3", "sha256": "{{Sha256Hex(PreviewBytes)}}", "bytes": {{PreviewBytes.Length}} }
+            ] },
+          { "slug": "{{BrokenSlug}}", "kind": "voice-pack", "audience": "everyone",
+            "manifest": { "path": "entries/{{BrokenSlug}}/{{BrokenSlug}}.voice-pack.json", "sha256": "{{Sha256Hex(ManifestJson(BrokenSlug, "af_broken"))}}" },
+            "meta": { "path": "entries/{{BrokenSlug}}/{{BrokenSlug}}.meta.json", "sha256": "{{Sha256Hex(MetaJson)}}" },
+            "assets": [
+              { "path": "entries/{{BrokenSlug}}/af_broken.pt", "sha256": "{{Sha256Hex(RealBrokenPtBytes)}}", "bytes": {{CorruptedBrokenPtBytes.Length}} },
+              { "path": "entries/{{BrokenSlug}}/{{BrokenSlug}}.preview.mp3", "sha256": "{{Sha256Hex(PreviewBytes)}}", "bytes": {{PreviewBytes.Length}} }
+            ] } ] }
+        """;
+
+    /// <summary>
+    /// Serves both fixture packs' own documents/assets — <c>broken-pack</c>'s own
+    /// <c>af_broken.pt</c> route deliberately serves <see cref="CorruptedBrokenPtBytes"/> while the
+    /// index still pins <see cref="RealBrokenPtBytes"/>'s own hash, proving fail-closed integrity
+    /// verification (mirrors <c>FontPackInstallFixtures</c>'s own
+    /// <c>AHashMismatchRefusesFailClosedWithNothingStored</c> precedent) — plus a Kokoro
+    /// <c>GET /v1/audio/voices</c> that dynamically lists whatever <c>.pt</c> files
+    /// <paramref name="voicesRoot"/> actually holds at request time. <paramref name="firstPtBytes"/>/
+    /// <paramref name="secondPtBytes"/> let a reinstall fact serve genuinely different content for the
+    /// SAME <c>af_first</c>/<c>af_second</c> voice ids (T413 review round 4 finding L2) — every other
+    /// caller just passes <see cref="FirstPtBytes"/>/<see cref="SecondPtBytes"/> straight through.
+    /// </summary>
+    public static FakeHttpMessageHandler BuildRoutedHandler(string voicesRoot, byte[] firstPtBytes, byte[] secondPtBytes)
+    {
+        var routes = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [IndexUrl] = IndexJson(firstPtBytes, secondPtBytes),
+            [Origin + $"entries/{InstallSlug}/{InstallSlug}.voice-pack.json"] = ManifestJson(InstallSlug, "af_first", "af_second"),
+            [Origin + $"entries/{InstallSlug}/{InstallSlug}.meta.json"] = MetaJson,
+            [Origin + $"entries/{BrokenSlug}/{BrokenSlug}.voice-pack.json"] = ManifestJson(BrokenSlug, "af_broken"),
+            [Origin + $"entries/{BrokenSlug}/{BrokenSlug}.meta.json"] = MetaJson,
+        };
+        var assetBytesByUrl = new Dictionary<string, byte[]>(StringComparer.Ordinal)
+        {
+            [Origin + $"entries/{InstallSlug}/af_first.pt"] = firstPtBytes,
+            [Origin + $"entries/{InstallSlug}/af_second.pt"] = secondPtBytes,
+            [Origin + $"entries/{InstallSlug}/{InstallSlug}.preview.mp3"] = PreviewBytes,
+            // Deliberately corrupted — the index above still pins RealBrokenPtBytes's own hash.
+            [Origin + $"entries/{BrokenSlug}/af_broken.pt"] = CorruptedBrokenPtBytes,
+            [Origin + $"entries/{BrokenSlug}/{BrokenSlug}.preview.mp3"] = PreviewBytes,
+        };
+
+        return new((request, _) =>
+        {
+            var absoluteUri = request.RequestUri!.AbsoluteUri;
+
+            if (string.Equals(absoluteUri, KokoroVoicesUrl, StringComparison.Ordinal))
+            {
+                var installedVoiceIds = System.IO.Directory.Exists(voicesRoot)
+                    ? System.IO.Directory.EnumerateFiles(voicesRoot, "*.pt").Select(f => Path.GetFileNameWithoutExtension(f))
+                    : [];
+                var voices = installedVoiceIds.ToArray();
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(new { voices }),
+                });
+            }
+
+            if (assetBytesByUrl.TryGetValue(absoluteUri, out var assetBytes))
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(assetBytes) });
+
+            return Task.FromResult(
+                routes.TryGetValue(absoluteUri, out var body)
+                    ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") }
+                    : new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
     }
 }

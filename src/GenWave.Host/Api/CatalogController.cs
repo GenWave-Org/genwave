@@ -268,6 +268,7 @@ public sealed partial class CatalogController(
         CatalogEntryKind.Avatar => "avatar",
         CatalogEntryKind.Icon => "icon",
         CatalogEntryKind.AdPack => "ad-pack",
+        CatalogEntryKind.VoicePack => "voice-pack",
         _ => throw new UnreachableException($"Unhandled {nameof(CatalogEntryKind)} value: {kind}."),
     };
 

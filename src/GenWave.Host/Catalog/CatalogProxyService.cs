@@ -766,7 +766,11 @@ public sealed class CatalogProxyService(
     /// pinned to <see cref="MaxAssetBytes"/> (256 KiB, unchanged); every PNG-carrying kind — an
     /// installed avatar-pack item AND a persona's own sidecar face, both declared under the SAME
     /// <see cref="CatalogIndexValidator.MaxPngAssetBytes"/> ceiling — fetches under that identical 512
-    /// KiB number instead. A kind that carries no assets at all (Theme/Show/Icon) never reaches this
+    /// KiB number instead. A voice pack's own <c>.pt</c>/preview assets (PLAN T413) fetch under
+    /// <see cref="CatalogIndexValidator.MaxVoiceFileBytes"/> (1 MiB, SPEC F164.5) — comfortably above
+    /// the ~524 KiB stock kokoro-fastapi <c>.pt</c> files measure, and above <see cref="MaxAssetBytes"/>'s
+    /// own font-sized 256 KiB, which would otherwise withhold every voice file. A kind that carries no
+    /// assets at all (Theme/Show/Icon) never reaches this
     /// method: <see cref="TryResolveAsset"/> already answers <see langword="false"/> before
     /// <see cref="GetAssetAsync"/> ever calls this, because <see cref="CatalogIndexValidator"/> never
     /// builds one of those kinds' entries with a populated <see cref="CatalogEntrySummary.Assets"/> —
@@ -775,6 +779,7 @@ public sealed class CatalogProxyService(
     static int AssetFetchCapFor(CatalogEntryKind kind) => kind switch
     {
         CatalogEntryKind.Avatar or CatalogEntryKind.Persona => CatalogIndexValidator.MaxPngAssetBytes,
+        CatalogEntryKind.VoicePack => CatalogIndexValidator.MaxVoiceFileBytes,
         _ => MaxAssetBytes,
     };
 

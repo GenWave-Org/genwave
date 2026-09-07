@@ -67,4 +67,16 @@ public enum CatalogEntryKind
     /// <c>AdScriptValidator</c> at generation time, exactly like an owner-authored one.
     /// </summary>
     AdPack,
+
+    /// <summary>
+    /// A voice pack (SPEC F164.1, STORY-395, PLAN T413) — manifest <c>&lt;slug&gt;.voice-pack.json</c>
+    /// + the usual meta, the THIRD assets-carrying kind alongside <see cref="Font"/>/<see cref="Avatar"/>:
+    /// one Kokoro <c>.pt</c> file per declared voice plus a single required preview clip
+    /// (SPEC F164.4), each riding <c>assets[]</c> in the same <c>{path, sha256, bytes}</c> shape.
+    /// Consent-gated at the manifest level (<c>synthetic: true</c>, <c>sourceRef</c> absent/null,
+    /// SPEC F164.3) — <see cref="CatalogIndexValidator"/> only checks the index/manifest SHAPE here;
+    /// the engine match (F164.2) and voice-id collision fence (F166.4) are install-time checks
+    /// (<see cref="Api.VoicePackController"/>), not index-validation concerns.
+    /// </summary>
+    VoicePack,
 }
