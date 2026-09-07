@@ -138,9 +138,9 @@ public static class FeatureAdoptionVerifyRepair
     /// review LOW-2). Every fact below that wants to isolate its own migration-marker perturbation to
     /// "nothing above db/NN" used to hand-list one <c>File.Delete</c> call per no-table migration
     /// above that marker — a real tax paid four separate times across db/38 (gh-#486), db/39 (T326),
-    /// db/43 (T398), and db/44 (T406) as each one landed — so the NEXT no-table migration (db/45, …)
-    /// is now a zero-edit event here: this helper deletes whatever currently exists above the marker,
-    /// found fresh off disk every call, never a literal filename list to extend by hand again.</summary>
+    /// db/43 (T398), and db/44 (T406) as each one landed — so the next no-table migration is now a
+    /// zero-edit event here: this helper deletes whatever currently exists above the marker, found
+    /// fresh off disk every call, never a literal filename list to extend by hand again.</summary>
     static void DeleteMigrationsAbove(string checkoutRoot, int keepThroughNumber)
     {
         foreach (var file in Directory.EnumerateFiles(Path.Combine(checkoutRoot, "db")))
@@ -209,12 +209,16 @@ public static class FeatureAdoptionVerifyRepair
     /// where it had sat since PLAN T337. Bumped again for PLAN T389/db/42 (gh-#380's ads epic,
     /// SPEC F159.1): db/42-ads-migration.sh's own LAST `create table if not exists` (two in that
     /// file — station.ad_spot, station.ad_brief, in that order) is `station.ad_brief`, now this
-    /// newest table-creating migration, moving this default off db/41/library.file_action.</summary>
+    /// newest table-creating migration, moving this default off db/41/library.file_action. Bumped
+    /// again for PLAN T410/db/45 (gh-#709's jingle + voice pack epic, SPEC F164-F170): db/45's own
+    /// LAST `create table if not exists` (three in that file — station.voice_pack,
+    /// station.voice_pack_voice, station.jingle_pack, in that order) is `station.jingle_pack`, now
+    /// this newest table-creating migration, moving this default off db/42/station.ad_brief.</summary>
     static string WriteDockerStub(
         string composeArgs = "-f compose.yaml",
         bool dbReachable = true,
         string migrationMarker = "t",
-        string migrationMarkerTable = "station.ad_brief",
+        string migrationMarkerTable = "station.jingle_pack",
         string? stationNameJson = null,
         string[]? services = null,
         string composeConfigBody = "services:\n  db:\n    image: postgres\n  api:\n    image: genwave/api\n",
@@ -593,7 +597,7 @@ public static class FeatureAdoptionVerifyRepair
         [Fact]
         public void AnUnappliedMigrationIsReportedAgainstTheRepoDbMax()
         {
-            // db/42 (PLAN T389) is this repo's own newest table-creating migration and its own
+            // db/45 (PLAN T410) is this repo's own newest table-creating migration and its own
             // repo/db max both at once — the derived marker and "repo's db/ max" name the SAME
             // number here, unlike ScenarioMigrationMarkerDerivation's own scratch gap facts below.
             var envFile = ScratchEnvPath();
@@ -602,7 +606,7 @@ public static class FeatureAdoptionVerifyRepair
 
             var (_, stdOut, _) = RunSetup(MakeBinDir(), envFile, "", new Dictionary<string, string> { ["GW_DOCKER_CMD"] = docker });
 
-            Assert.Contains("db/42", stdOut, StringComparison.Ordinal);
+            Assert.Contains("db/45", stdOut, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -846,16 +850,17 @@ public static class FeatureAdoptionVerifyRepair
             // points outside the checkout" shape the wire ran under.
             var checkoutRoot = MakeScratchCheckout();
 
-            // Every no-table migration above db/42 (PLAN T398's db/43, PLAN T406's db/44, …)
-            // reopens the SAME migration-marker gap gh-#486/T326 once did (see this fact's own
-            // remarks below): left in the scratch checkout, repo db/ max would outrun db/42's own
-            // marker again and the schema-migrations probe would degrade to UNKNOWN before ever
-            // reaching the stub. DeleteMigrationsAbove closes the gap for the identical reason the
-            // sibling ScenarioMigrationMarkerDerivation facts below delete their own perturbing
-            // files — this fact's own job is the env-file plumbing, not the migration-marker
-            // derivation itself, so it needs the gap CLOSED, not reopened — and needs no per-file
-            // edit the next time a no-table migration lands (PLAN T406 review LOW-2).
-            DeleteMigrationsAbove(checkoutRoot, keepThroughNumber: 42);
+            // Every no-table migration above db/45 (the next one to land after PLAN T410's own
+            // three-table db/45) reopens the SAME migration-marker gap gh-#486/T326 once did (see
+            // this fact's own remarks below): left in the scratch checkout, repo db/ max would
+            // outrun db/45's own marker again and the schema-migrations probe would degrade to
+            // UNKNOWN before ever reaching the stub. DeleteMigrationsAbove closes the gap for the
+            // identical reason the sibling ScenarioMigrationMarkerDerivation facts below delete
+            // their own perturbing files — this fact's own job is the env-file plumbing, not the
+            // migration-marker derivation itself, so it needs the gap CLOSED, not reopened — and
+            // needs no per-file edit the next time a no-table migration lands (PLAN T406 review
+            // LOW-2).
+            DeleteMigrationsAbove(checkoutRoot, keepThroughNumber: 45);
 
             var envFile = ScratchEnvPath();
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
@@ -882,22 +887,23 @@ public static class FeatureAdoptionVerifyRepair
             //
             // gh-#486 (db/38) and PLAN T326 (db/39) opened a migration-marker gap (both
             // column/value-only, no new table) that PLAN T337's db/40 closed once, PLAN T354's
-            // db/41 closed again, and PLAN T389's db/42 closes again still: db/42
-            // (station.ad_brief) is once again this repo's newest CREATE TABLE migration AND its
-            // own db/ max, so the schema-migrations probe's ordinary verdict is back to a PASS,
-            // not the honest gap report ScenarioMigrationMarkerDerivation's own scratch facts
-            // below still pin (those perturb a scratch db/ back into the gap on purpose).
-            // MakeScratchCheckout() copies the real db/ directory verbatim (this file's own
-            // remarks), so this scratch run sees the same db/38-db/42 the real repo does. Still
-            // proves the T321 plumbing fix: the T321 bug's own symptom ("Could not reach the db
-            // service to check") is absent, and the PASS verdict names db/42 and its own marker
-            // table (setup.sh's own verify_migrations wording) — it could only do that by
-            // actually reaching and querying the stub through the env-file-carrying compose call
-            // this test exists to pin. (any no-table migration above db/42 — see this method's own
-            // DeleteMigrationsAbove call above — would otherwise reopen this exact gap.)
+            // db/41 closed again, PLAN T389's db/42 closed again still, and PLAN T410's db/45
+            // closes it again still: db/45 (station.jingle_pack) is once again this repo's newest
+            // CREATE TABLE migration AND its own db/ max, so the schema-migrations probe's
+            // ordinary verdict is back to a PASS, not the honest gap report
+            // ScenarioMigrationMarkerDerivation's own scratch facts below still pin (those perturb
+            // a scratch db/ back into the gap on purpose). MakeScratchCheckout() copies the real
+            // db/ directory verbatim (this file's own remarks), so this scratch run sees the same
+            // db/38-db/45 the real repo does. Still proves the T321 plumbing fix: the T321 bug's
+            // own symptom ("Could not reach the db service to check") is absent, and the PASS
+            // verdict names db/45 and its own marker table (setup.sh's own verify_migrations
+            // wording) — it could only do that by actually reaching and querying the stub through
+            // the env-file-carrying compose call this test exists to pin. (any no-table migration
+            // above db/45 — see this method's own DeleteMigrationsAbove call above — would
+            // otherwise reopen this exact gap.)
             Assert.True(
                 exitCode == 0 &&
-                stdOut.Contains("Schema is current through db/42 (station.ad_brief present)", StringComparison.Ordinal) &&
+                stdOut.Contains("Schema is current through db/45 (station.jingle_pack present)", StringComparison.Ordinal) &&
                 !stdOut.Contains("Could not reach the db service", StringComparison.Ordinal) &&
                 stdOut.Contains("No locally-built services in this box's compose config", StringComparison.Ordinal) &&
                 stdOut.Contains("None found for project 'genwave'", StringComparison.Ordinal),
@@ -1417,27 +1423,31 @@ public static class FeatureAdoptionVerifyRepair
             // own derivation, setup.sh's verify_migrations), which would have silently stopped
             // this fact from reaching the psql-as-role query it exists to prove at all. PLAN
             // T389's db/42 (station.ad_brief) was this repo's newest CREATE TABLE migration AND
-            // its own db/ max for a while — the exact "no perturbation needed" window this
-            // comment used to describe — until PLAN T398's db/43 (the ad_spot CHECK constraints +
-            // index, no new table) reopened the SAME gap, exactly as this comment's own prior
+            // its own db/ max for a while — until PLAN T398's db/43 (the ad_spot CHECK constraints
+            // + index, no new table) reopened the SAME gap, exactly as this comment's own prior
             // wording anticipated ("a future re-opening of this same gap... has a ready-made
             // perturbation point here"); PLAN T406's db/44 (find_near_duplicates' `create or
-            // replace`, also no new table) reopens it a second time the moment db/43 alone is
-            // deleted back out. DeleteMigrationsAbove clears everything above db/42 from the
-            // scratch checkout below (PLAN T406 review LOW-2 — the next no-table migration needs no
-            // edit here) so this fact still reaches the real psql-as-role query it exists to prove,
-            // rather than short-circuiting to an UNKNOWN gap report before docker is ever touched
-            // (unlike ScenarioMigrationMarkerDerivation below, which deliberately REOPENS a gap in
-            // ITS own scratch db/ on purpose). WriteRealDbCompose still reads db/01+db/06 from the REAL
-            // repo root — those files are unrelated to which migration is the marker (db/06 now
-            // also carries the fresh-init mirror of db/42's own station.ad_spot/ad_brief AND
-            // db/43's own CHECK constraints/index, so the real container this fact stands up
-            // actually has station.ad_brief present too, regardless of db/43's/db/44's own
-            // deletion here from the SCRATCH checkout's db/ directory only — db/44 touches
-            // db/01-library.sh's own mirror, not db/06, so this fact's container is unaffected
-            // either way).
+            // replace`, also no new table) reopened it a second time the moment db/43 alone was
+            // deleted back out. PLAN T410's db/45 (three new tables — station.voice_pack,
+            // station.voice_pack_voice, station.jingle_pack) closes the gap again still and is
+            // this repo's newest CREATE TABLE migration AND its own db/ max for now — the exact
+            // "no perturbation needed" window this comment describes until the next no-table
+            // migration lands above it. DeleteMigrationsAbove clears everything above db/45 from
+            // the scratch checkout below (PLAN T406 review LOW-2 — the next no-table migration
+            // needs no edit here) so this fact still reaches the real psql-as-role query it exists
+            // to prove, rather than short-circuiting to an UNKNOWN gap report before docker is
+            // ever touched (unlike ScenarioMigrationMarkerDerivation below, which deliberately
+            // REOPENS a gap in ITS own scratch db/ on purpose). WriteRealDbCompose still reads
+            // db/01+db/06 from the REAL repo root — those files are unrelated to which migration
+            // is the marker (db/06 now also carries the fresh-init mirror of db/42's own
+            // station.ad_spot/ad_brief, db/43's own CHECK constraints/index, AND db/45's own
+            // voice_pack/voice_pack_voice/jingle_pack tables, so the real container this fact
+            // stands up actually has station.jingle_pack present too, regardless of db/43's/
+            // db/44's own deletion here from the SCRATCH checkout's db/ directory only — db/44
+            // touches db/01-library.sh's own mirror, not db/06, so this fact's container is
+            // unaffected either way).
             var checkoutRoot = MakeScratchCheckout();
-            DeleteMigrationsAbove(checkoutRoot, keepThroughNumber: 42);
+            DeleteMigrationsAbove(checkoutRoot, keepThroughNumber: 45);
 
             var repoRoot = RepoRoot();
             var projectName = $"genwave-hosttest-story346-{Guid.NewGuid():N}";
@@ -1462,7 +1472,7 @@ public static class FeatureAdoptionVerifyRepair
 
                 Assert.True(
                     stdOut.Contains("Schema migrations", StringComparison.Ordinal) &&
-                    stdOut.Contains("current through db/42", StringComparison.Ordinal) &&
+                    stdOut.Contains("current through db/45", StringComparison.Ordinal) &&
                     !stdOut.Contains("could not determine", StringComparison.Ordinal) &&
                     !stdErr.Contains("role \"root\" does not exist", StringComparison.Ordinal),
                     $"expected the psql probe to succeed as the container's own role, not root; stdout:\n{stdOut}\nstderr:\n{stdErr}");
@@ -1538,7 +1548,7 @@ public static class FeatureAdoptionVerifyRepair
             WriteEnvFile(envFile, HealthyEnvValues(Path.GetTempPath(), "compose.yaml"));
             // Explicit pin (not the default): db/37's own marker table, the one this scratch
             // checkout's own db/38 perturbation deliberately leaves as the highest CREATE TABLE —
-            // WriteDockerStub()'s bare default now tracks the REAL repo's db/42/station.ad_brief
+            // WriteDockerStub()'s bare default now tracks the REAL repo's db/45/station.jingle_pack
             // (see its own doc comment), which is irrelevant here since the gap short-circuits
             // verify_migrations before any psql query is ever issued.
             var docker = WriteDockerStub(migrationMarkerTable: "station.station_image");
