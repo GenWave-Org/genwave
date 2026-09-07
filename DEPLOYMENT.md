@@ -460,6 +460,31 @@ internet, no Caddy), none of this file applies — leave `Admin__Enabled` at its
 `true`, set `Station__SpectatorMode: "true"`, and point a kiosk browser at
 `http://<host>:8081/` (compose.yaml already publishes 8081 for exactly this).
 
+### Shared voice files: the `voices` volume (SPEC F166)
+
+Kokoro's voice files live in a named Docker volume (`voices`), not baked into the
+container image. On the very first `docker compose up`, a one-shot `voice-seed`
+container copies Kokoro's stock voice files into that volume before Kokoro starts
+— a fresh install ends up with Kokoro's full built-in voice set, ready to speak,
+with no extra step. The api does not wait for it: `./launch.sh` starts the core
+with `--no-deps` before the seed runs at all, and a seed that never runs or
+fails can't block or fail api's own startup (`required: false`); it only needs
+the volume when you install a voice pack, which is always after boot.
+A second `up` does nothing further: the seed only ever adds a file it doesn't
+already find in the volume.
+
+That also means a later Kokoro image upgrade does not overwrite or remove anything
+already in the volume. Any voice file a newer image ships that isn't already
+present gets added on the next `up`; nothing already there — including a voice
+pack you've installed — is ever touched or replaced.
+
+The api writes new voice-pack files into this same volume, read-write, at
+`/voices`. Kokoro reads from it read-only and rescans it on every request, so an
+installed voice pack goes live with no restart.
+
+`--piper-only` boxes skip all of this: Kokoro (and therefore `voice-seed`) is
+disabled on that topology, and Piper needs no voice files of its own.
+
 ---
 
 ## 🏠 The House Voice — announcements and the announce token (v5.4.0/v5.4.1, SPEC F143–F147)

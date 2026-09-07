@@ -39,6 +39,10 @@ volumes:
   # Alloy's WAL + Docker-tailing positions file (SPEC F78.1, STORY-202) — persisted so a
   # container restart resumes tailing where it left off instead of re-shipping from scratch.
   alloy_data: {}
+  # Kokoro's stock + voice-pack .pt files (SPEC F166.1). Kokoro-fastapi scans this directory
+  # FLAT and non-recursive (`_scan_directories` in its own paths.py) — every file lives directly
+  # here, never nested by pack slug, or kokoro's scan will never see it (F166.2/F166.3).
+  voices: {}
 
 services:
   db:
@@ -139,6 +143,14 @@ services:
       kokoro:
         condition: service_healthy
         required: false
+      # required: false, same shape as kokoro above: api's own boot never blocks on the seed
+      # container's lifecycle. The fail-loud path for a seed that actually fails runs through
+      # kokoro's own (required) dependency on voice-seed below instead — that failure fails the
+      # whole `up`, which launch.sh's stage-2 already turns into its existing DEGRADED (exit 4)
+      # report (SPEC F166.2).
+      voice-seed:
+        condition: service_completed_successfully
+        required: false
     environment:
       # The library service owns the only DB access; it connects as the dedicated library_svc role
       # with its search_path pinned to the `library` schema.
@@ -202,6 +214,10 @@ services:
       - tts:/tts                                # READ-WRITE: api writes TTS clips here for engine to play
       - dp_keys:/var/lib/genwave/dp-keys        # READ-WRITE: ASP.NET Core Data Protection key ring
       - authored:/authored                      # READ-WRITE: api renders authored safe-loop segments (F27, F11.12)
+      # READ-WRITE: voice-pack install writes .pt files here (F164.5). api has no `USER` (runs
+      # as root, verified: `docker run --entrypoint sh genwave-api id` -> uid=0/gid=0), same as
+      # voice-seed below — a root-owned 755 directory is never a write obstacle for it.
+      - voices:/voices
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health"]
       interval: 10s
@@ -232,6 +248,57 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    depends_on:
+      voice-seed:
+        condition: service_completed_successfully   # required (default) — a seed that fails
+                                                      # fails kokoro's start too, and thus the
+                                                      # whole `up` (fail-loud, SPEC F166.2).
+    volumes:
+      - voices:/app/api/src/voices/v1_0:ro      # READ-ONLY: flat scan dir (F166.1) — kokoro
+                                                 # rescans it on every request (F166.3), so a
+                                                 # voice-pack install is live with no restart.
+
+  # One-shot: seeds the shared `voices` volume with kokoro-fastapi's own stock .pt voice files
+  # on first boot, then exits. Per-file existence check (not a bulk `cp -R` guard) makes it
+  # idempotent forever: a second run, or a later kokoro image bump, only ever ADDS files that
+  # aren't there yet — it never overwrites a voice-pack install's `.pt` (T413) or a file a
+  # previous seed already wrote. Same image pin as `kokoro` (duplicated literal, not a YAML
+  # anchor — matches compose.demo.yaml's ollama/ollama-init pin idiom) so the copied files
+  # always match what that container will actually scan.
+  # NOT redundant with Docker's own empty-volume auto-populate (the local driver copies an
+  # image's mount-target directory into a brand-new volume on first mount, unless `nocopy` is
+  # set): launch.sh's stage 1 brings `api` up before `kokoro`/`voice-seed` even exist, and api's
+  # image has no `/voices` directory to copy from, so on the very first boot the volume would
+  # otherwise sit empty until this container explicitly seeds it. Harmless either way once
+  # kokoro's own (later, read-only) mount also touches the volume — same files, same names.
+  voice-seed:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.6.0   # PIN — same as kokoro, see its own note
+    network_mode: none                          # a local file copy needs no network at all
+    user: "0:0"                                 # kokoro-fastapi's image runs as non-root
+                                                 # `appuser`, which cannot write to a freshly
+                                                 # created (root-owned) empty named volume —
+                                                 # root here is scoped to this one-shot copy.
+    command:
+      # `$$` (not `$`): compose interpolates the raw YAML before the shell ever sees it, so a
+      # bare `$f` here is read as an (unset) compose variable and silently blanks to "" —
+      # `$$` is the escape that survives to the shell as a literal `$`. Verified via
+      # `docker compose config` on this exact file before committing.
+      - sh
+      - -c
+      - |
+        set -e
+        for f in /app/api/src/voices/v1_0/*.pt; do
+          [ -e "/out/$$(basename "$$f")" ] || cp "$$f" /out/
+        done
+    volumes:
+      - voices:/out
+    restart: "no"                               # a one-shot; `unless-stopped` would relaunch
+                                                  # it forever under launch.sh's stage-2 unscoped
+                                                  # `up` (SPEC F136)
+    labels:
+      # gh-#283: utility container — excluded from the Health page's dockerproxy stats, same
+      # as compose.demo.yaml's ollama-init.
+      genwave.role: utility
 
   piper:
     # Repo-built (gh-#241): the artibex/piper-http digest this service used to pin is amd64-only

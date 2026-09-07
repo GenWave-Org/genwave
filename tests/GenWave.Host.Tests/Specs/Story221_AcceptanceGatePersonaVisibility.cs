@@ -142,7 +142,17 @@ public static class FeatureAcceptanceGatePersonaVisibility
         // --remove-orphans` (no --no-recreate) then converges kokoro/ollama/ollama-init plus
         // every other profile-gated service). Same T85/T93 epoch-break-and-re-pin ritual; a
         // `depends_on`-only edit — no service, wire, volume or healthcheck change.
-        const string ComposeYamlSha256  = "bd61cd11a3c2a8079db63cf1f43618bf7d149d03bee020fc07d2585b04fe6fc7";
+        // ComposeYamlSha256 re-pinned 2026-09-06 (PLAN T412, SPEC F166.1/F166.2, STORY-395): a
+        // new `voices` named volume plus the `voice-seed` one-shot init service — api gains a
+        // read-write mount at `/voices` (F164.5) and a `required: false` depends_on on
+        // voice-seed; kokoro gains a read-only mount at its own flat scan dir plus a `required`
+        // (default) depends_on on voice-seed, so a failing seed fails the whole `up` (fail-loud,
+        // same T85/T93 ritual). Comment-only follow-up same task: api's mount notes it writes as
+        // root (no `USER` in its Dockerfile) into the volume's root-owned directory, and
+        // voice-seed's own comment notes it is not redundant with Docker's empty-volume
+        // auto-populate (api mounts the volume first under launch.sh's staged startup, and
+        // api's image has no `/voices` path to auto-populate from).
+        const string ComposeYamlSha256  = "f2a84f5f201a516f55a0ee640bbba0122778953dbc0fd8771121ed6edd355f89";
 
         [Fact]
         public static void EngineScriptByteMatchesMain()

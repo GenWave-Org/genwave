@@ -114,17 +114,22 @@ public static class FeatureComposePiperOnlyOverride
             // roster unnoticed.
             var services = Base.Value.RootElement.GetProperty("services")
                 .EnumerateObject().Select(p => p.Name).Order().ToArray();
-            Assert.Equal(new[] { "api", "db", "dockerproxy", "engine", "icecast", "kokoro" }, services);
+            Assert.Equal(new[] { "api", "db", "dockerproxy", "engine", "icecast", "kokoro", "voice-seed" }, services);
         }
 
         [Fact]
         [Trait("Category", "Integration")]
         public static void Api_still_hard_depends_on_kokoro_by_default()
         {
-            Assert.Equal(new[] { "db", "engine", "kokoro" }, DependsOnNames(Base.Value, "api"));
-            Assert.Equal("service_healthy",
-                Base.Value.RootElement.GetProperty("services").GetProperty("api")
-                    .GetProperty("depends_on").GetProperty("kokoro").GetProperty("condition").GetString());
+            Assert.Equal(new[] { "db", "engine", "kokoro", "voice-seed" }, DependsOnNames(Base.Value, "api"));
+            var dependsOn = Base.Value.RootElement.GetProperty("services").GetProperty("api").GetProperty("depends_on");
+            Assert.Equal("service_healthy", dependsOn.GetProperty("kokoro").GetProperty("condition").GetString());
+            // SPEC F166.2 — the voices volume's seed container; api's own boot tolerates it
+            // finishing late/failing (required: false, same posture as kokoro above), but
+            // kokoro's own (required) depends_on on it below is what makes a real seed failure
+            // fail the whole `up`.
+            Assert.Equal("service_completed_successfully",
+                dependsOn.GetProperty("voice-seed").GetProperty("condition").GetString());
         }
 
         [Fact]
@@ -145,11 +150,18 @@ public static class FeatureComposePiperOnlyOverride
 
         [Fact]
         [Trait("Category", "Integration")]
-        public static void Kokoro_is_absent_from_the_render()
+        public static void Kokoro_and_its_voice_seed_are_absent_from_the_render()
         {
             // The overlay's profile assignment ("disabled-by-piper-only", activated by nothing)
-            // removes the service from config/up/pull on the default profile set.
-            Assert.False(BasePiperOnly.Value.RootElement.GetProperty("services").TryGetProperty("kokoro", out _));
+            // removes the service from config/up/pull on the default profile set. voice-seed
+            // travels with kokoro (same rule as the ollama/ollama-init pair in Gh310): nothing on
+            // this topology ever reads the `voices` volume, so a Pi-class box has no reason to
+            // pull kokoro-fastapi's ~3.6GiB image just to seed it. api's own depends_on reset
+            // above already drops the (required: false) reference, so the merged render stays
+            // valid with voice-seed profiled off too.
+            var services = BasePiperOnly.Value.RootElement.GetProperty("services");
+            Assert.False(services.TryGetProperty("kokoro", out _));
+            Assert.False(services.TryGetProperty("voice-seed", out _));
         }
 
         [Fact]
