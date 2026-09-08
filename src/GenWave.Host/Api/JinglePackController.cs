@@ -209,8 +209,16 @@ public sealed class JinglePackController(
         }
 
         var canonicalRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(packsOptions.Value.JingleRoot));
-        var packDir = Path.Combine(canonicalRoot, slug);
-        var stagingDir = Path.Combine(canonicalRoot, $"{slug}.staging-{Guid.NewGuid():N}");
+        var packDir = Path.GetFullPath(Path.Combine(canonicalRoot, slug));
+        var stagingDir = Path.GetFullPath(Path.Combine(canonicalRoot, $"{slug}.staging-{Guid.NewGuid():N}"));
+        // The route slug is the ONLY request value that ever becomes part of a directory name here.
+        // ResolveGatedManifestAsync's own shape gate (CatalogInstallShell.SlugFormat, 400) already
+        // rules out every separator and dot, so this re-assertion is unreachable by construction —
+        // it is the same separator-aware canonical-root check MoveStagedFilesIntoPlaceAsync applies
+        // to every composed asset target, applied one level up to the two directories themselves
+        // (CodeQL cs/path-injection: the gate lives in a callee, the composition in this method).
+        if (!IsUnderCanonicalRoot(packDir, canonicalRoot) || !IsUnderCanonicalRoot(stagingDir, canonicalRoot))
+            throw new UnreachableException($"Jingle pack directories escaped the jingle root for slug \"{slug}\".");
 
         try
         {
