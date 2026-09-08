@@ -124,7 +124,7 @@ public static class FeatureAdBedPickerStampsABedPerSpot
     }
 
     /// <summary>
-    /// SPEC F168.3; STORY-403; PLAN T416 review R6(a) — proves <c>Station:Ads:BedFadeMs</c>'s own
+    /// SPEC F168.4; STORY-403; PLAN T416 review R6(a) — proves <c>Station:Ads:BedFadeMs</c>'s own
     /// ms→sec conversion actually reaches the request Kokoro/the mixer receive, through a REAL worker
     /// tick against the SAME live <see cref="Microsoft.Extensions.Configuration.IConfiguration"/>
     /// <see cref="AdRenderService"/>'s own per-render read goes through — never a hand-built
@@ -161,7 +161,7 @@ public static class FeatureAdBedPickerStampsABedPerSpot
         public void ARetryReproducesTheByteIdenticalBedMediaId()
         {
             // Given the SAME spot id and the SAME installed pool, picked twice (the "regeneration" a
-            // retry means — SPEC F168.4, distinct from AC1's own determinism fact: this one proves
+            // retry means — SPEC F168.3, distinct from AC1's own determinism fact: this one proves
             // the SAME guarantee survives a retry specifically, not just two calls in a row)...
             var pool = new long[] { 501, 777, 999 };
             const long spotId = 7;

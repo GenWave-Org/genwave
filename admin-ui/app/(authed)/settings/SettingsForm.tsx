@@ -460,8 +460,8 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "The pool of Kokoro voices an ad may cast for its other speaking roles, as a comma-separated " +
     "list of voice ids with no spaces, up to 16 ids. Defaults to af_nova,am_michael,bf_alice,am_onyx.",
   "Station:Ads:BedFadeMs":
-    "How long the background music fades in and out around the voice in a generated ad, in " +
-    "milliseconds. Defaults to 300. Accepted range: 100–1000.",
+    "How long the background music takes to fade out at the end of a generated ad, as the voice " +
+    "ends, in milliseconds. Defaults to 300. Accepted range: 100–1000.",
 };
 
 /**

@@ -16,7 +16,7 @@ namespace GenWave.Core.Domain;
 /// </param>
 /// <param name="OutputPath">Absolute path the rendered wav artifact is written to.</param>
 /// <param name="BedFadeSeconds">
-/// SPEC F168.3; STORY-403; PLAN T416 — how long, in seconds, the bed fades to silence across the
+/// SPEC F168.4; STORY-403; PLAN T416 — how long, in seconds, the bed fades to silence across the
 /// mix's trailing tail. Ignored when <see cref="Bed"/> is null. Defaulted to 0.0 (no fade) so every
 /// existing caller of this record keeps compiling and behaving unchanged — <c>GenWave.Ads</c>'s own
 /// ad render path is the one caller that varies it (plain text, not a <c>cref</c>: this project is

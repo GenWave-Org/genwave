@@ -557,9 +557,9 @@ public static class StationSettingsAllowlist
         // comma-separated pool of Kokoro voice ids the ad writer may cast OTHER speaking roles from
         // (T415); the seeded four (af_nova, am_michael, bf_alice, am_onyx) are deliberately distinct
         // from every persona catalog default and from the station voice itself, so a fresh deploy's
-        // ad cast never sounds like an existing DJ. BedFadeMs is the background-music fade-in/out
-        // duration the offline ad mixer (T416's AdRenderService, F168) applies around the voice
-        // track, in milliseconds — 300 (the default) mirrors a typical radio ad's bed fade, 100-1000
+        // ad cast never sounds like an existing DJ. BedFadeMs is the background-music tail-fade
+        // duration the offline ad mixer (T416's AdRenderService, F168.4) applies as the voice
+        // ends, in milliseconds — 300 (the default) mirrors a typical radio ad's bed fade, 100-1000
         // keeps an operator from setting a fade so short it clicks or so long it swallows the whole
         // spot.
         new("Station:Ads:AnnouncerVoice",                     SettingApplyMode.Live,          SettingKind.String,     ""),

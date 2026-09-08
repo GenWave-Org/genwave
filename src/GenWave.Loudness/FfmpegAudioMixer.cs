@@ -107,7 +107,7 @@ public sealed class FfmpegAudioMixer : IAudioMixer
     }
 
     /// <summary>
-    /// SPEC F168.1-F168.3; STORY-403; PLAN T416 review F1(b) — the bed's own filter_complex graph
+    /// SPEC F168.3 (cue-trim), F168.4 (fade); STORY-403; PLAN T416 review F1(b) — the bed's own filter_complex graph
     /// (cue-trim, loop-to-cover, duck, fade, delay-and-mix), extracted out of <see cref="RunWithBedAsync"/>
     /// as a pure, internal, static function for the SAME reason <see cref="BuildFadeSuffix"/> already is
     /// (this method's own remarks): unit-testable without a real ffmpeg binary via this project's
@@ -129,7 +129,7 @@ public sealed class FfmpegAudioMixer : IAudioMixer
         "[bed][voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[out]";
 
     /// <summary>
-    /// SPEC F168.3; STORY-403; PLAN T416 — the bed's own trailing <c>afade=t=out</c> filter suffix,
+    /// SPEC F168.4; STORY-403; PLAN T416 — the bed's own trailing <c>afade=t=out</c> filter suffix,
     /// appended to the bed chain right after its duck <c>volume</c> stage (so the fade rides on top of
     /// the already-ducked level, never fights it). Empty when <paramref name="bedFadeSeconds"/> is
     /// zero or negative (the "no fade" default — <see cref="AudioMixRequest.BedFadeSeconds"/>'s own

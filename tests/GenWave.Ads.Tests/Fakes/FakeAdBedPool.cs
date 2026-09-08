@@ -6,7 +6,7 @@ namespace GenWave.Ads.Tests.Fakes;
 /// <see cref="IAdBedPool"/> double (SPEC F168.1; STORY-403; PLAN T416) — an in-memory pool keyed by
 /// library id, the SAME "seed only what a scenario needs, count every call" shape
 /// <see cref="FakeAdsLibraryStore"/> already keeps one file over. A library id nothing ever seeded
-/// returns an empty pool — SPEC F168.5's own honest "no pack installed yet" answer is the default,
+/// returns an empty pool — SPEC F168.2's own honest "no pack installed yet" answer is the default,
 /// not an exceptional case a scenario must opt into.
 /// </summary>
 public sealed class FakeAdBedPool : IAdBedPool

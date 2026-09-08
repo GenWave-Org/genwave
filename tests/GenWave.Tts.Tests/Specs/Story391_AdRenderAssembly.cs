@@ -286,7 +286,7 @@ public static class FeatureAdRenderAssembly
     }
 
     /// <summary>
-    /// SPEC F168.3/F168.4; STORY-403; PLAN T416 review R6(b) — <see cref="FfmpegAudioMixer.BuildFadeSuffix"/>
+    /// SPEC F168.4; STORY-403; PLAN T416 review R6(b) — <see cref="FfmpegAudioMixer.BuildFadeSuffix"/>
     /// pinned directly, as the pure string-returning function it was extracted to be (that method's
     /// own remarks) — no ffmpeg process, no real audio, no <see cref="AudioMixRequest"/> plumbing:
     /// this class proves the FILTER STRING the mixer's bed chain emits, the "graph builder is a pure

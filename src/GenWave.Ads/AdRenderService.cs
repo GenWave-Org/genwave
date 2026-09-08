@@ -102,7 +102,7 @@ public sealed class AdRenderService(
         var ceilingSeconds = spot.SpotSeconds * (1 + adsOptions.CurrentValue.DurationToleranceRatio);
         var outputDirectory = Path.Combine(locatorRoots.AuthoredRoot, "ads");
 
-        // SPEC F168.3; STORY-403; PLAN T416 review F3+O3 — Station:Ads:BedFadeMs is a Live setting,
+        // SPEC F168.4; STORY-403; PLAN T416 review F3+O3 — Station:Ads:BedFadeMs is a Live setting,
         // handed in as liveSettings.BedFadeMs (the SAME AdLiveSettingsReader.Read result
         // AdSpotWorker's own cast-pick call already read once, earlier in the SAME tick — this class
         // no longer carries its own IConfiguration to re-read it a second time), stored in

@@ -25,7 +25,7 @@ internal static class AdLiveSettingsReader
 {
     internal const string DefaultAnnouncerVoice = "";
 
-    /// <summary>SPEC F168.3's own default — matches <c>appsettings.json</c>'s <c>Station:Ads:BedFadeMs</c>
+    /// <summary>SPEC F168.4's own default — matches <c>appsettings.json</c>'s <c>Station:Ads:BedFadeMs</c>
     /// seed and <c>GenWave.Host.Configuration.SettingValidator</c>'s own range (T417) exactly (plain
     /// text, not a <c>cref</c> — GenWave.Ads never references GenWave.Host, L10).</summary>
     internal const int DefaultBedFadeMs = 300;

@@ -382,7 +382,7 @@ public sealed class AdSpotWorker(
     /// via <see cref="StampBedIfNeededAsync"/>, the SAME "stamp the just-claimed row, once, before the
     /// render call" shape as the cast pick immediately above: no separate branch for "who wrote this
     /// spot", and an owner's own explicit <see cref="AdSpot.BedMediaId"/> is never second-guessed
-    /// (SPEC F168.2).
+    /// (SPEC F168.5).
     /// </para>
     /// </summary>
     async Task RenderOneIfDueAsync(AdLiveSettings liveSettings, CancellationToken stoppingToken)
@@ -496,7 +496,7 @@ public sealed class AdSpotWorker(
     /// pick against and returns <paramref name="spot"/> unchanged — <see cref="AdRenderService"/>'s own
     /// <c>ResolveLibraryIdAsync</c> reaches the SAME "the ads library does not exist yet" failure a
     /// moment later and fails the render with the honest reason, so nothing is lost by staying silent
-    /// here. An empty pool degrades to an unbedded render with one INFO line (SPEC F168.5's own honest
+    /// here. An empty pool degrades to an unbedded render with one INFO line (SPEC F168.2's own honest
     /// fallback) rather than a failure — the SAME "render dry, don't refuse" posture an empty cast pool
     /// already gets.
     /// </summary>

@@ -174,6 +174,14 @@ describe("Feature: Every settings field explains itself", () => {
         /-180.*180/
       );
     });
+
+    it("Station:Ads:BedFadeMs states the tail-only fade, never a fade-in (SPEC F168.4)", () => {
+      renderWithProviders(<SettingsForm settings={makeFullAllowlistSettings()} />);
+
+      const help = screen.getByTestId("setting-help-Station:Ads:BedFadeMs");
+      expect(help).toHaveTextContent(/fade out at the end of a generated ad, as the voice ends/);
+      expect(help).not.toHaveTextContent("fades in");
+    });
   });
 
   describe("Scenario: the YearLookup copy reads like English", () => {

@@ -139,8 +139,8 @@ public interface IAdSpotStore
     /// Stamps <paramref name="bedMediaId"/> onto a currently <see cref="AdState.Rendering"/> row —
     /// PLAN T416's own bed-pick seam, run once between <see cref="ClaimNextApprovedAsync"/> and the
     /// render itself (the SAME seam <see cref="StampVoicePlanIfNullAsync"/> already occupies, SPEC
-    /// F168.1). Never-overwrite is enforced HERE, in SQL, not merely by the caller checking
-    /// <see cref="AdSpot.BedMediaId"/> first (SPEC F168.6's own guarantee that an owner's explicit bed
+    /// F168.2). Never-overwrite is enforced HERE, in SQL, not merely by the caller checking
+    /// <see cref="AdSpot.BedMediaId"/> first (SPEC F168.5's own guarantee that an owner's explicit bed
     /// — set at approval time, or stamped by a previous pick — survives untouched): the
     /// implementation's own <c>coalesce(bed_media_id, ...)</c> means a row that already carries a bed
     /// is returned unchanged, at the SQL layer, even under a race the C#-side null check alone
