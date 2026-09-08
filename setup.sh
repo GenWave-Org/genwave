@@ -59,6 +59,12 @@
 #                       adoption mode runs under SKIP_PREFLIGHT=1 in Story346's specs precisely so
 #                       preflight's own (already-tested-elsewhere) checks stay out of this file's
 #                       own facts.
+#   GW_API_URL        — the local api's base URL install_first_beds's login + pack-install calls
+#                       target (default http://127.0.0.1:GW_API_PORT_DEFAULT — SPEC F165.7, PLAN
+#                       T428). Same idiom as GW_STREAM_URL just above: curl itself stays the real
+#                       binary everywhere in this file, never stubbed — a test points this one URL
+#                       at a scratch loopback server instead (Story345's own MountStub shape) so
+#                       Story405's specs never touch a real api.
 #   stdin             — the interview's answer channel: a caller pipes newline-terminated
 #                       answers in, one per prompt. Doubles as adoption-mode repair's per-item
 #                       confirm channel (T319) when --repair runs without --yes.
@@ -150,6 +156,9 @@
 #                               without prompting under --yes (F137.2). A finding with no safe,
 #                               scriptable fix (env completeness, stale-image ages) stays
 #                               report-only in both modes; the operator edits/rebuilds by hand.
+#   ./setup.sh --offline         first-run only — skip the background-music pack install
+#                               (F5, round-2 review: this line is what makes -h/--help actually
+#                               name the flag, matching the unknown-argument arm further down).
 #
 # Exit codes (adoption mode only — the interview path's own vocabulary, above, is unaffected):
 #   0   verify: no drift found (deliberate divergences, if any, are INFO-only — F137.4's
@@ -186,12 +195,24 @@ SECRET_LENGTH=40   # comfortably over F132.3's >=32-char floor
 # fallback guess for the runs this script can actually produce — it's the fact.
 GW_STREAM_PORT_DEFAULT=8000
 
+# GW_API_PORT_DEFAULT — install_first_beds's own fallback for GW_API_URL (SPEC F165.7, PLAN
+# T428), same reasoning as GW_STREAM_PORT_DEFAULT just above: compose.yaml's own "8080:8080"
+# mapping is a fixed literal no .env key configures, and launch.sh's own access-points printout
+# already names 8080 for the same api.
+GW_API_PORT_DEFAULT=8080
+
 # Adoption mode's own CLI surface (T319, STORY-346) — parsed in main(), before the virgin-vs-
 # existing routing decision. Meaningless on the virgin (interview) path; a first-run box simply
 # ignores them (no --repair-only validation gate here — the least surprising behaviour for an
 # operator who passes them out of habit before ever installing).
 SETUP_REPAIR=0
 SETUP_YES=0
+
+# First-run's own CLI surface (SPEC F165.7, PLAN T428) — parsed in main() alongside adoption
+# mode's own flags, above. Meaningless in adoption mode (an existing box never re-runs
+# install_first_beds at all — see that function's own header): --offline only ever changes
+# install_first_beds's own first branch on the virgin/interview path.
+SETUP_OFFLINE=0
 
 # usage — dumps this file's own header comment (the launch.sh idiom), for -h/--help.
 usage() {
@@ -241,6 +262,12 @@ SETUP_TMP_ENV_FILE=""
 SETUP_POLLER_PID=""
 SETUP_ONAIR_STAMP_FILE=""
 
+# install_first_beds's own cookie jar (SPEC F165.7, PLAN T428) — same tracker-variable idiom as
+# SETUP_TMP_ENV_FILE above: set only for the window a jar file actually exists, so the shared
+# EXIT trap can rm it unconditionally on every exit path (a Ctrl-C mid-curl-call must never leave
+# a session cookie sitting on disk).
+SETUP_PACK_INSTALL_COOKIE_JAR=""
+
 # discard_poller — N2 (round-3 review): the kill/reap/rm-stamp/clear-PID sequence every path
 # that stops trusting the background poller needs (a genuine launch failure, an operator
 # Ctrl-C, a poll timeout, a clean join, and the shared EXIT trap below) — extracted once so the
@@ -263,6 +290,7 @@ discard_poller() {
 setup_exit_trap() {
   discard_poller
   [ -n "$SETUP_TMP_ENV_FILE" ] && rm -f "$SETUP_TMP_ENV_FILE"
+  [ -n "$SETUP_PACK_INSTALL_COOKIE_JAR" ] && rm -f "$SETUP_PACK_INSTALL_COOKIE_JAR"
   # Adoption mode's own verify_print_report (T319) is called explicitly from
   # setup_adoption_mode, not chained here — its own report has to print BEFORE that function's
   # green/drift-found verdict line, and this trap only ever fires AFTER a function's own exit
@@ -1998,12 +2026,138 @@ print_handoff() {
   echo "                     drift it finds (SPEC F137, STORY-346)"
 }
 
+# install_first_beds — SPEC F165.7, STORY-405 AC2, PLAN T428: the wizard's very last step of
+# all, called AFTER print_handoff (round-2 review R6, below), never in adoption mode (an existing
+# box never re-runs the interview at all, so this call site is unreachable there). Installs the
+# first-party CC0 seed jingle pack (catalog slug gw-first-beds) so a fresh box's background-music
+# pool is never empty on day one.
+#
+# Runs after the handoff, not before it (round-2 review R6): the real install downloads the
+# pack's assets from the catalog and runs three ffmpeg analyzers per asset inline
+# (JinglePackController.StageAndEnrichAllAsync) — on a Pi that can run well past 30s — and this
+# step's two curl calls (--max-time 15 / --max-time 180, below) could together park the operator
+# for minutes between "On air" and the once-only ADMIN_PASSWORD line if this ran first instead.
+# Printing the handoff first means a slow or failed pack install can never delay or endanger the
+# password screen.
+#
+# Every branch below returns 0 — this step is entirely NON-FATAL by design (STORY-405 AC2's own
+# wording): a pack-install hiccup must never turn an otherwise successful launch into a failed
+# wizard run, and the operator can always install a pack later from the catalog page. main()'s
+# own exit code is therefore untouched by anything that happens in here. Two belts hold that
+# contract even if some future branch forgets to `return 0` on its own (round-2 review F3 — the
+# same unguarded-`$(...)`-under-`set -e` defect class T318's own round-2 review already caught
+# once, docs/PLAN.md:1068): belt #1 is the guarded `mktemp` assignment below (an unguarded
+# `$(...)` would otherwise kill the whole script on a full/unwritable temp dir); belt #2 is the
+# call site's own `|| true` (main(), below, after print_handoff).
+#
+# ADMIN_PASSWORD is read straight from ${ENV_FILE} via verify_env_file_value (already defined
+# below for adoption mode's own drift probes, reused as-is here) — NEVER from the process
+# environment. An ambient ADMIN_PASSWORD in the caller's own shell must never be the value this
+# step logs in with; only the value THIS run just generated and wrote is ever tried (the same
+# T318 F2 rule print_handoff's own header already documents for the handoff screen). The
+# password itself never touches curl's own argv either (round-2 review F1 — /proc/<pid>/cmdline
+# is world-readable for the life of any call): the login body travels on stdin, formatted by
+# bash's own `printf` BUILTIN (no forked process ever holds the secret in its own argv) and read
+# back on the curl side with `--data @-`.
+#
+# Both calls also carry --noproxy '*' (round-2 review F2 — the same T318 review LOW finding F9
+# mount_serves_audio already cites, above: a stray HTTP_PROXY/http_proxy must never make a
+# loopback call silently leave the machine — with F1's fix in place that would mean the plaintext
+# password itself reaching a third party). Login gets --max-time 15 (a fast local check); install
+# gets --max-time 180 (round-2 review R6 — a real catalog+ffmpeg install can run well past the
+# old 30s budget on a small box) — a progress line prints first so the wait is explained.
+#
+# curl itself stays the real binary (GW_API_URL is the only seam — see this file's own Seams
+# doc, near the top) — a scratch loopback server (Story345's own MountStub shape) is what
+# Story405's specs point it at, never a stubbed curl.
+install_first_beds() {
+  if [ "$SETUP_OFFLINE" = "1" ]; then
+    echo "Background music pack: skipped (offline)."
+    return 0
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "Background music pack: can't install automatically (curl not found on this machine) — install it later from the catalog page."
+    return 0
+  fi
+
+  local password api_base
+  password="$(verify_env_file_value ADMIN_PASSWORD)"
+  api_base="${GW_API_URL:-http://127.0.0.1:${GW_API_PORT_DEFAULT}}"
+
+  # Belt #1 (round-2 review F3): guard the assignment itself, not just the call site — under
+  # `set -e` an unguarded `$(...)` here would otherwise kill the whole script on a full or
+  # unwritable temp dir, even though print_handoff (and the once-only password) has already run.
+  SETUP_PACK_INSTALL_COOKIE_JAR="$(mktemp)" || {
+    echo "Background music pack not installed (no writable temp dir). Install it later from the catalog page."
+    return 0
+  }
+
+  echo "Installing the background music pack (this can take a few minutes on a small box)..."
+
+  # Login sets the session cookie in the jar; its own status is never inspected — a stale/failed
+  # login just means the install call below has no valid cookie, which the admin plane already
+  # turns into its own honest status code (401/404), handled by the case below either way. The
+  # body travels on stdin (`--data @-`), never on argv (round-2 review F1) — see this function's
+  # own header for why.
+  printf '{"password":"%s"}' "$password" | curl -sS --max-time 15 --noproxy '*' -o /dev/null \
+    --cookie-jar "$SETUP_PACK_INSTALL_COOKIE_JAR" \
+    -H 'Content-Type: application/json' \
+    --data @- \
+    "${api_base}/api/auth/login" >/dev/null 2>&1 || true
+
+  # `-w $'\n%{http_code}'` appends the status on its own trailing line so one curl call yields
+  # both the body (for the file count below) and the status (for the case below) with no second
+  # temp file — the `|| response=$'\n000'` fallback covers a curl that never reached the api at
+  # all (connection refused, DNS failure, the --max-time budget) the same honest way a real HTTP
+  # error status would be handled: "000" matches none of the named cases and falls to the
+  # generic not-installed line.
+  local response install_status install_body
+  response="$(curl -sS --max-time 180 --noproxy '*' \
+    --cookie "$SETUP_PACK_INSTALL_COOKIE_JAR" \
+    -X POST "${api_base}/api/jingle-packs/gw-first-beds/install" \
+    -w $'\n%{http_code}' 2>/dev/null)" || response=$'\n000'
+  install_status="${response##*$'\n'}"
+  install_body="${response%$'\n'*}"
+
+  rm -f "$SETUP_PACK_INSTALL_COOKIE_JAR"
+  SETUP_PACK_INSTALL_COOKIE_JAR=""
+
+  case "$install_status" in
+    200)
+      # No `jq` dependency anywhere in this file (the same call already made for compose config
+      # parsing, further up) — the response body is small and well-known (JinglePackInstallResponse,
+      # camelCase "file" per asset), so a plain grep count is the honest, dependency-free way to
+      # read it back.
+      local file_count
+      # `|| true`: under `set -o pipefail`, a body with zero "file" matches would otherwise make
+      # this whole pipeline (and, via `set -e`, the whole script) exit nonzero on grep's own
+      # empty-match status — `wc -l` still correctly reports "0" from grep's empty output either
+      # way, so nothing here needs grep's own exit code to succeed.
+      file_count="$(grep -o '"file"' <<<"$install_body" | wc -l | tr -d ' ')" || true
+      echo "Background music installed (${file_count} files)."
+      ;;
+    404)
+      # round-2 review R7: the install route also 404s for the catalog kill-switch and a slug
+      # not yet on the catalog (JinglePackController.cs:82-84,179), not only AdminSurfaceAttribute's
+      # own bare-404 kill switch (SPEC F61/F62.2) — name all three rather than guess one.
+      echo "Background music pack not installed (404: the pack is not in the catalog yet, or the admin surface is off). Install it later from the catalog page."
+      ;;
+    *)
+      echo "Background music pack not installed (${install_status}). Install it later from the catalog page."
+      ;;
+  esac
+
+  return 0
+}
+
 main() {
   local arg
   for arg in "$@"; do
     case "$arg" in
-      --repair) SETUP_REPAIR=1 ;;
-      --yes)    SETUP_YES=1 ;;
+      --repair)  SETUP_REPAIR=1 ;;
+      --yes)     SETUP_YES=1 ;;
+      --offline) SETUP_OFFLINE=1 ;;
       -h|--help)
         usage
         exit 0
@@ -2012,6 +2166,7 @@ main() {
         echo "setup.sh: unknown argument: $arg" >&2
         echo "  ./setup.sh                 first-run interview, or verify an existing install (read-only)" >&2
         echo "  ./setup.sh --repair [--yes] fix drift verify finds — per-item confirm, or --yes for all" >&2
+        echo "  ./setup.sh --offline       first-run only — skip the background-music pack install" >&2
         exit 2
         ;;
     esac
@@ -2204,6 +2359,15 @@ main() {
   esac
 
   print_handoff "$launch_exit"
+
+  # STORY-405 AC2 (PLAN T428) / round-2 review R6: the wizard's very last step of all, run AFTER
+  # the handoff (not before it — see install_first_beds's own header for why) once on-air is
+  # confirmed (or honestly could not be — poller_exit 2, above) and never reached on a launch
+  # failure or a poll timeout (both `exit` before print_handoff is ever called, above). The
+  # trailing `|| true` is belt #2 of install_first_beds's own two-belt non-fatal contract (its
+  # own header has belt #1) — nothing here can change launch_exit either way.
+  echo
+  install_first_beds || true
 
   # F4: propagate launch.sh's own exit code (0 clean, 4 degraded-but-airing) — the handoff
   # screen is shown either way, but a degraded install must never report a clean 0 to a

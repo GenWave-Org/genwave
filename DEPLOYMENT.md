@@ -233,7 +233,9 @@ header-identical to an unmapped route.
 build from source, where the music lives, which topology, admin on or off — then it generates
 every secret, writes `.env` in one atomic step, and hands off to `launch.sh`. On a box that
 already has a `.env` it never writes: it verifies the install against the machine (a drift
-report) and `--repair` fixes what it can. The one topology fact it persists is
+report) and `--repair` fixes what it can. A successful first run also installs a starter
+background-music pack once the station confirms on air; `--offline` skips that one step for
+offline builds and tests. The one topology fact it persists is
 **`GW_PRESET`** in `.env`, a closed set:
 
 | `GW_PRESET` | Files | Shape |
@@ -740,7 +742,7 @@ Live settings (allowlisted, PUT-able through the settings API/UI, no `api` resta
 | `Station:Ads:AntiRepeatWindow` | 5 | 0–50 | How many recently aired spots `LibraryAdSpotSource` excludes from its next pick |
 | `Station:Ads:AnnouncerVoice` | `` (empty) | — | Kokoro voice id cast as an ad's announcer; empty uses the station's own voice (`Station:Voice`) |
 | `Station:Ads:CastVoices` | `af_nova,am_michael,bf_alice,am_onyx` | 1–16 ids | Comma-separated pool of Kokoro voice ids an ad may cast for its other speaking roles |
-| `Station:Ads:BedFadeMs` | 300 | 100–1000 | Background-music fade-in/out duration around the voice in a generated ad, in milliseconds |
+| `Station:Ads:BedFadeMs` | 300 | 100–1000 | How long the background music takes to fade out at the end of a generated ad, as the voice ends, in milliseconds |
 
 No compose overlay is needed to turn ads on — the seam is always registered; `Station:Ads:EveryNUnits=0`
 is what keeps it silent on every existing station until an operator opts in. The Admin UI's
