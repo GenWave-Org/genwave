@@ -61,6 +61,8 @@ const STRING_KEYS = new Set<SettingsHelpKey>([
   "Station:Location:Latitude",
   "Station:Location:Longitude",
   "Station:Location:SpokenName",
+  "Station:Ads:AnnouncerVoice",
+  "Station:Ads:CastVoices",
 ]);
 
 function kindAndUnitFor(key: SettingsHelpKey): Pick<SettingDto, "kind" | "unit"> {
@@ -171,6 +173,14 @@ describe("Feature: Every settings field explains itself", () => {
       expect(screen.getByTestId("setting-help-Station:Location:Longitude")).toHaveTextContent(
         /-180.*180/
       );
+    });
+
+    it("Station:Ads:BedFadeMs states the tail-only fade, never a fade-in (SPEC F168.4)", () => {
+      renderWithProviders(<SettingsForm settings={makeFullAllowlistSettings()} />);
+
+      const help = screen.getByTestId("setting-help-Station:Ads:BedFadeMs");
+      expect(help).toHaveTextContent(/fade out at the end of a generated ad, as the voice ends/);
+      expect(help).not.toHaveTextContent("fades in");
     });
   });
 

@@ -94,6 +94,9 @@ export const SETTINGS_HELP_KEYS = [
   "Station:Ads:RefreshDays",
   "Station:Ads:AutoApprove",
   "Station:Ads:AntiRepeatWindow",
+  "Station:Ads:AnnouncerVoice",
+  "Station:Ads:CastVoices",
+  "Station:Ads:BedFadeMs",
 ] as const;
 
 export type SettingsHelpKey = (typeof SETTINGS_HELP_KEYS)[number];

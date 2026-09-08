@@ -241,6 +241,10 @@ public static class MediaLibraryServiceCollectionExtensions
         // Library admin write: create/rename/delete (Epic J, STORY-047).
         services.AddSingleton<IAdminLibraryWrite, AdminLibraryRepository>();
 
+        // Ad-spot background-music pool read (SPEC F168.1; STORY-403; PLAN T416) — the installed
+        // bed-role jingle rows AdSpotWorker's own bed pick reads from.
+        services.AddSingleton<IAdBedPool, AdBedPoolRepository>();
+
         services.Configure<CueDetectionOptions>(configuration.GetSection(CueDetectionOptions.Section));
         services.Configure<EnergyOptions>(configuration.GetSection(EnergyOptions.Section));
 

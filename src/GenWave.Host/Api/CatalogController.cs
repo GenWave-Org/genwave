@@ -219,11 +219,12 @@ public sealed partial class CatalogController(
         return File(bytes, AssetContentType(file));
     }
 
-    /// <summary><c>font/woff2</c> matches <c>FontEndpoints</c>' own vendored-face content type; <c>image/png</c> (SPEC F128.1, review finding — an avatar pack item/persona sidecar face is a real PNG, not opaque bytes) matches the .woff2 arm's own precedent rather than falling back to the generic binary type; the pack's OFL.txt (never a specimen itself, but served by the SAME asset-generic route) gets a plain-text type; anything else this pattern doesn't recognise falls back to a generic binary type rather than guessing.</summary>
+    /// <summary><c>font/woff2</c> matches <c>FontEndpoints</c>' own vendored-face content type; <c>image/png</c> (SPEC F128.1, review finding — an avatar pack item/persona sidecar face is a real PNG, not opaque bytes) matches the .woff2 arm's own precedent rather than falling back to the generic binary type; <c>audio/mpeg</c> (SPEC F164.4 — a voice pack's honest-preview clip, <c>VoicePackDetailPanel</c>'s own <c>&lt;audio&gt;</c> element) is the first audio ever routed through this switch, so it can no longer rely on a browser's own content sniffing to play correctly; the pack's OFL.txt (never a specimen itself, but served by the SAME asset-generic route) gets a plain-text type; anything else this pattern doesn't recognise falls back to a generic binary type rather than guessing.</summary>
     static string AssetContentType(string file) => Path.GetExtension(file).ToLowerInvariant() switch
     {
         ".woff2" => "font/woff2",
         ".png" => "image/png",
+        ".mp3" => "audio/mpeg",
         ".txt" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     };
@@ -268,6 +269,8 @@ public sealed partial class CatalogController(
         CatalogEntryKind.Avatar => "avatar",
         CatalogEntryKind.Icon => "icon",
         CatalogEntryKind.AdPack => "ad-pack",
+        CatalogEntryKind.VoicePack => "voice-pack",
+        CatalogEntryKind.JinglePack => "jingle-pack",
         _ => throw new UnreachableException($"Unhandled {nameof(CatalogEntryKind)} value: {kind}."),
     };
 

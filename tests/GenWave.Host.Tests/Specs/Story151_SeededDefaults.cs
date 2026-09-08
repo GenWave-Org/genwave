@@ -175,6 +175,10 @@ public static class FeatureSeededDefaults
         "Station:Location:Longitude",
         "Station:Location:SpokenName",
         "Crosstalk:Shows",
+        // Station:Ads:AnnouncerVoice (SPEC F170.1, STORY-405, PLAN T417) joins on Station:IconPack's
+        // own identical rationale: empty is the spec'd default meaning "use the station's own voice"
+        // (Station:Voice) — an honest blank, not a gap, until an operator casts a distinct announcer.
+        "Station:Ads:AnnouncerVoice",
     };
 
     /// <summary>

@@ -30,6 +30,31 @@ interface AdSpotRowProps {
 }
 
 /**
+ * Read-only voice-cast chips for a row (SPEC F167.5; PLAN T420) — one chip per `voicePlan` entry,
+ * `${tag} · ${voiceId}` in plan order, tag rendered exactly as stored (`ANNOUNCER`/`VOICE1`/
+ * `VOICE2`, never re-cased; the `AdSpotEditor`'s own "Voice cast" tag rendering is the same
+ * verbatim posture). Gated on state as well as a non-empty plan: F167.5 names `ready`/`rendering`
+ * (the plan is stamped at claim), and PLAN :1524's acceptance line adds `approved` (an
+ * owner-drafted spot's own cast can already be set before it ever renders) — a stamped plan on a
+ * draft or failed spot (or one carried into `retired`) stays chip-free. No per-tag override lives
+ * here, that stays gh-#691 territory.
+ */
+function CastChips({ spot }: { spot: AdSpotDto }): ReactNode {
+  const eligible = spot.state === "approved" || spot.state === "rendering" || spot.state === "ready";
+  if (!eligible || spot.voicePlan === null || spot.voicePlan.length === 0) {
+    return null;
+  }
+
+  return (
+    <span role="group" aria-label="Voice cast" className="flex flex-wrap items-center gap-1">
+      {spot.voicePlan.map((entry, index) => (
+        <Chip key={`${index}-${entry.tag}`}>{`${entry.tag} · ${entry.voiceId}`}</Chip>
+      ))}
+    </span>
+  );
+}
+
+/**
  * One ad spot row (SPEC F162.1; STORY-392 AC3/AC4; PLAN T404/T404b) — brand/length, the verbs legal
  * for its CURRENT state (mirrors `AdsController`'s own transition guards exactly, so no button here
  * ever fires a request the api would only 409), and — for a `ready` row — a real preview player.
@@ -119,6 +144,7 @@ export function AdSpotRow({ spot, onChanged, onEdit }: AdSpotRowProps): ReactNod
         <div className="flex flex-wrap items-center gap-2">
           <p className="truncate text-[0.9rem] text-ink">{spot.title}</p>
           <Chip>{AD_SOURCE_LABELS[spot.source]}</Chip>
+          <CastChips spot={spot} />
         </div>
         <p className="truncate text-[0.8rem] text-mute">
           {spot.brand} · {spot.spotSeconds}s

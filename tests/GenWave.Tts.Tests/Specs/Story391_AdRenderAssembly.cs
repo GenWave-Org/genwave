@@ -70,8 +70,11 @@ public static class FeatureAdRenderAssembly
 
     static CastAssemblyRequest Request(
         IReadOnlyList<CastLine> lines, IReadOnlyList<CastMember> cast, string outputDirectory,
-        double ceilingSeconds = 30.0, BedSpec? bed = null, double bedDuckDb = -12.0, double bedPadSeconds = 0.0) =>
-        new(lines, cast, ceilingSeconds, new AudioTags(StationName, SpotTitle), outputDirectory, bed, bedDuckDb, bedPadSeconds);
+        double ceilingSeconds = 30.0, BedSpec? bed = null, double bedDuckDb = -12.0, double bedPadSeconds = 0.0,
+        double bedFadeSeconds = 0.0) =>
+        new(
+            lines, cast, ceilingSeconds, new AudioTags(StationName, SpotTitle), outputDirectory, bed, bedDuckDb,
+            bedPadSeconds, bedFadeSeconds);
 
     static AuthoredMediaInsert BuildInsert(CrosstalkAssemblyResult.Assembled assembled) =>
         new(
@@ -279,6 +282,134 @@ public static class FeatureAdRenderAssembly
             Assert.Equal(CastSegmentFailureReason.ConfirmationFailed, result.FailureReason);
             Assert.False(writer.LastInsert!.Eligible);
             Assert.Equal(0, writer.SetEligibleCalls);
+        }
+    }
+
+    /// <summary>
+    /// SPEC F168.4; STORY-403; PLAN T416 review R6(b) — <see cref="FfmpegAudioMixer.BuildFadeSuffix"/>
+    /// pinned directly, as the pure string-returning function it was extracted to be (that method's
+    /// own remarks) — no ffmpeg process, no real audio, no <see cref="AudioMixRequest"/> plumbing:
+    /// this class proves the FILTER STRING the mixer's bed chain emits, the "graph builder is a pure
+    /// function" escape hatch the brief called for when the graph itself is not otherwise unit-testable
+    /// without a real ffmpeg binary. <c>GenWave.Ads.Tests</c>'s own sibling fact (R6(a),
+    /// Story403_AdBedPicker.cs — plain text, not a <c>cref</c>: this test project carries no reference
+    /// to that one) proves the OTHER half — that a live <c>Station:Ads:BedFadeMs</c> value actually
+    /// reaches <see cref="CastAssemblyRequest.BedFadeSeconds"/> in the first place; together the two
+    /// facts cover the whole plumbing without either needing the other's harness.
+    /// </summary>
+    public sealed class ScenarioTheTailFadeIsAPureFilterSuffix
+    {
+        [Fact]
+        public void AHalfSecondFadeEmitsAfadeOutWithDPointFive()
+        {
+            // M6's own red: removing BuildFadeSuffix's emission from the bed chain (FfmpegAudioMixer's
+            // own filter string) would leave this assertion with nothing to find.
+            var suffix = FfmpegAudioMixer.BuildFadeSuffix(totalDurationSec: 10.0, bedFadeSeconds: 0.5);
+
+            Assert.Contains("afade=t=out", suffix, StringComparison.Ordinal);
+            Assert.Contains("d=0.5", suffix, StringComparison.Ordinal);
+            Assert.Contains("st=9.5", suffix, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void ZeroFadeSecondsEmitsNoSuffixAtAll()
+        {
+            // The "0.0 = no fade" default (AudioMixRequest.BedFadeSeconds's own remarks) — every
+            // caller that never varies it renders the SAME filter string it always has today.
+            var suffix = FfmpegAudioMixer.BuildFadeSuffix(totalDurationSec: 10.0, bedFadeSeconds: 0.0);
+
+            Assert.Equal("", suffix);
+        }
+
+        [Fact]
+        public void AFadeLongerThanTheBedClampsToTheBedsOwnLength()
+        {
+            // A configured fade wider than the bed's own total duration would otherwise push st=
+            // negative (ffmpeg's afade rejects that outright) — clamped so the fade starts at 0 and
+            // covers the whole bed instead of failing the render over a configuration knob.
+            // PLAN T416 review O6: an exact match — Assert.Contains("st=0", …) also matches "st=0.5".
+            var suffix = FfmpegAudioMixer.BuildFadeSuffix(totalDurationSec: 2.0, bedFadeSeconds: 5.0);
+
+            Assert.Equal(",afade=t=out:st=0:d=2", suffix);
+        }
+    }
+
+    /// <summary>
+    /// PLAN T416 review F1(b) — <see cref="FfmpegAudioMixer.BuildBedFilterGraph"/> pinned directly: the
+    /// SAME pure-function escape hatch as <see cref="ScenarioTheTailFadeIsAPureFilterSuffix"/> above,
+    /// one level up the call chain. Before this class existed, deleting the <c>BuildFadeSuffix</c> call
+    /// out of the bed chain (<c>FfmpegAudioMixer.RunWithBedAsync</c>'s own filter string) stayed green —
+    /// <see cref="ScenarioTheTailFadeIsAPureFilterSuffix"/> only ever pinned the helper in isolation,
+    /// never its own wiring into the graph the mixer actually emits.
+    /// </summary>
+    public sealed class ScenarioTheBedFilterGraphWiresInTheFade
+    {
+        [Fact]
+        public void APositiveFadeAppearsInTheEmittedGraph()
+        {
+            var graph = FfmpegAudioMixer.BuildBedFilterGraph(
+                new AudioMixRequest("voice.wav", null, new AudioTags("station", "spot"), BedDuckDb: -12.0,
+                    BedPadSeconds: 0.0, OutputPath: "out.wav", BedFadeSeconds: 0.5),
+                cueInSec: 0.0, cueOutSec: 10.0, totalDurationSec: 10.0, loopBufferSamples: 441000, delayMs: 0);
+
+            Assert.Contains("afade=t=out:st=9.5:d=0.5", graph, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void ZeroFadeSecondsEmitsNoAfadeAtAllInTheGraph()
+        {
+            var graph = FfmpegAudioMixer.BuildBedFilterGraph(
+                new AudioMixRequest("voice.wav", null, new AudioTags("station", "spot"), BedDuckDb: -12.0,
+                    BedPadSeconds: 0.0, OutputPath: "out.wav", BedFadeSeconds: 0.0),
+                cueInSec: 0.0, cueOutSec: 10.0, totalDurationSec: 10.0, loopBufferSamples: 441000, delayMs: 0);
+
+            Assert.DoesNotContain("afade", graph, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// PLAN T416 review F1(a) — proves <see cref="CrosstalkAssembler.AssembleCastAsync"/> forwards
+    /// <see cref="CastAssemblyRequest.BedFadeSeconds"/> into <see cref="AudioMixRequest.BedFadeSeconds"/>
+    /// on the call to <see cref="GenWave.Core.Abstractions.IAudioMixer.MixAsync"/> — the OTHER
+    /// un-pinned deploy-path link the review named (mutation B: dropping that one argument off the
+    /// forward stayed green). Wires a <see cref="FakeAudioMixer"/> in place of the REAL
+    /// <see cref="FfmpegAudioMixer"/> the rest of this file always uses (file-level remarks) —
+    /// deliberately, so the request the assembler actually built is captured before the mixer runs;
+    /// the fake's own placeholder bytes then fail the post-mix ffprobe read exactly like the file-level
+    /// remarks describe, so this fact expects THAT failure rather than a full, successful assembly.
+    /// </summary>
+    public sealed class ScenarioBedFadeSecondsReachesTheMixer : IDisposable
+    {
+        readonly CrosstalkAssembler assembler;
+        readonly FakeCrosstalkVoiceSynthesizer synth;
+        readonly FakeAudioMixer mixer;
+        readonly string outputDirectory;
+
+        public ScenarioBedFadeSecondsReachesTheMixer()
+        {
+            outputDirectory = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            synth = new FakeCrosstalkVoiceSynthesizer();
+            mixer = new FakeAudioMixer();
+            var pronunciations = NoCorrections.PronunciationProvider();
+            var ttsMonitor = new TestOptionsMonitor<TtsOptions>(new TtsOptions { CacheRoot = outputDirectory, Format = "wav" });
+            var crosstalkMonitor = new TestOptionsMonitor<CrosstalkOptions>(new CrosstalkOptions());
+            assembler = new CrosstalkAssembler(
+                synth, pronunciations, new FakeLoudnessAnalyzer(), new FakeCueAnalyzer(), mixer,
+                ttsMonitor, crosstalkMonitor, NullLogger<CrosstalkAssembler>.Instance);
+        }
+
+        public void Dispose() => CleanUp(outputDirectory, synth);
+
+        [Fact]
+        public async Task TheRequestsBedFadeSecondsReachesTheAudioMixRequest()
+        {
+            // M5's own red: dropping the BedFadeSeconds argument off CrosstalkAssembler's forward into
+            // AudioMixRequest would leave mixer.LastRequest.BedFadeSeconds at its own default (0.0).
+            await Assert.ThrowsAsync<InvalidOperationException>(() => assembler.AssembleCastAsync(
+                Request(OneLineScript(), OneVoiceCast(), outputDirectory, bedFadeSeconds: 0.5),
+                CancellationToken.None));
+
+            Assert.Equal(0.5, mixer.LastRequest!.BedFadeSeconds);
         }
     }
 

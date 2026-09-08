@@ -27,6 +27,11 @@ static class StationSettingsHostingExtensions
     {
         var stationConnStr = builder.Configuration.GetConnectionString("Station") ?? string.Empty;
         var expectNoStore = builder.Configuration.GetValue<bool>(ExpectNoStoreKey);
+        // Same ConnectionStrings:Library value AddMediaLibrary itself resolves (T414) — needed only
+        // by AddJinglePackStore below, whose own JinglePackRepository is the first store in this
+        // extension to straddle both the station_svc and library_svc roles (see that repository's
+        // own remarks for why).
+        var libraryConnStr = builder.Configuration.GetConnectionString("Library") ?? string.Empty;
 
         // ── Station settings overlay (STORY-042, Epic I) ────────────────────
         // The custom provider is registered AFTER env/appsettings so a row in station.settings wins
@@ -201,6 +206,22 @@ static class StationSettingsHostingExtensions
         // visual layer's four stores (T290) shipped above.
         builder.Services.AddAdSpotStore(stationConnStr);
         builder.Services.AddAdBriefStore(stationConnStr);
+
+        // Voice pack store (SPEC F164.5/F164.6/F166.4; STORY-395/396/398/401; PLAN T413) — same
+        // station_svc connection string as every registration above; station.voice_pack(+_voice)
+        // lives in the same schema. VoicePackRepository shipped dark up to this point (no consumer
+        // yet): VoicePackController's install/uninstall routes (PLAN T413, this same task) are the
+        // first Host call site — the same "seam before consumer" way station.font_pack (T198) and
+        // the ad-spot/brief stores just above shipped.
+        builder.Services.AddVoicePackStore(stationConnStr);
+
+        // Jingle pack store (SPEC F165.2/F165.5/F165.6; STORY-399/401; PLAN T414) — the ONE store in
+        // this extension needing both connection strings: station.jingle_pack lives in station_svc,
+        // its asset rows are library.media rows in library_svc, and the two roles share no grant
+        // (JinglePackRepository's own remarks). JinglePackController's install/uninstall routes (this
+        // same task) are the first Host call site — the same "seam before consumer" ordering the
+        // voice-pack store above just followed.
+        builder.Services.AddJinglePackStore(stationConnStr, libraryConnStr);
 
         return builder;
     }

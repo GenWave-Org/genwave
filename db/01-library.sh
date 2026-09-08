@@ -425,6 +425,34 @@ psql -v ON_ERROR_STOP=1 -v pw="$LIBRARY_DB_PASSWORD" \
 
 	create index media_dup_keys on library.media (artist_key, title_key) where state = 'ready';
 
+	-- jingle_role (SPEC F165.3, PLAN T410): the functional role of a jingle-kind authored row,
+	-- stamped by jingle-pack install (T414). Closed set: 'bed' (background music ducked under
+	-- voice), 'sting' (punctuation/transition hit), 'station_id' (voiced station identification
+	-- clip). NULL = unclassified; scanned rows and every other imaging_kind never get this set.
+	-- CHECK enforces F165.3's closed set at the schema level -- changing the set is a migration,
+	-- not a silent application-layer decision.
+	--
+	-- pack_slug (SPEC F165.2/F165.6): which catalog pack installed the row; NULL for
+	-- station-authored rows. No CHECK -- any slug the catalog transport already validated is
+	-- valid here; referential integrity is app-side via the install path, the same posture
+	-- show_id above uses for its own cross-schema reference. Read by uninstall (F165.6) to find
+	-- a pack's own rows without a cross-schema FK.
+	--
+	-- Placed here (after the generated-column alter and media_dup_keys, not beside show_id above)
+	-- so a fresh box's column ordinal matches a box that ran db/45-jingle-voice-pack-migration.sh's
+	-- own ADD COLUMN (appended last) -- byte-identical `pg_dump -s` output either way (gh-#618).
+	alter table library.media
+	  add column jingle_role text
+	    check (jingle_role is null or jingle_role in ('bed', 'sting', 'station_id'));
+	alter table library.media
+	  add column pack_slug text;
+
+	-- media_pack_slug_title_key (SPEC F165.5): the upsert key jingle-pack (re)install writes through
+	-- (`ON CONFLICT (pack_slug, title)`) -- see db/45's own header for the full NULL-pack_slug
+	-- semantics rationale.
+	alter table library.media
+	  add constraint media_pack_slug_title_key unique (pack_slug, title);
+
 	-- find_near_duplicates (SPEC F153.5, amended at T354 review, F158.4 fence closed at T406):
 	-- playable rows are the FULL MediaRepository.PlayablePredicate as of T406, LEFT JOIN
 	-- library.media_rating included (T354 review MED-1 finding — see db/41's own header remarks for

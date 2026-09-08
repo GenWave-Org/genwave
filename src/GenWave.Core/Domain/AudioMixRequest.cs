@@ -15,10 +15,18 @@ namespace GenWave.Core.Domain;
 /// Lead-in/tail-out padding in seconds around the voice. Ignored when <see cref="Bed"/> is null.
 /// </param>
 /// <param name="OutputPath">Absolute path the rendered wav artifact is written to.</param>
+/// <param name="BedFadeSeconds">
+/// SPEC F168.4; STORY-403; PLAN T416 — how long, in seconds, the bed fades to silence across the
+/// mix's trailing tail. Ignored when <see cref="Bed"/> is null. Defaulted to 0.0 (no fade) so every
+/// existing caller of this record keeps compiling and behaving unchanged — <c>GenWave.Ads</c>'s own
+/// ad render path is the one caller that varies it (plain text, not a <c>cref</c>: this project is
+/// never referenced by GenWave.Ads, so the reverse reference cannot exist either).
+/// </param>
 public sealed record AudioMixRequest(
     string VoicePath,
     BedSpec? Bed,
     AudioTags Tags,
     double BedDuckDb,
     double BedPadSeconds,
-    string OutputPath);
+    string OutputPath,
+    double BedFadeSeconds = 0.0);

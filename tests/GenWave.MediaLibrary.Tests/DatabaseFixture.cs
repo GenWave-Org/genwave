@@ -282,6 +282,23 @@ public sealed class DatabaseFixture : IAsyncLifetime
         await cmd.ExecuteNonQueryAsync();
     }
 
+    /// <summary>
+    /// Truncate <c>station.jingle_pack</c> and reset its identity (SPEC F165.1, STORY-399/401, PLAN
+    /// T414). No FK references this table — db/45's own header remarks: <c>pack_slug</c> on
+    /// <c>library.media</c> carries no REFERENCES constraint, the db/22 schema-role boundary rule —
+    /// so no CASCADE is required, the same reasoning <see cref="ResetAnnouncementAsync"/>'s own
+    /// remarks give. Its own <c>library.media</c> asset rows are a separate reset
+    /// (<see cref="ResetAsync"/>, over <see cref="DataSource"/>) — the two tables live behind
+    /// different roles, same split every other jingle-pack seam already draws.
+    /// </summary>
+    public async Task ResetJinglePackAsync()
+    {
+        await using var conn = await StationDataSource.OpenConnectionAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "truncate table station.jingle_pack restart identity";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     async Task WaitForSchemaAsync()
     {
         for (var attempt = 0; attempt < 30; attempt++)

@@ -48,13 +48,21 @@ public sealed class AdRenderService(
     AdSpotLocatorRoots locatorRoots,
     ILogger<AdRenderService> logger)
 {
-    static readonly JsonSerializerOptions VoicePlanJsonOptions = new(JsonSerializerDefaults.Web);
-
-    public async Task<AdRenderOutcome> RenderAsync(AdSpot spot, CancellationToken ct)
+    /// <summary>
+    /// PLAN T416 review F3+O3 (amends brief ruling R6): <paramref name="liveSettings"/> is the SAME
+    /// <c>AdLiveSettingsReader.Read</c> result <see cref="AdSpotWorker"/> already reads once per tick
+    /// for its own cast pick — handed in here rather than re-read a second time off a second
+    /// <c>IConfiguration</c> dependency this class no longer carries. Passing the whole record (not a
+    /// bare <c>double bedFadeSeconds</c>) keeps the ms→seconds unit conversion co-located inside
+    /// <see cref="RenderCoreAsync"/>, exactly where <see cref="CastAssemblyRequest"/> is built, and
+    /// leaves room for a later render-time Live setting to ride the SAME parameter without another
+    /// signature change.
+    /// </summary>
+    internal async Task<AdRenderOutcome> RenderAsync(AdSpot spot, AdLiveSettings liveSettings, CancellationToken ct)
     {
         try
         {
-            return await RenderCoreAsync(spot, ct);
+            return await RenderCoreAsync(spot, liveSettings, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -67,7 +75,7 @@ public sealed class AdRenderService(
         }
     }
 
-    async Task<AdRenderOutcome> RenderCoreAsync(AdSpot spot, CancellationToken ct)
+    async Task<AdRenderOutcome> RenderCoreAsync(AdSpot spot, AdLiveSettings liveSettings, CancellationToken ct)
     {
         // A structural re-parse only (int.MaxValue as the per-line ceiling — the length rule was
         // already enforced at write time; re-checking it here would be re-validation, not rendering).
@@ -94,7 +102,20 @@ public sealed class AdRenderService(
         var ceilingSeconds = spot.SpotSeconds * (1 + adsOptions.CurrentValue.DurationToleranceRatio);
         var outputDirectory = Path.Combine(locatorRoots.AuthoredRoot, "ads");
 
-        var request = new CastAssemblyRequest(lines, cast, ceilingSeconds, tags, outputDirectory, bed, adsOptions.CurrentValue.BedDuckDb);
+        // SPEC F168.4; STORY-403; PLAN T416 review F3+O3 — Station:Ads:BedFadeMs is a Live setting,
+        // handed in as liveSettings.BedFadeMs (the SAME AdLiveSettingsReader.Read result
+        // AdSpotWorker's own cast-pick call already read once, earlier in the SAME tick — this class
+        // no longer carries its own IConfiguration to re-read it a second time), stored in
+        // milliseconds (SettingValidator's own unit) but CastAssemblyRequest/AudioMixRequest/
+        // FfmpegAudioMixer all work in seconds throughout (BedDuckDb/BedPadSeconds precedent right
+        // beside it) — converted here, once, at the one seam that actually crosses the unit boundary.
+        var bedFadeSeconds = liveSettings.BedFadeMs / 1000.0;
+        // Named, not positional, for BedFadeSeconds: CastAssemblyRequest carries an UNRELATED
+        // BedPadSeconds member (Station:Safe:* padding, never set by Ads) between BedDuckDb and
+        // BedFadeSeconds — a positional trailing arg here would silently land in the wrong slot.
+        var request = new CastAssemblyRequest(
+            lines, cast, ceilingSeconds, tags, outputDirectory, bed, adsOptions.CurrentValue.BedDuckDb,
+            BedFadeSeconds: bedFadeSeconds);
 
         var result = await author.AuthorAsync(
             request,
@@ -166,7 +187,7 @@ public sealed class AdRenderService(
         IReadOnlyList<AdVoicePlanEntry>? deserialized;
         try
         {
-            deserialized = JsonSerializer.Deserialize<IReadOnlyList<AdVoicePlanEntry>>(voicePlanJson, VoicePlanJsonOptions);
+            deserialized = JsonSerializer.Deserialize<IReadOnlyList<AdVoicePlanEntry>>(voicePlanJson, AdVoicePlanJson.Options);
         }
         catch (JsonException)
         {

@@ -88,15 +88,7 @@ public sealed class FfmpegAudioMixer : IAudioMixer
             bedSegmentDurationSec * BedProcessingSampleRate, MidpointRounding.AwayFromZero);
         var delayMs = (long)Math.Round(request.BedPadSeconds * 1000.0, MidpointRounding.AwayFromZero);
 
-        var filter =
-            $"[1:a]atrim=start={Fmt(cueInSec)}:end={Fmt(cueOutSec)},asetpts=PTS-STARTPTS," +
-            $"aformat=sample_rates={BedProcessingSampleRate}:channel_layouts=stereo," +
-            $"aloop=loop=-1:size={loopBufferSamples}," +
-            $"atrim=start=0:end={Fmt(totalDurationSec)},asetpts=PTS-STARTPTS," +
-            $"volume={Fmt(request.BedDuckDb)}dB[bed];" +
-            $"[0:a]aformat=sample_rates={BedProcessingSampleRate}:channel_layouts=stereo," +
-            $"adelay=delays={delayMs}:all=1[voice];" +
-            "[bed][voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[out]";
+        var filter = BuildBedFilterGraph(request, cueInSec, cueOutSec, totalDurationSec, loopBufferSamples, delayMs);
 
         var args = new List<string>
         {
@@ -112,6 +104,61 @@ public sealed class FfmpegAudioMixer : IAudioMixer
         args.Add(request.OutputPath);
 
         await FfmpegProcess.RunFfmpegAsync(args, ct);
+    }
+
+    /// <summary>
+    /// SPEC F168.3 (cue-trim), F168.4 (fade); STORY-403; PLAN T416 review F1(b) — the bed's own filter_complex graph
+    /// (cue-trim, loop-to-cover, duck, fade, delay-and-mix), extracted out of <see cref="RunWithBedAsync"/>
+    /// as a pure, internal, static function for the SAME reason <see cref="BuildFadeSuffix"/> already is
+    /// (this method's own remarks): unit-testable without a real ffmpeg binary via this project's
+    /// <c>InternalsVisibleTo</c> grant (csproj remarks). Before this extraction, the tail-fade's own
+    /// deploy-path wiring here — the <see cref="BuildFadeSuffix"/> call embedded inline below — had no
+    /// fact pinning it to this call site at all; a mutant deleting that call stayed green because only
+    /// the pure helper itself, never this graph, was ever asserted against.
+    /// </summary>
+    internal static string BuildBedFilterGraph(
+        AudioMixRequest request, double cueInSec, double cueOutSec, double totalDurationSec,
+        long loopBufferSamples, long delayMs) =>
+        $"[1:a]atrim=start={Fmt(cueInSec)}:end={Fmt(cueOutSec)},asetpts=PTS-STARTPTS," +
+        $"aformat=sample_rates={BedProcessingSampleRate}:channel_layouts=stereo," +
+        $"aloop=loop=-1:size={loopBufferSamples}," +
+        $"atrim=start=0:end={Fmt(totalDurationSec)},asetpts=PTS-STARTPTS," +
+        $"volume={Fmt(request.BedDuckDb)}dB{BuildFadeSuffix(totalDurationSec, request.BedFadeSeconds)}[bed];" +
+        $"[0:a]aformat=sample_rates={BedProcessingSampleRate}:channel_layouts=stereo," +
+        $"adelay=delays={delayMs}:all=1[voice];" +
+        "[bed][voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[out]";
+
+    /// <summary>
+    /// SPEC F168.4; STORY-403; PLAN T416 — the bed's own trailing <c>afade=t=out</c> filter suffix,
+    /// appended to the bed chain right after its duck <c>volume</c> stage (so the fade rides on top of
+    /// the already-ducked level, never fights it). Empty when <paramref name="bedFadeSeconds"/> is
+    /// zero or negative (the "no fade" default — <see cref="AudioMixRequest.BedFadeSeconds"/>'s own
+    /// remarks) so a caller that never varies it changes the rendered filter string not at all.
+    ///
+    /// <para>
+    /// <b>Clamped to the bed's own total duration (never a negative fade start).</b> A configured fade
+    /// longer than <paramref name="totalDurationSec"/> itself — a short spot, a large
+    /// <c>Station:Ads:BedFadeMs</c> — would otherwise push <c>st=</c> negative, which ffmpeg's
+    /// <c>afade</c> filter rejects outright; clamping the fade DURATION to the bed's own length instead
+    /// makes the fade start at 0 and cover the whole bed, the honest "fade what you've got" behavior
+    /// rather than a render failure over a configuration knob.
+    /// </para>
+    ///
+    /// <para>
+    /// Extracted as a pure, internal, static function (no ffmpeg process, no I/O) specifically so it is
+    /// unit-testable without a real ffmpeg binary — <c>GenWave.Tts.Tests</c> exercises it directly via
+    /// this project's own <c>InternalsVisibleTo</c> grant (csproj remarks), the SAME reason
+    /// <see cref="Fmt"/>'s own G17 formatting is reused rather than re-implemented here.
+    /// </para>
+    /// </summary>
+    internal static string BuildFadeSuffix(double totalDurationSec, double bedFadeSeconds)
+    {
+        if (bedFadeSeconds <= 0.0)
+            return "";
+
+        var fadeDuration = Math.Min(bedFadeSeconds, totalDurationSec);
+        var fadeStart = totalDurationSec - fadeDuration;
+        return $",afade=t=out:st={Fmt(fadeStart)}:d={Fmt(fadeDuration)}";
     }
 
     static void AddTagArgs(List<string> args, AudioTags tags)

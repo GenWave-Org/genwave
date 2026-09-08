@@ -42,7 +42,7 @@ import type { useRouter } from "next/navigation";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { PageSizePicker } from "@/components/ui/page-size-picker";
 import { Toaster } from "@/components/ui/toast";
-import type { AdBriefDto, AdSpotDto, AdState } from "@/lib/ads-api";
+import type { AdBriefDto, AdSpotDto, AdState, AdVoicePlanEntry } from "@/lib/ads-api";
 import { ADS_PAGE_SIZES, buildAdsHref, DEFAULT_ADS_PAGE_SIZE } from "../app/(authed)/ads/ads-paging";
 import type { AdsSection as AdsSectionComponent } from "../app/(authed)/ads/AdsSection";
 import type { AdSpotEditor as AdSpotEditorComponent } from "../app/(authed)/ads/AdSpotEditor";
@@ -299,6 +299,71 @@ describe("Feature: The Ads page", () => {
         expectVerb(row, "Preview", preview);
       }
     );
+  });
+
+  describe("Scenario: read-only voice-cast chips on a spot row (F167.5)", () => {
+    // Table-driven, mirroring the verb-gating scenario above: chips render iff the state is one of
+    // the three the two documents name between them (F167.5: `ready`/`rendering`; PLAN :1524's
+    // acceptance line: `approved`) AND the plan is a non-empty array — `null` and `[]` both count
+    // as "no plan" (PLAN T420).
+    const CAST_PLAN: AdVoicePlanEntry[] = [
+      { tag: "ANNOUNCER", voiceId: "af_heart", pace: 1 },
+      { tag: "VOICE1", voiceId: "am_michael", pace: 1 },
+      { tag: "VOICE2", voiceId: "af_bella", pace: 1 },
+    ];
+
+    interface CastExpectation {
+      name: string;
+      state: AdState;
+      voicePlan: AdVoicePlanEntry[] | null;
+      expectChips: boolean;
+    }
+
+    const CAST_TABLE: readonly CastExpectation[] = [
+      { name: "ready + 3-entry plan renders three chips", state: "ready", voicePlan: CAST_PLAN, expectChips: true },
+      { name: "rendering + plan renders chips", state: "rendering", voicePlan: CAST_PLAN, expectChips: true },
+      { name: "approved + plan renders chips", state: "approved", voicePlan: CAST_PLAN, expectChips: true },
+      { name: "draft + plan renders no group", state: "draft", voicePlan: CAST_PLAN, expectChips: false },
+      { name: "ready + null plan renders no group", state: "ready", voicePlan: null, expectChips: false },
+      { name: "ready + empty plan renders no group", state: "ready", voicePlan: [], expectChips: false },
+      { name: "failed + plan renders no group", state: "failed", voicePlan: CAST_PLAN, expectChips: false },
+      { name: "retired + plan renders no group", state: "retired", voicePlan: CAST_PLAN, expectChips: false },
+    ];
+
+    it.each(CAST_TABLE)("$name", ({ state, voicePlan, expectChips }) => {
+      const spot = adSpot({ id: 9, state, voicePlan, mediaId: state === "ready" ? 999 : null });
+
+      render(
+        <ConfirmDialogProvider>
+          <AdsSection tab={state} items={[spot]} total={1} />
+        </ConfirmDialogProvider>
+      );
+
+      const row = screen.getByText(spot.title).closest("div.py-3") as HTMLElement;
+
+      if (!expectChips) {
+        expect(within(row).queryByRole("group", { name: "Voice cast" })).not.toBeInTheDocument();
+        return;
+      }
+
+      const group = within(row).getByRole("group", { name: "Voice cast" });
+      const chipTexts = Array.from(group.children).map((chip) => chip.textContent ?? "");
+      expect(chipTexts).toEqual(["ANNOUNCER · af_heart", "VOICE1 · am_michael", "VOICE2 · af_bella"]);
+    });
+
+    it("still renders the source chip beside the cast (regression pin)", () => {
+      const spot = adSpot({ id: 9, state: "ready", source: "pack", voicePlan: CAST_PLAN, mediaId: 999 });
+
+      render(
+        <ConfirmDialogProvider>
+          <AdsSection tab="ready" items={[spot]} total={1} />
+        </ConfirmDialogProvider>
+      );
+
+      const row = screen.getByText(spot.title).closest("div.py-3") as HTMLElement;
+      expect(within(row).getByText("Pack")).toBeInTheDocument();
+      expect(within(row).getByRole("group", { name: "Voice cast" })).toBeInTheDocument();
+    });
   });
 
   describe("Scenario: the editor round-trips", () => {

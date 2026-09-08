@@ -233,7 +233,9 @@ header-identical to an unmapped route.
 build from source, where the music lives, which topology, admin on or off — then it generates
 every secret, writes `.env` in one atomic step, and hands off to `launch.sh`. On a box that
 already has a `.env` it never writes: it verifies the install against the machine (a drift
-report) and `--repair` fixes what it can. The one topology fact it persists is
+report) and `--repair` fixes what it can. A successful first run also installs a starter
+background-music pack once the station confirms on air; `--offline` skips that one step for
+offline builds and tests. The one topology fact it persists is
 **`GW_PRESET`** in `.env`, a closed set:
 
 | `GW_PRESET` | Files | Shape |
@@ -460,6 +462,43 @@ internet, no Caddy), none of this file applies — leave `Admin__Enabled` at its
 `true`, set `Station__SpectatorMode: "true"`, and point a kiosk browser at
 `http://<host>:8081/` (compose.yaml already publishes 8081 for exactly this).
 
+### Shared voice files: the `voices` volume (SPEC F166)
+
+Kokoro's voice files live in a named Docker volume (`voices`), not baked into the
+container image. On the very first `docker compose up`, a one-shot `voice-seed`
+container copies Kokoro's stock voice files into that volume before Kokoro starts
+— a fresh install ends up with Kokoro's full built-in voice set, ready to speak,
+with no extra step. The api does not wait for it: `./launch.sh` starts the core
+with `--no-deps` before the seed runs at all, and a seed that never runs or
+fails can't block or fail api's own startup (`required: false`); it only needs
+the volume when you install a voice pack, which is always after boot.
+A second `up` does nothing further: the seed only ever adds a file it doesn't
+already find in the volume.
+
+That also means a later Kokoro image upgrade does not overwrite or remove anything
+already in the volume. Any voice file a newer image ships that isn't already
+present gets added on the next `up`; nothing already there — including a voice
+pack you've installed — is ever touched or replaced.
+
+The api writes new voice-pack files into this same volume, read-write, at
+`/voices`. Kokoro reads from it read-only and rescans it on every request, so an
+installed voice pack goes live with no restart.
+
+`--piper-only` boxes skip all of this: Kokoro (and therefore `voice-seed`) is
+disabled on that topology, and Piper needs no voice files of its own.
+
+### Jingle-pack and voice-pack roots (SPEC F164–F170, gh-#709)
+
+Four more env/compose-only knobs, never a live setting — the same posture as `Plugins__*`
+in the "Plugins" section below:
+
+| Key | Default | What it does |
+|---|:---:|---|
+| `Packs__JingleRoot` | `/authored/jingle-packs` | Where installed jingle-pack assets land, under the `authored` volume |
+| `Packs__VoicesRoot` | `/voices` | Where installed voice-pack `.pt` files land — the shared `voices` volume described just above |
+| `Packs__PreviewMaxBytes` | 153600 | Maximum accepted size, in bytes, of a single voice-pack preview clip |
+| `Packs__JingleAssetMaxBytes` | 5242880 | Maximum accepted size, in bytes, of a single jingle-pack asset file |
+
 ---
 
 ## 🏠 The House Voice — announcements and the announce token (v5.4.0/v5.4.1, SPEC F143–F147)
@@ -683,7 +722,7 @@ booth-log row per plugin at boot.
 ## 📻 Ads (v5.6.0, SPEC F158–F163, gh-#380)
 
 The station authors and airs its own ad spots — a `GenWave.Ads.AdsOptions` env/compose-only
-knob set (`Ads__*`, boot-validated via `ValidateDataAnnotations()`) plus five `Station:Ads:*`
+knob set (`Ads__*`, boot-validated via `ValidateDataAnnotations()`) plus eight `Station:Ads:*`
 Live settings (allowlisted, PUT-able through the settings API/UI, no `api` restart needed).
 
 | Key | Default | Range | What it bounds |
@@ -701,6 +740,9 @@ Live settings (allowlisted, PUT-able through the settings API/UI, no `api` resta
 | `Station:Ads:RefreshDays` | 30 | 1–365 | Age, in days, past which a `ready` spot is retired and re-drafted |
 | `Station:Ads:AutoApprove` | `false` | — | Whether a freshly drafted spot skips the operator approval step |
 | `Station:Ads:AntiRepeatWindow` | 5 | 0–50 | How many recently aired spots `LibraryAdSpotSource` excludes from its next pick |
+| `Station:Ads:AnnouncerVoice` | `` (empty) | — | Kokoro voice id cast as an ad's announcer; empty uses the station's own voice (`Station:Voice`) |
+| `Station:Ads:CastVoices` | `af_nova,am_michael,bf_alice,am_onyx` | 1–16 ids | Comma-separated pool of Kokoro voice ids an ad may cast for its other speaking roles |
+| `Station:Ads:BedFadeMs` | 300 | 100–1000 | How long the background music takes to fade out at the end of a generated ad, as the voice ends, in milliseconds |
 
 No compose overlay is needed to turn ads on — the seam is always registered; `Station:Ads:EveryNUnits=0`
 is what keeps it silent on every existing station until an operator opts in. The Admin UI's

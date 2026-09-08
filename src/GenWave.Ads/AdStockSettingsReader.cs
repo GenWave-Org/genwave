@@ -41,21 +41,7 @@ public static class AdStockSettingsReader
     internal const bool DefaultAutoApprove = false;
 
     public static AdStockSettings Read(IConfiguration configuration) => new(
-        TargetCount: ReadOrDefault(configuration, "Station:Ads:TargetCount", DefaultTargetCount),
-        RefreshDays: ReadOrDefault(configuration, "Station:Ads:RefreshDays", DefaultRefreshDays),
-        AutoApprove: ReadOrDefault(configuration, "Station:Ads:AutoApprove", DefaultAutoApprove));
-
-    static T ReadOrDefault<T>(IConfiguration configuration, string key, T fallback) where T : struct
-    {
-        try
-        {
-            return configuration.GetValue(key, fallback);
-        }
-        catch (InvalidOperationException)
-        {
-            // GetValue<T> throws only when the key IS present but fails to convert — a data-integrity
-            // bug (SettingValidator already range-checked this at write time), not an expected input.
-            return fallback;
-        }
-    }
+        TargetCount: AdSettingsRead.OrDefault(configuration, "Station:Ads:TargetCount", DefaultTargetCount),
+        RefreshDays: AdSettingsRead.OrDefault(configuration, "Station:Ads:RefreshDays", DefaultRefreshDays),
+        AutoApprove: AdSettingsRead.OrDefault(configuration, "Station:Ads:AutoApprove", DefaultAutoApprove));
 }

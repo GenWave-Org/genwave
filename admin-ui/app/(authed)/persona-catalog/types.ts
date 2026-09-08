@@ -12,8 +12,18 @@ export type CatalogAudience = "everyone" | "mature";
  * unrecognised kind to "renders nothing" rather than misrouting it as a persona card — see
  * `PersonaCatalogClient.renderShelfEntry`'s own remarks) until T304 gives it a tab and a card of its
  * own to replace this "still-hidden" placeholder with. Widened again to `"ad-pack"` at
- * F162.2/STORY-393/T405 — data only, no audio/binary assets of any kind. */
-export type CatalogEntryKind = "persona" | "theme" | "font" | "show" | "avatar" | "icon" | "ad-pack";
+ * F162.2/STORY-393/T405 — data only, no audio/binary assets of any kind. Widened again to
+ * `"voice-pack"`/`"jingle-pack"` at F164/F165/STORY-397/T418 — see `Host.CatalogController.ToWireKind`. */
+export type CatalogEntryKind =
+  | "persona"
+  | "theme"
+  | "font"
+  | "show"
+  | "avatar"
+  | "icon"
+  | "ad-pack"
+  | "voice-pack"
+  | "jingle-pack";
 
 /** One mode's five shelf-chip swatches (SPEC F103.4, PLAN T185) — see Host's
  * `CatalogShelfSwatchSetDto`. `"accent-2"` keeps its hyphenated wire name (the app's own

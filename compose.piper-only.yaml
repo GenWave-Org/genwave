@@ -44,6 +44,16 @@ services:
     # profile name is deliberately self-describing and activated by nothing in this repo.
     profiles: ["disabled-by-piper-only"]
 
+  # voice-seed (SPEC F166.2) travels with kokoro by the same rule as the ollama pair below:
+  # nothing on this topology ever reads the `voices` volume (kokoro is the one process that
+  # does), so pulling its ~3.6GiB image just to seed a volume no service will use is pure
+  # waste on the small/low-memory boxes this overlay targets. api's own depends_on reset
+  # below already drops its (required: false) reference to voice-seed; this profile is the
+  # matching half for kokoro's (required, default) reference — both disabled together, same
+  # as ollama/ollama-init.
+  voice-seed:
+    profiles: ["disabled-by-piper-only"]
+
   # gh-#310 — the LLM pair, disabled by the same mechanism. HARDWARE.md topology (a)
   # (the RECOMMENDED Pi shape) says "playout + piper-only, NO LLM (templated patter, by
   # design)" and prescribes this overlay, but until now the demo overlay's ollama rode

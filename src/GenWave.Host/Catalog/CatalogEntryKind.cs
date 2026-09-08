@@ -67,4 +67,30 @@ public enum CatalogEntryKind
     /// <c>AdScriptValidator</c> at generation time, exactly like an owner-authored one.
     /// </summary>
     AdPack,
+
+    /// <summary>
+    /// A voice pack (SPEC F164.1, STORY-395, PLAN T413) — manifest <c>&lt;slug&gt;.voice-pack.json</c>
+    /// + the usual meta, the THIRD assets-carrying kind alongside <see cref="Font"/>/<see cref="Avatar"/>:
+    /// one Kokoro <c>.pt</c> file per declared voice plus a single required preview clip
+    /// (SPEC F164.4), each riding <c>assets[]</c> in the same <c>{path, sha256, bytes}</c> shape.
+    /// Consent-gated at the manifest level (<c>synthetic: true</c>, <c>sourceRef</c> absent/null,
+    /// SPEC F164.3) — <see cref="CatalogIndexValidator"/> only checks the index/manifest SHAPE here;
+    /// the engine match (F164.2) and voice-id collision fence (F166.4) are install-time checks
+    /// (<see cref="Api.VoicePackController"/>), not index-validation concerns.
+    /// </summary>
+    VoicePack,
+
+    /// <summary>
+    /// A jingle pack (SPEC F165.1, STORY-399, PLAN T414) — manifest <c>&lt;slug&gt;.jingle-pack.json</c>
+    /// + the usual meta, the FOURTH assets-carrying kind alongside <see cref="Font"/>/<see cref="Avatar"/>/
+    /// <see cref="VoicePack"/>: audio files, not images/<c>.pt</c> — one <c>wav</c>/<c>mp3</c>/<c>flac</c>
+    /// asset per declared jingle, each riding <c>assets[]</c> in the same <c>{path, sha256, bytes}</c>
+    /// shape, capped at <c>CatalogIndexValidator.MaxJingleAssetBytes</c> (5 MiB) rather than the tighter
+    /// PNG/<c>.pt</c> ceilings — a whole asset never enters <see cref="CatalogProxyService"/>'s bounded
+    /// asset cache (see that type's <c>GetAssetUncachedAsync</c> remarks). <see cref="CatalogIndexValidator"/>
+    /// only checks the index/manifest SHAPE here; the per-asset <c>role</c> closed set (SPEC F165.3,
+    /// mirrors db/45's own <c>check (jingle_role in ('bed', 'sting', 'station_id'))</c>) is an
+    /// install-time check (<see cref="Api.JinglePackController"/>), not an index-validation concern.
+    /// </summary>
+    JinglePack,
 }

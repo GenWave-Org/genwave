@@ -224,7 +224,9 @@ public sealed class CrosstalkAssembler(
             await MixAsync(lineFiles, isInterjections, CrosstalkTimeline.ComputeSeed(request.Lines), rawMixPath, ct);
 
             await mixer.MixAsync(
-                new AudioMixRequest(rawMixPath, request.Bed, request.Tags, request.BedDuckDb, request.BedPadSeconds, finalPath),
+                new AudioMixRequest(
+                    rawMixPath, request.Bed, request.Tags, request.BedDuckDb, request.BedPadSeconds, finalPath,
+                    request.BedFadeSeconds),
                 ct);
             DeleteIfExists(rawMixPath);
 

@@ -304,6 +304,20 @@ builder.Services
 // boot before this ever resolves it.
 builder.Services.AddSingleton<AnnouncementAcceptedRateLimiter>();
 
+// Jingle-pack/voice-pack filesystem roots and byte ceilings (SPEC F164-F170, STORY-395..405, PLAN
+// T417): env/compose-only, deliberately absent from StationSettingsAllowlist — deployment topology
+// (where the shared volumes are mounted, how big an upload may be), not an operator-tunable live
+// PUT (see PacksOptions' own remarks; the THREE Station:Ads:* knobs THAT split's Live half — cast
+// voices, announcer voice, bed fade — are allowlisted separately and need no options class, per
+// that class's own remarks). ValidateOnStart mirrors ArtworkOptions/RequestsOptions above; no
+// consumer is registered here yet — the pack-install routes that read this class land in later
+// tasks (T413/T414).
+builder.Services
+    .AddOptions<PacksOptions>()
+    .Bind(cfg.GetSection(PacksOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
 // Community-sourced content — currently just the Persona Catalog origin (SPEC F90.1, STORY-234,
 // PLAN T99). Live via IOptionsMonitor<CommunityOptions> (read by CommunityCatalogAccessor, T101's
 // eventual catalog endpoint consumer), so a PUT to Community:CatalogIndexUrl reaches the very next

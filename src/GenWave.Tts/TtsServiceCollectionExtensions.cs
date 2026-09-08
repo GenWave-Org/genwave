@@ -342,12 +342,19 @@ public static class TtsServiceCollectionExtensions
         services
             // IOptionsMonitor<TtsOptions> (not the KokoroVoiceLister's own snapshot) so a
             // repointed Tts:Endpoint invalidates the short TTL cache instead of serving the OLD
-            // endpoint's voice list for up to 5 more minutes (SPEC F36.4).
-            .AddSingleton<ITtsVoiceLister>(sp =>
+            // endpoint's voice list for up to 5 more minutes (SPEC F36.4). Registered concretely
+            // ONCE and exposed under BOTH seams it implements (mirrors LlmCopyWriter's
+            // ISegmentCopyWriter/IPersonaPreviewWriter split above) — IVoiceListingCache (SPEC
+            // F166.4, PLAN T413) is voice-pack install's own post-write "make the very next
+            // GET /api/voices honest again" lever, so it must invalidate the SAME cache instance
+            // GET /api/voices itself reads through ITtsVoiceLister, never a second parallel cache.
+            .AddSingleton(sp =>
                 new CachedVoiceLister(
                     sp.GetRequiredService<KokoroVoiceLister>(),
                     sp.GetRequiredService<IOptionsMonitor<TtsOptions>>(),
                     TimeSpan.FromMinutes(5)))
+            .AddSingleton<ITtsVoiceLister>(sp => sp.GetRequiredService<CachedVoiceLister>())
+            .AddSingleton<IVoiceListingCache>(sp => sp.GetRequiredService<CachedVoiceLister>())
             // FallbackTtsSynthesizer (SPEC F70.1, F70.4, STORY-190, gh-#147) sits BELOW
             // NormalizingTtsSynthesizer, executing the ordered fallback chain — the primary first,
             // then each configured hop — see its own remarks for the routing rule. The primary is

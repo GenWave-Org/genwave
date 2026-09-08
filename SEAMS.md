@@ -44,7 +44,7 @@
 > environment- or flag-gated `Add*` branch exists today), so nothing is known to be missing
 > from this map for that reason.
 >
-> **116 seams across 7 projects.**
+> **120 seams across 7 projects.**
 
 ## GenWave.Ads (2 seams)
 
@@ -107,10 +107,11 @@
 | `GenWave.Core.Abstractions.IEnergyAnalyzer` | `GenWave.Loudness.FfmpegEnergyAnalyzer` | Singleton | — |
 | `GenWave.Core.Abstractions.ILoudnessAnalyzer` | `GenWave.Loudness.FfmpegLoudnessAnalyzer` | Singleton | — |
 
-## GenWave.MediaLibrary (52 seams)
+## GenWave.MediaLibrary (55 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
+| `GenWave.Core.Abstractions.IAdBedPool` | `GenWave.MediaLibrary.Catalog.AdBedPoolRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAdBriefStore` | `GenWave.MediaLibrary.Station.AdBriefRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAdSpotStore` | `GenWave.MediaLibrary.Station.AdSpotRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IAdminLibraryWrite` | `GenWave.MediaLibrary.Catalog.AdminLibraryRepository` | Singleton | — |
@@ -136,6 +137,7 @@
 | `GenWave.Core.Abstractions.IFontPackStore` | `GenWave.MediaLibrary.Station.FontPackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IGardenerPass` | `GenWave.MediaLibrary.Garden.ShelfDustGardenerPass` | Singleton | also registered: `GenWave.MediaLibrary.Garden.DeadFileGardenerPass` (GenWave.MediaLibrary), `GenWave.MediaLibrary.Garden.NearDuplicateGardenerPass` (GenWave.MediaLibrary), `GenWave.MediaLibrary.Garden.StaleMetadataGardenerPass` (GenWave.MediaLibrary), `GenWave.MediaLibrary.Garden.UnreachableGardenerPass` (GenWave.MediaLibrary) |
 | `GenWave.Core.Abstractions.IIconPackStore` | `GenWave.MediaLibrary.Station.IconPackRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IJinglePackStore` | `GenWave.MediaLibrary.Station.JinglePackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.ILibraryRepository` | `GenWave.MediaLibrary.Catalog.LibraryRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaCatalog` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IMediaExplicitOverride` | `GenWave.MediaLibrary.Catalog.MediaRepository` | Singleton | — |
@@ -162,6 +164,7 @@
 | `GenWave.Core.Abstractions.IStationImageStore` | `GenWave.MediaLibrary.Station.StationImageRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IThemeStore` | `GenWave.MediaLibrary.Station.ThemeRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IThumbStore` | `GenWave.MediaLibrary.Garden.MediaThumbRepository` | Singleton | — |
+| `GenWave.Core.Abstractions.IVoicePackStore` | `GenWave.MediaLibrary.Station.VoicePackRepository` | Singleton | — |
 | `GenWave.Core.Abstractions.IYearLookup` | `GenWave.MediaLibrary.YearLookup.MusicBrainzYearLookup` | Singleton | — |
 
 ## GenWave.Orchestration (8 seams)
@@ -177,7 +180,7 @@
 | `GenWave.Orchestration.IRandomSource` | `GenWave.Orchestration.SystemRandomSource` | Singleton | — |
 | `GenWave.Orchestration.IRequestFulfillmentSource` | `GenWave.Orchestration.RequestFulfillmentProvider` | Singleton | also registered: `GenWave.Orchestration.NoOpRequestFulfillmentSource` (GenWave.Orchestration) |
 
-## GenWave.Tts (15 seams)
+## GenWave.Tts (16 seams)
 
 | Port | Adapter | Lifetime | Notes |
 |---|---|---|---|
@@ -196,3 +199,4 @@
 | `GenWave.Tts.IFallbackProfileRenderer` | `GenWave.Tts.KokoroFallbackRenderer` | Singleton | also registered: `GenWave.Tts.PiperTtsSynthesizer` (GenWave.Tts) |
 | `GenWave.Tts.ISafeSegmentAuthor` | `GenWave.Tts.SafeSegmentAuthor` | Singleton | — |
 | `GenWave.Tts.ISpeechNormalizationPreview` | `GenWave.Tts.NormalizingTtsSynthesizer` | Singleton | — |
+| `GenWave.Tts.IVoiceListingCache` | `GenWave.Tts.CachedVoiceLister` | Singleton | — |

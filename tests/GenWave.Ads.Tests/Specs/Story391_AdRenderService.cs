@@ -30,6 +30,14 @@ public static class FeatureAdRenderService
             CreatedAt: DateTime.UtcNow, StateChangedAt: DateTime.UtcNow, RenderedAt: null,
             RetiredAt: null, Version: "1");
 
+    /// <summary>PLAN T416 review F3+O3: <see cref="AdRenderService.RenderAsync"/> now takes the
+    /// caller's already-read <see cref="AdLiveSettings"/> directly rather than re-reading
+    /// <c>IConfiguration</c> itself — this suite's own render-shape facts (insert/ceiling/confirm/
+    /// fail-safe) never vary <c>BedFadeMs</c>, so <see cref="AdLiveSettingsReader.DefaultBedFadeMs"/>
+    /// is enough here; Story403_AdBedPicker.cs is where a real override gets its own fact.</summary>
+    static AdLiveSettings LiveSettings(int bedFadeMs = AdLiveSettingsReader.DefaultBedFadeMs) =>
+        new(AnnouncerVoice: "", CastVoices: [], BedFadeMs: bedFadeMs);
+
     /// <summary>Wires a REAL <see cref="AdRenderService"/> against fakes at every I/O seam — the
     /// SAME "real subject, faked edges" posture every other spec in this suite uses. Seeds the ads
     /// library by default (<paramref name="seedAdsLibrary"/> = false pins the "library missing"
@@ -69,7 +77,7 @@ public static class FeatureAdRenderService
             // test-local lookalike.
             var (service, author, _, _, _, adsLibraryId) = Build();
 
-            await service.RenderAsync(MakeSpot(), CancellationToken.None);
+            await service.RenderAsync(MakeSpot(), LiveSettings(), CancellationToken.None);
 
             var insert = author.CapturedInsert;
             Assert.NotNull(insert);
@@ -89,7 +97,7 @@ public static class FeatureAdRenderService
             // not merely "some ceiling was set" — a hardcoded/wrong constant fails this.
             var (service, author, _, _, _, _) = Build(toleranceRatio: 0.4);
 
-            await service.RenderAsync(MakeSpot(spotSeconds: 30), CancellationToken.None);
+            await service.RenderAsync(MakeSpot(spotSeconds: 30), LiveSettings(), CancellationToken.None);
 
             Assert.NotNull(author.LastRequest);
             Assert.Equal(42.0, author.LastRequest!.CeilingSeconds, precision: 6);
@@ -108,7 +116,7 @@ public static class FeatureAdRenderService
             author.MediaIdToConfirm = 999;
             var spot = MakeSpot(id: 55);
 
-            await service.RenderAsync(spot, CancellationToken.None);
+            await service.RenderAsync(spot, LiveSettings(), CancellationToken.None);
 
             Assert.Equal(1, store.MarkReadyCalls);
             Assert.Equal(55, store.LastMarkReadySpotId);
@@ -133,7 +141,7 @@ public static class FeatureAdRenderService
             var (service, author, store, _, _, _) = Build();
             var spot = MakeSpot(voicePlan: """[{"tag":"ANNOUNCER","voiceId":"announcer_v","pace":1.2},{"tag":"VOICE1","voiceId":"other_v"}]""");
 
-            await service.RenderAsync(spot, CancellationToken.None);
+            await service.RenderAsync(spot, LiveSettings(), CancellationToken.None);
 
             Assert.Equal(0, store.MarkFailedCalls);
             Assert.NotNull(author.LastRequest);
@@ -161,7 +169,7 @@ public static class FeatureAdRenderService
         {
             var (service, author, store, _, _, _) = Build();
 
-            await service.RenderAsync(MakeSpot(voicePlan: null), CancellationToken.None);
+            await service.RenderAsync(MakeSpot(voicePlan: null), LiveSettings(), CancellationToken.None);
 
             Assert.Equal(0, store.MarkFailedCalls);
             Assert.NotNull(author.LastRequest);
@@ -179,7 +187,7 @@ public static class FeatureAdRenderService
             var (service, author, store, _, _, _) = Build();
             var spot = MakeSpot(voicePlan: """[{"voiceId":"some_voice"}]""");
 
-            await service.RenderAsync(spot, CancellationToken.None);
+            await service.RenderAsync(spot, LiveSettings(), CancellationToken.None);
 
             Assert.Equal(0, store.MarkFailedCalls);
             Assert.NotNull(author.LastRequest);
@@ -194,7 +202,7 @@ public static class FeatureAdRenderService
             var (service, author, store, _, _, _) = Build();
             var spot = MakeSpot(voicePlan: """[{"tag":"ANNOUNCER"}]""");
 
-            await service.RenderAsync(spot, CancellationToken.None);
+            await service.RenderAsync(spot, LiveSettings(), CancellationToken.None);
 
             Assert.Equal(0, store.MarkFailedCalls);
             Assert.NotNull(author.LastRequest);
@@ -215,7 +223,7 @@ public static class FeatureAdRenderService
             var (service, author, store, _, _, _) = Build();
             var spot = MakeSpot(id: 2, script: "not a valid script at all");
 
-            await service.RenderAsync(spot, CancellationToken.None);
+            await service.RenderAsync(spot, LiveSettings(), CancellationToken.None);
 
             Assert.Equal(1, store.MarkFailedCalls);
             Assert.Equal(2, store.LastMarkFailedSpotId);
@@ -229,7 +237,7 @@ public static class FeatureAdRenderService
             var (service, author, store, _, _, _) = Build();
             var spot = MakeSpot(id: 3, bedMediaId: 777); // never added to FakeAdminMediaLookup
 
-            await service.RenderAsync(spot, CancellationToken.None);
+            await service.RenderAsync(spot, LiveSettings(), CancellationToken.None);
 
             Assert.Equal(1, store.MarkFailedCalls);
             Assert.Equal(3, store.LastMarkFailedSpotId);
@@ -243,7 +251,7 @@ public static class FeatureAdRenderService
             var (service, author, store, _, _, _) = Build(seedAdsLibrary: false);
             var spot = MakeSpot(id: 4);
 
-            await service.RenderAsync(spot, CancellationToken.None);
+            await service.RenderAsync(spot, LiveSettings(), CancellationToken.None);
 
             Assert.Equal(1, store.MarkFailedCalls);
             Assert.Equal(4, store.LastMarkFailedSpotId);
@@ -261,7 +269,7 @@ public static class FeatureAdRenderService
             author.Result = CastSegmentAuthorResult.Failure(CastSegmentFailureReason.ConfirmationFailed, "confirmation declined");
             var spot = MakeSpot(id: 9);
 
-            await service.RenderAsync(spot, CancellationToken.None);
+            await service.RenderAsync(spot, LiveSettings(), CancellationToken.None);
 
             Assert.Equal(1, store.MarkFailedCalls);
             Assert.Equal(9, store.LastMarkFailedSpotId);
@@ -291,7 +299,7 @@ public static class FeatureAdRenderService
             store.MarkFailedResult = false;
             var spot = MakeSpot(id: 77);
 
-            var outcome = await service.RenderAsync(spot, CancellationToken.None);
+            var outcome = await service.RenderAsync(spot, LiveSettings(), CancellationToken.None);
 
             Assert.Equal(AdRenderOutcome.ClaimConflict, outcome);
             // Attempted, but reported "no longer Rendering" — no orphan row: the store's own guarded

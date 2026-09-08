@@ -230,6 +230,20 @@ public sealed partial class SettingValidator
     internal const int AdsAntiRepeatWindowMin = 0;
     internal const int AdsAntiRepeatWindowMax = 50;
 
+    // Station:Ads:BedFadeMs (SPEC F170.1, STORY-405, PLAN T417) — the offline ad mixer's
+    // background-music fade duration, milliseconds. 100 floor guards against an inaudible/clicky
+    // fade; 1000 ceiling guards against a fade so long it swallows the whole spot (typical spot
+    // length is single-digit seconds).
+    internal const int AdsBedFadeMsMin = 100;
+    internal const int AdsBedFadeMsMax = 1000;
+
+    // Station:Ads:CastVoices (SPEC F170.1, STORY-405, PLAN T417) — a comma-separated list of Kokoro
+    // voice ids, F53.1's fat-finger entry-count ceiling shape (the Crosstalk:Shows precedent above):
+    // at least one voice to cast from (enforced by IsValidCastVoices' own IsNullOrWhiteSpace guard,
+    // no separate MinCount needed — Split(',') on a non-blank string can never return zero parts), at
+    // most 16 — no real ad cast needs more voices than that.
+    internal const int AdsCastVoicesMaxCount = 16;
+
     // Maps each allowlisted key to a per-key (range + type) validator. An instance method (not a
     // static field) purely because the Station:Theme entry below closes over the constructor's own
     // themeCatalog — every other entry is a plain static delegate exactly as before.
@@ -497,6 +511,13 @@ public sealed partial class SettingValidator
             ["Station:Ads:AutoApprove"] = IsBool,
             ["Station:Ads:AntiRepeatWindow"] =
                 v => IsIntInRange(v, AdsAntiRepeatWindowMin, AdsAntiRepeatWindowMax),
+
+            // Station:Ads:AnnouncerVoice/CastVoices/BedFadeMs (SPEC F170.1, STORY-405, PLAN T417) —
+            // the cast/bed half of the settings split; see this class's own AdsBedFadeMsMin/Max and
+            // AdsCastVoicesMaxCount remarks above.
+            ["Station:Ads:AnnouncerVoice"] = IsValidAnnouncerVoice,
+            ["Station:Ads:CastVoices"] = IsValidCastVoices,
+            ["Station:Ads:BedFadeMs"] = v => IsIntInRange(v, AdsBedFadeMsMin, AdsBedFadeMsMax),
         };
 
     // ── Per-key validation ─────────────────────────────────────────────────────────────────────
@@ -872,6 +893,56 @@ public sealed partial class SettingValidator
     [GeneratedRegex("\\A[a-z0-9]+(-[a-z0-9]+)*\\z")]
     private static partial Regex ShowSlugFormat();
 
+    // Mirrors db/45-jingle-voice-pack-migration.sh's own station.voice_pack_voice.voice_id CHECK
+    // (`voice_id ~ '^[a-z0-9][a-z0-9_-]*$'`) character class exactly — a voice id an operator names
+    // here must be a shape kokoro (or an installed voice pack) could ever actually serve. \A/\z, NOT
+    // ^/$, the same ShowSlugFormat rationale just above (.NET regex `$` matches immediately before a
+    // trailing '\n', not only at the true end of input) — the Postgres CHECK's own ^/$ anchors stay
+    // exactly as written there; only the C#-side anchor syntax differs, not the accepted characters.
+    // internal (not private): PLAN T413's voice-pack install route reuses this exact regex rather
+    // than hand-duplicating it, then layers its own explicit Length <= 64 install-time check on
+    // top — the shape stays identical here, no length cap, matching db/45's own CHECK.
+    [GeneratedRegex("\\A[a-z0-9][a-z0-9_-]*\\z")]
+    internal static partial Regex VoiceIdFormat();
+
+    /// <summary>
+    /// Validates <c>Station:Ads:AnnouncerVoice</c> (SPEC F170.1, PLAN T417): empty (the default,
+    /// "use the station's own voice") or exactly one <see cref="VoiceIdFormat"/>-shaped Kokoro voice
+    /// id — no comma list, unlike <see cref="IsValidCastVoices"/> just below.
+    /// </summary>
+    static bool IsValidAnnouncerVoice(string v) =>
+        string.IsNullOrEmpty(v) || VoiceIdFormat().IsMatch(v);
+
+    /// <summary>
+    /// Validates <c>Station:Ads:CastVoices</c> (SPEC F170.1, PLAN T417): one to <see
+    /// cref="AdsCastVoicesMaxCount"/> comma-separated, <see cref="VoiceIdFormat"/>-shaped, unique
+    /// Kokoro voice ids. Unlike <see cref="IsValidCrosstalkShowsArray"/>'s JSON array, this is a
+    /// plain comma string (F170.1's own wire shape) — no surrounding whitespace is tolerated
+    /// silently: a padded entry (" af_nova") never matches <see cref="VoiceIdFormat"/> and the whole
+    /// value is refused with a message stating the expected shape, rather than trimming and
+    /// accepting it. Blank is refused — unlike AnnouncerVoice, an ad needs at least one cast voice to
+    /// draw from. The split carries an explicit <see cref="AdsCastVoicesMaxCount"/>+1 limit so a
+    /// pathologically long value refuses on count without ever materialising an unbounded array —
+    /// once the limit is hit, the final chunk holds whatever comma-joined remainder is left
+    /// unsplit, which is irrelevant because the length check below already refuses it.
+    /// </summary>
+    static bool IsValidCastVoices(string v)
+    {
+        if (string.IsNullOrWhiteSpace(v)) return false;
+
+        var parts = v.Split(',', AdsCastVoicesMaxCount + 1);
+        if (parts.Length > AdsCastVoicesMaxCount) return false;
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var part in parts)
+        {
+            if (!VoiceIdFormat().IsMatch(part)) return false;
+            if (!seen.Add(part)) return false;
+        }
+
+        return true;
+    }
+
     /// <summary>
     /// Validates <c>Crosstalk:Shows</c> (SPEC F127.8, PLAN T285 review F4): a JSON array of unique
     /// show SLUGS (lowercase-kebab, <see cref="ShowSlugFormat"/>), at most
@@ -1146,6 +1217,17 @@ public sealed partial class SettingValidator
             => $"Value '{value}' is not valid for '{key}'. Must be a boolean (true/false).",
         var k when k.Equals("Station:Ads:AntiRepeatWindow", StringComparison.OrdinalIgnoreCase)
             => $"Value '{value}' is not valid for '{key}'. Must be an integer between {AdsAntiRepeatWindowMin} and {AdsAntiRepeatWindowMax} (spots).",
+        var k when k.Equals("Station:Ads:AnnouncerVoice", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be empty (use the station's own " +
+               "voice), or a single Kokoro voice id (lowercase letters, digits, underscores, " +
+               "hyphens — e.g. af_nova).",
+        var k when k.Equals("Station:Ads:CastVoices", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be one to " +
+               $"{AdsCastVoicesMaxCount} comma-separated Kokoro voice ids (lowercase letters, " +
+               "digits, underscores, hyphens — e.g. af_nova,am_michael), each unique, no " +
+               "surrounding spaces.",
+        var k when k.Equals("Station:Ads:BedFadeMs", StringComparison.OrdinalIgnoreCase)
+            => $"Value '{value}' is not valid for '{key}'. Must be an integer between {AdsBedFadeMsMin} and {AdsBedFadeMsMax} (milliseconds).",
         _ => $"Value '{value}' is not valid for '{key}'.",
     };
 }

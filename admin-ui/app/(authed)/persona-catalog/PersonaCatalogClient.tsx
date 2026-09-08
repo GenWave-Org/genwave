@@ -26,9 +26,13 @@ import { formatFontByteTotal } from "./font-format";
 import { prettifySlug } from "./format-slug";
 import { IconDetailPanel } from "./IconDetailPanel";
 import { IconInstallModal, type IconInstallResult } from "./IconInstallModal";
+import { JinglePackDetailPanel } from "./JinglePackDetailPanel";
+import { JinglePackInstallModal, type JinglePackInstallResult } from "./JinglePackInstallModal";
 import { ShowCardReviewModal, type ShowCardReviewImportResult } from "./ShowCardReviewModal";
 import { ThemeDetailPreview } from "./ThemeDetailPreview";
 import { ThemeInstallModal, type ThemeInstallResult } from "./ThemeInstallModal";
+import { VoicePackDetailPanel } from "./VoicePackDetailPanel";
+import { VoicePackInstallModal, type VoicePackInstallResult } from "./VoicePackInstallModal";
 import type {
   CatalogEntryDetailDto,
   CatalogEntryKind,
@@ -51,6 +55,8 @@ const KIND_TAB_NOUN: Record<CatalogEntryKind, string> = {
   avatar: "avatar packs",
   icon: "icons",
   "ad-pack": "ad packs",
+  "voice-pack": "voice packs",
+  "jingle-pack": "jingle packs",
 };
 
 interface PersonaCatalogClientProps {
@@ -114,6 +120,21 @@ interface PersonaCatalogClientProps {
    * the same posture every other installed-slugs prop on this component carries.
    */
   installedIconSlugs?: string[];
+  /**
+   * Every already-installed voice pack's slug (STORY-397, PLAN T418), per `GET /api/voice-packs`
+   * (R1's own new listing route). Unlike `installedAvatarSlugs`/`installedIconSlugs` above, this
+   * is read directly on every render rather than seeded into a locally-flipped `Set` — a successful
+   * install OR uninstall (`VoicePackDetailPanel`'s own job) calls `router.refresh()` instead, so the
+   * next server render's `GET /api/voice-packs` read is always this prop's own source of truth.
+   * Defaults to `[]` — fail closed, the same posture every other installed-slugs prop carries.
+   */
+  installedVoicePackSlugs?: string[];
+  /**
+   * Every already-installed jingle pack's slug (STORY-397, PLAN T418), per `GET /api/jingle-packs`
+   * — mirrors `installedVoicePackSlugs`'s own shape and "read fresh via `router.refresh()`, never a
+   * local flip" posture exactly, one endpoint over. Defaults to `[]`.
+   */
+  installedJinglePackSlugs?: string[];
   /** Test-only injection point for the theme provenance line's `formatDateStamp` call (gh-#375);
    * production omits this and gets the browser's local zone — the same SettingsForm/WardrobeClient/
    * PersonasClient idiom, not a bespoke one. */
@@ -176,6 +197,8 @@ export function PersonaCatalogClient({
   hiredPersonaSlugs = [],
   installedAvatarSlugs = [],
   installedIconSlugs = [],
+  installedVoicePackSlugs = [],
+  installedJinglePackSlugs = [],
   timeZone,
   activeKind = "persona",
 }: PersonaCatalogClientProps): ReactNode {
@@ -196,6 +219,8 @@ export function PersonaCatalogClient({
   const [installingAvatar, setInstallingAvatar] = useState(false);
   const [installingIcon, setInstallingIcon] = useState(false);
   const [installingAdPack, setInstallingAdPack] = useState(false);
+  const [installingVoicePack, setInstallingVoicePack] = useState(false);
+  const [installingJinglePack, setInstallingJinglePack] = useState(false);
   // Which show entry (if any) has its combined detail/review modal open (PLAN T255) — a show never
   // routes through `detail`/`loadDetail` at all (see `ShowCardReviewModal`'s own remarks for why),
   // so this is its own, independent piece of state.
@@ -238,6 +263,12 @@ export function PersonaCatalogClient({
   // soft offer below navigates away (`handleImported`'s own `router.push("/personas")`) before a
   // second offer in the same session could ever matter — see `handleShowImported`'s own remarks.
   const hiredPersonaSlugSet = useMemo(() => new Set(hiredPersonaSlugs), [hiredPersonaSlugs]);
+  // Read fresh from the server-fetched prop every render, never locally flipped (see
+  // `installedVoicePackSlugs`'s/`installedJinglePackSlugs`'s own remarks on `PersonaCatalogClientProps`
+  // for why — a successful install/uninstall calls `router.refresh()` instead of a local `Set`
+  // mutation the way `installedIconPackSlugs` above does).
+  const installedVoicePackSlugSet = useMemo(() => new Set(installedVoicePackSlugs), [installedVoicePackSlugs]);
+  const installedJinglePackSlugSet = useMemo(() => new Set(installedJinglePackSlugs), [installedJinglePackSlugs]);
 
   // Request token (T102 review, HIGH): loadDetail's fetch is not the only thing that can change
   // `detail` between when a request starts and when it resolves — the operator can also collapse
@@ -405,6 +436,27 @@ export function PersonaCatalogClient({
   }
 
   /**
+   * STORY-397's install success path — unlike every kind above, this closes the modal, toasts, AND
+   * calls `router.refresh()` instead of flipping a local `Set` (see `installedVoicePackSlugs`'s own
+   * remarks on `PersonaCatalogClientProps`): the next server render's `GET /api/voice-packs` read
+   * becomes this component's own "Installed" source of truth, the same mechanism
+   * `wardrobe/UninstallPackButton.tsx` already uses for its own 204 path.
+   */
+  function handleVoicePackInstalled(result: VoicePackInstallResult): void {
+    setInstallingVoicePack(false);
+    toast.success(`"${clampPackDisplayText(result.packName)}" installed (${result.voiceIds.join(", ")}).`);
+    router.refresh();
+  }
+
+  /** Mirrors `handleVoicePackInstalled`'s own shape exactly, the jingle-pack sibling. */
+  function handleJinglePackInstalled(result: JinglePackInstallResult): void {
+    setInstallingJinglePack(false);
+    const assetWord = `${result.assetCount} asset${result.assetCount === 1 ? "" : "s"}`;
+    toast.success(`"${clampPackDisplayText(result.packName)}" installed (${assetWord}).`);
+    router.refresh();
+  }
+
+  /**
    * A show entry's OPTIONAL `suggestedPersona` (SPEC F118.3, PLAN T255) is on the shelf when the
    * ALREADY-fetched index carries a persona entry under that exact slug — never a further catalog
    * fetch just to answer this. An absent/unknown suggestion (no such persona entry at all) reads
@@ -556,6 +608,28 @@ export function PersonaCatalogClient({
             onSelect={() => handleCardClick(entry.slug)}
           />
         );
+      case "voice-pack":
+        return (
+          <KindMarkerShelfCard
+            key={entry.slug}
+            entry={entry}
+            marker="Voice pack"
+            installed={installedVoicePackSlugSet.has(entry.slug)}
+            selected={entry.slug === selectedSlug}
+            onSelect={() => handleCardClick(entry.slug)}
+          />
+        );
+      case "jingle-pack":
+        return (
+          <KindMarkerShelfCard
+            key={entry.slug}
+            entry={entry}
+            marker="Jingle pack"
+            installed={installedJinglePackSlugSet.has(entry.slug)}
+            selected={entry.slug === selectedSlug}
+            onSelect={() => handleCardClick(entry.slug)}
+          />
+        );
       case "show":
         // Deliberately NOT `handleCardClick`/`detail` (PLAN T255) — a show card opens its own
         // combined detail-and-review modal directly (see `ShowCardReviewModal`'s own remarks), so
@@ -641,6 +715,24 @@ export function PersonaCatalogClient({
             slug={loaded.slug}
             detail={loaded.detail}
             onInstallClick={() => setInstallingAdPack(true)}
+          />
+        );
+      case "voice-pack":
+        return (
+          <VoicePackDetailPanel
+            slug={loaded.slug}
+            detail={loaded.detail}
+            isInstalled={installedVoicePackSlugSet.has(loaded.slug)}
+            onInstallClick={() => setInstallingVoicePack(true)}
+          />
+        );
+      case "jingle-pack":
+        return (
+          <JinglePackDetailPanel
+            slug={loaded.slug}
+            detail={loaded.detail}
+            isInstalled={installedJinglePackSlugSet.has(loaded.slug)}
+            onInstallClick={() => setInstallingJinglePack(true)}
           />
         );
       default:
@@ -761,6 +853,28 @@ export function PersonaCatalogClient({
         />
       )}
 
+      {/* Cancel = no-op (mirrors the ad-pack block immediately above, the SAME "no request body"
+          shape — VoicePackInstallModal posts no body of its own either). Reachable only once
+          `VoicePackDetailPanel`'s own honest-preview gate has already rendered the Install button
+          (F103.5/AC4) — this modal never opens on an unproven preview. */}
+      {installingVoicePack && detail.kind === "loaded" && selectedEntry?.kind === "voice-pack" && (
+        <VoicePackInstallModal
+          slug={detail.slug}
+          onCancel={() => setInstallingVoicePack(false)}
+          onInstalled={handleVoicePackInstalled}
+        />
+      )}
+
+      {/* Cancel = no-op (mirrors the voice-pack block immediately above, the SAME "no request body"
+          shape — JinglePackInstallModal posts no body of its own either). */}
+      {installingJinglePack && detail.kind === "loaded" && selectedEntry?.kind === "jingle-pack" && (
+        <JinglePackInstallModal
+          slug={detail.slug}
+          onCancel={() => setInstallingJinglePack(false)}
+          onInstalled={handleJinglePackInstalled}
+        />
+      )}
+
       {/* Cancel = no-op (mirrors the theme/font blocks above): closing this modal by any path just
           resets `reviewingShowSlug`, never touching the network — see ShowCardReviewModal's own
           remarks. Independent of `detail`/`selectedEntry` entirely (PLAN T255) — this modal owns
@@ -862,6 +976,10 @@ function detailSectionAriaLabel(kind: CatalogEntryKind | undefined): string {
       return "Icon pack details";
     case "ad-pack":
       return "Ad pack details";
+    case "voice-pack":
+      return "Voice pack details";
+    case "jingle-pack":
+      return "Jingle pack details";
     case "persona":
     default:
       return "Persona details";
@@ -1112,15 +1230,24 @@ function FontShelfCard({
  * `marker` line, and `bestFor` chips — all painted straight off the entry's already-fetched index
  * row, no manifest or asset fetch, ever, while browsing (the SAME zero-cost-browse contract every
  * kind's shelf card holds to).
+ *
+ * `installed` (PLAN T418) is optional and defaults to `undefined`-falsy: only the voice-pack and
+ * jingle-pack call sites pass it (sourced from each kind's own `GET /api/{voice,jingle}-packs`
+ * listing, `PersonaCatalogClient`'s `installedVoicePackSlugSet`/`installedJinglePackSlugSet`) —
+ * Avatar/Icon/Ad-pack have no listing endpoint at all (T413's own scope), so they never pass this
+ * prop and never show the chip. Mirrors `ShowShelfCard`'s own `imported` → `<Chip>Imported</Chip>`
+ * precedent immediately below.
  */
 function KindMarkerShelfCard({
   entry,
   marker,
+  installed,
   selected,
   onSelect,
 }: {
   entry: CatalogShelfEntryDto;
   marker: string;
+  installed?: boolean;
   selected: boolean;
   onSelect: () => void;
 }): ReactNode {
@@ -1140,6 +1267,7 @@ function KindMarkerShelfCard({
           {entry.audience === "mature" && <MatureBadge />}
         </div>
         <p className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-accent-2">{marker}</p>
+        {installed === true && <Chip>Installed</Chip>}
         <BestForChips items={entry.bestFor} />
       </button>
     </li>

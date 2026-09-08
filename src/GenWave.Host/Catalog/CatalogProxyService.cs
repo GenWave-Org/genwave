@@ -139,6 +139,14 @@ public sealed class CatalogProxyService(
     /// low-traffic specimen-preview surface (SPEC F104.4/F128.4) with headroom well beyond any one
     /// real pack's item count.
     /// </para>
+    ///
+    /// <para>
+    /// PLAN T414 does NOT extend this bound to jingle-pack assets: at their own 5 MiB ceiling
+    /// (<see cref="CatalogIndexValidator.MaxJingleAssetBytes"/>), 64 slots × 5 MiB would be 320 MiB —
+    /// far past what this admin-only surface's own bound is meant to hold. A jingle asset therefore
+    /// never occupies a <see cref="cachedAssets"/> slot at all — <see cref="GetAssetUncachedAsync"/>
+    /// fetches it fresh, one asset at a time, every call.
+    /// </para>
     /// </summary>
     const int MaxCachedAssets = 64;
 
@@ -332,6 +340,53 @@ public sealed class CatalogProxyService(
                 AssetFetchOutcome.NetworkFailure => ServeStaleAssetOrUnreachable(assetRef.Path),
                 // AssetFetchOutcome's constructor is private (closed hierarchy) — this arm can never
                 // actually run; kept for the same Roslyn-exhaustiveness reason as GetEntryAsync's own
+                // discard arm above.
+                _ => throw new UnreachableException($"Unhandled {nameof(AssetFetchOutcome)} case."),
+            };
+        }
+        finally
+        {
+            singleFlight.Release();
+        }
+    }
+
+    /// <summary>
+    /// The UNCACHED sibling of <see cref="GetAssetAsync"/> (SPEC F165.1, PLAN T414) — a jingle-pack
+    /// asset install fetches through this method instead, one asset at a time, so a 5 MiB jingle file
+    /// never occupies a <see cref="cachedAssets"/> slot (<see cref="MaxCachedAssets"/>'s own remarks:
+    /// 64 slots × 5 MiB would be 320 MiB, far past this admin-only surface's own bound). Every other
+    /// step is identical to <see cref="GetAssetAsync"/> — same index resolution, same
+    /// <see cref="TryResolveAsset"/>/<see cref="FetchAndVerifyAssetAsync"/> plumbing, same
+    /// <see cref="singleFlight"/> gate (still held for the DURATION of one fetch, never across a
+    /// multi-asset install loop — a caller installing several jingle assets calls this once per
+    /// asset) — except <see cref="AssetFetchOutcome.Ok"/> is wrapped directly into a
+    /// <see cref="CatalogAssetFetchResult.Ok"/> rather than routed through
+    /// <see cref="CacheAndReturnAsset"/>, and <see cref="AssetFetchOutcome.NetworkFailure"/> maps
+    /// straight to <see cref="CatalogAssetFetchResult.Unreachable"/> rather than
+    /// <see cref="ServeStaleAssetOrUnreachable"/> — there is never anything cached under this path for
+    /// a stale-serve fallback to find.
+    /// </summary>
+    public async Task<CatalogAssetFetchResult> GetAssetUncachedAsync(string slug, string file, CancellationToken ct)
+    {
+        var indexResult = await GetIndexAsync(ct);
+        if (indexResult is not CatalogIndexFetchResult.Ok)
+            return new CatalogAssetFetchResult.Unreachable();
+
+        if (!TryResolveAsset(slug, file, out var assetRef, out var directory, out var kind))
+            return new CatalogAssetFetchResult.NotFound();
+
+        await singleFlight.WaitAsync(ct);
+        try
+        {
+            var outcome = await FetchAndVerifyAssetAsync(directory, assetRef, kind, ct);
+            return outcome switch
+            {
+                AssetFetchOutcome.Ok ok => new CatalogAssetFetchResult.Ok(ok.Bytes, timeProvider.GetUtcNow()),
+                AssetFetchOutcome.HashMismatch mismatch => WithheldAssetHashMismatch(slug, assetRef, mismatch),
+                AssetFetchOutcome.Oversize => WithheldAssetOversize(slug, assetRef),
+                AssetFetchOutcome.NetworkFailure => new CatalogAssetFetchResult.Unreachable(),
+                // AssetFetchOutcome's constructor is private (closed hierarchy) — this arm can never
+                // actually run; kept for the same Roslyn-exhaustiveness reason as GetAssetAsync's own
                 // discard arm above.
                 _ => throw new UnreachableException($"Unhandled {nameof(AssetFetchOutcome)} case."),
             };
@@ -766,7 +821,15 @@ public sealed class CatalogProxyService(
     /// pinned to <see cref="MaxAssetBytes"/> (256 KiB, unchanged); every PNG-carrying kind — an
     /// installed avatar-pack item AND a persona's own sidecar face, both declared under the SAME
     /// <see cref="CatalogIndexValidator.MaxPngAssetBytes"/> ceiling — fetches under that identical 512
-    /// KiB number instead. A kind that carries no assets at all (Theme/Show/Icon) never reaches this
+    /// KiB number instead. A voice pack's own <c>.pt</c>/preview assets (PLAN T413) fetch under
+    /// <see cref="CatalogIndexValidator.MaxVoiceFileBytes"/> (1 MiB, SPEC F164.5) — comfortably above
+    /// the ~524 KiB stock kokoro-fastapi <c>.pt</c> files measure, and above <see cref="MaxAssetBytes"/>'s
+    /// own font-sized 256 KiB, which would otherwise withhold every voice file. A jingle pack's own
+    /// audio assets (PLAN T414, fetched via <see cref="GetAssetUncachedAsync"/> instead of
+    /// <see cref="GetAssetAsync"/>) fetch under <see cref="CatalogIndexValidator.MaxJingleAssetBytes"/>
+    /// (5 MiB, SPEC F165.1) — WITHOUT this arm, the fallback below (<see cref="MaxAssetBytes"/>, 256
+    /// KiB) would truncate every jingle asset over that font-sized ceiling before its own hash could
+    /// even be checked. A kind that carries no assets at all (Theme/Show/Icon) never reaches this
     /// method: <see cref="TryResolveAsset"/> already answers <see langword="false"/> before
     /// <see cref="GetAssetAsync"/> ever calls this, because <see cref="CatalogIndexValidator"/> never
     /// builds one of those kinds' entries with a populated <see cref="CatalogEntrySummary.Assets"/> —
@@ -775,6 +838,8 @@ public sealed class CatalogProxyService(
     static int AssetFetchCapFor(CatalogEntryKind kind) => kind switch
     {
         CatalogEntryKind.Avatar or CatalogEntryKind.Persona => CatalogIndexValidator.MaxPngAssetBytes,
+        CatalogEntryKind.VoicePack => CatalogIndexValidator.MaxVoiceFileBytes,
+        CatalogEntryKind.JinglePack => CatalogIndexValidator.MaxJingleAssetBytes,
         _ => MaxAssetBytes,
     };
 

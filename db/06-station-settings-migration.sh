@@ -577,4 +577,69 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'
 	  -- rows — see db/42's own header remarks.
 	  CONSTRAINT ad_brief_pack_slug_brand_key UNIQUE NULLS NOT DISTINCT (pack_slug, brand)
 	);
+
+	-- Jingle packs + voice packs (SPEC F164-F170, gh-#709, STORY-395..405, PLAN T410). Same shape as
+	-- station.font_pack immediately above (id bigint identity, slug UNIQUE, definition jsonb,
+	-- imported_from NOT NULL, imported_at/created_at) -- a pack has no authored-in-place path, the
+	-- catalog install route is the only door it ever arrives through, so imported_from is always
+	-- known. `id bigint GENERATED ALWAYS AS IDENTITY` (not serial) matches the newer station-schema
+	-- precedent (station.ad_spot/station.ad_brief immediately above), the house rule of matching the
+	-- nearest sibling over a fixed style. Fresh-init mirror of
+	-- db/45-jingle-voice-pack-migration.sh's own station-schema block -- see that script's own header
+	-- for the fuller design rationale and its ARCHITECTURE.md citation.
+	--
+	-- Both packs' `slug` and voice_pack_voice's `voice_id` carry a defense-in-depth CHECK. The
+	-- jingle-pack `slug` and every `voice_id` genuinely become filesystem path segments at install:
+	-- T414 writes `/authored/jingle-packs/{slug}/{file}`, and T413 writes each voice pack's `.pt`
+	-- file flat as `<Packs:VoicesRoot>/{voiceId}.pt` (T412's flat-layout ruling -- `slug` never
+	-- becomes a path segment there; `voice_pack.slug`'s own CHECK is kept anyway for defense-in-depth
+	-- consistency with `jingle_pack.slug`). So the schema refuses a value that could ever read as
+	-- a path separator or traversal segment. The pattern is deliberately NO STRICTER than
+	-- CatalogInstallShell.SlugFormat's own app-side gate (`[a-z0-9]+(-[a-z0-9]+)*`, GenWave.Host) --
+	-- the DB must never reject a slug the app already accepted.
+	CREATE TABLE IF NOT EXISTS station.voice_pack (
+	  id            bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	  slug          text        NOT NULL UNIQUE CHECK (slug ~ '^[a-z0-9][a-z0-9-]*$'),
+	  engine        text        NOT NULL CHECK (engine IN ('kokoro')), -- widens additively at gh-#614
+	  definition    jsonb       NOT NULL,
+	  imported_from text        NOT NULL,
+	  imported_at   timestamptz NOT NULL DEFAULT now(),
+	  created_at    timestamptz NOT NULL DEFAULT now()
+	);
+
+	-- One row per voice a voice_pack ships (SPEC F164.1/F164.5). `pack_id bigint` matches
+	-- station.voice_pack.id's own type (a FK column must match its referenced column's type).
+	-- FK CASCADE: uninstalling a pack removes its own roster rows with it (F164.6). `file` is the
+	-- flat `<voiceId>.pt` name voice-pack install (T413) writes directly under `Packs:VoicesRoot`
+	-- (T412's flat-layout ruling -- never nested under the pack's own slug); kokoro's own
+	-- per-request rescan (SPEC F166.3) makes each new voice live with no restart.
+	CREATE TABLE IF NOT EXISTS station.voice_pack_voice (
+	  id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	  pack_id      bigint NOT NULL REFERENCES station.voice_pack(id) ON DELETE CASCADE,
+	  voice_id     text   NOT NULL CHECK (voice_id ~ '^[a-z0-9][a-z0-9_-]*$'), -- kokoro ids: af_nova, am_adam
+	  file         text   NOT NULL,
+	  gender_hint  text,
+	  age_hint     text,
+	  preview_sha  text
+	);
+
+	-- Collision fence (SPEC F166.4, enforced at install by PLAN T413): a voice_id may live in only
+	-- one installed pack at a time -- a duplicate would make kokoro serve whichever `.pt` its own
+	-- directory scan happened to see last, nondeterministic. Named to match ARCHITECTURE.md's own
+	-- DDL verbatim.
+	CREATE UNIQUE INDEX IF NOT EXISTS voice_pack_voice_voice_id_uk ON station.voice_pack_voice(voice_id);
+
+	-- Jingle-pack metadata (SPEC F165.1). Audio bytes live as library.media rows on the /authored
+	-- volume, NOT in Postgres -- there is deliberately no `_asset` table (see db/45's own header for
+	-- the rejected alternative). `definition` carries the manifest including each asset's `role` and,
+	-- for a CC-BY asset, its structured per-asset attribution object (SPEC F165.4), read back by the
+	-- F169.2 attributions endpoint (T419).
+	CREATE TABLE IF NOT EXISTS station.jingle_pack (
+	  id            bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	  slug          text        NOT NULL UNIQUE CHECK (slug ~ '^[a-z0-9][a-z0-9-]*$'),
+	  definition    jsonb       NOT NULL,
+	  imported_from text        NOT NULL,
+	  imported_at   timestamptz NOT NULL DEFAULT now(),
+	  created_at    timestamptz NOT NULL DEFAULT now()
+	);
 	SQL

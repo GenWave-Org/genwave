@@ -39,6 +39,12 @@ using GenWave.Core.Domain;
 /// <see cref="Bed"/> is <see langword="null"/>.</param>
 /// <param name="BedPadSeconds">Lead-in/tail-out padding around the cast. Ignored when
 /// <see cref="Bed"/> is <see langword="null"/>.</param>
+/// <param name="BedFadeSeconds">SPEC F168.4; STORY-403; PLAN T416 — how long, in seconds, the bed
+/// fades to silence across the render's trailing tail (<c>Station:Ads:BedFadeMs</c>, converted to
+/// seconds by the one caller that varies it — <see cref="GenWave.Ads.AdRenderService"/>, plain text
+/// not a <c>cref</c>: GenWave.Tts must never reference GenWave.Ads). Zero (the default) means no
+/// fade — every existing caller of this record, including this project's own tests, keeps compiling
+/// and behaving unchanged. Ignored when <see cref="Bed"/> is <see langword="null"/>.</param>
 public sealed record CastAssemblyRequest(
     IReadOnlyList<CastLine> Lines,
     IReadOnlyList<CastMember> Cast,
@@ -47,4 +53,5 @@ public sealed record CastAssemblyRequest(
     string OutputDirectory,
     BedSpec? Bed = null,
     double BedDuckDb = 0.0,
-    double BedPadSeconds = 0.0);
+    double BedPadSeconds = 0.0,
+    double BedFadeSeconds = 0.0);
