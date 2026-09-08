@@ -216,6 +216,49 @@ describe("Feature: voice-pack install/uninstall verbs (SPEC F164, STORY-397, PLA
     });
   });
 
+  describe("Scenario: a 400 not_supported_engine refusal leaves the shelf on Install (STORY-396 AC4)", () => {
+    it("never refreshes, and closing the dialog shows the SAME Install button, never Installed/Uninstall", async () => {
+      const fetchMock = jest.fn<typeof fetch>().mockImplementation(async (input, init) => {
+        const url = String(input);
+        if (url === VOICE_ENTRY_URL) return makeJsonResponse(200, VOICE_DETAIL);
+        if (url === VOICE_ASSET_URL) return makeAssetResponse();
+        if (url === VOICE_INSTALL_URL && (init?.method ?? "GET") === "POST") {
+          return makeJsonResponse(400, {
+            title: "This station cannot install this voice pack.",
+            type: "not_supported_engine",
+            detail: 'Pack "moonlit-narrators" declares engine "kokoro", but this station\'s primary voice engine is "piper".',
+          });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }) as unknown as jest.MockedFunction<typeof fetch>;
+      global.fetch = fetchMock;
+
+      await openMoonlitNarratorsWithPlayablePreview();
+      fireEvent.click(screen.getByRole("button", { name: "Install" }));
+      const dialog = within(await screen.findByRole("dialog"));
+
+      await act(async () => {
+        fireEvent.click(dialog.getByRole("button", { name: "Confirm install" }));
+        await Promise.resolve();
+      });
+
+      // Same title-first ProblemDetails posture the 409 case above already proves (R4 ruling
+      // applies to every VoicePackInstallModal failure regardless of status code) — never refreshes,
+      // so PersonaCatalogClient's installedVoicePackSlugSet is never asked to change.
+      expect(await screen.findAllByText("This station cannot install this voice pack.")).toHaveLength(2);
+      expect(refreshMock).not.toHaveBeenCalled();
+
+      // Then closing the dialog (AC4's own "no half-state") returns to the exact button the card
+      // started with — "Install", never a "Re-install"/"Installed" chip/"Uninstall" button a
+      // successful install would have produced.
+      fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Install" })).toBeInTheDocument();
+      expect(screen.queryByText("Installed")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Uninstall" })).not.toBeInTheDocument();
+    });
+  });
+
   describe("Scenario: uninstall confirms, then DELETEs on confirm", () => {
     it("204 toasts success and calls router.refresh()", async () => {
       const fetchMock = jest.fn<typeof fetch>().mockImplementation(async (input, init) => {

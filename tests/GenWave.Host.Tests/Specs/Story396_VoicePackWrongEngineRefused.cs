@@ -23,6 +23,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using GenWave.Core.Abstractions;
+using GenWave.Host.Api;
 using GenWave.Host.Tests.Fakes;
 
 namespace GenWave.Host.Tests.Specs;
@@ -154,11 +155,51 @@ public static class FeatureVoicePackForWrongEngineIsRefusedBeforeBytesHitDisk
         }
     }
 
+    /// <summary>
+    /// STORY-396 AC4 — "the shelf entry is unchanged": <c>Given the refused install, When the shelf
+    /// refreshes, Then the pack still appears with the "install" button (no half-state)</c>. The
+    /// shelf (admin-ui's <c>PersonaCatalogClient</c>, PLAN T418) decides Install-vs-Installed off
+    /// <c>GET /api/voice-packs</c>'s own <c>installedVoicePackSlugSet</c> — this controller's own
+    /// <see cref="VoicePackController.List"/>. The fact below proves the SERVER half of that
+    /// contract (SPEC F164.2): a refusal leaves that listing exactly as it found it. The UI half —
+    /// that a refusal never even asks the shelf to re-read it, so it keeps rendering "Install" — is
+    /// the jest spec's own claim (<c>voice-jingle-pack-shelf-install.spec.tsx</c>).
+    /// </summary>
     public sealed class ScenarioShelfEntryUnchanged
     {
         [Fact]
-        public void TheShelfStillOffersTheInstallButtonAfterRefusal()
-            => Assert.Fail("pending: T418 — AC4 (no half-install state on the shelf)");
+        public async Task TheShelfStillOffersTheInstallButtonAfterRefusal()
+        {
+            // Given ONE unrelated pack already installed — seeded straight through the store,
+            // Story395's own ScenarioTheInstalledPacksListing idiom — so the before/after comparison
+            // below is a real equality over a non-empty listing, not two empty arrays matching by
+            // coincidence, plus the shelf's own pre-attempt read of that listing (GET
+            // /api/voice-packs, the ONE input installedVoicePackSlugSet.has(slug) depends on),
+            const string otherSlug = "other-already-installed-pack";
+            var store = new FakeVoicePackStore();
+            await store.UpsertAsync(otherSlug, "kokoro", "{}", otherSlug, [], CancellationToken.None);
+            await using var factory = new VoicePackEngineWebFactory(store, piperPrimaryEndpoint: "http://piper:5001");
+            var client = await VoicePackEngineWebFactory.LoggedInClientAsync(factory);
+            var before = await client.GetAsync("/api/voice-packs");
+            var beforeSummaries = await before.Content.ReadFromJsonAsync<InstalledPackSummaryDto[]>() ?? [];
+            Assert.Single(beforeSummaries, summary => summary.Slug == otherSlug);
+
+            // When install is refused (400 not_supported_engine, the piper-only station against the
+            // same kokoro pack ScenarioMismatchedEngineRefuses already proves 400s),
+            var install = await client.PostAsync($"/api/voice-packs/{VoicePackEngineFixtures.Slug}/install", null);
+            Assert.Equal(HttpStatusCode.BadRequest, install.StatusCode);
+
+            var after = await client.GetAsync("/api/voice-packs");
+            var afterSummaries = await after.Content.ReadFromJsonAsync<InstalledPackSummaryDto[]>() ?? [];
+
+            // Then the listing this button reads is unchanged — the unrelated pack is still the ONLY
+            // row, the refused slug never having joined it — so installedVoicePackSlugSet.has(slug)
+            // is false both times and the card keeps rendering "Install", never a half-installed
+            // "Installed"/"Uninstall" state.
+            Assert.Equal(HttpStatusCode.OK, after.StatusCode);
+            Assert.Equal(beforeSummaries, afterSummaries);
+            Assert.DoesNotContain(afterSummaries, summary => summary.Slug == VoicePackEngineFixtures.Slug);
+        }
     }
 
     // ---------------------------------------------------------------------
