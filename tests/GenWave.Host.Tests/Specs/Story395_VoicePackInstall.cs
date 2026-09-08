@@ -1051,6 +1051,37 @@ public static class FeatureVoicePackInstallGoesLiveWithoutARestart
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
     }
+
+    // ---------------------------------------------------------------------
+    // ASSET CONTENT TYPE (T418 rider — GET /api/catalog/entries/{slug}/assets/{file} names the
+    // preview clip's real MIME type; see CatalogController.AssetContentType's own remarks for the
+    // full switch this fact pins one arm of).
+    // ---------------------------------------------------------------------
+
+    public sealed class ScenarioThePreviewAssetIsServedAsAudio
+    {
+        [Fact]
+        public async Task ThePreviewMp3ServesWithAudioMpegContentType()
+        {
+            // Given the catalog's own index naming this pack's real preview mp3 (no install
+            // needed first — the asset route resolves straight off the fetched/cached index, the
+            // same way ScenarioAssetsStreamThroughTheGuardedDoor's woff2 facts do for a font pack),
+            var store = new FakeVoicePackStore();
+            await using var factory = new VoicePackInstallWebFactory(store);
+            var client = await VoicePackInstallWebFactory.LoggedInClientAsync(factory);
+
+            // When the preview asset is fetched through the real production asset route,
+            var response = await client.GetAsync(
+                $"/api/catalog/entries/{VoicePackInstallFixtures.InstallSlug}/assets/{VoicePackInstallFixtures.InstallSlug}.preview.mp3");
+
+            // Then it serves 200 as audio/mpeg — not the generic binary fallback a browser would
+            // have to sniff around — with the exact hash-verified preview bytes.
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("audio/mpeg", response.Content.Headers.ContentType?.MediaType);
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            Assert.Equal(VoicePackInstallFixtures.PreviewBytes, bytes);
+        }
+    }
 }
 
 /// <summary>
@@ -1181,7 +1212,9 @@ file static class VoicePackInstallFixtures
     // (CatalogProxyService.FetchAndVerifyAssetAsync), so an undersized declared length would trip
     // "exceeded its size limit" first and this fixture would never reach the hash-mismatch path it
     // exists to prove. Only the pinned sha256 is wrong here — the declared size is honest.
-    static readonly byte[] PreviewBytes = Encoding.UTF8.GetBytes("fake-preview-bytes-for-story395");
+    // Public (T418 rider) — ScenarioThePreviewAssetIsServedAsAudio compares the real asset route's
+    // response body against these exact bytes.
+    public static readonly byte[] PreviewBytes = Encoding.UTF8.GetBytes("fake-preview-bytes-for-story395");
 
     static string ManifestJson(string slug, params string[] voiceIds) => $$"""
         { "packName": "Test Pack", "engine": "kokoro", "synthetic": true, "sourceRef": null,
