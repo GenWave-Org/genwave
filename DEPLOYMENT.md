@@ -732,6 +732,8 @@ Live settings (allowlisted, PUT-able through the settings API/UI, no `api` resta
 | `Ads__BedDuckDb` | -12.0 | -60.0–0.0 | Bed attenuation, in dB, relative to the voice in an offline ad mix |
 | `Ads__LibraryName` | `ads` | — | Display name of the seeded ads library `AdsLibrarySeeder` creates if absent at boot |
 | `Ads__RenderBudgetSeconds` | 180 | 10–1800 | Wall-clock budget the worker gives one render attempt before cancelling it |
+| `Ads__PreviewRetentionDays` | 7 | 1–90 | How many days a rendered sponsor preview is kept before the retention sweep deletes it |
+| `Ads__JobQueueCapacity` | 8 | 1–64 | How many queued render jobs the sponsor job queue holds before new requests are refused |
 
 | Key | Default | Range | What it bounds |
 |---|:---:|:---:|---|
@@ -739,7 +741,7 @@ Live settings (allowlisted, PUT-able through the settings API/UI, no `api` resta
 | `Station:Ads:TargetCount` | 12 | 0–100 | How many generated spots (llm/pack, `draft` through `ready`) the stock pass keeps in the pipeline; owner spots never count |
 | `Station:Ads:RefreshDays` | 30 | 1–365 | Age, in days, past which a `ready` spot is retired and re-drafted |
 | `Station:Ads:AutoApprove` | `false` | — | Whether a freshly drafted spot skips the operator approval step |
-| `Station:Ads:AntiRepeatWindow` | 5 | 0–50 | How many recently aired spots `LibraryAdSpotSource` excludes from its next pick |
+| `Station:Ads:AntiRepeatWindow` | 5 | 0–50 | How many recently aired sponsors `LibraryAdSpotSource` excludes from its next pick |
 | `Station:Ads:AnnouncerVoice` | `` (empty) | — | Kokoro voice id cast as an ad's announcer; empty uses the station's own voice (`Station:Voice`) |
 | `Station:Ads:CastVoices` | `af_nova,am_michael,bf_alice,am_onyx` | 1–16 ids | Comma-separated pool of Kokoro voice ids an ad may cast for its other speaking roles |
 | `Station:Ads:BedFadeMs` | 300 | 100–1000 | How long the background music takes to fade out at the end of a generated ad, as the voice ends, in milliseconds |

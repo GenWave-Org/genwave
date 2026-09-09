@@ -89,4 +89,23 @@ public sealed class AdsOptions
     /// </summary>
     [Range(10, 1800)]
     public int RenderBudgetSeconds { get; set; } = 180;
+
+    /// <summary>
+    /// How many days a rendered sponsor preview is kept before the retention sweep removes it
+    /// (SPEC F176.2, gh-#714, STORY-431). Default 7. Range 1-90 (SPEC F176.2's own explicit
+    /// bounds): T442's <c>AdSpotLifecycleGuardianService</c> reads this when it deletes previews
+    /// of ready/retired spots and those older than the window (<c>{Ads:LibraryRoot}/preview/</c>).
+    /// </summary>
+    [Range(1, 90)]
+    public int PreviewRetentionDays { get; set; } = 7;
+
+    /// <summary>
+    /// The bounded capacity of <c>AdSpotJobService</c>'s (T441) FIFO render-job <c>Channel</c> —
+    /// once full, a new enqueue is refused with 429 <c>ad_job_queue_full</c> (SPEC F174.2, F176.2,
+    /// gh-#714, STORY-431). Default 8. Range 1-64 (SPEC F176.2's own explicit bounds): a queue of
+    /// 1 still lets the one running job's own enqueue through; 64 is already far past any station
+    /// this single-worker job service could ever drain before the queue itself becomes the bottleneck.
+    /// </summary>
+    [Range(1, 64)]
+    public int JobQueueCapacity { get; set; } = 8;
 }

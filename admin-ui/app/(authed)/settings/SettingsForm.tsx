@@ -451,8 +451,8 @@ const FIELD_HELP_TEXT: Record<SettingsHelpKey, string> = {
     "When off (the default), a freshly generated spot waits in draft for the owner's approval " +
     "before it can ever air. When on, generation flows straight to approved.",
   "Station:Ads:AntiRepeatWindow":
-    "How many of the most recently aired spots are excluded from the next pick, so the same ad " +
-    "does not repeat back to back. Defaults to 5. Accepted range: 0–50.",
+    "How many of the most recently aired sponsors are excluded from the next ad pick, so the " +
+    "same sponsor does not come back to back. Defaults to 5. Accepted range: 0–50.",
   "Station:Ads:AnnouncerVoice":
     "The Kokoro voice cast as an ad's announcer. Empty (the default) uses the station's own " +
     "voice instead of a separate one. Accepted value: empty, or a single voice id (e.g. af_nova).",
