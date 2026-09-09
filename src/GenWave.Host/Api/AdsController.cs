@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -42,9 +41,9 @@ namespace GenWave.Host.Api;
 /// ready|draft|approved|failed — see <see cref="IAdSpotStore.RetireAsync"/>'s own remarks. Rendering
 /// stays undiscardable by construction; this controller adds no extra state check of its own, since
 /// the store's guarded <c>WHERE</c> already refuses (409) anything outside that set.</item>
-/// <item><b>If-Match validated BEFORE it reaches SQL.</b> <see cref="ResolveIfMatch"/> strips the
-/// weak-ETag wrapper (<c>MediaController.StripETagWrapper</c>'s own shape) then parses the token as an
-/// unsigned 32-bit integer — Postgres's own <c>xid</c> domain — BEFORE any store call: absent → 428
+/// <item><b>If-Match validated BEFORE it reaches SQL.</b> <see cref="ResolveIfMatch"/> calls the shared
+/// <see cref="WeakETag.TryParseVersion"/> (strip the weak-ETag wrapper, then parse the token as an
+/// unsigned 32-bit integer — Postgres's own <c>xid</c> domain) BEFORE any store call: absent → 428
 /// (the <c>MediaController.Patch</c> precedent), present-but-malformed → 400 (never a raw
 /// <c>PostgresException 22P02</c> the way an unvalidated token reaching <c>@expectedVersion::xid</c>
 /// would produce), present-and-well-formed-but-stale/illegal-state → the store's own 409 Conflict. See
@@ -147,7 +146,7 @@ public sealed class AdsController(
     /// GET /api/ads/{id} (SPEC F162.1) — any existing row, any state (the <c>MediaController.GetById</c>/
     /// F43.1 IDOR-safe precedent: an operator opening a Failed spot to read why it failed is exactly
     /// this call). Carries a weak <c>ETag</c> derived from the row's <c>xmin</c> for
-    /// <c>PATCH</c>/verb <c>If-Match</c> — see <see cref="FormatWeakETag"/>.
+    /// <c>PATCH</c>/verb <c>If-Match</c> — see <see cref="WeakETag.Format"/>.
     /// </summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id, CancellationToken ct)
@@ -156,7 +155,7 @@ public sealed class AdsController(
         if (spot is null)
             return NotFound();
 
-        Response.Headers.ETag = FormatWeakETag(spot.Version);
+        Response.Headers.ETag = WeakETag.Format(spot.Version);
         return Ok(ToDto(spot));
     }
 
@@ -224,7 +223,7 @@ public sealed class AdsController(
         logger.LogInformation(
             "Ad spot created id={Id} source=owner brand={Brand}", spot.Id, LogSanitize.Strip(spot.SponsorName));
 
-        Response.Headers.ETag = FormatWeakETag(spot.Version);
+        Response.Headers.ETag = WeakETag.Format(spot.Version);
         return Created($"/api/ads/{spot.Id}", ToDto(spot));
     }
 
@@ -415,7 +414,7 @@ public sealed class AdsController(
 
     IActionResult Success(AdSpot spot)
     {
-        Response.Headers.ETag = FormatWeakETag(spot.Version);
+        Response.Headers.ETag = WeakETag.Format(spot.Version);
         return Ok(ToDto(spot));
     }
 
@@ -507,9 +506,9 @@ public sealed class AdsController(
     /// PLAN T432 round-3 finding R3 (see the class remarks): resolves <paramref name="brand"/> text to
     /// an owner <see cref="Sponsor"/>'s id via <see cref="ISponsorStore.FindOrCreateOwnerAsync"/> — the
     /// SAME resolution <c>AdBriefsController.ResolveOwnerSponsorAsync</c> runs one controller over
-    /// (kept as two live copies rather than extracted, the <see cref="StripETagWrapper"/>/
-    /// <see cref="FormatWeakETag"/> precedent just below: each controller's own diff stays inside the
-    /// file it owns). The store now owns the whole find-or-create/concurrent-insert-race contract this
+    /// (kept as two live copies rather than extracted: each controller's own diff stays inside the file
+    /// it owns — unlike the <see cref="WeakETag"/> seam below, this resolution has no third caller yet
+    /// to justify hoisting it). The store now owns the whole find-or-create/concurrent-insert-race contract this
     /// method used to hand-roll via <c>CreateOwnerAsync</c> + a <c>ListAsync</c> fallback scan — see
     /// that member's own remarks.
     ///
@@ -564,7 +563,8 @@ public sealed class AdsController(
         spot.StateChangedAt, spot.RenderedAt, spot.RetiredAt, spot.Version);
 
     /// <summary>
-    /// PLAN T403 carry-forward (b): validates the <c>If-Match</c> token BEFORE it ever reaches
+    /// PLAN T403 carry-forward (b), now via the shared <see cref="WeakETag.TryParseVersion"/> (T434
+    /// round-2 review finding F3): validates the <c>If-Match</c> token BEFORE it ever reaches
     /// <c>@expectedVersion::xid</c> — absent → 428 (<c>MediaController.Patch</c>'s own precedent);
     /// present but not a well-formed <c>xid</c> (Postgres's own 32-bit unsigned domain) → 400, never a
     /// raw <see cref="Npgsql.PostgresException"/> 22P02 the way an unvalidated token reaching the SQL
@@ -580,18 +580,15 @@ public sealed class AdsController(
     /// never both" contract holds without leaning on <c>!</c> anywhere.
     ///
     /// <para>
-    /// <b>Carry-forward (T403 review finding 9) — filed separately, not fixed here.</b>
-    /// <c>MediaController.Patch</c> still carries the UNVALIDATED half of this exact bug: its own
-    /// <c>StripETagWrapper</c> "returns the input unchanged if neither wrapper is present," and that
-    /// raw, unvalidated token reaches <c>@expectedVersion::xid</c> directly — a malformed
-    /// <c>If-Match</c> against <c>PATCH /api/media/{id}</c> today produces a raw
-    /// <see cref="Npgsql.PostgresException"/> (SqlState 22P02), the SAME live bug this method closes
-    /// for the Ads surface. The right altitude to close it in both places at once is a single shared
-    /// <c>WeakETag</c> seam (format/strip/validate, one implementation) rather than each admin
-    /// controller re-deriving its own copy — <c>AdsController</c>'s <see cref="StripETagWrapper"/>/
-    /// <see cref="FormatWeakETag"/> below are already a second, byte-identical copy of
-    /// <c>MediaController</c>'s own pair. Left as two live copies here, not extracted, so this task's
-    /// diff stays inside the files it owns.
+    /// <b>Carry-forward (T403 review finding 9) RESOLVED for Ads and Sponsors, still open for Media.</b>
+    /// This method and <see cref="SponsorsController.ResolveIfMatch"/> both now call
+    /// <see cref="WeakETag.TryParseVersion"/> — the single shared strip/validate implementation T403's
+    /// own review finding 9 called for. <c>MediaController.Patch</c> is the one surface NOT migrated:
+    /// its own <c>StripETagWrapper</c> still returns a raw, unvalidated token straight through to
+    /// <c>@expectedVersion::xid</c>, so a malformed <c>If-Match</c> against <c>PATCH /api/media/{id}</c>
+    /// still produces a raw <see cref="Npgsql.PostgresException"/> (SqlState 22P02) rather than a clean
+    /// 400 — see <see cref="WeakETag"/>'s own remarks for why that migration is a behaviour change left
+    /// outside this task.
     /// </para>
     /// </summary>
     (string ExpectedVersion, IActionResult? Error) ResolveIfMatch()
@@ -600,30 +597,10 @@ public sealed class AdsController(
         if (string.IsNullOrWhiteSpace(raw))
             return ("", PreconditionRequiredResult());
 
-        var stripped = StripETagWrapper(raw);
-        if (!uint.TryParse(stripped, NumberStyles.None, CultureInfo.InvariantCulture, out _))
-            return ("", BadRequest(InvalidIfMatchProblem()));
-
-        return (stripped, null);
+        return WeakETag.TryParseVersion(raw, out var version)
+            ? (version, null)
+            : ("", BadRequest(InvalidIfMatchProblem()));
     }
-
-    /// <summary>Mirrors <c>MediaController.StripETagWrapper</c> exactly — accepts <c>W/"&lt;token&gt;"</c>
-    /// (RFC 7232 weak) or plain <c>"&lt;token&gt;"</c>; returns the input unchanged if neither wrapper
-    /// is present (the subsequent <see cref="uint.TryParse"/> check in <see cref="ResolveIfMatch"/> is
-    /// what actually catches that case here, unlike <c>MediaController</c>'s own unvalidated
-    /// pass-through — see that method's own remarks for the filed carry-forward).</summary>
-    static string StripETagWrapper(string etag)
-    {
-        var tag = etag.Trim();
-        if (tag.StartsWith("W/\"", StringComparison.Ordinal) && tag.EndsWith('"'))
-            return tag[3..^1];
-        if (tag.StartsWith('"') && tag.EndsWith('"'))
-            return tag[1..^1];
-        return tag;
-    }
-
-    /// <summary>Mirrors <c>MediaController.FormatWeakETag</c> exactly.</summary>
-    static string FormatWeakETag(string version) => $"W/\"{version}\"";
 
     ObjectResult PreconditionRequiredResult() =>
         StatusCode(StatusCodes.Status428PreconditionRequired, new ProblemDetails
